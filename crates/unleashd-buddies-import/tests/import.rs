@@ -471,3 +471,51 @@ fn a_buddy_without_a_soul_verifies_but_a_lost_soul_fails() {
     assert!(!lost.ok && !lost.soul.ok);
     assert_eq!(lost.soul.differ, ["lead: doc_lost"]);
 }
+
+/// The legacy unified runner also stores schedules in buddy_runs, not only in
+/// buddy_automation_runs. Their queue state, lease and provenance must survive.
+#[test]
+fn scheduled_buddy_runs_survive_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = fixture(dir.path());
+    Connection::open(&old)
+        .unwrap()
+        .execute_batch(
+            "ALTER TABLE buddy_lists ADD COLUMN archived_at TEXT; PRAGMA user_version = 34;
+             INSERT INTO buddy_runs (id, input_key, input_kind, input_id, buddy_id, workspace_id,
+               conversation_id, ready_at, status, policy, created_at, claim_token, claim_expires_at,
+               deadline, error_code, error)
+             VALUES ('scheduled-queued', 'schedule:a1:2026-07-08T00:00:00.000Z', 'schedule', 'a1',
+               'b2', 'p1', 'scheduled-conversation', '2026-07-08T00:00:00.222Z', 'queued',
+               '{\"max_runtime_seconds\":480}', '2026-07-08T00:00:00.222Z', NULL, NULL, NULL, 'held', 'Hourly run limit reached'),
+               ('scheduled-running', 'schedule:a1:2026-07-07T00:00:00.000Z', 'schedule', 'a1',
+               'b2', 'p1', 'running-conversation', '2026-07-07T00:00:00.293Z', 'running',
+               '{\"max_runtime_seconds\":900}', '2026-07-07T00:00:00.293Z', 'lease',
+               '2026-07-07T00:15:00.000Z', '2026-07-07T00:15:00.000Z', NULL, NULL);",
+        )
+        .unwrap();
+    let source_hash = sha256_hex(&std::fs::read(&old).unwrap());
+    let new = dir.path().join("new.sqlite");
+    let report = import(&old, &new, &dir.path().join("owner-channel-reads.json"), ImportOptions::default()).unwrap();
+    assert!(verify(&old, &new, &report.soul_files, &report.owner_reads, &report.direct_reads).unwrap().ok);
+    let conn = Connection::open(&new).unwrap();
+    conn.execute("ATTACH DATABASE ?1 AS old", [old.to_str().unwrap()]).unwrap();
+    let differences: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM run n JOIN old.buddy_runs o USING (id) WHERE o.input_kind = 'schedule' AND (
+          n.input_key IS NOT o.input_key OR n.input_kind IS NOT o.input_kind OR n.input_id IS NOT o.input_id
+          OR n.status IS NOT o.status OR n.conversation_id IS NOT o.conversation_id OR n.ready_at IS NOT o.ready_at
+          OR n.lease_token IS NOT o.claim_token OR n.lease_expires_at IS NOT o.claim_expires_at
+          OR n.deadline IS NOT o.deadline OR n.error_code IS NOT o.error_code OR n.error IS NOT o.error
+          OR json_extract(n.legacy, '$.policy.max_runtime_seconds') IS NOT json_extract(o.policy, '$.max_runtime_seconds'))",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(differences, 0);
+    assert_eq!(json_row(&new, "SELECT count(*) FROM run WHERE id IN ('scheduled-queued', 'scheduled-running')"), 2);
+    let store = unleashd_buddies::store::Store::open(new.to_str().unwrap()).unwrap();
+    let run = store.get_run("scheduled-queued").unwrap();
+    assert!(matches!(run.input, unleashd_buddies::types::RunInput::Schedule { schedule_id, .. } if schedule_id == "a1"));
+    assert_eq!(sha256_hex(&std::fs::read(&old).unwrap()), source_hash);
+}

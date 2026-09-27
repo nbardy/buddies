@@ -370,7 +370,7 @@ const DOMAIN_CHECKS: &[(&str, &str)] = &[
     ),
     (
         "buddy_runs.input_kind unknown",
-        "SELECT count(*) FROM old.buddy_runs WHERE input_kind NOT IN ('chat','message_request','message_reply','failure_notice')",
+        "SELECT count(*) FROM old.buddy_runs WHERE input_kind NOT IN ('chat','message_request','message_reply','failure_notice','schedule')",
     ),
     (
         "buddy_automation_runs.status claimed",
