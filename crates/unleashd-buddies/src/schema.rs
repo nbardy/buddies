@@ -191,6 +191,13 @@ CREATE INDEX IF NOT EXISTS schedule_workspace ON schedule(workspace_id);
 CREATE INDEX IF NOT EXISTS run_workspace_live ON run(workspace_id, status, created_at)
   WHERE status IN ('queued','running','cancel_requested');";
 
+/// `runs.rs` reads `FROM run INDEXED BY run_active_buddy`, so a database without it fails every
+/// claim_run. 2026-09-29 queue stall (888861c): the index was added to `DDL` only, which runs for a
+/// brand-new file. RULE: every index added to `DDL` must also be listed here or in another on-open
+/// `IF NOT EXISTS` list; `every_ddl_index_is_recreated_on_open` enforces it.
+const RUN_INDEXES: &str = "
+CREATE INDEX IF NOT EXISTS run_active_buddy ON run(buddy_id) WHERE status IN ('running','cancel_requested');";
+
 /// A file imported before ordered ids has no `post.ord`: it cannot be ordered correctly, so it is
 /// refused with the fix (re-import), never opened half-working. No live file predates it (T15).
 fn require_ordered_ids(conn: &Connection, path: &str) -> Result<()> {
@@ -273,6 +280,7 @@ fn ensure_post_search(conn: &Connection) -> Result<()> {
     conn.execute_batch(POST_REFERENCE_INDEXES)?;
     conn.execute_batch(TASK_LIVE_INDEX)?;
     conn.execute_batch(LIST_SCOPE_INDEXES)?;
+    conn.execute_batch(RUN_INDEXES)?;
     let present: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'post_search')", [], |r| r.get(0))?;
     match present {
         true => Ok(()),
@@ -315,6 +323,60 @@ pub fn open(path: &str) -> Result<Connection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Regression guard for the 2026-09-29 queue stall (888861c): an index defined only in DDL is
+    // missing from every existing database. Drop each DDL index, reopen, and demand it back.
+    //
+    // Every live database was created by a DDL that already had BASELINE, so those need no on-open
+    // list. A new DDL index that is not in BASELINE must be recreated by open() or this fails.
+    #[test]
+    fn every_ddl_index_is_recreated_on_open() {
+        const BASELINE: &[&str] = &[
+            "buddy_manager",
+            "task_owner",
+            "task_workspace",
+            "task_parent",
+            "channel_member_by_member",
+            "post_channel",
+            "post_root",
+            "post_awaiting",
+            "post_awaiting_author",
+            "schedule_due",
+            "schedule_buddy",
+            "run_queue",
+            "run_lease",
+            "run_buddy",
+            "run_conversation",
+            "run_task",
+            "conversation_buddy",
+            "event_at",
+            "event_buddy",
+        ];
+        let names: Vec<&str> =
+            DDL.lines().filter_map(|l| l.strip_prefix("CREATE INDEX ")).map(|rest| rest.split_whitespace().next().unwrap()).collect();
+        assert!(names.contains(&"run_active_buddy"), "the parser found the DDL indexes");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.sqlite");
+        let path = path.to_str().unwrap();
+        let conn = open(path).unwrap();
+        for n in &names {
+            conn.execute_batch(&format!("DROP INDEX {n};")).unwrap();
+        }
+        drop(conn);
+        let conn = open(path).unwrap();
+        let missing: Vec<&&str> = names
+            .iter()
+            .filter(|n| !BASELINE.contains(n))
+            .filter(|n| {
+                !conn
+                    .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?1)", [n], |r| {
+                        r.get::<_, bool>(0)
+                    })
+                    .unwrap()
+            })
+            .collect();
+        assert!(missing.is_empty(), "DDL-only indexes (add to an on-open IF NOT EXISTS list): {missing:?}");
+    }
 
     // A live file created before 2026-09-28 has no run.config; every run read names it.
     #[test]

@@ -957,3 +957,16 @@ fn a_database_from_before_threads_arrives_caught_up() {
     assert!(matches!(page.threads[0].tail, ThreadTail::CaughtUp { .. }), "history is read, not a wall of unread");
     assert!(s.followed_threads(&buddy("ic"), WS, 10).unwrap().threads.is_empty(), "the backfill is the owner's only");
 }
+
+// 2026-09-29 queue stall (888861c): a database created before run_active_buddy existed failed every
+// claim_run with "no such index" because the index was DDL-only.
+#[test]
+fn claim_run_works_on_a_database_missing_run_active_buddy() {
+    let f = fixture();
+    let (path, _dir) = (f.path.clone(), f.dir);
+    drop(f.store);
+    rusqlite::Connection::open(&path).unwrap().execute_batch("DROP INDEX run_active_buddy;").unwrap();
+    let mut s = Store::open(path.to_str().unwrap()).unwrap();
+    s.enqueue_run(&Actor::Owner, chat("peer", "t1", "conv")).unwrap();
+    assert!(s.claim_run(60_000).unwrap().is_some());
+}
