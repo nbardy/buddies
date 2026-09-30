@@ -1,0 +1,134 @@
+"""Generate d-workshop.html (Direction D, "Workshop").
+
+Data read on 2026-09-30 ~12:00 UTC through the owner's GET endpoints:
+/api/buddies/workspaces/:id/threads, /inbox (filtered to this workspace's
+Buddies, because the owner inbox is global) and /runs?liveInWorkspace.
+Run from this folder: python3 build_d.py
+"""
+
+FACES = ['product-lead', 'dev-lead', 'ui-engineer', 'release-engineer', 'delivery-pm', 'upstream', 'marketing']
+
+# (preview, channel, root text, participants, replies, latest activity, is video, latest line)
+THREADS = [
+    ('a-pulse.png', '#general',
+     'Can we think of a better landing page for a workspace, this is so uninspiring',
+     ['you', 'marketing', 'product-lead'], 5, '3m', False, 'Marketing Designer posted three directions'),
+    ('assets/prev-clips.jpg', '#unleashd-2',
+     'What is all the clips we have and what is left to publish this?',
+     ['you', 'marketing'], 20, '7h', True, 'Launch video clips and what is left to publish'),
+    ('assets/prev-thread-ui.png', '#bugfixes',
+     'Replying here in the threads does not have balanced or aligned UI, we need to fix that',
+     ['you', 'ui-engineer'], 1, '2h', False, 'Buddies UI Engineer replied'),
+    ('assets/prev-dm-reply.png', '#bugfixes',
+     "In DM it's ugly, the reply",
+     ['you', 'product-lead'], 4, '5h', False, 'Product Development Lead replied'),
+]
+
+# The two open owner requests from this workspace's Buddies (text excerpted).
+REQUESTS = [
+    ('product-lead', 'Product Development Lead',
+     'Approve enabling a disabled automation and grant Product Development Lead schedule.manage plus '
+     'background execution? It runs daily at 09:00, handles at most one error group, with a '
+     '20-minute / 50k-token / $2 ceiling.', '15d'),
+    ('dev-lead', 'Buddies Development Lead',
+     'Manual owner review requested before any implementation. Task 95592e35 remains blocked on '
+     'inactive-grantee discoverability.', '14d'),
+]
+
+ARROW = '&rarr;'
+
+
+def people(ps):
+    return ''.join(
+        '<span class="you-av">N</span>' if p == 'you' else f'<img class="pf" src="assets/face-{p}.png" alt="">'
+        for p in ps
+    )
+
+
+def card(t):
+    img, ch, text, ps, n, when, video, last = t
+    play = '<span class="play">&#9654;</span>' if video else ''
+    word = 'reply' if n == 1 else 'replies'
+    return (
+        f'<article class="card"><div class="pv" style="background-image:url({img})">{play}</div>'
+        f'<div class="cb"><div class="meta"><span class="hash">{ch}</span>'
+        f'<span class="when" style="margin-left:auto">{when}</span></div>'
+        f'<div class="tt">{text}</div><div class="last">{last}</div>'
+        f'<div class="foot"><span class="ps">{people(ps)}</span><span class="when">{n} {word}</span>'
+        f'<span class="open">Open thread {ARROW}</span></div></div></article>'
+    )
+
+
+def request(r):
+    face, name, text, when = r
+    return (
+        f'<div class="rq"><div class="rq-h"><img class="pf" src="assets/face-{face}.png" alt="">'
+        f'<b>{name}</b><span class="when" style="margin-left:auto">{when}</span></div>'
+        f'<div class="rq-t">{text}</div><div class="rq-a">Answer in DM {ARROW}</div></div>'
+    )
+
+
+CSS = """
+.wrap { padding: 40px 52px 0; }
+header { display: flex; align-items: flex-end; gap: 24px; }
+.name { font-size: 44px; font-weight: 800; color: var(--text); letter-spacing: -.02em; line-height: 1; }
+.path { font-family: var(--mono); font-size: 14px; color: var(--muted); margin-top: 10px; }
+.team { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+.tf { width: 36px; height: 36px; border-radius: 10px; }
+.start { margin-left: 18px; background: var(--accent); color: #1b1530; font-weight: 700; border-radius: 12px; padding: 13px 22px; font-size: 16px; }
+.cols { display: grid; grid-template-columns: 1fr 420px; gap: 28px; margin-top: 34px; }
+.sh { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.pv { height: 250px; background: #111 center top / cover no-repeat; position: relative; border-bottom: 1px solid var(--line); }
+.play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 64px; height: 64px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; display: grid; place-items: center; font-size: 24px; border: 1px solid rgba(255,255,255,.3); }
+.cb { padding: 14px 18px 16px; }
+.meta { display: flex; font-size: 13px; }
+.tt { color: var(--text); font-size: 17px; font-weight: 600; margin-top: 6px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.last { font-size: 14px; color: var(--muted); margin-top: 4px; }
+.foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.ps { display: flex; }
+.pf, .you-av { width: 24px; height: 24px; border-radius: 7px; margin-right: -4px; box-shadow: 0 0 0 2px var(--card); }
+.you-av { background: #3a3f55; color: var(--text); font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; }
+.foot .when { margin-left: 10px; }
+.open { margin-left: auto; color: var(--accent); font-size: 14px; }
+.rq { border: 1px solid #5a4a2a; border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; background: linear-gradient(180deg, rgba(251,191,36,.07), var(--card) 60%); }
+.rq-h { display: flex; gap: 10px; align-items: center; font-size: 15px; color: var(--text); }
+.rq-h .pf { margin-right: 0; }
+.rq-t { font-size: 14px; line-height: 1.45; margin-top: 8px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.rq-a { color: var(--amber); font-size: 14px; margin-top: 10px; }
+.cnt { background: var(--amber); color: #2a1d00; font-weight: 700; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+.note { font-size: 13px; color: var(--muted); line-height: 1.5; margin-top: 6px; border: 1px dashed var(--line); border-radius: 12px; padding: 12px 14px; }
+.strip { margin-top: 26px; display: flex; gap: 26px; align-items: center; border-top: 1px solid var(--line); padding-top: 16px; font-size: 14px; }
+.strip img { width: 22px; height: 22px; border-radius: 6px; }
+.strip .it { display: flex; gap: 8px; align-items: center; }
+.tag { position: absolute; right: 20px; bottom: 14px; font-family: var(--mono); font-size: 11px; color: #59627f; }
+"""
+
+team = ''.join(f'<img class="tf" src="assets/face-{f}.png" alt="">' for f in FACES)
+cards = ''.join(card(t) for t in THREADS)
+reqs = ''.join(request(r) for r in REQUESTS)
+
+html = f"""<!doctype html>
+<!-- Generated by build_d.py. Direction D, Workshop: restrained chrome; real
+     attachments from followed threads carry the page. -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="shared.css"><style>{CSS}</style></head><body>
+<aside class="rail"><img src="assets/rail.png" alt=""></aside>
+<main><div class="wrap">
+<header><div><div class="name">unleashd</div><div class="path">~/git/unleashd</div></div>
+<div class="team">{team}<span class="start">Start a conversation</span></div></header>
+<div class="cols">
+<section><div class="sh"><span class="label">Pick up where you left off</span><span class="when">threads you follow</span></div>
+<div class="grid">{cards}</div></section>
+<aside><div class="sh"><span class="label">Waiting on you</span><span class="cnt">{len(REQUESTS)}</span></div>{reqs}
+<div class="note">Only requests from this workspace's Buddies. The owner inbox is global, so the page filters it to this workspace.</div></aside>
+</div>
+<div class="strip"><span class="label">Working now</span>
+<span class="it"><img src="assets/face-product-lead.png" alt=""><span class="live">Product Development Lead</span><span class="when">2 chats running</span></span>
+<span class="it"><img src="assets/face-marketing.png" alt=""><span class="live">Marketing Designer</span><span class="when">1 chat running</span></span>
+<span class="open" style="margin-left:auto">Team view {ARROW}</span></div>
+</div><span class="tag">MOCK &middot; live data read 2026-09-30 12:00 UTC</span></main></body></html>
+"""
+
+with open('d-workshop.html', 'w') as f:
+    f.write(html)
