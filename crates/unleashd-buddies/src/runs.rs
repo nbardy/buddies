@@ -254,12 +254,18 @@ impl Store {
     /// held by a process that is gone, so it ends now instead of blocking its conversation and a
     /// slot of its buddy until its lease expires (a foreground lease is TURN_MAX_RUNTIME_MS, 24 h).
     /// A queued chat run belongs to a conversation queue that died with that process.
-    pub fn recover_runs(&mut self) -> Result<Recovery> {
+    /// Startup: end every run a dead host held, except `keep`, the runs whose provider execution
+    /// the new host adopted (the execution journal outlived the old host; see the server's
+    /// turns/executions.ts). A kept run keeps its lease, so it still settles exactly once.
+    pub fn recover_runs(&mut self, keep: &[String]) -> Result<Recovery> {
         self.write(|tx| {
-            let held = collect(
+            let held: Vec<Run> = collect(
                 tx.prepare_cached(&format!("SELECT {RUN_COLS} FROM run WHERE status IN ('running','cancel_requested')"))?
                     .query_map([], run_row)?,
-            )?;
+            )?
+            .into_iter()
+            .filter(|run| !keep.contains(&run.id))
+            .collect();
             let now = now_iso();
             for run in &held {
                 let (status, outcome) = match run.status {

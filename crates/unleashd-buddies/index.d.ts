@@ -35,7 +35,7 @@ export declare class BuddiesCore {
   settleRun(runId: string, leaseToken: string, outcome: Outcome): Promise<Run>
   bindRun(runId: string, leaseToken: string, conversationId: string): Promise<Run>
   cancelRun(actor: Actor, runId: string): Promise<Run>
-  recoverRuns(): Promise<Recovery>
+  recoverRuns(keep: Array<string>): Promise<Recovery>
   createWorkspace(actor: Actor, input: WorkspaceInput): Promise<Workspace>
   createBuddy(actor: Actor, input: BuddyCreate): Promise<Buddy>
   updateBuddy(actor: Actor, input: BuddyUpdate): Promise<Buddy>
