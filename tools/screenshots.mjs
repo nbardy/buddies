@@ -384,6 +384,16 @@ const OPEN_MENTION_MODEL = prep(`
   await tick(150);
   return has('.channel-composer-model');`);
 
+// Click the first image in a channel post: the viewer must be centred on the page
+// (it sat top-left, #bugfixes 2026-10-01).
+const OPEN_IMAGE_VIEWER = prep(`
+  const link = document.querySelector('.channel-markdown .channel-media-link');
+  if (!link) return 'SKIP';
+  link.scrollIntoView({ block: 'center' });
+  link.click();
+  await tick(300);
+  return has('dialog.channel-image-overlay[open]');`);
+
 // Scroll the LAST post body containing `text` to the top of its pane, so a
 // long reply deep in a thread can be shot at a named spot. Last, because the
 // desktop thread pane follows the channel pane in document order.
@@ -657,6 +667,11 @@ function buildScreens(found, focus) {
 
 function escapeHtml(text) {
   return String(text).replace(
+    {
+      name: 'image-viewer',
+      missing: noChannel,
+      views: onBoth(`${channels}?${channel}`, OPEN_IMAGE_VIEWER),
+    },
     /[&<>"]/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
   );

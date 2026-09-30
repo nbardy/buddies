@@ -313,7 +313,7 @@ function ChannelImageOverlay({
   return (
     <dialog
       ref={dialogRef}
-      className="channel-task-overlay ui-card ui-stack"
+      className="channel-task-overlay channel-image-overlay ui-card ui-stack"
       aria-label={image.alt || 'Image preview'}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -346,7 +346,6 @@ function ChannelImageOverlay({
         className="channel-media"
         src={image.src}
         alt={image.alt}
-        style={{ maxWidth: '100%', maxHeight: 'calc(80vh - 72px)', objectFit: 'contain' }}
       />
     </dialog>
   );

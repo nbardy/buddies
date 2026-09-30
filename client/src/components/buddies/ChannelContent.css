@@ -286,6 +286,7 @@ video.channel-media {
 
 /* A Task click: the Task over the channel, not a trip to the Work tab (493c1c7). */
 .channel-task-overlay {
+  margin: auto;
   gap: var(--sp-5);
   width: min(560px, 100%);
   max-height: 80vh;
@@ -296,6 +297,23 @@ video.channel-media {
 
 .channel-task-overlay::backdrop {
   background: rgb(0 0 0 / 45%);
+}
+
+/* Image viewer: it sat top-left when it only reused .channel-task-overlay (2026-10-01). */
+.channel-image-overlay {
+  inset: 50% auto auto 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  width: fit-content;
+  max-width: min(92vw, 1100px);
+  max-height: 92vh;
+}
+
+.channel-image-overlay .channel-media {
+  max-width: 100%;
+  max-height: calc(92vh - 120px);
+  margin: 0 auto;
+  object-fit: contain;
 }
 
 .channel-task-overlay-header {
