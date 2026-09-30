@@ -291,6 +291,14 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   help. Same root cause as `git diff > x.patch` capturing a hunk-less summary —
   rtk output is for reading, never for capturing or citing. See
   `agent_notes/2026-08-22_memory-implementation-handoff_buddies-development-lead.md`.
+- Never run `sqlite3` (or node:sqlite, DB Browser, `.backup`) against the live
+  `~/.buddies` or `~/.agent-viewer` stores; read through the API or `pnpm errors:list`,
+  and reproduce on temp stores (`UNLEASHD_DATA_DIR`, `UNLEASHD_BUDDIES_DB`,
+  `BUDDIES_HOME` under a tmpdir). An outside opener is harmless only while the backend
+  holds its POSIX locks, and on 2026-09-30 it did not: `sqlite3` runs 5.8 s and 0.6 s
+  before two SIGBUS deaths of the backend. Inside the backend process, nothing but the
+  owning addon may open a store file, not even to read bytes: see
+  `docs/patterns.md#store-descriptor-isolation` (guard `server/test/sqlite-locks.test.ts`).
 - Never run the Buddies package CLI (`bin/buddies.js`, from `~/git/buddies` or a
   package worktree) without `BUDDIES_HOME=<tmpdir>`. It ignores unknown flags —
   `buddies init --db /tmp/x.sqlite` opened the LIVE `~/.buddies/buddies.sqlite`

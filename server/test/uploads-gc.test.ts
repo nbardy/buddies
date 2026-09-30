@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { runUploadsGc, runUploadsGcInWorker } from '../src/uploads/gc';
+import { runUploadsGc, runUploadsGcInChild } from '../src/uploads/gc';
 
 const DAY = 24 * 60 * 60_000;
 const NOW = Date.parse('2026-09-25T12:00:00Z');
@@ -52,7 +52,7 @@ const survivors = (uploads: string) => fs.readdirSync(uploads).sort();
 test('uploads GC deletes only old entries nothing references', async () => {
   const { root, uploads, transcripts } = fixture();
   try {
-    const report = await runUploadsGcInWorker({
+    const report = await runUploadsGcInChild({
       uploadsDir: uploads,
       // The app data directory is a root too: the scan must skip the uploads dir inside it,
       // or every upload would reference itself by its own path.

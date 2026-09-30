@@ -1,11 +1,16 @@
 //! Pattern: one-write-path (docs/patterns.md#one-write-path) — `Writer::apply` is the only
 //! write; every row a reader sees came through it.
 //!
-//! Only this crate may open the file. A second SQLite library in the same process (node:sqlite)
-//! breaks locking: POSIX locks are per process, so closing that copy's descriptor drops this
-//! copy's locks, and it may then truncate the WAL index this copy has mapped. The parity harness
-//! did exactly that and died with SIGBUS (2026-09-25; sqlite.org/howtocorrupt.html §2.2.1).
-//! Other processes (the sqlite3 CLI) are safe.
+//! Pattern: store-descriptor-isolation (docs/patterns.md#store-descriptor-isolation)
+//! Only this crate's connections may hold a descriptor on the file (or its -wal/-shm) in this
+//! process. POSIX locks are per process, so ANY other in-process close() on the inode drops every
+//! lock this connection holds: a second SQLite library (node:sqlite, 2026-09-25 parity harness)
+//! or a plain byte read (the uploads GC worker thread, 2026-09-30). Losing the locks is silent;
+//! the damage comes from the next opener in ANY process (sqlite3 CLI, a second backend), which
+//! then thinks it is alone, resets the -shm this connection has mapped (SIGBUS) and on close
+//! checkpoints and deletes the WAL (sqlite.org/howtocorrupt.html §2.2.1). Other processes are
+//! safe only while these locks are held; still never point sqlite3 at a live store.
+//! Guard: server/test/sqlite-locks.test.ts.
 //!
 //! The SQLite store. Written only by the ingest thread (one connection); read through a second
 //! connection so a query never waits behind a long ingest transaction (WAL).

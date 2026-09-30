@@ -121,7 +121,9 @@ and never a record scan. Until T23b (2026-09-26) records were `config-store.ts`:
 one JSON file per conversation plus one per session, all read at startup —
 18,850 reads of 8,019 records in the first 7s (T14b). Only the addon may open
 the records file in this process: node:sqlite is a second SQLite library, and
-two in one process broke POSIX locking (SIGBUS in the T12 parity run).
+two in one process broke POSIX locking (SIGBUS in the T12 parity run). The same
+holds for any in-process descriptor on a store, even a plain read
+(`docs/patterns.md#store-descriptor-isolation`).
 
 Transcripts come from the Rust ingest (`server/src/ingest/*` over the
 `unleashd-ingest` addon). There is no `server/src/adapters/`, session cache,

@@ -157,6 +157,22 @@ allowed a px font-size/padding/gap) and `client/src/ui/primitives.css` (layer 2:
 `.ui-inline-row`, `.ui-truncate`, `.ui-card`, `.ui-muted`), T21a. Gates G7 (no literal px, breakpoints only
 768px/340px) and G8 (total CSS lines never grow) in `tools/check-client-invariants.sh`. Views and shells: T20/T21.
 
+## store-descriptor-isolation
+**Smell:** backend code opens a file that happens to be a live SQLite store (or its `-wal`/`-shm`): a
+second SQLite library, a directory walk that reads every file, a copy, a hash, a file watcher.
+**Pattern:** inside the backend process, only the owning addon's connections hold a descriptor on a
+store file. POSIX locks belong to the process, so any other in-process `close()` on the inode silently
+drops every lock the store holds; the next opener in any process then believes it is alone, resets the
+mapped `-shm` (SIGBUS) and deletes the WAL on close. Work that must read store bytes runs in a child
+process, whose descriptors carry its own locks.
+**Here:** the uploads GC scans the app data and Buddies directories from a child process
+(`server/src/uploads/gc.ts`, `runUploadsGcInChild`). It ran in a worker thread until 2026-09-30,
+dropped all four stores' locks at every boot, and two SIGBUS deaths followed. Earlier:
+node:sqlite in the parity harness (2026-09-25). Comment at `crates/unleashd-ingest/src/store.rs`.
+Guard: `server/test/sqlite-locks.test.ts` boots the real backend on temp stores, runs a GC pass
+that scans them, then opens every store from a second process and fails if the WAL or `-shm` is
+reset or deleted.
+
 ## fix-guards
 **Smell:** a fixed slowdown or bug quietly comes back.
 **Pattern:** every fix leaves three things:

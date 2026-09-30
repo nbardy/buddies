@@ -1,6 +1,6 @@
+import { fork } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 
 /**
  * Uploads retention. `POST /api/upload` writes `<uploads>/<conversationId>/<ts>_<name>` and the
@@ -17,13 +17,13 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
  * Any unreadable reference root or file aborts the run with no deletions: a reference we could not
  * read is a reference we cannot rule out.
  *
- * The scan reads every transcript (~10 GB here), so it runs in a worker thread, at startup and
+ * The scan reads every transcript (~10 GB here), so it runs off the event loop, at startup and
  * once a day (`startUploadsGc`).
  */
 
 export const UPLOADS_RETENTION_MS = 30 * 24 * 60 * 60_000;
 const UPLOADS_GC_INTERVAL_MS = 24 * 60 * 60_000;
-const UPLOADS_GC_TASK = 'unleashd-uploads-gc';
+const UPLOADS_GC_TASK = 'unleashd-uploads-gc' as const;
 const ALWAYS_KEPT = new Set(['channels']);
 const NEEDLES = ['uploads/', 'uploads\\/', 'uploads%2F', 'uploads%2f'].map((n) => Buffer.from(n));
 const MAX_NAME_BYTES = 255;
@@ -174,26 +174,35 @@ export async function runUploadsGc(options: UploadsGcOptions): Promise<UploadsGc
   return report;
 }
 
-/** Runs one GC pass in a worker thread so the transcript scan never touches the event loop. */
-export function runUploadsGcInWorker(options: UploadsGcOptions): Promise<UploadsGcReport> {
+/**
+ * Runs one GC pass in a child PROCESS, never a worker thread: the reference roots hold the live
+ * SQLite stores. POSIX locks belong to the process, so a close() of any descriptor on a store
+ * inode here released every lock the backend held on it; the next outside opener (sqlite3, a
+ * second backend) then reset the mapped -shm → SIGBUS in buddies-core.node, twice on 2026-09-30,
+ * and deleted the backend's WAL on close. Guard: server/test/sqlite-locks.test.ts.
+ */
+// Pattern: store-descriptor-isolation (docs/patterns.md#store-descriptor-isolation)
+export function runUploadsGcInChild(options: UploadsGcOptions): Promise<UploadsGcReport> {
   return new Promise((resolve, reject) => {
-    // Boot through `require` so the worker compiles this file the way the main thread does
-    // (tsx's CJS hook in dev, plain CJS in dist). `new Worker(__filename)` of the .ts made
-    // Node parse it as CJS, fail on `import`, and print MODULE_TYPELESS_PACKAGE_JSON on
-    // every dev start (2026-09-28).
-    const worker = new Worker(`require(${JSON.stringify(__filename)})`, {
-      eval: true,
-      workerData: { task: UPLOADS_GC_TASK, options },
+    // The child inherits process.execArgv, so it loads this file the way the parent did
+    // (tsx's `--import` in dev, plain CJS in dist). tsx's preflight shares the IPC channel,
+    // so both ends read only messages tagged with the task.
+    const child = fork(__filename, [UPLOADS_GC_TASK], {
+      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     });
-    worker.once(
-      'message',
-      (message: { ok: true; report: UploadsGcReport } | { ok: false; error: string }) =>
-        message.ok ? resolve(message.report) : reject(new Error(message.error))
-    );
-    worker.once('error', reject);
-    worker.once('exit', (code) => {
-      if (code !== 0) reject(new Error(`uploads GC worker exited with code ${code}`));
+    let settled = false;
+    child.on('message', (message: Partial<GcReply>) => {
+      if (message.task !== UPLOADS_GC_TASK || !message.result) return;
+      settled = true;
+      const { result } = message;
+      result.ok ? resolve(result.report) : reject(new Error(result.error));
     });
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (!settled)
+        reject(new Error(`uploads GC process exited (${code ?? signal}) without a report`));
+    });
+    child.send({ task: UPLOADS_GC_TASK, options } satisfies GcRequest);
   });
 }
 
@@ -204,7 +213,7 @@ export function startUploadsGc(inputs: () => Promise<Omit<UploadsGcOptions, 'now
     if (running) return;
     running = true;
     try {
-      const report = await runUploadsGcInWorker({ ...(await inputs()), nowMs: Date.now() });
+      const report = await runUploadsGcInChild({ ...(await inputs()), nowMs: Date.now() });
       const freed = report.deleted.reduce((sum, entry) => sum + entry.bytes, 0);
       console.log(
         `[uploads-gc] deleted ${report.deleted.length} entries (${(freed / 1e6).toFixed(1)} MB); ` +
@@ -223,10 +232,22 @@ export function startUploadsGc(inputs: () => Promise<Omit<UploadsGcOptions, 'now
   return () => clearInterval(timer);
 }
 
-if (!isMainThread && workerData?.task === UPLOADS_GC_TASK) {
-  runUploadsGc(workerData.options as UploadsGcOptions).then(
-    (report) => parentPort?.postMessage({ ok: true, report }),
-    (error: unknown) =>
-      parentPort?.postMessage({ ok: false, error: String((error as Error)?.stack ?? error) })
-  );
+type GcRequest = { task: typeof UPLOADS_GC_TASK; options: UploadsGcOptions };
+type GcReply = {
+  task: typeof UPLOADS_GC_TASK;
+  result: { ok: true; report: UploadsGcReport } | { ok: false; error: string };
+};
+
+if (process.argv[2] === UPLOADS_GC_TASK && process.send) {
+  const reply = (result: GcReply['result']) =>
+    process.send?.({ task: UPLOADS_GC_TASK, result } satisfies GcReply, () => process.disconnect());
+  const onRequest = (message: Partial<GcRequest>) => {
+    if (message.task !== UPLOADS_GC_TASK || !message.options) return;
+    process.off('message', onRequest);
+    runUploadsGc(message.options).then(
+      (report) => reply({ ok: true, report }),
+      (error: unknown) => reply({ ok: false, error: String((error as Error)?.stack ?? error) })
+    );
+  };
+  process.on('message', onRequest);
 }
