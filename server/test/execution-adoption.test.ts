@@ -398,12 +398,9 @@ test(
     );
     assert.match(String(lostRun.error), /lost/, JSON.stringify(lostRun));
 
-    // Every journal is settled and gone.
+    // Every journal is settled and gone, turns' and memory reviews' alike.
     await eventually(
-      () =>
-        fs
-          .readdirSync(path.join(home, '.agent-viewer', 'executions'))
-          .filter((n) => !n.startsWith('ephemeral-')),
+      () => fs.readdirSync(path.join(home, '.agent-viewer', 'executions')),
       (left) => left.length === 0,
       'journals removed after settle'
     );
