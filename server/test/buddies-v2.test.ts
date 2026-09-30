@@ -1945,6 +1945,50 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       action: { kind: 'list', scope: { buddyId: w.designer.id } },
     });
     assert.equal(pinRows.value.find((item: { id: string }) => item.id === task.value.id).pin, 1);
+    // A retried pin replays its first result instead of failing on its now-stale baseRevision.
+    const retried = await call(designerGrant, 'task_write', {
+      write: {
+        kind: 'update',
+        taskId: task.value.id,
+        baseRevision: task.value.revision,
+        changes: { pin: 1 },
+      },
+      key: 'pin-task',
+    });
+    assert.equal(retried.isError, false, retried.text);
+    assert.equal(retried.value.revision, pinned.value.revision);
+    // Pinning grants nothing new: a peer's Task stays out of reach, and a todo cannot be pinned.
+    const leads = await w.core.upsertTask(OWNER, {
+      kind: 'create',
+      ownerId: w.lead.id,
+      title: 'Lead plan',
+      doneCriteria: 'x',
+      key: 'lead-task',
+    });
+    const todo = await w.core.upsertTask(OWNER, {
+      kind: 'create',
+      ownerId: w.designer.id,
+      parentId: task.value.id,
+      title: 'Sketch',
+      doneCriteria: 'x',
+      key: 'designer-todo',
+    });
+    for (const [target, key] of [
+      [leads, 'pin-peer'],
+      [todo, 'pin-todo'],
+    ] as const) {
+      const refused = await call(designerGrant, 'task_write', {
+        write: {
+          kind: 'update',
+          taskId: target.id,
+          baseRevision: target.revision,
+          changes: { pin: 2 },
+        },
+        key,
+      });
+      assert.equal(refused.isError, true, key);
+      assert.equal((await w.core.getTask(target.id)).pin, 0, key);
+    }
     const taskRows = await call(builder, 'tasks', {
       action: { kind: 'list', scope: { workspace: w.ws } },
     });

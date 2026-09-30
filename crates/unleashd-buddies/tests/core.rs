@@ -243,8 +243,48 @@ fn pin_is_an_ordinary_task_update_on_top_level_tasks_only() {
     assert!(s.upsert_task(&buddy(&actor), write).is_err(), "peer must not pin someone else's task");
     let (actor, write) = pin(&todo, "ic", 1, "p4");
     assert!(matches!(s.upsert_task(&buddy(&actor), write).unwrap_err(), CoreError::Invalid(_)), "a todo cannot be pinned");
+    // The pin is part of the idempotent payload: a retried pin replays (no conflict on its now-stale
+    // base), and the same key reused for a DIFFERENT pin is refused instead of replaying the old one.
+    let (actor, write) = pin(&top, "ic", 3, "p1");
+    assert_eq!(s.upsert_task(&buddy(&actor), write).unwrap().revision, 2, "a retried pin replays");
+    let (actor, write) = pin(&top, "ic", 7, "p1");
+    assert!(matches!(s.upsert_task(&buddy(&actor), write).unwrap_err(), CoreError::IdempotencyConflict(_)));
     let (actor, write) = pin(&pinned, "ic", 0, "p5");
     assert_eq!(s.upsert_task(&buddy(&actor), write).unwrap().pin, 0, "0 unpins");
+}
+
+// Home's reorder is two ordinary pin updates; the order must read back from a fresh store (the
+// phone and the Buddies read the file, not the writer's memory).
+#[test]
+fn pin_order_persists_across_reopen() {
+    let mut f = fixture();
+    let make = |s: &mut unleashd_buddies::Store, title: &str| {
+        s.upsert_task(
+            &Actor::Owner,
+            TaskWrite::Create { owner_id: "ic".into(), parent_id: None, title: title.into(), done_criteria: "d".into(), key: title.into() },
+        )
+        .unwrap()
+    };
+    let set = |s: &mut unleashd_buddies::Store, task: &Task, pin: i64| {
+        let changes = TaskChanges { pin: Some(pin), ..Default::default() };
+        let key = format!("{}-{pin}-{}", task.title, task.revision);
+        s.upsert_task(&Actor::Owner, TaskWrite::Update { task_id: task.id.clone(), base_revision: task.revision, changes, key }).unwrap()
+    };
+    let (a, b) = (make(&mut f.store, "a"), make(&mut f.store, "b"));
+    let (a, b) = (set(&mut f.store, &a, 1), set(&mut f.store, &b, 2));
+    set(&mut f.store, &b, 1);
+    set(&mut f.store, &a, 2);
+    let reopened = unleashd_buddies::Store::open(f.path.to_str().unwrap()).unwrap();
+    let workspace_id = a.workspace_id.clone();
+    let mut pins: Vec<(String, i64)> = reopened
+        .list_tasks(TaskQuery::Workspace { workspace_id })
+        .unwrap()
+        .into_iter()
+        .filter(|task| task.pin > 0)
+        .map(|task| (task.title, task.pin))
+        .collect();
+    pins.sort_by_key(|(_, pin)| *pin);
+    assert_eq!(pins, [("b".to_string(), 1), ("a".to_string(), 2)]);
 }
 
 #[test]
