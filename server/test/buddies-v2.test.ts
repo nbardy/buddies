@@ -2449,3 +2449,50 @@ test('Buddy MCP renames a public channel without changing its identity or histor
     await w.close();
   }
 });
+
+// Task comments shared the post store but skipped the channel dispatch, silently losing mentions.
+test('task comment mentions wake a Buddy and preserve replies in the task discussion', async () => {
+  const w = await world();
+  try {
+    const task = await w.core.upsertTask(OWNER, {
+      kind: 'create',
+      ownerId: w.lead.id,
+      title: 'Review task',
+      doneCriteria: 'Reviewed',
+      key: 'task-comment',
+    });
+    const root = await w.post(
+      OWNER,
+      { kind: 'task', taskId: task.id },
+      {
+        kind: 'inform',
+        body: `[@Designer](buddy:${w.designer.id}) review this task`,
+        evidence: [],
+        broadcast: false,
+        key: 'task-mention',
+      }
+    );
+    w.answers.set(1, 'Task reviewed');
+    w.emit({
+      kind: 'posted',
+      post: root,
+      channel: await w.core.openChannel(OWNER, { kind: 'id', id: root.channelId }),
+      picks: NO_PICKS,
+    });
+    await until(
+      async () =>
+        (await w.core.taskPosts(OWNER, task.id, null, 50)).posts.some(
+          (post) => post.body === 'Task reviewed'
+        ),
+      'task mention reply'
+    );
+    const posts = (await w.core.taskPosts(OWNER, task.id, null, 50)).posts;
+    const reply = posts.find((post) => post.body === 'Task reviewed');
+    assert.equal(reply?.rootId, root.id);
+    assert.equal(reply?.taskId, task.id);
+    assert.equal(reply?.channelId, root.channelId);
+    assert.equal(w.turns.length, 1);
+  } finally {
+    await w.close();
+  }
+});

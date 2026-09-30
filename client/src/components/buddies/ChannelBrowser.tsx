@@ -9,16 +9,17 @@ import { Chat } from '../Chat';
 import { AppSettingsDropdown } from './AppSettingsDropdown';
 import { BuddyRailRow, CreatingBuddyRailRow } from './BuddyRailRow';
 import { ArchivedChannels, ChannelHeaderControls, useArchivedChannels } from './ChannelArchive';
-import { type OpenDm } from './ChannelAuthor';
+import type { OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
-import { ChannelLanding } from './ChannelLanding';
 import { ChannelDm } from './ChannelDm';
+import { ChannelLanding } from './ChannelLanding';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
-import { type RowContext, LeadRow, Replying, renderRow, renderRows } from './ChannelRows';
+import { LeadRow, Replying, type RowContext, renderRow, renderRows } from './ChannelRows';
 import { ChannelSearch } from './ChannelSearch';
 import { ChannelWorkers } from './ChannelWorkers';
 import { CopyLinkButton } from './CopyLinkButton';
 import { TaskFilter } from './TaskFilter';
+import { TaskPage } from './TaskPage';
 import { ThreadsPane } from './ThreadsPane';
 import { errorText } from './api';
 import { useNewBuddy } from './buddy-direct-actions';
@@ -37,7 +38,6 @@ import {
   newestServedId,
   railChannels,
   renderFeed,
-  taskPostsFeed,
   unreadThreadIds,
   useChannelFeed,
   useChannelResponding,
@@ -50,8 +50,8 @@ import {
   useWorkspaceInbox,
 } from './channel-data';
 import { channelLinkPath } from './channel-link';
-import { type ChannelsView, channelsHref, channelsView } from './channels-view';
 import { mentionsABuddy, plainChannelText } from './channel-text';
+import { type ChannelsView, channelsHref, channelsView } from './channels-view';
 import type { Channel, ChannelUnread, Inbox } from './types';
 import { initials } from './ui-contract';
 import './ChannelBrowser.css';
@@ -153,49 +153,6 @@ function ThreadPane({
   );
 }
 
-// The Task filter's transcript: one Task's posts across every channel, paged
-// back like a channel (T22: dropped in the T11 client migration). Keyed by the
-// Task, so a switch starts a fresh feed and scroll position.
-function TaskTranscript({ taskId, context }: { taskId: string; context: RowContext }) {
-  const feed = useChannelFeed(taskPostsFeed(taskId));
-  const rows = useMemo(() => channelRows(feed.posts ?? []), [feed.posts]);
-  const follow = useFollowBottom(rows.length, feed.posts, null);
-  return (
-    <div
-      className="channel-browser-scroll ui-stack"
-      ref={follow.scrollRef}
-      onScroll={follow.onScroll}
-    >
-      {(feed.latest.kind === 'failed' || feed.latest.kind === 'stale') && (
-        <p className="channel-browser-error" role="alert">
-          Task posts could not refresh: {feed.latest.error.message}
-        </p>
-      )}
-      {renderFeed(feedPhase(feed.latest.kind, feed.posts), {
-        loading: () => <ChannelLoader label="Loading the Task's posts…" />,
-        failed: () => null,
-        empty: () => (
-          <div className="channel-browser-empty ui-muted ui-row">
-            <span>No posts about this Task yet.</span>
-          </div>
-        ),
-        posts: () => (
-          <>
-            <ChannelHistory
-              edge={feed.edge}
-              scrollRef={follow.scrollRef}
-              onReach={() => void feed.loadOlder(follow.hold)}
-            />
-            <ol className="channel-browser-messages">
-              {rows.map((row) => renderRow(row, context))}
-            </ol>
-          </>
-        ),
-      })}
-    </div>
-  );
-}
-
 function ChannelPane({
   entry,
   workspaceId,
@@ -258,7 +215,6 @@ function ChannelPane({
     },
   };
   const threadContext: RowContext = { ...base, place: { kind: 'thread' } };
-  const taskContext: RowContext = { ...base, place: { kind: 'task', channelNames } };
   return (
     <div className="channel-browser-panes" data-thread={threadId ? 'open' : undefined}>
       <section
@@ -332,9 +288,16 @@ function ChannelPane({
             })}
           </div>
         ) : (
-          <TaskTranscript key={taskFilter} taskId={taskFilter} context={taskContext} />
+          <TaskPage
+            key={taskFilter}
+            taskId={taskFilter}
+            workspaceId={workspaceId}
+            channelId={channelId}
+            directory={directory}
+            submit="enter"
+          />
         )}
-        {!entry.channel.archivedAt && (
+        {taskFilter === null && !entry.channel.archivedAt && (
           <ChannelComposer
             channelId={channelId}
             rootId={null}
@@ -651,8 +614,9 @@ export function ChannelBrowser({
   const railScroll = useScrollActivity();
   // The Home composer posts to #general; a workspace without one gets no composer.
   const generalChannelId =
-    rail.channels.find((entry) => entry.channel.kind.type === 'public' && entry.channel.kind.name === 'general')
-      ?.channel.id ?? null;
+    rail.channels.find(
+      (entry) => entry.channel.kind.type === 'public' && entry.channel.kind.name === 'general'
+    )?.channel.id ?? null;
   const listed = [
     ...rail.channels,
     ...rail.direct,
@@ -856,6 +820,16 @@ export function ChannelBrowser({
               openDm={openDm}
             />
           ),
+          task: (taskId, channelId) => (
+            <TaskPage
+              key={taskId}
+              taskId={taskId}
+              channelId={channelId}
+              workspaceId={workspaceId}
+              directory={directory}
+              submit="enter"
+            />
+          ),
           channel: () =>
             selected ? (
               <ChannelPane
@@ -906,6 +880,7 @@ type MainPanes = {
   dm(conversationId: string): ReactNode;
   threads(): ReactNode;
   channel(): ReactNode;
+  task(taskId: string, channelId: string): ReactNode;
 };
 
 function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
@@ -919,9 +894,10 @@ function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
       return panes.dm(view.conversationId);
     case 'threads':
       return panes.threads();
+    case 'task':
+      return panes.task(view.taskId, view.channelId);
     case 'channel':
     case 'thread':
-    case 'task':
       return panes.channel();
   }
 }

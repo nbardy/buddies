@@ -37,7 +37,7 @@ export function channelsView(search: string): ChannelsView {
   if (params.get('view') === 'threads') return { kind: 'threads' };
   if (channelId && rootId)
     return { kind: 'thread', channelId, rootId, linkedPostId: params.get('post') };
-  if (channelId && taskId) return { kind: 'task', channelId, taskId };
+  if (taskId) return { kind: 'task', channelId: channelId ?? '', taskId };
   if (channelId) return { kind: 'channel', channelId };
   return { kind: 'home' };
 }
@@ -60,7 +60,7 @@ export function channelsHref(workspaceId: string, screen: ChannelsView): string 
         : `${thread}&post=${encodeURIComponent(screen.linkedPostId)}`;
     }
     case 'task':
-      return `${base}?channel=${encodeURIComponent(screen.channelId)}&task=${encodeURIComponent(screen.taskId)}`;
+      return `${base}?${screen.channelId ? `channel=${encodeURIComponent(screen.channelId)}&` : ''}task=${encodeURIComponent(screen.taskId)}`;
     case 'workers':
       return `${base}?workers=${encodeURIComponent(screen.buddyId)}`;
     case 'dm':

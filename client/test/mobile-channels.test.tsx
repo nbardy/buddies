@@ -278,7 +278,7 @@ test('the Channels tab opens the most recently active workspace first', async ()
 // in the Buddy Mailbox channel reader (d382234: "on mobile the only Task filter
 // over channel posts"). A desktop `?channel=&task=` link must open it on a
 // phone too, and each post must link into its own channel.
-test('the mobile Task filter opens from a channel and links each post into its own channel', async () => {
+test('the mobile Task page opens from a channel with details and links each post into its own channel', async () => {
   const ws = 'ws-phone-task';
   const base = `/buddies/workspaces/${ws}/channels`;
   await loadResource({
@@ -361,19 +361,45 @@ test('the mobile Task filter opens from a channel and links each post into its o
     channelId: 'ch_gen',
     taskId: 'task-ship',
   });
+  await loadResource({
+    key: '/api/buddies/tasks/task-ship',
+    load: async () => ({
+      task: {
+        id: 'task-ship',
+        workspaceId: ws,
+        ownerId: 'lead',
+        title: 'Ship channels',
+        doneCriteria: 'Shipped',
+        status: 'in_progress',
+        paused: false,
+        epoch: 1,
+        evidence: [],
+        position: 0,
+        pin: 0,
+        revision: 1,
+        createdAt: '2026-09-24T00:00:00.000Z',
+        updatedAt: '2026-09-24T00:00:00.000Z',
+      },
+      channel: {
+        ...publicChannel('task-channel', 'task', ws),
+        kind: { type: 'task', taskId: 'task-ship' },
+      },
+      children: [],
+      comments: [],
+      runs: [],
+    }),
+  });
   const html = render(url);
-  assert.match(html, /<h1>Task: Ship channels<\/h1>/);
-  assert.match(
-    html,
-    new RegExp(`class="mobile-channel-header__back"[^>]*href="${base}\\?channel=ch_gen"`)
-  );
+  assert.match(html, /<h2>Ship channels<\/h2>/);
+  assert.match(html, /href="[^"]*view=home"/);
+  assert.match(html, /Discussion/);
   assert.match(html, /Deployed to staging\./);
   assert.match(html, /Started on it\./);
   // The reply links to itself inside its thread in #ops, not into #general.
   assert.match(
     html,
     new RegExp(
-      `class="mobile-channel-post__reply[^"]*" href="${base}\\?channel=ch_ops&amp;thread=ops-root&amp;post=ops-reply"[^>]*>#ops</a>`
+      `href="${base}\\?channel=ch_ops&amp;thread=ops-root&amp;post=ops-reply"[^>]*>View in channel</a>`
     )
   );
 });

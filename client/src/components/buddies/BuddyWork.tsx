@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { BuddyRunList } from './BuddyRunList';
 import { BuddyTaskCommentForm, BuddyTaskCommentList } from './BuddyTaskComments';
@@ -180,11 +181,15 @@ function TaskEditForm({ task, refresh }: { task: Task; refresh: () => Promise<vo
   );
 }
 
-function TaskDetailBody({
+export function TaskDetailBody({
   detail,
   names,
   refresh,
+  taskHref,
+  comments = true,
 }: {
+  taskHref?: (taskId: string) => string;
+  comments?: boolean;
   detail: TaskDetail;
   names: Readonly<Record<string, string>>;
   refresh: () => Promise<void>;
@@ -193,34 +198,57 @@ function TaskDetailBody({
   const todos = byPosition(detail.children);
   return (
     <>
-      <p className="buddy-panel__criteria">
-        <strong>Done when</strong> {task.doneCriteria}
-      </p>
-      {task.evidence.length > 0 && (
-        <ul className="buddy-post-list__evidence">
-          {task.evidence.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      )}
-      {/* Keyed by revision: a saved or concurrent edit resets the draft to the stored task. */}
-      <TaskEditForm key={task.revision} task={task} refresh={refresh} />
-      <h4 className="buddy-panel__heading">Todos</h4>
+      <details open={taskHref ? undefined : true}>
+        <summary>Details · done criteria, evidence and settings</summary>
+        <p className="buddy-panel__criteria">
+          <strong>Done when</strong> {task.doneCriteria}
+        </p>
+        {task.evidence.length > 0 && (
+          <ul className="buddy-post-list__evidence">
+            {task.evidence.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        )}
+        {/* Keyed by revision: a saved or concurrent edit resets the draft. */}
+        <TaskEditForm key={task.revision} task={task} refresh={refresh} />
+      </details>
+      <h4 className="buddy-panel__heading">Subtasks</h4>
       <ul className="buddy-task-list__todos">
         {todos.map((child, index) => (
           <li key={child.id} data-tone={TASK_STATUS[child.status].tone}>
-            <span aria-hidden="true">{TASK_STATUS[child.status].glyph}</span> {child.title}
+            <span aria-hidden="true">{TASK_STATUS[child.status].glyph}</span>{' '}
+            {taskHref ? <Link to={taskHref(child.id)}>{child.title}</Link> : child.title}
             {child.paused ? ' · Paused' : ''}
-            <TaskControls ordered={todos} index={index} refresh={refresh} />
+            {taskHref ? (
+              <>
+                <span className="ui-muted"> · {TASK_STATUS[child.status].label}</span>
+                <details>
+                  <summary>Manage</summary>
+                  <TaskControls ordered={todos} index={index} refresh={refresh} />
+                </details>
+              </>
+            ) : (
+              <TaskControls ordered={todos} index={index} refresh={refresh} />
+            )}
           </li>
         ))}
       </ul>
-      <NewTaskForm ownerId={task.ownerId} parentId={task.id} label="todo" refresh={refresh} />
-      <h4 className="buddy-panel__heading">Runs</h4>
-      <BuddyRunList runs={detail.runs} refresh={refresh} empty="No runs for this task yet." />
-      <h4 className="buddy-panel__heading">Comments</h4>
-      <BuddyTaskCommentForm channelId={detail.channel.id} refresh={refresh} />
-      <BuddyTaskCommentList comments={detail.comments} names={names} />
+      <details open={taskHref ? undefined : true}>
+        <summary>Add subtask</summary>
+        <NewTaskForm ownerId={task.ownerId} parentId={task.id} label="todo" refresh={refresh} />
+      </details>
+      <details open={taskHref ? undefined : true}>
+        <summary>Execution history · {detail.runs.length} runs</summary>
+        <BuddyRunList runs={detail.runs} refresh={refresh} empty="No runs for this task yet." />
+      </details>
+      {comments && (
+        <>
+          <h4 className="buddy-panel__heading">Comments</h4>
+          <BuddyTaskCommentForm channelId={detail.channel.id} refresh={refresh} />
+          <BuddyTaskCommentList comments={detail.comments} names={names} />
+        </>
+      )}
     </>
   );
 }

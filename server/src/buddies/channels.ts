@@ -709,6 +709,10 @@ export function createChannels(ports: ChannelsPorts) {
     ports.channelChanged(event.channel.id);
     const { channel, post, picks } = event;
     switch (channel.kind.type) {
+      // Task comments previously dropped @mentions entirely. Reuse the channel seat
+      // dispatch; guard: buddies-v2.test.ts task comment mentions.
+      // Pattern: one-write-path (docs/patterns.md#one-write-path)
+      case 'task':
       case 'public': {
         const hops = hopsOf(post);
         void wake(channel, post, hops, picks, 'mention', mentionedByPost(post)).catch((error) =>
@@ -724,8 +728,6 @@ export function createChannels(ports: ChannelsPorts) {
         void directPost(channel, channel.kind.members, post, picks).catch((error) =>
           logger.warn(`[channels] DM post ${post.id} failed to wake its Buddies:`, error)
         );
-        return;
-      case 'task':
         return;
     }
   });

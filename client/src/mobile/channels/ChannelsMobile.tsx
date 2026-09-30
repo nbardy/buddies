@@ -8,10 +8,12 @@ import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLin
 import { BuddySigil } from '../../components/buddies/BuddySigil';
 import { ArchivedChannels, useArchivedChannels } from '../../components/buddies/ChannelArchive';
 import { ChannelDm } from '../../components/buddies/ChannelDm';
+import { ChannelLanding } from '../../components/buddies/ChannelLanding';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
+import { TaskPage } from '../../components/buddies/TaskPage';
 import { WakeIcon, WakeIndicator } from '../../components/buddies/WakeIndicator';
 import { errorText } from '../../components/buddies/api';
 import { useBuddyDirectActions, useNewBuddy } from '../../components/buddies/buddy-direct-actions';
@@ -28,7 +30,6 @@ import {
   newestServedId,
   railChannels,
   renderFeed,
-  taskPostsFeed,
   useChannelFeed,
   useChannelResponding,
   useFollowBottom,
@@ -56,10 +57,9 @@ import {
   MobileSection,
 } from '../components/MobileUI';
 import { ChannelComposerMobile, MobileChannelComposeFrame } from './ChannelComposerMobile';
-import { type RowContext, Row, ScreenHeader, useChannelsDm } from './ChannelRowsMobile';
-import { ChannelLanding } from '../../components/buddies/ChannelLanding';
-import { ThreadsScreen } from './ThreadsMobile';
+import { Row, type RowContext, ScreenHeader, useChannelsDm } from './ChannelRowsMobile';
 import { buddyWorkspaceActivityAtom, overviewWorkspaces } from './ChannelsIndex';
+import { ThreadsScreen } from './ThreadsMobile';
 
 // Channels on a phone, following Slack's mobile app: one screen at a time.
 //   Home    — channels and Buddies, tab bar visible
@@ -639,8 +639,6 @@ function ChannelScreen({ channelId, context }: { channelId: string; context: Scr
 
 // ── Task ────────────────────────────────────────────────────────────────────
 
-// The Task filter: one Task's posts from every channel, newest page first and
-// paged back like a channel; each row links to the post in its own channel.
 function TaskScreen({
   channelId,
   taskId,
@@ -650,63 +648,15 @@ function TaskScreen({
   taskId: string;
   context: ScreenContext;
 }) {
-  const { workspaceId, directory } = context;
-  const feed = useChannelFeed(taskPostsFeed(taskId));
-  const rows = useMemo(() => channelRows(feed.posts ?? []), [feed.posts]);
-  const follow = useFollowBottom(rows.length, feed.posts, null);
-  const channelNames = useMemo(
-    () =>
-      new Map(
-        context.listed.map((entry) => {
-          const heading = channelHeading(entry.channel.kind, directory.buddyNames);
-          return [entry.channel.id, `${heading.mark}${heading.name}`] as const;
-        })
-      ),
-    [context.listed, directory.buddyNames]
-  );
-  const rowContext: RowContext = {
-    directory,
-    place: { kind: 'task', workspaceId, channelNames },
-    linkedPostId: null,
-  };
   return (
-    <div className="mobile-channel ui-stack">
-      <ScreenHeader
-        backTo={channelsHref(workspaceId, { kind: 'channel', channelId })}
-        title={`Task: ${directory.taskById.get(taskId)?.title ?? taskId}`}
-        subtitle="One Task, across every channel"
-        link={{
-          path: channelsHref(workspaceId, { kind: 'task', channelId, taskId }),
-          label: 'Copy link to Task filter',
-        }}
-      />
-      <div className="mobile-channel__scroll" ref={follow.scrollRef} onScroll={follow.onScroll}>
-        {(feed.latest.kind === 'failed' || feed.latest.kind === 'stale') && (
-          <p className="mobile-channel__error" role="alert">
-            Task posts could not refresh: {feed.latest.error.message}
-          </p>
-        )}
-        {renderFeed(feedPhase(feed.latest.kind, feed.posts), {
-          loading: () => <ChannelLoader label="Loading the Task's posts…" />,
-          failed: () => null,
-          empty: () => <MobileEmptyPanel>No posts about this Task yet.</MobileEmptyPanel>,
-          posts: () => (
-            <>
-              <ChannelHistory
-                edge={feed.edge}
-                scrollRef={follow.scrollRef}
-                onReach={() => void feed.loadOlder(follow.hold)}
-              />
-              <ol className="mobile-channel__posts">
-                {rows.map((row) => (
-                  <Row key={row.key} row={row} context={rowContext} />
-                ))}
-              </ol>
-            </>
-          ),
-        })}
-      </div>
-    </div>
+    <TaskPage
+      key={taskId}
+      taskId={taskId}
+      channelId={channelId}
+      workspaceId={context.workspaceId}
+      directory={context.directory}
+      submit="button"
+    />
   );
 }
 
