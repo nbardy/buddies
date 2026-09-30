@@ -48,6 +48,7 @@ async function seed() {
       id,
       kind: { t: 'buddy', buddyId: 'lead', workspaceId: WS, visibility: 'foreground' },
       provider: 'codex',
+      createdAt: at(index === 1 ? 0 : 30).getTime(),
       messageCount: 2,
     });
   jotaiStore.set(
@@ -102,9 +103,13 @@ test('a desktop DM keeps generations in order and puts Refresh context in the he
   await seed();
   const html = desktop(NEW);
   assert.match(html, /aria-label="Direct message with Lead"/);
-  const order = ['Old question', 'Old answer', '>New chat<', 'Fresh start', 'Fresh answer'].map(
-    (text) => html.indexOf(text)
-  );
+  const order = [
+    'Old question',
+    'Old answer',
+    'Context refreshed · New chat',
+    'Fresh start',
+    'Fresh answer',
+  ].map((text) => html.indexOf(text));
   assert.ok(
     order.every((index, i) => index !== -1 && (i === 0 || index > order[i - 1])),
     `generations in order around the divider: ${order}`
@@ -300,4 +305,26 @@ test('the New chat divider says when the harness changed, and stays plain when i
     remove: [],
   });
   assert.match(desktop(NEW), /harness and model changed to codex/);
+});
+
+test('reset banners follow the date on desktop and in an empty new chat', async () => {
+  await seed();
+  const tomorrow = new Date(Date.UTC(2026, 8, 27, 9, 30));
+  const row = jotaiStore.get(rowsAtom).get(NEW)!;
+  jotaiStore.set(
+    rowsAtom,
+    new Map([
+      ...jotaiStore.get(rowsAtom),
+      [NEW, { ...row, createdAt: tomorrow.getTime(), messageCount: 0 }],
+    ])
+  );
+  jotaiStore.set(transcriptStore.patch, {
+    set: [[NEW, { tag: 'loaded', epoch: 0, messages: [], detail: syntheticDetail(NEW) }]],
+    remove: [],
+  });
+  const html = desktop(NEW);
+  const date = tomorrow.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  assert.ok(html.indexOf(date) > html.indexOf('Old answer'));
+  assert.ok(html.indexOf('Context refreshed · New chat') > html.indexOf(date));
+  assert.match(html, /class="channel-dm-notice"/);
 });

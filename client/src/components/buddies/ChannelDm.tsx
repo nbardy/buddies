@@ -34,6 +34,7 @@ import { clockTime, useFollowBottom } from './channel-data';
 import { type DmRow, dmRows, lastOwnerText } from './channel-dm';
 import { type ChannelTask, mediaMarkdown } from './channel-text';
 import './ChannelComposer.css';
+import './ChannelDm.css';
 
 // A Buddy DM inside Channels (493c1c7), drawn as a thread: sigil, name, time and ChannelMarkdown
 // for both sides, and a channel-style composer. It is still the Buddy's ongoing owner
@@ -61,7 +62,6 @@ const FRAMES = {
     content: 'channel-browser-message-content',
     meta: 'channel-browser-message-heading',
     author: 'channel-browser-author',
-    divider: 'channel-thread-divider ui-muted ui-row',
     note: 'channel-dm-replying channel-browser-replying ui-row ui-muted',
   },
   mobile: {
@@ -79,7 +79,6 @@ const FRAMES = {
     content: 'mobile-channel-post__content',
     meta: 'mobile-channel-post__heading',
     author: 'mobile-channel-post__author',
-    divider: 'mobile-channel-divider ui-row ui-muted',
     note: 'mobile-channel__replying',
   },
 } as const;
@@ -183,6 +182,7 @@ export function ChannelDm({
   const newChat = async (input: { config: ConversationConfig; message?: string }) => {
     const next = await startNewDirectChat(buddyId, input);
     await chain.refetch();
+    follow.pin();
     onConversation(next);
   };
   const retryText = lastOwnerText(messages);
@@ -330,17 +330,19 @@ export function ChannelDm({
         {row === null ? (
           <ChannelLoader label="Opening DM…" />
         ) : (
-          shown.map((id, index) => (
-            <DmGeneration
-              key={id}
-              conversationId={id}
-              previousId={index > 0 ? shown[index - 1] : null}
-              frame={f}
-              buddyName={buddyName}
-              buddyNames={buddyNames}
-              tasks={tasks}
-            />
-          ))
+          <div className="channel-dm-timeline" ref={follow.contentRef}>
+            {shown.map((id, index) => (
+              <DmGeneration
+                key={id}
+                conversationId={id}
+                previousId={index > 0 ? shown[index - 1] : null}
+                frame={f}
+                buddyName={buddyName}
+                buddyNames={buddyNames}
+                tasks={tasks}
+              />
+            ))}
+          </div>
         )}
         {running && stream.length === 0 && (
           <p className={f.note}>
@@ -403,6 +405,7 @@ function DmGeneration({
   const groups = useAtomValue(groupsFamily(conversationId));
   const queue = queueOf(useAtomValue(transcriptFamily(conversationId)));
   const { catalog } = useProviderCatalog();
+  const generation = useAtomValue(rowFamily(conversationId));
   const divider = previousId !== null;
   const config = detailOf(useAtomValue(transcriptFamily(conversationId)))?.config.config ?? null;
   const before = detailOf(useAtomValue(transcriptFamily(previousId ?? conversationId)))?.config
@@ -412,15 +415,20 @@ function DmGeneration({
     config && before && (config.provider !== before.provider || summary(config) !== summary(before))
       ? `${config.provider} · ${summary(config)}`
       : null;
-  const rows = dmRows(groups, queue);
+  const rows = dmRows(
+    groups,
+    queue,
+    divider && generation
+      ? {
+          at: new Date(generation.createdAt),
+          label: changedTo
+            ? `New chat · harness and model changed to ${changedTo}`
+            : 'Context refreshed · New chat',
+        }
+      : undefined
+  );
   return (
     <>
-      {divider && (
-        <div className={frame.divider}>
-          <span>New chat</span>
-          {changedTo && <span>· harness and model changed to {changedTo}</span>}
-        </div>
-      )}
       {rows.length === 0 && !divider ? (
         <p className={frame.note}>Send a message to start the conversation.</p>
       ) : (
@@ -430,7 +438,11 @@ function DmGeneration({
               key={row.key}
               row={row}
               frame={frame}
-              name={row.kind !== 'day' && row.author === 'buddy' ? buddyName : 'You'}
+              name={
+                (row.kind === 'lead' || row.kind === 'continuation') && row.author === 'buddy'
+                  ? buddyName
+                  : 'You'
+              }
               buddyNames={buddyNames}
               tasks={tasks}
             />
@@ -461,6 +473,8 @@ function DmRowView({
           <span>{row.label}</span>
         </li>
       );
+    case 'notice':
+      return <li className="channel-dm-notice">{row.label}</li>;
     case 'lead':
       return (
         <li className={frame.lead}>

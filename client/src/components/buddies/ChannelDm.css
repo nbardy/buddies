@@ -1,0 +1,14 @@
+.channel-dm-timeline {
+  width: 100%;
+  margin-top: auto;
+}
+.channel-dm-notice {
+  width: 100%;
+  margin: var(--sp-4) 0;
+  padding: var(--sp-4) var(--sp-6);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: var(--fs-3);
+  box-sizing: border-box;
+}

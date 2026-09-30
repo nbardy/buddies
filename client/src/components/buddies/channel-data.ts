@@ -652,7 +652,20 @@ export function useChannelResponding(
 export function useFollowBottom(rowCount: number, version: unknown, linkedPostId: string | null) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
+  const contentRef = useRef<HTMLDivElement>(null);
   const revealedRef = useRef<string | null>(null);
+  // Fix guard: DM history loads in separate generations; following only the active
+  // transcript left new chats at the top. Observe the whole timeline as it hydrates.
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const observer = new ResizeObserver(() => {
+      const node = scrollRef.current;
+      if (node && followRef.current) node.scrollTop = node.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  });
   // biome-ignore lint/correctness/useExhaustiveDependencies: version is the re-pin trigger
   useEffect(() => {
     const node = scrollRef.current;
@@ -697,7 +710,7 @@ export function useFollowBottom(rowCount: number, version: unknown, linkedPostId
     const node = scrollRef.current;
     if (node) heldRef.current = node.scrollHeight - node.scrollTop;
   };
-  return { scrollRef, onScroll, pin, hold };
+  return { scrollRef, contentRef, onScroll, pin, hold };
 }
 
 // ── Owner unread ────────────────────────────────────────────────────────────

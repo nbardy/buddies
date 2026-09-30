@@ -21,7 +21,7 @@ const GROUP_WINDOW_MS = 5 * 60_000;
 export type DmAuthor = 'owner' | 'buddy';
 
 export type DmRow =
-  | { kind: 'day'; key: string; label: string }
+  | { kind: 'day' | 'notice'; key: string; label: string }
   | { kind: 'lead' | 'continuation'; key: string; author: DmAuthor; at: string; body: MessageBody };
 
 const dayLabel = (date: Date) =>
@@ -44,14 +44,27 @@ function responseBody(group: Extract<MessageGroup, { type: 'assistant' }>): Mess
  * its retry under the transcript instead. `queued` is what the owner sent that the server has not
  * written to the transcript yet, so Send shows it at once.
  */
-export function dmRows(groups: readonly MessageGroup[], queued: readonly QueuedMessage[]): DmRow[] {
+export function dmRows(
+  groups: readonly MessageGroup[],
+  queued: readonly QueuedMessage[],
+  boundary?: { at: Date; label: string }
+): DmRow[] {
   const rows: DmRow[] = [];
+  // Fix guard: a reset belongs below its own date, even before the first message arrives.
+  // channel-dm.test.tsx covers empty generations and resets on a new day.
+  let currentDay: string | null = null;
+  if (boundary) {
+    currentDay = boundary.at.toDateString();
+    rows.push({ kind: 'day', key: 'day:reset', label: dayLabel(boundary.at) });
+    rows.push({ kind: 'notice', key: 'reset', label: boundary.label });
+  }
   let previous: { author: DmAuthor; at: number; day: string } | null = null;
   const push = (key: string, author: DmAuthor, at: Date, body: MessageBody) => {
     if (body.t === 'text' && !body.text.trim()) return;
     if (body.t === 'parts' && body.parts.length === 0) return;
     const day = at.toDateString();
-    if (previous?.day !== day) rows.push({ kind: 'day', key: `day:${key}`, label: dayLabel(at) });
+    if (currentDay !== day) rows.push({ kind: 'day', key: `day:${key}`, label: dayLabel(at) });
+    currentDay = day;
     const continues =
       previous?.day === day &&
       previous.author === author &&
