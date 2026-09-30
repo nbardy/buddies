@@ -36,3 +36,24 @@ Owner: "agents should be able to pin key tasks for us via mcp". Home pins are de
 
 ## Not doing
 No `Project` type, no separate pin table, no new MCP tool.
+
+## Follow-up 2026-09-30 (request post_01a0f291…, Task task_01a0f290…): commits b36403a, c7b8882, 05b5372
+
+- **Retired device pins (c7b8882).** ae83eb5 removed `projectPins` from `DeviceUiPrefsSchema`; zod strips
+  unknown keys on read, so the next unrelated prefs write would have deleted a device's saved pins
+  silently. `client/src/atoms/ui.ts` now lifts them at load into `unleashd-retired-home-pins`, and Home
+  shows "N pins were saved on this device…" with **Import** (append after the shared pins in saved
+  order; skips already-pinned, todos, deleted) or **Discard**. Guard: `client/test/retired-home-pins.test.ts`
+  (fails if the lift is removed).
+- **Tests (b36403a).** Crate: the pin is in the idempotent payload (retry replays; same key with a
+  different pin → `IdempotencyConflict`); reorder reads back from a reopened store. Server MCP: a Buddy
+  cannot pin a peer's Task or a todo through `task_write`; a retried pin replays.
+- **Temp-store check.** Online `.backup` of the live buddies-v3 DB, served by a throwaway server from a
+  worktree at 05b5372: the column was added on open (`pin INTEGER DEFAULT 0`); owner PATCH pin 1..3, same
+  key replayed, stale base → 409, todo → 400, reorder and unpin persisted. A pre-pin addon build (cache
+  445026e9…) opened the migrated copy and listed all 532 tasks: rollback is safe.
+- **Screenshots** (05b5372 screens `landing`, `landing-menu`, `landing-show-all`, `landing-search`):
+  `output/screenshots/task-pins-2026-09-30/`. Show all is desktop-only by design.
+- **Throwaway-server trap.** `~/.nvm/.../bin` contains `codex` and `gemini`: putting it on the server's
+  PATH let the copied DB's queued runs spawn codex (they all failed 401 under the fake HOME). Use a
+  temp bin dir holding only a `node` symlink.
