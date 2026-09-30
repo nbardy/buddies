@@ -21,7 +21,13 @@ import { startBackend, startCompiler, startVite } from './dev-runtime.mjs';
 import { LOCAL_DOMAIN_ENV, detectLocalDomain } from './local-domain.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DEV_PORTS = { dev: [7489, 7499], 'dev-server': [7499], 'dev-client': [7489] };
+// `dev-server` honours PORT like the backend it runs (server.ts), so a test can drive the real
+// dev entry on a spare port beside the owner's live runtime. `dev` stays fixed: Vite proxies to 7499.
+const DEV_PORTS = {
+  dev: [7489, 7499],
+  'dev-server': [Number(process.env.PORT ?? 7499)],
+  'dev-client': [7489],
+};
 // Covers the backend's shutdown drain grace plus its state-flush watchdog.
 const REPLACE_TIMEOUT_MS = 10_000;
 
@@ -241,11 +247,34 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+// pnpm relays the terminal's SIGINT to its script, so ONE Ctrl+C under `pnpm dev` reaches this
+// process twice, 0.1-0.2 ms apart (measured 2026-10-01). Counting the relay as a second press
+// escalated every single Ctrl+C to SIGKILL of the backend, skipping its graceful shutdown.
+// A repeat inside this window is the relay; a human second press is far slower.
+// Guard: server/test/ctrl-c-adoption.test.ts ("one Ctrl+C ... exits gracefully").
+const RELAYED_SIGNAL_MS = 250;
+
+/** Press = First ⊕ Relay (the same press, relayed) ⊕ Again (a real second press). */
+function pressCounter() {
+  let firstAt = null;
+  return () => {
+    const now = performance.now();
+    if (firstAt === null) {
+      firstAt = now;
+      return 'first';
+    }
+    return now - firstAt < RELAYED_SIGNAL_MS ? 'relay' : 'again';
+  };
+}
+
 async function runSteps(steps, onChild) {
   let received = null;
   let child = null;
+  const press = pressCounter();
   const forward = (name) => {
-    if (child) signal(-child.pid, received ? 'SIGKILL' : name);
+    const kind = press();
+    if (kind === 'relay') return;
+    if (child) signal(-child.pid, kind === 'again' ? 'SIGKILL' : name);
     received = name;
   };
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
@@ -284,8 +313,11 @@ const log = (line) => process.stdout.write(`${line}\n`);
 async function runServices(services) {
   const running = { compilers: [], backend: null, vite: null };
   let stopping = null;
+  const press = pressCounter();
   const stop = (name) => {
-    if (stopping) {
+    const kind = press();
+    if (kind === 'relay') return;
+    if (kind === 'again') {
       running.backend?.stop('SIGKILL');
       return;
     }
