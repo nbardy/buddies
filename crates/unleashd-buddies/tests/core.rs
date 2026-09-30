@@ -638,7 +638,7 @@ fn startup_recovery_ends_runs_a_dead_host_held() {
     assert_eq!(claim.run.input, RunInput::Post { post_id: ask.id.clone() });
     let waiting_chat = s.enqueue_run(&Actor::Owner, chat("lead", "turn", "c-lead")).unwrap();
 
-    let recovery = s.recover_runs().unwrap();
+    let recovery = s.recover_runs(&[]).unwrap();
     assert_eq!(recovery, Recovery { interrupted: 1, abandoned_chats: 1 });
     let run = s.get_run(&claim.run.id).unwrap();
     assert_eq!((run.status, run.error_code.as_deref()), (RunStatus::Failed, Some("interrupted")));
@@ -654,6 +654,33 @@ fn startup_recovery_ends_runs_a_dead_host_held() {
     assert_eq!(
         s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "late".into() }).unwrap_err().code(),
         "lease_lost"
+    );
+}
+
+// 2026-09-30: a restart ended every running run even when its provider was still running and the
+// new host adopted it (agent_notes/2026-09-30_execution-adoption-design.md). A kept run is not
+// interrupted, keeps its lease, and still settles exactly once.
+#[test]
+fn startup_recovery_keeps_runs_the_new_host_adopted() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let ask = s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
+    let adopted = s.claim_run(86_400_000).unwrap().unwrap();
+    s.post(&buddy("mid"), dm("mid", "ic"), request("and this", "ask-2")).unwrap();
+    let orphan = s.claim_run(86_400_000).unwrap().unwrap();
+
+    let recovery = s.recover_runs(&[adopted.run.id.clone()]).unwrap();
+    assert_eq!(recovery.interrupted, 1, "only the run nobody adopted ends");
+    assert_eq!(s.get_run(&adopted.run.id).unwrap().status, RunStatus::Running);
+    assert_eq!(s.get_run(&orphan.run.id).unwrap().status, RunStatus::Failed);
+    assert!(matches!(s.get_post(&Actor::Owner, &ask.id).unwrap().request, RequestState::Awaiting));
+    s.settle_run(&adopted.run.id, &adopted.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
+    assert_eq!(
+        s.settle_run(&adopted.run.id, &adopted.lease_token, Outcome::Complete { text: "again".into() })
+            .unwrap_err()
+            .code(),
+        "lease_lost",
+        "an adopted run settles once"
     );
 }
 
