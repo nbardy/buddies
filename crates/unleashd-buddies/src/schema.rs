@@ -53,7 +53,8 @@ CREATE TABLE task (
   paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1)), epoch INTEGER NOT NULL DEFAULT 1,
   next_action TEXT, blocked_reason TEXT, evidence TEXT NOT NULL DEFAULT '[]',
   position INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, legacy TEXT) STRICT;
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, legacy TEXT,
+  pin INTEGER NOT NULL DEFAULT 0 CHECK(pin >= 0)) STRICT;
 CREATE INDEX task_owner ON task(owner_id, updated_at);
 CREATE INDEX task_workspace ON task(workspace_id, updated_at);
 CREATE INDEX task_parent ON task(parent_id, position) WHERE parent_id IS NOT NULL;
@@ -298,6 +299,8 @@ pub fn open(path: &str) -> Result<Connection> {
         (true, _) => {
             require_ordered_ids(&conn, path)?;
             ensure_column(&conn, "channel", "archived_at", "TEXT")?;
+            // Workspace-home pins (2026-09-30): additive, so an older build still opens the file.
+            ensure_column(&conn, "task", "pin", "INTEGER NOT NULL DEFAULT 0 CHECK(pin >= 0)")?;
             drop_run_retry_of(&conn)?;
             drop_buddy_background_enabled(&conn)?;
             ensure_run_config(&conn)?;
@@ -329,6 +332,20 @@ mod tests {
         let conn = open(path).unwrap();
         let present: bool =
             conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('run') WHERE name = 'config')", [], |r| r.get(0)).unwrap();
+        assert!(present);
+        open(path).unwrap();
+    }
+
+    // A file created before 2026-09-30 has no task.pin; every task read names it.
+    #[test]
+    fn task_pin_is_added_to_an_existing_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.sqlite");
+        let path = path.to_str().unwrap();
+        open(path).unwrap().execute_batch("ALTER TABLE task DROP COLUMN pin;").unwrap();
+        let conn = open(path).unwrap();
+        let present: bool =
+            conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('task') WHERE name = 'pin')", [], |r| r.get(0)).unwrap();
         assert!(present);
         open(path).unwrap();
     }

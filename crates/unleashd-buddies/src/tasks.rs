@@ -9,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
 
 const TASK_COLS: &str = "id, workspace_id, owner_id, parent_id, title, done_criteria, status, paused, epoch, next_action, \
-    blocked_reason, evidence, position, revision, created_at, updated_at";
+    blocked_reason, evidence, position, revision, created_at, updated_at, pin";
 
 fn task_row(r: &Row) -> rusqlite::Result<Task> {
     Ok(Task {
@@ -29,6 +29,7 @@ fn task_row(r: &Row) -> rusqlite::Result<Task> {
         revision: r.get(13)?,
         created_at: r.get(14)?,
         updated_at: r.get(15)?,
+        pin: r.get(16)?,
     })
 }
 
@@ -137,7 +138,7 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
         op: "task.update",
         payload: json!({"base": base_revision, "title": c.title, "done_criteria": c.done_criteria, "status": c.status.map(|s| s.as_str()),
             "next_action": c.next_action, "blocked_reason": c.blocked_reason, "evidence": c.evidence, "paused": c.paused,
-            "position": c.position, "owner": c.owner_id}),
+            "position": c.position, "pin": c.pin, "owner": c.owner_id}),
         key: Some(key),
     };
     idempotent(tx, &m, |tx| {
@@ -153,6 +154,7 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
             evidence: c.evidence.unwrap_or(task.evidence.clone()),
             paused: c.paused.unwrap_or(task.paused),
             position: c.position.unwrap_or(task.position),
+            pin: c.pin.unwrap_or(task.pin),
             owner_id: c.owner_id.unwrap_or(task.owner_id.clone()),
             revision: task.revision + 1,
             updated_at: now_iso(),
@@ -160,6 +162,10 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
         };
         if next.status == TaskStatus::Blocked && next.blocked_reason.as_deref().unwrap_or("").trim().is_empty() {
             return Err(CoreError::Invalid("a blocked task needs a blocked_reason".into()));
+        }
+        // A pin is a Home-level selection: only a top-level task (an initiative) can carry one.
+        if next.pin < 0 || (next.pin > 0 && next.parent_id.is_some()) {
+            return Err(CoreError::Invalid("only a top-level task can be pinned (pin >= 0; 0 unpins)".into()));
         }
         // Pattern: fix-guards (docs/patterns.md#fix-guards)
         // Unpausing used to bump the epoch too, silently cancelling a request queued while the
@@ -171,7 +177,7 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
         let epoch = task.epoch + i64::from(invalidates);
         tx.execute(
             "UPDATE task SET title = ?2, done_criteria = ?3, status = ?4, next_action = ?5, blocked_reason = ?6, evidence = ?7,
-               paused = ?8, position = ?9, owner_id = ?10, epoch = ?11, revision = ?12, updated_at = ?13 WHERE id = ?1",
+               paused = ?8, position = ?9, owner_id = ?10, epoch = ?11, revision = ?12, updated_at = ?13, pin = ?14 WHERE id = ?1",
             params![
                 task.id,
                 next.title,
@@ -185,7 +191,8 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
                 next.owner_id,
                 epoch,
                 next.revision,
-                next.updated_at
+                next.updated_at,
+                next.pin
             ],
         )?;
         tx.execute(

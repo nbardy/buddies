@@ -1928,6 +1928,23 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       ),
       [task.value.id, closed.id].sort()
     );
+    // A Buddy pins its own top-level Task for the workspace Home through the ordinary task_write
+    // update (2026-09-30); the slim task row then carries `pin` so the next writer can append.
+    const pinned = await call(designerGrant, 'task_write', {
+      write: {
+        kind: 'update',
+        taskId: task.value.id,
+        baseRevision: task.value.revision,
+        changes: { pin: 1 },
+      },
+      key: 'pin-task',
+    });
+    assert.equal(pinned.isError, false, pinned.text);
+    assert.equal(pinned.value.pin, 1);
+    const pinRows = await call(designerGrant, 'tasks', {
+      action: { kind: 'list', scope: { buddyId: w.designer.id } },
+    });
+    assert.equal(pinRows.value.find((item: { id: string }) => item.id === task.value.id).pin, 1);
     const taskRows = await call(builder, 'tasks', {
       action: { kind: 'list', scope: { workspace: w.ws } },
     });

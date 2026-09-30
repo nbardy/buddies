@@ -222,6 +222,7 @@ const taskRow = (task: Awaited<ReturnType<BuddiesCore['getTask']>>) => ({
   title: task.title,
   status: task.status,
   paused: task.paused,
+  pin: task.pin,
   updatedAt: task.updatedAt,
 });
 const readTaskRows = async (deps: ToolDeps, scope: Scope, include: TaskInclude) => {
@@ -384,7 +385,7 @@ const BUDDY_TOOLS = {
   tasks: TASKS_TOOL,
   task_write: buddyTool({
     description:
-      'Create or compare-and-swap update a task. Pausing, cancelling or reassigning cancels queued runs. Comments use post {channel:{task}}.',
+      'Create or compare-and-swap update a task. Pausing, cancelling or reassigning cancels queued runs. changes.pin pins a top-level task on the workspace Home: N>0 orders it (lower first; use max pin + 1 to append), 0 unpins. Comments use post {channel:{task}}.',
     writes: true,
     schema: taskWriteSchema(),
     handler: (deps, grant, input) => writeTask(deps, grant, input, grant.buddyId),

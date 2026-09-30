@@ -46,6 +46,8 @@ export const TaskChangesSchema = z.object({
   evidence: z.array(z.string()).optional(),
   paused: z.boolean().optional(),
   position: z.number().int().optional(),
+  // Home pin: 0 unpins, N > 0 pins at order N (lower = earlier); top-level Tasks only (the crate refuses others).
+  pin: z.number().int().min(0).optional(),
   ownerId: z.string().optional(),
 });
 

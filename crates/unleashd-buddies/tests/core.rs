@@ -206,6 +206,47 @@ fn upsert_task_is_compare_and_swap() {
     assert!(matches!(s.upsert_task(&buddy("ic"), blocked).unwrap_err(), CoreError::Invalid(_)), "blocked needs a reason");
 }
 
+// Workspace-home pins ride the ordinary task update: same compare-and-swap, same `write_task`
+// authority. Only a top-level task can carry one (a todo pinned to Home would be an orphan card).
+#[test]
+fn pin_is_an_ordinary_task_update_on_top_level_tasks_only() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let make = |s: &mut unleashd_buddies::Store, parent: Option<String>, key: &str| {
+        s.upsert_task(
+            &buddy("mid"),
+            TaskWrite::Create { owner_id: "ic".into(), parent_id: parent, title: "t".into(), done_criteria: "d".into(), key: key.into() },
+        )
+        .unwrap()
+    };
+    let top = make(s, None, "c1");
+    let todo = make(s, Some(top.id.clone()), "c2");
+    assert_eq!(top.pin, 0);
+    let pin = |task: &Task, actor: &str, pin: i64, key: &str| {
+        (
+            actor.to_string(),
+            TaskWrite::Update {
+                task_id: task.id.clone(),
+                base_revision: task.revision,
+                key: key.into(),
+                changes: TaskChanges { pin: Some(pin), ..Default::default() },
+            },
+        )
+    };
+    let (actor, write) = pin(&top, "ic", 3, "p1");
+    let pinned = s.upsert_task(&buddy(&actor), write).unwrap();
+    assert_eq!((pinned.pin, pinned.revision), (3, 2));
+    // A stale writer is refused like any update; a peer outside the owner's line has no authority.
+    let (actor, write) = pin(&top, "ic", 4, "p2");
+    assert!(matches!(s.upsert_task(&buddy(&actor), write).unwrap_err(), CoreError::RevisionConflict { .. }));
+    let (actor, write) = pin(&pinned, "peer", 4, "p3");
+    assert!(s.upsert_task(&buddy(&actor), write).is_err(), "peer must not pin someone else's task");
+    let (actor, write) = pin(&todo, "ic", 1, "p4");
+    assert!(matches!(s.upsert_task(&buddy(&actor), write).unwrap_err(), CoreError::Invalid(_)), "a todo cannot be pinned");
+    let (actor, write) = pin(&pinned, "ic", 0, "p5");
+    assert_eq!(s.upsert_task(&buddy(&actor), write).unwrap().pin, 0, "0 unpins");
+}
+
 #[test]
 fn idempotency_key_replays_and_rejects_a_changed_payload() {
     let mut f = fixture();

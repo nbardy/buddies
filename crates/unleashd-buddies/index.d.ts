@@ -522,6 +522,8 @@ export interface Task {
   blockedReason?: string
   evidence: Array<string>
   position: number
+  /** Workspace-home pin: 0 = not pinned, N > 0 = pinned, shown in ascending N. Top-level tasks only. */
+  pin: number
   revision: number
   createdAt: string
   updatedAt: string
@@ -536,6 +538,8 @@ export interface TaskChanges {
   evidence?: Array<string>
   paused?: boolean
   position?: number
+  /** 0 unpins; N > 0 pins at order N (lower = earlier). Only a top-level task can be pinned. */
+  pin?: number
   ownerId?: string
 }
 

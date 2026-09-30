@@ -275,6 +275,8 @@ pub struct Task {
     pub blocked_reason: Option<String>,
     pub evidence: Vec<String>,
     pub position: i64,
+    /// Workspace-home pin: 0 = not pinned, N > 0 = pinned, shown in ascending N. Top-level tasks only.
+    pub pin: i64,
     pub revision: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -523,6 +525,8 @@ pub struct TaskChanges {
     pub evidence: Option<Vec<String>>,
     pub paused: Option<bool>,
     pub position: Option<i64>,
+    /// 0 unpins; N > 0 pins at order N (lower = earlier). Only a top-level task can be pinned.
+    pub pin: Option<i64>,
     pub owner_id: Option<String>,
 }
 
