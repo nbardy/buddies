@@ -15,8 +15,8 @@
 .landing-hero {
   position: relative;
   align-items: center;
-  gap: var(--sp-7);
-  padding-top: var(--sp-8);
+  gap: var(--sp-9);
+  padding-top: var(--sp-10);
   text-align: center;
 }
 
@@ -38,21 +38,52 @@
   box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-/* The workspace emblem's own colours, blurred into an aura behind the headline. */
-.landing-aura {
+/* A slow, soft aurora behind the logo and headline: layered radial glows that drift. */
+.landing-aura,
+.landing-aura::after {
   position: absolute;
-  top: 0;
-  left: 50%;
-  z-index: -1;
-  width: 640px;
-  max-width: 100%;
-  height: 300px;
-  translate: -50% -30%;
-  border-radius: 50%;
-  opacity: 0.32;
-  /* The emblem ground is dark by design; lift it so the blur reads as light. */
-  filter: blur(80px) saturate(2.5) brightness(3);
+  inset: 0;
   pointer-events: none;
+}
+
+.landing-aura {
+  top: 0;
+  bottom: auto;
+  z-index: -1;
+  height: 420px;
+  translate: 0 -22%;
+  filter: blur(56px);
+  opacity: 0.6;
+  background:
+    radial-gradient(38% 50% at 26% 42%, oklch(0.62 0.2 300), transparent 70%),
+    radial-gradient(36% 52% at 74% 38%, oklch(0.66 0.15 240), transparent 70%),
+    radial-gradient(34% 44% at 50% 72%, oklch(0.7 0.17 350), transparent 70%);
+  animation: landing-aurora 18s ease-in-out infinite alternate;
+}
+
+.landing-aura::after {
+  content: '';
+  opacity: 0.7;
+  background:
+    radial-gradient(30% 40% at 62% 60%, oklch(0.76 0.12 200), transparent 70%),
+    radial-gradient(28% 40% at 36% 30%, oklch(0.68 0.18 320), transparent 70%);
+  animation: landing-aurora 24s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes landing-aurora {
+  from {
+    transform: translate3d(-4%, 0, 0) rotate(-5deg) scale(1);
+  }
+  to {
+    transform: translate3d(4%, 3%, 0) rotate(6deg) scale(1.14);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-aura,
+  .landing-aura::after {
+    animation: none;
+  }
 }
 
 .landing-composer {
@@ -176,7 +207,7 @@ a.landing-thread:hover {
 /* Tasks: a grid on desktop, one sideways row on phone (data-frame). */
 .landing-projects {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: var(--sp-7);
   margin: 0;
   padding: 0;
@@ -259,17 +290,6 @@ a.landing-thread:hover {
 
 .landing-project-link:hover .landing-project-title {
   color: var(--accent);
-}
-
-.landing-project-next {
-  display: -webkit-box;
-  margin: 0;
-  overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  color: var(--text-secondary);
-  font-size: var(--fs-3);
-  line-height: 1.4;
 }
 
 .landing-foot {
@@ -398,13 +418,13 @@ a.landing-thread:hover {
 
 .landing-request {
   padding: var(--sp-6) var(--sp-7);
-  border-left: 3px solid var(--warning);
+  border-left: 3px solid var(--accent);
 }
 
 .landing-request-from {
   font-size: var(--fs-2);
   font-weight: 600;
-  color: var(--warning);
+  color: var(--accent);
 }
 
 .landing-request-body {

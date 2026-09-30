@@ -38,21 +38,10 @@ export function projectProgress(children: readonly Task[]): ProjectProgress {
   };
 }
 
-/** What the card says to do next: the stored blocked reason / next action, else the first unfinished todo. */
-export function projectNext(parent: Task, children: readonly Task[]): string | null {
-  if (parent.blockedReason) return `Blocked: ${parent.blockedReason}`;
-  if (parent.nextAction) return parent.nextAction;
-  const next = children
-    .filter((task) => task.status !== 'done' && task.status !== 'cancelled')
-    .sort((a, b) => a.position - b.position)[0];
-  return next ? next.title : null;
-}
-
 /** One Task card on Home: a top-level Task, its checklist progress, and whether the owner pinned it. */
 export type HomeTask = {
   task: Task;
   progress: ProjectProgress;
-  next: string | null;
   pinned: boolean;
   /** Has child Tasks: what the owner calls a "project". Derived, never stored (no Project type). */
   project: boolean;
@@ -81,7 +70,6 @@ export function homeTasks(tasks: readonly Task[], query: string): readonly HomeT
     return {
       task,
       progress: projectProgress(own),
-      next: projectNext(task, own),
       pinned: pinned.has(task.id),
       project: own.length > 0,
     };

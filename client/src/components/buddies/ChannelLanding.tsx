@@ -44,7 +44,7 @@ import './ChannelLanding.css';
 
 const NO_RUNS: readonly Run[] = [];
 const NO_IDS: readonly string[] = [];
-const DESKTOP_TASKS = 4;
+const DESKTOP_TASKS = 6;
 const THREAD_CARDS = 4;
 
 export function ChannelLanding({
@@ -65,7 +65,7 @@ export function ChannelLanding({
   return (
     <div className="landing ui-stack" data-frame={frame}>
       <header className="landing-hero ui-stack">
-        <BuddySigil name={directory.workspaceName} className="landing-aura" />
+        <div className="landing-aura" aria-hidden="true" />
         <BuddySigil name={directory.workspaceName} className="landing-emblem" />
         <h1>What should the team build next?</h1>
         {generalChannelId !== null ? (
@@ -263,7 +263,7 @@ function TaskCard({
   onTogglePin(): void;
   menu: { earlier(): void; later(): void };
 }) {
-  const { task, progress, next } = entry;
+  const { task, progress } = entry;
   const owner = buddyNames[task.ownerId] ?? 'Buddy';
   const title = <span className="landing-project-title">{task.title}</span>;
   return (
@@ -303,7 +303,6 @@ function TaskCard({
         ) : (
           title
         )}
-        {next && <p className="landing-project-next">{next}</p>}
       </div>
       <ProgressFoot progress={progress} />
     </li>
