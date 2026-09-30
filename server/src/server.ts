@@ -111,11 +111,24 @@ const server = http.createServer(app);
 const APP_DATA_DIR = appDataDirectory();
 // Every provider execution is journaled here so the next backend can adopt it (turns/executions.ts).
 const executionJournals = createExecutionJournals(path.join(APP_DATA_DIR, 'executions'));
-/** A background CLI run with no conversation: journaled so the next boot kills, never adopts, it. */
+/**
+ * A background CLI run with no conversation: journaled so the next boot kills, never adopts, it;
+ * its journal goes when it ends (the reviewer runs after every Buddy turn, so they add up).
+ */
 const ephemeralExecute =
   (label: string): typeof executeCommand =>
-  (request) =>
-    executeCommand({ ...request, journalDir: executionJournals.ephemeral(label) });
+  (request) => {
+    const journalDir = executionJournals.ephemeral(label);
+    const remove = () => executionJournals.remove(journalDir);
+    try {
+      const handle = executeCommand({ ...request, journalDir });
+      handle.completed.then(remove, remove);
+      return handle;
+    } catch (error) {
+      remove();
+      throw error;
+    }
+  };
 const LISTEN_HOST = resolveListenHost();
 
 const authResolution = resolveAuthPolicy({
