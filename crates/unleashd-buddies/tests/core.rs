@@ -536,6 +536,11 @@ fn startup_recovery_ends_runs_a_dead_host_held() {
     let run = s.get_run(&claim.run.id).unwrap();
     assert_eq!((run.status, run.error_code.as_deref()), (RunStatus::Failed, Some("interrupted")));
     assert_eq!(s.get_run(&waiting_chat.id).unwrap().status, RunStatus::Cancelled);
+    // "What was running when the host died?" is one workspace read (2026-09-30): the interrupted
+    // run stays listed after it stops being live, and its row says why it ended.
+    let rows = s.list_run_rows(ListScope::Workspace { workspace_id: WS.into() }, 100).unwrap();
+    let row = rows.iter().find(|r| r.id == claim.run.id).expect("interrupted run left the workspace list");
+    assert_eq!((row.status, row.error_code.as_deref()), (RunStatus::Failed, Some("interrupted")));
     assert!(matches!(s.get_post(&Actor::Owner, &ask.id).unwrap().request, RequestState::Failed));
     let notice = s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 5).unwrap();
     assert!(notice.iter().any(|r| r.input == RunInput::FailureNotice { run_id: claim.run.id.clone() }));

@@ -303,9 +303,13 @@ impl Store {
         let (filter, scope) = match scope {
             ListScope::Buddy { buddy_id } => ("r.buddy_id = ?2", buddy_id),
             ListScope::Task { task_id } => ("r.task_id = ?2", task_id),
-            ListScope::Workspace { workspace_id } => {
-                ("r.workspace_id = ?2 AND r.status IN ('queued','running','cancel_requested')", workspace_id)
-            }
+            // Live work, plus what ended in the last 12 h: after a host restart the interrupted
+            // runs are already `failed`, and a live-only view made them vanish (2026-09-30).
+            ListScope::Workspace { workspace_id } => (
+                "r.workspace_id = ?2 AND (r.status IN ('queued','running','cancel_requested')
+                   OR r.ended_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '-12 hours'))",
+                workspace_id,
+            ),
         };
         let requester = "CASE
             WHEN r.input_kind = 'chat' THEN 'owner'
@@ -315,9 +319,11 @@ impl Store {
         let sql = format!(
             "SELECT r.id, r.status, r.input_kind, r.input_id, r.ready_at, r.task_id,
                     {requester}, r.started_at, r.ended_at,
-                    CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END
+                    CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END,
+                    r.conversation_id, r.error_code, r.error
              {RUN_WITH_ACTIVITY_SQL}
-             WHERE {filter} ORDER BY r.created_at DESC, r.id DESC LIMIT ?3"
+             WHERE {filter}
+             ORDER BY r.status IN ('queued','running','cancel_requested') DESC, r.created_at DESC, r.id DESC LIMIT ?3"
         );
         collect(self.conn.prepare_cached(&sql)?.query_map(params![now_iso(), scope, limit], |r| {
             let ready_at: String = r.get(4)?;
@@ -337,6 +343,9 @@ impl Store {
                 started_at: r.get(7)?,
                 ended_at: r.get(8)?,
                 waiting,
+                conversation_id: r.get(10)?,
+                error_code: r.get(11)?,
+                error: r.get(12)?,
             })
         })?)
     }

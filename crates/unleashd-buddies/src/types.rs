@@ -421,6 +421,11 @@ pub struct RunRow {
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
     pub waiting: Option<RunWaiting>,
+    /// The thread the run worked in, so a reader can open or resume it.
+    pub conversation_id: Option<String>,
+    /// What happened to a run that did not complete (e.g. `interrupted`: the host restarted).
+    pub error_code: Option<String>,
+    pub error: Option<String>,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(object))]

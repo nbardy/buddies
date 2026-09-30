@@ -443,6 +443,11 @@ export interface RunRow {
   startedAt?: string
   endedAt?: string
   waiting?: RunWaiting
+  /** The thread the run worked in, so a reader can open or resume it. */
+  conversationId?: string
+  /** What happened to a run that did not complete (e.g. `interrupted`: the host restarted). */
+  errorCode?: string
+  error?: string
 }
 
 export type RunStatus = 'queued' | 'running' | 'cancel_requested' | 'complete' | 'failed' | 'cancelled'

@@ -412,7 +412,7 @@ const BUDDY_TOOLS = {
   }),
   runs: buddyTool({
     description:
-      'List slim run rows by {buddyId}, {taskId}, or {workspace} (yours; queued/running only) as {runs, truncated}. Get one full run or cancel. Queued rows include waiting.',
+      'List run rows by {buddyId}, {taskId}, or {workspace} (yours: live runs first, then runs ended in the last 12 h) as {runs, truncated}. Each row says what happened: status, errorCode/error (errorCode "interrupted" = the host restarted mid-run) and conversationId. Get one full run or cancel. Queued rows include waiting.',
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [

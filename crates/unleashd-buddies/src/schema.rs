@@ -189,7 +189,8 @@ const LIST_SCOPE_INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS schedule_task ON schedule(task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS schedule_workspace ON schedule(workspace_id);
 CREATE INDEX IF NOT EXISTS run_workspace_live ON run(workspace_id, status, created_at)
-  WHERE status IN ('queued','running','cancel_requested');";
+  WHERE status IN ('queued','running','cancel_requested');
+CREATE INDEX IF NOT EXISTS run_workspace_ended ON run(workspace_id, ended_at) WHERE ended_at IS NOT NULL;";
 
 /// A file imported before ordered ids has no `post.ord`: it cannot be ordered correctly, so it is
 /// refused with the fix (re-import), never opened half-working. No live file predates it (T15).
