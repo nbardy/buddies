@@ -47,6 +47,23 @@ h1 { text-align: center; font-weight: 800; color: var(--text); letter-spacing: -
 .working .w { display: flex; gap: 8px; align-items: center; }
 .working img { width: 22px; height: 22px; border-radius: 6px; }
 .helper { color: var(--muted); text-align: center; line-height: 1.5; }
+.pj { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.pj-top { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.pj-top img { width: 22px; height: 22px; border-radius: 6px; }
+.pj-status { color: var(--green); border: 1px solid rgba(74,222,128,.35); border-radius: 999px; padding: 1px 8px; }
+.pj-top .when { margin-left: auto; }
+.pj-title { color: var(--text); font-weight: 700; margin-top: 8px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pj-next { font-size: 13px; color: var(--body); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pj-count { font-size: 13px; color: var(--muted); margin-top: auto; padding-top: 10px; display: flex; gap: 4px; }
+.pj-count b { color: var(--text); }
+.pj-count span { margin-left: auto; color: var(--text); font-weight: 700; }
+.muted { color: var(--muted) !important; }
+.pbar { height: 6px; background: #343850; margin: 8px -14px 0; display: flex; }
+.pbar i { display: block; height: 100%; }
+.pbar .done { background: var(--green); }
+.pbar .doing { background: var(--accent); }
+.pbar .blocked { background: var(--amber); }
+.pbar.empty { background: repeating-linear-gradient(90deg, #343850 0 8px, transparent 8px 14px); }
 .tag { position: absolute; right: 18px; bottom: 12px; font-family: var(--mono); font-size: 11px; color: #59627f; z-index: 2; }
 
 main { display: flex; justify-content: center; }
@@ -61,9 +78,13 @@ h1 { font-size: 56px; margin-top: 18px; }
 .sel { padding: 7px 12px; font-size: 14px; }
 .send { padding: 9px 18px; font-size: 15px; }
 .chips { margin-top: 16px; }
-.cols { display: grid; grid-template-columns: 1fr 340px; gap: 24px; margin-top: 40px; }
+.projects { margin-top: 34px; }
+.pj-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.pj { height: 150px; }
+.pj-title { font-size: 15px; }
+.cols { display: grid; grid-template-columns: 1fr 340px; gap: 24px; margin-top: 30px; }
 .threads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.pv { height: 200px; }
+.pv { height: 150px; }
 .pv-text span { font-size: 17px; }
 .t-title { font-size: 15px; }
 .working { margin-top: 26px; padding-top: 14px; }
@@ -76,6 +97,7 @@ h1 { font-size: 56px; margin-top: 18px; }
 <div class="composer"><div class="ph">Describe the work, or <b>@mention</b> a Buddy&hellip;</div>
 <div class="bar"><span class="sel"># general &#9662;</span><span class="sel">Attach</span><span class="send">Start thread &#8629;</span></div></div>
 <div class="chips"><span class="chip"><img src="assets/face-product-lead.png" alt="">Product Dev Lead</span><span class="chip"><img src="assets/face-ui-engineer.png" alt="">UI Engineer</span><span class="chip"><img src="assets/face-dev-lead.png" alt="">Buddies Lead</span><span class="chip"><img src="assets/face-release-engineer.png" alt="">Release Engineer</span><span class="chip"><img src="assets/face-delivery-pm.png" alt="">Delivery PM</span><span class="chip"><img src="assets/face-marketing.png" alt="">Marketing Designer</span><span class="chip"><img src="assets/face-upstream.png" alt="">Upstream</span></div>
+<section class="projects "><div class="sec-head"><span class="label">Pinned projects</span><span class="when">examples &middot; real todo counts</span><a class="more">+ Pin a Task</a></div><div class="pj-row"><article class="pj"><div class="pj-top"><img src="assets/face-release-engineer.png" alt="" title="Buddies Release Engineer"><span class="pj-status">In progress</span><span class="when">5d</span></div><div class="pj-title">Unleashd 2.0 Channels release and launch video</div><div class="pj-next"><span class="label" style="font-size:10px">Next</span> Name the Channels release candidate</div><div class="pj-count"><b>1 of 6</b> todos done<span>17%</span></div><div class="pbar"><i class="done" style="width:16.67%"></i></div></article><article class="pj"><div class="pj-top"><img src="assets/face-product-lead.png" alt="" title="Product Development Lead"><span class="pj-status">In progress</span><span class="when">4d</span></div><div class="pj-title">First-run unleashd workspace + upstream auto-update</div><div class="pj-next"><span class="label" style="font-size:10px">Next</span> Client popup Update/Later, dismissal keyed by upstream sha</div><div class="pj-count"><b>3 of 5</b> todos done &middot; 2 in progress<span>60%</span></div><div class="pbar"><i class="done" style="width:60.00%"></i><i class="doing" style="width:40.00%"></i></div></article><article class="pj"><div class="pj-top"><img src="assets/face-product-lead.png" alt="" title="Product Development Lead"><span class="pj-status">In progress</span><span class="when">5d</span></div><div class="pj-title">Buddy background workers survive the turn and report back</div><div class="pj-next"><span class="label" style="font-size:10px">Next</span> 60-minute provider-idle watchdog still kills a silent Claude wait</div><div class="pj-count"><b>2 of 6</b> todos done<span>33%</span></div><div class="pbar"><i class="done" style="width:33.33%"></i></div></article><article class="pj"><div class="pj-top"><img src="assets/face-product-lead.png" alt="" title="Product Development Lead"><span class="pj-status">In progress</span><span class="when">7h</span></div><div class="pj-title">Model families resolve to the newest version; medium default effort</div><div class="pj-next muted">Break it into todos to track progress</div><div class="pj-count muted">No todos yet</div><div class="pbar empty"></div></article></div></section>
 <div class="cols">
 <section><div class="sec-head"><span class="label">Pick up where you left off</span><a class="more">All threads &rarr;</a></div>
 <div class="threads"><article class="t"><div class="pv" style="background-image:url(assets/prev-general.png)"></div><div class="t-body"><div class="t-meta"><span class="hash">#general</span><span class="when">now</span></div><div class="t-title">Can we think of a better landing page for a workspace, this is so uninspiring</div><div class="t-sum">Four directions; you picked C</div><div class="t-foot"><span class="ps"><span class="you-av">N</span><img class="pf" src="assets/face-marketing.png" alt=""><img class="pf" src="assets/face-product-lead.png" alt=""></span><span class="when">7 replies</span></div></div></article><article class="t"><div class="pv" style="background-image:url(assets/prev-clips.jpg)"><span class="play">&#9654;</span></div><div class="t-body"><div class="t-meta"><span class="hash">#unleashd-2</span><span class="when">7h</span></div><div class="t-title">What is all the clips we have and what is left to publish this?</div><div class="t-sum">Launch video clips and what is left</div><div class="t-foot"><span class="ps"><span class="you-av">N</span><img class="pf" src="assets/face-marketing.png" alt=""></span><span class="when">20 replies</span></div></div></article><article class="t"><div class="pv" style="background-image:url(assets/prev-thread-ui.png)"></div><div class="t-body"><div class="t-meta"><span class="hash">#bugfixes</span><span class="when">2h</span></div><div class="t-title">Replying here in the threads does not have balanced or aligned UI, we need to fix that</div><div class="t-sum">Buddies UI Engineer replied</div><div class="t-foot"><span class="ps"><span class="you-av">N</span><img class="pf" src="assets/face-ui-engineer.png" alt=""></span><span class="when">1 reply</span></div></div></article><article class="t"><div class="pv pv-text"><span>&ldquo;Unify the DM header. It should have one model picker and not grey out harness change&rdquo;</span></div><div class="t-body"><div class="t-meta"><span class="hash">#channels-feature</span><span class="when">3h</span></div><div class="t-title">Unify the DM header. It should have one model picker and not grey out harness change</div><div class="t-sum">Product Development Lead replied</div><div class="t-foot"><span class="ps"><span class="you-av">N</span><img class="pf" src="assets/face-product-lead.png" alt=""></span><span class="when">4 replies</span></div></div></article></div></section>

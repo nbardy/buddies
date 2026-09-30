@@ -65,6 +65,55 @@ CHANNELS = [('general', 6), ('bugfixes', 43), ('channels-feature', 33), ('buddie
             ('unleashd-2', 1), ('upstream', 0)]
 
 
+# Pinned projects: top-level Tasks, pinned by the owner (these four are the
+# designer's example picks; nothing is pinned yet). Counts are the real todo
+# statuses on 2026-09-30. Progress = done / (all todos - cancelled); review and
+# blocked count as unfinished; a Task with no todos says so instead of a percent.
+# (title, owner face, owner name, status, done, in_progress, blocked, open, next step, updated)
+PROJECTS = [
+    ('Unleashd 2.0 Channels release and launch video', 'release-engineer', 'Buddies Release Engineer',
+     'In progress', 1, 0, 0, 5, 'Name the Channels release candidate', '5d'),
+    ('First-run unleashd workspace + upstream auto-update', 'product-lead', 'Product Development Lead',
+     'In progress', 3, 2, 0, 0, 'Client popup Update/Later, dismissal keyed by upstream sha', '4d'),
+    ('Buddy background workers survive the turn and report back', 'product-lead', 'Product Development Lead',
+     'In progress', 2, 0, 0, 4, '60-minute provider-idle watchdog still kills a silent Claude wait', '5d'),
+    ('Model families resolve to the newest version; medium default effort', 'product-lead',
+     'Product Development Lead', 'In progress', 0, 0, 0, 0, None, '7h'),
+]
+
+
+def project_card(pr):
+    title, face, owner, status, done, doing, blocked, todo, nxt, when = pr
+    total = done + doing + blocked + todo
+    if total == 0:
+        progress = '<div class="pj-count muted">No todos yet</div><div class="pbar empty"></div>'
+        step = '<div class="pj-next muted">Break it into todos to track progress</div>'
+    else:
+        pct = round(100 * done / total)
+        segs = ''.join(
+            f'<i class="{cls}" style="width:{100 * n / total:.2f}%"></i>'
+            for cls, n in (('done', done), ('doing', doing), ('blocked', blocked))
+            if n
+        )
+        extra = f' &middot; {doing} in progress' if doing else ''
+        progress = f'<div class="pj-count"><b>{done} of {total}</b> todos done{extra}<span>{pct}%</span></div><div class="pbar">{segs}</div>'
+        step = f'<div class="pj-next"><span class="label" style="font-size:10px">Next</span> {nxt}</div>'
+    return (
+        f'<article class="pj"><div class="pj-top"><img src="assets/face-{face}.png" alt="" title="{owner}">'
+        f'<span class="pj-status">{status}</span><span class="when">{when}</span></div>'
+        f'<div class="pj-title">{title}</div>{step}{progress}</article>'
+    )
+
+
+def projects_section(extra_cls=''):
+    cards = ''.join(project_card(p) for p in PROJECTS)
+    return (
+        f'<section class="projects {extra_cls}"><div class="sec-head"><span class="label">Pinned projects</span>'
+        f'<span class="when">examples &middot; real todo counts</span><a class="more">+ Pin a Task</a></div>'
+        f'<div class="pj-row">{cards}</div></section>'
+    )
+
+
 def people(ps):
     return ''.join(
         '<span class="you-av">N</span>' if p == 'you' else f'<img class="pf" src="assets/face-{p}.png" alt="">'
@@ -160,6 +209,23 @@ h1 { text-align: center; font-weight: 800; color: var(--text); letter-spacing: -
 .working .w { display: flex; gap: 8px; align-items: center; }
 .working img { width: 22px; height: 22px; border-radius: 6px; }
 .helper { color: var(--muted); text-align: center; line-height: 1.5; }
+.pj { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.pj-top { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.pj-top img { width: 22px; height: 22px; border-radius: 6px; }
+.pj-status { color: var(--green); border: 1px solid rgba(74,222,128,.35); border-radius: 999px; padding: 1px 8px; }
+.pj-top .when { margin-left: auto; }
+.pj-title { color: var(--text); font-weight: 700; margin-top: 8px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pj-next { font-size: 13px; color: var(--body); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pj-count { font-size: 13px; color: var(--muted); margin-top: auto; padding-top: 10px; display: flex; gap: 4px; }
+.pj-count b { color: var(--text); }
+.pj-count span { margin-left: auto; color: var(--text); font-weight: 700; }
+.muted { color: var(--muted) !important; }
+.pbar { height: 6px; background: #343850; margin: 8px -14px 0; display: flex; }
+.pbar i { display: block; height: 100%; }
+.pbar .done { background: var(--green); }
+.pbar .doing { background: var(--accent); }
+.pbar .blocked { background: var(--amber); }
+.pbar.empty { background: repeating-linear-gradient(90deg, #343850 0 8px, transparent 8px 14px); }
 .tag { position: absolute; right: 18px; bottom: 12px; font-family: var(--mono); font-size: 11px; color: #59627f; z-index: 2; }
 """
 
@@ -176,20 +242,30 @@ h1 { font-size: 56px; margin-top: 18px; }
 .sel { padding: 7px 12px; font-size: 14px; }
 .send { padding: 9px 18px; font-size: 15px; }
 .chips { margin-top: 16px; }
-.cols { display: grid; grid-template-columns: 1fr 340px; gap: 24px; margin-top: 40px; }
+.projects { margin-top: 34px; }
+.pj-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.pj { height: 150px; }
+.pj-title { font-size: 15px; }
+.cols { display: grid; grid-template-columns: 1fr 340px; gap: 24px; margin-top: 30px; }
 .threads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.pv { height: 200px; }
+.pv { height: 150px; }
 .pv-text span { font-size: 17px; }
 .t-title { font-size: 15px; }
 .working { margin-top: 26px; padding-top: 14px; }
 """
 
 PHONE_CSS = """
-html, body { width: 375px; height: 812px; }
+html, body { width: 375px; height: 1440px; }
 body { display: block; }
-main { width: 375px; height: 812px; }
+main { width: 375px; height: 1440px; }
 .aura { width: 700px; height: 520px; top: -240px; }
-.wrap { padding: 22px 16px 0; height: 755px; overflow: hidden; }
+.wrap { padding: 22px 16px 0; height: 1383px; overflow: hidden; }
+.pj-row { display: flex; gap: 12px; overflow: hidden; }
+.pj { width: 260px; height: 150px; flex: none; }
+.pj-title { font-size: 14px; }
+.projects { margin-top: 20px; }
+.projects .sec-head .when { display: none; }
+.pj-count { white-space: nowrap; }
 .top { display: flex; align-items: center; gap: 10px; }
 .top img { width: 34px; height: 34px; border-radius: 9px; }
 .top b { color: var(--text); font-size: 20px; font-weight: 800; }
@@ -236,6 +312,7 @@ def desktop():
 <div class="composer"><div class="ph">Describe the work, or <b>@mention</b> a Buddy&hellip;</div>
 <div class="bar"><span class="sel"># general &#9662;</span><span class="sel">Attach</span><span class="send">Start thread &#8629;</span></div></div>
 <div class="chips">{chips(TEAM)}</div>
+{projects_section()}
 <div class="cols">
 <section><div class="sec-head"><span class="label">Pick up where you left off</span><a class="more">All threads {ARROW}</a></div>
 <div class="threads">{threads}</div></section>
@@ -305,9 +382,11 @@ def phone():
 <div class="composer"><div class="ph">Describe the work, or <b>@mention</b>&hellip;</div>
 <div class="bar"><span class="sel"># general &#9662;</span><span class="send">Start &#8629;</span></div></div>
 <div class="chips">{chips(TEAM)}</div>
+{projects_section()}
 <section class="sec"><div class="sec-head"><span class="label">Waiting on you</span><span class="cnt">{len(REQUESTS)}</span></div>{reqs}</section>
 <section class="sec"><div class="sec-head"><span class="label">Pick up where you left off</span></div>
 <div class="rail-row">{threads}</div></section>
+{working_row()}
 </div><div class="tabs"><img src="assets/phone-tabbar.png" alt=""></div></main>"""
     return page(PHONE_CSS, body)
 
