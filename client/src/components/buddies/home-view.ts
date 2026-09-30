@@ -192,9 +192,3 @@ export function excerpt(body: string, max: number): string {
 export function firstImage(body: string): string | null {
   return /!\[[^\]]*\]\(([^)\s]+)\)/.exec(body)?.[1] ?? null;
 }
-
-/** A Task status as a sentence-case label: "in_progress" -> "In progress". */
-export function statusLabel(status: Task['status']): string {
-  const words = status.replace('_', ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}

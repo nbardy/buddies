@@ -22,7 +22,6 @@ import {
   type PinWrite,
   appendPin,
   excerpt,
-  statusLabel,
   firstImage,
   importPins,
   movePin,
@@ -188,7 +187,6 @@ function TaskSection({
               entry={entry}
               workspaceId={workspaceId}
               channelId={channelId}
-              buddyNames={directory.buddyNames}
               busy={action.busy}
               onTogglePin={() =>
                 write(entry.pinned ? unpin(entry.task) : appendPin(directory.tasks, entry.task))
@@ -250,7 +248,6 @@ function TaskCard({
   entry,
   workspaceId,
   channelId,
-  buddyNames,
   busy,
   onTogglePin,
   menu,
@@ -258,26 +255,15 @@ function TaskCard({
   entry: HomeTask;
   workspaceId: string;
   channelId: string | null;
-  buddyNames: Readonly<Record<string, string>>;
   busy: boolean;
   onTogglePin(): void;
   menu: { earlier(): void; later(): void };
 }) {
   const { task, progress } = entry;
-  const owner = buddyNames[task.ownerId] ?? 'Buddy';
   const title = <span className="landing-project-title">{task.title}</span>;
   return (
     <li className="landing-project ui-card ui-surface" data-status={task.status}>
       <div className="landing-project-body ui-stack">
-        <div className="landing-project-top ui-row">
-          <span className="landing-status-row ui-row">
-            <span role="img" title={owner} aria-label={`Owner: ${owner}`}>
-              <BuddySigil name={owner} className="landing-chip-face" />
-            </span>
-            <span className="landing-status" data-status={task.status}>
-              {statusLabel(task.status)}
-            </span>
-          </span>
           <span className="landing-card-actions ui-row">
             {entry.pinned && <ReorderMenu title={task.title} menu={menu} />}
             <button
@@ -292,7 +278,6 @@ function TaskCard({
               {entry.pinned ? '★' : '☆'}
             </button>
           </span>
-        </div>
         {channelId ? (
           <Link
             className="landing-project-link"
@@ -365,10 +350,15 @@ function ProgressFoot({ progress }: { progress: HomeTask['progress'] }) {
       );
     case 'counted': {
       const share = (count: number) => `${(count / progress.total) * 100}%`;
-      const rest = [
+      // The bar's colours are the only status on a card (owner, 2026-10-01); the words live in the
+      // accessible value and the tooltip so colour is never the sole carrier.
+      const words = [
+        `${progress.done} of ${progress.total} todos done`,
         progress.inProgress > 0 ? `${progress.inProgress} in progress` : null,
         progress.blocked > 0 ? `${progress.blocked} blocked` : null,
-      ].filter((part) => part !== null);
+      ]
+        .filter((part) => part !== null)
+        .join(', ');
       return (
         <div className="landing-foot ui-stack">
           <span className="landing-progress-label ui-row">
@@ -378,7 +368,6 @@ function ProgressFoot({ progress }: { progress: HomeTask['progress'] }) {
               </strong>{' '}
               · {progress.percent}%
             </span>
-            {rest.length > 0 && <span className="ui-muted">{rest.join(' · ')}</span>}
           </span>
           {/* Only green is progress; the tinted segments are unfinished work, named in the label. */}
           <span
@@ -388,7 +377,8 @@ function ProgressFoot({ progress }: { progress: HomeTask['progress'] }) {
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={progress.percent}
-            aria-valuetext={`${progress.done} of ${progress.total} todos done`}
+            aria-valuetext={words}
+            title={words}
           >
             <span className="landing-bar-done" style={{ width: share(progress.done) }} />
             <span className="landing-bar-active" style={{ width: share(progress.inProgress) }} />
