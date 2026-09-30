@@ -549,13 +549,13 @@ FULL_CUE = [  # script v2 (2026-09-30): every scene is one 4-bar phrase; a crash
     Drop(5),  # "Ask your agents"
     Groove(
         6,
-        24,
-        crashes=(9, 13, 17, 21),  # show their work, any harness, flashes, you own it
-        chops=((9, 3, 0.55), (13, 2, 0.55), (17, 3, 0.55), (21, 2, 0.55)),
+        28,
+        crashes=(9, 13, 17, 21, 25),  # show their work (2 phrases), any harness, swarms, you own it
+        chops=((9, 3, 0.55), (13, 2, 0.55), (17, 3, 0.55), (21, 2, 0.55), (25, 3, 0.55)),
     ),
     # Owner, 2026-09-30: the Vim line's breakdown "adds tension", but the beat coming back for a
     # recap hit read as weird; close quiet and dramatic instead. A -> D resolves on the end card.
-    Coda(25, 29, chords=("Bm", "G", "D", "A"), chop=0, ring=6.0, fade=4.0),
+    Coda(29, 33, chords=("Bm", "G", "D", "A"), chop=0, ring=6.0, fade=4.0),
 ]
 
 CUT_FADE = 0.015  # a cue that ends mid-groove is cut with a 15 ms linear fade

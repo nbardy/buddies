@@ -14,12 +14,13 @@ const D = staticFile('2026-09-26_design-review_D_post-screenshots-request.mov');
 
 // Source seconds. Script v2 (2026-09-30): one 4-bar phrase (7.5 s), three shots. The owner found
 // the 7-cut version "too cutty" inside the full film: ask → six minutes later the results land →
-// hold on one result. The iPad click and the scroll are gone.
+// hold on the three posts. The iPad click and scroll are gone, and so is the iPad Buddies-grid hold:
+// the owner called that thumbnail "a bad screenshot" (2026-09-30).
 const REQUEST = play(0.8, 5.3, 1.5, 'request appears in the composer, sent, thread opens');
 const CUTS: Cut[] = [
   REQUEST,
   play(392.7, 398.1, 2.16, '~6 min later: "captured all 21 views", then Mobile / iPad / Desktop land'),
-  hold(431.75, 2.0, 'iPad landscape: the Buddies grid'),
+  hold(398.1, 2.0, 'the three posts in the channel, held'),
 ];
 
 const { starts, duration, at } = timeline(CUTS);
@@ -30,7 +31,6 @@ const FULL: Shot = { ...COMPOSER, focus: 0 };
 const PANE_WAIT: Shot = { focus: 1, x: 2156, w: 818, top: 632, scale: 0.8, ...STILL, oy: 0.3 }; // request + typing
 const PANE_REPLY: Shot = { ...PANE_WAIT, top: 480, oy: 0.7 }; // request + "On it"
 const POSTS: Shot = { focus: 1, x: 540, w: 1620, top: 800, scale: 1, ...STILL, ox: 0.3, oy: 0.6 }; // the three posts
-const IPAD_BUDDIES: Shot = { focus: 1, x: 2156, w: 818, top: 740, scale: 1.2, ...STILL, oy: 0.45 };
 
 const SENT = (3.6 - REQUEST.from) / REQUEST.rate; // the post leaves the composer
 const LANDED = at(1) + (396.1 - 392.7) / 2.16; // the three posts are in the channel
@@ -44,9 +44,7 @@ const CAMERA: Key[] = [
   { t: at(1), shot: PANE_REPLY },
   { t: LANDED - 0.6, shot: PANE_REPLY },
   { t: LANDED, shot: POSTS },
-  { t: at(2), shot: push(POSTS, 1.06) },
-  { t: at(2), shot: IPAD_BUDDIES },
-  { t: duration / FPS, shot: push(IPAD_BUDDIES, 1.06) },
+  { t: duration / FPS, shot: push(POSTS, 1.12) },
 ];
 
 // The honest time-skip: the Lead took about six minutes to capture 21 views at four sizes.

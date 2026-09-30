@@ -58,13 +58,13 @@ from edm import (
     write,
 )
 
-LAST_GROOVE = 24
-CODA = 25
-END = 29
+LAST_GROOVE = 28
+CODA = 29
+END = 33
 RING = 6.0
 FADE = 4.0
 LENGTH = at(END) + RING
-PHRASES = (9, 13, 17, 21)
+PHRASES = (9, 13, 17, 21, 25)
 
 
 # ---- The mix: four buses and two reverb sends, summed once at the end.

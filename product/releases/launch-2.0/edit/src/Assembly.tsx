@@ -50,16 +50,16 @@ export const SECTIONS: Section[] = [
   section('overload', 0, Overload.DURATION, Overload.Overload, Overload.DURATION),
   section('benefits', MUSIC_IN, bar(5), PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
   section('ask', bar(5), bar(9), DesignReview.DesignReview, DesignReview.DURATION),
-  section('show-work', bar(9), bar(13), ShowWork.ShowWork, ShowWork.DURATION),
-  section('harness-slide', bar(13), bar(15), Slides, SLIDE_SPLIT),
-  section('picker', bar(15), bar(17), PickerRefresh.PickerRefresh, PickerRefresh.DURATION),
-  section('swarm', bar(17), bar(19), Swarm.Swarm, Swarm.DURATION),
-  section('features', bar(19), bar(20), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
-  section('subscriptions-slide', bar(20), bar(21), Slides, SLIDES_END, SLIDE_SPLIT),
-  section('fork', bar(21), bar(23), Close.Fork, Close.FORK_FRAMES),
-  section('run', bar(23), bar(25), Close.Run, Close.RUN_FRAMES),
-  section('vim', bar(25), bar(29), Close.Vim, Close.VIM_FRAMES),
-  section('end', bar(29), bar(29) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
+  section('show-work', bar(9), bar(17), ShowWork.ShowWork, ShowWork.DURATION),
+  section('harness-slide', bar(17), bar(19), Slides, SLIDE_SPLIT),
+  section('picker', bar(19), bar(21), PickerRefresh.PickerRefresh, PickerRefresh.DURATION),
+  section('swarm', bar(21), bar(23), Swarm.Swarm, Swarm.DURATION),
+  section('features', bar(23), bar(24), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
+  section('subscriptions-slide', bar(24), bar(25), Slides, SLIDES_END, SLIDE_SPLIT),
+  section('fork', bar(25), bar(27), Close.Fork, Close.FORK_FRAMES),
+  section('run', bar(27), bar(29), Close.Run, Close.RUN_FRAMES),
+  section('vim', bar(29), bar(33), Close.Vim, Close.VIM_FRAMES),
+  section('end', bar(33), bar(33) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
 ];
 
 // The cue comes up out of the intro instead of arriving at full level: the intro's tail sits near
@@ -72,8 +72,8 @@ const buildRamp = (f: number) => (f >= BUILD_FRAMES ? 1 : 0.4 + 0.6 * (f / BUILD
 // One caption per product scene, always top left, in from the scene's second beat.
 const CAPTIONS: { from: number; to: number; lines: [string, string] }[] = [
   { from: bar(5), to: bar(9), lines: ['Ask your agents.', 'In channels.'] },
-  { from: bar(9), to: bar(13), lines: ['They show their work.', 'Images and video, right in the thread.'] },
-  { from: bar(17), to: bar(19), lines: ['Multi-agent swarms.', 'Agents @-mention each other.'] },
+  { from: bar(9), to: bar(17), lines: ['They show their work.', 'Images and video, right in the thread.'] },
+  { from: bar(21), to: bar(23), lines: ['Multi-agent swarms.', 'Agents @-mention each other.'] },
 ];
 const CAPTION_IN = (60 / 128) * 0.5; // seconds after the scene's downbeat
 

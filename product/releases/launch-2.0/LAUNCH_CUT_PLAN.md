@@ -80,3 +80,12 @@ Not done from the v2 script: the groove does not thin before the coda (bar 24 is
 - #unleashd-2 threads `post_b4c4e4bd-9c32-4306-84fe-c1b7b6987a24`,
   `post_8b3f5688-be29-41be-baf4-a5058775cc17`,
   `post_62a6fa1c-c73c-4873-8cdd-ad7b2a9ff004`.
+
+## Update 2026-09-30 (late): 84 s, "They show their work" doubled
+
+Owner: stay longer on "They show their work", the iPad Buddies grid at 0:32 was a bad screenshot,
+and the bare emblem sheet at 0:37 was confusing. Now: "Ask your agents" ends on the three posts
+(bars 5-8); "They show their work" is 8 bars (inline video, emblem post, labelled emblem sheet, "Great
+work!"); the harness slide, picker, swarm, mobile flash, subscriptions, fork, run, Vim and end card
+all move 4 bars later. `calm.py`/`edm.py` stretch the groove to bar 28, coda bars 29-32, end bar 33
+(66 s cues). Score: half-time (owner pick), mastered to a -10 dBFS peak.
