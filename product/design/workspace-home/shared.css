@@ -1,0 +1,57 @@
+/* Workspace-home mocks (2026-09-30). Colours sampled from the running app's
+ * dark theme so the mock sits beside the real rail without a seam. */
+:root {
+  --bg: #1e2029;
+  --bg-deep: #191b22;
+  --card: #242733;
+  --card-hi: #2b2f3d;
+  --line: #30344a;
+  --text: #e8e9f1;
+  --body: #c5c9d8;
+  --muted: #7f8bb0;
+  --accent: #c49bff;
+  --green: #4ade80;
+  --amber: #fbbf24;
+  --mono: 'SF Mono', ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 2000px; height: 1250px; overflow: hidden; background: var(--bg); }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  color: var(--body);
+  display: flex;
+}
+.rail { width: 366px; height: 1250px; flex: none; border-right: 1px solid #2a2d3a; }
+.rail img { width: 366px; display: block; }
+main { flex: 1; height: 1250px; overflow: hidden; position: relative; }
+.label {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.face { width: 26px; height: 26px; border-radius: 8px; display: block; }
+.faces { display: flex; }
+.faces .face { margin-left: -6px; box-shadow: 0 0 0 2px var(--card); }
+.faces .face:first-child { margin-left: 0; }
+.badge {
+  background: var(--accent);
+  color: #1b1530;
+  font-weight: 700;
+  font-size: 13px;
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.live { display: inline-flex; align-items: center; gap: 7px; color: var(--green); font-size: 14px; }
+.live::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.18);
+}
+.when { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.hash { color: var(--muted); }
+.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

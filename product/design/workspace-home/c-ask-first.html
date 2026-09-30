@@ -1,0 +1,52 @@
+<!doctype html>
+<!-- Direction C, "Ask first": the home is a place to start work, not a list to
+     read. One big composer addressed to the team, then your open threads, then
+     channels as chips. Data: the unleashd workspace, 2026-09-30. -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="shared.css"><style>
+main { display:flex; flex-direction:column; align-items:center; }
+.aura { position:absolute; left:50%; top:-260px; width:1300px; height:1000px; transform:translateX(-50%);
+  background:url(assets/emblem-unleashd.png) center/contain no-repeat; filter:blur(90px) saturate(1.6); opacity:.42; }
+.fade { position:absolute; inset:0; background:linear-gradient(180deg, rgba(30,32,41,.1) 0, rgba(30,32,41,.55) 360px, var(--bg) 640px); }
+.wrap { position:relative; z-index:1; width:1080px; padding-top:92px; }
+.id { display:flex; align-items:center; gap:16px; justify-content:center; }
+.id img { width:64px; height:64px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.5); }
+.id span { font-family:var(--mono); color:var(--muted); font-size:15px; }
+h1 { text-align:center; font-size:60px; font-weight:800; color:var(--text); letter-spacing:-.025em; margin-top:26px; }
+.lede { text-align:center; font-size:18px; color:var(--body); margin-top:12px; }
+.lede .live { font-size:18px; }
+.composer { margin-top:34px; background:rgba(36,39,51,.92); border:1px solid #3d4260; border-radius:20px; padding:22px 24px 16px;
+  box-shadow:0 30px 80px rgba(0,0,0,.45), 0 0 0 6px rgba(196,155,255,.07); backdrop-filter:blur(8px); }
+.ph { font-size:20px; color:var(--muted); height:64px; }
+.ph b { color:var(--accent); font-weight:500; }
+.bar { display:flex; align-items:center; gap:12px; border-top:1px solid var(--line); padding-top:14px; }
+.sel { border:1px solid var(--line); border-radius:9px; padding:7px 12px; font-size:14px; color:var(--body); }
+.send { margin-left:auto; background:var(--accent); color:#1b1530; font-weight:700; border-radius:10px; padding:9px 18px; font-size:15px; }
+.chips { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-top:18px; }
+.chip { display:inline-flex; align-items:center; gap:8px; background:rgba(36,39,51,.8); border:1px solid var(--line); border-radius:999px; padding:5px 14px 5px 5px; font-size:14px; color:var(--body); }
+.chip img { width:26px; height:26px; border-radius:8px; }
+.sec { margin-top:46px; }
+.sec-head { display:flex; align-items:baseline; gap:12px; margin-bottom:14px; }
+.sec-head a { margin-left:auto; color:var(--accent); font-size:14px; }
+.threads { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+.t { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; height:156px; display:flex; flex-direction:column; }
+.t-top { display:flex; font-size:13px; }
+.t-text { font-size:15px; color:var(--text); margin-top:8px; line-height:1.4; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.t-foot { margin-top:auto; display:flex; gap:8px; align-items:center; }
+.t-foot .face { width:22px; height:22px; border-radius:6px; }
+.cs { display:flex; flex-wrap:wrap; gap:10px; }
+.c { display:inline-flex; gap:6px; align-items:center; border:1px solid var(--line); border-radius:10px; padding:8px 14px; font-size:15px; color:var(--body); background:var(--card); }
+.c.u { color:var(--text); font-weight:600; }
+.c b { background:var(--accent); color:#1b1530; border-radius:999px; font-size:12px; padding:1px 7px; margin-left:4px; }
+</style></head><body>
+<aside class="rail"><img src="assets/rail.png" alt=""></aside>
+<main><div class="aura"></div><div class="fade"></div>
+<div class="wrap">
+<div class="id"><img src="assets/emblem-unleashd.png" alt=""><span>unleashd · ~/git/unleashd</span></div>
+<h1>What should the team build next?</h1>
+<p class="lede">7 Buddies · <span class="live">2 working now</span> · 16 Tasks in progress · 17 waiting for your review</p>
+<div class="composer"><div class="ph">Describe the work, or <b>@mention</b> a Buddy…</div>
+<div class="bar"><span class="sel"># general ▾</span><span class="sel">📎 Attach</span><span class="send">Start thread ↵</span></div></div>
+<div class="chips"><span class="chip"><img src="assets/face-product-lead.png" alt="">Product Dev Lead</span><span class="chip"><img src="assets/face-ui-engineer.png" alt="">UI Engineer</span><span class="chip"><img src="assets/face-dev-lead.png" alt="">Buddies Lead</span><span class="chip"><img src="assets/face-release-engineer.png" alt="">Release Engineer</span><span class="chip"><img src="assets/face-delivery-pm.png" alt="">Delivery PM</span><span class="chip"><img src="assets/face-marketing.png" alt="">Marketing Designer</span><span class="chip"><img src="assets/face-upstream.png" alt="">Upstream</span></div>
+<div class="sec"><div class="sec-head"><span class="label">Your open threads</span><a>All threads →</a></div><div class="threads"><div class="t"><div class="t-top"><span class="hash">#general</span><span class="when" style="margin-left:auto">2m</span></div><div class="t-text">Can we think of a better landing page for a workspace, this is so uninspiring</div><div class="t-foot"><img class="face" src="assets/face-marketing.png" alt=""><span class="live" style="font-size:13px">Marketing Designer is working</span></div></div><div class="t"><div class="t-top"><span class="hash">#bugfixes</span><span class="when" style="margin-left:auto">2h</span></div><div class="t-text">replying here in the threads does not have balanced or aligned UI, we need to fix that</div><div class="t-foot"><img class="face" src="assets/face-ui-engineer.png" alt=""><span class="when">@Buddies UI Engineer</span></div></div><div class="t"><div class="t-top"><span class="hash">#channels-feature</span><span class="when" style="margin-left:auto">15h</span></div><div class="t-text">Unify the DM header. It should have one model picker and not grey out harness change</div><div class="t-foot"><img class="face" src="assets/face-product-lead.png" alt=""><span class="when">@Product Development Lead</span></div></div><div class="t"><div class="t-top"><span class="hash">#unleashd-2</span><span class="when" style="margin-left:auto">18h</span></div><div class="t-text">What is all the clips we have and what is left to publish this?</div><div class="t-foot"><img class="face" src="assets/face-marketing.png" alt=""><span class="when">@Marketing Designer</span></div></div></div></div>
+<div class="sec"><div class="sec-head"><span class="label">Channels</span></div><div class="cs"><span class="c u"><span class="hash">#</span>general<b>6</b></span><span class="c u"><span class="hash">#</span>bugfixes<b>43</b></span><span class="c u"><span class="hash">#</span>channels-feature<b>33</b></span><span class="c u"><span class="hash">#</span>buddies-dev<b>12</b></span><span class="c u"><span class="hash">#</span>triage<b>5</b></span><span class="c u"><span class="hash">#</span>buddy-repairs<b>4</b></span><span class="c u"><span class="hash">#</span>case-studies<b>3</b></span><span class="c u"><span class="hash">#</span>releases<b>3</b></span><span class="c u"><span class="hash">#</span>unleashd-2<b>1</b></span><span class="c"><span class="hash">#</span>upstream</span></div></div>
+</div></main></body></html>
