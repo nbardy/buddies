@@ -1,60 +1,81 @@
 /* Workspace Home. Classes are prefixed .landing-* (CSS is global). Sizes come from tokens. */
 .landing {
-  gap: var(--sp-9);
+  --landing-radius: 14px;
+  --landing-card: color-mix(in srgb, var(--text-bright) 4%, transparent);
+  --landing-line: color-mix(in srgb, var(--text-bright) 9%, transparent);
+  position: relative;
+  gap: var(--sp-10);
   width: 100%;
   max-width: 1040px;
   margin: 0 auto;
-  padding: var(--sp-9);
+  padding: var(--sp-11) var(--sp-9) var(--sp-11);
+}
+
+/* A soft accent glow behind the headline, fading into the page. */
+.landing::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 420px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 60% 100% at 50% 0,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    transparent 70%
+  );
 }
 
 .landing-hero {
   align-items: center;
-  gap: var(--sp-6);
+  gap: var(--sp-7);
+  padding-top: var(--sp-8);
   text-align: center;
 }
 
 .landing-hero h1 {
   margin: 0;
-  font-size: var(--fs-8);
+  font-size: var(--fs-hero);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
   color: var(--text-bright);
+  text-wrap: balance;
 }
 
 .landing-emblem {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-}
-
-.landing-path {
-  margin: 0;
-  max-width: 100%;
-  font-size: var(--fs-3);
+  width: 52px;
+  height: 52px;
+  border-radius: var(--landing-radius);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .landing-composer {
   width: 100%;
   max-width: 720px;
+  margin-top: var(--sp-5);
   text-align: left;
 }
 
-.landing-note {
-  margin: 0;
-  font-size: var(--fs-3);
+.landing-composer .channel-composer {
+  padding: var(--sp-3);
+  border-radius: var(--landing-radius);
+  box-shadow:
+    0 0 0 1px var(--landing-line),
+    0 18px 50px -18px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
-.landing-team {
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--sp-4);
+.landing-note {
+  max-width: 520px;
   margin: 0;
-  padding: 0;
-  list-style: none;
+  font-size: var(--fs-4);
+  line-height: 1.5;
 }
 
 .landing-chip {
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-5) var(--sp-2) var(--sp-2);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--landing-line);
   border-radius: 999px;
   color: var(--text-primary);
   font-size: var(--fs-3);
@@ -73,17 +94,25 @@ a.landing-chip:hover {
 }
 
 .landing-section {
-  gap: var(--sp-5);
+  gap: var(--sp-6);
 }
 
 .landing-section-head {
+  align-items: baseline;
   justify-content: space-between;
 }
 
 .landing-section-head h2 {
   margin: 0;
-  font-size: var(--fs-5);
+  font-size: var(--fs-6);
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text-bright);
+}
+
+.landing-device-note,
+.landing-all {
+  font-size: var(--fs-2);
 }
 
 .landing-empty {
@@ -92,32 +121,55 @@ a.landing-chip:hover {
 }
 
 .landing-more {
-  align-self: flex-start;
+  align-self: center;
   font-size: var(--fs-3);
 }
 
-/* Projects: a grid on desktop, one sideways row on phone (data-frame). */
+.landing-search {
+  width: 100%;
+  padding: var(--sp-5) var(--sp-7);
+  border: 1px solid var(--landing-line);
+  border-radius: var(--sp-6);
+  background: var(--landing-card);
+  color: var(--text-primary);
+  font-size: var(--fs-4);
+}
+
+.landing-search:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* Cards: one surface for Tasks, requests and threads. */
+.landing-project,
+.landing-request,
+.landing-thread,
+.landing-retired {
+  border: 1px solid var(--landing-line);
+  border-radius: var(--landing-radius);
+  background: var(--landing-card);
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.15s;
+}
+
+.landing-project:hover,
+a.landing-request:hover,
+a.landing-thread:hover {
+  border-color: var(--border-emphasis);
+  background: color-mix(in srgb, var(--text-bright) 6%, transparent);
+  transform: translateY(-1px);
+}
+
+/* Tasks: a grid on desktop, one sideways row on phone (data-frame). */
 .landing-projects {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--sp-6);
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--sp-7);
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.landing[data-frame='mobile'] .landing-projects {
-  display: flex;
-  overflow-x: auto;
-  scroll-snap-type: x proximity;
-  margin-inline: calc(var(--sp-7) * -1);
-  padding-inline: var(--sp-7);
-}
-
-.landing[data-frame='mobile'] .landing-project {
-  flex: none;
-  width: 240px;
-  scroll-snap-align: start;
 }
 
 .landing-project {
@@ -129,19 +181,36 @@ a.landing-chip:hover {
 }
 
 .landing-project-body {
-  gap: var(--sp-3);
-  padding: var(--sp-6) var(--sp-6) var(--sp-4);
+  gap: var(--sp-4);
+  padding: var(--sp-7) var(--sp-7) var(--sp-5);
 }
 
 .landing-project-top {
   justify-content: space-between;
+  min-height: 24px;
 }
 
+/* Status: a dot and a word in the status colour, on a faint tint of it. */
 .landing-status {
-  font-size: var(--fs-1);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-1) var(--sp-4) var(--sp-1) var(--sp-3);
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
   color: var(--text-muted);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.landing-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .landing-status[data-status='blocked'] {
@@ -161,19 +230,24 @@ a.landing-chip:hover {
   text-decoration: none;
 }
 
-.landing-project-link:hover .landing-project-title {
-  text-decoration: underline;
+.landing-project-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: var(--fs-6);
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--text-bright);
 }
 
-.landing-project-title {
-  font-size: var(--fs-post);
-  font-weight: 600;
-  color: var(--text-bright);
+.landing-project-link:hover .landing-project-title {
+  color: var(--accent);
 }
 
 .landing-project-owner {
   gap: var(--sp-3);
-  font-size: var(--fs-3);
+  font-size: var(--fs-2);
 }
 
 .landing-project-next {
@@ -183,31 +257,38 @@ a.landing-chip:hover {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   font-size: var(--fs-3);
+  line-height: 1.4;
 }
 
 .landing-foot {
-  gap: var(--sp-2);
-  padding: 0 var(--sp-6) var(--sp-5);
+  gap: var(--sp-3);
+  padding: 0 var(--sp-7) var(--sp-6);
 }
 
 .landing-progress-label {
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: var(--sp-4);
+  gap: var(--sp-1) var(--sp-4);
   font-size: var(--fs-2);
+}
+
+/* Each half wraps as a unit, never mid-phrase ("3 in progress · 3" / "blocked"). */
+.landing-progress-label > span {
+  white-space: nowrap;
 }
 
 .landing-bar {
   display: flex;
-  height: 4px;
+  height: 6px;
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--text-bright) 10%, transparent);
 }
 
 .landing-bar--dashed {
-  background: none;
-  border-top: 1px dashed var(--border-emphasis);
   height: 0;
+  border-top: 1px dashed var(--border-emphasis);
+  background: none;
 }
 
 .landing-bar-done {
@@ -222,15 +303,33 @@ a.landing-chip:hover {
   background: var(--warning);
 }
 
-.landing-menu {
-  position: relative;
+.landing-card-actions {
+  gap: var(--sp-1);
 }
 
+.landing-pin,
 .landing-menu-button {
   padding: 0 var(--sp-3);
   border: 0;
   background: none;
   color: var(--text-muted);
+  font-size: var(--fs-5);
+  opacity: 0.6;
+}
+
+.landing-project:hover .landing-pin,
+.landing-pin:focus-visible,
+.landing-pin[aria-pressed='true'],
+.landing-project:hover .landing-menu-button {
+  opacity: 1;
+}
+
+.landing-pin[aria-pressed='true'] {
+  color: var(--warning);
+}
+
+.landing-menu {
+  position: relative;
 }
 
 .landing-menu-list {
@@ -243,12 +342,13 @@ a.landing-chip:hover {
   min-width: 140px;
   padding: var(--sp-2);
   border: 1px solid var(--border-default);
-  border-radius: var(--sp-3);
+  border-radius: var(--sp-4);
 }
 
 .landing-menu-list button {
   padding: var(--sp-3) var(--sp-4);
   border: 0;
+  border-radius: var(--sp-2);
   background: none;
   color: var(--text-primary);
   font-size: var(--fs-3);
@@ -259,18 +359,22 @@ a.landing-chip:hover {
   background: color-mix(in srgb, var(--text-bright) 8%, transparent);
 }
 
+.landing-retired {
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-7);
+  font-size: var(--fs-3);
+}
+
+.landing-retired p {
+  margin: 0;
+}
+
 .landing-requests,
 .landing-threads {
   gap: var(--sp-5);
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.landing-threads {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--sp-6);
 }
 
 .landing-request,
@@ -281,16 +385,25 @@ a.landing-chip:hover {
 }
 
 .landing-request {
-  padding: var(--sp-5) var(--sp-6);
+  padding: var(--sp-6) var(--sp-7);
+  border-left: 3px solid var(--warning);
 }
 
 .landing-request-from {
   font-size: var(--fs-2);
+  font-weight: 600;
   color: var(--warning);
 }
 
 .landing-request-body {
   font-size: var(--fs-4);
+  line-height: 1.45;
+}
+
+.landing-threads {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-7);
 }
 
 .landing-thread {
@@ -310,39 +423,28 @@ a.landing-chip:hover {
 }
 
 .landing-thread-lead {
-  padding: var(--sp-6);
+  padding: var(--sp-7);
   overflow: hidden;
   font-size: var(--fs-6);
-  font-weight: 600;
+  font-weight: 650;
+  line-height: 1.3;
   color: var(--text-secondary);
 }
 
 .landing-thread-meta {
   gap: var(--sp-2);
-  padding: var(--sp-5) var(--sp-6) var(--sp-6);
+  padding: var(--sp-5) var(--sp-7) var(--sp-6);
 }
 
 .landing-thread-title {
   font-size: var(--fs-4);
-  font-weight: 600;
+  font-weight: 650;
   color: var(--text-bright);
 }
 
 .landing-thread-latest,
 .landing-thread-foot {
   font-size: var(--fs-2);
-}
-
-.landing[data-frame='mobile'] .landing-threads {
-  display: flex;
-  overflow-x: auto;
-  margin-inline: calc(var(--sp-7) * -1);
-  padding-inline: var(--sp-7);
-}
-
-.landing[data-frame='mobile'] .landing-threads > li {
-  flex: none;
-  width: 240px;
 }
 
 .landing-working {
@@ -366,56 +468,36 @@ a.landing-chip:hover {
   background: var(--success);
 }
 
+/* Phone: a tighter hero, and Tasks and threads scroll sideways. */
 .landing[data-frame='mobile'] {
+  gap: var(--sp-9);
   padding: var(--sp-6) var(--sp-7);
 }
 
-/* Phone: the hero is compact (the page title already names the workspace) and the team scrolls sideways. */
+.landing[data-frame='mobile'] .landing-hero {
+  padding-top: 0;
+}
+
 .landing[data-frame='mobile'] .landing-emblem {
   display: none;
 }
 
 .landing[data-frame='mobile'] .landing-hero h1 {
-  font-size: var(--fs-7);
+  font-size: var(--fs-9);
 }
 
-.landing[data-frame='mobile'] .landing-team {
-  flex-wrap: nowrap;
-  justify-content: flex-start;
+.landing[data-frame='mobile'] .landing-projects,
+.landing[data-frame='mobile'] .landing-threads {
+  display: flex;
   overflow-x: auto;
-  align-self: stretch;
+  scroll-snap-type: x proximity;
+  margin-inline: calc(var(--sp-7) * -1);
+  padding-inline: var(--sp-7);
 }
 
-.landing[data-frame='mobile'] .landing-chip {
-  white-space: nowrap;
-}
-
-.landing-device-note {
-  font-size: var(--fs-2);
-}
-
-.landing-search {
-  width: 100%;
-  padding: var(--sp-4) var(--sp-6);
-  border: 1px solid var(--border-default);
-  border-radius: var(--sp-4);
-  background: none;
-  color: var(--text-primary);
-  font-size: var(--fs-4);
-}
-
-.landing-card-actions {
-  gap: var(--sp-1);
-}
-
-.landing-pin {
-  padding: 0 var(--sp-3);
-  border: 0;
-  background: none;
-  color: var(--text-muted);
-  font-size: var(--fs-5);
-}
-
-.landing-pin[aria-pressed='true'] {
-  color: var(--warning);
+.landing[data-frame='mobile'] .landing-projects > li,
+.landing[data-frame='mobile'] .landing-threads > li {
+  flex: none;
+  width: 250px;
+  scroll-snap-align: start;
 }

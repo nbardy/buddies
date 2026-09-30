@@ -27,6 +27,7 @@
   --fs-7: 18px; /* panel titles */
   --fs-8: 24px; /* page titles, large glyphs */
   --fs-9: 32px; /* display: mobile page titles, empty-state glyphs */
+  --fs-hero: 52px; /* workspace Home headline (desktop) */
 
   /* Spacing scale: padding, gap. 2px half-steps up to 12 (70% of all paddings
    * sit there, and 10px alone is 65 rows: dropping it would move every list),

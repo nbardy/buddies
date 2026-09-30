@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { forgetRetiredHomePins, retiredHomePinsAtom } from '../../atoms/ui';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
-import { shortenHomePath } from '../../utils/directories';
 import { formatTimeAgo } from '../../utils/time';
 import { BuddySigil } from './BuddySigil';
 import { ChannelComposer } from './ChannelComposer';
@@ -67,15 +66,11 @@ export function ChannelLanding({
       <header className="landing-hero ui-stack">
         <BuddySigil name={directory.workspaceName} className="landing-emblem" />
         <h1>What should the team build next?</h1>
-        <p className="landing-path ui-muted ui-truncate">
-          {directory.workspaceName}
-          {directory.rootPath && ` · ${shortenHomePath(directory.rootPath)}`}
-        </p>
         {generalChannelId !== null ? (
           <div className="landing-composer">
             <ChannelComposer
               channelId={generalChannelId}
-              placeholder="Ask a Buddy — @mention one — or start a thread in #general"
+              placeholder="Describe the work — @mention a Buddy to start it"
               rootId={null}
               references={directory.references}
               submit={frame === 'desktop' ? 'enter' : 'button'}
@@ -91,7 +86,6 @@ export function ChannelLanding({
             />
           </div>
         ) : null}
-        <Team directory={directory} workspaceId={workspaceId} inbox={inbox} />
         {directory.activeMembers.length === 0 && (
           <p className="landing-note ui-muted">
             Posting saves a thread{generalChannelId ? ' in #general' : ''}; nobody answers yet. To
@@ -109,53 +103,6 @@ export function ChannelLanding({
       <RecentThreads workspaceId={workspaceId} directory={directory} />
       <WorkingNow workspaceId={workspaceId} directory={directory} />
     </div>
-  );
-}
-
-function Team({
-  directory,
-  workspaceId,
-  inbox,
-}: {
-  directory: WorkspaceDirectory;
-  workspaceId: string;
-  inbox: Inbox | null;
-}) {
-  const dms = new Map(
-    (inbox?.channels ?? []).flatMap((entry) =>
-      entry.channel.kind.type === 'direct'
-        ? entry.channel.kind.members.flatMap((member) =>
-            member.kind === 'buddy' ? [[member.id, entry.channel.id] as const] : []
-          )
-        : []
-    )
-  );
-  return (
-    <ul className="landing-team ui-row">
-      {directory.activeMembers.map((member) => {
-        const channelId = dms.get(member.id);
-        const chip = (
-          <>
-            <BuddySigil name={member.name} className="landing-chip-face" />
-            <span className="ui-truncate">{member.name}</span>
-          </>
-        );
-        return (
-          <li key={member.id}>
-            {channelId ? (
-              <Link
-                className="landing-chip ui-row"
-                to={channelsHref(workspaceId, { kind: 'channel', channelId })}
-              >
-                {chip}
-              </Link>
-            ) : (
-              <span className="landing-chip ui-row">{chip}</span>
-            )}
-          </li>
-        );
-      })}
-    </ul>
   );
 }
 
