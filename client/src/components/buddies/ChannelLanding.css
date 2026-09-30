@@ -11,7 +11,7 @@
   font-feature-settings: 'cv11', 'ss03';
   gap: var(--sp-10);
   width: 100%;
-  max-width: 1040px;
+  max-width: 1008px;
   margin: 0 auto;
   padding: var(--sp-11) var(--sp-9) var(--sp-11);
 }
@@ -94,7 +94,6 @@
 
 .landing-composer {
   width: 100%;
-  max-width: 720px;
   margin-top: var(--sp-5);
   text-align: left;
 }
@@ -232,7 +231,12 @@ a.landing-thread:hover {
 
 .landing-project-body {
   gap: var(--sp-4);
-  padding: var(--sp-7) var(--sp-7) var(--sp-5);
+  padding: var(--sp-8) var(--sp-8) var(--sp-5);
+}
+
+/* A pinned card also carries the reorder menu beside its star. */
+.landing-project[data-pinned='true'] .landing-project-title {
+  padding-right: var(--sp-11);
 }
 
 .landing-project-link {
@@ -266,7 +270,7 @@ a.landing-thread:hover {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--sp-1) var(--sp-4);
-  padding: 0 var(--sp-7);
+  padding: 0 var(--sp-8);
   font-size: var(--fs-2);
 }
 
@@ -387,7 +391,18 @@ a.landing-thread:hover {
 
 .landing-request {
   padding: var(--sp-6) var(--sp-7);
-  border-left: 3px solid var(--accent);
+  position: relative;
+}
+
+.landing-request::before {
+  content: '';
+  position: absolute;
+  top: var(--sp-6);
+  bottom: var(--sp-6);
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
 }
 
 .landing-request-from {
@@ -414,38 +429,50 @@ a.landing-thread:hover {
   height: 100%;
 }
 
-.landing-thread-image,
-.landing-thread-lead {
+.landing-thread-image {
   display: block;
   width: 100%;
-  height: 120px;
+  height: 96px;
   object-fit: cover;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.landing-thread-lead {
-  padding: var(--sp-7);
-  overflow: hidden;
-  font-size: var(--fs-6);
-  font-weight: 650;
-  line-height: 1.3;
-  color: var(--text-secondary);
+  /* A thread with no image gets this soft tint, so every card keeps one shape. */
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    color-mix(in srgb, var(--accent) 6%, transparent)
+  );
 }
 
 .landing-thread-meta {
-  gap: var(--sp-2);
-  padding: var(--sp-5) var(--sp-7) var(--sp-6);
+  flex: 1;
+  gap: var(--sp-3);
+  padding: var(--sp-7);
 }
 
 .landing-thread-title {
-  font-size: var(--fs-4);
+  overflow-wrap: anywhere;
+  font-size: var(--fs-5);
+  line-height: 1.35;
   font-weight: 650;
   color: var(--text-bright);
+}
+
+.landing-thread-title,
+.landing-thread-latest {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .landing-thread-latest,
 .landing-thread-foot {
   font-size: var(--fs-2);
+  line-height: 1.45;
+}
+
+.landing-thread-foot {
+  margin-top: auto;
+  padding-top: var(--sp-3);
 }
 
 .landing-working {
@@ -460,6 +487,11 @@ a.landing-thread:hover {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.landing-working > .ui-muted {
+  flex: none;
+  white-space: nowrap;
 }
 
 .landing-working-dot {
@@ -501,4 +533,15 @@ a.landing-thread:hover {
   flex: none;
   width: 250px;
   scroll-snap-align: start;
+}
+
+/* Phone: Working now is one row that scrolls, never a stack of chips. */
+.landing[data-frame='mobile'] .landing-working,
+.landing[data-frame='mobile'] .landing-working ul {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.landing[data-frame='mobile'] .landing-chip {
+  white-space: nowrap;
 }

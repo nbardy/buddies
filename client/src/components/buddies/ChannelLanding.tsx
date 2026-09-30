@@ -48,7 +48,7 @@ import './ChannelLanding.css';
 const NO_RUNS: readonly Run[] = [];
 const NO_IDS: readonly string[] = [];
 const DESKTOP_TASKS = 6;
-const THREAD_CARDS = 4;
+const THREAD_CARDS = 3;
 
 export function ChannelLanding({
   workspaceId,
@@ -266,7 +266,11 @@ function TaskCard({
   const { task, progress } = entry;
   const title = <span className="landing-project-title">{task.title}</span>;
   return (
-    <li className="landing-project ui-card ui-surface" data-status={task.status}>
+    <li
+      className="landing-project ui-card ui-surface"
+      data-status={task.status}
+      data-pinned={entry.pinned}
+    >
       <div className="landing-project-body ui-stack">
           <span className="landing-card-actions ui-row">
             {entry.pinned && <ReorderMenu title={task.title} menu={menu} />}
@@ -480,9 +484,7 @@ function RecentThreads({
                       loading="lazy"
                     />
                   ) : (
-                    <span className="landing-thread-lead" aria-hidden="true">
-                      {excerpt(thread.root.body, 90)}
-                    </span>
+                    <span className="landing-thread-image" aria-hidden="true" />
                   )}
                   <span className="landing-thread-meta ui-stack">
                     <span className="landing-thread-title">{excerpt(thread.root.body, 80)}</span>
@@ -515,26 +517,27 @@ function WorkingNow({
   directory: WorkspaceDirectory;
 }) {
   const live = usePolledFetch<Run[]>(liveRunsUrl(workspaceId), 5_000);
-  const runs = live.data ?? NO_RUNS;
-  if (runs.length === 0) return null;
+  // One chip per Buddy (it may hold several runs); "queued" only when none of its runs is running.
+  const byBuddy = new Map<string, boolean>();
+  for (const run of live.data ?? NO_RUNS) {
+    byBuddy.set(run.buddyId, (byBuddy.get(run.buddyId) ?? true) && run.status === 'queued');
+  }
+  if (byBuddy.size === 0) return null;
   return (
     <section className="landing-working ui-row" aria-label="Working now">
       <span className="landing-working-dot" aria-hidden="true" />
       <span className="ui-muted">Working now</span>
       <ul className="ui-row">
-        {runs.map((run) => (
-          <li key={run.id}>
+        {[...byBuddy].map(([buddyId, queued]) => (
+          <li key={buddyId}>
             <Link
               className="landing-chip ui-row"
-              to={channelsHref(workspaceId, { kind: 'workers', buddyId: run.buddyId })}
+              to={channelsHref(workspaceId, { kind: 'workers', buddyId })}
             >
-              <BuddySigil
-                name={directory.buddyNames[run.buddyId] ?? 'Buddy'}
-                className="landing-chip-face"
-              />
+              <BuddySigil name={directory.buddyNames[buddyId] ?? 'Buddy'} className="landing-chip-face" />
               <span>
-                {directory.buddyNames[run.buddyId] ?? 'Buddy'}
-                {run.status === 'queued' ? ' · queued' : ''}
+                {directory.buddyNames[buddyId] ?? 'Buddy'}
+                {queued ? ' · queued' : ''}
               </span>
             </Link>
           </li>
