@@ -54,7 +54,6 @@ test(
         resumeScheduler: () => undefined,
         stopScheduler: () => undefined,
         flushState: () => undefined,
-        broadcastMessage: () => undefined,
         exit: () => order.push('exit'),
       }
     );

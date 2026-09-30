@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -61,6 +60,7 @@ import {
 } from '../src/conversations/runtime';
 import { replaceRuntimeConfig } from '../src/conversations/runtime-config';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
+import { testExecutions } from './fixtures/fake-turn';
 import { recordStore } from './fixtures/records';
 
 // The Buddy server end to end through its real boundaries: the crate on a temp DB, the HTTP MCP
@@ -179,6 +179,7 @@ async function world() {
     events,
     grants,
     uploadsRoot: () => join(scratch, 'uploads'),
+    portFile: join(scratch, 'buddy-mcp.json'),
   });
 
   // The provider. `during(turn)` runs inside turn n, as the model's tool calls would.
@@ -211,14 +212,10 @@ async function world() {
     }>((resolve) => {
       finish = resolve;
     });
-    // A running child, as the runtime's stop escalation reads it (exitCode, 'close').
-    const child = Object.assign(new EventEmitter(), { exitCode: null as number | null });
-    completed.then(() => {
-      child.exitCode = 0;
-      child.emit('close');
-    });
     return {
-      child,
+      // No process: the journal the runtime created for this turn, removed at its drain.
+      pid: 0,
+      journalDir: request.journalDir,
       events: (async function* () {
         yield { type: 'session.started' as const, sessionId };
         yield { type: 'turn.started' as const };
@@ -299,13 +296,21 @@ async function world() {
           visibility: 'background',
         });
       },
-      runTurn: async ({ conversationId, context, prompt, leaseToken }) =>
-        conversations.get(conversationId)!.runCoordinationMessage(prompt, context, leaseToken),
+      runTurn: async ({ conversationId, context, prompt, leaseToken, deadlineMs }) =>
+        conversations
+          .get(conversationId)!
+          .runCoordinationMessage(
+            prompt,
+            context,
+            leaseToken,
+            new Date(Date.now() + deadlineMs).toISOString()
+          ),
       stop: (id) => conversations.get(id)?.stop(),
     },
   });
   const port = createBuddyPolicyPort({ runner, grants, briefings, reviewer, spec: endpoint.spec });
   const Conversation = createConversationRuntime({
+    executions: testExecutions(),
     buddies: port,
     broadcast: () => undefined,
     registerSessionAlias: () => undefined,
@@ -356,7 +361,7 @@ async function world() {
     channelChanged: () => undefined,
     logger: { warn: () => undefined },
   });
-  await runner.start();
+  await runner.start([]);
   return {
     core,
     /** A crate post, unwrapped from its PostWrite. */
@@ -1522,7 +1527,13 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
   });
   const events = createBuddyEvents();
   const grants = createGrants({ ttlMs: 60_000 });
-  const endpoint = await startMcpEndpoint({ core, events, grants, uploadsRoot: () => scratch });
+  const endpoint = await startMcpEndpoint({
+    core,
+    events,
+    grants,
+    uploadsRoot: () => scratch,
+    portFile: join(scratch, 'buddy-mcp.json'),
+  });
   const harnesses: string[] = [];
   const requests: ProviderRequest[] = [];
   let spec!: McpServerSpec;
@@ -1561,7 +1572,6 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
         };
       })();
       return {
-        child: { exitCode: 0 },
         // The reviewer reads only tool.use / error events; this CLI emits none.
         events: (async function* () {
           await completed;
@@ -1727,6 +1737,7 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => scratch,
+    portFile: join(scratch, 'buddy-mcp.json'),
   });
   const reviewer = createMemoryReviewer({
     core,
@@ -1747,7 +1758,6 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
         return { exitCode: 0, signal: null, sessionId: 's', reason: 'success' };
       })();
       return {
-        child: { exitCode: 0 },
         events: (async function* () {
           await completed;
           yield* [];
@@ -1851,6 +1861,7 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => scratch,
+    portFile: join(scratch, 'buddy-mcp.json'),
   });
   // An owner chat turn's context: the conversation's, plus its admitted chat run.
   const chat = (conversationId: string): BuddyContext => ({
@@ -1884,7 +1895,6 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
         return { exitCode: 0, signal: null, sessionId: 's', reason: 'success' };
       })();
       return {
-        child: { exitCode: 0 },
         events: (async function* () {
           await completed;
           yield* [];

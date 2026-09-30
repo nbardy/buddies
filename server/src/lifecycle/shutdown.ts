@@ -1,11 +1,10 @@
-import type { Message } from '@unleashd/shared';
-
 export interface ShutdownConversation {
-  id: string;
-  messages: Message[];
-  process: { kill(signal?: NodeJS.Signals | number): boolean } | null;
-  hasActiveProcess(): boolean;
-  stop(reason?: 'user_stop' | 'server_restart'): void;
+  /**
+   * Work that exists only in this backend's memory: a queued message not yet sent, or a chat
+   * waiting for a run slot. A running provider turn is NOT such work: it is journaled on disk
+   * and the next backend adopts it (turns/executions.ts), so exits never wait for or stop it.
+   */
+  holdsUnadoptableWork(): boolean;
 }
 
 export interface ShutdownPorts {
@@ -15,24 +14,22 @@ export interface ShutdownPorts {
   resumeScheduler(): void;
   stopScheduler(): void;
   flushState(): void | Promise<void>;
-  broadcastMessage(conversationId: string, content: string): void;
   exit(code?: number): void;
 }
 
 export interface ShutdownOptions {
-  /** SIGINT/SIGTERM: how long already-interrupted work may take to release. */
+  /** SIGINT/SIGTERM: how long in-memory work (mutations, queued sends) may take to drain. */
   forceExitGraceMs: number;
   /** Hard cap on the final state flush. A hung flush must never strand `exiting`. */
   flushGraceMs: number;
 }
 
-// A source reload NEVER interrupts a running turn. This is what lets agents
-// develop Unleashd from inside Unleashd: they edit the server that runs them,
-// and the reload waits for their turns to finish instead of killing them. The
-// old backend stays fully available and owns every provider stream until work
-// is idle, then exits and tools/watch-server.mjs starts the new one. Do not add
-// a reload deadline or interrupt path here; only explicit shutdown
-// (SIGINT/SIGTERM, dev:replace) may stop running turns.
+// No exit path stops a running provider turn: not a source reload, not SIGINT/SIGTERM, not the
+// loss of the dev runner. Each turn runs from an on-disk journal and the next backend adopts it
+// (turns/executions.ts, agent_notes/2026-09-30_execution-adoption-design.md). Before 2026-09-30
+// a reload waited for every turn to finish (it starved for 20+ minutes under steady Buddy work)
+// and SIGTERM stopped them all; an abrupt death orphaned every run anyway. Exits now wait only
+// for work that lives solely in memory. Only an explicit Stop stops a turn.
 const DRAIN_POLL_INTERVAL_MS = 500;
 
 export type ShutdownState = 'starting' | 'idle' | 'reloading' | 'shutting_down' | 'exiting';
@@ -64,10 +61,10 @@ export function createShutdownController(
   let schedulerStopped = false;
   let exitPromise: Promise<void> | null = null;
 
-  const activeRuns = () =>
-    Array.from(ports.conversations()).filter((item) => item.hasActiveProcess());
+  const unadoptable = () =>
+    Array.from(ports.conversations()).filter((item) => item.holdsUnadoptableWork());
   const activeWorkCount = () =>
-    activeRuns().length + ports.activeSchedulerRuns() + activeMutations + (startupPending ? 1 : 0);
+    unadoptable().length + ports.activeSchedulerRuns() + activeMutations + (startupPending ? 1 : 0);
   const clearTimers = () => {
     if (drainInterval) clearInterval(drainInterval);
     if (forceExitTimeout) clearTimeout(forceExitTimeout);
@@ -90,18 +87,6 @@ export function createShutdownController(
     if (schedulerStopped) return;
     schedulerStopped = true;
     ports.stopScheduler();
-  };
-  const interrupt = (reason: string) => {
-    for (const conversation of activeRuns()) {
-      const content = `Server is restarting (${reason}); interrupted current turn.`;
-      conversation.messages.push({
-        role: 'system',
-        body: { t: 'text', text: content },
-        timestamp: new Date(),
-      });
-      ports.broadcastMessage(conversation.id, content);
-      conversation.stop('server_restart');
-    }
   };
   const exitOnce = (code = 0): Promise<void> => {
     if (exitPromise) return exitPromise;
@@ -138,21 +123,13 @@ export function createShutdownController(
     return exitPromise;
   };
   const forceShutdownDrain = (graceMs: number) => {
+    // Queued sends and waiting chats are lost here, as they always were; running turns are not.
     console.warn(
-      `Backend force-draining after ${graceMs}ms grace (${activeWorkCount()} operation(s) still active)`
+      `Backend exiting after ${graceMs}ms grace (${activeWorkCount()} in-memory operation(s) still pending)`
     );
-    // Drop the stale counts BEFORE interrupting. These assignments cannot throw,
-    // so activeWorkCount() is guaranteed to fall even if interrupt() below does.
     stopScheduler();
     startupPending = false;
     activeMutations = 0;
-    try {
-      interrupt('force-drain after grace');
-    } catch (error: unknown) {
-      // This timer is one-shot. Letting a broadcast/stop failure escape here would
-      // skip exitOnce() and wedge the controller in `reloading` permanently.
-      console.error('Failed to interrupt active turns during force-drain:', error);
-    }
     clearTimers();
     void exitOnce();
   };
@@ -177,9 +154,8 @@ export function createShutdownController(
     // A reload never enters a read-only absorbing state while work is active.
     // This is the deliberately simpler ownership rule chosen in
     // agent_notes/2026-08-24_automation-execution-ownership-design.md: the old
-    // server remains the fully usable owner; SIGINT/SIGTERM is the explicit,
-    // bounded operator-recovery path. We do not pretend a replacement can adopt
-    // parent-owned provider pipes.
+    // server remains the fully usable owner until nothing in memory is pending.
+    // Running provider turns do not count: the replacement adopts them.
     pauseScheduler();
     if (activeWorkCount() !== 0) {
       resumeScheduler();
@@ -233,8 +209,9 @@ export function createShutdownController(
     clearTimers();
     state = 'shutting_down';
     startupPending = false;
-    console.log(`${signal} — stopping active turns and shutting down`);
-    interrupt('explicit shutdown');
+    console.log(
+      `${signal} — shutting down; running turns continue and the next backend adopts them`
+    );
     // waitForShutdownDrain exits immediately when nothing is outstanding, and owns
     // the single force-exit timer. Arming a second one here used to overwrite the
     // handle, leaking a timer that clearTimers()/dispose() could never reach.
@@ -248,7 +225,6 @@ export function createShutdownController(
     stopScheduler();
     startupPending = false;
     state = 'shutting_down';
-    interrupt('startup failure');
     void exitOnce(1);
   };
 

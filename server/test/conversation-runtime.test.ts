@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -18,7 +17,7 @@ import {
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { type TurnTimeoutKind, TurnWatchdog } from '../src/turns/watchdog';
 import { fakeBuddyPort } from './fixtures/buddy-port';
-import { fakeExecuteTurn } from './fixtures/fake-turn';
+import { fakeExecuteTurn, testExecutions } from './fixtures/fake-turn';
 
 const BACKGROUND_AGENT_FIXTURE = join(
   __dirname,
@@ -56,6 +55,7 @@ function runtimeFixture(
   const broadcasts: unknown[] = [];
   const config = options.config ?? createDefaultConversationConfig(options.provider ?? 'codex');
   const Conversation = createConversationRuntime({
+    executions: testExecutions(),
     broadcast: (message) => broadcasts.push(message),
     registerSessionAlias: (sessionId, conversationId) => {
       if (sessionId) aliases.push([sessionId, conversationId]);
@@ -114,10 +114,9 @@ function captureSpawns() {
       stubs.push(stub);
       return stub.turn;
     }),
-    /** Stop the open turn and its timers so the test process can exit. */
+    /** Stop the open turn so the test process can exit (kill escalation timers are unref'd). */
     release(conversation: { resetProcess(): void }) {
       conversation.resetProcess();
-      for (const stub of stubs) stub.child.emit('close');
     },
   };
 }
@@ -158,7 +157,6 @@ test('resumed Buddy turns re-brief only when the memory generation changes', asy
       requests.push(request);
       const sessionId = request.resumeSessionId ?? 'native-session';
       return {
-        child: { exitCode: 0 },
         events: (async function* () {
           yield { type: 'session.started' as const, sessionId };
           yield { type: 'turn.started' as const };
@@ -213,7 +211,6 @@ test('session audience key: an owner turn resumes a session saved under the old 
       requests.push(request);
       const sessionId = request.resumeSessionId ?? `fresh-${requests.length}`;
       return {
-        child: { exitCode: 0 },
         events: (async function* () {
           yield { type: 'session.started' as const, sessionId };
           yield { type: 'turn.started' as const };
@@ -280,7 +277,6 @@ test('provider completion waits for the normalized event stream and session pers
     persistCurrentSession: () => persistence.promise,
     revokeBuddyControlCapability: (conversationId) => revoked.push(conversationId),
     executeTurn: fakeExecuteTurn(() => ({
-      child: { exitCode: 0 },
       events: events(),
       completed: completion.promise,
       stop: () => undefined,
@@ -343,7 +339,6 @@ test('an early turn.complete does not drop the prompt answer that follows it', a
   }
   const fixture = runtimeFixture({
     executeTurn: fakeExecuteTurn(() => ({
-      child: { exitCode: 0 },
       events: events(),
       completed: Promise.resolve({
         exitCode: 0,
@@ -376,7 +371,6 @@ test('buddy completion preserves current-turn prose when a tool is last', async 
         yield { type: 'turn.complete' as const, reason: 'success' as const };
       }
       return {
-        child: { exitCode: 0 },
         events: events(),
         completed: Promise.resolve({
           exitCode: 0,
@@ -410,7 +404,6 @@ test('a provider error fails the turn with its own message, not the JSON envelop
   }
   const fixture = runtimeFixture({
     executeTurn: fakeExecuteTurn(() => ({
-      child: { exitCode: 1 },
       events: events(),
       completed: Promise.resolve({
         exitCode: 1,
@@ -442,7 +435,6 @@ test('event-stream failure after turn.complete fails automation after joined dra
     buddyContext: { buddyId: 'buddy-1', workspaceId: 'workspace-1' },
     reviewCompletedBuddyTurn: (turn) => reviews.push(turn),
     executeTurn: fakeExecuteTurn(() => ({
-      child: { exitCode: 0 },
       events: events(),
       completed: Promise.resolve({
         exitCode: 0,
@@ -473,7 +465,6 @@ test('event-stream failure after turn.complete fails automation after joined dra
 test('only a successfully exited Buddy turn schedules memory review', async () => {
   for (const outcome of ['ordinary', 'failed', 'cancelled', 'success'] as const) {
     const reviews: CompletedBuddyTurn[] = [];
-    const child = Object.assign(new EventEmitter(), { exitCode: 0 });
     const completion = deferred<{
       exitCode: number;
       signal: null;
@@ -485,7 +476,6 @@ test('only a successfully exited Buddy turn schedules memory review', async () =
         outcome === 'ordinary' ? undefined : { buddyId: 'buddy-1', workspaceId: 'workspace-1' },
       reviewCompletedBuddyTurn: (turn) => reviews.push(turn),
       executeTurn: fakeExecuteTurn(() => ({
-        child,
         events: (async function* () {
           yield { type: 'turn.started' as const };
           yield { type: 'text.delta' as const, text: 'Completed answer' };
@@ -553,7 +543,6 @@ test('a Codex turn that fails before creating a thread retries without resume', 
       requests.push(request);
       const first = requests.length === 1;
       return {
-        child: { exitCode: first ? 1 : 0 },
         events: (async function* () {
           yield { type: 'turn.started' as const };
           if (first) {
@@ -594,7 +583,6 @@ test('a missing Codex rollout clears a legacy phantom session binding', async ()
       requests.push(request);
       const missing = requests.length === 1;
       return {
-        child: { exitCode: missing ? 1 : 0 },
         events: (async function* () {
           yield { type: 'turn.started' as const };
           if (missing) {
@@ -680,7 +668,6 @@ test('a foreground Buddy turn over capacity waits pending, then starts once admi
   const executeTurn = fakeExecuteTurn(() => {
     providerStarts += 1;
     return {
-      child: { exitCode: 0 },
       events: (async function* () {
         yield { type: 'turn.started' as const };
         yield { type: 'turn.complete' as const, reason: 'success' as const };
@@ -979,7 +966,6 @@ test('every harness receives its resolved effort in one request shape', () => {
     assert.equal(request.reasoningEffort, expected[provider], provider);
     assert.equal(request.prompt, 'effort probe');
     conversation.resetProcess();
-    stub.child.emit('close');
   }
 });
 
@@ -999,7 +985,7 @@ test('timer-only heartbeats cannot mask provider idleness, while native advancem
     { bridgeMs: 2 * 60_000, providerIdleMs: 60 * 60_000, maxRuntimeMs: 24 * 60 * 60_000 },
     (kind) => fired.push(kind)
   );
-  watchdog.start();
+  watchdog.start(Date.now());
 
   // Keep the bridge healthy for 59 minutes. One native advancement near the
   // original provider deadline must extend only the provider-progress clock.
@@ -1145,7 +1131,6 @@ test('a recorded background agent stays running until its task finishes', async 
   const { conversation } = runtimeFixture({
     provider: 'claude',
     executeTurn: fakeExecuteTurn(() => ({
-      child: { exitCode: 0 },
       events: (async function* () {
         for (const event of events) {
           yield event;
@@ -1180,7 +1165,6 @@ test('a recorded background agent stays running until its task finishes', async 
 test('bridge watchdog terminates a turn when neither unified events nor heartbeats arrive', (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
   const stub = openTurnStub();
-  t.after(() => stub.child.emit('close'));
   const { broadcasts, conversation } = runtimeFixture({
     executeTurn: fakeExecuteTurn(() => stub.turn),
   });
@@ -1269,7 +1253,6 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
     reason: 'killed';
   }>();
   const stopped = deferred<void>();
-  const child = Object.assign(new EventEmitter(), { exitCode: null as number | null });
   const terminals: Parameters<
     NonNullable<ConversationRuntimeDependencies['turnAttempts']>['terminal']
   >[0][] = [];
@@ -1300,7 +1283,6 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
       terminal: (result) => terminals.push(result),
     },
     executeTurn: fakeExecuteTurn(() => ({
-      child,
       events: (async function* () {
         yield { type: 'turn.started' as const };
         yield { type: 'text.delta' as const, text: 'Still working' };
@@ -1328,8 +1310,6 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
   assert.equal(terminals.at(-1)?.state, 'failed');
   assert.equal(conversation.hasActiveProcess(), true);
   assert.equal(settlements.length, 0, 'ownership must wait for process and event drain');
-  child.exitCode = 0;
-  child.emit('close');
   stopped.resolve();
   completed.resolve({
     exitCode: null,
@@ -1353,7 +1333,6 @@ test('background deadline uses timeout classification and waits for provider dra
     reason: 'killed';
   }>();
   const stopped = deferred<void>();
-  const child = Object.assign(new EventEmitter(), { exitCode: null as number | null });
   const terminals: Parameters<
     NonNullable<ConversationRuntimeDependencies['turnAttempts']>['terminal']
   >[0][] = [];
@@ -1371,7 +1350,6 @@ test('background deadline uses timeout classification and waits for provider dra
       terminal: (result) => terminals.push(result),
     },
     executeTurn: fakeExecuteTurn(() => ({
-      child,
       events: (async function* () {
         yield { type: 'turn.started' as const };
         yield { type: 'text.delta' as const, text: 'Still working' };
@@ -1395,6 +1373,9 @@ test('background deadline uses timeout classification and waits for provider dra
     'Keep working',
     { buddyId: 'buddy-fixture', workspaceId: 'workspace-fixture', coordinationRunId: 'worker-run' },
     'worker-token',
+    // The run's deadline is armed by the policy (it used to be a server.ts timer that no
+    // adopting backend could re-arm).
+    new Date(Date.now() + 1000).toISOString(),
     (status, detail, terminalCause) => {
       drainedCause = terminalCause;
       settlements.push(['worker-run', 'worker-token', status, detail]);
@@ -1402,14 +1383,12 @@ test('background deadline uses timeout classification and waits for provider dra
   );
   const rejected = assert.rejects(execution, /maximum runtime/);
   await new Promise<void>((resolve) => setImmediate(resolve));
-  conversation.expireCoordinationRun();
+  t.mock.timers.tick(1000);
   assert.equal(release, true);
   assert.equal(terminals.at(-1)?.terminalCause, 'max_runtime_timeout');
   assert.equal(terminals.at(-1)?.state, 'failed');
   assert.equal(conversation.hasActiveProcess(), true);
   assert.equal(settlements.length, 0, 'ownership must wait for process and event drain');
-  child.exitCode = 0;
-  child.emit('close');
   stopped.resolve();
   completed.resolve({
     exitCode: null,
@@ -1428,9 +1407,7 @@ test('background deadline uses timeout classification and waits for provider dra
 
 function openTurnStub() {
   let stops = 0;
-  const child = Object.assign(new EventEmitter(), { exitCode: null as number | null });
   const turn = {
-    child,
     // No events on purpose: a post-stop turn.started would re-arm the bridge
     // watchdog on the dead turn and stall test exit for the full timeout.
     events: (async function* () {
@@ -1441,7 +1418,7 @@ function openTurnStub() {
       stops += 1;
     },
   };
-  return { turn, child, stops: () => stops };
+  return { turn, stops: () => stops };
 }
 
 function runningFixture() {
@@ -1489,9 +1466,6 @@ test('interrupt keeps the pending queue and sends the new message first', () => 
     lastQueue?.patch.queue.map((m) => m.content),
     ['Urgent', 'Second']
   );
-  // Clear the SIGTERM kill timer the interrupt armed; the killed turn's
-  // completion is intentionally never resolved in this test.
-  opened[0]?.child.emit('close');
 });
 
 test('interrupt with no active turn sends ahead of the queue', () => {
@@ -1536,7 +1510,6 @@ test('promote moves a pending message first and interrupts the turn', () => {
   // Unknown or non-pending ids are a no-op, like cancelQueuedMessage.
   conversation.promoteQueuedMessage('missing-id');
   assert.equal(conversation.queue.length, 2);
-  opened[0]?.child.emit('close');
 });
 
 type ScriptedEvent = import('@nbardy/agent-cli').UnifiedAgentEvent;
@@ -1546,7 +1519,6 @@ async function runScriptedTurn(provider: Provider, events: ScriptedEvent[]) {
   const { conversation, broadcasts } = runtimeFixture({
     provider,
     executeTurn: fakeExecuteTurn(() => ({
-      child: { exitCode: 0 },
       events: (async function* () {
         yield* events;
       })(),
