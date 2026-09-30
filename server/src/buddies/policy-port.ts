@@ -3,7 +3,7 @@ import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { BuddyContext } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
-import type { Grants, TurnGrant } from './grants';
+import type { GrantRecord, Grants, TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
 import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
 import type { ChatAdmission, Runner } from './runner';
@@ -30,8 +30,10 @@ export interface BuddyPolicyPort {
     context: BuddyContext;
     conversationId: string;
     owner: boolean;
-  }): Record<string, McpServerSpec>;
-  builderMcpServers(conversationId: string): Record<string, McpServerSpec>;
+  }): TurnTools;
+  builderMcpServers(conversationId: string): TurnTools;
+  /** A replacement backend adopted a running turn: its grant works again, unchanged. */
+  adoptGrant(grant: GrantRecord): void;
   /** The turn ended: settle its run (which also revokes the run's grants). */
   settle(
     runId: string,
@@ -39,9 +41,25 @@ export interface BuddyPolicyPort {
     status: 'complete' | 'failed' | 'cancelled',
     detail: string
   ): void;
+  /**
+   * An adopted runner-owned run drained (its `runTurn` promise died with the old backend): the
+   * runner finishes it exactly as `runJob` would have, then settles it.
+   */
+  finishAdoptedRun(
+    runId: string,
+    leaseToken: string,
+    status: 'complete' | 'failed',
+    detail: string
+  ): void;
   revoke(conversationId: string): void;
   /** After a successful turn: memory review. */
   afterTurn(turn: CompletedBuddyTurn): void;
+}
+
+/** One turn's MCP servers and the grant they carry (kept so the turn can be adopted). */
+export interface TurnTools {
+  servers: Record<string, McpServerSpec>;
+  grant: GrantRecord;
 }
 
 export function createBuddyPolicyPort(deps: {
@@ -76,12 +94,20 @@ export function createBuddyPolicyPort(deps: {
         runId: context.coordinationRunId ?? null,
       });
       if (owner) grants.promoteToOwner(conversationId);
-      return { [MCP_SERVER_NAME]: deps.spec(grant) };
+      return {
+        servers: { [MCP_SERVER_NAME]: deps.spec(grant) },
+        grant: grants.record(grant.token),
+      };
     },
     builderMcpServers(conversationId) {
       grants.revokeConversation(conversationId);
-      return { [MCP_SERVER_NAME]: deps.spec(grants.issueBuilder(conversationId)) };
+      const grant = grants.issueBuilder(conversationId);
+      return {
+        servers: { [MCP_SERVER_NAME]: deps.spec(grant) },
+        grant: grants.record(grant.token),
+      };
     },
+    adoptGrant: (grant) => grants.adopt(grant),
     settle(runId, leaseToken, status, detail) {
       const outcome =
         status === 'complete'
@@ -92,6 +118,11 @@ export function createBuddyPolicyPort(deps: {
       void runner
         .finishChat(runId, leaseToken, outcome)
         .catch((error) => console.error('[buddies] settle failed', runId, error));
+    },
+    finishAdoptedRun(runId, leaseToken, status, detail) {
+      void runner
+        .finishAdoptedRun(runId, leaseToken, status, detail)
+        .catch((error) => console.error('[buddies] adopted run did not finish', runId, error));
     },
     revoke: (conversationId) => grants.revokeConversation(conversationId),
     afterTurn: (turn) => deps.reviewer.enqueue(turn),

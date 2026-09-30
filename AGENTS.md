@@ -229,6 +229,12 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   worktrees against the live ~/.buddies, and each would otherwise register
   its own workspace and hire its own pair. The check only fetches; the merge
   is the Release Manager's turn, started by `POST /api/upstream/update`.
+- A running turn survives any backend exit (reload, SIGTERM, crash): every provider runs
+  from an on-disk journal under `~/.agent-viewer/executions/` and the next backend adopts it
+  at boot, before the Buddy runner recovers anything (docs/turn-lifecycle.md#execution-adoption).
+  Only an explicit Stop kills a turn, so never "fix" a stuck restart by stopping turns in
+  `shutdown.ts`, and never delete a journal of a live process: its conversation and run are
+  then orphaned. Guard: `server/test/execution-adoption.test.ts` (real backend SIGKILLed mid-turn).
 - Every SQLite open sets `checkpoint_fullfsync = ON`: macOS `fsync()` skips the drive
   cache, and a hard power-off on 2026-09-30 tore a checkpoint in
   `~/.agent-viewer/observability/turn-attempts.sqlite` ("database disk image is

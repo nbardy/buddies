@@ -27,7 +27,7 @@ test('SQLite attempt history preserves exact outcome, correlation, and indexed l
     now: () => new Date(clock++),
     logger: silentLogger,
   });
-  await journal.initialize();
+  await journal.initialize(new Set());
   await journal.startAttempt({ attemptId: 'a1', conversationId: 'c1', queueMessageId: 'q1' });
   await journal.transitionAttempt({ attemptId: 'a1', state: 'starting' });
   await journal.transitionAttempt({ attemptId: 'a1', state: 'running', providerSessionId: 's1' });
@@ -69,7 +69,7 @@ test('SQLite attempt history preserves exact outcome, correlation, and indexed l
 test('observer queues asynchronous observations and boot recovery interrupts only old active attempts', async (t) => {
   const directory = await temporaryDirectory(t);
   const first = new TurnAttemptJournal({ directory, serverBootId: 'boot-1', logger: silentLogger });
-  await first.initialize();
+  await first.initialize(new Set());
   const observer = createJournalTurnAttemptObserver(first, silentLogger);
   observer.queued({ attemptId: 'active', conversationId: 'c1', queueMessageId: 'q1' });
   observer.starting('active');
@@ -97,7 +97,7 @@ test('observer queues asynchronous observations and boot recovery interrupts onl
     serverBootId: 'boot-2',
     logger: silentLogger,
   });
-  assert.equal((await second.initialize()).recoveredAttempts, 1);
+  assert.equal((await second.initialize(new Set())).recoveredAttempts, 1);
   assert.equal((await second.getAttempt('active'))?.terminalCause, 'server_restart');
   assert.equal((await second.getAttempt('done'))?.terminalCause, 'spawn_failed');
   assert.equal(
@@ -132,7 +132,7 @@ test('legacy import is atomic, keeps original bytes, and makes source-less activ
   ].join('\n');
   await fs.promises.writeFile(file, old);
   const journal = new TurnAttemptJournal({ directory, serverBootId: 'new', logger: silentLogger });
-  await journal.initialize();
+  await journal.initialize(new Set());
   const imported = await journal.getAttempt('legacy');
   assert.equal(imported?.lastActivity?.source, 'legacy_unknown');
   assert.equal(imported?.queueMessageId, 'q1');
@@ -144,7 +144,7 @@ test('legacy import is atomic, keeps original bytes, and makes source-less activ
     serverBootId: 'newer',
     logger: silentLogger,
   });
-  await reopened.initialize();
+  await reopened.initialize(new Set());
   assert.equal((await reopened.recentEvents({ attemptId: 'legacy' })).length, 5);
 });
 
@@ -153,7 +153,7 @@ test('unreadable legacy source does not mark an empty import complete', async (t
   const file = path.join(directory, 'turn-attempts.jsonl');
   await fs.promises.writeFile(file, '{"kind":"partial');
   await assert.rejects(
-    new TurnAttemptJournal({ directory, logger: silentLogger }).initialize(),
+    new TurnAttemptJournal({ directory, logger: silentLogger }).initialize(new Set()),
     /no readable events/
   );
   assert.equal(await fs.promises.readFile(file, 'utf8'), '{"kind":"partial');

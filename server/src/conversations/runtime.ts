@@ -1,8 +1,7 @@
-import type { ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
-import { executeCommand } from '@nbardy/agent-cli';
+import { type ExecutionHandle, executeCommand } from '@nbardy/agent-cli';
 import type {
   BuddyContext,
   ConfigResolution,
@@ -43,6 +42,7 @@ import { SWARM_POLL_INTERVAL_MS, SWARM_POLL_THROTTLE_MS } from '../constants/tim
 import type { RuntimeTurnAttemptObserver } from '../observability';
 import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-service';
 import { SwarmObservers } from '../swarm';
+import type { TurnOwner } from '../turns/executions';
 import {
   type OwnerInput,
   type SeatTurnInput,
@@ -234,12 +234,12 @@ export class Conversation extends EventEmitter {
   messages: Message[] = [];
   // The last run state sent, so a status change publishes one `run` patch.
   private _publishedRun: RunState = 'idle';
-  private _process: ChildProcess | null = null;
-  get process(): ChildProcess | null {
+  private _process: ExecutionHandle | null = null;
+  get process(): ExecutionHandle | null {
     return this._process;
   }
   // Process exit is the idle boundary: held-back transcript changes replace the overlay now.
-  set process(value: ChildProcess | null) {
+  set process(value: ExecutionHandle | null) {
     const ended = this._process !== null && value === null;
     this._process = value;
     if (ended) this.env.history.idle(this.id);
@@ -422,6 +422,7 @@ export class Conversation extends EventEmitter {
     content: string,
     context: BuddyContext,
     claimToken: string,
+    deadline: string,
     onDrained?: CoordinationDrained,
     onAdmitted?: (config: ResolvedExecutionConfig) => void
   ): Promise<string> {
@@ -431,7 +432,14 @@ export class Conversation extends EventEmitter {
     if (this.process || this.isRunning || this.turnQueue.length) {
       return Promise.reject(new Error('Conversation is busy'));
     }
-    return this._policy.runCoordination(content, context, claimToken, onDrained, onAdmitted);
+    return this._policy.runCoordination(
+      content,
+      context,
+      claimToken,
+      deadline,
+      onDrained,
+      onAdmitted
+    );
   }
 
   sendMessage(content: string, ownerInput?: OwnerInput): void {
@@ -533,7 +541,8 @@ export class Conversation extends EventEmitter {
             refreshBriefing,
           });
 
-    this.appendMessage({ role: 'user', body: { t: 'text', text: content }, timestamp: new Date() });
+    const timestamp = new Date();
+    this.appendMessage({ role: 'user', body: { t: 'text', text: content }, timestamp });
     this._policy.admitted(input, content);
     // Provenance comes from the host producer, never transcript text.
     this.runner.start({
@@ -542,7 +551,27 @@ export class Conversation extends EventEmitter {
       forkSourceSessionId,
       resume,
       input,
+      userMessage: { text: content, timestamp },
     });
+  }
+
+  /**
+   * This backend replaced the one that spawned `owner`'s turn, which may still be running. The
+   * overlay gets the turn's user row back (same text and time, so the history merge pairs it with
+   * the native transcript as it did live), the policy its grant and run, and the runner follows
+   * the journal from byte 0. Adoption happens before any run is claimed, so a conversation with
+   * an adopted turn is busy and no second writer can start on its session.
+   */
+  adoptTurn(owner: TurnOwner, handle: ExecutionHandle): void {
+    if (this.process || this.isRunning)
+      throw new Error(`Conversation ${this.id} is already running`);
+    this.appendMessage({
+      role: 'user',
+      body: { t: 'text', text: owner.userMessage.text },
+      timestamp: new Date(owner.userMessage.timestamp),
+    });
+    this._policy.adopt(owner.policy, { attemptId: owner.attemptId, messageStart: 0 });
+    this.runner.adopt(owner, handle);
   }
 
   // Soft handoff, upgraded to session inheritance by capability, never rejecting the send
@@ -658,10 +687,6 @@ export class Conversation extends EventEmitter {
     console.log(
       `[${this.id}] Reset session: ${oldSessionId.substring(0, 8)}... -> ${this.sessionId.substring(0, 8)}...`
     );
-  }
-
-  expireCoordinationRun(): void {
-    this.runner.timeout('max');
   }
 
   broadcastQueue(): void {
@@ -811,6 +836,11 @@ export class Conversation extends EventEmitter {
 
   waitingForRunSlot(): boolean {
     return this._policy.waitingForRunSlot();
+  }
+
+  /** What a backend exit would drop (lifecycle/shutdown.ts); a running turn is adopted instead. */
+  holdsUnadoptableWork(): boolean {
+    return this.waitingForRunSlot() || this.turnQueue.hasPending();
   }
 
   async waitForTurnDrain(): Promise<void> {

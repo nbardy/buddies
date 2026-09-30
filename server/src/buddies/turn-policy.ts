@@ -15,14 +15,17 @@ import type { TurnTerminalCause } from '../observability';
 import { noteActivity } from '../observability/event-loop-stall';
 import { type SessionRelativePrompt, type TurnInput, sameEitherWay } from '../turns/input';
 import {
+  type AdoptedReview,
   type CoordinationDrained,
   type MemorySnapshot,
+  type PolicyAdoption,
   type TurnEnd,
   type TurnGate,
   type TurnPolicy,
   commonToolResultParts,
 } from '../turns/policy';
 import { BUDDY_BUILDER_BRIEFING } from './builder';
+import type { GrantRecord } from './grants';
 import { HARNESS_MEMORY_OFF } from './harness-memory';
 import type { BuddyPolicyPort } from './policy-port';
 import type { OwnedChatRun } from './runner';
@@ -183,6 +186,8 @@ function onTurnDrained(
 /** The Buddy Builder thread: team tools on owner input, its own briefing, no Buddy identity. */
 export class BuddyBuilderTurnPolicy implements TurnPolicy {
   readonly acceptsUserInput = true;
+  // This turn's team-tools grant; null when its input was not the owner's (no tools).
+  private grant: GrantRecord | null = null;
 
   constructor(
     private readonly host: BuddyPolicyHost,
@@ -212,11 +217,23 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
   }
   // Owner authority comes from input provenance alone (B1): only an owner input gets the tools.
   startTurn(input: TurnInput, config: ResolvedExecutionConfig) {
+    this.grant = null;
     if (input.origin !== 'owner_input') return {};
     assertBuddyProviderSupportsMcp(config.provider);
-    return { mcpServers: this.dependencies.buddies.builderMcpServers(this.host.id) };
+    const tools = this.dependencies.buddies.builderMcpServers(this.host.id);
+    this.grant = tools.grant;
+    return { mcpServers: tools.servers };
   }
   spawned(): void {}
+  adoptionRecord(): PolicyAdoption {
+    return { t: 'builder', grant: this.grant };
+  }
+  adopt(record: PolicyAdoption): void {
+    if (record.t !== 'builder')
+      throw new Error(`The Buddy Builder cannot adopt a ${record.t} turn`);
+    this.grant = record.grant;
+    if (record.grant) this.dependencies.buddies.adoptGrant(record.grant);
+  }
   spawnFailed(): void {
     this.revoke();
   }
@@ -288,12 +305,38 @@ export function sessionAudienceKey(
 
 // --- Buddy ---------------------------------------------------------------------
 
-/** The run a turn executes under: a foreground chat's admitted run, or a runner-owned run. */
-type RunExecution = {
+/**
+ * The run a Buddy turn executes under, as data: a foreground chat's admitted run or a
+ * runner-owned run. Its lease settles it; its deadline expires it as max_runtime_timeout.
+ */
+export interface RunRecord {
+  readonly kind: 'chat' | 'runner';
+  readonly runId: string;
+  readonly leaseToken: string;
+  readonly deadline: string;
+  readonly context: BuddyContext;
+}
+
+/** What a Buddy or Builder turn holds that an adopting backend restores (turns/policy.ts). */
+export type BuddyPolicyAdoption =
+  | { t: 'builder'; grant: GrantRecord | null }
+  | {
+      t: 'buddy';
+      grant: GrantRecord;
+      run: RunRecord;
+      briefedGeneration: string | null;
+      audienceKey: string | null;
+    };
+
+/**
+ * The run in flight, plus who hears its drain: the chat's settle, the runner's awaiting
+ * `runCoordination`, or (adopted, when that promise died with the old backend) the runner's
+ * `finishAdoptedRun`.
+ */
+type RunExecution = RunRecord & {
   onAdmitted?: (config: ResolvedExecutionConfig) => void;
-  context: BuddyContext;
-  leaseToken: string;
   terminalCause?: TurnTerminalCause;
+  drained(status: 'complete' | 'failed', detail: string): void;
 };
 
 export interface BuddyTurnPolicySeed {
@@ -314,6 +357,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
   private chatTicket: { turnId: string; stopWaiting: () => void } | null = null;
   private admittedChatRun: OwnedChatRun | null = null;
   private execution: RunExecution | null = null;
+  // This turn's grant, held as data so the turn can be adopted.
+  private grant: GrantRecord | null = null;
   private reviewTicket: { attemptId: string; messageStart: number; context: BuddyContext } | null =
     null;
 
@@ -486,14 +531,15 @@ export class BuddyTurnPolicy implements TurnPolicy {
     if (owned) this.ownChatRun(owned);
     assertBuddyProviderSupportsMcp(config.provider);
     const context = this.turnContext();
-    const mcpServers = this.buddies.mcpServers({
+    const tools = this.buddies.mcpServers({
       context,
       conversationId: this.host.id,
       owner: input.origin === 'owner_input',
     });
+    this.grant = tools.grant;
     // Capture exactly the resolved request at the provider boundary, after all awaits.
     this.execution?.onAdmitted?.(config);
-    return { mcpServers, extraArgs: HARNESS_MEMORY_OFF[config.provider] };
+    return { mcpServers: tools.servers, extraArgs: HARNESS_MEMORY_OFF[config.provider] };
   }
 
   /**
@@ -501,26 +547,81 @@ export class BuddyTurnPolicy implements TurnPolicy {
    * as max_runtime_timeout, never user_stop, and the run settles once on the terminal event.
    */
   private ownChatRun(owned: OwnedChatRun): void {
-    this.execution = {
-      context: { ...this.turnContext(), coordinationRunId: owned.id },
+    this.armExecution({
+      kind: 'chat',
+      runId: owned.id,
       leaseToken: owned.claim_token,
-    };
+      deadline: owned.deadline,
+      context: { ...this.turnContext(), coordinationRunId: owned.id },
+      drained: (status, detail) => this.buddies.settle(owned.id, owned.claim_token, status, detail),
+    });
+  }
+
+  /**
+   * One path for every run a turn executes under: hold it, expire it at its deadline, and hand
+   * its drain to whoever settles it. Until 2026-09-30 a runner-owned run's deadline was a timer
+   * in server.ts `runTurn`, so it could not survive the backend that armed it.
+   */
+  private armExecution(execution: RunExecution): () => void {
+    this.execution = execution;
     const timer = setTimeout(
       () => this.host.maxRuntimeReached(),
-      Math.max(0, Date.parse(owned.deadline) - Date.now())
+      Math.max(0, Date.parse(execution.deadline) - Date.now())
     );
     // A 24 h deadline must not by itself keep a process alive (the runtime tests' turns that
     // never answer left it pending, and the test process never exited).
     timer.unref?.();
-    onTurnDrained(this.host, (status, detail) => {
+    const detach = onTurnDrained(this.host, (status, detail) => {
       clearTimeout(timer);
       this.execution = null;
-      this.buddies.settle(owned.id, owned.claim_token, status, detail);
+      execution.drained(status, detail);
     });
+    // For a run that never reached a turn: drop its deadline and drain listeners with it.
+    return () => {
+      clearTimeout(timer);
+      detach();
+      this.execution = null;
+    };
   }
 
   spawned(review: { attemptId: string; messageStart: number }): void {
     this.reviewTicket = { ...review, context: this.turnContext() };
+  }
+
+  adoptionRecord(): PolicyAdoption {
+    const { execution, grant } = this;
+    if (!execution || !grant)
+      throw new Error('A Buddy turn without its run and grant cannot be adopted');
+    const { kind, runId, leaseToken, deadline, context } = execution;
+    return {
+      t: 'buddy',
+      grant,
+      run: { kind, runId, leaseToken, deadline, context },
+      briefedGeneration: this.briefedMemoryGeneration,
+      audienceKey: this.providerAudienceKey,
+    };
+  }
+
+  /**
+   * This backend replaced the one that spawned the turn. The same grant works again, the run keeps
+   * its lease and deadline, and its drain settles it here: a chat run through the port as before,
+   * a runner-owned run through the runner (its awaiting promise died with the old backend).
+   */
+  adopt(record: PolicyAdoption, review: AdoptedReview): void {
+    if (record.t !== 'buddy') throw new Error(`A Buddy thread cannot adopt a ${record.t} turn`);
+    const { run } = record;
+    this.buddies.adoptGrant(record.grant);
+    this.grant = record.grant;
+    this.briefedMemoryGeneration = record.briefedGeneration;
+    this.providerAudienceKey = record.audienceKey;
+    this.armExecution({
+      ...run,
+      drained: (status, detail) =>
+        run.kind === 'chat'
+          ? this.buddies.settle(run.runId, run.leaseToken, status, detail)
+          : this.buddies.finishAdoptedRun(run.runId, run.leaseToken, status, detail),
+    });
+    this.spawned(review);
   }
 
   spawnFailed(): void {
@@ -576,6 +677,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     content: string,
     context: BuddyContext,
     leaseToken: string,
+    deadline: string,
     onDrained?: CoordinationDrained,
     onAdmitted?: (config: ResolvedExecutionConfig) => void
   ): Promise<string> {
@@ -588,27 +690,30 @@ export class BuddyTurnPolicy implements TurnPolicy {
     ) {
       return Promise.reject(new Error('Run identity or lease is missing'));
     }
-    this.execution = { context, leaseToken, onAdmitted };
+    const runId = context.coordinationRunId;
     return new Promise<string>((resolve, reject) => {
-      const detach = onTurnDrained(this.host, (status, detail) => {
-        try {
-          onDrained?.(status, detail, this.execution?.terminalCause);
-        } catch (error) {
-          this.execution = null;
-          return reject(error);
-        }
-        this.execution = null;
-        if (status === 'complete') resolve(detail);
-        else reject(new Error(detail));
-      });
+      const execution: RunExecution = {
+        kind: 'runner',
+        runId,
+        leaseToken,
+        deadline,
+        context,
+        onAdmitted,
+        drained: (status, detail) => {
+          try {
+            onDrained?.(status, detail, execution.terminalCause);
+          } catch (error) {
+            return reject(error);
+          }
+          if (status === 'complete') resolve(detail);
+          else reject(new Error(detail));
+        },
+      };
+      const release = this.armExecution(execution);
       try {
-        this.host.send(sameEitherWay(content), {
-          origin: 'buddy_message',
-          inputId: context.coordinationRunId!,
-        });
+        this.host.send(sameEitherWay(content), { origin: 'buddy_message', inputId: runId });
       } catch (error) {
-        detach();
-        this.execution = null;
+        release();
         reject(error);
       }
     });
