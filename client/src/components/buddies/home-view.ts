@@ -48,51 +48,79 @@ export function projectNext(parent: Task, children: readonly Task[]): string | n
   return next ? next.title : null;
 }
 
-export type PinnedProject = {
+/** One Task card on Home: a top-level Task, its checklist progress, and whether the owner pinned it. */
+export type HomeTask = {
   task: Task;
   progress: ProjectProgress;
   next: string | null;
+  pinned: boolean;
+  /** Has child Tasks: what the owner calls a "project". Derived, never stored (no Project type). */
+  project: boolean;
 };
 
+/** Recent projects offered beside the pins when the search box is empty. */
+export const RECENT_PROJECTS = 8;
+
 /**
- * The pinned Tasks in the owner's order. A pin whose Task is gone (deleted, or not loaded yet)
- * is skipped, never rendered blank; the stored id stays so a slow load does not unpin it.
+ * The Home's Task list. Empty query: the owner's pins in their order, then the most recently
+ * active UNFINISHED unpinned PROJECTS (top-level Tasks that have child Tasks; activity = newest update of the
+ * Task or any child). A query: every top-level Task whose title, next action or blocked reason
+ * contains every word, pinned first, then by activity; the owner pins from these results.
+ * A pin whose Task is gone (deleted, or not loaded yet) is skipped, but its stored id stays so a
+ * slow load does not unpin it.
  */
-export function pinnedProjects(
+export function homeTasks(
   pinIds: readonly string[],
-  tasks: readonly Task[]
-): readonly PinnedProject[] {
-  const byId = new Map(tasks.map((task) => [task.id, task] as const));
+  tasks: readonly Task[],
+  query: string
+): readonly HomeTask[] {
   const children = new Map<string, Task[]>();
   for (const task of tasks) {
     if (task.parentId === undefined) continue;
     children.set(task.parentId, [...(children.get(task.parentId) ?? []), task]);
   }
-  return pinIds.flatMap((id): PinnedProject[] => {
-    const task = byId.get(id);
-    if (task === undefined || task.parentId !== undefined) return [];
-    const own = children.get(id) ?? [];
-    return [{ task, progress: projectProgress(own), next: projectNext(task, own) }];
-  });
-}
-
-/** Top-level Tasks not yet pinned: unfinished first, then those with a checklist, then newest. */
-export function pinnable(pinIds: readonly string[], tasks: readonly Task[]): readonly Task[] {
   const pinned = new Set(pinIds);
-  const todos = new Map<string, number>();
-  for (const task of tasks) {
-    if (task.parentId !== undefined) todos.set(task.parentId, (todos.get(task.parentId) ?? 0) + 1);
-  }
-  const finished = (task: Task) => (task.status === 'done' || task.status === 'cancelled' ? 1 : 0);
-  const listed = (task: Task) => ((todos.get(task.id) ?? 0) > 0 ? 0 : 1);
-  return tasks
-    .filter((task) => task.parentId === undefined && !pinned.has(task.id))
-    .sort(
-      (a, b) =>
-        finished(a) - finished(b) ||
-        listed(a) - listed(b) ||
-        (a.updatedAt < b.updatedAt ? 1 : -1)
+  const card = (task: Task): HomeTask => {
+    const own = children.get(task.id) ?? [];
+    return {
+      task,
+      progress: projectProgress(own),
+      next: projectNext(task, own),
+      pinned: pinned.has(task.id),
+      project: own.length > 0,
+    };
+  };
+  const activity = (task: Task) =>
+    [task, ...(children.get(task.id) ?? [])].reduce(
+      (newest, entry) => (entry.updatedAt > newest ? entry.updatedAt : newest),
+      ''
     );
+  const newestFirst = (a: Task, b: Task) => (activity(a) < activity(b) ? 1 : -1);
+  const topLevel = tasks.filter((task) => task.parentId === undefined);
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length > 0) {
+    const matches = (task: Task) => {
+      const text = `${task.title} ${task.nextAction ?? ''} ${task.blockedReason ?? ''}`.toLowerCase();
+      return words.every((word) => text.includes(word));
+    };
+    return topLevel
+      .filter(matches)
+      .sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || newestFirst(a, b))
+      .map(card);
+  }
+  const byId = new Map(topLevel.map((task) => [task.id, task] as const));
+  const mine = pinIds.flatMap((id) => byId.get(id) ?? []);
+  const recent = topLevel
+    .filter(
+      (task) =>
+        !pinned.has(task.id) &&
+        task.status !== 'done' &&
+        task.status !== 'cancelled' &&
+        (children.get(task.id)?.length ?? 0) > 0
+    )
+    .sort(newestFirst)
+    .slice(0, RECENT_PROJECTS);
+  return [...mine, ...recent].map(card);
 }
 
 /** Move one id `delta` places, clamped; the same list when it is absent. */

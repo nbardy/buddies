@@ -18,12 +18,11 @@ import {
 import { channelLinkPath, postLink } from './channel-link';
 import { channelsHref } from './channels-view';
 import {
-  type PinnedProject,
+  type HomeTask,
   excerpt,
   firstImage,
   movePin,
-  pinnable,
-  pinnedProjects,
+  homeTasks,
   recentThreads,
   threadLatest,
 } from './home-view';
@@ -33,11 +32,11 @@ import './ChannelLanding.css';
 
 // The workspace Home (owner, 2026-09-30): what to pick up, who needs you, where to begin.
 // One component for both shells; the shell passes `frame` and the Home does not know which.
-// Pins are DEVICE-LOCAL (prefs.projectPins): a server-stored pin list is a contract the owner has
+// The Tasks section: pins, then recent projects; search finds any Task. Pins are DEVICE-LOCAL (prefs.projectPins): a server-stored pin list is a contract the owner has
 // not approved yet (brief, "Data and persistence proposal"), so they do not sync to the phone.
 
 const NO_RUNS: readonly Run[] = [];
-const DESKTOP_PINS = 4;
+const DESKTOP_TASKS = 4;
 const THREAD_CARDS = 4;
 
 export function ChannelLanding({
@@ -92,7 +91,7 @@ export function ChannelLanding({
           </p>
         )}
       </header>
-      <PinnedProjects
+      <TaskSection
         workspaceId={workspaceId}
         directory={directory}
         channelId={generalChannelId ?? inbox?.channels[0]?.channel.id ?? null}
@@ -152,9 +151,9 @@ function Team({
   );
 }
 
-// ── Pinned projects ─────────────────────────────────────────────────────────
+// ── Tasks ───────────────────────────────────────────────────────────────────
 
-function PinnedProjects({
+function TaskSection({
   workspaceId,
   directory,
   channelId,
@@ -167,94 +166,84 @@ function PinnedProjects({
 }) {
   const pins = useAtomValue(prefsAtom).projectPins[workspaceId] ?? [];
   const [showAll, setShowAll] = useState(false);
-  const [picking, setPicking] = useState(false);
-  const tasks = directory.tasks;
-  const projects = pinnedProjects(pins, tasks);
-  const shown = frame === 'desktop' && !showAll ? projects.slice(0, DESKTOP_PINS) : projects;
-  const choices = pinnable(pins, tasks);
+  const [query, setQuery] = useState('');
+  const searching = query.trim() !== '';
+  const cards = homeTasks(pins, directory.tasks, query);
+  const shown = frame === 'desktop' && !showAll && !searching ? cards.slice(0, DESKTOP_TASKS) : cards;
   const write = (next: readonly string[]) => setProjectPins(workspaceId, next);
   return (
-    <section className="landing-section ui-stack" aria-label="Pinned projects">
+    <section className="landing-section ui-stack" aria-label="Tasks">
       <div className="landing-section-head ui-row">
-        <h2>Pinned projects</h2>
-        <button
-          type="button"
-          className="landing-pin-add ui-control"
-          aria-expanded={picking}
-          onClick={() => setPicking((open) => !open)}
-        >
-          + Pin a Task
-        </button>
+        <h2>Tasks</h2>
+        <span className="landing-device-note ui-muted">Pins are saved on this device</span>
       </div>
-      {picking && (
-        <ul className="landing-picker ui-stack" aria-label="Tasks to pin">
-          <li className="landing-picker-note ui-muted">Pins are saved on this device</li>
-          {choices.length === 0 && <li className="ui-muted">Every top-level Task is pinned.</li>}
-          {choices.slice(0, 12).map((task) => (
-            <li key={task.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  write([...pins, task.id]);
-                  setPicking(false);
-                }}
-              >
-                <span className="ui-truncate">{task.title}</span>
-                <span className="ui-muted">{task.status.replace('_', ' ')}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {projects.length === 0 ? (
+      <input
+        type="search"
+        className="landing-search"
+        placeholder="Search Tasks"
+        aria-label="Search Tasks"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      {cards.length === 0 ? (
         <p className="landing-empty ui-muted">
-          Pin a top-level Task to follow an initiative here, with progress from its todos.
+          {searching
+            ? 'No Task matches.'
+            : 'Recent projects (Tasks with todos) and your pins show here. Search to pin any Task.'}
         </p>
       ) : (
         <ul className="landing-projects">
-          {shown.map((project) => (
-            <ProjectCard
-              key={project.task.id}
-              project={project}
+          {shown.map((entry) => (
+            <TaskCard
+              key={entry.task.id}
+              entry={entry}
               workspaceId={workspaceId}
               channelId={channelId}
               buddyNames={directory.buddyNames}
+              onTogglePin={() =>
+                write(
+                  entry.pinned
+                    ? pins.filter((id) => id !== entry.task.id)
+                    : [...pins, entry.task.id]
+                )
+              }
               menu={{
-                earlier: () => write(movePin(pins, project.task.id, -1)),
-                later: () => write(movePin(pins, project.task.id, 1)),
-                unpin: () => write(pins.filter((id) => id !== project.task.id)),
+                earlier: () => write(movePin(pins, entry.task.id, -1)),
+                later: () => write(movePin(pins, entry.task.id, 1)),
               }}
             />
           ))}
         </ul>
       )}
-      {frame === 'desktop' && projects.length > DESKTOP_PINS && (
+      {frame === 'desktop' && !searching && cards.length > DESKTOP_TASKS && (
         <button
           type="button"
           className="landing-more ui-control"
           onClick={() => setShowAll((all) => !all)}
         >
-          {showAll ? 'Show fewer' : `Show all (${projects.length})`}
+          {showAll ? 'Show fewer' : `Show all (${cards.length})`}
         </button>
       )}
     </section>
   );
 }
 
-function ProjectCard({
-  project,
+function TaskCard({
+  entry,
   workspaceId,
   channelId,
   buddyNames,
+  onTogglePin,
   menu,
 }: {
-  project: PinnedProject;
+  entry: HomeTask;
   workspaceId: string;
   channelId: string | null;
   buddyNames: Readonly<Record<string, string>>;
-  menu: { earlier(): void; later(): void; unpin(): void };
+  onTogglePin(): void;
+  menu: { earlier(): void; later(): void };
 }) {
-  const { task, progress, next } = project;
+  const { task, progress, next } = entry;
   const owner = buddyNames[task.ownerId] ?? 'Buddy';
   const title = <span className="landing-project-title">{task.title}</span>;
   return (
@@ -264,7 +253,19 @@ function ProjectCard({
           <span className="landing-status" data-status={task.status}>
             {task.status.replace('_', ' ')}
           </span>
-          <ProjectMenu title={task.title} menu={menu} />
+          <span className="landing-card-actions ui-row">
+            {entry.pinned && <ReorderMenu title={task.title} menu={menu} />}
+            <button
+              type="button"
+              className="landing-pin ui-control"
+              aria-pressed={entry.pinned}
+              aria-label={`${entry.pinned ? 'Unpin' : 'Pin'} ${task.title}`}
+              title={entry.pinned ? 'Unpin' : 'Pin to Home'}
+              onClick={onTogglePin}
+            >
+              {entry.pinned ? '★' : '☆'}
+            </button>
+          </span>
         </div>
         {channelId ? (
           <Link
@@ -287,12 +288,12 @@ function ProjectCard({
   );
 }
 
-function ProjectMenu({
+function ReorderMenu({
   title,
   menu,
 }: {
   title: string;
-  menu: { earlier(): void; later(): void; unpin(): void };
+  menu: { earlier(): void; later(): void };
 }) {
   const [open, setOpen] = useState(false);
   const run = (action: () => void) => () => {
@@ -306,7 +307,7 @@ function ProjectMenu({
         className="landing-menu-button ui-control"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Pin options for ${title}`}
+        aria-label={`Reorder ${title}`}
         onClick={() => setOpen((value) => !value)}
       >
         ⋯
@@ -319,16 +320,13 @@ function ProjectMenu({
           <button type="button" role="menuitem" onClick={run(menu.later)}>
             Move later
           </button>
-          <button type="button" role="menuitem" onClick={run(menu.unpin)}>
-            Unpin
-          </button>
         </div>
       )}
     </div>
   );
 }
 
-function ProgressFoot({ progress }: { progress: PinnedProject['progress'] }) {
+function ProgressFoot({ progress }: { progress: HomeTask['progress'] }) {
   switch (progress.kind) {
     case 'none':
       return (

@@ -91,36 +91,9 @@ a.landing-chip:hover {
   font-size: var(--fs-3);
 }
 
-.landing-pin-add,
 .landing-more {
   align-self: flex-start;
   font-size: var(--fs-3);
-}
-
-.landing-picker {
-  gap: var(--sp-1);
-  margin: 0;
-  padding: var(--sp-3);
-  list-style: none;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--sp-4);
-}
-
-.landing-picker button {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-6);
-  width: 100%;
-  padding: var(--sp-3) var(--sp-4);
-  border: 0;
-  background: none;
-  color: var(--text-primary);
-  font-size: var(--fs-3);
-  text-align: left;
-}
-
-.landing-picker button:hover {
-  background: color-mix(in srgb, var(--text-bright) 6%, transparent);
 }
 
 /* Projects: a grid on desktop, one sideways row on phone (data-frame). */
@@ -417,12 +390,32 @@ a.landing-chip:hover {
   white-space: nowrap;
 }
 
-.landing-picker-note {
-  padding: var(--sp-2) var(--sp-4);
+.landing-device-note {
   font-size: var(--fs-2);
 }
 
-.landing-picker button > .ui-muted {
-  flex: none;
-  white-space: nowrap;
+.landing-search {
+  width: 100%;
+  padding: var(--sp-4) var(--sp-6);
+  border: 1px solid var(--border-default);
+  border-radius: var(--sp-4);
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-4);
+}
+
+.landing-card-actions {
+  gap: var(--sp-1);
+}
+
+.landing-pin {
+  padding: 0 var(--sp-3);
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--fs-5);
+}
+
+.landing-pin[aria-pressed='true'] {
+  color: var(--warning);
 }
