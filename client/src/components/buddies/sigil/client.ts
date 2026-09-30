@@ -7,7 +7,7 @@
 // pane mounted, so "Loading thread…" waited on avatars. Guard:
 // client/test/sigil-off-main-thread.test.ts.
 
-/** What the worker draws: a Buddy's sigil, or a workspace's emblem (emblem.ts). */
+/** Render styles: patterned surround (sigil), or glowing kernel (emblem). */
 export type SigilKind = 'sigil' | 'emblem';
 export type SigilRequest = { id: number; kind: SigilKind; name: string };
 export type SigilReply =

@@ -38,14 +38,14 @@ function Generated({
   );
 }
 
-/** Generative avatar for a Buddy, seeded by its name. */
+/** Buddy avatar: the glowing kernel style, seeded by its name. */
 export function BuddySigil({ name, className }: { name: string; className: string }) {
-  const ground = useMemo(() => backgroundCss(nameGenome(name)), [name]);
-  return <Generated name={name} kind="sigil" ground={ground} className={className} />;
-}
-
-/** A workspace's emblem: the Buddy sigil inverted (sigil/emblem.ts; port of c5e0ded). */
-export function WorkspaceEmblem({ name, className }: { name: string; className: string }) {
   const ground = useMemo(() => emblemGroundCss(workspaceEmblemGenome(name)), [name]);
   return <Generated name={name} kind="emblem" ground={ground} className={className} />;
+}
+
+/** Workspace icon: the patterned surround with a dark silhouette. */
+export function WorkspaceEmblem({ name, className }: { name: string; className: string }) {
+  const ground = useMemo(() => backgroundCss(nameGenome(name)), [name]);
+  return <Generated name={name} kind="sigil" ground={ground} className={className} />;
 }

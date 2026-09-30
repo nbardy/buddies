@@ -1,4 +1,5 @@
-// Workspace emblem genome: the Buddy sigil, inverted.
+// Glowing kernel genome, originally the workspace emblem; now used for Buddies
+// (owner, #channels-feature 2026-09-30 swapped the two icon styles).
 //
 // A Buddy sigil is a bright pattern AROUND a dark silhouette. A workspace
 // emblem is the opposite (owner, #channels-feature 2026-09-25): a dark ground,
@@ -9,9 +10,9 @@
 //
 // The pattern itself reuses the sigil decoder (same field, CPPN, palette), so
 // the two families share a visual language. The kernel and ground read their
-// own seeded decoder rows: nothing here changes any Buddy's sigil. Changing
-// this decoder, its seed, or the ORDER of `take()` calls redraws every
-// workspace — bump EMBLEM_VERSION when you do it on purpose.
+// own seeded decoder rows. Changing this decoder, its seed, or the ORDER of
+// `take()` calls redraws every icon using this style — bump EMBLEM_VERSION
+// when you do it on purpose.
 
 import {
   LATENT_DIM,
