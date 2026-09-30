@@ -1,4 +1,7 @@
 // Render the workspace Home with candidate typefaces (style override in a read-only session).
+// Fonts (OFL) are read from /tmp/fonts; fetch them first from github.com/google/fonts:
+//   ofl/geist/Geist[wght].ttf, ofl/inter/Inter[opsz,wght].ttf, ofl/instrumentserif/InstrumentSerif-Regular.ttf
+// Run with the dev server up: node product/design/workspace-home/font-options.mjs <workspaceId> <outDir>
 import * as fs from 'node:fs';
 import { openSession, resolveAuthToken, sleep } from '/Users/nicholasbardy/git/unleashd/tools/lib/headless-chrome.mjs';
 
