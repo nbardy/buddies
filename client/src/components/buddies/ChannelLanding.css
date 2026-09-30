@@ -203,7 +203,9 @@ a.landing-thread:hover {
 
 /* Status: a calm outlined pill in sentence case, its colour a dot and a word. */
 .landing-status-row {
+  flex-wrap: nowrap;
   gap: var(--sp-4);
+  min-width: 0;
 }
 
 .landing-status {
@@ -216,6 +218,7 @@ a.landing-thread:hover {
   color: var(--text-muted);
   font-size: var(--fs-2);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .landing-status::before {
