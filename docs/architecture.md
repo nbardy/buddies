@@ -256,35 +256,57 @@ is now `providerSupportsFork(this.provider)`; guard:
 process-lifecycle authority. States: `starting → idle`, and `starting|idle →
 reloading → exiting`.
 
-**`reloading` is absorbing — so a source reload must not enter it while work is
-active.** A reload request remains pending while the old backend retains sole
-ownership of every provider stream and automation wrapper. Its current admission
-policy stays in effect: `idle` accepts mutations; `starting` admits only WebSocket
-`create_conversation`. Other WS commands await the startup barrier, and HTTP
-mutations (including New Buddy's builder request) receive `503 server_starting`
-until `idle`. At an observed idle boundary the controller pauses the scheduler,
-synchronously rechecks all work counters, and
-only then enters `reloading` and exits. If work appeared, it resumes the
-scheduler and keeps waiting. Hot reload has no force/quiesce deadline: such a
-deadline must either kill admitted work or strand the app read-only. Provider
-watchdogs bound provider turns; SIGINT/SIGTERM are the explicit bounded operator
-recovery paths. The alternatives and tradeoffs are recorded in
-`agent_notes/2026-08-24_automation-execution-ownership-design.md`.
+**No exit stops a running provider turn.** This covers reload, SIGINT/SIGTERM, and
+the loss of the dev runner. Each turn runs from an on-disk journal, and the next
+backend adopts it (docs/turn-lifecycle.md#execution-adoption). Only an explicit Stop
+stops a turn.
+
+**`reloading` is absorbing, so a source reload must not enter it while
+memory-only work is active.** Memory-only work is anything a backend exit would
+drop:
+- a queued message not yet sent;
+- a Buddy chat waiting for a run slot;
+- an admitted mutation;
+- startup;
+- a memory review;
+- a Buddy run's completion step or settle.
+
+Running provider turns do not count. The reload policy while it waits:
+- Admission policy stays in effect: `idle` accepts mutations; `starting` admits
+  only WebSocket `create_conversation`.
+- Other WS commands await the startup barrier.
+- HTTP mutations, including New Buddy's builder request, receive
+  `503 server_starting` until `idle`.
+
+At an observed idle boundary, the controller:
+1. pauses the scheduler;
+2. synchronously rechecks all work counters;
+3. only then enters `reloading` and exits.
+
+If work appeared, it resumes the scheduler and keeps waiting.
+
+Before 2026-09-30:
+- A reload also waited for every running turn, which starved a reload for 20+
+  minutes under steady Buddy work.
+- SIGTERM stopped every running turn.
+- An abrupt death orphaned every running turn anyway.
+
+The alternatives and tradeoffs are recorded in
+`agent_notes/2026-08-24_automation-execution-ownership-design.md` and its successor,
+`agent_notes/2026-09-30_execution-adoption-design.md`.
 
 The remaining hard bounds are specific to explicit shutdown and final flushing:
 
 | Bound | Constant | Protects against |
 |---|---|---|
-| shutdown drain | `HOT_RELOAD_FORCE_EXIT_GRACE_MS` (3s) | work `interrupt()` cannot clear |
+| shutdown drain | `HOT_RELOAD_FORCE_EXIT_GRACE_MS` (3s) | memory-only work that never drains (it is dropped) |
 | flush watchdog | `SHUTDOWN_FLUSH_GRACE_MS` (5s) | `exiting` wedged by a hung flush |
 
 The flush watchdog is the subtle one: `exitOnce()` calls `clearTimers()` *before*
 awaiting `flushState()`, so without it a `turnAttemptJournal.flush()` that never
 settles leaves the process alive in `exiting` with nothing armed to rescue it —
 the same user-visible error, but permanent. It is armed after `clearTimers()`
-deliberately. Force-drain also resets its counters *before* calling `interrupt()`,
-because the explicit-shutdown force timer is one-shot and a throw there would
-strand `shutting_down`.
+deliberately.
 
 The startup barrier (`initialLoadComplete`) means "startup is no longer in
 progress", **not** "startup succeeded". A reload arriving mid-startup makes

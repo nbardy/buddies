@@ -1,6 +1,10 @@
-import type { ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
-import type { ExecuteCommandRequest, UnifiedAgentEvent, executeCommand } from '@nbardy/agent-cli';
+import type {
+  ExecuteCommandRequest,
+  ExecutionHandle,
+  UnifiedAgentEvent,
+  executeCommand,
+} from '@nbardy/agent-cli';
 import type {
   ContentPart,
   Message,
@@ -25,6 +29,7 @@ import type {
 } from '../observability';
 import { type SwarmObservers, watchSwarmRuns } from '../swarm';
 import { type BackgroundWait, backgroundWaitFor } from './background-wait';
+import type { ExecutionJournals, TurnOwner } from './executions';
 import type { TurnInput } from './input';
 import type { TurnPolicy } from './policy';
 import type { QueueEntry, TurnQueue } from './queue';
@@ -63,7 +68,8 @@ export interface TurnRunnerHost {
   sessionId: string;
   messages: Message[];
   subAgents: SubAgent[];
-  process: ChildProcess | null;
+  /** The live execution (spawned here or adopted): its journal, not a child pipe. */
+  process: ExecutionHandle | null;
   isRunning: boolean;
   isStreaming: boolean;
   providerUsage: ProviderTurnUsage | null;
@@ -104,6 +110,8 @@ export interface TurnRunnerPorts {
   ): Promise<void>;
   createSessionId(): string;
   executeTurn: typeof executeCommand;
+  /** Where each turn's execution is journaled, so a replacement backend can adopt it. */
+  executions: ExecutionJournals;
   turnAttempts: RuntimeTurnAttemptObserver;
   swarmObservers: SwarmObservers;
 }
@@ -122,7 +130,6 @@ export type TurnBroadcast =
 export class TurnRunner {
   // Per-run token: every late event/completion from a replaced handle is ignored.
   private runToken = 0;
-  private stopTurn: ((signal?: NodeJS.Signals) => void) | null = null;
   private activeDrain: Promise<void> | null = null;
   private stderrBuffer = '';
   // Whether assistant text or a tool event reached the unified stream.
@@ -248,6 +255,8 @@ export class TurnRunner {
     forkSourceSessionId: string | undefined;
     resume: boolean;
     input: TurnInput;
+    /** The user row this turn appended (history text and time), kept for adoption. */
+    userMessage: { text: string; timestamp: Date };
   }): void {
     const host = this.host;
     if (host.process || host.isRunning) {
@@ -256,10 +265,6 @@ export class TurnRunner {
     }
     const runToken = ++this.runToken;
 
-    // This session is now being handled locally; clear any stale external flags.
-    this.ports.clearExternalRunningStatus(host.id, host.sessionId);
-    this.ports.clearLocalCompletionSuppression(host.id, host.sessionId);
-
     const forking = !!turn.forkSourceSessionId;
     const executionMode = forking ? 'fork' : turn.resume ? 'resume' : 'fresh';
     console.log(
@@ -267,20 +272,8 @@ export class TurnRunner {
     );
     console.log(`[${host.id}] Message: "${turn.content.substring(0, 50)}"`);
 
-    this.stderrBuffer = '';
-    this.turnMessageStart = host.messages.length;
-    this.sawMeaningfulOutput = false;
-    this.completedCleanly = false;
-    this.sealed = false;
-    this.terminalCauseHint = null;
-    this.providerFailureMessage = null;
-    this.stopCause = null;
-    this.processStartTime = Date.now();
-    this.lastAttemptActivityAt = 0;
-    this.lastAttemptActivitySource = null;
-    this.lastObservedActivity = null;
-    this.subAgentFold = subAgentFoldFor(turn.config.provider);
-    this.backgroundWait = backgroundWaitFor(turn.config.provider);
+    this.beginTurnState(turn.config.provider, Date.now());
+    const attemptId = this.activeAttemptId ?? crypto.randomUUID();
     if (this.activeAttemptId) {
       this.ports.turnAttempts.starting(this.activeAttemptId);
       this.ports.turnAttempts.activity(
@@ -296,9 +289,21 @@ export class TurnRunner {
       );
     }
 
-    let handle: ReturnType<typeof executeCommand>;
+    let handle: ExecutionHandle;
     try {
       const extras = host.policy.startTurn(turn.input, turn.config);
+      // The owner is on disk before the provider exists (turns/executions.ts).
+      const journalDir = this.ports.executions.forTurn({
+        conversationId: host.id,
+        attemptId,
+        provider: turn.config.provider,
+        userMessage: {
+          text: turn.userMessage.text,
+          timestamp: turn.userMessage.timestamp.toISOString(),
+        },
+        startedAt: new Date(this.processStartTime).toISOString(),
+        policy: host.policy.adoptionRecord(),
+      });
       // One request shape for every harness; the cast covers agent-cli's `never` effort typing
       // on harnesses without effort (docs/turn-lifecycle.md#one-request-shape).
       handle = this.ports.executeTurn({
@@ -310,7 +315,7 @@ export class TurnRunner {
         resumeSessionId: turn.resume ? host.sessionId : undefined,
         forkSessionId: forking ? turn.forkSourceSessionId : undefined,
         yolo: true,
-        detached: true,
+        journalDir,
         debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
         reasoningEffort: turn.config.reasoningEffort,
         ...extras,
@@ -326,13 +331,65 @@ export class TurnRunner {
     }
 
     host.policy.spawned({
-      attemptId: this.activeAttemptId ?? crypto.randomUUID(),
+      attemptId,
       messageStart: Math.max(0, host.messages.length - 1),
     });
-    host.process = handle.child;
-    this.stopTurn = handle.stop;
-    host.isRunning = true;
+    // Spawn only: an adopted attempt is already running in the journal of the boot that spawned it.
     if (this.activeAttemptId) this.ports.turnAttempts.running(this.activeAttemptId, host.sessionId);
+    this.follow(handle, runToken);
+  }
+
+  /**
+   * A replacement backend takes over a turn another backend spawned and that still runs (or
+   * ended while no backend watched). The overlay already holds the turn's user row; the journal
+   * replays from byte 0 through the same fold, so this backend ends up exactly where a
+   * never-restarted one would be. Guard: execution-adoption.test.ts.
+   */
+  adopt(owner: TurnOwner, handle: ExecutionHandle): void {
+    const host = this.host;
+    const runToken = ++this.runToken;
+    console.log(`[${host.id}] Adopting running ${owner.provider} turn (pid ${handle.pid})`);
+    this.beginTurnState(owner.provider, Date.parse(owner.startedAt));
+    this.activeAttemptId = owner.attemptId;
+    this.ports.turnAttempts.activity(
+      owner.attemptId,
+      {
+        source: 'runtime',
+        providerEventType: 'execution.adopted',
+        providerEventSource: 'unleashd.runtime',
+      },
+      host.sessionId
+    );
+    this.follow(handle, runToken);
+  }
+
+  /** Per-turn state, fresh for a spawn or an adoption. */
+  private beginTurnState(provider: ResolvedExecutionConfig['provider'], startedAt: number): void {
+    const host = this.host;
+    // This session is now being handled locally; clear any stale external flags.
+    this.ports.clearExternalRunningStatus(host.id, host.sessionId);
+    this.ports.clearLocalCompletionSuppression(host.id, host.sessionId);
+    this.stderrBuffer = '';
+    this.turnMessageStart = host.messages.length;
+    this.sawMeaningfulOutput = false;
+    this.completedCleanly = false;
+    this.sealed = false;
+    this.terminalCauseHint = null;
+    this.providerFailureMessage = null;
+    this.stopCause = null;
+    this.processStartTime = startedAt;
+    this.lastAttemptActivityAt = 0;
+    this.lastAttemptActivitySource = null;
+    this.lastObservedActivity = null;
+    this.subAgentFold = subAgentFoldFor(provider);
+    this.backgroundWait = backgroundWaitFor(provider);
+  }
+
+  /** The one read path: a spawned and an adopted turn are both followed from their journal. */
+  private follow(handle: ExecutionHandle, runToken: number): void {
+    const host = this.host;
+    host.process = handle;
+    host.isRunning = true;
     host.emit('buddy-turn-started');
     this.startWatchdogs();
     this.broadcastStatus();
@@ -362,6 +419,9 @@ export class TurnRunner {
     this.activeDrain = turnDrain;
     void turnDrain.finally(() => {
       if (this.activeDrain === turnDrain) this.activeDrain = null;
+      // Settled (or superseded by a reset): the journal is spent. Removed only now, so a backend
+      // that dies mid-settle re-adopts it and the lease rejects the second settle.
+      this.ports.executions.remove(handle.journalDir);
     });
   }
 
@@ -735,12 +795,11 @@ export class TurnRunner {
       this.ports.turnAttempts.stopping(this.activeAttemptId);
       if (reason === 'server_restart') this.finishStopped(reason);
     }
-    const stopTurn = this.stopTurn;
     // Never clear isRunning here: settle does, after exit, so processQueue cannot
     // start while the old process lives (start()'s guard would drop the message).
-    stopTurn?.('SIGTERM');
+    proc.stop('SIGTERM');
     host.policy.ended({ t: 'cancelled' });
-    escalateKill(proc, stopTurn, STOP_KILL_GRACE_MS, () =>
+    escalateKill(proc, STOP_KILL_GRACE_MS, () =>
       console.warn(`[${host.id}] Process did not exit after SIGTERM, sending SIGKILL`)
     );
   }
@@ -752,11 +811,10 @@ export class TurnRunner {
     this.providerUsageDirty = false;
     const proc = host.process;
     if (!proc) return;
-    const stopTurn = this.stopTurn;
     this.finishAttempt('interrupted', 'process_killed');
     this.runToken += 1;
-    stopTurn?.('SIGTERM');
-    escalateKill(proc, stopTurn, TURN_TIMEOUT_KILL_GRACE_MS, () =>
+    proc.stop('SIGTERM');
+    escalateKill(proc, TURN_TIMEOUT_KILL_GRACE_MS, () =>
       console.warn(`[${host.id}] Reset process did not exit after SIGTERM, sending SIGKILL`)
     );
     this.detachProcess();
@@ -803,9 +861,8 @@ export class TurnRunner {
     host.policy.ended({ t: 'failed', detail: timeout.message });
     host.emit('buddy-turn-failed', timeout.message);
 
-    const stopTurn = this.stopTurn;
-    stopTurn?.('SIGTERM');
-    escalateKill(proc, stopTurn, TURN_TIMEOUT_KILL_GRACE_MS, () =>
+    proc.stop('SIGTERM');
+    escalateKill(proc, TURN_TIMEOUT_KILL_GRACE_MS, () =>
       console.warn(`[${host.id}] Timeout kill escalation: sending SIGKILL`)
     );
   }
@@ -817,7 +874,7 @@ export class TurnRunner {
   }
 
   private startWatchdogs(): void {
-    this.watchdog.start();
+    this.watchdog.start(this.processStartTime);
     this.stopSwarmWatch?.();
     this.stopSwarmWatch = watchSwarmRuns(
       this.ports.swarmObservers,
@@ -832,7 +889,6 @@ export class TurnRunner {
 
   private detachProcess(): void {
     this.host.process = null;
-    this.stopTurn = null;
   }
 
   // The local run ended: clear stale external-running flags and suppress
@@ -983,18 +1039,16 @@ function crashMessage(
   };
 }
 
-function escalateKill(
-  proc: ChildProcess,
-  stopTurn: ((signal?: NodeJS.Signals) => void) | null,
-  graceMs: number,
-  warn: () => void
-): void {
+/** SIGKILL the execution's group if it has not ended within the grace. */
+function escalateKill(handle: ExecutionHandle, graceMs: number, warn: () => void): void {
   const killTimer = setTimeout(() => {
-    if (proc.exitCode !== null) return;
     warn();
-    stopTurn?.('SIGKILL');
+    handle.stop('SIGKILL');
   }, graceMs);
-  proc.once('close', () => clearTimeout(killTimer));
+  // The group runs on its own; this timer alone must not hold a backend (or a test) open.
+  killTimer.unref();
+  const clear = () => clearTimeout(killTimer);
+  handle.completed.then(clear, clear);
 }
 
 function stripAnsi(value: string): string {

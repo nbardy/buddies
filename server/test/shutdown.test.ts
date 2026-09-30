@@ -4,7 +4,6 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { Message } from '@unleashd/shared';
 import {
   type ShutdownConversation,
   type ShutdownOptions,
@@ -36,18 +35,11 @@ function createFixture(activeInitially: boolean) {
   let schedulerStops = 0;
   let flushes = 0;
   let exits = 0;
-  let processStops = 0;
   const pendingFlush = deferred();
-  const messages: Message[] = [];
+  // `active` = memory-only work (a queued send, a chat waiting for a slot). A running provider
+  // turn is never this: the next backend adopts it.
   const conversation: ShutdownConversation = {
-    id: 'conversation-1',
-    messages,
-    process: null,
-    hasActiveProcess: () => active,
-    stop: () => {
-      processStops += 1;
-      active = false;
-    },
+    holdsUnadoptableWork: () => active,
   };
   const ports: ShutdownPorts = {
     conversations: () => [conversation],
@@ -65,7 +57,6 @@ function createFixture(activeInitially: boolean) {
       flushes += 1;
       return pendingFlush.promise;
     },
-    broadcastMessage: () => undefined,
     exit: () => {
       exits += 1;
     },
@@ -86,7 +77,6 @@ function createFixture(activeInitially: boolean) {
       schedulerStops,
       flushes,
       exits,
-      processStops,
     }),
   };
 }
@@ -105,7 +95,6 @@ test('SIGTERM claims shutdown before its single flush can be re-entered', async 
     schedulerStops: 1,
     flushes: 1,
     exits: 0,
-    processStops: 0,
   });
 
   fixture.pendingFlush.resolve();
@@ -115,7 +104,7 @@ test('SIGTERM claims shutdown before its single flush can be re-entered', async 
   controller.dispose();
 });
 
-test('reload waits for active turns and coalesces repeated requests', async () => {
+test('reload waits for memory-only work and coalesces repeated requests', async () => {
   const fixture = createFixture(true);
   const controller = createShutdownController(INERT, fixture.ports);
   assert.equal(controller.beginMutation(), null);
@@ -140,9 +129,7 @@ test('reload waits for active turns and coalesces repeated requests', async () =
     schedulerStops: 0,
     flushes: 0,
     exits: 0,
-    processStops: 0,
   });
-  assert.equal(fixture.conversation.messages.length, 0);
 
   fixture.setActive(false);
   await sleep(550);
@@ -176,7 +163,6 @@ test('a pending reload remains fully available without interrupting its live tur
   const admittedLater = controller.beginMutation();
   assert.ok(admittedLater, 'pending reload never turns the old owner read-only');
   admittedLater();
-  assert.equal(fixture.counts().processStops, 0, 'reload never signals a live turn');
   assert.equal(fixture.counts().schedulerPauses, 0, 'scheduler remains live while work is active');
   assert.equal(fixture.counts().flushes, 0);
 
@@ -237,7 +223,6 @@ test('reload resumes the scheduler when pausing reveals newly active work', asyn
     },
     stopScheduler: () => undefined,
     flushState: () => undefined,
-    broadcastMessage: () => undefined,
     exit: () => {
       exits += 1;
     },
@@ -260,71 +245,61 @@ test('reload resumes the scheduler when pausing reveals newly active work', asyn
   controller.dispose();
 });
 
-test('hot reload preserves a real detached provider process until an idle boundary', async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), 'unleashd-reload-provider-'));
-  const marker = join(directory, 'completed');
-  const child = spawn(
-    process.execPath,
-    [
-      '-e',
-      "setTimeout(() => require('node:fs').writeFileSync(process.argv[1], 'ok'), 650)",
-      marker,
-    ],
-    { detached: true, stdio: 'ignore' }
-  );
-  let stopped = 0;
-  let flushed = 0;
-  let exited = 0;
-  const conversation: ShutdownConversation = {
-    id: 'real-provider-turn',
-    messages: [],
-    process: child,
-    hasActiveProcess: () => child.exitCode === null,
-    stop: () => {
-      stopped += 1;
-      if (child.pid != null) process.kill(-child.pid, 'SIGTERM');
-    },
-  };
-  const controller = createShutdownController(INERT, {
-    conversations: () => [conversation],
-    activeSchedulerRuns: () => 0,
-    pauseScheduler: () => undefined,
-    resumeScheduler: () => undefined,
-    stopScheduler: () => undefined,
-    flushState: () => {
-      flushed += 1;
-    },
-    broadcastMessage: () => undefined,
-    exit: () => {
-      exited += 1;
-    },
+// 2026-09-30: reload used to wait for every running turn (it starved for 20+ minutes under steady
+// Buddy work) and SIGTERM stopped them all. A running provider is journaled and adopted by the next
+// backend, so no exit waits for it or signals it, and it finishes its work after the exit.
+for (const exit of ['reload', 'SIGTERM'] as const) {
+  test(`${exit} exits at once and leaves a real running provider process to finish`, async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'unleashd-reload-provider-'));
+    const marker = join(directory, 'completed');
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        "setTimeout(() => require('node:fs').writeFileSync(process.argv[1], 'ok'), 650)",
+        marker,
+      ],
+      { detached: true, stdio: 'ignore' }
+    );
+    let flushed = 0;
+    let exited = 0;
+    // A conversation whose only work is that running turn.
+    const conversation: ShutdownConversation = { holdsUnadoptableWork: () => false };
+    const controller = createShutdownController(INERT, {
+      conversations: () => [conversation],
+      activeSchedulerRuns: () => 0,
+      pauseScheduler: () => undefined,
+      resumeScheduler: () => undefined,
+      stopScheduler: () => undefined,
+      flushState: () => {
+        flushed += 1;
+      },
+      exit: () => {
+        exited += 1;
+      },
+    });
+    t.after(() => {
+      controller.dispose();
+      if (child.exitCode === null && child.pid != null) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {}
+      }
+      rmSync(directory, { recursive: true, force: true });
+    });
+    assert.equal(controller.completeStartup(), true);
+
+    if (exit === 'reload') controller.handleReload();
+    else controller.handleSigterm();
+    await sleep(100);
+
+    assert.equal(flushed, 1, 'the exit did not wait for the running turn');
+    assert.equal(exited, 1);
+    assert.equal(child.exitCode, null, 'the provider is still running after the exit');
+    await new Promise<void>((resolve) => child.once('close', () => resolve()));
+    assert.equal(existsSync(marker), true, 'the provider finished its work');
   });
-  t.after(() => {
-    controller.dispose();
-    if (child.exitCode === null && child.pid != null) {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {}
-    }
-    rmSync(directory, { recursive: true, force: true });
-  });
-  assert.equal(controller.completeStartup(), true);
-
-  controller.handleReload();
-  await sleep(250);
-
-  assert.equal(controller.state, 'idle');
-  assert.equal(stopped, 0);
-  assert.equal(flushed, 0);
-
-  await new Promise<void>((resolve) => child.once('close', () => resolve()));
-  await sleep(550);
-
-  assert.equal(existsSync(marker), true, 'provider completed its work after reload quiesced');
-  assert.equal(stopped, 0, 'reload never signalled the provider process group');
-  assert.equal(flushed, 1);
-  assert.equal(exited, 1);
-});
+}
 
 /**
  * Incident 2026-09-23: a backend started at 01:31 outlived the dev runner that
@@ -347,7 +322,7 @@ test('a backend exits when its dev runner goes away', async (t) => {
       `const { registerShutdownHandlers } = require(${JSON.stringify(shutdownModule)});
        const controller = registerShutdownHandlers({ forceExitGraceMs: 1000, flushGraceMs: 1000 }, {
          conversations: () => [], activeSchedulerRuns: () => 0, pauseScheduler() {},
-         resumeScheduler() {}, stopScheduler() {}, flushState() {}, broadcastMessage() {},
+         resumeScheduler() {}, stopScheduler() {}, flushState() {},
          exit: (code) => process.exit(code),
        });
        controller.completeStartup();
@@ -398,8 +373,8 @@ test('a state flush that never settles still exits the process', async () => {
  */
 test('shutdown force-exits on the shutdown grace, not the reload grace', async () => {
   const fixture = createFixture(false);
-  // A scheduler run is work that interrupt() cannot clear, so the drain is still
-  // open when the grace expires.
+  // A scheduler run is work the exit waits for, so the drain is still open when the grace
+  // expires.
   fixture.setActiveSchedulerRuns(1);
   const controller = createShutdownController({ ...INERT, forceExitGraceMs: 300 }, fixture.ports);
   assert.equal(controller.completeStartup(), true);

@@ -40,6 +40,13 @@ export interface BuilderGrant extends GrantBase {
 
 export type TurnGrant = BuddyGrant | BuilderGrant;
 
+/**
+ * A grant as data: what a replacement backend re-registers when it adopts a turn that is still
+ * running (turns/executions.ts). The same token, scope and expiry; no new authority. `observe`
+ * is not data: only the memory reviewer sets one, and its executions are never adopted.
+ */
+export type GrantRecord = Omit<BuddyGrant, 'observe'> | Omit<BuilderGrant, 'observe'>;
+
 export type BuddyGrantInput = {
   role: 'worker' | 'reviewer';
   buddyId: string;
@@ -90,6 +97,19 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
         if (grant.conversationId !== conversationId || grant.role !== 'worker') continue;
         byToken.set(grant.token, { ...grant, role: 'owner', principal: OWNER });
       }
+    },
+
+    /** The grant this token holds now (after any promotion), as data. */
+    record(token: string): GrantRecord {
+      const grant = byToken.get(token);
+      if (!grant) throw new Error('No live grant for this token');
+      const { observe: _observe, ...record } = grant;
+      return record;
+    },
+
+    /** Re-register an adopted turn's grant exactly as it was issued (same token and expiry). */
+    adopt(record: GrantRecord): void {
+      byToken.set(record.token, { ...record, observe: ignore } as TurnGrant);
     },
 
     lookup(bearer: string): TurnGrant | null {

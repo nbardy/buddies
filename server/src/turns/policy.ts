@@ -7,6 +7,7 @@ import type {
   ResolvedExecutionConfig,
 } from '@unleashd/shared';
 import { parseBuddyWorkerToolResult } from '@unleashd/shared';
+import type { BuddyPolicyAdoption } from '../buddies/turn-policy';
 import type { TurnTerminalCause } from '../observability';
 import type { TurnInput } from './input';
 
@@ -37,6 +38,20 @@ export type TurnEnd =
   | { t: 'succeeded' }
   | { t: 'failed'; detail: string }
   | { t: 'cancelled'; detail?: string };
+
+/**
+ * What a spawned turn's policy holds that a replacement backend needs to adopt the turn while it
+ * still runs (turns/executions.ts): data only, written to the execution's journal at spawn. Each
+ * policy reads back only its own variant; any other is a typed refusal, never a default.
+ */
+// Pattern: sum-types (docs/patterns.md#sum-types)
+export type PolicyAdoption = { t: 'chat' } | BuddyPolicyAdoption;
+
+/** The adopted turn's own review window: its attempt, and where its messages start. */
+export interface AdoptedReview {
+  attemptId: string;
+  messageStart: number;
+}
 
 export type CoordinationDrained = (
   status: 'complete' | 'failed',
@@ -70,6 +85,10 @@ export interface TurnPolicy {
     config: ResolvedExecutionConfig
   ): { mcpServers?: Record<string, McpServerSpec>; extraArgs?: readonly string[] };
   spawned(review: { attemptId: string; messageStart: number }): void;
+  /** Right after startTurn, before spawn: this turn's state as data, for adoption. */
+  adoptionRecord(): PolicyAdoption;
+  /** A replacement backend adopted this turn while it runs: restore what the record holds. */
+  adopt(record: PolicyAdoption, review: AdoptedReview): void;
   spawnFailed(): void;
   toolResultParts(output: unknown): ContentPart[];
   streamCompleted(): void;
@@ -87,10 +106,12 @@ export interface TurnPolicy {
   attemptFinished(cause: TurnTerminalCause): void;
   sessionReset(): void;
   audienceKey(): string | undefined;
+  /** `deadline` (ISO) expires the run as max_runtime_timeout, like a chat run's lease. */
   runCoordination(
     content: string,
     context: BuddyContext,
     claimToken: string,
+    deadline: string,
     onDrained?: CoordinationDrained,
     onAdmitted?: (config: ResolvedExecutionConfig) => void
   ): Promise<string>;
@@ -144,6 +165,12 @@ export class ChatTurnPolicy implements TurnPolicy {
     return {};
   }
   spawned(): void {}
+  adoptionRecord(): PolicyAdoption {
+    return { t: 'chat' };
+  }
+  adopt(record: PolicyAdoption): void {
+    if (record.t !== 'chat') throw new Error(`A chat cannot adopt a ${record.t} turn`);
+  }
   spawnFailed(): void {}
   toolResultParts(output: unknown): ContentPart[] {
     return commonToolResultParts(output);

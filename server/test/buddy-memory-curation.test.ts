@@ -203,6 +203,7 @@ async function runCase(c: CurationCase, repeat: number, warnings: string[]): Pro
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => scratch,
+    portFile: join(scratch, 'buddy-mcp.json'),
   });
   const rungs: Rung[] = [];
   // The real executeCommand; the tee only records what each rung streamed.

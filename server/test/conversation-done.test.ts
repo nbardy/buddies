@@ -10,6 +10,7 @@ import { createConversationRuntime } from '../src/conversations/runtime';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { registerConversationWebSocket } from '../src/transport/conversation-websocket';
 import { fakeBuddyPort } from './fixtures/buddy-port';
+import { testExecutions } from './fixtures/fake-turn';
 import { recordStore } from './fixtures/records';
 
 const CONVERSATION_ID = '00000000-0000-4000-8000-0000000000d1';
@@ -43,6 +44,7 @@ test('a hide set over the WebSocket survives session rotation and a restart', as
       provenance: 'user',
     });
     const Conversation = createConversationRuntime({
+      executions: testExecutions(),
       broadcast: () => undefined,
       registerSessionAlias: () => undefined,
       unregisterSessionAlias: () => undefined,
