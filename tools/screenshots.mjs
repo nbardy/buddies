@@ -564,33 +564,38 @@ function buildScreens(found, focus) {
     },
     { name: 'channel', missing: noChannel, views: onBoth(`${channels}?${channel}`) },
     { name: 'thread', missing: noThread, views: onBoth(thread) },
-    // The workspace Home: recent projects by default, two starred through the real pin button
-    // (localStorage only; the session is read-only toward the server), and a search.
+    // The workspace Home. Pins are `Task.pin` on the server and this session refuses writes, so
+    // the stars and the reorder menu show only when the data already has pins (task_write or the
+    // owner PATCH). Show all exists on desktop only; the phone row lists every card.
+    { name: 'landing', missing: null, views: onBoth(`${channels}?view=home`) },
     {
-      name: 'landing',
+      name: 'landing-menu',
+      missing: null,
+      views: onBoth(
+        `${channels}?view=home`,
+        clickThen('.landing-menu-button', '.landing-menu-list')
+      ),
+    },
+    {
+      name: 'landing-show-all',
+      missing: null,
+      views: onBoth(
+        `${channels}?view=home`,
+        clickThen('.landing-more', '.landing-project:nth-child(5)')
+      ),
+    },
+    {
+      name: 'landing-search',
       missing: null,
       views: onBoth(
         `${channels}?view=home`,
         prep(`
-  for (const label of [2, 1]) {
-    const pin = document.querySelectorAll('.landing-pin')[label];
-    if (!pin) return 'SKIP';
-    pin.click();
-    await tick();
-  }
-  return has('.landing-pin[aria-pressed="true"]');`)
-      ),
-    },
-    { name: 'landing-no-pins', missing: null, views: onBoth(`${channels}?view=home`) },
-    {
-      name: 'landing-search',
-      missing: null,
-      views: onBoth(`${channels}?view=home`, prep(`
   const input = document.querySelector('.landing-search');
   if (!input) return 'SKIP';
   typeInto(input, 'home');
   await tick();
-  return has('.landing-project');`)),
+  return has('.landing-project');`)
+      ),
     },
     // The Threads view (product/buddies/THREADS_VIEW_2026-09-28.md). Its fold expands in place on
     // desktop only; mobile's opens the thread screen.
