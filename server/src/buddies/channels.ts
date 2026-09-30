@@ -27,10 +27,11 @@ import type { BuddyEvents, MentionPicks } from './events';
 // the core). ONE entry: the `posted` event, which every writer (MCP tool, owner route, runner)
 // emits once per CREATED post — a replayed idempotency key announces nothing (the crate's
 // `PostWrite.created`; until 2026-09-29 a retried tool call re-ran every mention and gate). Two
-// causes, on public channels, the same whoever wrote the post (owner or Buddy):
+// causes, on public channels, the same whoever wrote the post (owner or Buddy), plus one in DMs:
 //   mention   — a post @mentions a Buddy; it must answer (the owner's chip picks ride the event).
 //   follow_up — a new reply in a thread asks each OTHER Buddy who posted there one gate question
 //               (channel-reply-gate.ts); only a strict <yes> starts a reply.
+//   direct    — the owner's plain post in a DM wakes the DM's Buddies (requests/answers excepted).
 // HOPS bound Buddy-to-Buddy activity by cause, not by thread: an owner post is hop 0, a post
 // written in a seat turn is one more than the post that started the turn, and a post at
 // MAX_BUDDY_HOPS wakes nobody. Until 2026-09-29 the bound was "3 Buddy posts in a row in this
@@ -143,9 +144,10 @@ export interface ChannelsPorts {
   logger?: Pick<Console, 'warn'>;
 }
 
-// mention: must answer. follow_up: the gate said yes; runs only if the pair has not read the post.
+// mention: must answer. direct: the owner wrote in a DM with the Buddy; must answer.
+// follow_up: the gate said yes; runs only if the pair has not read the post.
 // retry: the owner reran a failed reply on another harness; must answer.
-type Cause = 'mention' | 'follow_up' | 'retry';
+type Cause = 'mention' | 'direct' | 'follow_up' | 'retry';
 type Reply = {
   channel: Channel;
   cause: Cause;
@@ -235,6 +237,8 @@ export function createChannels(ports: ChannelsPorts) {
     switch (cause) {
       case 'mention':
         return `${author} mentioned you in ${where}`;
+      case 'direct':
+        return `${author} wrote ${where} in your direct messages`;
       case 'follow_up':
         return `A new message arrived in ${where} you have posted in, and you chose to reply`;
       case 'retry':
@@ -636,12 +640,19 @@ export function createChannels(ports: ChannelsPorts) {
   }
 
   /**
-   * One reply per valid @mention, in the Buddy's seat for this thread, on the owner's chip pick
-   * when there is one. A mention past the hop bound leaves a notice in the thread: a Buddy's was
-   * only logged (review R8).
+   * One reply per woken Buddy (a valid @mention, or a DM member), in its seat for this thread, on
+   * the owner's chip pick when there is one. A wake past the hop bound leaves a notice in the
+   * thread: a Buddy's was only logged (review R8).
    */
-  async function mentions(channel: Channel, post: Post, hops: number, picks: MentionPicks) {
-    for (const buddyId of mentionedByPost(post)) {
+  async function wake(
+    channel: Channel,
+    post: Post,
+    hops: number,
+    picks: MentionPicks,
+    cause: 'mention' | 'direct',
+    buddyIds: string[]
+  ) {
+    for (const buddyId of buddyIds) {
       const admitted = await eligible(buddyId, channel.workspaceId);
       if (!admitted.ok) {
         logger.warn(`[channels] mention of ${buddyId} in ${post.id}: ${admitted.reason}`);
@@ -658,7 +669,7 @@ export function createChannels(ports: ChannelsPorts) {
       const config = picks.get(buddyId);
       const mention: Reply = {
         channel,
-        cause: 'mention',
+        cause,
         request: config ? { kind: 'chosen', config } : { kind: 'keep' },
         trigger: post,
         rootId: rootOf(post),
@@ -670,22 +681,53 @@ export function createChannels(ports: ChannelsPorts) {
     }
   }
 
-  // Every created post, from any writer, pushes its channel; in a public channel it starts its
-  // @mentions and asks the thread's other Buddies whether to follow up. A post at the hop bound
-  // starts no follow-up. A DM request needs neither: the core already queued the recipient's run.
+  /**
+   * The owner's plain post in a DM, top-level or in a thread, wakes the DM's Buddies. Until
+   * 2026-09-30 every DM post but a request was dropped, @mentions included, so owner replies in a
+   * DM thread sat unanswered with no error (four in one thread). A request, or an answer to one,
+   * is skipped: the core already queued that run. A Buddy's DM inform still wakes nobody, so two
+   * Buddies cannot wake each other. Guard: buddies-v2.test.ts "an owner reply in a DM thread".
+   */
+  async function directPost(
+    channel: Channel,
+    members: Actor[],
+    post: Post,
+    picks: MentionPicks
+  ): Promise<void> {
+    if (post.author.kind !== 'owner' || post.request.state !== 'none') return;
+    const parent = post.replyToId ? await core.getPost(OWNER, post.replyToId) : null;
+    if (parent?.request.state === 'answered' && parent.request.answerId === post.id) return;
+    const buddyIds = members.flatMap((member) => (member.kind === 'buddy' ? [member.id] : []));
+    await wake(channel, post, 0, picks, 'direct', buddyIds);
+  }
+
+  // Every created post, from any writer, pushes its channel. In a public channel it starts its
+  // @mentions and asks the thread's other Buddies whether to follow up; a post at the hop bound
+  // starts no follow-up. In a DM the owner's post wakes the DM's Buddies (directPost).
   ports.events.on((event) => {
     if (event.kind !== 'posted') return;
     ports.channelChanged(event.channel.id);
-    if (event.channel.kind.type !== 'public') return;
     const { channel, post, picks } = event;
-    const hops = hopsOf(post);
-    void mentions(channel, post, hops, picks).catch((error) =>
-      logger.warn(`[channels] mentions in post ${post.id} failed:`, error)
-    );
-    if (hops >= MAX_BUDDY_HOPS) return;
-    void followUps(channel, post, hops).catch((error) =>
-      logger.warn(`[channels] follow-up gating failed for post ${post.id}:`, error)
-    );
+    switch (channel.kind.type) {
+      case 'public': {
+        const hops = hopsOf(post);
+        void wake(channel, post, hops, picks, 'mention', mentionedByPost(post)).catch((error) =>
+          logger.warn(`[channels] mentions in post ${post.id} failed:`, error)
+        );
+        if (hops >= MAX_BUDDY_HOPS) return;
+        void followUps(channel, post, hops).catch((error) =>
+          logger.warn(`[channels] follow-up gating failed for post ${post.id}:`, error)
+        );
+        return;
+      }
+      case 'direct':
+        void directPost(channel, channel.kind.members, post, picks).catch((error) =>
+          logger.warn(`[channels] DM post ${post.id} failed to wake its Buddies:`, error)
+        );
+        return;
+      case 'task':
+        return;
+    }
   });
 
   return {

@@ -1648,6 +1648,68 @@ test('native child events cannot bypass restricted Buddy runs', async () => {
 
 // Review R2 (2026-09-28): the crate replays a post's idempotency key by returning the first post,
 // and the tool announced it again, so a retried tool call re-ran every mention it held.
+// 2026-09-30: the dispatch returned on every non-public channel, so the owner's four replies (two
+// of them @mentions) in a DM thread under a Buddy's request started nothing and showed no error.
+test('an owner reply in a DM thread wakes the Buddy; its request, its answer and Buddy informs do not', async () => {
+  const w = await world();
+  try {
+    const dm = { kind: 'direct' as const, members: [buddyActor(w.lead.id), OWNER] };
+    const announce = async (post: Post) =>
+      w.emit({
+        kind: 'posted',
+        post,
+        channel: await w.core.openChannel(OWNER, { kind: 'id', id: post.channelId }),
+        picks: NO_PICKS,
+      });
+    const thread = async (rootId: string) =>
+      (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
+    const directTurns = () =>
+      w.turns.filter((turn) => /in your direct messages/.test(turn.request.prompt));
+    const ask = await w.post(buddyActor(w.lead.id), dm, {
+      kind: 'request',
+      body: 'Approve the plan?',
+      evidence: [],
+      broadcast: false,
+      key: 'ask',
+    });
+    await announce(ask);
+    const nudge = await w.post(OWNER, dm, {
+      kind: 'inform',
+      body: "what's next?",
+      replyToId: ask.id,
+      evidence: [],
+      broadcast: false,
+      key: 'nudge',
+    });
+    w.answers.set(1, 'Next: the plan');
+    await announce(nudge);
+    await until(
+      async () => (await thread(ask.id)).some((post) => post.body === 'Next: the plan'),
+      "Lead's reply in the DM thread"
+    );
+    assert.equal(directTurns().length, 1);
+    await until(() => w.channels.responding(ask.channelId).length === 0, 'the turn ends');
+
+    await announce(
+      await w.post(buddyActor(w.lead.id), dm, {
+        kind: 'inform',
+        body: 'FYI',
+        replyToId: ask.id,
+        evidence: [],
+        broadcast: false,
+        key: 'fyi',
+      })
+    );
+    await announce(
+      await w.core.answer(OWNER, { requestId: ask.id, body: 'Approved', evidence: [], key: 'yes' })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.equal(directTurns().length, 1, 'a Buddy inform and an answer start no DM reply');
+  } finally {
+    await w.close();
+  }
+});
+
 test('a retried post (same key) wakes its mentioned Buddy once', async () => {
   const w = await world();
   try {
