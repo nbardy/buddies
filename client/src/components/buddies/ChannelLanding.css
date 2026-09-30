@@ -1,0 +1,418 @@
+/* Workspace Home. Classes are prefixed .landing-* (CSS is global). Sizes come from tokens. */
+.landing {
+  gap: var(--sp-9);
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: var(--sp-9);
+}
+
+.landing-hero {
+  align-items: center;
+  gap: var(--sp-6);
+  text-align: center;
+}
+
+.landing-hero h1 {
+  margin: 0;
+  font-size: var(--fs-8);
+  color: var(--text-bright);
+}
+
+.landing-emblem {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+}
+
+.landing-path {
+  margin: 0;
+  max-width: 100%;
+  font-size: var(--fs-3);
+}
+
+.landing-composer {
+  width: 100%;
+  max-width: 720px;
+  text-align: left;
+}
+
+.landing-note {
+  margin: 0;
+  font-size: var(--fs-3);
+}
+
+.landing-team {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-chip {
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-5) var(--sp-2) var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: var(--fs-3);
+  text-decoration: none;
+}
+
+a.landing-chip:hover {
+  border-color: var(--border-emphasis);
+}
+
+.landing-chip-face {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+.landing-section {
+  gap: var(--sp-5);
+}
+
+.landing-section-head {
+  justify-content: space-between;
+}
+
+.landing-section-head h2 {
+  margin: 0;
+  font-size: var(--fs-5);
+  color: var(--text-bright);
+}
+
+.landing-empty {
+  margin: 0;
+  font-size: var(--fs-3);
+}
+
+.landing-pin-add,
+.landing-more {
+  align-self: flex-start;
+  font-size: var(--fs-3);
+}
+
+.landing-picker {
+  gap: var(--sp-1);
+  margin: 0;
+  padding: var(--sp-3);
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--sp-4);
+}
+
+.landing-picker button {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-3);
+  text-align: left;
+}
+
+.landing-picker button:hover {
+  background: color-mix(in srgb, var(--text-bright) 6%, transparent);
+}
+
+/* Projects: a grid on desktop, one sideways row on phone (data-frame). */
+.landing-projects {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing[data-frame='mobile'] .landing-projects {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  margin-inline: calc(var(--sp-7) * -1);
+  padding-inline: var(--sp-7);
+}
+
+.landing[data-frame='mobile'] .landing-project {
+  flex: none;
+  width: 240px;
+  scroll-snap-align: start;
+}
+
+.landing-project {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: 0;
+}
+
+.landing-project-body {
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-6) var(--sp-4);
+}
+
+.landing-project-top {
+  justify-content: space-between;
+}
+
+.landing-status {
+  font-size: var(--fs-1);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.landing-status[data-status='blocked'] {
+  color: var(--warning);
+}
+
+.landing-status[data-status='in_progress'] {
+  color: var(--accent);
+}
+
+.landing-status[data-status='done'] {
+  color: var(--success);
+}
+
+.landing-project-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.landing-project-link:hover .landing-project-title {
+  text-decoration: underline;
+}
+
+.landing-project-title {
+  font-size: var(--fs-post);
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.landing-project-owner {
+  gap: var(--sp-3);
+  font-size: var(--fs-3);
+}
+
+.landing-project-next {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: var(--fs-3);
+}
+
+.landing-foot {
+  gap: var(--sp-2);
+  padding: 0 var(--sp-6) var(--sp-5);
+}
+
+.landing-progress-label {
+  justify-content: space-between;
+  gap: var(--sp-4);
+  font-size: var(--fs-2);
+}
+
+.landing-bar {
+  display: flex;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-bright) 10%, transparent);
+}
+
+.landing-bar--dashed {
+  background: none;
+  border-top: 1px dashed var(--border-emphasis);
+  height: 0;
+}
+
+.landing-bar-done {
+  background: var(--success);
+}
+
+.landing-bar-active {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.landing-bar-blocked {
+  background: var(--warning);
+}
+
+.landing-menu {
+  position: relative;
+}
+
+.landing-menu-button {
+  padding: 0 var(--sp-3);
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+}
+
+.landing-menu-list {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: var(--sp-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--sp-3);
+}
+
+.landing-menu-list button {
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-3);
+  text-align: left;
+}
+
+.landing-menu-list button:hover {
+  background: color-mix(in srgb, var(--text-bright) 8%, transparent);
+}
+
+.landing-requests,
+.landing-threads {
+  gap: var(--sp-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-threads {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-6);
+}
+
+.landing-request,
+.landing-thread {
+  gap: var(--sp-2);
+  color: inherit;
+  text-decoration: none;
+}
+
+.landing-request {
+  padding: var(--sp-5) var(--sp-6);
+}
+
+.landing-request-from {
+  font-size: var(--fs-2);
+  color: var(--warning);
+}
+
+.landing-request-body {
+  font-size: var(--fs-4);
+}
+
+.landing-thread {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+.landing-thread-image,
+.landing-thread-lead {
+  display: block;
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.landing-thread-lead {
+  padding: var(--sp-6);
+  overflow: hidden;
+  font-size: var(--fs-6);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.landing-thread-meta {
+  gap: var(--sp-2);
+  padding: var(--sp-5) var(--sp-6) var(--sp-6);
+}
+
+.landing-thread-title {
+  font-size: var(--fs-4);
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.landing-thread-latest,
+.landing-thread-foot {
+  font-size: var(--fs-2);
+}
+
+.landing[data-frame='mobile'] .landing-threads {
+  display: flex;
+  overflow-x: auto;
+  margin-inline: calc(var(--sp-7) * -1);
+  padding-inline: var(--sp-7);
+}
+
+.landing[data-frame='mobile'] .landing-threads > li {
+  flex: none;
+  width: 240px;
+}
+
+.landing-working {
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+  font-size: var(--fs-3);
+}
+
+.landing-working ul {
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-working-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.landing[data-frame='mobile'] {
+  padding: var(--sp-6) var(--sp-7);
+}
+
+/* Phone: the hero is compact (the page title already names the workspace) and the team scrolls sideways. */
+.landing[data-frame='mobile'] .landing-emblem {
+  display: none;
+}
+
+.landing[data-frame='mobile'] .landing-hero h1 {
+  font-size: var(--fs-7);
+}
+
+.landing[data-frame='mobile'] .landing-team {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  align-self: stretch;
+}
+
+.landing[data-frame='mobile'] .landing-chip {
+  white-space: nowrap;
+}

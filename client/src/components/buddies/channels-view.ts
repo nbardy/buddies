@@ -2,20 +2,21 @@
  * client/src/components/buddies/channels-view.ts
  *
  * Which view a channels URL names, for BOTH shells:
- * /buddies/workspaces/:id/channels?channel=&thread=&post=&task=&dm=&workers=&view=threads.
+ * /buddies/workspaces/:id/channels?channel=&thread=&post=&task=&dm=&workers=&view=home|threads.
  * Mobile renders it one screen at a time, as Slack does on a phone; desktop picks its main pane
  * from it. (It was mobile's parser alone until the Threads view, while desktop read the same
  * params with its own if-ladder.) Pure: mobile may import it (gate G3). `post` is the reply a permalink names (components/buddies/channel-link.ts);
  * `task` is the Task filter (one Task's posts across every channel), opened
  * from its channel.
  *
- *   D = Home (channel list + Buddies) ⊕ Threads ⊕ Channel ⊕ Thread ⊕ Task ⊕ DM ⊕ Workers
+ *   D = Home (channel list + Buddies) ⊕ Landing (the workspace Home) ⊕ Threads ⊕ Channel ⊕ Thread ⊕ Task ⊕ DM ⊕ Workers
  *
  * `dm` is a Buddy DM conversation drawn as a thread (493c1c7). It wins over the other params,
  * which stay in the URL so Back (dropping `dm`) returns to the screen the DM was opened from.
  */
 export type ChannelsView =
   | { kind: 'home' }
+  | { kind: 'landing' }
   | { kind: 'threads' }
   | { kind: 'channel'; channelId: string }
   | { kind: 'thread'; channelId: string; rootId: string; linkedPostId: string | null }
@@ -32,6 +33,7 @@ export function channelsView(search: string): ChannelsView {
   if (workers) return { kind: 'workers', buddyId: workers };
   const dm = params.get('dm');
   if (dm) return { kind: 'dm', conversationId: dm };
+  if (params.get('view') === 'home') return { kind: 'landing' };
   if (params.get('view') === 'threads') return { kind: 'threads' };
   if (channelId && rootId)
     return { kind: 'thread', channelId, rootId, linkedPostId: params.get('post') };
@@ -45,6 +47,8 @@ export function channelsHref(workspaceId: string, screen: ChannelsView): string 
   switch (screen.kind) {
     case 'home':
       return base;
+    case 'landing':
+      return `${base}?view=home`;
     case 'threads':
       return `${base}?view=threads`;
     case 'channel':

@@ -10,5 +10,5 @@ const CHANNELS_PATH = /^\/buddies\/workspaces\/[^/]+\/channels\/?$/;
 export function isImmersiveChannelRoute(pathname: string, search: string): boolean {
   if (!CHANNELS_PATH.test(pathname)) return false;
   const kind = channelsView(search).kind;
-  return kind !== 'home' && kind !== 'threads';
+  return kind !== 'home' && kind !== 'landing' && kind !== 'threads';
 }

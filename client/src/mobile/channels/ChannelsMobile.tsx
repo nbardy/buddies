@@ -57,6 +57,7 @@ import {
 } from '../components/MobileUI';
 import { ChannelComposerMobile, MobileChannelComposeFrame } from './ChannelComposerMobile';
 import { type RowContext, Row, ScreenHeader, useChannelsDm } from './ChannelRowsMobile';
+import { ChannelLanding } from '../../components/buddies/ChannelLanding';
 import { ThreadsScreen } from './ThreadsMobile';
 import { buddyWorkspaceActivityAtom, overviewWorkspaces } from './ChannelsIndex';
 
@@ -115,6 +116,8 @@ function renderScreen(screen: ChannelsView, context: ScreenContext) {
       );
     case 'home':
       return <ChannelsHome context={context} />;
+    case 'landing':
+      return <LandingScreen context={context} />;
     case 'threads':
       return (
         <ThreadsScreen
@@ -209,6 +212,24 @@ const LOADING_HEADING: ChannelHeading = { mark: '#', name: 'channel', about: '' 
 
 // ── Home ────────────────────────────────────────────────────────────────────
 
+function LandingScreen({ context }: { context: ScreenContext }) {
+  const { workspaceId, directory, inbox } = context;
+  const general = context.listed.find(
+    (entry) => entry.channel.kind.type === 'public' && entry.channel.kind.name === 'general'
+  );
+  return (
+    <MobilePage title="Home" subtitle={directory.workspaceName}>
+      <ChannelLanding
+        workspaceId={workspaceId}
+        directory={directory}
+        inbox={inbox}
+        generalChannelId={general?.channel.id ?? null}
+        frame="mobile"
+      />
+    </MobilePage>
+  );
+}
+
 function ChannelsHome({ context }: { context: ScreenContext }) {
   const overview = useBuddyOverview();
   const workspaces = overviewWorkspaces(overview.data, useAtomValue(buddyWorkspaceActivityAtom));
@@ -282,6 +303,17 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
         </ul>
       )}
       <ul className="mobile-channels-list">
+        <li>
+          <Link
+            className="mobile-channels-row ui-row"
+            to={channelsHref(workspaceId, { kind: 'landing' })}
+          >
+            <span className="mobile-channels-row__hash" aria-hidden="true">
+              ⌂
+            </span>
+            <span className="mobile-channels-row__name ui-truncate">Home</span>
+          </Link>
+        </li>
         <li>
           <Link
             className="mobile-channels-row ui-row"

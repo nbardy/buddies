@@ -11,6 +11,7 @@ import { BuddyRailRow, CreatingBuddyRailRow } from './BuddyRailRow';
 import { ArchivedChannels, ChannelHeaderControls, useArchivedChannels } from './ChannelArchive';
 import { type OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
+import { ChannelLanding } from './ChannelLanding';
 import { ChannelDm } from './ChannelDm';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { type RowContext, LeadRow, Replying, renderRow, renderRows } from './ChannelRows';
@@ -594,62 +595,30 @@ function RailChannel({
   );
 }
 
+// The workspace Home (ChannelLanding), with the archived channels the rail does not list below it.
 function ChannelHomePane({
   workspaceId,
-  channels,
+  directory,
   archived,
   inbox,
-  buddyNames,
+  generalChannelId,
 }: {
   workspaceId: string;
-  channels: readonly ChannelUnread[];
+  directory: WorkspaceDirectory;
   archived: readonly Channel[];
   inbox: Inbox | null;
-  buddyNames: Readonly<Record<string, string>>;
+  generalChannelId: string | null;
 }) {
   return (
-    <section className="channel-browser-pane ui-stack" aria-label="Channel directory">
-      <header className="channel-browser-pane-header ui-row">
-        <div className="channel-browser-pane-title ui-stack">
-          <h2>Channels</h2>
-          <p className="ui-muted">Choose a channel to open its conversation.</p>
-        </div>
-      </header>
+    <section className="channel-browser-pane ui-stack" aria-label="Home">
       <div className="channel-browser-scroll ui-stack">
-        <section className="ui-stack">
-          <div className="channel-browser-rail-section-row ui-row">
-            <h3 className="channel-browser-rail-section ui-muted">Active channels</h3>
-          </div>
-          {channels.length > 0 ? (
-            <ul className="channel-browser-channels">
-              {channels.map((entry) => {
-                const heading = channelHeading(entry.channel.kind, buddyNames);
-                return (
-                  <li key={entry.channel.id}>
-                    <Link
-                      className="channel-browser-buddy-link"
-                      to={channelLinkPath(workspaceId, {
-                        kind: 'channel',
-                        channelId: entry.channel.id,
-                      })}
-                      data-unread={channelUnreadAttr(entry.unread)}
-                    >
-                      <span className="channel-browser-hash ui-muted" aria-hidden="true">
-                        {heading.mark}
-                      </span>
-                      <span className="channel-browser-channel-name ui-truncate">
-                        {heading.name}
-                      </span>
-                      <RequestsBadge count={channelRequestCount(inbox, entry.channel.id)} />
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="channel-browser-rail-empty ui-muted">No active channels.</p>
-          )}
-        </section>
+        <ChannelLanding
+          workspaceId={workspaceId}
+          directory={directory}
+          inbox={inbox}
+          generalChannelId={generalChannelId}
+          frame="desktop"
+        />
         <ArchivedChannels workspaceId={workspaceId} channels={archived} />
       </div>
     </section>
@@ -680,6 +649,10 @@ export function ChannelBrowser({
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
   const railScroll = useScrollActivity();
+  // The Home composer posts to #general; a workspace without one gets no composer.
+  const generalChannelId =
+    rail.channels.find((entry) => entry.channel.kind.type === 'public' && entry.channel.kind.name === 'general')
+      ?.channel.id ?? null;
   const listed = [
     ...rail.channels,
     ...rail.direct,
@@ -739,6 +712,19 @@ export function ChannelBrowser({
         </header>
         <div className="channel-browser-rail-scroll ui-scroll-quiet" {...railScroll}>
           <ul className="channel-browser-channels channel-browser-rail-views">
+            <li>
+              <button
+                type="button"
+                aria-current={view.kind === 'home' || view.kind === 'landing' ? 'page' : undefined}
+                onClick={() => setParams({ view: 'home' })}
+                title="Pinned projects, recent threads and what needs you"
+              >
+                <span className="channel-browser-hash ui-muted" aria-hidden="true">
+                  ⌂
+                </span>
+                <span className="channel-browser-channel-name ui-truncate">Home</span>
+              </button>
+            </li>
             <li>
               <button
                 type="button"
@@ -838,10 +824,10 @@ export function ChannelBrowser({
           home: () => (
             <ChannelHomePane
               workspaceId={workspaceId}
-              channels={rail.channels}
+              directory={directory}
               archived={archived.data ?? []}
               inbox={inbox.data}
-              buddyNames={directory.buddyNames}
+              generalChannelId={generalChannelId}
             />
           ),
           workers: (buddyId) => (
@@ -925,6 +911,7 @@ type MainPanes = {
 function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
   switch (view.kind) {
     case 'home':
+    case 'landing':
       return panes.home();
     case 'workers':
       return panes.workers(view.buddyId);

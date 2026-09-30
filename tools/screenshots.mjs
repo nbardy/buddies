@@ -564,6 +564,27 @@ function buildScreens(found, focus) {
     },
     { name: 'channel', missing: noChannel, views: onBoth(`${channels}?${channel}`) },
     { name: 'thread', missing: noThread, views: onBoth(thread) },
+    // The workspace Home. Pins are device-local, so the shot pins the first four Tasks through
+    // the real "+ Pin a Task" menu (localStorage only; the session is read-only toward the server).
+    {
+      name: 'landing',
+      missing: null,
+      views: onBoth(
+        `${channels}?view=home`,
+        prep(`
+  for (let i = 0; i < 4; i++) {
+    const add = document.querySelector('.landing-pin-add');
+    if (!add) return 'SKIP';
+    add.click();
+    await tick();
+    const item = document.querySelector('.landing-picker button');
+    if (!item) return 'SKIP';
+    item.click();
+    await tick();
+  }
+  return has('.landing-project');`)
+      ),
+    },
     // The Threads view (product/buddies/THREADS_VIEW_2026-09-28.md). Its fold expands in place on
     // desktop only; mobile's opens the thread screen.
     { name: 'threads', missing: null, views: onBoth(`${channels}?view=threads`) },

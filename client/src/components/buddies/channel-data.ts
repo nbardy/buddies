@@ -556,6 +556,10 @@ export type WorkspaceDirectory = {
   /** Every Buddy's name, archived and other workspaces' included: they author posts. */
   buddyNames: Readonly<Record<string, string>>;
   taskById: ReadonlyMap<string, ChannelTask>;
+  /** Every Task of the workspace, todos included: the Home's pinned-project progress. */
+  tasks: readonly Task[];
+  /** The workspace folder; null while the overview has not loaded it. */
+  rootPath: string | null;
   references: readonly ChannelReference[];
 };
 
@@ -577,6 +581,8 @@ export function workspaceDirectory(
     activeMembers,
     buddyNames,
     taskById: new Map(viewed.map((task) => [task.id, task])),
+    tasks,
+    rootPath: workspace?.rootPath ?? null,
     references: channelReferences(activeMembers, viewed),
   };
 }

@@ -174,7 +174,7 @@ test('channel home keeps archived channels out of the rail and in the scrollable
   );
   const rail = html.slice(html.indexOf('<nav'), html.indexOf('</nav>'));
   assert.doesNotMatch(rail, /Archived channels/);
-  assert.match(html, /aria-label="Channel directory"/);
+  assert.match(html, /aria-label="Home"/);
   assert.match(html, /Archived channels \(1\)/);
   assert.match(html, /href="\/buddies\/workspaces\/ws-archive\/channels\?channel=ch_archived/);
   assert.doesNotMatch(html, /<details>/);

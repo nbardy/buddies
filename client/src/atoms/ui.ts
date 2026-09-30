@@ -18,6 +18,7 @@ const PREFS_DEFAULTS: DeviceUiPrefs = {
   showWorkerConversations: false,
   lastWorkingDirectory: null,
   promotedWorkers: [],
+  projectPins: {},
 };
 
 // ---------------------------------------------------------------------------
@@ -138,6 +139,11 @@ export function setShowDoneConversations(show: boolean): void {
 
 export function setShowWorkerConversations(show: boolean): void {
   setPrefs({ showWorkerConversations: show });
+}
+
+/** Replace one workspace's ordered Home pins (pin, unpin and reorder all write the whole list). */
+export function setProjectPins(workspaceId: string, taskIds: readonly string[]): void {
+  setPrefs({ projectPins: { ...jotaiStore.get(prefsAtom).projectPins, [workspaceId]: [...taskIds] } });
 }
 
 export function promoteWorker(conversationId: string): void {
