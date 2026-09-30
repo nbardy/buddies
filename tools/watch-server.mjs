@@ -13,6 +13,8 @@
 //   backend exit  → Draining: start the replacement
 //                   Running:  it crashed or was killed → Down, retry with backoff (never gives up)
 //                   Stopping: done
+//   every exit is appended to <data dir>/observability/backend-exits.jsonl; the
+//   next backend boot journals the crashes (server/src/observability/backend-exits.ts).
 //
 // What to watch is never configured. The backend reports every file it loads
 // (Node's own --watch protocol, WATCH_REPORT_DEPENDENCIES), so no dependency can
@@ -21,8 +23,9 @@
 // backend kept serving the v32 post shape for hours.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync, watch } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, watch } from 'node:fs';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureAddonBuild } from './ensure-addons.mjs';
@@ -47,6 +50,27 @@ function digest(file) {
 
 function describeExit(code, signal) {
   return signal ? `signal ${signal}` : `exit ${code}`;
+}
+
+/**
+ * The backend's own data directory (server/src/app-data.ts; dev-supervisor's
+ * lockPath resolves it the same way), read from the env the backend gets.
+ */
+export function backendExitsFile(env) {
+  const dataDirectory = path.resolve(
+    env.UNLEASHD_DATA_DIR ?? path.join(os.homedir(), '.agent-viewer')
+  );
+  return path.join(dataDirectory, 'observability', 'backend-exits.jsonl');
+}
+
+// kind: 'crash' (the backend died on its own) | 'drained' (a reload it asked
+// for) | 'stopped' (the runner stopped it). A draining exit is 'drained' only
+// when clean: on 2026-09-30 a native SIGBUS during a drain was logged as
+// "Backend finished its active work" and its signal was dropped, so the crash
+// left no trace outside the terminal.
+function appendExit(file, record) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  appendFileSync(file, `${JSON.stringify(record)}\n`);
 }
 
 /** Whole-graph esbuild bundle: catches syntax errors and missing exports in ~60ms. */
@@ -106,6 +130,8 @@ export function createBackendRunner({
   logError = (line) => console.error(`[server-watch] ${line}`),
 }) {
   const root = realpathSync(watchRoot);
+  const backendEnv = { ...process.env, ...env, WATCH_REPORT_DEPENDENCIES: '1' };
+  const exitsFile = backendExitsFile(backendEnv);
   let state = { kind: 'down', timer: undefined };
   // Loaded file → digest of the content the backend loaded. This is the running
   // backend's baseline and is never overwritten by file events; only a new
@@ -184,7 +210,7 @@ export function createBackendRunner({
     loaded = new Map();
     const child = spawn(command, args, {
       cwd,
-      env: { ...process.env, ...env, WATCH_REPORT_DEPENDENCIES: '1' },
+      env: backendEnv,
       stdio: output ? ['inherit', 'pipe', 'pipe', 'ipc'] : ['inherit', 'inherit', 'inherit', 'ipc'],
     });
     if (output) {
@@ -193,18 +219,36 @@ export function createBackendRunner({
     }
     const startedAt = Date.now();
     child.on('message', recordLoaded);
-    child.once('exit', (code, signal) => onExit(code, signal, Date.now() - startedAt));
+    child.once('exit', (code, signal) => onExit(code, signal, Date.now() - startedAt, child.pid));
     state = { kind: 'running', child };
   }
 
-  function onExit(code, signal, uptimeMs) {
+  function onExit(code, signal, uptimeMs, pid) {
+    const record = (kind) => ({
+      at: new Date().toISOString(),
+      kind,
+      state: state.kind,
+      code,
+      signal,
+      uptimeMs,
+      pid,
+    });
     switch (state.kind) {
       case 'draining':
-        log('Backend finished its active work; starting the updated backend');
+        if (code === 0) {
+          appendExit(exitsFile, record('drained'));
+          log('Backend finished its active work; starting the updated backend');
+        } else {
+          appendExit(exitsFile, record('crash'));
+          logError(
+            `Backend crashed while draining (${describeExit(code, signal)}) after ${uptimeMs}ms; starting the updated backend`
+          );
+        }
         backoffMs = initialBackoffMs;
         spawnBackend();
         return;
       case 'running': {
+        appendExit(exitsFile, record('crash'));
         const delayMs = uptimeMs >= HEALTHY_UPTIME_MS ? initialBackoffMs : backoffMs;
         backoffMs = Math.min(delayMs * 2, MAX_BACKOFF_MS);
         logError(
@@ -214,6 +258,7 @@ export function createBackendRunner({
         return;
       }
       case 'stopping':
+        appendExit(exitsFile, record('stopped'));
         finish();
         return;
     }

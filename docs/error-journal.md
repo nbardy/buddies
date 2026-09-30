@@ -34,6 +34,17 @@ that way — the boundary state used to be `{ failed: boolean }`, which discarde
 indistinguishable from every other crash without leaving the broken app. Guarded by
 `client/test/client-error-fallback.test.tsx`.
 
+## Backend crashes
+
+A dying backend cannot journal its own death (a SIGBUS or SIGKILL runs no JS), so the dev runner
+(`tools/watch-server.mjs`) appends every backend exit to `<data-dir>/observability/backend-exits.jsonl`
+as `{at, kind, state, code, signal, uptimeMs, pid}`, where `kind` is `crash`, `drained` (a clean
+reload drain) or `stopped`. A draining exit with a signal or non-zero code is a `crash`: on
+2026-09-30 a SIGBUS during a drain was logged as a finished drain. The next backend boot journals
+each unreported crash as an `error` with component `backend-exit`
+(`server/src/observability/backend-exits.ts`); `backend-exits.reported` holds the byte offset already
+reported. `pnpm start` runs no dev runner, so it records nothing.
+
 ## Event-loop stalls
 
 Any pause of the server's event loop of 100 ms or more is journaled as a `warn` with component

@@ -1,3 +1,4 @@
+export * from './backend-exits';
 export * from './error-journal';
 export * from './event-loop-stall';
 export * from './structured-logger';

@@ -3,7 +3,12 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { crateOfSource, createBackendRunner, esbuildCheck } from './watch-server.mjs';
+import {
+  backendExitsFile,
+  crateOfSource,
+  createBackendRunner,
+  esbuildCheck,
+} from './watch-server.mjs';
 
 // A stand-in backend: loads a local module and a node_modules package, records
 // each boot, and honours the reload request the way the real server does
@@ -15,7 +20,7 @@ const pkg = require('pkg');
 const addon = require('./crates/demo/addon.cjs');
 fs.appendFileSync('boots.log', JSON.stringify({ pid: process.pid, local: local.value, pkg: pkg.value, addon: addon.value }) + '\\n');
 process.on('message', (message) => {
-  if (message?.type === 'unleashd:dev-reload') setTimeout(() => process.exit(0), 50);
+  if (message?.type === 'unleashd:dev-reload') setTimeout(() => process.exit(0), Number(process.env.DRAIN_MS));
 });
 setInterval(() => {}, 1000);
 `;
@@ -35,7 +40,7 @@ function buildDemoCrate(root, builds) {
   };
 }
 
-function fixture(t) {
+function fixture(t, { drainMs = 50 } = {}) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'watch-server-')));
   mkdirSync(path.join(root, 'node_modules', 'pkg'), { recursive: true });
   mkdirSync(path.join(root, 'crates', 'demo', 'src'), { recursive: true });
@@ -45,6 +50,7 @@ function fixture(t) {
   writeFileSync(path.join(root, 'crates', 'demo', 'package.json'), '{}');
   mkdirSync(path.join(root, 'crates', 'tool', 'src'), { recursive: true });
   const builds = [];
+  const logs = [];
   writeFileSync(path.join(root, 'package.json'), '{}');
   writeFileSync(path.join(root, 'backend.cjs'), BACKEND);
   writeFileSync(path.join(root, 'local.cjs'), 'module.exports = { value: 1 };\n');
@@ -56,13 +62,15 @@ function fixture(t) {
     command: process.execPath,
     args: ['backend.cjs'],
     cwd: root,
+    // Never the live ~/.agent-viewer: the runner records every exit there.
+    env: { UNLEASHD_DATA_DIR: path.join(root, 'data'), DRAIN_MS: String(drainMs) },
     watchRoot: root,
     check: esbuildCheck('backend.cjs', root),
     buildCrate: buildDemoCrate(root, builds),
     settleMs: 100,
     initialBackoffMs: 100,
-    log: () => {},
-    logError: () => {},
+    log: (line) => logs.push(line),
+    logError: (line) => logs.push(line),
   });
   t.after(async () => {
     runner.stop('SIGTERM');
@@ -74,7 +82,12 @@ function fixture(t) {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-  return { root, runner, boots, builds };
+  const exits = () =>
+    readFileSync(backendExitsFile({ UNLEASHD_DATA_DIR: path.join(root, 'data') }), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+  return { root, runner, boots, builds, logs, exits };
 }
 
 async function until(predicate, timeoutMs = 5000) {
@@ -162,6 +175,26 @@ test('a backend killed from outside is restarted', async (t) => {
   process.kill(first.pid, 'SIGKILL');
   const [, second] = await until(() => boots().length === 2 && boots());
   assert.notEqual(second.pid, first.pid);
+});
+
+test('a backend killed while draining is recorded as a crash with its signal', async (t) => {
+  // Regression, 2026-09-30: a native SIGBUS during a drain was logged as
+  // "Backend finished its active work" and its code and signal were dropped.
+  const { root, runner, boots, logs, exits } = fixture(t, { drainMs: 60_000 });
+  runner.start();
+  await firstBoot(boots);
+  writeFileSync(path.join(root, 'local.cjs'), 'module.exports = { value: 2 };\n');
+  await until(() => logs.some((line) => line.startsWith('Source changed')));
+  process.kill(boots()[0].pid, 'SIGKILL');
+  await until(() => boots().length === 2);
+  const [exit] = exits();
+  assert.equal(exit.kind, 'crash');
+  assert.equal(exit.state, 'draining');
+  assert.equal(exit.signal, 'SIGKILL');
+  assert.equal(exit.pid, boots()[0].pid);
+  assert.ok(
+    logs.some((line) => line.startsWith('Backend crashed while draining (signal SIGKILL)'))
+  );
 });
 
 test('saving a crate source rebuilds its addon, and the new addon reloads the backend', async (t) => {

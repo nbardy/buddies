@@ -67,6 +67,7 @@ import {
   createJournalTurnAttemptObserver,
   installConsoleErrorCapture,
   noteActivity,
+  reportBackendExits,
   startEventLoopStallMonitor,
 } from './observability';
 import { createPaletteService } from './palettes/palette-service';
@@ -750,6 +751,10 @@ void runServerStartup(
       await conversationConfigStore.opened();
       installConsoleErrorCapture(errorJournal);
       startEventLoopStallMonitor(errorJournal);
+      // Crashes the dev runner recorded while no backend was alive to journal them.
+      void reportBackendExits(errorJournal, path.join(APP_DATA_DIR, 'observability')).catch(
+        (error) => console.error('[backend-exits] Failed to journal recorded backend exits:', error)
+      );
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).
       buddyMcp = await startMcpEndpoint({
         core: buddiesCore,
