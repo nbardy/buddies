@@ -28,20 +28,26 @@ TEAM = [
     ('upstream', 'Upstream'),
 ]
 
-# (preview or None, channel, root text, participants, replies, latest, is video, summary)
+# (preview or None, channel, root text, participants, replies, latest, is video, latest post excerpt)
+# The excerpt is the real latest post (author + opening words) from the threads
+# endpoint's tail, read 2026-09-30 12:10 UTC. No summarizer.
 THREADS = [
     ('assets/prev-general.png', '#general',
      'Can we think of a better landing page for a workspace, this is so uninspiring',
-     ['you', 'marketing', 'product-lead'], 7, 'now', False, 'Four directions; you picked C'),
+     ['you', 'marketing', 'product-lead'], 16, 'now', False,
+     ('Marketing Designer', 'Pinned projects are in, directly under the composer')),
     ('assets/prev-clips.jpg', '#unleashd-2',
      'What is all the clips we have and what is left to publish this?',
-     ['you', 'marketing'], 20, '7h', True, 'Launch video clips and what is left'),
+     ['you', 'marketing'], 20, '7h', True,
+     ('Marketing Designer', "Half-time is now the pick, and it's 10 dB quieter and rebalanced")),
     ('assets/prev-thread-ui.png', '#bugfixes',
      'Replying here in the threads does not have balanced or aligned UI, we need to fix that',
-     ['you', 'ui-engineer'], 1, '2h', False, 'Buddies UI Engineer replied'),
+     ['you', 'ui-engineer'], 1, '2h', False,
+     ('Buddies UI Engineer', 'Fixed the Threads card alignment on desktop and phone')),
     (None, '#channels-feature',
      'Unify the DM header. It should have one model picker and not grey out harness change',
-     ['you', 'product-lead'], 4, '3h', False, 'Product Development Lead replied'),
+     ['you', 'product-lead'], 4, '3h', False,
+     ('Product Development Lead', 'Pushed to origin/main. It went from 5c9381e to 09d8b0e')),
 ]
 
 # The open owner requests from this workspace's Buddies (excerpts).
@@ -82,8 +88,9 @@ PROJECTS = [
 ]
 
 
-def project_card(pr):
+def project_card(pr, hover=False):
     title, face, owner, status, done, doing, blocked, todo, nxt, when = pr
+    pin = '<span class="pin hover">Unpin</span>' if hover else '<span class="pin" title="Pinned">&#128204;</span>'
     total = done + doing + blocked + todo
     if total == 0:
         progress = '<div class="pj-count muted">No todos yet</div><div class="pbar empty"></div>'
@@ -95,18 +102,18 @@ def project_card(pr):
             for cls, n in (('done', done), ('doing', doing), ('blocked', blocked))
             if n
         )
-        extra = f' &middot; {doing} in progress' if doing else ''
-        progress = f'<div class="pj-count"><b>{done} of {total}</b> todos done{extra}<span>{pct}%</span></div><div class="pbar">{segs}</div>'
+        extra = f'{doing} in progress' if doing else ''
+        progress = f'<div class="pj-count"><b>{done} of {total}</b>&nbsp;todos done &middot; {pct}%<span class="pj-doing">{extra}</span></div><div class="pbar">{segs}</div>'
         step = f'<div class="pj-next"><span class="label" style="font-size:10px">Next</span> {nxt}</div>'
     return (
-        f'<article class="pj"><div class="pj-top"><img src="assets/face-{face}.png" alt="" title="{owner}">'
-        f'<span class="pj-status">{status}</span><span class="when">{when}</span></div>'
+        f'<article class="pj{" hover" if hover else ""}"><div class="pj-top"><img src="assets/face-{face}.png" alt="" title="{owner}">'
+        f'<span class="pj-status">{status}</span><span class="when">{when}</span>{pin}</div>'
         f'<div class="pj-title">{title}</div>{step}{progress}</article>'
     )
 
 
 def projects_section(extra_cls=''):
-    cards = ''.join(project_card(p) for p in PROJECTS)
+    cards = ''.join(project_card(p, hover=(i == 1)) for i, p in enumerate(PROJECTS))
     return (
         f'<section class="projects {extra_cls}"><div class="sec-head"><span class="label">Pinned projects</span>'
         f'<span class="when">examples &middot; real todo counts</span><a class="more">+ Pin a Task</a></div>'
@@ -134,7 +141,7 @@ def thread_card(t):
     return (
         f'<article class="t">{preview}<div class="t-body">'
         f'<div class="t-meta"><span class="hash">{ch}</span><span class="when">{when}</span></div>'
-        f'<div class="t-title">{text}</div><div class="t-sum">{summary}</div>'
+        f'<div class="t-title">{text}</div><div class="t-sum"><b>{summary[0]}:</b> {summary[1]}</div>'
         f'<div class="t-foot"><span class="ps">{people(ps)}</span><span class="when">{n} {word}</span></div>'
         f'</div></article>'
     )
@@ -192,7 +199,8 @@ h1 { text-align: center; font-weight: 800; color: var(--text); letter-spacing: -
 .t-body { padding: 12px 14px 14px; }
 .t-meta { display: flex; justify-content: space-between; font-size: 13px; }
 .t-title { color: var(--text); font-weight: 600; margin-top: 5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.t-sum { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.t-sum { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.t-sum b { color: var(--body); font-weight: 600; }
 .t-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .ps { display: flex; }
 .pf, .you-av { width: 22px; height: 22px; border-radius: 6px; margin-right: -4px; box-shadow: 0 0 0 2px var(--card); }
@@ -218,7 +226,10 @@ h1 { text-align: center; font-weight: 800; color: var(--text); letter-spacing: -
 .pj-next { font-size: 13px; color: var(--body); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pj-count { font-size: 13px; color: var(--muted); margin-top: auto; padding-top: 10px; display: flex; gap: 4px; }
 .pj-count b { color: var(--text); }
-.pj-count span { margin-left: auto; color: var(--text); font-weight: 700; }
+.pj-count .pj-doing { margin-left: auto; color: var(--accent); }
+.pin { margin-left: 2px; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--accent); background: rgba(196,155,255,.12); font-size: 12px; }
+.pin.hover { background: var(--card-hi); color: var(--text); width: auto; padding: 0 8px; font-size: 12px; border: 1px solid var(--line); }
+.pj.hover { border-color: #4b3f6e; }
 .muted { color: var(--muted) !important; }
 .pbar { height: 6px; background: #343850; margin: 8px -14px 0; display: flex; }
 .pbar i { display: block; height: 100%; }
@@ -344,6 +355,7 @@ EMPTY_CSS = DESKTOP_CSS + """
 .er-h { font-family: var(--mono); font-size: 13px; letter-spacing: .08em; color: var(--muted); margin-top: 34px; display: flex; justify-content: space-between; }
 .aura { background-image: url(assets/emblem-new.png); }
 .helper { margin-top: 18px; font-size: 15px; }
+.helper b { color: var(--text); font-weight: 600; }
 .starters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; width: 1000px; margin: 40px auto 0; }
 .starter { border: 1px dashed var(--line); border-radius: 14px; padding: 16px 18px; background: rgba(36,39,51,.5); }
 .starter b { color: var(--text); font-size: 15px; display: block; }
@@ -361,7 +373,7 @@ def empty():
 <div class="composer"><div class="ph">Describe the work&hellip;</div>
 <div class="bar"><span class="sel"># general &#9662;</span><span class="sel">Attach</span><span class="send">Start thread &#8629;</span></div></div>
 <div class="chips"><span class="chip hire">+ Hire your first Buddy</span></div>
-<p class="helper">Post here and @mention a Buddy to hand it the work.<br>Hire one first: describe the role, and the Builder drafts it.</p>
+<p class="helper"><b>Posting saves a thread in #general; nobody answers yet.</b><br>To get a reply, hire a Buddy (describe the role and the Builder drafts it), then @mention it.</p>
 <div class="starters">
 <div class="starter"><b>An engineer for this repo</b><span>Reads the code, fixes bugs, opens a branch per change.</span></div>
 <div class="starter"><b>A product lead</b><span>Turns your asks into Tasks and keeps the team on them.</span></div>
