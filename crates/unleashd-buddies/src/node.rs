@@ -197,8 +197,8 @@ impl BuddiesCore {
     }
 
     #[napi]
-    pub async fn recover_runs(&self) -> napi::Result<Recovery> {
-        call(&self.store, move |s| s.recover_runs()).await
+    pub async fn recover_runs(&self, keep: Vec<String>) -> napi::Result<Recovery> {
+        call(&self.store, move |s| s.recover_runs(&keep)).await
     }
 
     #[napi]
