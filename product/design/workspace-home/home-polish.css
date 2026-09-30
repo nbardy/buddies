@@ -1,0 +1,77 @@
+/* v1: one column, calmer rhythm, aligned cards */
+.landing { max-width: 1000px; gap: 56px; }
+.landing-hero { gap: 28px; }
+.landing-composer { max-width: 100%; }
+.landing-section { gap: 16px; }
+
+/* section heads: count sits next to the title as a pill */
+.landing-section-head { justify-content: flex-start; gap: 10px; }
+.landing-section-head > :last-child:not(h2) { margin-left: auto; }
+.landing-section[aria-label="Waiting on you"] .landing-section-head > span {
+  margin-left: 0; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  color: var(--text-bright); background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* search: lighter, shorter */
+.landing-search { padding: 10px 16px; border-radius: 10px; background: transparent; font-size: 14px; }
+
+/* task cards: even padding, 2-line title slot so progress rows align across a row */
+.landing-projects { gap: 16px; }
+.landing-project-body { padding: 20px 22px 0; }
+.landing-project-title { font-weight: 600; line-height: 1.35; min-height: calc(2 * 1.35em); padding-right: 28px; }
+.landing-foot { gap: 14px; margin-top: 14px; }
+.landing-progress-label { padding: 0 22px; }
+.landing-card-actions { top: 16px; right: 14px; }
+
+/* requests: no bent left border; a dot marks who asks */
+.landing-requests { gap: 12px; }
+.landing-request { border-left: 1px solid var(--landing-line); padding: 18px 22px; gap: 6px; }
+.landing-request-from { display: inline-flex; align-items: center; gap: 8px; }
+.landing-request-from::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+/* threads: one row of three; text-only preview becomes a quiet aurora tile, not a duplicate title */
+.landing-threads { grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.landing-threads > li:nth-child(n + 4) { display: none; }
+.landing-thread-image, .landing-thread-lead { height: 132px; }
+.landing-thread-lead {
+  color: transparent; user-select: none;
+  background:
+    radial-gradient(60% 90% at 20% 30%, oklch(0.55 0.16 300 / 0.55), transparent 70%),
+    radial-gradient(60% 90% at 85% 70%, oklch(0.6 0.12 230 / 0.45), transparent 70%),
+    color-mix(in srgb, var(--text-bright) 3%, transparent);
+}
+.landing-thread-meta { padding: 16px 20px 18px; gap: 6px; }
+.landing-thread-title, .landing-thread-latest { overflow-wrap: anywhere; }
+.landing-thread-latest { color: var(--text-secondary); line-height: 1.45; }
+.landing-thread-foot { margin-top: auto; padding-top: 4px; }
+.landing-thread-meta { flex: 1; }
+
+/* working now: a quiet footer line */
+.landing-working { padding-top: 20px; border-top: 1px solid var(--landing-line); }
+
+/* v2: equal thread columns, clamped text, one-line foot */
+.landing-threads { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.landing-threads > li { min-width: 0; }
+.landing-thread-title, .landing-thread-latest {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.landing-thread-title { line-height: 1.4; }
+.landing-thread-foot { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.landing-request-body { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.landing-thread-foot { color: var(--text-muted); }
+
+/* v3: requests become one compact list card; show 3 (TSX: cap at 3 + "Show all (N)") */
+.landing-requests { gap: 0; border: 1px solid var(--landing-line); border-radius: var(--landing-radius); background: var(--landing-card); overflow: hidden; }
+.landing-requests > li + li { border-top: 1px solid var(--landing-line); }
+.landing-requests > li:nth-child(n + 4) { display: none; }
+.landing-request { border: 0; border-radius: 0; background: none; padding: 14px 22px; flex-direction: row !important; align-items: baseline; gap: 16px; }
+.landing-request-from { flex: none; width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.landing-request-body { -webkit-line-clamp: 1; font-size: 14px; color: var(--text-primary); }
+a.landing-request:hover { transform: none; background: color-mix(in srgb, var(--text-bright) 4%, transparent); }
+
+/* v4: archived channels sit in the same column as everything else */
+section[aria-label="Home"] section[aria-labelledby="archived-channels-heading"] {
+  width: 100%; max-width: 1000px; margin: 0 auto; padding: 0 24px 48px; opacity: 0.8;
+}
+.landing { padding-bottom: 32px; }
+.landing-request-from { width: 190px; }
