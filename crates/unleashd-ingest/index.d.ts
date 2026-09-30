@@ -58,6 +58,8 @@ export declare class Ingest {
 
 export declare class TurnAttempts {
   static open(dbPath: string): Promise<TurnAttempts>
+  /** Directory a corrupt predecessor was moved into when this store opened, if any. */
+  get quarantined(): string | null
   append(snapshot: string | undefined | null, event: string): Promise<boolean>
   get(id: string): Promise<string | null>
   query(conversation: string | undefined | null, queue: string | undefined | null, session: string | undefined | null, state: string | undefined | null, cause: string | undefined | null, limit: number): Promise<Array<string>>

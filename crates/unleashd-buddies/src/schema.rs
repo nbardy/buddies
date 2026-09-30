@@ -281,7 +281,9 @@ fn ensure_post_search(conn: &Connection) -> Result<()> {
 }
 
 fn configure(conn: &Connection) -> Result<()> {
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
+    // checkpoint_fullfsync: macOS fsync() skips the drive cache, and a power cut mid-checkpoint
+    // corrupted the attempt store on 2026-09-30. Only checkpoints pay for F_FULLFSYNC.
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA checkpoint_fullfsync = ON; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
     Ok(())
 }
 

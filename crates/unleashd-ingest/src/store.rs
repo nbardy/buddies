@@ -115,6 +115,9 @@ fn open(path: &Path) -> Result<Connection> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     // The provider files are the source of truth; a lost last transaction is re-read on start.
     conn.pragma_update(None, "synchronous", "NORMAL")?;
+    // macOS fsync() skips the drive cache; a power cut mid-checkpoint corrupted the attempt
+    // store on 2026-09-30. F_FULLFSYNC on checkpoints only keeps commits cheap.
+    conn.pragma_update(None, "checkpoint_fullfsync", "ON")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     Ok(conn)
 }

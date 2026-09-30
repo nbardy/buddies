@@ -2,6 +2,7 @@ export const OBSERVABILITY_LOG_EVENTS = [
   'journal_initialized',
   'journal_rotated',
   'journal_corrupt_line',
+  'journal_quarantined',
   'journal_write_failed',
   'attempt_recovered',
   'attempt_observation_failed',
@@ -36,6 +37,7 @@ export interface SafeObservabilityLogContext {
   state?: string;
   count?: number;
   fileIndex?: number;
+  quarantinedTo?: string;
 }
 
 export interface StructuredObservabilityLogger {
@@ -112,5 +114,6 @@ function pickSafeContext(context: SafeObservabilityLogContext): SafeObservabilit
     ...(context.state ? { state: context.state } : {}),
     ...(context.count !== undefined ? { count: context.count } : {}),
     ...(context.fileIndex !== undefined ? { fileIndex: context.fileIndex } : {}),
+    ...(context.quarantinedTo ? { quarantinedTo: context.quarantinedTo } : {}),
   };
 }

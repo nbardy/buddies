@@ -99,6 +99,13 @@ export class TurnAttemptJournal {
       if (this.store) return { recoveredAttempts: 0 };
       await fs.promises.mkdir(this.directory, { recursive: true });
       const store = await TurnAttempts.open(path.join(this.directory, 'turn-attempts.sqlite'));
+      // A corrupt store (torn checkpoint after a power cut) was moved aside and replaced; its
+      // history is recoverable with `sqlite3 <dir>/turn-attempts.sqlite .recover`.
+      if (store.quarantined)
+        this.logger.error('journal_quarantined', {
+          serverBootId: this.serverBootId,
+          quarantinedTo: store.quarantined,
+        });
       // Import and completion marker commit together. Source files stay byte-for-byte untouched.
       await this.importLegacy(store);
       this.store = store;

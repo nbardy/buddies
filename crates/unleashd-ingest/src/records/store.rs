@@ -230,6 +230,9 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     // Records are authoritative (nothing re-derives them, unlike ingest's rows): a committed CAS
     // must survive power loss, so every commit syncs the WAL. Measured cost: see T23a report.
     conn.pragma_update(None, "synchronous", "FULL")?;
+    // macOS fsync() skips the drive cache; a power cut mid-checkpoint corrupted the attempt
+    // store on 2026-09-30. F_FULLFSYNC on checkpoints keeps the main file consistent.
+    conn.pragma_update(None, "checkpoint_fullfsync", "ON")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     // Pattern: fix-guards (docs/patterns.md#fix-guards). Two connections opening a NEW file at
     // once (two server processes, two test stores) both saw no `records_schema` row and the

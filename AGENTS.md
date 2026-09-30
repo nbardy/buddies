@@ -229,6 +229,14 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   worktrees against the live ~/.buddies, and each would otherwise register
   its own workspace and hire its own pair. The check only fetches; the merge
   is the Release Manager's turn, started by `POST /api/upstream/update`.
+- Every SQLite open sets `checkpoint_fullfsync = ON`: macOS `fsync()` skips the drive
+  cache, and a hard power-off on 2026-09-30 tore a checkpoint in
+  `~/.agent-viewer/observability/turn-attempts.sqlite` ("database disk image is
+  malformed"), crash-looping startup. That journal is diagnostics, so its open runs
+  `quick_check` and moves a corrupt file into `corrupt-<unix secs>/` beside it
+  (log event `journal_quarantined`); salvage with `sqlite3 <file> .recover`. Guard:
+  `corrupt_store_is_quarantined_and_replaced` in `crates/unleashd-ingest/src/attempts.rs`.
+  Authoritative stores (records, buddies) are never auto-replaced.
 - Inspect unresolved operational failures with `pnpm errors:list`; do not read or
   mutate the JSONL journal directly. Its configured location and capture policy
   are documented in `docs/error-journal.md`.
