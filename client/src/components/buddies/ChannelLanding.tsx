@@ -1,7 +1,5 @@
-import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { prefsAtom, setProjectPins } from '../../atoms/ui';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { shortenHomePath } from '../../utils/directories';
 import { formatTimeAgo } from '../../utils/time';
@@ -14,26 +12,32 @@ import {
   authorName,
   channelHeading,
   inboxRequests,
+  workspaceTasksUrl,
 } from './channel-data';
 import { channelLinkPath, postLink } from './channel-link';
 import { channelsHref } from './channels-view';
 import {
   type HomeTask,
+  type PinWrite,
+  appendPin,
   excerpt,
   firstImage,
   movePin,
+  unpin,
   homeTasks,
   recentThreads,
   threadLatest,
 } from './home-view';
 import { mediaUrl } from './channel-text';
-import type { Inbox, Run } from './types';
+import { ActionError, useBuddyAction } from './useBuddyAction';
+import { buddyWrite } from './api';
+import type { Inbox, Run, Task } from './types';
 import './ChannelLanding.css';
 
 // The workspace Home (owner, 2026-09-30): what to pick up, who needs you, where to begin.
 // One component for both shells; the shell passes `frame` and the Home does not know which.
-// The Tasks section: pins, then recent projects; search finds any Task. Pins are DEVICE-LOCAL (prefs.projectPins): a server-stored pin list is a contract the owner has
-// not approved yet (brief, "Data and persistence proposal"), so they do not sync to the phone.
+// The Tasks section: pins, then recent projects; search finds any Task. Pins are `Task.pin`, stored
+// on the server: desktop, phone and Buddies (`task_write`) share them.
 
 const NO_RUNS: readonly Run[] = [];
 const DESKTOP_TASKS = 4;
@@ -164,18 +168,29 @@ function TaskSection({
   channelId: string | null;
   frame: 'desktop' | 'mobile';
 }) {
-  const pins = useAtomValue(prefsAtom).projectPins[workspaceId] ?? [];
+  const tasks = usePolledFetch<Task[]>(workspaceTasksUrl(workspaceId), 15_000);
+  const action = useBuddyAction(async () => tasks.refetch());
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState('');
   const searching = query.trim() !== '';
-  const cards = homeTasks(pins, directory.tasks, query);
+  const cards = homeTasks(directory.tasks, query);
   const shown = frame === 'desktop' && !showAll && !searching ? cards.slice(0, DESKTOP_TASKS) : cards;
-  const write = (next: readonly string[]) => setProjectPins(workspaceId, next);
+  // Pins are a Task field (`task_write` `pin`): the same write path, authority and change push
+  // Buddies use. One CAS update per Task whose key changes.
+  const write = (writes: readonly PinWrite[]) =>
+    void action.run('pin', async () => {
+      for (const { task, pin } of writes) {
+        await buddyWrite(`/api/buddies/tasks/${encodeURIComponent(task.id)}`, 'PATCH', {
+          baseRevision: task.revision,
+          changes: { pin },
+        });
+      }
+    });
   return (
     <section className="landing-section ui-stack" aria-label="Tasks">
       <div className="landing-section-head ui-row">
         <h2>Tasks</h2>
-        <span className="landing-device-note ui-muted">Pins are saved on this device</span>
+        <span className="landing-device-note ui-muted">Pins are shared with your Buddies</span>
       </div>
       <input
         type="search"
@@ -185,6 +200,7 @@ function TaskSection({
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
+      <ActionError state={action.state} />
       {cards.length === 0 ? (
         <p className="landing-empty ui-muted">
           {searching
@@ -200,16 +216,13 @@ function TaskSection({
               workspaceId={workspaceId}
               channelId={channelId}
               buddyNames={directory.buddyNames}
+              busy={action.busy}
               onTogglePin={() =>
-                write(
-                  entry.pinned
-                    ? pins.filter((id) => id !== entry.task.id)
-                    : [...pins, entry.task.id]
-                )
+                write(entry.pinned ? unpin(entry.task) : appendPin(directory.tasks, entry.task))
               }
               menu={{
-                earlier: () => write(movePin(pins, entry.task.id, -1)),
-                later: () => write(movePin(pins, entry.task.id, 1)),
+                earlier: () => write(movePin(directory.tasks, entry.task, -1)),
+                later: () => write(movePin(directory.tasks, entry.task, 1)),
               }}
             />
           ))}
@@ -233,6 +246,7 @@ function TaskCard({
   workspaceId,
   channelId,
   buddyNames,
+  busy,
   onTogglePin,
   menu,
 }: {
@@ -240,6 +254,7 @@ function TaskCard({
   workspaceId: string;
   channelId: string | null;
   buddyNames: Readonly<Record<string, string>>;
+  busy: boolean;
   onTogglePin(): void;
   menu: { earlier(): void; later(): void };
 }) {
@@ -259,6 +274,7 @@ function TaskCard({
               type="button"
               className="landing-pin ui-control"
               aria-pressed={entry.pinned}
+              disabled={busy}
               aria-label={`${entry.pinned ? 'Unpin' : 'Pin'} ${task.title}`}
               title={entry.pinned ? 'Unpin' : 'Pin to Home'}
               onClick={onTogglePin}

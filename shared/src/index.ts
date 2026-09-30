@@ -272,9 +272,6 @@ export const DeviceUiPrefsSchema = z.object({
   showWorkerConversations: z.boolean(),
   lastWorkingDirectory: z.string().nullable(),
   promotedWorkers: z.array(z.string()),
-  // Workspace Home pins: ordered top-level Task ids per workspace, device-local until the owner
-  // approves a server-stored list (agent_notes/2026-09-30_workspace-landing-product-brief.md).
-  projectPins: z.record(z.string(), z.array(z.string())).default({}),
 });
 
 export type DeviceUiPrefs = z.infer<typeof DeviceUiPrefsSchema>;

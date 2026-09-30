@@ -198,6 +198,7 @@ test('the Task filter shows one Task across channels, each post linked into its 
     epoch: 1,
     evidence: [],
     position: 0,
+    pin: 0,
     revision: 1,
     createdAt: at(0),
     updatedAt: at(0),

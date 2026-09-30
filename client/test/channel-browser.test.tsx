@@ -241,6 +241,7 @@ test('posts render markdown mentions, Task chips and media; the rail keeps one B
         epoch: 1,
         evidence: [],
         position: 0,
+        pin: 0,
         revision: 1,
         createdAt: '2026-09-23T00:00:00.000Z',
         updatedAt: '2026-09-23T00:30:00.000Z',

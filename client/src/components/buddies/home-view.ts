@@ -62,24 +62,20 @@ export type HomeTask = {
 export const RECENT_PROJECTS = 8;
 
 /**
- * The Home's Task list. Empty query: the owner's pins in their order, then the most recently
+ * The Home's Task list. Empty query: the pins (`Task.pin`, server-stored, shared by the owner and
+ * every Buddy) in ascending order, then the most recently
  * active UNFINISHED unpinned PROJECTS (top-level Tasks that have child Tasks; activity = newest update of the
  * Task or any child). A query: every top-level Task whose title, next action or blocked reason
  * contains every word, pinned first, then by activity; the owner pins from these results.
- * A pin whose Task is gone (deleted, or not loaded yet) is skipped, but its stored id stays so a
- * slow load does not unpin it.
  */
-export function homeTasks(
-  pinIds: readonly string[],
-  tasks: readonly Task[],
-  query: string
-): readonly HomeTask[] {
+export function homeTasks(tasks: readonly Task[], query: string): readonly HomeTask[] {
   const children = new Map<string, Task[]>();
   for (const task of tasks) {
     if (task.parentId === undefined) continue;
     children.set(task.parentId, [...(children.get(task.parentId) ?? []), task]);
   }
-  const pinned = new Set(pinIds);
+  const pinnedTasks = pinOrder(tasks);
+  const pinned = new Set(pinnedTasks.map((task) => task.id));
   const card = (task: Task): HomeTask => {
     const own = children.get(task.id) ?? [];
     return {
@@ -108,8 +104,7 @@ export function homeTasks(
       .sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || newestFirst(a, b))
       .map(card);
   }
-  const byId = new Map(topLevel.map((task) => [task.id, task] as const));
-  const mine = pinIds.flatMap((id) => byId.get(id) ?? []);
+  const mine = pinnedTasks;
   const recent = topLevel
     .filter(
       (task) =>
@@ -123,15 +118,39 @@ export function homeTasks(
   return [...mine, ...recent].map(card);
 }
 
-/** Move one id `delta` places, clamped; the same list when it is absent. */
-export function movePin(ids: readonly string[], id: string, delta: -1 | 1): string[] {
-  const from = ids.indexOf(id);
+/** The pinned top-level Tasks, ascending by `pin` (ties by title, so agents' equal keys stay stable). */
+export function pinOrder(tasks: readonly Task[]): readonly Task[] {
+  return tasks
+    .filter((task) => task.parentId === undefined && task.pin > 0)
+    .sort((a, b) => a.pin - b.pin || a.title.localeCompare(b.title));
+}
+
+/** One `task_write` update: set `task.pin` to `pin` (0 unpins). */
+export type PinWrite = { task: Task; pin: number };
+
+/** Pin at the end of the list. */
+export function appendPin(tasks: readonly Task[], task: Task): readonly PinWrite[] {
+  const last = pinOrder(tasks).reduce((max, entry) => Math.max(max, entry.pin), 0);
+  return [{ task, pin: last + 1 }];
+}
+
+export function unpin(task: Task): readonly PinWrite[] {
+  return [{ task, pin: 0 }];
+}
+
+/**
+ * Move a pin one place. Rewrites the order as dense ranks 1..n and returns only the Tasks whose
+ * key changes, so a list with gaps or ties (Buddies choose their own keys) settles into a clean one.
+ */
+export function movePin(tasks: readonly Task[], task: Task, delta: -1 | 1): readonly PinWrite[] {
+  const order = [...pinOrder(tasks)];
+  const from = order.findIndex((entry) => entry.id === task.id);
   const to = from + delta;
-  if (from < 0 || to < 0 || to >= ids.length) return [...ids];
-  const next = [...ids];
-  next.splice(from, 1);
-  next.splice(to, 0, id);
-  return next;
+  if (from < 0 || to < 0 || to >= order.length) return [];
+  order.splice(to, 0, ...order.splice(from, 1));
+  return order.flatMap((entry, index): PinWrite[] =>
+    entry.pin === index + 1 ? [] : [{ task: entry, pin: index + 1 }]
+  );
 }
 
 /** The newest post a card shows: its latest reply, else the root. */
