@@ -416,3 +416,13 @@ a.landing-chip:hover {
 .landing[data-frame='mobile'] .landing-chip {
   white-space: nowrap;
 }
+
+.landing-picker-note {
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-2);
+}
+
+.landing-picker button > .ui-muted {
+  flex: none;
+  white-space: nowrap;
+}

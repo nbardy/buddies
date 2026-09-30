@@ -585,6 +585,13 @@ function buildScreens(found, focus) {
   return has('.landing-project');`)
       ),
     },
+    // The Home with nothing pinned, and with the pin picker open (both real, unpinned state).
+    { name: 'landing-no-pins', missing: null, views: onBoth(`${channels}?view=home`) },
+    {
+      name: 'landing-picker',
+      missing: null,
+      views: onBoth(`${channels}?view=home`, clickThen('.landing-pin-add', '.landing-picker')),
+    },
     // The Threads view (product/buddies/THREADS_VIEW_2026-09-28.md). Its fold expands in place on
     // desktop only; mobile's opens the thread screen.
     { name: 'threads', missing: null, views: onBoth(`${channels}?view=threads`) },

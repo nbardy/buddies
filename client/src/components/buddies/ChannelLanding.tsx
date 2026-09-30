@@ -188,6 +188,7 @@ function PinnedProjects({
       </div>
       {picking && (
         <ul className="landing-picker ui-stack" aria-label="Tasks to pin">
+          <li className="landing-picker-note ui-muted">Pins are saved on this device</li>
           {choices.length === 0 && <li className="ui-muted">Every top-level Task is pinned.</li>}
           {choices.slice(0, 12).map((task) => (
             <li key={task.id}>
