@@ -22,6 +22,7 @@ import {
   type PinWrite,
   appendPin,
   excerpt,
+  statusLabel,
   firstImage,
   importPins,
   movePin,
@@ -64,6 +65,7 @@ export function ChannelLanding({
   return (
     <div className="landing ui-stack" data-frame={frame}>
       <header className="landing-hero ui-stack">
+        <BuddySigil name={directory.workspaceName} className="landing-aura" />
         <BuddySigil name={directory.workspaceName} className="landing-emblem" />
         <h1>What should the team build next?</h1>
         {generalChannelId !== null ? (
@@ -143,7 +145,11 @@ function TaskSection({
     <section className="landing-section ui-stack" aria-label="Tasks">
       <div className="landing-section-head ui-row">
         <h2>Tasks</h2>
-        <span className="landing-device-note ui-muted">Pins are shared with your Buddies</span>
+        {frame === 'desktop' && !searching && cards.length > DESKTOP_TASKS && (
+          <button type="button" className="landing-more" onClick={() => setShowAll((all) => !all)}>
+            {showAll ? 'Show fewer' : `Show all (${cards.length})`}
+          </button>
+        )}
       </div>
       <input
         type="search"
@@ -194,15 +200,6 @@ function TaskSection({
             />
           ))}
         </ul>
-      )}
-      {frame === 'desktop' && !searching && cards.length > DESKTOP_TASKS && (
-        <button
-          type="button"
-          className="landing-more ui-control"
-          onClick={() => setShowAll((all) => !all)}
-        >
-          {showAll ? 'Show fewer' : `Show all (${cards.length})`}
-        </button>
       )}
     </section>
   );
@@ -273,8 +270,13 @@ function TaskCard({
     <li className="landing-project ui-card ui-surface" data-status={task.status}>
       <div className="landing-project-body ui-stack">
         <div className="landing-project-top ui-row">
-          <span className="landing-status" data-status={task.status}>
-            {task.status.replace('_', ' ')}
+          <span className="landing-status-row ui-row">
+            <span role="img" title={owner} aria-label={`Owner: ${owner}`}>
+              <BuddySigil name={owner} className="landing-chip-face" />
+            </span>
+            <span className="landing-status" data-status={task.status}>
+              {statusLabel(task.status)}
+            </span>
           </span>
           <span className="landing-card-actions ui-row">
             {entry.pinned && <ReorderMenu title={task.title} menu={menu} />}
@@ -284,7 +286,7 @@ function TaskCard({
               aria-pressed={entry.pinned}
               disabled={busy}
               aria-label={`${entry.pinned ? 'Unpin' : 'Pin'} ${task.title}`}
-              title={entry.pinned ? 'Unpin' : 'Pin to Home'}
+              title={entry.pinned ? 'Unpin' : 'Pin to Home (shared with your Buddies)'}
               onClick={onTogglePin}
             >
               {entry.pinned ? '★' : '☆'}
@@ -301,11 +303,7 @@ function TaskCard({
         ) : (
           title
         )}
-        <div className="landing-project-owner ui-row ui-muted">
-          <BuddySigil name={owner} className="landing-chip-face" />
-          <span className="ui-truncate">{owner}</span>
-        </div>
-        {next && <p className="landing-project-next ui-muted">{next}</p>}
+        {next && <p className="landing-project-next">{next}</p>}
       </div>
       <ProgressFoot progress={progress} />
     </li>
@@ -379,7 +377,7 @@ function ProgressFoot({ progress }: { progress: HomeTask['progress'] }) {
               <strong>
                 {progress.done} of {progress.total}
               </strong>{' '}
-              todos done · {progress.percent}%
+              · {progress.percent}%
             </span>
             {rest.length > 0 && <span className="ui-muted">{rest.join(' · ')}</span>}
           </span>

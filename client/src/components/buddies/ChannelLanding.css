@@ -4,6 +4,7 @@
   --landing-card: color-mix(in srgb, var(--text-bright) 4%, transparent);
   --landing-line: color-mix(in srgb, var(--text-bright) 9%, transparent);
   position: relative;
+  isolation: isolate;
   gap: var(--sp-10);
   width: 100%;
   max-width: 1040px;
@@ -11,22 +12,8 @@
   padding: var(--sp-11) var(--sp-9) var(--sp-11);
 }
 
-/* A soft accent glow behind the headline, fading into the page. */
-.landing::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto;
-  height: 420px;
-  z-index: -1;
-  pointer-events: none;
-  background: radial-gradient(
-    ellipse 60% 100% at 50% 0,
-    color-mix(in srgb, var(--accent) 22%, transparent),
-    transparent 70%
-  );
-}
-
 .landing-hero {
+  position: relative;
   align-items: center;
   gap: var(--sp-7);
   padding-top: var(--sp-8);
@@ -44,10 +31,28 @@
 }
 
 .landing-emblem {
+  position: relative;
   width: 52px;
   height: 52px;
   border-radius: var(--landing-radius);
   box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* The workspace emblem's own colours, blurred into an aura behind the headline. */
+.landing-aura {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: -1;
+  width: 640px;
+  max-width: 100%;
+  height: 300px;
+  translate: -50% -30%;
+  border-radius: 50%;
+  opacity: 0.32;
+  /* The emblem ground is dark by design; lift it so the blur reads as light. */
+  filter: blur(80px) saturate(2.5) brightness(3);
+  pointer-events: none;
 }
 
 .landing-composer {
@@ -110,7 +115,6 @@ a.landing-chip:hover {
   color: var(--text-bright);
 }
 
-.landing-device-note,
 .landing-all {
   font-size: var(--fs-2);
 }
@@ -121,8 +125,15 @@ a.landing-chip:hover {
 }
 
 .landing-more {
-  align-self: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
   font-size: var(--fs-3);
+}
+
+.landing-more:hover {
+  color: var(--accent);
 }
 
 .landing-search {
@@ -190,19 +201,21 @@ a.landing-thread:hover {
   min-height: 24px;
 }
 
-/* Status: a dot and a word in the status colour, on a faint tint of it. */
+/* Status: a calm outlined pill in sentence case, its colour a dot and a word. */
+.landing-status-row {
+  gap: var(--sp-4);
+}
+
 .landing-status {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-1) var(--sp-4) var(--sp-1) var(--sp-3);
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, currentColor 12%, transparent);
   color: var(--text-muted);
-  font-size: var(--fs-1);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: var(--fs-2);
+  font-weight: 500;
 }
 
 .landing-status::before {
@@ -245,48 +258,44 @@ a.landing-thread:hover {
   color: var(--accent);
 }
 
-.landing-project-owner {
-  gap: var(--sp-3);
-  font-size: var(--fs-2);
-}
-
 .landing-project-next {
   display: -webkit-box;
   margin: 0;
   overflow: hidden;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  color: var(--text-secondary);
   font-size: var(--fs-3);
   line-height: 1.4;
 }
 
 .landing-foot {
-  gap: var(--sp-3);
-  padding: 0 var(--sp-7) var(--sp-6);
+  gap: var(--sp-4);
 }
 
 .landing-progress-label {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--sp-1) var(--sp-4);
+  padding: 0 var(--sp-7);
   font-size: var(--fs-2);
 }
 
-/* Each half wraps as a unit, never mid-phrase ("3 in progress · 3" / "blocked"). */
+/* Each half stays whole; the breakdown drops to its own line when the card is narrow. */
 .landing-progress-label > span {
   white-space: nowrap;
 }
 
+/* The bar runs the card's bottom edge, clipped by its rounded corners. */
 .landing-bar {
   display: flex;
   height: 6px;
-  overflow: hidden;
-  border-radius: 3px;
   background: color-mix(in srgb, var(--text-bright) 10%, transparent);
 }
 
 .landing-bar--dashed {
   height: 0;
+  margin-bottom: var(--sp-3);
   border-top: 1px dashed var(--border-emphasis);
   background: none;
 }
