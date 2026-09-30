@@ -34,6 +34,10 @@ import { mediaUrl } from './channel-text';
 import { ActionError, useBuddyAction } from './useBuddyAction';
 import { buddyWrite } from './api';
 import type { Inbox, Run, Task } from './types';
+// Self-hosted variable fonts (unicode-range subsets, fetched only when Home renders). The app
+// named "Inter" but never shipped it, so Home fell back to the system UI font.
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/plus-jakarta-sans/wght.css';
 import './ChannelLanding.css';
 
 // The workspace Home (owner, 2026-09-30): what to pick up, who needs you, where to begin.
