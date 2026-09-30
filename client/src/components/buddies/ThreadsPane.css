@@ -5,10 +5,18 @@
   list-style: none;
 }
 
+/* One left/right edge for everything in a card that is not a message row: header, fold,
+   replying line, composer. Messages pad by --sp-9 themselves; before this the header sat flush
+   on the card border, the fold at 12px, the replying line and composer touching the border
+   (owner: "replying here in the threads does not have balanced or aligned UI"). */
+.threads-card {
+  --threads-inset: var(--sp-9);
+}
+
 .threads-head,
 .threads-fold {
   gap: var(--sp-4);
-  padding: var(--sp-4) var(--sp-6) 0;
+  padding: var(--sp-4) var(--threads-inset) 0;
   border: 0;
   background: none;
   color: var(--text-bright);
@@ -23,13 +31,28 @@
 
 .threads-header {
   flex-wrap: nowrap;
+  gap: var(--sp-5);
   min-width: 0;
+  padding: var(--sp-6) var(--threads-inset) 0;
+}
+
+/* The header owns the inset; its children must not add their own (shared classes double-padded). */
+.threads-header .threads-head,
+.threads-header .threads-fold {
+  padding: 0;
 }
 
 .threads-header .threads-head {
-  padding: 0;
   white-space: nowrap;
   font-weight: 700;
+}
+
+.threads-card .channel-browser-replying {
+  padding: var(--sp-4) var(--threads-inset) 0;
+}
+
+.threads-card .channel-composer {
+  margin: var(--sp-5) var(--threads-inset) var(--sp-7);
 }
 
 .threads-open {
@@ -58,6 +81,7 @@
 }
 
 [data-device="mobile"] .threads-card {
+  --threads-inset: var(--sp-7); /* mobile messages pad 16px, not 24px */
   padding: var(--sp-5) 0;
   border: 0;
   border-bottom: 1px solid var(--border-subtle);
