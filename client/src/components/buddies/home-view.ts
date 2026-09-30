@@ -96,7 +96,8 @@ export function homeTasks(tasks: readonly Task[], query: string): readonly HomeT
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length > 0) {
     const matches = (task: Task) => {
-      const text = `${task.title} ${task.nextAction ?? ''} ${task.blockedReason ?? ''}`.toLowerCase();
+      const text =
+        `${task.title} ${task.nextAction ?? ''} ${task.blockedReason ?? ''}`.toLowerCase();
       return words.every((word) => text.includes(word));
     };
     return topLevel
@@ -151,6 +152,26 @@ export function movePin(tasks: readonly Task[], task: Task, delta: -1 | 1): read
   return order.flatMap((entry, index): PinWrite[] =>
     entry.pin === index + 1 ? [] : [{ task: entry, pin: index + 1 }]
   );
+}
+
+/**
+ * A device's retired pins (saved before pins moved to the server), appended after the current pins
+ * in their saved order. A saved id that is now pinned, a subtask, or gone is skipped: importing
+ * never reorders or duplicates what the owner and Buddies already pinned.
+ */
+export function importPins(
+  tasks: readonly Task[],
+  savedIds: readonly string[]
+): readonly PinWrite[] {
+  const unpinned = new Map(
+    tasks
+      .filter((task) => task.parentId === undefined && task.pin === 0)
+      .map((task) => [task.id, task] as const)
+  );
+  const last = pinOrder(tasks).reduce((max, entry) => Math.max(max, entry.pin), 0);
+  return [...new Set(savedIds)]
+    .flatMap((id) => unpinned.get(id) ?? [])
+    .map((task, index) => ({ task, pin: last + 1 + index }));
 }
 
 /** The newest post a card shows: its latest reply, else the root. */

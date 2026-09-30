@@ -1,4 +1,10 @@
-import { type DeviceUiPrefs, DeviceUiPrefsSchema, SeenMessageIndexSchema } from '@unleashd/shared';
+import {
+  type DeviceUiPrefs,
+  DeviceUiPrefsSchema,
+  type RetiredHomePins,
+  RetiredHomePinsSchema,
+  SeenMessageIndexSchema,
+} from '@unleashd/shared';
 import { atomWithStorage } from 'jotai/utils';
 import type { SyncStorage } from 'jotai/vanilla/utils/atomWithStorage';
 import { jotaiStore } from './store';
@@ -84,6 +90,53 @@ const seenStorage = validatedStorage<Record<string, number>>((raw) => {
   return result.success ? result.data : null;
 });
 
+// ---------------------------------------------------------------------------
+// Retired Home pins ('unleashd-retired-home-pins'). Until 2026-09-30 Home pins lived in the prefs
+// blob (`projectPins`); they are now `Task.pin` on the server, shared with Buddies. The prefs
+// schema no longer has the field, and zod strips it on read, so the NEXT prefs write (any toggle)
+// would silently delete a device's saved pins. They move to their own key before any prefs read,
+// and Home offers Import (append them as server pins) or Discard. Nothing is applied on its own.
+// ---------------------------------------------------------------------------
+const RETIRED_PINS_KEY = 'unleashd-retired-home-pins';
+
+const retiredPinsStorage = validatedStorage<RetiredHomePins>((raw) => {
+  const result = RetiredHomePinsSchema.safeParse(raw);
+  return result.success ? result.data : null;
+});
+
+/** κ, once per load: lift `projectPins` out of the prefs blob into its own key (merged, in order). */
+function retireDevicePins(): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (!raw) return;
+    const { projectPins, ...prefs } = JSON.parse(raw) as { projectPins?: unknown };
+    if (projectPins === undefined) return;
+    const found = RetiredHomePinsSchema.safeParse(projectPins);
+    if (found.success) {
+      const kept = retiredPinsStorage.getItem(RETIRED_PINS_KEY, {});
+      const merged: RetiredHomePins = { ...kept };
+      for (const [workspaceId, ids] of Object.entries(found.data)) {
+        const next = [...new Set([...(kept[workspaceId] ?? []), ...ids])];
+        if (next.length > 0) merged[workspaceId] = next;
+      }
+      retiredPinsStorage.setItem(RETIRED_PINS_KEY, merged);
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(prefs));
+  } catch {
+    // unreadable blob: prefsStorage discards it whole on its own read
+  }
+}
+retireDevicePins();
+
+/** Pins this device saved before server pins, per workspace; empty once imported or discarded. */
+export const retiredHomePinsAtom = atomWithStorage<RetiredHomePins>(
+  RETIRED_PINS_KEY,
+  {},
+  retiredPinsStorage,
+  { getOnInit: true }
+);
+
 // getOnInit — read synchronously at first get so the first render sees the
 // persisted prefs.
 // Read with `useAtomValue(prefsAtom).field`: prefs change only on a user
@@ -161,6 +214,12 @@ export function removeSeenIndex(conversationId: string): void {
   if (!(conversationId in current)) return;
   const { [conversationId]: _removed, ...rest } = current;
   jotaiStore.set(seenAtom, rest);
+}
+
+/** Home imported or discarded this workspace's retired device pins: forget them. */
+export function forgetRetiredHomePins(workspaceId: string): void {
+  const { [workspaceId]: _gone, ...rest } = jotaiStore.get(retiredHomePinsAtom);
+  jotaiStore.set(retiredHomePinsAtom, rest);
 }
 
 // ---------------------------------------------------------------------------

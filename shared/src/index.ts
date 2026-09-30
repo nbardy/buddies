@@ -279,6 +279,13 @@ export type DeviceUiPrefs = z.infer<typeof DeviceUiPrefsSchema>;
 /** Last viewed message index per conversation id, for the NEW badge. */
 export const SeenMessageIndexSchema = z.record(z.string(), z.number());
 
+/**
+ * Home pins a device saved before pins became `Task.pin` (2026-09-30): ordered top-level Task ids
+ * per workspace, kept only until the owner imports or discards them on Home.
+ */
+export const RetiredHomePinsSchema = z.record(z.string(), z.array(z.string()));
+export type RetiredHomePins = z.infer<typeof RetiredHomePinsSchema>;
+
 // =============================================================================
 // Server → Client Messages (protocol v4; T09 introduced the v3 row/patch layout)
 //

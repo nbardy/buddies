@@ -1,5 +1,7 @@
+import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { forgetRetiredHomePins, retiredHomePinsAtom } from '../../atoms/ui';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { shortenHomePath } from '../../utils/directories';
 import { formatTimeAgo } from '../../utils/time';
@@ -22,6 +24,7 @@ import {
   appendPin,
   excerpt,
   firstImage,
+  importPins,
   movePin,
   unpin,
   homeTasks,
@@ -40,6 +43,7 @@ import './ChannelLanding.css';
 // on the server: desktop, phone and Buddies (`task_write`) share them.
 
 const NO_RUNS: readonly Run[] = [];
+const NO_IDS: readonly string[] = [];
 const DESKTOP_TASKS = 4;
 const THREAD_CARDS = 4;
 
@@ -174,18 +178,20 @@ function TaskSection({
   const [query, setQuery] = useState('');
   const searching = query.trim() !== '';
   const cards = homeTasks(directory.tasks, query);
-  const shown = frame === 'desktop' && !showAll && !searching ? cards.slice(0, DESKTOP_TASKS) : cards;
+  const shown =
+    frame === 'desktop' && !showAll && !searching ? cards.slice(0, DESKTOP_TASKS) : cards;
+  const retired = useAtomValue(retiredHomePinsAtom)[workspaceId] ?? NO_IDS;
   // Pins are a Task field (`task_write` `pin`): the same write path, authority and change push
   // Buddies use. One CAS update per Task whose key changes.
-  const write = (writes: readonly PinWrite[]) =>
-    void action.run('pin', async () => {
-      for (const { task, pin } of writes) {
-        await buddyWrite(`/api/buddies/tasks/${encodeURIComponent(task.id)}`, 'PATCH', {
-          baseRevision: task.revision,
-          changes: { pin },
-        });
-      }
-    });
+  const save = async (writes: readonly PinWrite[]) => {
+    for (const { task, pin } of writes) {
+      await buddyWrite(`/api/buddies/tasks/${encodeURIComponent(task.id)}`, 'PATCH', {
+        baseRevision: task.revision,
+        changes: { pin },
+      });
+    }
+  };
+  const write = (writes: readonly PinWrite[]) => void action.run('pin', () => save(writes));
   return (
     <section className="landing-section ui-stack" aria-label="Tasks">
       <div className="landing-section-head ui-row">
@@ -201,6 +207,20 @@ function TaskSection({
         onChange={(event) => setQuery(event.target.value)}
       />
       <ActionError state={action.state} />
+      {retired.length > 0 && tasks.data && (
+        <RetiredPins
+          saved={retired.length}
+          imports={importPins(tasks.data, retired)}
+          busy={action.busy}
+          onImport={(imports) =>
+            void action.run('import', async () => {
+              await save(imports);
+              forgetRetiredHomePins(workspaceId);
+            })
+          }
+          onDiscard={() => forgetRetiredHomePins(workspaceId)}
+        />
+      )}
       {cards.length === 0 ? (
         <p className="landing-empty ui-muted">
           {searching
@@ -238,6 +258,47 @@ function TaskSection({
         </button>
       )}
     </section>
+  );
+}
+
+/** Pins this device saved before pins were shared: import them as server pins, or discard them. */
+function RetiredPins({
+  saved,
+  imports,
+  busy,
+  onImport,
+  onDiscard,
+}: {
+  saved: number;
+  imports: readonly PinWrite[];
+  busy: boolean;
+  onImport(imports: readonly PinWrite[]): void;
+  onDiscard(): void;
+}) {
+  const stale = saved - imports.length;
+  return (
+    <div className="landing-retired ui-card ui-surface ui-stack">
+      <p>
+        {saved === 1 ? '1 pin was' : `${saved} pins were`} saved on this device before pins were
+        shared with your Buddies.
+        {stale > 0 && ` ${stale} no longer ${stale === 1 ? 'matches' : 'match'} an unpinned Task.`}
+      </p>
+      <div className="ui-row">
+        {imports.length > 0 && (
+          <button
+            type="button"
+            className="ui-control"
+            disabled={busy}
+            onClick={() => onImport(imports)}
+          >
+            Import {imports.length === 1 ? '1 pin' : `${imports.length} pins`}
+          </button>
+        )}
+        <button type="button" className="ui-control" disabled={busy} onClick={onDiscard}>
+          Discard
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -368,7 +429,10 @@ function ProgressFoot({ progress }: { progress: HomeTask['progress'] }) {
         <div className="landing-foot ui-stack">
           <span className="landing-progress-label ui-row">
             <span>
-              <strong>{progress.done} of {progress.total}</strong> todos done · {progress.percent}%
+              <strong>
+                {progress.done} of {progress.total}
+              </strong>{' '}
+              todos done · {progress.percent}%
             </span>
             {rest.length > 0 && <span className="ui-muted">{rest.join(' · ')}</span>}
           </span>
@@ -448,10 +512,7 @@ function RecentThreads({
     <section className="landing-section ui-stack" aria-label="Pick up where you left off">
       <div className="landing-section-head ui-row">
         <h2>Pick up where you left off</h2>
-        <Link
-          className="landing-all ui-muted"
-          to={channelsHref(workspaceId, { kind: 'threads' })}
-        >
+        <Link className="landing-all ui-muted" to={channelsHref(workspaceId, { kind: 'threads' })}>
           All threads ›
         </Link>
       </div>
@@ -474,7 +535,12 @@ function RecentThreads({
                   })}
                 >
                   {image ? (
-                    <img className="landing-thread-image" src={mediaUrl(image)} alt="" loading="lazy" />
+                    <img
+                      className="landing-thread-image"
+                      src={mediaUrl(image)}
+                      alt=""
+                      loading="lazy"
+                    />
                   ) : (
                     <span className="landing-thread-lead" aria-hidden="true">
                       {excerpt(thread.root.body, 90)}
@@ -487,9 +553,8 @@ function RecentThreads({
                     </span>
                     <span className="landing-thread-foot ui-muted">
                       {heading.mark}
-                      {heading.name} · {thread.replies}{' '}
-                      {thread.replies === 1 ? 'reply' : 'replies'} ·{' '}
-                      {formatTimeAgo(new Date(latest.createdAt))}
+                      {heading.name} · {thread.replies} {thread.replies === 1 ? 'reply' : 'replies'}{' '}
+                      · {formatTimeAgo(new Date(latest.createdAt))}
                     </span>
                   </span>
                 </Link>

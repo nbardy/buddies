@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { appendPin, homeTasks, movePin, projectProgress } from '../src/components/buddies/home-view';
+import {
+  appendPin,
+  homeTasks,
+  importPins,
+  movePin,
+  projectProgress,
+} from '../src/components/buddies/home-view';
 import type { Task, TaskStatus } from '../src/components/buddies/types';
 
 const task = (id: string, status: TaskStatus, parentId?: string): Task => ({
@@ -63,7 +69,12 @@ test('pins keep their order, then recent projects; search finds any Task; grandc
     [true, true, false]
   );
   assert.deepEqual(home[1]?.progress, {
-    kind: 'counted', done: 1, total: 1, percent: 100, inProgress: 0, blocked: 0,
+    kind: 'counted',
+    done: 1,
+    total: 1,
+    percent: 100,
+    inProgress: 0,
+    blocked: 0,
   });
   // A query reaches Tasks Home never lists by default (`lone`); matches sort newest activity first.
   assert.deepEqual(ids(homeTasks(tasks, 'O')), ['lone', 'old']);
@@ -87,5 +98,30 @@ test('moving a pin renumbers a gappy, tied list and appending goes last', () => 
     ]
   );
   assert.deepEqual(movePin(tasks, byId('a'), -1), []);
-  assert.deepEqual(appendPin(tasks, byId('d')).map((write) => write.pin), [10]);
+  assert.deepEqual(
+    appendPin(tasks, byId('d')).map((write) => write.pin),
+    [10]
+  );
+});
+
+// A device's pins saved before server pins import AFTER the shared ones, in saved order. A saved
+// id that a Buddy already pinned, a todo, or a deleted Task must not be written: re-pinning an
+// already-pinned Task would move it to the end and silently reorder the owner's list.
+test('importing retired device pins appends in saved order and skips pinned, todos and missing', () => {
+  const tasks = [
+    { ...task('shared', 'open'), pin: 4 },
+    task('x', 'open'),
+    task('y', 'done'),
+    task('todo', 'open', 'x'),
+  ];
+  assert.deepEqual(
+    importPins(tasks, ['y', 'shared', 'gone', 'todo', 'x', 'y']).map((write) => [
+      write.task.id,
+      write.pin,
+    ]),
+    [
+      ['y', 5],
+      ['x', 6],
+    ]
+  );
 });
