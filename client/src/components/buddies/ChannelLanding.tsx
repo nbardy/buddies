@@ -286,16 +286,9 @@ function TaskCard({
               {entry.pinned ? '★' : '☆'}
             </button>
           </span>
-        {channelId ? (
-          <Link
-            className="landing-project-link"
-            to={channelsHref(workspaceId, { kind: 'task', channelId, taskId: task.id })}
-          >
-            {title}
-          </Link>
-        ) : (
-          title
-        )}
+        <Link className="landing-project-link" to={channelsHref(workspaceId, { kind: 'task', channelId: channelId ?? '', taskId: task.id })}>
+          {title}
+        </Link>
       </div>
       <ProgressFoot progress={progress} />
     </li>
@@ -400,6 +393,8 @@ function ProgressFoot({ progress }: { progress: HomeTask['progress'] }) {
 
 // ── Waiting on you ──────────────────────────────────────────────────────────
 
+const REQUESTS_SHOWN = 3;
+
 function WaitingOnYou({
   workspaceId,
   directory,
@@ -409,25 +404,30 @@ function WaitingOnYou({
   directory: WorkspaceDirectory;
   inbox: Inbox | null;
 }) {
+  const [showAll, setShowAll] = useState(false);
   // A loading inbox is not "nothing needs you": render nothing until it arrives.
   if (inbox === null) return null;
   const requests = inboxRequests(inbox);
   if (requests.length === 0) return null;
+  const shown = showAll ? requests : requests.slice(0, REQUESTS_SHOWN);
   return (
     <section className="landing-section ui-stack" aria-label="Waiting on you">
       <div className="landing-section-head ui-row">
         <h2>Waiting on you</h2>
-        <span className="ui-muted">{requests.length}</span>
+        <span className="landing-count">{requests.length}</span>
+        {requests.length > REQUESTS_SHOWN && (
+          <button type="button" className="landing-more" onClick={() => setShowAll((all) => !all)}>
+            {showAll ? 'Show fewer' : `Show all (${requests.length})`}
+          </button>
+        )}
       </div>
-      <ul className="landing-requests ui-stack">
-        {requests.map((post) => (
+      {/* One compact list: who asks, then the question. Dozens of requests must not take over Home. */}
+      <ul className="landing-requests">
+        {shown.map((post) => (
           <li key={post.id}>
-            <Link
-              className="landing-request ui-card ui-surface ui-stack"
-              to={channelLinkPath(workspaceId, postLink(post))}
-            >
+            <Link className="landing-request" to={channelLinkPath(workspaceId, postLink(post))}>
               <span className="landing-request-from">
-                {authorName(post.author, directory.buddyNames)} asks
+                {authorName(post.author, directory.buddyNames)}
               </span>
               <span className="landing-request-body">{excerpt(post.body, 160)}</span>
             </Link>

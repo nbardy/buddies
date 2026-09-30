@@ -9,7 +9,7 @@
   isolation: isolate;
   font-family: var(--landing-body);
   font-feature-settings: 'cv11', 'ss03';
-  gap: var(--sp-10);
+  gap: calc(var(--sp-10) + var(--sp-9));
   width: 100%;
   max-width: 1008px;
   margin: 0 auto;
@@ -135,12 +135,26 @@ a.landing-chip:hover {
 }
 
 .landing-section {
-  gap: var(--sp-6);
+  gap: var(--sp-7);
 }
 
 .landing-section-head {
   align-items: baseline;
-  justify-content: space-between;
+  gap: var(--sp-5);
+}
+
+/* The right-hand link (Show all, All threads) sits at the far end. */
+.landing-section-head > :last-child:not(h2, .landing-count) {
+  margin-left: auto;
+}
+
+.landing-count {
+  padding: var(--sp-1) var(--sp-4);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--text-bright);
+  font-size: var(--fs-3);
+  font-weight: 600;
 }
 
 .landing-section-head h2 {
@@ -177,10 +191,10 @@ a.landing-chip:hover {
   width: 100%;
   padding: var(--sp-5) var(--sp-7);
   border: 1px solid var(--landing-line);
-  border-radius: var(--sp-6);
-  background: var(--landing-card);
+  border-radius: var(--sp-5);
+  background: transparent;
   color: var(--text-primary);
-  font-size: var(--fs-4);
+  font-size: var(--fs-5);
 }
 
 .landing-search:focus-visible {
@@ -188,9 +202,8 @@ a.landing-chip:hover {
   outline: none;
 }
 
-/* Cards: one surface for Tasks, requests and threads. */
+/* Cards: one surface for Tasks, threads and notices. */
 .landing-project,
-.landing-request,
 .landing-thread,
 .landing-retired {
   border: 1px solid var(--landing-line);
@@ -203,7 +216,6 @@ a.landing-chip:hover {
 }
 
 .landing-project:hover,
-a.landing-request:hover,
 a.landing-thread:hover {
   border-color: var(--border-emphasis);
   background: color-mix(in srgb, var(--text-bright) 6%, transparent);
@@ -252,7 +264,8 @@ a.landing-thread:hover {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   font-size: var(--fs-6);
-  font-weight: 700;
+  min-height: calc(2 * 1.3em);
+  font-weight: 600;
   line-height: 1.3;
   letter-spacing: -0.01em;
   color: var(--text-bright);
@@ -376,44 +389,65 @@ a.landing-thread:hover {
 
 .landing-requests,
 .landing-threads {
-  gap: var(--sp-5);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.landing-request,
-.landing-thread {
-  gap: var(--sp-2);
+/* Requests: one list card, a row per request (who asks, then the question on one line). */
+.landing-requests {
+  overflow: hidden;
+  border: 1px solid var(--landing-line);
+  border-radius: var(--landing-radius);
+  background: var(--landing-card);
+}
+
+.landing-requests > li + li {
+  border-top: 1px solid var(--landing-line);
+}
+
+.landing-request {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-7);
+  padding: var(--sp-6) var(--sp-8);
   color: inherit;
   text-decoration: none;
 }
 
-.landing-request {
-  padding: var(--sp-6) var(--sp-7);
-  position: relative;
+.landing-request:hover {
+  background: color-mix(in srgb, var(--text-bright) 4%, transparent);
 }
 
-.landing-request::before {
+/* A dot marks who asks. */
+.landing-request-from {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-4);
+  width: 190px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--accent);
+  font-size: var(--fs-3);
+  font-weight: 600;
+}
+
+.landing-request-from::before {
   content: '';
-  position: absolute;
-  top: var(--sp-6);
-  bottom: var(--sp-6);
-  left: 0;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   background: var(--accent);
 }
 
-.landing-request-from {
-  font-size: var(--fs-2);
-  font-weight: 600;
-  color: var(--accent);
-}
-
 .landing-request-body {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: var(--fs-4);
-  line-height: 1.45;
 }
 
 .landing-threads {
@@ -434,12 +468,11 @@ a.landing-thread:hover {
   width: 100%;
   height: 96px;
   object-fit: cover;
-  /* A thread with no image gets this soft tint, so every card keeps one shape. */
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--accent) 22%, transparent),
-    color-mix(in srgb, var(--accent) 6%, transparent)
-  );
+  /* A thread with no image gets a quiet aurora tile, so every card keeps one shape. */
+  background:
+    radial-gradient(60% 90% at 20% 30%, oklch(0.55 0.16 300 / 0.55), transparent 70%),
+    radial-gradient(60% 90% at 85% 70%, oklch(0.6 0.12 230 / 0.45), transparent 70%),
+    color-mix(in srgb, var(--text-bright) 3%, transparent);
 }
 
 .landing-thread-meta {
@@ -478,7 +511,18 @@ a.landing-thread:hover {
 .landing-working {
   flex-wrap: wrap;
   gap: var(--sp-5);
+  padding-top: var(--sp-8);
+  border-top: 1px solid var(--landing-line);
   font-size: var(--fs-3);
+}
+
+/* Archived channels (outside .landing) share the page's column. */
+section[aria-label='Home'] section[aria-labelledby='archived-channels-heading'] {
+  width: 100%;
+  max-width: 1008px;
+  margin: 0 auto;
+  padding: 0 var(--sp-9) var(--sp-11);
+  opacity: 0.8;
 }
 
 .landing-working ul {
@@ -544,4 +588,21 @@ a.landing-thread:hover {
 
 .landing[data-frame='mobile'] .landing-chip {
   white-space: nowrap;
+}
+
+/* Phone: a request is a stack (who, then the question) and may wrap. */
+.landing[data-frame='mobile'] .landing-request {
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.landing[data-frame='mobile'] .landing-request-from {
+  width: auto;
+}
+
+.landing[data-frame='mobile'] .landing-request-body {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
 }
