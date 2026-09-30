@@ -151,3 +151,34 @@ P1-guard **Regression-proof.** The acceptance test from the PDL triage note (fak
 Open questions: MCP calls during the ~1.5 s gap (does each CLI retry, or do we need a tiny stable
 proxy?); whether Claude's CLI tolerates file stdout identically to pipes (08-21 experiment says a
 file-backed child ran to completion); Windows is out of scope.
+
+## 6. Successor (2026-09-30, later same day): root cause confirmed; unification proposal
+
+**Crash root cause — confirmed by reproduction** (supersedes §1 "unknown"): `server/src/uploads/gc.ts`
+(297f4ec, 2026-09-25) scanned every file under the data dir and the Buddies DB dir — the live
+SQLite files included — from a `worker_thread`, i.e. inside the backend process. Each `close()`
+released all of the process's POSIX locks on that inode. The next outside opener (sqlite3, a copied
+backend) then reset the `-shm` the backend had mapped → SIGBUS. Temp-store repro: locks held before
+the GC pass, all four stores unlocked after. Fix `b79b2c1` (GC in a child process) + guard
+`server/test/sqlite-locks.test.ts` (fails on the old gc.ts) + pattern
+`docs/patterns.md#store-descriptor-isolation`; evidence note `2026-09-30_sqlite-locks-sigbus-root-cause.md`
+(`fdbe6f1`). Fast-forwarded to local main by the lead after rebase; guards 4/4 + typecheck green.
+Remaining uncertainty: tonight's exact outside opener is inferred from timing, not traced.
+
+**Classification.** Crash = small, 5-day-old regression (fixed). Worker loss on backend death =
+architecture never built (P1 execution adoption, in progress).
+
+**Map of work paths (Explore audit at 232c6fc):** one execution primitive (`TurnRunner.start`,
+`runtime.ts:508-545`) reached by two admission routes: (a) conversation `TurnQueue` + chat run ticket
+(owner chats, DM seats, channel seats) — durable row only once an item is queue head; (b) crate run
+queue (DM requests, workers, schedules, returns) — durable in the same transaction as the post.
+Channel @mentions are least durable: pair queues, gate verdicts, read marks, hop counts are memory only
+(`channels.ts:49-51` admits it); the reply gate (`channel-reply-gate.ts`) and memory review spawn
+outside the primitive. Task assignment starts no run.
+
+**Proposal (lead recommendation, NOT yet owner-accepted):** one durable run per unit of work, written
+in the same transaction as the message/post that caused it — owner chat messages and @mention /
+follow-up replies become crate run rows like DM requests already are; the per-conversation queue is the
+crate queue; the pair machine becomes a pure function over durable rows; the gate becomes part of the
+reply run. With P1 adoption, a reload no longer drains: queued work is on disk, running work is
+adopted. Revisit if per-message run rows measurably slow chat latency or bloat the runs table.
