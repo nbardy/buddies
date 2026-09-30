@@ -8,6 +8,7 @@ import { type ConversationOptions, createConversationRuntime } from '../src/conv
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { registerConversationWebSocket } from '../src/transport/conversation-websocket';
 import { fakeBuddyPort } from './fixtures/buddy-port';
+import { testExecutions } from './fixtures/fake-turn';
 
 const buddyContext: BuddyContext = {
   buddyId: 'buddy-1',
@@ -19,6 +20,7 @@ function runtimeFixture() {
   const broadcasts: unknown[] = [];
   const config = createDefaultConversationConfig('codex');
   const Conversation = createConversationRuntime({
+    executions: testExecutions(),
     broadcast: (message) => broadcasts.push(message),
     registerSessionAlias: () => undefined,
     unregisterSessionAlias: () => undefined,

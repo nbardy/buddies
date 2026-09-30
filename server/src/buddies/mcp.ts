@@ -1,5 +1,7 @@
+import fs from 'node:fs';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
@@ -676,7 +678,34 @@ export type McpEndpoint = {
 };
 
 /** Serve `/mcp` on 127.0.0.1 at an OS-assigned port. */
-export async function startMcpEndpoint(deps: ToolDeps & { grants: Grants }): Promise<McpEndpoint> {
+/**
+ * The port the previous backend listened on (absent on a first start). A turn's CLI was
+ * configured with this URL at spawn, and an adopted turn keeps calling it after the backend that
+ * spawned it is gone (turns/executions.ts), so every backend listens where the last one did.
+ */
+function lastPort(portFile: string): number | null {
+  try {
+    const { port } = JSON.parse(fs.readFileSync(portFile, 'utf8')) as { port: number };
+    return Number.isInteger(port) && port > 0 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+function listen(http: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const failed = (error: Error) => reject(error);
+    http.once('error', failed);
+    http.listen(port, '127.0.0.1', () => {
+      http.off('error', failed);
+      resolve();
+    });
+  });
+}
+
+export async function startMcpEndpoint(
+  deps: ToolDeps & { grants: Grants; portFile: string }
+): Promise<McpEndpoint> {
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
     const grant = bearer ? deps.grants.lookup(bearer) : null;
@@ -697,8 +726,22 @@ export async function startMcpEndpoint(deps: ToolDeps & { grants: Grants }): Pro
       if (!res.headersSent) res.writeHead(500).end(String(error));
     });
   });
-  await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
-  const url = `http://127.0.0.1:${(http.address() as AddressInfo).port}/mcp`;
+  const previous = lastPort(deps.portFile);
+  try {
+    await listen(http, previous ?? 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || previous === null) throw error;
+    // Loud, never silent: turns adopted from the previous backend call the old URL and will get
+    // connection errors from their Buddy tools until they end.
+    console.error(
+      `[buddies-mcp] port ${previous} is taken; adopted turns lose their Buddy tools. Listening on a new port.`
+    );
+    await listen(http, 0);
+  }
+  const port = (http.address() as AddressInfo).port;
+  fs.mkdirSync(path.dirname(deps.portFile), { recursive: true });
+  fs.writeFileSync(deps.portFile, `${JSON.stringify({ port })}\n`);
+  const url = `http://127.0.0.1:${port}/mcp`;
   return {
     url,
     spec: (grant) => ({

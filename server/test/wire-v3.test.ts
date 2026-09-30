@@ -18,6 +18,7 @@ import { registerConversationRoutes } from '../src/http/conversation-routes';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { registerConversationWebSocket } from '../src/transport/conversation-websocket';
 import { fakeBuddyPort } from './fixtures/buddy-port';
+import { testExecutions } from './fixtures/fake-turn';
 
 // Guards for protocol v3 (T09, 2026-09-25). Measured before it on a copy of
 // the live data: `init` was 1.87 MB for 1,161 conversations (every row carried
@@ -33,6 +34,7 @@ const configState = {
 };
 const broadcasts: ServerMessage[] = [];
 const Conversation = createConversationRuntime({
+  executions: testExecutions(),
   broadcast: (message) => broadcasts.push(message as ServerMessage),
   registerSessionAlias: () => undefined,
   unregisterSessionAlias: () => undefined,

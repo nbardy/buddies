@@ -18,6 +18,8 @@ import type { Grants } from './grants';
 
 /** An admitted chat's run: its lease is the turn's deadline. */
 export type OwnedChatRun = { id: string; claim_token: string; deadline: string };
+/** A run whose turn this backend adopted: kept through recovery, stoppable by conversation. */
+export type AdoptedRun = { runId: string; conversationId: string };
 export type ChatAdmission =
   | { kind: 'admitted'; run: OwnedChatRun }
   | { kind: 'waiting'; reason: string }
@@ -121,6 +123,17 @@ export function createRunner(options: {
       claim = await core.claimRun(options.leaseMs)
     )
       void execute(claim);
+  }
+
+  // Turn endings in flight (completion step + settle): a backend exit waits for them
+  // (lifecycle/shutdown.ts), because the turn's journal is already gone and a lost settle would
+  // read as an interrupted run at the next boot. Counted from the synchronous call on.
+  let settling = 0;
+  function tracked(work: Promise<void>): Promise<void> {
+    settling += 1;
+    return work.finally(() => {
+      settling -= 1;
+    });
   }
 
   async function settle(run: Run, leaseToken: string, outcome: Outcome): Promise<void> {
@@ -299,18 +312,32 @@ export function createRunner(options: {
             leaseToken: claim.leaseToken,
             deadlineMs: options.backgroundTurnMs,
           });
-          await job.after(text);
-          return settle(run, claim.leaseToken, { kind: 'complete', text });
+          return tracked(finishTurn(run, claim.leaseToken, job.after, text));
         }
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return settle(run, claim.leaseToken, {
-        kind: 'failed',
-        code: 'execution_failed',
-        error: message,
-      });
+      return fail(run, claim.leaseToken, error);
     }
+  }
+
+  /** A turn job's text is in: its completion step, then the one settle. */
+  async function finishTurn(
+    run: Run,
+    leaseToken: string,
+    after: (text: string) => Promise<void>,
+    text: string
+  ): Promise<void> {
+    try {
+      await after(text);
+    } catch (error) {
+      return fail(run, leaseToken, error);
+    }
+    return settle(run, leaseToken, { kind: 'complete', text });
+  }
+
+  function fail(run: Run, leaseToken: string, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    return settle(run, leaseToken, { kind: 'failed', code: 'execution_failed', error: message });
   }
 
   // A running run whose cancel was recorded: kill its turn, and settle records it cancelled. Until
@@ -330,8 +357,17 @@ export function createRunner(options: {
   return {
     leaseMs: options.leaseMs,
 
-    async start(): Promise<void> {
-      const recovered = await core.recoverRuns();
+    /**
+     * `adopted`: runs whose provider execution this backend adopted from the one before it
+     * (turns/executions.ts). They stay running; every other held run ends interrupted. A kept run
+     * whose stop was requested before the old backend could act on it is stopped now.
+     */
+    async start(adopted: readonly AdoptedRun[]): Promise<void> {
+      const recovered = await core.recoverRuns(adopted.map((run) => run.runId));
+      for (const run of adopted) {
+        const current = await core.getRun(run.runId);
+        if (current.status === 'cancel_requested') host.stop(run.conversationId);
+      }
       logger.log(
         `[buddies-runner] recovered: ${recovered.interrupted} interrupted, ${recovered.abandonedChats} abandoned chat turns`
       );
@@ -362,6 +398,9 @@ export function createRunner(options: {
     },
 
     wake,
+
+    /** Settles still writing (shutdown waits for them). */
+    settling: (): number => settling,
 
     /** Idle once the current drain finished (tests; shutdown). */
     settled: async (): Promise<void> => {
@@ -422,7 +461,34 @@ export function createRunner(options: {
     },
 
     finishChat(runId: string, leaseToken: string, outcome: Outcome): Promise<void> {
-      return core.getRun(runId).then((run) => settle(run, leaseToken, outcome));
+      return tracked(core.getRun(runId).then((run) => settle(run, leaseToken, outcome)));
+    },
+
+    /**
+     * An adopted runner-owned turn drained. Its `runJob` died with the backend that claimed it, so
+     * its completion step is re-derived from the run's input (`jobFor` reads only the run and the
+     * store) and the run settles under the lease it was claimed with.
+     */
+    finishAdoptedRun(
+      runId: string,
+      leaseToken: string,
+      status: 'complete' | 'failed',
+      detail: string
+    ): Promise<void> {
+      return tracked(
+        (async () => {
+          const run = await core.getRun(runId);
+          if (status === 'failed') return fail(run, leaseToken, detail);
+          let after: (text: string) => Promise<void> = nothingAfter;
+          try {
+            const job = await jobFor(run);
+            if (job.kind === 'turn') after = job.after;
+          } catch (error) {
+            return fail(run, leaseToken, error);
+          }
+          return finishTurn(run, leaseToken, after, detail);
+        })()
+      );
     },
 
     /** Owner stop: a queued run ends now; a running one is asked to stop and its turn is killed. */

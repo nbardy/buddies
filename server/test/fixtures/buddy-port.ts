@@ -1,8 +1,11 @@
 import type { BuddyContext } from '@unleashd/shared';
+import type { GrantRecord } from '../../src/buddies/grants';
 import type { CompletedBuddyTurn } from '../../src/buddies/memory-review';
 import type { BuddyPolicyPort } from '../../src/buddies/policy-port';
 import type { ChatAdmission } from '../../src/buddies/runner';
 import { TURN_MAX_RUNTIME_MS } from '../../src/constants/timeouts';
+
+const FIXTURE_GRANT = { token: 'fixture-grant' } as GrantRecord;
 
 // Fixture: the Buddy module as the conversation runtime's Buddy policy sees it. The real port
 // (policy-port.ts over the crate, grants and runner) is exercised end to end by
@@ -39,8 +42,11 @@ export function fakeBuddyPort(
         },
       })),
     abandon: options.abandon ?? (() => undefined),
-    mcpServers: () => ({}),
-    builderMcpServers: () => ({}),
+    // No endpoint in these fixtures: no servers, and a grant that only needs to be data.
+    mcpServers: () => ({ servers: {}, grant: FIXTURE_GRANT }),
+    builderMcpServers: () => ({ servers: {}, grant: FIXTURE_GRANT }),
+    adoptGrant: () => undefined,
+    finishAdoptedRun: () => undefined,
     settle: options.settle ?? (() => undefined),
     revoke: options.revoke ?? (() => undefined),
     afterTurn: options.afterTurn ?? (() => undefined),
