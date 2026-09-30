@@ -15,7 +15,7 @@
 .landing-hero {
   position: relative;
   align-items: center;
-  gap: var(--sp-9);
+  gap: var(--sp-10);
   padding-top: var(--sp-10);
   text-align: center;
 }
@@ -32,8 +32,8 @@
 
 .landing-emblem {
   position: relative;
-  width: 52px;
-  height: 52px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--landing-radius);
   box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 30%, transparent);
 }
@@ -207,7 +207,7 @@ a.landing-thread:hover {
 /* Tasks: a grid on desktop, one sideways row on phone (data-frame). */
 .landing-projects {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: var(--sp-7);
   margin: 0;
   padding: 0;
