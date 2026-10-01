@@ -299,21 +299,40 @@ video.channel-media {
   background: rgb(0 0 0 / 45%);
 }
 
-/* Image viewer: it sat top-left when it only reused .channel-task-overlay (2026-10-01). */
-.channel-image-overlay {
-  inset: 50% auto auto 50%;
-  margin: 0;
-  transform: translate(-50%, -50%);
-  width: fit-content;
-  max-width: min(92vw, 1100px);
-  max-height: 92vh;
+/* Image viewer: full-screen dim layer, image centred at natural size capped to the
+   viewport (never stretched), close X in the corner. Not a card (2026-10-01). */
+.channel-image-overlay[open] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  background: rgb(0 0 0 / 88%);
 }
 
 .channel-image-overlay .channel-media {
-  max-width: 100%;
-  max-height: calc(92vh - 120px);
-  margin: 0 auto;
+  max-width: 94vw;
+  max-height: 94dvh;
+  margin: 0;
+  border: 1px solid rgb(255 255 255 / 18%);
   object-fit: contain;
+}
+
+.channel-image-close {
+  position: absolute;
+  top: var(--sp-5);
+  right: var(--sp-5);
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 12%);
+  color: #fff;
+  font-size: var(--fs-6);
 }
 
 .channel-task-overlay-header {

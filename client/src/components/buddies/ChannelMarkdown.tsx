@@ -313,40 +313,22 @@ function ChannelImageOverlay({
   return (
     <dialog
       ref={dialogRef}
-      className="channel-task-overlay channel-image-overlay ui-card ui-stack"
+      className="channel-image-overlay"
       aria-label={image.alt || 'Image preview'}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <header
-        className="channel-task-overlay-header ui-row"
-        style={{ justifyContent: 'space-between' }}
+      <button
+        type="button"
+        className="channel-image-close"
+        onClick={onClose}
+        aria-label="Close image"
+        title="Close image"
       >
-        {image.alt && <span>{image.alt}</span>}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close image"
-          title="Close image"
-          style={{
-            flex: 'none',
-            width: 32,
-            height: 32,
-            padding: 0,
-            border: 0,
-            background: 'transparent',
-            color: 'inherit',
-          }}
-        >
-          ✕
-        </button>
-      </header>
-      <img
-        className="channel-media"
-        src={image.src}
-        alt={image.alt}
-      />
+        ✕
+      </button>
+      <img className="channel-media" src={image.src} alt={image.alt} />
     </dialog>
   );
 }
