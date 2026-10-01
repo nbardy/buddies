@@ -3,15 +3,12 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { forgetRetiredHomePins, retiredHomePinsAtom } from '../../atoms/ui';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
-import { formatTimeAgo } from '../../utils/time';
 import { BuddySigil } from './BuddySigil';
 import { ChannelComposer } from './ChannelComposer';
 import { liveRunsUrl } from './BuddyWorkspaceActivity';
-import { useThreadsView } from './threads-view';
 import {
   type WorkspaceDirectory,
   authorName,
-  channelHeading,
   inboxRequests,
   workspaceTasksUrl,
 } from './channel-data';
@@ -22,15 +19,11 @@ import {
   type PinWrite,
   appendPin,
   excerpt,
-  firstImage,
   importPins,
   movePin,
   unpin,
   homeTasks,
-  recentThreads,
-  threadLatest,
 } from './home-view';
-import { mediaUrl } from './channel-text';
 import { ActionError, useBuddyAction } from './useBuddyAction';
 import { buddyWrite } from './api';
 import type { Inbox, Run, Task } from './types';
@@ -48,7 +41,6 @@ import './ChannelLanding.css';
 const NO_RUNS: readonly Run[] = [];
 const NO_IDS: readonly string[] = [];
 const DESKTOP_TASKS = 6;
-const THREAD_CARDS = 3;
 
 export function ChannelLanding({
   workspaceId,
@@ -71,8 +63,10 @@ export function ChannelLanding({
         <div className="landing-aura" aria-hidden="true" />
         <BuddySigil name={directory.workspaceName} className="landing-emblem" />
         <h1>What should the team build next?</h1>
-        {generalChannelId !== null ? (
-          <div className="landing-composer">
+        {/* Working now sits on one line right under the box (owner, 2026-10-01): the composer
+            starts work, and the line shows who took it. */}
+        <div className="landing-composer ui-stack">
+          {generalChannelId !== null && (
             <ChannelComposer
               channelId={generalChannelId}
               placeholder="Describe the work — @mention a Buddy to start it"
@@ -89,8 +83,9 @@ export function ChannelLanding({
                 )
               }
             />
-          </div>
-        ) : null}
+          )}
+          <WorkingNow workspaceId={workspaceId} directory={directory} />
+        </div>
         {directory.activeMembers.length === 0 && (
           <p className="landing-note ui-muted">
             Posting saves a thread{generalChannelId ? ' in #general' : ''}; nobody answers yet. To
@@ -105,8 +100,6 @@ export function ChannelLanding({
         frame={frame}
       />
       <WaitingOnYou workspaceId={workspaceId} directory={directory} inbox={inbox} />
-      <RecentThreads workspaceId={workspaceId} directory={directory} />
-      <WorkingNow workspaceId={workspaceId} directory={directory} />
     </div>
   );
 }
@@ -272,21 +265,28 @@ function TaskCard({
       data-pinned={entry.pinned}
     >
       <div className="landing-project-body ui-stack">
-          <span className="landing-card-actions ui-row">
-            {entry.pinned && <ReorderMenu title={task.title} menu={menu} />}
-            <button
-              type="button"
-              className="landing-pin ui-control"
-              aria-pressed={entry.pinned}
-              disabled={busy}
-              aria-label={`${entry.pinned ? 'Unpin' : 'Pin'} ${task.title}`}
-              title={entry.pinned ? 'Unpin' : 'Pin to Home (shared with your Buddies)'}
-              onClick={onTogglePin}
-            >
-              {entry.pinned ? '★' : '☆'}
-            </button>
-          </span>
-        <Link className="landing-project-link" to={channelsHref(workspaceId, { kind: 'task', channelId: channelId ?? '', taskId: task.id })}>
+        <span className="landing-card-actions ui-row">
+          {entry.pinned && <ReorderMenu title={task.title} menu={menu} />}
+          <button
+            type="button"
+            className="landing-pin ui-control"
+            aria-pressed={entry.pinned}
+            disabled={busy}
+            aria-label={`${entry.pinned ? 'Unpin' : 'Pin'} ${task.title}`}
+            title={entry.pinned ? 'Unpin' : 'Pin to Home (shared with your Buddies)'}
+            onClick={onTogglePin}
+          >
+            {entry.pinned ? '★' : '☆'}
+          </button>
+        </span>
+        <Link
+          className="landing-project-link"
+          to={channelsHref(workspaceId, {
+            kind: 'task',
+            channelId: channelId ?? '',
+            taskId: task.id,
+          })}
+        >
           {title}
         </Link>
       </div>
@@ -438,75 +438,6 @@ function WaitingOnYou({
   );
 }
 
-// ── Recent threads ──────────────────────────────────────────────────────────
-
-function RecentThreads({
-  workspaceId,
-  directory,
-}: {
-  workspaceId: string;
-  directory: WorkspaceDirectory;
-}) {
-  const { followed } = useThreadsView(workspaceId);
-  const threads = recentThreads(followed.data?.threads ?? [], THREAD_CARDS);
-  if (followed.data === null) return null;
-  return (
-    <section className="landing-section ui-stack" aria-label="Pick up where you left off">
-      <div className="landing-section-head ui-row">
-        <h2>Pick up where you left off</h2>
-        <Link className="landing-all ui-muted" to={channelsHref(workspaceId, { kind: 'threads' })}>
-          All threads ›
-        </Link>
-      </div>
-      {threads.length === 0 ? (
-        <p className="landing-empty ui-muted">Threads you start or reply in show up here.</p>
-      ) : (
-        <ul className="landing-threads">
-          {threads.map((thread) => {
-            const latest = threadLatest(thread);
-            const image = firstImage(thread.root.body) ?? firstImage(latest.body);
-            const heading = channelHeading(thread.channel.kind, directory.buddyNames);
-            return (
-              <li key={thread.root.id}>
-                <Link
-                  className="landing-thread ui-card ui-surface"
-                  to={channelLinkPath(workspaceId, {
-                    kind: 'thread',
-                    channelId: thread.channel.id,
-                    rootId: thread.root.id,
-                  })}
-                >
-                  {image ? (
-                    <img
-                      className="landing-thread-image"
-                      src={mediaUrl(image)}
-                      alt=""
-                      loading="lazy"
-                    />
-                  ) : (
-                    <span className="landing-thread-image" aria-hidden="true" />
-                  )}
-                  <span className="landing-thread-meta ui-stack">
-                    <span className="landing-thread-title">{excerpt(thread.root.body, 80)}</span>
-                    <span className="landing-thread-latest ui-muted">
-                      {authorName(latest.author, directory.buddyNames)}: {excerpt(latest.body, 90)}
-                    </span>
-                    <span className="landing-thread-foot ui-muted">
-                      {heading.mark}
-                      {heading.name} · {thread.replies} {thread.replies === 1 ? 'reply' : 'replies'}{' '}
-                      · {formatTimeAgo(new Date(latest.createdAt))}
-                    </span>
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
-  );
-}
-
 // ── Working now ─────────────────────────────────────────────────────────────
 
 function WorkingNow({
@@ -534,7 +465,10 @@ function WorkingNow({
               className="landing-chip ui-row"
               to={channelsHref(workspaceId, { kind: 'workers', buddyId })}
             >
-              <BuddySigil name={directory.buddyNames[buddyId] ?? 'Buddy'} className="landing-chip-face" />
+              <BuddySigil
+                name={directory.buddyNames[buddyId] ?? 'Buddy'}
+                className="landing-chip-face"
+              />
               <span>
                 {directory.buddyNames[buddyId] ?? 'Buddy'}
                 {queued ? ' · queued' : ''}

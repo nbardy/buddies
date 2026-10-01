@@ -8,7 +8,7 @@
  *   - review, blocked and in-progress todos are unfinished; nested descendants are not counted;
  *   - no todos → "No todos yet", all cancelled → "No active todos", never a made-up 0%.
  */
-import type { FollowedThread, Post, Task } from './types';
+import type { Task } from './types';
 
 /** A pinned project's checklist. D = NoTodos ⊕ NoActive ⊕ Counted. */
 export type ProjectProgress =
@@ -162,21 +162,6 @@ export function importPins(
     .map((task, index) => ({ task, pin: last + 1 + index }));
 }
 
-/** The newest post a card shows: its latest reply, else the root. */
-export function threadLatest(thread: FollowedThread): Post {
-  return thread.tail.posts.at(-1) ?? thread.root;
-}
-
-/** Followed threads, newest activity first (the server orders unread first, which is not "recent"). */
-export function recentThreads(
-  threads: readonly FollowedThread[],
-  limit: number
-): readonly FollowedThread[] {
-  return [...threads]
-    .sort((a, b) => (threadLatest(a).ord < threadLatest(b).ord ? 1 : -1))
-    .slice(0, limit);
-}
-
 /** The opening words of a post: markdown images and link syntax stripped, whitespace collapsed. */
 export function excerpt(body: string, max: number): string {
   const text = body
@@ -186,9 +171,4 @@ export function excerpt(body: string, max: number): string {
     .replace(/\s+/g, ' ')
     .trim();
   return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
-}
-
-/** The first markdown image path in a post, the card's preview. */
-export function firstImage(body: string): string | null {
-  return /!\[[^\]]*\]\(([^)\s]+)\)/.exec(body)?.[1] ?? null;
 }

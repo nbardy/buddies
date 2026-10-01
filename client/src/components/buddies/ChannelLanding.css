@@ -93,6 +93,7 @@
 }
 
 .landing-composer {
+  gap: var(--sp-5);
   width: 100%;
   margin-top: var(--sp-5);
   text-align: left;
@@ -166,10 +167,6 @@ a.landing-chip:hover {
   color: var(--text-bright);
 }
 
-.landing-all {
-  font-size: var(--fs-2);
-}
-
 .landing-empty {
   margin: 0;
   font-size: var(--fs-3);
@@ -202,9 +199,8 @@ a.landing-chip:hover {
   outline: none;
 }
 
-/* Cards: one surface for Tasks, threads and notices. */
+/* Cards: one surface for Tasks and notices. */
 .landing-project,
-.landing-thread,
 .landing-retired {
   border: 1px solid var(--landing-line);
   border-radius: var(--landing-radius);
@@ -215,8 +211,7 @@ a.landing-chip:hover {
     transform 0.15s;
 }
 
-.landing-project:hover,
-a.landing-thread:hover {
+.landing-project:hover {
   border-color: var(--border-emphasis);
   background: color-mix(in srgb, var(--text-bright) 6%, transparent);
   transform: translateY(-1px);
@@ -387,8 +382,7 @@ a.landing-thread:hover {
   margin: 0;
 }
 
-.landing-requests,
-.landing-threads {
+.landing-requests {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -450,69 +444,23 @@ a.landing-thread:hover {
   font-size: var(--fs-4);
 }
 
-.landing-threads {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--sp-7);
-}
-
-.landing-thread {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  height: 100%;
-}
-
-.landing-thread-image {
-  display: block;
-  width: 100%;
-  height: 96px;
-  object-fit: cover;
-  /* A thread with no image gets a quiet aurora tile, so every card keeps one shape. */
-  background:
-    radial-gradient(60% 90% at 20% 30%, oklch(0.55 0.16 300 / 0.55), transparent 70%),
-    radial-gradient(60% 90% at 85% 70%, oklch(0.6 0.12 230 / 0.45), transparent 70%),
-    color-mix(in srgb, var(--text-bright) 3%, transparent);
-}
-
-.landing-thread-meta {
-  flex: 1;
-  gap: var(--sp-3);
-  padding: var(--sp-7);
-}
-
 .landing-thread-title {
   overflow-wrap: anywhere;
   font-size: var(--fs-5);
   line-height: 1.35;
   font-weight: 650;
   color: var(--text-bright);
-}
-
-.landing-thread-title,
-.landing-thread-latest {
   display: -webkit-box;
   overflow: hidden;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
-.landing-thread-latest,
-.landing-thread-foot {
-  font-size: var(--fs-2);
-  line-height: 1.45;
-}
-
-.landing-thread-foot {
-  margin-top: auto;
-  padding-top: var(--sp-3);
-}
-
+/* Working now: one quiet line in the composer column, flush under the box. */
 .landing-working {
   flex-wrap: wrap;
   gap: var(--sp-5);
-  padding-top: var(--sp-8);
-  border-top: 1px solid var(--landing-line);
+  padding-inline: var(--sp-3);
   font-size: var(--fs-3);
 }
 
@@ -545,7 +493,7 @@ section[aria-label='Home'] section[aria-labelledby='archived-channels-heading'] 
   background: var(--success);
 }
 
-/* Phone: a tighter hero, and Tasks and threads scroll sideways. */
+/* Phone: a tighter hero, and Tasks scroll sideways. */
 .landing[data-frame='mobile'] {
   gap: var(--sp-9);
   padding: var(--sp-6) var(--sp-7);
@@ -563,8 +511,7 @@ section[aria-label='Home'] section[aria-labelledby='archived-channels-heading'] 
   font-size: var(--fs-9);
 }
 
-.landing[data-frame='mobile'] .landing-projects,
-.landing[data-frame='mobile'] .landing-threads {
+.landing[data-frame='mobile'] .landing-projects {
   display: flex;
   overflow-x: auto;
   scroll-snap-type: x proximity;
@@ -572,8 +519,7 @@ section[aria-label='Home'] section[aria-labelledby='archived-channels-heading'] 
   padding-inline: var(--sp-7);
 }
 
-.landing[data-frame='mobile'] .landing-projects > li,
-.landing[data-frame='mobile'] .landing-threads > li {
+.landing[data-frame='mobile'] .landing-projects > li {
   flex: none;
   width: 250px;
   scroll-snap-align: start;
