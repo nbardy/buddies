@@ -1070,3 +1070,40 @@ fn a_database_from_before_threads_arrives_caught_up() {
     assert!(matches!(page.threads[0].tail, ThreadTail::CaughtUp { .. }), "history is read, not a wall of unread");
     assert!(s.followed_threads(&buddy("ic"), WS, 10).unwrap().threads.is_empty(), "the backfill is the owner's only");
 }
+
+// Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01: a request to a group DM started
+// only its first recipient: the run key was `post:<id>`, so the second recipient's enqueue got the
+// first recipient's run back. Two recipients must get two runs; a single-recipient request keeps
+// the legacy `post:<id>` key so a replay of a pre-fix post still matches its run.
+#[test]
+fn a_group_request_starts_one_run_per_recipient() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let group = ChannelRef::Direct { members: vec![buddy("mid"), buddy("ic"), buddy("peer")] };
+    let asked = s.post(&buddy("mid"), group.clone(), request("both of you", "g1")).unwrap();
+    let runs_for = |s: &Store| {
+        let mut runs = s.list_runs(RunQuery::Queued, 10).unwrap();
+        runs.sort_by(|a, b| a.buddy_id.cmp(&b.buddy_id));
+        runs
+    };
+    let runs = runs_for(s);
+    assert_eq!(runs.iter().map(|r| r.buddy_id.as_str()).collect::<Vec<_>>(), ["ic", "peer"]);
+    assert!(runs.iter().all(|r| r.input == RunInput::Post { post_id: asked.id.clone() }));
+
+    s.post(&buddy("mid"), group, request("both of you", "g1")).unwrap();
+    assert_eq!(runs_for(s).len(), 2, "replaying the post creates no run");
+
+    // A run written before the fix carries the bare `post:<id>` key; enqueueing the same post for
+    // the same buddy must find it, not start a second run.
+    let solo = s.post(&buddy("mid"), dm("mid", "ic"), request("just you", "s1")).unwrap();
+    let run = s.list_runs(RunQuery::Queued, 10).unwrap().into_iter().find(|r| r.input_key.starts_with(&format!("post:{}", solo.id))).unwrap();
+    rusqlite::Connection::open(&f.path)
+        .unwrap()
+        .execute("UPDATE run SET input_key = ?1 WHERE id = ?2", rusqlite::params![format!("post:{}", solo.id), run.id])
+        .unwrap();
+    let again = f
+        .store
+        .enqueue_run(&Actor::Owner, EnqueueInput { buddy_id: "ic".into(), input: RunInput::Post { post_id: solo.id.clone() }, ..chat("ic", "x", "c") })
+        .unwrap();
+    assert_eq!(again.id, run.id, "a pre-fix run is still matched by its legacy key");
+}

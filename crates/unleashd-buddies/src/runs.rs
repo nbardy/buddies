@@ -110,11 +110,12 @@ pub(crate) trait Enqueue {
 
 impl Enqueue for Connection {
     fn enqueue(&self, input: EnqueueInput) -> Result<Run> {
-        let (kind, input_id, key) = input.input.columns();
-        let existing = self
-            .prepare_cached(&format!("SELECT {RUN_COLS} FROM run WHERE input_key = ?1 ORDER BY attempt DESC LIMIT 1"))?
-            .query_row([&key], run_row)
-            .optional()?;
+        let (kind, input_id, key) = input.input.columns(&input.buddy_id);
+        let latest = format!("SELECT {RUN_COLS} FROM run WHERE input_key = ?1 AND buddy_id = ?2 ORDER BY attempt DESC LIMIT 1");
+        let mut existing = self.prepare_cached(&latest)?.query_row([&key, &input.buddy_id], run_row).optional()?;
+        if let (None, Some(legacy)) = (&existing, input.input.legacy_key()) {
+            existing = self.prepare_cached(&latest)?.query_row([&legacy, &input.buddy_id], run_row).optional()?;
+        }
         if let Some(run) = existing {
             return Ok(run);
         }
