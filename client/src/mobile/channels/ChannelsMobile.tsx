@@ -424,7 +424,8 @@ function BuddySection({
 }
 
 // Slack's DM row: tapping the Buddy opens the conversation (its one ongoing
-// DM, history kept). Wake is a visible button, since touch has no hover.
+// DM, history kept). Wake is a visible button, since touch has no hover. Its progress dots and
+// the done check replace the icon in the same 44px slot: a sibling there shifted the row.
 function BuddyRow({ member }: { member: Buddy }) {
   // The DM opens inside Channels; Back returns here, not to the Buddies tab.
   const openDm = useChannelsDm();
@@ -456,25 +457,27 @@ function BuddyRow({ member }: { member: Buddy }) {
         workspaceId={member.workspaceId}
         name={member.name}
       />
-      {direct.woken && (
-        <WakeIndicator
-          key={direct.woken.attempt}
-          conversationId={direct.woken.conversationId}
-          name={member.name}
-          className="mobile-channels-wake-status ui-inline-row ui-muted"
-          doneClassName="mobile-channels-wake-done"
-          linkState={mobileConversationRouteState(location)}
-        />
-      )}
-      <button
-        type="button"
-        className="mobile-channels-wake ui-muted"
-        aria-label={`Wake ${member.name}: catch up on the channels and act`}
-        disabled={action.kind === 'pending'}
-        onClick={direct.wake}
-      >
-        <WakeIcon />
-      </button>
+      <span className="mobile-channels-wake-slot">
+        <button
+          type="button"
+          className="mobile-channels-wake ui-muted"
+          aria-label={`Wake ${member.name}: catch up on the channels and act`}
+          disabled={action.kind === 'pending'}
+          onClick={direct.wake}
+        >
+          <WakeIcon />
+        </button>
+        {direct.woken && (
+          <WakeIndicator
+            key={direct.woken.attempt}
+            conversationId={direct.woken.conversationId}
+            name={member.name}
+            className="mobile-channels-wake-status ui-muted"
+            doneClassName="mobile-channels-wake-done"
+            linkState={mobileConversationRouteState(location)}
+          />
+        )}
+      </span>
     </li>
   );
 }

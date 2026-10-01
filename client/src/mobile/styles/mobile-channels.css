@@ -147,16 +147,30 @@
   color: var(--text-bright);
 }
 
+/* Wake progress covers the icon in place (a sibling shifted the row); the icon returns if the
+   indicator renders nothing. */
+.mobile-channels-wake-slot {
+  position: relative;
+  flex: none;
+}
+
+.mobile-channels-wake-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.mobile-channels-wake-slot:has(.mobile-channels-wake-status) svg {
+  visibility: hidden;
+}
+
 /* The Task filter now sits in the header's settings slot (578e160): no margin, just no shrink. */
-.mobile-channels-wake-status,
 .mobile-channel__task-filter {
   flex: none;
 }
 
 a.mobile-channels-wake-done {
-  min-width: 28px;
-  min-height: 44px;
-  justify-content: center;
   color: var(--success-bright);
   text-decoration: none;
 }
