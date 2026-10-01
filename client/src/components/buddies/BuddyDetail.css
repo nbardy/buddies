@@ -127,49 +127,6 @@
   position: relative;
 }
 
-.buddy-work-disclosure {
-  border-bottom: 1px solid var(--border-subtle);
-}
-.buddy-work-disclosure > summary {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  position: relative;
-  padding: var(--sp-7) var(--sp-9) var(--sp-7) 0;
-  min-height: 44px;
-  cursor: pointer;
-  list-style: none;
-}
-.buddy-work-disclosure > summary::-webkit-details-marker {
-  display: none;
-}
-.buddy-work-disclosure > summary strong {
-  color: var(--text-bright);
-  font-size: var(--fs-6);
-  font-weight: 500;
-}
-.buddy-work-disclosure > summary span {
-  color: var(--text-secondary);
-  font-size: var(--fs-3);
-}
-.buddy-work-disclosure > summary::after {
-  content: "+";
-  position: absolute;
-  right: 0;
-  top: 18px;
-  color: var(--text-secondary);
-}
-.buddy-work-disclosure[open] > summary::after {
-  content: "−";
-}
-.buddy-work-history > summary {
-  padding: var(--sp-7) 0;
-  min-height: 44px;
-  color: var(--text-secondary);
-  font-size: var(--fs-4);
-  cursor: pointer;
-}
-
 /* Buddy page panels (components/buddies/BuddyTabContent.tsx), both shells. */
 .buddy-panel {
   display: grid;
@@ -488,3 +445,44 @@
   outline: 2px solid var(--accent-primary);
   outline-offset: 3px;
 }
+
+/* Task pages share Home's column, cards and type instead of the old Work disclosures. */
+.task-page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.task-page-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.task-page-heading {
+  margin: 0;
+  font-family: var(--landing-display);
+  font-size: var(--fs-9);
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+.task-page-copy {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-5);
+  line-height: 1.65;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.task-page .task-page-footer { padding-top: var(--sp-5); padding-bottom: var(--sp-7); flex: none; }
+.task-page-comments { margin: 0; padding: 0; list-style: none; min-width: 0; }
+.task-page-comments > li { min-width: 0; padding: var(--sp-7) 0; border-bottom: 1px solid var(--landing-line); }
+.task-line { display: flex; align-items: center; }
+.task-line > a.landing-request[href] { flex: 1; min-width: 0; flex-direction: row; align-items: center; gap: var(--sp-5); }
+.task-line-copy { flex: 1; min-width: 0; }
+.task-line-menu { position: relative; margin-right: var(--sp-7); }
+.task-line-menu > summary { list-style: none; color: var(--text-muted); cursor: pointer; }
+.task-line-menu > summary::-webkit-details-marker { display: none; }
+.task-line-menu .buddy-panel__actions { display: grid; }
+.task-page .landing .task-page-breadcrumb > :last-child { margin-left: 0; }
+[data-device="mobile"] .task-line .ui-badge { display: none; }
+.task-line-status { display: none; }
+[data-device="mobile"] .task-line-status { display: block; color: var(--text-muted); font-size: var(--fs-2); }

@@ -12,6 +12,7 @@ import { BuddyMessages } from './BuddyMessages';
 import { BuddySchedules } from './BuddySchedules';
 import { BuddySettings } from './BuddySettings';
 import { BuddyWork } from './BuddyWork';
+import './ChannelLanding.css';
 import { buddyNamesOf, isActive } from './roster';
 import type { BuddyDetail, BuddyOverview, EmployeeTab, Task, WorkspaceRoster } from './types';
 import { taskStatusView } from './ui-contract';

@@ -4,6 +4,7 @@ import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { BuddyRunList } from './BuddyRunList';
 import { BuddyTaskCommentForm, BuddyTaskCommentList } from './BuddyTaskComments';
 import { buddyWrite } from './api';
+import { channelsHref } from './channels-view';
 import type { Task, TaskDetail, TaskStatus } from './types';
 import { TASK_STATUS, isTaskOpen } from './ui-contract';
 import { ActionError, useBuddyAction } from './useBuddyAction';
@@ -82,7 +83,7 @@ function TaskControls({
 }
 
 /** A new task for this Buddy, or a todo under `parentId`. */
-function NewTaskForm({
+export function NewTaskForm({
   ownerId,
   parentId,
   label,
@@ -135,7 +136,7 @@ function NewTaskForm({
 }
 
 /** Status, next action and blocker, sent as a patch of the changed fields only. */
-function TaskEditForm({ task, refresh }: { task: Task; refresh: () => Promise<void> }) {
+export function TaskEditForm({ task, refresh }: { task: Task; refresh: () => Promise<void> }) {
   const [status, setStatus] = useState<TaskStatus>(task.status);
   const [nextAction, setNextAction] = useState(task.nextAction ?? '');
   const [blockedReason, setBlockedReason] = useState(task.blockedReason ?? '');
@@ -278,35 +279,54 @@ export function BuddyTaskPanel({
   }
 }
 
-function TaskCard({
-  ordered,
-  index,
-  names,
+// Pattern: one-definition (docs/patterns.md#one-definition)
+// One compact linked row for the task page and the Buddy's Work page.
+export function TaskRows({
+  tasks,
   refresh,
+  taskHref,
 }: {
-  ordered: readonly Task[];
-  index: number;
-  names: Readonly<Record<string, string>>;
+  tasks: readonly Task[];
   refresh: () => Promise<void>;
+  taskHref?: (id: string) => string;
 }) {
-  const [open, setOpen] = useState(false);
-  const task = ordered[index];
-  const status = TASK_STATUS[task.status];
+  const ordered = byPosition(tasks);
   return (
-    <details
-      className="buddy-work-disclosure"
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>
-        <strong>{task.title}</strong>
-        <span>
-          {status.label}
-          {task.paused ? ' · Paused' : ''} · {task.nextAction ?? 'No next action'}
-        </span>
-        <TaskControls ordered={ordered} index={index} refresh={refresh} />
-      </summary>
-      {open && <BuddyTaskPanel taskId={task.id} names={names} />}
-    </details>
+    <ul className="landing-requests">
+      {ordered.map((task, index) => {
+        const status = TASK_STATUS[task.status];
+        return (
+          <li key={task.id} className="task-line">
+            <Link
+              className="landing-request"
+              to={
+                taskHref
+                  ? taskHref(task.id)
+                  : channelsHref(task.workspaceId, { kind: 'task', channelId: '', taskId: task.id })
+              }
+            >
+              <span className="ui-muted" aria-hidden="true">
+                {status.glyph}
+              </span>
+              <span className="task-line-copy">
+                <span className="landing-thread-title">{task.title}</span>
+                <span className="task-line-status">{task.paused ? 'Paused' : status.label}</span>
+              </span>
+              <span className="ui-badge">{task.paused ? 'Paused' : status.label}</span>
+              <span className="ui-muted" aria-hidden="true">
+                ›
+              </span>
+            </Link>
+            <details className="task-line-menu">
+              <summary aria-label={`Actions for ${task.title}`}>•••</summary>
+              <div className="ui-popover ui-popover--end">
+                <TaskControls ordered={ordered} index={index} refresh={refresh} />
+              </div>
+            </details>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -314,7 +334,6 @@ function TaskCard({
 export function BuddyWork({
   buddyId,
   tasks,
-  names,
   refresh,
 }: {
   buddyId: string;
@@ -326,28 +345,24 @@ export function BuddyWork({
   const current = topLevel.filter((task) => isTaskOpen(task.status));
   const finished = topLevel.filter((task) => !isTaskOpen(task.status));
   return (
-    <section className="buddy-panel" aria-label="Work">
-      <div className="buddy-panel__title ui-row">
-        <h2>Current tasks</h2>
-        <span>{current.length} open</span>
-      </div>
-      {current.length === 0 && <p className="buddy-panel__empty">No open tasks.</p>}
-      {current.map((task, index) => (
-        <TaskCard key={task.id} ordered={current} index={index} names={names} refresh={refresh} />
-      ))}
-      <NewTaskForm ownerId={buddyId} label="task" refresh={refresh} />
+    <section className="landing ui-stack" aria-label="Work">
+      <header className="landing-section-head ui-row">
+        <h2>Tasks</h2>
+        <span className="landing-count">{current.length} open</span>
+      </header>
+      {current.length === 0 ? (
+        <p className="landing-empty ui-muted">No open tasks.</p>
+      ) : (
+        <TaskRows tasks={current} refresh={refresh} />
+      )}
+      <details className="landing-retired">
+        <summary>New task</summary>
+        <NewTaskForm ownerId={buddyId} label="task" refresh={refresh} />
+      </details>
       {finished.length > 0 && (
-        <details className="buddy-work-history">
-          <summary>Completed & cancelled · {finished.length}</summary>
-          {finished.map((task, index) => (
-            <TaskCard
-              key={task.id}
-              ordered={finished}
-              index={index}
-              names={names}
-              refresh={refresh}
-            />
-          ))}
+        <details className="landing-section">
+          <summary className="landing-more">Completed & cancelled · {finished.length}</summary>
+          <TaskRows tasks={finished} refresh={refresh} />
         </details>
       )}
     </section>

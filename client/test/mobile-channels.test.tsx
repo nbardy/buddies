@@ -390,7 +390,7 @@ test('the mobile Task page opens from a channel with details and links each post
     }),
   });
   const html = render(url);
-  assert.match(html, /<h2>Ship channels<\/h2>/);
+  assert.match(html, /<h1 class="task-page-heading">Ship channels<\/h1>/);
   assert.match(html, /href="[^"]*view=home"/);
   assert.match(html, /Discussion/);
   assert.match(html, /Deployed to staging\./);

@@ -80,6 +80,11 @@ test('Home task destination shows task details, project and subtask links, and m
     assert.match(html, /Discussion/);
     assert.match(html, /@mention a Buddy/);
     assert.match(html, /class="channel-composer/);
+    assert.doesNotMatch(
+      html,
+      /Manage<\/summary>/,
+      'task rows must not repeat management disclosures'
+    );
   }
 });
 

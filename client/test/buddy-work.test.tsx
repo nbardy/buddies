@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router-dom';
 import { BuddyWork, byPosition, moveTask } from '../src/components/buddies/BuddyWork';
 import type { Task } from '../src/components/buddies/types';
 
@@ -52,18 +53,22 @@ test('reordering tied top-level tasks renumbers them once, then moves write only
 
 test('the Work tab offers task creation and per-task reorder and pause controls', () => {
   const html = renderToStaticMarkup(
-    <BuddyWork
-      buddyId="ada"
-      tasks={[task('1', 1), task('2', 0, { paused: true }), task('3', 0, { parentId: '1' })]}
-      names={{}}
-      refresh={async () => {}}
-    />
+    <MemoryRouter>
+      <BuddyWork
+        buddyId="ada"
+        tasks={[task('1', 1), task('2', 0, { paused: true }), task('3', 0, { parentId: '1' })]}
+        names={{}}
+        refresh={async () => {}}
+      />
+    </MemoryRouter>
   );
   assert.match(html, /aria-label="New task"/);
   // Position order: task 2 (0) first, then task 1 (1); the todo stays inside its task.
   assert.ok(html.indexOf('Title 2') < html.indexOf('Title 1'));
   assert.doesNotMatch(html, /Title 3/);
-  assert.match(html, /Title 2<\/strong><span>Open · Paused/);
+  assert.match(html, /Paused/);
+  assert.match(html, /href="[^"]*task=2"/);
+  assert.match(html, /href="[^"]*task=1"/);
   assert.match(html, /Resume/, 'a paused task offers Resume');
   assert.match(html, /Pause</, 'a running task offers Pause');
   const [first] = html.split('Title 1');
