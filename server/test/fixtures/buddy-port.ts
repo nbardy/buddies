@@ -46,6 +46,7 @@ export function fakeBuddyPort(
     mcpServers: () => ({ servers: {}, grant: FIXTURE_GRANT }),
     builderMcpServers: () => ({ servers: {}, grant: FIXTURE_GRANT }),
     adoptGrant: () => undefined,
+    renewLease: async () => ({ kind: 'renewed' }),
     finishAdoptedRun: () => undefined,
     settle: options.settle ?? (() => undefined),
     revoke: options.revoke ?? (() => undefined),

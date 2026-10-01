@@ -152,18 +152,28 @@ impl Store {
     }
 
     /// Claims the oldest ready run, or None when nothing is claimable.
-    pub fn claim_run(&mut self, lease_ms: i64) -> Result<Option<Claim>> {
-        self.claim_run_at(&now_iso(), lease_ms)
+    pub fn claim_run(&mut self, budgets: RunBudgets) -> Result<Option<Claim>> {
+        self.claim_run_at(&now_iso(), budgets)
     }
 
-    pub fn claim_run_at(&mut self, now: &str, lease_ms: i64) -> Result<Option<Claim>> {
+    // Pattern: lease-heartbeat (docs/patterns.md#lease-heartbeat)
+    // THE CLAIM GATE, and the one place a run whose holder is gone stops being `running`. Its
+    // first step ends every run whose lease ran out; nothing else sweeps held runs, at boot or
+    // anywhere. A lease is a heartbeat of minutes that a live holder renews (`renew_run`); it is NOT
+    // the run's deadline, which is the separate `deadline` column (24 h for an owner chat, the
+    // background turn budget otherwise) enforced by the holder as max_runtime_timeout.
+    // Why one gate and no boot sweep: until 2026-10-01 the lease WAS the 24 h deadline, so a run
+    // left `running` only when its holder settled it or the next boot swept every held run.
+    // Measured cost: a 9.5 h overnight `running` lie (2026-09-30→10-01); 14 and 10 orphaned runs
+    // at 12:34Z and 14:09Z on 09-30; and the sweep also ended runs a second live backend on the
+    // same store (a worktree server) still held. The reverse mistake was the 2026-09-10 incident:
+    // a 600 s claim lease used as a foreground chat's deadline killed healthy chats. Keeping the
+    // two values apart is what lets the lease be short and the deadline long.
+    // Guards: crate tests `an_expired_lease_ends_its_run_like_a_failed_settle` and
+    // `a_renewed_lease_outlives_its_first_term`; server/test/run-lease.test.ts.
+    pub fn claim_run_at(&mut self, now: &str, budgets: RunBudgets) -> Result<Option<Claim>> {
         self.write(|tx| {
-            tx.execute(
-                "UPDATE run SET status = 'failed', error_code = 'lease_expired', error = 'lease expired before settle',
-                   lease_token = NULL, ended_at = ?1
-                 WHERE status IN ('running','cancel_requested') AND lease_expires_at < ?1",
-                [now],
-            )?;
+            expire_leases(tx, now)?;
             // Ready, predecessor finished, conversation free, buddy under its limit, task not paused.
             // Background work is always claimable: the old per-Buddy hold was removed 2026-09-29
             // (owner) after it silently parked requests as "delivered but held".
@@ -176,10 +186,19 @@ impl Store {
                 .query_row([now], |r| r.get(0))
                 .optional()?;
             let Some(id) = candidate else { return Ok(None) };
+            let deadline_ms = match get_run(tx, &id)?.input {
+                RunInput::Chat { .. } => budgets.chat_deadline_ms,
+                RunInput::Post { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } => {
+                    budgets.turn_deadline_ms
+                }
+            };
             let token = uuid::Uuid::new_v4().to_string();
+            // An enqueue-time deadline (EnqueueInput.deadline; no caller sets one today) wins.
             let claimed = tx.execute(
-                "UPDATE run SET status = 'running', lease_token = ?2, lease_expires_at = ?3, started_at = ?4 WHERE id = ?1 AND status = 'queued'",
-                params![id, token, plus_ms(now, lease_ms)?, now],
+                "UPDATE run SET status = 'running', lease_token = ?2, lease_expires_at = ?3, started_at = ?4,
+                   deadline = coalesce(deadline, ?5)
+                 WHERE id = ?1 AND status = 'queued'",
+                params![id, token, plus_ms(now, budgets.lease_ms)?, now, plus_ms(now, deadline_ms)?],
             )?;
             match claimed {
                 1 => Ok(Some(Claim { run: get_run(tx, &id)?, lease_token: token })),
@@ -188,23 +207,30 @@ impl Store {
         })
     }
 
+    /// The holder is alive: push its lease `lease_ms` past now. Called on the server's bridge clock
+    /// (see `TurnPolicy.bridgeAlive`), never on provider progress. A lease that ran out but was not
+    /// yet cleared by the claim gate renews: an adopting backend after a long gap is the holder.
+    /// `lease_lost` once the gate cleared it or the run settled: the holder must stop renewing.
+    pub fn renew_run(&mut self, run_id: &str, lease_token: &str, lease_ms: i64) -> Result<Run> {
+        self.renew_run_at(&now_iso(), run_id, lease_token, lease_ms)
+    }
+
+    pub fn renew_run_at(&mut self, now: &str, run_id: &str, lease_token: &str, lease_ms: i64) -> Result<Run> {
+        self.write(|tx| {
+            leased(tx, run_id, lease_token)?;
+            tx.execute("UPDATE run SET lease_expires_at = ?2 WHERE id = ?1", params![run_id, plus_ms(now, lease_ms)?])?;
+            get_run(tx, run_id)
+        })
+    }
+
     /// Records the outcome of a claimed run. A run whose cancel was requested can only end cancelled.
     pub fn settle_run(&mut self, run_id: &str, lease_token: &str, outcome: Outcome) -> Result<Run> {
         self.write(|tx| {
             let run = leased(tx, run_id, lease_token)?;
-            let (status, text, code, error) = match (&run.status, &outcome) {
-                (RunStatus::CancelRequested, Outcome::Complete { .. } | Outcome::Failed { .. }) => {
-                    return Err(CoreError::Invalid(format!("run {run_id} was asked to cancel; settle it as cancelled")));
-                }
-                (_, Outcome::Complete { text }) => ("complete", Some(text.as_str()), None, None),
-                (_, Outcome::Failed { code, error }) => ("failed", None, Some(code.as_str()), Some(error.as_str())),
-                (_, Outcome::Cancelled { reason }) => ("cancelled", None, Some("cancelled"), Some(reason.as_str())),
-            };
-            tx.execute(
-                "UPDATE run SET status = ?2, outcome = ?3, error_code = ?4, error = ?5, lease_token = NULL, ended_at = ?6 WHERE id = ?1",
-                params![run_id, status, text, code, error, now_iso()],
-            )?;
-            after_settle(tx, &run, &outcome)?;
+            if let (RunStatus::CancelRequested, Outcome::Complete { .. } | Outcome::Failed { .. }) = (&run.status, &outcome) {
+                return Err(CoreError::Invalid(format!("run {run_id} was asked to cancel; settle it as cancelled")));
+            }
+            end_run(tx, &run, &outcome, &now_iso())?;
             get_run(tx, run_id)
         })
     }
@@ -250,44 +276,6 @@ impl Store {
         get_run(&self.conn, id)
     }
 
-    /// Startup recovery, run once by the one process that owns the runner. Every running run was
-    /// held by a process that is gone, so it ends now instead of blocking its conversation and a
-    /// slot of its buddy until its lease expires (a foreground lease is TURN_MAX_RUNTIME_MS, 24 h).
-    /// A queued chat run belongs to a conversation queue that died with that process.
-    /// Startup: end every run a dead host held, except `keep`, the runs whose provider execution
-    /// the new host adopted (the execution journal outlived the old host; see the server's
-    /// turns/executions.ts). A kept run keeps its lease, so it still settles exactly once.
-    pub fn recover_runs(&mut self, keep: &[String]) -> Result<Recovery> {
-        self.write(|tx| {
-            let held: Vec<Run> = collect(
-                tx.prepare_cached(&format!("SELECT {RUN_COLS} FROM run WHERE status IN ('running','cancel_requested')"))?
-                    .query_map([], run_row)?,
-            )?
-            .into_iter()
-            .filter(|run| !keep.contains(&run.id))
-            .collect();
-            let now = now_iso();
-            for run in &held {
-                let (status, outcome) = match run.status {
-                    RunStatus::CancelRequested => ("cancelled", Outcome::Cancelled { reason: "the host restarted".into() }),
-                    _ => ("failed", Outcome::Failed { code: "interrupted".into(), error: "the host restarted during this run".into() }),
-                };
-                let (code, error) = outcome.code_and_error();
-                tx.execute(
-                    "UPDATE run SET status = ?2, error_code = ?3, error = ?4, lease_token = NULL, ended_at = ?5 WHERE id = ?1",
-                    params![run.id, status, code, error, now],
-                )?;
-                after_settle(tx, run, &outcome)?;
-            }
-            let abandoned = tx.execute(
-                "UPDATE run SET status = 'cancelled', error_code = 'interrupted', error = 'the host restarted before this chat turn started',
-                   ended_at = ?1 WHERE status = 'queued' AND input_kind = 'chat'",
-                [&now],
-            )?;
-            Ok(Recovery { interrupted: held.len() as i64, abandoned_chats: abandoned as i64 })
-        })
-    }
-
     pub fn list_runs(&self, query: RunQuery, limit: i64) -> Result<Vec<Run>> {
         let (filter, mut args): (&str, Vec<Value>) = match query {
             RunQuery::Buddy { buddy_id } => ("buddy_id = ? ORDER BY created_at DESC, id DESC", vec![buddy_id.into()]),
@@ -309,8 +297,8 @@ impl Store {
         let (filter, scope) = match scope {
             ListScope::Buddy { buddy_id } => ("r.buddy_id = ?2", buddy_id),
             ListScope::Task { task_id } => ("r.task_id = ?2", task_id),
-            // Live work, plus what ended in the last 12 h: after a host restart the interrupted
-            // runs are already `failed`, and a live-only view made them vanish (2026-09-30).
+            // Live work, plus what ended in the last 12 h: a run whose holder died is `failed`
+            // (lease_expired) soon after, and a live-only view made such runs vanish (2026-09-30).
             ListScope::Workspace { workspace_id } => (
                 "r.workspace_id = ?2 AND (r.status IN ('queued','running','cancel_requested')
                    OR r.ended_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '-12 hours'))",
@@ -484,6 +472,48 @@ fn leased(tx: &Connection, run_id: &str, lease_token: &str) -> Result<Run> {
     }
 }
 
+/// The one write of a run's outcome, for a holder's settle and the claim gate's expiry alike.
+fn end_run(tx: &Transaction, run: &Run, outcome: &Outcome, now: &str) -> Result<()> {
+    let (status, text, code, error) = match outcome {
+        Outcome::Complete { text } => ("complete", Some(text.as_str()), None, None),
+        Outcome::Failed { code, error } => ("failed", None, Some(code.as_str()), Some(error.as_str())),
+        Outcome::Cancelled { reason } => ("cancelled", None, Some("cancelled"), Some(reason.as_str())),
+    };
+    tx.execute(
+        "UPDATE run SET status = ?2, outcome = ?3, error_code = ?4, error = ?5, lease_token = NULL, ended_at = ?6 WHERE id = ?1",
+        params![run.id, status, text, code, error, now],
+    )?;
+    after_settle(tx, run, outcome)
+}
+
+/// The claim gate's first step (see `claim_run_at`): every held run whose lease ran out ends as a
+/// failed settle would, so its request stops awaiting and its sender gets a failure notice. Until
+/// 2026-10-01 this was a bare UPDATE that skipped `after_settle`, leaving requests awaiting forever.
+fn expire_leases(tx: &Transaction, now: &str) -> Result<()> {
+    let expired = collect(
+        tx.prepare_cached(&format!(
+            "SELECT {RUN_COLS} FROM run WHERE status IN ('running','cancel_requested') AND lease_expires_at < ?1"
+        ))?
+        .query_map([now], run_row)?,
+    )?;
+    for run in &expired {
+        let outcome = match run.status {
+            RunStatus::Running => Outcome::Failed {
+                code: "lease_expired".into(),
+                error: "its holder stopped renewing the lease: the backend running it died or lost the turn".into(),
+            },
+            RunStatus::CancelRequested => {
+                Outcome::Cancelled { reason: "its holder stopped renewing the lease before the stop finished".into() }
+            }
+            RunStatus::Queued | RunStatus::Complete | RunStatus::Failed | RunStatus::Cancelled => {
+                return Err(CoreError::Corrupt(format!("run {} is {:?} but was selected as held", run.id, run.status)));
+            }
+        };
+        end_run(tx, run, &outcome, now)?;
+    }
+    Ok(())
+}
+
 /// A request whose run failed or was cancelled stops awaiting; a failure tells the sender.
 fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
     match (&run.input, outcome) {
@@ -510,16 +540,5 @@ fn close_request(tx: &Transaction, post_id: &str, state: &str, failed_run: Optio
             })
             .map(|_| ()),
         _ => Ok(()),
-    }
-}
-
-impl Outcome {
-    /// The (error_code, error) columns of an outcome that did not complete.
-    fn code_and_error(&self) -> (Option<&str>, Option<&str>) {
-        match self {
-            Outcome::Complete { .. } => (None, None),
-            Outcome::Failed { code, error } => (Some(code), Some(error)),
-            Outcome::Cancelled { reason } => (Some("cancelled"), Some(reason)),
-        }
     }
 }

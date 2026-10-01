@@ -97,6 +97,13 @@ client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen in
   authority and runtime regression tests when changing timers or Buddy versions.
   History: `docs/incident-2026-09-10-buddy-chat-timeout.md` (distinct from the
   August bridge-heartbeat fix).
+  A run's LEASE is not its deadline (`docs/patterns.md#lease-heartbeat`). The
+  lease is a 5-minute heartbeat (`BUDDY_RUN_LEASE_MS`), renewed on the turn's
+  bridge clock. The claim gate is the ONE place a dead holder's run ends, and
+  nothing sweeps runs at boot. Never make the lease the deadline's length again:
+  with a 24 h lease, dead holders' runs stayed `running` for up to 9.5 h
+  (2026-09-30). Never derive a deadline from the lease, either: that was the
+  09-10 incident. Guard: `server/test/run-lease.test.ts`.
 
 - Structural patterns live in `docs/patterns.md` (one store + one index,
   sum types, capability grants, one write path, idempotency keys,

@@ -49,7 +49,7 @@ import { createBuddyPolicyPort } from '../src/buddies/policy-port';
 import { registerBuddyRoutes } from '../src/buddies/routes';
 import { createRunner } from '../src/buddies/runner';
 import { workerConversationConfig } from '../src/buddies/worker-config';
-import { TURN_MAX_RUNTIME_MS } from '../src/constants/timeouts';
+import { BUDDY_RUN_LEASE_MS, TURN_MAX_RUNTIME_MS } from '../src/constants/timeouts';
 import { createBuddyCreationService } from '../src/conversations/buddy-creation-service';
 import { ConversationConfigService } from '../src/conversations/config-service';
 import {
@@ -272,7 +272,8 @@ async function world() {
     grants,
     events,
     briefings,
-    leaseMs: TURN_MAX_RUNTIME_MS,
+    leaseMs: BUDDY_RUN_LEASE_MS,
+    chatDeadlineMs: TURN_MAX_RUNTIME_MS,
     backgroundTurnMs: 60_000,
     backstopMs: 200,
     logger: { warn: () => undefined, log: () => undefined },
@@ -294,15 +295,10 @@ async function world() {
           visibility: 'background',
         });
       },
-      runTurn: async ({ conversationId, context, prompt, leaseToken, deadlineMs }) =>
+      runTurn: async ({ conversationId, context, prompt, leaseToken, deadline }) =>
         conversations
           .get(conversationId)!
-          .runCoordinationMessage(
-            prompt,
-            context,
-            leaseToken,
-            new Date(Date.now() + deadlineMs).toISOString()
-          ),
+          .runCoordinationMessage(prompt, context, leaseToken, deadline),
       stop: (id) => conversations.get(id)?.stop(),
     },
   });
@@ -467,11 +463,12 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     assert.match(back.outcome ?? '', /delivered to the DM/);
     assert.equal(w.turns.length, 2, 'no automated turn in the owner chat');
 
-    // A chat run's lease IS the foreground deadline: exactly TURN_MAX_RUNTIME_MS (the 2026-09-10
-    // incident killed healthy owner chats at an inherited 600 s).
+    // A chat run's deadline is exactly TURN_MAX_RUNTIME_MS (the 2026-09-10 incident killed healthy
+    // owner chats at an inherited 600 s). Until 2026-10-01 this read `leaseExpiresAt`, because the
+    // lease WAS the deadline; the lease is now a separate short heartbeat (Pattern: lease-heartbeat).
     const chatRun = leadRuns.find((r) => r.input.kind === 'chat')!;
-    const leased = Date.parse(chatRun.leaseExpiresAt!) - Date.parse(chatRun.startedAt!);
-    assert.ok(Math.abs(leased - TURN_MAX_RUNTIME_MS) < 1_000, `lease ${leased} ms`);
+    const budget = Date.parse(chatRun.deadline!) - Date.parse(chatRun.startedAt!);
+    assert.ok(Math.abs(budget - TURN_MAX_RUNTIME_MS) < 1_000, `deadline ${budget} ms`);
 
     // Tokens are readable by the agent's shell, so a settled turn's grant must be dead.
     for (const turn of w.turns)
@@ -586,7 +583,7 @@ test('workspace run rows expose task_paused and clear it when the same run becom
     });
     const releasedRow = released.value.runs.find((item: { id: string }) => item.id === row.id);
     assert.equal(releasedRow.waiting ?? null, null);
-    assert.equal((await w.core.claimRun(60_000))?.run.id, row.id);
+    assert.equal((await w.core.claimRun(w.runner.budgets))?.run.id, row.id);
 
     const missing = await w.core.enqueueRun(OWNER, {
       buddyId: w.designer.id,

@@ -17,6 +17,7 @@ import { setIgnorePatterns, shouldIgnoreWorkingDirectory } from './config';
 import {
   BUDDY_BACKGROUND_TURN_MS,
   BUDDY_RUNNER_BACKSTOP_MS,
+  BUDDY_RUN_LEASE_MS,
   EXTERNAL_GRACE_MS,
   HOT_RELOAD_FORCE_EXIT_GRACE_MS,
   LOCAL_COMPLETION_SUPPRESS_MS,
@@ -389,13 +390,12 @@ const buddyRunnerHost: RunnerHost = {
       visibility: 'background',
     });
   },
-  runTurn: async ({ conversationId, context, prompt, leaseToken, deadlineMs }) => {
+  runTurn: async ({ conversationId, context, prompt, leaseToken, deadline }) => {
     const registered = conversations.get(conversationId);
     if (!registered) throw new Error(`Run conversation ${conversationId} is not registered`);
     const conversation = await buddyCreationService.ensureConversationReady(registered);
     // Automatic expiry is max_runtime_timeout, never stop()/user_stop (AGENTS.md). The policy
-    // arms it, so an adopting backend re-arms the same absolute deadline.
-    const deadline = new Date(Date.now() + deadlineMs).toISOString();
+    // arms it from the run's own deadline, so an adopting backend re-arms the same instant.
     return conversation.runCoordinationMessage(prompt, context, leaseToken, deadline);
   },
   stop: (id) => conversations.get(id)?.stop(),
@@ -406,8 +406,11 @@ const buddyRunner = createRunner({
   grants: buddyGrants,
   events: buddyEvents,
   briefings: buddyBriefings,
-  // Explicit: a foreground chat's deadline is its lease (runner.ts, 2026-09-10 incident).
-  leaseMs: TURN_MAX_RUNTIME_MS,
+  // Two values, never one (Pattern: lease-heartbeat): the lease is a minutes-long heartbeat the
+  // turn renews on its bridge clock; a foreground chat's deadline is TURN_MAX_RUNTIME_MS, passed
+  // explicitly (2026-09-10: a 600 s claim lease used as the chat deadline killed live chats).
+  leaseMs: BUDDY_RUN_LEASE_MS,
+  chatDeadlineMs: TURN_MAX_RUNTIME_MS,
   backgroundTurnMs: BUDDY_BACKGROUND_TURN_MS,
   backstopMs: BUDDY_RUNNER_BACKSTOP_MS,
 });

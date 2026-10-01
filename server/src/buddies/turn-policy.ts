@@ -10,6 +10,7 @@ import type {
   ResolvedExecutionConfig,
 } from '@unleashd/shared';
 import { parseBuddyBuilderToolResult } from '@unleashd/shared';
+import { BUDDY_RUN_LEASE_RENEW_MS } from '../constants/timeouts';
 import type { ConversationRuntimeView } from '../conversations/runtime';
 import type { TurnTerminalCause } from '../observability';
 import { noteActivity } from '../observability/event-loop-stall';
@@ -264,6 +265,7 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
   }
   queueEmptied(): void {}
   attemptFinished(): void {}
+  bridgeAlive(): void {}
   sessionReset(): void {}
   audienceKey(): string | undefined {
     return undefined;
@@ -308,7 +310,8 @@ export function sessionAudienceKey(
 
 /**
  * The run a Buddy turn executes under, as data: a foreground chat's admitted run or a
- * runner-owned run. Its lease settles it; its deadline expires it as max_runtime_timeout.
+ * runner-owned run. Its lease token settles it and is renewed on the bridge clock; its deadline
+ * (a separate value: 24 h for a chat) expires it as max_runtime_timeout.
  */
 export interface RunRecord {
   readonly kind: 'chat' | 'runner';
@@ -340,6 +343,9 @@ type RunExecution = RunRecord & {
   drained(status: 'complete' | 'failed', detail: string): void;
 };
 
+/** This holder's view of its run's lease: renewed at `renewedAt`, a renewal in flight, or gone. */
+type LeaseHold = { t: 'held'; renewedAt: number } | { t: 'renewing' } | { t: 'lost' };
+
 export interface BuddyTurnPolicySeed {
   readonly memorySnapshot: MemorySnapshot | null;
   /** The session audience key the restored provider session was saved under. */
@@ -358,6 +364,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
   private chatTicket: { turnId: string; stopWaiting: () => void } | null = null;
   private admittedChatRun: OwnedChatRun | null = null;
   private execution: RunExecution | null = null;
+  // The execution's lease, as this holder last knew it (see bridgeAlive).
+  private lease: LeaseHold | null = null;
   // This turn's grant, held as data so the turn can be adopted.
   private grant: GrantRecord | null = null;
   private reviewTicket: { attemptId: string; messageStart: number; context: BuddyContext } | null =
@@ -398,8 +406,9 @@ export class BuddyTurnPolicy implements TurnPolicy {
   }
 
   // Admitted: the owned run. Otherwise the queue head goes back to pending and the shared tick
-  // re-runs processQueue. The run's lease is its deadline: the runner leases every claim for
-  // TURN_MAX_RUNTIME_MS (runner.ts; 600 s killed live owner chats on 2026-09-10).
+  // re-runs processQueue. The run's deadline is TURN_MAX_RUNTIME_MS, passed explicitly to the
+  // claim (runner.ts `chatDeadlineMs`; a 600 s claim lease used as the deadline killed live owner
+  // chats on 2026-09-10). Its lease is a separate short heartbeat (bridgeAlive).
   private admitChatRun(): OwnedChatRun | null {
     this.chatTicket ??= {
       turnId: this.buddies.enqueueChat(this.turnContext(), this.host.id),
@@ -544,8 +553,9 @@ export class BuddyTurnPolicy implements TurnPolicy {
   }
 
   /**
-   * The admitted chat run owns this turn until it drains: its deadline (the run's lease) expires
-   * as max_runtime_timeout, never user_stop, and the run settles once on the terminal event.
+   * The admitted chat run owns this turn until it drains: its deadline (the run's own, never its
+   * lease) expires as max_runtime_timeout, never user_stop, and the run settles once on the
+   * terminal event.
    */
   private ownChatRun(owned: OwnedChatRun): void {
     this.armExecution(
@@ -572,6 +582,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
    */
   private armExecution(execution: RunExecution, state: AdoptedExecution['state']): () => void {
     this.execution = execution;
+    // Just claimed, or (adopted) renewed by the runner's start before its first claim.
+    this.lease = { t: 'held', renewedAt: Date.now() };
     const timer =
       state === 'running'
         ? setTimeout(
@@ -585,6 +597,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     const detach = onTurnDrained(this.host, (status, detail) => {
       clearTimeout(timer);
       this.execution = null;
+      this.lease = null;
       execution.drained(status, detail);
     });
     // For a run that never reached a turn: drop its deadline and drain listeners with it.
@@ -592,6 +605,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
       clearTimeout(timer);
       detach();
       this.execution = null;
+      this.lease = null;
     };
   }
 
@@ -677,6 +691,62 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   attemptFinished(cause: TurnTerminalCause): void {
     if (this.execution && !this.execution.terminalCause) this.execution.terminalCause = cause;
+  }
+
+  // Pattern: lease-heartbeat (docs/patterns.md#lease-heartbeat)
+  // THE RENEWAL SITE. TurnRunner calls this on every event that ticks the watchdog's bridge clock.
+  // At most once per BUDDY_RUN_LEASE_RENEW_MS it pushes the run's lease BUDDY_RUN_LEASE_MS ahead.
+  //
+  // Why the bridge clock, not provider progress: a model may think silently for up to the 60-min
+  // provider-idle budget. A lease renewed only on progress would have to be an hour long, so a
+  // dead holder's run would lie for an hour. agent-cli heartbeats tick the bridge clock every
+  // <= 30 s while the wrapper and this backend are alive, so a minutes-long lease survives any
+  // silent turn. Stuck providers are still the idle timer's job: heartbeats renew the lease but
+  // never count as progress.
+  //
+  // Why renewal at all, instead of a lease the length of the deadline: until 2026-10-01 the lease
+  // WAS the 24 h deadline, and a dead holder's runs stayed `running` until the next boot:
+  // - a 9.5 h overnight lie on 2026-09-30→10-01;
+  // - 14 and 10 orphaned runs at 12:34Z and 14:09Z on 09-30.
+  // The opposite mistake, a short lease used as a chat's deadline, killed healthy owner chats at
+  // 600 s on 2026-09-10. Lease and deadline are separate values and must stay separate.
+  //
+  // An adopted turn (P1) renews here too: its new backend is now the holder.
+  // `lost` means the claim gate already ended the run, which takes a renewal gap longer than the
+  // whole lease (a multi-minute event-loop stall, or another backend's gate during a restart gap).
+  // The turn is not killed: its requester was already told the run failed, a late answer or settle
+  // is rejected, and this conversation stays busy in memory, so no second writer starts here.
+  // Killing it would report a bookkeeping loss as a timeout or a user stop (the 09-10 misreport).
+  // Guards: server/test/run-lease.test.ts "a heartbeating silent turn outlives its lease; a turn
+  // with no provider progress still dies of the idle timer" and "a holder that dies while the
+  // backend stays up is cleared within the lease time".
+  bridgeAlive(): void {
+    const { execution, lease } = this;
+    if (!execution || lease?.t !== 'held') return;
+    if (Date.now() - lease.renewedAt < BUDDY_RUN_LEASE_RENEW_MS) return;
+    this.lease = { t: 'renewing' };
+    void this.buddies.renewLease(execution.runId, execution.leaseToken).then((renewal) => {
+      if (this.execution !== execution) return; // drained meanwhile; the settle owns it now
+      switch (renewal.kind) {
+        case 'renewed':
+          this.lease = { t: 'held', renewedAt: Date.now() };
+          return;
+        case 'failed':
+          // Retry one renewal interval later: the lease still has four intervals to run.
+          console.warn(
+            `[${this.host.id}] lease renewal failed for ${execution.runId}:`,
+            renewal.error
+          );
+          this.lease = { t: 'held', renewedAt: Date.now() };
+          return;
+        case 'lost':
+          console.error(
+            `[${this.host.id}] run ${execution.runId} lost its lease: the claim gate ended it; the turn continues unowned`
+          );
+          this.lease = { t: 'lost' };
+          return;
+      }
+    });
   }
 
   stop(): boolean {

@@ -809,10 +809,16 @@ pub struct WorkspaceInput {
     pub root_path: String,
 }
 
-/// What startup recovery ended: runs a dead process held, and chat turns nobody waits for.
+/// The two clocks a claim starts, kept apart because one number serving both killed owner chats
+/// at 600 s (2026-09-10) and left dead holders' runs `running` for 24 h (2026-09-30).
+/// `lease_ms`: how long the holder may go without renewing before the claim gate ends the run.
+/// `chat_deadline_ms` / `turn_deadline_ms`: the absolute runtime budget of a foreground chat run
+/// and of every other run, written to the run's `deadline` column. All three are required: the
+/// host passes TURN_MAX_RUNTIME_MS for chats explicitly, never a default (AGENTS.md).
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Recovery {
-    pub interrupted: i64,
-    pub abandoned_chats: i64,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunBudgets {
+    pub lease_ms: i64,
+    pub chat_deadline_ms: i64,
+    pub turn_deadline_ms: i64,
 }

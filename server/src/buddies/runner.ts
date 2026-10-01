@@ -1,4 +1,12 @@
-import type { Claim, Outcome, Post, Run, RunConfig, RunInput } from '@unleashd/buddies-core';
+import type {
+  Claim,
+  Outcome,
+  Post,
+  Run,
+  RunBudgets,
+  RunConfig,
+  RunInput,
+} from '@unleashd/buddies-core';
 import type { BuddyContext } from '@unleashd/shared';
 import type { Briefings } from './briefing';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
@@ -13,13 +21,19 @@ import type { Grants } from './grants';
  *   enqueues due schedules → claimRun until nothing is claimable → one handler per RunInput.
  *
  * Every claim is indexed (crates/unleashd-buddies/tests/query_plan.rs), so a wake costs a few
- * off-loop SQLite calls. Recovery runs once, at start: runs a dead host held end there.
+ * off-loop SQLite calls. There is no startup recovery: a run whose holder died ends at the claim
+ * gate when its lease runs out (Pattern: lease-heartbeat, docs/patterns.md#lease-heartbeat).
  */
 
-/** An admitted chat's run: its lease is the turn's deadline. */
+/** An admitted chat's run: `deadline` is the run's own (TURN_MAX_RUNTIME_MS), not its lease. */
 export type OwnedChatRun = { id: string; claim_token: string; deadline: string };
-/** A run whose turn this backend adopted: kept through recovery, stoppable by conversation. */
-export type AdoptedRun = { runId: string; conversationId: string };
+/** A run whose turn this backend adopted: its lease renewed at start, stoppable by conversation. */
+export type AdoptedRun = { runId: string; leaseToken: string; conversationId: string };
+/** One lease renewal: `lost` means the claim gate already ended the run or it settled. */
+export type LeaseRenewal =
+  | { kind: 'renewed' }
+  | { kind: 'lost' }
+  | { kind: 'failed'; error: string };
 export type ChatAdmission =
   | { kind: 'admitted'; run: OwnedChatRun }
   | { kind: 'waiting'; reason: string }
@@ -41,7 +55,8 @@ export interface RunnerHost {
     context: BuddyContext;
     prompt: string;
     leaseToken: string;
-    deadlineMs: number;
+    /** The run's absolute deadline (ISO), set at its claim. */
+    deadline: string;
   }): Promise<string>;
   stop(conversationId: string): void;
 }
@@ -75,13 +90,17 @@ export function createRunner(options: {
   grants: Grants;
   events: BuddyEvents;
   briefings: Briefings;
-  /**
-   * The lease of every claim, and so a foreground chat's deadline. The server passes
-   * TURN_MAX_RUNTIME_MS explicitly: inheriting a shorter background default killed healthy
-   * owner chats at 600 s on 2026-09-10 (docs/incident-2026-09-10-buddy-chat-timeout.md).
-   * Guard: `buddies-v2.test.ts` "a chat run is leased for exactly TURN_MAX_RUNTIME_MS".
-   */
+  /** The heartbeat lease of every claim (BUDDY_RUN_LEASE_MS): minutes, renewed by `renew`. */
   leaseMs: number;
+  /**
+   * A foreground chat run's deadline. The server passes TURN_MAX_RUNTIME_MS explicitly: a chat
+   * deadline taken from a 600 s background claim lease killed healthy owner chats on 2026-09-10
+   * (docs/incident-2026-09-10-buddy-chat-timeout.md). The lease is a separate value since
+   * 2026-10-01. Guard: `buddies-v2.test.ts`, which asserts a chat run's deadline is exactly
+   * TURN_MAX_RUNTIME_MS.
+   */
+  chatDeadlineMs: number;
+  /** Every other run's deadline (BUDDY_BACKGROUND_TURN_MS). */
   backgroundTurnMs: number;
   backstopMs: number;
   logger?: Pick<Console, 'warn' | 'log'>;
@@ -89,6 +108,11 @@ export function createRunner(options: {
   const { core, host, grants, events, briefings } = options;
   const logger = options.logger ?? console;
   const chats = new Map<string, ChatTicket>();
+  const budgets: RunBudgets = {
+    leaseMs: options.leaseMs,
+    chatDeadlineMs: options.chatDeadlineMs,
+    turnDeadlineMs: options.backgroundTurnMs,
+  };
   let draining: Promise<void> | null = null;
   let again = false;
   // Paused while a backend reload drains: running turns finish, nothing new is claimed.
@@ -117,11 +141,7 @@ export function createRunner(options: {
     // into one) and the schedule advances, in one indexed transaction (the crate's cron math,
     // with IANA timezones). This replaced scheduler.ts, its legacy executor and its 1 s tick.
     await core.dueSchedules(new Date().toISOString());
-    for (
-      let claim = await core.claimRun(options.leaseMs);
-      claim;
-      claim = await core.claimRun(options.leaseMs)
-    )
+    for (let claim = await core.claimRun(budgets); claim; claim = await core.claimRun(budgets))
       void execute(claim);
   }
 
@@ -147,7 +167,7 @@ export function createRunner(options: {
           : outcome;
       await core.settleRun(run.id, leaseToken, final);
     } catch (error) {
-      // lease_lost: the lease expired or startup recovery ended it; the queue already moved on.
+      // lease_lost: the claim gate ended it when its lease ran out; the queue already moved on.
       logger.warn(
         `[buddies-runner] could not settle ${run.id}:`,
         coreError(error)?.message ?? error
@@ -309,7 +329,7 @@ export function createRunner(options: {
             context,
             prompt: job.prompt,
             leaseToken: claim.leaseToken,
-            deadlineMs: options.backgroundTurnMs,
+            deadline: run.deadline!,
           });
           return tracked(finishTurn(run, claim.leaseToken, job.after, text));
         }
@@ -345,6 +365,22 @@ export function createRunner(options: {
     if (run.status === 'cancel_requested' && run.conversationId) host.stop(run.conversationId);
   }
 
+  /**
+   * Push a held run's lease BUDDY_RUN_LEASE_MS past now. The caller is the turn's bridge clock
+   * (TurnPolicy.bridgeAlive) and, at boot, `start` for adopted turns; see the renewal site in
+   * buddies/turn-policy.ts for why. `lost` is final: the run already ended (claim gate or settle).
+   */
+  async function renew(runId: string, leaseToken: string): Promise<LeaseRenewal> {
+    try {
+      await core.renewRun(runId, leaseToken, options.leaseMs);
+      return { kind: 'renewed' };
+    } catch (error) {
+      const known = coreError(error);
+      if (known?.code === 'lease_lost') return { kind: 'lost' };
+      return { kind: 'failed', error: known?.message ?? String(error) };
+    }
+  }
+
   function execute(claim: Claim): Promise<void> {
     const input = claim.run.input;
     const done = input.kind === 'chat' ? admitChat(claim, input.turnId) : runJob(claim);
@@ -354,22 +390,28 @@ export function createRunner(options: {
   }
 
   return {
-    leaseMs: options.leaseMs,
+    chatDeadlineMs: options.chatDeadlineMs,
+    budgets,
+    renew,
 
     /**
      * `adopted`: runs whose provider execution this backend adopted from the one before it
-     * (turns/executions.ts). They stay running; every other held run ends interrupted. A kept run
+     * (turns/executions.ts). Their leases are renewed BEFORE the first claim, because the first
+     * claim's gate would otherwise end a run whose lease ran out while no backend was alive. Every
+     * other held run is left to the gate: its lease ends it (2026-10-01; this replaced the
+     * blanket startup sweep, which also ended runs a second live backend still held). A kept run
      * whose stop was requested before the old backend could act on it is stopped now.
      */
     async start(adopted: readonly AdoptedRun[]): Promise<void> {
-      const recovered = await core.recoverRuns(adopted.map((run) => run.runId));
       for (const run of adopted) {
+        const renewal = await renew(run.runId, run.leaseToken);
+        // `lost`: its replay already settled it (an execution that ended during the gap).
+        if (renewal.kind === 'failed')
+          logger.warn(`[buddies-runner] adopted run ${run.runId} not renewed: ${renewal.error}`);
         const current = await core.getRun(run.runId);
         if (current.status === 'cancel_requested') host.stop(run.conversationId);
       }
-      logger.log(
-        `[buddies-runner] recovered: ${recovered.interrupted} interrupted, ${recovered.abandonedChats} abandoned chat turns`
-      );
+      logger.log(`[buddies-runner] started; ${adopted.length} adopted runs renewed`);
       unsubscribe = events.on((event) => {
         if (event.kind === 'cancelled') stopTurn(event.run);
         wake();
@@ -441,7 +483,7 @@ export function createRunner(options: {
             run: {
               id: ticket.claim.run.id,
               claim_token: ticket.claim.leaseToken,
-              deadline: ticket.claim.run.leaseExpiresAt!,
+              deadline: ticket.claim.run.deadline!,
             },
           };
       }
