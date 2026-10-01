@@ -1,10 +1,11 @@
 import type { ExecutionHandle } from '@nbardy/agent-cli';
 import type { AdoptedRun } from '../buddies/runner';
 import type { FoundExecution, TurnOwner } from '../turns/executions';
+import type { AdoptedExecution } from '../turns/policy';
 
 /** A conversation as the boot adoption pass sees it. */
 export interface AdoptingConversation {
-  adoptTurn(owner: TurnOwner, handle: ExecutionHandle): void;
+  adoptTurn(owner: TurnOwner, handle: ExecutionHandle, execution: AdoptedExecution): void;
 }
 
 export interface AdoptionPorts {
@@ -61,7 +62,7 @@ async function adoptTurn(
   const conversation = await ports.conversation(owner.conversationId);
   if (!conversation) return refuse('its conversation is gone');
   try {
-    conversation.adoptTurn(owner, ports.attach(item.dir));
+    conversation.adoptTurn(owner, ports.attach(item.dir), executionAt(item.state));
   } catch (error) {
     return refuse(`adoption failed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -71,4 +72,17 @@ async function adoptTurn(
   return owner.policy.t === 'buddy'
     ? { runId: owner.policy.run.runId, conversationId: owner.conversationId }
     : null;
+}
+
+// Pattern: sum-types (docs/patterns.md#sum-types)
+function executionAt(state: Extract<FoundExecution, { t: 'turn' }>['state']): AdoptedExecution {
+  switch (state.kind) {
+    case 'running':
+      return { state: 'running' };
+    case 'exited':
+    case 'lost':
+      return { state: 'ended' };
+    case 'unstarted':
+      throw new Error('an unstarted execution is refused, never adopted');
+  }
 }

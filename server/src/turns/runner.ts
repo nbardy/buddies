@@ -31,7 +31,7 @@ import { type SwarmObservers, watchSwarmRuns } from '../swarm';
 import { type BackgroundWait, backgroundWaitFor } from './background-wait';
 import type { ExecutionJournals, TurnOwner } from './executions';
 import type { TurnInput } from './input';
-import type { TurnPolicy } from './policy';
+import type { AdoptedExecution, TurnPolicy } from './policy';
 import type { QueueEntry, TurnQueue } from './queue';
 import {
   type SubAgentFold,
@@ -345,11 +345,18 @@ export class TurnRunner {
    * replays from byte 0 through the same fold, so this backend ends up exactly where a
    * never-restarted one would be. Guard: execution-adoption.test.ts.
    */
-  adopt(owner: TurnOwner, handle: ExecutionHandle): void {
+  adopt(owner: TurnOwner, handle: ExecutionHandle, execution: AdoptedExecution): void {
     const host = this.host;
     const runToken = ++this.runToken;
-    console.log(`[${host.id}] Adopting running ${owner.provider} turn (pid ${handle.pid})`);
-    this.beginTurnState(owner.provider, Date.parse(owner.startedAt));
+    console.log(
+      `[${host.id}] Adopting ${execution.state} ${owner.provider} turn (pid ${handle.pid})`
+    );
+    // An ended turn's outcome is on disk: a max-runtime clock that ran out during the gap must
+    // not seal its replay (see BuddyTurnPolicy.armExecution).
+    this.beginTurnState(
+      owner.provider,
+      execution.state === 'running' ? Date.parse(owner.startedAt) : Date.now()
+    );
     this.activeAttemptId = owner.attemptId;
     this.ports.turnAttempts.activity(
       owner.attemptId,
