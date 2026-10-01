@@ -20,6 +20,8 @@ import './ChannelLanding.css';
 
 // Home opened only a message filter, hiding criteria and children.
 // Guard: task-page.test.tsx renders the Home destination and checks its linked hierarchy.
+// The old settings disclosure hid task criteria behind an unrelated progress form.
+// Guard: task-page.test.tsx keeps criteria visible and run history after discussion.
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 export function TaskPage({
   taskId,
@@ -38,6 +40,7 @@ export function TaskPage({
   const feed = useChannelFeed(taskPostsFeed(taskId));
   const [replyTo, setReplyTo] = useState<{ rootId: string; channelId: string } | null>(null);
   const href = (id: string) => channelsHref(workspaceId, { kind: 'task', channelId, taskId: id });
+  const [editing, setEditing] = useState(false);
   const task = detail.data?.task;
   const parent = task?.parentId ? directory.tasks.find((item) => item.id === task.parentId) : null;
   if (!detail.data)
@@ -75,31 +78,55 @@ export function TaskPage({
               </span>
               {data.task.paused && <span className="ui-badge">Paused</span>}
             </div>
-            <p className="task-page-copy">{data.task.doneCriteria}</p>
-            <details className="landing-retired">
-              <summary className="landing-more">Details & settings</summary>
-              <div className="landing-section ui-stack">
-                <p className="buddy-panel__criteria">
-                  <strong>Done when</strong> {data.task.doneCriteria}
+            <section className="landing-section ui-stack" aria-label="Completion criteria">
+              <header className="landing-section-head ui-row">
+                <h2>Done when</h2>
+                <button className="landing-more" type="button" onClick={() => setEditing(!editing)}>
+                  {editing ? 'Cancel editing' : 'Edit task'}
+                </button>
+              </header>
+              {editing && (
+                <section className="landing-retired ui-stack" aria-label="Edit task">
+                  <h3>Update task progress</h3>
+                  <p className="landing-empty ui-muted">
+                    Change the status, next action or blocker.
+                  </p>
+                  <TaskEditForm
+                    className="task-page-edit"
+                    key={data.task.revision}
+                    task={data.task}
+                    refresh={detail.refetch}
+                  />
+                </section>
+              )}
+              <div className="task-page-copy">
+                <ChannelMarkdown
+                  body={{ t: 'text', text: data.task.doneCriteria }}
+                  buddyNames={directory.buddyNames}
+                  tasks={directory.taskById}
+                />
+              </div>
+              {data.task.nextAction && (
+                <p className="landing-empty">
+                  <strong>Next action</strong> · {data.task.nextAction}
                 </p>
-                {data.task.evidence.length > 0 && (
+              )}
+              {data.task.blockedReason && (
+                <p className="landing-empty">
+                  <strong>Blocked by</strong> · {data.task.blockedReason}
+                </p>
+              )}
+              {data.task.evidence.length > 0 && (
+                <section aria-label="Evidence">
+                  <h3>Evidence</h3>
                   <ul className="buddy-post-list__evidence">
                     {data.task.evidence.map((item) => (
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
-                )}
-                <TaskEditForm key={data.task.revision} task={data.task} refresh={detail.refetch} />
-                <details>
-                  <summary>Execution history · {data.runs.length} runs</summary>
-                  <BuddyRunList
-                    runs={data.runs}
-                    refresh={detail.refetch}
-                    empty="No runs for this task yet."
-                  />
-                </details>
-              </div>
-            </details>
+                </section>
+              )}
+            </section>
             {detail.kind === 'stale' && <p role="alert">{detail.error.message}</p>}
           </header>
           <section className="landing-section ui-stack" aria-label="Subtasks">
@@ -209,6 +236,17 @@ export function TaskPage({
                 ))}
               </ol>
             )}
+          </section>
+          <section className="landing-section ui-stack" aria-label="Execution history">
+            <header className="landing-section-head ui-row">
+              <h2>Execution history</h2>
+              <span className="landing-count">{data.runs.length} runs</span>
+            </header>
+            <BuddyRunList
+              runs={data.runs}
+              refresh={detail.refetch}
+              empty="No runs for this task yet."
+            />
           </section>
         </div>
       </div>

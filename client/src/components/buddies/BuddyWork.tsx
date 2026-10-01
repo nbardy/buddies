@@ -136,7 +136,15 @@ export function NewTaskForm({
 }
 
 /** Status, next action and blocker, sent as a patch of the changed fields only. */
-export function TaskEditForm({ task, refresh }: { task: Task; refresh: () => Promise<void> }) {
+export function TaskEditForm({
+  task,
+  refresh,
+  className = 'buddy-panel__form',
+}: {
+  task: Task;
+  refresh: () => Promise<void>;
+  className?: string;
+}) {
   const [status, setStatus] = useState<TaskStatus>(task.status);
   const [nextAction, setNextAction] = useState(task.nextAction ?? '');
   const [blockedReason, setBlockedReason] = useState(task.blockedReason ?? '');
@@ -148,7 +156,7 @@ export function TaskEditForm({ task, refresh }: { task: Task; refresh: () => Pro
   };
   return (
     <form
-      className="buddy-panel__form"
+      className={className}
       onSubmit={(event) => {
         event.preventDefault();
         void action.run('task', () =>

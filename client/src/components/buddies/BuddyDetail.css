@@ -467,11 +467,11 @@
   color: var(--text-secondary);
   font-size: var(--fs-5);
   line-height: 1.65;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
+.task-page-edit { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-5); }
+.task-page-edit label { display: flex; flex: 1 1 12rem; flex-direction: column; gap: var(--sp-3); font-size: var(--fs-3); color: var(--text-secondary); }
+.task-page-edit input, .task-page-edit select { width: 100%; min-width: 0; padding: var(--sp-4); border: 1px solid var(--landing-line); border-radius: var(--sp-5); background: var(--bg-primary); color: var(--text-primary); }
+.task-page-edit button { padding: var(--sp-4) var(--sp-5); border-radius: var(--sp-5); }
 .task-page .task-page-footer { padding-top: var(--sp-5); padding-bottom: var(--sp-7); flex: none; }
 .task-page-comments { margin: 0; padding: 0; list-style: none; min-width: 0; }
 .task-page-comments > li { min-width: 0; padding: var(--sp-7) 0; border-bottom: 1px solid var(--landing-line); }

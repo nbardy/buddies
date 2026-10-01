@@ -74,6 +74,17 @@ test('Home task destination shows task details, project and subtask links, and m
     );
     assert.match(html, /Task page/);
     assert.match(html, /A usable task page/);
+    assert.match(html, /aria-label="Completion criteria"/);
+    assert.match(html, /Edit task<\/button>/);
+    assert.doesNotMatch(html, /Details &amp; settings/);
+    assert.doesNotMatch(
+      html,
+      /<details[^>]*>[\s\S]*?A usable task page/,
+      'criteria must stay visible'
+    );
+    assert.ok(
+      html.indexOf('aria-label="Execution history"') > html.indexOf('aria-label="Discussion"')
+    );
     assert.match(html, /Project: Ship Tasks/);
     assert.match(html, /href="[^"]*task=project"/);
     assert.match(html, /href="[^"]*task=child"/);
