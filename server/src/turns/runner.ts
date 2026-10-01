@@ -31,7 +31,7 @@ import { type SwarmObservers, watchSwarmRuns } from '../swarm';
 import { type BackgroundWait, backgroundWaitFor } from './background-wait';
 import type { ExecutionJournals, TurnOwner } from './executions';
 import type { TurnInput } from './input';
-import type { TurnPolicy } from './policy';
+import type { AdoptedExecution, TurnPolicy } from './policy';
 import type { QueueEntry, TurnQueue } from './queue';
 import {
   type SubAgentFold,
@@ -212,7 +212,6 @@ export class TurnRunner {
   }
 
   finishAttempt(state: AttemptState, terminalCause: TurnTerminalCause): void {
-    this.host.policy.attemptFinished(terminalCause);
     if (!this.activeAttemptId) return;
     this.ports.turnAttempts.terminal({
       attemptId: this.activeAttemptId,
@@ -290,10 +289,11 @@ export class TurnRunner {
     }
 
     let handle: ExecutionHandle;
+    let journalDir: string | null = null;
     try {
       const extras = host.policy.startTurn(turn.input, turn.config);
       // The owner is on disk before the provider exists (turns/executions.ts).
-      const journalDir = this.ports.executions.forTurn({
+      journalDir = this.ports.executions.forTurn({
         conversationId: host.id,
         attemptId,
         provider: turn.config.provider,
@@ -321,6 +321,8 @@ export class TurnRunner {
         ...extras,
       } as ExecuteCommandRequest);
     } catch (error) {
+      // Never started: its journal (which names a live grant and lease) goes with it.
+      if (journalDir) this.ports.executions.remove(journalDir);
       host.policy.spawnFailed();
       this.finishAttempt('failed', 'spawn_failed');
       const message = error instanceof Error ? error.message : String(error);
@@ -345,11 +347,16 @@ export class TurnRunner {
    * replays from byte 0 through the same fold, so this backend ends up exactly where a
    * never-restarted one would be. Guard: execution-adoption.test.ts.
    */
-  adopt(owner: TurnOwner, handle: ExecutionHandle): void {
+  adopt(owner: TurnOwner, handle: ExecutionHandle, execution: AdoptedExecution): void {
     const host = this.host;
     const runToken = ++this.runToken;
-    console.log(`[${host.id}] Adopting running ${owner.provider} turn (pid ${handle.pid})`);
-    this.beginTurnState(owner.provider, Date.parse(owner.startedAt));
+    console.log(`[${host.id}] Adopting ${execution.state} ${owner.provider} turn (pid ${handle.pid})`);
+    // An ended turn's budgets no longer apply: its outcome is on disk, and a max-runtime clock
+    // that ran out meanwhile must not seal the replay as a timeout.
+    this.beginTurnState(
+      owner.provider,
+      execution.state === 'running' ? Date.parse(owner.startedAt) : Date.now()
+    );
     this.activeAttemptId = owner.attemptId;
     this.ports.turnAttempts.activity(
       owner.attemptId,
@@ -403,6 +410,8 @@ export class TurnRunner {
       this.surfaceError(normalizeProviderErrorMessage(fold.streamError.message));
     });
 
+    // The run settle this turn's drain started (policy.settlement()); resolved when none did.
+    let settled: Promise<void> = Promise.resolve();
     const turnDrain = handle.completed
       .then(async (completion) => {
         if (runToken !== this.runToken) return;
@@ -411,18 +420,27 @@ export class TurnRunner {
         await eventConsumption;
         if (runToken !== this.runToken) return;
         await this.settle(completion, fold);
+        settled = host.policy.settlement();
       })
       .catch((err: unknown) => {
         if (runToken !== this.runToken) return;
         this.completionBroke(err);
+        settled = host.policy.settlement();
       });
     this.activeDrain = turnDrain;
-    void turnDrain.finally(() => {
-      if (this.activeDrain === turnDrain) this.activeDrain = null;
-      // Settled (or superseded by a reset): the journal is spent. Removed only now, so a backend
-      // that dies mid-settle re-adopts it and the lease rejects the second settle.
-      this.ports.executions.remove(handle.journalDir);
-    });
+    void turnDrain
+      .finally(() => {
+        if (this.activeDrain === turnDrain) this.activeDrain = null;
+      })
+      .then(() => settled)
+      .catch(() => undefined)
+      .finally(() => {
+        // The journal is spent only once the run's settle landed (a Buddy answer can take
+        // seconds): a backend that dies before then re-adopts the exited journal and settles it,
+        // and a second settle is rejected by the lease. Removing it at drain let a crash in that
+        // window recover a finished run as interrupted (review of 2392b63).
+        this.ports.executions.remove(handle.journalDir);
+      });
   }
 
   // --- event fold (called by EventFold) ----------------------------------------

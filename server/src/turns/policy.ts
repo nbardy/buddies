@@ -53,11 +53,16 @@ export interface AdoptedReview {
   messageStart: number;
 }
 
-export type CoordinationDrained = (
-  status: 'complete' | 'failed',
-  detail: string,
-  terminalCause?: TurnTerminalCause
-) => void;
+/**
+ * How the adopted execution stands. `ended`: it exited while no backend watched, so its outcome
+ * is on disk and no deadline applies. `revoked`: a Stop or timeout revoked its tools before the
+ * old backend died, so the grant stays dead.
+ */
+export interface AdoptedExecution {
+  state: 'running' | 'ended';
+  grant: 'live' | 'revoked';
+}
+
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
 export interface TurnPolicy {
@@ -88,7 +93,13 @@ export interface TurnPolicy {
   /** Right after startTurn, before spawn: this turn's state as data, for adoption. */
   adoptionRecord(): PolicyAdoption;
   /** A replacement backend adopted this turn while it runs: restore what the record holds. */
-  adopt(record: PolicyAdoption, review: AdoptedReview): void;
+  adopt(record: PolicyAdoption, review: AdoptedReview, execution: AdoptedExecution): void;
+  /**
+   * The drained turn's run settle, completion step included. The runner keeps the turn's journal
+   * until it resolves, so a crash before the settle lands re-adopts and settles instead of the
+   * run being recovered as interrupted.
+   */
+  settlement(): Promise<void>;
   spawnFailed(): void;
   toolResultParts(output: unknown): ContentPart[];
   streamCompleted(): void;
@@ -103,18 +114,19 @@ export interface TurnPolicy {
   dropWaitingTurn(): boolean;
   waitingForRunSlot(): boolean;
   queueEmptied(): void;
-  attemptFinished(cause: TurnTerminalCause): void;
   sessionReset(): void;
   audienceKey(): string | undefined;
-  /** `deadline` (ISO) expires the run as max_runtime_timeout, like a chat run's lease. */
+  /**
+   * `deadline` (ISO) expires the run as max_runtime_timeout, like a chat run's lease. Resolves at
+   * drain (the policy settles the run); rejects only if the turn never started.
+   */
   runCoordination(
     content: string,
     context: BuddyContext,
     claimToken: string,
     deadline: string,
-    onDrained?: CoordinationDrained,
     onAdmitted?: (config: ResolvedExecutionConfig) => void
-  ): Promise<string>;
+  ): Promise<void>;
   sendAutomation(content: string): void;
   stopAutomation(): void;
 }
@@ -171,6 +183,9 @@ export class ChatTurnPolicy implements TurnPolicy {
   adopt(record: PolicyAdoption): void {
     if (record.t !== 'chat') throw new Error(`A chat cannot adopt a ${record.t} turn`);
   }
+  settlement(): Promise<void> {
+    return Promise.resolve();
+  }
   spawnFailed(): void {}
   toolResultParts(output: unknown): ContentPart[] {
     return commonToolResultParts(output);
@@ -189,12 +204,11 @@ export class ChatTurnPolicy implements TurnPolicy {
     return false;
   }
   queueEmptied(): void {}
-  attemptFinished(): void {}
   sessionReset(): void {}
   audienceKey(): string | undefined {
     return undefined;
   }
-  runCoordination(): Promise<string> {
+  runCoordination(): Promise<void> {
     return Promise.reject(new Error('Coordination identity or claim is missing'));
   }
   sendAutomation(): void {

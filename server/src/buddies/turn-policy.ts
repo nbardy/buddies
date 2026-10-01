@@ -11,12 +11,11 @@ import type {
 } from '@unleashd/shared';
 import { parseBuddyBuilderToolResult } from '@unleashd/shared';
 import type { ConversationRuntimeView } from '../conversations/runtime';
-import type { TurnTerminalCause } from '../observability';
 import { noteActivity } from '../observability/event-loop-stall';
 import { type SessionRelativePrompt, type TurnInput, sameEitherWay } from '../turns/input';
 import {
+  type AdoptedExecution,
   type AdoptedReview,
-  type CoordinationDrained,
   type MemorySnapshot,
   type PolicyAdoption,
   type TurnEnd,
@@ -262,12 +261,11 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
     return false;
   }
   queueEmptied(): void {}
-  attemptFinished(): void {}
   sessionReset(): void {}
   audienceKey(): string | undefined {
     return undefined;
   }
-  runCoordination(): Promise<string> {
+  runCoordination(): Promise<void> {
     return Promise.reject(new Error('Coordination identity or claim is missing'));
   }
   sendAutomation(): void {
@@ -328,15 +326,9 @@ export type BuddyPolicyAdoption =
       audienceKey: string | null;
     };
 
-/**
- * The run in flight, plus who hears its drain: the chat's settle, the runner's awaiting
- * `runCoordination`, or (adopted, when that promise died with the old backend) the runner's
- * `finishAdoptedRun`.
- */
+/** The run in flight; `onAdmitted` sees the resolved config at the provider boundary. */
 type RunExecution = RunRecord & {
   onAdmitted?: (config: ResolvedExecutionConfig) => void;
-  terminalCause?: TurnTerminalCause;
-  drained(status: 'complete' | 'failed', detail: string): void;
 };
 
 export interface BuddyTurnPolicySeed {
@@ -359,6 +351,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
   private execution: RunExecution | null = null;
   // This turn's grant, held as data so the turn can be adopted.
   private grant: GrantRecord | null = null;
+  // The last drained run's settle (and completion step): its journal outlives it (settlement()).
+  private settling: Promise<void> = Promise.resolve();
   private reviewTicket: { attemptId: string; messageStart: number; context: BuddyContext } | null =
     null;
 
@@ -553,28 +547,37 @@ export class BuddyTurnPolicy implements TurnPolicy {
       leaseToken: owned.claim_token,
       deadline: owned.deadline,
       context: { ...this.turnContext(), coordinationRunId: owned.id },
-      drained: (status, detail) => this.buddies.settle(owned.id, owned.claim_token, status, detail),
     });
   }
 
   /**
-   * One path for every run a turn executes under: hold it, expire it at its deadline, and hand
-   * its drain to whoever settles it. Until 2026-09-30 a runner-owned run's deadline was a timer
-   * in server.ts `runTurn`, so it could not survive the backend that armed it.
+   * One path for every run a turn executes under, spawned or adopted: hold it, expire it at its
+   * deadline, and settle it once when the turn drains. Until 2026-09-30 a runner-owned run's
+   * deadline was a timer in server.ts `runTurn` and its settle ran in the runner's `runJob`
+   * continuation, so neither survived the backend that armed them. `deadline: 'none'` is an
+   * adopted turn that already ended while no backend watched: its outcome is on disk, and a
+   * deadline that passed meanwhile must not seal its replay as a timeout.
    */
-  private armExecution(execution: RunExecution): () => void {
+  private armExecution(
+    execution: RunExecution,
+    options: { deadline: 'armed' | 'none'; whenDrained: () => void }
+  ): () => void {
     this.execution = execution;
-    const timer = setTimeout(
-      () => this.host.maxRuntimeReached(),
-      Math.max(0, Date.parse(execution.deadline) - Date.now())
-    );
+    const timer =
+      options.deadline === 'armed'
+        ? setTimeout(
+            () => this.host.maxRuntimeReached(),
+            Math.max(0, Date.parse(execution.deadline) - Date.now())
+          )
+        : undefined;
     // A 24 h deadline must not by itself keep a process alive (the runtime tests' turns that
     // never answer left it pending, and the test process never exited).
-    timer.unref?.();
+    timer?.unref?.();
     const detach = onTurnDrained(this.host, (status, detail) => {
       clearTimeout(timer);
       this.execution = null;
-      execution.drained(status, detail);
+      this.settling = this.settleRun(execution, status, detail);
+      options.whenDrained();
     });
     // For a run that never reached a turn: drop its deadline and drain listeners with it.
     return () => {
@@ -582,6 +585,24 @@ export class BuddyTurnPolicy implements TurnPolicy {
       detach();
       this.execution = null;
     };
+  }
+
+  // Pattern: sum-types (docs/patterns.md#sum-types)
+  private settleRun(
+    run: RunRecord,
+    status: 'complete' | 'failed',
+    detail: string
+  ): Promise<void> {
+    switch (run.kind) {
+      case 'chat':
+        return this.buddies.settle(run.runId, run.leaseToken, status, detail);
+      case 'runner':
+        return this.buddies.finishRun(run.runId, run.leaseToken, status, detail);
+    }
+  }
+
+  settlement(): Promise<void> {
+    return this.settling;
   }
 
   spawned(review: { attemptId: string; messageStart: number }): void {
@@ -607,19 +628,16 @@ export class BuddyTurnPolicy implements TurnPolicy {
    * its lease and deadline, and its drain settles it here: a chat run through the port as before,
    * a runner-owned run through the runner (its awaiting promise died with the old backend).
    */
-  adopt(record: PolicyAdoption, review: AdoptedReview): void {
+  adopt(record: PolicyAdoption, review: AdoptedReview, execution: AdoptedExecution): void {
     if (record.t !== 'buddy') throw new Error(`A Buddy thread cannot adopt a ${record.t} turn`);
-    const { run } = record;
-    this.buddies.adoptGrant(record.grant);
     this.grant = record.grant;
     this.briefedMemoryGeneration = record.briefedGeneration;
     this.providerAudienceKey = record.audienceKey;
-    this.armExecution({
-      ...run,
-      drained: (status, detail) =>
-        run.kind === 'chat'
-          ? this.buddies.settle(run.runId, run.leaseToken, status, detail)
-          : this.buddies.finishAdoptedRun(run.runId, run.leaseToken, status, detail),
+    // A stopped or timed-out turn's grant was revoked on purpose; adoption must not revive it.
+    if (execution.grant === 'live') this.buddies.adoptGrant(record.grant);
+    this.armExecution(record.run, {
+      deadline: execution.state === 'running' ? 'armed' : 'none',
+      whenDrained: () => undefined,
     });
     this.spawned(review);
   }
@@ -661,9 +679,6 @@ export class BuddyTurnPolicy implements TurnPolicy {
     this.buddies.revoke(this.host.id);
   }
 
-  attemptFinished(cause: TurnTerminalCause): void {
-    if (this.execution && !this.execution.terminalCause) this.execution.terminalCause = cause;
-  }
 
   stop(): boolean {
     this.revoke();
@@ -672,15 +687,18 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   // --- runner-owned runs --------------------------------------------------------
 
-  /** One background turn for a run the runner claimed (runner.ts `RunnerHost.runTurn`). */
+  /**
+   * One background turn for a run the runner claimed (runner.ts `RunnerHost.runTurn`). Resolves
+   * when the turn drained, by which point its settle is under way here (`settleRun`); rejects only
+   * when the turn never started, which leaves the settle to the runner.
+   */
   runCoordination(
     content: string,
     context: BuddyContext,
     leaseToken: string,
     deadline: string,
-    onDrained?: CoordinationDrained,
     onAdmitted?: (config: ResolvedExecutionConfig) => void
-  ): Promise<string> {
+  ): Promise<void> {
     if (this.execution) return Promise.reject(new Error('Conversation is busy'));
     if (
       !context.coordinationRunId ||
@@ -691,25 +709,11 @@ export class BuddyTurnPolicy implements TurnPolicy {
       return Promise.reject(new Error('Run identity or lease is missing'));
     }
     const runId = context.coordinationRunId;
-    return new Promise<string>((resolve, reject) => {
-      const execution: RunExecution = {
-        kind: 'runner',
-        runId,
-        leaseToken,
-        deadline,
-        context,
-        onAdmitted,
-        drained: (status, detail) => {
-          try {
-            onDrained?.(status, detail, execution.terminalCause);
-          } catch (error) {
-            return reject(error);
-          }
-          if (status === 'complete') resolve(detail);
-          else reject(new Error(detail));
-        },
-      };
-      const release = this.armExecution(execution);
+    return new Promise<void>((resolve, reject) => {
+      const release = this.armExecution(
+        { kind: 'runner', runId, leaseToken, deadline, context, onAdmitted },
+        { deadline: 'armed', whenDrained: resolve }
+      );
       try {
         this.host.send(sameEitherWay(content), { origin: 'buddy_message', inputId: runId });
       } catch (error) {
