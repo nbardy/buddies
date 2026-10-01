@@ -311,12 +311,13 @@ video.channel-media {
   max-height: none;
   padding: 0;
   border: 0;
+  outline: none;
   background: rgb(0 0 0 / 88%);
 }
 
 .channel-image-overlay .channel-media {
-  max-width: 94vw;
-  max-height: 94dvh;
+  max-width: calc(100vw - 112px);
+  max-height: calc(100dvh - 112px);
   margin: 0;
   border: 1px solid rgb(255 255 255 / 18%);
   object-fit: contain;
@@ -326,13 +327,25 @@ video.channel-media {
   position: absolute;
   top: var(--sp-5);
   right: var(--sp-5);
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 0;
   border-radius: 50%;
-  background: rgb(255 255 255 / 12%);
+  background: rgb(255 255 255 / 10%);
+  color: rgb(255 255 255 / 85%);
+  font-size: var(--fs-5);
+  line-height: 1;
+}
+
+.channel-image-close:hover {
+  background: rgb(255 255 255 / 22%);
   color: #fff;
-  font-size: var(--fs-6);
+}
+
+.channel-image-close:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 70%);
+  outline-offset: 2px;
 }
 
 .channel-task-overlay-header {

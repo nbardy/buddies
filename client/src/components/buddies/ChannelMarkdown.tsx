@@ -299,6 +299,8 @@ function ChannelImageOverlay({
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (!dialog.open) dialog.showModal();
+    // showModal focuses the first control; keep focus on the dialog so the X shows no ring.
+    dialog.focus();
     const onCancel = (event: Event) => {
       event.preventDefault();
       onClose();
@@ -314,6 +316,7 @@ function ChannelImageOverlay({
     <dialog
       ref={dialogRef}
       className="channel-image-overlay"
+      tabIndex={-1}
       aria-label={image.alt || 'Image preview'}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
