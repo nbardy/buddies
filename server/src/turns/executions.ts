@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { type ExecutionState, executionState, signalGroup } from '@nbardy/agent-cli';
+import { type ExecutionState, executionState, isOwnWrapper, signalGroup } from '@nbardy/agent-cli';
 import type { Provider } from '@unleashd/shared';
 import type { PolicyAdoption } from './policy';
 
@@ -110,7 +110,11 @@ export function createExecutionJournals(root: string) {
       if (found.state.kind === 'running') {
         signalGroup(found.state.pid, 'SIGTERM');
         const pid = found.state.pid;
-        setTimeout(() => signalGroup(pid, 'SIGKILL'), 3000).unref();
+        const dir = found.dir;
+        // 3 s later the pid may be reused (review of P1, 2026-10-01): kill only our wrapper.
+        setTimeout(() => {
+          if (isOwnWrapper(pid, dir)) signalGroup(pid, 'SIGKILL');
+        }, 3000).unref();
       }
       fs.rmSync(found.dir, { recursive: true, force: true });
     },
