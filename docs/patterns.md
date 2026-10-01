@@ -190,6 +190,29 @@ Guard: `server/test/sqlite-locks.test.ts` boots the real backend on temp stores,
 that scans them, then opens every store from a second process and fails if the WAL or `-shm` is
 reset or deleted.
 
+## lease-heartbeat
+**Smell:** one number used both as "how long the holder may stay silent" and as "how long the work may run",
+or a startup sweep that ends everything the previous process held.
+**Pattern:** a claim carries two separate values. The **lease** is a short heartbeat that the live holder renews.
+The **deadline** is the work's absolute budget, which the holder enforces as its own timeout. A dead holder is
+noticed in ONE place, the gate that hands out new claims: it ends every run whose lease ran out, exactly as a
+failed settle would. Liveness is "the lease was renewed recently", with no separate progress field. Nothing is
+swept at boot, so a second live process on the same store keeps what it holds.
+**Here:** crate `runs.rs` `claim_run_at` (the gate, `expire_leases`, `end_run`) and `renew_run`; the
+`RunBudgets` type. The lease is `BUDDY_RUN_LEASE_MS` (5 min) in `server/src/constants/timeouts.ts`. Renewal is
+`BuddyTurnPolicy.bridgeAlive`, called by `TurnRunner` on every event that ticks the watchdog's bridge clock, at
+most once a minute. Renewal rides the bridge clock and not provider progress, because a model may think
+silently for the 60-min idle budget while agent-cli heartbeats keep ticking. The runner's `start` renews
+adopted turns before its first claim. The deadline is the run's `deadline` column, `TURN_MAX_RUNTIME_MS` for a
+chat (passed explicitly) and `BUDDY_BACKGROUND_TURN_MS` otherwise.
+History: on 2026-09-10 a 600 s lease used as a chat deadline killed healthy owner chats. The fix made the lease
+24 h, and dead holders' runs then stayed `running` until the next boot: a 9.5 h overnight lie on 09-30→10-01,
+and 14 and 10 orphaned runs at 12:34Z/14:09Z on 09-30. The boot sweep also ended runs a second live backend held.
+Decision: `agent_notes/2026-10-01_return-route-decision.md`, "Successor 14:48Z" and its successor.
+Guards: `server/test/run-lease.test.ts` (a dead holder is cleared within the lease while the backend stays up;
+a heartbeating silent turn outlives its lease; the idle timer still kills a turn with no provider progress),
+plus crate tests `an_expired_lease_ends_its_run_like_a_failed_settle` and `a_renewed_lease_outlives_its_first_term`.
+
 ## fix-guards
 **Smell:** a fixed slowdown or bug quietly comes back.
 **Pattern:** every fix leaves three things:

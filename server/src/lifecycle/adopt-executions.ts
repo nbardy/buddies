@@ -20,11 +20,13 @@ export interface AdoptionPorts {
 }
 
 /**
- * Boot, after conversations load and BEFORE the Buddy runner recovers or claims anything: every
+ * Boot, after conversations load and BEFORE the Buddy runner claims anything: every
  * journal a previous backend left is adopted by its conversation or discarded. Adopting first is
  * what makes a second writer impossible: the conversation is busy with the adopted turn by the
  * time any run could resume its session (the 2026-09-30 "already has an active writer" failure).
- * Returns the Buddy runs the adopted turns execute under, which recovery must keep.
+ * Returns the Buddy runs the adopted turns execute under: the runner renews their leases before its
+ * first claim, whose gate would otherwise end a run whose lease ran out during the gap. A refused
+ * turn's run is not ended here: its lease runs out and the gate ends it (Pattern: lease-heartbeat).
  */
 export async function adoptExecutions(
   found: readonly FoundExecution[],
@@ -70,7 +72,11 @@ async function adoptTurn(
     `[adopt] ${owner.conversationId}: adopted ${item.state.kind} ${owner.provider} turn ${owner.attemptId}`
   );
   return owner.policy.t === 'buddy'
-    ? { runId: owner.policy.run.runId, conversationId: owner.conversationId }
+    ? {
+        runId: owner.policy.run.runId,
+        leaseToken: owner.policy.run.leaseToken,
+        conversationId: owner.conversationId,
+      }
     : null;
 }
 

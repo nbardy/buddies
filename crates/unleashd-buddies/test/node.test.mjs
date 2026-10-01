@@ -45,7 +45,11 @@ test('a request, its run and its answer cross the napi boundary', async () => {
   const sorted = [a, b].sort((x, y) => (x.id < y.id ? -1 : 1));
   assert.deepEqual(channel.kind, { type: 'direct', members: sorted });
 
-  const claim = await core.claimRun(60_000);
+  const claim = await core.claimRun({
+    leaseMs: 60_000,
+    chatDeadlineMs: 86_400_000,
+    turnDeadlineMs: 3_600_000,
+  });
   assert.deepEqual(claim.run.input, { kind: 'post', postId: post.id });
   const answer = await core.answer(b, {
     requestId: post.id,

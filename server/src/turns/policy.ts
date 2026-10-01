@@ -110,9 +110,14 @@ export interface TurnPolicy {
   waitingForRunSlot(): boolean;
   queueEmptied(): void;
   attemptFinished(cause: TurnTerminalCause): void;
+  /**
+   * The turn's bridge is alive: called on every event that ticks the watchdog's bridge clock,
+   * heartbeats included. A Buddy turn renews its run's lease here (Pattern: lease-heartbeat).
+   */
+  bridgeAlive(): void;
   sessionReset(): void;
   audienceKey(): string | undefined;
-  /** `deadline` (ISO) expires the run as max_runtime_timeout, like a chat run's lease. */
+  /** `deadline` (ISO) expires the run as max_runtime_timeout, like a chat run's deadline. */
   runCoordination(
     content: string,
     context: BuddyContext,
@@ -196,6 +201,7 @@ export class ChatTurnPolicy implements TurnPolicy {
   }
   queueEmptied(): void {}
   attemptFinished(): void {}
+  bridgeAlive(): void {}
   sessionReset(): void {}
   audienceKey(): string | undefined {
     return undefined;
