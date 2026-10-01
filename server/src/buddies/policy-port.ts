@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { McpServerSpec } from '@nbardy/agent-cli';
-import type { BuddyContext } from '@unleashd/shared';
+import type { Returns } from '@unleashd/buddies-core';
+import type { BuddyContext, BuddyVisibility } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
-import type { Grants, TurnGrant } from './grants';
+import { type Grants, INBOX, type TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
 import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
 import type { ChatAdmission, Runner } from './runner';
@@ -30,6 +31,8 @@ export interface BuddyPolicyPort {
     context: BuddyContext;
     conversationId: string;
     owner: boolean;
+    /** The conversation's placement; it fixes where answers to this turn's requests go. */
+    visibility: BuddyVisibility;
   }): Record<string, McpServerSpec>;
   builderMcpServers(conversationId: string): Record<string, McpServerSpec>;
   /** The turn ended: settle its run (which also revokes the run's grants). */
@@ -65,7 +68,7 @@ export function createBuddyPolicyPort(deps: {
     },
     admission: (turnId) => runner.chatAdmission(turnId),
     abandon: (turnId) => runner.abandonChat(turnId),
-    mcpServers({ context, conversationId, owner }) {
+    mcpServers({ context, conversationId, owner, visibility }) {
       // A new turn's grant replaces whatever this conversation still held.
       grants.revokeConversation(conversationId);
       const grant = grants.issueBuddy({
@@ -74,6 +77,7 @@ export function createBuddyPolicyPort(deps: {
         workspaceId: context.workspaceId,
         conversationId,
         runId: context.coordinationRunId ?? null,
+        returns: returnsFor(visibility, conversationId),
       });
       if (owner) grants.promoteToOwner(conversationId);
       return { [MCP_SERVER_NAME]: deps.spec(grant) };
@@ -96,4 +100,27 @@ export function createBuddyPolicyPort(deps: {
     revoke: (conversationId) => grants.revokeConversation(conversationId),
     afterTurn: (turn) => deps.reviewer.enqueue(turn),
   };
+}
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/**
+ * Where answers to a turn's requests go, decided here, before the request exists, from the one
+ * stored placement of the sending conversation (its kind never changes after creation). The crate
+ * keeps it on the request, and nothing downstream re-derives it.
+ *
+ * Why not later: until 2026-10-01 the runner asked this question only after claiming a `reply`
+ * run. For a human chat the answer was "nothing to do" (the `mailbox` job), but the run had already
+ * queued behind the owner's turn as `conversation_busy`: 9 no-op replies waited up to 2h44m and
+ * read as "blocked", and a CEO Buddy offered to cancel the owner's productive GPU turn. An Inbox
+ * request creates no run at all. A human chat never takes automated input, so its Buddy reads
+ * answers in its inbox; a background conversation is woken by a turn, behind its busy gate.
+ * Guard: buddies-v2 "an answer to a request sent from a human chat starts no run …".
+ */
+export function returnsFor(visibility: BuddyVisibility, conversationId: string): Returns {
+  switch (visibility) {
+    case 'foreground':
+      return INBOX;
+    case 'background':
+      return { kind: 'conversation', id: conversationId };
+  }
 }

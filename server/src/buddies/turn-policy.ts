@@ -490,6 +490,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
       context,
       conversationId: this.host.id,
       owner: input.origin === 'owner_input',
+      visibility: this.host.visibility(),
     });
     // Capture exactly the resolved request at the provider boundary, after all awaits.
     this.execution?.onAdmitted?.(config);

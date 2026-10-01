@@ -350,13 +350,7 @@ const buddyCreationService: BuddyCreationService = createBuddyCreationService({
 
 // One background Buddy turn = one conversation runtime turn (runCoordinationMessage).
 const buddyRunnerHost: RunnerHost = {
-  placement: (id) => {
-    const conversation = conversations.get(id);
-    if (!conversation) return 'absent';
-    return conversation.kind.t === 'buddy' && conversation.kind.visibility === 'background'
-      ? 'background'
-      : 'foreground';
-  },
+  registered: (id) => conversations.get(id) !== undefined,
   openBackground: async ({ conversationId, context, commandId, config }) => {
     await buddyCreationService.createServerBuddyConversation({
       context,

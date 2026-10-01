@@ -26,6 +26,7 @@ fn request(body: &str, key: &str) -> PostInput {
         reply_to_id: None,
         task_id: None,
         from_conversation_id: Some("conv-sender".into()),
+        returns: Some(Returns::Conversation { id: "conv-sender".into() }),
         run_config: None,
         broadcast: false,
         key: key.into(),
@@ -405,6 +406,31 @@ fn request_answer_round_trip_and_failure_notice() {
     assert_eq!(s.get_post(&buddy("mid"), &failing.id).unwrap().request, RequestState::Failed);
     let notice = s.claim_run(60_000).unwrap().unwrap();
     assert_eq!((notice.run.buddy_id.as_str(), notice.run.input), ("mid", RunInput::FailureNotice { run_id: claim.run.id }));
+}
+
+// Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01: answers to requests sent from an
+// owner chat each queued a no-op `reply` run behind that chat (`conversation_busy`, up to 2h44m).
+// A request sent with `Returns::Inbox` must leave nothing in the run queue, answered or failed.
+#[test]
+fn an_inbox_request_starts_no_run_for_its_answer_or_failure() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let from_chat = |body: &str, key: &str| PostInput { returns: Some(Returns::Inbox), ..request(body, key) };
+    let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat("please do X", "r1")).unwrap();
+    assert_eq!(asked.returns, Some(Returns::Inbox));
+    let claim = s.claim_run(60_000).unwrap().unwrap();
+    let answer = s
+        .answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec![], key: "a".into() })
+        .unwrap();
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    assert_eq!(s.get_post(&buddy("mid"), &asked.id).unwrap().request, RequestState::Answered { answer_id: answer.id }, "the post is the delivery");
+
+    let failing = s.post(&buddy("mid"), dm("mid", "ic"), from_chat("will fail", "r2")).unwrap();
+    let claim = s.claim_run(60_000).unwrap().unwrap();
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap();
+    assert_eq!(s.get_post(&buddy("mid"), &failing.id).unwrap().request, RequestState::Failed);
+    assert!(s.claim_run(60_000).unwrap().is_none(), "neither the answer nor the failure queued a run");
+    assert!(s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 10).unwrap().is_empty());
 }
 
 // 2026-09-28: no run could choose its model, so a Buddy launched four untracked `codex exec`
@@ -812,6 +838,7 @@ fn task_posts_gather_one_tasks_posts_across_the_channels_a_reader_may_read() {
             reply_to_id: None,
             task_id: None,
             from_conversation_id: None,
+            returns: None,
             run_config: None,
             broadcast: false,
             key: "task-channel".into(),

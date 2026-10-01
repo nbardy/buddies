@@ -320,7 +320,8 @@ export interface Post {
   evidence: Array<string>
   request: RequestState
   conversationId?: string
-  returnConversationId?: string
+  /** Where a request's answer goes (`Returns`); absent on an inform, which has no answer. */
+  returns?: Returns
   createdAt: string
   /** The post's ordered id (UUIDv7): threads, pages and read cursors order by it. */
   ord: string
@@ -337,8 +338,10 @@ export interface PostInput {
   /** A reply in a thread: the post it responds to, in the same channel. Absent = a new top-level post. */
   replyToId?: string
   taskId?: string
-  /** The sender's conversation; a `Request`'s answer returns there. */
+  /** Provenance: the conversation the post was written from (a thread seat skips its own posts). */
   fromConversationId?: string
+  /** The sending turn's `Returns`, stamped by its host; only a `Request` keeps it. Absent = Inbox. */
+  returns?: Returns
   /**
    * A `Request` only: its recipients' runs execute with this instead of their profile (a
    * worker). Every recipient must be the author or report to it (`EnqueueRun`).
@@ -379,6 +382,27 @@ export type RequestState =
   | { state: 'answered'; answerId: string }
   | { state: 'cancelled' }
   | { state: 'failed' }
+
+/**
+ * Where a request's answer, and the failure notice if its run fails, goes. The sender's host
+ * fixes it when the request is SENT, from the sending conversation's placement, and nothing
+ * after that asks again. Stored in `post.return_conversation_id`: NULL on a request is `Inbox`.
+ *
+ * Why at send time: until 2026-10-01 every Buddy request queued a `reply` run tagged with its
+ * origin conversation, and only after claiming it did the runner learn the origin was a human
+ * chat and the run had nothing to do (the old `mailbox` job). A run with a conversation waits
+ * behind that conversation's running turn (`WAITING_REASON_SQL`), so in wave_sim 9 such no-op
+ * replies sat `queued / conversation_busy` for up to 2h44m behind one owner turn, then all
+ * settled in ~70 ms when it ended. Reading "9 blocked", a CEO Buddy told the owner the chat was
+ * stuck and offered to cancel a productive GPU turn. Deciding the route before any run exists
+ * means an Inbox answer never enters the model-work queue at all.
+ * (agent_notes/2026-10-01_return-route-decision.md, _unleashd_case_study_conversation_busy.md)
+ * Guards: `an_inbox_request_starts_no_run_for_its_answer_or_failure` (tests/core.rs) and
+ * "an answer to a request sent from a human chat starts no run …" (server/test/buddies-v2).
+ */
+export type Returns =
+  | { kind: 'inbox' }
+  | { kind: 'conversation'; id: string }
 
 export interface Run {
   id: string

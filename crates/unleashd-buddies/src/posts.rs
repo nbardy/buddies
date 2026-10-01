@@ -53,6 +53,7 @@ fn post_row(r: &Row) -> rusqlite::Result<Post> {
         (Some("failed"), None) => RequestState::Failed,
         (state, answer) => return Err(corrupt(CoreError::Corrupt(format!("request {state:?} with answer {answer:?}")))),
     };
+    let returns = returns_of(&request, r.get(12)?);
     Ok(Post {
         id: r.get(0)?,
         channel_id: r.get(1)?,
@@ -65,11 +66,21 @@ fn post_row(r: &Row) -> rusqlite::Result<Post> {
         evidence: parse_evidence(&r.get::<_, String>(8)?).map_err(corrupt)?,
         request,
         conversation_id: r.get(11)?,
-        return_conversation_id: r.get(12)?,
+        returns,
         created_at: r.get(13)?,
         ord: r.get(14)?,
         broadcast: r.get(15)?,
     })
+}
+
+/// A request's stored route: `return_conversation_id` NULL is `Inbox` (see `Returns`).
+fn returns_of(request: &RequestState, conversation: Option<String>) -> Option<Returns> {
+    match request {
+        RequestState::None => None,
+        RequestState::Awaiting | RequestState::Answered { .. } | RequestState::Cancelled | RequestState::Failed => {
+            Some(conversation.map_or(Returns::Inbox, |id| Returns::Conversation { id }))
+        }
+    }
 }
 
 pub(crate) fn get_post(conn: &Connection, id: &str) -> Result<Post> {
@@ -683,9 +694,13 @@ fn insert_post(
         evidence_json(&input.evidence),
         ask.column(),
         // Provenance: the conversation the post was written from. A thread seat reads it to skip
-        // its own posts. Only a request's answer returns to it.
+        // its own posts. It is NOT the return route: an owner chat is provenance too, and its
+        // answers must not come back as runs (`Returns`).
         input.from_conversation_id,
-        ask.column().and(input.from_conversation_id.as_deref()),
+        ask.column().and(match &input.returns {
+            Some(Returns::Conversation { id }) => Some(id.as_str()),
+            Some(Returns::Inbox) | None => None,
+        }),
         now_iso(),
         ord,
         input.broadcast
@@ -738,20 +753,34 @@ fn thread_root(tx: &Transaction, parent_id: &str, channel_id: &str) -> Result<St
     }
 }
 
-/// An answer goes back to a buddy author as a `Reply` run; the owner reads it in the UI.
+/// An answer goes back along the route its request fixed when it was sent.
 fn notify_author(tx: &Transaction, request: &Post) -> Result<()> {
-    match &request.author {
-        Actor::Owner => Ok(()),
-        Actor::Buddy { id } => tx
+    send_back(tx, request, RunInput::Reply { post_id: request.id.clone() })
+}
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/// The one place a request's answer or failure notice becomes a run, shared by `notify_author`
+/// and the failure path (runs.rs `close_request`). It reads the route the request was sent with
+/// and asks nothing else: whether the sender's conversation is a human chat was settled at send.
+/// An `Inbox` route enqueues NOTHING. Before 2026-10-01 it enqueued a run tagged with the origin
+/// conversation and let the runner discover after claim that it was a no-op; those runs waited
+/// behind the owner's turn up to 2h44m and read as "blocked" (see `Returns`). A run here is real
+/// model work in a background conversation, so serializing it behind that conversation is right.
+/// Guard: `an_inbox_request_starts_no_run_for_its_answer_or_failure` (tests/core.rs).
+pub(crate) fn send_back(tx: &Transaction, request: &Post, input: RunInput) -> Result<()> {
+    match (&request.author, &request.returns) {
+        (Actor::Buddy { id }, Some(Returns::Conversation { id: conversation })) => tx
             .enqueue(EnqueueInput {
                 buddy_id: id.clone(),
-                input: RunInput::Reply { post_id: request.id.clone() },
-                conversation_id: request.return_conversation_id.clone(),
+                input,
+                conversation_id: Some(conversation.clone()),
                 task_id: request.task_id.clone(),
                 after_run_id: None,
                 deadline: None,
                 config: None,
             })
             .map(|_| ()),
+        // The owner reads answers in the UI; an Inbox sender reads its inbox. Neither is a run.
+        (Actor::Owner, _) | (Actor::Buddy { .. }, Some(Returns::Inbox) | None) => Ok(()),
     }
 }

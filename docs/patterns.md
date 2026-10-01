@@ -157,6 +157,23 @@ allowed a px font-size/padding/gap) and `client/src/ui/primitives.css` (layer 2:
 `.ui-inline-row`, `.ui-truncate`, `.ui-card`, `.ui-muted`), T21a. Gates G7 (no literal px, breakpoints only
 768px/340px) and G8 (total CSS lines never grow) in `tools/check-client-invariants.sh`. Views and shells: T20/T21.
 
+## route-at-send
+**Smell:** work is queued first and its kind is discovered after it is claimed ("is the origin a human
+chat? then there was nothing to do"). The queue's gates (busy conversation, pool cap) then hold rows that
+were never work, and anyone reading the queue sees them as blocked.
+**Pattern:** decide where a result goes when the thing that will produce it is created, from stable data,
+and store the decision as a sum type on it. Downstream code reads the stored route and never re-derives it;
+a route that needs no work creates no queued row at all.
+**Here:** `Returns = Inbox | Conversation(id)` (crate `types.rs`) is fixed by the sending turn's grant
+(`returnsFor` in `server/src/buddies/policy-port.ts`, from the conversation's visibility, which never
+changes) and kept on the request (`post.return_conversation_id`; NULL on a request is Inbox). The crate's
+`send_back` (`posts.rs`) is the one place an answer or failure notice becomes a run; Inbox enqueues none.
+Replaced the runner's post-claim `placement()` and its `mailbox` job: on 2026-10-01 nine no-op replies
+sat `conversation_busy` behind one owner turn for up to 2h44m and a Buddy offered to cancel that turn.
+Decision: `agent_notes/2026-10-01_return-route-decision.md`. Guards: buddies-v2 "an answer to a request
+sent from a human chat starts no run and never queues behind that chat"; crate
+`an_inbox_request_starts_no_run_for_its_answer_or_failure`.
+
 ## store-descriptor-isolation
 **Smell:** backend code opens a file that happens to be a live SQLite store (or its `-wal`/`-shm`): a
 second SQLite library, a directory walk that reads every file, a copy, a hash, a file watcher.

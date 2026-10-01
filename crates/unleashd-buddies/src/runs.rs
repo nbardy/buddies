@@ -29,6 +29,14 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 // Pattern: one-definition (docs/patterns.md#one-definition)
 // A run once appeared runnable in one view while the claimer held it for another condition. The
 // list and claim now use this exact expression; the crate test fails if either path can drift.
+//
+// `conversation_busy` is one writer per conversation, and it is only right because every run with
+// a conversation_id is a real turn in it. Do not admit a run here whose job is decided after the
+// claim: on 2026-10-01 no-op `reply` runs for answers to an owner chat's requests sat behind the
+// owner's turn up to 2h44m and read as "blocked" (a Buddy offered to cancel the owner's GPU turn).
+// The fix is upstream, not a special case in this gate: the route is fixed when the request is
+// sent (types.rs `Returns`), and an Inbox answer creates no run. Guard: buddies-v2 "an answer to
+// a request sent from a human chat starts no run and never queues behind that chat".
 const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
@@ -491,18 +499,9 @@ fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
 fn close_request(tx: &Transaction, post_id: &str, state: &str, failed_run: Option<&str>) -> Result<()> {
     let closed = tx.execute("UPDATE post SET request = ?2 WHERE id = ?1 AND request = 'awaiting'", params![post_id, state])?;
     let post = get_post(tx, post_id)?;
-    match (closed, failed_run, post.author) {
-        (1, Some(run_id), Actor::Buddy { id }) => tx
-            .enqueue(EnqueueInput {
-                buddy_id: id,
-                input: RunInput::FailureNotice { run_id: run_id.to_string() },
-                conversation_id: post.return_conversation_id,
-                task_id: post.task_id,
-                after_run_id: None,
-                deadline: None,
-                config: None,
-            })
-            .map(|_| ()),
+    // A failure notice follows the request's route, like its answer would (posts.rs `send_back`).
+    match (closed, failed_run) {
+        (1, Some(run_id)) => crate::posts::send_back(tx, &post, RunInput::FailureNotice { run_id: run_id.to_string() }),
         _ => Ok(()),
     }
 }

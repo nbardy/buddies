@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { Actor } from '@unleashd/buddies-core';
+import type { Actor, Returns } from '@unleashd/buddies-core';
 import { OWNER, buddyActor } from './core';
 
 /**
@@ -21,6 +21,11 @@ interface GrantBase {
   readonly expiresAt: number;
   readonly author: Actor;
   readonly principal: Actor;
+  /**
+   * Where answers to requests this turn sends go, fixed when the turn starts (its conversation's
+   * kind never changes) and stamped on each request. See `returnsFor` in policy-port.ts.
+   */
+  readonly returns: Returns;
   /** Called before each tool call; the reviewer counts calls and records its reads here. */
   readonly observe: (tool: string, input: unknown) => void;
 }
@@ -46,10 +51,14 @@ export type BuddyGrantInput = {
   workspaceId: string;
   conversationId: string;
   runId: string | null;
+  returns: Returns;
   observe?: (tool: string, input: unknown) => void;
 };
 
 const ignore = () => undefined;
+
+/** The owner, and any human chat, reads answers in the inbox: no run brings them back. */
+export const INBOX: Returns = { kind: 'inbox' };
 
 export type Grants = ReturnType<typeof createGrants>;
 
@@ -79,7 +88,13 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
       }),
 
     issueBuilder: (conversationId: string) =>
-      issue<BuilderGrant>({ role: 'builder', conversationId, author: OWNER, principal: OWNER }),
+      issue<BuilderGrant>({
+        role: 'builder',
+        conversationId,
+        author: OWNER,
+        principal: OWNER,
+        returns: INBOX,
+      }),
 
     /**
      * The owner wrote this turn's input: the conversation's worker grant becomes an owner grant.

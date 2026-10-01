@@ -25,7 +25,8 @@ export type ChatAdmission =
 
 /** What the runner needs from the conversation runtime (implemented by the host). */
 export interface RunnerHost {
-  placement(conversationId: string): 'background' | 'foreground' | 'absent';
+  /** The conversation is loaded here. Never its placement: that was fixed at send (`Returns`). */
+  registered(conversationId: string): boolean;
   /** `config`: a worker run's own provider/model; absent, the Buddy's profile. */
   openBackground(input: {
     conversationId: string;
@@ -49,7 +50,7 @@ type ChatTicket =
   | { state: 'admitted'; claim: Claim }
   | { state: 'failed'; error: string };
 
-/** A background job: a turn in a conversation, or a delivery that needs no turn. */
+/** A background job: a turn in a conversation, or nothing left to do. */
 type Job =
   | {
       kind: 'turn';
@@ -58,7 +59,6 @@ type Job =
       prompt: string;
       after(text: string): Promise<void>;
     }
-  | { kind: 'mailbox'; note: string }
   | { kind: 'skip'; reason: string };
 
 const nothingAfter = async () => undefined;
@@ -208,19 +208,22 @@ export function createRunner(options: {
     );
   }
 
-  /** A return (answer or failure) goes back to the conversation the request was sent from. */
+  // Pattern: route-at-send (docs/patterns.md#route-at-send)
+  /**
+   * A return (answer or failure) is a turn in the background conversation the request was sent
+   * from. Only a request sent with `Returns.conversation` has a return run at all (crate
+   * `send_back`), so this never asks whether the origin is a human chat. It used to, after the
+   * claim, and its `mailbox` answer ("nothing to do") came only once the run had waited behind
+   * the owner's turn: 9 such runs up to 2h44m on 2026-10-01. Guard: buddies-v2 "an answer to a
+   * request sent from a human chat starts no run …". What is left after the claim is existence:
+   * an origin deleted since then (or none, on a row queued before routes were stamped) gets a
+   * fresh turn, as before.
+   */
   function returnJob(run: Run, prompt: string): Job {
     const origin = run.conversationId;
-    const placement = origin ? host.placement(origin) : 'absent';
-    switch (placement) {
-      // A human chat never takes automated input: the answer is already in the DM (inbox).
-      case 'foreground':
-        return { kind: 'mailbox', note: 'delivered to the DM; the sender reads it in its inbox' };
-      case 'background':
-        return { kind: 'turn', conversationId: origin!, open: false, prompt, after: nothingAfter };
-      case 'absent':
-        return freshTurn(run, prompt);
-    }
+    return origin && host.registered(origin)
+      ? { kind: 'turn', conversationId: origin, open: false, prompt, after: nothingAfter }
+      : freshTurn(run, prompt);
   }
 
   async function replyJob(run: Run, requestId: string): Promise<Job> {
@@ -278,8 +281,6 @@ export function createRunner(options: {
       switch (job.kind) {
         case 'skip':
           return settle(run, claim.leaseToken, { kind: 'cancelled', reason: job.reason });
-        case 'mailbox':
-          return settle(run, claim.leaseToken, { kind: 'complete', text: job.note });
         case 'turn': {
           const context = contextFor(run);
           if (job.open)

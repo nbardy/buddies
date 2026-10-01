@@ -317,7 +317,15 @@ const BUDDY_TOOLS = {
         grant.author,
         { kind: 'id', id: channel.id },
         // Buddies never send a reply to the channel: that is the owner's call (THREADS_VIEW §3).
-        { ...input, body, fromConversationId: grant.conversationId, runConfig, broadcast: false }
+        {
+          ...input,
+          body,
+          fromConversationId: grant.conversationId,
+          // The route was fixed when this turn started (Returns, policy-port.ts `returnsFor`).
+          returns: grant.returns,
+          runConfig,
+          broadcast: false,
+        }
       );
       // A replayed key (a retried tool call) announces nothing: it would wake everyone again.
       if (created) deps.events.emit({ kind: 'posted', post, channel, picks: NO_PICKS });
