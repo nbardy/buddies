@@ -53,6 +53,7 @@ import {
 import {
   ChatTurnPolicy,
   type CoordinationDrained,
+  type AdoptedExecution,
   type MemorySnapshot,
   type TurnPolicy,
 } from '../turns/policy';
@@ -562,7 +563,7 @@ export class Conversation extends EventEmitter {
    * the journal from byte 0. Adoption happens before any run is claimed, so a conversation with
    * an adopted turn is busy and no second writer can start on its session.
    */
-  adoptTurn(owner: TurnOwner, handle: ExecutionHandle): void {
+  adoptTurn(owner: TurnOwner, handle: ExecutionHandle, execution: AdoptedExecution): void {
     if (this.process || this.isRunning)
       throw new Error(`Conversation ${this.id} is already running`);
     this.appendMessage({
@@ -570,8 +571,8 @@ export class Conversation extends EventEmitter {
       body: { t: 'text', text: owner.userMessage.text },
       timestamp: new Date(owner.userMessage.timestamp),
     });
-    this._policy.adopt(owner.policy, { attemptId: owner.attemptId, messageStart: 0 });
-    this.runner.adopt(owner, handle);
+    this._policy.adopt(owner.policy, { attemptId: owner.attemptId, messageStart: 0 }, execution);
+    this.runner.adopt(owner, handle, execution);
   }
 
   // Soft handoff, upgraded to session inheritance by capability, never rejecting the send
