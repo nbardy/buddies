@@ -45,12 +45,15 @@ Track multi-agent swarm runs — iterations, merges, rejections, per-worker time
 
 ## Quick Start
 
-**Prerequisites:** [pnpm](https://pnpm.io/) and at least one supported CLI agent installed and authenticated (e.g. `claude`).
+**Prerequisites:** git, [Node](https://nodejs.org/) 22.13 or newer, [pnpm](https://pnpm.io/), and at least one supported CLI agent installed and authenticated (e.g. `claude`).
+
+Install and run (the same command as the website):
 
 ```bash
-pnpm install
-pnpm dev
+git clone --recursive https://github.com/nbardy/unleashd && cd unleashd && pnpm install && pnpm build && pnpm start
 ```
+
+To develop on it, use `pnpm install && pnpm dev` instead of build/start.
 
 Development uses [http://localhost:7489](http://localhost:7489) by default. Run `pnpm local-domain:setup` once if you prefer [http://unleashd.localhost](http://unleashd.localhost), and `pnpm local-domain:remove` to remove it. The setup command installs a persistent, loopback-only macOS port proxy; dev startup only detects it and never prompts for administrator access. Unleashd itself always runs as your normal user. In dev, the API server stays on port `7499` behind the Vite proxy.
 
