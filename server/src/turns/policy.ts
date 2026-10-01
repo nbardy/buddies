@@ -53,6 +53,12 @@ export interface AdoptedReview {
   messageStart: number;
 }
 
+/**
+ * How the adopted execution stood at boot. `ended`: it exited (or was lost) while no backend
+ * watched, so its outcome is already on disk and no runtime budget applies to its replay.
+ */
+export type AdoptedExecution = { state: 'running' } | { state: 'ended' };
+
 export type CoordinationDrained = (
   status: 'complete' | 'failed',
   detail: string,
@@ -88,7 +94,7 @@ export interface TurnPolicy {
   /** Right after startTurn, before spawn: this turn's state as data, for adoption. */
   adoptionRecord(): PolicyAdoption;
   /** A replacement backend adopted this turn while it runs: restore what the record holds. */
-  adopt(record: PolicyAdoption, review: AdoptedReview): void;
+  adopt(record: PolicyAdoption, review: AdoptedReview, execution: AdoptedExecution): void;
   spawnFailed(): void;
   toolResultParts(output: unknown): ContentPart[];
   streamCompleted(): void;

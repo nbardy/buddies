@@ -68,6 +68,12 @@ async function main() {
   text('two;');
   mark(scenario + '.midturn', process.pid);
   if (scenario === 'hang' || scenario === 'lost') return setInterval(() => {}, 1000);
+  if (scenario === 'quick') {
+    await until('quick.go');
+    text('quick done;');
+    say({ type: 'result', subtype: 'success' });
+    return mark('quick.exited', process.pid);
+  }
   await until('dead');
   text('during;');
   mark(scenario + '.during');
@@ -87,7 +93,7 @@ const workspaceDir = path.join(root, 'workspace');
 const log: string[] = [];
 let backend: ChildProcess | null = null;
 
-function startBackend(name: string): Promise<void> {
+function startBackend(name: string, extraEnv: Record<string, string> = {}): Promise<void> {
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
     cwd: path.join(__dirname, '..'),
     env: {
@@ -100,6 +106,7 @@ function startBackend(name: string): Promise<void> {
       UNLEASHD_AUTH_TOKEN: TOKEN,
       FAKE_DIR: fakeDir,
       NODE_ENV: 'test',
+      ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     // Its own group, like a supervisor-run backend: killing it must not reach the providers.
@@ -247,7 +254,7 @@ before(() => {
 
 after(async () => {
   await killBackend();
-  for (const scenario of ['chat', 'worker', 'hang', 'lost']) {
+  for (const scenario of ['chat', 'worker', 'hang', 'lost', 'quick']) {
     if (!exists(`${scenario}.pgid`)) continue;
     try {
       process.kill(-Number(readFake(`${scenario}.pgid`)), 'SIGKILL');
@@ -404,5 +411,42 @@ test(
       (left) => left.length === 0,
       'journals removed after settle'
     );
+  }
+);
+
+// Review of P1 (2026-10-01): adoption re-armed the run deadline as max(0, deadline - now), so a
+// turn that finished cleanly while no backend ran, adopted after its deadline had passed, was
+// sealed as max_runtime_timeout mid-replay and its successful run settled failed.
+test(
+  'a turn that finished during the gap is adopted as finished, even past its deadline',
+  { timeout: 120_000 },
+  async () => {
+    const deadlineMs = 8_000;
+    const env = { CWV_BUDDY_BACKGROUND_TURN_MS: String(deadlineMs) };
+    await killBackend(); // the previous test's backend B still holds the port
+    await startBackend('C', env);
+    const ws = await http('POST', '/api/buddies/workspaces', {
+      name: 'gap',
+      rootPath: workspaceDir,
+    });
+    assert.equal(ws.status, 201, JSON.stringify(ws.body));
+    const quick = await hire(ws.body.id as string, 'quick');
+    const askedAt = Date.now();
+    await ask(quick, 'quick');
+    await eventually(() => exists('quick.midturn'), Boolean, 'quick mid-turn');
+
+    await killBackend();
+    fs.writeFileSync(path.join(fakeDir, 'quick.go'), '');
+    await eventually(() => exists('quick.exited'), Boolean, 'quick finished with no backend');
+    assert.ok(Date.now() - askedAt < deadlineMs, 'the provider finished inside its deadline');
+    await new Promise((resolve) => setTimeout(resolve, askedAt + deadlineMs + 1_000 - Date.now()));
+
+    await startBackend('D', env);
+    const run = await eventually(
+      () => runOf(quick),
+      (r) => r?.status === 'complete' || r?.status === 'failed',
+      'quick run settled'
+    );
+    assert.equal(run.status, 'complete', JSON.stringify(run));
   }
 );
