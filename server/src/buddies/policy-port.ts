@@ -7,7 +7,7 @@ import type { Briefings, ResolvedBuddyConversation } from './briefing';
 import { type GrantRecord, type Grants, INBOX, type TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
 import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
-import type { ChatAdmission, Runner } from './runner';
+import type { ChatAdmission, LeaseRenewal, Runner } from './runner';
 
 /**
  * The narrow interface BuddyTurnPolicy (buddies/turn-policy.ts) calls for one Buddy turn.
@@ -35,6 +35,8 @@ export interface BuddyPolicyPort {
     visibility: BuddyVisibility;
   }): TurnTools;
   builderMcpServers(conversationId: string): TurnTools;
+  /** The turn's holder is alive: push its run's lease forward (Pattern: lease-heartbeat). */
+  renewLease(runId: string, leaseToken: string): Promise<LeaseRenewal>;
   /** A replacement backend adopted a running turn: its grant works again, unchanged. */
   adoptGrant(grant: GrantRecord): void;
   /** The turn ended: settle its run (which also revokes the run's grants). */
@@ -73,10 +75,12 @@ export function createBuddyPolicyPort(deps: {
   spec(grant: TurnGrant): McpServerSpec;
 }): BuddyPolicyPort {
   const { runner, grants, briefings } = deps;
-  // A chat's deadline is its run's lease. A lease shorter than the turn budget killed healthy
-  // owner chats at 600 s on 2026-09-10; refuse to build that. Guard: buddies-v2.test.ts.
-  if (runner.leaseMs < TURN_MAX_RUNTIME_MS)
-    throw new Error(`Buddy run lease ${runner.leaseMs} ms < TURN_MAX_RUNTIME_MS`);
+  // A chat's deadline is its run's `deadline`, set at claim from this budget. A chat deadline
+  // shorter than the turn budget (a 600 s claim lease) killed healthy owner chats on 2026-09-10;
+  // refuse to build that. The lease is a separate, short heartbeat since 2026-10-01 and is
+  // deliberately NOT checked here. Guard: buddies-v2.test.ts.
+  if (runner.chatDeadlineMs < TURN_MAX_RUNTIME_MS)
+    throw new Error(`Buddy chat deadline ${runner.chatDeadlineMs} ms < TURN_MAX_RUNTIME_MS`);
   return {
     currentBriefing: (context) => briefings.current(context),
     enqueueChat(context, conversationId) {
@@ -111,6 +115,7 @@ export function createBuddyPolicyPort(deps: {
         grant: grants.record(grant.token),
       };
     },
+    renewLease: (runId, leaseToken) => runner.renew(runId, leaseToken),
     adoptGrant: (grant) => grants.adopt(grant),
     settle(runId, leaseToken, status, detail) {
       const outcome =

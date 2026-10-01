@@ -480,6 +480,9 @@ export class TurnRunner {
       this.ports.turnAttempts.activity(this.activeAttemptId, activity, this.host.sessionId);
     }
     this.watchdog.note(event);
+    // The same signal renews a Buddy run's lease: a live bridge means a live holder (lease ≠
+    // deadline; see BuddyTurnPolicy.bridgeAlive).
+    this.host.policy.bridgeAlive();
     this.ports.swarmObservers.poke(this.host.workingDirectory);
   }
 

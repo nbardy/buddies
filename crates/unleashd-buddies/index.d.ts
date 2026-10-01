@@ -31,11 +31,11 @@ export declare class BuddiesCore {
   listTasks(query: TaskQuery): Promise<Array<Task>>
   taskCounts(workspaceId: string): Promise<Array<TaskCount>>
   enqueueRun(actor: Actor, input: EnqueueInput): Promise<Run>
-  claimRun(leaseMs: number): Promise<Claim | null>
+  claimRun(budgets: RunBudgets): Promise<Claim | null>
+  renewRun(runId: string, leaseToken: string, leaseMs: number): Promise<Run>
   settleRun(runId: string, leaseToken: string, outcome: Outcome): Promise<Run>
   bindRun(runId: string, leaseToken: string, conversationId: string): Promise<Run>
   cancelRun(actor: Actor, runId: string): Promise<Run>
-  recoverRuns(keep: Array<string>): Promise<Recovery>
   createWorkspace(actor: Actor, input: WorkspaceInput): Promise<Workspace>
   createBuddy(actor: Actor, input: BuddyCreate): Promise<Buddy>
   updateBuddy(actor: Actor, input: BuddyUpdate): Promise<Buddy>
@@ -369,12 +369,6 @@ export interface PostWrite {
   created: boolean
 }
 
-/** What startup recovery ended: runs a dead process held, and chat turns nobody waits for. */
-export interface Recovery {
-  interrupted: number
-  abandonedChats: number
-}
-
 /** A post's request lifecycle. Column `request` NULL is `None`; `Answered` names the answer post. */
 export type RequestState =
   | { state: 'none' }
@@ -428,6 +422,20 @@ export interface Run {
   endedAt?: string
   /** Absent: the run executes on its buddy's profile. */
   config?: RunConfig
+}
+
+/**
+ * The two clocks a claim starts, kept apart because one number serving both killed owner chats
+ * at 600 s (2026-09-10) and left dead holders' runs `running` for 24 h (2026-09-30).
+ * `lease_ms`: how long the holder may go without renewing before the claim gate ends the run.
+ * `chat_deadline_ms` / `turn_deadline_ms`: the absolute runtime budget of a foreground chat run
+ * and of every other run, written to the run's `deadline` column. All three are required: the
+ * host passes TURN_MAX_RUNTIME_MS for chats explicitly, never a default (AGENTS.md).
+ */
+export interface RunBudgets {
+  leaseMs: number
+  chatDeadlineMs: number
+  turnDeadlineMs: number
 }
 
 /**
