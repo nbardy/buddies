@@ -174,8 +174,14 @@ export class TurnAttemptJournal {
       });
     });
   }
+  /**
+   * The first terminal record wins; a later one is a replay and appends nothing. Settle effects
+   * repeat after a crash between the effect and the next phase write (execution-state.ts), and a
+   * timeout records its terminal before the drain's settle records it again.
+   */
   finishAttempt(input: FinishTurnAttemptInput): Promise<TurnAttemptSnapshot> {
     return this.mutate(input.attemptId, (current) => {
+      if (isTerminalAttemptState(current.state)) return null;
       assertTransition(current.state, input.state);
       return this.baseEvent({
         kind: 'attempt_terminal',
@@ -254,15 +260,18 @@ export class TurnAttemptJournal {
     return this.runExclusive(async () => undefined);
   }
 
+  /** `make` returns null when the attempt already holds what the event would record. */
   private mutate(
     id: string,
-    make: (current: TurnAttemptSnapshot) => TurnAttemptJournalEvent
+    make: (current: TurnAttemptSnapshot) => TurnAttemptJournalEvent | null
   ): Promise<TurnAttemptSnapshot> {
     return this.runExclusive(async () => {
       const value = await this.requireStore().get(required(id, 'attemptId'));
       if (!value) throw new Error(`Attempt not found: ${id}`);
       const current = parseSnapshot(value);
-      return (await this.appendEvent(make(current), current))!;
+      const event = make(current);
+      if (!event) return current;
+      return (await this.appendEvent(event, current))!;
     });
   }
   private async appendEvent(

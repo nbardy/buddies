@@ -3,14 +3,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { type ExecutionState, executionState, isOwnWrapper, signalGroup } from '@nbardy/agent-cli';
 import type { Provider } from '@unleashd/shared';
+import {
+  type Execution,
+  type ExecutionEvent,
+  type Phase,
+  type ProcessAt,
+  applyStep,
+} from './execution-state';
 import type { PolicyAdoption } from './policy';
 
 /**
  * Every provider execution this server starts is journaled on disk (agent-cli journal.ts:
  * file-backed stdout/stderr, the wrapper's pid and exit status), under one root. The server adds
- * `owner.json`: who the execution belongs to, as data. A replacement backend scans the root at
- * boot and ADOPTS each running turn: it follows the same journal from byte 0 through the same
- * code path the spawner used. Until 2026-09-30 provider output was piped to the backend, so
+ * `owner.json`: who the execution belongs to, as data, and `phase.json`: where the execution is
+ * (turns/execution-state.ts, written before each step's side effects). A replacement backend scans
+ * the root at boot and decides each turn from its phase and process alone: it ADOPTS a turn by
+ * following the same journal from byte 0 through the same code path the spawner used. Until 2026-09-30 provider output was piped to the backend, so
  * every backend death killed every turn and orphaned its run (14 and 10 runs that day).
  * Design and history: agent_notes/2026-09-30_execution-adoption-design.md.
  */
@@ -40,11 +48,38 @@ export type ExecutionOwner = TurnOwner | EphemeralOwner;
 
 /** One journal found at boot, classified once (the κ of this boundary). */
 export type FoundExecution =
-  | { t: 'turn'; dir: string; owner: TurnOwner; state: ExecutionState }
+  | {
+      t: 'turn';
+      dir: string;
+      owner: TurnOwner;
+      phase: Phase;
+      process: ProcessAt;
+      state: ExecutionState;
+    }
+  /** The owner was written but the provider never spawned. */
+  | { t: 'unstarted'; dir: string; owner: TurnOwner; state: ExecutionState }
   | { t: 'ephemeral'; dir: string; state: ExecutionState }
   | { t: 'unreadable'; dir: string; state: ExecutionState; error: string };
 
 const OWNER_FILE = 'owner.json';
+const PHASE_FILE = 'phase.json';
+
+// Atomic (tmp + rename): a reader sees the old phase or the new one, never a torn file. Not
+// fsynced: the crashes this survives are process deaths, whose writes the kernel already holds.
+function writeAtomic(file: string, value: unknown): void {
+  fs.writeFileSync(`${file}.tmp`, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  fs.renameSync(`${file}.tmp`, file);
+}
+
+function writePhase(dir: string, phase: Phase): void {
+  writeAtomic(path.join(dir, PHASE_FILE), phase);
+}
+
+const PROCESS_AT: Record<Exclude<ExecutionState['kind'], 'unstarted'>, ProcessAt> = {
+  running: 'live',
+  exited: 'ended',
+  lost: 'ended',
+};
 
 export type ExecutionJournals = ReturnType<typeof createExecutionJournals>;
 
@@ -54,19 +89,20 @@ export function createExecutionJournals(root: string) {
   function create(name: string, owner: ExecutionOwner): string {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 });
     const dir = path.join(root, name);
-    // The owner exists before the provider does: a journal with a process always names its owner.
+    // Phase and owner exist before the provider does: a journal with a process always has both.
     fs.mkdirSync(dir, { mode: 0o700 });
-    const file = path.join(dir, OWNER_FILE);
-    fs.writeFileSync(`${file}.tmp`, `${JSON.stringify(owner)}\n`, { mode: 0o600 });
-    fs.renameSync(`${file}.tmp`, file);
+    writePhase(dir, { t: 'running' });
+    writeAtomic(path.join(dir, OWNER_FILE), owner);
     return dir;
   }
 
   function read(dir: string): FoundExecution {
     const state = executionState(dir);
     let owner: ExecutionOwner;
+    let phase: Phase;
     try {
       owner = JSON.parse(fs.readFileSync(path.join(dir, OWNER_FILE), 'utf8')) as ExecutionOwner;
+      phase = JSON.parse(fs.readFileSync(path.join(dir, PHASE_FILE), 'utf8')) as Phase;
     } catch (error) {
       return { t: 'unreadable', dir, state, error: String(error) };
     }
@@ -74,7 +110,9 @@ export function createExecutionJournals(root: string) {
       return { t: 'unreadable', dir, state, error: `owner version ${String(owner.version)}` };
     switch (owner.kind) {
       case 'turn':
-        return { t: 'turn', dir, owner, state };
+        return state.kind === 'unstarted'
+          ? { t: 'unstarted', dir, owner, state }
+          : { t: 'turn', dir, owner, phase, process: PROCESS_AT[state.kind], state };
       case 'ephemeral':
         return { t: 'ephemeral', dir, state };
     }
@@ -83,9 +121,17 @@ export function createExecutionJournals(root: string) {
   return {
     root,
 
-    /** A turn's journal, named by its attempt; the owner is written before spawn. */
-    forTurn(owner: Omit<TurnOwner, 'version' | 'kind'>): string {
-      return create(owner.attemptId, { version: 1, kind: 'turn', ...owner });
+    /** A turn's journal, named by its attempt, `running`; owner and phase are written before spawn. */
+    forTurn(owner: Omit<TurnOwner, 'version' | 'kind'>): Execution {
+      return {
+        dir: create(owner.attemptId, { version: 1, kind: 'turn', ...owner }),
+        phase: { t: 'running' },
+      };
+    },
+
+    /** The one way a phase changes: persisted, then its effects handed back (execution-state.ts). */
+    step(execution: Execution, event: ExecutionEvent) {
+      return applyStep(execution, event, writePhase);
     },
 
     /** A journal the next backend kills rather than adopts. */

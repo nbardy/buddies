@@ -53,7 +53,11 @@ function pnpm(...args) {
 
 // A task = one-shot `steps` (spawned in order, each must exit 0), then the
 // long-lived `services` this process hosts itself (tools/dev-runtime.mjs).
-export function taskPlan(task) {
+// UNLEASHD_DEV_PREBUILT=1 (tests only) skips the dev-server's TS builds: the agent-cli build
+// begins by deleting its dist, so the eight launches of ctrl-c-adoption.test.ts deleted the dist
+// every other test file was importing in parallel, and under full-suite load each rebuild took
+// ~100 s, past the launch wait (the P1 Ctrl+C flake, 2026-10-03).
+export function taskPlan(task, env = process.env) {
   const buildShared = pnpm('--filter', '@unleashd/shared', 'build');
   const buildCli = pnpm('--dir', 'vendor/agent-cli-tool', 'build');
   // Both napi addons, from the shared build cache when any worktree has built
@@ -86,7 +90,10 @@ export function taskPlan(task) {
         services: [],
       };
     case 'dev-server':
-      return { steps: [buildShared, buildCli, ensureAddons], services: ['backend'] };
+      return {
+        steps: env.UNLEASHD_DEV_PREBUILT === '1' ? [ensureAddons] : [buildShared, buildCli, ensureAddons],
+        services: ['backend'],
+      };
     case 'dev-client':
       return { steps: [buildShared], services: ['vite'] };
     // Only the addons: the compilers' first pass is the TS build, and nothing

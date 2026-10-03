@@ -50,13 +50,8 @@ import {
   type TurnInput,
   sameEitherWay,
 } from '../turns/input';
-import {
-  ChatTurnPolicy,
-  type CoordinationDrained,
-  type AdoptedExecution,
-  type MemorySnapshot,
-  type TurnPolicy,
-} from '../turns/policy';
+import type { Effect, Phase } from '../turns/execution-state';
+import { ChatTurnPolicy, type MemorySnapshot, type TurnPolicy } from '../turns/policy';
 import { type QueueEntry, TurnQueue } from '../turns/queue';
 import { type TurnBroadcast, TurnRunner, type TurnRunnerPorts } from '../turns/runner';
 
@@ -423,24 +418,15 @@ export class Conversation extends EventEmitter {
     content: string,
     context: BuddyContext,
     claimToken: string,
-    deadline: string,
-    onDrained?: CoordinationDrained,
-    onAdmitted?: (config: ResolvedExecutionConfig) => void
-  ): Promise<string> {
+    deadline: string
+  ): Promise<void> {
     if (this._kind.t !== 'buddy' || this._kind.visibility !== 'background') {
       return Promise.reject(new Error('Automated Buddy inputs require a background conversation'));
     }
     if (this.process || this.isRunning || this.turnQueue.length) {
       return Promise.reject(new Error('Conversation is busy'));
     }
-    return this._policy.runCoordination(
-      content,
-      context,
-      claimToken,
-      deadline,
-      onDrained,
-      onAdmitted
-    );
+    return this._policy.runCoordination(content, context, claimToken, deadline);
   }
 
   sendMessage(content: string, ownerInput?: OwnerInput): void {
@@ -563,7 +549,12 @@ export class Conversation extends EventEmitter {
    * the journal from byte 0. Adoption happens before any run is claimed, so a conversation with
    * an adopted turn is busy and no second writer can start on its session.
    */
-  adoptTurn(owner: TurnOwner, handle: ExecutionHandle, execution: AdoptedExecution): void {
+  adoptTurn(
+    owner: TurnOwner,
+    handle: ExecutionHandle,
+    phase: Phase,
+    effects: readonly Effect[]
+  ): void {
     if (this.process || this.isRunning)
       throw new Error(`Conversation ${this.id} is already running`);
     this.appendMessage({
@@ -571,8 +562,8 @@ export class Conversation extends EventEmitter {
       body: { t: 'text', text: owner.userMessage.text },
       timestamp: new Date(owner.userMessage.timestamp),
     });
-    this._policy.adopt(owner.policy, { attemptId: owner.attemptId, messageStart: 0 }, execution);
-    this.runner.adopt(owner, handle, execution);
+    this._policy.adopt(owner.policy, { attemptId: owner.attemptId, messageStart: 0 });
+    this.runner.adopt(owner, handle, phase, effects);
   }
 
   // Soft handoff, upgraded to session inheritance by capability, never rejecting the send
@@ -656,21 +647,21 @@ export class Conversation extends EventEmitter {
     this.emit('buddy-turn-failed', errorMessage);
   }
 
-  stop(reason: 'user_stop' | 'server_restart' = 'user_stop'): void {
-    if (this._policy.stop(reason)) this.stopOwnedTurn(reason);
+  stop(): void {
+    if (this._policy.stop()) this.stopOwnedTurn();
   }
 
   /** Coordinator-only process stop (see BuddyTurnPolicy.stopAutomation). */
   stopAutomationTurn(): void {
     this._policy.stopAutomation();
-    this.stopOwnedTurn('user_stop');
+    this.stopOwnedTurn();
   }
 
-  private stopOwnedTurn(reason: 'user_stop' | 'server_restart'): void {
+  private stopOwnedTurn(): void {
     if (this._policy.dropWaitingTurn()) {
       this.emit('buddy-turn-failed', 'Stopped while waiting for a run slot');
     }
-    this.runner.stop(reason);
+    this.runner.stop();
   }
 
   // A fresh provider session under the same conversation id.

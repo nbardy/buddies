@@ -18,6 +18,7 @@ export function fakeBuddyPort(
     enqueueChat?: (context: BuddyContext, conversationId: string) => string;
     abandon?: (turnId: string) => void;
     settle?: BuddyPolicyPort['settle'];
+    finishRun?: BuddyPolicyPort['finishRun'];
     revoke?: (conversationId: string) => void;
     afterTurn?: (turn: CompletedBuddyTurn) => void;
   } = {}
@@ -45,10 +46,9 @@ export function fakeBuddyPort(
     // No endpoint in these fixtures: no servers, and a grant that only needs to be data.
     mcpServers: () => ({ servers: {}, grant: FIXTURE_GRANT }),
     builderMcpServers: () => ({ servers: {}, grant: FIXTURE_GRANT }),
-    adoptGrant: () => undefined,
     renewLease: async () => ({ kind: 'renewed' }),
-    finishAdoptedRun: () => undefined,
-    settle: options.settle ?? (() => undefined),
+    finishRun: options.finishRun ?? (async () => undefined),
+    settle: options.settle ?? (async () => undefined),
     revoke: options.revoke ?? (() => undefined),
     afterTurn: options.afterTurn ?? (() => undefined),
   };

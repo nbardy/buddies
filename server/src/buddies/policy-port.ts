@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { McpServerSpec } from '@nbardy/agent-cli';
-import type { Returns } from '@unleashd/buddies-core';
+import type { Outcome, Returns } from '@unleashd/buddies-core';
 import type { BuddyContext, BuddyVisibility } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
+import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
 import { type GrantRecord, type Grants, INBOX, type TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
@@ -37,25 +38,13 @@ export interface BuddyPolicyPort {
   builderMcpServers(conversationId: string): TurnTools;
   /** The turn's holder is alive: push its run's lease forward (Pattern: lease-heartbeat). */
   renewLease(runId: string, leaseToken: string): Promise<LeaseRenewal>;
-  /** A replacement backend adopted a running turn: its grant works again, unchanged. */
-  adoptGrant(grant: GrantRecord): void;
-  /** The turn ended: settle its run (which also revokes the run's grants). */
-  settle(
-    runId: string,
-    leaseToken: string,
-    status: 'complete' | 'failed' | 'cancelled',
-    detail: string
-  ): void;
   /**
-   * An adopted runner-owned run drained (its `runTurn` promise died with the old backend): the
-   * runner finishes it exactly as `runJob` would have, then settles it.
+   * The turn of a chat run ended: settle it (which also revokes the run's grants). Resolves once
+   * the settle landed or the run had already ended (lease_lost); rejects on a transient failure.
    */
-  finishAdoptedRun(
-    runId: string,
-    leaseToken: string,
-    status: 'complete' | 'failed',
-    detail: string
-  ): void;
+  settle(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void>;
+  /** A runner-owned run's turn ended: its completion step, then its settle, as `settle` resolves. */
+  finishRun(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void>;
   revoke(conversationId: string): void;
   /** After a successful turn: memory review. */
   afterTurn(turn: CompletedBuddyTurn): void;
@@ -116,23 +105,9 @@ export function createBuddyPolicyPort(deps: {
       };
     },
     renewLease: (runId, leaseToken) => runner.renew(runId, leaseToken),
-    adoptGrant: (grant) => grants.adopt(grant),
-    settle(runId, leaseToken, status, detail) {
-      const outcome =
-        status === 'complete'
-          ? ({ kind: 'complete', text: detail } as const)
-          : status === 'failed'
-            ? ({ kind: 'failed', code: 'execution_failed', error: detail } as const)
-            : ({ kind: 'cancelled', reason: detail } as const);
-      void runner
-        .finishChat(runId, leaseToken, outcome)
-        .catch((error) => console.error('[buddies] settle failed', runId, error));
-    },
-    finishAdoptedRun(runId, leaseToken, status, detail) {
-      void runner
-        .finishAdoptedRun(runId, leaseToken, status, detail)
-        .catch((error) => console.error('[buddies] adopted run did not finish', runId, error));
-    },
+    settle: (runId, leaseToken, outcome) =>
+      runner.finishChat(runId, leaseToken, crateOutcome(outcome)),
+    finishRun: (runId, leaseToken, outcome) => runner.finishRun(runId, leaseToken, outcome),
     revoke: (conversationId) => grants.revokeConversation(conversationId),
     afterTurn: (turn) => deps.reviewer.enqueue(turn),
   };
@@ -158,5 +133,17 @@ export function returnsFor(visibility: BuddyVisibility, conversationId: string):
       return INBOX;
     case 'background':
       return { kind: 'conversation', id: conversationId };
+  }
+}
+
+/** A turn's outcome as the crate records a run's. */
+export function crateOutcome(outcome: ExecutionOutcome): Outcome {
+  switch (outcome.t) {
+    case 'complete':
+      return { kind: 'complete', text: outcome.text };
+    case 'failed':
+      return { kind: 'failed', code: 'execution_failed', error: outcome.detail };
+    case 'cancelled':
+      return { kind: 'cancelled', reason: outcome.detail };
   }
 }
