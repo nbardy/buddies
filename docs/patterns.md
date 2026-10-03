@@ -213,6 +213,29 @@ Guards: `server/test/run-lease.test.ts` (a dead holder is cleared within the lea
 a heartbeating silent turn outlives its lease; the idle timer still kills a turn with no provider progress),
 plus crate tests `an_expired_lease_ends_its_run_like_a_failed_settle` and `a_renewed_lease_outlives_its_first_term`.
 
+## persisted-state-machine
+**Smell:** one thing's truth is spread over several stores (an in-memory flag, a file, a DB row) that are
+updated one after another, so a crash between two writes leaves them disagreeing, and recovery code guesses
+which one to believe.
+**Pattern:** the thing has ONE persisted state, a sum type. One pure transition function (a thin dispatcher
+over a phase × event table, one straight-line handler per cell) returns the next state and the side effects
+it licenses. The state is written to disk BEFORE any of those effects runs, and every effect is idempotent,
+so a crash at any point resumes from a state that explains it, and recovery redoes the effects. Recovery reads
+only that state (plus facts it can observe, like process liveness). An exhaustive small-scope checker injects
+a crash at every step, and a mutation check proves it catches a broken rule.
+**Here:** `server/src/turns/execution-state.ts` (`Phase = running | stopping(intent) | abandoned |
+ended(outcome) | settled`, `TRANSITIONS`, `ADOPTIONS`, `GRANTS`, `applyStep`). The phase lives in the
+execution's journal directory (`phase.json`, beside agent-cli's `pid`/`exit.json`; written by
+`turns/executions.ts`). `TurnRunner` runs the effects (`EFFECTS`), and boot adoption
+(`lifecycle/adopt-executions.ts`) reads the phase and restores grants before the Buddy MCP endpoint listens.
+History: P1 review, 2026-10-01. In 2a, a stop revoked the grant in memory only, so a backend killed inside the
+3 s kill grace left a turn the next backend adopted as live, with its tools back. In 2b, the journal was
+removed before the run settle landed, so a finished run recovered as interrupted.
+Decision: `agent_notes/2026-10-03_p1-single-execution-state-decision.md`.
+Guards: `server/test/execution-crash-checker.test.ts` (every crash point, and the mutation check), plus the
+real-backend tests in `server/test/execution-adoption.test.ts`: "a Stop survives a backend crash inside the
+kill grace", "a timeout survives…" and "a crash between the drain and the run settle".
+
 ## fix-guards
 **Smell:** a fixed slowdown or bug quietly comes back.
 **Pattern:** every fix leaves three things:

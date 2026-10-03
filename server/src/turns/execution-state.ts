@@ -19,8 +19,9 @@ import type { TurnTerminalCause } from '../observability';
  * Guards:
  * - server/test/execution-crash-checker.test.ts: every crash point, exhaustively, plus a
  *   mutation check;
- * - server/test/adoption-stop.test.ts (2a) and adoption-settle-crash.test.ts (2b): the real
- *   backend, killed in each window.
+ * - server/test/execution-adoption.test.ts, the real backend killed in each window: "a Stop
+ *   survives a backend crash inside the kill grace" and "a timeout survives…" (2a), "a crash
+ *   between the drain and the run settle" (2b).
  * Decision: agent_notes/2026-10-03_p1-single-execution-state-decision.md.
  */
 export type Phase =
