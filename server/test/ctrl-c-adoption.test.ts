@@ -95,6 +95,9 @@ interface Case {
   readonly workspaceDir: string;
   readonly env: NodeJS.ProcessEnv;
   readonly log: string[];
+  /** The last `eventually` this case waited on, for the diagnosis of a timed-out test. */
+  waitingFor: string;
+  finished: boolean;
 }
 
 interface DevGroup {
@@ -129,6 +132,8 @@ function makeCase(name: string): Case {
     fakeDir,
     workspaceDir,
     log: [],
+    waitingFor: '',
+    finished: false,
     env: {
       ...process.env,
       HOME: home,
@@ -152,6 +157,9 @@ function makeCase(name: string): Case {
       BUDDIES_HOME: path.join(home, '.buddies'),
       UNLEASHD_AUTH_TOKEN: TOKEN,
       FAKE_DIR: fakeDir,
+      // The dists are built before the suite; a rebuild here deletes them under every other test
+      // file (tools/dev-supervisor.mjs taskPlan).
+      UNLEASHD_DEV_PREBUILT: '1',
     },
   };
   cases.push(created);
@@ -191,14 +199,8 @@ function launch(c: Case, name: string, args: string[] = []): DevGroup {
   };
   child.stdout?.on('data', record);
   child.stderr?.on('data', record);
-  const timer = setTimeout(
-    () => rejectReady(new Error(`${name} did not start:\n${c.log.slice(-60).join('\n')}`)),
-    120_000
-  );
-  void ready.then(
-    () => clearTimeout(timer),
-    () => clearTimeout(timer)
-  );
+  // No startup timer: readiness is the log line, failure is the exit; the test's own timeout
+  // bounds a hang (a 120 s timer here raced a loaded machine's startup).
   const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
   void exited.then(() =>
     rejectReady(new Error(`${name} exited before ready:\n${c.log.slice(-60).join('\n')}`))
@@ -233,23 +235,24 @@ const alive = (pid: number) => {
   }
 };
 
+/**
+ * Wait until the condition holds. No deadline of its own: every wait here is for an event the
+ * system under test produces, and the test's timeout bounds a hang. Fixed 30 s deadlines failed
+ * under full-suite load while nothing was wrong (the P1 Ctrl+C flake). `what` and the case log
+ * are printed by `after` for a case that never finished.
+ */
 async function eventually<T>(
   c: Case,
   read: () => Promise<T> | T,
   ok: (value: T) => boolean,
-  what: string,
-  timeoutMs = 30_000
+  what: string
 ) {
-  const deadline = Date.now() + timeoutMs;
-  let last: T | undefined;
-  while (Date.now() < deadline) {
-    last = await read();
-    if (ok(last)) return last;
+  c.waitingFor = what;
+  for (;;) {
+    const value = await read();
+    if (ok(value)) return value;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(
-    `timed out waiting for ${what}; last: ${JSON.stringify(last)}\n${c.log.slice(-80).join('\n')}`
-  );
 }
 
 async function http(method: string, route: string, body?: unknown) {
@@ -441,6 +444,8 @@ async function stopGroup(group: DevGroup) {
 after(async () => {
   for (const group of groups) await stopGroup(group);
   for (const c of cases) {
+    if (!c.finished)
+      console.error(`[${c.root}] unfinished, waiting for ${c.waitingFor}:\n${c.log.slice(-80).join('\n')}`);
     for (const file of fs.existsSync(c.fakeDir) ? fs.readdirSync(c.fakeDir) : []) {
       if (!file.endsWith('.pgid')) continue;
       signalGroup(Number(fs.readFileSync(path.join(c.fakeDir, file), 'utf8')), 'SIGKILL');
@@ -469,6 +474,7 @@ test(
     await second.ready;
     await assertAdoptedAndCompleted(c, work);
     await stopGroup(second);
+    c.finished = true;
   }
 );
 
@@ -503,6 +509,7 @@ test(
     await second.ready;
     await assertAdoptedAndCompleted(c, work);
     await stopGroup(second);
+    c.finished = true;
   }
 );
 
@@ -519,6 +526,7 @@ test(
     await second.ready;
     await assertAdoptedAndCompleted(c, work);
     await stopGroup(second);
+    c.finished = true;
   }
 );
 
@@ -553,6 +561,7 @@ test(
     await assertAdoptedAndCompleted(c, work);
     // The failed in-gap call wrote nothing; the retry after relaunch (the `after` call) did.
     await stopGroup(second);
+    c.finished = true;
   }
 );
 
@@ -621,8 +630,7 @@ test(
               /sleep 15/.test(fs.readFileSync(path.join(dir, 'stdout'), 'utf8'))
           ),
       Boolean,
-      'the real CLI to start its sleep',
-      180_000
+      'the real CLI to start its sleep'
     );
     assert.ok(journal);
     const wrapper = Number(fs.readFileSync(path.join(journal, 'pid'), 'utf8'));
@@ -668,8 +676,7 @@ test(
       c,
       () => runOf(buddy),
       (r) => ['complete', 'failed', 'cancelled'].includes(r?.status),
-      'the real run to settle',
-      300_000
+      'the real run to settle'
     );
     report.run = { status: run.status, error: run.error ?? null };
     const dm = await http('GET', `/api/buddies/channels/${request.channelId}/posts`);
@@ -686,6 +693,7 @@ test(
       .map((p) => p.body);
     console.log(`[real claude] ${JSON.stringify(report, null, 2)}`);
     await stopGroup(second);
+    c.finished = true;
     fs.rmSync(
       path.join(
         REAL_HOME,

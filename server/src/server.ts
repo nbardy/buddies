@@ -58,7 +58,7 @@ import { type BootedIngest, bootIngest } from './ingest/boot';
 import type { ConversationList } from './ingest/conversation-list';
 import { currentIngest } from './ingest/instance';
 import { createRuntimeBuilder } from './ingest/runtimes';
-import { adoptExecutions } from './lifecycle/adopt-executions';
+import { adoptExecutions, liveGrants } from './lifecycle/adopt-executions';
 import { type ShutdownController, registerShutdownHandlers } from './lifecycle/shutdown';
 import { runServerStartup } from './lifecycle/startup';
 import { registerStaticClient } from './lifecycle/static-client';
@@ -781,6 +781,10 @@ void runServerStartup(
       void reportBackendExits(errorJournal, path.join(APP_DATA_DIR, 'observability')).catch(
         (error) => console.error('[backend-exits] Failed to journal recorded backend exits:', error)
       );
+      // Journals the previous backend left: their open attempts are adopted, not swept. A live
+      // turn's grant is valid again BEFORE the tool endpoint answers (adopt-executions.ts).
+      foundExecutions = executionJournals.scan();
+      for (const grant of liveGrants(foundExecutions)) buddyGrants.adopt(grant);
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).
       buddyMcp = await startMcpEndpoint({
         core: buddiesCore,
@@ -793,11 +797,11 @@ void runServerStartup(
       // hold startup, and their failures are logged after capture is installed.
       upstream.start();
       startupAuditResults = auditLocalAgents();
-      // Journals the previous backend left: their open attempts are adopted, not swept.
-      foundExecutions = executionJournals.scan();
       await turnAttemptJournal.initialize(
         new Set(
-          foundExecutions.flatMap((found) => (found.t === 'turn' ? [found.owner.attemptId] : []))
+          foundExecutions.flatMap((found) =>
+            found.t === 'turn' || found.t === 'unstarted' ? [found.owner.attemptId] : []
+          )
         )
       );
       await persistedServerState.initialize();
@@ -856,7 +860,10 @@ void runServerStartup(
           return registered && buddyCreationService.ensureConversationReady(registered);
         },
         attach: attachExecution,
-        discard: executionJournals.discard,
+        discard: (found) => {
+          executionJournals.discard(found);
+          if (found.t === 'turn') buddyGrants.revokeConversation(found.owner.conversationId);
+        },
         attemptInterrupted: (attemptId) =>
           turnAttemptObserver.terminal({
             attemptId,

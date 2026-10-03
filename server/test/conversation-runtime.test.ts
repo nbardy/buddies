@@ -46,6 +46,7 @@ function runtimeFixture(
     startBuddyChatRun?: (turnId: string) => ChatAdmission;
     abandonBuddyChatRun?: (turnId: string) => void;
     finishBuddyChatRun?: BuddyPolicyPort['settle'];
+    finishBuddyRun?: BuddyPolicyPort['finishRun'];
     reviewCompletedBuddyTurn?: (turn: CompletedBuddyTurn) => void;
     readCurrentBuddyContext?: () => { briefing: string; memoryGeneration: string };
     buddyContext?: CompletedBuddyTurn['context'];
@@ -79,6 +80,7 @@ function runtimeFixture(
       admission: options.startBuddyChatRun,
       abandon: options.abandonBuddyChatRun,
       settle: options.finishBuddyChatRun,
+      finishRun: options.finishBuddyRun,
       revoke: options.revokeBuddyControlCapability,
       afterTurn: options.reviewCompletedBuddyTurn,
       briefing: options.readCurrentBuddyContext,
@@ -696,7 +698,9 @@ test('a foreground Buddy turn over capacity waits pending, then starts once admi
           }
         : { kind: 'waiting', reason: 'Waiting for a run slot: 5 of 5 active.' },
     abandonBuddyChatRun: (runId) => abandoned.push(runId),
-    finishBuddyChatRun: (...args) => settlements.push(args),
+    finishBuddyChatRun: async (...args) => {
+      settlements.push(args);
+    },
     executeTurn,
   });
   const { conversation } = fixture;
@@ -1272,7 +1276,9 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
         },
       };
     },
-    finishBuddyChatRun: (...args) => settlements.push(args),
+    finishBuddyChatRun: async (...args) => {
+      settlements.push(args);
+    },
     turnAttempts: {
       queued: () => {},
       starting: () => {},
@@ -1320,8 +1326,8 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(conversation.hasActiveProcess(), false);
   assert.equal(settlements.length, 1);
-  assert.equal(settlements[0][2], 'failed');
-  assert.match(settlements[0][3] ?? '', /maximum runtime/);
+  assert.equal(settlements[0][2].t, 'failed');
+  assert.match(JSON.stringify(settlements[0][2]), /maximum runtime/);
 });
 
 test('background deadline uses timeout classification and waits for provider drain', async (t) => {
@@ -1336,10 +1342,13 @@ test('background deadline uses timeout classification and waits for provider dra
   const terminals: Parameters<
     NonNullable<ConversationRuntimeDependencies['turnAttempts']>['terminal']
   >[0][] = [];
-  const settlements: Parameters<BuddyPolicyPort['settle']>[] = [];
+  const settlements: Parameters<BuddyPolicyPort['finishRun']>[] = [];
   let release = false;
-  let drainedCause: string | undefined;
   const fixture = runtimeFixture({
+    // The runner-owned run settles through the same port call live and adopted (finishRun).
+    finishBuddyRun: async (...args) => {
+      settlements.push(args);
+    },
     turnAttempts: {
       queued: () => {},
       starting: () => {},
@@ -1375,13 +1384,8 @@ test('background deadline uses timeout classification and waits for provider dra
     'worker-token',
     // The run's deadline is armed by the policy (it used to be a server.ts timer that no
     // adopting backend could re-arm).
-    new Date(Date.now() + 1000).toISOString(),
-    (status, detail, terminalCause) => {
-      drainedCause = terminalCause;
-      settlements.push(['worker-run', 'worker-token', status, detail]);
-    }
+    new Date(Date.now() + 1000).toISOString()
   );
-  const rejected = assert.rejects(execution, /maximum runtime/);
   await new Promise<void>((resolve) => setImmediate(resolve));
   t.mock.timers.tick(1000);
   assert.equal(release, true);
@@ -1399,10 +1403,11 @@ test('background deadline uses timeout classification and waits for provider dra
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(conversation.hasActiveProcess(), false);
   assert.equal(settlements.length, 1);
-  await rejected;
-  assert.equal(drainedCause, 'max_runtime_timeout');
-  assert.equal(settlements[0][2], 'failed');
-  assert.match(settlements[0][3] ?? '', /maximum runtime/);
+  await execution;
+  assert.deepEqual(settlements[0].slice(0, 2), ['worker-run', 'worker-token']);
+  const outcome = settlements[0][2];
+  assert.equal(outcome.t === 'failed' && outcome.cause, 'max_runtime_timeout');
+  assert.match(JSON.stringify(outcome), /maximum runtime/);
 });
 
 function openTurnStub() {

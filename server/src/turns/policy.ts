@@ -8,7 +8,7 @@ import type {
 } from '@unleashd/shared';
 import { parseBuddyWorkerToolResult } from '@unleashd/shared';
 import type { BuddyPolicyAdoption } from '../buddies/turn-policy';
-import type { TurnTerminalCause } from '../observability';
+import type { ExecutionOutcome } from './execution-state';
 import type { TurnInput } from './input';
 
 /**
@@ -33,12 +33,6 @@ export interface MemorySnapshot {
  */
 export type TurnGate = 'send' | 'enqueue' | 'wait' | 'admitted';
 
-/** How a started turn ended, for the policy's own bookkeeping. */
-export type TurnEnd =
-  | { t: 'succeeded' }
-  | { t: 'failed'; detail: string }
-  | { t: 'cancelled'; detail?: string };
-
 /**
  * What a spawned turn's policy holds that a replacement backend needs to adopt the turn while it
  * still runs (turns/executions.ts): data only, written to the execution's journal at spawn. Each
@@ -52,18 +46,6 @@ export interface AdoptedReview {
   attemptId: string;
   messageStart: number;
 }
-
-/**
- * How the adopted execution stood at boot. `ended`: it exited (or was lost) while no backend
- * watched, so its outcome is already on disk and no runtime budget applies to its replay.
- */
-export type AdoptedExecution = { state: 'running' } | { state: 'ended' };
-
-export type CoordinationDrained = (
-  status: 'complete' | 'failed',
-  detail: string,
-  terminalCause?: TurnTerminalCause
-) => void;
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
 export interface TurnPolicy {
@@ -93,23 +75,31 @@ export interface TurnPolicy {
   spawned(review: { attemptId: string; messageStart: number }): void;
   /** Right after startTurn, before spawn: this turn's state as data, for adoption. */
   adoptionRecord(): PolicyAdoption;
-  /** A replacement backend adopted this turn while it runs: restore what the record holds. */
-  adopt(record: PolicyAdoption, review: AdoptedReview, execution: AdoptedExecution): void;
+  /**
+   * A replacement backend adopted this turn: restore what the record holds. Its grant, if it may
+   * hold one, was restored at boot (execution-state.ts `holdsGrant`), never here.
+   */
+  adopt(record: PolicyAdoption, review: AdoptedReview): void;
+  /** An adopted live turn: expire it at its run's deadline again (effect `arm_deadline`). */
+  armDeadline(): void;
   spawnFailed(): void;
   toolResultParts(output: unknown): ContentPart[];
   streamCompleted(): void;
   /** A successful, un-stopped turn drained; `messages` is the whole history. */
   reviewCompleted(messages: readonly Message[]): void;
-  ended(end: TurnEnd): void;
+  /**
+   * The turn's settle effect (execution-state.ts): settle the run it executes under with this
+   * outcome. Resolves once that landed; only then is the turn's journal removed.
+   */
+  settle(outcome: ExecutionOutcome): Promise<void>;
   /** Revoke per-turn capabilities (tool grants) now. */
   revoke(): void;
-  /** A user/server stop. Returns false when the policy handled it without stopping the turn. */
-  stop(reason: 'user_stop' | 'server_restart'): boolean;
+  /** An owner stop. Returns false when the policy handled it without stopping the turn. */
+  stop(): boolean;
   /** Stop while waiting for a run slot. Returns true when a waiting turn was dropped. */
   dropWaitingTurn(): boolean;
   waitingForRunSlot(): boolean;
   queueEmptied(): void;
-  attemptFinished(cause: TurnTerminalCause): void;
   /**
    * The turn's bridge is alive: called on every event that ticks the watchdog's bridge clock,
    * heartbeats included. A Buddy turn renews its run's lease here (Pattern: lease-heartbeat).
@@ -117,15 +107,16 @@ export interface TurnPolicy {
   bridgeAlive(): void;
   sessionReset(): void;
   audienceKey(): string | undefined;
-  /** `deadline` (ISO) expires the run as max_runtime_timeout, like a chat run's deadline. */
+  /**
+   * One turn for a run the Buddy runner claimed. `deadline` (ISO) expires it as
+   * max_runtime_timeout. Resolves once the turn settled its run; rejects only when it never started.
+   */
   runCoordination(
     content: string,
     context: BuddyContext,
     claimToken: string,
-    deadline: string,
-    onDrained?: CoordinationDrained,
-    onAdmitted?: (config: ResolvedExecutionConfig) => void
-  ): Promise<string>;
+    deadline: string
+  ): Promise<void>;
   sendAutomation(content: string): void;
   stopAutomation(): void;
 }
@@ -182,13 +173,16 @@ export class ChatTurnPolicy implements TurnPolicy {
   adopt(record: PolicyAdoption): void {
     if (record.t !== 'chat') throw new Error(`A chat cannot adopt a ${record.t} turn`);
   }
+  armDeadline(): void {}
   spawnFailed(): void {}
   toolResultParts(output: unknown): ContentPart[] {
     return commonToolResultParts(output);
   }
   streamCompleted(): void {}
   reviewCompleted(): void {}
-  ended(): void {}
+  settle(): Promise<void> {
+    return Promise.resolve();
+  }
   revoke(): void {}
   stop(): boolean {
     return true;
@@ -200,13 +194,12 @@ export class ChatTurnPolicy implements TurnPolicy {
     return false;
   }
   queueEmptied(): void {}
-  attemptFinished(): void {}
   bridgeAlive(): void {}
   sessionReset(): void {}
   audienceKey(): string | undefined {
     return undefined;
   }
-  runCoordination(): Promise<string> {
+  runCoordination(): Promise<void> {
     return Promise.reject(new Error('Coordination identity or claim is missing'));
   }
   sendAutomation(): void {
