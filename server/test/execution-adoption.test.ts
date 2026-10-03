@@ -507,12 +507,14 @@ function stopConversation(conversationId: string): Promise<void> {
     const socket = new WebSocket(`ws://127.0.0.1:${PORT}${WS_PATH}`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     });
+    // Left open: the server drops a command whose socket closed before it was dispatched (the
+    // `readyState` check after the initial-load await), and this backend dies on the stop anyway.
     socket.on('open', () => {
       socket.send(JSON.stringify({ type: 'stop_conversation', conversationId }));
-      socket.close();
       resolve();
     });
-    socket.on('error', reject);
+    socket.on('error', () => undefined);
+    socket.once('unexpected-response', () => reject(new Error('stop socket refused')));
   });
 }
 
