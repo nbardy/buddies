@@ -58,17 +58,35 @@ def write(name: str, x: np.ndarray, peak: float) -> None:
 
 
 # Boops: one per robot, climbing D major pentatonic (D4 F#4 A4 B4 D5, the marimba's key). Each is
-# a sine that starts a fifth high and glides down over 120 ms, with a soft octave on top and a
-# 0.45 s decay: a bubble, not a click.
-BOOP_NOTES = [-7, -3, 0, 2, 5]
-for k, semis in enumerate(BOOP_NOTES):
-    t = t_axis(0.55)
+# a sine that starts a fifth high and glides down over 120 ms, with a soft octave on top: a bubble,
+# not a click. Owner, 2026-10-03: the 2nd and 3rd want "more timbre and warmth", and the 3rd "a
+# little more ring on the fade out". So each boop has a `warmth` (a sub-octave sine, slower-decaying
+# 2nd and 3rd partials, gentle tanh saturation) and a `ring` (decay time constant and length).
+# 2nd and 3rd only.
+Boop = tuple[int, float, float, float, float]  # semitones from A4, warmth 0..1, decay tau (s), length (s), ring 0..1
+BOOPS: list[Boop] = [
+    (-7, 0.0, 0.13, 0.55, 0.0),
+    (-3, 0.7, 0.16, 0.65, 0.0),
+    (0, 0.8, 0.34, 1.20, 1.0),
+    (2, 0.0, 0.13, 0.55, 0.0),
+    (5, 0.0, 0.13, 0.55, 0.0),
+]
+for k, (semis, warmth, tau, length, ring_mix) in enumerate(BOOPS):
+    t = t_axis(length)
     f = hz(semis)
     glide = f * (1 + 0.5 * np.exp(-t / 0.04))
     phase = 2 * np.pi * np.cumsum(glide) / SR
-    env = np.minimum(1, t / 0.008) * np.exp(-t / 0.13)
-    body = np.sin(phase) + 0.18 * np.sin(2 * phase) * np.exp(-t / 0.05)
-    write(f"boop-{k}", body * env, peak=0.8)
+    env = np.minimum(1, t / 0.008) * np.exp(-t / tau)
+    body = (
+        np.sin(phase)
+        + 0.18 * np.sin(2 * phase) * np.exp(-t / (0.05 + 0.15 * warmth))
+        + warmth * 0.22 * np.sin(3 * phase) * np.exp(-t / 0.12)
+        + warmth * 0.35 * np.sin(0.5 * phase)
+    )
+    body = np.tanh(body * (1 + 1.2 * warmth)) / np.tanh(1 + 1.2 * warmth)
+    # The ring: a faint detuned copy beating slowly against the fundamental as it fades.
+    ring = ring_mix * 0.25 * np.sin(phase * 1.003) * np.exp(-t / (tau * 1.4))
+    write(f"boop-{k}", (body + ring) * env, peak=0.8)
 
 # Swell: noise and a detuned D-major chord rising together, the filter opening as they climb,
 # then cut on the last sample so the hit lands as the drop.

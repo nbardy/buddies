@@ -4,7 +4,7 @@
 import type React from 'react';
 import { AbsoluteFill, Img, Sequence, useCurrentFrame } from 'remotion';
 import { Block, INK, lerp } from './blocks';
-import { HOME, SIDEBAR_W } from './HomeIntro';
+import { HOME, HOME_SRC, SIDEBAR_W } from './HomeIntro';
 import { MARIMBA, SFX, Soundtrack } from './soundtrack';
 
 export const FPS = 60;
@@ -21,11 +21,11 @@ export const TITLES = [
   { lines: ['Completely', 'customizable'], fill: INK.cyan, rot: 1.5 },
 ];
 
-// The card is 1780 px wide; the screenshot is 2810×1880, so it is 1191 px tall and the card shows its top.
+// The card is 1780 px wide; the screenshot (HOME_SRC) is about 3:2, so the card shows its top.
 const CARD_W = 1780;
 const Home: React.FC = () => (
   <>
-    <Img src={HOME} style={{ position: 'absolute', left: 0, top: 0, width: CARD_W, height: Math.round((CARD_W * 1880) / 2810) }} />
+    <Img src={HOME} style={{ position: 'absolute', left: 0, top: 0, width: CARD_W, height: Math.round((CARD_W * HOME_SRC.h) / HOME_SRC.w) }} />
     <div
       style={{
         position: 'absolute',

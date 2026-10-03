@@ -166,3 +166,11 @@ The crop removes the browser's "ChatGPT started debugging this browser" bar; the
 source size (a 1.8% aspect change).
 Privacy: workspace name (wave_sim), channel #iceblade, Buddy names and a long thread of project text
 are in the frame; the cut shows only the thread pane and the sidebar's worker column, on a blurred backdrop.
+
+## 2026-10-03_home_final.png (home and benefits scenes)
+
+The workspace home the owner dialed in, posted in #unleashd-2 on 2026-10-03 ("that is the final home
+image we dialed in"). 2804×1874 PNG, the unleashd workspace. Replaces 2026-10-02_home_new.png.
+Privacy: the sidebar (workspace name "unleashd", channel and Buddy names) is blurred in both scenes.
+Still readable in the main area before the home scene softens: six task titles (one says "First-run
+unleashd workspace") and two "Waiting on you" rows, which include an automation id.

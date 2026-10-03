@@ -3,7 +3,8 @@
 // "Manage your team of agents just like a team of employees", before the faster music starts.
 // One 4-bar phrase of calm (no beat yet: calm.py `opening`). The type is NOT the colour-slab
 // Block of the demo scenes: the owner wants a calmer treatment here, like the close.
-// Image: ../footage/2026-10-02_home_new.png (see FOOTAGE.md). The sidebar is blurred throughout:
+// Image: ../footage/2026-10-03_home_final.png, the home the owner dialed in (2026-10-03; it replaced
+// 2026-10-02_home_new.png). The sidebar is blurred throughout:
 // it lists real channel and Buddy names.
 import type React from 'react';
 import { AbsoluteFill, Easing, Img, staticFile, useCurrentFrame } from 'remotion';
@@ -15,9 +16,10 @@ export const HEIGHT = 1080;
 const BAR = (4 * 60) / 128;
 export const DURATION = Math.round(4 * BAR * FPS);
 
-export const HOME = staticFile('2026-10-02_home_new.png'); // 2810×1880
+export const HOME = staticFile('2026-10-03_home_final.png');
+export const HOME_SRC = { w: 2804, h: 1874 };
 export const HOME_W = 1920;
-export const HOME_H = Math.round((HOME_W * 1880) / 2810);
+export const HOME_H = Math.round((HOME_W * HOME_SRC.h) / HOME_SRC.w);
 export const SIDEBAR_W = Math.round((375 / 2000) * HOME_W); // the sidebar's right edge in the screenshot
 
 // Seconds into the scene.
