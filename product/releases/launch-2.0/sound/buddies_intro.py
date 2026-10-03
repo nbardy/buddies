@@ -83,7 +83,8 @@ for k, (semis, warmth, tau, length, ring_mix) in enumerate(BOOPS):
         + warmth * 0.22 * np.sin(3 * phase) * np.exp(-t / 0.12)
         + warmth * 0.35 * np.sin(0.5 * phase)
     )
-    body = np.tanh(body * (1 + 1.2 * warmth)) / np.tanh(1 + 1.2 * warmth)
+    # Saturation scales with warmth, so a warmth-0 boop is the original sound, byte for byte.
+    body = (1 - warmth) * body + warmth * np.tanh(body * 2.2) / np.tanh(2.2)
     # The ring: a faint detuned copy beating slowly against the fundamental as it fades.
     ring = ring_mix * 0.25 * np.sin(phase * 1.003) * np.exp(-t / (tau * 1.4))
     write(f"boop-{k}", (body + ring) * env, peak=0.8)
