@@ -2,12 +2,24 @@
 // "Replying…" like the typing rows in a channel; the text rolls up, the faces simplify to plain
 // circles, and the circles slide together into the Huddle mark as "buddies" lands beside it.
 // Two cast sizes to compare, 3 and 5 (owner: "3 seems pretty good already").
-// Sound: the synthesized samples in ../../sound (soundtrack.tsx), so we own all of it.
+// Sound: synthesized by ../../sound/buddies_intro.py (boops, swell, hit) and synth.py (sparkle), so
+// we own all of it. The owner rejected the first sound (marimba "ding dong" = doorbell; blip pops too
+// quick), 2026-10-03.
 import type React from 'react';
 import { AbsoluteFill, useCurrentFrame } from 'remotion';
 import { clamp01, easeOutBack, FONT, lerp } from './blocks';
 import { AURA, NIGHT } from './BuddiesLogos';
-import { type Cue, MARIMBA, POPS, SFX, Soundtrack } from './soundtrack';
+import boop0 from '../../sound/boop-0.wav';
+import boop1 from '../../sound/boop-1.wav';
+import boop2 from '../../sound/boop-2.wav';
+import boop3 from '../../sound/boop-3.wav';
+import boop4 from '../../sound/boop-4.wav';
+import introHit from '../../sound/intro-hit.wav';
+import introSwell from '../../sound/intro-swell.wav';
+import { type Cue, SFX, Soundtrack } from './soundtrack';
+
+const BOOPS = [boop0, boop1, boop2, boop3, boop4]; // climbing D major pentatonic
+const SWELL_SECONDS = 1.1; // = SWELL_SECONDS in buddies_intro.py: the swell ends on the lock
 
 export const FPS = 60;
 const CREAM = '#fdf6e3';
@@ -53,7 +65,7 @@ export const CAST: Record<Count, Cast> = {
     rowPitch: 172,
     avatar: 60,
     text: 66,
-    stagger: 0.22,
+    stagger: 0.3,
   },
 };
 
@@ -200,11 +212,10 @@ export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
   const tag = easeOutCubic(span(t, b.tag, 0.5));
 
   const cues: Cue[] = [
-    ...c.colors.map((_, i) => ({ at: b.pop(i), src: POPS[Math.min(POPS.length - 1, i * 2)], volume: 0.7 })),
-    { at: b.roll, src: SFX.whoosh, volume: 0.35 },
-    { at: b.lock - 0.05, src: MARIMBA.D5, volume: 0.5 },
-    { at: b.lock + 0.12, src: MARIMBA.A4, volume: 0.35 },
-    { at: b.word + 0.1, src: SFX.sparkle, volume: 0.25 },
+    ...c.colors.map((_, i) => ({ at: b.pop(i), src: BOOPS[i], volume: 0.42 })),
+    { at: b.lock - SWELL_SECONDS, src: introSwell, volume: 0.5 },
+    { at: b.lock, src: introHit, volume: 1 },
+    { at: b.word + 0.1, src: SFX.sparkle, volume: 0.15 },
   ];
 
   return (

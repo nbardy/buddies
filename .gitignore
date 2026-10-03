@@ -59,6 +59,10 @@ product/**
 !product/design/**
 !product/releases/launch-2.0/logos/**
 !product/releases/launch-2.0/brand/**
+# Synthesized sound (generator scripts + their WAVs). Earlier files were force-added, so new
+# samples were silently ignored until this negation (2026-10-03).
+!product/releases/launch-2.0/sound/**
+product/releases/launch-2.0/sound/__pycache__/
 # Remotion edit project; its own .gitignore keeps node_modules/ and out/ renders out.
 !product/releases/launch-2.0/edit/**
 output
