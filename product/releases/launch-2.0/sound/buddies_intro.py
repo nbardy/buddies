@@ -18,6 +18,9 @@ import numpy as np
 SR = 48_000
 OUT = Path(__file__).parent
 SWELL_SECONDS = 1.1
+# The hit ends with the intro: in the cut the intro's Sequence ends 2.0 s after the lock and would
+# chop a longer tail, so it fades out over its last 0.8 s instead (lock -> end in BuddiesIntro.tsx).
+HIT_SECONDS = 2.0
 rng = np.random.default_rng(20261003)
 
 
@@ -78,8 +81,8 @@ swell = onepole(0.5 * tone + 0.8 * noise, 300 + 6000 * u**2) * u**2.2
 write("intro-swell", swell, peak=0.7)
 
 # Hit: a sub boom (90 → 48 Hz) under a wide D add9 chord of detuned saws whose filter blooms open
-# and closes again, with a high shimmer that rings out. Three seconds of tail for the logo hold.
-t = t_axis(3.0)
+# and closes again, with a high shimmer that rings out under the logo hold.
+t = t_axis(HIT_SECONDS)
 boom = np.sin(2 * np.pi * np.cumsum(48 + 42 * np.exp(-t / 0.06)) / SR) * np.exp(-t / 0.5)
 
 
@@ -92,4 +95,5 @@ pad = sum(saw(hz(s) * (1 + d)) for s in pad_notes for d in (-0.006, 0.0, 0.006))
 bloom = 500 + 3500 * np.exp(-((t - 0.25) ** 2) / 0.08)
 pad = onepole(pad, bloom) * np.minimum(1, t / 0.02) * np.exp(-t / 1.1)
 shimmer = sum(np.sin(2 * np.pi * hz(s) * t) for s in (19, 24, 28)) * np.exp(-t / 0.9) * np.minimum(1, t / 0.05)
-write("intro-hit", 1.0 * boom + 0.22 * pad / len(pad_notes) + 0.05 * shimmer, peak=0.85)
+tail = np.clip((HIT_SECONDS - t) / 0.8, 0, 1) ** 2
+write("intro-hit", (1.0 * boom + 0.22 * pad / len(pad_notes) + 0.05 * shimmer) * tail, peak=0.85)

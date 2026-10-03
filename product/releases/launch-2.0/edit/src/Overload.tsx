@@ -1,12 +1,13 @@
 // Beats 1–5, the open. One agent chat: type, send, it pops, it minimizes. A second one. Then the
 // pace ramps (2, 4, 8, 16, 30 a second) until chat windows bury the frame. Hard cut to black:
-// "AI Overload! We're all feeling it." Then the title, "Introducing Unleashd 2.0".
+// "AI Overload! We're all feeling it." Then the title: the Buddies robot intro (BuddiesIntro.tsx,
+// 5 robots), which replaced "Introducing Unleashd 2.0" in the rename to Buddies (owner, 2026-10-03).
 // The windows are styled after the desktop agent apps people already juggle (a Claude-style
 // studio, a Codex-style workbench, a ChatGPT-style assistant, a CLI), per owner direction
 // 2026-09-26, with no product names or logos. Timeline is data (FOCUS, GAPS, T).
 import type React from 'react';
-import { AbsoluteFill, Easing, Img, Sequence, interpolate, random, useCurrentFrame } from 'remotion';
-import wordmark from '../../brand/unleashd-wordmark-3d_trimmed.png';
+import { AbsoluteFill, Easing, Sequence, interpolate, random, useCurrentFrame } from 'remotion';
+import * as Intro from './BuddiesIntro';
 import { Block, INK, clamp01, easeOutBack, lerp } from './blocks';
 import { type Cue, KEYS, MARIMBA, POPS, SFX, Soundtrack } from './soundtrack';
 
@@ -15,15 +16,15 @@ export const WIDTH = 1920;
 export const HEIGHT = 1080;
 
 // Output seconds. Music should put a hit on every pile arrival up to the 1/16 s run.
+export const INTRO_ROBOTS = 5; // owner pick, 2026-10-03; the end card's mark matches it
 const T = {
   rampStart: 6.2, // first pile window; the ramp runs 5 s (sum of GAPS)
   cut: 11.7, // hard cut to black and near silence
   title: 15.0, // voice line "Don't worry, we've got you covered." sits ~13.4–15.0 over the card
-  end: 18.0,
+  end: 15.0 + Intro.frames(INTRO_ROBOTS) / Intro.FPS, // the robot intro plays out in full
 };
 // Entrances inside the card and title scenes, in seconds from each scene's start.
 const CARD = { overload: 0.35, feeling: 0.95, covered: 1.7 };
-const TITLE = { introducing: 0.3, reveal: 0.55, badge: 1.3 };
 export const DURATION = Math.round(T.end * FPS);
 const frames = (s: number) => Math.round(s * FPS);
 
@@ -548,23 +549,6 @@ const OverloadCard: React.FC = () => {
   );
 };
 
-const Title: React.FC = () => {
-  const t = useCurrentFrame() / FPS;
-  const reveal = Easing.out(Easing.cubic)(clamp01((t - TITLE.reveal) / 0.7));
-  return (
-    <AbsoluteFill style={{ background: INK.night, alignItems: 'center', justifyContent: 'center' }}>
-      <AbsoluteFill style={{ background: INK.plate, opacity: clamp01(t / 0.5) }} />
-      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-        <Block text="Introducing" u={t - TITLE.introducing} size="md" fill={INK.surface} ink={INK.cream} rot={0} />
-        <Img src={wordmark} style={{ width: 1150, opacity: reveal, transform: `scale(${lerp(0.92, 1, reveal)})` }} />
-        <div style={{ position: 'absolute', right: -40, bottom: 40 }}>
-          <Block text="2.0" u={t - TITLE.badge} size="xl" fill={INK.wordmarkOrange} ink={INK.plate} rot={-6} />
-        </div>
-      </div>
-    </AbsoluteFill>
-  );
-};
-
 // ---- Sound: every cue is derived from the same timeline the picture uses -------------------------
 
 // One tick per character, at the moment typedText() reveals it.
@@ -591,16 +575,14 @@ const pileCues = (w: WindowSpec, i: number): Cue[] => [
 ];
 
 // After the boom, the calm answer: soft marimba (owner pick, 2026-09-26, over a synthesized
-// guitar, electric piano and strings pad). A rising D arpeggio under the voice line, G under the
-// title, a rolled D chord on "2.0". Grid: the title falls exactly four eighths after it enters.
+// guitar, electric piano and strings pad), a rising D arpeggio under the voice line. The title
+// brings its own sound (BuddiesIntro: boops in D pentatonic, a swell, the hit), so the old title's
+// G chord, "2.0" roll, pad and sparkle are gone. Grid: the title falls four eighths after CALM_IN.
 const EIGHTH = 0.4375; // ≈ 69 bpm
 const CALM_IN = T.title - 4 * EIGHTH; // 13.25 s, just after the thud
-const BADGE = T.title + TITLE.badge; // 16.3 s
 type Mallet = keyof typeof MARIMBA;
 const picked = (at: number, notes: Mallet[], volume: number): Cue[] =>
   notes.map((n, k) => ({ at: at + k * EIGHTH, src: MARIMBA[n], volume }));
-const rolled = (at: number, notes: Mallet[], volume: number): Cue[] =>
-  notes.map((n, k) => ({ at: at + k * 0.05, src: MARIMBA[n], volume }));
 
 // Levels: the boom stays the loudest moment; stacked chords sum, so they sit lower than single notes.
 const OVERLOAD_CUES: Cue[] = [
@@ -610,11 +592,6 @@ const OVERLOAD_CUES: Cue[] = [
   { at: T.cut + CARD.overload, src: SFX.impact, volume: 1 },
   { at: T.cut + CARD.feeling, src: SFX.thud, volume: 0.5 },
   ...picked(CALM_IN, ['D4', 'Fs4', 'A4', 'D5'], 0.38),
-  ...rolled(T.title, ['G3', 'D4'], 0.34),
-  ...picked(T.title + EIGHTH, ['B4', 'D5'], 0.34),
-  ...rolled(BADGE, ['D4', 'Fs4', 'A4', 'Fs5'], 0.2),
-  { at: T.title, src: SFX.pad, volume: 0.25 },
-  { at: BADGE, src: SFX.sparkle, volume: 0.35 },
 ];
 
 export const Overload: React.FC = () => (
@@ -627,7 +604,7 @@ export const Overload: React.FC = () => (
       <OverloadCard />
     </Sequence>
     <Sequence from={frames(T.title)} durationInFrames={frames(T.end - T.title)}>
-      <Title />
+      <Intro.BuddiesIntro count={INTRO_ROBOTS} />
     </Sequence>
   </AbsoluteFill>
 );

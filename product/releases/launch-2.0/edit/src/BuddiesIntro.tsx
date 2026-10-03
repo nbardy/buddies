@@ -159,18 +159,40 @@ const Replying: React.FC<{ t: number; at: number; roll: number; x: number; y: nu
   );
 };
 
-const Wordmark: React.FC<{ t: number; at: number }> = ({ t, at }) => (
-  <div style={{ display: 'flex', fontFamily: FONT, fontSize: WORD, fontWeight: 800, fontVariationSettings: "'opsz' 96", letterSpacing: -WORD * 0.035, lineHeight: 1, color: CREAM }}>
+export const Wordmark: React.FC<{ t: number; at: number; size: number }> = ({ t, at, size }) => (
+  <div style={{ display: 'flex', fontFamily: FONT, fontSize: size, fontWeight: 800, fontVariationSettings: "'opsz' 96", letterSpacing: -size * 0.035, lineHeight: 1, color: CREAM }}>
     {'buddies'.split('').map((ch, i) => {
       const p = easeOutCubic(span(t, at + i * 0.04, 0.45));
       return (
-        <span key={`${i}${ch}`} style={{ opacity: p, filter: `blur(${lerp(8, 0, p)}px)`, transform: `translateY(${lerp(WORD * 0.25, 0, p)}px)` }}>
+        <span key={`${i}${ch}`} style={{ opacity: p, filter: `blur(${lerp(8, 0, p)}px)`, transform: `translateY(${lerp(size * 0.25, 0, p)}px)` }}>
           {ch}
         </span>
       );
     })}
   </div>
 );
+
+// The mark the intro lands on, for reuse elsewhere (the end card): the cast's discs drop in one
+// after another (u = seconds since the build began) and settle into the huddle.
+export const HuddleMark: React.FC<{ count: Count; size: number; u: number }> = ({ count, size, u }) => {
+  const c = CAST[count];
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" style={{ overflow: 'visible', display: 'block' }}>
+      <g style={{ isolation: 'isolate' }}>
+        {c.huddle.map((s, i) => (
+          <circle
+            key={c.colors[i]}
+            cx={s.x}
+            cy={s.y}
+            r={s.r * easeOutBack(span(u, i * 0.1, 0.4), 2)}
+            fill={c.colors[i]}
+            style={{ mixBlendMode: 'screen' }}
+          />
+        ))}
+      </g>
+    </svg>
+  );
+};
 
 export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
   const t = useCurrentFrame() / FPS;
@@ -247,7 +269,7 @@ export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
         ))}
       </svg>
       <div style={{ position: 'absolute', left: MARK_LEFT + MARK + GAP + slide, top: MARK_TOP + MARK / 2 - WORD * 0.56 }}>
-        <Wordmark t={t} at={b.word} />
+        <Wordmark t={t} at={b.word} size={WORD} />
       </div>
       <div
         style={{

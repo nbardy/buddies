@@ -5,8 +5,9 @@
 // Sections are data (text, timing, colour); the components just render them.
 import type React from 'react';
 import { AbsoluteFill, Easing, Img, OffthreadVideo, Series, staticFile, useCurrentFrame } from 'remotion';
-import wordmark from '../../brand/unleashd-wordmark-3d_trimmed.png';
 import { Block, clamp01, FONT, INK, lerp } from './blocks';
+import * as Intro from './BuddiesIntro';
+import { INTRO_ROBOTS } from './Overload';
 
 export const FPS = 60;
 export const WIDTH = 1920;
@@ -229,8 +230,10 @@ export const Vim: React.FC = () => (
   </AbsoluteFill>
 );
 
-// ---- The end card, over the coda's final chord (6 s ring): the wordmark settles in, the call to
-// action and the repo surface as plain type, and the frame fades to black with the chord. --------
+// ---- The end card, over the coda's final chord (6 s ring): the Buddies lockup builds (the title's
+// huddle discs drop in, "buddies" rises; it replaced the 3D Unleashd wordmark in the rename, 2026-10-03),
+// the call to action and the repo surface as plain type, and the frame fades to black with the chord.
+// The URL stays github.com/nbardy/unleashd until the repo is renamed (GitHub redirects it after). --
 export const END_FRAMES = Math.round(6.0 * FPS);
 const END_FADE = 1.4;
 export const EndCard: React.FC = () => {
@@ -240,8 +243,13 @@ export const EndCard: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: INK.night }}>
       <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', gap: 26, opacity: out }}>
-        <Img src={wordmark} style={{ width: 900, opacity: settle, transform: `scale(${lerp(0.96, 1, settle)})` }} />
-        <QuietLine line={{ text: 'Try Unleashd today. Free.', at: 1.2, size: 56, weight: 600, color: INK.cream }} t={t} />
+        <div style={{ transform: `scale(${lerp(0.96, 1, settle)})` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 44 }}>
+            <Intro.HuddleMark count={INTRO_ROBOTS} size={200} u={t} />
+            <Intro.Wordmark t={t} at={0.45} size={190} />
+          </div>
+        </div>
+        <QuietLine line={{ text: 'Try Buddies today. Free.', at: 1.2, size: 56, weight: 600, color: INK.cream }} t={t} />
         <QuietLine line={{ text: 'github.com/nbardy/unleashd', at: 1.9, size: 36, weight: 400, color: QUIET_CREAM }} t={t} />
       </AbsoluteFill>
     </AbsoluteFill>
