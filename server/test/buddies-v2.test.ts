@@ -582,7 +582,9 @@ test('a group-DM request starts a run for each recipient; the first answer wins 
     chat.sendMessage('Ask Designer and Reviewer', { origin: 'owner_input', inputId: 'owner-1' });
 
     const complete = (id: string) =>
-      w.runs(id).then((runs) => runs.find((r) => r.status === 'complete' && r.input.kind === 'post'));
+      w
+        .runs(id)
+        .then((runs) => runs.find((r) => r.status === 'complete' && r.input.kind === 'post'));
     const designerRun = await until(() => complete(w.designer.id), "Designer's run");
     const reviewerRun = await until(() => complete(reviewer.id), "Reviewer's run");
     assert.deepEqual(designerRun.input, { kind: 'post', postId: request.id });
@@ -835,7 +837,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
 
 // 2026-09-28: a Buddy's @mention dispatched nothing — a live-looking chip that woke nobody. It now
 // takes the owner's mention path (same seat, latest config), with Buddy authority and the chain cap.
-test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs stop at the hop bound across new threads", async () => {
+test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs are not capped", async () => {
   const w = await world();
   try {
     const thread = async (rootId: string) =>
@@ -863,7 +865,6 @@ test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs stop at the hop b
       assert.equal(posted.isError, false, posted.text);
       return posted.value as Post;
     };
-    let last: Post | undefined;
     w.during.set(1, async (turn) => void (await handOff(w.designer, 'hop-1')(turn)));
     w.during.set(2, async (turn) => {
       assert.ok(
@@ -873,19 +874,23 @@ test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs stop at the hop b
       assert.match(turn.request.prompt, /Lead mentioned you in a new message/);
       await handOff(w.lead, 'hop-2')(turn);
     });
-    w.during.set(3, async (turn) => {
-      last = await handOff(w.designer, 'hop-3')(turn);
-    });
+    w.during.set(3, async (turn) => void (await handOff(w.designer, 'hop-3')(turn)));
+    w.during.set(4, async (turn) => void (await handOff(w.lead, 'hop-4')(turn)));
+    // Owner decision 2026-10-03: no hand-off cap. A "3 hand-offs since the owner last spoke"
+    // counter used to post a reply_failed notice and kill a live review thread; the chain now
+    // runs until a Buddy stops handing off (turn 5 posts nothing).
     w.announce(root);
-    // The third hand-off is past the bound: no fourth turn, and a notice says why (a Buddy's
-    // capped mention used to be only logged, review R8).
-    const notice = await until(
-      async () => last && (await thread(last.id)).find((p) => p.purpose === 'reply_failed'),
-      'the capped hand-off notice'
+    await until(async () => w.turns.length >= 5, 'the chain runs past three hand-offs');
+    const all = await w.core.listPosts(
+      OWNER,
+      { kind: 'channel', channelId: w.general.id } as never,
+      null,
+      100
     );
-    assert.match(notice.body, /waiting for the owner/);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.equal(w.turns.length, 3, 'owner → Lead → Designer → Lead, then nothing');
+    assert.ok(
+      !all.posts.some((p) => /waiting for the owner/.test(p.body)),
+      'no hand-off cap notice'
+    );
   } finally {
     await w.close();
   }
@@ -1421,6 +1426,85 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
   }
 });
 
+// Required MCP discovery can succeed while a separate CLI tool host fails. Keep that evidence.
+test('a reviewer with no memory reads retains bounded, redacted CLI failure evidence', async () => {
+  const w = await world();
+  const warnings: string[] = [];
+  let token = '';
+  let launches = 0;
+  const reviewer = createMemoryReviewer({
+    core: w.core,
+    grants: w.grants,
+    spec: w.endpoint.spec,
+    logger: { warn: (...args: unknown[]) => void warnings.push(args.map(String).join(' ')) },
+    execute: ((request: ProviderRequest) => {
+      launches += 1;
+      const spec = request.mcpServers!.unleashd_memory;
+      assert.equal(spec.kind, 'http');
+      if (spec.kind !== 'http') throw new Error('unreachable');
+      token = spec.headers!.Authorization.replace('Bearer ', '');
+      // Startup discovery works; the CLI's separate tool host fails before any memory call.
+      const completed = (async () => {
+        assert.deepEqual((await toolNames(spec)).sort(), ['doc_read', 'doc_write']);
+        return { exitCode: 0, signal: null, sessionId: 'no-tools-session', reason: 'success' };
+      })();
+      return {
+        child: { exitCode: 0 },
+        events: (async function* () {
+          await completed;
+          yield { type: 'stderr', text: 'x'.repeat(9000) };
+          yield {
+            type: 'stderr',
+            text: `\nERROR failed to spawn code-mode host: No such file; Bearer ${token.slice(0, 10)}`,
+          };
+          yield { type: 'stderr', text: `${token.slice(10)}; api_key=pri` };
+          yield { type: 'stderr', text: 'vate-key' };
+          yield { type: 'text.delta', text: `Tool host unavailable. Grant ${token.slice(0, 10)}` };
+          yield { type: 'text.delta', text: token.slice(10) };
+          yield { type: 'turn.complete', reason: 'success' };
+        })(),
+        completed,
+        stop: () => undefined,
+      };
+    }) as never,
+  });
+  try {
+    reviewer.start();
+    reviewer.enqueue({
+      attemptId: 'missing-host',
+      conversationId: 'chat',
+      context: { buddyId: w.lead.id, workspaceId: w.ws, coordinationRunId: 'run-chat' },
+      completedAt: new Date().toISOString(),
+      messages: [{ role: 'user', body: { t: 'text', text: 'hello' } }],
+    });
+    const event = await until(
+      async () =>
+        (await w.core.listEvents(w.lead.id, Number.MAX_SAFE_INTEGER, 20)).find(
+          (event) => event.op === 'memory_review'
+        ),
+      'failed review receipt'
+    );
+    const receipt = JSON.parse(event.payload);
+    assert.equal(receipt.status, 'failed');
+    assert.match(receipt.error, /without reading memory/);
+    assert.equal(launches, 1, 'no silent fallback after a tool-host failure');
+    const warning = warnings.join('\n');
+    const diagnostics = JSON.parse(warning.split('Reviewer diagnostics: ')[1]);
+    assert.equal(diagnostics.sessionId, 'no-tools-session');
+    assert.equal(diagnostics.exitCode, 0);
+    assert.equal(diagnostics.toolUses, 0);
+    assert.match(diagnostics.stderr, /failed to spawn code-mode host/);
+    assert.match(diagnostics.report, /Tool host unavailable/);
+    assert.ok(diagnostics.stderr.length <= 4000);
+    assert.ok(diagnostics.report.length <= 1000);
+    assert.ok(!warning.includes(token), 'grant tokens never enter failure diagnostics');
+    assert.ok(!warning.includes('private-key'), 'common credential assignments are redacted');
+  } finally {
+    reviewer.stop();
+    await w.close();
+  }
+});
+
 // One 120 s budget used to cover the whole ladder, so a slow first rung starved the rest
 // (41 timed-out reviews). The budget is per rung, and a rung that times out climbs.
 test('a reviewer rung that outlives its timeout climbs to the next rung, which completes', async () => {
@@ -1859,7 +1943,7 @@ test('a retried post (same key) wakes its mentioned Buddy once', async () => {
   }
 });
 
-test('Buddy follow-ups stop at the hop bound until the owner speaks, and a failed gate on an owner post is shown', async () => {
+test('a failed gate on an owner post is shown', async () => {
   const w = await world();
   try {
     const say = (author: 'owner' | string, body: string, replyToId?: string) =>
@@ -1875,25 +1959,15 @@ test('Buddy follow-ups stop at the hop bound until the owner speaks, and a faile
           key: `${author}:${body}`,
         }
       );
-    // Both Buddies answer the owner, and every gate says yes: each reply asks the other Buddy,
-    // who replies, and so on. Hops bound it: replies to the owner are hop 1, their follow-ups
-    // hop 2, those follow-ups' hop 3, and a hop-3 post asks nobody. At most two turns per hop.
-    w.gate.verdict = { kind: 'respond' };
     const root = await say(
       'owner',
       `[@Lead](buddy:${w.lead.id}) [@Designer](buddy:${w.designer.id}) who owns the launch?`
     );
+    w.gate.verdict = { kind: 'respond' };
     w.announce(root);
-    let seen = -1;
-    await until(async () => {
-      const settled = seen === w.turns.length && w.channels.responding(w.general.id).length === 0;
-      seen = w.turns.length;
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      return settled;
-    }, 'the Buddies stop');
-    assert.ok(w.turns.length >= 3 && w.turns.length <= 6, `${w.turns.length} turns`);
-    const gated = w.gate.calls;
-    assert.ok(gated > 0, 'the Buddies did follow each other up');
+    await until(async () => w.turns.length >= 2, 'both Buddies answer');
+    w.gate.verdict = { kind: 'pass' };
+    await new Promise((resolve) => setTimeout(resolve, 400));
 
     // The owner waits on an answer, so a gate that could not run is posted in the thread
     // (2026-09-24: every gate failed on a Codex usage limit and the thread stayed silent).
