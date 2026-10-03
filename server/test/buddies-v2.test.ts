@@ -1103,6 +1103,44 @@ test('a harness failure is retried on another harness, in a new seat of the same
 
 // 493c1c7: "New chat" in a DM starts the next generation and keeps the earlier ones, which the DM
 // shows above a divider; the out-of-tokens retry is a new chat on another harness that resends.
+test("a model-only Buddy profile opens its DM on the model's harness", async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const designer = await w.core.createBuddy(OWNER, {
+      workspaceId: w.ws,
+      slug: 'model-only-designer',
+      name: 'Product Designer',
+      role: 'Design the product',
+      manager: { kind: 'nobody' },
+      model: 'claude-opus-5-5',
+      key: 'model-only-designer',
+    });
+    const opened = await http('POST', `/api/buddies/${designer.id}/direct`, {});
+    assert.equal(opened.status, 200, JSON.stringify(opened.body));
+    const id = (opened.body as unknown as { conversationId: string }).conversationId;
+    const conversation = w.conversations.get(id)!;
+    assert.equal(conversation.config.provider, 'claude');
+    assert.deepEqual(conversation.config.model, { mode: 'explicit', modelId: 'claude-opus-5-5' });
+    const reopened = await http('POST', `/api/buddies/${designer.id}/direct`, {});
+    assert.equal((reopened.body as unknown as { conversationId: string }).conversationId, id);
+    const explicit = await w.core.createBuddy(OWNER, {
+      workspaceId: w.ws,
+      slug: 'explicit-mismatch',
+      name: 'Explicit mismatch',
+      role: 'Test explicit harness authority',
+      manager: { kind: 'nobody' },
+      provider: 'codex',
+      model: 'claude-opus-5-5',
+      key: 'explicit-mismatch',
+    });
+    await assert.rejects(w.channels.openDirect(explicit.id), /Model is unavailable for codex/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await w.close();
+  }
+});
+
 test('a DM new chat opens the next generation; the chain keeps every earlier one', async () => {
   const w = await world();
   const { server, http } = await ownerHttp(w);
