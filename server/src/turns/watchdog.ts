@@ -143,13 +143,16 @@ export class TurnWatchdog {
   }
 }
 
+/** A timed-out turn's terminal cause and the system line it leaves. */
+export interface TurnTimeout {
+  readonly terminalCause: 'bridge_timeout' | 'provider_idle_timeout' | 'max_runtime_timeout';
+  readonly message: string;
+}
+
 export function describeTurnTimeout(
   kind: TurnTimeoutKind,
   input: TurnIdleReading & { sawMeaningfulOutput: boolean }
-): {
-  terminalCause: 'bridge_timeout' | 'provider_idle_timeout' | 'max_runtime_timeout';
-  message: string;
-} {
+): TurnTimeout {
   const outputDetail = input.sawMeaningfulOutput
     ? ''
     : ' (no assistant text or tool output reached Unleashd)';

@@ -173,6 +173,23 @@ Guard: `server/test/sqlite-locks.test.ts` boots the real backend on temp stores,
 that scans them, then opens every store from a second process and fails if the WAL or `-shm` is
 reset or deleted.
 
+## detached-execution
+**Smell:** a provider turn's life is tied to the backend process (piped stdio, in-memory stop state), so a
+backend death kills the turn, or a replacement backend resurrects a turn the old one was ending.
+**Pattern:** every provider execution runs from an on-disk journal directory
+(`<data>/executions/<attemptId>/`), and every backend READS its turn from there, so a live turn and an adopted
+one take the same code path. What the journal must say, and when:
+1. **Stop intent before the signal.** Stop, timeout and reset write `intent.json` into the journal BEFORE
+   signalling the process (`ExecutionJournals.markStopping`). Boot adoption reads it (and, for a Buddy run, the
+   crate's `cancel_requested` / terminal status and its deadline) and never adopts such an execution as a live
+   writer: no grant is restored, the stop is re-issued through the same `TurnRunner` stop/expire path, and it
+   settles exactly as it would have without the crash (user Stop → cancelled/user_stop, timeout →
+   failed/max_runtime_timeout). Only a running execution with no stop intent gets its grant back.
+**Here:** `server/src/turns/executions.ts`, `server/src/lifecycle/adopt-executions.ts` (`standingOf`),
+`server/src/turns/runner.ts` (`stop`, `timeout`, `adopt`). Design:
+`agent_notes/2026-09-30_execution-adoption-design.md`. Guards: `server/test/execution-adoption.test.ts`,
+`server/test/adoption-stop.test.ts` (a Stop and a timeout survive a backend SIGKILL inside the 3 s kill grace).
+
 ## fix-guards
 **Smell:** a fixed slowdown or bug quietly comes back.
 **Pattern:** every fix leaves three things:

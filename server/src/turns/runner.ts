@@ -29,7 +29,7 @@ import type {
 } from '../observability';
 import { type SwarmObservers, watchSwarmRuns } from '../swarm';
 import { type BackgroundWait, backgroundWaitFor } from './background-wait';
-import type { ExecutionJournals, TurnOwner } from './executions';
+import type { AdoptedStop, ExecutionJournals, TurnOwner } from './executions';
 import type { TurnInput } from './input';
 import type { AdoptedExecution, TurnPolicy } from './policy';
 import type { QueueEntry, TurnQueue } from './queue';
@@ -41,6 +41,7 @@ import {
 } from './subagents';
 import { isCompletionOnlyToolUse } from './tool-format';
 import {
+  type TurnTimeout,
   type TurnTimeoutKind,
   TurnWatchdog,
   describeTurnTimeout,
@@ -344,19 +345,21 @@ export class TurnRunner {
    * ended while no backend watched). The overlay already holds the turn's user row; the journal
    * replays from byte 0 through the same fold, so this backend ends up exactly where a
    * never-restarted one would be. Guard: execution-adoption.test.ts.
+   *
+   * A turn the old backend was STOPPING (its intent is on disk) is not adopted as a writer: the
+   * same stop or expiry is re-issued at once, sealing the stream before any replayed event folds,
+   * and the turn settles exactly as it would have without the crash (lead's decision, 2026-10-01:
+   * user Stop → cancelled/user_stop, timeout → failed/max_runtime_timeout). Guard:
+   * adoption-stop.test.ts.
    */
+  // Pattern: detached-execution (docs/patterns.md#detached-execution)
   adopt(owner: TurnOwner, handle: ExecutionHandle, execution: AdoptedExecution): void {
     const host = this.host;
     const runToken = ++this.runToken;
     console.log(
       `[${host.id}] Adopting ${execution.state} ${owner.provider} turn (pid ${handle.pid})`
     );
-    // An ended turn's outcome is on disk: a max-runtime clock that ran out during the gap must
-    // not seal its replay (see BuddyTurnPolicy.armExecution).
-    this.beginTurnState(
-      owner.provider,
-      execution.state === 'running' ? Date.parse(owner.startedAt) : Date.now()
-    );
+    this.beginTurnState(owner.provider, adoptedStartTime(owner, execution));
     this.activeAttemptId = owner.attemptId;
     this.ports.turnAttempts.activity(
       owner.attemptId,
@@ -368,6 +371,31 @@ export class TurnRunner {
       host.sessionId
     );
     this.follow(handle, runToken);
+    this.resumeAdopted(handle, execution);
+  }
+
+  /** Carry on with what the journal says the adopted turn was doing. */
+  private resumeAdopted(handle: ExecutionHandle, execution: AdoptedExecution): void {
+    switch (execution.state) {
+      case 'running':
+      case 'ended':
+        return;
+      case 'stopping':
+        return this.reissueStop(handle, execution.stop);
+    }
+  }
+
+  // The intent is already on disk; only the in-memory half of the stop runs again.
+  private reissueStop(handle: ExecutionHandle, stop: AdoptedStop): void {
+    switch (stop.t) {
+      case 'stop':
+        this.clearWatchdogs();
+        this.sealed = true;
+        this.stopCause = stop.cause;
+        return this.signalStop(handle);
+      case 'timeout':
+        return this.expire(handle, stop);
+    }
   }
 
   /** Per-turn state, fresh for a spawn or an adoption. */
@@ -792,16 +820,27 @@ export class TurnRunner {
 
   /** Stop the live process; the close handler finishes the turn. */
   stop(reason: 'user_stop' | 'server_restart'): void {
-    const host = this.host;
     this.clearWatchdogs();
-    const proc = host.process;
-    if (!proc) return;
+    const proc = this.host.process;
+    // Already ending (an earlier Stop, a timeout): its signal and SIGKILL escalation are armed, and
+    // a second intent must not overwrite the first one on disk.
+    if (!proc || this.sealed) return;
+    // Durable BEFORE the signal: a backend that dies inside the kill grace leaves this intent, and
+    // the next one re-issues the stop instead of adopting a live writer with its grant restored
+    // (release blocker 2a; guard: adoption-stop.test.ts).
+    this.ports.executions.markStopping(proc.journalDir, { t: 'stop', cause: reason });
     this.sealed = true;
     this.stopCause = reason;
     if (this.activeAttemptId) {
       this.ports.turnAttempts.stopping(this.activeAttemptId);
       if (reason === 'server_restart') this.finishStopped(reason);
     }
+    this.signalStop(proc);
+  }
+
+  /** The signal half of a stop, shared by a live Stop and an adopted one. */
+  private signalStop(proc: ExecutionHandle): void {
+    const host = this.host;
     // Never clear isRunning here: settle does, after exit, so processQueue cannot
     // start while the old process lives (start()'s guard would drop the message).
     proc.stop('SIGTERM');
@@ -818,6 +857,9 @@ export class TurnRunner {
     this.providerUsageDirty = false;
     const proc = host.process;
     if (!proc) return;
+    // A crash before the old process exits must not let the next backend adopt it beside the
+    // fresh turn that replaces it: it is discarded at boot (adopt-executions.ts `standingOf`).
+    this.ports.executions.markStopping(proc.journalDir, { t: 'reset' });
     this.finishAttempt('interrupted', 'process_killed');
     this.runToken += 1;
     proc.stop('SIGTERM');
@@ -838,8 +880,8 @@ export class TurnRunner {
   timeout(kind: TurnTimeoutKind): void {
     const host = this.host;
     const proc = host.process;
-    if (!proc || !host.isRunning) return;
-    host.policy.revoke();
+    // A turn already being stopped does not also time out (its intent on disk stays the Stop).
+    if (!proc || !host.isRunning || this.sealed) return;
     const idle = this.watchdog.idle();
     const timeout = describeTurnTimeout(kind, {
       ...idle,
@@ -849,6 +891,16 @@ export class TurnRunner {
     console.error(
       `[${host.id}] ${timeout.message} | timeoutKind=${kind} terminalCause=${timeout.terminalCause} sawMeaningfulOutput=${this.sawMeaningfulOutput} elapsed=${idle.elapsedSeconds}s bridgeIdle=${idle.bridgeIdleSeconds}s providerIdle=${idle.providerIdleSeconds}s lastActivitySource=${lastActivity?.source ?? 'none'} lastProviderEvent=${lastActivity?.providerEventType ?? 'none'} stderr=${this.stderrBuffer.length > 0 ? 'yes' : 'no'}`
     );
+    // Durable BEFORE the signal, with its exact message: an adopting backend expires the turn the
+    // same way (release blocker 2a; guard: adoption-stop.test.ts "a timeout survives …").
+    this.ports.executions.markStopping(proc.journalDir, { t: 'timeout', ...timeout });
+    this.expire(proc, timeout);
+  }
+
+  /** End the turn as timed out, live or re-issued by an adopting backend. */
+  private expire(proc: ExecutionHandle, timeout: TurnTimeout): void {
+    const host = this.host;
+    host.policy.revoke();
     this.clearWatchdogs();
     this.surfaceError(timeout.message);
     this.finishAttempt('failed', timeout.terminalCause);
@@ -1047,6 +1099,21 @@ function crashMessage(
 }
 
 /** SIGKILL the execution's group if it has not ended within the grace. */
+/**
+ * When the adopted turn's clocks start. A live or stopping turn keeps its original start (its
+ * max-runtime budget is not renewed per backend). An ended turn's outcome is on disk: a clock that
+ * ran out during the gap must not seal its replay (see BuddyTurnPolicy.armExecution).
+ */
+function adoptedStartTime(owner: TurnOwner, execution: AdoptedExecution): number {
+  switch (execution.state) {
+    case 'running':
+    case 'stopping':
+      return Date.parse(owner.startedAt);
+    case 'ended':
+      return Date.now();
+  }
+}
+
 function escalateKill(handle: ExecutionHandle, graceMs: number, warn: () => void): void {
   const killTimer = setTimeout(() => {
     warn();
