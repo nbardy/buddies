@@ -76,6 +76,10 @@ const RUNS: {
  * execute under: the runner renews their leases before its first claim, whose gate would otherwise
  * end a run whose lease ran out during the gap. A refused turn's run is not ended here: its lease
  * runs out and the gate ends it (Pattern: lease-heartbeat).
+ * Boot trusts the phase alone because each phase reached disk before its effects ran: a `stopping`
+ * turn is signalled again rather than revived (2a), and an `ended` one settles the outcome its
+ * drain recorded rather than recovering as interrupted (2b). Guards: execution-crash-checker.test.ts
+ * and the crash-window tests in execution-adoption.test.ts.
  */
 export async function adoptExecutions(
   found: readonly FoundExecution[],

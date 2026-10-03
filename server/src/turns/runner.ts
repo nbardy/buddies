@@ -340,8 +340,8 @@ export class TurnRunner {
    * holds (execution-state.ts ADOPTIONS decided `effects`). The overlay already holds the turn's
    * user row; the journal replays from byte 0 through the same fold, so this backend ends up
    * where a never-restarted one would be. A `stopping` turn is sealed first, as its live stop
-   * sealed it, so nothing it wrote after the stop folds in. Guards: execution-adoption.test.ts,
-   * adoption-stop.test.ts, adoption-settle-crash.test.ts.
+   * sealed it, so nothing it wrote after the stop folds in. Guards: execution-adoption.test.ts
+   * (the kill-grace and drain-to-settle crash tests) and execution-crash-checker.test.ts.
    */
   // Pattern: persisted-state-machine (docs/patterns.md#persisted-state-machine)
   adopt(owner: TurnOwner, handle: ExecutionHandle, phase: Phase, effects: readonly Effect[]): void {
