@@ -8,6 +8,7 @@ import { rowBuddy } from '../../utils/conversation-row';
 import { Chat } from '../Chat';
 import { AppSettingsDropdown } from './AppSettingsDropdown';
 import { BuddyRailRow, CreatingBuddyRailRow } from './BuddyRailRow';
+import { BuddySigil } from './BuddySigil';
 import { ArchivedChannels, ChannelHeaderControls, useArchivedChannels } from './ChannelArchive';
 import type { OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
@@ -407,6 +408,7 @@ function WorkspaceSwitcher({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
+        <BuddySigil name={workspaceName} className="channel-browser-workspace-emblem" />
         <h1>{workspaceName}</h1>
         <span className="channel-browser-caret ui-muted" aria-hidden="true">
           ▾

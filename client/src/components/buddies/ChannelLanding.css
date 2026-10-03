@@ -20,7 +20,8 @@
   position: relative;
   align-items: center;
   gap: var(--sp-10);
-  padding-top: var(--sp-10);
+  /* Room above the headline now the workspace logo lives in the rail (owner, 2026-10-03). */
+  padding-top: calc(var(--sp-11) * 2);
   text-align: center;
 }
 
@@ -36,15 +37,7 @@
   text-wrap: balance;
 }
 
-.landing-emblem {
-  position: relative;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--landing-radius);
-  box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-/* A slow, soft aurora behind the logo and headline: layered radial glows that drift. */
+/* A slow, soft aurora behind the headline: layered radial glows that drift. */
 .landing-aura,
 .landing-aura::after {
   position: absolute;
@@ -501,10 +494,6 @@ section[aria-label='Home'] section[aria-labelledby='archived-channels-heading'] 
 
 .landing[data-frame='mobile'] .landing-hero {
   padding-top: 0;
-}
-
-.landing[data-frame='mobile'] .landing-emblem {
-  display: none;
 }
 
 .landing[data-frame='mobile'] .landing-hero h1 {

@@ -61,7 +61,6 @@ export function ChannelLanding({
     <div className="landing ui-stack" data-frame={frame}>
       <header className="landing-hero ui-stack">
         <div className="landing-aura" aria-hidden="true" />
-        <BuddySigil name={directory.workspaceName} className="landing-emblem" />
         <h1>What should the team build next?</h1>
         {/* Working now sits on one line right under the box (owner, 2026-10-01): the composer
             starts work, and the line shows who took it. */}

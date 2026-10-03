@@ -62,6 +62,16 @@
   background: color-mix(in srgb, var(--text-emphasis) 7%, transparent);
 }
 
+/* The workspace logo sits with its name in the switcher, not over Home's headline
+   (owner, 2026-10-03: the centred hero logo looked out of place). */
+.channel-browser-workspace-emblem {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-right: var(--sp-2);
+  border-radius: 8px;
+}
+
 .channel-browser-workspace h1 {
   margin: 0;
   overflow: hidden;
