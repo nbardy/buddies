@@ -34,6 +34,16 @@ that way — the boundary state used to be `{ failed: boolean }`, which discarde
 indistinguishable from every other crash without leaving the broken app. Guarded by
 `client/test/client-error-fallback.test.tsx`.
 
+Memory-review failures include a bounded CLI diagnostic summary: harness/model, provider session,
+exit reason/code/signal, elapsed time, observed tool names/counts and tool-error count, the last
+4,000 characters of stderr and 1,000 of the reviewer report. Credentials are redacted, including
+the attempt's own grant token. No tool arguments, tool outputs or input transcript are included.
+The existing memory-review receipt retains its bounded error; `pnpm errors:list` exposes the fuller
+failure and stack. A successful process exit does not prove that memory tools ran: on 2026-10-03
+the locally installed Codex fork was missing `codex-code-mode-host`, but still exited 0 after
+reporting the tool host unavailable. Required MCP startup probes reached the endpoint independently
+and could not detect the missing CLI host. Guard: the no-memory-reads test in `buddies-v2.test.ts`.
+
 ## Backend crashes
 
 A dying backend cannot journal its own death (a SIGBUS or SIGKILL runs no JS), so the dev runner

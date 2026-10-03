@@ -19,6 +19,7 @@ import {
   createMemoryReviewer,
 } from '../src/buddies/memory-review';
 import { TURN_MAX_RUNTIME_MS } from '../src/constants/timeouts';
+import { redactAndBound } from '../src/observability/error-journal';
 import {
   CURATION_CASES,
   type CurationCase,
@@ -136,6 +137,7 @@ interface Rung {
   harness: string;
   model: string;
   text: string;
+  stderr: string;
   tools: Array<{ name: string; input: unknown }>;
 }
 
@@ -212,14 +214,20 @@ async function runCase(c: CurationCase, repeat: number, warnings: string[]): Pro
       harness: request.harness,
       model: String(request.model),
       text: '',
+      stderr: '',
       tools: [],
     };
     rungs.push(rung);
     async function* tee(events: AsyncIterable<UnifiedAgentEvent>) {
-      for await (const event of events) {
-        if (event.type === 'text.delta') rung.text += event.text;
-        if (event.type === 'tool.use') rung.tools.push({ name: event.name, input: event.input });
-        yield event;
+      try {
+        for await (const event of events) {
+          if (event.type === 'text.delta') rung.text += event.text;
+          if (event.type === 'stderr') rung.stderr = (rung.stderr + event.text).slice(-8000);
+          if (event.type === 'tool.use') rung.tools.push({ name: event.name, input: event.input });
+          yield event;
+        }
+      } finally {
+        rung.stderr = redactAndBound(rung.stderr, 8000);
       }
     }
     return { ...handle, events: tee(handle.events) };

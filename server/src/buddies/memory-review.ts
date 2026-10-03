@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { ExecuteCommandRequest, McpServerSpec } from '@nbardy/agent-cli';
 import { executeCommand } from '@nbardy/agent-cli';
 import type { BuddyContext, Message } from '@unleashd/shared';
+import { redactAndBound } from '../observability/error-journal';
 import { readBuddyState } from './briefing';
 import { type BuddiesCore, buddyActor } from './core';
 import { runDetached } from './detached-cli';
@@ -281,8 +282,11 @@ const HARNESSES: Record<MemoryReviewModelChoice['harness'], Harness> = {
 };
 
 /** `climb` is the one failure the ladder answers: credits ran out, or the rung ran out of time. */
-type Attempt = { kind: 'success' } | { kind: 'climb'; message: string };
+type Attempt = { kind: 'success'; diagnostics: string } | { kind: 'climb'; message: string };
 
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
+// Six reviews exited 0 with no memory reads; discarded stderr hid a missing Codex tool host.
+// Guard: "a reviewer with no memory reads retains bounded, redacted CLI failure evidence".
 async function runAttempt(
   harness: Harness,
   launch: Launch,
@@ -290,12 +294,36 @@ async function runAttempt(
   signal: AbortSignal,
   timeoutMs: number
 ): Promise<Attempt> {
+  const startedAt = Date.now();
   let failure: string | undefined;
+  let stderr = '';
+  let report = '';
+  let toolUses = 0;
+  let toolErrors = 0;
+  const toolNames = new Set<string>();
+  const headers = launch.server.kind === 'http' ? Object.values(launch.server.headers ?? {}) : [];
+  const scrub = (text: string, limit: number) => {
+    let redacted = text;
+    for (const header of headers) {
+      if (header) redacted = redacted.replaceAll(header, '[REDACTED]');
+      const token = /^Bearer (.+)$/i.exec(header)?.[1];
+      if (token) redacted = redacted.replaceAll(token, '[REDACTED]');
+    }
+    return redactAndBound(redacted, Number.MAX_SAFE_INTEGER).slice(-limit);
+  };
   const rung = new AbortController();
   const timer = setTimeout(() => rung.abort(), timeoutMs);
   const cancel = () => rung.abort();
   signal.addEventListener('abort', cancel, { once: true });
   const result = await runDetached(execute, harness.request(launch), rung.signal, (event, stop) => {
+    if (event.type === 'stderr') stderr = `${stderr}${event.text}`.slice(-4000);
+    if (event.type === 'text.delta') report = `${report}${event.text}`.slice(-1000);
+    if (event.type === 'turn.complete' && event.text) report = event.text.slice(-1000);
+    if (event.type === 'tool.use') {
+      toolUses += 1;
+      if (toolNames.size < MAX_TOOL_CALLS) toolNames.add(event.name);
+    }
+    if (event.type === 'tool.result' && event.isError) toolErrors += 1;
     // Native child states are tool activity too, even without a preceding tool.use.
     // Guard: buddies-v2.test.ts "native child events cannot bypass restricted Buddy runs".
     if (event.type === 'subagent.state') {
@@ -313,13 +341,27 @@ async function runAttempt(
   if (rung.signal.aborted)
     return { kind: 'climb', message: `${launch.choice.model} timed out after ${timeoutMs} ms` };
   const completion = result();
+  const diagnostics = JSON.stringify({
+    harness: launch.choice.harness,
+    model: launch.choice.model,
+    sessionId: completion.sessionId,
+    reason: completion.reason,
+    exitCode: completion.exitCode,
+    signal: completion.signal,
+    elapsedMs: Date.now() - startedAt,
+    toolUses,
+    toolErrors,
+    toolNames: [...toolNames],
+    stderr: scrub(stderr, 4000),
+    report: scrub(report, 1000),
+  });
   if (!failure && completion.reason === 'success' && completion.exitCode === 0)
-    return { kind: 'success' };
+    return { kind: 'success', diagnostics };
   const message =
     failure ?? `Memory reviewer exited: ${completion.reason} (${completion.exitCode})`;
   // A tool violation or crash does not climb: the next rung would repeat it.
   if (!failure && completion.reason === 'out_of_tokens') return { kind: 'climb', message };
-  throw new Error(message);
+  throw new Error(`${message}\nReviewer diagnostics: ${diagnostics}`);
 }
 
 // ---- the queue --------------------------------------------------------------------------------
@@ -441,7 +483,9 @@ export function createMemoryReviewer(options: {
           );
           if (outcome.kind === 'success') {
             if (!memoryRead)
-              throw new Error('Memory reviewer completed without reading memory through its tools');
+              throw new Error(
+                `Memory reviewer completed without reading memory through its tools\nReviewer diagnostics: ${outcome.diagnostics}`
+              );
             return finish('complete');
           }
           exhausted = outcome.message;

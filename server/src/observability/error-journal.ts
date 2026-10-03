@@ -417,7 +417,7 @@ function normalizeVolatileText(value: string): string {
     .trim();
 }
 
-function redactAndBound(value: string, maximumCharacters: number): string {
+export function redactAndBound(value: string, maximumCharacters: number): string {
   const redacted = value
     .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
     .replace(

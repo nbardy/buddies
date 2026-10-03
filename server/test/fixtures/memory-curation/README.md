@@ -117,7 +117,8 @@ and the harness, the ladder, the rung timeout), the case input, reviewer warning
 `result` that is one of:
 
 - `reviewed`: the receipt (status/model/fallbackFrom/writes), before/after snapshots of soul,
-  working and long-term (content + revision), every rung's streamed text and tool uses, the
+  working and long-term (content + revision), every rung's streamed text, bounded redacted CLI stderr
+  and tool uses, the
   final report and one `verdict` per check.
 - `infra`: a setup crash (`receipt: null`) or a review that did not complete (failed,
   interrupted, skipped receipt). Infra rows are never graded and never dropped.
