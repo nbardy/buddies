@@ -61,7 +61,7 @@ export const Root: React.FC = () => (
     <Composition
       id="Assembly"
       component={Assembly.Assembly}
-      defaultProps={{ score: 'edm' } satisfies Assembly.AssemblyProps}
+      defaultProps={{ score: 'halftime' } satisfies Assembly.AssemblyProps}
       durationInFrames={Assembly.DURATION}
       fps={Assembly.FPS}
       width={Assembly.WIDTH}

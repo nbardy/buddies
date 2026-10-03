@@ -1,9 +1,10 @@
-// Owner take, 2026-09-27 14:42:42 +08. Only its opening 1.5 seconds are used;
-// hold the last home frame while the four benefits land, one per bar of the EDM build (script v2,
-// 2026-09-30): the promise rides the build and the drop starts the proof.
+// The four benefits land one per bar of the build (script v2, 2026-09-30): the promise rides the
+// build and the drop starts the proof. Behind them, the new workspace home (owner, 2026-10-02: it
+// replaces the old home take as the first product screen; see HomeIntro.tsx for the image).
 import type React from 'react';
-import { AbsoluteFill, Freeze, OffthreadVideo, Sequence, staticFile, useCurrentFrame } from 'remotion';
+import { AbsoluteFill, Img, Sequence, useCurrentFrame } from 'remotion';
 import { Block, INK, lerp } from './blocks';
+import { HOME, SIDEBAR_W } from './HomeIntro';
 import { MARIMBA, SFX, Soundtrack } from './soundtrack';
 
 export const FPS = 60;
@@ -12,8 +13,6 @@ export const HEIGHT = 1080;
 const BEAT = 60 / 128;
 export const boundary = (i: number) => Math.round(i * 4 * BEAT * FPS);
 export const DURATION = boundary(4);
-const SOURCE = staticFile('2026-09-27_post-intro_home.mov');
-const HOME_END = 90;
 
 export const TITLES = [
   { lines: ['Multi harness'], fill: INK.cyan, rot: -2 },
@@ -22,12 +21,23 @@ export const TITLES = [
   { lines: ['Completely', 'customizable'], fill: INK.cyan, rot: 1.5 },
 ];
 
+// The card is 1780 px wide; the screenshot is 2810×1880, so it is 1191 px tall and the card shows its top.
+const CARD_W = 1780;
 const Home: React.FC = () => (
-  <OffthreadVideo
-    src={SOURCE}
-    muted
-    style={{ position: 'absolute', width: 2750, height: 1882, left: -490, top: -120 }}
-  />
+  <>
+    <Img src={HOME} style={{ position: 'absolute', left: 0, top: 0, width: CARD_W, height: Math.round((CARD_W * 1880) / 2810) }} />
+    <div
+      style={{
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        width: Math.round((SIDEBAR_W / 1920) * CARD_W),
+        height: '100%',
+        backdropFilter: 'blur(12px)',
+        background: 'rgba(5,9,11,.35)',
+      }}
+    />
+  </>
 );
 
 export const PostIntroBenefits: React.FC = () => {
@@ -43,11 +53,10 @@ export const PostIntroBenefits: React.FC = () => {
           borderRadius: 24, overflow: 'hidden',
           boxShadow: '0 32px 80px rgba(0,0,0,.45)',
           border: '1px solid rgba(253,246,227,.14)',
-          filter: 'brightness(1.25)',
           transform: `scale(${lerp(1, 1.055, frame / DURATION)})`,
         }}
       >
-        <Freeze frame={Math.min(frame, HOME_END - 1)}><Home /></Freeze>
+        <Home />
       </div>
       <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(0deg, #002b36 2%, transparent 35%)' }} />
       <div style={{ position: 'absolute', left: 80, right: 80, bottom: 75, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>

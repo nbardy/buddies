@@ -9,10 +9,10 @@ import beat9 from '../../beat9/beat9.mp4';
 import calmDowntempo from '../../sound/calm-downtempo.wav';
 import calmHalftime from '../../sound/calm-halftime.wav';
 import calmPulse from '../../sound/calm-pulse.wav';
-import edmFull from '../../sound/edm-full.wav';
 import * as Close from './Close';
 import * as DesignReview from './DesignReview';
 import * as FeatureFlash from './FeatureFlash';
+import * as HomeIntro from './HomeIntro';
 import * as Overload from './Overload';
 import * as PickerRefresh from './PickerRefresh';
 import * as Swarm from './Swarm';
@@ -48,32 +48,34 @@ const section = (id: string, from: number, to: number, C: React.FC, frames: numb
 
 export const SECTIONS: Section[] = [
   section('overload', 0, Overload.DURATION, Overload.Overload, Overload.DURATION),
-  section('benefits', MUSIC_IN, bar(5), PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
-  section('ask', bar(5), bar(9), DesignReview.DesignReview, DesignReview.DURATION),
-  section('show-work', bar(9), bar(17), ShowWork.ShowWork, ShowWork.DURATION),
-  section('harness-slide', bar(17), bar(19), Slides, SLIDE_SPLIT),
-  section('picker', bar(19), bar(21), PickerRefresh.PickerRefresh, PickerRefresh.DURATION),
-  section('swarm', bar(21), bar(23), Swarm.Swarm, Swarm.DURATION),
-  section('features', bar(23), bar(24), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
-  section('subscriptions-slide', bar(24), bar(25), Slides, SLIDES_END, SLIDE_SPLIT),
-  section('fork', bar(25), bar(27), Close.Fork, Close.FORK_FRAMES),
-  section('run', bar(27), bar(29), Close.Run, Close.RUN_FRAMES),
-  section('vim', bar(29), bar(33), Close.Vim, Close.VIM_FRAMES),
-  section('end', bar(33), bar(33) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
+  section('home', bar(1), bar(5), HomeIntro.HomeIntro, HomeIntro.DURATION),
+  section('benefits', bar(5), bar(9), PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
+  section('ask', bar(9), bar(13), DesignReview.DesignReview, DesignReview.DURATION),
+  section('show-work', bar(13), bar(21), ShowWork.ShowWork, ShowWork.DURATION),
+  section('harness-slide', bar(21), bar(23), Slides, SLIDE_SPLIT),
+  section('picker', bar(23), bar(25), PickerRefresh.PickerRefresh, PickerRefresh.DURATION),
+  section('swarm', bar(25), bar(27), Swarm.Swarm, Swarm.DURATION),
+  section('features', bar(27), bar(28), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
+  section('subscriptions-slide', bar(28), bar(29), Slides, SLIDES_END, SLIDE_SPLIT),
+  section('fork', bar(29), bar(31), Close.Fork, Close.FORK_FRAMES),
+  section('run', bar(31), bar(33), Close.Run, Close.RUN_FRAMES),
+  section('vim', bar(33), bar(37), Close.Vim, Close.VIM_FRAMES),
+  section('end', bar(37), bar(37) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
 ];
 
-// The cue comes up out of the intro instead of arriving at full level: the intro's tail sits near
-// -21 dB mean and the build's first bar at -12 dB, a 9 dB step that read as "abrupt" (owner,
-// 2026-09-30), and the marimba over the unramped build clipped at 0 dBFS. The ramp reaches 1 on the
-// drop, so the drop is also the first full-level moment.
-const BUILD_FRAMES = bar(5) - MUSIC_IN;
-const buildRamp = (f: number) => (f >= BUILD_FRAMES ? 1 : 0.4 + 0.6 * (f / BUILD_FRAMES) ** 1.6);
+// The cue comes up out of the intro instead of arriving at full level: the score's own levels carry
+// the opening (pad, mean -25 dB, just under the intro's marimba at -19) and the build climbs to the
+// drop; the ramp only trims the build's first bars. An unramped build once stepped 9 dB over the
+// intro's tail and clipped under the marimba handoff (owner, 2026-09-30: "abrupt").
+const BUILD_FROM = bar(5) - MUSIC_IN;
+const BUILD_FRAMES = bar(9) - bar(5);
+const buildRamp = (f: number) => (f < BUILD_FROM ? 1 : f >= BUILD_FROM + BUILD_FRAMES ? 1 : 0.75 + 0.25 * ((f - BUILD_FROM) / BUILD_FRAMES) ** 1.6);
 
 // One caption per product scene, always top left, in from the scene's second beat.
 const CAPTIONS: { from: number; to: number; lines: [string, string] }[] = [
-  { from: bar(5), to: bar(9), lines: ['Ask your agents.', 'In channels.'] },
-  { from: bar(9), to: bar(17), lines: ['They show their work.', 'Images and video, right in the thread.'] },
-  { from: bar(21), to: bar(23), lines: ['Multi-agent swarms.', 'Agents @-mention each other.'] },
+  { from: bar(9), to: bar(13), lines: ['Ask your agents.', 'In channels.'] },
+  { from: bar(13), to: bar(21), lines: ['They show their work.', 'Images and video, right in the thread.'] },
+  { from: bar(25), to: bar(27), lines: ['Multi-agent swarms.', 'Agents @-mention each other.'] },
 ];
 const CAPTION_IN = (60 / 128) * 0.5; // seconds after the scene's downbeat
 
@@ -111,7 +113,7 @@ const Place: React.FC<{ s: Section }> = ({ s }) => {
 // The score under everything after the intro. Same bar grid and length, so the picture never changes
 // with it: edm.py's EDM cue, or one of calm.py's three calmer versions (owner, 2026-09-30: "too
 // upbeat and generic"). Pick one at render time: --props='{"score":"pulse"}'.
-export const SCORES = { edm: edmFull, halftime: calmHalftime, pulse: calmPulse, downtempo: calmDowntempo } as const;
+export const SCORES = { halftime: calmHalftime, pulse: calmPulse, downtempo: calmDowntempo } as const;
 export type Score = keyof typeof SCORES;
 export type AssemblyProps = { score: Score };
 
@@ -125,7 +127,7 @@ export const Assembly: React.FC<AssemblyProps> = ({ score }) => (
         <Caption lines={c.lines} />
       </Sequence>
     ))}
-    <Sequence from={MUSIC_IN} layout="none">
+    <Sequence from={bar(5)} layout="none">
       <PostIntroBenefits.BenefitsSound />
     </Sequence>
     <Sequence from={MUSIC_IN} layout="none">
