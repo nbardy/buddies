@@ -445,7 +445,9 @@ after(async () => {
   for (const group of groups) await stopGroup(group);
   for (const c of cases) {
     if (!c.finished)
-      console.error(`[${c.root}] unfinished, waiting for ${c.waitingFor}:\n${c.log.slice(-80).join('\n')}`);
+      console.error(
+        `[${c.root}] unfinished, waiting for ${c.waitingFor}:\n${c.log.slice(-80).join('\n')}`
+      );
     for (const file of fs.existsSync(c.fakeDir) ? fs.readdirSync(c.fakeDir) : []) {
       if (!file.endsWith('.pgid')) continue;
       signalGroup(Number(fs.readFileSync(path.join(c.fakeDir, file), 'utf8')), 'SIGKILL');
