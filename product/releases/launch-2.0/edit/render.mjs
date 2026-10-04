@@ -64,7 +64,8 @@ const finalArgs = hasConcurrency ? args : [...args, `--concurrency=${share}`];
 
 const slot = await claim();
 const release = () => fs.rmSync(slot, { force: true });
-const child = spawn(REMOTION, finalArgs, { stdio: 'inherit' });
+// remotion.config.ts refuses to render without this, so nothing can skip the queue.
+const child = spawn(REMOTION, finalArgs, { stdio: 'inherit', env: { ...process.env, REMOTION_RENDER_QUEUE: '1' } });
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, () => child.kill(sig));
 }
