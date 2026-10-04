@@ -65,7 +65,7 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
     await session.evaluate('new Promise(resolve => setTimeout(resolve, 300))');
     assert.equal(
       await session.evaluate(
-        'document.querySelector("button[aria-label*="Install Rust"]").textContent'
+        'document.querySelector("dialog section button").textContent'
       ),
       'Copied'
     );
