@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Buddy, Doc } from '@unleashd/buddies-core';
 import type { BuddyContext, ModelId, Provider } from '@unleashd/shared';
-import { buddyExecutionPreferences } from '../conversations/config-mapping';
+import { buddyExecutionPreferences } from '@unleashd/shared';
 import { type BuddiesCore, buddyActor } from './core';
 
 /** A composed Buddy conversation: its briefing plus what the creation service needs to open it. */

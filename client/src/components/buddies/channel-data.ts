@@ -11,9 +11,10 @@
  */
 import {
   type BuddyMemberExecution,
-  type ConversationConfig,
-  ConversationConfigSchema,
   type MessageBody,
+  ProviderSchema,
+  buddyExecutionPreferences,
+  configFromProviderPreferences,
   legacyBody,
 } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
@@ -501,22 +502,22 @@ export function postPurposeLabel(post: Post): string | null {
 
 /**
  * What a mentioned Buddy's reply runs on when nobody picks: its profile, the
- * way the server builds a seat (server/src/buddies/channels.ts profileConfig,
- * whose missing-provider default is codex). A provider the client's schema
+ * shared profile mapping used by the server's seat creation. A provider the client's schema
  * does not know is `unreported` — the picker cannot open at it honestly.
  */
 function profileExecution(buddy: Buddy): BuddyMemberExecution {
-  const candidate: unknown = {
-    provider: buddy.provider ?? 'codex',
-    model: buddy.model ? { mode: 'explicit', modelId: buddy.model } : { mode: 'default' },
-    reasoning: buddy.reasoningEffort
-      ? { mode: 'explicit', effort: buddy.reasoningEffort }
-      : { mode: 'default' },
+  if (buddy.provider && !ProviderSchema.safeParse(buddy.provider).success)
+    return { kind: 'unreported' };
+  return {
+    kind: 'profile',
+    config: configFromProviderPreferences(
+      buddyExecutionPreferences({
+        provider: buddy.provider ?? null,
+        model: buddy.model ?? null,
+        reasoning_effort: buddy.reasoningEffort ?? null,
+      })
+    ),
   };
-  const parsed = ConversationConfigSchema.safeParse(candidate);
-  return parsed.success
-    ? { kind: 'profile', config: parsed.data satisfies ConversationConfig }
-    : { kind: 'unreported' };
 }
 
 // The universal @ menu: active Buddies and every live top-level Task (todos

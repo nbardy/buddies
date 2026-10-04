@@ -19,6 +19,7 @@ import {
   type ConversationConfig,
   type ProviderCatalog,
 } from '@unleashd/shared';
+import { modelSummary } from '../../views/config/config-options';
 import type { Task, TaskStatus, ThreadSeat } from './types';
 
 // A Buddy carries what its turn runs on by default, so the composer's mention
@@ -240,7 +241,8 @@ export const mentionsABuddy = (body: string) => /\]\(buddy:[A-Za-z0-9_-]+\)/.tes
  */
 export function mentionedBuddies(
   text: string,
-  picked: readonly ChannelReference[]
+  picked: readonly ChannelReference[],
+  directory: readonly ChannelReference[] = picked
 ): BuddyReference[] {
   const byId = new Map(
     picked
@@ -250,7 +252,16 @@ export function mentionedBuddies(
   const ids = new Set([...encodeReferences(text, picked).matchAll(MENTION_TOKEN)].map((m) => m[1]));
   return [...ids].flatMap((id) => {
     const reference = byId.get(id);
-    return reference ? [reference] : [];
+    if (!reference) return [];
+    // Drafts retain mention identity, not a second owner of the Buddy's current default.
+    // Guard: restored mention uses current profile rather than its stored execution snapshot.
+    const current = directory.find((entry) => entry.kind === 'buddy' && entry.id === id);
+    return [
+      {
+        ...reference,
+        execution: current?.kind === 'buddy' ? current.execution : { kind: 'unreported' as const },
+      },
+    ];
   });
 }
 
@@ -386,57 +397,29 @@ export function parseChannelLink(href: string): ChannelLink {
 export type MentionChoice =
   | { kind: 'chosen'; config: ConversationConfig }
   | { kind: 'seat'; config: ConversationConfig }
-  | { kind: 'profile'; profile: ConversationConfig }
+  | { kind: 'profile'; config: ConversationConfig }
+  | { kind: 'loading' }
   | { kind: 'unreported' };
 
 export function mentionChoice(
   buddy: BuddyReference,
   choices: ReadonlyMap<string, ConversationConfig>,
-  seats: readonly ThreadSeat[]
+  seats: readonly ThreadSeat[] | undefined
 ): MentionChoice {
   const chosen = choices.get(buddy.id);
   if (chosen) return { kind: 'chosen', config: chosen };
+  if (seats === undefined) return { kind: 'loading' };
   const seat = seats.find((entry) => entry.buddyId === buddy.id);
   if (seat) return { kind: 'seat', config: seat.config };
   switch (buddy.execution.kind) {
     case 'profile':
-      return { kind: 'profile', profile: buddy.execution.config };
+      return { kind: 'profile', config: buddy.execution.config };
     case 'unreported':
       return { kind: 'unreported' };
   }
 }
 
-function configLabel(config: ConversationConfig, catalog: ProviderCatalog | null): string {
-  const provider = catalog?.providers.find((candidate) => candidate.id === config.provider);
-  const modelId =
-    config.model.mode === 'explicit' ? config.model.modelId : provider?.defaultModelId;
-  const model = provider?.models.find((candidate) => candidate.id === modelId);
-  // The catalog supplies the user-facing model name; the provider is already
-  // represented by the Buddy's model choice and does not need repeating here.
-  return model?.displayName ?? modelId ?? `${config.provider} default`;
-}
-
 export function choiceLabel(choice: MentionChoice, catalog: ProviderCatalog | null): string {
-  switch (choice.kind) {
-    case 'chosen':
-    case 'seat':
-      return configLabel(choice.config, catalog);
-    case 'profile':
-      return configLabel(choice.profile, catalog);
-    case 'unreported':
-      return 'default';
-  }
-}
-
-// Where the picker opens. Null only for `unreported`, whose chip is disabled.
-export function pickerValue(choice: MentionChoice): ConversationConfig | null {
-  switch (choice.kind) {
-    case 'chosen':
-    case 'seat':
-      return choice.config;
-    case 'profile':
-      return choice.profile;
-    case 'unreported':
-      return null;
-  }
+  if (choice.kind === 'loading') return 'Loading model…';
+  return choice.kind === 'unreported' ? 'default' : modelSummary(choice.config, catalog);
 }

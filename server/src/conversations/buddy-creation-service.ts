@@ -5,9 +5,9 @@ import type {
   ConversationConfig,
 } from '@unleashd/shared';
 import { bodyText, buddyKind } from '@unleashd/shared';
+import { configFromProviderPreferences } from '@unleashd/shared';
 import type { ResolvedBuddyConversation } from '../buddies/briefing';
-import { configFromProviderPreferences } from './config-mapping';
-import { INITIAL_MESSAGE_DISPATCH_LEASE_MS } from './config-records';
+import { type ConfigProvenance, INITIAL_MESSAGE_DISPATCH_LEASE_MS } from './config-records';
 import type { ConversationConfigService } from './config-service';
 import { createConversationService } from './creation-service';
 import type {
@@ -19,6 +19,7 @@ import type {
 
 export interface CreateServerBuddyConversationInput {
   config?: ConversationConfig;
+  provenance?: ConfigProvenance;
   context: BuddyContext;
   initialMessage?: string;
   commandId: string;
@@ -217,6 +218,7 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
       conversationId: input.conversationId ?? ports.createId(),
       workingDirectory: ports.resolveWorkingDirectory(resolved.workingDirectory),
       config: input.config ?? resolveConfig(resolved),
+      provenance: input.provenance,
       commandId: input.commandId,
       initialMessage: input.initialMessage,
       branch: input.branch,

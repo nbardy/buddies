@@ -1,11 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Actor, Buddy, Channel, Cursor, Post } from '@unleashd/buddies-core';
 import { type ConversationConfig, isHarnessRetryFailure } from '@unleashd/shared';
+import { buddyExecutionPreferences, configFromProviderPreferences } from '@unleashd/shared';
 import { awaitTurn } from '../conversations/await-turn';
-import {
-  buddyExecutionPreferences,
-  configFromProviderPreferences,
-} from '../conversations/config-mapping';
 import type {
   ConversationRuntime,
   SeatTurnInput,
@@ -105,7 +102,10 @@ export function seatTurnInput(trigger: Post): SeatTurnInput {
 }
 
 export type ThreadSeat = { buddyId: string; config: ConversationConfig };
-export type SeatRequest = { kind: 'keep' } | { kind: 'chosen'; config: ConversationConfig };
+export type SeatRequest =
+  | { kind: 'keep' }
+  | { kind: 'chosen'; config: ConversationConfig }
+  | { kind: 'resolved'; seat: LiveConversation };
 export type MentionDispatch =
   | { buddyId: string; status: 'started' }
   | { buddyId: string; status: 'rejected'; reason: string };
@@ -345,24 +345,6 @@ export function createChannels(ports: ChannelsPorts) {
       })
     );
 
-  // A started session cannot change provider (config-service.ts), so only a pick on another
-  // provider needs a new seat; a model or effort pick is applied to the current one, whose
-  // session resumes. Guard: buddies-v2 "an effort pick keeps the seat's session …".
-  function seatFor(
-    request: SeatRequest,
-    seats: { current: LiveConversation | null; next(): string },
-    profile: ConversationConfig
-  ): LiveConversation {
-    switch (request.kind) {
-      case 'keep':
-        return seats.current ?? { conversationId: seats.next(), config: profile };
-      case 'chosen':
-        return seats.current?.config.provider === request.config.provider
-          ? { conversationId: seats.current.conversationId, config: request.config }
-          : { conversationId: seats.next(), config: request.config };
-    }
-  }
-
   // Pattern: one-definition (docs/patterns.md#one-definition)
   // A Buddy can post from a DM/worker rather than its derived thread seat. Following the stale
   // seat could query Claude while the latest reply used Sol. Guard: latest thread reply model.
@@ -382,23 +364,35 @@ export function createChannels(ports: ChannelsPorts) {
     request: SeatRequest,
     thread?: Post[]
   ): Promise<LiveConversation & { hasHistory: boolean }> {
+    if (request.kind === 'resolved') return { ...request.seat, hasHistory: true };
     const seats = await scanGenerations(ports.conversations, (g) =>
       threadConversationId(rootId, buddyId, g)
     );
-    const remembered =
-      request.kind === 'keep'
+    // Pattern: one-write-path (docs/patterns.md#one-write-path)
+    // Failed explicit picks used to lose to an older successful post (Claude weekly limit,
+    // 2026-10-04). The record owns intent; guard: explicit thread choice survives a failed attempt.
+    const override = seats.current?.provenance === 'user';
+    const history =
+      request.kind === 'keep' && !override
         ? await threadModel(
             thread ?? (await wholeThread(await core.getPost(OWNER, rootId))),
             buddyId
           )
         : null;
+    const config =
+      request.kind === 'chosen'
+        ? request.config
+        : override
+          ? seats.current!.config
+          : (history ?? seats.current?.config ?? profileConfig(await core.getBuddy(buddyId)));
     return {
-      ...seatFor(
-        remembered ? { kind: 'chosen', config: remembered } : request,
-        seats,
-        profileConfig(await core.getBuddy(buddyId))
-      ),
-      hasHistory: remembered !== null || seats.current !== null,
+      conversationId:
+        seats.current?.config.provider === config.provider
+          ? seats.current.conversationId
+          : seats.next(),
+      config,
+      provenance: request.kind === 'chosen' || override ? 'user' : 'legacy_inferred',
+      hasHistory: seats.current !== null || history !== null || request.kind === 'chosen',
     };
   }
 
@@ -462,6 +456,7 @@ export function createChannels(ports: ChannelsPorts) {
         conversationId: seat.conversationId,
         commandId: `channel-thread-${seat.conversationId}`,
         config: seat.config,
+        provenance: seat.provenance,
       });
       seatId = conversation.id;
       const trigger = await core.getPost(OWNER, input.trigger.id);
@@ -471,7 +466,7 @@ export function createChannels(ports: ChannelsPorts) {
       let composed: Awaited<ReturnType<typeof seatPrompt>>;
       do {
         await untilIdle(conversation);
-        await ports.conversations.reconfigure(conversation, seat.config);
+        await ports.conversations.reconfigure(conversation, seat.config, seat.provenance);
         composed = await seatPrompt(input, conversation.id);
       } while (!idle(conversation));
       const { prompt, through } = composed;
@@ -559,7 +554,7 @@ export function createChannels(ports: ChannelsPorts) {
       try {
         const seat = await seatConfig(input.root.id, input.buddyId, { kind: 'keep' }, thread);
         // The decision and its reply share one resolved choice, even if another post arrives.
-        followUpReply.request = { kind: 'chosen', config: seat.config };
+        followUpReply.request = { kind: 'resolved', seat };
         return await ports.gate({
           config: seat.config,
           prompt: [
@@ -748,8 +743,7 @@ export function createChannels(ports: ChannelsPorts) {
   return {
     /**
      * Each thread Buddy's latest seat (harness, model, reasoning): the one its next reply runs
-     * on. The mention chip and follow-up gate share the latest posted model, then the remembered
-     * mention choice in the seat, then the profile default.
+     * on. The composer, retry and gate share explicit intent, then thread history, then profile.
      */
     async threadSeats(rootId: string): Promise<ThreadSeat[]> {
       const root = await core.getPost(OWNER, rootId);

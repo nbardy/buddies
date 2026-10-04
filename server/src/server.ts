@@ -545,8 +545,8 @@ const buddyConversations: StableConversationPorts = {
   getConversation: (id) => applicationContext.registry.get(id),
   ensureConversationReady: buddyCreationService.ensureConversationReady,
   createConversation: (input) => buddyCreationService.createServerBuddyConversation(input),
-  reconfigure: (conversation, config) =>
-    replaceRuntimeConfig(conversationConfigService, conversation, config),
+  reconfigure: (conversation, config, provenance) =>
+    replaceRuntimeConfig(conversationConfigService, conversation, config, provenance),
 };
 
 // One channel's posts or responders changed: clients refresh only that channel's views.

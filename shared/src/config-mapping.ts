@@ -1,13 +1,14 @@
 import {
   type ConversationConfig,
   type ModelId,
-  type Provider,
-  ProviderSchema,
-  catalogEntryForProvider,
   createDefaultConversationConfig,
-  normalizeModelId,
-} from '@unleashd/shared';
+} from './conversation-config.js';
+import { catalogEntryForProvider, normalizeModelId } from './model-catalog.js';
+import { type Provider, ProviderSchema } from './provider-catalog.js';
 
+// Pattern: one-definition (docs/patterns.md#one-definition)
+// Composer profile fallback and server execution must infer the same provider/model.
+// Guard: model-only Buddy profile opens its DM on the model's harness.
 export function configFromProviderPreferences(input: {
   provider: Provider;
   model?: ModelId;

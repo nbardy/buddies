@@ -23,6 +23,7 @@ import {
   createDefaultConversationConfig,
 } from '@unleashd/shared';
 import express from 'express';
+import { choiceLabel, mentionChoice } from '../../client/src/components/buddies/channel-text';
 import { BUDDY_TOOL_GUIDE, composeBriefing, createBriefings } from '../src/buddies/briefing';
 import { type StableConversationPorts, slotOf } from '../src/buddies/buddy-conversation-slots';
 import {
@@ -190,6 +191,7 @@ async function world() {
   const silent = new Set<number>();
   // Turns that end out of tokens, as a harness at its usage limit reports it.
   const outOfTokens = new Set<number>();
+  const providerErrors = new Map<number, string>();
   // Turns whose provider process was told to stop.
   const stopped = new Set<number>();
   const seatPost = /post\(\{ channel: \{ id: "([^"]+)" \}, replyToId: "([^"]+)"/;
@@ -223,6 +225,13 @@ async function world() {
         yield { type: 'session.started' as const, sessionId };
         yield { type: 'turn.started' as const };
         await during.get(turn.n)?.(turn);
+        const error = providerErrors.get(turn.n);
+        if (error) {
+          yield { type: 'error' as const, message: error };
+          yield { type: 'turn.complete' as const, reason: 'error' as const };
+          finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
+          return;
+        }
         if (outOfTokens.has(turn.n)) {
           yield { type: 'out_of_tokens' as const, message: 'You have hit your usage limit' };
           yield { type: 'turn.complete' as const, reason: 'out_of_tokens' as const };
@@ -338,8 +347,8 @@ async function world() {
     getConversation: (id) => conversations.get(id),
     ensureConversationReady: creation.ensureConversationReady,
     createConversation: (input) => creation.createServerBuddyConversation(input),
-    reconfigure: (conversation, config) =>
-      replaceRuntimeConfig(configService, conversation, config),
+    reconfigure: (conversation, config, provenance) =>
+      replaceRuntimeConfig(configService, conversation, config, provenance),
   };
   const channels = createChannels({
     core,
@@ -377,9 +386,11 @@ async function world() {
     answers,
     silent,
     outOfTokens,
+    providerErrors,
     stopped,
     gate,
     channels,
+    stable,
     creation,
     conversations,
     runner,
@@ -1118,7 +1129,12 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
         { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `priority-${++n}` }
       );
     const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
-    w.announce(root, new Map([[w.lead.id, createDefaultConversationConfig('claude')]]));
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.lead.id,
+      changes: { provider: { kind: 'set', value: 'claude' } },
+      key: 'initial-profile',
+    });
+    w.announce(root);
     const thread = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
     await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
@@ -1153,7 +1169,34 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
       sol
     );
     w.gate.verdict = { kind: 'respond' };
+    let releaseGate!: () => void;
+    w.gate.hold = new Promise((resolve) => {
+      releaseGate = resolve;
+    });
     w.announce(await say('What next?', root.id));
+    await until(() => w.gate.configs.length === 1, 'gate selected Sol');
+    const duringGate = await w.creation.createServerBuddyConversation({
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      conversationId: 'during-gate-claude',
+      commandId: 'during-gate-claude',
+      config: createDefaultConversationConfig('claude'),
+      deferInitialMessage: true,
+    });
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'New history while the check is pending',
+        replyToId: root.id,
+        fromConversationId: duringGate.id,
+        evidence: [],
+        broadcast: false,
+        key: 'during-gate',
+      }
+    );
+    releaseGate();
+    w.gate.hold = Promise.resolve();
     await until(() => w.turns.length === 2, 'follow-up reply');
     assert.deepEqual(w.gate.configs[0], sol);
     assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
@@ -1177,6 +1220,294 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
       'remembered follow-up'
     );
     assert.deepEqual(w.gate.configs[1], explicit);
+  } finally {
+    await w.close();
+  }
+});
+
+test('explicit thread choice survives a failed attempt and records reopen; picker, gate and invocation agree', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const root = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) start`,
+        evidence: [],
+        broadcast: false,
+        key: 'selection-root',
+      }
+    );
+    const old = await w.creation.createServerBuddyConversation({
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      conversationId: 'old-claude',
+      commandId: 'old-claude',
+      config: createDefaultConversationConfig('claude'),
+      deferInitialMessage: true,
+    });
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Earlier Claude work',
+        purpose: 'reply',
+        replyToId: root.id,
+        fromConversationId: old.id,
+        evidence: [],
+        broadcast: false,
+        key: 'old-work',
+      }
+    );
+    const threadRead = async () => {
+      const response = await http('GET', `/api/buddies/posts/${root.id}/thread`);
+      assert.equal(response.status, 200);
+      return response.body as unknown as {
+        posts: Post[];
+        seats: { buddyId: string; config: ConversationConfig }[];
+      };
+    };
+    const buddy = {
+      kind: 'buddy' as const,
+      id: w.lead.id,
+      label: 'Lead',
+      detail: '',
+      execution: { kind: 'profile' as const, config: createDefaultConversationConfig('codex') },
+    };
+    const before = mentionChoice(buddy, new Map(), (await threadRead()).seats);
+    assert.equal(
+      ('config' in before ? before.config : null)?.provider,
+      'claude',
+      'old thread displays its actual next model'
+    );
+    const explicit: ConversationConfig = {
+      provider: 'codex',
+      model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
+      reasoning: { mode: 'explicit', effort: 'high' },
+    };
+    w.providerErrors.set(1, "You've hit your weekly limit · resets 7pm (Asia/Makassar)");
+    const response = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body: `[@Lead](buddy:${w.lead.id}) use the changed picker`,
+      replyToId: root.id,
+      mentionConfigs: [{ buddyId: w.lead.id, config: explicit }],
+      key: 'failed-choice',
+    });
+    assert.equal(response.status, 201);
+    const failed = await until(
+      async () => (await threadRead()).posts.find((p) => p.purpose === 'reply_failed'),
+      'chosen attempt fails'
+    );
+    assert.match(failed.body, /You've hit your weekly limit/);
+    await until(() => w.channels.responding(w.general.id).length === 0, 'failed pair idle');
+    const shown = mentionChoice(buddy, new Map(), (await threadRead()).seats);
+    assert.equal(
+      choiceLabel(shown, null),
+      `${w.turns[0].request.model} · high`,
+      'display equals failed invocation'
+    );
+    assert.deepEqual(
+      'config' in shown ? shown.config : null,
+      explicit,
+      'failure does not revert to old Claude history'
+    );
+
+    // Reopen the real records store and a fresh responder; no in-memory selection survives.
+    const reopened = new ConversationConfigService({
+      store: recordStore(join(w.scratch, 'config')),
+      resolver: { resolve: async (config) => resolveConfigAgainstProviderCatalog(config) },
+    });
+    const events = createBuddyEvents();
+    const configs: ConversationConfig[] = [];
+    const reloaded = createChannels({
+      core: w.core,
+      events,
+      uploadsRoot: () => join(w.scratch, 'uploads'),
+      conversations: { ...w.stable, slot: async (id) => slotOf(await reopened.getRecord(id)) },
+      gate: async ({ config }) => {
+        configs.push(config);
+        return { kind: 'respond' };
+      },
+      channelChanged: () => undefined,
+    });
+    assert.deepEqual(
+      (await reloaded.threadSeats(root.id)).find((s) => s.buddyId === w.lead.id)?.config,
+      explicit
+    );
+    const next = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Continue after failure',
+        replyToId: root.id,
+        evidence: [],
+        broadcast: false,
+        key: 'next-after-failure',
+      }
+    );
+    events.emit({ kind: 'posted', post: next, channel: w.general, picks: NO_PICKS });
+    await until(() => w.turns.length === 2, 'reloaded follow-up invokes');
+    assert.deepEqual(configs, [explicit], 'gate consumes the persisted override');
+    assert.equal(w.turns[1].request.harness, explicit.provider);
+    assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
+    assert.equal(w.turns[1].request.reasoningEffort, 'high');
+    await until(() => reloaded.responding(w.general.id).length === 0, 'reloaded reply idle');
+    const retry = await http('POST', `/api/buddies/posts/${failed.id}/retry`, { config: explicit });
+    assert.equal(retry.status, 202, JSON.stringify(retry.body));
+    await until(() => w.turns.length === 3, 'plain weekly-limit retry invokes');
+    assert.equal(w.turns[2].request.model, 'gpt-6.1-sol');
+    await until(() => w.channels.responding(w.general.id).length === 0, 'weekly retry idle');
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
+test('same-value picks become durable overrides, independent of another Buddy and deleted history', async () => {
+  const w = await world();
+  try {
+    let n = 0;
+    const say = (body: string, replyToId?: string) =>
+      w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          broadcast: false,
+          key: `scope-${++n}`,
+        }
+      );
+    const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
+    w.announce(root);
+    await until(
+      () => w.turns.length === 1 && w.channels.responding(w.general.id).length === 0,
+      'default reply'
+    );
+    const initial = (await w.channels.threadSeats(root.id)).find(
+      (s) => s.buddyId === w.lead.id
+    )!.config;
+    assert.deepEqual(
+      initial,
+      createDefaultConversationConfig('codex'),
+      'empty thread uses profile'
+    );
+    // The config is unchanged: only its origin changes, before the failed attempt.
+    w.outOfTokens.add(2);
+    w.announce(
+      await say(`[@Lead](buddy:${w.lead.id}) keep this model`, root.id),
+      new Map([[w.lead.id, initial]])
+    );
+    await until(
+      () => w.turns.length === 2 && w.channels.responding(w.general.id).length === 0,
+      'same-value pick fails'
+    );
+    const external = await w.creation.createServerBuddyConversation({
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      conversationId: 'later-external-claude',
+      commandId: 'later-external-claude',
+      config: createDefaultConversationConfig('claude'),
+      deferInitialMessage: true,
+    });
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Newer external Claude work',
+        replyToId: root.id,
+        fromConversationId: external.id,
+        evidence: [],
+        broadcast: false,
+        key: 'newer-external',
+      }
+    );
+    assert.deepEqual(
+      (await w.channels.threadSeats(root.id)).find((s) => s.buddyId === w.lead.id)?.config,
+      initial,
+      'explicit intent beats newer inferred history'
+    );
+    w.announce(
+      await say(`[@Designer](buddy:${w.designer.id}) use your own model`, root.id),
+      new Map([[w.designer.id, createDefaultConversationConfig('claude')]])
+    );
+    await until(
+      () => w.turns.length === 3 && w.channels.responding(w.general.id).length === 0,
+      'independent Designer reply'
+    );
+    const seats = await w.channels.threadSeats(root.id);
+    assert.equal(seats.find((s) => s.buddyId === w.designer.id)?.config.provider, 'claude');
+    assert.equal(seats.find((s) => s.buddyId === w.lead.id)?.config.provider, 'codex');
+
+    // A different, unseated thread falls back past a deleted latest reference.
+    const other = await say('A thread without an override');
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'History',
+        replyToId: other.id,
+        fromConversationId: external.id,
+        evidence: [],
+        broadcast: false,
+        key: 'history-other',
+      }
+    );
+    assert.equal((await w.channels.threadSeats(other.id))[0].config.provider, 'claude');
+    const records = recordStore(join(w.scratch, 'config'));
+    await records.delete(external.id);
+    assert.deepEqual(
+      await w.channels.threadSeats(other.id),
+      [],
+      'deleted historical config is skipped; composer uses profile'
+    );
+    const unavailable: ConversationConfig = {
+      provider: 'codex',
+      model: { mode: 'explicit', modelId: 'retired-model' },
+      reasoning: { mode: 'default' },
+    };
+    await records.create({
+      conversationId: 'retired-history',
+      kind: {
+        t: 'buddy',
+        context: { buddyId: w.lead.id, workspaceId: w.ws },
+        visibility: 'foreground',
+      },
+      config: unavailable,
+      provenance: 'external_discovered',
+    });
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Work on a now-retired model',
+        replyToId: other.id,
+        fromConversationId: 'retired-history',
+        evidence: [],
+        broadcast: false,
+        key: 'retired-history',
+      }
+    );
+    assert.deepEqual(
+      (await w.channels.threadSeats(other.id))[0].config,
+      unavailable,
+      'unavailable history is shown, not silently replaced'
+    );
+    w.announce(await say(`[@Lead](buddy:${w.lead.id}) continue here`, other.id));
+    await until(
+      async () =>
+        (await w.core.listPosts(OWNER, { kind: 'thread', rootId: other.id }, null, 50)).posts.some(
+          (p) => p.purpose === 'reply_failed' && /Model is unavailable/.test(p.body)
+        ),
+      'unavailable model fails visibly'
+    );
+    assert.equal(w.turns.length, 3, 'no provider substitution after resolution failure');
   } finally {
     await w.close();
   }
