@@ -6,9 +6,9 @@
 import type React from 'react';
 import { AbsoluteFill, Audio, Freeze, OffthreadVideo, Sequence, useCurrentFrame } from 'remotion';
 import beat9 from '../../beat9/beat9.mp4';
-import calmDowntempo from '../../sound/calm-downtempo.wav';
-import calmHalftime from '../../sound/calm-halftime.wav';
-import calmPulse from '../../sound/calm-pulse.wav';
+import revealDrop from '../../sound/reveal-drop.wav';
+import revealHalftime from '../../sound/reveal-halftime.wav';
+import revealMarimba from '../../sound/reveal-marimba.wav';
 import * as Close from './Close';
 import * as DesignReview from './DesignReview';
 import * as FeatureFlash from './FeatureFlash';
@@ -25,7 +25,10 @@ export const WIDTH = 1920;
 export const HEIGHT = 1080;
 
 const BAR = (4 * 60) / 128; // 1.875 s
-const MUSIC_IN = Overload.DURATION; // the build starts under the benefits
+// Bar 1 is the drop: the logo locks on the song's first downbeat (owner, 2026-10-04; see
+// ../../sound/INTRO_SOUND_PLAN.md). The music itself starts two bars earlier, on the first robot.
+const MUSIC_IN = Math.round(Overload.LOCK * FPS);
+const CUE_IN = Math.round(Overload.CUE_IN * FPS);
 // Frame where bar b (1-based) of the cue starts. Bars are 112.5 frames, so round per bar, never accumulate.
 const bar = (b: number) => MUSIC_IN + Math.round((b - 1) * BAR * FPS);
 
@@ -48,7 +51,7 @@ const section = (id: string, from: number, to: number, C: React.FC, frames: numb
 
 export const SECTIONS: Section[] = [
   section('overload', 0, Overload.DURATION, Overload.Overload, Overload.DURATION),
-  section('home', bar(1), bar(5), HomeIntro.HomeIntro, HomeIntro.DURATION),
+  section('home', bar(2), bar(5), HomeIntro.HomeIntro, HomeIntro.DURATION),
   section('benefits', bar(5), bar(9), PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
   section('ask', bar(9), bar(13), DesignReview.DesignReview, DesignReview.DURATION),
   section('show-work', bar(13), bar(21), ShowWork.ShowWork, ShowWork.DURATION),
@@ -63,13 +66,6 @@ export const SECTIONS: Section[] = [
   section('end', bar(37), bar(37) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
 ];
 
-// The cue comes up out of the intro instead of arriving at full level: the score's own levels carry
-// the opening (pad, mean -25 dB, just under the intro's marimba at -19) and the build climbs to the
-// drop; the ramp only trims the build's first bars. An unramped build once stepped 9 dB over the
-// intro's tail and clipped under the marimba handoff (owner, 2026-09-30: "abrupt").
-const BUILD_FROM = bar(5) - MUSIC_IN;
-const BUILD_FRAMES = bar(9) - bar(5);
-const buildRamp = (f: number) => (f < BUILD_FROM ? 1 : f >= BUILD_FROM + BUILD_FRAMES ? 1 : 0.75 + 0.25 * ((f - BUILD_FROM) / BUILD_FRAMES) ** 1.6);
 
 // One caption per product scene, always top left, in from the scene's second beat.
 const CAPTIONS: { from: number; to: number; lines: [string, string] }[] = [
@@ -110,10 +106,11 @@ const Place: React.FC<{ s: Section }> = ({ s }) => {
   );
 };
 
-// The score under everything after the intro. Same bar grid and length, so the picture never changes
-// with it: edm.py's EDM cue, or one of calm.py's three calmer versions (owner, 2026-09-30: "too
-// upbeat and generic"). Pick one at render time: --props='{"score":"pulse"}'.
-export const SCORES = { halftime: calmHalftime, pulse: calmPulse, downtempo: calmDowntempo } as const;
+// The score: reveal.py's song, from the first robot. Three flavours on one grid, so the picture never
+// changes with it (owner to pick, 2026-10-04). DRAFT: each file runs only to the first demo (bar 10);
+// the chosen flavour gets the full length. Pick at render time: --props='{"score":"marimba"}'.
+// The calm.py scores (2026-09-30) were written for the old title and are no longer placed.
+export const SCORES = { drop: revealDrop, halftime: revealHalftime, marimba: revealMarimba } as const;
 export type Score = keyof typeof SCORES;
 export type AssemblyProps = { score: Score };
 
@@ -127,12 +124,11 @@ export const Assembly: React.FC<AssemblyProps> = ({ score }) => (
         <Caption lines={c.lines} />
       </Sequence>
     ))}
-    <Overload.OverloadTail />
     <Sequence from={bar(5)} layout="none">
       <PostIntroBenefits.BenefitsSound />
     </Sequence>
-    <Sequence from={MUSIC_IN} layout="none">
-      <Audio src={SCORES[score]} volume={buildRamp} />
+    <Sequence from={CUE_IN} layout="none">
+      <Audio src={SCORES[score]} />
     </Sequence>
   </AbsoluteFill>
 );

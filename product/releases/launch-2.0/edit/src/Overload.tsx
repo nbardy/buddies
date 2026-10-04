@@ -16,7 +16,6 @@ export const WIDTH = 1920;
 export const HEIGHT = 1080;
 
 // Output seconds. Music should put a hit on every pile arrival up to the 1/16 s run.
-export const INTRO_HIT: Intro.Hit = 'drop'; // placeholder until the owner picks drop / trailer / impact
 export const INTRO_ROBOTS = 5; // owner pick, 2026-10-03; the end card's mark matches it
 const T = {
   rampStart: 6.2, // first pile window; the ramp runs 5 s (sum of GAPS)
@@ -24,6 +23,10 @@ const T = {
   title: 15.0, // voice line "Don't worry, we've got you covered." sits ~13.4–15.0 over the card
   end: 15.0 + Intro.frames(INTRO_ROBOTS) / Intro.FPS, // the robot intro plays out in full
 };
+// The music (../../sound/reveal.py) starts on the first robot's pop and drops on the logo lock;
+// the edit's bar grid (Assembly.bar) counts from the lock.
+export const CUE_IN = T.title + Intro.POP_AT;
+export const LOCK = T.title + Intro.lockAt(INTRO_ROBOTS);
 // Entrances inside the card and title scenes, in seconds from each scene's start.
 const CARD = { overload: 0.35, feeling: 0.95, covered: 1.7 };
 export const DURATION = Math.round(T.end * FPS);
@@ -594,21 +597,6 @@ const OVERLOAD_CUES: Cue[] = [
   { at: T.cut + CARD.feeling, src: SFX.thud, volume: 0.5 },
   ...picked(CALM_IN, ['D4', 'Fs4', 'A4', 'D5'], 0.38),
 ];
-
-// The robot intro's hit rings on into the next scene, so the cut places it outside the Overload
-// section (Assembly); OverloadTail is that hit, timed on Overload's clock.
-export const OverloadTail: React.FC = () => (
-  <Sequence from={frames(T.title + Intro.hitAt(INTRO_ROBOTS))} layout="none">
-    <Intro.IntroHit hit={INTRO_HIT} />
-  </Sequence>
-);
-// Overload alone (Root's preview composition): picture, sound and the hit, cut at T.end.
-export const OverloadPreview: React.FC = () => (
-  <AbsoluteFill>
-    <Overload />
-    <OverloadTail />
-  </AbsoluteFill>
-);
 
 export const Overload: React.FC = () => (
   <AbsoluteFill>

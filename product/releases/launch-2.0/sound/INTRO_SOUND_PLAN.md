@@ -54,3 +54,13 @@ reverb. The new cue uses edm.py's production chain (stereo supersaws, sidechain,
 a master limiter, stems), and I'll judge it **in context**, rendering 8–45 s of the cut rather than
 an isolated clip. I can't hear, though: the owner's ears are the only real check, so the first
 deliverable is one 35 s in-context draft, not three variations.
+
+## Built (2026-10-04)
+
+`reveal.py` writes `reveal-{drop,halftime,marimba}.wav`, one per flavour, on this structure. The
+boops keep the owner's liked sound (it was `buddies_intro.py`, now deleted with its stingers) as
+the melody's first notes. The picture is on the grid: `BuddiesIntro.tsx` pops the robots on the
+melody's 8ths and locks on bar 3; `Assembly.tsx` counts bar 1 from the lock and starts the file on
+the first pop. The home scene is three bars (it was four). Drafts run to the first demo only.
+Measured per-bar loudness (RMS, dBFS), all three flavours: robots -17, build -12, drop -9 (the
+loudest bar), home -14 to -15, full -10.
