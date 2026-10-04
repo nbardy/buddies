@@ -123,7 +123,7 @@ function ThreadCardMobile({
   return (
     <li className="threads-card ui-card ui-surface ui-stack">
       <Link className="threads-head ui-row" to={threadHref}>
-        <strong>
+        <strong className="ui-truncate">
           {heading.mark}
           {heading.name}
         </strong>
