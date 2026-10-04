@@ -234,16 +234,17 @@ export function DependenciesPrompt() {
       <div className="ui-stack" style={{ maxHeight: '85dvh' }}>
         <header style={{ padding: 'var(--sp-9) var(--sp-9) var(--sp-7)', flexShrink: 0 }}>
           <div className="ui-row" style={{ justifyContent: 'space-between' }}>
-            <span
+            <h2
+              id="dependencies-title"
               style={{
-                fontSize: 'var(--fs-2)',
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-                color: SURFACE.muted,
+                fontSize: 'var(--fs-8)',
+                letterSpacing: '-0.025em',
+                color: SURFACE.text,
+                margin: 0,
               }}
             >
-              This computer
-            </span>
+              Setup
+            </h2>
             <button
               type="button"
               aria-label="Close dependency checks"
@@ -259,20 +260,6 @@ export function DependenciesPrompt() {
               ✕
             </button>
           </div>
-          <h2
-            id="dependencies-title"
-            style={{
-              fontSize: 'var(--fs-8)',
-              letterSpacing: '-0.025em',
-              color: SURFACE.text,
-              margin: 'var(--sp-4) 0 var(--sp-3)',
-            }}
-          >
-            Dependencies
-          </h2>
-          <p style={{ fontSize: 'var(--fs-4)', color: SURFACE.muted, margin: 0, lineHeight: 1.5 }}>
-            Make sure your tools can respond.
-          </p>
         </header>
         <div
           aria-live="polite"
