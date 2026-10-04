@@ -135,3 +135,7 @@ Source-install follow-through: when Homebrew is absent and Claude is missing or 
 Owner requested one Setup heading in place of the eyebrow/title/subtitle. Removed all three prior lines and retained the close control beside Setup. No server behavior change.
 
 Release assessment remains conditional: actual installer downloads and login-to-first-response onboarding are unverified. Current workspace create route delegates directly to the crate; create_workspace in crates/unleashd-buddies/src/team.rs inserts only the workspace, without a default channel. ChannelBrowser still derives Home's composer target from #general and explicitly has no composer when it is absent. The dependency-check work does not resolve that original onboarding blocker. Recommend a release candidate for validation, not a public-launch readiness claim.
+
+## Flat Setup surface (2026-10-04)
+
+Owner requested removal of row boxes, rounded corners and the bottom paragraph. Replaced row cards with inset horizontal dividers, removed outer border/gradient/shadow and backdrop blur, squared controls, and made command fields flat with a bottom rule. Setup remains centered with scrollable rows and visible actions. Removed the footer quota paragraph; README still documents probe quota. No dependency-check behavior changed. Verify the committed client with its browser-boundary regression and inspect phone/desktop fixture screenshots against the prior Setup renders.

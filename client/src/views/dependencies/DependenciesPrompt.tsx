@@ -42,13 +42,12 @@ const SURFACE = {
   text: '#edf3fa',
   muted: '#a4b4c5',
   border: '#304052',
-  raised: '#1c2a3a',
 };
 const buttonStyle: CSSProperties = {
   padding: 'var(--sp-4) var(--sp-6)',
-  border: `1px solid ${SURFACE.border}`,
-  borderRadius: 'var(--ui-radius)',
-  background: SURFACE.raised,
+  border: 'none',
+  borderRadius: 0,
+  background: 'transparent',
   color: SURFACE.text,
   cursor: 'pointer',
   font: 'inherit',
@@ -72,9 +71,10 @@ function DependencyCommand({ command, label }: { command: string; label: string 
           fontSize: 'var(--fs-3)',
           padding: 'var(--sp-4)',
           color: SURFACE.text,
-          background: '#0d1722',
-          border: `1px solid ${SURFACE.border}`,
-          borderRadius: 'var(--ui-radius)',
+          background: 'transparent',
+          border: 'none',
+          borderBottom: `1px solid ${SURFACE.border}`,
+          borderRadius: 0,
         }}
       />
       <button
@@ -107,11 +107,8 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
         display: 'grid',
         gridTemplateColumns: '28px minmax(0, 1fr)',
         gap: 'var(--sp-6)',
-        padding: 'var(--sp-7)',
-        border: `1px solid ${SURFACE.border}`,
-        borderRadius: 'var(--ui-radius)',
-        background: 'linear-gradient(135deg, #1b2939, #172332)',
-        boxShadow: '0 2px 8px rgb(0 0 0 / 12%)',
+        padding: 'var(--sp-7) 0',
+        borderTop: `1px solid ${SURFACE.border}`,
       }}
     >
       <span
@@ -224,11 +221,11 @@ export function DependenciesPrompt() {
         maxWidth: 'none',
         padding: 0,
         overflow: 'hidden',
-        border: `1px solid ${SURFACE.border}`,
-        borderRadius: 'var(--sp-6)',
-        background: 'linear-gradient(145deg, #202e3e, #101a26)',
+        border: 'none',
+        borderRadius: 0,
+        background: '#172332',
         color: SURFACE.text,
-        boxShadow: '0 32px 90px rgb(0 0 0 / 65%), inset 0 1px 0 rgb(255 255 255 / 6%)',
+        boxShadow: 'none',
       }}
     >
       <div className="ui-stack" style={{ maxHeight: '85dvh' }}>
@@ -265,8 +262,8 @@ export function DependenciesPrompt() {
           aria-live="polite"
           className="ui-stack"
           style={{
-            gap: 'var(--sp-4)',
-            padding: '0 var(--sp-9) var(--sp-9)',
+            gap: 0,
+            padding: '0 var(--sp-9)',
             overflowY: 'auto',
             minHeight: 0,
           }}
@@ -281,9 +278,9 @@ export function DependenciesPrompt() {
         </div>
         <footer
           style={{
-            padding: 'var(--sp-7) var(--sp-9)',
+            margin: '0 var(--sp-9)',
+            padding: 'var(--sp-7) 0',
             borderTop: `1px solid ${SURFACE.border}`,
-            background: 'rgb(0 0 0 / 14%)',
             flexShrink: 0,
           }}
         >
@@ -310,16 +307,6 @@ export function DependenciesPrompt() {
               Continue →
             </button>
           </div>
-          <p
-            style={{
-              color: SURFACE.muted,
-              fontSize: 'var(--fs-2)',
-              lineHeight: 1.4,
-              margin: 'var(--sp-6) 0 0',
-            }}
-          >
-            Response checks use a little agent quota. You can continue while resolving a check.
-          </p>
         </footer>
       </div>
     </dialog>
