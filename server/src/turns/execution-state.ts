@@ -74,7 +74,7 @@ export interface Step {
   readonly effects: readonly Effect[];
 }
 
-/** The process as a replacement backend finds it (agent-cli's exited and lost are both `ended`). */
+/** The process as a replacement backend finds it, once started (agent-cli `executionProcess`). */
 export type ProcessAt = 'live' | 'ended';
 
 /** What a replacement backend does with a journal it found. */
