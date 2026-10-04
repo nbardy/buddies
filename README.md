@@ -45,13 +45,24 @@ Track multi-agent swarm runs — iterations, merges, rejections, per-worker time
 
 ## Quick Start
 
-**Prerequisites:** git, [Node](https://nodejs.org/) 22.13 or newer, [pnpm](https://pnpm.io/), and at least one supported CLI agent installed and authenticated (e.g. `claude`).
+**Prerequisites:** git, [Node](https://nodejs.org/) 22.13 or newer, [pnpm](https://pnpm.io/), [Rust and Cargo](https://rustup.rs/) (for the native addons), and at least one supported CLI agent installed and authenticated (e.g. `claude`).
 
 Install and run (the same command as the website):
 
 ```bash
 git clone --recursive https://github.com/nbardy/unleashd && cd unleashd && pnpm install && pnpm build && pnpm start
 ```
+
+The install preflight checks Rust, Claude Code and Codex. If Rust is missing it runs
+`brew install rust`; without Homebrew it asks an installed Claude Code to install
+Rust via rustup. If that fails, it prints the manual install steps. Packaged
+installs with prebuilt addons do not require Rust.
+
+At app launch, the **Dependencies** window checks Rust and asks Claude and Codex
+to reply “Yes” once (this uses a small amount of agent quota). Missing agents and
+failed responses show installation/login guidance. Log in from your terminal
+with `claude auth login` or `codex login`, then click **Check again**. You can
+continue into the app while resolving dependencies.
 
 To develop on it, use `pnpm install && pnpm dev` instead of build/start.
 

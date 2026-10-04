@@ -19,6 +19,7 @@ import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
 import { initSettings } from './stores/settingsStore';
 import { SWARM_PAGE_LOADERS } from './swarm';
+import { DependenciesPrompt } from './views/dependencies/DependenciesPrompt';
 import './App.css';
 import './components/buddies/BuddyDetail.css';
 
@@ -316,6 +317,7 @@ function AppInner() {
 
   return (
     <>
+      <DependenciesPrompt />
       <UpdateBanner />
       <AppRoutes device={device} />
       {/* App-wide, outside both shells: it shows on every route of either tree. */}

@@ -73,6 +73,7 @@ import {
 import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
+import { registerDependencyRoutes } from './providers/dependencies';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
@@ -509,6 +510,7 @@ app.use((request, response, next) => {
 const UPLOADS_DIR = uploadsDirectory();
 registerUploadRoutes(app, UPLOADS_DIR);
 registerCoreRoutes(app, () => startupAuditResults);
+const dependencyChecks = registerDependencyRoutes(app);
 registerConversationRoutes(
   app,
   (id) => runtimeBuilder.materialize(id),
@@ -701,6 +703,7 @@ shutdownController = registerShutdownHandlers(
     stopScheduler: stopBuddyScheduler,
     flushState: async () => {
       upstream.stop();
+      dependencyChecks.close();
       await Promise.all([turnAttemptJournal.flush(), errorJournal.flush()]);
       await buddyMcp?.close();
       if (bootedIngest) {

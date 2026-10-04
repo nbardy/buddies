@@ -512,3 +512,5 @@ export * from './buddy-channel-posts.js';
 export * from './harness-retry.js';
 
 export * from './upstream.js';
+
+export * from './dependencies.js';

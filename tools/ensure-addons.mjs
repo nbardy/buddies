@@ -29,6 +29,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// rustup installs here even when the calling shell predates its PATH update.
+process.env.PATH = `${process.env.PATH ?? ''}${path.delimiter}${path.join(os.homedir(), '.cargo', 'bin')}`;
+
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Shared by every worktree of this checkout: one addon cache and one cargo target dir.
 const BUILD_ROOT = process.env.UNLEASHD_BUILD_ROOT ?? path.join(os.homedir(), '.cache', 'unleashd');

@@ -25,6 +25,45 @@ test('a clone without the submodule names the git command', () => {
 test('a tarball install (no .gitmodules) does not demand a submodule', () => {
   assert.deepEqual(
     findProblems({ nodeVersion: 'v24.3.0', isGitCheckout: false, submoduleReady: false }),
-    [],
+    []
   );
+});
+
+// Exercise install commands with executable fixtures, never the host toolchain.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { checkDependencies } from './preflight.mjs';
+
+test('missing Rust installs through brew or Claude and verifies the result', () => {
+  for (const installer of ['brew', 'claude']) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-test-'));
+    const write = (name, body) =>
+      fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    try {
+      const guard = installer === 'brew'
+        ? '[ "$1" = install ] && [ "$2" = rust ] || exit 1'
+        : '[ "$1" = -p ] && [ "$3" = --allowedTools ] && [ "$4" = Bash ] || exit 1';
+      write(
+        installer,
+        `if [ "$1" = --version ]; then exit 0; fi\n${guard}\nfor bin in rustc cargo; do\n/bin/echo '#!/bin/sh' > "$HOME/$bin"\n/bin/echo 'exit 0' >> "$HOME/$bin"\n/bin/chmod +x "$HOME/$bin"\ndone`
+      );
+      const logs = [];
+      checkDependencies({ env: { PATH: dir, HOME: dir }, log: (line) => logs.push(line) });
+      assert.ok(
+        logs.some((line) =>
+          line.includes(installer === 'brew' ? 'brew install rust' : 'Asking Claude')
+        )
+      );
+      assert.ok(logs.some((line) => line.includes('codex is not available')));
+      fs.unlinkSync(path.join(dir, 'rustc'));
+      write(installer, 'exit 0');
+      assert.throws(
+        () => checkDependencies({ env: { PATH: dir, HOME: dir }, log: () => {} }),
+        /Rust installation did not complete/
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
 });

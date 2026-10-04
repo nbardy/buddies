@@ -1,0 +1,58 @@
+# Onboarding dependency checks
+
+Owner scope: #unleashd-2 thread post_01a10112-930c-7691-92c0-c43f20499441;
+request post_01a1027a-5a97-7069-9758-67700fac888e, renewed 2026-10-04.
+Implement Rust installer preflight and Claude/Codex availability and response checks.
+The other onboarding proposals (workspace defaults, Builder defaults, nav/copy) are outside this change.
+
+## Behavior
+
+- Source-install preflight verifies Rust and Cargo. If missing, runs `brew install rust`;
+  absent Homebrew, asks installed Claude to install stable Rust via rustup, with Bash
+  permission, no sudo and no project edits. Verifies tools afterward; failures print
+  manual install/login guidance and fail installation. Installer timeout: 10 minutes.
+- Install-time agent version checks warn for missing Claude/Codex. Packaged prebuilt
+  installs skip Rust installation (no .gitmodules).
+- Both addon builds and response checks find ~/.cargo/bin even if the calling shell
+  predates rustup's PATH update.
+- Server starts asynchronous checks once per launch. GET status is read-only and cached;
+  POST check explicitly retries. Parallel retries share the pending check.
+- Each agent runs in an empty temporary directory, asks for only Yes, and must exit
+  successfully with an exact Yes (case insensitive, optional punctuation). Claude uses
+  no tools, no MCP servers and no session persistence; Codex uses ephemeral, read-only
+  execution outside a Git repository. Each probe has a 45-second deadline; process
+  groups are killed at timeout and at canonical server shutdown. Raw CLI diagnostics
+  are not forwarded to the browser.
+- One native dialog in App, shared by both shells, shows checking/ready/missing/failed,
+  installation/login guidance, Check again and Continue. Reads use the existing keyed
+  resource cache. Continue/Escape dismiss and stop polling. README explains behavior.
+
+## Validation
+
+- `pnpm build`, `pnpm typecheck`, `pnpm test:tools`: passed.
+- `pnpm exec tsx --test server/test/dependencies.test.ts`: passed. Real executable
+  fixtures + real HTTP cover absent binary, Yes success, Yes with nonzero exit,
+  incorrect answer, timeout, concurrent refresh and POST retry.
+- Installer test runs real fixture executables for both brew and Claude routes,
+  validates command arguments, and rejects a fake successful installer that does
+  not actually make rustc/Cargo available. No host Rust install or live agent probe
+  was performed during verification.
+- `bash tools/check-client-invariants.sh`: passed.
+- `pnpm test:client`: 221/222 passed; existing unrelated failure in
+  channel-dm.test.tsx expects "Retry with a different harness" but HEAD's
+  HarnessPicker.tsx renders "Retry with model…". Both mismatch strings are in HEAD,
+  and neither file is changed here.
+- Screenshots: output/dependencies-2026-10-04/missing@phone.png,
+  missing@desktop.png, ready-fixture@phone.png. Inspected missing-state phone and
+  desktop images. Real app runs against empty temporary HOME/data/Buddies stores
+  on port 17589, with no real agent CLIs on PATH. Ready screenshot uses explicit
+  fake executables answering Yes, not live authentication evidence. POST retry
+  returned 202; Continue removed the dialog. Browser session refused no writes.
+- RTK.md is absent in this checkout; no changes made to concurrent dirty files.
+
+Official flag references reviewed:
+https://developers.openai.com/codex/cli/reference
+https://code.claude.com/docs/en/cli-reference
+
+Live installation/authentication remains an owner-environment smoke test; the live
+backend was not forcibly restarted and no push was performed.
