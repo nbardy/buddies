@@ -418,7 +418,7 @@ fn an_inbox_request_starts_no_run_for_its_answer_or_failure() {
     let from_chat = |body: &str, key: &str| PostInput { returns: Some(Returns::Inbox), ..request(body, key) };
     let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat("please do X", "r1")).unwrap();
     assert_eq!(asked.returns, Some(Returns::Inbox));
-    let claim = s.claim_run(60_000).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
     let answer = s
         .answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec![], key: "a".into() })
         .unwrap();
@@ -426,10 +426,10 @@ fn an_inbox_request_starts_no_run_for_its_answer_or_failure() {
     assert_eq!(s.get_post(&buddy("mid"), &asked.id).unwrap().request, RequestState::Answered { answer_id: answer.id }, "the post is the delivery");
 
     let failing = s.post(&buddy("mid"), dm("mid", "ic"), from_chat("will fail", "r2")).unwrap();
-    let claim = s.claim_run(60_000).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap();
     assert_eq!(s.get_post(&buddy("mid"), &failing.id).unwrap().request, RequestState::Failed);
-    assert!(s.claim_run(60_000).unwrap().is_none(), "neither the answer nor the failure queued a run");
+    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "neither the answer nor the failure queued a run");
     assert!(s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 10).unwrap().is_empty());
 }
 
