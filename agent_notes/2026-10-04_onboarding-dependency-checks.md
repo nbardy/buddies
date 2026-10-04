@@ -139,3 +139,7 @@ Release assessment remains conditional: actual installer downloads and login-to-
 ## Flat Setup surface (2026-10-04)
 
 Owner requested removal of row boxes, rounded corners and the bottom paragraph. Replaced row cards with inset horizontal dividers, removed outer border/gradient/shadow and backdrop blur, squared controls, and made command fields flat with a bottom rule. Setup remains centered with scrollable rows and visible actions. Removed the footer quota paragraph; README still documents probe quota. No dependency-check behavior changed. Verify the committed client with its browser-boundary regression and inspect phone/desktop fixture screenshots against the prior Setup renders.
+
+## Setup visual hierarchy refinement (2026-10-04)
+
+Owner found the flattened presentation unattractive. Kept square edges, inset dividers, a single Setup heading and no footer paragraph. Refined hierarchy with larger lighter heading type, tool names and compact statuses on one line, quieter separator contrast, a neutral dark surface with restrained depth and a narrow accent edge. Login commands now precede help links; copy actions have a distinct accent and Continue has a clearer primary treatment. Initial focus goes to the dialog instead of making Close appear selected, while native focus trapping and keyboard controls remain. Readiness behavior is unchanged. Browser checks and phone/desktop visual inspection must use fresh builds, not previously saved screenshots.

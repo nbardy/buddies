@@ -33,18 +33,18 @@ const GUIDES = {
 const STATES = {
   ready: { icon: '✓', label: 'Yes — ready', color: '#22c55e' },
   missing: { icon: '✕', label: 'No — not installed', color: 'var(--danger)' },
-  failed: { icon: '✕', label: 'Installed — needs attention', color: 'var(--danger)' },
+  failed: { icon: '✕', label: 'Installed — needs attention', color: '#ff9b94' },
   installing: { icon: '…', label: 'Installing automatically…', color: 'var(--warning)' },
   checking: { icon: '…', label: 'Checking…', color: 'var(--warning)' },
 };
 
 const SURFACE = {
-  text: '#edf3fa',
-  muted: '#a4b4c5',
-  border: '#304052',
+  text: '#f2f4f8',
+  muted: '#9da8b5',
+  border: '#ffffff14',
 };
 const buttonStyle: CSSProperties = {
-  padding: 'var(--sp-4) var(--sp-6)',
+  padding: 'var(--sp-6) var(--sp-7)',
   border: 'none',
   borderRadius: 0,
   background: 'transparent',
@@ -57,7 +57,15 @@ const buttonStyle: CSSProperties = {
 function DependencyCommand({ command, label }: { command: string; label: string }) {
   const copy = useCopyAction(command);
   return (
-    <div className="ui-row" style={{ gap: 'var(--sp-3)', marginTop: 'var(--sp-3)' }}>
+    <div
+      className="ui-row"
+      style={{
+        gap: 'var(--sp-4)',
+        marginTop: 'var(--sp-6)',
+        borderBottom: `1px solid ${SURFACE.border}`,
+        background: '#ffffff04',
+      }}
+    >
       <input
         aria-label={label}
         readOnly
@@ -73,13 +81,12 @@ function DependencyCommand({ command, label }: { command: string; label: string 
           color: SURFACE.text,
           background: 'transparent',
           border: 'none',
-          borderBottom: `1px solid ${SURFACE.border}`,
           borderRadius: 0,
         }}
       />
       <button
         type="button"
-        style={buttonStyle}
+        style={{ ...buttonStyle, color: '#a6c7ff', fontSize: 'var(--fs-3)' }}
         onClick={copy.copy}
         aria-label={`${COPY_LABEL[copy.state]} ${label}`}
       >
@@ -107,7 +114,7 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
         display: 'grid',
         gridTemplateColumns: '28px minmax(0, 1fr)',
         gap: 'var(--sp-6)',
-        padding: 'var(--sp-7) 0',
+        padding: 'var(--sp-8) 0',
         borderTop: `1px solid ${SURFACE.border}`,
       }}
     >
@@ -128,10 +135,24 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
         {state.icon}
       </span>
       <div className="ui-stack" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
-        <strong style={{ color: SURFACE.text, fontSize: 'var(--fs-5)', lineHeight: 1.3 }}>
-          {guide.name}
-        </strong>
-        <span style={{ color: state.color, fontSize: 'var(--fs-3)' }}>{label}</span>
+        <div
+          className="ui-row"
+          style={{ justifyContent: 'space-between', gap: 'var(--sp-4)', flexWrap: 'wrap' }}
+        >
+          <strong
+            style={{
+              color: SURFACE.text,
+              fontSize: 'var(--fs-6)',
+              lineHeight: 1.5,
+              fontWeight: 500,
+            }}
+          >
+            {guide.name}
+          </strong>
+          <span style={{ color: state.color, fontSize: 'var(--fs-2)', lineHeight: 1.5 }}>
+            {label}
+          </span>
+        </div>
         {check.status === 'failed' && (
           <span
             style={{
@@ -154,16 +175,6 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
             )}
           </>
         )}
-        {(check.status === 'missing' || check.status === 'failed') && (
-          <a
-            href={guide.url}
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: '#8bbcff', fontSize: 'var(--fs-3)', marginTop: 'var(--sp-3)' }}
-          >
-            {check.status === 'missing' ? 'Installation guide' : 'Account & setup help'} ↗
-          </a>
-        )}
         {check.status === 'failed' &&
           guide.login &&
           check.failure !== 'quota' &&
@@ -173,6 +184,26 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
               label={`${check.failure === 'login' ? 'Sign in to' : 'Open'} ${guide.name} command`}
             />
           )}
+        {(check.status === 'missing' || check.status === 'failed') && (
+          <a
+            href={guide.url}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              color: '#8bbcff',
+              fontSize: 'var(--fs-3)',
+              marginTop: 'var(--sp-5)',
+              textDecoration: 'none',
+            }}
+          >
+            {check.status === 'missing'
+              ? 'Installation guide'
+              : check.failure === 'login'
+                ? 'How to sign in'
+                : 'Account help'}{' '}
+            ↗
+          </a>
+        )}
       </div>
     </section>
   );
@@ -187,7 +218,10 @@ export function DependenciesPrompt() {
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (!dismissed) dialog.current?.showModal();
+    if (!dismissed) {
+      dialog.current?.showModal();
+      dialog.current?.focus();
+    }
   }, [dismissed]);
 
   const retry = async () => {
@@ -213,6 +247,7 @@ export function DependenciesPrompt() {
     <dialog
       className="dependencies-dialog"
       ref={dialog}
+      tabIndex={-1}
       aria-labelledby="dependencies-title"
       onCancel={() => setDismissed(true)}
       style={{
@@ -223,19 +258,22 @@ export function DependenciesPrompt() {
         overflow: 'hidden',
         border: 'none',
         borderRadius: 0,
-        background: '#172332',
+        background: '#141b24',
+        borderTop: '2px solid #a6c7ff',
+        outline: 'none',
         color: SURFACE.text,
-        boxShadow: 'none',
+        boxShadow: '0 24px 80px rgb(0 0 0 / 35%)',
       }}
     >
       <div className="ui-stack" style={{ maxHeight: '85dvh' }}>
-        <header style={{ padding: 'var(--sp-9) var(--sp-9) var(--sp-7)', flexShrink: 0 }}>
+        <header style={{ padding: 'var(--sp-10) var(--sp-9) var(--sp-9)', flexShrink: 0 }}>
           <div className="ui-row" style={{ justifyContent: 'space-between' }}>
             <h2
               id="dependencies-title"
               style={{
-                fontSize: 'var(--fs-8)',
-                letterSpacing: '-0.025em',
+                fontSize: 'var(--fs-9)',
+                fontWeight: 500,
+                letterSpacing: '-0.04em',
                 color: SURFACE.text,
                 margin: 0,
               }}
@@ -248,7 +286,8 @@ export function DependenciesPrompt() {
               onClick={() => setDismissed(true)}
               style={{
                 ...buttonStyle,
-                padding: 'var(--sp-2) var(--sp-4)',
+                padding: 'var(--sp-4)',
+                fontSize: 'var(--fs-7)',
                 border: 'none',
                 background: 'transparent',
                 color: SURFACE.muted,
@@ -279,7 +318,7 @@ export function DependenciesPrompt() {
         <footer
           style={{
             margin: '0 var(--sp-9)',
-            padding: 'var(--sp-7) 0',
+            padding: 'var(--sp-8) 0',
             borderTop: `1px solid ${SURFACE.border}`,
             flexShrink: 0,
           }}
@@ -297,9 +336,9 @@ export function DependenciesPrompt() {
               type="button"
               style={{
                 ...buttonStyle,
-                background: '#a9c6ff',
-                color: '#102039',
-                borderColor: '#a9c6ff',
+                background: '#d9e7ff',
+                color: '#162034',
+                padding: 'var(--sp-6) var(--sp-9)',
                 fontWeight: 600,
               }}
               onClick={() => setDismissed(true)}
