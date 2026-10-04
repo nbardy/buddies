@@ -44,3 +44,24 @@ hit Remotion's frame-fetch timeout on `2026-09-30_feature_app.mp4` after 32 min.
 4. **VERSIONS.md ledger.** Version → commit → what changed → owner verdict → file. Backfill v2–v9 from threads.
 5. **One editor per release dir at a time.** Today one session's uncommitted hit experiment sat in the
    tree another session was rendering from. Experiments go in a worktree or a `git archive` export.
+
+## Follow-up: how Remotion renders, and engines that skip Chrome (owner question, 2026-10-04 23:00)
+- Remotion does not play the video in real time and record it. Per frame, a headless Chrome tab is told
+  "you are frame N" (`seek-to-frame.ts`). It waits for every `delayRender` (video frame fetched from the
+  Rust compositor, fonts, images), then takes a JPEG screenshot (`puppeteer-screenshot.ts`).
+  N tabs (`--concurrency`) work on different frames in parallel, and the frames are piped to ffmpeg.
+  Speed is whatever the slowest step allows: ~13 fps for our animation, ~1.4 fps for footage.
+- Native comparison, measured: the same card-over-blur shot (REPLY clip, 120 frames, 1920×1080 at 60 fps)
+  in a pure ffmpeg filtergraph (crop + scale + boxblur + overlay) took **9.95 s wall, 7.3 s CPU at load
+  ~70–100**, against 101–123 s in Remotion. Framing is approximate, without the eased camera; it measures
+  the engine, not a drop-in replacement.
+- Candidates to evaluate (not yet tried):
+  - Remotion web-renderer (`@remotion/web-renderer`, in `~/git/remotion/packages`). Still a browser, but it
+    draws the DOM into a canvas itself and encodes with WebCodecs: no per-frame screenshot or IPC. Supports
+    a subset of CSS, so our scenes need checking.
+  - ffmpeg filtergraphs for footage shots (crop, push-in, blur, overlay); keep Remotion for type/motion.
+  - MLT (`melt`; the engine behind Shotcut/Kdenlive): native NLE timeline with XML projects, good for
+    cutting and compositing footage.
+  - Skia natively (skia-canvas / Skottie for Lottie) drawing frames in Node and piping raw frames to ffmpeg.
+  - Godot Movie Maker mode: a GPU game engine writing frames at a fixed rate, for heavy motion graphics.
+  - Motion Canvas / Revideo: nicer animation API, but they also render through a browser.
