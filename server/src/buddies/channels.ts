@@ -232,7 +232,7 @@ export function createChannels(ports: ChannelsPorts) {
       case 'follow_up':
         return `A new message arrived in ${where} you have posted in, and you chose to reply`;
       case 'retry':
-        return `Your earlier reply to ${author} failed; the owner asked you to retry it on another harness. The message is in ${where}`;
+        return `Your earlier reply to ${author} failed; the owner asked you to retry it with their chosen model. The message is in ${where}`;
     }
   }
 
@@ -363,15 +363,43 @@ export function createChannels(ports: ChannelsPorts) {
     }
   }
 
+  // Pattern: one-definition (docs/patterns.md#one-definition)
+  // A Buddy can post from a DM/worker rather than its derived thread seat. Following the stale
+  // seat could query Claude while the latest reply used Sol. Guard: latest thread reply model.
+  async function threadModel(thread: Post[], buddyId: string): Promise<ConversationConfig | null> {
+    for (const post of talkOf(thread).slice().reverse()) {
+      if (post.author.kind !== 'buddy' || post.author.id !== buddyId || !post.conversationId)
+        continue;
+      const slot = await ports.conversations.slot(post.conversationId);
+      if (slot.kind === 'live') return slot.config;
+    }
+    return null;
+  }
+
   async function seatConfig(
     rootId: string,
     buddyId: string,
-    request: SeatRequest
-  ): Promise<LiveConversation> {
+    request: SeatRequest,
+    thread?: Post[]
+  ): Promise<LiveConversation & { hasHistory: boolean }> {
     const seats = await scanGenerations(ports.conversations, (g) =>
       threadConversationId(rootId, buddyId, g)
     );
-    return seatFor(request, seats, profileConfig(await core.getBuddy(buddyId)));
+    const remembered =
+      request.kind === 'keep'
+        ? await threadModel(
+            thread ?? (await wholeThread(await core.getPost(OWNER, rootId))),
+            buddyId
+          )
+        : null;
+    return {
+      ...seatFor(
+        remembered ? { kind: 'chosen', config: remembered } : request,
+        seats,
+        profileConfig(await core.getBuddy(buddyId))
+      ),
+      hasHistory: remembered !== null || seats.current !== null,
+    };
   }
 
   // A failure notice asks nobody to follow up, so it is pushed but not announced as a post.
@@ -527,25 +555,39 @@ export function createChannels(ports: ChannelsPorts) {
       buddyId: input.buddyId,
       noticeKey: noticeKey(input.trigger, input.buddyId),
     };
-    const verdict = await ports.gate({
-      config: (await seatConfig(input.root.id, input.buddyId, { kind: 'keep' })).config,
-      prompt: [
-        `You are ${await role(input.buddyId)}, one member of a team in the channel ${input.channel.kind.type === 'public' ? `#${input.channel.kind.name}` : input.channel.id}.`,
-        'A new message was just posted in a thread you have posted in. The root, then its most recent replies, oldest first:',
-        '',
-        transcriptLine(context.root, nameMap),
-        ...context.shown.map((p) => transcriptLine(p, nameMap)),
-        '',
-        `New message, from ${label(input.trigger.author, nameMap)}:`,
-        readableChannelText(input.trigger.body),
-        '',
-        `Also in this thread: the Owner, ${(await Promise.all(input.others.map(role))).join(', ')}.`,
-        '',
-        'Should you respond, or leave it to another team member? Say yes only when the thread needs something from you specifically: a question aimed at you or your role, a correction only you can make, or work you own. Do not reply just to acknowledge or agree.',
-        '',
-        'Answer with exactly <yes> or <no> and nothing else.',
-      ].join('\n'),
-    });
+    const verdict = await (async () => {
+      try {
+        const seat = await seatConfig(input.root.id, input.buddyId, { kind: 'keep' }, thread);
+        // The decision and its reply share one resolved choice, even if another post arrives.
+        followUpReply.request = { kind: 'chosen', config: seat.config };
+        return await ports.gate({
+          config: seat.config,
+          prompt: [
+            `You are ${await role(input.buddyId)}, one member of a team in the channel ${input.channel.kind.type === 'public' ? `#${input.channel.kind.name}` : input.channel.id}.`,
+            'A new message was just posted in a thread you have posted in. The root, then its most recent replies, oldest first:',
+            '',
+            transcriptLine(context.root, nameMap),
+            ...context.shown.map((p) => transcriptLine(p, nameMap)),
+            '',
+            `New message, from ${label(input.trigger.author, nameMap)}:`,
+            readableChannelText(input.trigger.body),
+            '',
+            `Also in this thread: the Owner, ${(await Promise.all(input.others.map(role))).join(', ')}.`,
+            '',
+            'Should you respond, or leave it to another team member? Say yes only when the thread needs something from you specifically: a question aimed at you or your role, a correction only you can make, or work you own. Do not reply just to acknowledge or agree.',
+            '',
+            'Answer with exactly <yes> or <no> and nothing else.',
+          ].join('\n'),
+        });
+      } catch (error) {
+        // Resolution failures used to bypass the visible notice and silently brick the gate.
+        // Guard: a throwing reply gate leaves a retryable failure notice.
+        return {
+          kind: 'failed' as const,
+          reason: error instanceof Error ? error.message : String(error),
+        };
+      }
+    })();
     switch (verdict.kind) {
       case 'respond':
         return {
@@ -559,18 +601,17 @@ export function createChannels(ports: ChannelsPorts) {
           `[channels] ${input.buddyId} gave no <yes>/<no> for post ${input.trigger.id}: ${JSON.stringify(verdict.output)}`
         );
         return { kind: 'gate_no' };
-      // The owner waits on an answer, so a gate that could not run is shown in the thread
-      // (2026-09-24: every gate failed on a Codex usage limit and threads just stayed quiet).
+      // A failed decision is visible and retryable even for Buddy-to-Buddy follow-ups.
+      // Failure notices are not announced, so they cannot start another gate.
       case 'failed':
         logger.warn(
           `[channels] reply gate failed for ${input.buddyId} on post ${input.trigger.id}: ${verdict.reason}`
         );
-        if (input.trigger.author.kind === 'owner')
-          await postFailure(
-            followUpReply,
-            null,
-            `could not decide whether to reply (${verdict.reason})`
-          );
+        await postFailure(
+          followUpReply,
+          null,
+          `could not decide whether to reply (${verdict.reason})`
+        );
         return { kind: 'gate_no' };
     }
   }
@@ -707,24 +748,22 @@ export function createChannels(ports: ChannelsPorts) {
   return {
     /**
      * Each thread Buddy's latest seat (harness, model, reasoning): the one its next reply runs
-     * on. The mention chip opens on it; until 493c1c7 it showed the profile default, which is
-     * wrong once an earlier pick made the seat. A Buddy with no seat yet is omitted (its first
-     * reply runs on the profile default, which the client already has).
+     * on. The mention chip and follow-up gate share the latest posted model, then the remembered
+     * mention choice in the seat, then the profile default.
      */
     async threadSeats(rootId: string): Promise<ThreadSeat[]> {
       const root = await core.getPost(OWNER, rootId);
       if (root.rootId) return [];
+      const thread = await wholeThread(root);
       const buddyIds = new Set<string>();
-      for (const post of await wholeThread(root)) {
+      for (const post of thread) {
         for (const id of buddyAuthor(post)) buddyIds.add(id);
         for (const id of mentionedByPost(post)) buddyIds.add(id);
       }
       const seats: ThreadSeat[] = [];
       for (const buddyId of buddyIds) {
-        const { current } = await scanGenerations(ports.conversations, (g) =>
-          threadConversationId(rootId, buddyId, g)
-        );
-        if (current) seats.push({ buddyId, config: current.config });
+        const seat = await seatConfig(rootId, buddyId, { kind: 'keep' }, thread);
+        if (seat.hasHistory) seats.push({ buddyId, config: seat.config });
       }
       return seats;
     },
@@ -744,8 +783,8 @@ export function createChannels(ports: ChannelsPorts) {
 
     /**
      * Rerun a reply whose HARNESS failed (out of tokens, a provider error) on the harness the owner
-     * picks, in a new seat; the failure notice stays and the new attempt is a later reply. A started
-     * session cannot change provider, so the harness that failed is refused (493c1c7). A second
+     * picks; the failure notice stays and the new attempt is a later reply. A model change resumes
+     * the seat, while a provider change opens a new one. A second
      * click while the rerun is queued or running starts nothing.
      */
     async retryReply(failed: Post, config: ConversationConfig): Promise<MentionDispatch> {
@@ -759,16 +798,9 @@ export function createChannels(ports: ChannelsPorts) {
       if (!admitted.ok) return { buddyId, status: 'rejected', reason: admitted.reason };
       const trigger = await core.getPost(OWNER, failed.replyToId);
       const rootId = rootOf(trigger);
-      // The harness that failed: the seat that wrote the notice, else (a gate failure) the seat.
-      const slot = failed.conversationId
-        ? await ports.conversations.slot(failed.conversationId)
-        : ({ kind: 'absent' } as const);
-      const failedProvider =
-        slot.kind === 'live'
-          ? slot.config.provider
-          : (await seatConfig(rootId, buddyId, { kind: 'keep' })).config.provider;
-      if (config.provider === failedProvider)
-        throw new Error(`Pick a different harness. ${failedProvider} is the one that failed.`);
+      // Retry can change the model on the same harness; only changing provider needs a new
+      // seat. The old provider-wide ban hid working Sol alternatives after a model failure.
+      // Guard: a gate failure can retry with another model on the same harness.
       const retry: Reply = {
         channel,
         cause: 'retry',

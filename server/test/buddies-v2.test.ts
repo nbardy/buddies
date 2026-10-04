@@ -253,8 +253,15 @@ async function world() {
   }) as unknown as NonNullable<ConversationRuntimeDependencies['executeTurn']>;
 
   // `hold` keeps a gate in flight until the test settles it.
-  const gate: { verdict: GateVerdict; calls: number; hold: Promise<void> } = {
+  const gate: {
+    verdict: GateVerdict;
+    calls: number;
+    hold: Promise<void>;
+    configs: ConversationConfig[];
+    error?: Error;
+  } = {
     verdict: { kind: 'pass' },
+    configs: [],
     calls: 0,
     hold: Promise.resolve(),
   };
@@ -339,9 +346,11 @@ async function world() {
     events,
     conversations: stable,
     uploadsRoot: () => join(scratch, 'uploads'),
-    gate: async () => {
+    gate: async ({ config }) => {
       gate.calls += 1;
+      gate.configs.push(config);
       await gate.hold;
+      if (gate.error) throw gate.error;
       return gate.verdict;
     },
     channelChanged: () => undefined,
@@ -1036,7 +1045,7 @@ test('a follow-up for a post a mention turn already read starts no second turn',
 });
 
 // 493c1c7: a reply that failed on its harness (here out of tokens) had no way forward but to
-// re-mention and hope. The owner reruns it on another harness; the same harness is refused.
+// re-mention and hope. The owner can rerun it with a selected harness/model.
 test('a harness failure is retried on another harness, in a new seat of the same thread', async () => {
   const w = await world();
   try {
@@ -1060,10 +1069,6 @@ test('a harness failure is retried on another harness, in a new seat of the same
       'the out-of-tokens notice'
     );
     assert.match(notice.body, /Out of tokens/);
-    await assert.rejects(
-      w.channels.retryReply(notice, createDefaultConversationConfig('codex')),
-      /Pick a different harness/
-    );
     // A double click starts one rerun (review R3: each click started a turn).
     const [retried] = await Promise.all([
       w.channels.retryReply(notice, createDefaultConversationConfig('claude')),
@@ -1097,6 +1102,163 @@ test('a harness failure is retried on another harness, in a new seat of the same
       /out-of-tokens or provider-error/
     );
   } finally {
+    await w.close();
+  }
+});
+
+// A stale derived seat must not override the Buddy's latest actual model in this thread.
+test('latest thread reply model drives the picker, should-reply gate and answer; explicit picks win', async () => {
+  const w = await world();
+  try {
+    let n = 0;
+    const say = (body: string, replyToId?: string) =>
+      w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `priority-${++n}` }
+      );
+    const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
+    w.announce(root, new Map([[w.lead.id, createDefaultConversationConfig('claude')]]));
+    const thread = async () =>
+      (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
+    await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
+
+    const sol: ConversationConfig = {
+      ...createDefaultConversationConfig('codex'),
+      model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
+    };
+    const latest = await w.creation.createServerBuddyConversation({
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      conversationId: 'external-sol-reply',
+      commandId: 'external-sol-reply',
+      config: sol,
+      deferInitialMessage: true,
+    });
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Latest work on Sol',
+        purpose: 'reply',
+        replyToId: root.id,
+        fromConversationId: latest.id,
+        evidence: [],
+        broadcast: false,
+        key: 'external-reply',
+      }
+    );
+    assert.deepEqual(
+      (await w.channels.threadSeats(root.id)).find((s) => s.buddyId === w.lead.id)?.config,
+      sol
+    );
+    w.gate.verdict = { kind: 'respond' };
+    w.announce(await say('What next?', root.id));
+    await until(() => w.turns.length === 2, 'follow-up reply');
+    assert.deepEqual(w.gate.configs[0], sol);
+    assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
+    await until(
+      async () => (await thread()).filter((p) => p.purpose === 'reply').length === 3,
+      'follow-up post'
+    );
+    const explicit = createDefaultConversationConfig('claude');
+    w.announce(
+      await say(`[@Lead](buddy:${w.lead.id}) switch back`, root.id),
+      new Map([[w.lead.id, explicit]])
+    );
+    await until(
+      async () => (await thread()).filter((p) => p.purpose === 'reply').length === 4,
+      'explicit reply'
+    );
+    assert.equal(w.turns[2].request.harness, 'claude');
+    w.announce(await say('Continue without repeating the model', root.id));
+    await until(
+      async () => (await thread()).filter((p) => p.purpose === 'reply').length === 5,
+      'remembered follow-up'
+    );
+    assert.deepEqual(w.gate.configs[1], explicit);
+  } finally {
+    await w.close();
+  }
+});
+
+test('a throwing reply gate leaves a retryable failure notice and can retry on the same harness', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const root = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) start`,
+        evidence: [],
+        broadcast: false,
+        key: 'gate-start',
+      }
+    );
+    w.announce(root);
+    const thread = async () =>
+      (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
+    await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
+    w.gate.error = new Error('Model is unavailable for codex: retired-model');
+    const trigger = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'What next?',
+        replyToId: root.id,
+        evidence: [],
+        broadcast: false,
+        key: 'gate-next',
+      }
+    );
+    w.announce(trigger);
+    const notice = await until(
+      async () => (await thread()).find((p) => p.purpose === 'reply_failed'),
+      'gate failure notice'
+    );
+    assert.match(notice.body, /could not decide whether to reply.*retired-model/);
+    const sol: ConversationConfig = {
+      ...createDefaultConversationConfig('codex'),
+      model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
+    };
+    const retry = await http('POST', `/api/buddies/posts/${notice.id}/retry`, { config: sol });
+    assert.equal(retry.status, 202, JSON.stringify(retry.body));
+    const answer = await until(
+      async () =>
+        (await thread()).find(
+          (p) => p.id !== notice.id && p.purpose === 'reply' && p.body === 'Answer 2'
+        ),
+      'retry answer'
+    );
+    assert.equal(w.turns[1].request.harness, 'codex');
+    assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
+    assert.equal(answer.rootId, root.id);
+    assert.match(w.turns[1].request.prompt, /What next\?/);
+    const buddyFollowUp = await w.post(
+      buddyActor(w.designer.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Lead, review this next',
+        replyToId: root.id,
+        evidence: [],
+        broadcast: false,
+        key: 'buddy-gate-next',
+      }
+    );
+    w.announce(buddyFollowUp);
+    await until(
+      async () =>
+        (await thread()).find(
+          (p) => p.replyToId === buddyFollowUp.id && p.purpose === 'reply_failed'
+        ),
+      'Buddy follow-up gate failure notice'
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     await w.close();
   }
 });
@@ -1146,7 +1308,9 @@ test('a DM new chat opens the next generation; the chain keeps every earlier one
   const { server, http } = await ownerHttp(w);
   try {
     const first = (await w.channels.openDirect(w.lead.id)).conversationId;
-    const created = await http('POST', `/api/buddies/${w.lead.id}/direct/new-chat`, {});
+    const created = await http('POST', `/api/buddies/${w.lead.id}/direct/new-chat`, {
+      key: 'new-direct-chat',
+    });
     assert.equal(created.status, 200, JSON.stringify(created.body));
     const second = (created.body as unknown as { conversationId: string }).conversationId;
     assert.notEqual(second, first);

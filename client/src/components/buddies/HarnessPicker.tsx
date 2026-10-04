@@ -1,11 +1,5 @@
-import {
-  type ConversationConfig,
-  isHarnessRetryFailure,
-  isOutOfTokensFailure,
-} from '@unleashd/shared';
-import { useAtomValue } from 'jotai';
+import { type ConversationConfig, isHarnessRetryFailure } from '@unleashd/shared';
 import { type CSSProperties, useState } from 'react';
-import { rowFamily } from '../../atoms/conversations';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { ConversationConfigPicker } from '../../views/config/ConversationConfigPicker';
 import { buddyWrite, errorText } from './api';
@@ -139,21 +133,16 @@ export function HarnessPicker({
   );
 }
 
-/** Under a Buddy's failed reply: rerun it on another harness when its harness was the problem. */
+/** Failed replies and decision checks share model recovery in the original thread. */
 export function ReplyRetry({ post }: { post: Post }) {
-  const seat = useAtomValue(rowFamily(post.conversationId ?? ''));
   if (post.purpose !== 'reply_failed' || !isHarnessRetryFailure(post.body)) return null;
   return (
     <HarnessPicker
-      label="Retry with a different harness"
-      note={
-        isOutOfTokensFailure(post.body)
-          ? 'This harness is out of tokens. The retry runs on the one you pick, in this thread.'
-          : 'This harness couldn’t finish the turn. The retry runs on the one you pick, in this thread.'
-      }
+      label="Retry with model…"
+      note="Choose a model to answer the original message in this thread."
       confirm="Retry"
       seed={null}
-      excluded={seat?.provider ?? null}
+      excluded={null}
       buddy
       placement="above"
       onConfirm={(config) =>

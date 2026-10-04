@@ -1,4 +1,4 @@
-// A Buddy reply that failed because of its HARNESS can be rerun on another one (493c1c7). The
+// A Buddy reply or should-reply check that failed can be rerun with a selected model. The
 // server refuses any other failure; the client shows the retry button only for these.
 
 /** The harness's usage or session limit (the runtime prefixes "Out of tokens:"). */
@@ -14,6 +14,10 @@ export function isOutOfTokensFailure(text: string): boolean {
 export function isHarnessRetryFailure(text: string): boolean {
   return (
     isOutOfTokensFailure(text) ||
+    // Gate errors include usage limits, timeouts and config resolution failures. They used to
+    // render without recovery. Guard: ReplyRetry renders for failed should-reply checks.
+    /could not decide whether to reply/i.test(text) ||
+    /Model is unavailable for/i.test(text) ||
     /completed the turn with reason:\s*error/i.test(text) ||
     /not supported when using/i.test(text)
   );
