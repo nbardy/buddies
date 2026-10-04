@@ -14,6 +14,14 @@ pnpm run render:multi-harness            # -> out/multi-harness.mp4 (9.05 s, sil
 ./bank.sh                                # copy finished renders into ../clips/ (the clips bank)
 ```
 
+**Render through the queue, never `remotion render` directly.** `node render.mjs render|still …`
+takes the same arguments, runs at most 2 renders at once machine-wide (`REMOTION_MAX_RENDERS`),
+queues the rest, and gives each render its share of the cores (`--concurrency`, unless you pass
+one). All `pnpm run render:*` scripts use it. On 2026-10-04 six renders from several sessions ran
+together with Remotion's default concurrency (half the cores each), every Chrome fought for the
+CPU and GPU, and all of them crawled. Slots live in `$TMPDIR/remotion-render-slots/`; a slot whose
+pid is dead is reclaimed, so worktree renders share the same queue.
+
 Licence: Remotion is source-available and free for individuals and companies of up to 3
 employees; a bigger company needs a paid licence (see `LICENSE.md` in `~/git/remotion`).
 
