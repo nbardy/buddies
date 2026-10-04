@@ -640,9 +640,14 @@ test(
       fs.writeFileSync(path.join(fakeDir, 'settler.go'), '');
       // Drained: on this branch the journal says `ended`; on 811f758 it is already removed.
       await eventually(
-        () =>
-          !fs.existsSync(journal) ||
-          fs.readFileSync(path.join(journal, 'phase.json'), 'utf8').includes('"ended"'),
+        () => {
+          // 811f758 has no phase.json: read it only where it exists, so that build reaches its crash.
+          const phase = path.join(journal, 'phase.json');
+          return (
+            !fs.existsSync(journal) ||
+            (fs.existsSync(phase) && fs.readFileSync(phase, 'utf8').includes('"ended"'))
+          );
+        },
         Boolean,
         'the backend drained the finished turn'
       );
