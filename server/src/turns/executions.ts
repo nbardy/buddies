@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { type ExecutionState, executionState, isOwnWrapper, signalGroup } from '@nbardy/agent-cli';
+import { type ExecutionProcess, executionProcess, killExecution } from '@nbardy/agent-cli';
 import type { Provider } from '@unleashd/shared';
 import {
   type Execution,
@@ -53,13 +53,12 @@ export type FoundExecution =
       dir: string;
       owner: TurnOwner;
       phase: Phase;
-      process: ProcessAt;
-      state: ExecutionState;
+      process: Extract<ExecutionProcess, { t: ProcessAt }>;
     }
   /** The owner was written but the provider never spawned. */
-  | { t: 'unstarted'; dir: string; owner: TurnOwner; state: ExecutionState }
-  | { t: 'ephemeral'; dir: string; state: ExecutionState }
-  | { t: 'unreadable'; dir: string; state: ExecutionState; error: string };
+  | { t: 'unstarted'; dir: string; owner: TurnOwner; process: ExecutionProcess }
+  | { t: 'ephemeral'; dir: string; process: ExecutionProcess }
+  | { t: 'unreadable'; dir: string; process: ExecutionProcess; error: string };
 
 const OWNER_FILE = 'owner.json';
 const PHASE_FILE = 'phase.json';
@@ -74,12 +73,6 @@ function writeAtomic(file: string, value: unknown): void {
 function writePhase(dir: string, phase: Phase): void {
   writeAtomic(path.join(dir, PHASE_FILE), phase);
 }
-
-const PROCESS_AT: Record<Exclude<ExecutionState['kind'], 'unstarted'>, ProcessAt> = {
-  running: 'live',
-  exited: 'ended',
-  lost: 'ended',
-};
 
 export type ExecutionJournals = ReturnType<typeof createExecutionJournals>;
 
@@ -97,24 +90,25 @@ export function createExecutionJournals(root: string) {
   }
 
   function read(dir: string): FoundExecution {
-    const state = executionState(dir);
+    // The process is read from agent-cli's journal on every scan, never copied (one view of it).
+    const process = executionProcess(dir);
     let owner: ExecutionOwner;
     let phase: Phase;
     try {
       owner = JSON.parse(fs.readFileSync(path.join(dir, OWNER_FILE), 'utf8')) as ExecutionOwner;
       phase = JSON.parse(fs.readFileSync(path.join(dir, PHASE_FILE), 'utf8')) as Phase;
     } catch (error) {
-      return { t: 'unreadable', dir, state, error: String(error) };
+      return { t: 'unreadable', dir, process, error: String(error) };
     }
     if (owner.version !== 1)
-      return { t: 'unreadable', dir, state, error: `owner version ${String(owner.version)}` };
+      return { t: 'unreadable', dir, process, error: `owner version ${String(owner.version)}` };
     switch (owner.kind) {
       case 'turn':
-        return state.kind === 'unstarted'
-          ? { t: 'unstarted', dir, owner, state }
-          : { t: 'turn', dir, owner, phase, process: PROCESS_AT[state.kind], state };
+        return process.t === 'unstarted'
+          ? { t: 'unstarted', dir, owner, process }
+          : { t: 'turn', dir, owner, phase, process };
       case 'ephemeral':
-        return { t: 'ephemeral', dir, state };
+        return { t: 'ephemeral', dir, process };
     }
   }
 
@@ -153,15 +147,8 @@ export function createExecutionJournals(root: string) {
 
     /** Kill a journal's process group (if it runs) and remove it: nothing untracked survives. */
     discard(found: FoundExecution): void {
-      if (found.state.kind === 'running') {
-        signalGroup(found.state.pid, 'SIGTERM');
-        const pid = found.state.pid;
-        const dir = found.dir;
-        // 3 s later the pid may be reused (review of P1, 2026-10-01): kill only our wrapper.
-        setTimeout(() => {
-          if (isOwnWrapper(pid, dir)) signalGroup(pid, 'SIGKILL');
-        }, 3000).unref();
-      }
+      // SIGKILL after the grace checks the pid is still our wrapper (review of P1, 2026-10-01).
+      if (found.process.t === 'live') killExecution(found.process.pid, found.dir);
       fs.rmSync(found.dir, { recursive: true, force: true });
     },
 

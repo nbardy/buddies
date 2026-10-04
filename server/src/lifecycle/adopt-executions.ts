@@ -43,7 +43,7 @@ type Turn = Extract<FoundExecution, { t: 'turn' }>;
  */
 export function liveGrants(found: readonly FoundExecution[]): GrantRecord[] {
   return found.flatMap((item) =>
-    item.t === 'turn' && holdsGrant(item.phase, item.process)
+    item.t === 'turn' && holdsGrant(item.phase, item.process.t)
       ? GRANTS[item.owner.policy.t](item.owner.policy as never)
       : []
   );
@@ -96,7 +96,7 @@ export async function adoptExecutions(
         refuse(item, 'the provider never started', ports);
         continue;
       case 'turn': {
-        const plan = adoption(item.phase, item.process);
+        const plan = adoption(item.phase, item.process.t);
         adopted.push(...(await ADOPT[plan.t](item, plan as never, ports)));
         continue;
       }
@@ -142,7 +142,7 @@ const ADOPT: {
       return refuse(item, `adoption failed: ${message}`, ports);
     }
     ports.logger.log(
-      `[adopt] ${owner.conversationId}: adopted ${item.phase.t} (${item.process}) ${owner.provider} turn ${owner.attemptId}`
+      `[adopt] ${owner.conversationId}: adopted ${item.phase.t} (${item.process.t}) ${owner.provider} turn ${owner.attemptId}`
     );
     return RUNS[owner.policy.t](owner.policy as never, owner.conversationId);
   },
