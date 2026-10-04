@@ -91,7 +91,10 @@ export function taskPlan(task, env = process.env) {
       };
     case 'dev-server':
       return {
-        steps: env.UNLEASHD_DEV_PREBUILT === '1' ? [ensureAddons] : [buildShared, buildCli, ensureAddons],
+        steps:
+          env.UNLEASHD_DEV_PREBUILT === '1'
+            ? [ensureAddons]
+            : [buildShared, buildCli, ensureAddons],
         services: ['backend'],
       };
     case 'dev-client':

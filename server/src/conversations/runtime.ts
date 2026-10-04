@@ -42,6 +42,7 @@ import { SWARM_POLL_INTERVAL_MS, SWARM_POLL_THROTTLE_MS } from '../constants/tim
 import type { RuntimeTurnAttemptObserver } from '../observability';
 import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-service';
 import { SwarmObservers } from '../swarm';
+import type { Effect, Phase } from '../turns/execution-state';
 import type { TurnOwner } from '../turns/executions';
 import {
   type OwnerInput,
@@ -50,7 +51,6 @@ import {
   type TurnInput,
   sameEitherWay,
 } from '../turns/input';
-import type { Effect, Phase } from '../turns/execution-state';
 import { ChatTurnPolicy, type MemorySnapshot, type TurnPolicy } from '../turns/policy';
 import { type QueueEntry, TurnQueue } from '../turns/queue';
 import { type TurnBroadcast, TurnRunner, type TurnRunnerPorts } from '../turns/runner';
