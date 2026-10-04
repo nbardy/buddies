@@ -10,6 +10,8 @@ import { openSession } from './lib/headless-chrome.mjs';
 test('built dependency dialog stays compact, aligned, and actionable on both screens', async () => {
   const app = express();
   let state = 'quota';
+  // This preview has no workspace store; return an empty inventory, not an HTTP error.
+  app.get('/api/buddies/overview', (_req, res) => res.json([]));
   app.get('/api/dependencies', (_req, res) =>
     res.json({
       checks:
