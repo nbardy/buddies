@@ -127,6 +127,7 @@ export const Assembly: React.FC<AssemblyProps> = ({ score }) => (
         <Caption lines={c.lines} />
       </Sequence>
     ))}
+    <Overload.OverloadTail />
     <Sequence from={bar(5)} layout="none">
       <PostIntroBenefits.BenefitsSound />
     </Sequence>

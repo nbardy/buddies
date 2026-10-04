@@ -32,7 +32,7 @@ registerRoot(() => (
       height={L.HEIGHT}
     />
     {([3, 5] as const).map((n) => (
-      <Composition key={n} id={`Intro-${n}`} component={I.BuddiesIntro} defaultProps={{ count: n }} durationInFrames={I.frames(n)} fps={I.FPS} width={1920} height={1080} />
+      <Composition key={n} id={`Intro-${n}`} component={I.IntroStandalone} defaultProps={{ count: n }} durationInFrames={I.standaloneFrames(n)} fps={I.FPS} width={1920} height={1080} />
     ))}
     <Composition id="KitReel" component={K.KitReel} durationInFrames={K.REEL_FRAMES} fps={K.FPS} width={1920} height={1080} />
     {K.PAGES.map((p) => (

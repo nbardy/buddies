@@ -12,7 +12,7 @@ export const Root: React.FC = () => (
   <>
     <Composition
       id="Overload"
-      component={Overload.Overload}
+      component={Overload.OverloadPreview}
       durationInFrames={Overload.DURATION}
       fps={Overload.FPS}
       width={Overload.WIDTH}

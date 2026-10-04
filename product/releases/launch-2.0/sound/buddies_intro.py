@@ -8,6 +8,7 @@ dong is way too door bell and should be more intro style". So the pops are long,
 (the old pop-*.wav were 0.14 s blips), and the two marimba notes on the logo lock became a
 swell into a boom plus a wide chord. The swell's length is tied to the picture: it ends exactly
 on the lock (SWELL_SECONDS; BuddiesIntro.tsx starts it SWELL_SECONDS before `lock`).
+Then: the swell ("zoom") and the hit's ring-out want more timbre and warmth, and the hit more ring.
 """
 
 from pathlib import Path
@@ -18,9 +19,9 @@ import numpy as np
 SR = 48_000
 OUT = Path(__file__).parent
 SWELL_SECONDS = 1.1
-# The hit ends with the intro: in the cut the intro's Sequence ends 2.0 s after the lock and would
-# chop a longer tail, so it fades out over its last 0.8 s instead (lock -> end in BuddiesIntro.tsx).
-HIT_SECONDS = 2.0
+# The hit rings 4.5 s: past the intro's last frame and under the start of the home scene. The cut
+# places it outside the intro's Sequence (Overload.OverloadTail), so the ring is not chopped.
+HIT_SECONDS = 4.5
 rng = np.random.default_rng(20261003)
 
 
@@ -43,6 +44,10 @@ def onepole(x: np.ndarray, cutoff: np.ndarray) -> np.ndarray:
     return y
 
 
+def saw(f: float, t: np.ndarray) -> np.ndarray:
+    return 2 * ((f * t) % 1) - 1
+
+
 def write(name: str, x: np.ndarray, peak: float) -> None:
     n = int(SR * 0.003)
     x = x.copy()
@@ -58,61 +63,45 @@ def write(name: str, x: np.ndarray, peak: float) -> None:
 
 
 # Boops: one per robot, climbing D major pentatonic (D4 F#4 A4 B4 D5, the marimba's key). Each is
-# a sine that starts a fifth high and glides down over 120 ms, with a soft octave on top: a bubble,
-# not a click. Owner, 2026-10-03: the 2nd and 3rd want "more timbre and warmth", and the 3rd "a
-# little more ring on the fade out". So each boop has a `warmth` (a sub-octave sine, slower-decaying
-# 2nd and 3rd partials, gentle tanh saturation) and a `ring` (decay time constant and length).
-# 2nd and 3rd only.
-Boop = tuple[int, float, float, float, float]  # semitones from A4, warmth 0..1, decay tau (s), length (s), ring 0..1
-BOOPS: list[Boop] = [
-    (-7, 0.0, 0.13, 0.55, 0.0),
-    (-3, 0.7, 0.16, 0.65, 0.0),
-    (0, 0.8, 0.34, 1.20, 1.0),
-    (2, 0.0, 0.13, 0.55, 0.0),
-    (5, 0.0, 0.13, 0.55, 0.0),
-]
-for k, (semis, warmth, tau, length, ring_mix) in enumerate(BOOPS):
-    t = t_axis(length)
+# a sine that starts a fifth high and glides down over 120 ms, with a soft octave on top and a
+# 0.45 s decay: a bubble, not a click. All five are made the same way (owner, 2026-10-03: "I liked
+# the old version ... they were nice and all the same"; warmer 2nd/3rd boops were a misread).
+BOOP_NOTES = [-7, -3, 0, 2, 5]
+for k, semis in enumerate(BOOP_NOTES):
+    t = t_axis(0.55)
     f = hz(semis)
     glide = f * (1 + 0.5 * np.exp(-t / 0.04))
     phase = 2 * np.pi * np.cumsum(glide) / SR
-    env = np.minimum(1, t / 0.008) * np.exp(-t / tau)
-    body = (
-        np.sin(phase)
-        + 0.18 * np.sin(2 * phase) * np.exp(-t / (0.05 + 0.15 * warmth))
-        + warmth * 0.22 * np.sin(3 * phase) * np.exp(-t / 0.12)
-        + warmth * 0.35 * np.sin(0.5 * phase)
-    )
-    # Saturation scales with warmth, so a warmth-0 boop is the original sound, byte for byte.
-    body = (1 - warmth) * body + warmth * np.tanh(body * 2.2) / np.tanh(2.2)
-    # The ring: a faint detuned copy beating slowly against the fundamental as it fades.
-    ring = ring_mix * 0.25 * np.sin(phase * 1.003) * np.exp(-t / (tau * 1.4))
-    write(f"boop-{k}", (body + ring) * env, peak=0.8)
+    env = np.minimum(1, t / 0.008) * np.exp(-t / 0.13)
+    body = np.sin(phase) + 0.18 * np.sin(2 * phase) * np.exp(-t / 0.05)
+    write(f"boop-{k}", body * env, peak=0.8)
 
-# Swell: noise and a detuned D-major chord rising together, the filter opening as they climb,
-# then cut on the last sample so the hit lands as the drop.
+# Swell (the "zoom" after the boops): a detuned D-major chord of saws over a sub D, the filter
+# opening as it climbs, with only a little air on top; soft saturation rounds it. It was mostly
+# noise; now it is mostly tone. Cut on the last sample so the hit lands as the drop.
 t = t_axis(SWELL_SECONDS)
 u = t / t[-1]
 chord = [-19, -12, -7, -3]  # D3 A3 D4 F#4
-tone = sum(np.sin(2 * np.pi * hz(s) * (1 + d) * t) for s in chord for d in (-0.004, 0.004))
-noise = rng.standard_normal(len(t))
-swell = onepole(0.5 * tone + 0.8 * noise, 300 + 6000 * u**2) * u**2.2
-write("intro-swell", swell, peak=0.7)
+tone = sum(saw(hz(s) * (1 + d), t) for s in chord for d in (-0.005, 0.005)) / (2 * len(chord))
+sub = np.sin(2 * np.pi * hz(-31) * t)  # D2
+air = rng.standard_normal(len(t))
+swell = onepole(tone + 0.6 * sub + 0.12 * air, 220 + 3400 * u**2)
+write("intro-swell", np.tanh(2.0 * swell) * u**2.2, peak=0.7)
 
-# Hit: a sub boom (90 → 48 Hz) under a wide D add9 chord of detuned saws whose filter blooms open
-# and closes again, with a high shimmer that rings out under the logo hold.
+# Hit: a sub boom (90 → 48 Hz) under a wide D add9 chord. Detuned saws bloom open and settle low;
+# a warm sine chord and a high shimmer ring on underneath, beating slowly as they fade; the last
+# 1.2 s fade to silence.
 t = t_axis(HIT_SECONDS)
 boom = np.sin(2 * np.pi * np.cumsum(48 + 42 * np.exp(-t / 0.06)) / SR) * np.exp(-t / 0.5)
-
-
-def saw(f: float) -> np.ndarray:
-    return 2 * ((f * t) % 1) - 1
-
-
 pad_notes = [-31, -19, -12, -7, -3, 7]  # D2 D3 A3 D4 F#4 E5
-pad = sum(saw(hz(s) * (1 + d)) for s in pad_notes for d in (-0.006, 0.0, 0.006))
-bloom = 500 + 3500 * np.exp(-((t - 0.25) ** 2) / 0.08)
-pad = onepole(pad, bloom) * np.minimum(1, t / 0.02) * np.exp(-t / 1.1)
-shimmer = sum(np.sin(2 * np.pi * hz(s) * t) for s in (19, 24, 28)) * np.exp(-t / 0.9) * np.minimum(1, t / 0.05)
-tail = np.clip((HIT_SECONDS - t) / 0.8, 0, 1) ** 2
-write("intro-hit", (1.0 * boom + 0.22 * pad / len(pad_notes) + 0.05 * shimmer) * tail, peak=0.85)
+saws = sum(saw(hz(s) * (1 + d), t) for s in pad_notes for d in (-0.006, 0.0, 0.006)) / (3 * len(pad_notes))
+bloom = 380 + 2400 * np.exp(-((t - 0.25) ** 2) / 0.08)
+saws = onepole(saws, bloom) * np.exp(-t / 1.6)
+warm = sum(np.sin(2 * np.pi * hz(s) * (1 + d) * t) for s in pad_notes for d in (-0.0015, 0.0015))
+warm = warm / (2 * len(pad_notes)) * np.exp(-t / 2.2)
+shimmer = sum(np.sin(2 * np.pi * hz(s) * t) for s in (19, 24, 28)) / 3 * np.exp(-t / 2.0)
+shimmer *= 0.75 + 0.25 * np.sin(2 * np.pi * 3.2 * t)
+chord = np.tanh(1.6 * (0.9 * saws + 0.8 * warm)) + 0.12 * shimmer
+chord *= np.minimum(1, t / 0.02)
+tail = np.clip((HIT_SECONDS - t) / 1.2, 0, 1) ** 2
+write("intro-hit", (boom + 0.55 * chord) * tail, peak=0.85)

@@ -6,7 +6,7 @@
 // we own all of it. The owner rejected the first sound (marimba "ding dong" = doorbell; blip pops too
 // quick), 2026-10-03.
 import type React from 'react';
-import { AbsoluteFill, useCurrentFrame } from 'remotion';
+import { AbsoluteFill, Audio, Sequence, useCurrentFrame } from 'remotion';
 import { clamp01, easeOutBack, FONT, lerp } from './blocks';
 import { AURA, NIGHT } from './BuddiesLogos';
 import boop0 from '../../sound/boop-0.wav';
@@ -194,7 +194,25 @@ export const HuddleMark: React.FC<{ count: Count; size: number; u: number }> = (
   );
 };
 
-export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
+// The hit on the lock rings on past the intro's last frame (owner, 2026-10-03: "a little more ring
+// on the fade out"), so it is not one of the intro's own cues, which end with the intro's Sequence:
+// whoever places the intro also places IntroHit at hitAt(count), outside that Sequence.
+export const hitAt = (n: Count) => beats(CAST[n]).lock;
+export const IntroHit: React.FC = () => <Audio src={introHit} volume={1} />;
+
+// The intro alone, with its ring-out: held on the logo for HOLD extra seconds.
+const HOLD = 2.5;
+export const standaloneFrames = (n: Count) => frames(n) + Math.round(HOLD * FPS);
+export const IntroStandalone: React.FC<{ count: Count }> = ({ count }) => (
+  <AbsoluteFill>
+    <BuddiesIntro count={count} />
+    <Sequence from={Math.round(hitAt(count) * FPS)} layout="none">
+      <IntroHit />
+    </Sequence>
+  </AbsoluteFill>
+);
+
+export function BuddiesIntro({ count }: { count: Count }) {
   const t = useCurrentFrame() / FPS;
   const c = CAST[count];
   const b = beats(c);
@@ -236,7 +254,6 @@ export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
   const cues: Cue[] = [
     ...c.colors.map((_, i) => ({ at: b.pop(i), src: BOOPS[i], volume: 0.42 })),
     { at: b.lock - SWELL_SECONDS, src: introSwell, volume: 0.5 },
-    { at: b.lock, src: introHit, volume: 1 },
     { at: b.word + 0.1, src: SFX.sparkle, volume: 0.15 },
   ];
 
@@ -291,4 +308,4 @@ export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
       <Soundtrack cues={cues} fps={FPS} />
     </AbsoluteFill>
   );
-};
+}

@@ -594,6 +594,21 @@ const OVERLOAD_CUES: Cue[] = [
   ...picked(CALM_IN, ['D4', 'Fs4', 'A4', 'D5'], 0.38),
 ];
 
+// The robot intro's hit rings on into the next scene, so the cut places it outside the Overload
+// section (Assembly); OverloadTail is that hit, timed on Overload's clock.
+export const OverloadTail: React.FC = () => (
+  <Sequence from={frames(T.title + Intro.hitAt(INTRO_ROBOTS))} layout="none">
+    <Intro.IntroHit />
+  </Sequence>
+);
+// Overload alone (Root's preview composition): picture, sound and the hit, cut at T.end.
+export const OverloadPreview: React.FC = () => (
+  <AbsoluteFill>
+    <Overload />
+    <OverloadTail />
+  </AbsoluteFill>
+);
+
 export const Overload: React.FC = () => (
   <AbsoluteFill>
     <Soundtrack cues={OVERLOAD_CUES} fps={FPS} />
