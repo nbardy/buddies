@@ -13,7 +13,7 @@ export declare class BuddiesCore {
   listPostsFrom(actor: Actor, query: PostQuery, postId: string, limit: number): Promise<PostPage>
   threadStats(actor: Actor, channelId: string, rootIds: Array<string>): Promise<Array<ThreadStat>>
   taskPosts(actor: Actor, taskId: string, before: Cursor | undefined | null, limit: number): Promise<PostPage>
-  searchPosts(actor: Actor, workspaceId: string, query: string, before: Cursor | undefined | null, limit: number): Promise<PostPage>
+  searchPosts(actor: Actor, workspaceId: string, query: SearchQuery, before: Cursor | undefined | null, limit: number): Promise<PostPage>
   inbox(actor: Actor, workspaceId: string): Promise<Inbox>
   markRead(actor: Actor, channelId: string, postId: string): Promise<void>
   followedThreads(actor: Actor, workspaceId: string, limit: number): Promise<FollowedThreads>
@@ -516,6 +516,25 @@ export interface ScheduleInput {
   limits: string
   enabled: boolean
   key: string
+}
+
+/**
+ * A structured post search. `text` is the grammar in `search.rs`; every filter narrows the
+ * candidate set BEFORE paging and can only narrow it: readability is checked separately.
+ * Empty `channels`/`from` = no filter (the lists are alternatives, ORed within a filter).
+ */
+export interface SearchQuery {
+  text: string
+  /** Channel ids or public channel names (a leading `#` is ignored). */
+  channels: Array<string>
+  /** Buddy ids, or `owner`. */
+  from: Array<string>
+  /** Inclusive lower bound: `YYYY-MM-DD` or an RFC 3339 timestamp. */
+  after?: string
+  /** Exclusive upper bound, same formats. */
+  before?: string
+  /** A thread's root post id: the root and its replies. */
+  inThread?: string
 }
 
 /**

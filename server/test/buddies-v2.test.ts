@@ -2316,7 +2316,7 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       returns: INBOX,
     });
     const searched = await call(w.endpoint.spec(grant), 'channel_read', {
-      read: { search: 'quarterly' },
+      read: { search: { text: 'quarterly' } },
     });
     assert.deepEqual(
       searched.value.posts.map((post: Post) => post.id),
@@ -2325,10 +2325,28 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     // Search pages like a channel: `before` once went unforwarded, so a Buddy saw only the
     // newest hits forever (2026-09-27). Nothing older than the only hit remains.
     const older = await call(w.endpoint.spec(grant), 'channel_read', {
-      read: { search: 'quarterly' },
+      read: { search: { text: 'quarterly' } },
       before: { ord: written.post.ord },
     });
     assert.deepEqual(older.value.posts, []);
+    // Typed filters and a typed error cross the real MCP boundary: a malformed query is refused
+    // loudly, never matched as literal words (the old behaviour).
+    const byDesigner = await call(w.endpoint.spec(grant), 'channel_read', {
+      read: { search: { text: '"quarterly logo" -draft', from: [w.designer.id], after: '2020-01-01' } },
+    });
+    assert.deepEqual(
+      byDesigner.value.posts.map((post: Post) => post.id),
+      [written.post.id]
+    );
+    const byOwner = await call(w.endpoint.spec(grant), 'channel_read', {
+      read: { search: { text: 'quarterly', from: ['owner'] } },
+    });
+    assert.deepEqual(byOwner.value.posts, []);
+    const malformed = await call(w.endpoint.spec(grant), 'channel_read', {
+      read: { search: { text: '"quarterly' } },
+    });
+    assert.equal(malformed.isError, true);
+    assert.match(malformed.text, /unclosed quote/);
 
     // The Builder saves a new hire's first task (it has no Buddy of its own: ownerId is required).
     const builder = w.endpoint.spec(w.grants.issueBuilder('builder-chat'));
