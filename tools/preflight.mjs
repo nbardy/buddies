@@ -73,6 +73,40 @@ export function checkDependencies({ env = process.env, log = console.warn } = {}
         { env: installEnv, cwd: os.tmpdir(), timeout: 600_000, stdio: 'inherit' }
       );
     }
+    // A fresh machine may have neither brew nor an authenticated Claude yet.
+    // Do not require agent login just to build Rust. Guard: rustup fixture test.
+    if ((!available('rustc') || !available('cargo')) && available('curl') && available('bash')) {
+      log('Installing Rust directly with the official rustup installer…');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'unleashd-rust-install-'));
+      try {
+        const script = path.join(dir, 'rustup.sh');
+        result = spawnSync(
+          'curl',
+          [
+            '--fail',
+            '--silent',
+            '--show-error',
+            '--location',
+            'https://sh.rustup.rs',
+            '--output',
+            script,
+          ],
+          {
+            env: installEnv,
+            timeout: 600_000,
+            stdio: 'inherit',
+          }
+        );
+        if (result.status === 0)
+          result = spawnSync('bash', [script, '-y', '--profile', 'minimal'], {
+            env: installEnv,
+            timeout: 600_000,
+            stdio: 'inherit',
+          });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
     if (!result || result.status !== 0 || !available('rustc') || !available('cargo')) {
       throw new Error(
         'Rust installation did not complete. Run `brew install rust` or install from https://rustup.rs, then run pnpm install again. If using Claude, run `claude auth login` first.'
@@ -83,7 +117,7 @@ export function checkDependencies({ env = process.env, log = console.warn } = {}
     log(
       available(bin)
         ? `${bin} found. The app will check whether it can respond at launch.`
-        : `${bin} is not available. Install ${bin === 'claude' ? 'Claude Code (https://code.claude.com/docs/en/quickstart)' : 'Codex (npm install -g @openai/codex)'}, then log in. At least one agent is needed to send messages.`
+        : `${bin} is not available. The app will attempt installation on first boot, then guide you through login. At least one agent is needed to send messages.`
     );
   }
 }

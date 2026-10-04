@@ -55,7 +55,8 @@ git clone --recursive https://github.com/nbardy/unleashd && cd unleashd && pnpm 
 
 The install preflight checks Rust, Claude Code and Codex. If Rust is missing it runs
 `brew install rust`; without Homebrew it asks an installed Claude Code to install
-Rust via rustup. If that fails, it prints the manual install steps. Packaged
+Rust via rustup. If Claude is missing or cannot install it, the official rustup
+installer runs directly. Failed installs print manual steps. Packaged
 installs with prebuilt addons do not require Rust.
 
 On first server boot, missing Claude Code and Codex are installed automatically

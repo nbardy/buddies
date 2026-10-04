@@ -72,8 +72,17 @@ test('first boot installs missing tools once; every restart checks login without
     fs.writeFile(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   // Installers are executable fixtures; the service still traverses the real
   // process/filesystem boundary, including discovery of newly installed binaries.
-  await executable('rustc', 'echo rustc');
-  await executable('cargo', 'echo cargo');
+  await executable(
+    'brew',
+    `if [ "$1" = '--version' ]; then echo brew; exit; fi
+    echo brew >> "$HOME/attempts"
+    /bin/cat > "$HOME/bin/rustc" <<'SCRIPT'
+#!/bin/sh
+echo rustc
+SCRIPT
+    /bin/cp "$HOME/bin/rustc" "$HOME/bin/cargo"
+    /bin/chmod +x "$HOME/bin/rustc" "$HOME/bin/cargo"`
+  );
   await executable(
     'curl',
     `echo curl >> "$HOME/attempts"\nwhile [ "$1" != '--output' ]; do shift; done\nshift\necho fixture > "$1"`
@@ -98,7 +107,7 @@ test('first boot installs missing tools once; every restart checks login without
     assert.equal(first.snapshot().checks[1].failure, 'login');
     assert.match(execFileSync('codex', ['--version'], { env, encoding: 'utf8' }), /codex/);
     const attempts = await fs.readFile(path.join(dir, 'attempts'), 'utf8');
-    assert.deepEqual(attempts.trim().split('\n').sort(), ['bash', 'curl', 'npm']);
+    assert.deepEqual(attempts.trim().split('\n').sort(), ['bash', 'brew', 'curl', 'npm']);
     await restarted.refresh();
     assert.equal(restarted.snapshot().checks[1].failure, 'login');
     assert.equal(await fs.readFile(path.join(dir, 'attempts'), 'utf8'), attempts);
