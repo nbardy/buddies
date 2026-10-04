@@ -9,6 +9,7 @@ import type {
 import { parseBuddyWorkerToolResult } from '@unleashd/shared';
 import type { BuddyPolicyAdoption } from '../buddies/turn-policy';
 import type { TurnTerminalCause } from '../observability';
+import type { AdoptedStop } from './executions';
 import type { TurnInput } from './input';
 
 /**
@@ -54,10 +55,29 @@ export interface AdoptedReview {
 }
 
 /**
- * How the adopted execution stood at boot. `ended`: it exited (or was lost) while no backend
- * watched, so its outcome is already on disk and no runtime budget applies to its replay.
+ * How the adopted execution stood at boot (lifecycle/adopt-executions.ts `standingOf`).
+ * `running`: live, nothing ends it; the only state whose tool grant is restored.
+ * `ended`: it exited (or was lost) while no backend watched, so its outcome is already on disk and
+ * no runtime budget applies to its replay.
+ * `stopping`: a Stop or timeout was recorded before the old backend died (StopIntent); the adopter
+ * re-issues it and the turn settles as it would have without the crash.
  */
-export type AdoptedExecution = { state: 'running' } | { state: 'ended' };
+// Pattern: detached-execution (docs/patterns.md#detached-execution)
+export type AdoptedExecution =
+  | { state: 'running' }
+  | { state: 'ended' }
+  | { state: 'stopping'; stop: AdoptedStop };
+
+/** Only a live execution gets its tools back: a stopping or ended one never does (blocker 2a). */
+export function restoresGrant(execution: AdoptedExecution): boolean {
+  switch (execution.state) {
+    case 'running':
+      return true;
+    case 'ended':
+    case 'stopping':
+      return false;
+  }
+}
 
 export type CoordinationDrained = (
   status: 'complete' | 'failed',

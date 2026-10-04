@@ -860,6 +860,10 @@ void runServerStartup(
             state: 'interrupted',
             terminalCause: 'server_restart',
           }),
+        // A stopped, settled or expired run is never adopted as a live writer (blocker 2a).
+        runStatus: async (runId) => (await buddiesCore.getRun(runId)).status,
+        maxRuntimeMs: TURN_MAX_RUNTIME_MS,
+        now: Date.now,
         logger: console,
       });
     },

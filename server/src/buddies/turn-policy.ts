@@ -24,6 +24,7 @@ import {
   type TurnGate,
   type TurnPolicy,
   commonToolResultParts,
+  restoresGrant,
 } from '../turns/policy';
 import { BUDDY_BUILDER_BRIEFING } from './builder';
 import type { GrantRecord } from './grants';
@@ -229,11 +230,13 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
   adoptionRecord(): PolicyAdoption {
     return { t: 'builder', grant: this.grant };
   }
-  adopt(record: PolicyAdoption): void {
+  adopt(record: PolicyAdoption, _review: AdoptedReview, execution: AdoptedExecution): void {
     if (record.t !== 'builder')
       throw new Error(`The Buddy Builder cannot adopt a ${record.t} turn`);
     this.grant = record.grant;
-    if (record.grant) this.dependencies.buddies.adoptGrant(record.grant);
+    // A stopped, timed-out or ended turn's grant stays revoked (release blocker 2a).
+    if (record.grant && restoresGrant(execution))
+      this.dependencies.buddies.adoptGrant(record.grant);
   }
   spawnFailed(): void {
     this.revoke();
@@ -568,7 +571,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
    * in server.ts `runTurn`, so it could not survive the backend that armed it. An adopted turn
    * that already ended arms no deadline: its outcome is on disk, and re-arming a deadline that
    * passed during the gap sealed a successful replay as max_runtime_timeout (review of P1,
-   * 2026-10-01; guard: execution-adoption.test.ts "finished during the gap").
+   * 2026-10-01; guard: execution-adoption.test.ts "finished during the gap"). Neither does a
+   * stopping one: its stop (or expiry) is re-issued by the runner from the journal's intent.
    */
   private armExecution(execution: RunExecution, state: AdoptedExecution['state']): () => void {
     this.execution = execution;
@@ -614,14 +618,17 @@ export class BuddyTurnPolicy implements TurnPolicy {
   }
 
   /**
-   * This backend replaced the one that spawned the turn. The same grant works again, the run keeps
-   * its lease and deadline, and its drain settles it here: a chat run through the port as before,
-   * a runner-owned run through the runner (its awaiting promise died with the old backend).
+   * This backend replaced the one that spawned the turn. A live turn's grant works again; a turn
+   * that was being stopped, timed out or already ended gets none: restoring it let a stopped agent
+   * write with full authority after a crash in the kill grace (release blocker 2a; guard:
+   * adoption-stop.test.ts). The run keeps its lease, and its drain settles it here: a chat run
+   * through the port as before, a runner-owned run through the runner (its awaiting promise died
+   * with the old backend).
    */
   adopt(record: PolicyAdoption, review: AdoptedReview, execution: AdoptedExecution): void {
     if (record.t !== 'buddy') throw new Error(`A Buddy thread cannot adopt a ${record.t} turn`);
     const { run } = record;
-    this.buddies.adoptGrant(record.grant);
+    if (restoresGrant(execution)) this.buddies.adoptGrant(record.grant);
     this.grant = record.grant;
     this.briefedMemoryGeneration = record.briefedGeneration;
     this.providerAudienceKey = record.audienceKey;

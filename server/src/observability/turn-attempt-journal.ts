@@ -174,16 +174,33 @@ export class TurnAttemptJournal {
       });
     });
   }
+  /**
+   * The first terminal record wins; a later one for the same attempt is a replay and is dropped.
+   * An adopted execution is finished again by the backend that adopts it (a re-issued Stop or
+   * timeout after a crash in the kill grace, or a turn settled again after a crash before its
+   * journal was removed): those replays must not fail as invalid transitions (release blockers
+   * 2a/2b; guards: adoption-stop.test.ts, adoption-settle-crash.test.ts).
+   */
   finishAttempt(input: FinishTurnAttemptInput): Promise<TurnAttemptSnapshot> {
-    return this.mutate(input.attemptId, (current) => {
-      assertTransition(current.state, input.state);
-      return this.baseEvent({
-        kind: 'attempt_terminal',
-        ...identity(current, input.providerSessionId),
-        previousState: current.state as 'queued' | 'starting' | 'running' | 'stopping',
-        state: input.state,
-        terminalCause: input.terminalCause,
-      });
+    return this.runExclusive(async () => {
+      const value = await this.requireStore().get(required(input.attemptId, 'attemptId'));
+      if (!value) throw new Error(`Attempt not found: ${input.attemptId}`);
+      const current = parseSnapshot(value);
+      if (isTerminalAttemptState(current.state)) return current;
+      return (await this.appendEvent(this.finishEvent(current, input), current))!;
+    });
+  }
+  private finishEvent(
+    current: TurnAttemptSnapshot,
+    input: FinishTurnAttemptInput
+  ): TurnAttemptJournalEvent {
+    assertTransition(current.state, input.state);
+    return this.baseEvent({
+      kind: 'attempt_terminal',
+      ...identity(current, input.providerSessionId),
+      previousState: current.state as 'queued' | 'starting' | 'running' | 'stopping',
+      state: input.state,
+      terminalCause: input.terminalCause,
     });
   }
   bindProviderSession(input: BindTurnAttemptProviderSessionInput): Promise<TurnAttemptSnapshot> {
