@@ -2,13 +2,10 @@
    Post content (markdown, chips, media, typing dots) and the composer's own
    look come from components/buddies/ChannelContent.css + ChannelComposer.css;
    this file owns only mobile layout and the Home rows. */
-
 /* ── Home: channel and Buddy rows ─────────────────────────────────────── */
-
 .mobile-channels-header-aside {
   gap: var(--sp-4);
 }
-
 .mobile-channels-list {
   display: grid;
   /* minmax(0, …): a grid item's min-width is its content by default, so a
@@ -19,13 +16,11 @@
   padding: 0;
   list-style: none;
 }
-
 .mobile-channels-workspaces {
   margin-bottom: 16px;
   padding-bottom: var(--sp-6);
   border-bottom: 1px solid var(--border-subtle);
 }
-
 .mobile-channels-row {
   gap: var(--sp-4);
   width: 100%;
@@ -39,20 +34,16 @@
   text-align: left;
   text-decoration: none;
 }
-
 .mobile-channels-row:active {
   background: color-mix(in srgb, var(--text-emphasis) 8%, transparent);
 }
-
 .mobile-channels-row[aria-current="page"] {
   color: var(--text-bright);
   font-weight: 600;
 }
-
 .mobile-channels-row--add {
   color: var(--text-secondary);
 }
-
 .mobile-channels-row__hash,
 .mobile-channels-row__mark {
   display: grid;
@@ -63,7 +54,6 @@
   color: var(--text-muted);
   font-size: var(--fs-7);
 }
-
 .mobile-channels-row__mark {
   border-radius: var(--ui-radius);
   background: color-mix(in srgb, var(--text-emphasis) 10%, transparent);
@@ -71,7 +61,6 @@
   font-size: var(--fs-4);
   font-weight: 700;
 }
-
 .mobile-channels-row__sigil {
   display: block;
   flex: none;
@@ -79,32 +68,26 @@
   height: 32px;
   border-radius: 8px;
 }
-
 .mobile-channels-row__stack {
   flex: 1;
   min-width: 0;
 }
-
 .mobile-channels-row__name {
   flex: 1;
   min-width: 0;
   font-size: var(--fs-6);
 }
-
 .mobile-channels-row__detail {
   font-size: var(--fs-4);
 }
-
 /* Owner unread (Slack): new → bold and bright, read → dimmed. */
 .mobile-channels-row[data-unread="new"] .mobile-channels-row__name {
   color: var(--text-bright);
   font-weight: 700;
 }
-
 .mobile-channels-row[data-unread="read"] .mobile-channels-row__name {
   color: var(--text-muted);
 }
-
 .mobile-channels-row__badge {
   flex: none;
   min-width: 20px;
@@ -115,20 +98,16 @@
   font: 700 12px / 1 var(--font-mono);
   text-align: center;
 }
-
 .mobile-channels-buddy {
   gap: var(--sp-2);
 }
-
 .mobile-channels-buddy > .mobile-channels-row {
   flex: 1;
   min-width: 0;
 }
-
 .mobile-channels-buddy[data-failed] .mobile-channels-row__detail {
   color: var(--theme-warning);
 }
-
 /* Touch has no hover, so Wake is a visible 44px button on every Buddy row. */
 .mobile-channels-wake {
   display: grid;
@@ -141,46 +120,38 @@
   border-radius: var(--ui-radius);
   background: transparent;
 }
-
 .mobile-channels-wake:active {
   background: color-mix(in srgb, var(--text-emphasis) 10%, transparent);
   color: var(--text-bright);
 }
-
 /* Wake progress covers the icon in place (a sibling shifted the row); the icon returns if the
    indicator renders nothing. */
 .mobile-channels-wake-slot {
   position: relative;
   flex: none;
 }
-
 .mobile-channels-wake-status {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
 }
-
 .mobile-channels-wake-slot:has(.mobile-channels-wake-status) svg {
   visibility: hidden;
 }
-
 /* The Task filter now sits in the header's settings slot (578e160): no margin, just no shrink. */
 .mobile-channel__task-filter {
   flex: none;
 }
-
 a.mobile-channels-wake-done {
   color: var(--success-bright);
   text-decoration: none;
 }
-
 .mobile-channels-new {
   display: grid;
   gap: var(--sp-4);
   padding: var(--sp-5) var(--sp-2);
 }
-
 .mobile-channels-new input {
   min-height: 44px;
   padding: 0 var(--sp-6);
@@ -191,19 +162,16 @@ a.mobile-channels-wake-done {
   font: inherit;
   font-size: var(--fs-6); /* 16px stops iOS zooming into the field */
 }
-
 .mobile-channels-new__problem {
   margin: 0;
   color: var(--theme-warning);
   font-size: var(--fs-4);
 }
-
 .mobile-channels-new__actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--sp-4);
 }
-
 .mobile-channels-new__actions button {
   min-height: 44px;
   padding: 0 var(--sp-7);
@@ -213,25 +181,20 @@ a.mobile-channels-wake-done {
   color: var(--text-secondary);
   font: inherit;
 }
-
 .mobile-channels-new__actions button[type="submit"] {
   border-color: transparent;
   background: var(--accent-primary);
   color: var(--text-on-accent);
 }
-
 .mobile-channels-wake:disabled,
 .mobile-channels-new__actions button:disabled {
   opacity: 0.5;
 }
-
 /* ── Channel / thread screen: a pane, header + transcript + composer ──── */
-
 .mobile-channel {
   flex: 1;
   min-height: 0;
 }
-
 .mobile-channel-header {
   flex: none;
   gap: var(--sp-2);
@@ -242,7 +205,6 @@ a.mobile-channels-wake-done {
   padding: 0 var(--sp-6) 0 var(--sp-2);
   border-bottom: 1px solid var(--border-subtle);
 }
-
 .mobile-channel-header__back {
   display: grid;
   flex: none;
@@ -254,12 +216,10 @@ a.mobile-channels-wake-done {
   line-height: 1;
   text-decoration: none;
 }
-
 .mobile-channel-header__heading,
 .mobile-channel-post__content {
   min-width: 0;
 }
-
 .mobile-channel-header__heading h1 {
   margin: 0;
   overflow: hidden;
@@ -269,37 +229,30 @@ a.mobile-channels-wake-done {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .mobile-channel-header__dm-actions {
   flex: 0 1 100%;
   min-width: 0;
   gap: var(--sp-2);
 }
-
 .mobile-channel-header__dm-actions > .channel-harness-picker {
   min-width: 0;
 }
-
 .mobile-channel-header__dm-actions > .channel-dm-model {
   flex: 1 1 0;
   min-width: 0;
 }
-
 @media (max-width: 340px) {
   .mobile-channel-header__dm-actions {
     flex-direction: column;
   }
-
   .mobile-channel-header__dm-actions > .channel-harness-picker,
   .mobile-channel-header__dm-actions > .channel-dm-model {
     width: 100%;
   }
-
   .mobile-channel-header__dm-actions > .channel-harness-picker > .channel-inline-action {
     width: 100%;
   }
 }
-
 .mobile-channel__scroll {
   flex: 1;
   min-height: 0;
@@ -307,25 +260,21 @@ a.mobile-channels-wake-done {
   overscroll-behavior: contain;
   padding: var(--sp-2) 0 var(--sp-6);
 }
-
 .mobile-channel__error {
   margin: 8px 14px;
   color: var(--theme-warning);
   font-size: var(--fs-4);
 }
-
 .mobile-channel__posts {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-
 .mobile-channel-day {
   display: flex;
   justify-content: center;
   margin: 14px 0 4px;
 }
-
 .mobile-channel-day span {
   padding: var(--sp-1) var(--sp-5);
   border: 1px solid var(--border-subtle);
@@ -334,24 +283,20 @@ a.mobile-channels-wake-done {
   font-size: var(--fs-3);
   font-weight: 600;
 }
-
 .mobile-channel-post {
   padding: var(--sp-2) var(--sp-7);
 }
-
 .mobile-channel-post--lead {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
   column-gap: var(--sp-5);
   margin-top: 8px;
 }
-
 /* Continuations line up with the lead's text column, as in Slack. */
 .mobile-channel-post--continuation {
   /* 60px: avatar + column gap, kept exact rather than snapped to a token. */
   padding-left: calc(var(--sp-11) + var(--sp-8));
 }
-
 .mobile-channel-post__avatar {
   display: block;
   width: 36px;
@@ -359,14 +304,12 @@ a.mobile-channels-wake-done {
   margin-top: 2px;
   border-radius: 8px;
 }
-
 .mobile-channel-post__heading {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--sp-1) var(--sp-4);
 }
-
 .mobile-channel-post__author {
   color: var(--text-bright);
   font-size: var(--fs-post);
@@ -379,12 +322,10 @@ a.mobile-channels-wake-done {
   font-family: inherit;
   cursor: pointer;
 }
-
 .mobile-channel-post__heading time {
   color: var(--text-muted);
   font-size: var(--fs-3);
 }
-
 .mobile-channel-post__purpose {
   padding: var(--sp-1) var(--sp-3);
   border-radius: var(--ui-radius);
@@ -392,37 +333,30 @@ a.mobile-channels-wake-done {
   color: var(--ai-bright);
   font: 500 11px / 1.5 var(--font-mono);
 }
-
 .mobile-channel-post__purpose[data-purpose="reply_failed"] {
   background: color-mix(in srgb, var(--theme-warning) 16%, transparent);
   color: var(--theme-warning);
 }
-
 .mobile-channel-post[data-purpose="reply_failed"] .channel-markdown {
   color: var(--text-muted);
 }
-
 .mobile-channel .channel-markdown {
   font-size: var(--fs-post);
 }
-
 .mobile-channel .channel-media {
   max-width: 100%;
 }
-
 .mobile-channel-post__footer {
   flex-wrap: wrap;
   gap: var(--sp-2) var(--sp-6);
   margin-top: 2px;
 }
-
 /* 44px-tall tap areas that sit on one text line visually. */
 .mobile-channel-post__reply {
   min-height: 32px;
   font-size: var(--fs-4);
   text-decoration: none;
 }
-
 .mobile-channel-post__replying,
 .mobile-channel__replying {
   display: inline-flex;
@@ -432,24 +366,20 @@ a.mobile-channels-wake-done {
   font-size: var(--fs-4);
   font-style: italic;
 }
-
 .mobile-channel__replying {
   margin: 8px 14px 0 60px;
 }
-
 .mobile-channel-divider {
   gap: var(--sp-5);
   margin: 8px 14px 0;
   font-size: var(--fs-3);
 }
-
 .mobile-channel-divider::after {
   flex: 1;
   height: 1px;
   background: var(--border-subtle);
   content: "";
 }
-
 /* The composer: pinned under the transcript, owning the home-indicator
    inset (no tab bar below). Tight at rest; ChannelComposerMobile wraps it in
    FullscreenComposer, which owns the editing layout (below). */
@@ -458,47 +388,39 @@ a.mobile-channels-wake-done {
   margin: 4px 6px calc(6px + env(safe-area-inset-bottom));
   border-radius: var(--ui-radius);
 }
-
 .mobile-channel-compose .channel-composer-highlight,
 .mobile-channel-compose .channel-composer textarea {
   min-height: 38px;
   padding: var(--sp-4) var(--sp-6) var(--sp-1);
   font-size: var(--fs-6); /* 16px stops iOS zooming into the field; the mirror must match */
 }
-
 .mobile-channel-compose .channel-composer-bar {
   padding: var(--sp-1) var(--sp-3) var(--sp-3);
 }
-
 .mobile-channel-compose .channel-composer-attach {
   width: 32px;
   height: 32px;
 }
-
 .mobile-channel-compose .channel-composer-send,
 .mobile-channel-compose .channel-composer-model-actions button {
   min-height: 32px;
   padding: 0 var(--sp-7);
   border-radius: var(--ui-radius);
 }
-
 .mobile-channel-compose .channel-composer-picker {
   max-height: 45dvh;
   border-radius: var(--ui-radius);
 }
-
 .mobile-channel-compose .channel-composer-picker button,
 .mobile-channel-compose .channel-composer-model-actions button,
 .mobile-channel-compose__head button {
   min-height: 44px;
 }
-
 /* Editing (a2e4135): viewport-sized frame, Done head, @ menu in flow. Keyed on --editing, not
    .mobile-channel: the Threads card composer shrank outside it (#bugfixes 2026-09-29). */
 .mobile-channel-compose__head {
   display: none;
 }
-
 .mobile-channel-compose--editing,
 .mobile-channel-compose--editing .channel-composer {
   display: flex;
@@ -510,7 +432,6 @@ a.mobile-channels-wake-done {
   border: 0;
   border-radius: 0;
 }
-
 .mobile-channel-compose--editing .mobile-channel-compose__head {
   display: flex;
   flex: none;
@@ -520,37 +441,31 @@ a.mobile-channels-wake-done {
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-muted);
 }
-
 .mobile-channel-compose__head button {
   border: 0;
   background: transparent;
   color: var(--text-secondary);
   font-weight: 600;
 }
-
 .mobile-channel-compose--editing .channel-composer-field {
   flex: 1 1 0;
   min-height: 0;
 }
-
 /* !important beats the grow-with-text inline height ChannelComposer sets. */
 .mobile-channel-compose--editing .channel-composer textarea {
   height: 100% !important;
   max-height: none;
   overflow-y: auto;
 }
-
 .mobile-channel-compose--editing .channel-composer-picker {
   position: static;
   order: 1;
   max-height: 40%;
   margin: 0 6px 4px;
 }
-
 .mobile-channel-compose--editing .channel-composer-bar {
   order: 2;
 }
-
 /* The harness/model picker is a bottom sheet on touch; opening it dismisses
    the keyboard, which pushed the popover off-screen (#bugfixes 2026-09-25). */
 .mobile-channel-compose .channel-composer-model {
@@ -560,7 +475,6 @@ a.mobile-channels-wake-done {
   padding-bottom: calc(var(--sp-7) + env(safe-area-inset-bottom));
   border-radius: 12px 12px 0 0;
 }
-
 .mobile-channel-header__link {
   display: grid;
   flex: none;
@@ -574,11 +488,9 @@ a.mobile-channels-wake-done {
   background: transparent;
   font-size: var(--fs-post);
 }
-
 .mobile-channel-header__link[data-copy-state="copied"] {
   color: var(--theme-success);
 }
-
 /* The reply a permalink opened (`?post=`), highlighted as Slack does. */
 .mobile-channel-post[data-linked="true"] {
   background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
