@@ -5,6 +5,7 @@ export const DependencyCheckSchema = z.object({
   id: z.enum(['rust', 'claude', 'codex']),
   status: z.enum(['checking', 'ready', 'missing', 'failed']),
   message: z.string(),
+  failure: z.enum(['login', 'quota', 'network', 'other']).optional(),
 });
 export const DependenciesSchema = z.object({
   checks: z.array(DependencyCheckSchema),

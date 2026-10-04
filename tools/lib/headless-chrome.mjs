@@ -299,7 +299,7 @@ export async function openBlankTab() {
  * `clockMs` is the instant the page's Date is frozen at (see stabilisingScript).
  *
  * Returns { goto, evaluate, setViewport, waitForNetworkIdle, capture,
- * blockedWrites, close }.
+ * click, blockedWrites, close }.
  * `await close()` must run (use try/finally) or a Chrome process outlives the
  * script.
  */
@@ -395,6 +395,22 @@ export async function openSession({ baseUrl, token, clockMs }) {
       return pending();
     };
 
+    // A real user gesture is required by native clipboard permissions; calling
+    // element.click() through Runtime.evaluate does not create one.
+    const click = async (selector) => {
+      const point = await evaluate(`(() => {
+        const element = document.querySelector(${JSON.stringify(selector)});
+        if (!element) throw new Error('No element for click');
+        element.scrollIntoView({block: 'center'});
+        const rect = element.getBoundingClientRect();
+        return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2};
+      })()`);
+      await cdp.send('Page.bringToFront', {}, sessionId);
+      for (const type of ['mousePressed', 'mouseReleased']) {
+        await cdp.send('Input.dispatchMouseEvent', {type, ...point, button: 'left', clickCount: 1}, sessionId);
+      }
+    };
+
     const capture = async (file) => {
       const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' }, sessionId);
       fs.writeFileSync(file, Buffer.from(data, 'base64'));
@@ -413,7 +429,7 @@ export async function openSession({ baseUrl, token, clockMs }) {
       );
     }
 
-    return { goto, evaluate, setViewport, waitForNetworkIdle, capture, blockedWrites, close };
+    return { goto, evaluate, setViewport, waitForNetworkIdle, capture, click, blockedWrites, close };
   } catch (error) {
     await close();
     throw error;

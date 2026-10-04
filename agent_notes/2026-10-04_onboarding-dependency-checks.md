@@ -56,3 +56,43 @@ https://code.claude.com/docs/en/cli-reference
 
 Live installation/authentication remains an owner-environment smoke test; the live
 backend was not forcibly restarted and no push was performed.
+
+## Owner correction: centered window, visual status, setup actions (2026-10-04)
+
+Owner rejected the bottom-aligned, text-only presentation and reasonably read the
+empty-environment screenshots as an inaccurate statement about their installation.
+
+Changes:
+- Center the native dialog on phone and desktop, with explicit green checkmarks,
+  red crosses and human status labels: Yes — ready / No — not installed /
+  Installed — needs attention / Checking.
+- Missing dependencies offer readonly selectable commands, Copy buttons, official
+  installation links, and agent sign-in commands. Installed response failures do
+  not claim that the binary is missing.
+- Classify usage-limit, authentication and connection errors into fixed public
+  copy; raw subprocess diagnostics remain private. Remove the inherited Claude
+  nested-session marker for the independent probe and explicitly resume streams.
+- SSR card regression covers ready/missing/quota markup and actionable links and
+  commands. Real child/API regression covers quota on stderr and the nested marker.
+- Add native mouse clicks to the existing read-only CDP screenshot driver so
+  clipboard checks use browser user activation rather than synthetic element.click.
+  A native click on the actual Copy button returned Copied. A proposed clipboard
+  helper change was discarded: the original passed the native-click check, and the
+  apparent failure was from the synthetic test gesture. The helper is unchanged.
+
+Real host results from the dependency-only preview: Rust/Cargo ready, Codex answered
+Yes, Claude installed but returned a usage-limit failure. This preview runs only the
+new checks and static client, with actual host credentials/PATH; it opens no stores
+and starts no Buddy scheduler. Prior live API agreed on Rust/Codex ready and Claude
+failed, but the prior code hid the reason. No production restart or login change.
+
+Screenshots in output/dependencies-correction-2026-10-04:
+actual-host@phone.png / actual-host@desktop.png show real host check results;
+missing-fixture@phone.png / missing-fixture@desktop.png are explicitly labeled
+missing-dependency fixtures to demonstrate the install links and Copy controls.
+Underlying workspace UI is hidden in the dependency-only preview screenshots, since
+this preview deliberately serves no workspace data. The dialog's bounds were centered
+in both dimensions (desktop 560px wide; phone 370px wide).
+
+Claude native install command confirmed from:
+https://code.claude.com/docs/en/quickstart

@@ -12,7 +12,7 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'deps-test-'));
   const executable = async (name: string, body: string) =>
     fs.writeFile(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
-  const checks = createDependencyChecks({ PATH: dir, HOME: dir }, 1500);
+  const checks = createDependencyChecks({ PATH: dir, HOME: dir, CLAUDECODE: '1' }, 1500);
   const app = express();
   registerDependencyRoutes(app, checks);
   const server = app.listen(0, '127.0.0.1');
@@ -22,7 +22,7 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
   try {
     await executable('rustc', 'echo rustc');
     await executable('cargo', 'echo cargo');
-    await executable('claude', 'echo Yes');
+    await executable('claude', '[ -z "$CLAUDECODE" ] || exit 1; echo Yes');
     await checks.refresh();
     let snapshot = DependenciesSchema.parse(await (await fetch(`${url}/api/dependencies`)).json());
     assert.deepEqual(
@@ -45,7 +45,11 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
     await checks.refresh();
     snapshot = checks.snapshot();
     assert.equal(snapshot.checks[2].status, 'ready');
-    assert.match(snapshot.checks[1].message, /No response within/);
+    assert.match(snapshot.checks[1].message, /no response within/i);
+    await executable('claude', 'echo "Weekly limit reached" >&2; exit 1');
+    await checks.refresh();
+    assert.equal(checks.snapshot().checks[1].failure, 'quota');
+    assert.match(checks.snapshot().checks[1].message, /Installed.*usage limit/);
     await executable('claude', 'echo yesterday');
     await checks.refresh();
     assert.equal(checks.snapshot().checks[1].status, 'failed', 'substring yes is not a response');

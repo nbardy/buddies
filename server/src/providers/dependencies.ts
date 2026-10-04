@@ -9,10 +9,13 @@ import type { Express } from 'express';
 // response, not merely --version. Guard: dependencies.test.ts (real child processes).
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
-  const probeEnv = {
+  const probeEnv: NodeJS.ProcessEnv = {
     ...env,
     PATH: `${env.PATH ?? ''}${path.delimiter}${path.join(env.HOME || os.homedir(), '.cargo', 'bin')}`,
   };
+  // An app launched from Claude must not make this independent health probe
+  // look like a nested interactive session. Guard: dependencies.test.ts.
+  probeEnv.CLAUDECODE = undefined;
   let checks: DependencyCheck[] = [];
   let pending: Promise<void> | null = null;
   const children = new Set<ReturnType<typeof spawn>>();
@@ -21,17 +24,19 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
     return new Promise<{
       code: number | null;
       output: string;
+      diagnostics: string;
       missing: boolean;
       timedOut: boolean;
     }>((resolve) => {
       const child = spawn(command, args, {
         cwd,
         env: probeEnv,
-        stdio: ['ignore', 'pipe', 'ignore'],
+        stdio: ['ignore', 'pipe', 'pipe'],
         detached: process.platform !== 'win32',
       });
       children.add(child);
       let output = '';
+      let diagnostics = '';
       let timedOut = false;
       const timer = setTimeout(() => {
         timedOut = true;
@@ -40,10 +45,15 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
       child.stdout?.on('data', (data: Buffer) => {
         output = (output + data.toString()).slice(-16_384);
       });
+      child.stdout?.resume();
+      child.stderr?.on('data', (data: Buffer) => {
+        diagnostics = (diagnostics + data.toString()).slice(-16_384);
+      });
+      child.stderr?.resume();
       const finish = (code: number | null, missing = false) => {
         clearTimeout(timer);
         children.delete(child);
-        resolve({ code, output, missing, timedOut });
+        resolve({ code, output, diagnostics, missing, timedOut });
       };
       child.on('error', (error: NodeJS.ErrnoException) => finish(null, error.code === 'ENOENT'));
       child.on('close', (code) => finish(code));
@@ -110,13 +120,30 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
     if (result.code === 0 && /^yes[.!]?$/i.test(result.output.trim())) {
       return { id, status: 'ready', message: 'Answered Yes — ready to use.' };
     }
-    return {
-      id,
-      status: 'failed',
-      message: result.timedOut
-        ? `No response within ${Math.round(timeoutMs / 1000)} seconds. Check your connection and ${id} login, then retry.`
-        : `Could not answer. Run ${id === 'claude' ? 'claude auth login' : 'codex login'} in your terminal, check quota and connection, then retry.`,
+    // Installed is not authenticated/ready: quota errors previously looked like
+    // missing login. Only classified fixed copy crosses the API, never raw stderr.
+    const diagnostics = `${result.output} ${result.diagnostics}`;
+    const failure =
+      /usage limit|weekly limit|rate.?limit|quota|credit balance|hit your.*limit/i.test(diagnostics)
+        ? 'quota'
+        : /not logged in|please log in|authentication|unauthorized|invalid.*key|login required/i.test(
+              diagnostics
+            )
+          ? 'login'
+          : result.timedOut || /network|connection|ECONN|ENOTFOUND|fetch failed/i.test(diagnostics)
+            ? 'network'
+            : 'other';
+    const messages = {
+      quota:
+        'Installed, but the response check hit an account usage limit. Check your usage or try again later.',
+      login: 'Installed, but sign-in failed. Log in from your terminal, then check again.',
+      network: result.timedOut
+        ? `Installed, but no response within ${Math.round(timeoutMs / 1000)} seconds. Check your connection, then retry.`
+        : 'Installed, but the response check could not connect. Check your connection, then retry.',
+      other:
+        'Installed, but the response check failed. Open the agent in your terminal to see the error, then check again.',
     };
+    return { id, status: 'failed', failure, message: messages[failure] };
   }
 
   function refresh(): Promise<void> {
