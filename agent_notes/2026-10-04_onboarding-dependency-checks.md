@@ -119,3 +119,11 @@ client invariant gates, and new real-browser layout regression. The browser guar
 uses the built app through HTTP, checks compact width, centering, a shared name
 column, visible footer on desktop/phone, native-click Copy (Copied), and Close.
 Run it after building the client: node --test tools/dependencies-layout.test.mjs.
+
+## First-boot install / restart login checks (owner follow-up, 2026-10-04)
+
+Owner requested automatic first-load dependency installation and authentication checks on every server start. Missing tools now get one automatic installation attempt on the first server boot: Claude official native installer, Codex npm with user-local prefix, Rust Homebrew or official rustup. Exclusive per-tool marker files under the canonical app data directory (`dependency-setup`) are written before spawning; installed tools also get markers, so later disappearance does not silently trigger installation. Restarts and Check again perform readiness probes without repeating installers. Installer processes are bounded, tracked and killed at normal server shutdown; downloads use direct argv and private temp scripts.
+
+The server environment includes ~/.local/bin and ~/.cargo/bin so normal agent turns discover the installed binaries too. Claude/Codex response checks still run on each server start, including usage/network classification. Explicit auth failures show Login required and copyable login commands. Source-build Rust preflight remains in place before addons are built.
+
+Verification: real subprocess/filesystem fixture regression covers missing Rust/Claude/Codex installation, newly installed binary discovery using the same environment, login failure, restart probes, no repeated installation and no reinstall after a tool disappears. Render regression covers installing/login labels. Browser regression validates both screen sizes, centered alignment, visible actions and copy behavior; login screenshots in output/dependencies-firstboot-2026-10-04/ are explicitly fixtures, not host authentication results. Actual downloads/account logins were not exercised; existing host tools were not replaced. No push or forced live restart.

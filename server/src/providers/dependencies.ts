@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { Dependencies, DependencyCheck } from '@unleashd/shared';
@@ -8,19 +8,33 @@ import type { Express } from 'express';
 // Fresh installs used to reach spawn ENOENT on their first message. Probe a real
 // response, not merely --version. Guard: dependencies.test.ts (real child processes).
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
-export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
-  const probeEnv: NodeJS.ProcessEnv = {
-    ...env,
-    PATH: `${env.PATH ?? ''}${path.delimiter}${path.join(env.HOME || os.homedir(), '.cargo', 'bin')}`,
-  };
+export function createDependencyChecks(
+  env = process.env,
+  timeoutMs = 45_000,
+  setupDirectory?: string,
+  installTimeoutMs = 600_000
+) {
+  // The runner inherits this environment too: a ready probe must not be the
+  // only process that can discover a freshly installed CLI. Guard: first-boot test.
+  const home = env.HOME || os.homedir();
+  env.PATH = [
+    ...new Set([
+      ...(env.PATH ?? '').split(path.delimiter).filter(Boolean),
+      path.join(home, '.cargo', 'bin'),
+      path.join(home, '.local', 'bin'),
+    ]),
+  ].join(path.delimiter);
+  const probeEnv: NodeJS.ProcessEnv = { ...env };
   // An app launched from Claude must not make this independent health probe
   // look like a nested interactive session. Guard: dependencies.test.ts.
   probeEnv.CLAUDECODE = undefined;
   let checks: DependencyCheck[] = [];
   let pending: Promise<void> | null = null;
+  let closed = false;
   const children = new Set<ReturnType<typeof spawn>>();
 
-  async function run(command: string, args: string[], cwd: string) {
+  async function run(command: string, args: string[], cwd: string, limitMs = timeoutMs) {
+    if (closed) return { code: null, output: '', diagnostics: '', missing: false, timedOut: false };
     return new Promise<{
       code: number | null;
       output: string;
@@ -41,7 +55,7 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
       const timer = setTimeout(() => {
         timedOut = true;
         kill(child);
-      }, timeoutMs);
+      }, limitMs);
       child.stdout?.on('data', (data: Buffer) => {
         output = (output + data.toString()).slice(-16_384);
       });
@@ -70,12 +84,84 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
     }
   }
 
+  // Record each attempt before spawning: crashes/restarts must not repeat installers.
+  // Guard: first-boot installation regression in dependencies.test.ts.
+  async function claimFirstBoot(id: DependencyCheck['id']) {
+    if (!setupDirectory || closed) return false;
+    await mkdir(setupDirectory, { recursive: true });
+    try {
+      await writeFile(path.join(setupDirectory, `${id}.attempted`), new Date().toISOString(), {
+        flag: 'wx',
+        mode: 0o600,
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw error;
+    }
+    return true;
+  }
+
+  async function installOnce(id: DependencyCheck['id'], cwd: string, firstBoot: boolean) {
+    if (!firstBoot || closed) return;
+    checks = checks.map((check) =>
+      check.id === id ? { id, status: 'installing', message: 'Installing automatically…' } : check
+    );
+    if (id === 'codex') {
+      await run(
+        'npm',
+        [
+          'install',
+          '--global',
+          '--prefix',
+          path.join(probeEnv.HOME || os.homedir(), '.local'),
+          '@openai/codex',
+        ],
+        cwd,
+        installTimeoutMs
+      );
+    } else if (id === 'rust' && (await run('brew', ['--version'], cwd)).code === 0) {
+      await run('brew', ['install', 'rust'], cwd, installTimeoutMs);
+    } else {
+      const script = path.join(cwd, `${id}-install.sh`);
+      const download = await run(
+        'curl',
+        [
+          '--fail',
+          '--silent',
+          '--show-error',
+          '--location',
+          id === 'claude' ? 'https://claude.ai/install.sh' : 'https://sh.rustup.rs',
+          '--output',
+          script,
+        ],
+        cwd,
+        installTimeoutMs
+      );
+      if (download.code === 0 && !closed) {
+        await run(
+          'bash',
+          [script, ...(id === 'rust' ? ['-y', '--profile', 'minimal'] : [])],
+          cwd,
+          installTimeoutMs
+        );
+      }
+    }
+  }
+
   async function probe(id: DependencyCheck['id'], cwd: string): Promise<DependencyCheck> {
+    const firstBoot = await claimFirstBoot(id);
     if (id === 'rust') {
-      const results = await Promise.all([
+      let results = await Promise.all([
         run('rustc', ['--version'], cwd),
         run('cargo', ['--version'], cwd),
       ]);
+      if (!results.every((r) => r.code === 0)) {
+        await installOnce(id, cwd, firstBoot);
+        results = await Promise.all([
+          run('rustc', ['--version'], cwd),
+          run('cargo', ['--version'], cwd),
+        ]);
+      }
       return results.every((r) => r.code === 0)
         ? { id, status: 'ready', message: 'Rust and Cargo are available.' }
         : {
@@ -85,6 +171,8 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
               'Rust is needed for source builds. Install with brew install rust or https://rustup.rs, then check again.',
           };
     }
+    if ((await run(id, ['--version'], cwd)).missing) await installOnce(id, cwd, firstBoot);
+    if (closed) return { id, status: 'failed', message: 'Server is stopping.' };
     const args =
       id === 'claude'
         ? [
@@ -126,7 +214,7 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
     const failure =
       /usage limit|weekly limit|rate.?limit|quota|credit balance|hit your.*limit/i.test(diagnostics)
         ? 'quota'
-        : /not logged in|please log in|authentication|unauthorized|invalid.*key|login required/i.test(
+        : /not logged in|not authenticated|please (?:log|sign) in|authentication|unauthorized|invalid.*key|login required|login to|sign.?in required/i.test(
               diagnostics
             )
           ? 'login'
@@ -148,6 +236,7 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
 
   function refresh(): Promise<void> {
     if (pending) return pending;
+    if (closed) return Promise.resolve();
     checks = ['rust', 'claude', 'codex'].map((id) => ({
       id: id as DependencyCheck['id'],
       status: 'checking',
@@ -168,7 +257,7 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
     })()
       .catch(() => {
         checks = checks.map((check) =>
-          check.status === 'checking'
+          check.status === 'checking' || check.status === 'installing'
             ? { ...check, status: 'failed', message: 'Dependency check failed. Retry.' }
             : check
         );
@@ -182,6 +271,7 @@ export function createDependencyChecks(env = process.env, timeoutMs = 45_000) {
     snapshot: (): Dependencies => ({ checks }),
     refresh,
     close: () => {
+      closed = true;
       for (const child of children) kill(child);
     },
   };

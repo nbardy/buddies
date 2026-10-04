@@ -3,7 +3,7 @@ import { z } from 'zod';
 // Pattern: one-type-source (docs/patterns.md#one-type-source)
 export const DependencyCheckSchema = z.object({
   id: z.enum(['rust', 'claude', 'codex']),
-  status: z.enum(['checking', 'ready', 'missing', 'failed']),
+  status: z.enum(['checking', 'installing', 'ready', 'missing', 'failed']),
   message: z.string(),
   failure: z.enum(['login', 'quota', 'network', 'other']).optional(),
 });

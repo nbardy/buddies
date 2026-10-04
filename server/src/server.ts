@@ -73,7 +73,7 @@ import {
 import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
-import { registerDependencyRoutes } from './providers/dependencies';
+import { createDependencyChecks, registerDependencyRoutes } from './providers/dependencies';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
@@ -510,7 +510,10 @@ app.use((request, response, next) => {
 const UPLOADS_DIR = uploadsDirectory();
 registerUploadRoutes(app, UPLOADS_DIR);
 registerCoreRoutes(app, () => startupAuditResults);
-const dependencyChecks = registerDependencyRoutes(app);
+const dependencyChecks = registerDependencyRoutes(
+  app,
+  createDependencyChecks(process.env, 45_000, path.join(APP_DATA_DIR, 'dependency-setup'))
+);
 registerConversationRoutes(
   app,
   (id) => runtimeBuilder.materialize(id),

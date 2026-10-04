@@ -34,6 +34,7 @@ const STATES = {
   ready: { icon: '✓', label: 'Yes — ready', color: '#22c55e' },
   missing: { icon: '✕', label: 'No — not installed', color: 'var(--danger)' },
   failed: { icon: '✕', label: 'Installed — needs attention', color: 'var(--danger)' },
+  installing: { icon: '…', label: 'Installing automatically…', color: 'var(--warning)' },
   checking: { icon: '…', label: 'Checking…', color: 'var(--warning)' },
 };
 
@@ -95,7 +96,9 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
     check.status === 'failed'
       ? check.failure === 'quota'
         ? 'Installed · usage limit'
-        : 'Installed · check failed'
+        : check.failure === 'login'
+          ? 'Login required'
+          : 'Installed · check failed'
       : state.label;
   return (
     <section
@@ -203,7 +206,11 @@ export function DependenciesPrompt() {
       setRetrying(false);
     }
   };
-  const checking = !status.data || status.data.checks.some((check) => check.status === 'checking');
+  const checking =
+    !status.data ||
+    status.data.checks.some(
+      (check) => check.status === 'checking' || check.status === 'installing'
+    );
   if (dismissed) return null;
   return (
     <dialog

@@ -2,26 +2,36 @@
 // text wrapping onto inconsistent columns and controls below the phone fold.
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import test from 'node:test';
 import express from 'express';
 import { openSession } from './lib/headless-chrome.mjs';
 
 test('built dependency dialog stays compact, aligned, and actionable on both screens', async () => {
   const app = express();
-  let installState = false;
+  let state = 'quota';
   app.get('/api/dependencies', (_req, res) =>
     res.json({
-      checks: installState
-        ? ['rust', 'claude', 'codex'].map((id) => ({
-            id,
-            status: 'missing',
-            message: 'Not installed',
-          }))
-        : [
-            { id: 'rust', status: 'ready', message: 'Available' },
-            { id: 'claude', status: 'failed', failure: 'quota', message: 'Usage limit' },
-            { id: 'codex', status: 'ready', message: 'Answered Yes' },
-          ],
+      checks:
+        state === 'missing'
+          ? ['rust', 'claude', 'codex'].map((id) => ({
+              id,
+              status: 'missing',
+              message: 'Not installed',
+            }))
+          : [
+              { id: 'rust', status: 'ready', message: 'Available' },
+              {
+                id: 'claude',
+                status: 'failed',
+                failure: state === 'login' ? 'login' : 'quota',
+                message:
+                  state === 'login'
+                    ? 'Log in from your terminal, then check again.'
+                    : 'Usage limit',
+              },
+              { id: 'codex', status: 'ready', message: 'Answered Yes' },
+            ],
     })
   );
   app.use(express.static(path.resolve('client/dist')));
@@ -59,14 +69,34 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
       );
       assert.ok(geometry.footerBottom < viewport.height, 'actions stay visible');
     }
-    installState = true;
+    state = 'login';
+    const out = path.resolve('output/dependencies-firstboot-2026-10-04');
+    await mkdir(out, { recursive: true });
+    for (const [name, viewport] of [
+      ['desktop', { width: 1440, height: 1000, mobile: false, deviceScaleFactor: 1 }],
+      ['phone', { width: 390, height: 844, mobile: true, deviceScaleFactor: 1 }],
+    ]) {
+      await session.setViewport(viewport);
+      await session.goto(`http://127.0.0.1:${server.address().port}/`, 700);
+      assert.ok(
+        await session.evaluate(
+          'document.querySelector("dialog").textContent.includes("Login required")'
+        )
+      );
+      assert.equal(
+        await session.evaluate(
+          `document.querySelector('input[aria-label="Sign in to Claude Code command"]').value`
+        ),
+        'claude auth login'
+      );
+      await session.capture(path.join(out, `login-fixture@${name}.png`));
+    }
+    state = 'missing';
     await session.goto(`http://127.0.0.1:${server.address().port}/`, 700);
     await session.click('button[aria-label="Copy Install Rust / Cargo command"]');
     await session.evaluate('new Promise(resolve => setTimeout(resolve, 300))');
     assert.equal(
-      await session.evaluate(
-        'document.querySelector("dialog section button").textContent'
-      ),
+      await session.evaluate('document.querySelector("dialog section button").textContent'),
       'Copied'
     );
     assert.ok(

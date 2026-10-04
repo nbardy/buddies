@@ -45,7 +45,7 @@ Track multi-agent swarm runs — iterations, merges, rejections, per-worker time
 
 ## Quick Start
 
-**Prerequisites:** git, [Node](https://nodejs.org/) 22.13 or newer, [pnpm](https://pnpm.io/), [Rust and Cargo](https://rustup.rs/) (for the native addons), and at least one supported CLI agent installed and authenticated (e.g. `claude`).
+**Prerequisites:** git, [Node](https://nodejs.org/) 22.13 or newer, [pnpm](https://pnpm.io/), [Rust and Cargo](https://rustup.rs/) (for the native addons), and an account for at least one supported CLI agent (e.g. Claude Code or Codex). The app installs missing agent CLIs on first boot and guides you through login.
 
 Install and run (the same command as the website):
 
@@ -58,11 +58,17 @@ The install preflight checks Rust, Claude Code and Codex. If Rust is missing it 
 Rust via rustup. If that fails, it prints the manual install steps. Packaged
 installs with prebuilt addons do not require Rust.
 
-At app launch, the **Dependencies** window checks Rust and asks Claude and Codex
-to reply “Yes” once (this uses a small amount of agent quota). Missing agents and
-failed responses show installation/login guidance. Log in from your terminal
-with `claude auth login` or `codex login`, then click **Check again**. You can
-continue into the app while resolving dependencies.
+On first server boot, missing Claude Code and Codex are installed automatically
+using the official Claude installer and npm (Codex goes in `~/.local/bin`).
+Missing Rust uses Homebrew, or rustup when Homebrew is unavailable. Each tool's
+first-boot attempt is recorded in the app data directory, so restarts and
+**Check again** never repeat installers. Failed installs keep manual setup guidance.
+On **every server start**, Claude and Codex are asked to respond “Yes” to verify
+that they can actually answer. The **Dependencies** window shows progress and
+**Login required** with a copyable login command when authentication is missing.
+Usage limits and connection failures stay separate from login failures. Response
+checks time out after 45 seconds and use a little agent quota; installation steps
+allow up to 10 minutes each. You can continue while resolving a check.
 
 To develop on it, use `pnpm install && pnpm dev` instead of build/start.
 
