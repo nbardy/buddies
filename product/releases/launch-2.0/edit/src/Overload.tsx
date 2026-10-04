@@ -16,6 +16,7 @@ export const WIDTH = 1920;
 export const HEIGHT = 1080;
 
 // Output seconds. Music should put a hit on every pile arrival up to the 1/16 s run.
+export const INTRO_HIT: Intro.Hit = 'drop'; // placeholder until the owner picks drop / trailer / impact
 export const INTRO_ROBOTS = 5; // owner pick, 2026-10-03; the end card's mark matches it
 const T = {
   rampStart: 6.2, // first pile window; the ramp runs 5 s (sum of GAPS)
@@ -598,7 +599,7 @@ const OVERLOAD_CUES: Cue[] = [
 // section (Assembly); OverloadTail is that hit, timed on Overload's clock.
 export const OverloadTail: React.FC = () => (
   <Sequence from={frames(T.title + Intro.hitAt(INTRO_ROBOTS))} layout="none">
-    <Intro.IntroHit />
+    <Intro.IntroHit hit={INTRO_HIT} />
   </Sequence>
 );
 // Overload alone (Root's preview composition): picture, sound and the hit, cut at T.end.

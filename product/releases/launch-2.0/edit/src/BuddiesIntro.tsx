@@ -14,7 +14,9 @@ import boop1 from '../../sound/boop-1.wav';
 import boop2 from '../../sound/boop-2.wav';
 import boop3 from '../../sound/boop-3.wav';
 import boop4 from '../../sound/boop-4.wav';
-import introHit from '../../sound/intro-hit.wav';
+import hitDrop from '../../sound/intro-hit-drop.wav';
+import hitImpact from '../../sound/intro-hit-impact.wav';
+import hitTrailer from '../../sound/intro-hit-trailer.wav';
 import introSwell from '../../sound/intro-swell.wav';
 import { type Cue, SFX, Soundtrack } from './soundtrack';
 
@@ -198,16 +200,21 @@ export const HuddleMark: React.FC<{ count: Count; size: number; u: number }> = (
 // on the fade out"), so it is not one of the intro's own cues, which end with the intro's Sequence:
 // whoever places the intro also places IntroHit at hitAt(count), outside that Sequence.
 export const hitAt = (n: Count) => beats(CAST[n]).lock;
-export const IntroHit: React.FC = () => <Audio src={introHit} volume={1} />;
+// The climax on the lock, three versions for the owner to pick (2026-10-04: "BOOM climax!"):
+// drop = EDM drop, trailer = movie-trailer slam, impact = the "AI Overload!" boom + a chord stab.
+export type Hit = 'drop' | 'trailer' | 'impact';
+export const HITS: Record<Hit, string> = { drop: hitDrop, trailer: hitTrailer, impact: hitImpact };
+export const IntroHit: React.FC<{ hit: Hit }> = ({ hit }) => <Audio src={HITS[hit]} volume={1} />;
 
 // The intro alone, with its ring-out: held on the logo for HOLD extra seconds.
 const HOLD = 2.5;
 export const standaloneFrames = (n: Count) => frames(n) + Math.round(HOLD * FPS);
-export const IntroStandalone: React.FC<{ count: Count }> = ({ count }) => (
+export type StandaloneProps = { count: Count; hit: Hit };
+export const IntroStandalone: React.FC<StandaloneProps> = ({ count, hit }) => (
   <AbsoluteFill>
     <BuddiesIntro count={count} />
     <Sequence from={Math.round(hitAt(count) * FPS)} layout="none">
-      <IntroHit />
+      <IntroHit hit={hit} />
     </Sequence>
   </AbsoluteFill>
 );
