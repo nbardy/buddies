@@ -1,5 +1,5 @@
 import { DependenciesSchema, type DependencyCheck } from '@unleashd/shared';
-import { useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
 
@@ -37,10 +37,27 @@ const STATES = {
   checking: { icon: '…', label: 'Checking…', color: 'var(--warning)' },
 };
 
+const SURFACE = {
+  text: '#edf3fa',
+  muted: '#a4b4c5',
+  border: '#304052',
+  raised: '#1c2a3a',
+};
+const buttonStyle: CSSProperties = {
+  padding: 'var(--sp-4) var(--sp-6)',
+  border: `1px solid ${SURFACE.border}`,
+  borderRadius: 'var(--ui-radius)',
+  background: SURFACE.raised,
+  color: SURFACE.text,
+  cursor: 'pointer',
+  font: 'inherit',
+  fontSize: 'var(--fs-4)',
+};
+
 function DependencyCommand({ command, label }: { command: string; label: string }) {
   const copy = useCopyAction(command);
   return (
-    <div className="ui-row" style={{ gap: 'var(--sp-3)' }}>
+    <div className="ui-row" style={{ gap: 'var(--sp-3)', marginTop: 'var(--sp-3)' }}>
       <input
         aria-label={label}
         readOnly
@@ -48,17 +65,20 @@ function DependencyCommand({ command, label }: { command: string; label: string 
         onFocus={(event) => event.currentTarget.select()}
         style={{
           minWidth: 0,
+          width: 0,
           flex: 1,
           fontFamily: 'monospace',
-          padding: 'var(--sp-3)',
-          color: 'var(--text-primary)',
-          background: 'var(--bg-raised-2)',
-          border: '1px solid var(--border-default)',
+          fontSize: 'var(--fs-3)',
+          padding: 'var(--sp-4)',
+          color: SURFACE.text,
+          background: '#0d1722',
+          border: `1px solid ${SURFACE.border}`,
+          borderRadius: 'var(--ui-radius)',
         }}
       />
       <button
         type="button"
-        className="ui-choice"
+        style={buttonStyle}
         onClick={copy.copy}
         aria-label={`${COPY_LABEL[copy.state]} ${label}`}
       >
@@ -71,52 +91,89 @@ function DependencyCommand({ command, label }: { command: string; label: string 
 export function DependencyCard({ check }: { check: DependencyCheck }) {
   const guide = GUIDES[check.id];
   const state = STATES[check.status];
+  const label =
+    check.status === 'failed'
+      ? check.failure === 'quota'
+        ? 'Installed · usage limit'
+        : 'Installed · check failed'
+      : state.label;
   return (
     <section
-      className="ui-card ui-stack"
-      style={{ padding: 'var(--sp-5)', gap: 'var(--sp-3)' }}
       aria-label={guide.name}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '28px minmax(0, 1fr)',
+        gap: 'var(--sp-6)',
+        padding: 'var(--sp-7)',
+        border: `1px solid ${SURFACE.border}`,
+        borderRadius: 'var(--ui-radius)',
+        background: 'linear-gradient(135deg, #1b2939, #172332)',
+        boxShadow: '0 2px 8px rgb(0 0 0 / 12%)',
+      }}
     >
-      <div
-        className="ui-row"
-        style={{ gap: 'var(--sp-3)', justifyContent: 'space-between', flexWrap: 'wrap' }}
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'grid',
+          placeItems: 'center',
+          width: 28,
+          height: 28,
+          borderRadius: '50%',
+          color: state.color,
+          background: `color-mix(in srgb, ${state.color} 12%, transparent)`,
+          fontWeight: 700,
+          fontSize: 'var(--fs-6)',
+        }}
       >
-        <strong>{guide.name}</strong>
-        <strong style={{ color: state.color }}>
-          <span aria-hidden="true">{state.icon} </span>
-          {state.label}
+        {state.icon}
+      </span>
+      <div className="ui-stack" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
+        <strong style={{ color: SURFACE.text, fontSize: 'var(--fs-5)', lineHeight: 1.3 }}>
+          {guide.name}
         </strong>
-      </div>
-      <span>{check.message}</span>
-      {check.status === 'missing' && (
-        <>
-          <DependencyCommand command={guide.install} label={`Install ${guide.name} command`} />
-          <a href={guide.url} target="_blank" rel="noreferrer">
-            Install {guide.name} — official guide ↗
+        <span style={{ color: state.color, fontSize: 'var(--fs-3)' }}>{label}</span>
+        {check.status === 'failed' && (
+          <span
+            style={{
+              color: SURFACE.muted,
+              fontSize: 'var(--fs-4)',
+              lineHeight: 1.5,
+              marginTop: 'var(--sp-2)',
+            }}
+          >
+            {check.failure === 'quota'
+              ? 'This response check hit an account limit. Try again later.'
+              : check.message}
+          </span>
+        )}
+        {check.status === 'missing' && (
+          <>
+            <DependencyCommand command={guide.install} label={`Install ${guide.name} command`} />
+            {guide.login && (
+              <DependencyCommand command={guide.login} label={`Sign in to ${guide.name} command`} />
+            )}
+          </>
+        )}
+        {(check.status === 'missing' || check.status === 'failed') && (
+          <a
+            href={guide.url}
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: '#8bbcff', fontSize: 'var(--fs-3)', marginTop: 'var(--sp-3)' }}
+          >
+            {check.status === 'missing' ? 'Installation guide' : 'Account & setup help'} ↗
           </a>
-          {check.id === 'rust' && (
-            <span className="ui-muted">
-              No Homebrew? The Rust guide includes the rustup installer.
-            </span>
-          )}
-          {guide.login && (
-            <DependencyCommand command={guide.login} label={`Sign in to ${guide.name} command`} />
-          )}
-        </>
-      )}
-      {check.status === 'failed' && guide.login && (
-        <>
-          {check.failure !== 'quota' && check.failure !== 'network' && (
+        )}
+        {check.status === 'failed' &&
+          guide.login &&
+          check.failure !== 'quota' &&
+          check.failure !== 'network' && (
             <DependencyCommand
               command={check.failure === 'login' ? guide.login : check.id}
               label={`${check.failure === 'login' ? 'Sign in to' : 'Open'} ${guide.name} command`}
             />
           )}
-          <a href={guide.url} target="_blank" rel="noreferrer">
-            {guide.name} setup and sign-in help ↗
-          </a>
-        </>
-      )}
+      </div>
     </section>
   );
 }
@@ -150,23 +207,76 @@ export function DependenciesPrompt() {
   if (dismissed) return null;
   return (
     <dialog
+      className="dependencies-dialog"
       ref={dialog}
-      className="ui-sheet"
-      style={{
-        margin: 'auto',
-        width: 'calc(100% - var(--sp-8))',
-        border: '1px solid var(--border-default)',
-        borderRadius: 'var(--ui-radius)',
-      }}
       aria-labelledby="dependencies-title"
       onCancel={() => setDismissed(true)}
+      style={{
+        margin: 'auto',
+        width: 'min(420px, calc(100vw - var(--sp-9)))',
+        maxWidth: 'none',
+        padding: 0,
+        overflow: 'hidden',
+        border: `1px solid ${SURFACE.border}`,
+        borderRadius: 'var(--sp-6)',
+        background: 'linear-gradient(145deg, #202e3e, #101a26)',
+        color: SURFACE.text,
+        boxShadow: '0 32px 90px rgb(0 0 0 / 65%), inset 0 1px 0 rgb(255 255 255 / 6%)',
+      }}
     >
-      <div className="ui-sheet__inner ui-stack">
-        <h2 id="dependencies-title" className="ui-sheet__title">
-          Dependencies
-        </h2>
-        <p>Checked on the computer running Unleashd.</p>
-        <div aria-live="polite" className="ui-stack" style={{ gap: 'var(--sp-4)' }}>
+      <div className="ui-stack" style={{ maxHeight: '85dvh' }}>
+        <header style={{ padding: 'var(--sp-9) var(--sp-9) var(--sp-7)', flexShrink: 0 }}>
+          <div className="ui-row" style={{ justifyContent: 'space-between' }}>
+            <span
+              style={{
+                fontSize: 'var(--fs-2)',
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: SURFACE.muted,
+              }}
+            >
+              This computer
+            </span>
+            <button
+              type="button"
+              aria-label="Close dependency checks"
+              onClick={() => setDismissed(true)}
+              style={{
+                ...buttonStyle,
+                padding: 'var(--sp-2) var(--sp-4)',
+                border: 'none',
+                background: 'transparent',
+                color: SURFACE.muted,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <h2
+            id="dependencies-title"
+            style={{
+              fontSize: 'var(--fs-8)',
+              letterSpacing: '-0.025em',
+              color: SURFACE.text,
+              margin: 'var(--sp-4) 0 var(--sp-3)',
+            }}
+          >
+            Dependencies
+          </h2>
+          <p style={{ fontSize: 'var(--fs-4)', color: SURFACE.muted, margin: 0, lineHeight: 1.5 }}>
+            Make sure your tools can respond.
+          </p>
+        </header>
+        <div
+          aria-live="polite"
+          className="ui-stack"
+          style={{
+            gap: 'var(--sp-4)',
+            padding: '0 var(--sp-9) var(--sp-9)',
+            overflowY: 'auto',
+            minHeight: 0,
+          }}
+        >
           {status.data?.checks.map((check) => <DependencyCard key={check.id} check={check} />) ?? (
             <p>Checking dependencies…</p>
           )}
@@ -175,23 +285,48 @@ export function DependenciesPrompt() {
           )}
           {error && <p role="alert">{error}</p>}
         </div>
-        <p className="ui-muted">
-          You can continue using Unleashd. After resolving any checks above, click Check again.
-          Response checks use a little agent quota.
-        </p>
-        <div className="ui-row" style={{ gap: 'var(--sp-4)', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            className="ui-choice"
-            disabled={retrying || (checking && !!status.data)}
-            onClick={() => void retry()}
+        <footer
+          style={{
+            padding: 'var(--sp-7) var(--sp-9)',
+            borderTop: `1px solid ${SURFACE.border}`,
+            background: 'rgb(0 0 0 / 14%)',
+            flexShrink: 0,
+          }}
+        >
+          <div className="ui-row" style={{ gap: 'var(--sp-4)', justifyContent: 'space-between' }}>
+            <button
+              type="button"
+              style={buttonStyle}
+              disabled={retrying || (checking && !!status.data)}
+              onClick={() => void retry()}
+            >
+              ↻ Check again
+            </button>
+            <button
+              type="button"
+              style={{
+                ...buttonStyle,
+                background: '#a9c6ff',
+                color: '#102039',
+                borderColor: '#a9c6ff',
+                fontWeight: 600,
+              }}
+              onClick={() => setDismissed(true)}
+            >
+              Continue →
+            </button>
+          </div>
+          <p
+            style={{
+              color: SURFACE.muted,
+              fontSize: 'var(--fs-2)',
+              lineHeight: 1.4,
+              margin: 'var(--sp-6) 0 0',
+            }}
           >
-            Check again
-          </button>
-          <button type="button" className="ui-choice" onClick={() => setDismissed(true)}>
-            Continue
-          </button>
-        </div>
+            Response checks use a little agent quota. You can continue while resolving a check.
+          </p>
+        </footer>
       </div>
     </dialog>
   );

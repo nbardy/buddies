@@ -96,3 +96,26 @@ in both dimensions (desktop 560px wide; phone 370px wide).
 
 Claude native install command confirmed from:
 https://code.claude.com/docs/en/quickstart
+
+## Compact visual redesign (owner follow-up)
+
+Owner rejected the broad, flat board and inconsistent text alignment. Replaced
+it with a 420px centered dialog (366px on the 390px phone), a raised navy surface,
+soft shadow, strong title hierarchy, tinted status icons, and one fixed icon/text
+grid for every provider. Status labels now sit under names in the same column.
+Ready rows drop duplicate prose; failed rows retain the reason. Setup commands
+and official links stay available. The body scrolls independently, so the header
+and primary Continue / secondary Check again footer remain visible on phones.
+Close is explicit and Escape remains supported.
+
+Screenshots: output/dependencies-redesign-2026-10-04/host-snapshot@desktop.png,
+host-snapshot@phone.png, install-fixture@desktop.png, install-fixture@phone.png.
+Host images replay this turn's previously measured host results; no extra agent
+probes were billed for this visual iteration. Missing-state images are fixtures.
+Inspected desktop host and phone install state. Phone actions remain above the fold.
+
+Validation: client build (includes tsc -b), SSR dependency card regression, all
+client invariant gates, and new real-browser layout regression. The browser guard
+uses the built app through HTTP, checks compact width, centering, a shared name
+column, visible footer on desktop/phone, native-click Copy (Copied), and Close.
+Run it after building the client: node --test tools/dependencies-layout.test.mjs.

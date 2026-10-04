@@ -32,6 +32,6 @@ test('dependency cards distinguish installed readiness and give usable setup act
       }}
     />
   );
-  assert.match(quota, /Installed — needs attention/);
+  assert.match(quota, /Installed · usage limit/);
   assert.doesNotMatch(quota, /not installed|value="claude auth login"/);
 });

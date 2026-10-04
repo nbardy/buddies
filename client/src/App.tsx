@@ -21,6 +21,7 @@ import { initSettings } from './stores/settingsStore';
 import { SWARM_PAGE_LOADERS } from './swarm';
 import { DependenciesPrompt } from './views/dependencies/DependenciesPrompt';
 import './App.css';
+import './views/dependencies/DependenciesPrompt.css';
 import './components/buddies/BuddyDetail.css';
 
 // =============================================================================
