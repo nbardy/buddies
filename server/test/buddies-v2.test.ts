@@ -162,12 +162,10 @@ async function world() {
     });
   const lead = await hire('lead', 'Lead');
   const designer = await hire('designer', 'Designer');
-  const general = await core.createChannel(OWNER, {
-    workspaceId: ws,
-    name: 'general',
-    purpose: 'Team chat',
-    key: 'general',
-  });
+  // Every workspace is born with #general (createWorkspace); creating it again would collide.
+  const general = (await core.inbox(OWNER, ws)).channels.find(
+    ({ channel }) => channel.kind.type === 'public' && channel.kind.name === 'general'
+  )!.channel;
 
   const events = createBuddyEvents();
   const seen: BuddyEvent[] = [];
