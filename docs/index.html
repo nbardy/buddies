@@ -6,7 +6,7 @@
     <title>Buddies - your team of AI agents. Free, open source, multi harness.</title>
     <meta name="description" content="Buddies is a free, open source, multi-harness agent team orchestrator. Claude Code, Codex and Gemini side by side, OpenCode read-only. Runs on your own computer.">
     <link rel="icon" type="image/svg+xml" href="icon.svg">
-    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <meta name="theme-color" content="#0b0a14">
 
@@ -99,7 +99,7 @@
         .lockup {
             display: inline-flex;
             align-items: center;
-            gap: calc(2.4rem * 0.24); /* 0.24 x the mark (BuddiesKit Lockup) */
+            gap: 0.24em; /* Lockup on the web: brand/BUDDIES_BRAND.md */
             text-decoration: none;
             font-weight: 700;
             font-stretch: 92%;
@@ -109,7 +109,7 @@
             letter-spacing: -0.026em;
         }
 
-        .mark { width: 2.4rem; height: 2.4rem; display: block; flex: none; }
+        .mark { width: 1em; height: 1em; display: block; flex: none; }
 
         .glass {
             background: var(--glass);
@@ -134,25 +134,12 @@
 
         .pill svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
 
-        /* Hero: the Vim line leads. */
+        /* Hero: under the video, the pitch and the install. */
         .hero { text-align: center; padding: 4rem 0 1rem; }
 
         .tags { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2.25rem; }
 
-        h1 {
-            font-weight: 700;
-            font-stretch: 92%;
-            font-size: clamp(2.4rem, 6.4vw, 5rem);
-            letter-spacing: -0.035em;
-            line-height: 1.02;
-            max-width: 18ch;
-            margin: 0 auto;
-        }
-
-        h1 .second { display: block; color: var(--quiet); margin-top: 0.15em; }
-
         .accent-violet { color: var(--violet); }
-        .accent-teal { color: var(--teal); }
 
         .pitch {
             font-size: clamp(1.1rem, 2.1vw, 1.35rem);
@@ -247,7 +234,9 @@
 
         .btn-primary svg { width: 1.2rem; height: 1.2rem; fill: currentColor; }
 
-        /* Media frames: the launch video leads the page, right under the nav (owner, 2026-10-05:
+        /* Media frames: the launch video leads the page. No autoplay: the poster is the video's Vim
+           card (73.5 s), shown until play, and the page no longer repeats it as text (owner, 2026-10-05).
+           The launch video leads the page, right under the nav (owner, 2026-10-05:
            text before the video read as "a wall of text"). */
         .frame {
             position: relative;
@@ -345,7 +334,6 @@
         }
 
         footer .lockup { font-size: 1.15rem; color: var(--quiet); margin-bottom: 0.75rem; }
-        footer .mark { width: 1.8rem; height: 1.8rem; }
         footer a:hover { color: var(--cream); }
 
         @media (max-width: 768px) {
@@ -374,7 +362,7 @@
     <div class="page">
         <nav>
             <a class="lockup" href="./" aria-label="Buddies home">
-                <svg class="mark" aria-hidden="true"><use href="#pair"/></svg>
+                <svg class="mark" viewBox="8 8 84 84" aria-hidden="true"><use href="#pair" width="100" height="100"/></svg>
                 Buddies
             </a>
             <a class="pill glass" href="https://github.com/nbardy/buddies">
@@ -385,7 +373,7 @@
 
         <div class="video-section">
             <div class="frame">
-                <video autoplay muted loop playsinline controls preload="metadata" poster="screenshots/video-poster.jpg" aria-label="Buddies launch video">
+                <video muted loop playsinline controls preload="metadata" poster="screenshots/video-poster.jpg" aria-label="Buddies launch video">
                     <source src="resources/unleashd-2.mp4" type="video/mp4">
                 </video>
             </div>
@@ -397,7 +385,6 @@
                 <span class="pill glass">Free</span>
                 <span class="pill glass">Multi harness</span>
             </div>
-            <h1>Vim is open source and it's still here decades later.<span class="second">Agent software should be <span class="accent-teal">too.</span></span></h1>
             <p class="pitch"><strong>Buddies is your team of AI agents.</strong> Channels, tasks and memory for Claude Code, Codex and Gemini, side by side, on your own computer.</p>
             <div class="actions">
                 <div class="install-box glass">
@@ -480,7 +467,7 @@
 
         <footer>
             <a class="lockup" href="https://github.com/nbardy/buddies">
-                <svg class="mark" aria-hidden="true"><use href="#pair"/></svg>
+                <svg class="mark" viewBox="8 8 84 84" aria-hidden="true"><use href="#pair" width="100" height="100"/></svg>
                 Buddies
             </a>
             <p>Free and open source. Built by <a href="https://github.com/nbardy" target="_blank" rel="noopener">nbardy</a>.</p>
