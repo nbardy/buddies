@@ -19,7 +19,8 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
     buddies: [],
     taskCounts: [],
   };
-  app.get('/api/buddies/overview', (_req, res) => res.json([workspace]));
+  let workspaces = [workspace];
+  app.get('/api/buddies/overview', (_req, res) => res.json(workspaces));
   app.get('/api/buddies/workspaces/project_fixture/inbox', (_req, res) =>
     res.json({ requests: [], waitingOn: [], channels: [], unreadThreads: 0 })
   );
@@ -67,12 +68,23 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
       token: null,
       clockMs: Date.now(),
     });
-    const waitForTeam = () =>
+    // Onboarding's last step is the `/` page itself: one create-a-workspace form, not a
+    // second one in the dialog (owner, #buddies-dev 2026-10-05).
+    const waitForWorkspaceForm = () =>
       session.evaluate(`new Promise((resolve, reject) => {
       const deadline = performance.now() + 5000;
-      const poll = () => document.querySelector('dialog textarea') ? resolve() : performance.now() > deadline ? reject(new Error('Team form did not load')) : setTimeout(poll, 20);
+      const poll = () => document.querySelector('.workspace-home-create textarea') ? resolve() : performance.now() > deadline ? reject(new Error('Workspace form did not load')) : setTimeout(poll, 20);
       poll();
     })`);
+    const landsOnWorkspaceForm = async () => {
+      await waitForWorkspaceForm();
+      assert.equal(
+        await session.evaluate('document.querySelector("dialog.dependencies-dialog") === null'),
+        true,
+        'the wizard closes; the page carries the last step'
+      );
+      assert.equal(await session.evaluate('location.pathname + location.search'), '/?new=1');
+    };
     for (const viewport of [
       { width: 1440, height: 1000, mobile: false, deviceScaleFactor: 1 },
       { width: 390, height: 844, mobile: true, deviceScaleFactor: 1 },
@@ -108,18 +120,38 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
       assert.ok(geometry.footerBottom < viewport.height, 'actions stay visible');
       await session.capture(path.join(out, `setup@${viewport.mobile ? 'phone' : 'desktop'}.png`));
       await session.click('dialog.dependencies-dialog footer button:last-child');
-      assert.ok(
-        await session.evaluate(
-          'document.querySelector("dialog h2").textContent.includes("Create your team")'
-        )
-      );
-      await waitForTeam();
-      await session.capture(path.join(out, `team@${viewport.mobile ? 'phone' : 'desktop'}.png`));
-      await session.click('dialog.dependencies-dialog footer button:first-child');
-      assert.ok(
-        await session.evaluate('document.querySelector("dialog h2").textContent.includes("Setup")')
+      await landsOnWorkspaceForm();
+      await session.capture(
+        path.join(out, `workspace@${viewport.mobile ? 'phone' : 'desktop'}.png`)
       );
     }
+    // No workspace yet: the form is the page, no Close, and the folder gates both actions.
+    workspaces = [];
+    for (const viewport of [
+      { width: 1440, height: 1000, mobile: false, deviceScaleFactor: 1 },
+      { width: 390, height: 844, mobile: true, deviceScaleFactor: 1 },
+    ]) {
+      await session.setViewport(viewport);
+      await session.goto(`http://127.0.0.1:${server.address().port}/`, 700);
+      await session.click('dialog.dependencies-dialog footer button:last-child');
+      await session.click('dialog.dependencies-dialog footer button:last-child');
+      await landsOnWorkspaceForm();
+      assert.equal(
+        await session.evaluate('document.querySelector(".workspace-home-close") === null'),
+        true
+      );
+      assert.deepEqual(
+        await session.evaluate(
+          `[...document.querySelectorAll('.workspace-home-create .onboarding-team-actions button')].map(b => b.disabled)`
+        ),
+        [true, true],
+        'neither action submits without a folder'
+      );
+      await session.capture(
+        path.join(out, `workspace-empty@${viewport.mobile ? 'phone' : 'desktop'}.png`)
+      );
+    }
+    workspaces = [workspace];
     state = 'login';
     for (const [name, viewport] of [
       ['desktop', { width: 1440, height: 1000, mobile: false, deviceScaleFactor: 1 }],
@@ -196,23 +228,13 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
     await session.capture(path.join(out, 'reopened-from-settings@phone.png'));
     await session.click('dialog.dependencies-dialog footer button:last-child');
     await session.click('dialog.dependencies-dialog footer button:last-child');
+    await landsOnWorkspaceForm();
     assert.ok(
       await session.evaluate(
-        'document.querySelector("dialog h2").textContent.includes("Create your team")'
+        'document.querySelector(".workspace-home-create textarea").placeholder.includes("kick off your Buddies")'
       )
-    );
-    await waitForTeam();
-    assert.ok(
-      await session.evaluate(
-        'document.querySelector("dialog textarea").placeholder.includes("kick off your Buddies")'
-      )
-    );
-    assert.equal(
-      await session.evaluate('document.querySelector("dialog form button[type=submit]").disabled'),
-      true
     );
     await session.capture(path.join(out, 'create-team@phone.png'));
-    await session.click('dialog.dependencies-dialog footer button:last-child');
     await reload();
     await reopen();
     await session.evaluate(

@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,7 +30,10 @@ import {
   createDefaultConversationConfig,
 } from '@unleashd/shared';
 import express from 'express';
+import { buddyWrite, retryFailedReply } from '../../client/src/components/buddies/api';
 import { choiceLabel, mentionChoice } from '../../client/src/components/buddies/channel-text';
+import { scheduleFieldsOf } from '../../client/src/components/buddies/schedule-fields';
+import { reorderTasks } from '../../client/src/components/buddies/task-actions';
 import { BUDDY_TOOL_GUIDE, composeBriefing, createBriefings } from '../src/buddies/briefing';
 import { type StableConversationPorts, slotOf } from '../src/buddies/buddy-conversation-slots';
 import {
@@ -1367,7 +1378,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
     assert.equal(w.turns[1].request.reasoningEffort, 'high');
     await until(() => reloaded.responding(w.general.id).length === 0, 'reloaded reply idle');
-    const retry = await http('POST', `/api/buddies/posts/${failed.id}/retry`, { config: explicit });
+    const retry = await http('POST', `/api/buddies/posts/${failed.id}/retry`, {
+      config: explicit,
+      key: 'retry-explicit',
+    });
     assert.equal(retry.status, 202, JSON.stringify(retry.body));
     await until(() => w.turns.length === 3, 'plain weekly-limit retry invokes');
     assert.equal(w.turns[2].request.model, 'gpt-6.1-sol');
@@ -1526,9 +1540,9 @@ test('same-value picks become durable overrides, independent of another Buddy an
   }
 });
 
-test('a throwing reply gate leaves a retryable failure notice and can retry on the same harness', async () => {
+test('keyed retry over owner HTTP recovers a capacity-failed reply gate on the same harness', async () => {
   const w = await world();
-  const { server, http } = await ownerHttp(w);
+  const { server, withClient } = await ownerHttp(w);
   try {
     const root = await w.post(
       OWNER,
@@ -1545,7 +1559,9 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
     const thread = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
     await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
-    w.gate.error = new Error('Model is unavailable for codex: retired-model');
+    w.gate.error = new Error(
+      'gate run ended: error (Selected model is at capacity. Please try a different model.)'
+    );
     const trigger = await w.post(
       OWNER,
       { kind: 'id', id: w.general.id },
@@ -1563,13 +1579,15 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
       async () => (await thread()).find((p) => p.purpose === 'reply_failed'),
       'gate failure notice'
     );
-    assert.match(notice.body, /could not decide whether to reply.*retired-model/);
+    assert.match(notice.body, /could not decide whether to reply.*Selected model is at capacity/);
     const sol: ConversationConfig = {
       ...createDefaultConversationConfig('codex'),
       model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
     };
-    const retry = await http('POST', `/api/buddies/posts/${notice.id}/retry`, { config: sol });
-    assert.equal(retry.status, 202, JSON.stringify(retry.body));
+    const retry = await withClient(() =>
+      buddyWrite('reply.retry', { postId: notice.id }, { config: sol })
+    );
+    assert.deepEqual(retry, { buddyId: w.lead.id, status: 'started' });
     const answer = await until(
       async () =>
         (await thread()).find(
@@ -1600,6 +1618,15 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
           (p) => p.replyToId === buddyFollowUp.id && p.purpose === 'reply_failed'
         ),
       'Buddy follow-up gate failure notice'
+    );
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.lead.id,
+      changes: { status: 'archived' },
+      key: 'archive-after-retry',
+    });
+    await assert.rejects(
+      withClient(() => retryFailedReply(notice.id, sol)),
+      /not active/
     );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -2761,8 +2788,176 @@ async function ownerHttp(w: Awaited<ReturnType<typeof world>>) {
       body: (await response.json()) as { error: string; requests: Post[] },
     };
   };
-  return { server, http, builderDirectories };
+  // Resolve browser-relative URLs onto this real HTTP server. No response is mocked.
+  const withClient = async <T>(work: () => Promise<T>): Promise<T> => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (input, init) =>
+      original(typeof input === 'string' && input.startsWith('/api/') ? base + input : input, init);
+    try {
+      return await work();
+    } finally {
+      globalThis.fetch = original;
+    }
+  };
+  return { server, http, withClient, builderDirectories };
 }
+
+test('client Buddy JSON mutations use the server contracts; task reorder reaches the store', async () => {
+  const w = await world();
+  const { server, http, withClient } = await ownerHttp(w);
+  try {
+    await withClient(async () => {
+      const workspace = await buddyWrite('workspace.create', {}, { rootPath: w.scratch });
+      assert.equal(workspace.rootPath, realpathSync(w.scratch));
+      assert.equal(
+        (await buddyWrite('workspace.create', {}, { rootPath: w.scratch })).id,
+        workspace.id
+      );
+      const builder = await buddyWrite('builder.open', {}, { workspaceId: w.ws });
+      assert.equal(builder.conversationId, 'builder');
+      const buddy = await buddyWrite(
+        'buddy.create',
+        {},
+        {
+          workspaceId: w.ws,
+          slug: 'contract',
+          name: 'Contract',
+          role: 'Check requests',
+        }
+      );
+      const updated = await buddyWrite(
+        'buddy.update',
+        { buddyId: buddy.id },
+        {
+          model: 'gpt-6.1-sol',
+          provider: 'codex',
+          reasoningEffort: null,
+        }
+      );
+      assert.equal(updated.model, 'gpt-6.1-sol');
+      assert.equal(updated.reasoningEffort, undefined);
+      const first = await buddyWrite(
+        'task.create',
+        {},
+        {
+          ownerId: w.lead.id,
+          title: 'First',
+          doneCriteria: 'First done',
+          key: undefined,
+        }
+      );
+      const second = await buddyWrite(
+        'task.create',
+        {},
+        {
+          ownerId: w.lead.id,
+          title: 'Second',
+          doneCriteria: 'Second done',
+        }
+      );
+      await reorderTasks([first, second], 1, -1);
+      assert.equal((await w.core.getTask(first.id)).position, 1);
+      assert.equal((await w.core.getTask(second.id)).position, 0);
+
+      const doc = await buddyWrite(
+        'doc.write',
+        { buddyId: buddy.id, kind: 'soul' },
+        {
+          content: 'Contract soul',
+          baseRevision: 0,
+          reason: 'Contract test',
+        }
+      );
+      assert.equal(doc.content, 'Contract soul');
+      const schedule = await buddyWrite(
+        'schedule.create',
+        { buddyId: w.lead.id },
+        {
+          taskId: first.id,
+          name: 'Check',
+          cron: '0 9 * * *',
+          timezone: 'UTC',
+          prompt: 'Check',
+          enabled: false,
+        }
+      );
+      const saved = await buddyWrite(
+        'schedule.update',
+        { buddyId: w.lead.id, scheduleId: schedule.id },
+        {
+          ...scheduleFieldsOf(schedule),
+          name: 'Updated',
+        }
+      );
+      assert.equal(saved.name, 'Updated');
+      assert.equal(saved.taskId, first.id, 'editing a linked schedule preserves its Task');
+      const channel = await buddyWrite(
+        'channel.create',
+        { workspaceId: w.ws },
+        {
+          name: 'contract',
+          purpose: 'Check HTTP contracts',
+        }
+      );
+      const post = await buddyWrite(
+        'channel.post',
+        { channelId: channel.id },
+        {
+          body: 'Hello',
+          key: 'contract-post',
+        }
+      );
+      const replay = await buddyWrite(
+        'channel.post',
+        { channelId: channel.id },
+        {
+          body: 'Hello',
+          key: 'contract-post',
+        }
+      );
+      assert.equal(replay.post.id, post.post.id, 'the client preserves caller keys');
+      await buddyWrite('channel.read', { channelId: channel.id }, { postId: post.post.id });
+      await buddyWrite('thread.read', { rootId: post.post.id }, { postId: post.post.id });
+      const renamed = await buddyWrite(
+        'channel.rename',
+        { channelId: channel.id },
+        { name: 'renamed' }
+      );
+      assert.equal(renamed.kind.type === 'public' && renamed.kind.name, 'renamed');
+      await buddyWrite('channel.archive', { channelId: channel.id }, { archived: true });
+      // A variable with extra fields passes TS structural assignability; strict shared parsing
+      // refuses it before a request can mutate the store.
+      const badChanges = { position: 2, task: first };
+      await assert.rejects(
+        buddyWrite(
+          'task.update',
+          { taskId: first.id },
+          {
+            baseRevision: 2,
+            changes: badChanges,
+          }
+        ),
+        /Unrecognized key.*task/
+      );
+      assert.equal((await w.core.getTask(first.id)).position, 1);
+      const malformed = await http('PATCH', `/api/buddies/tasks/${first.id}`, {
+        baseRevision: 2,
+        changes: badChanges,
+        key: 'malformed-changes',
+      });
+      assert.equal(malformed.status, 400);
+      assert.match(malformed.body.error, /Unrecognized key.*task/);
+      const direct = await buddyWrite('direct.open', { buddyId: buddy.id });
+      const next = await buddyWrite('direct.new', { buddyId: buddy.id }, {});
+      assert.notEqual(next.conversationId, direct.conversationId);
+      const archived = await buddyWrite('buddy.archive', { buddyId: buddy.id });
+      assert.equal(archived.status, 'archived');
+    });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await w.close();
+  }
+});
 
 test('builder opened from a workspace uses that workspace root', async () => {
   const w = await world();

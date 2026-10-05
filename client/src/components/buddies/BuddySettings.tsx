@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { hideArchivedBuddy } from '../../atoms/buddy-visibility';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
-import { buddyAction, buddyWrite } from './api';
+import { buddyWrite } from './api';
 import type { Buddy } from './types';
 import { ActionError, useBuddyAction } from './useBuddyAction';
 import './BuddySettings.css';
@@ -79,7 +79,7 @@ function ProfileForm({
       onSubmit={(event) => {
         event.preventDefault();
         void action.run('profile', () =>
-          buddyWrite(`/api/buddies/${encodeURIComponent(buddy.id)}`, 'PATCH', changes)
+          buddyWrite('buddy.update', { buddyId: buddy.id }, changes)
         );
       }}
     >
@@ -190,9 +190,7 @@ function ArchiveBuddy({ buddy }: { buddy: Buddy }) {
     navigate('/buddies', { replace: true });
   });
   const archive = () =>
-    void action.run('archive', () =>
-      buddyAction(`/api/buddies/${encodeURIComponent(buddy.id)}`, 'DELETE')
-    );
+    void action.run('archive', () => buddyWrite('buddy.archive', { buddyId: buddy.id }));
   return (
     <section className="buddy-settings" aria-labelledby="buddy-settings-title">
       <h2 id="buddy-settings-title">Archive Buddy</h2>

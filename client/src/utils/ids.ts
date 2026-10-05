@@ -23,7 +23,7 @@ function uuidFromBytes(bytes: Uint8Array): string {
 
 /** A v4 UUID. Works in secure and non-secure contexts alike. */
 export function newId(): string {
-  const cryptoRef = globalThis.crypto as Crypto | undefined;
+  const cryptoRef = globalThis.crypto;
 
   if (typeof cryptoRef?.randomUUID === 'function') return cryptoRef.randomUUID();
 

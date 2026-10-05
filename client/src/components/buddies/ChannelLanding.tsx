@@ -4,9 +4,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { forgetRetiredHomePins, retiredHomePinsAtom } from '../../atoms/ui';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { BuddySigil } from './BuddySigil';
+import { liveRunsUrl } from './BuddyWorkspaceActivity';
 import { ChannelComposer } from './ChannelComposer';
 import { TaskProgress } from './TaskProgress';
-import { liveRunsUrl } from './BuddyWorkspaceActivity';
+import { buddyWrite } from './api';
 import {
   type WorkspaceDirectory,
   authorName,
@@ -20,14 +21,13 @@ import {
   type PinWrite,
   appendPin,
   excerpt,
+  homeTasks,
   importPins,
   movePin,
   unpin,
-  homeTasks,
 } from './home-view';
-import { ActionError, useBuddyAction } from './useBuddyAction';
-import { buddyWrite } from './api';
 import type { Inbox, Run, Task } from './types';
+import { ActionError, useBuddyAction } from './useBuddyAction';
 // Self-hosted variable fonts (unicode-range subsets, fetched only when Home renders). The app
 // named "Inter" but never shipped it, so Home fell back to the system UI font.
 import '@fontsource-variable/inter/wght.css';
@@ -130,10 +130,14 @@ function TaskSection({
   // Buddies use. One CAS update per Task whose key changes.
   const save = async (writes: readonly PinWrite[]) => {
     for (const { task, pin } of writes) {
-      await buddyWrite(`/api/buddies/tasks/${encodeURIComponent(task.id)}`, 'PATCH', {
-        baseRevision: task.revision,
-        changes: { pin },
-      });
+      await buddyWrite(
+        'task.update',
+        { taskId: task.id },
+        {
+          baseRevision: task.revision,
+          changes: { pin },
+        }
+      );
     }
   };
   const write = (writes: readonly PinWrite[]) => void action.run('pin', () => save(writes));

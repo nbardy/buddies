@@ -6,12 +6,19 @@ import { listField } from '../../atoms/conversations';
 import { DRAFT_KEY_PREFIX } from '../../atoms/ui';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { PathAutocomplete } from '../PathAutocomplete';
-import { buddyApi, errorText } from './api';
+import { buddyWrite, errorText } from './api';
 import { createBuddyViaBuilder } from './create-buddy-builder';
 import type { Workspace } from './types';
+import { createReady } from './workspace-home';
+
+const channelsPath = (workspaceId: string) =>
+  `/buddies/workspaces/${encodeURIComponent(workspaceId)}/channels`;
 
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
-// Onboarding and empty workspaces use the same workspace → Builder → acknowledged send path.
+// The ONE "create a workspace" form (owner, #buddies-dev 2026-10-05: the onboarding team step
+// and the `/` Folder/Name card were two forms for one job). Onboarding lands on `/` with it open;
+// an empty workspace's New Buddy opens it with the folder fixed. Both go workspace → Builder →
+// acknowledged send. A new folder may also be created bare ("Just create the workspace").
 export function WorkspaceTeamForm({
   workspace,
   onStarted,
@@ -24,22 +31,20 @@ export function WorkspaceTeamForm({
   const [directory, setDirectory] = useState(workspace?.rootPath ?? '');
   const [valid, setValid] = useState(!!workspace);
   const [description, setDescription] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'team' | 'bare' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [builder, setBuilder] = useState<string | null>(null);
+  const folderReady = createReady(directory, valid);
+  const teamReady = folderReady && description.trim() !== '' && busy === null;
+  const selectWorkspace = async () =>
+    workspace ?? (await buddyWrite('workspace.create', {}, { rootPath: directory.trim() }));
   const start = async (event: FormEvent) => {
     event.preventDefault();
-    if (!directory.trim() || !valid || !description.trim() || busy) return;
-    setBusy(true);
+    if (!teamReady) return;
+    setBusy('team');
     setError(null);
     try {
-      const selected =
-        workspace ??
-        (await buddyApi<Workspace>('/api/buddies/workspaces', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ rootPath: directory.trim() }),
-        }));
+      const selected = await selectWorkspace();
       // Keep the setup chat on a failed send so retry never creates another Builder.
       const conversationId = builder ?? (await createBuddyViaBuilder(selected.id));
       setBuilder(conversationId);
@@ -47,16 +52,29 @@ export function WorkspaceTeamForm({
       await sendMessageCommand(conversationId, description.trim(), 'queue');
       localStorage.removeItem(`${DRAFT_KEY_PREFIX}${conversationId}`);
       onStarted?.();
-      navigate(`/buddies/workspaces/${selected.id}/channels?dm=${conversationId}`);
+      navigate(`${channelsPath(selected.id)}?dm=${conversationId}`);
     } catch (cause) {
       setError(errorText(cause));
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  };
+  const createBare = async () => {
+    setBusy('bare');
+    setError(null);
+    try {
+      // The server resolves the folder, reuses its workspace and names it after the folder.
+      const selected = await selectWorkspace();
+      onStarted?.();
+      navigate(channelsPath(selected.id));
+    } catch (cause) {
+      setError(errorText(cause));
+      setBusy(null);
     }
   };
   return (
     <form className="ui-stack onboarding-team" onSubmit={(event) => void start(event)}>
-      <fieldset className="ui-stack" disabled={busy || !!builder}>
+      <fieldset className="ui-stack" disabled={busy !== null || !!builder}>
         <legend>Choose a folder</legend>
         {workspace ? (
           <input aria-label="Choose folder" value={workspace.rootPath} readOnly />
@@ -64,11 +82,12 @@ export function WorkspaceTeamForm({
           <PathAutocomplete
             value={directory}
             onChange={(value) => {
-              if (!builder && !busy) setDirectory(value);
+              if (!builder && busy === null) setDirectory(value);
             }}
             recentDirectories={recentDirectories}
             placeholder="Search folders or type a path…"
             onValidationChange={setValid}
+            autoFocus
           />
         )}
       </fieldset>
@@ -77,19 +96,27 @@ export function WorkspaceTeamForm({
         <textarea
           rows={5}
           value={description}
-          disabled={busy}
+          disabled={busy !== null}
           onChange={(event) => setDescription(event.target.value)}
           placeholder="What are you building, and who do you want on the team? Type about your project and what the team should look like, and we’ll kick off your Buddies."
         />
       </label>
       {error && <p role="alert">{error}</p>}
-      <button
-        className="onboarding-primary"
-        type="submit"
-        disabled={!directory.trim() || !valid || !description.trim() || busy}
-      >
-        {busy ? 'Starting your team…' : 'Kick off my Buddies'}
-      </button>
+      <div className="onboarding-team-actions">
+        {!workspace && (
+          <button
+            type="button"
+            className="onboarding-quiet"
+            disabled={!folderReady || busy !== null || !!builder}
+            onClick={() => void createBare()}
+          >
+            {busy === 'bare' ? 'Creating…' : 'Just create the workspace'}
+          </button>
+        )}
+        <button className="onboarding-primary" type="submit" disabled={!teamReady}>
+          {busy === 'team' ? 'Starting your team…' : 'Kick off my Buddies'}
+        </button>
+      </div>
     </form>
   );
 }

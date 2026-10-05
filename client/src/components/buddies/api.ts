@@ -1,3 +1,12 @@
+import {
+  type BuddyMediaResult,
+  type BuddyMutation,
+  type BuddyMutationInput,
+  type BuddyMutationParams,
+  type BuddyMutationResults,
+  type ConversationConfig,
+  buddyMutations,
+} from '@unleashd/shared';
 import { newId } from '../../utils/ids';
 
 export class BuddyApiError extends Error {
@@ -13,7 +22,7 @@ export class BuddyApiError extends Error {
 }
 
 /** One request to the Buddy owner API; a non-2xx answer throws its `{error}` text. */
-export async function buddyApi<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.headers.get('content-type')?.includes('application/json')) {
     throw new BuddyApiError(
@@ -33,27 +42,56 @@ export async function buddyApi<T>(path: string, init?: RequestInit): Promise<T> 
   return payload as T;
 }
 
-/**
- * A JSON write. Every owner write carries an idempotency `key` (the server
- * parses it strictly); a fresh one is added here unless the caller keyed the
- * write itself, so no call site can forget it.
- */
-// Pattern: idempotency-keys (docs/patterns.md#idempotency-keys)
-export function buddyWrite<T>(
-  path: string,
-  method: 'POST' | 'PUT' | 'PATCH',
-  body: Record<string, unknown>
-): Promise<T> {
-  return buddyApi<T>(path, {
+/** Read-only JSON fetch. Mutations must choose a shared operation, never a free-form body. */
+export function buddyApi<T>(path: string, init?: Pick<RequestInit, 'signal'>): Promise<T> {
+  return request<T>(path, init);
+}
+
+/** A named JSON mutation: one contract owns its params, body, method and success result. */
+// Pattern: one-type-source (docs/patterns.md#one-type-source)
+// Loose objects missed the retry key and a task reorder's extra `task` field. Shared parsing
+// also catches extra fields in variables (TS structural assignability permits those).
+// Guard: buddies-v2.test.ts (HTTP) and buddy-api-types.ts (compile-time).
+export async function buddyWrite<K extends BuddyMutation>(
+  operation: K,
+  params: BuddyMutationParams<K>,
+  ...args: undefined extends BuddyMutationInput<K>
+    ? [body?: BuddyMutationInput<K>]
+    : [body: BuddyMutationInput<K>]
+): Promise<BuddyMutationResults[K]> {
+  const { method, path, body: schema } = buddyMutations[operation];
+  const url = path.replace(/:([a-zA-Z]+)/g, (_, name: string) =>
+    encodeURIComponent((params as Record<string, string>)[name])
+  );
+  const input = args[0];
+  const keyed = 'shape' in schema && 'key' in schema.shape;
+  const body = schema.parse(
+    keyed ? { ...input, key: (input as { key?: string } | undefined)?.key ?? newId() } : input
+  );
+  return request<BuddyMutationResults[K]>(url, {
     method,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ key: newId(), ...body }),
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
   });
 }
 
-/** A body-less action (`/direct`, `/wake`, `/builder`, run cancel, archive). */
-export function buddyAction<T>(path: string, method: 'POST' | 'DELETE' = 'POST'): Promise<T> {
-  return buddyApi<T>(path, { method });
+/** Multipart media is the one non-JSON write in the Buddy UI. */
+export function buddyUpload(channelId: string, files: FormData): Promise<BuddyMediaResult> {
+  return request<BuddyMediaResult>(`/api/buddies/channels/${encodeURIComponent(channelId)}/media`, {
+    method: 'POST',
+    body: files,
+  });
+}
+
+// A 202 retry can be refused by eligibility; treating it as success hid the reason from the UI.
+// Guard: archived-Buddy retry through the real client (buddies-v2.test.ts).
+export async function retryFailedReply(postId: string, config: ConversationConfig): Promise<void> {
+  const result = await buddyWrite('reply.retry', { postId }, { config });
+  if (result.status === 'rejected') throw new Error(result.reason);
 }
 
 export const errorText = (cause: unknown): string =>

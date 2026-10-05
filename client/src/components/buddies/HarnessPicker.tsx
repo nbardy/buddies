@@ -3,7 +3,7 @@ import { type CSSProperties, useState } from 'react';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { ConversationConfigPicker } from '../../views/config/ConversationConfigPicker';
-import { buddyWrite, errorText } from './api';
+import { errorText, retryFailedReply } from './api';
 import type { Post, ThreadPage } from './types';
 import './ChannelComposer.css';
 
@@ -161,9 +161,7 @@ export function ReplyRetry({ post }: { post: Post }) {
       excluded={null}
       buddy
       placement="above"
-      onConfirm={(config) =>
-        buddyWrite(`/api/buddies/posts/${encodeURIComponent(post.id)}/retry`, 'POST', { config })
-      }
+      onConfirm={(config) => retryFailedReply(post.id, config)}
     />
   );
 }
