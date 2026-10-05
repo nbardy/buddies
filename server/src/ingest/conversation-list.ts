@@ -43,9 +43,25 @@ type Records = {
  */
 export type ListedRuntime = Omit<HistorySubject, 'createdAt'>;
 
+/**
+ * A listed row without its run state. `run` is never cached: it is read from external activity
+ * whenever a row is served (`servedRow`). Incident 2026-10-01
+ * (agent_notes/2026-10-01_product_lead_dispatch_fanout_handoff.md): an open tab showed two Codex
+ * native children "running" an hour after their parents finished. The cache kept the `run` of
+ * each row's last publish, which is always `running` (relist marks the session active before the
+ * settle publishes), and the quiet backstop (`expireExternal`) only broadcast `idle`. Every hello
+ * after that (a reconnect) re-served the frozen `running`, the activity had already expired so
+ * no patch ever followed, and the client kept it. A fresh hello said idle only because a detail
+ * GET (the worker badge loads one for each row it sees running) had materialized the child into
+ * a runtime, whose own row is idle; that sends no patch either. Omitting the
+ * field makes that stale copy unrepresentable. Guard: ingest-list.test.ts "a hello after the
+ * quiet backstop agrees with the patched tab; a child outliving its parent stays running".
+ */
+export type ListedRow = Omit<ConversationRow, 'run'>;
+
 /** What one record contributes to the list. A sum, so the join never guesses a row. */
 type Listing =
-  | { t: 'listed'; row: ConversationRow }
+  | { t: 'listed'; row: ListedRow }
   /** No bound transcript in the store: only a runtime (app-created, not yet run) shows it. */
   | { t: 'no_transcript' }
   /** No cwd in record or transcripts (Muse approval-review children); never guessed, counted. */
@@ -138,8 +154,7 @@ export function listingFor(
   record: RecordSummary,
   sessions: readonly SessionRow[],
   settled: Settled,
-  conversationOfSession: (sessionId: string) => string | undefined,
-  run: ConversationRow['run']
+  conversationOfSession: (sessionId: string) => string | undefined
 ): Listing {
   if (sessions.length === 0) return { t: 'no_transcript' };
   const cwd = cwdOf(record, sessions);
@@ -156,7 +171,6 @@ export function listingFor(
       provider: record.provider,
       cwd,
       ...historyFields(record, sessions, settled, undefined),
-      run,
       done: record.done,
     },
   };
@@ -192,7 +206,7 @@ export interface JoinedConversation {
   /** Bound sessions in the store, oldest first. */
   sessions: SessionRow[];
   /** Present when the record is listed (has a transcript and a working directory). */
-  row: ConversationRow | null;
+  row: ListedRow | null;
 }
 
 export interface ConversationList {
@@ -259,7 +273,7 @@ export async function createConversationList(
   const recordOf = new Map<string, RecordSummary>();
   const conversationBySession = new Map<string, string>();
   const settledOf = new Map<string, Settled>();
-  const rows = new Map<string, ConversationRow>();
+  const rows = new Map<string, ListedRow>();
   /** Conversations whose transcript changed while their turn ran. */
   const queued = new Map<string, { rewritten: boolean }>();
   const served = new Map<string, { key: string; messages: Message[] }>();
@@ -278,14 +292,16 @@ export async function createConversationList(
       ? 'running'
       : 'idle';
 
+  /** A row as sent to clients: run state read now, never cached (see ListedRow). */
+  const servedRow = (record: RecordSummary, row: ListedRow): ConversationRow => ({
+    ...row,
+    run: runOf(record),
+  });
+
   function listing(record: RecordSummary): Listing {
     const settled = settledOf.get(record.conversationId) ?? unsettled(record);
-    return listingFor(
-      record,
-      boundSessions(record),
-      settled,
-      (id) => conversationBySession.get(id),
-      runOf(record)
+    return listingFor(record, boundSessions(record), settled, (id) =>
+      conversationBySession.get(id)
     );
   }
 
@@ -407,7 +423,7 @@ export async function createConversationList(
       });
       dependencies.broadcast({ type: 'patch', id, patch: { t: 'label', label: fields.label } });
     } else if (!previous) {
-      dependencies.broadcast({ type: 'rows', ...encodeRows([result.row]) });
+      dependencies.broadcast({ type: 'rows', ...encodeRows([servedRow(record, result.row)]) });
     } else {
       for (const patch of patchesBetween(previous, result.row)) {
         dependencies.broadcast({ type: 'patch', id, patch });
@@ -544,7 +560,12 @@ export async function createConversationList(
   let pending: Promise<void> = Promise.resolve();
 
   return {
-    rows: () => [...rows.values()].filter((row) => !dependencies.runtime(row.id)),
+    // `rows` and `recordOf` share keys (both set by a listed publish, both cleared by forget).
+    rows: () =>
+      [...rows].flatMap(([id, row]) => {
+        const record = recordOf.get(id);
+        return record && !dependencies.runtime(id) ? [servedRow(record, row)] : [];
+      }),
     ids: () => [...rows.keys()],
     joined(conversationId) {
       const record = recordOf.get(conversationId);
@@ -625,7 +646,7 @@ function pageOf(
 
 // Pattern: patches-not-snapshots (docs/patterns.md#patches-not-snapshots)
 /** The field patches that move `before` to `after` (only the fields the store derives). */
-function patchesBetween(before: ConversationRow, after: ConversationRow): RowPatch[] {
+function patchesBetween(before: ListedRow, after: ListedRow): RowPatch[] {
   const patches: RowPatch[] = [];
   if (before.label !== after.label) patches.push({ t: 'label', label: after.label });
   if (before.activityAt !== after.activityAt || before.messageCount !== after.messageCount) {
