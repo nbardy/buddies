@@ -577,14 +577,23 @@ const OVERLOAD_CUES: Cue[] = [
 // The reveal reads its own clock: seconds since the cut.
 const RevealScene: React.FC = () => <Reveal.OverloadReveal t={useCurrentFrame() / FPS} />;
 
-export const Overload: React.FC = () => (
+// Picture and sound are separate so the Assembly's sound renders without stepping through footage.
+export const OverloadSound: React.FC = () => <Soundtrack cues={OVERLOAD_CUES} fps={FPS} />;
+
+export const OverloadPicture: React.FC = () => (
   <AbsoluteFill>
-    <Soundtrack cues={OVERLOAD_CUES} fps={FPS} />
     <Sequence durationInFrames={frames(T.cut)}>
       <Pileup />
     </Sequence>
     <Sequence from={frames(T.cut)} durationInFrames={frames(T.end - T.cut)}>
       <RevealScene />
     </Sequence>
+  </AbsoluteFill>
+);
+
+export const Overload: React.FC = () => (
+  <AbsoluteFill>
+    <OverloadSound />
+    <OverloadPicture />
   </AbsoluteFill>
 );

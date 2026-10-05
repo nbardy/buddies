@@ -6,15 +6,16 @@ Owner, 2026-10-05: of the three reveal songs, the EDM "Drop" is the one: "great"
 fun non-monotone beat that comes in when the buddies launch" (the hook: the robots' boop line an
 octave up, on the 8ths 0, 2, 3, 4, 6). It replaces the edm.py build version of this file. The robots
 pop on the "AI Overload" screen during bar 1; the logo locks on the drop (bar 3). Cue bar b is
-Assembly bar b - 2 (Assembly's bar 1 is the lock):
+Assembly bar b - 2 (Assembly's bar 1 is the lock). Order of 2026-10-05: the logo holds two bars,
+the swarm comes right after the home, the benefits move to just before the Vim line:
 
   bar  1        ROBOTS  five boops = the melody's first notes       (on the AI Overload screen)
   bar  2        BUILD   snare roll, riser, a beat of silence         (the robots gather)
   bar  3        DROP    full band + the hook                         (the logo)
-  bars 4-6      HOME    lighter: filtered chords, soft kick          (home)
-  bars 7-34     FULL    the groove; on each scene's downbeat a crash and the hook again
-  bars 35-38    CODA    the home texture again, quiet                (the Vim line)
-  bar  39       END     one ringing D chord, the hook on a pluck     (the end card), 6 s, faded
+  bars 4-7      HOME    lighter: filtered chords, soft kick          ("buddies" holds, then the home)
+  bars 8-37     FULL    the groove; on each scene's downbeat a crash and the hook again
+  bars 38-41    CODA    the home texture again, quiet                (the Vim line)
+  bar  42       END     one ringing D chord, the hook on a pluck     (the end card), 6 s, faded
 
 Writes launch.wav: stereo 48 kHz 16-bit, peak -3 dBFS.
 """
@@ -36,11 +37,11 @@ from reveal import (
 )
 
 DROP_SONG = next(f for f in FLAVOURS if f.name == "drop")
-HOME = range(4, 7)
-FULL = range(7, 35)
-SCENES = (7, 11, 15, 23, 27, 31)  # benefits, ask, show their work, harness, swarms, fork
-CODA = range(35, 39)
-END = 39
+HOME = range(4, 8)
+FULL = range(8, 38)
+SCENES = (8, 12, 16, 24, 30, 34)  # swarms, ask, show their work, harness, fork, benefits
+CODA = range(38, 42)
+END = 42
 RING = 6.0
 FADE = 4.0
 

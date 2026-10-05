@@ -32,7 +32,8 @@ const R = {
   tag: song(3, 2),
 };
 export const LOCK = R.lock;
-export const END = R.lock + BAR; // one bar on the logo, then the home scene
+// Two bars on the logo, then the home scene. Owner, 2026-10-05: at one bar "buddies" went by too fast to read.
+export const END = R.lock + 2 * BAR;
 export const CUE_IN = SONG;
 
 const easeOutCubic = (x: number) => 1 - (1 - x) ** 3;

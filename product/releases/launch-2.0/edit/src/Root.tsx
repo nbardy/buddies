@@ -67,6 +67,22 @@ export const Root: React.FC = () => (
       height={Assembly.HEIGHT}
     />
     <Composition
+      id="AssemblyPicture"
+      component={Assembly.AssemblyPicture}
+      durationInFrames={Assembly.DURATION}
+      fps={Assembly.FPS}
+      width={Assembly.WIDTH}
+      height={Assembly.HEIGHT}
+    />
+    <Composition
+      id="AssemblySound"
+      component={Assembly.AssemblySound}
+      durationInFrames={Assembly.DURATION}
+      fps={Assembly.FPS}
+      width={Assembly.WIDTH}
+      height={Assembly.HEIGHT}
+    />
+    <Composition
       id="Close"
       component={Close.Close}
       durationInFrames={Close.DURATION}
