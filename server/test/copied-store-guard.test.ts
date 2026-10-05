@@ -44,7 +44,7 @@ async function seedStore(dir: string): Promise<void> {
     core.post(
       OWNER,
       { kind: 'direct', members: [OWNER, buddyActor(buddy.id)] },
-      { kind: 'request', body: `Do the thing ${key}`, evidence: [], broadcast: false, key }
+      { kind: 'request', body: `Do the thing ${key}`, evidence: [], broadcast: false, wakes: [], key }
     );
   await ask('stale'); // its run is claimed below and left running under a 1 ms lease
   const claimed = await core.claimRun({ leaseMs: 1, chatDeadlineMs: 1, turnDeadlineMs: 1 });

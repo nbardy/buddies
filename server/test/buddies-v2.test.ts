@@ -1263,6 +1263,7 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
         fromConversationId: duringGate.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'during-gate',
       }
     );
@@ -1308,6 +1309,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
         body: `[@Lead](buddy:${w.lead.id}) start`,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'selection-root',
       }
     );
@@ -1329,6 +1331,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
         fromConversationId: old.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'old-work',
       }
     );
@@ -1416,6 +1419,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
         replyToId: root.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'next-after-failure',
       }
     );
@@ -1451,6 +1455,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
           replyToId,
           evidence: [],
           broadcast: false,
+          wakes: [],
           key: `scope-${++n}`,
         }
       );
@@ -1495,6 +1500,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
         fromConversationId: external.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'newer-external',
       }
     );
@@ -1527,6 +1533,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
         fromConversationId: external.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'history-other',
       }
     );
@@ -1563,6 +1570,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
         fromConversationId: 'retired-history',
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'retired-history',
       }
     );
@@ -1732,6 +1740,7 @@ test('an unpinned Buddy runs the installed agent; a pinned one never moves', asy
           body: `[@Product Dev](buddy:${home.productDevId}) status?`,
           evidence: [],
           broadcast: false,
+          wakes: [],
           key,
         }
       );
