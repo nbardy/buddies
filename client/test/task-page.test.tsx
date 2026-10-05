@@ -4,6 +4,7 @@ import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import type { Task, TaskDetail } from '../src/components/buddies/types';
+import { CODEX_INSTALLED } from './fixtures/buddy-roster';
 
 register(
   `data:text/javascript,${encodeURIComponent(`
@@ -66,7 +67,12 @@ test('Home task destination shows task details, project and subtask links, and m
             taskId="current"
             workspaceId="workspace"
             channelId="general"
-            directory={workspaceDirectory([], 'workspace', [project, current, child])}
+            directory={workspaceDirectory(
+              [],
+              'workspace',
+              [project, current, child],
+              CODEX_INSTALLED
+            )}
             submit={submit}
           />
         </MemoryRouter>

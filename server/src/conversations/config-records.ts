@@ -178,12 +178,13 @@ export class ConversationRecordStore {
     }
   }
 
-  /** Compare-and-set on `configRevision`; provenance becomes `user`. */
+  /** Compare-and-set on `configRevision`; ordinary edits have `user` provenance. */
   async setConfig(input: {
     conversationId: string;
     expectedConfigRevision: number;
     config: ConversationConfig;
     lastResolvedConfig: ResolvedExecutionConfig;
+    provenance?: ConfigProvenance;
   }): Promise<SetConfigResult> {
     const outcome = await (await this.ready).setConfig(
       {
@@ -191,6 +192,7 @@ export class ConversationRecordStore {
         expectedConfigRevision: input.expectedConfigRevision,
         config: input.config,
         lastResolvedConfig: input.lastResolvedConfig,
+        provenance: input.provenance,
       },
       this.at()
     );

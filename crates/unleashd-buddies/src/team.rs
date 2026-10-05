@@ -31,6 +31,18 @@ impl Store {
                     "INSERT INTO workspace (id, name, root_path, created_at) VALUES (?1, ?2, ?3, ?4)",
                     params![id, input.name, input.root_path, now_iso()],
                 )?;
+                // Fix-guard: a fresh install's Home posts to #general, and the crate gave new
+                // workspaces no channel, so Home rendered no composer (fresh-install trial
+                // 2026-10-05, agent_notes/2026-10-05_fresh-install-launch-blockers-decision.md).
+                // Created in this same write so the client never find-or-creates it. Guarded by
+                // `new_workspace_has_general_once` in tests/core.rs.
+                // NOT inserted for an existing workspace (early return above): backfilling live
+                // stores is a separate decision.
+                tx.execute(
+                    "INSERT INTO channel (id, workspace_id, kind, name, purpose, created_at)
+                     VALUES (?1, ?2, 'public', 'general', 'Workspace-wide discussion', ?3)",
+                    params![new_id("list"), id, now_iso()],
+                )?;
                 Ok(id.clone())
             })?;
             workspace_at(tx, &input.root_path)?.ok_or_else(|| CoreError::not_found("workspace", &id))

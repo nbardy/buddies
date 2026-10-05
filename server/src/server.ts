@@ -79,6 +79,7 @@ import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { createDependencyChecks, registerDependencyRoutes } from './providers/dependencies';
+import { installedAgent } from './providers/installed-agent';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
@@ -326,7 +327,7 @@ const buddiesCore = lateBoundCore(buddiesReady);
 const buddyEvents = createBuddyEvents();
 // A grant lives as long as its run's lease at most; settle and turn end revoke it sooner.
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
-const buddyBriefings = createBriefings(buddiesCore);
+const buddyBriefings = createBriefings(buddiesCore, () => installedAgent());
 let buddyMcp: McpEndpoint | null = null;
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {
   if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
@@ -376,6 +377,7 @@ const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 const buddyCreationService: BuddyCreationService = createBuddyCreationService({
   configService: conversationConfigService,
   resolveBuddyConversation,
+  installedAgent: () => installedAgent(),
   resolveWorkingDirectory: resolveWorkingDirectoryInput,
   createId: uuidv4,
   getConversation: (id) => applicationContext.registry.get(id),
@@ -608,14 +610,15 @@ const buddyConversations: StableConversationPorts = {
   getConversation: (id) => applicationContext.registry.get(id),
   ensureConversationReady: buddyCreationService.ensureConversationReady,
   createConversation: (input) => buddyCreationService.createServerBuddyConversation(input),
-  reconfigure: (conversation, config) =>
-    replaceRuntimeConfig(conversationConfigService, conversation, config),
+  reconfigure: (conversation, config, provenance) =>
+    replaceRuntimeConfig(conversationConfigService, conversation, config, provenance),
 };
 
 // One channel's posts or responders changed: clients refresh only that channel's views.
 const channelChanged = (channelId: string) =>
   applicationContext.broadcast({ type: 'channel_changed', channelId });
 const buddyChannels = createChannels({
+  installedAgent: () => installedAgent(),
   core: buddiesCore,
   events: buddyEvents,
   channelChanged,
