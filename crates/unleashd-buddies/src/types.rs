@@ -32,7 +32,7 @@ str_enum!(TaskStatus { Open = "open", InProgress = "in_progress", Blocked = "blo
 str_enum!(RunStatus { Queued = "queued", Running = "running", CancelRequested = "cancel_requested", Complete = "complete", Failed = "failed", Cancelled = "cancelled" });
 str_enum!(DocKind { Soul = "soul", Working = "working", LongTerm = "long_term", Shared = "shared" });
 str_enum!(PostKind { Inform = "inform", Request = "request" });
-str_enum!(Op { ReadDoc = "read_doc", WriteDoc = "write_doc", Post = "post", ReadChannel = "read_channel", SearchPosts = "search_posts", CreateChannel = "create_channel", ArchiveChannel = "archive_channel", RenameChannel = "rename_channel", WriteTask = "write_task", EnqueueRun = "enqueue_run", CancelRun = "cancel_run", WriteSchedule = "write_schedule", Admin = "admin" });
+str_enum!(Op { ReadDoc = "read_doc", WriteDoc = "write_doc", Post = "post", ReadChannel = "read_channel", SearchPosts = "search_posts", CreateChannel = "create_channel", ArchiveChannel = "archive_channel", RenameChannel = "rename_channel", WriteTask = "write_task", EnqueueRun = "enqueue_run", CancelRun = "cancel_run", RetryRun = "retry_run", WriteSchedule = "write_schedule", Admin = "admin" });
 
 /// Who acts. Stored as NULL (post author / channel creator) or the key `'owner'` (events, read
 /// cursors, channel members).
@@ -76,6 +76,8 @@ pub enum Subject {
     Owner,
     Buddy { id: String },
     Channel { id: String },
+    /// A run, for `RetryRun`: its Buddy and managers, or the author of the request it answers.
+    Run { id: String },
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]

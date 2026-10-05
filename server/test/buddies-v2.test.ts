@@ -1970,6 +1970,149 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
   }
 });
 
+// Regression: 0fef9d4 (lean rewrite) dropped `buddy.new_list` and `buddy.retry_run`, and a tool-count
+// assertion (13) never noticed which CAPABILITIES went with them. This checks what a worker turn can
+// DO, through the real MCP endpoint's tool schemas, so a rewrite that reshapes tools but drops a
+// capability fails here by name. Do not replace it with a count.
+test('a worker turn can still create channels, search and follow, spawn and retry runs, write tasks and memory', async () => {
+  const w = await world();
+  try {
+    const spec = w.endpoint.spec(
+      w.grants.issueBuddy({
+        role: 'worker',
+        buddyId: w.lead.id,
+        workspaceId: w.ws,
+        conversationId: 'capability-guard',
+        runId: null,
+        returns: INBOX,
+      })
+    );
+    const client = await connect(spec);
+    let schemas: Map<string, string>;
+    try {
+      schemas = new Map(
+        (await client.listTools()).tools.map((t) => [t.name, JSON.stringify(t.inputSchema)])
+      );
+    } finally {
+      await client.close();
+    }
+    const schema = (tool: string) => {
+      const found = schemas.get(tool);
+      assert.ok(found, `worker lost the ${tool} tool`);
+      return found;
+    };
+    const capabilities: Array<[string, string, RegExp[]]> = [
+      ['create a channel', 'channel_create', [/"name"/, /"purpose"/]],
+      ['search by channel and author', 'channel_read', [/"search"/, /"channels"/, /"from"/]],
+      ['follow a thread', 'channel_read', [/"follow"/, /"until"/]],
+      ['request a worker on a chosen model', 'post', [/"worker"/, /"request"/, /"answers"/]],
+      ['cancel a run', 'runs', [/"cancel"/]],
+      ['retry a run on another model', 'runs', [/"retry"/, /"worker"/]],
+      ['write a task', 'task_write', [/"changes"|"title"/]],
+      ['read memory', 'doc_read', [/"memory"|"working"|"kind"/]],
+      ['write memory', 'doc_write', [/"baseRevision"/]],
+    ];
+    for (const [what, tool, needs] of capabilities)
+      for (const need of needs)
+        assert.match(schema(tool), need, `worker can no longer ${what}: ${tool} lacks ${need}`);
+  } finally {
+    await w.close();
+  }
+});
+
+// A Buddy whose worker failed could only re-ask from scratch once `buddy.retry_run` was dropped.
+// End to end through the real runner and MCP endpoint: the worker fails, the failure notice wakes
+// the spawner, it retries on another model, and the retry's answer wakes the same conversation.
+test('runs retry re-runs a failed worker as attempt 2 on another model and wakes the requester with its answer', async () => {
+  const w = await world();
+  try {
+    const luna = { provider: 'codex', model: 'gpt-6-luna', reasoningEffort: 'low' };
+    const sol = { provider: 'codex', model: 'gpt-6-sol' };
+    let spawned!: Post;
+    const results: Array<{ isError: boolean; text: string }> = [];
+    w.during.set(1, async (turn) => {
+      const posted = await call(turn.mcp, 'post', {
+        channel: { direct: [] },
+        kind: 'request',
+        body: 'Sweep the repo',
+        worker: luna,
+        key: 'sweep',
+      });
+      assert.equal(posted.isError, false, posted.text);
+      spawned = posted.value;
+    });
+    const route = async (turn: Turn) => {
+      const prompt = turn.request.prompt;
+      if (prompt.includes(`Request ${spawned.id}`)) {
+        // Attempt 1 dies on the provider; attempt 2 answers.
+        const attempts = w.turns.filter((t) => t.request.prompt.includes(`Request ${spawned.id}`));
+        if (attempts.length === 1) return void w.providerErrors.set(turn.n, 'provider fell over');
+        const answered = await call(turn.mcp, 'post', {
+          answers: spawned.id,
+          body: 'Swept',
+          key: 'swept',
+        });
+        assert.equal(answered.isError, false, answered.text);
+      } else if (prompt.includes('for your request failed')) {
+        const failed = (await w.runs(w.lead.id)).find(
+          (r) => r.input.kind === 'post' && r.status === 'failed'
+        )!;
+        const key = 'retry-sweep';
+        const args = { action: { kind: 'retry', runId: failed.id, worker: sol, key } };
+        // A run already retried is a typed error, not a silent no-op; the same key replays.
+        const first = await call(turn.mcp, 'runs', args);
+        const replay = await call(turn.mcp, 'runs', args);
+        const stale = await call(turn.mcp, 'runs', {
+          action: { kind: 'retry', runId: failed.id, key: 'again' },
+        });
+        results.push(first, replay, stale);
+      }
+    };
+    for (let n = 2; n <= 6; n++) w.during.set(n, route);
+
+    const schedule = await w.core.putSchedule(OWNER, {
+      buddyId: w.lead.id,
+      name: 'sweep',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      prompt: 'Run the sweep',
+      limits: '{}',
+      enabled: true,
+      key: 'sweep',
+    });
+    await w.core.enqueueRun(OWNER, {
+      buddyId: w.lead.id,
+      input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
+    });
+    w.emit({ kind: 'changed' });
+
+    const retried = await until(async () => {
+      const run = (await w.runs(w.lead.id)).find((r) => r.input.kind === 'post' && r.attempt === 2);
+      return run?.status === 'complete' && run;
+    }, 'attempt 2 complete');
+    assert.deepEqual(retried.config, sol, 'the retry runs on the model it was moved to');
+    const returned = await until(
+      () =>
+        w.turns.find((t) => t.request.prompt.includes(`Your request ${spawned.id} was answered`)),
+      "the requester's wake with the retry's answer"
+    );
+    assert.equal(
+      returned.request.resumeSessionId,
+      'native-1',
+      'the answer returns to the conversation that asked'
+    );
+    assert.equal((await w.core.getPost(OWNER, spawned.id)).request.state, 'answered');
+    const [first, replay, stale] = results;
+    assert.equal(first.isError, false, first.text);
+    assert.equal(JSON.parse(first.text).id, JSON.parse(replay.text).id);
+    assert.equal(stale.isError, true, 'attempt 1 is no longer the latest');
+    const attempts = (await w.runs(w.lead.id)).filter((r) => r.input.kind === 'post');
+    assert.deepEqual(attempts.map((r) => r.attempt).sort(), [1, 2]);
+  } finally {
+    await w.close();
+  }
+});
+
 /** A PATH of real executables: what the reviewer's harness probe walks (providers/installed-agent). */
 function binPath(dir: string, ...names: string[]): NodeJS.ProcessEnv {
   const bin = join(dir, 'review-bin');

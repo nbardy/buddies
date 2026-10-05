@@ -568,13 +568,19 @@ const BUDDY_TOOLS = {
   }),
   runs: buddyTool({
     description:
-      'List run rows by {buddyId}, {taskId}, or {workspace} (yours: live runs first, then runs ended in the last 12 h) as {runs, truncated}. Each row says what happened: status, errorCode/error (errorCode "interrupted" = the host restarted mid-run) and conversationId. Get one full run or cancel. Queued rows include waiting.',
+      'List run rows by {buddyId}, {taskId}, or {workspace} (yours: live runs first, then runs ended in the last 12 h) as {runs, truncated}. Each row says what happened: status, errorCode/error (errorCode "interrupted" = the host restarted mid-run) and conversationId. Get one full run, cancel one, or retry a failed or cancelled one (retry re-enqueues the same input as the next attempt, optionally on another `worker` model, and reopens the request it answers; a live or complete run is an error). Queued rows include waiting.',
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('list'), scope: scopeSchema }),
         z.object({ kind: z.literal('get'), runId: z.string().min(1) }),
         z.object({ kind: z.literal('cancel'), runId: z.string().min(1) }),
+        z.object({
+          kind: z.literal('retry'),
+          runId: z.string().min(1),
+          worker: WorkerSchema.optional().describe('Absent: the retry runs as the failed run did'),
+          key,
+        }),
       ]),
     }),
     async handler(deps, grant, input) {
@@ -592,6 +598,15 @@ const BUDDY_TOOLS = {
           deps.events.emit({ kind: 'cancelled', run });
           return run;
         }
+        case 'retry':
+          // Attempt numbering and the request re-open live in the crate (runs.rs `retry_run`);
+          // authority too. Only the model choice is checked here, against the catalog.
+          return deps.core.retryRun(
+            grant.principal,
+            input.action.runId,
+            input.action.worker && checkedRunConfig(input.action.worker),
+            input.action.key
+          );
       }
     },
   }),

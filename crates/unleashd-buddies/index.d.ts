@@ -42,6 +42,7 @@ export declare class BuddiesCore {
   settleRun(runId: string, leaseToken: string, outcome: Outcome): Promise<Run>
   bindRun(runId: string, leaseToken: string, conversationId: string): Promise<Run>
   cancelRun(actor: Actor, runId: string): Promise<Run>
+  retryRun(actor: Actor, runId: string, config: RunConfig | undefined | null, key: string): Promise<Run>
   createWorkspace(actor: Actor, input: WorkspaceInput): Promise<Workspace>
   createBuddy(actor: Actor, input: BuddyCreate): Promise<Buddy>
   updateBuddy(actor: Actor, input: BuddyUpdate): Promise<Buddy>
@@ -327,7 +328,7 @@ export type ManagerRef =
   | { kind: 'nobody' }
   | { kind: 'buddy'; id: string }
 
-export type Op = 'read_doc' | 'write_doc' | 'post' | 'read_channel' | 'search_posts' | 'create_channel' | 'archive_channel' | 'rename_channel' | 'write_task' | 'enqueue_run' | 'cancel_run' | 'write_schedule' | 'admin'
+export type Op = 'read_doc' | 'write_doc' | 'post' | 'read_channel' | 'search_posts' | 'create_channel' | 'archive_channel' | 'rename_channel' | 'write_task' | 'enqueue_run' | 'cancel_run' | 'retry_run' | 'write_schedule' | 'admin'
 
 /** How a run ended, reported by the runner. */
 export type Outcome =
@@ -586,6 +587,7 @@ export type Subject =
   | { kind: 'owner' }
   | { kind: 'buddy'; id: string }
   | { kind: 'channel'; id: string }
+  | { kind: 'run'; id: string }
 
 export interface Task {
   id: string
