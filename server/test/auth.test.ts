@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { WS_PATH } from '@unleashd/shared';
 import { WebSocket } from 'ws';
-import { resolveAuthPolicy } from '../src/auth/policy';
+import { decideAuth } from '../src/auth/gate';
+import { digestToken, resolveAuthPolicy } from '../src/auth/policy';
 
 /**
  * Boots the real server process with a shared secret configured and probes it
@@ -19,6 +21,24 @@ import { resolveAuthPolicy } from '../src/auth/policy';
 const PORT = 7527;
 const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'f4c1a9e2b7d60358f4c1a9e2b7d60358';
+const OWNER = 'owner@example.com';
+const TS_HOST = 'buddies-mac.tail0000.ts.net';
+
+/**
+ * The test client is always on loopback, which this machine's browser is
+ * admitted from without a key. These headers are what `tailscale serve` sends
+ * for a device with no user login (a tagged device): forwarded from a tailnet
+ * address, so it must present the key like any other remote caller.
+ */
+const REMOTE = { 'x-forwarded-for': '100.101.102.103' } as const;
+/** What Serve sends for the owner's own phone. */
+const OWNER_PHONE = {
+  host: TS_HOST,
+  'x-forwarded-for': '100.64.0.7',
+  'x-forwarded-host': TS_HOST,
+  'x-forwarded-proto': 'https',
+  'tailscale-user-login': OWNER,
+} as const;
 
 let serverProcess: ChildProcess | null = null;
 let dataDirectory = '';
@@ -33,6 +53,21 @@ function startServer(): Promise<void> {
   const shim = path.join(shimDirectory, 'claude');
   fs.writeFileSync(shim, '#!/bin/sh\nexit 0\n', 'utf8');
   fs.chmodSync(shim, 0o755);
+  // A tailnet owned by OWNER whose Serve forwards TS_HOST to this server.
+  const status = { BackendState: 'Running', Self: { DNSName: `${TS_HOST}.`, UserID: 7 } };
+  const serve = { Web: { [`${TS_HOST}:443`]: { Handlers: { '/': { Proxy: BASE } } } } };
+  fs.writeFileSync(
+    path.join(shimDirectory, 'status.json'),
+    JSON.stringify({ ...status, User: { '7': { LoginName: OWNER } } })
+  );
+  fs.writeFileSync(path.join(shimDirectory, 'serve.json'), JSON.stringify(serve));
+  const tailscale = path.join(shimDirectory, 'tailscale');
+  fs.writeFileSync(
+    tailscale,
+    `#!/bin/sh\ncase "$1" in\n  status) cat "${shimDirectory}/status.json";;\n  serve) cat "${shimDirectory}/serve.json";;\nesac\n`,
+    'utf8'
+  );
+  fs.chmodSync(tailscale, 0o755);
 
   return new Promise((resolve, reject) => {
     serverProcess = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
@@ -42,14 +77,21 @@ function startServer(): Promise<void> {
         HOME: dataDirectory,
         PATH: `${shimDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
         PORT: String(PORT),
+        // Not development: the UI is served from PORT itself, which is where
+        // the fake Serve config points (development would expect Vite's 7489).
+        NODE_ENV: 'test',
         UNLEASHD_DATA_DIR: dataDirectory,
         UNLEASHD_AUTH_TOKEN: '',
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const timer = setTimeout(() => reject(new Error('server did not start in 30s')), 30_000);
+    // Both lines: the tailnet test needs the owner read, which lands in the
+    // background and could trail "Server running" on a loaded machine.
+    let output = '';
     serverProcess.stdout?.on('data', (chunk: Buffer) => {
-      if (chunk.toString().includes('Server running')) {
+      output += chunk.toString();
+      if (output.includes('Server running') && output.includes(`tailnet owner: ${OWNER}`)) {
         clearTimeout(timer);
         setTimeout(resolve, 300);
       }
@@ -80,6 +122,27 @@ async function stopServer(): Promise<void> {
   if (dataDirectory) fs.rmSync(dataDirectory, { recursive: true, force: true });
 }
 
+/** node:http, not fetch: fetch will not send an arbitrary Host header. */
+function probe(
+  pathname: string,
+  headers: Record<string, string>,
+  method = 'GET'
+): Promise<{ status: number; headers: http.IncomingHttpHeaders }> {
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      { host: '127.0.0.1', port: PORT, path: pathname, method, headers },
+      (response) => {
+        response.resume();
+        response.on('end', () =>
+          resolve({ status: response.statusCode ?? 0, headers: response.headers })
+        );
+      }
+    );
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 function connectWebSocket(headers: Record<string, string>): Promise<'open' | 'rejected'> {
   return new Promise((resolve) => {
     const socket = new WebSocket(`ws://127.0.0.1:${PORT}${WS_PATH}`, { headers });
@@ -103,8 +166,8 @@ describe('shared-secret auth (real server)', () => {
   before(startServer);
   after(stopServer);
 
-  test('API data is not served without a credential', async () => {
-    const response = await fetch(`${BASE}/api/provider-catalog`);
+  test('API data is not served to a remote caller without a credential', async () => {
+    const response = await fetch(`${BASE}/api/provider-catalog`, { headers: REMOTE });
     assert.equal(response.status, 401);
     assert.deepEqual(await response.json(), {
       error: 'unauthorized',
@@ -124,14 +187,14 @@ describe('shared-secret auth (real server)', () => {
     // digests is what keeps this a 401 instead of a 500.
     for (const wrong of ['x', `${TOKEN}extra`, TOKEN.replace('f', 'a')]) {
       const response = await fetch(`${BASE}/api/provider-catalog`, {
-        headers: { authorization: `Bearer ${wrong}` },
+        headers: { ...REMOTE, authorization: `Bearer ${wrong}` },
       });
       assert.equal(response.status, 401, `expected 401 for ${wrong.slice(0, 8)}…`);
     }
   });
 
   test('the app shell itself is gated and answers with a login form', async () => {
-    const response = await fetch(BASE, { headers: { accept: 'text/html' } });
+    const response = await fetch(BASE, { headers: { ...REMOTE, accept: 'text/html' } });
     assert.equal(response.status, 401);
     const body = await response.text();
     assert.match(body, /action="\/__auth\/login"/);
@@ -151,7 +214,7 @@ describe('shared-secret auth (real server)', () => {
     assert.match(cookie, /SameSite=Lax/);
 
     const withCookie = await fetch(`${BASE}/api/provider-catalog`, {
-      headers: { cookie: `unleashd_auth=${TOKEN}` },
+      headers: { ...REMOTE, cookie: `unleashd_auth=${TOKEN}` },
     });
     assert.equal(withCookie.status, 200);
   });
@@ -181,7 +244,7 @@ describe('shared-secret auth (real server)', () => {
     // The client redirects here on any 401. If this path were itself gated the
     // browser would bounce between 401 and redirect forever.
     const response = await fetch(`${BASE}/__auth/login?redirectTo=/chat/xyz`, {
-      headers: { accept: 'text/html' },
+      headers: { ...REMOTE, accept: 'text/html' },
     });
     assert.equal(response.status, 200);
     assert.match(await response.text(), /name="redirectTo" value="\/chat\/xyz"/);
@@ -189,7 +252,7 @@ describe('shared-secret auth (real server)', () => {
 
   test('a crafted redirectTo cannot turn the form into an open redirect', async () => {
     const response = await fetch(`${BASE}/__auth/login?redirectTo=//evil.example.com`, {
-      headers: { accept: 'text/html' },
+      headers: { ...REMOTE, accept: 'text/html' },
     });
     const body = await response.text();
     assert.match(body, /name="redirectTo" value="\/"/);
@@ -262,10 +325,94 @@ describe('shared-secret auth (real server)', () => {
     assert.match(cookie, /Max-Age=\d+/);
   });
 
-  test('the WebSocket command channel refuses unauthenticated upgrades', async () => {
-    assert.equal(await connectWebSocket({}), 'rejected');
-    assert.equal(await connectWebSocket({ cookie: 'unleashd_auth=wrong' }), 'rejected');
-    assert.equal(await connectWebSocket({ cookie: `unleashd_auth=${TOKEN}` }), 'open');
+  test('the WebSocket command channel refuses unauthenticated remote upgrades', async () => {
+    assert.equal(await connectWebSocket({ ...REMOTE }), 'rejected');
+    assert.equal(await connectWebSocket({ ...REMOTE, cookie: 'unleashd_auth=wrong' }), 'rejected');
+    assert.equal(await connectWebSocket({ ...REMOTE, cookie: `unleashd_auth=${TOKEN}` }), 'open');
+  });
+
+  test("this machine's browser gets in without a key, API and socket alike", async () => {
+    // The 2026-10-05 onboarding complaint: the owner's own desktop was asked
+    // for a key it had never seen.
+    assert.equal((await fetch(`${BASE}/api/provider-catalog`)).status, 200);
+    assert.equal(await connectWebSocket({ origin: BASE }), 'open');
+  });
+
+  test('a foreign web page cannot ride the local admission', async () => {
+    // Browsers do not block cross-site WebSockets: without the Origin check,
+    // any site the owner visits could open ws://localhost/ws and run agents.
+    assert.equal(await connectWebSocket({ origin: 'https://evil.example' }), 'rejected');
+    assert.equal(await connectWebSocket({ origin: 'null' }), 'rejected');
+    const crossSitePost = await probe(
+      '/api/mobile-access/pairing',
+      { host: `127.0.0.1:${PORT}`, origin: 'https://evil.example' },
+      'POST'
+    );
+    assert.equal(crossSitePost.status, 401);
+    // DNS rebinding: evil.example re-resolved to 127.0.0.1 is same-origin to
+    // itself, so only the Host header gives it away.
+    const rebound = await probe('/api/provider-catalog', {
+      host: `evil.example:${PORT}`,
+      origin: `http://evil.example:${PORT}`,
+    });
+    assert.equal(rebound.status, 401);
+  });
+
+  test("the owner's tailnet devices get in; other tailnet users and Funnel do not", async () => {
+    assert.equal((await probe('/api/provider-catalog', { ...OWNER_PHONE })).status, 200);
+    assert.equal(await connectWebSocket({ ...OWNER_PHONE, origin: `https://${TS_HOST}` }), 'open');
+    // Someone the owner shared the machine with is a different login.
+    const sharee = await probe('/api/provider-catalog', {
+      ...OWNER_PHONE,
+      'tailscale-user-login': 'friend@example.com',
+    });
+    assert.equal(sharee.status, 401);
+    // A page the phone visits cannot drive the socket through Serve either.
+    assert.equal(
+      await connectWebSocket({ ...OWNER_PHONE, origin: 'https://evil.example' }),
+      'rejected'
+    );
+    // Funnel requests carry no login; Serve marks them instead.
+    const { 'tailscale-user-login': _login, ...anonymous } = OWNER_PHONE;
+    const funnel = await probe('/api/provider-catalog', {
+      ...anonymous,
+      'tailscale-funnel-request': '?1',
+    });
+    assert.equal(funnel.status, 401);
+  });
+
+  test('a pairing QR signs a phone in once, and never carries the key', async () => {
+    const minted = await fetch(`${BASE}/api/mobile-access/pairing`, {
+      method: 'POST',
+      headers: { origin: BASE },
+    });
+    assert.equal(minted.status, 200, await minted.clone().text());
+    const pairing = (await minted.json()) as { url: string; svg: string; expiresAt: number };
+    const link = new URL(pairing.url);
+    assert.equal(link.host, TS_HOST);
+    assert.equal(link.pathname, '/__auth/pair');
+    assert.doesNotMatch(pairing.url, new RegExp(TOKEN));
+    assert.match(pairing.svg, /^<svg/);
+
+    // A remote caller cannot mint one: only someone already admitted can pair.
+    const remoteMint = await fetch(`${BASE}/api/mobile-access/pairing`, {
+      method: 'POST',
+      headers: REMOTE,
+    });
+    assert.equal(remoteMint.status, 401);
+
+    const target = `${link.pathname}${link.search}`;
+    const scanned = await probe(target, { ...REMOTE, 'x-forwarded-proto': 'https' });
+    assert.equal(scanned.status, 302);
+    assert.equal(scanned.headers.location, '/');
+    const cookie = String(scanned.headers['set-cookie'] ?? '');
+    assert.match(cookie, new RegExp(`unleashd_auth=${TOKEN}`));
+    assert.match(cookie, /Secure/);
+
+    const rescanned = await probe(target, { ...REMOTE });
+    assert.equal(rescanned.status, 302);
+    assert.equal(rescanned.headers.location, '/__auth/login?error=pairing-expired');
+    assert.equal(rescanned.headers['set-cookie'], undefined);
   });
 
   // Wire compression lives on the same gated wiring, so it is probed here
@@ -310,37 +457,40 @@ describe('auth policy resolution', () => {
     throw new Error('ENOENT');
   };
 
-  test('refuses to start when bound off-loopback with no token', () => {
-    // The whole point of the feature: exposing the port must not be possible
-    // by accident. A regression here reintroduces the original audit finding.
-    const resolution = resolveAuthPolicy({
-      env: {},
-      listenHost: '0.0.0.0',
-      dataDirectory: '/nonexistent',
-      readFile: noFiles,
-    });
-    assert.equal(resolution.ok, false);
-    assert.match(resolution.ok ? '' : resolution.error, /Refusing to listen on 0\.0\.0\.0/);
+  test('a fresh install creates a private key once, and every later start reuses it', () => {
+    // pnpm dev resolves this in the backend AND Vite at once; both must end up
+    // with the same key, or the browser holds a cookie only one gate accepts.
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'unleashd-key-'));
+    try {
+      const first = resolveAuthPolicy({ env: {}, dataDirectory: directory });
+      const second = resolveAuthPolicy({ env: {}, dataDirectory: directory });
+      const keyPath = path.join(directory, 'auth-token');
+      assert.deepEqual(first.ok && first.key, { kind: 'created', path: keyPath });
+      assert.deepEqual(second.ok && second.key, { kind: 'unchanged' });
+      const token = fs.readFileSync(keyPath, 'utf8').trim();
+      assert.match(token, /^[0-9a-f]{64}$/);
+      assert.equal(first.ok && first.policy.kind === 'required' && first.policy.token, token);
+      assert.equal(second.ok && second.policy.kind === 'required' && second.policy.token, token);
+      // Any local account could otherwise read the key.
+      assert.equal(fs.statSync(keyPath).mode & 0o777, 0o600);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
-  test('loopback without a token stays open so localhost dev keeps working', () => {
+  test('an empty named key file is an error, not a reason to invent a key', () => {
     const resolution = resolveAuthPolicy({
-      env: {},
-      listenHost: '127.0.0.1',
+      env: { UNLEASHD_AUTH_TOKEN_FILE: '/run/secrets/buddies' },
       dataDirectory: '/nonexistent',
-      readFile: noFiles,
+      readFile: () => '\n',
+      createFile: () => assert.fail('must not create a key'),
     });
-    assert.equal(resolution.ok, true);
-    assert.deepEqual(resolution.ok && resolution.policy, {
-      kind: 'open',
-      reason: 'loopback-without-token',
-    });
+    assert.equal(resolution.ok, false);
   });
 
   test('a too-short token is a startup error, not a weak accepted secret', () => {
     const resolution = resolveAuthPolicy({
       env: { UNLEASHD_AUTH_TOKEN: 'hunter2' },
-      listenHost: '127.0.0.1',
       dataDirectory: '/nonexistent',
       readFile: noFiles,
     });
@@ -348,17 +498,39 @@ describe('auth policy resolution', () => {
     assert.match(resolution.ok ? '' : resolution.error, /at least 16/);
   });
 
-  test('opting out off-loopback requires the explicit flag', () => {
+  test('opting out requires the explicit flag, and then no key is created', () => {
     const resolution = resolveAuthPolicy({
       env: { UNLEASHD_AUTH_DISABLED: '1' },
-      listenHost: '0.0.0.0',
       dataDirectory: '/nonexistent',
       readFile: noFiles,
+      createFile: () => assert.fail('must not create a key'),
     });
     assert.equal(resolution.ok, true);
     assert.deepEqual(resolution.ok && resolution.policy, {
       kind: 'open',
       reason: 'explicitly-disabled',
     });
+  });
+});
+
+describe('request classification', () => {
+  const policy = { kind: 'required', digest: digestToken(TOKEN), token: TOKEN } as const;
+  const owner = { kind: 'known', login: OWNER } as const;
+
+  test('a forged Tailscale login from a LAN peer is not the owner', () => {
+    // Serve always connects from loopback. Vite listens on every interface
+    // once a key exists, so a LAN host can send this header straight to it.
+    const decision = decideAuth(
+      policy,
+      { method: 'GET', url: '/api/x', headers: { ...OWNER_PHONE }, peer: '192.168.1.20' },
+      owner
+    );
+    assert.equal(decision.kind, 'challenge');
+    const lanBrowser = decideAuth(
+      policy,
+      { method: 'GET', url: '/', headers: { host: 'localhost:7489' }, peer: '192.168.1.20' },
+      owner
+    );
+    assert.equal(lanBrowser.kind, 'challenge');
   });
 });
