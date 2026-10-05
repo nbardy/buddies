@@ -198,6 +198,8 @@ async function world(reopen?: string) {
     events,
     grants,
     uploadsRoot: () => join(scratch, 'uploads'),
+    // Late-bound like server.ts: channels is built below, and the endpoint is only called after.
+    planWakes: (...args) => channels.planWakes(...args),
     portFile: join(scratch, 'buddy-mcp.json'),
   });
 
@@ -324,12 +326,13 @@ async function world(reopen?: string) {
           visibility: 'background',
         });
       },
-      runTurn: async ({ conversationId, context, prompt, leaseToken, deadline }) =>
+      runTurn: async ({ conversationId, context, prompt, input, leaseToken, deadline }) =>
         conversations
           .get(conversationId)!
-          .runCoordinationMessage(prompt, context, leaseToken, deadline),
+          .runCoordinationMessage(prompt, input, context, leaseToken, deadline),
       stop: (id) => conversations.get(id)?.stop(),
     },
+    seats: () => channels.seats,
   });
   const port = createBuddyPolicyPort({ runner, grants, briefings, reviewer, spec: endpoint.spec });
   const Conversation = createConversationRuntime({
@@ -390,7 +393,18 @@ async function world(reopen?: string) {
   return {
     core,
     /** A crate post, unwrapped from its PostWrite. */
-    post: async (...args: Parameters<typeof core.post>) => (await core.post(...args)).post,
+    // As every writer does (routes.ts publishOwnerPost, mcp.ts post): plan the must-answer
+    // wakes before the write, so they commit with the post; `picks` are the owner's chips.
+    post: async (
+      actor: Parameters<typeof core.post>[0],
+      ref: Parameters<typeof core.post>[1],
+      input: Parameters<typeof core.post>[2],
+      picks: MentionPicks = NO_PICKS
+    ) => {
+      const channel = await core.openChannel(OWNER, ref);
+      const wakes = await channels.planWakes(channel, actor, input, picks);
+      return (await core.post(actor, { kind: 'id', id: channel.id }, { ...input, wakes })).post;
+    },
     /** Announce a post in #general, as every post writer does: the one dispatch entry. */
     announce: (post: Post, picks: MentionPicks = NO_PICKS) =>
       events.emit({ kind: 'posted', post, channel: general, picks }),
@@ -1055,19 +1069,32 @@ test("an effort pick keeps the seat's session; a provider pick opens a new seat 
       reasoning: { mode: 'explicit' as const, effort },
     });
     let n = 0;
-    const say = (body: string, replyToId?: string) =>
+    const say = (body: string, replyToId?: string, picks?: MentionPicks) =>
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, wakes: [], key: `say-${++n}` }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          broadcast: false,
+          wakes: [],
+          key: `say-${++n}`,
+        },
+        picks
       );
     const replies = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 100)).posts.filter(
         (post) => post.purpose === 'reply'
       ).length;
     const mention = async (text: string, config: ConversationConfig, expected: number) => {
-      const post = await say(`[@Lead](buddy:${w.lead.id}) ${text}`, root.id);
-      w.announce(post, new Map([[w.lead.id, config]]));
+      const post = await say(
+        `[@Lead](buddy:${w.lead.id}) ${text}`,
+        root.id,
+        new Map([[w.lead.id, config]])
+      );
+      w.announce(post);
       await until(async () => (await replies()) === expected, `reply ${expected}`);
     };
     const root = await say('Plan the barrel solver');
@@ -1096,7 +1123,7 @@ test("an effort pick keeps the seat's session; a provider pick opens a new seat 
 
 // F1 (agent_notes/2026-09-28_channels-state-machine-review.md): a gate in flight for P1 while a
 // mention P2 ran; the mention turn read P1, then the gate's yes started a second turn answering it.
-test('a follow-up for a post a mention turn already read starts no second turn', async () => {
+test('a follow-up for a post a mention turn already read asks no gate and starts no turn', async () => {
   const w = await world();
   try {
     let n = 0;
@@ -1104,38 +1131,47 @@ test('a follow-up for a post a mention turn already read starts no second turn',
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, wakes: [], key: `say-${++n}` }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          broadcast: false,
+          wakes: [],
+          key: `say-${++n}`,
+        }
       );
     const replies = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts.filter(
         (post) => post.purpose === 'reply'
       ).length;
-    const root = await say(`[@Lead](buddy:${w.lead.id}) status?`);
-    w.announce(root);
-    await until(async () => (await replies()) === 1, "Lead's first reply");
-
+    // Durable lane (design Revision 9): the seat runs one input at a time in post order. While
+    // Lead's first turn runs, a mention (P2) and then a plain post (P3) queue behind it; the
+    // crate derives a follow_up for P3. The P2 turn's prompt shows P3 and its complete settle
+    // marks the thread read through it, so the follow_up asks no gate and starts no turn.
     let release!: () => void;
-    w.gate.hold = new Promise((resolve) => {
+    const held = new Promise<void>((resolve) => {
       release = resolve;
     });
+    w.during.set(1, () => held);
     w.gate.verdict = { kind: 'respond' };
+    const root = await say(`[@Lead](buddy:${w.lead.id}) status?`);
+    w.announce(root);
+    await until(() => w.turns.length === 1, "Lead's first turn running");
+    w.announce(await say(`[@Lead](buddy:${w.lead.id}) answer now`, root.id));
     w.announce(await say('Thoughts?', root.id));
-    await until(() => w.gate.calls === 1, 'the gate for P1 in flight');
-    const p2 = await say(`[@Lead](buddy:${w.lead.id}) answer now`, root.id);
-    w.announce(p2);
-    await until(async () => (await replies()) === 2, 'the mention reply');
-    assert.match(w.turns[1].request.prompt, /Thoughts\?/, 'the mention turn read P1');
     release();
-    // The gate's yes is queued now; a later mention runs behind it on the pair's serial queue.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const p3 = await say(`[@Lead](buddy:${w.lead.id}) one more`, root.id);
-    w.announce(p3);
-    await until(async () => (await replies()) === 3, 'the reply to P3');
-    assert.equal(
-      w.turns.filter((turn) => /you chose to reply/.test(turn.request.prompt)).length,
-      0,
-      "the gate's yes for an already-read post starts no turn"
+    await until(async () => (await replies()) === 2, 'the mention reply');
+    assert.match(w.turns[1].request.prompt, /Thoughts\?/, 'the mention turn read P3');
+    await until(
+      async () =>
+        (await w.core.listRuns({ kind: 'buddy', buddyId: w.lead.id }, 20)).some(
+          (run) => run.input.kind === 'follow_up' && run.status === 'cancelled'
+        ),
+      'the follow_up settles without a turn'
     );
+    assert.equal(w.gate.calls, 0, 'an already-read post asks no gate');
+    assert.equal(w.turns.length, 2, 'the follow_up for an already-read post starts no turn');
   } finally {
     await w.close();
   }
@@ -1214,7 +1250,15 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, wakes: [], key: `priority-${++n}` }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          broadcast: false,
+          wakes: [],
+          key: `priority-${++n}`,
+        }
       );
     const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
     await w.core.updateBuddy(OWNER, {
@@ -1392,7 +1436,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
       'chosen attempt fails'
     );
     assert.match(failed.body, /You've hit your weekly limit/);
-    await until(() => w.channels.responding(w.general.id).length === 0, 'failed pair idle');
+    await until(
+      async () => (await w.channels.responding(w.general.id)).length === 0,
+      'failed pair idle'
+    );
     const shown = mentionChoice(buddy, new Map(), (await threadRead()).seats);
     assert.equal(
       choiceLabel(shown, null),
@@ -1447,7 +1494,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     assert.equal(w.turns[1].request.harness, explicit.provider);
     assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
     assert.equal(w.turns[1].request.reasoningEffort, 'high');
-    await until(() => reloaded.responding(w.general.id).length === 0, 'reloaded reply idle');
+    await until(
+      async () => (await reloaded.responding(w.general.id)).length === 0,
+      'reloaded reply idle'
+    );
     const retry = await http('POST', `/api/buddies/posts/${failed.id}/retry`, {
       config: explicit,
       key: 'retry-explicit',
@@ -1455,7 +1505,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     assert.equal(retry.status, 202, JSON.stringify(retry.body));
     await until(() => w.turns.length === 3, 'plain weekly-limit retry invokes');
     assert.equal(w.turns[2].request.model, 'gpt-6.1-sol');
-    await until(() => w.channels.responding(w.general.id).length === 0, 'weekly retry idle');
+    await until(
+      async () => (await w.channels.responding(w.general.id)).length === 0,
+      'weekly retry idle'
+    );
   } finally {
     server.close();
     await w.close();
@@ -1483,7 +1536,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
     const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
     w.announce(root);
     await until(
-      () => w.turns.length === 1 && w.channels.responding(w.general.id).length === 0,
+      async () => w.turns.length === 1 && (await w.channels.responding(w.general.id)).length === 0,
       'default reply'
     );
     const initial = (await w.channels.threadSeats(root.id)).find(
@@ -1501,7 +1554,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
       new Map([[w.lead.id, initial]])
     );
     await until(
-      () => w.turns.length === 2 && w.channels.responding(w.general.id).length === 0,
+      async () => w.turns.length === 2 && (await w.channels.responding(w.general.id)).length === 0,
       'same-value pick fails'
     );
     const external = await w.creation.createServerBuddyConversation({
@@ -1535,7 +1588,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
       new Map([[w.designer.id, createDefaultConversationConfig('claude')]])
     );
     await until(
-      () => w.turns.length === 3 && w.channels.responding(w.general.id).length === 0,
+      async () => w.turns.length === 3 && (await w.channels.responding(w.general.id)).length === 0,
       'independent Designer reply'
     );
     const seats = await w.channels.threadSeats(root.id);
@@ -2072,6 +2125,7 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
     events,
     grants,
     uploadsRoot: () => scratch,
+    planWakes: async () => [],
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   const harnesses: string[] = [];
@@ -2198,6 +2252,7 @@ async function reviewOnce(dir: string, env: NodeJS.ProcessEnv) {
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => dir,
+    planWakes: async () => [],
     portFile: join(dir, 'buddy-mcp.json'),
   });
   const launches: Array<{ harness: string; model: string }> = [];
@@ -2371,6 +2426,7 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => scratch,
+    planWakes: async () => [],
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   const reviewer = createMemoryReviewer({
@@ -2496,6 +2552,7 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => scratch,
+    planWakes: async () => [],
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   // An owner chat turn's context: the conversation's, plus its admitted chat run.
@@ -2742,7 +2799,10 @@ test('an owner reply in a DM thread wakes the Buddy; its request, its answer and
       "Lead's reply in the DM thread"
     );
     assert.equal(directTurns().length, 1);
-    await until(() => w.channels.responding(ask.channelId).length === 0, 'the turn ends');
+    await until(
+      async () => (await w.channels.responding(ask.channelId)).length === 0,
+      'the turn ends'
+    );
 
     await announce(
       await w.post(buddyActor(w.lead.id), dm, {
@@ -2784,7 +2844,10 @@ test('a retried post (same key) wakes its mentioned Buddy once', async () => {
     const first = await call(w.endpoint.spec(grant), 'post', mention);
     await until(() => w.turns.length === 1, "Designer's turn");
     // Retry once that turn is over: a queued duplicate is absorbed by the pair's queue anyway.
-    await until(() => w.channels.responding(w.general.id).length === 0, 'the turn ends');
+    await until(
+      async () => (await w.channels.responding(w.general.id)).length === 0,
+      'the turn ends'
+    );
     const again = await call(w.endpoint.spec(grant), 'post', mention);
     assert.equal(again.value.id, first.value.id, 'the replay returns the first post');
     // A second turn would open the seat and poll it idle first: give it well over that.
@@ -3074,7 +3137,14 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     const ask = await w.post(
       buddyActor(w.lead.id),
       { kind: 'direct', members: [buddyActor(w.lead.id), OWNER] },
-      { kind: 'request', body: 'May I deploy?', evidence: [], broadcast: false, wakes: [], key: 'ask' }
+      {
+        kind: 'request',
+        body: 'May I deploy?',
+        evidence: [],
+        broadcast: false,
+        wakes: [],
+        key: 'ask',
+      }
     );
     const inbox = await http('GET', `/api/buddies/workspaces/${w.ws}/inbox`);
     assert.deepEqual(
@@ -3403,7 +3473,16 @@ test('owner routes restore what the T11 client migration dropped: reply stats, t
       w.post(
         buddyActor(w.lead.id),
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, taskId, evidence: [], broadcast: false, wakes: [], key: body }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          taskId,
+          evidence: [],
+          broadcast: false,
+          wakes: [],
+          key: body,
+        }
       );
     const root = await say('Launch plan', undefined, task.id);
     const replies = [];
@@ -3487,7 +3566,14 @@ test('owner channel replies stay in threads and reject old broadcast requests', 
     const root = await w.post(
       OWNER,
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: 'Thread root', evidence: [], broadcast: false, wakes: [], key: 'broadcast-root' }
+      {
+        kind: 'inform',
+        body: 'Thread root',
+        evidence: [],
+        broadcast: false,
+        wakes: [],
+        key: 'broadcast-root',
+      }
     );
     const reply = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
       body: 'Do not broadcast this reply',

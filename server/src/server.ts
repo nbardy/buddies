@@ -401,13 +401,13 @@ const buddyRunnerHost: RunnerHost = {
       visibility: 'background',
     });
   },
-  runTurn: async ({ conversationId, context, prompt, leaseToken, deadline }) => {
+  runTurn: async ({ conversationId, context, prompt, input, leaseToken, deadline }) => {
     const registered = conversations.get(conversationId);
     if (!registered) throw new Error(`Run conversation ${conversationId} is not registered`);
     const conversation = await buddyCreationService.ensureConversationReady(registered);
     // Automatic expiry is max_runtime_timeout, never stop()/user_stop (AGENTS.md). The policy
     // arms it from the run's own deadline, so an adopting backend re-arms the same instant.
-    return conversation.runCoordinationMessage(prompt, context, leaseToken, deadline);
+    return conversation.runCoordinationMessage(prompt, input, context, leaseToken, deadline);
   },
   stop: (id) => conversations.get(id)?.stop(),
 };
@@ -424,6 +424,8 @@ const buddyRunner = createRunner({
   chatDeadlineMs: TURN_MAX_RUNTIME_MS,
   backgroundTurnMs: BUDDY_BACKGROUND_TURN_MS,
   backstopMs: BUDDY_RUNNER_BACKSTOP_MS,
+  // channels.ts implements the seat runs; it is built further down (it needs the conversations).
+  seats: () => buddyChannels.seats,
 });
 const memoryReviewer = createMemoryReviewer({
   core: buddiesCore,
@@ -673,6 +675,7 @@ const upstream = createUpstreamService({
   core: buddiesCore,
   events: buddyEvents,
   uploadsRoot: () => UPLOADS_DIR,
+  planWakes: buddyChannels.planWakes,
 });
 upstream.registerRoutes(app);
 
@@ -824,6 +827,7 @@ void runServerStartup(
         events: buddyEvents,
         grants: buddyGrants,
         uploadsRoot: () => UPLOADS_DIR,
+        planWakes: buddyChannels.planWakes,
         portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
       });
       // Background, never awaited: bootstrap and the upstream fetch must not

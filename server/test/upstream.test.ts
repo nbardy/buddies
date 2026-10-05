@@ -300,6 +300,7 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
     core,
     events,
     uploadsRoot: () => join(root, 'uploads'),
+    planWakes: async () => [],
   });
   const app = express();
   service.registerRoutes(app);

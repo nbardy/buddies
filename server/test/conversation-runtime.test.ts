@@ -1379,7 +1379,8 @@ test('background deadline uses timeout classification and waits for provider dra
     kind: buddyKind({ buddyId: 'buddy-fixture', workspaceId: 'workspace-fixture' }, 'background'),
   });
   const execution = conversation.runCoordinationMessage(
-    'Keep working',
+    { resumed: 'Keep working', fresh: 'Keep working' },
+    { origin: 'buddy_message', inputId: 'worker-run' },
     { buddyId: 'buddy-fixture', workspaceId: 'workspace-fixture', coordinationRunId: 'worker-run' },
     'worker-token',
     // The run's deadline is armed by the policy (it used to be a server.ts timer that no

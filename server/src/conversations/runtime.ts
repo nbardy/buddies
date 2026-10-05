@@ -414,19 +414,23 @@ export class Conversation extends EventEmitter {
     this.publish({ t: 'label', label: this.label() });
   }
 
+  // A runner-claimed turn: background work, or a channel thread seat (a foreground Buddy
+  // conversation the owner can also type in). The crate's `conversation_busy` claim rule already
+  // serializes it against the owner's chat runs in the same conversation, so foreground is safe.
   runCoordinationMessage(
-    content: string,
+    prompt: SessionRelativePrompt,
+    input: TurnInput,
     context: BuddyContext,
     claimToken: string,
     deadline: string
   ): Promise<void> {
-    if (this._kind.t !== 'buddy' || this._kind.visibility !== 'background') {
-      return Promise.reject(new Error('Automated Buddy inputs require a background conversation'));
+    if (this._kind.t !== 'buddy') {
+      return Promise.reject(new Error('Automated Buddy inputs require a Buddy conversation'));
     }
     if (this.process || this.isRunning || this.turnQueue.length) {
       return Promise.reject(new Error('Conversation is busy'));
     }
-    return this._policy.runCoordination(content, context, claimToken, deadline);
+    return this._policy.runCoordination(prompt, input, context, claimToken, deadline);
   }
 
   sendMessage(content: string, ownerInput?: OwnerInput): void {

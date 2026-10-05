@@ -48,3 +48,19 @@ export function checkedRunConfig(input: z.infer<typeof WorkerSchema>): RunConfig
   }
   return input;
 }
+
+/**
+ * The owner's chip pick or retry choice as the `RunConfig` a crate run carries. A run config
+ * names a model, so a pick on "default" is resolved against the catalog NOW (the default it means
+ * at the moment the owner chose it); an unresolvable pick is an error at the route, never some
+ * other model.
+ */
+export function runConfigOf(config: ConversationConfig): RunConfig {
+  const resolution = resolveConfigAgainstProviderCatalog(config);
+  if (resolution.status !== 'resolved') throw new Error(resolution.error.message);
+  return {
+    provider: resolution.value.provider,
+    model: resolution.value.modelId,
+    reasoningEffort: resolution.value.reasoningEffort,
+  };
+}

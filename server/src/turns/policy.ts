@@ -9,7 +9,7 @@ import type {
 import { parseBuddyWorkerToolResult } from '@unleashd/shared';
 import type { BuddyPolicyAdoption } from '../buddies/turn-policy';
 import type { ExecutionOutcome } from './execution-state';
-import type { TurnInput } from './input';
+import type { SessionRelativePrompt, TurnInput } from './input';
 
 /**
  * What a conversation's KIND adds to its turns. Chosen ONCE per conversation
@@ -112,7 +112,8 @@ export interface TurnPolicy {
    * max_runtime_timeout. Resolves once the turn settled its run; rejects only when it never started.
    */
   runCoordination(
-    content: string,
+    prompt: SessionRelativePrompt,
+    input: TurnInput,
     context: BuddyContext,
     claimToken: string,
     deadline: string

@@ -21,7 +21,7 @@ import {
   managerRef,
   taskDetail,
 } from './core';
-import { type BuddyEvents, NO_PICKS, announcePost } from './events';
+import { type BuddyEvents, NO_PICKS, type PlanWakes, announcePost } from './events';
 import type { BuddyGrant, Grants, Role, TurnGrant } from './grants';
 import { attachToRelay } from './mcp-relay';
 import { WorkerSchema, checkedRunConfig } from './worker-config';
@@ -40,6 +40,7 @@ export interface ToolDeps {
   core: BuddiesCore;
   events: BuddyEvents;
   uploadsRoot(): string;
+  planWakes: PlanWakes;
 }
 
 type Tool<G extends TurnGrant> = {
@@ -426,7 +427,12 @@ const BUDDY_TOOLS = {
           returns: grant.returns,
           runConfig,
           broadcast: false,
-          wakes: [],
+          wakes: await deps.planWakes(
+            channel,
+            grant.author,
+            { body, replyToId: input.replyToId, kind: input.kind },
+            NO_PICKS
+          ),
         }
       );
       // A replayed key (a retried tool call) announces nothing: it would wake everyone again.

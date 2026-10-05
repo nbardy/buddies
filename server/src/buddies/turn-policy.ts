@@ -14,7 +14,7 @@ import { BUDDY_RUN_LEASE_RENEW_MS } from '../constants/timeouts';
 import type { ConversationRuntimeView } from '../conversations/runtime';
 import { noteActivity } from '../observability/event-loop-stall';
 import type { ExecutionOutcome } from '../turns/execution-state';
-import { type SessionRelativePrompt, type TurnInput, sameEitherWay } from '../turns/input';
+import type { SessionRelativePrompt, TurnInput } from '../turns/input';
 import {
   type AdoptedReview,
   type MemorySnapshot,
@@ -729,7 +729,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
    * preflight refusal or a rejected fork, whose message the runtime emits synchronously.
    */
   runCoordination(
-    content: string,
+    prompt: SessionRelativePrompt,
+    input: TurnInput,
     context: BuddyContext,
     leaseToken: string,
     deadline: string
@@ -756,7 +757,10 @@ export class BuddyTurnPolicy implements TurnPolicy {
     };
     this.host.once('buddy-turn-failed', heard);
     try {
-      this.host.send(sameEitherWay(content), { origin: 'buddy_message', inputId: runId });
+      // `input` is the run's provenance: `buddy_message` for background work, the trigger
+      // author's origin for a channel seat (seatTurnInput, B1), so owner authority and the
+      // session audience follow the stored post exactly as they did before seats ran on runs.
+      this.host.send(prompt, input);
     } catch (error) {
       this.disarm();
       return Promise.reject(error);

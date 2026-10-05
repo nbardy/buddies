@@ -58,7 +58,13 @@ import {
   managerRef,
   taskDetail,
 } from './core';
-import { type BuddyEvents, type MentionPicks, NO_PICKS, announcePost } from './events';
+import {
+  type BuddyEvents,
+  type MentionPicks,
+  NO_PICKS,
+  type PlanWakes,
+  announcePost,
+} from './events';
 import type { Runner } from './runner';
 import { channelsNamed } from './search-channels';
 
@@ -146,7 +152,7 @@ export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 
  */
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 export async function publishOwnerPost(
-  deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot'>,
+  deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot'> & { planWakes: PlanWakes },
   author: Actor,
   ref: ChannelRef,
   input: OwnerPostInput,
@@ -160,7 +166,13 @@ export async function publishOwnerPost(
   const { post, created } = await deps.core.post(
     author,
     { kind: 'id', id: target.id },
-    { ...input, body, wakes: [] }
+    {
+      ...input,
+      body,
+      // Pattern: durable-intake (docs/patterns.md#durable-intake): the must-answer wakes commit
+      // with the post; the crate adds the follow-ups.
+      wakes: await deps.planWakes(target, author, { ...input, body }, picks),
+    }
   );
   if (!created) return { post };
   deps.events.emit({ kind: 'changed' });
@@ -208,7 +220,13 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     const { asBuddyId, ...input } = PostBodySchema.parse(raw);
     const author = asBuddyId === undefined ? OWNER : buddyActor(asBuddyId);
     const chosen = mentionConfigsByBuddy(input.body, input.mentionConfigs);
-    return publishOwnerPost(deps, author, ref, input, chosen);
+    return publishOwnerPost(
+      { ...deps, planWakes: deps.channels.planWakes },
+      author,
+      ref,
+      input,
+      chosen
+    );
   };
   const archive = async (buddyId: string, changes: BuddyChanges, changeKey: string) => {
     const buddy = await write(core.updateBuddy(OWNER, { buddyId, changes, key: changeKey }));

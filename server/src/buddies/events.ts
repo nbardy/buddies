@@ -1,9 +1,19 @@
-import type { Actor, BuddiesCore, Channel, Post, Run } from '@unleashd/buddies-core';
+import type { Actor, BuddiesCore, Channel, Post, Run, Wake } from '@unleashd/buddies-core';
 import type { ConversationConfig } from '@unleashd/shared';
 
 /** The owner's mention-chip picks: the harness each mentioned Buddy answers on. */
 export type MentionPicks = ReadonlyMap<string, ConversationConfig>;
 export const NO_PICKS: MentionPicks = new Map();
+/**
+ * The host's half of a post's wakes (channels.ts `planWakes`): must-answer mentions and DM
+ * wakes, planned before the write so the crate enqueues them in the post's own transaction.
+ */
+export type PlanWakes = (
+  channel: Channel,
+  author: Actor,
+  draft: { body: string; replyToId?: string | null; kind: 'inform' | 'request' },
+  picks: MentionPicks
+) => Promise<Wake[]>;
 
 /**
  * The in-process change bus. Every Buddy write (MCP tool, owner route, runner, responder) now

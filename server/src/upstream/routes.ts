@@ -9,7 +9,7 @@ import {
 } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import { type BuddiesCore, OWNER, coreError } from '../buddies/core';
-import { type BuddyEvents, NO_PICKS } from '../buddies/events';
+import { type BuddyEvents, NO_PICKS, type PlanWakes } from '../buddies/events';
 import { publishOwnerPost } from '../buddies/routes';
 import { type Checkout, UPSTREAM_BRANCH, checkUpstream, resolveCheckout } from './git-upstream';
 import { bootstrapUnleashdHome } from './unleashd-home';
@@ -30,6 +30,7 @@ export interface UpstreamServiceDependencies {
   core: BuddiesCore;
   events: BuddyEvents;
   uploadsRoot(): string;
+  planWakes: PlanWakes;
 }
 
 type UpdateOutcome =
