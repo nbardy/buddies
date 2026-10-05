@@ -157,6 +157,11 @@ pub enum RunInput {
     FailureNotice {
         run_id: String,
     },
+    /// The buddy follows a thread (`thread_follow`): due at its `until`, or now once someone else
+    /// posts there (follows.rs).
+    Follow {
+        follow_id: String,
+    },
 }
 
 impl RunInput {
@@ -174,12 +179,17 @@ impl RunInput {
             RunInput::Reply { post_id } => ("reply", post_id, format!("reply:{post_id}")),
             RunInput::Schedule { schedule_id, slot } => ("schedule", schedule_id, format!("schedule:{schedule_id}:{slot}")),
             RunInput::FailureNotice { run_id } => ("failure_notice", run_id, format!("failure:{run_id}")),
+            RunInput::Follow { follow_id } => ("follow", follow_id, format!("follow:{follow_id}")),
         }
     }
     pub fn legacy_key(&self) -> Option<String> {
         match self {
             RunInput::Post { post_id } => Some(format!("post:{post_id}")),
-            RunInput::Chat { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } => None,
+            RunInput::Chat { .. }
+            | RunInput::Reply { .. }
+            | RunInput::Schedule { .. }
+            | RunInput::FailureNotice { .. }
+            | RunInput::Follow { .. } => None,
         }
     }
     /// A schedule run's slot is its `ready_at`.
@@ -190,6 +200,7 @@ impl RunInput {
             "reply" => Ok(RunInput::Reply { post_id: id }),
             "schedule" => Ok(RunInput::Schedule { schedule_id: id, slot: ready_at.to_string() }),
             "failure_notice" => Ok(RunInput::FailureNotice { run_id: id }),
+            "follow" => Ok(RunInput::Follow { follow_id: id }),
             other => Err(CoreError::Corrupt(format!("run input_kind {other:?}"))),
         }
     }
@@ -876,6 +887,67 @@ pub struct WorkspaceInput {
     pub name: String,
     pub root_path: String,
 }
+
+/// A follow of one thread by one conversation (follows.rs). Not `thread_read`, which is the
+/// owner's "followed threads" list and read cursor; this one wakes a Buddy's conversation.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadFollow {
+    pub id: String,
+    pub root_id: String,
+    pub buddy_id: String,
+    /// The conversation the wake goes to: the one that asked to follow.
+    pub conversation_id: String,
+    /// The thread's newest post when the follow was registered; only later posts wake it.
+    pub through_ord: String,
+    pub until: String,
+    pub created_at: String,
+    pub run_id: String,
+}
+
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct FollowInput {
+    pub root_id: String,
+    /// The conversation the wake goes to (the caller's background conversation).
+    pub conversation_id: String,
+    /// RFC 3339; must be in the future and at most `MAX_FOLLOW_DAYS` ahead.
+    pub until: String,
+    /// The most unread posts returned inline (`FollowRead::Unread`).
+    pub limit: i64,
+}
+
+/// A thread's unread posts for one Buddy, oldest first: the newest `limit`, and how many older
+/// unread ones were left out.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct ThreadUnread {
+    pub posts: Vec<Post>,
+    pub unshown: i64,
+}
+
+/// A follow read's last step (follows.rs `follow_thread`).
+#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
+#[derive(Debug, Clone)]
+pub enum FollowRead {
+    /// Someone else posted past the read mark: returned now, no follow registered.
+    Unread { posts: Vec<Post>, unshown: i64 },
+    /// Nothing unread: the follow is registered and the caller's conversation wakes once.
+    Following { follow: ThreadFollow },
+}
+
+/// What a claimed follow run shows (follows.rs `deliver_follow`).
+#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
+#[derive(Debug, Clone)]
+pub enum FollowWake {
+    /// Posts by others the follower has not read, oldest first (`unshown` older ones left out).
+    Posts { follow: ThreadFollow, posts: Vec<Post>, unshown: i64 },
+    /// Others posted, but the follower read them itself before the run fired: no turn.
+    AlreadyRead { follow: ThreadFollow },
+    /// `until` passed with no post by anyone else.
+    Timeout { follow: ThreadFollow },
+}
+
 
 /// The two clocks a claim starts, kept apart because one number serving both killed owner chats
 /// at 600 s (2026-09-10) and left dead holders' runs `running` for 24 h (2026-09-30).
