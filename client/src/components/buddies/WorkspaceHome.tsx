@@ -1,6 +1,6 @@
 import { useAtomValue } from 'jotai';
 import { type FormEvent, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { listField } from '../../atoms/conversations';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { useTimeTick } from '../../hooks/useTimeTick';
@@ -37,7 +37,9 @@ export function WorkspaceHome() {
   const overview = useBuddyOverview(CHANNEL_BACKSTOP_MS);
   const inboxes = useOwnerInboxes();
   const entries = useAtomValue(listField('buddyEntries'));
-  const [creating, setCreating] = useState(false);
+  // `/?new=1` (the channel rail's "New workspace") opens the creation form on arrival.
+  const [params] = useSearchParams();
+  const [creating, setCreating] = useState(params.get('new') === '1');
 
   const workspaces = overview.data ?? [];
   const totals = new Map(workspaces.map((w) => [w.id, ownerUnreadTotal(inboxes.data, w.id)]));

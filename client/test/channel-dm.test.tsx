@@ -80,6 +80,8 @@ async function seed() {
     load: async () => [rosterFixture([lead], { id: WS, name: 'unleashd' })],
   });
   await loadResource({ key: `/api/buddies/tasks?workspaceId=${WS}`, load: async () => [] });
+  // The divider reads the previous chat's config from its detail alone (ChannelDm DmGeneration).
+  await loadResource({ key: `/api/conversations/${OLD}`, load: async () => syntheticDetail(OLD) });
 }
 
 const directory = () =>
@@ -104,13 +106,14 @@ function desktop(dm: string) {
   );
 }
 
-test('a desktop DM keeps generations in order and puts Refresh context in the header', async () => {
+test('a desktop DM opens on its latest chat, earlier ones behind a button, Refresh context in the header', async () => {
   await seed();
   const html = desktop(NEW);
   assert.match(html, /aria-label="Direct message with Lead"/);
+  // 2026-10-05: drawing and fetching every earlier chat on open cost up to ~1 s per click.
+  assert.doesNotMatch(html, /Old question/, 'earlier chats are not drawn until asked for');
   const order = [
-    'Old question',
-    'Old answer',
+    'Show 1 earlier chat',
     'Context refreshed · New chat',
     'Fresh start',
     'Fresh answer',
@@ -121,7 +124,7 @@ test('a desktop DM keeps generations in order and puts Refresh context in the he
   );
   assert.match(html, /class="channel-browser-author">Lead</);
   assert.match(html, /class="channel-inline-action"[^>]*>Refresh context</);
-  assert.ok(html.indexOf('Refresh context') < html.indexOf('Old question'));
+  assert.ok(html.indexOf('Refresh context') < html.indexOf('Fresh start'));
   assert.match(html, /Model: /);
   assert.match(html, /aria-label="About Lead"/);
   assert.match(html, /placeholder="Message Lead"/);
@@ -329,7 +332,7 @@ test('reset banners follow the date on desktop and in an empty new chat', async 
   });
   const html = desktop(NEW);
   const date = tomorrow.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
-  assert.ok(html.indexOf(date) > html.indexOf('Old answer'));
+  assert.ok(html.indexOf(date) > html.indexOf('earlier chat'));
   assert.ok(html.indexOf('Context refreshed · New chat') > html.indexOf(date));
   assert.match(html, /class="channel-dm-notice"/);
 });
@@ -398,4 +401,25 @@ test('a restarted backend still shows a missing-CLI failure from the journaled a
   // With the live message still present it is the one failure row, not two.
   seedNew([message('system', "Couldn't start codex: the `codex` command was not found.", 2)]);
   assert.equal(desktop(NEW).match(/role="alert"/g)?.length, 1);
+});
+
+test('a long DM draws only its newest rows, opening on a lead, with older ones paged on scroll-up', async () => {
+  // Fix guard (2026-10-05): a 331-row DM drew ~3,300 nodes on every open (0.7-1.2 s of long
+  // tasks). The open chat draws a window of rows and ChannelHistory reveals more on scroll-up.
+  await seed();
+  // Pairs a minute apart: each owner line is a lead, each answer continues nothing (author flips).
+  const long = Array.from({ length: 150 }, (_, i) =>
+    message(i % 2 ? 'assistant' : 'user', `Line ${i} end`, 30 + Math.floor(i / 10))
+  );
+  jotaiStore.set(transcriptStore.patch, {
+    set: [[NEW, { tag: 'loaded', epoch: 0, messages: long, detail: syntheticDetail(NEW) }]],
+    remove: [],
+  });
+  const html = desktop(NEW);
+  assert.match(html, /Line 149 end/, 'the newest row is drawn');
+  assert.doesNotMatch(html, /Line 0 end/, 'the oldest row is held back');
+  assert.match(html, /class="channel-history"/, 'a scroll-up sentinel pages the rest in');
+  assert.doesNotMatch(html, /Show 1 earlier chat/, 'earlier chats wait until this one is revealed');
+  const drawn = html.split('Line ').length - 1;
+  assert.ok(drawn >= 40 && drawn < 60, `a window of rows, not all 150 (drew ${drawn})`);
 });

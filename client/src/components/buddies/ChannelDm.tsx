@@ -1,6 +1,13 @@
-import type { ConversationConfig } from '@unleashd/shared';
+import type { ConversationConfig, ConversationDetail } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Link } from 'react-router-dom';
 import { queueMessage, readConversation, setConversationDone } from '../../atoms/actions';
 import { setConversationConfig } from '../../atoms/commands';
@@ -25,13 +32,13 @@ import { modelSummary } from '../../views/config/config-options';
 import { BuddyAbout } from './BuddyAboutCard';
 import { BuddySigil } from './BuddySigil';
 import type { ComposerSubmit } from './ChannelComposer';
-import { ChannelLoader } from './ChannelLoader';
+import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { ChannelMarkdown, TypingDots } from './ChannelMarkdown';
 import { CopyLinkButton } from './CopyLinkButton';
 import { HarnessPicker } from './HarnessPicker';
 import { buddyWrite, errorText } from './api';
-import { clockTime, useFollowBottom } from './channel-data';
-import { type DmRow, dmRows, lastOwnerText, startFailureText } from './channel-dm';
+import { type OlderEdge, clockTime, useFollowBottom } from './channel-data';
+import { type DmRow, dmRows, lastOwnerText, startFailureText, tailRows } from './channel-dm';
 import { type ChannelTask, mediaMarkdown } from './channel-text';
 import './ChannelComposer.css';
 import './ChannelDm.css';
@@ -83,6 +90,13 @@ const FRAMES = {
   },
 } as const;
 type Frame = (typeof FRAMES)[DmFrame];
+
+// Fix guard: an open drew every generation's whole history and fetched each earlier one after the
+// chain (2026-10-05: 3 chats, 331 rows, ~3,300 nodes, 0.7-1.2 s of long tasks per open). The open
+// chat draws its newest DM_ROW_WINDOW rows and reveals more on scroll-up, the way a channel pages;
+// earlier chats load only on "Show earlier chats". Guard: channel-dm.test.tsx.
+const DM_ROW_WINDOW = 40;
+const MORE_ROWS: OlderEdge = { kind: 'more' };
 
 /** GET /api/buddies/:buddyId/direct/chain: live DM generations, oldest first. */
 export type DirectChain = { buddyId: string; generations: string[] };
@@ -166,7 +180,10 @@ export function ChannelDm({
   const diagnostics = useTurnDiagnostics(conversationId);
   const queue = queueOf(transcript);
   const messages = messagesOf(transcript);
-  const follow = useFollowBottom(messages.length + queue.length, groups, null);
+  const [limit, setLimit] = useState(DM_ROW_WINDOW);
+  const [earlierShown, setEarlierShown] = useState(false);
+  // `limit` is in the count so a revealed page restores the held scroll position (hold()).
+  const follow = useFollowBottom(messages.length + queue.length + limit, groups, null);
   const generations = chain.data?.generations ?? [conversationId];
   const latest = generations.at(-1) ?? conversationId;
   useEffect(() => {
@@ -177,8 +194,16 @@ export function ChannelDm({
       if (readConversation(id)?.done === false) setConversationDone(id, true);
     }
   }, [row, latest, conversationId, chain.data]);
-  // An earlier generation shows alone, with a way to the latest; the latest shows every one.
-  const shown = latest === conversationId ? generations : [conversationId];
+  // An earlier generation shows alone, with a way to the latest. The latest shows alone too until
+  // "Show earlier chats" mounts (and so loads) the ones before it.
+  const timeline = latest === conversationId ? generations : [conversationId];
+  const firstShown = earlierShown ? 0 : timeline.length - 1;
+  const earlierButton =
+    firstShown > 0 ? (
+      <button type="button" className="channel-inline-action" onClick={() => setEarlierShown(true)}>
+        Show {firstShown} earlier {firstShown === 1 ? 'chat' : 'chats'}
+      </button>
+    ) : null;
   const newChat = async (input: { config: ConversationConfig; message?: string }) => {
     const next = await startNewDirectChat(buddyId, input);
     await chain.refetch();
@@ -331,15 +356,22 @@ export function ChannelDm({
           <ChannelLoader label="Opening DM…" />
         ) : (
           <div className="channel-dm-timeline" ref={follow.contentRef}>
-            {shown.map((id, index) => (
+            {timeline.slice(firstShown).map((id, index) => (
               <DmGeneration
                 key={id}
                 conversationId={id}
-                previousId={index > 0 ? shown[index - 1] : null}
+                previousId={firstShown + index > 0 ? timeline[firstShown + index - 1] : null}
                 frame={f}
                 buddyName={buddyName}
                 buddyNames={buddyNames}
                 tasks={tasks}
+                limit={id === conversationId ? limit : Number.POSITIVE_INFINITY}
+                scrollRef={follow.scrollRef}
+                onReachTop={() => {
+                  follow.hold();
+                  setLimit((current) => current + DM_ROW_WINDOW);
+                }}
+                top={earlierButton}
               />
             ))}
           </div>
@@ -392,6 +424,10 @@ function DmGeneration({
   buddyName,
   buddyNames,
   tasks,
+  limit,
+  scrollRef,
+  onReachTop,
+  top,
 }: {
   conversationId: string;
   /** The generation before this one; null for the first, which has no divider. */
@@ -400,6 +436,12 @@ function DmGeneration({
   buddyName: string;
   buddyNames: Readonly<Record<string, string>>;
   tasks: ReadonlyMap<string, ChannelTask>;
+  /** Rows drawn from the end; Infinity draws every row. */
+  limit: number;
+  scrollRef: RefObject<HTMLDivElement | null>;
+  onReachTop(): void;
+  /** Drawn above the rows once none are held back. */
+  top: ReactNode;
 }) {
   useConversationBodies(conversationId);
   const groups = useAtomValue(groupsFamily(conversationId));
@@ -408,8 +450,12 @@ function DmGeneration({
   const generation = useAtomValue(rowFamily(conversationId));
   const divider = previousId !== null;
   const config = detailOf(useAtomValue(transcriptFamily(conversationId)))?.config.config ?? null;
-  const before = detailOf(useAtomValue(transcriptFamily(previousId ?? conversationId)))?.config
-    .config;
+  // The previous generation's detail alone (~1 KB): its config names the divider's harness change
+  // without loading that chat's whole history.
+  const before = usePolledFetch<ConversationDetail>(
+    previousId && `/api/conversations/${encodeURIComponent(previousId)}`,
+    0
+  ).data?.config.config;
   const summary = (c: ConversationConfig) => modelSummary(c, catalog);
   const changedTo =
     config && before && (config.provider !== before.provider || summary(config) !== summary(before))
@@ -431,13 +477,25 @@ function DmGeneration({
       ? startFailureText(config.provider)
       : undefined
   );
+  const shown = tailRows(rows, limit);
   return (
     <>
+      {shown.length < rows.length ? (
+        // Keyed by the window so each revealed page observes the sentinel afresh.
+        <ChannelHistory
+          key={shown.length}
+          edge={MORE_ROWS}
+          scrollRef={scrollRef}
+          onReach={onReachTop}
+        />
+      ) : (
+        top
+      )}
       {rows.length === 0 && !divider ? (
         <p className={frame.note}>Send a message to start the conversation.</p>
       ) : (
         <ol className={frame.list}>
-          {rows.map((row) => (
+          {shown.map((row) => (
             <DmRowView
               key={row.key}
               row={row}

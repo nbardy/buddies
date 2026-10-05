@@ -296,3 +296,21 @@ export function hasUnseenAfter(lastSeen: number | undefined, totalMessages: numb
   if (totalMessages === 0 || lastSeen === undefined) return false;
   return lastSeen < totalMessages - 1;
 }
+
+// Pattern: one-write-path (docs/patterns.md#one-write-path)
+/** Channel favorites are personal navigation preferences, saved on this device. */
+export const starredChannelIdsAtom = atomWithStorage<string[]>(
+  'unleashd-starred-channels',
+  [],
+  validatedStorage<string[]>((raw) =>
+    Array.isArray(raw) && raw.every((id) => typeof id === 'string') ? raw : null
+  ),
+  { getOnInit: true }
+);
+
+export function toggleChannelStar(channelId: string): void {
+  jotaiStore.set(
+    starredChannelIdsAtom,
+    toggleInList(jotaiStore.get(starredChannelIdsAtom), channelId)
+  );
+}

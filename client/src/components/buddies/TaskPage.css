@@ -1,0 +1,24 @@
+/* Pattern: tokens-and-shells (docs/patterns.md#tokens-and-shells)
+   Task layout only: sections, controls, badges and posts use the shared UI classes. */
+.task-page { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.task-page-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.task-page-column { width: 100%; max-width: 800px; margin: 0 auto; padding: var(--sp-8) var(--sp-9); gap: var(--sp-9); }
+.task-page-section { gap: var(--sp-5); }
+.task-page-section + .task-page-section { border-top: 1px solid var(--border-subtle); padding-top: var(--sp-7); }
+.task-page-breadcrumb, .task-page-actions { gap: var(--sp-4); flex-wrap: wrap; }
+.task-page-breadcrumb { flex-wrap: nowrap; }
+.task-page-heading { margin: 0; font-size: var(--fs-9); line-height: 1.25; overflow-wrap: anywhere; }
+.task-page-copy { color: var(--text-primary); font-size: var(--fs-post); line-height: 1.7; }
+.task-page-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.task-page-edit { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-5); }
+.task-page-edit label { display: flex; flex: 1 1 12rem; flex-direction: column; gap: var(--sp-3); font-size: var(--fs-3); color: var(--text-secondary); }
+.task-page-edit input, .task-page-edit select { width: 100%; min-width: 0; padding: var(--sp-4); border: 1px solid var(--border-subtle); border-radius: var(--ui-radius); background: var(--bg-primary); color: var(--text-primary); }
+.task-page .task-page-footer { padding-top: var(--sp-5); padding-bottom: var(--sp-7); flex: none; gap: var(--sp-4); }
+[data-device="mobile"] .task-page-column { padding-inline: var(--sp-7); }
+.task-page .ui-section__title { color: var(--text-emphasis); font-size: var(--fs-7); font-weight: 650; letter-spacing: 0; text-transform: none; }
+.task-page .ui-section__header { margin: 0; }
+.task-page-next { padding: var(--sp-7) var(--sp-8); gap: var(--sp-4); border-left: 3px solid var(--accent-primary); }
+.task-page .channel-browser-messages { padding-top: 0; }
+.task-page .channel-browser-message { padding-inline: 0; }
+[data-device="mobile"] .task-page-heading { font-size: var(--fs-8); }
+.task-page .task-progress-label { padding: 0; }
