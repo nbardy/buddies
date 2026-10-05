@@ -19,6 +19,7 @@ import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
 import { initSettings } from './stores/settingsStore';
 import { SWARM_PAGE_LOADERS } from './swarm';
+import { ConnectMobile } from './views/dependencies/ConnectMobile';
 import { DependenciesPrompt } from './views/dependencies/DependenciesPrompt';
 import './App.css';
 import './views/dependencies/DependenciesPrompt.css';
@@ -306,6 +307,12 @@ function AppRoutes({ device }: { device: DeviceKind }) {
   );
 }
 
+// A phone is the thing being connected, so only desktop Setup offers it.
+const SETUP_SECTIONS: Record<DeviceKind, ReactElement | null> = {
+  desktop: <ConnectMobile />,
+  mobile: null,
+};
+
 function AppInner() {
   const device = useDeviceKind();
   useWebSocketBridge();
@@ -318,7 +325,7 @@ function AppInner() {
 
   return (
     <>
-      <DependenciesPrompt />
+      <DependenciesPrompt>{SETUP_SECTIONS[device]}</DependenciesPrompt>
       <UpdateBanner />
       <AppRoutes device={device} />
       {/* App-wide, outside both shells: it shows on every route of either tree. */}

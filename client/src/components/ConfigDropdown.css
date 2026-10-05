@@ -61,3 +61,8 @@
   font-size: var(--fs-3);
   text-transform: capitalize;
 }
+
+/* The phone is what Connect mobile connects; its Setup has no such section. */
+[data-device="mobile"] .config-item--connect-mobile {
+  display: none;
+}

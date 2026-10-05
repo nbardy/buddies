@@ -1,9 +1,9 @@
 import { DependenciesSchema, type DependencyCheck } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { setSetupDismissed, setupDismissedAtom } from '../../atoms/ui';
-import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
+import { DependencyCommand, SURFACE, buttonStyle } from './setup-ui';
 
 const STATUS = resource('/api/dependencies', async (signal) => {
   const response = await fetch('/api/dependencies', { signal });
@@ -39,64 +39,6 @@ const STATES = {
   installing: { icon: '…', label: 'Installing automatically…', color: 'var(--warning)' },
   checking: { icon: '…', label: 'Checking…', color: 'var(--warning)' },
 };
-
-const SURFACE = {
-  text: '#f2f4f8',
-  muted: '#9da8b5',
-  border: '#ffffff14',
-};
-const buttonStyle: CSSProperties = {
-  padding: 'var(--sp-6) var(--sp-7)',
-  border: 'none',
-  borderRadius: 0,
-  background: 'transparent',
-  color: SURFACE.text,
-  cursor: 'pointer',
-  font: 'inherit',
-  fontSize: 'var(--fs-4)',
-};
-
-function DependencyCommand({ command, label }: { command: string; label: string }) {
-  const copy = useCopyAction(command);
-  return (
-    <div
-      className="ui-row"
-      style={{
-        gap: 'var(--sp-4)',
-        marginTop: 'var(--sp-6)',
-        borderBottom: `1px solid ${SURFACE.border}`,
-        background: '#ffffff04',
-      }}
-    >
-      <input
-        aria-label={label}
-        readOnly
-        value={command}
-        onFocus={(event) => event.currentTarget.select()}
-        style={{
-          minWidth: 0,
-          width: 0,
-          flex: 1,
-          fontFamily: 'monospace',
-          fontSize: 'var(--fs-3)',
-          padding: 'var(--sp-4)',
-          color: SURFACE.text,
-          background: 'transparent',
-          border: 'none',
-          borderRadius: 0,
-        }}
-      />
-      <button
-        type="button"
-        style={{ ...buttonStyle, color: '#a6c7ff', fontSize: 'var(--fs-3)' }}
-        onClick={copy.copy}
-        aria-label={`${COPY_LABEL[copy.state]} ${label}`}
-      >
-        {COPY_LABEL[copy.state]}
-      </button>
-    </div>
-  );
-}
 
 export function DependencyCard({ check }: { check: DependencyCheck }) {
   const guide = GUIDES[check.id];
@@ -213,7 +155,8 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
 
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 // One app-wide prompt, shared by both shells. Polling reads the server's cached checks.
-export function DependenciesPrompt() {
+// `children`: device-specific sections after the checks (desktop: Connect from mobile).
+export function DependenciesPrompt({ children }: { children?: ReactNode }) {
   const dismissed = useAtomValue(setupDismissedAtom);
   const status = usePolledFetch(STATUS, 2_000, !dismissed);
   const [retrying, setRetrying] = useState(false);
@@ -316,6 +259,7 @@ export function DependenciesPrompt() {
             <p>Could not load checks: {status.error.message}</p>
           )}
           {error && <p role="alert">{error}</p>}
+          {children}
         </div>
         <footer
           style={{

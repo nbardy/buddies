@@ -17,7 +17,9 @@ import { isViteClientModule, patchViteResumeReload } from './src/pwa/resume';
 const DEV_CLIENT_PORT = 7489;
 const API_SERVER_PORT = 7499;
 const LOCAL_DOMAIN = 'unleashd.localhost';
-const TAILSCALE_DOMAIN = '.tail58a146.ts.net';
+// Any tailnet's MagicDNS name: Setup's Connect mobile serves this port over
+// Tailscale, and the owner's own tailnet name here 403'd every other install.
+const TAILSCALE_DOMAIN = '.ts.net';
 const LOCAL_DEV_URL =
   process.env.UNLEASHD_LOCAL_DOMAIN_ENABLED === '1'
     ? `http://${LOCAL_DOMAIN}`

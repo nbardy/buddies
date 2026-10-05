@@ -1,7 +1,7 @@
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { type Connection, connectionAtom } from '../atoms/conversations';
-import { setSetupDismissed } from '../atoms/ui';
+import { openSetupAt, setSetupDismissed } from '../atoms/ui';
 import { useSettingsStore } from '../stores/settingsStore';
 import { ColorPalettePicker } from './ColorPalettePicker';
 import { UsagePanel } from './UsagePanel';
@@ -79,6 +79,17 @@ export function ConfigDropdown() {
           >
             <span className="config-item-icon ui-row ui-muted">✓</span>
             <span className="config-item-label">Setup</span>
+          </button>
+          <button
+            type="button"
+            className="config-item config-item--connect-mobile ui-control ui-row"
+            onClick={() => {
+              openSetupAt('connect-mobile');
+              setIsOpen(false);
+            }}
+          >
+            <span className="config-item-icon ui-row ui-muted">▯</span>
+            <span className="config-item-label">Connect mobile</span>
           </button>
           <div className="config-item ui-control ui-row status-item">
             <span className="config-item-icon ui-row ui-muted">
