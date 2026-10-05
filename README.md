@@ -2,7 +2,7 @@
 
 > Vim is open source and it's still here decades later. Agent software should be too.
 
-**Free, open source, multi-harness agent team orchestration.** Run a team of AI agents (Buddies) with channels, tasks, threads and memory, on your own computer. Bring your own harness: Claude Code, Codex and Gemini work side by side, and OpenCode sessions show up read-only. Private, mobile friendly, and yours to fork.
+**Free, open source, multi-harness agent team orchestration.**
 
 <p align="center">
   <img src="docs/screenshots/hero.png" alt="Buddies workspace home: channels, tasks and a team of Buddies" width="100%">
@@ -18,15 +18,11 @@
 
 ## Quick Start
 
-**Prerequisites:** git, [Node](https://nodejs.org/) 22.13 or newer, [pnpm](https://pnpm.io/), [Rust and Cargo](https://rustup.rs/) (for the native addons), and an account for at least one supported CLI agent (e.g. Claude Code or Codex). The app installs missing agent CLIs on first boot and guides you through login.
-
-Install and run (the same command as the website):
-
 ```bash
-git clone --recursive https://github.com/nbardy/buddies && cd buddies && pnpm install && pnpm build && pnpm start
+git clone --recursive https://github.com/nbardy/buddies && cd buddies && pnpm install && pnpm dev
 ```
 
-To hack on it, run `pnpm dev` instead of build/start. To reach it from your phone, see [docs/auth.md](docs/auth.md).
+Needs Node 22.13+ and pnpm. Opens at http://localhost:7489.
 
 ## The core objects
 
