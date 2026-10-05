@@ -14,8 +14,8 @@ import { WebSocket } from 'ws';
  * drives the REAL dev entry instead: `pnpm run dev:server` (pnpm → tools/dev-supervisor.mjs →
  * tools/watch-server.mjs runner → server.ts) in its own process group, stopped the way a terminal
  * stops it: SIGINT to the whole foreground group. Cases: one Ctrl+C, two (the supervisor escalates
- * to SIGKILL), `--replace` over a running runtime, and a ~30 s outage during which the agent calls
- * a Buddy tool.
+ * to SIGKILL), `--replace` over a running runtime, and three outages during which the agent calls
+ * a Buddy tool (held by the relay and delivered; held past 55 s and refused clearly; Stopped first).
  *
  * Isolated: temp HOME, UNLEASHD_DATA_DIR, UNLEASHD_BUDDIES_DB, BUDDIES_HOME; a spare PORT (the
  * dev-server task honours it); a PATH holding only the fake CLIs, node and system tools, so no

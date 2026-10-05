@@ -11,7 +11,7 @@ import path from 'node:path';
  * attach connection stays open for the backend's whole life, and the relay forwards only while it
  * is open.
  */
-// Pattern: detached-execution (docs/patterns.md#detached-execution)
+// Pattern: hold-through-outage (docs/patterns.md#hold-through-outage)
 
 // Same relative path from src/buddies (tsx) and dist/buddies (built).
 const RELAY_ENTRY = path.resolve(__dirname, '..', '..', 'relay', 'buddy-mcp-relay.mjs');

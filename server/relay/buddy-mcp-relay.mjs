@@ -1,3 +1,4 @@
+// Pattern: hold-through-outage (docs/patterns.md#hold-through-outage)
 // The Buddy MCP relay: a detached loopback process that owns the stable Buddy tool port and holds
 // a turn's tool call while no backend is running.
 //

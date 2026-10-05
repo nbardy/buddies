@@ -227,7 +227,8 @@ a crash at every step, and a mutation check proves it catches a broken rule.
 ended(outcome) | settled`, `TRANSITIONS`, `ADOPTIONS`, `GRANTS`, `applyStep`). The phase lives in the
 execution's journal directory (`phase.json`, beside agent-cli's `pid`/`exit.json`; written by
 `turns/executions.ts`). `TurnRunner` runs the effects (`EFFECTS`), and boot adoption
-(`lifecycle/adopt-executions.ts`) reads the phase and restores grants before the Buddy MCP endpoint listens.
+(`lifecycle/adopt-executions.ts`) reads the phase and restores grants before the Buddy MCP endpoint attaches to
+its relay ([hold-through-outage](#hold-through-outage)).
 History: P1 review, 2026-10-01. In 2a, a stop revoked the grant in memory only, so a backend killed inside the
 3 s kill grace left a turn the next backend adopted as live, with its tools back. In 2b, the journal was
 removed before the run settle landed, so a finished run recovered as interrupted.
@@ -235,6 +236,26 @@ Decision: `agent_notes/2026-10-03_p1-single-execution-state-decision.md`.
 Guards: `server/test/execution-crash-checker.test.ts` (every crash point, and the mutation check), plus the
 real-backend tests in `server/test/execution-adoption.test.ts`: "a Stop survives a backend crash inside the
 kill grace", "a timeout survives…" and "a crash between the drain and the run settle".
+
+## hold-through-outage
+**Smell:** a client that outlives its server, calling it over a transport that turns "server restarting" into an
+immediate error (connection refused, 503), with delivery left to whoever reads the error and decides to retry.
+**Pattern:** a small relay that outlives the server owns the address the client was given. It accepts the
+call and holds it until a server is attached, then forwards it unchanged. It gives up before the client's own
+timeout, with an error that says the call was not delivered. The server attaches over a connection it holds open
+for its lifetime, so the relay knows the moment the server dies (the kernel closes the socket, even on SIGKILL)
+and never forwards to a stale port. A forward that fails before the response starts is resent, which is safe
+only because every write carries an idempotency key ([idempotency-keys](#idempotency-keys)). Authority stays with
+the server: the relay passes credentials through and never interprets them.
+**Here:** `server/relay/buddy-mcp-relay.mjs` (plain node, spawned detached so a terminal's Ctrl+C does not end it;
+`HOLD_MS` = 55 s) and `server/src/buddies/mcp-relay.ts` (find or start the relay, attach, re-attach).
+`startMcpEndpoint` in `buddies/mcp.ts` serves on an internal port and attaches after boot has restored adopted
+grants. The stable port and attach key are in `<data dir>/buddy-mcp.json`.
+History: Ctrl+C proof case 4 (2026-10-01): a Buddy call made during an outage got ECONNREFUSED and was lost,
+because neither claude nor codex retries a refused connection or a 503. Both wait on a held request, and claude
+gives up at 60 s. Measurements and the alternatives that lost: `agent_notes/2026-10-05_outage-tool-delivery.md`.
+Guards: `server/test/ctrl-c-adoption.test.ts`, the three outage cases (lands once and its replay creates nothing;
+over the hold, a clear error at ~55 s; a Stopped turn's held call gets 401). All three fail on 3a21efd.
 
 ## fix-guards
 **Smell:** a fixed slowdown or bug quietly comes back.
