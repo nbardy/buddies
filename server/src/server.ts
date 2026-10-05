@@ -87,6 +87,7 @@ import { type SessionRow, defaultRoots } from '@unleashd/ingest';
 import { validate as isUuid } from 'uuid';
 import { auditLocalAgents } from './audit.js';
 import { createBriefings } from './buddies/briefing';
+import { admitExecution, decideExecutionGate } from './buddies/execution-gate';
 import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
 import { createCliReplyGate } from './buddies/channel-reply-gate';
 import { createChannels } from './buddies/channels';
@@ -217,10 +218,7 @@ const pauseBuddyScheduler = () => {
   buddyRunner.pause();
   memoryReviewer.pause();
 };
-const resumeBuddyScheduler = () => {
-  buddyRunner.resume();
-  memoryReviewer.start();
-};
+const resumeBuddyScheduler = () => execution.resume();
 const stopBuddyScheduler = () => {
   memoryReviewer.stop();
   buddyRunner.stop();
@@ -421,6 +419,20 @@ const memoryReviewer = createMemoryReviewer({
   grants: buddyGrants,
   spec: buddyMcpSpec,
   execute: ephemeralExecute('memory-review'),
+});
+// Pattern: fix-guards (docs/patterns.md#fix-guards) — the ONE gate on Buddy execution (see
+// buddies/execution-gate.ts): scan/adopt, scheduler start, resume and the memory reviewer.
+const execution = admitExecution<FoundExecution, AdoptedRun>(decideExecutionGate(), {
+  scan: () => executionJournals.scan(),
+  start: async (adopted) => {
+    await buddyRunner.start(adopted);
+    memoryReviewer.start();
+  },
+  resume: () => {
+    buddyRunner.resume();
+    memoryReviewer.start();
+  },
+  started: 'Buddy runner started',
 });
 const buddyPolicyPort = createBuddyPolicyPort({
   runner: buddyRunner,
@@ -791,7 +803,7 @@ void runServerStartup(
       );
       // Journals the previous backend left: their open attempts are adopted, not swept. A live
       // turn's grant is valid again BEFORE the tool endpoint answers (adopt-executions.ts).
-      foundExecutions = executionJournals.scan();
+      foundExecutions = execution.scan();
       for (const grant of liveGrants(foundExecutions)) buddyGrants.adopt(grant);
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).
       buddyMcp = await startMcpEndpoint({
@@ -835,9 +847,8 @@ void runServerStartup(
     startOptionalScheduler: async () => {
       try {
         await buddiesReady;
-        await buddyRunner.start(adoptedRuns);
-        memoryReviewer.start();
-        console.log('Buddy runner started');
+        await execution.start(adoptedRuns);
+        console.log(execution.started);
       } catch (error) {
         console.warn('[buddies] Runner unavailable:', error);
       }
