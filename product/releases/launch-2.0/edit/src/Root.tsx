@@ -13,6 +13,7 @@ export const Root: React.FC = () => (
     <Composition
       id="Overload"
       component={Overload.Overload}
+      defaultProps={{ type: 'slam' } satisfies Overload.OverloadProps}
       durationInFrames={Overload.DURATION}
       fps={Overload.FPS}
       width={Overload.WIDTH}
@@ -61,7 +62,7 @@ export const Root: React.FC = () => (
     <Composition
       id="Assembly"
       component={Assembly.Assembly}
-      defaultProps={{ score: 'halftime' } satisfies Assembly.AssemblyProps}
+      defaultProps={{ type: 'slam' } satisfies Assembly.AssemblyProps}
       durationInFrames={Assembly.DURATION}
       fps={Assembly.FPS}
       width={Assembly.WIDTH}

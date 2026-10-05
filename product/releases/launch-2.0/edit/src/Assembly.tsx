@@ -1,19 +1,19 @@
 // The whole launch video, script v2 (../../SCRIPT_V2_2026-09-30.md). The open keeps its own sound
 // design; from the title one continuous EDM cue (../../sound/edm-full.wav, 128 BPM) runs to the end
 // card, and every scene after the open is one 4-bar phrase of it: a scene change anywhere else
-// read as "off step" (owner, 2026-09-30). Sections are data (SECTIONS); a section
+// read as "off step" (owner, 2026-09-30). Sections are data (sections()); a section
 // plays its clip from `offset` and holds the clip's last frame if its slot outlasts it.
 import type React from 'react';
+import { useMemo } from 'react';
 import { AbsoluteFill, Audio, Freeze, OffthreadVideo, Sequence, useCurrentFrame } from 'remotion';
 import beat9 from '../../beat9/beat9.mp4';
-import revealDrop from '../../sound/reveal-drop.wav';
-import revealHalftime from '../../sound/reveal-halftime.wav';
-import revealMarimba from '../../sound/reveal-marimba.wav';
+import launchSong from '../../sound/launch.wav';
 import * as Close from './Close';
 import * as DesignReview from './DesignReview';
 import * as FeatureFlash from './FeatureFlash';
 import * as HomeIntro from './HomeIntro';
 import * as Overload from './Overload';
+import type { TypeStyle } from './OverloadReveal';
 import * as PickerRefresh from './PickerRefresh';
 import * as Swarm from './Swarm';
 import { Block, INK } from './blocks';
@@ -25,8 +25,8 @@ export const WIDTH = 1920;
 export const HEIGHT = 1080;
 
 const BAR = (4 * 60) / 128; // 1.875 s
-// Bar 1 is the drop: the logo locks on the song's first downbeat (owner, 2026-10-04; see
-// ../../sound/INTRO_SOUND_PLAN.md). The music itself starts two bars earlier, on the first robot.
+// Bar 1 is the drop: the logo locks on it (owner, 2026-10-04). The song (../../sound/launch.py)
+// starts four bars earlier, on "AI Overload." (owner, 2026-10-05); its bar b is our bar b - 4.
 const MUSIC_IN = Math.round(Overload.LOCK * FPS);
 const CUE_IN = Math.round(Overload.CUE_IN * FPS);
 // Frame where bar b (1-based) of the cue starts. Bars are 112.5 frames, so round per bar, never accumulate.
@@ -49,8 +49,9 @@ const section = (id: string, from: number, to: number, C: React.FC, frames: numb
   offset,
 });
 
-export const SECTIONS: Section[] = [
-  section('overload', 0, Overload.DURATION, Overload.Overload, Overload.DURATION),
+// The open's type treatment is the one input that changes the picture (owner to pick).
+const sections = (type: TypeStyle): Section[] => [
+  section('overload', 0, Overload.DURATION, () => <Overload.Overload type={type} />, Overload.DURATION),
   section('home', bar(2), bar(5), HomeIntro.HomeIntro, HomeIntro.DURATION),
   section('benefits', bar(5), bar(9), PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
   section('ask', bar(9), bar(13), DesignReview.DesignReview, DesignReview.DURATION),
@@ -84,7 +85,7 @@ const Caption: React.FC<{ lines: [string, string] }> = ({ lines }) => {
     </div>
   );
 };
-export const DURATION = SECTIONS[SECTIONS.length - 1].to;
+export const DURATION = bar(37) + Close.END_FRAMES; // the end card's last frame
 
 const Place: React.FC<{ s: Section }> = ({ s }) => {
   const plays = Math.min(s.to - s.from, s.frames - s.offset);
@@ -106,29 +107,27 @@ const Place: React.FC<{ s: Section }> = ({ s }) => {
   );
 };
 
-// The score: reveal.py's song, from the first robot. Three flavours on one grid, so the picture never
-// changes with it (owner to pick, 2026-10-04). DRAFT: each file runs only to the first demo (bar 10);
-// the chosen flavour gets the full length. Pick at render time: --props='{"score":"marimba"}'.
-// The calm.py scores (2026-09-30) were written for the old title and are no longer placed.
-export const SCORES = { drop: revealDrop, halftime: revealHalftime, marimba: revealMarimba } as const;
-export type Score = keyof typeof SCORES;
-export type AssemblyProps = { score: Score };
+// The score: launch.py's song under everything from "AI Overload." to the end card.
+export type AssemblyProps = { type: TypeStyle };
 
-export const Assembly: React.FC<AssemblyProps> = ({ score }) => (
-  <AbsoluteFill style={{ background: '#000' }}>
-    {SECTIONS.map((s) => (
-      <Place key={s.id} s={s} />
-    ))}
-    {CAPTIONS.map((c) => (
-      <Sequence key={c.lines[0]} from={c.from} durationInFrames={c.to - c.from} name={`caption: ${c.lines[0]}`}>
-        <Caption lines={c.lines} />
+export const Assembly: React.FC<AssemblyProps> = ({ type }) => {
+  const list = useMemo(() => sections(type), [type]); // stable components, so nothing remounts per frame
+  return (
+    <AbsoluteFill style={{ background: '#000' }}>
+      {list.map((s) => (
+        <Place key={s.id} s={s} />
+      ))}
+      {CAPTIONS.map((c) => (
+        <Sequence key={c.lines[0]} from={c.from} durationInFrames={c.to - c.from} name={`caption: ${c.lines[0]}`}>
+          <Caption lines={c.lines} />
+        </Sequence>
+      ))}
+      <Sequence from={bar(5)} layout="none">
+        <PostIntroBenefits.BenefitsSound />
       </Sequence>
-    ))}
-    <Sequence from={bar(5)} layout="none">
-      <PostIntroBenefits.BenefitsSound />
-    </Sequence>
-    <Sequence from={CUE_IN} layout="none">
-      <Audio src={SCORES[score]} />
-    </Sequence>
-  </AbsoluteFill>
-);
+      <Sequence from={CUE_IN} layout="none">
+        <Audio src={launchSong} />
+      </Sequence>
+    </AbsoluteFill>
+  );
+};

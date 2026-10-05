@@ -82,19 +82,19 @@ export const frames = (n: Count) => Math.round(beats(CAST[n]).end * FPS);
 export const lockAt = (n: Count) => beats(CAST[n]).lock;
 
 // ---- Final lockup geometry (px): mark box, gap, lowercase "buddies".
-const MARK = 250;
-const WORD = 230;
+export const MARK = 250;
+export const WORD = 230;
 const WORD_EM = 3.32; // rendered width of "buddies" at 800 in ems, measured off the logo sheet
-const GAP = MARK * 0.22;
+export const GAP = MARK * 0.22;
 const LOCKUP_W = MARK + GAP + WORD * WORD_EM;
-const MARK_LEFT = 960 - LOCKUP_W / 2;
-const MARK_TOP = 540 - MARK / 2 - 40; // room for the tagline
-const CENTRE_SHIFT = 960 - (MARK_LEFT + MARK / 2); // mark alone sits centred, then slides left
+export const MARK_LEFT = 960 - LOCKUP_W / 2;
+export const MARK_TOP = 540 - MARK / 2 - 40; // room for the tagline
+export const CENTRE_SHIFT = 960 - (MARK_LEFT + MARK / 2); // mark alone sits centred, then slides left
 
 // ---- One robot: head, antenna, visor and eyes. `face` 1 → 0 simplifies it to a plain disc.
-type Pose = { x: number; y: number; r: number; face: number; blink: number; color: string };
+export type Pose = { x: number; y: number; r: number; face: number; blink: number; color: string };
 
-const Antenna: React.FC<{ p: Pose }> = ({ p }) => {
+export const Antenna: React.FC<{ p: Pose }> = ({ p }) => {
   const h = 0.48 * p.r * p.face;
   return (
     <g opacity={p.face}>
@@ -104,7 +104,7 @@ const Antenna: React.FC<{ p: Pose }> = ({ p }) => {
   );
 };
 
-const Face: React.FC<{ p: Pose }> = ({ p }) => {
+export const Face: React.FC<{ p: Pose }> = ({ p }) => {
   const eyeY = p.y + p.r * 0.06;
   const eyeR = p.r * 0.12;
   return (

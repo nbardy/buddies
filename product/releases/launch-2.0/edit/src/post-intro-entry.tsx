@@ -10,7 +10,7 @@ const NATIVE_IN = Overload.DURATION + Benefits.DURATION;
 const REVIEW_DURATION = NATIVE_IN + Native.DURATION;
 const Review: React.FC = () => (
   <AbsoluteFill>
-    <Sequence durationInFrames={Overload.DURATION}><Overload.Overload /></Sequence>
+    <Sequence durationInFrames={Overload.DURATION}><Overload.Overload type="slam" /></Sequence>
     <Sequence from={Overload.DURATION} durationInFrames={Benefits.DURATION}><Benefits.PostIntroBenefits /></Sequence>
     <Sequence from={Overload.DURATION} layout="none"><Benefits.BenefitsSound /></Sequence>
     <Sequence from={NATIVE_IN} durationInFrames={Native.DURATION}><Native.NativeMultimedia /></Sequence>
