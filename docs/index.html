@@ -135,61 +135,9 @@
         .pill svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
 
         /* Hero: under the video, the pitch and the install. */
-        .hero { text-align: center; padding: 4rem 0 1rem; }
-
-        /* The headline's one highlight: "Open Source", capitalised, in the purple "magic" of the
-           app's "Let the AI Cook" animation (ColorPalettePicker): a shimmering violet-pink
-           gradient, a soft glow and twinkling sparkles (owner, 2026-10-05). */
-        h1 {
-            font-weight: 700;
-            font-stretch: 92%;
-            font-variation-settings: 'opsz' 96;
-            font-size: clamp(2.6rem, 7vw, 5.25rem);
-            letter-spacing: -0.035em;
-            line-height: 1.02;
-        }
-
-        .magic {
-            position: relative;
-            display: inline-block;
-            white-space: nowrap;
-        }
-
-        /* Shimmer: the owner's pick for the video's Vim card (take 2, 2026-10-05). Same colours,
-           speed and glow as the video, so page and poster match (Designer's values). */
-        .open-source {
-            background: linear-gradient(100deg, oklch(0.74 0.19 300) 0%, oklch(0.7 0.17 350) 25%,
-                oklch(0.74 0.19 300) 50%, oklch(0.76 0.12 200) 75%, oklch(0.74 0.19 300) 100%);
-            background-size: 200% 100%;
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            padding-bottom: 0.08em; /* room for the "p" descender inside the clipped gradient */
-            filter: drop-shadow(0 0 22px oklch(0.62 0.2 300 / 0.6));
-            animation: shimmer 9s linear infinite;
-        }
-
-        @keyframes shimmer {
-            to { background-position: -200% 0; }
-        }
-
-        .sparkle {
-            position: absolute;
-            width: 0.42em;
-            height: 0.42em;
-            fill: #fff6c2;
-            filter: drop-shadow(0 0 4px oklch(0.75 0.15 300));
-            animation: twinkle 1.8s ease-in-out infinite both;
-        }
-
-        .sparkle:nth-of-type(1) { top: -0.12em; left: -0.18em; }
-        .sparkle:nth-of-type(2) { top: 0.02em; right: 0.22em; width: 0.3em; height: 0.3em; animation-delay: 0.6s; }
-        .sparkle:nth-of-type(3) { bottom: 0.02em; left: 42%; width: 0.24em; height: 0.24em; animation-delay: 1.2s; }
-
-        @keyframes twinkle {
-            0%, 100% { opacity: 0.15; transform: scale(0.3) rotate(0deg); }
-            50% { opacity: 1; transform: scale(1) rotate(90deg); }
-        }
+        /* No headline under the video: the poster already says "Vim is Open Source", and the
+           owner removed every line that repeated it (2026-10-05, twice). Keep it that way. */
+        .hero { text-align: center; padding: 2.25rem 0 1rem; }
 
         .accent-violet { color: var(--violet); }
 
@@ -214,8 +162,7 @@
         }
 
         @media (prefers-reduced-motion: reduce) {
-            .rise > *, body::before, .open-source, .sparkle { animation: none; }
-            .sparkle { opacity: 1; }
+            .rise > *, body::before { animation: none; }
         }
 
         .actions {
@@ -390,7 +337,7 @@
         footer a:hover { color: var(--cream); }
 
         @media (max-width: 768px) {
-            .hero { padding: 2.5rem 0 2rem; }
+            .hero { padding: 1.5rem 0 2rem; }
             .features { grid-template-columns: 1fr; }
             .agents th, .agents td { padding: 0.85rem 1rem; }
             section { padding-top: 4rem; }
@@ -433,7 +380,6 @@
         </div>
 
         <header class="hero rise">
-            <h1>Free and <span class="magic"><span class="open-source">Open Source</span><svg class="sparkle" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 0 6 4 10 5 6 6 5 10 4 6 0 5 4 4z"/></svg><svg class="sparkle" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 0 6 4 10 5 6 6 5 10 4 6 0 5 4 4z"/></svg><svg class="sparkle" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 0 6 4 10 5 6 6 5 10 4 6 0 5 4 4z"/></svg></span>.</h1>
             <p class="pitch"><strong>Buddies is your team of AI agents.</strong> Multi harness: Claude Code, Codex and Gemini side by side, with channels, tasks and memory, on your own computer.</p>
             <div class="actions">
                 <div class="install-box glass">
