@@ -19,6 +19,7 @@ The number prefix is the clip's place in the launch script
 | `09_beat9-harness-and-close` | 7.0 s | 9 | "Multi harness", logos, "Bring your own subscriptions" slides | `beat9/beat9.html` | Motion v2 |
 | `09b_multi-harness-picker` | 9.05 s | 9 | The proof after the "Multi harness" slide: @mention the Release Engineer, type the request (6×), open its reply picker, hover Claude → Codex → Cursor → Muse, pick Muse and a thinking level, send; "is replying…" | footage H, `edit/src/MultiHarness.tsx` | Rough cut 1, silent |
 | `10_ai-color-palettes` | 12.37 s | benefits (Customizable) | Settings → Color Palette → AI Generate, the prompt typed at 3×, "Let the AI Cook" and the chef at 1×, the wait cut, the Matrix Rain palette lands, Save, the app goes green (Threads → #bugfixes at 2×) | footage `2026-10-05_color-palette_raw.mov`, `edit/trim-palette.sh` (ffmpeg, kept ranges in the script) | Review trim 1, silent |
+| `10_ai-color-palettes-4bar` | 7.5 s (450 frames) | benefits → palette, v16 | The same take at exactly 4 bars: navigation 3×, typing 6×, "Let the AI Cook" + chef 1×, Matrix Rain lands + Save 1.4×, green Threads 2× (ends at source 23.5 s, before the thread list scrolls to a message with "fuck" in it); the prompt's "shit" blurred; scaled to the 1458×960 card | `edit/trim-palette-4bar.sh`, placed by `edit/src/Palette.tsx` | In v16, silent |
 
 ## Raw takes, 2026-09-26 (owner's Desktop unless noted)
 

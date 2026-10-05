@@ -15,9 +15,10 @@ the Vim line; "They show their work" is 2 bars (the emblem shots were cut):
   bar  3        DROP    full band + the hook                         (the logo)
   bars 4-7      HOME    lighter: filtered chords, soft kick          ("buddies" holds, then the home);
                         bars 4-5 crossfade from the full band into it, so the drop eases down
-  bars 8-32     FULL    the groove; on each scene's downbeat a crash and the hook again
-  bars 33-36    CODA    the home texture again, quiet                (the Vim line)
-  bar  37       END     one ringing D chord, the hook on a pluck     (the end card), 6 s, faded
+  bars 8-36     FULL    the groove; on each scene's downbeat a crash and the hook again
+                        (bars 33-36: AI color themes, added 2026-10-06)
+  bars 37-40    CODA    the home texture again, quiet                (the Vim line)
+  bar  41       END     one ringing D chord, the hook on a pluck     (the end card), 6 s, faded
 
 Writes launch.wav: stereo 48 kHz 16-bit, peak -3 dBFS.
 """
@@ -40,10 +41,10 @@ from reveal import (
 
 DROP_SONG = next(f for f in FLAVOURS if f.name == "drop")
 HOME = range(4, 8)
-FULL = range(8, 33)
-SCENES = (8, 12, 14, 18, 20, 25, 29)  # swarms, mobile, ask, show their work, harness, fork, benefits
-CODA = range(33, 37)
-END = 37
+FULL = range(8, 37)
+SCENES = (8, 12, 14, 18, 20, 25, 29, 33)  # swarms, mobile, ask, show their work, harness, fork, benefits, palette
+CODA = range(37, 41)
+END = 41
 RING = 6.0
 FADE = 4.0
 
