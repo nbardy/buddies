@@ -33,6 +33,7 @@ str_enum!(RunStatus { Queued = "queued", Running = "running", CancelRequested = 
 str_enum!(DocKind { Soul = "soul", Working = "working", LongTerm = "long_term", Shared = "shared" });
 str_enum!(PostKind { Inform = "inform", Request = "request" });
 str_enum!(WakeKind { Mention = "mention", FollowUp = "follow_up" });
+str_enum!(Placement { Back = "back", Front = "front" });
 str_enum!(Op { ReadDoc = "read_doc", WriteDoc = "write_doc", Post = "post", ReadChannel = "read_channel", SearchPosts = "search_posts", CreateChannel = "create_channel", ArchiveChannel = "archive_channel", RenameChannel = "rename_channel", WriteTask = "write_task", EnqueueRun = "enqueue_run", CancelRun = "cancel_run", WriteSchedule = "write_schedule", Admin = "admin" });
 
 /// Who acts. Stored as NULL (post author / channel creator) or the key `'owner'` (events, read
@@ -581,6 +582,8 @@ pub struct ChatEnqueue {
     pub turn_id: String,
     /// JSON; opaque to the crate (the host's message, wording and provenance).
     pub body: String,
+    /// `back`: a send, behind the conversation's live inputs. `front`: interrupt-and-send.
+    pub placement: Placement,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(object))]

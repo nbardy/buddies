@@ -203,6 +203,9 @@ export function createRunner(options: {
     try {
       // The runtime reads the briefing synchronously once admitted (briefing.ts).
       await briefings.warm(ticket.context);
+      // Executed from here on: a backend that dies now leaves a run that is adopted or fails,
+      // never one requeued and replayed (Pattern: durable-intake).
+      await core.markExecuting(claim.run.id, claim.leaseToken, null);
       chats.set(turnId, { state: 'admitted', claim });
     } catch (error) {
       chats.set(turnId, { state: 'failed', error: String(error) });
@@ -335,6 +338,10 @@ export function createRunner(options: {
             });
           await core.bindRun(run.id, claim.leaseToken, job.conversationId);
           await briefings.warm(context);
+          // Pattern: durable-intake (docs/patterns.md#durable-intake). The last await before the
+          // spawn: until here a dead backend's run goes back to the queue (nothing ran); from
+          // here it is adopted from its journal or fails, never replayed.
+          await core.markExecuting(run.id, claim.leaseToken, null);
           // The turn's settle runs `finishRun`: the completion step is re-derived there from the
           // run (`jobFor`), the same way for a live turn and one a later backend adopted.
           return await host.runTurn({
@@ -492,6 +499,7 @@ export function createRunner(options: {
         conversationId,
         turnId,
         body,
+        placement: 'back',
       });
       chats.set(turnId, { state: 'queued', context, conversationId, run });
       run.then(wake, (error) => {

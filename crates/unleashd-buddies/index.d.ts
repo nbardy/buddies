@@ -32,6 +32,9 @@ export declare class BuddiesCore {
   taskCounts(workspaceId: string): Promise<Array<TaskCount>>
   enqueueRun(actor: Actor, input: EnqueueInput): Promise<Run>
   enqueueChat(actor: Actor, input: ChatEnqueue): Promise<Run>
+  markExecuting(runId: string, leaseToken: string, readThrough?: string | undefined | null): Promise<Run>
+  releaseRun(runId: string, leaseToken: string, conversationId: string): Promise<Run>
+  promoteRun(actor: Actor, runId: string): Promise<Run>
   claimRun(budgets: RunBudgets): Promise<Claim | null>
   renewRun(runId: string, leaseToken: string, leaseMs: number): Promise<Run>
   settleRun(runId: string, leaseToken: string, outcome: Outcome): Promise<Run>
@@ -163,6 +166,8 @@ export interface ChatEnqueue {
   turnId: string
   /** JSON; opaque to the crate (the host's message, wording and provenance). */
   body: string
+  /** `back`: a send, behind the conversation's live inputs. `front`: interrupt-and-send. */
+  placement: Placement
 }
 
 export interface Claim {
@@ -320,6 +325,8 @@ export type Outcome =
   | { kind: 'complete'; text: string }
   | { kind: 'failed'; code: string; error: string }
   | { kind: 'cancelled'; reason: string }
+
+export type Placement = 'back' | 'front'
 
 export interface Post {
   id: string

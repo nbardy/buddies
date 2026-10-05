@@ -182,6 +182,21 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn mark_executing(&self, run_id: String, lease_token: String, read_through: Option<String>) -> napi::Result<Run> {
+        call(&self.store, move |s| s.mark_executing(&run_id, &lease_token, read_through)).await
+    }
+
+    #[napi]
+    pub async fn release_run(&self, run_id: String, lease_token: String, conversation_id: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.release_run(&run_id, &lease_token, &conversation_id)).await
+    }
+
+    #[napi]
+    pub async fn promote_run(&self, actor: Actor, run_id: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.promote_run(&actor, &run_id)).await
+    }
+
+    #[napi]
     pub async fn claim_run(&self, budgets: RunBudgets) -> napi::Result<Option<Claim>> {
         call(&self.store, move |s| s.claim_run(budgets)).await
     }

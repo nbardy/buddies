@@ -40,6 +40,7 @@ fn chat(buddy_id: &str, turn: &str, conversation: &str) -> ChatEnqueue {
         conversation_id: conversation.into(),
         turn_id: turn.into(),
         body: format!("{{\"text\":\"{turn}\"}}"),
+        placement: Placement::Back,
     }
 }
 
@@ -335,6 +336,8 @@ fn a_lease_is_the_only_way_to_settle_and_it_expires() {
     let s = &mut f.store;
     s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "c1")).unwrap();
     let claim = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(1_000)).unwrap().unwrap();
+    // The holder spawned (durable intake: an unexecuted run would be requeued, not failed).
+    s.mark_executing(&claim.run.id, &claim.lease_token, None).unwrap();
     let wrong = s.settle_run(&claim.run.id, "not-the-token", Outcome::Complete { text: "x".into() }).unwrap_err();
     assert!(matches!(wrong, CoreError::LeaseLost(_)));
     // The next claim after expiry fails the abandoned run instead of leaving it running forever.
@@ -649,6 +652,7 @@ fn an_expired_lease_ends_its_run_like_a_failed_settle() {
     let ask = s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
     let claim = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
     assert_eq!(claim.run.input, RunInput::Post { post_id: ask.id.clone() });
+    s.mark_executing(&claim.run.id, &claim.lease_token, None).unwrap();
     // The lease is not the deadline: minutes of lease, an hour of turn budget.
     assert_eq!(claim.run.lease_expires_at.as_deref(), Some("2099-01-01T00:05:00.000Z"));
     assert_eq!(claim.run.deadline.as_deref(), Some("2099-01-01T01:00:00.000Z"));
@@ -683,6 +687,7 @@ fn a_renewed_lease_outlives_its_first_term() {
     assert_eq!(chat_run.run.deadline.as_deref(), Some("2099-01-02T00:00:00.000Z"), "24 h, from the chat budget");
     s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
     let orphan = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
+    s.mark_executing(&orphan.run.id, &orphan.lease_token, None).unwrap();
 
     for minute in [4, 8, 12] {
         let at = format!("2099-01-01T00:{minute:02}:00.000Z");

@@ -238,6 +238,11 @@ impl Store {
     pub fn enqueue_chat(&mut self, actor: &Actor, input: ChatEnqueue) -> Result<Run> {
         self.write(|tx| {
             require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: input.buddy_id.clone() })?;
+            let place = match input.placement {
+                Placement::Back => Place::Back,
+                Placement::Front => Place::Front,
+            };
+            let lane = format!("conv:{}", input.conversation_id);
             tx.insert_run(NewRun {
                 input: EnqueueInput {
                     buddy_id: input.buddy_id,
@@ -249,7 +254,7 @@ impl Store {
                     config: None,
                 },
                 body: Some(input.body),
-                lane: None,
+                lane: Some((lane, place)),
             })
         })
     }
@@ -299,14 +304,14 @@ impl Store {
             };
             let token = uuid::Uuid::new_v4().to_string();
             // An enqueue-time deadline (EnqueueInput.deadline; no caller sets one today) wins.
-            // `executing_at` at the claim (W0a of durable intake): every holder today spawns right
-            // after it with nothing undoable in between, so a claimed run counts as executed and a
-            // dead holder's run is never requeued. W0b moves the stamp to `mark_executing`, just
-            // before the spawn. A build that left it NULL here would have its running rows REPLAYED
-            // by the next build's requeue rule (design Revision 3).
+            // No `executing_at` here: the holder stamps it with `mark_executing` just before its
+            // spawn. Until then the run may still compose a prompt, ask the reply gate or wait for
+            // its seat, all of which a successor can redo, so a holder that dies here gets the run
+            // requeued (`expire_leases`), never replayed. W0a stamped at claim, which is why its
+            // running rows are never requeued by this build (design Revision 3).
             let claimed = tx.execute(
                 "UPDATE run SET status = 'running', lease_token = ?2, lease_expires_at = ?3, started_at = ?4,
-                   deadline = coalesce(deadline, ?5), executing_at = ?4
+                   deadline = coalesce(deadline, ?5)
                  WHERE id = ?1 AND status = 'queued'",
                 params![id, token, plus_ms(now, budgets.lease_ms)?, now, plus_ms(now, deadline_ms)?],
             )?;
@@ -329,6 +334,73 @@ impl Store {
         self.write(|tx| {
             leased(tx, run_id, lease_token)?;
             tx.execute("UPDATE run SET lease_expires_at = ?2 WHERE id = ?1", params![run_id, plus_ms(now, lease_ms)?])?;
+            get_run(tx, run_id)
+        })
+    }
+
+    // Pattern: durable-intake (docs/patterns.md#durable-intake)
+    /// The holder is about to spawn: from now on the run has executed, and a holder that dies is
+    /// adopted (its journal) or ends visibly, never requeued (the August rule: an executed input
+    /// is never silently replayed). Every holder calls it right before the side-effecting spawn;
+    /// a second call keeps the first stamp. `read_through`: a channel reply's newest post its
+    /// prompt showed, kept on the run so its settle can mark the thread read (design R2).
+    pub fn mark_executing(&mut self, run_id: &str, lease_token: &str, read_through: Option<String>) -> Result<Run> {
+        self.write(|tx| {
+            let run = leased(tx, run_id, lease_token)?;
+            let body = match (&run.input, read_through) {
+                (RunInput::Mention { .. } | RunInput::FollowUp { .. }, Some(ord)) => Some(json!({ "readThrough": ord }).to_string()),
+                // Refused here, not at settle: a complete channel reply must move the cursor, and a
+                // missing one would only surface as a Corrupt error from `after_settle`.
+                (RunInput::Mention { .. } | RunInput::FollowUp { .. }, None) => {
+                    return Err(CoreError::Invalid(format!("channel reply {run_id} must say what its prompt read")));
+                }
+                (_, None) => run.body.clone(),
+                (other, Some(_)) => return Err(CoreError::Invalid(format!("only a channel reply reads a thread: {other:?}"))),
+            };
+            tx.execute(
+                "UPDATE run SET executing_at = coalesce(executing_at, ?2), body = ?3 WHERE id = ?1",
+                params![run_id, now_iso(), body],
+            )?;
+            get_run(tx, run_id)
+        })
+    }
+
+    /// The holder cannot run it yet (its seat is busy with another turn): back to the queue, bound
+    /// to `conversation_id` so the claim gate holds it as `conversation_busy` until that turn
+    /// settles, instead of the holder polling with a pool slot. Only before `mark_executing`.
+    pub fn release_run(&mut self, run_id: &str, lease_token: &str, conversation_id: &str) -> Result<Run> {
+        self.write(|tx| {
+            let run = leased(tx, run_id, lease_token)?;
+            if run.executing_at.is_some() {
+                return Err(CoreError::Invalid(format!("run {run_id} already executed; it cannot go back to the queue")));
+            }
+            tx.execute(
+                "UPDATE run SET status = 'queued', lease_token = NULL, lease_expires_at = NULL, started_at = NULL,
+                   deadline = NULL, conversation_id = ?2
+                 WHERE id = ?1",
+                params![run_id, conversation_id],
+            )?;
+            get_run(tx, run_id)
+        })
+    }
+
+    /// The owner moved a queued input first in its lane (it also keeps that place in the pool).
+    pub fn promote_run(&mut self, actor: &Actor, run_id: &str) -> Result<Run> {
+        self.write(|tx| {
+            let run = get_run(tx, run_id)?;
+            require(tx, actor, Op::CancelRun, &Subject::Buddy { id: run.buddy_id.clone() })?;
+            let lane = match (&run.status, &run.lane) {
+                (RunStatus::Queued, Some(lane)) => lane.clone(),
+                _ => return Err(CoreError::Invalid(format!("run {run_id} is not a queued input of a lane"))),
+            };
+            let first = lane_position(tx, &lane, Place::Front)?;
+            tx.execute(
+                "UPDATE run SET position = ?2,
+                   ready_at = min(ready_at, (SELECT min(l.ready_at) FROM run l WHERE l.lane = ?3
+                                             AND l.status IN ('queued','running','cancel_requested')))
+                 WHERE id = ?1",
+                params![run_id, first, lane],
+            )?;
             get_run(tx, run_id)
         })
     }
@@ -607,7 +679,24 @@ fn end_run(tx: &Transaction, run: &Run, outcome: &Outcome, now: &str) -> Result<
 /// The claim gate's first step (see `claim_run_at`): every held run whose lease ran out ends as a
 /// failed settle would, so its request stops awaiting and its sender gets a failure notice. Until
 /// 2026-10-01 this was a bare UPDATE that skipped `after_settle`, leaving requests awaiting forever.
+///
+/// Pattern: durable-intake (docs/patterns.md#durable-intake). A run its holder never marked
+/// executing has not run: it goes back to the queue, keeping its lane position, so the input is
+/// neither lost nor reported failed. This is the boot rule of the design ("`executing_at` NULL →
+/// requeue"), placed in this gate because the gate is the one place a dead holder's run changes
+/// (Pattern: lease-heartbeat; no boot sweep, a second live backend may hold runs). Guard: crate test
+/// `a_dead_holder_requeues_an_unexecuted_run_and_fails_an_executed_one`.
 fn expire_leases(tx: &Transaction, now: &str) -> Result<()> {
+    // The `status IN (...)` term repeats `run_lease`'s partial-index condition so the planner can
+    // use it (a bare `status = 'running'` scanned the table; guard: query_plan.rs). A stop requested
+    // before anything ran is not requeued: the loop below ends it cancelled through `end_run`, so
+    // its request closes (a bare UPDATE here skipped `after_settle`, the 2026-10-01 bug again).
+    tx.prepare_cached(
+        "UPDATE run SET status = 'queued', lease_token = NULL, lease_expires_at = NULL, started_at = NULL, deadline = NULL
+         WHERE status IN ('running','cancel_requested') AND lease_expires_at < ?1
+           AND status = 'running' AND executing_at IS NULL",
+    )?
+    .execute([now])?;
     let expired = collect(
         tx.prepare_cached(&format!(
             "SELECT {RUN_COLS} FROM run WHERE status IN ('running','cancel_requested') AND lease_expires_at < ?1"
@@ -632,8 +721,27 @@ fn expire_leases(tx: &Transaction, now: &str) -> Result<()> {
     Ok(())
 }
 
-/// A request whose run failed or was cancelled stops awaiting; a failure tells the sender.
+/// A request whose run failed or was cancelled stops awaiting; a failure tells the sender. A channel
+/// reply that completed marks its thread read through what its prompt showed, in the settle's own
+/// transaction (design R2): the cursor follows completed handling, never the compose step, so a
+/// crash between composing and running can never read as "already handled".
 fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
+    if let (RunInput::Mention { post_id } | RunInput::FollowUp { post_id }, Some(body), Outcome::Complete { .. }) =
+        (&run.input, &run.body, outcome)
+    {
+        let through = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|v| v.get("readThrough").and_then(|o| o.as_str()).map(str::to_owned))
+            .ok_or_else(|| CoreError::Corrupt(format!("run {} body {body:?}", run.id)))?;
+        let post = get_post(tx, post_id)?;
+        let root = post.root_id.unwrap_or(post.id);
+        tx.execute(
+            "INSERT INTO thread_read (reader, root_id, last_ord, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(reader, root_id) DO UPDATE SET last_ord = excluded.last_ord, updated_at = excluded.updated_at
+             WHERE excluded.last_ord > thread_read.last_ord",
+            params![run.buddy_id, root, through, now_iso()],
+        )?;
+    }
     match (&run.input, outcome) {
         (RunInput::Post { post_id }, Outcome::Failed { .. }) => close_request(tx, post_id, "failed", Some(&run.id)),
         (RunInput::Post { post_id }, Outcome::Cancelled { .. }) => close_request(tx, post_id, "cancelled", None),

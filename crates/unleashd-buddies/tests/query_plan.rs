@@ -145,7 +145,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
     let run = s
         .enqueue_chat(
             &owner,
-            ChatEnqueue { buddy_id: "peer".into(), conversation_id: "c-peer".into(), turn_id: "u2".into(), body: "{}".into() },
+            ChatEnqueue { buddy_id: "peer".into(), conversation_id: "c-peer".into(), turn_id: "u2".into(), body: "{}".into(), placement: Placement::Back },
         )
         .unwrap();
     s.cancel_run(&owner, &run.id).unwrap();

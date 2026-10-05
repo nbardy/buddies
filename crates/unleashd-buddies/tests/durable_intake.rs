@@ -220,7 +220,13 @@ fn a_queued_chat_always_has_its_text_and_settling_clears_it() {
     let chat = s
         .enqueue_chat(
             &Actor::Owner,
-            ChatEnqueue { buddy_id: "peer".into(), conversation_id: "c1".into(), turn_id: "t1".into(), body: "{\"text\":\"hi\"}".into() },
+            ChatEnqueue {
+                buddy_id: "peer".into(),
+                conversation_id: "c1".into(),
+                turn_id: "t1".into(),
+                body: "{\"text\":\"hi\"}".into(),
+                placement: Placement::Back,
+            },
         )
         .unwrap();
     assert_eq!(chat.body.as_deref(), Some("{\"text\":\"hi\"}"));
@@ -349,4 +355,137 @@ fn a_newer_follow_up_supersedes_queued_ones_but_never_a_mention() {
     let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "ic".into() }, 10).unwrap();
     let waiting = rows.iter().find(|r| r.status == RunStatus::Queued).unwrap().waiting.clone();
     assert_eq!(waiting, Some(RunWaiting::BehindInLane));
+}
+
+fn chat_in(conversation: &str, turn: &str, placement: Placement) -> ChatEnqueue {
+    ChatEnqueue {
+        buddy_id: "lead".into(),
+        conversation_id: conversation.into(),
+        turn_id: turn.into(),
+        body: format!("{{\"text\":\"{turn}\"}}"),
+        placement,
+    }
+}
+
+fn turn_of(claim: &Claim) -> String {
+    match &claim.run.input {
+        RunInput::Chat { turn_id } => turn_id.clone(),
+        other => panic!("not a chat: {other:?}"),
+    }
+}
+
+/// Claim, settle, and return the turn order of every chat run in the store.
+fn drain_order(s: &mut Store, now: &str) -> Vec<String> {
+    let mut order = vec![];
+    while let Some(claim) = s.claim_run_at(now, lease(60_000)).unwrap() {
+        order.push(turn_of(&claim));
+        s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    }
+    order
+}
+
+// Product review 2 (2026-10-01), design R3: one writer is not FIFO. Inside a conversation's lane only
+// `position` orders. Three sends written with one identical `ready_at` (mutation: order the claim
+// by `ready_at, id` alone and the promote below is undone) claim in send order; a promote moves one
+// first and survives a reopen from disk.
+#[test]
+fn a_lane_claims_in_position_order_at_one_frozen_instant() {
+    let mut f = fixture();
+    for turn in ["one", "two", "three"] {
+        f.store.enqueue_chat(&Actor::Owner, chat_in("c", turn, Placement::Back)).unwrap();
+    }
+    let conn = Connection::open(&f.path).unwrap();
+    // Every run at one instant, and ids reversed against send order: only position can order them.
+    conn.execute("UPDATE run SET ready_at = ?1", [T0]).unwrap();
+    let three = f.store.list_runs(RunQuery::Conversation { conversation_id: "c".into() }, 10).unwrap();
+    let three = three.iter().find(|r| r.input == RunInput::Chat { turn_id: "three".into() }).unwrap().id.clone();
+    f.store.promote_run(&Actor::Owner, &three).unwrap();
+    drop(f.store);
+    let mut s = Store::open(f.path.to_str().unwrap()).unwrap();
+    assert_eq!(drain_order(&mut s, "2099-01-01T00:00:01.000Z"), ["three", "one", "two"]);
+
+    // interrupt_and_send: a front placement goes ahead of everything queued.
+    for turn in ["a", "b"] {
+        s.enqueue_chat(&Actor::Owner, chat_in("d", turn, Placement::Back)).unwrap();
+    }
+    s.enqueue_chat(&Actor::Owner, chat_in("d", "now", Placement::Front)).unwrap();
+    assert_eq!(drain_order(&mut s, "2099-01-01T00:00:02.000Z"), ["now", "a", "b"]);
+}
+
+// Design §3, adapted to the lease-heartbeat gate (Revision 6): a holder that dies before it marked
+// the run executing leaves nothing that ran, so the claim gate puts the run back in the queue in
+// its own slot, ahead of every input sent after it. A holder that died after `mark_executing` left
+// a turn that ran: the gate fails it (its journal, if any, is adopted by the next backend before
+// that). Mutation: requeue regardless of `executing_at` and the executed run replays here.
+#[test]
+fn a_dead_holder_requeues_an_unexecuted_run_and_fails_an_executed_one() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    s.enqueue_chat(&Actor::Owner, chat_in("c", "head", Placement::Back)).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat_in("busy", "ran", Placement::Back)).unwrap();
+    let head = s.claim_run_at(T0, lease(1_000)).unwrap().unwrap();
+    let ran = s.claim_run_at(T0, lease(1_000)).unwrap().unwrap();
+    assert_eq!((turn_of(&head), turn_of(&ran)), ("head".into(), "ran".into()));
+    s.mark_executing(&ran.run.id, &ran.lease_token, None).unwrap();
+    // A send arrives behind the claimed head while its holder is alive.
+    s.enqueue_chat(&Actor::Owner, chat_in("c", "later", Placement::Back)).unwrap();
+
+    // Both holders die; the next claim after the lease ran out decides each.
+    let next = s.claim_run_at("2099-01-01T00:00:05.000Z", lease(1_000)).unwrap().unwrap();
+    assert_eq!(turn_of(&next), "head", "the requeued head keeps its slot ahead of the later send");
+    assert_ne!(next.lease_token, head.lease_token);
+    assert_eq!(s.get_run(&next.run.id).unwrap().attempt, 1, "the same run, not a retry");
+    let failed = s.get_run(&ran.run.id).unwrap();
+    assert_eq!((failed.status, failed.error_code.as_deref()), (RunStatus::Failed, Some("lease_expired")));
+    // The dead holder's late writes are refused: it can never spawn after its run moved on.
+    assert_eq!(s.mark_executing(&head.run.id, &head.lease_token, None).unwrap_err().code(), "lease_lost");
+}
+
+// Design R2 (product review 3): the read cursor follows completed handling. A channel reply's
+// cursor moves in its settle's transaction, to what its prompt showed, and only when it completed;
+// composing a prompt moves nothing.
+#[test]
+fn a_reply_marks_its_thread_read_only_when_it_settles_complete() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let channel = public(s);
+    let id = ChannelRef::Id { id: channel };
+    let root = s.write_post(&Actor::Owner, id.clone(), inform("root", "r", None, vec![wake("ic", WakeKind::Mention)])).unwrap().post;
+    let conn = Connection::open(&f.path).unwrap();
+    let read = || -> Option<String> {
+        conn.query_row("SELECT last_ord FROM thread_read WHERE reader = 'ic' AND root_id = ?1", [&root.id], |r| r.get(0)).ok()
+    };
+    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    s.mark_executing(&claim.run.id, &claim.lease_token, Some(root.ord.clone())).unwrap();
+    assert_eq!(read(), None, "marking executing reads nothing");
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    assert_eq!(read(), Some(root.ord.clone()));
+}
+
+// A seat busy with another turn sends its reply back to the queue, bound to that seat, so the gate
+// holds it as `conversation_busy` (no holder polls with a pool slot). Never after it ran.
+#[test]
+fn a_reply_whose_seat_is_busy_goes_back_to_the_queue_bound_to_it() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    s.enqueue_chat(
+        &Actor::Owner,
+        ChatEnqueue { buddy_id: "ic".into(), ..chat_in("seat-1", "owner-typing", Placement::Back) },
+    )
+    .unwrap();
+    let typing = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let channel = public(s);
+    let hi = s.write_post(&Actor::Owner, ChannelRef::Id { id: channel }, inform("hi", "k", None, vec![wake("ic", WakeKind::Mention)])).unwrap().post;
+    let mention = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert!(matches!(s.bind_run(&mention.run.id, &mention.lease_token, "seat-1"), Err(CoreError::ConversationBusy(_))));
+    s.release_run(&mention.run.id, &mention.lease_token, "seat-1").unwrap();
+    assert!(s.claim_run(lease(60_000)).unwrap().is_none());
+    let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "ic".into() }, 10).unwrap();
+    assert_eq!(rows.iter().find(|r| r.id == mention.run.id).unwrap().waiting, Some(RunWaiting::ConversationBusy));
+    s.settle_run(&typing.run.id, &typing.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    let again = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert_eq!(again.run.id, mention.run.id);
+    assert_eq!(s.mark_executing(&again.run.id, &again.lease_token, None).unwrap_err().code(), "invalid", "a reply says what it read");
+    s.mark_executing(&again.run.id, &again.lease_token, Some(hi.ord.clone())).unwrap();
+    assert_eq!(s.release_run(&again.run.id, &again.lease_token, "seat-1").unwrap_err().code(), "invalid");
 }
