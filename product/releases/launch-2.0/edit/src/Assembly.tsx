@@ -26,7 +26,7 @@ export const HEIGHT = 1080;
 
 const BAR = (4 * 60) / 128; // 1.875 s
 // Bar 1 is the drop: the logo locks on it (owner, 2026-10-04). The song (../../sound/launch.py)
-// starts four bars earlier, on "AI Overload." (owner, 2026-10-05); its bar b is our bar b - 4.
+// starts two bars earlier, on the first robot (owner, 2026-10-05); its bar b is our bar b - 2.
 const MUSIC_IN = Math.round(Overload.LOCK * FPS);
 const CUE_IN = Math.round(Overload.CUE_IN * FPS);
 // Frame where bar b (1-based) of the cue starts. Bars are 112.5 frames, so round per bar, never accumulate.
@@ -107,7 +107,7 @@ const Place: React.FC<{ s: Section }> = ({ s }) => {
   );
 };
 
-// The score: launch.py's song under everything from "AI Overload." to the end card.
+// The score: launch.py's song under everything from the first robot to the end card.
 export type AssemblyProps = { type: TypeStyle };
 
 export const Assembly: React.FC<AssemblyProps> = ({ type }) => {

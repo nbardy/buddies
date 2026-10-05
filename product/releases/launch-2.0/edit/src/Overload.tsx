@@ -24,7 +24,7 @@ const T = {
   cut: CUT,
   end: CUT + Reveal.END, // the reveal: "AI Overload.", the robots, the logo, one bar on it
 };
-// The launch song (../../sound/launch.py) starts on "AI Overload." and drops on the logo lock;
+// The launch song (../../sound/launch.py) starts on the first robot and drops on the logo lock;
 // the edit's bar grid (Assembly.bar) counts from the lock.
 export const CUE_IN = T.cut + Reveal.CUE_IN;
 export const LOCK = T.cut + Reveal.LOCK;
@@ -565,15 +565,13 @@ const pileCues = (w: WindowSpec, i: number): Cue[] => [
   ...(i < 30 ? [{ at: w.at + sendAt(w), src: SFX.send, volume: 0.22 }] : []),
 ];
 
-// After the boom the launch song takes over (Assembly places it); here only a soft pop per robot.
+// After the boom the launch song takes over (Assembly places it): the robots' boops are its first notes.
 // Levels: the boom stays the loudest moment; stacked chords sum, so they sit lower than single notes.
 const OVERLOAD_CUES: Cue[] = [
   ...FOCUS.flatMap(focusCues),
   ...PILE.flatMap(pileCues),
   { at: T.rampStart, src: SFX.riser, volume: 0.6 }, // ends exactly on T.cut: the silence is the drop
-  // At full level the boom summed with the song's first bar to 589 clipped samples (2026-10-05).
-  { at: T.cut + Reveal.CUE_IN, src: SFX.impact, volume: 0.55 },
-  ...Reveal.POPS.map((at, i) => ({ at: T.cut + at, src: POPS[i + 2], volume: 0.35 })),
+  { at: T.cut + Reveal.LEAD, src: SFX.impact, volume: 1 }, // "AI Overload."; the song starts a bar later
 ];
 
 // The reveal reads its own clock: seconds since the cut.

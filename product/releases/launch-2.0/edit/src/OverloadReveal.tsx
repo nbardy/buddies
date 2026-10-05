@@ -2,8 +2,8 @@
 // "sucks", and the separate robot intro after it (boops, fade, cut) was a weak transition. Now the
 // robots pop in on the left of the "AI Overload" screen, the lines answer them, then the robots
 // gather, become the Huddle mark, and the logo pops on the drop of the launch song.
-// Timed on that song's build (../../sound/launch.py = edm.py bars 1-4, 128 bpm): every entrance
-// below is a beat of it, in seconds from the hard cut to black.
+// Timed on that song (../../sound/launch.py: reveal.py's Drop, the owner's pick, 128 bpm): the robots
+// pop on its five boops, gather in its build bar and lock on its drop. Seconds from the cut to black.
 import type React from 'react';
 import { AbsoluteFill, random } from 'remotion';
 import { clamp01, easeOutBack, FONT, INK, lerp } from './blocks';
@@ -17,25 +17,27 @@ const CREAM = '#fdf6e3';
 const MONO = '"SF Mono", Menlo, Consolas, monospace';
 const ROBOTS = CAST[5];
 
-// ---- Timeline (s from the cut). The song starts LEAD after the cut: a breath of black first.
+// ---- Timeline (s from the cut). A breath of black, then "AI Overload." on the boom; the song
+// starts one bar later with the first robot (its bar 1), builds (bar 2) and drops on the logo (bar 3).
 export const LEAD = BEAT / 2;
-const bar = (b: number, beat = 0) => LEAD + (b - 1) * BAR + beat * BEAT;
+const SLAM = LEAD;
+const SONG = SLAM + BAR; // the song's first sample = the first robot's boop
+const song = (b: number, beat = 0) => SONG + (b - 1) * BAR + beat * BEAT;
 const R = {
-  slam: bar(1), // "AI Overload." on the build's first downbeat, with the boom
-  feeling: bar(1, 2),
-  pop: (i: number) => bar(2, i / 2), // the five robots on the 8ths of bar 2
-  shift: bar(2) - 0.12, // the lines make room as the first robot lands
-  covered: bar(3),
-  exit: bar(4), // lines leave, faces simplify
-  gather: bar(4, 1),
-  squeeze: bar(5) - BEAT / 2, // the song's dry gap: the discs hold their breath
-  lock: bar(5), // the drop
-  tag: bar(5, 2),
+  slam: SLAM,
+  feeling: SLAM + 2 * BEAT,
+  pop: (i: number) => song(1, ROBOTS.pops[i] / 2), // the boops: the melody's 8ths 0, 2, 3, 4, 6
+  shift: song(1) - 0.12, // the lines make room as the first robot lands
+  covered: song(1, 2),
+  exit: song(2), // the build: lines leave, faces simplify
+  gather: song(2, 1),
+  squeeze: song(2, 3.5), // the song's dry 8th before the drop: the discs hold their breath
+  lock: song(3), // the drop
+  tag: song(3, 2),
 };
 export const LOCK = R.lock;
 export const END = R.lock + BAR; // one bar on the logo, then the home scene
-export const CUE_IN = R.slam; // the song's first sample
-export const POPS = ROBOTS.colors.map((_, i) => R.pop(i));
+export const CUE_IN = SONG;
 
 const easeOutCubic = (x: number) => 1 - (1 - x) ** 3;
 const easeInOut = (x: number) => (x < 0.5 ? 4 * x ** 3 : 1 - (-2 * x + 2) ** 3 / 2);

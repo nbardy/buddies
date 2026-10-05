@@ -102,8 +102,9 @@ def up(note: str) -> str:
 
 
 class Mix:
-    def __init__(self):
-        self.n = round(LENGTH * SR)
+    def __init__(self, length: float, fade: float):
+        self.length, self.fade = length, fade
+        self.n = round(length * SR)
         self.time = np.arange(self.n) / SR
         self.bus = {k: np.zeros((2, self.n)) for k in ("drums", "room", "music", "hall", "bass", "swell")}
         self.kicks: list[float] = []
@@ -134,7 +135,7 @@ def master(mix: Mix, pump_depth: float) -> np.ndarray:
     # A light limiter (+2 dB): more drive flattened the arc, and the robots bar read only 3 dB under
     # the drop. The robots should be soft, the drop the loudest bar, the home a step down.
     out = out * limiter_gain(out / top, drive=10 ** (2 / 20)) / top
-    out *= np.clip((LENGTH - mix.time) / FADE, 0, 1) ** 2
+    out *= np.clip((mix.length - mix.time) / mix.fade, 0, 1) ** 2
     return out * PEAK / np.max(np.abs(out))
 
 
@@ -330,7 +331,7 @@ FLAVOURS = [
 
 
 def render(f: Flavour) -> np.ndarray:
-    mix = Mix()
+    mix = Mix(LENGTH, FADE)
     robots_bar(mix)
     build_bar(mix)
     f.drop(mix, DROP)
