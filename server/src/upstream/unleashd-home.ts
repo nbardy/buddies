@@ -3,7 +3,7 @@ import type { Buddy } from '@unleashd/buddies-core';
 import { type BuddiesCore, OWNER, managerRef } from '../buddies/core';
 
 // First-run home for an install: the checkout itself as a Buddy workspace
-// named "unleashd", its #upstream channel, and two Buddies — Product Dev and
+// named "Buddies", its #upstream channel, and two Buddies — Product Dev and
 // the Upstream Release Manager. Runs on every server start and must converge:
 // a second run changes nothing. Every write goes through the crate.
 //
@@ -18,7 +18,16 @@ import { type BuddiesCore, OWNER, managerRef } from '../buddies/core';
 
 export const BOOTSTRAP_KEY = 'unleashd-bootstrap';
 export const UPSTREAM_CHANNEL_NAME = 'upstream';
-const WORKSPACE_NAME = 'unleashd';
+// Public copy is "Buddies" (the 2026-10 rename); the code identifiers, BOOTSTRAP_KEY and
+// the command keys below stay "unleashd" because they are identity, not display.
+// Why existing installs keep their old copy: the name/role/purpose/soul below are written
+// ONLY when a piece is created. Reuse is keyed on the realpath rootPath, the seat slug and
+// the public channel name "upstream" — never on these strings — so an install bootstrapped
+// before the rename keeps whatever the owner sees and edited, and a retired seat stays
+// retired. Do not "rename by name" or rewrite existing rows here; that duplicates the
+// workspace or overwrites owner edits. Guard: "bootstrap after the rename leaves a
+// pre-rename install untouched" in server/test/upstream.test.ts.
+const WORKSPACE_NAME = 'Buddies';
 
 export interface UnleashdHome {
   repoRoot: string;
@@ -40,9 +49,9 @@ type Seat = {
 const PRODUCT_DEV: Seat = {
   slug: 'product-dev',
   name: 'Product Dev',
-  role: 'Owns the product roadmap and development of this Unleashd install',
+  role: 'Owns the product roadmap and development of this Buddies install',
   soul: [
-    'You are Product Dev for this Unleashd install.',
+    'You are Product Dev for this Buddies install.',
     'You own its product roadmap and development: decide what to build next from the owner’s goals and real usage, break it into Tasks, build or delegate it, and verify it works in the running app.',
     'Keep changes small and reviewable. Report what shipped, what is next, and anything you need from the owner.',
   ].join('\n\n'),
@@ -52,9 +61,9 @@ const PRODUCT_DEV: Seat = {
 const RELEASE_MANAGER: Seat = {
   slug: 'upstream-release-manager',
   name: 'Upstream Release Manager',
-  role: 'Keeps this checkout merged with upstream Unleashd',
+  role: 'Keeps this checkout merged with upstream Buddies',
   soul: [
-    'You are the Upstream Release Manager for this Unleashd install.',
+    'You are the Upstream Release Manager for this Buddies install.',
     'You keep this checkout merged with upstream: commit any local edits first, fetch upstream main, and MERGE it in. Never reset, rebase, force-push or discard local work.',
     'Resolve conflicts by keeping both the local changes and upstream’s intent; ask the owner when the two genuinely disagree.',
     'After merging run `pnpm install && pnpm build`, then report in the thread what changed upstream, which conflicts you resolved and how, and whether the build passed.',
@@ -73,7 +82,7 @@ async function ensureUpstreamChannel(core: BuddiesCore, workspaceId: string): Pr
     workspaceId,
     name: UPSTREAM_CHANNEL_NAME,
     purpose:
-      'Merging upstream Unleashd into this install: update requests, conflict reports and build results.',
+      'Merging upstream Buddies into this install: update requests, conflict reports and build results.',
     key: `${BOOTSTRAP_KEY}:channel:${UPSTREAM_CHANNEL_NAME}`,
   });
   return created.id;
