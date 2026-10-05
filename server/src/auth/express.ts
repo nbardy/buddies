@@ -3,6 +3,7 @@ import {
   type AuthDecision,
   LOGIN_PATH,
   LOGOUT_PATH,
+  PAIR_PATH,
   buildClearedSessionCookie,
   buildSessionCookie,
   decideAuth,
@@ -11,7 +12,9 @@ import {
   tokenMatches,
 } from './gate';
 import { type LoginNotice, loginNoticeFromQuery, loginPageHtml } from './login-page';
+import type { PairingCodes } from './pairing';
 import type { AuthPolicy } from './policy';
+import type { TailnetOwnerWatch } from './tailnet-owner';
 
 /**
  * Express adapter over `decideAuth`. Mount this before every route — the app
@@ -20,7 +23,17 @@ import type { AuthPolicy } from './policy';
  */
 
 function gateRequest(request: Request) {
-  return { method: request.method, url: request.originalUrl, headers: request.headers };
+  return {
+    method: request.method,
+    url: request.originalUrl,
+    headers: request.headers,
+    peer: request.socket.remoteAddress ?? '',
+  };
+}
+
+export interface AuthRouteDeps {
+  readonly owner: TailnetOwnerWatch;
+  readonly pairing: PairingCodes;
 }
 
 function renderLogin(
@@ -69,7 +82,7 @@ function applyDecision(
   sendChallenge(request, response, decision.wants);
 }
 
-export function registerAuthRoutes(app: Express, policy: AuthPolicy): void {
+export function registerAuthRoutes(app: Express, policy: AuthPolicy, deps: AuthRouteDeps): void {
   // Login and logout must stay reachable without a credential, so they are
   // registered ahead of the gate rather than exempted from inside it.
 
@@ -77,7 +90,9 @@ export function registerAuthRoutes(app: Express, policy: AuthPolicy): void {
   // mid-use lands on a real page instead of a blank or half-broken shell.
   app.get(LOGIN_PATH, (request: Request, response: Response) => {
     const redirectTo = safeRedirectTarget(request.query.redirectTo);
-    if (policy.kind === 'open') {
+    // Already admitted (open, this machine's browser, the owner's tailnet
+    // device, a valid cookie): a login form would only ask for a key nobody needs.
+    if (decideAuth(policy, gateRequest(request), deps.owner.current()).kind === 'allow') {
       response.redirect(302, redirectTo);
       return;
     }
@@ -123,12 +138,36 @@ export function registerAuthRoutes(app: Express, policy: AuthPolicy): void {
     }
   );
 
+  // The Connect-mobile QR lands here. The code is exchanged for the same
+  // year-long cookie the login form sets; the key never appears in the URL.
+  app.get(PAIR_PATH, (request: Request, response: Response) => {
+    const code = typeof request.query.code === 'string' ? request.query.code : '';
+    if (policy.kind === 'open') {
+      response.redirect(302, '/');
+      return;
+    }
+    if (!code || !deps.pairing.redeem(code)) {
+      response.redirect(302, `${LOGIN_PATH}?error=pairing-expired`);
+      return;
+    }
+    response.setHeader(
+      'Set-Cookie',
+      buildSessionCookie(policy.token, { secure: isSecureRequest(gateRequest(request)) })
+    );
+    response.redirect(302, '/');
+  });
+
   app.get(LOGOUT_PATH, (_request: Request, response: Response) => {
     response.setHeader('Set-Cookie', buildClearedSessionCookie());
     response.redirect(302, `${LOGIN_PATH}?error=signed-out`);
   });
 
   app.use((request: Request, response: Response, next: NextFunction) => {
-    applyDecision(decideAuth(policy, gateRequest(request)), request, response, next);
+    applyDecision(
+      decideAuth(policy, gateRequest(request), deps.owner.current()),
+      request,
+      response,
+      next
+    );
   });
 }

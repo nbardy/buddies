@@ -8,8 +8,9 @@ export const MobileAccessSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('tailscale_missing') }),
   // BackendState other than Running: NeedsLogin, Stopped, Starting, NoState.
   z.object({ kind: z.literal('tailscale_stopped'), state: z.string() }),
-  // Auth is open (loopback, no key): Serve forwards from 127.0.0.1, so it would
-  // publish the app to the tailnet with no sign-in. `exposed`: it already does.
+  // Auth is open (UNLEASHD_AUTH_DISABLED=1; a key is otherwise created on first
+  // run): Serve forwards from 127.0.0.1, so it would publish the app to the
+  // tailnet with no sign-in. `exposed`: it already does.
   z.object({
     kind: z.literal('access_key_missing'),
     command: z.string(),
@@ -29,3 +30,12 @@ export const MobileAccessSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('failed'), message: z.string() }),
 ]);
 export type MobileAccess = z.infer<typeof MobileAccessSchema>;
+
+// A one-time pairing link for the phone and its QR (an SVG document). The link
+// carries a single-use code that expires at `expiresAt` (epoch ms), not the key.
+export const MobilePairingSchema = z.object({
+  url: z.string(),
+  svg: z.string(),
+  expiresAt: z.number(),
+});
+export type MobilePairing = z.infer<typeof MobilePairingSchema>;

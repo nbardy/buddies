@@ -20,6 +20,40 @@ why the server uses `new WebSocketServer({ noServer: true })` plus an explicit
 upgrade before any application code runs — restoring it silently republishes
 the command channel.
 
+## Who needs the key (`classifyRequest` in `server/src/auth/gate.ts`)
+
+The owner never types the key on their own devices. Each request is classified
+from what a web page cannot forge, and only `remote` needs a credential:
+
+| Source | Admitted without the key when |
+|---|---|
+| `local` — this machine's browser | the TCP peer is loopback, every `X-Forwarded-For` hop is loopback, the `Host` is a loopback name (`localhost`, `*.localhost`, `127.x`, `[::1]`), and any `Origin` is the request's own |
+| `tailnet` — forwarded by `tailscale serve` | the peer is loopback, `Tailscale-User-Login` names this machine's owner (read from `tailscale status`, refreshed every minute), and any `Origin` is the request's own |
+| `remote` — LAN, Funnel, tagged devices, another tailnet user, any foreign `Origin` | never; key, cookie or pairing code |
+
+Why each check exists:
+
+- **Origin.** Browsers do not block cross-site WebSockets. Without this check any
+  site the owner visits could open `ws://localhost:7489/ws` and run agents; it
+  was open exactly that way whenever no key was configured (the fresh-install
+  default before 2026-10-05). `Origin: null` counts as foreign.
+- **Host.** A DNS-rebinding page (`evil.example` re-resolved to 127.0.0.1) is
+  same-origin to itself, so its Origin matches; its `Host` is still `evil.example`.
+- **Peer for `tailnet`.** Serve connects from loopback. Vite listens on every
+  interface once a key exists, so a LAN host can send a `Tailscale-User-Login`
+  header straight to it; a non-loopback peer is therefore always `remote`.
+- **Owner login, not any login.** A device someone shares into the tailnet
+  arrives with their own login and still needs the key.
+
+Serve overwrites a client-sent `Tailscale-User-Login` and `X-Forwarded-For`
+(verified against tailscale 1.102.2 on 2026-10-05 with forged values: the owner's
+login and the real `100.x` address arrived instead). Funnel requests carry
+`Tailscale-Funnel-Request` and no login.
+
+Trade-off, accepted deliberately: any process on this machine can call the API
+without the key, agent turns included. They could already read the key file as
+the same user; the key was never a boundary against local processes.
+
 ### Buddy turn callbacks are not public-route exceptions
 
 An admitted Buddy turn sometimes needs its owning server to create another
@@ -42,11 +76,14 @@ In precedence order:
 2. `UNLEASHD_AUTH_TOKEN_FILE` — path to a file holding the token. A named file
    that cannot be read is a startup error, never a fallback to no auth.
 3. `<UNLEASHD_DATA_DIR>/auth-token` — the conventional default, normally
-   `~/.agent-viewer/auth-token`. This is the recommended option.
+   `~/.agent-viewer/auth-token`. This is the recommended option, and the server
+   **creates it on first run** (64 hex characters, mode 0600) when none of the
+   three exists. `pnpm dev` starts the backend and Vite at once; the file is
+   created exclusively (`wx`), so whichever is first writes it and the other
+   reads it.
 
-```bash
-openssl rand -hex 32 > ~/.agent-viewer/auth-token
-```
+An explicitly named file that is empty is also a startup error: a key is only
+ever invented at the conventional path.
 
 Prefer the file over the env var. The server spawns agent CLIs as child
 processes and children inherit the environment, so a secret in
@@ -61,18 +98,19 @@ Tokens shorter than 16 characters are rejected at startup.
 
 `resolveAuthPolicy` is the single place the decision is made:
 
-| Token configured | Listen host | Result |
-|---|---|---|
-| yes | any | auth required on every request |
-| no | loopback | open, with a warning — localhost dev keeps working |
-| no | anything else | **refuses to start** |
-| no, `UNLEASHD_AUTH_DISABLED=1` | any | open, explicitly |
+| Key | Result |
+|---|---|
+| configured | required (except `local` / owner `tailnet`, above) |
+| none | one is created, then as above |
+| none, `UNLEASHD_AUTH_DISABLED=1` | open, explicitly; nothing is created |
 
-Refusing to start on a non-loopback bind without a token is the point of the
-feature: exposing the port must be a decision, not an accident.
+Until 2026-10-05 a missing key meant "open on loopback, refuse to start
+anywhere else". Creating the key removed both the open state (and with it the
+cross-site WebSocket hole) and the `openssl` step from mobile setup.
 
-The Vite dev server follows the same rule from the other direction. Without a
-token it binds `127.0.0.1` only; a configured token is what earns `host: true`.
+The Vite dev server binds `127.0.0.1` only when auth is disabled; a key is what
+earns `host: true`. Since the key now always exists, `pnpm dev` listens on every
+interface by default, and a LAN caller gets the login page.
 Before this, `pnpm dev` bound every interface and proxied `/api` and `/ws`
 straight to the backend, so anyone on the same wifi had the full API at
 `http://<lan-ip>:7489` — the backend's own loopback bind did nothing to stop it.
@@ -123,6 +161,11 @@ Routes:
 | `GET /__auth/login` | 200 + the form. Honours `?redirectTo=` and `?error=`. |
 | `POST /__auth/login` | Content-negotiated: JSON for the enhanced form, 302/HTML for a plain form POST. |
 | `GET /__auth/logout` | Clears the cookie, redirects to `?error=signed-out`. |
+| `GET /__auth/pair?code=` | The pairing QR's target. Redeems the one-time code for the same year-long cookie, redirects to `/`; a used or expired code redirects to `?error=pairing-expired`. |
+
+`GET /__auth/login` redirects straight to `redirectTo` when the caller is already
+admitted (local, owner tailnet device, valid cookie), so a stale tab never shows
+a form asking for a key nobody needs.
 
 Error states are a named sum (`LoginNotice`), not a boolean, so "wrong key" and
 "signed out" cannot collapse into one message:
@@ -202,10 +245,17 @@ Both are cheap and each removes the cleartext-on-the-wire caveat:
    only shows a URL when Serve answers on this node's *current* MagicDNS name and
    proxies to the client port (`server/src/auth/mobile-access.ts`). A renamed
    node keeps its old Serve entry, and the old name no longer resolves; that is
-   how a phone was handed a dead URL on 2026-09-09. The copied URL never carries
-   the access key: the phone signs in once on the login page, and the cookie
-   lasts a year. With no key configured, Setup asks for one before Serve, since
-   Serve connects from loopback and loopback without a key is open.
+   how a phone was handed a dead URL on 2026-09-09. The owner's phone is
+   admitted by its tailnet login and needs nothing more. **Show QR code**
+   (`POST /api/mobile-access/pairing`, only reachable past the gate) mints a
+   one-time pairing code (`server/src/auth/pairing.ts`: single use, 5 minutes,
+   in memory, so a restart voids it) and returns
+   `https://<host>/__auth/pair?code=…` with its QR as SVG. Scanning it sets the
+   year-long cookie, which is what signs in a device that is not the owner's
+   (another tailnet user, a tagged device). Neither the QR nor the copied URL
+   ever carries the key itself, so it never lands in the phone's history, a
+   proxy log or a screenshot. With auth disabled, Setup asks to turn it back on
+   before Serve, since Serve connects from loopback.
 
    This also makes the page a *secure context*, which fixes the
    `crypto.randomUUID` / `navigator.clipboard` unavailability that gates G4 and
@@ -213,8 +263,9 @@ Both are cheap and each removes the cleartext-on-the-wire caveat:
 
 2. **Keep the backend bound to loopback** (the default) and let Tailscale be
    the only thing that reaches it. If you want the backend itself on the
-   tailnet interface instead, set `UNLEASHD_HOST=100.64.36.46` — a non-loopback
-   bind now requires a token, so this cannot be done accidentally.
+   tailnet interface instead, set `UNLEASHD_HOST=100.64.36.46`. Requests then
+   arrive from a tailnet peer, not from Serve on loopback, so every device needs
+   the key or a pairing code.
 
 Do not enable Tailscale Funnel unless you specifically want the app on the
 public internet; with Funnel on, the shared key becomes the *only* thing
@@ -224,7 +275,8 @@ between the internet and full agent execution on this machine.
 
 - No rate limiting on the login form. On a tailnet-only deployment the attacker
   set is your own devices; on a Funnel deployment this would need to change.
-- No rate limiting on the login form (see above).
+- Local admission covers every account on the machine, not just the owner's:
+  any user who can reach `localhost` gets in. Fine on a personal machine.
 
 ## Why both servers need an `upgrade` handler
 
@@ -263,10 +315,12 @@ node -e "const {WebSocket}=require('ws');
 
 | File | Role |
 |---|---|
-| `server/src/auth/policy.ts` | κ: env/disk → `AuthPolicy`; startup refusal |
-| `server/src/auth/gate.ts` | framework-agnostic decisions, cookies, credentials |
+| `server/src/auth/policy.ts` | κ: env/disk → `AuthPolicy`; creates the key on first run |
+| `server/src/auth/gate.ts` | framework-agnostic decisions, request classification, cookies, credentials |
+| `server/src/auth/tailnet-owner.ts` | reads the tailnet owner's login for the `tailnet` admission |
+| `server/src/auth/pairing.ts` | one-time pairing codes for the Connect-mobile QR |
 | `server/src/auth/login-page.ts` | the unauthenticated landing page + its error states |
-| `server/src/auth/express.ts` | Express adapter + `/__auth/login`, `/__auth/logout` |
+| `server/src/auth/express.ts` | Express adapter + `/__auth/login`, `/__auth/logout`, `/__auth/pair` |
 | `server/src/server.ts` | mounts the gate; gates the WebSocket upgrade |
 | `client/vite.config.ts` | same gate for the dev server; loopback bind default |
 | `client/src/auth/session.ts` | 401 → login page recovery for the running app |

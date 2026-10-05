@@ -1,8 +1,13 @@
-import { type MobileAccess, MobileAccessSchema } from '@unleashd/shared';
-import type { ReactNode } from 'react';
+import {
+  type MobileAccess,
+  MobileAccessSchema,
+  type MobilePairing,
+  MobilePairingSchema,
+} from '@unleashd/shared';
+import { type ReactNode, useState } from 'react';
 import type { SetupSection } from '../../atoms/ui';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
-import { DependencyCommand, SURFACE } from './setup-ui';
+import { DependencyCommand, SURFACE, buttonStyle } from './setup-ui';
 
 const ACCESS = resource('/api/mobile-access', async (signal) => {
   const response = await fetch('/api/mobile-access', { signal });
@@ -75,7 +80,8 @@ function AccessKeyMissing({ command, exposed }: { command: string; exposed: bool
   return (
     <>
       <p style={text}>
-        Set an access key first. Buddies has no key, so a phone would get in without signing in.
+        Sign-in is turned off (UNLEASHD_AUTH_DISABLED=1), so a phone would get in without signing
+        in. Turn it back on first:
       </p>
       {exposed && (
         <p role="alert" style={{ ...text, color: '#ff9b94' }}>
@@ -83,8 +89,8 @@ function AccessKeyMissing({ command, exposed }: { command: string; exposed: bool
           with no sign-in.
         </p>
       )}
-      <DependencyCommand command={command} label="Create access key command" />
-      <p style={text}>Then restart Buddies.</p>
+      <DependencyCommand command={command} label="Turn sign-in on command" />
+      <p style={text}>Then restart Buddies. It creates an access key on its first start.</p>
     </>
   );
 }
@@ -105,12 +111,89 @@ function ServeMissing({ host, command }: { host: string; command: string }) {
   );
 }
 
+// Pattern: sum-types (docs/patterns.md#sum-types)
+type Pairing =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'shown'; readonly pairing: MobilePairing }
+  | { readonly kind: 'failed'; readonly message: string };
+
+// A click mints the code (POST), so codes are never minted by the 3s poll.
+async function requestPairing(): Promise<Pairing> {
+  try {
+    const response = await fetch('/api/mobile-access/pairing', { method: 'POST' });
+    if (!response.ok) return { kind: 'failed', message: `HTTP ${response.status}` };
+    return { kind: 'shown', pairing: MobilePairingSchema.parse(await response.json()) };
+  } catch (error) {
+    return { kind: 'failed', message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+const expiryTime = (expiresAt: number) =>
+  new Date(expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+function PairingQr() {
+  const [pairing, setPairing] = useState<Pairing>({ kind: 'idle' });
+  const show = () => {
+    setPairing({ kind: 'loading' });
+    void requestPairing().then(setPairing);
+  };
+  const button = (label: string) => (
+    <button
+      type="button"
+      style={{ ...buttonStyle, padding: 0, color: '#a6c7ff' }}
+      onClick={show}
+      disabled={pairing.kind === 'loading'}
+    >
+      {label}
+    </button>
+  );
+  switch (pairing.kind) {
+    case 'idle':
+      return <p style={text}>{button('Show QR code')}</p>;
+    case 'loading':
+      return <p style={text}>{button('Making a code…')}</p>;
+    case 'failed':
+      return (
+        <p style={text}>
+          Could not make a code: {pairing.message} {button('Try again')}
+        </p>
+      );
+    case 'shown':
+      return (
+        <>
+          <img
+            src={`data:image/svg+xml;utf8,${encodeURIComponent(pairing.pairing.svg)}`}
+            alt="QR code that signs your phone in"
+            style={{
+              display: 'block',
+              width: 'min(220px, 60vw)',
+              marginTop: 'var(--sp-4)',
+              background: '#fff',
+              borderRadius: 'var(--sp-2)',
+            }}
+          />
+          <p style={text}>
+            Scan with your phone's camera. Works once, until {expiryTime(pairing.pairing.expiresAt)}
+            . {button('New code')}
+          </p>
+        </>
+      );
+  }
+}
+
 function Ready({ url, funnel, keyFile }: { url: string; funnel: boolean; keyFile: string }) {
   return (
     <>
-      <p style={text}>Open this on your phone with Tailscale connected:</p>
+      <p style={text}>
+        Scan this with your phone (Tailscale connected) to open Buddies already signed in:
+      </p>
+      <PairingQr />
+      <p style={text}>
+        Or open the address yourself. Your own Tailscale devices get in without a key:
+      </p>
       <DependencyCommand command={url} label="Mobile URL" />
-      <p style={text}>Sign in there with your access key. To copy it without showing it, run:</p>
+      <p style={text}>Anywhere else, sign in with the access key. To copy it without showing it:</p>
       <DependencyCommand command={keyFile} label="Copy access key command" />
       {funnel && (
         <p role="alert" style={{ ...text, color: '#ff9b94' }}>
