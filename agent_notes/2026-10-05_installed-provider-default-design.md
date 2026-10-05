@@ -116,3 +116,24 @@ failure in the trial.
 The owner wants a second install to keep new conversations on the first agent (adopt (c)). Also
 revisit if Setup starts offering a third agent, which must then be placed in the order, or if
 Buddy profiles gain explicit provenance for other reasons.
+
+## Implementation and trial (2026-10-05)
+
+Commits: 57994a7 (design implemented) and d03dde6. The trial found that thread reads resolved the
+profile only to discard it, so a `no-agent` profile failed every thread read. d03dde6 fixes that:
+`threadChoice` / `seatConfig` are now split.
+
+The trial followed the todo_b4d7809f sequence: a fresh `git clone` of the branch, the submodule
+via `--reference`, `pnpm run bootstrap`, `pnpm build`, and temp `UNLEASHD_DATA_DIR` /
+`UNLEASHD_BUDDIES_DB` / `BUDDIES_HOME`. First-boot markers were pre-created so the installer
+downloaded nothing. Evidence is untracked in the main checkout under
+`agent_notes/2026-10-05_installed-provider-trial-d03dde6/`.
+
+| Install | `agent` | First DM to Product Dev | Picker |
+|---|---|---|---|
+| only `claude` (57994a7 build) | claude | replied PONG, conversation resolved `claude-opus-5-5` | Model: Opus 5.5 |
+| only `codex` (57994a7 build) | codex | replied PONG, resolved `gpt-6.1-sol` | Model: GPT-6.1 Sol |
+| none (d03dde6 build) | none | DM open refused, inline "No agent is installed…" (desktop rail, phone list) | mention chip "Needs an agent" (disabled); send → `reply_failed` notice in the thread; 0 spawns |
+
+Seen and left alone: the memory reviewer pins `codex` and logs `spawn codex ENOENT` after a turn
+on a Claude-only install. It is background-only and outside this scope (see "Scope left out").
