@@ -3,8 +3,10 @@ import type {
   BuddyVisibility,
   ConversationBranch,
   ConversationConfig,
+  InstalledAgent,
+  Provider,
 } from '@unleashd/shared';
-import { bodyText, buddyKind } from '@unleashd/shared';
+import { bodyText, buddyExecutionPreferences, buddyKind } from '@unleashd/shared';
 import { NO_AGENT_INSTALLED, configFromProviderPreferences } from '@unleashd/shared';
 import type { ResolvedBuddyConversation } from '../buddies/briefing';
 import { type ConfigProvenance, INITIAL_MESSAGE_DISPATCH_LEASE_MS } from './config-records';
@@ -57,6 +59,8 @@ export interface BuddyCreationServicePorts {
     | 'setCurrentSession'
   >;
   resolveBuddyConversation(context: BuddyContext): Promise<ResolvedBuddyConversation>;
+  /** What the Builder runs on: read per open, like an unpinned Buddy (providers/installed-agent.ts). */
+  installedAgent(): InstalledAgent;
   resolveWorkingDirectory(input: string): string;
   createId(): string;
   getConversation(id: string): ConversationRuntime | undefined;
@@ -89,6 +93,11 @@ export interface BuddyCreationService {
     input: CreateBuddyBuilderConversationInput
   ): Promise<ConversationRuntime>;
 }
+
+// The Builder's tuned seat, per harness. A harness with no entry runs its catalog default.
+const BUILDER_SEAT: Partial<Record<Provider, { model: string; reasoningEffort: string }>> = {
+  codex: { model: 'gpt-6-astra', reasoningEffort: 'low' },
+};
 
 export function createBuddyCreationService(ports: BuddyCreationServicePorts): BuddyCreationService {
   const logger = ports.logger ?? console;
@@ -242,11 +251,26 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
   ): Promise<ConversationRuntime> {
     const conversationId = input.conversationId ?? ports.createId();
     const workingDirectory = ports.resolveWorkingDirectory(input.workingDirectory);
-    const config = configFromProviderPreferences({
-      provider: 'codex',
-      model: 'gpt-6-astra',
-      reasoningEffort: 'low',
-    });
+    // The Builder used to be a literal codex: on a Claude-only install opening it ran
+    // `spawn codex ENOENT` (fresh-install trial 2026-10-05). It now follows the installed agent,
+    // like an unpinned Buddy; codex keeps its tuned seat, and with nothing installed the open
+    // fails with the 'No agent is installed' notice before any conversation exists.
+    // Guard: buddy-creation-service "the Builder runs the installed agent".
+    const execution = buddyExecutionPreferences(
+      { provider: null, model: null, reasoning_effort: null },
+      ports.installedAgent()
+    );
+    const config = (() => {
+      switch (execution.kind) {
+        case 'run':
+          return configFromProviderPreferences({
+            ...execution,
+            ...BUILDER_SEAT[execution.provider],
+          });
+        case 'no-agent':
+          throw new Error(NO_AGENT_INSTALLED);
+      }
+    })();
     const conversation = await createOrReuse({
       conversationId,
       workingDirectory,

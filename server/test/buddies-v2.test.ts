@@ -341,6 +341,7 @@ async function world() {
   const creation = createBuddyCreationService({
     configService,
     resolveBuddyConversation: (context) => briefings.warm(context),
+    installedAgent: installed,
     resolveWorkingDirectory: (directory) => directory,
     createId: () => `conversation-${++ids}`,
     getConversation: (id) => conversations.get(id),
@@ -1935,6 +1936,14 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
   }
 });
 
+/** A PATH of real executables: what the reviewer's harness probe walks (providers/installed-agent). */
+function binPath(dir: string, ...names: string[]): NodeJS.ProcessEnv {
+  const bin = join(dir, 'review-bin');
+  mkdirSync(bin, { recursive: true });
+  for (const name of names) writeFileSync(join(bin, name), '#!/bin/sh\n', { mode: 0o755 });
+  return { PATH: bin };
+}
+
 // The reviewer used to see prose only (tool calls dropped) in a private temp cwd, so it tried to
 // verify claims with file tools and the guard killed it (12 failed reviews, 2026-09 audit).
 test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs in the workspace, and curates memory on the same endpoint', async () => {
@@ -1960,6 +1969,7 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
     core,
     grants,
     spec: endpoint.spec,
+    env: binPath(scratch, 'codex'),
     logger: { warn: () => undefined },
     execute: ((request: ProviderRequest) => {
       harnesses.push(request.harness);
@@ -2058,6 +2068,97 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
   }
 });
 
+// Fresh-install trial 2026-10-05: on a Claude-only machine every turn ended in `spawn codex ENOENT`.
+// The owner directs the reviewer model, so a missing harness is a recorded skip, never a swap.
+async function reviewOnce(dir: string, env: NodeJS.ProcessEnv) {
+  const core = await BuddiesCore.open(join(dir, 'db.sqlite'));
+  const ws = (await core.createWorkspace(OWNER, { name: 'Team', rootPath: dir })).id;
+  const lead = await core.createBuddy(OWNER, {
+    workspaceId: ws,
+    slug: 'lead',
+    name: 'Lead',
+    role: 'r',
+    manager: { kind: 'nobody' },
+    key: 'lead',
+  });
+  const grants = createGrants({ ttlMs: 60_000 });
+  const endpoint = await startMcpEndpoint({
+    core,
+    events: createBuddyEvents(),
+    grants,
+    uploadsRoot: () => dir,
+  });
+  const launches: Array<{ harness: string; model: string }> = [];
+  const reviewer = createMemoryReviewer({
+    core,
+    grants,
+    spec: endpoint.spec,
+    env,
+    logger: { warn: () => undefined },
+    execute: ((request: ProviderRequest) => {
+      launches.push({ harness: request.harness, model: request.model! });
+      const spec = request.mcpServers!.unleashd_memory;
+      const completed = (async () => {
+        await call(spec, 'doc_read', { kind: 'working' });
+        return { exitCode: 0, signal: null, sessionId: 's', reason: 'success' };
+      })();
+      return {
+        child: { exitCode: 0 },
+        events: (async function* () {
+          await completed;
+          yield* [];
+        })(),
+        completed,
+        stop: () => undefined,
+      };
+    }) as never,
+  });
+  try {
+    reviewer.start();
+    reviewer.enqueue({
+      attemptId: 'a1',
+      conversationId: 'chat',
+      context: { buddyId: lead.id, workspaceId: ws, coordinationRunId: 'run-chat' },
+      completedAt: new Date().toISOString(),
+      messages: [{ role: 'user', body: { t: 'text', text: 'hello' } }],
+    });
+    const receipt = await until(
+      async () =>
+        (await core.listEvents(lead.id, Number.MAX_SAFE_INTEGER, 20)).find(
+          (e) => e.op === 'memory_review'
+        ),
+      'the review receipt'
+    );
+    return { launches, receipt: JSON.parse(receipt.payload) };
+  } finally {
+    reviewer.stop();
+    await endpoint.close();
+  }
+}
+
+test('a reviewer whose harness is not installed records a skip and spawns nothing', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'buddies-review-claude-only-'));
+  try {
+    const { launches, receipt } = await reviewOnce(scratch, binPath(scratch, 'claude'));
+    assert.deepEqual(launches, []);
+    assert.equal(receipt.status, 'skipped');
+    assert.deepEqual(receipt.skipReason, { kind: 'harness_missing', harness: 'codex' });
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('a reviewer on a codex install still runs the owner-directed gpt-6-luna', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'buddies-review-codex-'));
+  try {
+    const { launches, receipt } = await reviewOnce(scratch, binPath(scratch, 'codex', 'claude'));
+    assert.deepEqual(launches, [{ harness: 'codex', model: 'gpt-6-luna' }]);
+    assert.equal(receipt.status, 'complete');
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 // Required MCP discovery can succeed while a separate CLI tool host fails. Keep that evidence.
 test('a reviewer with no memory reads retains bounded, redacted CLI failure evidence', async () => {
   const w = await world();
@@ -2068,6 +2169,7 @@ test('a reviewer with no memory reads retains bounded, redacted CLI failure evid
     core: w.core,
     grants: w.grants,
     spec: w.endpoint.spec,
+    env: { PATH: w.agentBin },
     logger: { warn: (...args: unknown[]) => void warnings.push(args.map(String).join(' ')) },
     execute: ((request: ProviderRequest) => {
       launches += 1;
@@ -2163,6 +2265,7 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
     grants,
     spec: endpoint.spec,
     timeoutMs: 200,
+    env: binPath(scratch, 'codex'),
     logger: { warn: () => undefined },
     execute: ((request: ProviderRequest) => {
       const spec = request.mcpServers!.unleashd_memory;
@@ -2292,6 +2395,7 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     core,
     grants,
     spec: reviewEndpoint.spec,
+    env: binPath(scratch, 'codex'),
     logger: { warn: () => undefined },
     execute: ((request: ProviderRequest) => {
       const spec = request.mcpServers!.unleashd_memory;
@@ -2445,6 +2549,7 @@ test('native child events cannot bypass restricted Buddy runs', async () => {
     core: w.core,
     grants: w.grants,
     spec: w.endpoint.spec,
+    env: { PATH: w.agentBin },
     execute,
     logger: { warn: () => undefined },
   });

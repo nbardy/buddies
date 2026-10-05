@@ -347,6 +347,7 @@ const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 const buddyCreationService: BuddyCreationService = createBuddyCreationService({
   configService: conversationConfigService,
   resolveBuddyConversation,
+  installedAgent: () => installedAgent(),
   resolveWorkingDirectory: resolveWorkingDirectoryInput,
   createId: uuidv4,
   getConversation: (id) => applicationContext.registry.get(id),

@@ -9,7 +9,7 @@ import type { InstalledAgent, Provider } from '@unleashd/shared';
 // Design: agent_notes/2026-10-05_installed-provider-default-design.md.
 const AUTO_AGENTS: readonly Provider[] = ['codex', 'claude'];
 
-function onPath(binary: string, env: NodeJS.ProcessEnv): boolean {
+export function onPath(binary: string, env: NodeJS.ProcessEnv): boolean {
   return (env.PATH ?? '').split(path.delimiter).some((dir) => {
     if (!dir) return false;
     const file = path.join(dir, binary);
