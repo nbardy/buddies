@@ -38,11 +38,14 @@ Missing Rust uses Homebrew, or rustup when Homebrew is unavailable. Each tool's
 first-boot attempt is recorded in the app data directory, so restarts and
 **Check again** never repeat installers. Failed installs keep manual setup guidance.
 On **every server start**, Claude and Codex are asked to respond “Yes” to verify
-that they can actually answer. The **Dependencies** window shows progress and
+that they can actually answer. The **Setup** window shows progress and
 **Login required** with a copyable login command when authentication is missing.
 Usage limits and connection failures stay separate from login failures. Response
 checks time out after 45 seconds and use a little agent quota; installation steps
 allow up to 10 minutes each. You can continue while resolving a check.
+Continue, Close and Escape remember dismissal on this browser, so Setup stays
+closed across reloads and server restarts. Reopen it from **Settings → Setup**;
+startup checks still run in the background.
 
 To develop on it, use `pnpm install && pnpm dev` instead of build/start.
 

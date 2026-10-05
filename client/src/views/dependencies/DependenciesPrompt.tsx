@@ -1,5 +1,7 @@
 import { DependenciesSchema, type DependencyCheck } from '@unleashd/shared';
+import { useAtomValue } from 'jotai';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { setSetupDismissed, setupDismissedAtom } from '../../atoms/ui';
 import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
 
@@ -212,7 +214,7 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 // One app-wide prompt, shared by both shells. Polling reads the server's cached checks.
 export function DependenciesPrompt() {
-  const [dismissed, setDismissed] = useState(false);
+  const dismissed = useAtomValue(setupDismissedAtom);
   const status = usePolledFetch(STATUS, 2_000, !dismissed);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -249,7 +251,7 @@ export function DependenciesPrompt() {
       ref={dialog}
       tabIndex={-1}
       aria-labelledby="dependencies-title"
-      onCancel={() => setDismissed(true)}
+      onCancel={() => setSetupDismissed(true)}
       style={{
         margin: 'auto',
         width: 'min(420px, calc(100vw - var(--sp-9)))',
@@ -283,7 +285,7 @@ export function DependenciesPrompt() {
             <button
               type="button"
               aria-label="Close dependency checks"
-              onClick={() => setDismissed(true)}
+              onClick={() => setSetupDismissed(true)}
               style={{
                 ...buttonStyle,
                 padding: 'var(--sp-4)',
@@ -341,7 +343,7 @@ export function DependenciesPrompt() {
                 padding: 'var(--sp-6) var(--sp-9)',
                 fontWeight: 600,
               }}
-              onClick={() => setDismissed(true)}
+              onClick={() => setSetupDismissed(true)}
             >
               Continue →
             </button>

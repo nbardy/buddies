@@ -1,8 +1,8 @@
 // Browser-boundary guard: the dependency window was a wide board with status
 // text wrapping onto inconsistent columns and controls below the phone fold.
 import assert from 'node:assert/strict';
-import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
 import { openSession } from './lib/headless-chrome.mjs';
@@ -72,7 +72,7 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
       assert.ok(geometry.footerBottom < viewport.height, 'actions stay visible');
     }
     state = 'login';
-    const out = path.resolve('output/dependencies-firstboot-2026-10-04');
+    const out = path.resolve('output/dependencies-dismissal-2026-10-05');
     await mkdir(out, { recursive: true });
     for (const [name, viewport] of [
       ['desktop', { width: 1440, height: 1000, mobile: false, deviceScaleFactor: 1 }],
@@ -108,6 +108,30 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
     );
     await session.click('button[aria-label="Close dependency checks"]');
     assert.equal(await session.evaluate('document.querySelector("dialog") === null'), true);
+    // Reload without goto(): screenshot navigation deliberately clears localStorage.
+    // Restarting the fixture server on the same origin must also preserve dismissal.
+    const port = server.address().port;
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const reload = async () => {
+      await session.evaluate('location.reload()');
+      await session.evaluate('new Promise(resolve => setTimeout(resolve, 700))');
+      assert.equal(await session.evaluate('document.querySelector("dialog") === null'), true);
+    };
+    const reopen = async () => {
+      await session.click('button[title="Settings"]');
+      await session.click('.config-menu button:first-child');
+      assert.equal(await session.evaluate('document.querySelector("dialog").open'), true);
+    };
+    await reload();
+    await session.capture(path.join(out, 'dismissed-after-restart@phone.png'));
+    await reopen();
+    await session.capture(path.join(out, 'reopened-from-settings@phone.png'));
+    await session.click('dialog footer button:last-child');
+    await reload();
+    await reopen();
+    await session.evaluate('document.querySelector("dialog").dispatchEvent(new Event("cancel"))');
+    await reload();
   } finally {
     await session?.close();
     await new Promise((resolve) => server.close(resolve));

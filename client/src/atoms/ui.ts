@@ -244,6 +244,20 @@ export function markUpstreamHandled(sha: string): void {
   jotaiStore.set(upstreamHandledShaAtom, sha);
 }
 
+// Pattern: one-write-path (docs/patterns.md#one-write-path)
+// Setup reopened on every reload because dismissal lived only in component state.
+// Guard: dependencies-layout.test.mjs reloads after Continue, Close and Escape.
+export const setupDismissedAtom = atomWithStorage<boolean>(
+  'unleashd-setup-dismissed',
+  false,
+  validatedStorage<boolean>((raw) => (typeof raw === 'boolean' ? raw : null)),
+  { getOnInit: true }
+);
+
+export function setSetupDismissed(dismissed: boolean): void {
+  jotaiStore.set(setupDismissedAtom, dismissed);
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
