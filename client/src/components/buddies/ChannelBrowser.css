@@ -320,7 +320,7 @@
   top: 0;
   left: 50%;
   z-index: 20;
-  width: min(560px, 60vw);
+  width: min(640px, 70vw);
   max-height: 70vh;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
@@ -349,6 +349,42 @@
   min-height: 0;
   overflow-y: auto;
   animation: channel-search-reveal 260ms ease-out;
+}
+/* Results: room between hits, a rendered excerpt (markdown, matches marked) instead of flat text. */
+.channel-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin: 0;
+  padding: var(--sp-4);
+  list-style: none;
+}
+.channel-search-list .channel-search-item {
+  padding: var(--sp-6) var(--sp-7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--ui-radius);
+}
+.channel-search-list .search-view__head {
+  margin-bottom: var(--sp-3);
+}
+.search-excerpt {
+  max-height: 11em;
+  overflow: hidden;
+  font-size: var(--fs-4);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.search-excerpt > :first-child {
+  margin-top: 0;
+}
+.search-excerpt > :last-child {
+  margin-bottom: 0;
+}
+.search-excerpt mark {
+  padding: 0 var(--sp-1);
+  border-radius: var(--sp-1);
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: inherit;
 }
 @keyframes channel-search-reveal {
   from {

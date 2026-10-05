@@ -48,6 +48,7 @@ import {
 } from './core';
 import { type BuddyEvents, type MentionPicks, NO_PICKS, announcePost } from './events';
 import type { Runner } from './runner';
+import { channelsNamed } from './search-channels';
 
 /**
  * The owner's Buddy API over the crate, mounted behind the auth gate (server.ts registers it after
@@ -402,17 +403,27 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     // ---- channels, DMs and the owner's inbox (everything is a post in a channel) ----------------
     'GET 200 /api/buddies/workspaces/:workspaceId/inbox': (req) =>
       core.inbox(OWNER, p(req, 'workspaceId')),
-    // The channel Search panel shows the newest 50 hits; paging is the Buddy tool's (channel_read).
-    'GET 200 /api/buddies/workspaces/:workspaceId/search': async (req) =>
-      (
-        await core.searchPosts(
-          OWNER,
-          p(req, 'workspaceId'),
-          { text: z.string().trim().min(1).parse(q(req, 'q')), channels: [], from: [] },
-          null,
-          50
-        )
-      ).posts,
+    // The channel Search panel shows the newest 50 hits plus the channels the words name; paging is
+    // the Buddy tool's (channel_read). `@Name` in the text filters to that author (crate-side).
+    'GET 200 /api/buddies/workspaces/:workspaceId/search': async (req) => {
+      const workspaceId = p(req, 'workspaceId');
+      const text = z.string().trim().min(1).parse(q(req, 'q'));
+      const page = await core.searchPosts(
+        OWNER,
+        workspaceId,
+        { text, channels: [], from: [] },
+        null,
+        50
+      );
+      const inbox = await core.inbox(OWNER, workspaceId);
+      return {
+        channels: channelsNamed(
+          inbox.channels.map((row) => row.channel),
+          text
+        ),
+        posts: page.posts,
+      };
+    },
     'GET 200 /api/buddies/workspaces/:workspaceId/channels/archived': (req) =>
       core.archivedChannels(OWNER, p(req, 'workspaceId')),
     'POST 200 /api/buddies/channels/:channelId/archive': async (req) => {

@@ -2304,8 +2304,38 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     assert.deepEqual(written.post.author, buddyActor(w.designer.id));
     const found = await http('GET', `/api/buddies/workspaces/${w.ws}/search?q=quarterly%20LOGO`);
     assert.deepEqual(
-      (found.body as unknown as Post[]).map((post) => post.id),
+      (found.body as unknown as { posts: Post[] }).posts.map((post) => post.id),
       [written.post.id]
+    );
+    // Fuzzy matching, @author and channel-name rows, through the real route.
+    type Found = { posts: Post[]; channels: Array<{ id: string }> };
+    const byAuthor = await http(
+      'GET',
+      `/api/buddies/workspaces/${w.ws}/search?q=${encodeURIComponent('@Designer logos')}`
+    );
+    assert.deepEqual(
+      (byAuthor.body as unknown as Found).posts.map((post) => post.id),
+      [written.post.id],
+      '@Name filters to the author, and "logos" reaches "logo" by stem'
+    );
+    const authorOnly = await http(
+      'GET',
+      `/api/buddies/workspaces/${w.ws}/search?q=${encodeURIComponent('@designer')}`
+    );
+    assert.ok(
+      (authorOnly.body as unknown as Found).posts.some((post) => post.id === written.post.id)
+    );
+    const unknownAuthor = await http(
+      'GET',
+      `/api/buddies/workspaces/${w.ws}/search?q=${encodeURIComponent('@Nobody logo')}`
+    );
+    assert.equal(unknownAuthor.status, 400);
+    assert.match(unknownAuthor.body.error, /no Buddy named "Nobody"/);
+    const named = await http('GET', `/api/buddies/workspaces/${w.ws}/search?q=gener`);
+    assert.deepEqual(
+      (named.body as unknown as Found).channels.map((c) => c.id),
+      [w.general.id],
+      'a channel the words name leads the results'
     );
     const grant = w.grants.issueBuddy({
       role: 'worker',
@@ -2332,7 +2362,9 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     // Typed filters and a typed error cross the real MCP boundary: a malformed query is refused
     // loudly, never matched as literal words (the old behaviour).
     const byDesigner = await call(w.endpoint.spec(grant), 'channel_read', {
-      read: { search: { text: '"quarterly logo" -draft', from: [w.designer.id], after: '2020-01-01' } },
+      read: {
+        search: { text: '"quarterly logo" -draft', from: [w.designer.id], after: '2020-01-01' },
+      },
     });
     assert.deepEqual(
       byDesigner.value.posts.map((post: Post) => post.id),

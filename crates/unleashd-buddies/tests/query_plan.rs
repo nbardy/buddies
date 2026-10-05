@@ -29,8 +29,10 @@ const INDEX_WALKS_BY_DESIGN: &[&str] = &[
     "SCAN run USING INDEX run_lease",
     "SCAN run USING INDEX run_active_buddy",
 ];
-/// Plan lines that scan no table: the manager-walk CTE and its constant seed row.
-const NOT_TABLES: &[&str] = &["SCAN up", "SCAN CONSTANT ROW"];
+/// Plan lines that scan no table: the manager-walk CTE and its constant seed row, and the FTS
+/// vocabulary read by term range (`term >= 'r' AND term < 's'`, INDEX 6) for typo matching: it
+/// walks one letter's terms. An unconstrained vocab read plans as `INDEX 0:` and would still fail.
+const NOT_TABLES: &[&str] = &["SCAN up", "SCAN CONSTANT ROW", "SCAN post_search_vocab VIRTUAL TABLE INDEX 6:"];
 
 fn workload(s: &mut unleashd_buddies::Store) {
     let ic = buddy("ic");
