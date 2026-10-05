@@ -95,13 +95,19 @@ function buddyBriefedPrompt(context: BuddyContext, memory: MemorySnapshot, conte
   return `<!-- unleashd:buddy-context-v2 ${encodedContext} ${briefing.length} -->\n${briefing}\n<!-- /unleashd:buddy-context-v2 -->\n\n${content}`;
 }
 
-function builderFirstTurnPrompt(
+export function builderFirstTurnPrompt(
   content: string,
   firstUnstartedTurn: boolean,
   workingDirectory: string
 ): string {
   if (!firstUnstartedTurn) return content;
-  return `<!-- unleashd:buddy-builder-v1 ${BUDDY_BUILDER_BRIEFING.length} -->\n${BUDDY_BUILDER_BRIEFING}\n<!-- /unleashd:buddy-builder-v1 -->\nWorking directory: ${workingDirectory}\n\n${content}`;
+  // Fix-guard: everything hidden goes INSIDE the counted body. 3c1d8d6 put the working directory
+  // after the closing marker; ingest (markers.rs BUILDER_V1_SUFFIX) then failed to strip it, the
+  // user row became a placeholder and the overlay merge doubled the replies (task_01a10d29).
+  // Guards: markers.rs builder_envelope_strips_in_every_shape_the_server_has_written,
+  // ingest-history.test.ts "a Builder first turn shows once".
+  const body = `${BUDDY_BUILDER_BRIEFING}\n\nWorking directory: ${workingDirectory}`;
+  return `<!-- unleashd:buddy-builder-v1 ${body.length} -->\n${body}\n<!-- /unleashd:buddy-builder-v1 -->\n\n${content}`;
 }
 
 // --- Run-slot admission tick -----------------------------------------------
