@@ -460,6 +460,22 @@ async function assertAdoptedAndCompleted(c: Case, work: Work) {
   );
 }
 
+// Fix-guard: adopted turns run under the agent-cli journal wrapper, which is deliberately outside
+// the dev server's process group (it must survive the backend). Killing the group and the fake's
+// `.pgid` files therefore missed them: fake `claude` processes parented to PID 1 piled up across
+// runs (seen 2026-10-06, alive since 01:00). Any process whose command line names this case's
+// temp root is ours (the root is a fresh mkdtemp dir), so sweep by that before deleting it.
+function killProcessesUnder(root: string) {
+  const rows = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' }).split('\n');
+  for (const row of rows) {
+    const [pid, ...command] = row.trim().split(/\s+/);
+    if (Number(pid) === process.pid || !command.join(' ').includes(root)) continue;
+    try {
+      process.kill(Number(pid), 'SIGKILL');
+    } catch {}
+  }
+}
+
 async function stopGroup(group: DevGroup) {
   signalGroup(group.pgid, 'SIGINT');
   await Promise.race([group.exited, new Promise((resolve) => setTimeout(resolve, 20_000))]);
@@ -477,6 +493,7 @@ after(async () => {
       if (!file.endsWith('.pgid')) continue;
       signalGroup(Number(fs.readFileSync(path.join(c.fakeDir, file), 'utf8')), 'SIGKILL');
     }
+    killProcessesUnder(c.root);
     fs.rmSync(c.root, { recursive: true, force: true });
   }
 });
