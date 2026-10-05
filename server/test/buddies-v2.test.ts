@@ -1021,11 +1021,12 @@ test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs are not capped", 
 test('a seat reply is what the Buddy posts; a turn that posts nothing leaves a failure notice', async () => {
   const w = await world();
   try {
-    const say = (body: string, replyToId?: string) =>
+    const say = (body: string, replyToId?: string, picks?: MentionPicks) =>
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, wakes: [], key: body }
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, wakes: [], key: body },
+        picks
       );
     const thread = async (rootId: string) =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
@@ -1127,7 +1128,7 @@ test('a follow-up for a post a mention turn already read asks no gate and starts
   const w = await world();
   try {
     let n = 0;
-    const say = (body: string, replyToId?: string) =>
+    const say = (body: string, replyToId?: string, picks?: MentionPicks) =>
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
@@ -1139,7 +1140,8 @@ test('a follow-up for a post a mention turn already read asks no gate and starts
           broadcast: false,
           wakes: [],
           key: `say-${++n}`,
-        }
+        },
+        picks
       );
     const replies = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts.filter(
@@ -1246,7 +1248,7 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
   const w = await world();
   try {
     let n = 0;
-    const say = (body: string, replyToId?: string) =>
+    const say = (body: string, replyToId?: string, picks?: MentionPicks) =>
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
@@ -1258,7 +1260,8 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
           broadcast: false,
           wakes: [],
           key: `priority-${++n}`,
-        }
+        },
+        picks
       );
     const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
     await w.core.updateBuddy(OWNER, {
@@ -1340,8 +1343,11 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
     );
     const explicit = createDefaultConversationConfig('claude');
     w.announce(
-      await say(`[@Lead](buddy:${w.lead.id}) switch back`, root.id),
-      new Map([[w.lead.id, explicit]])
+      await say(
+        `[@Lead](buddy:${w.lead.id}) switch back`,
+        root.id,
+        new Map([[w.lead.id, explicit]])
+      )
     );
     await until(
       async () => (await thread()).filter((p) => p.purpose === 'reply').length === 4,
@@ -1519,7 +1525,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
   const w = await world();
   try {
     let n = 0;
-    const say = (body: string, replyToId?: string) =>
+    const say = (body: string, replyToId?: string, picks?: MentionPicks) =>
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
@@ -1531,7 +1537,8 @@ test('same-value picks become durable overrides, independent of another Buddy an
           broadcast: false,
           wakes: [],
           key: `scope-${++n}`,
-        }
+        },
+        picks
       );
     const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
     w.announce(root);
@@ -1550,8 +1557,11 @@ test('same-value picks become durable overrides, independent of another Buddy an
     // The config is unchanged: only its origin changes, before the failed attempt.
     w.outOfTokens.add(2);
     w.announce(
-      await say(`[@Lead](buddy:${w.lead.id}) keep this model`, root.id),
-      new Map([[w.lead.id, initial]])
+      await say(
+        `[@Lead](buddy:${w.lead.id}) keep this model`,
+        root.id,
+        new Map([[w.lead.id, initial]])
+      )
     );
     await until(
       async () => w.turns.length === 2 && (await w.channels.responding(w.general.id)).length === 0,
@@ -1584,8 +1594,11 @@ test('same-value picks become durable overrides, independent of another Buddy an
       'explicit intent beats newer inferred history'
     );
     w.announce(
-      await say(`[@Designer](buddy:${w.designer.id}) use your own model`, root.id),
-      new Map([[w.designer.id, createDefaultConversationConfig('claude')]])
+      await say(
+        `[@Designer](buddy:${w.designer.id}) use your own model`,
+        root.id,
+        new Map([[w.designer.id, createDefaultConversationConfig('claude')]])
+      )
     );
     await until(
       async () => w.turns.length === 3 && (await w.channels.responding(w.general.id)).length === 0,
