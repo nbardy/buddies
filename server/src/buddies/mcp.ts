@@ -1,7 +1,5 @@
-import fs from 'node:fs';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
@@ -25,6 +23,7 @@ import {
 } from './core';
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
 import type { BuddyGrant, Grants, Role, TurnGrant } from './grants';
+import { attachToRelay } from './mcp-relay';
 import { WorkerSchema, checkedRunConfig } from './worker-config';
 
 /**
@@ -672,37 +671,26 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 }
 
 export type McpEndpoint = {
-  url: string;
+  readonly url: string;
   close(): Promise<void>;
   spec(grant: TurnGrant): McpServerSpec;
 };
 
-/** Serve `/mcp` on 127.0.0.1 at an OS-assigned port. */
-/**
- * The port the previous backend listened on (absent on a first start). A turn's CLI was
- * configured with this URL at spawn, and an adopted turn keeps calling it after the backend that
- * spawned it is gone (turns/executions.ts), so every backend listens where the last one did.
- */
-function lastPort(portFile: string): number | null {
-  try {
-    const { port } = JSON.parse(fs.readFileSync(portFile, 'utf8')) as { port: number };
-    return Number.isInteger(port) && port > 0 ? port : null;
-  } catch {
-    return null;
-  }
-}
-
-function listen(http: Server, port: number): Promise<void> {
+function listen(http: Server): Promise<void> {
   return new Promise((resolve, reject) => {
-    const failed = (error: Error) => reject(error);
-    http.once('error', failed);
-    http.listen(port, '127.0.0.1', () => {
-      http.off('error', failed);
+    http.once('error', reject);
+    http.listen(0, '127.0.0.1', () => {
+      http.off('error', reject);
       resolve();
     });
   });
 }
 
+/**
+ * Serve `/mcp` on an OS-assigned internal loopback port, attached to the Buddy MCP relay. Turns
+ * call the relay's port, which outlives this backend (mcp-relay.ts), so a call made while no
+ * backend runs is held and delivered by the next one instead of meeting ECONNREFUSED.
+ */
 export async function startMcpEndpoint(
   deps: ToolDeps & { grants: Grants; portFile: string }
 ): Promise<McpEndpoint> {
@@ -726,30 +714,24 @@ export async function startMcpEndpoint(
       if (!res.headersSent) res.writeHead(500).end(String(error));
     });
   });
-  const previous = lastPort(deps.portFile);
-  try {
-    await listen(http, previous ?? 0);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || previous === null) throw error;
-    // Loud, never silent: turns adopted from the previous backend call the old URL and will get
-    // connection errors from their Buddy tools until they end.
-    console.error(
-      `[buddies-mcp] port ${previous} is taken; adopted turns lose their Buddy tools. Listening on a new port.`
-    );
-    await listen(http, 0);
-  }
-  const port = (http.address() as AddressInfo).port;
-  fs.mkdirSync(path.dirname(deps.portFile), { recursive: true });
-  fs.writeFileSync(deps.portFile, `${JSON.stringify({ port })}\n`);
-  const url = `http://127.0.0.1:${port}/mcp`;
+  await listen(http);
+  // Attach only now: the grants of adopted turns are restored before this (server.ts), so the
+  // first call the relay forwards already finds them.
+  const relay = await attachToRelay(deps.portFile, (http.address() as AddressInfo).port);
+  const url = () => `http://127.0.0.1:${relay.port}/mcp`;
   return {
-    url,
+    get url() {
+      return url();
+    },
     spec: (grant) => ({
       kind: 'http',
-      url,
+      url: url(),
       headers: { Authorization: `Bearer ${grant.token}` },
       required: true,
     }),
-    close: () => new Promise((resolve) => http.close(() => resolve())),
+    close: () => {
+      relay.close();
+      return new Promise((resolve) => http.close(() => resolve()));
+    },
   };
 }

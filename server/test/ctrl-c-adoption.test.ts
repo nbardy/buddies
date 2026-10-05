@@ -30,16 +30,19 @@ const PNPM = process.env.npm_execpath ?? '';
 const REAL_HOME = os.homedir();
 
 // Chosen by a SCENARIO marker in the prompt; every step leaves a file in FAKE_DIR. A prompt with
-// no marker (bootstrap, review) answers at once. `down` also calls a Buddy tool while no backend
-// runs and records what it got back.
+// no marker (bootstrap, review) answers at once. `down` and `longdown` also call a Buddy tool while
+// no backend runs and record what they got back (`<scenario>.gap`, and the raw body in `.raw`);
+// `down` then replays that call with the same key. `stopped` hands its in-gap call to a detached
+// child, so the call is still made after Stop killed the CLI's group.
 const FAKE_CLAUDE = String.raw`#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const dir = process.env.FAKE_DIR;
+const gapChild = process.argv.indexOf('--gap-child');
 let prompt = '';
-process.stdin.on('data', (d) => (prompt += d));
-process.stdin.on('end', () => main().catch((e) => { fs.writeFileSync(path.join(dir, 'fatal-' + process.pid), String(e.stack)); process.exit(3); }));
+if (gapChild < 0) process.stdin.on('data', (d) => (prompt += d));
+if (gapChild < 0) process.stdin.on('end', () => main().catch((e) => { fs.writeFileSync(path.join(dir, 'fatal-' + process.pid), String(e.stack)); process.exit(3); }));
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 const text = (t) => say({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } });
 const mark = (name, value = '') => fs.writeFileSync(path.join(dir, name), String(value));
@@ -59,11 +62,23 @@ async function post(tools, body, key) {
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'post', arguments: { channel: { direct: ['owner'] }, body, key } } }),
     });
     const raw = await response.text();
-    return response.status + ' ' + (raw.includes('"isError":true') ? 'tool-error ' + raw : 'ok');
+    fs.writeFileSync(path.join(dir, key + '.raw'), raw);
+    // isError: the tool failed; a JSON-RPC error: the call never reached a tool (the relay's answer).
+    const failed = raw.includes('"isError":true') || raw.includes('"error":{');
+    return response.status + ' ' + (failed ? 'tool-error ' + raw : 'ok');
   } catch (error) {
     return 'transport-error ' + (error.cause?.code ?? error.message);
   }
 }
+// The in-gap call: '.gap-sent' just before it, '.gap' with its result, '.gap-ms' how long it took.
+async function gapCall(tools, scenario) {
+  mark(scenario + '.gap-sent');
+  const started = Date.now();
+  const result = await post(tools, scenario + ' in-gap', scenario + '-gap');
+  mark(scenario + '.gap-ms', Date.now() - started);
+  mark(scenario + '.gap', result);
+}
+if (gapChild >= 0) until('dead').then(() => gapCall(JSON.parse(process.argv[gapChild + 1]), 'stopped'));
 async function main() {
   const scenario = (/SCENARIO:(\w+)/.exec(prompt) || [])[1];
   say({ type: 'system', subtype: 'init', session_id: 'fake-' + (scenario || 'other') + '-' + process.pid });
@@ -74,13 +89,20 @@ async function main() {
   text('one;');
   if (tools) mark(scenario + '.before', await post(tools, scenario + ' before-restart', scenario + '-before'));
   text('two;');
+  if (tools && scenario === 'stopped') {
+    const { spawn } = require('node:child_process');
+    const child = spawn(process.execPath, [__filename, '--gap-child', JSON.stringify(tools)], { detached: true, stdio: 'ignore', env: process.env });
+    mark('stopped-child.pgid', child.pid);
+    child.unref();
+  }
   mark(scenario + '.midturn', process.pid);
   await until('dead');
   text('during;');
-  if (tools && scenario === 'down') mark(scenario + '.gap', await post(tools, scenario + ' in-gap', scenario + '-gap'));
+  if (tools && (scenario === 'down' || scenario === 'longdown')) await gapCall(tools, scenario);
   mark(scenario + '.during');
   await until('release');
   if (tools) mark(scenario + '.after', await post(tools, scenario + ' after-restart', scenario + '-after'));
+  if (tools && scenario === 'down') mark(scenario + '.replay', await post(tools, scenario + ' in-gap', scenario + '-gap'));
   text('four;');
   say({ type: 'result', subtype: 'success' });
   mark(scenario + '.exited', process.pid);
@@ -532,8 +554,26 @@ test(
   }
 );
 
+/**
+ * Bodies the worker posted to its DM with the owner. The channel id comes from the worker's
+ * `before` call, which landed while backend A ran.
+ */
+async function ownerDmBodies(c: Case, scenario: string): Promise<string[]> {
+  const raw = fs.readFileSync(path.join(c.fakeDir, `${scenario}-before.raw`), 'utf8');
+  const channelId = /channelId\\*":\\*"([^"\\]+)/.exec(raw)?.[1];
+  assert.ok(channelId, `no channel id in ${raw}`);
+  const page = await http('GET', `/api/buddies/channels/${channelId}/posts`);
+  return (page.body.posts as Array<{ body: string }>).map((post) => post.body);
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Task task_01a0f65c. Until the relay (server/relay/buddy-mcp-relay.mjs), this call got
+// ECONNREFUSED: neither claude nor codex retries that, so the post was lost unless the model chose
+// to try again (agent_notes/2026-10-05_outage-tool-delivery.md). Now the relay, which outlives the
+// Ctrl+C, holds the call and the relaunched backend delivers it.
 test(
-  'a ~30 s outage: the agent calls a Buddy tool with no backend, then completes after relaunch',
+  'a ~10 s outage: a Buddy post made with no backend lands once after relaunch; its replay creates nothing',
   { timeout: 300_000 },
   async () => {
     const c = makeCase('downtime');
@@ -542,26 +582,113 @@ test(
     const work = await startWork(c, 'down');
     signalGroup(first.pgid, 'SIGINT');
     await assertGroupGoneAgentsJournaling(c, first, work);
-    const downAt = Date.now();
+    await eventually(
+      c,
+      () => fs.existsSync(path.join(c.fakeDir, 'down.gap-sent')),
+      Boolean,
+      'tool call in the gap'
+    );
+    await sleep(10_000);
+    assert.ok(
+      !fs.existsSync(path.join(c.fakeDir, 'down.gap')),
+      `held while no backend runs, not failed: ${fs.existsSync(path.join(c.fakeDir, 'down.gap')) && work.fake('down.gap')}`
+    );
+    const second = launch(c, 'B');
+    await second.ready;
     await eventually(
       c,
       () => fs.existsSync(path.join(c.fakeDir, 'down.gap')),
       Boolean,
-      'tool call in the gap'
+      'the held call to return'
     );
-    // What an agent sees from its Buddy MCP endpoint while no backend runs: a refused connection.
-    const gap = work.fake('down.gap');
-    console.log(`[downtime] Buddy tool call with no backend: ${gap}`);
-    assert.match(gap, /^transport-error ECONNREFUSED/);
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.max(0, 30_000 - (Date.now() - downAt)))
+    assert.match(work.fake('down.gap'), /^200 ok/, 'the in-gap post was delivered');
+    await assertAdoptedAndCompleted(c, work);
+    // The same call again with the same key (a CLI or model retry) replays the first result.
+    assert.match(work.fake('down.replay'), /^200 ok/);
+    const bodies = await ownerDmBodies(c, 'down');
+    assert.equal(bodies.filter((b) => b === 'down in-gap').length, 1, 'exactly once');
+    await stopGroup(second);
+    c.finished = true;
+  }
+);
+
+test(
+  'an outage longer than the hold: the in-gap call gets a clear tool error at ~55 s, never a hang',
+  { timeout: 300_000 },
+  async () => {
+    const c = makeCase('longdown');
+    const first = launch(c, 'A');
+    await first.ready;
+    const work = await startWork(c, 'longdown');
+    signalGroup(first.pgid, 'SIGINT');
+    await assertGroupGoneAgentsJournaling(c, first, work);
+    await eventually(
+      c,
+      () => fs.existsSync(path.join(c.fakeDir, 'longdown.gap')),
+      Boolean,
+      'the held call to give up'
     );
-    for (const pid of Object.values(work.pids))
-      assert.ok(alive(pid), 'the agent is still running after 30 s alone');
+    const gap = work.fake('longdown.gap');
+    assert.match(gap, /^200 tool-error .*NOT delivered/, gap);
+    // Before claude's own 60 s request timeout, so the model reads the relay's message.
+    const waited = Number(work.fake('longdown.gap-ms'));
+    assert.ok(waited >= 50_000 && waited < 60_000, `held ${waited} ms`);
     const second = launch(c, 'B');
     await second.ready;
     await assertAdoptedAndCompleted(c, work);
-    // The failed in-gap call wrote nothing; the retry after relaunch (the `after` call) did.
+    assert.deepEqual(
+      (await ownerDmBodies(c, 'longdown')).filter((b) => b === 'longdown in-gap'),
+      [],
+      'the call that got the error never lands later'
+    );
+    await stopGroup(second);
+    c.finished = true;
+  }
+);
+
+test(
+  'a turn Stopped before the outage: its call held through the outage gets 401, never a post',
+  { timeout: 300_000 },
+  async () => {
+    const c = makeCase('stopped');
+    const first = launch(c, 'A');
+    await first.ready;
+    const work = await startWork(c, 'stopped');
+    const run = await runOf(work.worker);
+    const cancelled = await http('POST', `/api/buddies/runs/${run.id}/cancel`);
+    assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
+    // Stop is durable (`stopping` on disk) and kills the CLI's group; the detached child that
+    // holds the grant's token lives on and calls during the outage.
+    await eventually(
+      c,
+      () => alive(work.pids.worker),
+      (a) => !a,
+      'the stopped CLI to exit'
+    );
+    signalGroup(first.pgid, 'SIGINT');
+    await first.exited;
+    fs.writeFileSync(path.join(c.fakeDir, 'dead'), '');
+    await eventually(
+      c,
+      () => fs.existsSync(path.join(c.fakeDir, 'stopped.gap-sent')),
+      Boolean,
+      'tool call in the gap'
+    );
+    await sleep(3_000);
+    const second = launch(c, 'B');
+    await second.ready;
+    await eventually(
+      c,
+      () => fs.existsSync(path.join(c.fakeDir, 'stopped.gap')),
+      Boolean,
+      'the held call to return'
+    );
+    assert.match(work.fake('stopped.gap'), /^401 /, "a stopped turn's grant is not restored");
+    assert.deepEqual(
+      (await ownerDmBodies(c, 'stopped')).filter((b) => b === 'stopped in-gap'),
+      []
+    );
+    fs.writeFileSync(path.join(c.fakeDir, 'release'), '');
     await stopGroup(second);
     c.finished = true;
   }
