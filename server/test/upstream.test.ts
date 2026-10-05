@@ -132,7 +132,7 @@ test('bootstrap converges: one workspace, one #upstream, one of each Buddy', asy
   const second = await bootstrapUnleashdHome(core, repoRoot);
   assert.deepEqual(second, first);
   assert.equal((await core.listWorkspaces()).length, 1);
-  assert.deepEqual(await publicChannelNames(core, first.workspaceId), ['upstream']);
+  assert.deepEqual(await publicChannelNames(core, first.workspaceId), ['general', 'upstream']);
   assert.deepEqual(await namedInWorkspace(core, first.workspaceId, 'Product Dev'), [
     first.productDevId,
   ]);

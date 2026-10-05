@@ -1152,3 +1152,25 @@ fn a_group_request_starts_one_run_per_recipient() {
         .unwrap();
     assert_eq!(again.id, run.id, "a pre-fix run is still matched by its legacy key");
 }
+
+// Regression guard (fresh-install trial 2026-10-05): a new workspace had no #general, so Home had
+// no composer. Re-registering the folder (every server start runs bootstrap) must not add another,
+// and an archived #general keeps the name, so nothing may try to create a second or error.
+#[test]
+fn new_workspace_has_general_once() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let folder = WorkspaceInput { name: "Fresh".into(), root_path: "/tmp/fresh".into() };
+    let ws = s.create_workspace(&Actor::Owner, folder.clone()).unwrap();
+    s.create_workspace(&Actor::Owner, folder).unwrap();
+    let general = |s: &Store| -> Vec<Channel> {
+        s.inbox(&Actor::Owner, &ws.id).unwrap().channels.into_iter().map(|c| c.channel).filter(|c| matches!(&c.kind, ChannelKind::Public { name, .. } if name == "general")).collect()
+    };
+    let found = general(s);
+    assert_eq!(found.len(), 1, "one #general after create + re-register");
+
+    s.set_channel_archived(&Actor::Owner, &found[0].id, true, "arch").unwrap();
+    s.create_workspace(&Actor::Owner, WorkspaceInput { name: "Fresh".into(), root_path: "/tmp/fresh".into() }).unwrap();
+    assert!(general(s).is_empty(), "archived #general stays archived; no replacement appears");
+    assert_eq!(s.archived_channels(&Actor::Owner, &ws.id).unwrap().len(), 1);
+}
