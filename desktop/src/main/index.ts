@@ -10,6 +10,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { mergePath, resolveLoginPath } from "./login-path";
 
 const startedAt = Date.now();
 const payload = join(PATHS.RESOURCES_FOLDER, "app", "payload");
@@ -66,26 +67,27 @@ const buddiesHome = join(home, "buddies");
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(buddiesHome, { recursive: true });
 const token = authToken(dataDir);
-// The server's first boot installs Rust (`brew install rust`, else rustup) for source
-// builds. A packaged app never builds from source: the spike's first launch started
-// `brew install rust` against the machine's Homebrew. Claiming the server's own
-// once-per-install marker skips that installer; Claude/Codex installs still run.
-// TODO(desktop): replace with an explicit server setting instead of the marker file.
-mkdirSync(join(dataDir, "dependency-setup"), { recursive: true });
-const rustClaim = join(dataDir, "dependency-setup", "rust.attempted");
-if (!existsSync(rustClaim)) writeFileSync(rustClaim, "desktop app: no source builds\n");
 const port = Number(process.env.BUDDIES_DESKTOP_PORT ?? (await sparePort()));
 const origin = `http://127.0.0.1:${port}`;
 const nodeBin = join(payload, "node", "bin");
 
-// Finder launches apps with PATH=/usr/bin:/bin:/usr/sbin:/sbin. The bundled node
-// goes first so `#!/usr/bin/env node` agent shims resolve to it; the server adds
-// ~/.local/bin and ~/.cargo/bin itself when it probes for agent CLIs.
+// The bundled node goes first so `#!/usr/bin/env node` agent shims resolve to it; the rest
+// is the user's login-shell PATH (see login-path.ts for why not a list of directories).
+const login = await resolveLoginPath(process.env, homedir());
+log(
+	login.kind === "login-shell"
+		? `PATH from ${login.shell}: ${login.path}`
+		: `PATH FALLBACK (${login.reason}): ${login.path}`,
+);
+
 const server = Bun.spawn([join(nodeBin, "node"), join(payload, "server", "dist", "server.js")], {
 	cwd: payload,
 	env: {
 		...process.env,
-		PATH: [nodeBin, process.env.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin"].join(":"),
+		PATH: mergePath(nodeBin, login.path),
+		// A packaged app never builds from source, so Rust is not a prerequisite: the server
+		// neither probes nor installs it (UNLEASHD_SOURCE_BUILDS, dependencies.ts).
+		UNLEASHD_SOURCE_BUILDS: "0",
 		NODE_ENV: "production",
 		PORT: String(port),
 		UNLEASHD_HOST: "127.0.0.1",
