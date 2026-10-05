@@ -206,12 +206,16 @@ function BuddyDocEditor({
     setBusy(true);
     setNotice(null);
     try {
-      const saved = await buddyWrite<Doc>(docUrl(buddyId, kind), 'PUT', {
-        ...address,
-        content: edited.content,
-        baseRevision: edited.base.revision,
-        reason,
-      });
+      const saved = await buddyWrite(
+        'doc.write',
+        { buddyId, kind },
+        {
+          ...address,
+          content: edited.content,
+          baseRevision: edited.base.revision,
+          reason,
+        }
+      );
       setDraft({ base: baseOf(saved), content: saved.content });
       setReason('');
       await refetch();
@@ -490,12 +494,16 @@ function NewDocForm({ buddyId, workspaceId }: { buddyId: string; workspaceId: st
         event.preventDefault();
         void action
           .run('create', () =>
-            buddyWrite(docUrl(buddyId, 'shared'), 'PUT', {
-              ...scope,
-              content,
-              baseRevision: 0,
-              reason: 'Created by the owner',
-            })
+            buddyWrite(
+              'doc.write',
+              { buddyId, kind: 'shared' },
+              {
+                ...scope,
+                content,
+                baseRevision: 0,
+                reason: 'Created by the owner',
+              }
+            )
           )
           .then((ok) => {
             if (!ok) return;

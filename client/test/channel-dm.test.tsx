@@ -229,13 +229,10 @@ test('only a harness failure offers a retry on another harness', () => {
         />
       </Provider>
     );
-  assert.match(
-    failed('Couldn’t reply: Out of tokens: usage limit'),
-    />Retry with a different harness</
-  );
+  assert.match(failed('Couldn’t reply: Out of tokens: usage limit'), />Retry with model…</);
   assert.match(
     failed('Couldn’t reply: Provider completed the turn with reason: error'),
-    /Retry with a different harness/
+    /Retry with model…/
   );
   assert.equal(failed('Couldn’t reply: Buddy is not active'), '');
   assert.equal(failed('Couldn’t reply: the turn ended without a channel post'), '');

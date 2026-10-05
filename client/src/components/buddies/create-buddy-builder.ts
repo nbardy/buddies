@@ -1,4 +1,4 @@
-import { buddyApi } from './api';
+import { buddyWrite } from './api';
 
 /**
  * Open a Buddy Builder conversation (POST /api/buddies/builder →
@@ -7,10 +7,10 @@ import { buddyApi } from './api';
  * the sidebar, which has no current workspace. The caller owns navigation.
  */
 export async function createBuddyViaBuilder(workspaceId?: string): Promise<string> {
-  const { conversationId } = await buddyApi<{ conversationId: string }>('/api/buddies/builder', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(workspaceId ? { workspaceId } : {}),
-  });
+  const { conversationId } = await buddyWrite(
+    'builder.open',
+    {},
+    workspaceId ? { workspaceId } : {}
+  );
   return conversationId;
 }

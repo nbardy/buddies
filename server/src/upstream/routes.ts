@@ -1,10 +1,11 @@
 import type { Cursor } from '@unleashd/buddies-core';
-import type {
-  UnleashdHomeState,
-  UpstreamCheck,
-  UpstreamCheckState,
-  UpstreamStatus,
-  UpstreamUpdateResult,
+import {
+  type UnleashdHomeState,
+  type UpstreamCheck,
+  type UpstreamCheckState,
+  type UpstreamStatus,
+  type UpstreamUpdateResult,
+  buddyMutations,
 } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import { type BuddiesCore, OWNER, coreError } from '../buddies/core';
@@ -152,12 +153,13 @@ export function createUpstreamService(dependencies: UpstreamServiceDependencies)
       app.get('/api/upstream/status', (_req: Request, res: Response) => {
         res.json({ check, home } satisfies UpstreamStatus);
       });
-      app.post('/api/upstream/update', (_req: Request, res: Response) => {
+      const update = buddyMutations['upstream.update'];
+      app.post(update.path, (_req: Request, res: Response) => {
         requestUpdate()
           .then((outcome) => {
             switch (outcome.kind) {
               case 'posted':
-                res.status(201).json(outcome.result);
+                res.status(update.status).json(outcome.result);
                 return;
               case 'refused':
                 res.status(409).json({ error: outcome.reason });

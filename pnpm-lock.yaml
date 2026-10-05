@@ -225,6 +225,9 @@ importers:
 
   shared:
     devDependencies:
+      '@unleashd/buddies-core':
+        specifier: workspace:*
+        version: link:../crates/unleashd-buddies
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

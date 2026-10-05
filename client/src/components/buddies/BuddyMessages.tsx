@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { actorName } from './BuddyTaskComments';
-import { buddyApi, buddyWrite } from './api';
+import { buddyWrite } from './api';
 import type {
   Actor,
   ChannelPage,
@@ -51,9 +51,13 @@ function AnswerForm({ request, refresh }: { request: Post; refresh: () => Promis
       onSubmit={(event) => {
         event.preventDefault();
         void action.run('answer', () =>
-          buddyWrite(`/api/buddies/posts/${encodeURIComponent(request.id)}/answer`, 'POST', {
-            body,
-          })
+          buddyWrite(
+            'request.answer',
+            { postId: request.id },
+            {
+              body,
+            }
+          )
         );
       }}
     >
@@ -83,11 +87,15 @@ function SendForm({ buddyId, refresh }: { buddyId: string; refresh: () => Promis
         event.preventDefault();
         void action
           .run('send', () =>
-            buddyWrite('/api/buddies/direct/posts', 'POST', {
-              members: [buddyId],
-              body,
-              kind: request ? 'request' : 'inform',
-            })
+            buddyWrite(
+              'direct.post',
+              {},
+              {
+                members: [buddyId],
+                body,
+                kind: request ? 'request' : 'inform',
+              }
+            )
           )
           .then((ok) => ok && setBody(''));
       }}
@@ -145,11 +153,15 @@ export function PostAsBuddyForm({
         event.preventDefault();
         void action
           .run('post', () =>
-            buddyWrite(`/api/buddies/channels/${encodeURIComponent(target)}/posts`, 'POST', {
-              asBuddyId: buddyId,
-              purpose: purpose.trim(),
-              body,
-            })
+            buddyWrite(
+              'channel.post',
+              { channelId: target },
+              {
+                asBuddyId: buddyId,
+                purpose: purpose.trim(),
+                body,
+              }
+            )
           )
           .then((ok) => ok && setBody(''));
       }}
@@ -247,8 +259,8 @@ function ThreadReplies({
           void action
             .run('reply', () =>
               buddyWrite(
-                `/api/buddies/channels/${encodeURIComponent(root.channelId)}/posts`,
-                'POST',
+                'channel.post',
+                { channelId: root.channelId },
                 { body, replyToId: root.id }
               )
             )
@@ -376,11 +388,9 @@ function DirectChannel({
   // Seeing the DM reads it through the newest post rendered; a later post stays unread.
   useEffect(() => {
     if (newest === undefined || direct.unread === 0) return;
-    void buddyApi(`/api/buddies/channels/${encodeURIComponent(channelId)}/read`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ postId: newest }),
-    }).catch((error: unknown) => console.warn('[buddies] could not mark the DM read:', error));
+    void buddyWrite('channel.read', { channelId }, { postId: newest }).catch((error: unknown) =>
+      console.warn('[buddies] could not mark the DM read:', error)
+    );
   }, [channelId, newest, direct.unread]);
   const awaitingOwner = new Set(
     inbox.requests.filter((post) => post.channelId === channelId).map((post) => post.id)

@@ -6,7 +6,7 @@ import { listField } from '../../atoms/conversations';
 import { DRAFT_KEY_PREFIX } from '../../atoms/ui';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { PathAutocomplete } from '../PathAutocomplete';
-import { buddyApi, errorText } from './api';
+import { buddyWrite, errorText } from './api';
 import { createBuddyViaBuilder } from './create-buddy-builder';
 import type { Workspace } from './types';
 import { createReady } from './workspace-home';
@@ -37,12 +37,7 @@ export function WorkspaceTeamForm({
   const folderReady = createReady(directory, valid);
   const teamReady = folderReady && description.trim() !== '' && busy === null;
   const selectWorkspace = async () =>
-    workspace ??
-    (await buddyApi<Workspace>('/api/buddies/workspaces', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ rootPath: directory.trim() }),
-    }));
+    workspace ?? (await buddyWrite('workspace.create', {}, { rootPath: directory.trim() }));
   const start = async (event: FormEvent) => {
     event.preventDefault();
     if (!teamReady) return;
