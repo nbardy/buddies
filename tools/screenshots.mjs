@@ -347,16 +347,21 @@ const OPEN_MENTION_MENU = prep(`
 
 // Expand the channel header's Search pill in place and type a query so the
 // results drop below it.
-const OPEN_CHANNEL_SEARCH = prep(`
+const openChannelSearch = (query) =>
+  prep(`
+  // A server with no agent CLIs on PATH (the throwaway one) opens the dependency prompt first.
+  document.querySelector('[aria-label="Close dependency checks"]')?.click();
+  await tick(300);
   const pill = document.querySelector('.channel-search-trigger');
   if (!pill) return 'SKIP';
   pill.click();
   await tick(50);
   const input = document.querySelector('.channel-search-panel input');
   if (!input) return false;
-  typeInto(input, 'search');
+  typeInto(input, ${JSON.stringify(query)});
   await tick(1500);
   return has('.channel-search-panel');`);
+const OPEN_CHANNEL_SEARCH = openChannelSearch('search');
 
 // Pick the first Buddy from the @ menu with Enter (React handles the native
 // keydown), then click its chip on the bar to open the harness/model picker.
@@ -632,6 +637,12 @@ function buildScreens(found, focus) {
       name: 'channel-search',
       missing: noChannel,
       views: { desktop: { path: `${channels}?${channel}`, prepare: OPEN_CHANNEL_SEARCH } },
+    },
+    // The owner's 2026-10-05 miss: "market" should find marketing posts and show #marketing.
+    {
+      name: 'channel-search-market',
+      missing: noChannel,
+      views: { desktop: { path: `${channels}?${channel}`, prepare: openChannelSearch('market') } },
     },
     {
       name: 'mention-menu',
