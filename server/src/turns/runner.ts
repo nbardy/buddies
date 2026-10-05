@@ -128,9 +128,17 @@ export type TurnBroadcast =
       content: string;
     };
 
-/** The command named by a Node `spawn <cmd> ENOENT` failure, or null for any other message. */
+/**
+ * The command a failure names as missing, or null for any other message. Two forms: Node's
+ * `spawn <cmd> ENOENT` (a rejected completion), and the journal wrapper shell's
+ * `<cmd>: command not found` (exit 127), which is how a missing CLI ends since turns run from an
+ * on-disk journal (`/bin/sh` always spawns, so Node never sees ENOENT for the CLI itself).
+ */
 function missingCommand(message: string): string | null {
-  return /(?:^|[\s:])spawn (\S+) ENOENT$/.exec(message)?.[1] ?? null;
+  const match =
+    /(?:^|[\s:])spawn (\S+) ENOENT$/.exec(message) ??
+    /(?:^|\s)([^\s:]+): command not found/.exec(message);
+  return match?.[1] ?? null;
 }
 
 export class TurnRunner {
@@ -606,7 +614,9 @@ export class TurnRunner {
       // Repair old phantom bindings so the next explicit retry starts a real thread.
       this.host.markSessionStarted(false);
     }
-    this.terminalCauseHint = cause;
+    // A missing CLI is journaled as `spawn_failed` so the DM can rebuild its notice after a
+    // restart (see describeFailure's fix guard).
+    this.terminalCauseHint = missingCommand(message) ? 'spawn_failed' : cause;
     this.providerFailureMessage = this.describeFailure(normalizeProviderErrorMessage(message));
     this.surfaceError(this.providerFailureMessage);
   }
@@ -732,7 +742,9 @@ export class TurnRunner {
    * Fix guard: a provider binary missing from PATH surfaced as the raw `spawn codex ENOENT`, which
    * the DM view then hid, leaving an empty bubble (fresh-install trial 2026-10-05). Name the
    * provider and the command and point at Setup, in the one text every shell and every path
-   * (chat, DM, @mention `Couldn't reply: …`) shows. Guard: conversation-runtime.test.ts
+   * (chat, DM, @mention `Couldn't reply: …`) shows. Since journaled executions the same failure
+   * arrives as the wrapper shell's `codex: command not found` (exit 127) in a provider error
+   * event; missingCommand reads both forms. Guard: conversation-runtime.test.ts
    * "a missing provider binary".
    */
   private describeFailure(message: string): string {
@@ -807,7 +819,7 @@ export class TurnRunner {
     if (failure)
       return {
         t: 'failed',
-        cause: this.terminalCauseHint === 'out_of_tokens' ? 'out_of_tokens' : 'provider_error',
+        cause: this.terminalCauseHint ?? 'provider_error',
         detail: failure,
       };
     // Review is enqueued before listeners or processQueue can start another turn. Not after a
@@ -849,11 +861,9 @@ export class TurnRunner {
     this.releaseRunFlags();
     if (host.turnQueue.finishHead()) host.broadcastQueue();
     const cause: TurnTerminalCause =
-      reason === 'out_of_tokens' || this.terminalCauseHint === 'out_of_tokens'
+      reason === 'out_of_tokens'
         ? 'out_of_tokens'
-        : this.terminalCauseHint === 'provider_error'
-          ? 'provider_error'
-          : crashed(completion).cause;
+        : (this.terminalCauseHint ?? crashed(completion).cause);
     return { t: 'failed', cause, detail: reason };
   }
 

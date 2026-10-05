@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { type UnifiedAgentEvent, createParser } from '@nbardy/agent-cli';
@@ -1718,8 +1719,17 @@ test('a Task tool starts a generic sub-agent that parent completion settles', as
 // Regression: a provider binary absent from PATH showed an empty Buddy DM bubble; `spawn codex
 // ENOENT` reached only the server log (fresh-install trial 2026-10-05). Real executeTurn, empty PATH.
 test('a missing provider binary settles the turn with a visible system message naming it', async () => {
-  const saved = process.env.PATH;
-  process.env.PATH = '/nonexistent-dir';
+  const saved = process.env.PATH ?? '';
+  // A PATH holding only what the journal needs: the wrapper shell's `mv` (exit.json) and the
+  // backend's `ps` (wrapper liveness). An empty PATH (the pre-journal version of this test) also
+  // hides those, so the execution is reported lost instead of the missing CLI.
+  const bin = mkdtempSync(join(tmpdir(), 'no-provider-bin-'));
+  for (const tool of ['mv', 'ps']) {
+    const dir = saved.split(':').find((d) => d && existsSync(join(d, tool)));
+    assert.ok(dir, `${tool} on PATH`);
+    symlinkSync(join(dir, tool), join(bin, tool));
+  }
+  process.env.PATH = bin;
   try {
     // The in-memory notice is gone after a backend restart; the attempt journal is what the DM
     // rebuilds the message from, so a missing command must be journaled as spawn_failed.
@@ -1753,5 +1763,6 @@ test('a missing provider binary settles the turn with a visible system message n
     );
   } finally {
     process.env.PATH = saved;
+    rmSync(bin, { recursive: true, force: true });
   }
 });
