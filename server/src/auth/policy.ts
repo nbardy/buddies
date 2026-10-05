@@ -80,6 +80,17 @@ function readConfiguredToken(input: PolicyInput): string | undefined {
   }
 }
 
+/** Where the owner's key lives, so Setup can say where to find it. Same precedence as above. */
+export type KeyLocation =
+  | { readonly kind: 'env' }
+  | { readonly kind: 'file'; readonly path: string };
+
+export function keyLocation(env: NodeJS.ProcessEnv, dataDirectory: string): KeyLocation {
+  if (env.UNLEASHD_AUTH_TOKEN?.trim()) return { kind: 'env' };
+  const explicitPath = env.UNLEASHD_AUTH_TOKEN_FILE?.trim();
+  return { kind: 'file', path: explicitPath || path.join(dataDirectory, 'auth-token') };
+}
+
 export function resolveAuthPolicy(input: PolicyInput): PolicyResolution {
   let token: string | undefined;
   try {

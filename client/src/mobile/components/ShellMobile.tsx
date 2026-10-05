@@ -11,6 +11,7 @@ import {
   mobilePrimarySectionForPath,
   resolveMobileConversationDestination,
 } from '../../utils/conversation-route-state';
+import { HomeScreenGuide } from '../../views/home-screen-guide/HomeScreenGuide';
 import { isImmersiveChannelRoute } from '../channels/channel-route';
 import '../styles/mobile.css';
 import '../styles/mobile-ui.css';
@@ -108,6 +109,7 @@ export function ShellMobile() {
           </NavLink>
         ))}
       </nav>
+      <HomeScreenGuide />
     </div>
   );
 }

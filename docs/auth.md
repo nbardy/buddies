@@ -185,11 +185,27 @@ substitute for transport security on an untrusted network.
 Both are cheap and each removes the cleartext-on-the-wire caveat:
 
 1. **Serve over https through Tailscale.** One command, real cert, no config
-   change in this repo:
+   change in this repo. Point it at the port that serves the **client**:
 
    ```bash
-   tailscale serve --bg --https 443 http://127.0.0.1:7499
+   tailscale serve --bg --https=443 http://127.0.0.1:7489
    ```
+
+   | Mode | Client (serve this) | API |
+   |---|---|---|
+   | built app, `pnpm start` | `7489` (or `PORT`): UI, API and `/ws` on one port | same port |
+   | development, `pnpm dev` | `7489`: Vite, which proxies `/api` and `/ws` | `7499`, never serve it |
+
+   Serving `7499` in development gives the phone the API with no client to load.
+   Setup → **Connect from mobile** (or **Connect mobile** at the bottom of the
+   desktop sidebar) reads `tailscale status` and `tailscale serve status`, and
+   only shows a URL when Serve answers on this node's *current* MagicDNS name and
+   proxies to the client port (`server/src/auth/mobile-access.ts`). A renamed
+   node keeps its old Serve entry, and the old name no longer resolves; that is
+   how a phone was handed a dead URL on 2026-09-09. The copied URL never carries
+   the access key: the phone signs in once on the login page, and the cookie
+   lasts a year. With no key configured, Setup asks for one before Serve, since
+   Serve connects from loopback and loopback without a key is open.
 
    This also makes the page a *secure context*, which fixes the
    `crypto.randomUUID` / `navigator.clipboard` unavailability that gates G4 and

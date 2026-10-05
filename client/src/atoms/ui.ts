@@ -5,6 +5,7 @@ import {
   RetiredHomePinsSchema,
   SeenMessageIndexSchema,
 } from '@unleashd/shared';
+import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import type { SyncStorage } from 'jotai/vanilla/utils/atomWithStorage';
 import { jotaiStore } from './store';
@@ -256,6 +257,33 @@ export const setupDismissedAtom = atomWithStorage<boolean>(
 
 export function setSetupDismissed(dismissed: boolean): void {
   jotaiStore.set(setupDismissedAtom, dismissed);
+}
+
+/** The Setup section an opener asked to reveal; consumed once it has scrolled into view. */
+export type SetupSection = 'connect-mobile';
+export const setupRevealAtom = atom<SetupSection | null>(null);
+
+/** Sidebar "Connect mobile": reopen Setup scrolled to that section. */
+export function openSetupAt(section: SetupSection): void {
+  jotaiStore.set(setupRevealAtom, section);
+  jotaiStore.set(setupDismissedAtom, false);
+}
+
+export function setupRevealed(): void {
+  jotaiStore.set(setupRevealAtom, null);
+}
+
+// The mobile Add to Home Screen guide shows once per device: dismissing it here
+// is permanent, and an installed (standalone) launch never shows it at all.
+export const homeScreenGuideDismissedAtom = atomWithStorage<boolean>(
+  'buddies-home-screen-guide-dismissed',
+  false,
+  validatedStorage<boolean>((raw) => (typeof raw === 'boolean' ? raw : null)),
+  { getOnInit: true }
+);
+
+export function dismissHomeScreenGuide(): void {
+  jotaiStore.set(homeScreenGuideDismissedAtom, true);
 }
 
 // ---------------------------------------------------------------------------

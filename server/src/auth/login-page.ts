@@ -105,7 +105,7 @@ const ENHANCEMENT_SCRIPT = [
   '      }',
   "      say('Sign-in failed (server error ' + response.status + ').', 'error');",
   '    }).catch(function () {',
-  "      say('Cannot reach the server. Check that unleashd is running and that you are on the right network.', 'error');",
+  "      say('Cannot reach the server. Check that Buddies is running and that you are on the right network.', 'error');",
   '    }).finally(function () {',
   '      submit.disabled = false;',
   "      submit.textContent = 'Unlock';",
@@ -125,7 +125,7 @@ export function loginPageHtml(options: {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#002b36">
-<title>unleashd — sign in</title>
+<title>Buddies — sign in</title>
 <style>
   :root {
     --bg: #002b36;
@@ -189,7 +189,7 @@ export function loginPageHtml(options: {
 </head>
 <body>
 <main>
-  <h1>unleashd</h1>
+  <h1>Buddies</h1>
   <p class="lede">This server is private. Enter your access key to continue.</p>
   ${noticeMarkup(options.notice)}
   <form id="login-form" method="post" action="${LOGIN_PATH}">
@@ -203,7 +203,7 @@ export function loginPageHtml(options: {
     </div>
     <button id="submit" type="submit">Unlock</button>
   </form>
-  <p class="hint">The key is on the machine running unleashd, in
+  <p class="hint">The key is on the computer running Buddies, in
     <code>~/.agent-viewer/auth-token</code>.</p>
 </main>
 <script>${ENHANCEMENT_SCRIPT}</script>
