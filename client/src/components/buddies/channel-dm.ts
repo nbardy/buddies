@@ -124,3 +124,13 @@ export function lastOwnerText(messages: readonly Message[]): string | null {
   }
   return null;
 }
+
+/**
+ * The newest `limit` rows, widened back to the run's lead so a window never opens on a headless
+ * continuation. `limit` Infinity keeps every row.
+ */
+export function tailRows(rows: readonly DmRow[], limit: number): readonly DmRow[] {
+  let start = Math.max(0, rows.length - limit);
+  while (start > 0 && rows[start].kind === 'continuation') start -= 1;
+  return rows.slice(start);
+}
