@@ -1,3 +1,8 @@
+/* Fonts load with this sheet, not from DependenciesPrompt.tsx: a .tsx CSS import made
+   node's test runner throw ERR_UNKNOWN_FILE_EXTENSION, failing dependencies.test.tsx. */
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/plus-jakarta-sans/wght.css";
+
 .dependencies-dialog::backdrop {
   background: rgb(3 7 12 / 78%);
   backdrop-filter: blur(6px);

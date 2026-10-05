@@ -262,7 +262,15 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
       assert.ok(
         await session.evaluate('document.querySelector("dialog h2").textContent.includes("Setup")')
       );
-      assert.ok(await session.evaluate('document.getElementById("connect-mobile-title") !== null'));
+      const title = await session.evaluate(`(() => {
+        const r = document.getElementById('connect-mobile-title').getBoundingClientRect();
+        const footer = document.querySelector('dialog.dependencies-dialog footer');
+        return { top: r.top, bottom: r.bottom, limit: footer.getBoundingClientRect().top };
+      })()`);
+      assert.ok(
+        title.top >= 0 && title.bottom <= title.limit,
+        'Connect from mobile is scrolled into view'
+      );
       await session.capture(path.join(out, shot));
     };
     await session.setViewport({ width: 1440, height: 1000, mobile: false, deviceScaleFactor: 1 });
@@ -271,6 +279,7 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
       `localStorage.setItem('unleashd-setup-dismissed', 'true'); location.reload()`
     );
     await session.evaluate('new Promise(resolve => setTimeout(resolve, 700))');
+    await session.capture(path.join(out, 'workspace-rail@desktop.png'));
     await session.click('.channel-browser-rail-connect');
     await connectSection('connect-mobile-from-rail@desktop.png');
     await session.goto(`http://127.0.0.1:${port}/`, 700);

@@ -1,7 +1,6 @@
 import { type MobileAccess, MobileAccessSchema } from '@unleashd/shared';
-import { useAtomValue } from 'jotai';
-import { type ReactNode, useEffect, useRef } from 'react';
-import { setupRevealAtom, setupRevealed } from '../../atoms/ui';
+import type { ReactNode } from 'react';
+import type { SetupSection } from '../../atoms/ui';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import { DependencyCommand, SURFACE } from './setup-ui';
 
@@ -163,19 +162,11 @@ const LABEL: Record<MobileAccess['kind'], { text: string; color: string }> = {
 // open; it polls so running a command here flips the state without a reload.
 export function ConnectMobile() {
   const access = usePolledFetch(ACCESS, 3_000);
-  const reveal = useAtomValue(setupRevealAtom);
-  const section = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (reveal !== 'connect-mobile') return;
-    section.current?.scrollIntoView({ block: 'start' });
-    section.current?.focus({ preventScroll: true });
-    setupRevealed();
-  }, [reveal]);
 
   const label = access.data ? LABEL[access.data.kind] : { text: 'Checking…', color: SURFACE.muted };
   return (
     <section
-      ref={section}
+      id={'connect-mobile' satisfies SetupSection}
       tabIndex={-1}
       aria-labelledby="connect-mobile-title"
       style={{

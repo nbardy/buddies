@@ -1,11 +1,14 @@
 import { DependenciesSchema, type DependencyCheck } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type ReactNode, Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { setSetupDismissed, setupDismissedAtom, setupRevealAtom } from '../../atoms/ui';
+import {
+  setSetupDismissed,
+  setupDismissedAtom,
+  setupRevealAtom,
+  setupRevealed,
+} from '../../atoms/ui';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import { DependencyCommand, SURFACE, buttonStyle } from './setup-ui';
-import '@fontsource-variable/inter/wght.css';
-import '@fontsource-variable/plus-jakarta-sans/wght.css';
 
 const WorkspaceTeamForm = lazy(() =>
   import('../../components/buddies/WorkspaceTeamForm').then((module) => ({
@@ -192,6 +195,20 @@ export function DependenciesPrompt({ children }: { children?: ReactNode }) {
       dialog.current?.focus();
     }
   }, [dismissed]);
+  // Fix guard: scrolling when the section mounted did nothing (the dialog was not open yet)
+  // or was undone when the checks loaded above it. So reveal once the checks have settled,
+  // a frame after the dialog opens. Guard: tools/dependencies-layout.test.mjs (section in view).
+  const settled = status.kind !== 'idle' && status.kind !== 'loading';
+  useEffect(() => {
+    if (reveal === null || dismissed || !settled) return;
+    const frame = requestAnimationFrame(() => {
+      const section = dialog.current?.querySelector<HTMLElement>(`#${reveal}`);
+      section?.scrollIntoView({ block: 'start' });
+      section?.focus({ preventScroll: true });
+      setupRevealed();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [reveal, dismissed, settled]);
 
   const retry = async () => {
     setRetrying(true);
