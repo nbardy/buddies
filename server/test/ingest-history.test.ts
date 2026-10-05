@@ -7,11 +7,11 @@
  */
 
 import assert from 'node:assert/strict';
-import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
+import type { ExecutionHandle } from '@nbardy/agent-cli';
 import {
   ConversationDetailSchema,
   type Message,
@@ -33,6 +33,7 @@ import type { ConversationList } from '../src/ingest/conversation-list';
 import { createRuntimeBuilder } from '../src/ingest/runtimes';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { fakeBuddyPort } from './fixtures/buddy-port';
+import { testExecutions } from './fixtures/fake-turn';
 import { claudeLine, ingestHome, until } from './fixtures/ingest-home';
 import { recordStore } from './fixtures/records';
 
@@ -58,6 +59,7 @@ async function serve(fixture: ReturnType<typeof ingestHome>) {
   const registry = new Map<string, ConversationRuntime>();
   let list: ConversationList | null = null;
   const Conversation = createConversationRuntime({
+    executions: testExecutions(),
     broadcast: (data) => sent.push(data as ConversationBroadcast),
     registerSessionAlias: () => undefined,
     unregisterSessionAlias: () => undefined,
@@ -231,7 +233,7 @@ test('the live-turn overlay shows once, then gives way to the provider rows at i
     assert.ok(conversation);
     // A turn this server runs: its rows are the overlay until the provider's file has them.
     const sentAt = Date.now();
-    conversation.process = {} as ChildProcess;
+    conversation.process = {} as ExecutionHandle;
     conversation.appendMessage({
       role: 'user',
       body: { t: 'text', text: 'second question' },

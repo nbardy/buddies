@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{WS, buddy, fixture};
+use common::{WS, buddy, fixture, lease};
 use rusqlite::Connection;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
@@ -75,8 +75,9 @@ fn workload(s: &mut unleashd_buddies::Store) {
     s.mark_read(&ic, &channel.id, &top.id).unwrap();
     s.mark_read(&ic, &ask.channel_id, &ask.id).unwrap();
 
-    let claim = s.claim_run(60_000).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
     s.bind_run(&claim.run.id, &claim.lease_token, "c-ic").unwrap();
+    s.renew_run(&claim.run.id, &claim.lease_token, 60_000).unwrap();
     s.answer(&ic, AnswerInput { request_id: ask.id.clone(), body: "done".into(), evidence: vec![], key: "r".into() }).unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "x".into(), error: "y".into() }).unwrap();
 
@@ -174,7 +175,6 @@ fn workload(s: &mut unleashd_buddies::Store) {
     ] {
         s.list_run_rows(q, 10).unwrap();
     }
-    s.recover_runs().unwrap();
     s.create_workspace(&owner, WorkspaceInput { name: "w2".into(), root_path: "/tmp/w2".into() }).unwrap();
     let hired = s
         .create_buddy(

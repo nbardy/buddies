@@ -1,12 +1,23 @@
-import { type MobileAccess, MobileAccessSchema } from '@unleashd/shared';
-import type { ReactNode } from 'react';
+import {
+  type MobileAccess,
+  MobileAccessSchema,
+  type MobilePairing,
+  MobilePairingSchema,
+} from '@unleashd/shared';
+import { type ReactNode, useState } from 'react';
 import type { SetupSection } from '../../atoms/ui';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
-import { DependencyCommand, SURFACE } from './setup-ui';
+import { DependencyCommand, SURFACE, buttonStyle } from './setup-ui';
 
 const ACCESS = resource('/api/mobile-access', async (signal) => {
   const response = await fetch('/api/mobile-access', { signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new Error(
+      response.status === 404
+        ? 'The running server does not support this check yet. It will be available after the backend reloads.'
+        : `HTTP ${response.status}`
+    );
+  }
   return MobileAccessSchema.parse(await response.json());
 });
 
@@ -75,7 +86,8 @@ function AccessKeyMissing({ command, exposed }: { command: string; exposed: bool
   return (
     <>
       <p style={text}>
-        Set an access key first. Buddies has no key, so a phone would get in without signing in.
+        Sign-in is turned off (UNLEASHD_AUTH_DISABLED=1), so a phone would get in without signing
+        in. Turn it back on first:
       </p>
       {exposed && (
         <p role="alert" style={{ ...text, color: '#ff9b94' }}>
@@ -83,8 +95,8 @@ function AccessKeyMissing({ command, exposed }: { command: string; exposed: bool
           with no sign-in.
         </p>
       )}
-      <DependencyCommand command={command} label="Create access key command" />
-      <p style={text}>Then restart Buddies.</p>
+      <DependencyCommand command={command} label="Turn sign-in on command" />
+      <p style={text}>Then restart Buddies. It creates an access key on its first start.</p>
     </>
   );
 }
@@ -105,12 +117,120 @@ function ServeMissing({ host, command }: { host: string; command: string }) {
   );
 }
 
+// Pattern: sum-types (docs/patterns.md#sum-types)
+// The QR only works on a phone already on the tailnet, which this computer
+// cannot see, so the owner confirms that first ('phone-unconfirmed'). This
+// whole block renders only in the Ready state: Tailscale running here and
+// Serve answering, or there is nothing for the code to open.
+type Pairing =
+  | { readonly kind: 'phone-unconfirmed' }
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'shown'; readonly pairing: MobilePairing }
+  | { readonly kind: 'failed'; readonly message: string };
+
+// A click mints the code (POST), so codes are never minted by the 3s poll.
+async function requestPairing(): Promise<Pairing> {
+  try {
+    const response = await fetch('/api/mobile-access/pairing', { method: 'POST' });
+    if (!response.ok) return { kind: 'failed', message: `HTTP ${response.status}` };
+    return { kind: 'shown', pairing: MobilePairingSchema.parse(await response.json()) };
+  } catch (error) {
+    return { kind: 'failed', message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+const expiryTime = (expiresAt: number) =>
+  new Date(expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+const centered: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  textAlign: 'center',
+  marginTop: 'var(--sp-6)',
+};
+const primaryButton: React.CSSProperties = {
+  ...buttonStyle,
+  padding: 'var(--sp-4) var(--sp-7)',
+  border: '1px solid #a6c7ff55',
+  borderRadius: 'var(--sp-4)',
+  color: '#a6c7ff',
+};
+const linkButton: React.CSSProperties = { ...buttonStyle, padding: 0, color: '#a6c7ff' };
+
+function PairingQr() {
+  const [pairing, setPairing] = useState<Pairing>({ kind: 'phone-unconfirmed' });
+  const show = () => {
+    setPairing({ kind: 'loading' });
+    void requestPairing().then(setPairing);
+  };
+  switch (pairing.kind) {
+    case 'phone-unconfirmed':
+      return (
+        <div style={centered}>
+          <p style={{ ...text, marginTop: 0 }}>
+            First, on your phone: install <Link href={INSTALL.iphone}>Tailscale for iPhone</Link> or{' '}
+            <Link href={INSTALL.android}>Android</Link> and sign in with the same account as this
+            computer. The QR code only opens on a phone that is on Tailscale.
+          </p>
+          <button
+            type="button"
+            style={{ ...primaryButton, marginTop: 'var(--sp-6)' }}
+            onClick={show}
+          >
+            Tailscale is set up on my phone
+          </button>
+        </div>
+      );
+    case 'loading':
+      return (
+        <div style={centered}>
+          <p style={{ ...text, marginTop: 0 }}>Making a code…</p>
+        </div>
+      );
+    case 'failed':
+      return (
+        <div style={centered}>
+          <p style={{ ...text, marginTop: 0 }}>Could not make a code: {pairing.message}</p>
+          <button type="button" style={linkButton} onClick={show}>
+            Try again
+          </button>
+        </div>
+      );
+    case 'shown':
+      return (
+        <div style={centered}>
+          <img
+            src={`data:image/svg+xml;utf8,${encodeURIComponent(pairing.pairing.svg)}`}
+            alt="QR code that signs your phone in"
+            style={{
+              display: 'block',
+              width: 'min(220px, 60vw)',
+              background: '#fff',
+              borderRadius: 'var(--sp-2)',
+            }}
+          />
+          <p style={text}>
+            Scan with your phone's camera. Works once, until {expiryTime(pairing.pairing.expiresAt)}
+            .
+          </p>
+          <button type="button" style={linkButton} onClick={show}>
+            New code
+          </button>
+        </div>
+      );
+  }
+}
+
 function Ready({ url, funnel, keyFile }: { url: string; funnel: boolean; keyFile: string }) {
   return (
     <>
-      <p style={text}>Open this on your phone with Tailscale connected:</p>
+      <PairingQr />
+      <p style={{ ...text, marginTop: 'var(--sp-8)' }}>
+        Or open the address yourself. Your own Tailscale devices get in without a key:
+      </p>
       <DependencyCommand command={url} label="Mobile URL" />
-      <p style={text}>Sign in there with your access key. To copy it without showing it, run:</p>
+      <p style={text}>Anywhere else, sign in with the access key. To copy it without showing it:</p>
       <DependencyCommand command={keyFile} label="Copy access key command" />
       {funnel && (
         <p role="alert" style={{ ...text, color: '#ff9b94' }}>
@@ -118,7 +238,6 @@ function Ready({ url, funnel, keyFile }: { url: string; funnel: boolean; keyFile
           only thing in the way. Turn it off with <code>tailscale funnel off</code>.
         </p>
       )}
-      <PhoneApps />
     </>
   );
 }
@@ -163,7 +282,13 @@ const LABEL: Record<MobileAccess['kind'], { text: string; color: string }> = {
 export function ConnectMobile() {
   const access = usePolledFetch(ACCESS, 3_000);
 
-  const label = access.data ? LABEL[access.data.kind] : { text: 'Checking…', color: SURFACE.muted };
+  // A missing backend route returned 404 but still showed "Looking for Tailscale…".
+  // Failed requests have settled; only idle/loading may show progress. Guard: dependencies-layout.
+  const label = access.data
+    ? LABEL[access.data.kind]
+    : access.kind === 'failed'
+      ? LABEL.failed
+      : { text: 'Checking…', color: SURFACE.muted };
   return (
     <section
       id={'connect-mobile' satisfies SetupSection}
@@ -187,9 +312,18 @@ export function ConnectMobile() {
         </strong>
         <span style={{ color: label.color, fontSize: 'var(--fs-2)' }}>{label.text}</span>
       </div>
-      {access.data ? body(access.data) : <p style={text}>Looking for Tailscale…</p>}
+      {access.data
+        ? body(access.data)
+        : access.kind !== 'failed' && <p style={text}>Looking for Tailscale…</p>}
       {(access.kind === 'failed' || access.kind === 'stale') && (
-        <p style={text}>Could not load: {access.error.message}</p>
+        <>
+          <p style={text} role="alert">
+            Could not load: {access.error.message}
+          </p>
+          <button type="button" style={buttonStyle} onClick={() => void access.refetch()}>
+            Retry mobile check
+          </button>
+        </>
       )}
     </section>
   );

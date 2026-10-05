@@ -8,6 +8,7 @@ import { buddyKind, createDefaultConversationConfig } from '@unleashd/shared';
 import { type ConversationOptions, createConversationRuntime } from '../src/conversations/runtime';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { fakeBuddyPort } from './fixtures/buddy-port';
+import { testExecutions } from './fixtures/fake-turn';
 
 // Owner-approved 2026-09-28: Claude's auto-memory (~/.claude/projects/<cwd>/memory) is the
 // owner's, and Buddy turns read and wrote it (src/buddies/harness-memory.ts). The real runner and
@@ -41,6 +42,7 @@ test('Buddy turns run with harness auto-memory off; an owner chat keeps it', asy
 
   const config = createDefaultConversationConfig('claude');
   const Conversation = createConversationRuntime({
+    executions: testExecutions(),
     broadcast: () => undefined,
     registerSessionAlias: () => undefined,
     unregisterSessionAlias: () => undefined,

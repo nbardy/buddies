@@ -1,5 +1,14 @@
-import type { Claim, Outcome, Post, Run, RunConfig, RunInput } from '@unleashd/buddies-core';
+import type {
+  Claim,
+  Outcome,
+  Post,
+  Run,
+  RunBudgets,
+  RunConfig,
+  RunInput,
+} from '@unleashd/buddies-core';
 import type { BuddyContext } from '@unleashd/shared';
+import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings } from './briefing';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
@@ -13,11 +22,19 @@ import type { Grants } from './grants';
  *   enqueues due schedules → claimRun until nothing is claimable → one handler per RunInput.
  *
  * Every claim is indexed (crates/unleashd-buddies/tests/query_plan.rs), so a wake costs a few
- * off-loop SQLite calls. Recovery runs once, at start: runs a dead host held end there.
+ * off-loop SQLite calls. There is no startup recovery: a run whose holder died ends at the claim
+ * gate when its lease runs out (Pattern: lease-heartbeat, docs/patterns.md#lease-heartbeat).
  */
 
-/** An admitted chat's run: its lease is the turn's deadline. */
+/** An admitted chat's run: `deadline` is the run's own (TURN_MAX_RUNTIME_MS), not its lease. */
 export type OwnedChatRun = { id: string; claim_token: string; deadline: string };
+/** A run whose turn this backend adopted: its lease renewed at start, stoppable by conversation. */
+export type AdoptedRun = { runId: string; leaseToken: string; conversationId: string };
+/** One lease renewal: `lost` means the claim gate already ended the run or it settled. */
+export type LeaseRenewal =
+  | { kind: 'renewed' }
+  | { kind: 'lost' }
+  | { kind: 'failed'; error: string };
 export type ChatAdmission =
   | { kind: 'admitted'; run: OwnedChatRun }
   | { kind: 'waiting'; reason: string }
@@ -34,14 +51,18 @@ export interface RunnerHost {
     commandId: string;
     config?: RunConfig;
   }): Promise<void>;
-  /** One background turn; resolves with its final assistant text, rejects when it fails. */
+  /**
+   * One background turn. Resolves once the turn's own settle finished the run (`finishRun`, called
+   * from its turn policy, live or adopted alike); rejects only when the turn never started.
+   */
   runTurn(input: {
     conversationId: string;
     context: BuddyContext;
     prompt: string;
     leaseToken: string;
-    deadlineMs: number;
-  }): Promise<string>;
+    /** The run's absolute deadline (ISO), set at its claim. */
+    deadline: string;
+  }): Promise<void>;
   stop(conversationId: string): void;
 }
 
@@ -73,13 +94,17 @@ export function createRunner(options: {
   grants: Grants;
   events: BuddyEvents;
   briefings: Briefings;
-  /**
-   * The lease of every claim, and so a foreground chat's deadline. The server passes
-   * TURN_MAX_RUNTIME_MS explicitly: inheriting a shorter background default killed healthy
-   * owner chats at 600 s on 2026-09-10 (docs/incident-2026-09-10-buddy-chat-timeout.md).
-   * Guard: `buddies-v2.test.ts` "a chat run is leased for exactly TURN_MAX_RUNTIME_MS".
-   */
+  /** The heartbeat lease of every claim (BUDDY_RUN_LEASE_MS): minutes, renewed by `renew`. */
   leaseMs: number;
+  /**
+   * A foreground chat run's deadline. The server passes TURN_MAX_RUNTIME_MS explicitly: a chat
+   * deadline taken from a 600 s background claim lease killed healthy owner chats on 2026-09-10
+   * (docs/incident-2026-09-10-buddy-chat-timeout.md). The lease is a separate value since
+   * 2026-10-01. Guard: `buddies-v2.test.ts`, which asserts a chat run's deadline is exactly
+   * TURN_MAX_RUNTIME_MS.
+   */
+  chatDeadlineMs: number;
+  /** Every other run's deadline (BUDDY_BACKGROUND_TURN_MS). */
   backgroundTurnMs: number;
   backstopMs: number;
   logger?: Pick<Console, 'warn' | 'log'>;
@@ -87,6 +112,11 @@ export function createRunner(options: {
   const { core, host, grants, events, briefings } = options;
   const logger = options.logger ?? console;
   const chats = new Map<string, ChatTicket>();
+  const budgets: RunBudgets = {
+    leaseMs: options.leaseMs,
+    chatDeadlineMs: options.chatDeadlineMs,
+    turnDeadlineMs: options.backgroundTurnMs,
+  };
   let draining: Promise<void> | null = null;
   let again = false;
   // Paused while a backend reload drains: running turns finish, nothing new is claimed.
@@ -115,12 +145,19 @@ export function createRunner(options: {
     // into one) and the schedule advances, in one indexed transaction (the crate's cron math,
     // with IANA timezones). This replaced scheduler.ts, its legacy executor and its 1 s tick.
     await core.dueSchedules(new Date().toISOString());
-    for (
-      let claim = await core.claimRun(options.leaseMs);
-      claim;
-      claim = await core.claimRun(options.leaseMs)
-    )
+    for (let claim = await core.claimRun(budgets); claim; claim = await core.claimRun(budgets))
       void execute(claim);
+  }
+
+  // Turn endings in flight (completion step + settle): a graceful backend exit waits for them
+  // (lifecycle/shutdown.ts). Not for safety: the turn's journal stays `ended` until its settle
+  // lands, so a later backend would settle it; the wait only spares that boot the replay.
+  let settling = 0;
+  function tracked(work: Promise<void>): Promise<void> {
+    settling += 1;
+    return work.finally(() => {
+      settling -= 1;
+    });
   }
 
   async function settle(run: Run, leaseToken: string, outcome: Outcome): Promise<void> {
@@ -134,11 +171,13 @@ export function createRunner(options: {
           : outcome;
       await core.settleRun(run.id, leaseToken, final);
     } catch (error) {
-      // lease_lost: the lease expired or startup recovery ended it; the queue already moved on.
-      logger.warn(
-        `[buddies-runner] could not settle ${run.id}:`,
-        coreError(error)?.message ?? error
-      );
+      // Anything but lease_lost is transient and propagates: the turn's settle effect retries until
+      // it lands (TurnRunner.settleOutcome), and its journal stays `ended` meanwhile. Swallowing
+      // it would remove the journal of a run that never settled (2b without a crash).
+      if (coreError(error)?.code !== 'lease_lost') throw error;
+      // lease_lost: the claim gate ended it when its lease ran out, or it already settled (a
+      // replayed settle after a crash); the queue already moved on.
+      logger.warn(`[buddies-runner] could not settle ${run.id}: ${coreError(error)?.message}`);
     }
     events.emit({ kind: 'changed' });
   }
@@ -292,25 +331,40 @@ export function createRunner(options: {
             });
           await core.bindRun(run.id, claim.leaseToken, job.conversationId);
           await briefings.warm(context);
-          const text = await host.runTurn({
+          // The turn's settle runs `finishRun`: the completion step is re-derived there from the
+          // run (`jobFor`), the same way for a live turn and one a later backend adopted.
+          return await host.runTurn({
             conversationId: job.conversationId,
             context,
             prompt: job.prompt,
             leaseToken: claim.leaseToken,
-            deadlineMs: options.backgroundTurnMs,
+            deadline: run.deadline!,
           });
-          await job.after(text);
-          return settle(run, claim.leaseToken, { kind: 'complete', text });
         }
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return settle(run, claim.leaseToken, {
-        kind: 'failed',
-        code: 'execution_failed',
-        error: message,
-      });
+      return fail(run, claim.leaseToken, error);
     }
+  }
+
+  /** A turn job's text is in: its completion step, then the one settle. */
+  async function finishTurn(
+    run: Run,
+    leaseToken: string,
+    after: (text: string) => Promise<void>,
+    text: string
+  ): Promise<void> {
+    try {
+      await after(text);
+    } catch (error) {
+      return fail(run, leaseToken, error);
+    }
+    return settle(run, leaseToken, { kind: 'complete', text });
+  }
+
+  function fail(run: Run, leaseToken: string, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    return settle(run, leaseToken, { kind: 'failed', code: 'execution_failed', error: message });
   }
 
   // A running run whose cancel was recorded: kill its turn, and settle records it cancelled. Until
@@ -318,6 +372,44 @@ export function createRunner(options: {
   function stopTurn(run: Run): void {
     if (run.status === 'cancel_requested' && run.conversationId) host.stop(run.conversationId);
   }
+
+  /**
+   * Push a held run's lease BUDDY_RUN_LEASE_MS past now. The caller is the turn's bridge clock
+   * (TurnPolicy.bridgeAlive) and, at boot, `start` for adopted turns; see the renewal site in
+   * buddies/turn-policy.ts for why. `lost` is final: the run already ended (claim gate or settle).
+   */
+  async function renew(runId: string, leaseToken: string): Promise<LeaseRenewal> {
+    try {
+      await core.renewRun(runId, leaseToken, options.leaseMs);
+      return { kind: 'renewed' };
+    } catch (error) {
+      const known = coreError(error);
+      if (known?.code === 'lease_lost') return { kind: 'lost' };
+      return { kind: 'failed', error: known?.message ?? String(error) };
+    }
+  }
+
+  const FINISH: {
+    readonly [O in ExecutionOutcome as O['t']]: (
+      run: Run,
+      leaseToken: string,
+      outcome: O
+    ) => Promise<void>;
+  } = {
+    complete: async (run, leaseToken, { text }) => {
+      let after: (text: string) => Promise<void> = nothingAfter;
+      try {
+        const job = await jobFor(run);
+        if (job.kind === 'turn') after = job.after;
+      } catch (error) {
+        return fail(run, leaseToken, error);
+      }
+      return finishTurn(run, leaseToken, after, text);
+    },
+    failed: (run, leaseToken, { detail }) => fail(run, leaseToken, detail),
+    cancelled: (run, leaseToken, { detail }) =>
+      settle(run, leaseToken, { kind: 'cancelled', reason: detail }),
+  };
 
   function execute(claim: Claim): Promise<void> {
     const input = claim.run.input;
@@ -328,13 +420,28 @@ export function createRunner(options: {
   }
 
   return {
-    leaseMs: options.leaseMs,
+    chatDeadlineMs: options.chatDeadlineMs,
+    budgets,
+    renew,
 
-    async start(): Promise<void> {
-      const recovered = await core.recoverRuns();
-      logger.log(
-        `[buddies-runner] recovered: ${recovered.interrupted} interrupted, ${recovered.abandonedChats} abandoned chat turns`
-      );
+    /**
+     * `adopted`: runs whose provider execution this backend adopted from the one before it
+     * (turns/executions.ts). Their leases are renewed BEFORE the first claim, because the first
+     * claim's gate would otherwise end a run whose lease ran out while no backend was alive. Every
+     * other held run is left to the gate: its lease ends it (2026-10-01; this replaced the
+     * blanket startup sweep, which also ended runs a second live backend still held). A kept run
+     * whose stop was requested before the old backend could act on it is stopped now.
+     */
+    async start(adopted: readonly AdoptedRun[]): Promise<void> {
+      for (const run of adopted) {
+        const renewal = await renew(run.runId, run.leaseToken);
+        // `lost`: its replay already settled it (an execution that ended during the gap).
+        if (renewal.kind === 'failed')
+          logger.warn(`[buddies-runner] adopted run ${run.runId} not renewed: ${renewal.error}`);
+        const current = await core.getRun(run.runId);
+        if (current.status === 'cancel_requested') host.stop(run.conversationId);
+      }
+      logger.log(`[buddies-runner] started; ${adopted.length} adopted runs renewed`);
       unsubscribe = events.on((event) => {
         if (event.kind === 'cancelled') stopTurn(event.run);
         wake();
@@ -362,6 +469,9 @@ export function createRunner(options: {
     },
 
     wake,
+
+    /** Settles still writing (shutdown waits for them). */
+    settling: (): number => settling,
 
     /** Idle once the current drain finished (tests; shutdown). */
     settled: async (): Promise<void> => {
@@ -403,7 +513,7 @@ export function createRunner(options: {
             run: {
               id: ticket.claim.run.id,
               claim_token: ticket.claim.leaseToken,
-              deadline: ticket.claim.run.leaseExpiresAt!,
+              deadline: ticket.claim.run.deadline!,
             },
           };
       }
@@ -422,7 +532,19 @@ export function createRunner(options: {
     },
 
     finishChat(runId: string, leaseToken: string, outcome: Outcome): Promise<void> {
-      return core.getRun(runId).then((run) => settle(run, leaseToken, outcome));
+      return tracked(core.getRun(runId).then((run) => settle(run, leaseToken, outcome)));
+    },
+
+    /**
+     * A runner-owned turn ended, live or adopted (its `runJob` may have died with the backend that
+     * claimed it). Its completion step is re-derived from the run's input (`jobFor` reads only the
+     * run and the store) and the run settles under the lease it was claimed with. One path, so the
+     * turn can await the settle before its journal goes (execution-state.ts, 2b).
+     */
+    finishRun(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void> {
+      return tracked(
+        core.getRun(runId).then((run) => FINISH[outcome.t](run, leaseToken, outcome as never))
+      );
     },
 
     /** Owner stop: a queued run ends now; a running one is asked to stop and its turn is killed. */

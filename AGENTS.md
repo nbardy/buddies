@@ -97,6 +97,13 @@ client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen in
   authority and runtime regression tests when changing timers or Buddy versions.
   History: `docs/incident-2026-09-10-buddy-chat-timeout.md` (distinct from the
   August bridge-heartbeat fix).
+  A run's LEASE is not its deadline (`docs/patterns.md#lease-heartbeat`). The
+  lease is a 5-minute heartbeat (`BUDDY_RUN_LEASE_MS`), renewed on the turn's
+  bridge clock. The claim gate is the ONE place a dead holder's run ends, and
+  nothing sweeps runs at boot. Never make the lease the deadline's length again:
+  with a 24 h lease, dead holders' runs stayed `running` for up to 9.5 h
+  (2026-09-30). Never derive a deadline from the lease, either: that was the
+  09-10 incident. Guard: `server/test/run-lease.test.ts`.
 
 - Structural patterns live in `docs/patterns.md` (one store + one index,
   sum types, capability grants, one write path, idempotency keys,
@@ -150,8 +157,15 @@ The session is READ-ONLY (the page refuses non-GET fetch/XHR/beacon and drops
 WS sends; the manifest lists what it refused), so pointing it at the owner's
 live dev server is safe. For a static baseline, prefer a throwaway server on a
 spare port against a COPY of `~/.agent-viewer` + `~/.buddies` (`BUDDIES_HOME`
-at the copy) with no agent CLIs on its PATH: the Buddy scheduler still runs
-there and would otherwise launch real agents.
+at the copy) with no agent CLIs on its PATH. Buddy execution (scheduler, recovery
+follow-ups, worker spawns, memory reviewer, adoption of journaled executions) is
+DISABLED on any backend whose `UNLEASHD_BUDDIES_DB`, `BUDDIES_HOME` or
+`UNLEASHD_DATA_DIR` is set to a non-default path (log: `[buddies] Execution
+disabled`), so a copy serves its data and launches nothing. Set
+`UNLEASHD_BUDDY_EXECUTION=1` only for tests that need Buddies to run on temp
+stores (`run-lease`, `ctrl-c-adoption`); never on a copy of the live stores. The
+incident (2026-09-30: 5 real codex workers from a copied DB) and the gate:
+`server/src/buddies/execution-gate.ts`, guard `server/test/copied-store-guard.test.ts`.
 
 ```bash
 pnpm screenshots                              # every client screen × every size
@@ -229,6 +243,12 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   worktrees against the live ~/.buddies, and each would otherwise register
   its own workspace and hire its own pair. The check only fetches; the merge
   is the Release Manager's turn, started by `POST /api/upstream/update`.
+- A running turn survives any backend exit (reload, SIGTERM, crash): every provider runs
+  from an on-disk journal under `~/.agent-viewer/executions/` and the next backend adopts it
+  at boot, before the Buddy runner recovers anything (docs/turn-lifecycle.md#execution-adoption).
+  Only an explicit Stop kills a turn, so never "fix" a stuck restart by stopping turns in
+  `shutdown.ts`, and never delete a journal of a live process: its conversation and run are
+  then orphaned. Guard: `server/test/execution-adoption.test.ts` (real backend SIGKILLed mid-turn).
 - Every SQLite open sets `checkpoint_fullfsync = ON`: macOS `fsync()` skips the drive
   cache, and a hard power-off on 2026-09-30 tore a checkpoint in
   `~/.agent-viewer/observability/turn-attempts.sqlite` ("database disk image is

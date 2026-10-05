@@ -47,6 +47,11 @@ export class TurnQueue {
     return this.entries[0];
   }
 
+  /** A message still waiting to be sent: memory-only work a backend exit would drop. */
+  hasPending(): boolean {
+    return this.entries.some((entry) => entry.message.status === 'pending');
+  }
+
   pushBack(entry: QueueEntry): void {
     this.entries.push(entry);
   }

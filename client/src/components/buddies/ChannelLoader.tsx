@@ -6,6 +6,12 @@ import './ChannelLoader.css';
 // rendered "No posts yet" during the first fetch and then flashed the posts
 // in — an empty channel and an unloaded one looked identical. Desktop and
 // mobile share it (gate G3 allows components/buddies/).
+//
+// Fix-guard: animate ONLY the outer <svg>. CSS animations on elements INSIDE an
+// SVG (<g>/<path>) force an SVG layout every frame on the main thread; the
+// idle "older posts" flame did ~15 layouts/s for as long as a feed had older
+// posts (measured 2026-10-05: 229 layouts / 3.2 s per 15 s vs 0 / 0.16 s with
+// the animation on the <svg> element itself, which runs on the compositor).
 export function ChannelLoader({ label }: { label: string }) {
   return (
     <output className="channel-loader ui-stack" aria-live="polite">
@@ -21,18 +27,14 @@ export function ChannelLoader({ label }: { label: string }) {
             <stop offset="1" stopColor="#fff4c2" />
           </linearGradient>
         </defs>
-        <g className="channel-loader-sway">
-          <path
-            className="channel-loader-outer"
-            fill="url(#channel-loader-outer)"
-            d="M16 2c1.5 7 9.5 11.5 11.5 20.5C29.5 32 23.5 42 16 42S2.5 32 4.5 22.5C5.8 16.5 10 14 11 8.5c2.2 3 2.8 5.8 2.6 8.6C15.6 13.2 16.6 8 16 2Z"
-          />
-          <path
-            className="channel-loader-inner"
-            fill="url(#channel-loader-inner)"
-            d="M16 18c1 4 6 6.5 6 13 0 5.5-2.8 9-6 9s-6-3.5-6-9c0-4.2 2.6-6 3.6-9 .9 1.6 1.2 3 1 4.4C15.8 24.2 16.4 21.4 16 18Z"
-          />
-        </g>
+        <path
+          fill="url(#channel-loader-outer)"
+          d="M16 2c1.5 7 9.5 11.5 11.5 20.5C29.5 32 23.5 42 16 42S2.5 32 4.5 22.5C5.8 16.5 10 14 11 8.5c2.2 3 2.8 5.8 2.6 8.6C15.6 13.2 16.6 8 16 2Z"
+        />
+        <path
+          fill="url(#channel-loader-inner)"
+          d="M16 18c1 4 6 6.5 6 13 0 5.5-2.8 9-6 9s-6-3.5-6-9c0-4.2 2.6-6 3.6-9 .9 1.6 1.2 3 1 4.4C15.8 24.2 16.4 21.4 16 18Z"
+        />
       </svg>
       <span className="channel-loader-label">{label}</span>
     </output>
