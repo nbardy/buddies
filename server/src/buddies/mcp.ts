@@ -361,7 +361,7 @@ const BUDDY_TOOLS = {
   }),
   channel_read: buddyTool({
     description:
-      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here (newest first). Search text: words (all must match), "exact phrase", -excluded, OR; filters narrow before paging. Example: read:{search:{text:\'"deploy window" -draft\', channels:[\'ops\'], from:[\'owner\'], after:\'2026-10-01\'}}. Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
+      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here (newest first). Search text: words (all must match; prefix, plural/stem and one-typo matches count: "market" finds marketing), "exact phrase", -excluded, OR, @Name or @"Two Words" (posts by that Buddy or by @owner; alone it lists them); filters narrow before paging. Example: read:{search:{text:\'"deploy window" -draft\', channels:[\'ops\'], from:[\'owner\'], after:\'2026-10-01\'}}. Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
     writes: false,
     schema: z.object({
       read: z.union([

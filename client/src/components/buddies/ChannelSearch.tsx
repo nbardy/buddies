@@ -1,24 +1,39 @@
-import { useEffect, useRef, useState } from 'react';
+import { bodyText } from '@unleashd/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
-import { buddyApi } from './api';
-import { authorName } from './channel-data';
+import { SearchExcerpt } from './SearchExcerpt';
+import { BuddyApiError, buddyApi } from './api';
+import { authorName, channelPostBody } from './channel-data';
 import { channelLinkPath, postLink } from './channel-link';
-import type { Post } from './types';
+import { searchTerms } from './search-excerpt';
+import type { Channel, Post } from './types';
 import '../../views/search/SearchView.css';
 
 const MIN_QUERY_LENGTH = 2;
 const RESULT_LIMIT = 50;
 
+/** GET .../search: the channels the words name (above the posts) and the newest matching posts. */
+interface SearchResults {
+  channels: readonly Channel[];
+  posts: readonly Post[];
+}
+
 function searchResource(workspaceId: string, query: string) {
   const params = new URLSearchParams({ q: query, limit: String(RESULT_LIMIT) });
   const url = `/api/buddies/workspaces/${encodeURIComponent(workspaceId)}/search?${params}`;
-  return resource<readonly Post[]>(url, (signal) => buddyApi<Post[]>(url, { signal }));
+  return resource<SearchResults>(url, (signal) => buddyApi<SearchResults>(url, { signal }));
 }
 
-function excerpt(body: string): string {
-  const compact = body.replace(/\s+/g, ' ').trim();
-  return compact.length > 180 ? `${compact.slice(0, 177)}…` : compact;
+/** The server rejects a malformed or unknown-author search with a 400 whose text is for the owner
+ *  ("no Buddy named …"); strip the `[invalid]` code prefix and show it as the answer, not as a failure. */
+function rejection(error: Error): string | null {
+  if (!(error instanceof BuddyApiError) || error.status !== 400) return null;
+  return error.message.replace(/^\[invalid\]\s*(invalid:\s*)?(search text:\s*)?/, '');
+}
+
+function postProse(post: Post): string {
+  return bodyText(channelPostBody(post));
 }
 
 function SearchIcon() {
@@ -47,6 +62,7 @@ export function ChannelSearch({
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const trimmed = query.trim();
+  const terms = useMemo(() => searchTerms(trimmed), [trimmed]);
   const results = usePolledFetch(
     trimmed.length >= MIN_QUERY_LENGTH ? searchResource(workspaceId, trimmed) : null,
     0
@@ -127,25 +143,38 @@ export function ChannelSearch({
               <p className="search-view__status">Searching…</p>
             ) : results.kind === 'failed' ? (
               <p className="search-view__status" role="alert">
-                Search failed: {results.error.message}
+                {rejection(results.error) ?? `Search failed: ${results.error.message}`}
               </p>
-            ) : results.kind === 'stale' && results.data.length === 0 ? (
+            ) : results.kind === 'stale' && results.data.posts.length === 0 ? (
               <p className="search-view__status" role="alert">
                 Search could not refresh: {results.error.message}
               </p>
-            ) : results.data.length === 0 ? (
+            ) : results.data.posts.length === 0 && results.data.channels.length === 0 ? (
               <p className="search-view__status">No messages found.</p>
             ) : (
-              <ul
-                className="search-view__results"
-                style={{ margin: 0, padding: 'var(--sp-2)', listStyle: 'none' }}
-              >
-                {results.data.map((post) => (
+              <ul className="search-view__results channel-search-list">
+                {results.data.channels.map((channel) => (
+                  <li key={channel.id}>
+                    <Link
+                      to={channelLinkPath(workspaceId, { kind: 'channel', channelId: channel.id })}
+                      onClick={close}
+                      className="search-view__item channel-search-item"
+                    >
+                      <span className="search-view__head">
+                        <span className="search-view__kind search-view__kind--buddy">Channel</span>
+                        <span className="search-view__title ui-truncate">
+                          {channelNames.get(channel.id) ?? '#channel'}
+                        </span>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+                {results.data.posts.map((post) => (
                   <li key={post.id}>
                     <Link
                       to={channelLinkPath(workspaceId, postLink(post))}
                       onClick={close}
-                      className="search-view__item"
+                      className="search-view__item channel-search-item"
                     >
                       <span className="search-view__head">
                         <span className="search-view__kind search-view__kind--chat">
@@ -155,7 +184,7 @@ export function ChannelSearch({
                           {authorName(post.author, buddyNames)}
                         </span>
                       </span>
-                      <span className="search-view__snippet">{excerpt(post.body)}</span>
+                      <SearchExcerpt body={postProse(post)} terms={terms} />
                     </Link>
                   </li>
                 ))}
