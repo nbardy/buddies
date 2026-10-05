@@ -7,6 +7,7 @@ import * as FeatureFlash from './FeatureFlash';
 import * as MultiHarness from './MultiHarness';
 import * as NativeMultimedia from './NativeMultimedia';
 import * as Overload from './Overload';
+import * as VimHighlight from './VimHighlight';
 
 export const Root: React.FC = () => (
   <>
@@ -89,6 +90,15 @@ export const Root: React.FC = () => (
       fps={Close.FPS}
       width={Close.WIDTH}
       height={Close.HEIGHT}
+    />
+    <Composition
+      id="VimHighlight"
+      component={VimHighlight.VimHighlight}
+      durationInFrames={VimHighlight.DURATION}
+      fps={VimHighlight.FPS}
+      width={VimHighlight.WIDTH}
+      height={VimHighlight.HEIGHT}
+      defaultProps={{ variant: 'marker' as VimHighlight.Variant }}
     />
   </>
 );
