@@ -137,7 +137,24 @@
         /* Hero: under the video, the pitch and the install. */
         .hero { text-align: center; padding: 4rem 0 1rem; }
 
-        .tags { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2.25rem; }
+        /* The headline's one highlight: "open source" in the Pair's violet-to-teal, sentence case
+           like the kit's "Open source" pill (owner, 2026-10-05: highlight open source). */
+        h1 {
+            font-weight: 700;
+            font-stretch: 92%;
+            font-variation-settings: 'opsz' 96;
+            font-size: clamp(2.6rem, 7vw, 5.25rem);
+            letter-spacing: -0.035em;
+            line-height: 1.02;
+        }
+
+        .open-source {
+            background: linear-gradient(100deg, var(--violet) 10%, var(--blue) 50%, var(--teal) 90%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            padding-bottom: 0.08em; /* room for the "p" descender inside the clipped gradient */
+        }
 
         .accent-violet { color: var(--violet); }
 
@@ -380,12 +397,8 @@
         </div>
 
         <header class="hero rise">
-            <div class="tags">
-                <span class="pill glass">Open source</span>
-                <span class="pill glass">Free</span>
-                <span class="pill glass">Multi harness</span>
-            </div>
-            <p class="pitch"><strong>Buddies is your team of AI agents.</strong> Channels, tasks and memory for Claude Code, Codex and Gemini, side by side, on your own computer.</p>
+            <h1>Free and <span class="open-source">open source.</span></h1>
+            <p class="pitch"><strong>Buddies is your team of AI agents.</strong> Multi harness: Claude Code, Codex and Gemini side by side, with channels, tasks and memory, on your own computer.</p>
             <div class="actions">
                 <div class="install-box glass">
                     <code id="install-cmd">git clone --recursive https://github.com/nbardy/buddies && cd buddies && pnpm install && pnpm build && pnpm start</code>
