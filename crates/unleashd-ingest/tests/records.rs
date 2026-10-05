@@ -45,6 +45,7 @@ fn set(id: &str, expected: i64, model: &str) -> SetConfig {
         expected_config_revision: expected,
         config: config(model),
         last_resolved_config: resolved(model),
+        provenance: None,
     }
 }
 

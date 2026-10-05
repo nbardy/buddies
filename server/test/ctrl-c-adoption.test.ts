@@ -175,6 +175,8 @@ function makeCase(name: string): Case {
         process.env.UNLEASHD_BUILD_ROOT ?? path.join(REAL_HOME, '.cache', 'unleashd'),
       PORT: String(PORT),
       UNLEASHD_DATA_DIR: dataDir,
+      // Non-default stores: Buddy execution needs the opt-in (buddies/execution-gate.ts).
+      UNLEASHD_BUDDY_EXECUTION: '1',
       UNLEASHD_BUDDIES_DB: path.join(home, '.buddies', 'buddies-v3.sqlite'),
       BUDDIES_HOME: path.join(home, '.buddies'),
       UNLEASHD_AUTH_TOKEN: TOKEN,

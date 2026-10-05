@@ -716,13 +716,13 @@ fn post_search_finds_words_only_in_channels_the_reader_may_read() {
     s.post(&buddy("lead"), ChannelRef::Id { id: general.id.clone() }, say("Deploy the ranking model on Friday", "p1")).unwrap();
     s.post(&buddy("mid"), dm("mid", "ic"), say("secret ranking numbers", "p2")).unwrap();
     // Every word must match, in any order, case-insensitively; FTS syntax in the query is literal.
-    let hits = |who: &Actor, q: &str| s.search_posts(who, WS, q, None, 10).unwrap().posts.into_iter().map(|p| p.body).collect::<Vec<_>>();
+    let hits = |who: &Actor, q: &str| s.search_posts(who, WS, &SearchQuery::text(q), None, 10).unwrap().posts.into_iter().map(|p| p.body).collect::<Vec<_>>();
     assert_eq!(hits(&buddy("peer"), "friday RANKING"), ["Deploy the ranking model on Friday"]);
     assert_eq!(hits(&buddy("peer"), "ranking"), ["Deploy the ranking model on Friday"], "a DM is private to its members");
     assert_eq!(hits(&buddy("ic"), "ranking").len(), 2, "a member finds its DM");
     assert_eq!(hits(&Actor::Owner, "ranking").len(), 2, "the owner reads every DM");
     assert!(hits(&Actor::Owner, "rank* OR NEAR(").is_empty(), "operators are words, not syntax");
-    assert!(matches!(s.search_posts(&buddy("gone"), WS, "ranking", None, 10), Err(CoreError::Denied(_))), "archived buddies cannot search");
+    assert!(matches!(s.search_posts(&buddy("gone"), WS, &SearchQuery::text("ranking"), None, 10), Err(CoreError::Denied(_))), "archived buddies cannot search");
 }
 
 #[test]
@@ -744,7 +744,7 @@ fn post_search_pages_older_hits_with_its_cursor() {
     let mut seen = Vec::new();
     let mut before = None;
     loop {
-        let page = s.search_posts(&Actor::Owner, WS, "rollout", before, 2).unwrap();
+        let page = s.search_posts(&Actor::Owner, WS, &SearchQuery::text("rollout"), before, 2).unwrap();
         seen.extend(page.posts.into_iter().map(|p| p.body));
         match page.next {
             Some(cursor) => before = Some(cursor),
@@ -987,7 +987,7 @@ fn channel_archive_preserves_history_and_restores_posting() {
     assert!(!s.inbox(&Actor::Owner, WS).unwrap().channels.iter().any(|c| c.channel.id == channel.id));
     assert_eq!(s.archived_channels(&Actor::Owner, WS).unwrap()[0].id, channel.id);
     assert_eq!(s.open_channel(&Actor::Owner, channel_ref()).unwrap().archived_at, archived.archived_at);
-    assert_eq!(s.search_posts(&Actor::Owner, WS, "remember", None, 10).unwrap().posts[0].id, post.id);
+    assert_eq!(s.search_posts(&Actor::Owner, WS, &SearchQuery::text("remember"), None, 10).unwrap().posts[0].id, post.id);
     assert!(s.post(&Actor::Owner, channel_ref(), PostInput { kind: PostKind::Inform, reply_to_id: Some(post.id.clone()), ..request("no", "no") }).is_err());
     s.set_channel_archived(&Actor::Owner, &channel.id, false, "restore").unwrap();
     assert!(s.archived_channels(&Actor::Owner, WS).unwrap().is_empty());
@@ -1151,4 +1151,122 @@ fn a_group_request_starts_one_run_per_recipient() {
         .enqueue_run(&Actor::Owner, EnqueueInput { buddy_id: "ic".into(), input: RunInput::Post { post_id: solo.id.clone() }, ..chat("ic", "x", "c") })
         .unwrap();
     assert_eq!(again.id, run.id, "a pre-fix run is still matched by its legacy key");
+}
+
+// Regression guard (fresh-install trial 2026-10-05): a new workspace had no #general, so Home had
+// no composer. Re-registering the folder (every server start runs bootstrap) must not add another,
+// and an archived #general keeps the name, so nothing may try to create a second or error.
+#[test]
+fn new_workspace_has_general_once() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let folder = WorkspaceInput { name: "Fresh".into(), root_path: "/tmp/fresh".into() };
+    let ws = s.create_workspace(&Actor::Owner, folder.clone()).unwrap();
+    s.create_workspace(&Actor::Owner, folder).unwrap();
+    let general = |s: &Store| -> Vec<Channel> {
+        s.inbox(&Actor::Owner, &ws.id).unwrap().channels.into_iter().map(|c| c.channel).filter(|c| matches!(&c.kind, ChannelKind::Public { name, .. } if name == "general")).collect()
+    };
+    let found = general(s);
+    assert_eq!(found.len(), 1, "one #general after create + re-register");
+
+    s.set_channel_archived(&Actor::Owner, &found[0].id, true, "arch").unwrap();
+    s.create_workspace(&Actor::Owner, WorkspaceInput { name: "Fresh".into(), root_path: "/tmp/fresh".into() }).unwrap();
+    assert!(general(s).is_empty(), "archived #general stays archived; no replacement appears");
+    assert_eq!(s.archived_channels(&Actor::Owner, &ws.id).unwrap().len(), 1);
+}
+
+#[test]
+fn structured_search_filters_before_paging_and_never_leaves_readable_channels() {
+    // Main's search was literal words only: no phrase, exclusion, OR or filters, and FTS operators
+    // in the query were swallowed as words. Filters must narrow BEFORE the keyset page, or a page
+    // of 3 could come back short/empty while matches exist further back.
+    let mut f = fixture();
+    let (general, ops) = ["general", "ops"].map(|name| {
+        f.store
+            .create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: name.into(), purpose: "p".into(), key: name.into() })
+            .unwrap()
+    }).into();
+    let on = |c: &Channel| ChannelRef::Id { id: c.id.clone() };
+    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, ..request(body, key) };
+    let s = &mut f.store;
+    let mut put = |who: Actor, ch: ChannelRef, body: &str, day: &str| {
+        let id = s.post(&who, ch, say(body, &format!("k-{body}"))).unwrap().id;
+        (id, day.to_string())
+    };
+    let mut dated = vec![
+        put(Actor::Owner, on(&general), "deploy window opens friday", "2026-03-01"),
+        put(buddy("lead"), on(&general), "deploy the canary on friday", "2026-03-05"),
+        put(buddy("lead"), on(&general), "deploy draft notes", "2026-03-10"),
+        put(buddy("peer"), on(&ops), "canary deploy window closed", "2026-03-15"),
+        put(buddy("lead"), dm("lead", "mid"), "deploy secret between lead and mid", "2026-03-16"),
+    ];
+    for i in 0..6 {
+        dated.push(put(buddy("lead"), on(&ops), &format!("deploy bulk {i}"), "2026-03-20"));
+    }
+    drop(put);
+    let conn = rusqlite::Connection::open(&f.path).unwrap();
+    for (id, day) in &dated {
+        conn.execute("UPDATE post SET created_at = ?1 WHERE id = ?2", rusqlite::params![format!("{day}T12:00:00.000Z"), id]).unwrap();
+    }
+    let root = dated[0].0.clone();
+    let reply = f.store.post(&buddy("lead"), on(&general), PostInput { reply_to_id: Some(root.clone()), ..say("a reply in thread", "r") }).unwrap();
+    let s = &f.store;
+    let search = |who: &Actor, q: SearchQuery| s.search_posts(who, WS, &q, None, 50).unwrap().posts.into_iter().map(|p| p.body).collect::<Vec<_>>();
+    let q = |text: &str| SearchQuery::text(text);
+    let peer = buddy("peer");
+
+    assert_eq!(search(&peer, q("window friday")), ["deploy window opens friday"], "words: all must match");
+    assert_eq!(search(&peer, q("\"window friday\"")).len(), 0, "a phrase is adjacent words");
+    assert_eq!(search(&peer, q("\"deploy window\"")), ["canary deploy window closed", "deploy window opens friday"]);
+    assert_eq!(search(&peer, q("deploy -canary -draft -bulk")), ["deploy window opens friday"], "exclusion");
+    assert_eq!(search(&peer, q("draft OR canary -window")), ["deploy draft notes", "deploy the canary on friday"], "OR with a global exclusion");
+    assert_eq!(search(&peer, q("draft OR window friday")), ["deploy draft notes", "deploy window opens friday"], "AND binds tighter than OR");
+    for bad in ["", "\"open", "-x", "a OR", "OR"] {
+        assert!(matches!(s.search_posts(&peer, WS, &q(bad), None, 5), Err(CoreError::Invalid(_))), "{bad:?}");
+    }
+    let with = |text: &str, edit: &dyn Fn(&mut SearchQuery)| {
+        let mut query = q(text);
+        edit(&mut query);
+        query
+    };
+    assert_eq!(search(&peer, with("deploy", &|x| x.channels = vec!["#general".into()])).len(), 3, "channel by name, # optional");
+    assert_eq!(search(&peer, with("deploy", &|x| x.channels = vec![ops.id.clone()])).len(), 7, "channel by id");
+    assert_eq!(search(&peer, with("deploy", &|x| x.from = vec!["owner".into()])), ["deploy window opens friday"]);
+    assert_eq!(search(&peer, with("deploy", &|x| x.from = vec!["peer".into(), "owner".into()])).len(), 2);
+    let range = with("deploy", &|x| {
+        x.after = Some("2026-03-05".into());
+        x.before = Some("2026-03-15T12:00:00Z".into());
+    });
+    assert_eq!(search(&peer, range), ["deploy draft notes", "deploy the canary on friday"], "after inclusive, before exclusive");
+    assert_eq!(search(&peer, with("reply OR window", &|x| x.in_thread = Some(root.clone()))), [reply.body.clone(), "deploy window opens friday".into()], "the root and its replies only");
+    assert!(matches!(s.search_posts(&peer, WS, &with("deploy", &|x| x.after = Some("last week".into())), None, 5), Err(CoreError::Invalid(_))));
+
+    // Authorization: no filter can reach a DM the reader is not in.
+    let secret = |who: &Actor, edit: &dyn Fn(&mut SearchQuery)| search(who, with("secret", edit));
+    assert!(secret(&peer, &|_| {}).is_empty());
+    assert!(secret(&peer, &|x| x.from = vec!["lead".into()]).is_empty());
+    assert!(secret(&peer, &|x| x.after = Some("2026-03-16".into())).is_empty());
+    assert_eq!(secret(&buddy("mid"), &|x| x.from = vec!["lead".into()]).len(), 1, "a member still finds it");
+    let dm_channel = dated[4].0.clone();
+    let dm_id = s.get_post(&Actor::Owner, &dm_channel).unwrap().channel_id;
+    assert!(secret(&peer, &|x| x.channels = vec![dm_id.clone()]).is_empty(), "naming the DM's id does not open it");
+
+    // Paging a filtered result: lead in #ops, 6 hits, 4 per page-of-2 pages, no gap or duplicate.
+    let filtered = with("deploy", &|x| {
+        x.channels = vec!["ops".into()];
+        x.from = vec!["lead".into()];
+        x.after = Some("2026-03-20".into());
+    });
+    let (mut seen, mut cursor, mut pages) = (Vec::new(), None, 0);
+    loop {
+        let page = s.search_posts(&peer, WS, &filtered, cursor, 4).unwrap();
+        pages += 1;
+        seen.extend(page.posts.into_iter().map(|p| p.body));
+        match page.next {
+            Some(c) => cursor = Some(c),
+            None => break,
+        }
+    }
+    assert_eq!(pages, 2);
+    assert_eq!(seen, (0..6).rev().map(|i| format!("deploy bulk {i}")).collect::<Vec<_>>());
 }

@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { Actor, Buddy, Channel, Cursor, Post } from '@unleashd/buddies-core';
-import { type ConversationConfig, isHarnessRetryFailure } from '@unleashd/shared';
-import { awaitTurn } from '../conversations/await-turn';
 import {
+  type ConversationConfig,
+  type InstalledAgent,
+  isHarnessRetryFailure,
+} from '@unleashd/shared';
+import {
+  NO_AGENT_INSTALLED,
   buddyExecutionPreferences,
   configFromProviderPreferences,
-} from '../conversations/config-mapping';
+} from '@unleashd/shared';
+import { awaitTurn } from '../conversations/await-turn';
 import type {
   ConversationRuntime,
   SeatTurnInput,
@@ -105,7 +110,10 @@ export function seatTurnInput(trigger: Post): SeatTurnInput {
 }
 
 export type ThreadSeat = { buddyId: string; config: ConversationConfig };
-export type SeatRequest = { kind: 'keep' } | { kind: 'chosen'; config: ConversationConfig };
+export type SeatRequest =
+  | { kind: 'keep' }
+  | { kind: 'chosen'; config: ConversationConfig }
+  | { kind: 'resolved'; seat: LiveConversation };
 export type MentionDispatch =
   | { buddyId: string; status: 'started' }
   | { buddyId: string; status: 'rejected'; reason: string };
@@ -136,6 +144,8 @@ export interface ChannelsPorts {
   conversations: StableConversationPorts;
   uploadsRoot(): string;
   gate: ReplyGate;
+  /** The agent an unpinned Buddy runs (providers/installed-agent.ts), read per resolution. */
+  installedAgent(): InstalledAgent;
   /** Who is replying changed, or a failure notice landed: push `channel_changed`. */
   channelChanged(channelId: string): void;
   logger?: Pick<Console, 'warn'>;
@@ -336,32 +346,24 @@ export function createChannels(ports: ChannelsPorts) {
     return { prompt: { fresh, resumed }, through };
   }
 
-  const profileConfig = (buddy: Buddy) =>
-    configFromProviderPreferences(
-      buddyExecutionPreferences({
+  // A `no-agent` profile throws inside runReply's try, so the thread gets a visible reply_failed
+  // notice and nothing is spawned (fresh-install trial 2026-10-05: an empty bubble).
+  const profileConfig = (buddy: Buddy): ConversationConfig => {
+    const execution = buddyExecutionPreferences(
+      {
         provider: buddy.provider ?? null,
         model: buddy.model ?? null,
         reasoning_effort: buddy.reasoningEffort ?? null,
-      })
+      },
+      ports.installedAgent()
     );
-
-  // A started session cannot change provider (config-service.ts), so only a pick on another
-  // provider needs a new seat; a model or effort pick is applied to the current one, whose
-  // session resumes. Guard: buddies-v2 "an effort pick keeps the seat's session …".
-  function seatFor(
-    request: SeatRequest,
-    seats: { current: LiveConversation | null; next(): string },
-    profile: ConversationConfig
-  ): LiveConversation {
-    switch (request.kind) {
-      case 'keep':
-        return seats.current ?? { conversationId: seats.next(), config: profile };
-      case 'chosen':
-        return seats.current?.config.provider === request.config.provider
-          ? { conversationId: seats.current.conversationId, config: request.config }
-          : { conversationId: seats.next(), config: request.config };
+    switch (execution.kind) {
+      case 'run':
+        return configFromProviderPreferences(execution);
+      case 'no-agent':
+        throw new Error(NO_AGENT_INSTALLED);
     }
-  }
+  };
 
   // Pattern: one-definition (docs/patterns.md#one-definition)
   // A Buddy can post from a DM/worker rather than its derived thread seat. Following the stale
@@ -376,29 +378,54 @@ export function createChannels(ports: ChannelsPorts) {
     return null;
   }
 
-  async function seatConfig(
+  // What this thread already decided for the Buddy: the owner's pick, an explicit override, the
+  // model its latest reply ran, or its seat. `config: null` means nothing yet; only then does the
+  // profile decide. threadSeats reads this alone: it used to resolve the profile too and discard
+  // it, so a `no-agent` profile failed every thread read (fresh-install trial, 2026-10-05).
+  async function threadChoice(
     rootId: string,
     buddyId: string,
-    request: SeatRequest,
+    request: Exclude<SeatRequest, { kind: 'resolved' }>,
     thread?: Post[]
-  ): Promise<LiveConversation & { hasHistory: boolean }> {
+  ) {
     const seats = await scanGenerations(ports.conversations, (g) =>
       threadConversationId(rootId, buddyId, g)
     );
-    const remembered =
-      request.kind === 'keep'
+    // Pattern: one-write-path (docs/patterns.md#one-write-path)
+    // Failed explicit picks used to lose to an older successful post (Claude weekly limit,
+    // 2026-10-04). The record owns intent; guard: explicit thread choice survives a failed attempt.
+    const override = seats.current?.provenance === 'user';
+    const history =
+      request.kind === 'keep' && !override
         ? await threadModel(
             thread ?? (await wholeThread(await core.getPost(OWNER, rootId))),
             buddyId
           )
         : null;
+    const config: ConversationConfig | null =
+      request.kind === 'chosen'
+        ? request.config
+        : override
+          ? seats.current!.config
+          : (history ?? seats.current?.config ?? null);
+    return { seats, explicit: request.kind === 'chosen' || override, config };
+  }
+
+  async function seatConfig(
+    rootId: string,
+    buddyId: string,
+    request: SeatRequest,
+    thread?: Post[]
+  ): Promise<LiveConversation> {
+    if (request.kind === 'resolved') return request.seat;
+    const choice = await threadChoice(rootId, buddyId, request, thread);
+    const { current, next } = choice.seats;
+    const config = choice.config ?? profileConfig(await core.getBuddy(buddyId));
     return {
-      ...seatFor(
-        remembered ? { kind: 'chosen', config: remembered } : request,
-        seats,
-        profileConfig(await core.getBuddy(buddyId))
-      ),
-      hasHistory: remembered !== null || seats.current !== null,
+      conversationId:
+        current?.config.provider === config.provider ? current.conversationId : next(),
+      config,
+      provenance: choice.explicit ? 'user' : 'legacy_inferred',
     };
   }
 
@@ -462,6 +489,7 @@ export function createChannels(ports: ChannelsPorts) {
         conversationId: seat.conversationId,
         commandId: `channel-thread-${seat.conversationId}`,
         config: seat.config,
+        provenance: seat.provenance,
       });
       seatId = conversation.id;
       const trigger = await core.getPost(OWNER, input.trigger.id);
@@ -471,7 +499,7 @@ export function createChannels(ports: ChannelsPorts) {
       let composed: Awaited<ReturnType<typeof seatPrompt>>;
       do {
         await untilIdle(conversation);
-        await ports.conversations.reconfigure(conversation, seat.config);
+        await ports.conversations.reconfigure(conversation, seat.config, seat.provenance);
         composed = await seatPrompt(input, conversation.id);
       } while (!idle(conversation));
       const { prompt, through } = composed;
@@ -559,7 +587,7 @@ export function createChannels(ports: ChannelsPorts) {
       try {
         const seat = await seatConfig(input.root.id, input.buddyId, { kind: 'keep' }, thread);
         // The decision and its reply share one resolved choice, even if another post arrives.
-        followUpReply.request = { kind: 'chosen', config: seat.config };
+        followUpReply.request = { kind: 'resolved', seat };
         return await ports.gate({
           config: seat.config,
           prompt: [
@@ -748,8 +776,7 @@ export function createChannels(ports: ChannelsPorts) {
   return {
     /**
      * Each thread Buddy's latest seat (harness, model, reasoning): the one its next reply runs
-     * on. The mention chip and follow-up gate share the latest posted model, then the remembered
-     * mention choice in the seat, then the profile default.
+     * on. The composer, retry and gate share explicit intent, then thread history, then profile.
      */
     async threadSeats(rootId: string): Promise<ThreadSeat[]> {
       const root = await core.getPost(OWNER, rootId);
@@ -762,8 +789,8 @@ export function createChannels(ports: ChannelsPorts) {
       }
       const seats: ThreadSeat[] = [];
       for (const buddyId of buddyIds) {
-        const seat = await seatConfig(rootId, buddyId, { kind: 'keep' }, thread);
-        if (seat.hasHistory) seats.push({ buddyId, config: seat.config });
+        const { config } = await threadChoice(rootId, buddyId, { kind: 'keep' }, thread);
+        if (config) seats.push({ buddyId, config });
       }
       return seats;
     },

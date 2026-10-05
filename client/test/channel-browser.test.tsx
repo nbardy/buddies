@@ -4,7 +4,7 @@ import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { Channel, Post } from '../src/components/buddies/types';
-import { buddyFixture, rosterFixture } from './fixtures/buddy-roster';
+import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { inboxFixture, postFixture, publicChannel } from './fixtures/channel-posts';
 register(
   `data:text/javascript,${encodeURIComponent(`
@@ -74,7 +74,8 @@ const slackDirectory = () =>
   workspaceDirectory(
     [rosterFixture([lead, dev], { id: 'ws-slack', name: 'unleashd' })],
     'ws-slack',
-    []
+    [],
+    CODEX_INSTALLED
   );
 
 test('channel browser renders a Slack transcript, oldest first, with instance tags', async () => {
@@ -146,7 +147,7 @@ test('channel browser shows an empty state without channels', async () => {
     key: '/api/buddies/workspaces/ws-bare/inbox',
     load: async () => inboxFixture([]),
   });
-  const html = render('ws-bare', workspaceDirectory([], 'ws-bare', []));
+  const html = render('ws-bare', workspaceDirectory([], 'ws-bare', [], CODEX_INSTALLED));
   assert.match(html, /No channels yet/);
 });
 
@@ -169,7 +170,8 @@ test('channel home keeps archived channels out of the rail and in the scrollable
     workspaceDirectory(
       [rosterFixture([lead], { id: 'ws-archive', name: 'archive' })],
       'ws-archive',
-      []
+      [],
+      CODEX_INSTALLED
     )
   );
   const rail = html.slice(html.indexOf('<nav'), html.indexOf('</nav>'));
@@ -246,7 +248,8 @@ test('posts render markdown mentions, Task chips and media; the rail keeps one B
         createdAt: '2026-09-23T00:00:00.000Z',
         updatedAt: '2026-09-23T00:30:00.000Z',
       },
-    ]
+    ],
+    CODEX_INSTALLED
   );
   const html = render('ws-rich', directory, '/?channel=ch_rich');
   assert.match(html, /class="channel-browser-author">You</);
@@ -305,7 +308,7 @@ test('the channel and thread panes open on their newest page and page back', asy
   await loadResource({ key: '/api/buddies/channels/ch_long/responding', load: async () => [] });
   const html = render(
     'ws-long',
-    workspaceDirectory([rosterFixture([lead], { id: 'ws-long' })], 'ws-long', []),
+    workspaceDirectory([rosterFixture([lead], { id: 'ws-long' })], 'ws-long', [], CODEX_INSTALLED),
     '/?channel=ch_long&thread=root'
   );
   const [channelPane, threadPane = ''] = html.split('aria-label="Thread"');

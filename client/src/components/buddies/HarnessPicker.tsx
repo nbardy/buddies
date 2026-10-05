@@ -1,9 +1,10 @@
 import { type ConversationConfig, isHarnessRetryFailure } from '@unleashd/shared';
 import { type CSSProperties, useState } from 'react';
+import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { ConversationConfigPicker } from '../../views/config/ConversationConfigPicker';
 import { buddyWrite, errorText } from './api';
-import type { Post } from './types';
+import type { Post, ThreadPage } from './types';
 import './ChannelComposer.css';
 
 // A button that opens the composer's harness/model popover (the mention chip's, same classes) and
@@ -25,6 +26,7 @@ export function HarnessPicker({
   onConfirm,
   placement,
   style,
+  disabled = false,
 }: {
   label: string;
   note: string;
@@ -36,6 +38,7 @@ export function HarnessPicker({
   onConfirm(config: ConversationConfig): Promise<unknown>;
   placement: PickerPlacement;
   style?: CSSProperties;
+  disabled?: boolean;
 }) {
   const { catalog } = useProviderCatalog();
   const [draft, setDraft] = useState<ConversationConfig | null>(null);
@@ -60,7 +63,7 @@ export function HarnessPicker({
       <button
         type="button"
         className="channel-inline-action"
-        disabled={state.kind === 'busy'}
+        disabled={disabled || state.kind === 'busy'}
         onClick={() => {
           setDraft(null);
           setOpen(true);
@@ -135,13 +138,26 @@ export function HarnessPicker({
 
 /** Failed replies and decision checks share model recovery in the original thread. */
 export function ReplyRetry({ post }: { post: Post }) {
-  if (post.purpose !== 'reply_failed' || !isHarnessRetryFailure(post.body)) return null;
+  const retryable = post.purpose === 'reply_failed' && isHarnessRetryFailure(post.body);
+  const { data } = usePolledFetch<ThreadPage>(
+    retryable && post.rootId
+      ? `/api/buddies/posts/${encodeURIComponent(post.rootId)}/thread`
+      : null,
+    30_000
+  );
+  const author = post.author;
+  const seed =
+    author.kind === 'buddy'
+      ? (data?.seats.find((seat) => seat.buddyId === author.id)?.config ?? null)
+      : null;
+  if (!retryable) return null;
   return (
     <HarnessPicker
       label="Retry with model…"
       note="Choose a model to answer the original message in this thread."
       confirm="Retry"
-      seed={null}
+      seed={seed}
+      disabled={seed === null}
       excluded={null}
       buddy
       placement="above"

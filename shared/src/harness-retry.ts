@@ -14,6 +14,9 @@ export function isOutOfTokensFailure(text: string): boolean {
 export function isHarnessRetryFailure(text: string): boolean {
   return (
     isOutOfTokensFailure(text) ||
+    // Claude emits a plain weekly-limit provider error rather than out_of_tokens.
+    // Guard: ReplyRetry renders the exact weekly-limit envelope (straight/curly apostrophe).
+    /you['’]ve hit your weekly limit/i.test(text) ||
     // Gate errors include usage limits, timeouts and config resolution failures. They used to
     // render without recovery. Guard: ReplyRetry renders for failed should-reply checks.
     /could not decide whether to reply/i.test(text) ||

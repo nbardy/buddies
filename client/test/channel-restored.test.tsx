@@ -6,7 +6,7 @@ import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import type { ChannelUnread, Post, ThreadStat } from '../src/components/buddies/types';
-import { buddyFixture, rosterFixture } from './fixtures/buddy-roster';
+import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { inboxFixture, postFixture, publicChannel } from './fixtures/channel-posts';
 register(
   `data:text/javascript,${encodeURIComponent(`
@@ -62,11 +62,16 @@ async function renderChannel(opts: {
     load: async () => [],
   });
   return renderToStaticMarkup(
-      <MemoryRouter initialEntries={[opts.url ?? `/?channel=${channelId}`]}>
+    <MemoryRouter initialEntries={[opts.url ?? `/?channel=${channelId}`]}>
       <Provider store={jotaiStore}>
         <ChannelBrowser
           workspaceId={opts.ws}
-          directory={workspaceDirectory([rosterFixture([lead], { id: opts.ws })], opts.ws, [])}
+          directory={workspaceDirectory(
+            [rosterFixture([lead], { id: opts.ws })],
+            opts.ws,
+            [],
+            CODEX_INSTALLED
+          )}
           availableConversationIds={new Set()}
         />
       </Provider>
@@ -203,7 +208,12 @@ test('the Task filter shows one Task across channels, each post linked into its 
     createdAt: at(0),
     updatedAt: at(0),
   };
-  const directory = workspaceDirectory([rosterFixture([lead], { id: ws })], ws, [task]);
+  const directory = workspaceDirectory(
+    [rosterFixture([lead], { id: ws })],
+    ws,
+    [task],
+    CODEX_INSTALLED
+  );
   const html = renderToStaticMarkup(
     <MemoryRouter initialEntries={['/?channel=ch_main&task=task-ship']}>
       <Provider store={jotaiStore}>
@@ -220,7 +230,9 @@ test('the Task filter shows one Task across channels, each post linked into its 
   const channels = `/buddies/workspaces/${ws}/channels`;
   assert.match(
     rowOf(html, 'ops-reply'),
-    new RegExp(`href="${channels}\\?channel=ch_ops&amp;thread=ops-root&amp;post=ops-reply"[^>]*>#ops<`)
+    new RegExp(
+      `href="${channels}\\?channel=ch_ops&amp;thread=ops-root&amp;post=ops-reply"[^>]*>#ops<`
+    )
   );
   assert.match(
     rowOf(html, 'about-task'),

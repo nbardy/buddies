@@ -13,7 +13,9 @@ import { createConversationApplicationContext } from './application/context';
 import { registerAuthRoutes } from './auth/express';
 import { authorizeUpgrade } from './auth/gate';
 import { TAILSCALE_CANDIDATES, registerMobileAccessRoutes } from './auth/mobile-access';
+import { PairingCodes } from './auth/pairing';
 import { describePolicy, keyLocation, resolveAuthPolicy } from './auth/policy';
+import { watchTailnetOwner } from './auth/tailnet-owner';
 import { setIgnorePatterns, shouldIgnoreWorkingDirectory } from './config';
 import {
   BUDDY_BACKGROUND_TURN_MS,
@@ -77,6 +79,7 @@ import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { createDependencyChecks, registerDependencyRoutes } from './providers/dependencies';
+import { installedAgent } from './providers/installed-agent';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
@@ -87,6 +90,7 @@ import { type SessionRow, defaultRoots } from '@unleashd/ingest';
 import { validate as isUuid } from 'uuid';
 import { auditLocalAgents } from './audit.js';
 import { createBriefings } from './buddies/briefing';
+import { admitExecution, decideExecutionGate } from './buddies/execution-gate';
 import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
 import { createCliReplyGate } from './buddies/channel-reply-gate';
 import { createChannels } from './buddies/channels';
@@ -143,7 +147,6 @@ const portNumber = typeof PORT === 'string' ? Number.parseInt(PORT, 10) : PORT;
 
 const authResolution = resolveAuthPolicy({
   env: process.env,
-  listenHost: LISTEN_HOST,
   dataDirectory: APP_DATA_DIR,
 });
 if (!authResolution.ok) {
@@ -152,6 +155,13 @@ if (!authResolution.ok) {
 }
 const AUTH_POLICY = authResolution.policy;
 console.log(`[auth] ${describePolicy(AUTH_POLICY)}`);
+if (authResolution.key.kind === 'created') {
+  console.log(`[auth] created an access key at ${authResolution.key.path}`);
+}
+const TAILNET_OWNER = watchTailnetOwner(TAILSCALE_CANDIDATES, (owner) => {
+  console.log(`[auth] tailnet owner: ${owner.kind === 'known' ? owner.login : 'none'}`);
+});
+const PAIRING_CODES = new PairingCodes();
 
 // noServer + an explicit upgrade handler is what makes the WebSocket gateable:
 // `new WebSocketServer({ server })` accepts every upgrade before any of our
@@ -179,8 +189,9 @@ server.on('upgrade', (request, socket, head) => {
     method: request.method ?? 'GET',
     url: request.url ?? '/',
     headers: request.headers,
+    peer: request.socket.remoteAddress ?? '',
   };
-  if (!authorizeUpgrade(AUTH_POLICY, gateRequest)) {
+  if (!authorizeUpgrade(AUTH_POLICY, gateRequest, TAILNET_OWNER.current())) {
     socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
     socket.destroy();
     return;
@@ -217,10 +228,7 @@ const pauseBuddyScheduler = () => {
   buddyRunner.pause();
   memoryReviewer.pause();
 };
-const resumeBuddyScheduler = () => {
-  buddyRunner.resume();
-  memoryReviewer.start();
-};
+const resumeBuddyScheduler = () => execution.resume();
 const stopBuddyScheduler = () => {
   memoryReviewer.stop();
   buddyRunner.stop();
@@ -319,7 +327,7 @@ const buddiesCore = lateBoundCore(buddiesReady);
 const buddyEvents = createBuddyEvents();
 // A grant lives as long as its run's lease at most; settle and turn end revoke it sooner.
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
-const buddyBriefings = createBriefings(buddiesCore);
+const buddyBriefings = createBriefings(buddiesCore, () => installedAgent());
 let buddyMcp: McpEndpoint | null = null;
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {
   if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
@@ -369,6 +377,7 @@ const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 const buddyCreationService: BuddyCreationService = createBuddyCreationService({
   configService: conversationConfigService,
   resolveBuddyConversation,
+  installedAgent: () => installedAgent(),
   resolveWorkingDirectory: resolveWorkingDirectoryInput,
   createId: uuidv4,
   getConversation: (id) => applicationContext.registry.get(id),
@@ -421,6 +430,20 @@ const memoryReviewer = createMemoryReviewer({
   grants: buddyGrants,
   spec: buddyMcpSpec,
   execute: ephemeralExecute('memory-review'),
+});
+// Pattern: fix-guards (docs/patterns.md#fix-guards) — the ONE gate on Buddy execution (see
+// buddies/execution-gate.ts): scan/adopt, scheduler start, resume and the memory reviewer.
+const execution = admitExecution<FoundExecution, AdoptedRun>(decideExecutionGate(), {
+  scan: () => executionJournals.scan(),
+  start: async (adopted) => {
+    await buddyRunner.start(adopted);
+    memoryReviewer.start();
+  },
+  resume: () => {
+    buddyRunner.resume();
+    memoryReviewer.start();
+  },
+  started: 'Buddy runner started',
 });
 const buddyPolicyPort = createBuddyPolicyPort({
   runner: buddyRunner,
@@ -495,7 +518,7 @@ registerConversationWebSocket(wss, {
 
 // Auth first: every route below (API, uploads, and the static app shell) is
 // unreachable without the shared secret.
-registerAuthRoutes(app, AUTH_POLICY);
+registerAuthRoutes(app, AUTH_POLICY, { owner: TAILNET_OWNER, pairing: PAIRING_CODES });
 
 // gzip/deflate every compressible response over 1 KB (JSON API, the app
 // shell's JS/CSS). Mounted AFTER the gate so an unauthenticated caller costs
@@ -551,6 +574,7 @@ registerMobileAccessRoutes(app, {
   uiPort: process.env.NODE_ENV === 'development' ? DEV_CLIENT_PORT : portNumber,
   auth: AUTH_POLICY,
   key: keyLocation(process.env, APP_DATA_DIR),
+  pairing: PAIRING_CODES,
 });
 registerConversationRoutes(
   app,
@@ -586,14 +610,15 @@ const buddyConversations: StableConversationPorts = {
   getConversation: (id) => applicationContext.registry.get(id),
   ensureConversationReady: buddyCreationService.ensureConversationReady,
   createConversation: (input) => buddyCreationService.createServerBuddyConversation(input),
-  reconfigure: (conversation, config) =>
-    replaceRuntimeConfig(conversationConfigService, conversation, config),
+  reconfigure: (conversation, config, provenance) =>
+    replaceRuntimeConfig(conversationConfigService, conversation, config, provenance),
 };
 
 // One channel's posts or responders changed: clients refresh only that channel's views.
 const channelChanged = (channelId: string) =>
   applicationContext.broadcast({ type: 'channel_changed', channelId });
 const buddyChannels = createChannels({
+  installedAgent: () => installedAgent(),
   core: buddiesCore,
   events: buddyEvents,
   channelChanged,
@@ -791,7 +816,7 @@ void runServerStartup(
       );
       // Journals the previous backend left: their open attempts are adopted, not swept. A live
       // turn's grant is valid again BEFORE the tool endpoint answers (adopt-executions.ts).
-      foundExecutions = executionJournals.scan();
+      foundExecutions = execution.scan();
       for (const grant of liveGrants(foundExecutions)) buddyGrants.adopt(grant);
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).
       buddyMcp = await startMcpEndpoint({
@@ -835,9 +860,8 @@ void runServerStartup(
     startOptionalScheduler: async () => {
       try {
         await buddiesReady;
-        await buddyRunner.start(adoptedRuns);
-        memoryReviewer.start();
-        console.log('Buddy runner started');
+        await execution.start(adoptedRuns);
+        console.log(execution.started);
       } catch (error) {
         console.warn('[buddies] Runner unavailable:', error);
       }

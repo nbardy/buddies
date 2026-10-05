@@ -12,6 +12,7 @@ import {
 } from '../server/src/auth/gate';
 import { loginPageHtml } from '../server/src/auth/login-page';
 import { type AuthPolicy, describePolicy, resolveAuthPolicy } from '../server/src/auth/policy';
+import { type TailnetOwnerWatch, watchTailnetOwner } from '../server/src/auth/tailnet-owner';
 import { isViteClientModule, patchViteResumeReload } from './src/pwa/resume';
 
 const DEV_CLIENT_PORT = 7489;
@@ -82,27 +83,24 @@ function openInBrowser(url: string) {
 const APP_DATA_DIR = process.env.UNLEASHD_DATA_DIR ?? path.join(os.homedir(), '.agent-viewer');
 
 function resolveDevAuthPolicy(): AuthPolicy {
-  const resolution = resolveAuthPolicy({
-    env: process.env,
-    // Loopback so an unconfigured dev server is never the thing that refuses to
-    // start; `devServerHost` below is what keeps that promise honest.
-    listenHost: '127.0.0.1',
-    dataDirectory: APP_DATA_DIR,
-  });
+  // Started alongside the backend: whichever resolves first on a fresh install
+  // creates the key, and the other reads it (exclusive create in policy.ts).
+  const resolution = resolveAuthPolicy({ env: process.env, dataDirectory: APP_DATA_DIR });
   if (!resolution.ok) throw new Error(`[auth] ${resolution.error}`);
   return resolution.policy;
 }
 
 /**
- * Without a shared secret the dev server binds loopback only. Exposing it on
- * every interface has to be earned by configuring a token, otherwise `pnpm dev`
- * silently republishes the whole API to the local network.
+ * Without a shared secret (only when UNLEASHD_AUTH_DISABLED=1; a key is created
+ * on first run) the dev server binds loopback only. Exposing it on every
+ * interface has to be earned by a key, otherwise `pnpm dev` silently
+ * republishes the whole API to the local network.
  */
 function devServerHost(policy: AuthPolicy): boolean | string {
   return policy.kind === 'required' ? true : '127.0.0.1';
 }
 
-function devAuthPlugin(policy: AuthPolicy) {
+function devAuthPlugin(policy: AuthPolicy, owner: TailnetOwnerWatch) {
   return {
     name: 'unleashd-dev-auth',
     configureServer(server: ViteDevServer) {
@@ -121,11 +119,16 @@ function devAuthPlugin(policy: AuthPolicy) {
       // the dev server is built, and this has to reject the socket before that
       // one completes the handshake.
       server.httpServer?.prependListener('upgrade', (request, socket) => {
-        const decision = decideAuth(policy, {
-          method: request.method ?? 'GET',
-          url: request.url ?? '/',
-          headers: request.headers,
-        });
+        const decision = decideAuth(
+          policy,
+          {
+            method: request.method ?? 'GET',
+            url: request.url ?? '/',
+            headers: request.headers,
+            peer: request.socket.remoteAddress ?? '',
+          },
+          owner.current()
+        );
         if (decision.kind === 'challenge') {
           socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
           socket.destroy();
@@ -137,6 +140,7 @@ function devAuthPlugin(policy: AuthPolicy) {
           method: request.method ?? 'GET',
           url: request.url ?? '/',
           headers: request.headers,
+          peer: request.socket.remoteAddress ?? '',
         };
         // /__auth/* is the login form itself; the proxy hands it to the
         // backend, which validates the submitted key and sets the cookie.
@@ -144,7 +148,7 @@ function devAuthPlugin(policy: AuthPolicy) {
           next();
           return;
         }
-        const decision = decideAuth(policy, gateRequest);
+        const decision = decideAuth(policy, gateRequest, owner.current());
         if (decision.kind === 'allow') {
           next();
           return;
@@ -173,6 +177,13 @@ function devAuthPlugin(policy: AuthPolicy) {
 }
 
 const devAuthPolicy = resolveDevAuthPolicy();
+// The phone reaches Vite through `tailscale serve`; the backend runs its own watch.
+// One per PROCESS: a Vite restart re-imports this file, and a module-level watch
+// would stack another minute-interval `tailscale status` poll on every restart.
+const TAILNET_WATCH = Symbol.for('unleashd.dev.tailnetOwner');
+const processWatches = globalThis as { [TAILNET_WATCH]?: TailnetOwnerWatch };
+processWatches[TAILNET_WATCH] ??= watchTailnetOwner();
+const devTailnetOwner = processWatches[TAILNET_WATCH];
 
 // Once per PROCESS, not per config load. A Vite restart (vite.config.ts or .env
 // edit, `r` in the terminal) re-imports this file as a fresh module and re-runs
@@ -215,7 +226,7 @@ export default defineConfig({
   customLogger: viteLogger,
   plugins: [
     react(),
-    devAuthPlugin(devAuthPolicy),
+    devAuthPlugin(devAuthPolicy, devTailnetOwner),
     openPreferredDevUrlPlugin(),
     keepPageOnResumePlugin(),
   ],
