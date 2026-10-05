@@ -137,8 +137,9 @@
         /* Hero: under the video, the pitch and the install. */
         .hero { text-align: center; padding: 4rem 0 1rem; }
 
-        /* The headline's one highlight: "open source" in the Pair's violet-to-teal, sentence case
-           like the kit's "Open source" pill (owner, 2026-10-05: highlight open source). */
+        /* The headline's one highlight: "Open Source", capitalised, in the purple "magic" of the
+           app's "Let the AI Cook" animation (ColorPalettePicker): a shimmering violet-pink
+           gradient, a soft glow and twinkling sparkles (owner, 2026-10-05). */
         h1 {
             font-weight: 700;
             font-stretch: 92%;
@@ -148,12 +149,45 @@
             line-height: 1.02;
         }
 
+        .magic {
+            position: relative;
+            display: inline-block;
+            white-space: nowrap;
+        }
+
         .open-source {
-            background: linear-gradient(100deg, var(--violet) 10%, var(--blue) 50%, var(--teal) 90%);
+            background: linear-gradient(100deg,
+                var(--violet) 0%, var(--pink) 25%, var(--lens) 40%, var(--violet) 55%,
+                var(--pink) 80%, var(--violet) 100%);
+            background-size: 220% 100%;
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
             padding-bottom: 0.08em; /* room for the "p" descender inside the clipped gradient */
+            filter: drop-shadow(0 0 0.18em color-mix(in oklch, var(--violet) 70%, transparent));
+            animation: shimmer 6s linear infinite;
+        }
+
+        @keyframes shimmer {
+            to { background-position: -220% 0; }
+        }
+
+        .sparkle {
+            position: absolute;
+            width: 0.42em;
+            height: 0.42em;
+            fill: #fff6c2;
+            filter: drop-shadow(0 0 4px oklch(0.75 0.15 300));
+            animation: twinkle 1.8s ease-in-out infinite both;
+        }
+
+        .sparkle:nth-of-type(1) { top: -0.12em; left: -0.18em; }
+        .sparkle:nth-of-type(2) { top: 0.02em; right: 0.22em; width: 0.3em; height: 0.3em; animation-delay: 0.6s; }
+        .sparkle:nth-of-type(3) { bottom: 0.02em; left: 42%; width: 0.24em; height: 0.24em; animation-delay: 1.2s; }
+
+        @keyframes twinkle {
+            0%, 100% { opacity: 0.15; transform: scale(0.3) rotate(0deg); }
+            50% { opacity: 1; transform: scale(1) rotate(90deg); }
         }
 
         .accent-violet { color: var(--violet); }
@@ -179,7 +213,8 @@
         }
 
         @media (prefers-reduced-motion: reduce) {
-            .rise > *, body::before { animation: none; }
+            .rise > *, body::before, .open-source, .sparkle { animation: none; }
+            .sparkle { opacity: 1; }
         }
 
         .actions {
@@ -397,7 +432,7 @@
         </div>
 
         <header class="hero rise">
-            <h1>Free and <span class="open-source">open source.</span></h1>
+            <h1>Free and <span class="magic"><span class="open-source">Open Source</span><svg class="sparkle" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 0 6 4 10 5 6 6 5 10 4 6 0 5 4 4z"/></svg><svg class="sparkle" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 0 6 4 10 5 6 6 5 10 4 6 0 5 4 4z"/></svg><svg class="sparkle" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 0 6 4 10 5 6 6 5 10 4 6 0 5 4 4z"/></svg></span>.</h1>
             <p class="pitch"><strong>Buddies is your team of AI agents.</strong> Multi harness: Claude Code, Codex and Gemini side by side, with channels, tasks and memory, on your own computer.</p>
             <div class="actions">
                 <div class="install-box glass">
