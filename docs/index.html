@@ -7,7 +7,7 @@
     
     <!-- Open Graph / Meta Tags -->
     <meta property="og:title" content="Buddies - Free, Open Source Agent Team Orchestration">
-    <meta property="og:description" content="Buddies is a free, open source, multi-harness agent team orchestrator. Bring your own Claude Code, Codex, Gemini or OpenCode. Runs on your own computer.">
+    <meta property="og:description" content="Buddies is a free, open source, multi-harness agent team orchestrator. Bring your own Claude Code, Codex or Gemini; OpenCode history shows up read-only. Runs on your own computer.">
     <meta property="og:image" content="https://nbardy.github.io/buddies/screenshots/hero.png">
     <meta property="og:url" content="https://nbardy.github.io/buddies/">
     <meta property="og:type" content="website">
@@ -15,7 +15,7 @@
     <!-- Twitter Meta Tags -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Buddies - Free, Open Source Agent Team Orchestration">
-    <meta name="twitter:description" content="Buddies is a free, open source, multi-harness agent team orchestrator. Bring your own Claude Code, Codex, Gemini or OpenCode. Runs on your own computer.">
+    <meta name="twitter:description" content="Buddies is a free, open source, multi-harness agent team orchestrator. Bring your own Claude Code, Codex or Gemini; OpenCode history shows up read-only. Runs on your own computer.">
     <meta name="twitter:image" content="https://nbardy.github.io/buddies/screenshots/hero.png">
 
     <style>
@@ -107,14 +107,18 @@
         }
 
         /* Glowing Title */
+        /* The glow is a second copy of the title laid over it, so both must read one
+           size. The phone rule used to shrink only the h1; the glow stayed 80px and
+           pushed a 390px viewport to scrollWidth 400 (2026-10-05). */
         .title-container {
+            --title-size: clamp(5rem, 10vw, 8rem);
             position: relative;
             display: inline-block;
             margin-bottom: 0.2rem;
         }
         
         h1 {
-            font-size: clamp(5rem, 10vw, 8rem);
+            font-size: var(--title-size);
             font-weight: 900;
             letter-spacing: -0.03em;
             line-height: 1.1;
@@ -130,7 +134,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            font-size: clamp(5rem, 10vw, 8rem);
+            font-size: var(--title-size);
             font-weight: 900;
             letter-spacing: -0.03em;
             line-height: 1.1;
@@ -504,7 +508,7 @@
         }
 
         @media (max-width: 768px) {
-            h1 { font-size: 2.5rem; }
+            .title-container { --title-size: 2.5rem; }
             h2.tagline { font-size: 1.8rem; }
             .install-box { max-width: 100%; }
             .features { grid-template-columns: 1fr; }
@@ -526,7 +530,7 @@
             <div class="title-glow" aria-hidden="true">Buddies</div>
         </div>
         <h2 class="tagline">Free, open source agent teams. Bring your own harness.</h2>
-        <p class="subtitle">Multi-harness Agent Team Orchestration: Claude Code, Codex, Gemini and OpenCode in one place, on your own computer.</p>
+        <p class="subtitle">Multi-harness Agent Team Orchestration: Claude Code, Codex and Gemini in one place, on your own computer. OpenCode is read-only.</p>
 
         <div class="install-box">
             <code id="install-cmd">git clone --recursive https://github.com/nbardy/buddies && cd buddies && pnpm install && pnpm build && pnpm start</code>
@@ -566,7 +570,7 @@
             </div>
             <div class="feature">
                 <h3>Bring your own harness</h3>
-                <p>Claude Code, Codex, Gemini and OpenCode side by side. Use the best harness for each model.</p>
+                <p>Claude Code, Codex and Gemini side by side, with OpenCode history read-only. Use the best harness for each model.</p>
             </div>
             <div class="feature">
                 <h3>Teams with memory</h3>

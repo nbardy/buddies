@@ -2,7 +2,7 @@
 
 > Vim is open source and it's still here decades later. Agent software should be too.
 
-**Free, open source, multi-harness agent team orchestration.** Run a team of AI agents (Buddies) with channels, tasks, threads and memory, on your own computer. Bring your own harness: Claude Code, Codex, Gemini and OpenCode work side by side. Private, mobile friendly, and yours to fork.
+**Free, open source, multi-harness agent team orchestration.** Run a team of AI agents (Buddies) with channels, tasks, threads and memory, on your own computer. Bring your own harness: Claude Code, Codex and Gemini work side by side, and OpenCode sessions show up read-only. Private, mobile friendly, and yours to fork.
 
 <p align="center">
   <img src="docs/screenshots/hero.png" alt="Buddies workspace home: channels, tasks and a team of Buddies" width="100%">
@@ -49,7 +49,7 @@ startup checks still run in the background.
 
 To develop on it, use `pnpm install && pnpm dev` instead of build/start.
 
-Development uses [http://localhost:7489](http://localhost:7489) by default. Run `pnpm local-domain:setup` once if you prefer [http://unleashd.localhost](http://unleashd.localhost), and `pnpm local-domain:remove` to remove it. The setup command installs a persistent, loopback-only macOS port proxy; dev startup only detects it and never prompts for administrator access. Unleashd itself always runs as your normal user. In dev, the API server stays on port `7499` behind the Vite proxy.
+Development uses [http://localhost:7489](http://localhost:7489) by default. Run `pnpm local-domain:setup` once if you prefer [http://unleashd.localhost](http://unleashd.localhost), and `pnpm local-domain:remove` to remove it. The setup command installs a persistent, loopback-only macOS port proxy; dev startup only detects it and never prompts for administrator access. Buddies itself always runs as your normal user. In dev, the API server stays on port `7499` behind the Vite proxy.
 
 Frontend edits reload immediately. Backend edits are coalesced by the development watcher: if Codex or another provider has active turns, the current backend keeps owning their event streams until they finish, then exits and starts the updated server. An explicit `Ctrl-C`, `SIGTERM`, or `pnpm dev:replace` remains an intentional shutdown and stops active turns.
 
@@ -63,7 +63,7 @@ pnpm start     # serves built client + API on port 7489
 ### Access key
 
 By default both servers bind loopback only and no key is required. To reach
-unleashd from another device (Tailscale, LAN), set a shared secret first:
+Buddies from another device (Tailscale, LAN), set a shared secret first:
 
 ```bash
 openssl rand -hex 32 | tee ~/.agent-viewer/auth-token
@@ -90,7 +90,7 @@ memory docs, channels and runs live in `~/.buddies/buddies-v3.sqlite`
 (override with `UNLEASHD_BUDDIES_DB`).
 
 Each Buddy also has a private curated `MEMORY.md` plus append-only journal
-notes. Unleashd injects the bounded curated summary and recent journal excerpts
+notes. Buddies injects the bounded curated summary and recent journal excerpts
 into the first turn of each Buddy conversation. The `remember` operation
 records material outcomes, failures, durable decisions, and reusable lessons;
 `compact_memory` reconciles repetitive or stale history with source
@@ -113,6 +113,18 @@ live swap are in [crates/unleashd-buddies/README.md](crates/unleashd-buddies/REA
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `~/.gemini/tmp/` | Yes |
 
 The server auto-discovers conversations from each agent's disk format. No configuration needed — if the CLI has been used, its sessions show up.
+
+## Names: Buddies and unleashd
+
+Buddies was called Unleashd until October 2026. The public name changed; the
+internal names did not, so existing installs and their data keep working:
+
+- **npm package:** still `unleashd`. It installs two commands, `buddies` and
+  `unleashd`, which run the same server. Renaming the package would change what
+  `npm install` and the publish workflow resolve, so it waits for its own release.
+- **Kept on purpose:** the `@unleashd/*` workspace packages, `UNLEASHD_*`
+  environment variables, the `~/.agent-viewer` data folder, the
+  `unleashd.localhost` dev domain and the `crates/unleashd-*` crates.
 
 ## Project Structure
 

@@ -1,7 +1,7 @@
 {
-  "name": "Unleashd",
-  "short_name": "Unleashd",
-  "description": "Unleashd — headless Mac agent control via PWA",
+  "name": "Buddies",
+  "short_name": "Buddies",
+  "description": "Buddies — your team of AI agents, on your own computer",
   "display": "standalone",
   "start_url": "/",
   "scope": "/",
