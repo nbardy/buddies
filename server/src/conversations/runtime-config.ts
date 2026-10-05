@@ -7,6 +7,7 @@ import type {
   ConversationConfigState,
   Result,
 } from '@unleashd/shared';
+import type { ConfigProvenance } from './config-records';
 import type { ConfigUpdateCommand, ConversationConfigService } from './config-service';
 
 // The slice of a live conversation a configuration change reads and writes.
@@ -56,16 +57,24 @@ export async function updateRuntimeConfig(
  * when it already does; a refused change (a started session's provider) throws its reason.
  */
 export async function replaceRuntimeConfig(
-  configService: Pick<ConversationConfigService, 'update'>,
+  configService: Pick<ConversationConfigService, 'update' | 'getRecord'>,
   conversation: ConfigurableRuntime,
-  config: ConversationConfig
+  config: ConversationConfig,
+  provenance?: ConfigProvenance
 ): Promise<void> {
-  if (isDeepStrictEqual(conversation.config, config)) return;
+  // An explicit same-value pick must still persist its origin. Otherwise an older reply
+  // replaces that intent after reload. Guard: explicit thread choice survives a failed attempt.
+  if (isDeepStrictEqual(conversation.config, config)) {
+    if (provenance === undefined) return;
+    const record = await configService.getRecord(conversation.id);
+    if (record?.provenance === provenance) return;
+  }
   const result = await updateRuntimeConfig(configService, conversation, {
     conversationId: conversation.id,
     commandId: `pick-${randomUUID()}`,
     expectedRevision: conversation.configRevision,
     patch: { kind: 'replace', config },
+    provenance,
   });
   if (!result.ok) throw new Error(result.error.message);
 }

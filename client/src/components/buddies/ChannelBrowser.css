@@ -571,6 +571,7 @@ a.channel-browser-instance:hover {
    sigil so the worker link remains reachable on the right. */
 .channel-browser-buddy {
   position: relative;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
@@ -582,6 +583,14 @@ a.channel-browser-instance:hover {
 
 .channel-browser-buddy[data-failed] .channel-browser-channel-name {
   color: var(--theme-warning);
+}
+
+/* A DM that cannot open (e.g. no agent installed) says why under the row, not only in a tooltip. */
+.channel-browser-buddy-error {
+  flex-basis: 100%;
+  padding: 0 var(--sp-6) var(--sp-2) var(--sp-9);
+  color: var(--theme-warning);
+  font-size: var(--fs-2);
 }
 
 .channel-browser-buddy-actions {

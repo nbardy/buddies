@@ -13,7 +13,6 @@ import {
   insertReference,
   mentionChoice,
   mentionedBuddies,
-  pickerValue,
   rankReferences,
 } from '../src/components/buddies/channel-text';
 
@@ -110,6 +109,34 @@ test('mention chips follow the text, not the picked list', () => {
   assert.deepEqual(mentionedBuddies('never mind', picked), []);
 });
 
+test('a restored mention uses the current profile rather than its draft execution snapshot', () => {
+  const old = {
+    ...lead,
+    execution: {
+      kind: 'profile' as const,
+      config: {
+        provider: 'claude' as const,
+        model: { mode: 'default' as const },
+        reasoning: { mode: 'default' as const },
+      },
+    },
+  };
+  const current = {
+    ...lead,
+    label: 'Renamed Lead',
+    execution: {
+      kind: 'profile' as const,
+      config: { ...old.execution.config, provider: 'codex' as const },
+    },
+  };
+  const [mention] = mentionedBuddies('@Lead', [old], [current]);
+  assert.equal(mention.label, 'Lead', 'retain the identity spelled in the draft');
+  assert.deepEqual(mentionChoice(mention, new Map(), []), {
+    kind: 'profile',
+    config: current.execution.config,
+  });
+});
+
 // 2026-09-24: after Enter picked a Buddy, "@Product Development Lead " was
 // still a live query (queries may hold spaces), so the @ menu never closed and
 // covered the mention chip's model picker.
@@ -159,6 +186,19 @@ test('a restored draft still encodes its mentions', () => {
   // and a blob that is not a draft is discarded whole.
   assert.equal(encodeChannelDraft({ text: '', picked: [lead] }), '');
   assert.deepEqual(decodeChannelDraft('{"text":7}'), { text: '', picked: [] });
+  const config: ConversationConfig = {
+    provider: 'codex',
+    model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
+    reasoning: { mode: 'explicit', effort: 'high' },
+  };
+  const chosenDraft = decodeChannelDraft(
+    encodeChannelDraft({ text, picked: [lead], mentionConfigs: [{ buddyId: lead.id, config }] })
+  );
+  assert.deepEqual(
+    chosenDraft.mentionConfigs,
+    [{ buddyId: lead.id, config }],
+    'an unsent override survives reload'
+  );
 });
 
 // 493c1c7: an un-picked mention in a thread showed the Buddy's PROFILE default even though its
@@ -175,17 +215,22 @@ test('a mention chip opens on the thread seat; the profile applies only without 
     reasoning: { mode: 'explicit', effort: 'high' },
   };
   const buddy = { ...lead, execution: { kind: 'profile', config: profile } } as const;
+  assert.equal(
+    choiceLabel(mentionChoice(buddy, new Map(), undefined), null),
+    'Loading model…',
+    'an unread thread must not advertise its profile as the next model'
+  );
   const none = mentionChoice(buddy, new Map(), []);
-  assert.deepEqual(pickerValue(none), profile);
+  assert.deepEqual('config' in none ? none.config : null, profile);
   assert.equal(choiceLabel(none, null), 'gpt-5.6-sol');
 
   const seated = mentionChoice(buddy, new Map(), [{ buddyId: 'b1', config: seat }]);
-  assert.deepEqual(pickerValue(seated), seat);
-  assert.equal(choiceLabel(seated, null), 'opus');
+  assert.deepEqual('config' in seated ? seated.config : null, seat);
+  assert.equal(choiceLabel(seated, null), 'opus · high');
 
   const chosen = mentionChoice(buddy, new Map([['b1', profile]]), [
     { buddyId: 'b1', config: seat },
   ]);
   assert.equal(chosen.kind, 'chosen', 'a pick in this composer beats the seat');
-  assert.deepEqual(pickerValue(chosen), profile);
+  assert.deepEqual(chosen.config, profile);
 });

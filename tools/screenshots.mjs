@@ -384,6 +384,29 @@ const OPEN_MENTION_MODEL = prep(`
   await tick(150);
   return has('.channel-composer-model');`);
 
+// Use the first real seat in this thread. The chip and bottom picker must show its
+// contextual model rather than a profile default, on both composer shells.
+const OPEN_THREAD_SELECTION = (rootId, openPicker = false) =>
+  prep(`
+  const thread = await (await fetch('/api/buddies/posts/' + ${JSON.stringify(rootId)} + '/thread')).json();
+  const id = thread.seats?.[0]?.buddyId;
+  if (!id) return 'SKIP';
+  const buddy = await (await fetch('/api/buddies/' + encodeURIComponent(id))).json();
+  const input = [...document.querySelectorAll('.channel-composer textarea')].at(-1);
+  if (!input || !buddy.buddy?.name) return 'SKIP';
+  input.focus();
+  const query = '@' + buddy.buddy.name;
+  typeInto(input, query);
+  input.setSelectionRange(query.length, query.length);
+  await tick(150);
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await tick(150);
+  const chip = [...document.querySelectorAll('.channel-composer-mention')].at(-1);
+  if (!chip || chip.disabled) return 'SKIP';
+  ${openPicker ? 'chip.click();' : 'input.blur();'}
+  await tick(250);
+  return has(${JSON.stringify(openPicker ? '.channel-composer-model' : '.channel-composer-mention')});`);
+
 // Click the first image in a channel post: the viewer must be centred on the page
 // (it sat top-left, #bugfixes 2026-10-01).
 const OPEN_IMAGE_VIEWER = prep(`
@@ -445,7 +468,7 @@ const onBoth = (path, prepare = null) => ({
  * shows the screen there; a tree with no entry has no such screen. `missing`
  * is why the screen cannot be shot at all (its data is absent), or null.
  */
-function buildScreens(found, focus) {
+export function buildScreens(found, focus) {
   const chat = found.conversationId && `/chat/${enc(found.conversationId)}`;
   const noChat = chat ? null : 'no settled chat (general, not running, not done, idle ≥1h)';
   const noBuddy = found.buddyId ? null : 'no Buddy';
@@ -573,7 +596,22 @@ function buildScreens(found, focus) {
       views: onBoth(dm, clickThen('.buddy-about > summary', '.buddy-about-card')),
     },
     { name: 'channel', missing: noChannel, views: onBoth(`${channels}?${channel}`) },
+    {
+      name: 'image-viewer',
+      missing: noChannel,
+      views: onBoth(`${channels}?${channel}`, OPEN_IMAGE_VIEWER),
+    },
     { name: 'thread', missing: noThread, views: onBoth(thread) },
+    {
+      name: 'thread-selection',
+      missing: noThread,
+      views: onBoth(thread, OPEN_THREAD_SELECTION(found.threadRootId)),
+    },
+    {
+      name: 'thread-selection-picker',
+      missing: noThread,
+      views: onBoth(thread, OPEN_THREAD_SELECTION(found.threadRootId, true)),
+    },
     // The workspace Home. Pins are `Task.pin` on the server and this session refuses writes, so
     // the stars and the reorder menu show only when the data already has pins (task_write or the
     // owner PATCH). Show all exists on desktop only; the phone row lists every card.
@@ -666,18 +704,15 @@ function buildScreens(found, focus) {
 // ── Contact sheet ──────────────────────────────────────────────────────────
 
 function escapeHtml(text) {
+  // A screen definition accidentally landed in replace's arguments and crashed every gallery.
+  // Guard: thread selection screenshot run finishes with its contact sheet.
   return String(text).replace(
-    {
-      name: 'image-viewer',
-      missing: noChannel,
-      views: onBoth(`${channels}?${channel}`, OPEN_IMAGE_VIEWER),
-    },
     /[&<>"]/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
   );
 }
 
-function contactSheet(manifest) {
+export function contactSheet(manifest) {
   const header = manifest.sizes
     .map((name) => {
       const s = SIZES[name];
@@ -797,6 +832,14 @@ async function capture(args) {
           await session.goto(`${args.url}${view.path}`, screen.settleMs ?? 1000);
           // Requests still open at capture time (empty when the page went quiet).
           let pending = await session.waitForNetworkIdle(QUIET_MS, IDLE_TIMEOUT_MS, prefetch);
+          // Continue is a device-local dismissal, unlike "Check again", which invokes CLIs.
+          // Temporary servers deliberately have no agent CLIs; their prompt hid every screen.
+          await session.evaluate(
+            prep(`
+            const prompt = document.querySelector('dialog[aria-labelledby="dependencies-title"]');
+            [...(prompt?.querySelectorAll('button') ?? [])].find(button => button.textContent === 'Continue')?.click();
+            await tick(100);`)
+          );
           if (view.prepare) {
             if ((await session.evaluate(view.prepare)) === 'SKIP') {
               record('precondition absent on the page');
@@ -866,7 +909,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.stack ?? error}\n`);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    process.stderr.write(`${error.stack ?? error}\n`);
+    process.exit(1);
+  });
+}

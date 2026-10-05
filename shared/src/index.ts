@@ -23,6 +23,7 @@ import { legacyBody } from './legacy-content.js';
 import type { Provider } from './provider-catalog.js';
 
 export * from './conversation-config.js';
+export * from './config-mapping.js';
 export * from './conversation.js';
 export { bodyText } from './content-schema.js';
 export * from './turn-attempt.js';

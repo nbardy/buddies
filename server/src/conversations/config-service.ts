@@ -40,6 +40,8 @@ export interface ConfigUpdateCommand {
   commandId: string;
   expectedRevision: number;
   patch: ConversationConfigPatch;
+  /** Host selection origin; never accepted from a WS/owner request. */
+  provenance?: ConfigProvenance;
 }
 
 export interface ConfigUpdateSuccess {
@@ -294,6 +296,7 @@ export class ConversationConfigService {
       expectedConfigRevision: current.revision,
       config: transition.value,
       lastResolvedConfig: resolution.value,
+      provenance: command.provenance,
     });
     switch (outcome.t) {
       case 'committed':
