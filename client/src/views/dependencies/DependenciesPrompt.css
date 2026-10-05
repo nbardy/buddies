@@ -1,8 +1,157 @@
 .dependencies-dialog::backdrop {
   background: rgb(3 7 12 / 78%);
+  backdrop-filter: blur(6px);
 }
 
 .dependencies-dialog button:disabled {
   opacity: 0.5;
   cursor: wait;
+}
+
+/* Onboarding card: tinted surface, blue→violet hairline and a coloured glow (owner request). */
+.dependencies-dialog.onboarding-card {
+  border: 1px solid rgb(166 199 255 / 16%);
+  border-radius: 16px;
+  background: radial-gradient(120% 60% at 0% 0%, rgb(124 140 255 / 16%), transparent 60%),
+    radial-gradient(90% 50% at 100% 100%, rgb(42 161 152 / 12%), transparent 60%), #121821;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 40%), 0 30px 90px rgb(0 0 0 / 55%), 0 0 70px
+    rgb(124 140 255 / 22%);
+  font-family: "Inter Variable", system-ui, sans-serif;
+  line-height: 1.55;
+}
+
+.onboarding-card h2 {
+  font-family: "Plus Jakarta Sans Variable", "Inter Variable", system-ui, sans-serif;
+  font-size: var(--fs-8);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  background: linear-gradient(90deg, #f2f4f8, #c9d6ff 60%, #b9a8ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.onboarding-steps {
+  display: flex;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-8);
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-2);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.onboarding-steps li {
+  padding: var(--sp-2) var(--sp-5);
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: #7d8896;
+  white-space: nowrap;
+}
+
+.onboarding-steps li[aria-current="step"] {
+  border-color: rgb(166 199 255 / 45%);
+  background: rgb(124 140 255 / 16%);
+  color: #dbe5ff;
+  box-shadow: 0 0 16px rgb(124 140 255 / 30%);
+}
+
+.onboarding-lede {
+  margin: 0 0 var(--sp-8);
+  font-size: var(--fs-5);
+  color: #c3ccd8;
+}
+
+.onboarding-team {
+  gap: var(--sp-8);
+  padding-bottom: var(--sp-8);
+}
+
+.onboarding-team fieldset,
+.onboarding-team label {
+  gap: var(--sp-3);
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.onboarding-team legend,
+.onboarding-team label > span {
+  padding: 0 0 var(--sp-3);
+  font-size: var(--fs-4);
+  font-weight: 600;
+  color: #e6ebf2;
+}
+
+.onboarding-team input,
+.onboarding-team textarea {
+  width: 100%;
+  padding: var(--sp-5) var(--sp-6);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  background: rgb(5 9 14 / 55%);
+  color: #f2f4f8;
+  font: inherit;
+  font-size: var(--fs-5);
+  line-height: 1.5;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.onboarding-team textarea {
+  resize: vertical;
+}
+
+.onboarding-team :is(input, textarea):focus {
+  outline: none;
+  border-color: rgb(166 199 255 / 60%);
+  box-shadow: 0 0 0 3px rgb(124 140 255 / 22%);
+}
+
+.onboarding-team :is(input, textarea)::placeholder {
+  color: #6c7786;
+}
+
+.onboarding-primary {
+  padding: var(--sp-6) var(--sp-9);
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #a6c7ff, #b9a8ff);
+  color: #121a2c;
+  font: inherit;
+  font-size: var(--fs-5);
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 8px 28px rgb(124 140 255 / 35%);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.onboarding-primary:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 34px rgb(124 140 255 / 50%);
+}
+
+.onboarding-team .onboarding-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.onboarding-card button:focus-visible {
+  outline: 2px solid rgb(166 199 255 / 60%);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+/* The shared folder autocomplete, matched to the card's fields. */
+.onboarding-team .path-suggestions {
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  background: #0d131b;
+}
+
+.onboarding-team .path-suggestion-item:is(:hover, .selected) {
+  background: rgb(124 140 255 / 16%);
 }

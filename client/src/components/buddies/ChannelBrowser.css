@@ -142,6 +142,21 @@
   padding: var(--sp-7) var(--sp-5) var(--sp-9);
 }
 
+.channel-browser-rail-connect {
+  flex-shrink: 0;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-8);
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  font: 500 var(--fs-3) / 1 var(--font-mono);
+  cursor: pointer;
+}
+
+.channel-browser-rail-connect:hover {
+  color: var(--text-primary);
+}
+
 .channel-browser-rail-section {
   margin: 0;
   padding: 0 var(--sp-4);
