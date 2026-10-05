@@ -401,9 +401,10 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     w.during.set(1, async (turn) => {
       // Owner-authored input: the grant is the owner's, so team_admin is listed.
       const names = await toolNames(turn.mcp);
-      assert.equal(names.length, 12);
+      assert.equal(names.length, 13);
       assert.ok(names.includes('team_admin'));
       assert.ok(names.includes('channel_admin'));
+      assert.ok(names.includes('channel_create'));
       for (const removed of ['answer', 'channel_archive', 'channel_rename'])
         assert.equal(names.includes(removed), false);
       assert.equal(await probe(turn.mcp), 200);
@@ -2851,6 +2852,41 @@ test('Buddy MCP renames a public channel without changing its identity or histor
       read: { channelId: w.general.id },
     });
     assert.equal(history.value.posts[0].id, post.id);
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
+// Regression: 0fef9d4 (lean rewrite) dropped buddy.new_list, so no Buddy turn could create a channel.
+test('Buddy MCP creates a channel, posts in it, and a replayed key returns the same channel', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const grant = w.grants.issueBuddy({
+      role: 'worker',
+      buddyId: w.lead.id,
+      workspaceId: w.ws,
+      conversationId: 'create-channel-test',
+      runId: null,
+      returns: INBOX,
+    });
+    const spec = w.endpoint.spec(grant);
+    const input = { name: 'launch-prep', purpose: 'Launch checklist', key: 'mk-launch' };
+    const created = await call(spec, 'channel_create', input);
+    assert.equal(created.isError, false, created.text);
+    assert.equal(created.value.kind.name, 'launch-prep');
+    const replay = await call(spec, 'channel_create', input);
+    assert.equal(replay.value.id, created.value.id);
+
+    const posted = await call(spec, 'post', {
+      channel: { id: created.value.id },
+      body: 'First post',
+      key: 'first',
+    });
+    assert.equal(posted.isError, false, posted.text);
+    const owner = await http('GET', `/api/buddies/channels/${created.value.id}`);
+    assert.equal(owner.status, 200);
   } finally {
     server.close();
     await w.close();

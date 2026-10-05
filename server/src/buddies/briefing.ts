@@ -32,7 +32,7 @@ export const BUDDY_TOOL_GUIDE = [
   'BUDDY TOOLS (the `unleashd_buddy` MCP server, already bound to you, this workspace and this turn)',
   'inbox: requests you owe, your open requests, unread channels. Start there.',
   'post: write in a channel, a DM ({direct:[ids]}) or a task; `answers` replies to one request you owe and wakes its requester. kind "request" (DMs only) starts the recipient; "inform" wakes nobody.',
-  'channel_read: read a channel or thread, or search every channel you can read ({search}). channel_admin: rename/archive/restore a public channel.',
+  'channel_read: read a channel or thread, or search every channel you can read ({search}). channel_create: make a public channel (name + purpose). channel_admin: rename/archive/restore one.',
   'tasks: list rows by {buddyId}|{taskId}|{workspace}, then get one full task. task_write: create/update; comments use post {channel:{task}}.',
   'doc_read / doc_write: soul, working and long-term memory. Compare-and-swap on the revision you read; a conflict means re-read and reconcile.',
   'Detailed notes (decisions, evidence, failed attempts) are agent_notes/<date>_<topic>.md files you write and search with your own file tools.',

@@ -341,6 +341,22 @@ const BUDDY_TOOLS = {
     schema: z.object({}),
     handler: (deps, grant) => deps.core.inbox(grant.author, grant.workspaceId),
   }),
+  // Regression guard: 0fef9d4 (lean rewrite) dropped buddy.new_list, so Buddies could not create
+  // channels for ~10 days although the crate's create_channel is Rule::AnyBuddy. A separate tool
+  // (not a channel_admin variant) because admin acts on an existing channelId and a union at the
+  // top level would not be a JSON-schema object. Guard: buddies-v2.test.ts "Buddy MCP creates a channel".
+  channel_create: buddyTool({
+    description:
+      'Create a public channel in this workspace with a name and a one-line purpose. Idempotent on key: a retried call returns the same channel. Post in it with `post {channel:{id}}`.',
+    writes: true,
+    schema: z.object({
+      name: z.string().trim().min(1).max(80),
+      purpose: z.string().trim().min(1).max(500),
+      key,
+    }),
+    handler: (deps, grant, input) =>
+      deps.core.createChannel(grant.author, { ...input, workspaceId: grant.workspaceId }),
+  }),
   channel_admin: buddyTool({
     description:
       'Rename, archive or restore a public channel. Its identity and history stay intact; archived channels remain readable.',

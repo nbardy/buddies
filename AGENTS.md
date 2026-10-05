@@ -21,7 +21,7 @@ server/src/ingest/*                → transcripts + list from the Rust ingest a
 server/src/auth/*                  → shared-secret gate (policy/gate/express)
 server/src/providers/*             → provider registry + catalog service (models from the generated catalog)
 server/src/buddies/*               → Buddy server over the crate: grants, mcp (one HTTP
-                                     endpoint, 12 tools), runner, channels, routes,
+                                     endpoint, 13 tools), runner, channels, routes,
                                      briefing, memory-review, policy-port (T08 seam)
 crates/unleashd-buddies/           → Buddies core (Rust, napi-rs addon): schema,
                                      authorize, posts/docs/tasks/runs
