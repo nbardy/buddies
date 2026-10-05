@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 
 const GIT_TIMEOUT_MS = 60_000;
 
-/** The branch an install tracks. Every install is a clone of nbardy/unleashd `main`. */
+/** The branch an install tracks. Every install is a clone of nbardy/buddies `main`. */
 export const UPSTREAM_BRANCH = 'main';
 
 export type Checkout =

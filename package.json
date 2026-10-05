@@ -45,7 +45,8 @@
     "tsx": "^4.7.0"
   },
   "bin": {
-    "unleashd": "./bin/unleashd.js"
+    "unleashd": "./bin/unleashd.js",
+    "buddies": "./bin/unleashd.js"
   },
   "files": ["bin", "tools/preflight.mjs", "server/dist", "client/dist"],
   "bundledDependencies": ["@nbardy/agent-cli", "@unleashd/buddies-core", "@unleashd/shared"],

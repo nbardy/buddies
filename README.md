@@ -1,47 +1,20 @@
-# unleashd
+# Buddies
 
-A SWARM FIRST ADE (Agent Development Environment) for running and managing agent swarms across Claude Code, Codex, Gemini, and OpenCode.
+> Vim is open source and it's still here decades later. Agent software should be too.
+
+**Free, open source, multi-harness agent team orchestration.** Run a team of AI agents (Buddies) with channels, tasks, threads and memory, on your own computer. Bring your own harness: Claude Code, Codex, Gemini and OpenCode work side by side. Private, mobile friendly, and yours to fork.
 
 <p align="center">
-  <video
-    src="https://raw.githubusercontent.com/nbardy/unleashd/main/docs/resources/unleashd.mp4"
-    poster="https://raw.githubusercontent.com/nbardy/unleashd/main/docs/screenshots/gallery.png"
-    controls
-    muted
-    playsinline
-    preload="metadata"
-    width="100%">
-  </video>
+  <img src="docs/screenshots/hero.png" alt="Buddies workspace home: channels, tasks and a team of Buddies" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/nbardy/unleashd/main/docs/resources/unleashd.mp4">Download the unleashd demo video</a>
+  <a href="https://raw.githubusercontent.com/nbardy/buddies/main/docs/resources/unleashd-2.mp4">Watch the launch video</a>
 </p>
 
-## The problem
-
-You run agents from different CLIs — Claude Code, Codex, Gemini, OpenCode. Each has its own terminal, its own session history, its own way of showing what happened. When you're running a swarm of agents across a codebase, there's no single place to see what's going on, steer the work, or review what was done.
-
-## What unleashd does
-
-Two things:
-
-**1. Visibility and organization across all your agents.**
-See every conversation from every CLI agent, organized by project. Search across all of them. No more flipping between terminals trying to remember which agent you asked to do what.
-
-**2. Launch and manage long-running agent swarms.**
-Swarms are treated as two things at once:
-
-- **Background jobs** — they run in a loop, autonomously, without interruption.
-- **Artifacts** — they can be inspected, discussed, and steered through conversation.
-
-Swarms continue without you. But you guide them. From the same chat interface, you can launch a swarm, check its progress, debug a failing worker, or review its output.
-
-### Swarm Analytics
-
-Track multi-agent swarm runs — iterations, merges, rejections, per-worker timelines.
-
-![Swarm Analytics](docs/screenshots/swarm-analytics.png)
+- **Free, private, open source.** Fork it, add features, run it locally.
+- **Bring your own harness.** Use the best agent CLI for each model.
+- **Teams with memory.** Buddies share channels and tasks and remember across sessions.
 
 ## Quick Start
 
@@ -50,7 +23,7 @@ Track multi-agent swarm runs — iterations, merges, rejections, per-worker time
 Install and run (the same command as the website):
 
 ```bash
-git clone --recursive https://github.com/nbardy/unleashd && cd unleashd && pnpm install && pnpm build && pnpm start
+git clone --recursive https://github.com/nbardy/buddies && cd buddies && pnpm install && pnpm build && pnpm start
 ```
 
 The install preflight checks Rust, Claude Code and Codex. If Rust is missing it runs
