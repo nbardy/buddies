@@ -20,6 +20,7 @@
     "local-domain:setup": "sudo bash tools/setup-domain.sh install",
     "local-domain:remove": "sudo bash tools/setup-domain.sh remove",
     "build": "node tools/dev-supervisor.mjs --task build",
+    "desktop:build": "node tools/desktop-build.mjs",
     "start": "node server/dist/server.js",
     "typecheck": "node tools/dev-supervisor.mjs --task typecheck",
     "test": "pnpm typecheck && pnpm test:package && pnpm test:server && pnpm test:client && pnpm test:dev-supervisor && pnpm test:tools && pnpm test:cli && pnpm test:api",
