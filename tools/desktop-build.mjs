@@ -96,7 +96,8 @@ function replacePackage(nodeModules, name) {
 function addonFiles(crateDir) {
   const manifest = JSON.parse(fs.readFileSync(path.join(crateDir, 'package.json'), 'utf8'));
   const binary = `${manifest.napi.binaryName}.node`;
-  if (!fs.existsSync(path.join(crateDir, binary))) fail(`${crateDir}/${binary} missing: pnpm addons`);
+  if (!fs.existsSync(path.join(crateDir, binary)))
+    fail(`${crateDir}/${binary} missing: pnpm addons`);
   return ['package.json', 'index.js', 'index.d.ts', binary];
 }
 
@@ -132,7 +133,8 @@ async function stage() {
   }
   const buddies = path.join(ROOT, 'crates', 'unleashd-buddies');
   const buddiesTarget = replacePackage(nodeModules, '@unleashd/buddies-core');
-  for (const file of addonFiles(buddies)) copy(path.join(buddies, file), path.join(buddiesTarget, file));
+  for (const file of addonFiles(buddies))
+    copy(path.join(buddies, file), path.join(buddiesTarget, file));
 
   const ingest = path.join(ROOT, 'crates', 'unleashd-ingest');
   const ingestCopy = path.join(STAGE, 'crates', 'unleashd-ingest');
@@ -168,22 +170,30 @@ async function smoke() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'buddies-desktop-smoke-'));
   const port = await sparePort();
   const nodeBin = path.join(STAGE, 'node', 'bin');
-  const child = spawn(path.join(nodeBin, 'node'), [path.join(STAGE, 'server', 'dist', 'server.js')], {
-    cwd: STAGE,
-    env: {
-      PATH: `${nodeBin}:/usr/bin:/bin`,
-      HOME: temp,
-      PORT: String(port),
-      UNLEASHD_HOST: '127.0.0.1',
-      UNLEASHD_DATA_DIR: path.join(temp, 'agent-viewer'),
-      BUDDIES_HOME: path.join(temp, 'buddies'),
-      UNLEASHD_BUDDIES_DB: path.join(temp, 'buddies', 'buddies-v3.sqlite'),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const child = spawn(
+    path.join(nodeBin, 'node'),
+    [path.join(STAGE, 'server', 'dist', 'server.js')],
+    {
+      cwd: STAGE,
+      env: {
+        PATH: `${nodeBin}:/usr/bin:/bin`,
+        HOME: temp,
+        PORT: String(port),
+        UNLEASHD_HOST: '127.0.0.1',
+        UNLEASHD_DATA_DIR: path.join(temp, 'agent-viewer'),
+        BUDDIES_HOME: path.join(temp, 'buddies'),
+        UNLEASHD_BUDDIES_DB: path.join(temp, 'buddies', 'buddies-v3.sqlite'),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }
+  );
   let output = '';
-  child.stdout.on('data', (chunk) => (output += chunk));
-  child.stderr.on('data', (chunk) => (output += chunk));
+  child.stdout.on('data', (chunk) => {
+    output += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    output += chunk;
+  });
   const exited = new Promise((resolve) => child.once('exit', resolve));
   const base = `http://127.0.0.1:${port}`;
   try {
@@ -191,7 +201,10 @@ async function smoke() {
     for (;;) {
       if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}:\n${output}`);
       if (Date.now() - started > 30_000) throw new Error(`no answer in 30s:\n${output}`);
-      const ok = await fetch(`${base}/api/provider-catalog`).then((r) => r.ok, () => false);
+      const ok = await fetch(`${base}/api/provider-catalog`).then(
+        (r) => r.ok,
+        () => false
+      );
       if (ok) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -204,7 +217,8 @@ async function smoke() {
     });
     if (created.status !== 201) throw new Error(`create workspace: HTTP ${created.status}`);
     const overview = await (await fetch(`${base}/api/buddies/overview`)).json();
-    if (!overview.some((workspace) => workspace.name === 'Smoke')) throw new Error('workspace not read back');
+    if (!overview.some((workspace) => workspace.name === 'Smoke'))
+      throw new Error('workspace not read back');
     console.log('ok payload: catalog, client, Buddies write + read');
   } finally {
     child.kill('SIGTERM');
@@ -231,7 +245,8 @@ async function main() {
     const full = path.join(DESKTOP, dir);
     if (!fs.existsSync(full)) continue;
     for (const entry of fs.readdirSync(full, { recursive: true })) {
-      if (/\.(app|dmg)$/.test(entry)) console.log(`${sizeOf(path.join(full, entry))}\t${dir}/${entry}`);
+      if (/\.(app|dmg)$/.test(entry))
+        console.log(`${sizeOf(path.join(full, entry))}\t${dir}/${entry}`);
     }
   }
 }
