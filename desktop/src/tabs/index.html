@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Buddies</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #002b36; color: #93a1a1; font: 13px -apple-system, sans-serif; }
+    body { display: flex; flex-direction: column; }
+    #bar { display: flex; gap: 4px; padding: 6px 8px; background: #073642; }
+    #bar button { background: none; border: 0; color: inherit; padding: 4px 12px; border-radius: 4px; cursor: pointer; }
+    #bar button[aria-selected="true"] { background: #002b36; color: #eee8d5; }
+    #views { flex: 1; position: relative; }
+    electrobun-webview { position: absolute; inset: 0; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="bar"></div>
+  <div id="views"></div>
+  <script src="index.js"></script>
+</body>
+</html>
