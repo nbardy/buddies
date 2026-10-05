@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import net, { type AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 
 // Regression (2026-09-30, two live SIGBUS deaths in buddies-core.node): the uploads GC read every
 // file under the app data and Buddies directories — the SQLite stores included — from a worker
@@ -53,6 +54,8 @@ test('the live backend keeps its SQLite locks through an uploads GC pass', async
     cwd: SERVER_DIR,
     env: {
       HOME: home,
+      ...NO_AUTO_INSTALL,
+      UNLEASHD_UPLOADS_GC_DELAY_MS: '0', // this guard needs a GC pass at boot
       PATH: `${bin}:/usr/bin:/bin`,
       UNLEASHD_DATA_DIR: data,
       BUDDIES_HOME: buddies,

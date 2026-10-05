@@ -130,6 +130,36 @@ SCRIPT
   }
 });
 
+// Regression (2026-10-05): every test that booted the real backend on a temp HOME was "first
+// boot" and installed rustup/codex/claude into it (466 MB each, detached, outliving the test), so
+// $TMPDIR filled the disk. UNLEASHD_AUTO_INSTALL=0 must probe without running ANY installer.
+test('auto-install off: missing tools are reported, no installer runs', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'deps-noinstall-'));
+  const bin = path.join(dir, 'bin');
+  await fs.mkdir(bin);
+  for (const name of ['brew', 'curl', 'npm', 'bash'])
+    await fs.writeFile(
+      path.join(bin, name),
+      `#!/bin/sh\necho ${name} >> "$HOME/attempts"\nexit 1\n`,
+      {
+        mode: 0o755,
+      }
+    );
+  const env = { PATH: bin, HOME: dir, UNLEASHD_AUTO_INSTALL: '0' };
+  const checks = createDependencyChecks(env, 1500, path.join(dir, 'setup'), 1500);
+  try {
+    await checks.refresh();
+    assert.deepEqual(
+      checks.snapshot().checks.map((c) => c.status),
+      ['missing', 'missing', 'missing']
+    );
+    await assert.rejects(fs.readFile(path.join(dir, 'attempts'), 'utf8'), { code: 'ENOENT' });
+  } finally {
+    checks.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 // Fresh-install trial 2026-10-05: with only Claude installed, an unpinned Buddy spawned the
 // hardcoded Codex (ENOENT). The agent is read from the real PATH on every request, so a
 // first-boot install that lands after startup is picked up without a restart, and a file that

@@ -1,5 +1,6 @@
 import { fork } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 /**
@@ -17,12 +18,21 @@ import path from 'node:path';
  * Any unreadable reference root or file aborts the run with no deletions: a reference we could not
  * read is a reference we cannot rule out.
  *
- * The scan reads every transcript (~10 GB here), so it runs off the event loop, at startup and
- * once a day (`startUploadsGc`).
+ * The scan reads every transcript (~10 GB here), so it runs off the event loop at low priority,
+ * once a day, measured from the LAST SUCCESSFUL pass (`startUploadsGc`). It used to run on every
+ * backend start too: stale entries are mostly kept (still referenced), so each restart re-proved
+ * the same answer with a full 10 GB read, 8+ minutes at ~100% CPU on a loaded machine, while the
+ * UI showed "Buddies is loading slowly" (2026-10-06). Guard: uploads-gc.test.ts 'restart'.
  */
 
 export const UPLOADS_RETENTION_MS = 30 * 24 * 60 * 60_000;
 const UPLOADS_GC_INTERVAL_MS = 24 * 60 * 60_000;
+/** The first pass waits this long after boot, so it never competes with startup. */
+export const UPLOADS_GC_FIRST_DELAY_MS = 10 * 60_000;
+const UPLOADS_GC_RETRY_MS = 60 * 60_000;
+// ingest.sqlite is a derived copy of the transcripts, which are scanned at their source: reading
+// it again only doubles the bytes (931 MB here).
+const DERIVED_STORE = /^ingest\.sqlite(-wal|-shm)?$/;
 const UPLOADS_GC_TASK = 'unleashd-uploads-gc' as const;
 const ALWAYS_KEPT = new Set(['channels']);
 const NEEDLES = ['uploads/', 'uploads\\/', 'uploads%2F', 'uploads%2f'].map((n) => Buffer.from(n));
@@ -121,7 +131,7 @@ async function collectReferences(
     }
     if (stat.isDirectory()) {
       for (const child of await fs.promises.readdir(target)) await walk(path.join(target, child));
-    } else if (stat.isFile()) {
+    } else if (stat.isFile() && !DERIVED_STORE.test(path.basename(target))) {
       await scanFile(target, names);
       files += 1;
     }
@@ -206,12 +216,47 @@ export function runUploadsGcInChild(options: UploadsGcOptions): Promise<UploadsG
   });
 }
 
-/** Startup pass plus one pass a day. The caller supplies the live inputs for each pass. */
-export function startUploadsGc(inputs: () => Promise<Omit<UploadsGcOptions, 'nowMs'>>): () => void {
-  let running = false;
+export interface UploadsGcSchedule {
+  /** Where the last successful pass is recorded, so a restart does not repeat it. */
+  stateFile: string;
+  firstDelayMs: number;
+}
+
+function readLastSuccessMs(stateFile: string): number | null {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    const at = (parsed as { lastSuccessMs?: unknown }).lastSuccessMs;
+    return typeof at === 'number' ? at : null;
+  } catch {
+    // No record, or an unreadable one: run the pass. That is the safe direction, it only costs a scan.
+    return null;
+  }
+}
+
+/** Wait before the next pass: a day after the last success, never sooner than the boot delay. */
+export function gcDelayMs(
+  lastSuccessMs: number | null,
+  nowMs: number,
+  firstDelayMs: number
+): number {
+  const due = lastSuccessMs === null ? nowMs : lastSuccessMs + UPLOADS_GC_INTERVAL_MS;
+  return Math.max(firstDelayMs, due - nowMs);
+}
+
+/** One pass a day, starting `firstDelayMs` after boot or a day after the last success. */
+// Pattern: fix-guard (docs/patterns.md#fix-guards): the schedule is persisted, never "on every start".
+export function startUploadsGc(
+  inputs: () => Promise<Omit<UploadsGcOptions, 'nowMs'>>,
+  schedule: UploadsGcSchedule
+): () => void {
+  let timer: NodeJS.Timeout | undefined;
+  let stopped = false;
+  const arm = (delayMs: number) => {
+    timer = setTimeout(() => void pass(), delayMs);
+    timer.unref();
+  };
   const pass = async () => {
-    if (running) return;
-    running = true;
+    let succeeded = false;
     try {
       const report = await runUploadsGcInChild({ ...(await inputs()), nowMs: Date.now() });
       const freed = report.deleted.reduce((sum, entry) => sum + entry.bytes, 0);
@@ -220,16 +265,18 @@ export function startUploadsGc(inputs: () => Promise<Omit<UploadsGcOptions, 'now
           `kept ${report.keptReferenced} referenced, ${report.keptRecent} recent; ` +
           `scanned ${report.scannedFiles} files`
       );
+      fs.writeFileSync(schedule.stateFile, JSON.stringify({ lastSuccessMs: Date.now() }));
+      succeeded = true;
     } catch (error) {
       console.warn('[uploads-gc] pass aborted, nothing deleted after the failure:', error);
-    } finally {
-      running = false;
     }
+    if (!stopped) arm(succeeded ? UPLOADS_GC_INTERVAL_MS : UPLOADS_GC_RETRY_MS);
   };
-  void pass();
-  const timer = setInterval(() => void pass(), UPLOADS_GC_INTERVAL_MS);
-  timer.unref();
-  return () => clearInterval(timer);
+  arm(gcDelayMs(readLastSuccessMs(schedule.stateFile), Date.now(), schedule.firstDelayMs));
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
 }
 
 type GcRequest = { task: typeof UPLOADS_GC_TASK; options: UploadsGcOptions };
@@ -244,6 +291,8 @@ if (process.argv[2] === UPLOADS_GC_TASK && process.send) {
   const onRequest = (message: Partial<GcRequest>) => {
     if (message.task !== UPLOADS_GC_TASK || !message.options) return;
     process.off('message', onRequest);
+    // A 10 GB read must never outrank the user's foreground work.
+    os.setPriority(os.constants.priority.PRIORITY_BELOW_NORMAL);
     runUploadsGc(message.options).then(
       (report) => reply({ ok: true, report }),
       (error: unknown) => reply({ ok: false, error: String((error as Error)?.stack ?? error) })

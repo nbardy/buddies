@@ -93,8 +93,10 @@ export function createDependencyChecks(
 
   // Record each attempt before spawning: crashes/restarts must not repeat installers.
   // Guard: first-boot installation regression in dependencies.test.ts.
+  // UNLEASHD_AUTO_INSTALL=0 turns installing off entirely (probes still run): a test backend on a
+  // temp HOME is always "first boot" and used to download rustup into it (server/test/fixtures/backend-env.ts).
   async function claimFirstBoot(id: DependencyCheck['id']) {
-    if (!setupDirectory || closed) return false;
+    if (!setupDirectory || closed || env.UNLEASHD_AUTO_INSTALL === '0') return false;
     await mkdir(setupDirectory, { recursive: true });
     try {
       await writeFile(path.join(setupDirectory, `${id}.attempted`), new Date().toISOString(), {

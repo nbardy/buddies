@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { runUploadsGc, runUploadsGcInChild } from '../src/uploads/gc';
+import { runUploadsGc, runUploadsGcInChild, startUploadsGc } from '../src/uploads/gc';
 
 const DAY = 24 * 60 * 60_000;
 const NOW = Date.parse('2026-09-25T12:00:00Z');
@@ -100,6 +100,64 @@ test('uploads GC deletes nothing when a reference root cannot be read', async (t
     assert.deepEqual(survivors(uploads), before);
   } finally {
     fs.chmodSync(locked, 0o755);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regression (2026-10-06): the GC ran at EVERY backend start. Stale entries are mostly kept (still
+// referenced), so each restart re-read ~10 GB of transcripts for nothing: 8+ minutes at ~100% CPU
+// while the UI said "Buddies is loading slowly". The schedule is now a day after the last SUCCESS.
+test('restart: no pass within a day of the last success, a pass once it is due', async () => {
+  const { root, uploads, transcripts } = fixture();
+  const stateFile = path.join(root, 'uploads-gc.json');
+  const inputs = async () => ({
+    uploadsDir: uploads,
+    referenceRoots: [transcripts, path.join(root, 'app')],
+    protectedNames: [],
+    maxAgeMs: 30 * DAY,
+  });
+  const recent = Date.now() - 60 * 60_000;
+  fs.writeFileSync(stateFile, JSON.stringify({ lastSuccessMs: recent }));
+  let stop = startUploadsGc(inputs, { stateFile, firstDelayMs: 0 });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.ok(survivors(uploads).includes('orphan-old'), 'ran a pass an hour after the last one');
+    assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).lastSuccessMs, recent);
+    stop();
+
+    fs.writeFileSync(stateFile, JSON.stringify({ lastSuccessMs: Date.now() - 25 * 60 * 60_000 }));
+    stop = startUploadsGc(inputs, { stateFile, firstDelayMs: 0 });
+    const deadline = Date.now() + 30_000;
+    while (survivors(uploads).includes('orphan-old') && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok(!survivors(uploads).includes('orphan-old'), 'no pass ran once it was due');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.ok(JSON.parse(fs.readFileSync(stateFile, 'utf8')).lastSuccessMs > recent);
+  } finally {
+    stop();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ingest.sqlite is a derived copy and is not scanned; any other store still is', async () => {
+  const { root, uploads, transcripts } = fixture();
+  const app = path.join(root, 'app');
+  makeEntry(uploads, 'only-in-ingest-copy', 90);
+  makeEntry(uploads, 'only-in-other-store', 90);
+  fs.writeFileSync(path.join(app, 'ingest.sqlite'), `${uploads}/only-in-ingest-copy/x.png`);
+  fs.writeFileSync(path.join(app, 'records.sqlite'), `${uploads}/only-in-other-store/x.png`);
+  try {
+    const report = await runUploadsGc({
+      uploadsDir: uploads,
+      referenceRoots: [transcripts, app],
+      protectedNames: [],
+      maxAgeMs: 30 * DAY,
+      nowMs: NOW,
+    });
+    const deleted = report.deleted.map((entry) => entry.name);
+    assert.ok(deleted.includes('only-in-ingest-copy'));
+    assert.ok(!deleted.includes('only-in-other-store'));
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
