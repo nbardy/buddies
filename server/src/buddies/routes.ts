@@ -151,7 +151,9 @@ const ChannelSchema = z
     key,
   })
   .strict();
-const RetrySchema = z.object({ config: ConversationConfigSchema }).strict();
+// buddyWrite includes `key`: rejecting it blocked every model retry before dispatch (2026-10-05).
+// The channel pair already coalesces queued/running retries; guard: keyed retry over owner HTTP.
+const RetrySchema = z.object({ config: ConversationConfigSchema, key }).strict();
 const NewDirectSchema = z
   .object({
     config: ConversationConfigSchema.optional(),

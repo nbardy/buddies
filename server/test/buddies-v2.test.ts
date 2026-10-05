@@ -1366,7 +1366,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
     assert.equal(w.turns[1].request.reasoningEffort, 'high');
     await until(() => reloaded.responding(w.general.id).length === 0, 'reloaded reply idle');
-    const retry = await http('POST', `/api/buddies/posts/${failed.id}/retry`, { config: explicit });
+    const retry = await http('POST', `/api/buddies/posts/${failed.id}/retry`, {
+      config: explicit,
+      key: 'retry-explicit',
+    });
     assert.equal(retry.status, 202, JSON.stringify(retry.body));
     await until(() => w.turns.length === 3, 'plain weekly-limit retry invokes');
     assert.equal(w.turns[2].request.model, 'gpt-6.1-sol');
@@ -1525,7 +1528,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
   }
 });
 
-test('a throwing reply gate leaves a retryable failure notice and can retry on the same harness', async () => {
+test('keyed retry over owner HTTP recovers a capacity-failed reply gate on the same harness', async () => {
   const w = await world();
   const { server, http } = await ownerHttp(w);
   try {
@@ -1544,7 +1547,9 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
     const thread = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
     await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
-    w.gate.error = new Error('Model is unavailable for codex: retired-model');
+    w.gate.error = new Error(
+      'gate run ended: error (Selected model is at capacity. Please try a different model.)'
+    );
     const trigger = await w.post(
       OWNER,
       { kind: 'id', id: w.general.id },
@@ -1562,12 +1567,16 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
       async () => (await thread()).find((p) => p.purpose === 'reply_failed'),
       'gate failure notice'
     );
-    assert.match(notice.body, /could not decide whether to reply.*retired-model/);
+    assert.match(notice.body, /could not decide whether to reply.*Selected model is at capacity/);
     const sol: ConversationConfig = {
       ...createDefaultConversationConfig('codex'),
       model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
     };
-    const retry = await http('POST', `/api/buddies/posts/${notice.id}/retry`, { config: sol });
+    // Match buddyWrite's wire body: the old test omitted its automatically added key.
+    const retry = await http('POST', `/api/buddies/posts/${notice.id}/retry`, {
+      config: sol,
+      key: 'retry-capacity-with-sol',
+    });
     assert.equal(retry.status, 202, JSON.stringify(retry.body));
     const answer = await until(
       async () =>
