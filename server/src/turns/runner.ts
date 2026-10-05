@@ -1,6 +1,10 @@
-import type { ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
-import type { ExecuteCommandRequest, UnifiedAgentEvent, executeCommand } from '@nbardy/agent-cli';
+import type {
+  ExecuteCommandRequest,
+  ExecutionHandle,
+  UnifiedAgentEvent,
+  executeCommand,
+} from '@nbardy/agent-cli';
 import type {
   ContentPart,
   Message,
@@ -25,6 +29,8 @@ import type {
 } from '../observability';
 import { type SwarmObservers, watchSwarmRuns } from '../swarm';
 import { type BackgroundWait, backgroundWaitFor } from './background-wait';
+import type { Effect, Execution, ExecutionOutcome, Phase, StopIntent } from './execution-state';
+import type { ExecutionJournals, TurnOwner } from './executions';
 import type { TurnInput } from './input';
 import type { TurnPolicy } from './policy';
 import type { QueueEntry, TurnQueue } from './queue';
@@ -53,7 +59,7 @@ type AttemptState = 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
 const VERBOSE = process.env.VERBOSE === '1' || process.argv.includes('--verbose');
 const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 const ATTEMPT_ACTIVITY_INTERVAL_MS = 5_000;
-const STOP_KILL_GRACE_MS = 3000;
+const SETTLE_RETRY_MS = 5_000;
 
 /** The conversation as one turn sees it. */
 export interface TurnRunnerHost {
@@ -63,7 +69,8 @@ export interface TurnRunnerHost {
   sessionId: string;
   messages: Message[];
   subAgents: SubAgent[];
-  process: ChildProcess | null;
+  /** The live execution (spawned here or adopted): its journal, not a child pipe. */
+  process: ExecutionHandle | null;
   isRunning: boolean;
   isStreaming: boolean;
   providerUsage: ProviderTurnUsage | null;
@@ -104,6 +111,8 @@ export interface TurnRunnerPorts {
   ): Promise<void>;
   createSessionId(): string;
   executeTurn: typeof executeCommand;
+  /** Where each turn's execution is journaled, so a replacement backend can adopt it. */
+  executions: ExecutionJournals;
   turnAttempts: RuntimeTurnAttemptObserver;
   swarmObservers: SwarmObservers;
 }
@@ -122,7 +131,6 @@ export type TurnBroadcast =
 export class TurnRunner {
   // Per-run token: every late event/completion from a replaced handle is ignored.
   private runToken = 0;
-  private stopTurn: ((signal?: NodeJS.Signals) => void) | null = null;
   private activeDrain: Promise<void> | null = null;
   private stderrBuffer = '';
   // Whether assistant text or a tool event reached the unified stream.
@@ -135,7 +143,8 @@ export class TurnRunner {
   private terminalCauseHint: TurnTerminalCause | null = null;
   // The provider's own error text, preferred over the generic terminal message.
   private providerFailureMessage: string | null = null;
-  private stopCause: 'user_stop' | 'server_restart' | null = null;
+  // The live execution's journal and phase (execution-state.ts); null between turns.
+  private execution: Execution | null = null;
   private processStartTime = 0;
   private lastAttemptActivityAt = 0;
   private lastAttemptActivitySource: TurnActivitySource | null = null;
@@ -205,7 +214,6 @@ export class TurnRunner {
   }
 
   finishAttempt(state: AttemptState, terminalCause: TurnTerminalCause): void {
-    this.host.policy.attemptFinished(terminalCause);
     if (!this.activeAttemptId) return;
     this.ports.turnAttempts.terminal({
       attemptId: this.activeAttemptId,
@@ -217,12 +225,6 @@ export class TurnRunner {
     this.activeAttemptId = null;
     this.terminalCauseHint = null;
     this.providerFailureMessage = null;
-    this.stopCause = null;
-  }
-
-  /** A stop's terminal record: a restart interrupts, an owner stop cancels. */
-  private finishStopped(cause: 'user_stop' | 'server_restart'): void {
-    this.finishAttempt(cause === 'server_restart' ? 'interrupted' : 'cancelled', cause);
   }
 
   cancelQueuedAttempt(entry: QueueEntry): void {
@@ -248,6 +250,8 @@ export class TurnRunner {
     forkSourceSessionId: string | undefined;
     resume: boolean;
     input: TurnInput;
+    /** The user row this turn appended (history text and time), kept for adoption. */
+    userMessage: { text: string; timestamp: Date };
   }): void {
     const host = this.host;
     if (host.process || host.isRunning) {
@@ -256,10 +260,6 @@ export class TurnRunner {
     }
     const runToken = ++this.runToken;
 
-    // This session is now being handled locally; clear any stale external flags.
-    this.ports.clearExternalRunningStatus(host.id, host.sessionId);
-    this.ports.clearLocalCompletionSuppression(host.id, host.sessionId);
-
     const forking = !!turn.forkSourceSessionId;
     const executionMode = forking ? 'fork' : turn.resume ? 'resume' : 'fresh';
     console.log(
@@ -267,20 +267,8 @@ export class TurnRunner {
     );
     console.log(`[${host.id}] Message: "${turn.content.substring(0, 50)}"`);
 
-    this.stderrBuffer = '';
-    this.turnMessageStart = host.messages.length;
-    this.sawMeaningfulOutput = false;
-    this.completedCleanly = false;
-    this.sealed = false;
-    this.terminalCauseHint = null;
-    this.providerFailureMessage = null;
-    this.stopCause = null;
-    this.processStartTime = Date.now();
-    this.lastAttemptActivityAt = 0;
-    this.lastAttemptActivitySource = null;
-    this.lastObservedActivity = null;
-    this.subAgentFold = subAgentFoldFor(turn.config.provider);
-    this.backgroundWait = backgroundWaitFor(turn.config.provider);
+    this.beginTurnState(turn.config.provider, Date.now());
+    const attemptId = this.activeAttemptId ?? crypto.randomUUID();
     if (this.activeAttemptId) {
       this.ports.turnAttempts.starting(this.activeAttemptId);
       this.ports.turnAttempts.activity(
@@ -296,9 +284,22 @@ export class TurnRunner {
       );
     }
 
-    let handle: ReturnType<typeof executeCommand>;
+    let handle: ExecutionHandle;
+    let execution: Execution;
     try {
       const extras = host.policy.startTurn(turn.input, turn.config);
+      // Owner and `running` phase are on disk before the provider exists (turns/executions.ts).
+      execution = this.ports.executions.forTurn({
+        conversationId: host.id,
+        attemptId,
+        provider: turn.config.provider,
+        userMessage: {
+          text: turn.userMessage.text,
+          timestamp: turn.userMessage.timestamp.toISOString(),
+        },
+        startedAt: new Date(this.processStartTime).toISOString(),
+        policy: host.policy.adoptionRecord(),
+      });
       // One request shape for every harness; the cast covers agent-cli's `never` effort typing
       // on harnesses without effort (docs/turn-lifecycle.md#one-request-shape).
       handle = this.ports.executeTurn({
@@ -310,7 +311,7 @@ export class TurnRunner {
         resumeSessionId: turn.resume ? host.sessionId : undefined,
         forkSessionId: forking ? turn.forkSourceSessionId : undefined,
         yolo: true,
-        detached: true,
+        journalDir: execution.dir,
         debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
         reasoningEffort: turn.config.reasoningEffort,
         ...extras,
@@ -326,13 +327,90 @@ export class TurnRunner {
     }
 
     host.policy.spawned({
-      attemptId: this.activeAttemptId ?? crypto.randomUUID(),
+      attemptId,
       messageStart: Math.max(0, host.messages.length - 1),
     });
-    host.process = handle.child;
-    this.stopTurn = handle.stop;
-    host.isRunning = true;
+    // Spawn only: an adopted attempt is already running in the journal of the boot that spawned it.
     if (this.activeAttemptId) this.ports.turnAttempts.running(this.activeAttemptId, host.sessionId);
+    this.follow(handle, runToken, execution);
+  }
+
+  /**
+   * A replacement backend takes over a turn another backend spawned, in the phase its journal
+   * holds (execution-state.ts ADOPTIONS decided `effects`). The overlay already holds the turn's
+   * user row; the journal replays from byte 0 through the same fold, so this backend ends up
+   * where a never-restarted one would be. A `stopping` turn is sealed first, as its live stop
+   * sealed it, so nothing it wrote after the stop folds in. Guards: execution-adoption.test.ts
+   * (the kill-grace and drain-to-settle crash tests) and execution-crash-checker.test.ts.
+   */
+  // Pattern: persisted-state-machine (docs/patterns.md#persisted-state-machine)
+  adopt(owner: TurnOwner, handle: ExecutionHandle, phase: Phase, effects: readonly Effect[]): void {
+    const host = this.host;
+    const runToken = ++this.runToken;
+    console.log(`[${host.id}] Adopting ${phase.t} ${owner.provider} turn (pid ${handle.pid})`);
+    const execution: Execution = { dir: handle.journalDir, phase };
+    this.activeAttemptId = owner.attemptId;
+    this.ports.turnAttempts.activity(
+      owner.attemptId,
+      {
+        source: 'runtime',
+        providerEventType: 'execution.adopted',
+        providerEventSource: 'unleashd.runtime',
+      },
+      host.sessionId
+    );
+    ADOPTED[phase.t](this, owner, phase as never, () => this.follow(handle, runToken, execution));
+    void this.perform(effects, handle, execution);
+  }
+
+  /** Clocks from the turn's own start: a live turn's runtime budget is not renewed per backend. */
+  adoptRunning(owner: TurnOwner, follow: () => void): void {
+    this.beginTurnState(owner.provider, Date.parse(owner.startedAt));
+    follow();
+  }
+
+  /** A turn the old backend was stopping: sealed again, and a timeout's notice shown again. */
+  adoptStopping(owner: TurnOwner, intent: StopIntent, follow: () => void): void {
+    this.beginTurnState(owner.provider, Date.parse(owner.startedAt));
+    follow();
+    this.clearWatchdogs();
+    this.sealed = true;
+    STOP_SHOWN[intent.t](this, intent as never);
+  }
+
+  /** Its outcome is on disk: a clock that ran out during the gap must not seal its replay. */
+  adoptEnded(owner: TurnOwner, follow: () => void): void {
+    this.beginTurnState(owner.provider, Date.now());
+    follow();
+  }
+
+  /** Per-turn state, fresh for a spawn or an adoption. */
+  private beginTurnState(provider: ResolvedExecutionConfig['provider'], startedAt: number): void {
+    const host = this.host;
+    // This session is now being handled locally; clear any stale external flags.
+    this.ports.clearExternalRunningStatus(host.id, host.sessionId);
+    this.ports.clearLocalCompletionSuppression(host.id, host.sessionId);
+    this.stderrBuffer = '';
+    this.turnMessageStart = host.messages.length;
+    this.sawMeaningfulOutput = false;
+    this.completedCleanly = false;
+    this.sealed = false;
+    this.terminalCauseHint = null;
+    this.providerFailureMessage = null;
+    this.processStartTime = startedAt;
+    this.lastAttemptActivityAt = 0;
+    this.lastAttemptActivitySource = null;
+    this.lastObservedActivity = null;
+    this.subAgentFold = subAgentFoldFor(provider);
+    this.backgroundWait = backgroundWaitFor(provider);
+  }
+
+  /** The one read path: a spawned and an adopted turn are both followed from their journal. */
+  private follow(handle: ExecutionHandle, runToken: number, execution: Execution): void {
+    const host = this.host;
+    host.process = handle;
+    this.execution = execution;
+    host.isRunning = true;
     host.emit('buddy-turn-started');
     this.startWatchdogs();
     this.broadcastStatus();
@@ -348,21 +426,93 @@ export class TurnRunner {
 
     const turnDrain = handle.completed
       .then(async (completion) => {
-        if (runToken !== this.runToken) return;
         // Child exit is not event-stream EOF: settle only after both join
         // (docs/turn-lifecycle.md#one-terminal-path).
-        await eventConsumption;
-        if (runToken !== this.runToken) return;
-        await this.settle(completion, fold);
+        if (runToken === this.runToken) await eventConsumption;
+        // Superseded by a reset: the execution is `abandoned`, and its drain only removes it.
+        if (runToken !== this.runToken)
+          return this.perform(
+            this.ports.executions.step(execution, { t: 'drained', observed: crashed(completion) }),
+            handle,
+            execution
+          );
+        await this.drained(completion, fold, handle, execution);
       })
       .catch((err: unknown) => {
         if (runToken !== this.runToken) return;
-        this.completionBroke(err);
+        return this.completionBroke(err, handle, execution);
       });
     this.activeDrain = turnDrain;
     void turnDrain.finally(() => {
       if (this.activeDrain === turnDrain) this.activeDrain = null;
     });
+  }
+
+  /**
+   * Run a step's effects, in order, after `ExecutionJournals.step` persisted its phase. Each
+   * handler is one straight path (EFFECTS); only `settle` is asynchronous.
+   */
+  perform(
+    effects: readonly Effect[],
+    handle: ExecutionHandle,
+    execution: Execution
+  ): Promise<void> {
+    return Promise.all(
+      effects.map((effect) => EFFECTS[effect.t](this, effect as never, handle, execution))
+    ).then(() => undefined);
+  }
+
+  /** Effect `signal`: SIGTERM the group now, SIGKILL it after the grace. */
+  signal(handle: ExecutionHandle): void {
+    handle.stop('SIGTERM');
+    escalateKill(handle, TURN_TIMEOUT_KILL_GRACE_MS, () =>
+      console.warn(`[${this.host.id}] Process did not exit after SIGTERM, sending SIGKILL`)
+    );
+  }
+
+  /**
+   * Effect `settle`: the attempt record and the turn-end events, then the run's settle, awaited.
+   * Only once it landed is the execution `settled` and its journal removed; a crash before that
+   * leaves it `ended(outcome)` and the next backend settles that same outcome (2b).
+   */
+  async settleOutcome(
+    outcome: ExecutionOutcome,
+    handle: ExecutionHandle,
+    execution: Execution
+  ): Promise<void> {
+    const host = this.host;
+    SETTLED[outcome.t](this, outcome as never);
+    host.processQueue();
+    for (;;) {
+      try {
+        await host.policy.settle(outcome);
+        break;
+      } catch (error) {
+        // Transient (a busy store): `ended` stays on disk while this backend keeps trying.
+        console.error(`[${host.id}] run settle failed; retrying:`, error);
+        await new Promise((resolve) => setTimeout(resolve, SETTLE_RETRY_MS).unref());
+      }
+    }
+    await this.perform(this.ports.executions.step(execution, { t: 'landed' }), handle, execution);
+  }
+
+  revokeGrant(): void {
+    this.host.policy.revoke();
+  }
+
+  armDeadline(): void {
+    this.host.policy.armDeadline();
+  }
+
+  /** The attempt's terminal record and the turn-end event every listener awaits. */
+  finishWith(state: AttemptState, cause: TurnTerminalCause, event: string, detail: string): void {
+    this.finishAttempt(state, cause);
+    this.host.emit(event, detail);
+  }
+
+  removeJournal(execution: Execution): void {
+    if (this.execution === execution) this.execution = null;
+    this.ports.executions.remove(execution.dir);
   }
 
   // --- event fold (called by EventFold) ----------------------------------------
@@ -413,6 +563,9 @@ export class TurnRunner {
       this.ports.turnAttempts.activity(this.activeAttemptId, activity, this.host.sessionId);
     }
     this.watchdog.note(event);
+    // The same signal renews a Buddy run's lease: a live bridge means a live holder (lease ≠
+    // deadline; see BuddyTurnPolicy.bridgeAlive).
+    this.host.policy.bridgeAlive();
     this.ports.swarmObservers.poke(this.host.workingDirectory);
   }
 
@@ -567,14 +720,16 @@ export class TurnRunner {
 
   // --- drain -------------------------------------------------------------------------
 
-  private async settle(
-    completion: {
-      exitCode: number | null;
-      signal: NodeJS.Signals | null;
-      sessionId: string;
-      reason: CompletionReason;
-    },
-    fold: EventFold
+  /**
+   * The process ended and every event folded. Show it (in memory), then step `drained` with what
+   * the stream showed: the transition decides the outcome (a stop's intent overrides the stream)
+   * and persists `ended(outcome)` BEFORE the settle effect runs.
+   */
+  private async drained(
+    completion: Completion,
+    fold: EventFold,
+    handle: ExecutionHandle,
+    execution: Execution
   ): Promise<void> {
     const host = this.host;
     const { exitCode, signal, sessionId, reason } = completion;
@@ -599,25 +754,24 @@ export class TurnRunner {
     console.log(
       `[${host.id}] Process closed with code ${exitCode} signal=${signal ?? 'none'} (reason=${reason}) after ${durationMs}ms`
     );
-    if (this.completedCleanly) {
-      this.settleCleanStream(completion, fold);
-      return;
-    }
-    this.settleCrash(completion, durationMs);
+    const observed = this.completedCleanly
+      ? this.showCleanEnd(completion, fold)
+      : this.showCrash(completion, durationMs);
+    await this.perform(
+      this.ports.executions.step(execution, { t: 'drained', observed }),
+      handle,
+      execution
+    );
   }
 
   /** turn.complete (or a timeout) already closed the stream: release ownership. */
-  private settleCleanStream(
-    completion: { exitCode: number | null; reason: CompletionReason },
-    fold: EventFold
-  ): void {
+  private showCleanEnd(completion: Completion, fold: EventFold): ExecutionOutcome {
     const host = this.host;
-    host.policy.revoke();
     this.detachProcess();
     this.ports.clearExternalRunningStatus(host.id, host.sessionId);
     this.ports.markLocalCompletionSuppression(host.id, host.sessionId);
     if (host.turnQueue.finishHead()) host.broadcastQueue();
-    const completionFailure =
+    const failure =
       this.providerFailureMessage ??
       fold.streamError?.message ??
       fold.completionError ??
@@ -626,51 +780,30 @@ export class TurnRunner {
         : this.terminalCauseHint === 'provider_error'
           ? 'Provider reported an error'
           : null);
-    if (completionFailure) {
-      if (this.stopCause) this.finishStopped(this.stopCause);
-      else
-        this.finishAttempt(
-          'failed',
-          this.terminalCauseHint === 'out_of_tokens' ? 'out_of_tokens' : 'provider_error'
-        );
-      host.emit('buddy-turn-failed', completionFailure);
-    } else {
-      // Review is enqueued before listeners or processQueue can start another turn.
-      if (completion.reason === 'success' && completion.exitCode === 0 && !this.stopCause) {
-        host.policy.reviewCompleted(host.messages);
-      }
-      this.finishAttempt('succeeded', 'provider_complete');
-      host.emit(
-        'buddy-turn-complete',
-        host.messages
-          .slice(this.turnMessageStart)
-          .filter((message) => message.role === 'assistant')
-          .map((message) => bodyText(message.body))
-          .join('')
-      );
-    }
-    host.processQueue();
+    if (failure)
+      return {
+        t: 'failed',
+        cause: this.terminalCauseHint === 'out_of_tokens' ? 'out_of_tokens' : 'provider_error',
+        detail: failure,
+      };
+    // Review is enqueued before listeners or processQueue can start another turn. Not after a
+    // stop or timeout (sealed): that outcome is the stop's, never a completion.
+    if (completion.reason === 'success' && completion.exitCode === 0 && !this.sealed)
+      host.policy.reviewCompleted(host.messages);
+    return {
+      t: 'complete',
+      text: host.messages
+        .slice(this.turnMessageStart)
+        .filter((message) => message.role === 'assistant')
+        .map((message) => bodyText(message.body))
+        .join(''),
+    };
   }
 
   /** The process ended without turn.complete: crash, kill, OOM or a silent exit. */
-  private settleCrash(
-    completion: { exitCode: number | null; reason: CompletionReason },
-    durationMs: number
-  ): void {
+  private showCrash(completion: Completion, durationMs: number): ExecutionOutcome {
     const host = this.host;
     const { exitCode, reason } = completion;
-    if (reason === 'killed' && this.stopCause) {
-      this.finishStopped(this.stopCause);
-    } else if (reason === 'out_of_tokens' || this.terminalCauseHint === 'out_of_tokens') {
-      this.finishAttempt('failed', 'out_of_tokens');
-    } else if (this.terminalCauseHint === 'provider_error') {
-      this.finishAttempt('failed', 'provider_error');
-    } else if (reason === 'killed') {
-      this.finishAttempt('failed', 'process_killed');
-    } else {
-      this.finishAttempt('failed', 'process_exit');
-    }
-
     const systemMessage = crashMessage(completion, stderrSnippet(this.stderrBuffer), {
       sawOutput: this.sawMeaningfulOutput,
       durationMs,
@@ -690,58 +823,66 @@ export class TurnRunner {
     host.isRunning = false;
     this.detachProcess();
     this.releaseRunFlags();
-    host.policy.ended(
-      reason === 'killed' ? { t: 'cancelled', detail: reason } : { t: 'failed', detail: reason }
-    );
-    host.emit('buddy-turn-failed', reason);
     if (host.turnQueue.finishHead()) host.broadcastQueue();
-    host.processQueue();
+    const cause: TurnTerminalCause =
+      reason === 'out_of_tokens' || this.terminalCauseHint === 'out_of_tokens'
+        ? 'out_of_tokens'
+        : this.terminalCauseHint === 'provider_error'
+          ? 'provider_error'
+          : crashed(completion).cause;
+    return { t: 'failed', cause, detail: reason };
   }
 
-  /** The completion promise itself rejected. */
-  private completionBroke(err: unknown): void {
+  /** The completion promise itself rejected: the turn ended without a known exit. */
+  private completionBroke(
+    err: unknown,
+    handle: ExecutionHandle,
+    execution: Execution
+  ): Promise<void> {
     const host = this.host;
     this.clearWatchdogs();
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[${host.id}] Process completion error: ${message}`);
-    this.finishAttempt('failed', 'process_exit');
     this.surfaceError(normalizeProviderErrorMessage(message));
     host.isStreaming = false;
     host.isRunning = false;
     this.detachProcess();
     this.broadcastStatus();
-    host.policy.ended({ t: 'failed', detail: message });
-    host.emit('buddy-turn-failed', message);
-    if (host.turnQueue.length === 0) return;
-    const removed = host.turnQueue.length;
-    for (const entry of host.turnQueue.clearAll()) this.cancelQueuedAttempt(entry);
-    console.warn(
-      `[${host.id}] Cleared ${removed} pending message(s) due to process error to prevent retry loops.`
+    if (host.turnQueue.length > 0) {
+      const removed = host.turnQueue.length;
+      for (const entry of host.turnQueue.clearAll()) this.cancelQueuedAttempt(entry);
+      console.warn(
+        `[${host.id}] Cleared ${removed} pending message(s) due to process error to prevent retry loops.`
+      );
+      host.broadcastQueue();
+    }
+    const observed: ExecutionOutcome = { t: 'failed', cause: 'process_exit', detail: message };
+    return this.perform(
+      this.ports.executions.step(execution, { t: 'drained', observed }),
+      handle,
+      execution
     );
-    host.broadcastQueue();
   }
 
   // --- stop, reset, timeout ----------------------------------------------------------
 
-  /** Stop the live process; the close handler finishes the turn. */
-  stop(reason: 'user_stop' | 'server_restart'): void {
-    const host = this.host;
+  /**
+   * An owner Stop. `stopping` is on disk before the grant is revoked and the group signalled, so
+   * a backend that dies inside the kill grace leaves a turn the next one signals again and never
+   * adopts as live (2a). The drain finishes the turn: settle clears isRunning after exit, so
+   * processQueue cannot start while the old process lives (start()'s guard would drop the message).
+   */
+  stop(): void {
     this.clearWatchdogs();
-    const proc = host.process;
-    if (!proc) return;
+    const proc = this.host.process;
+    const execution = this.execution;
+    if (!proc || !execution) return;
     this.sealed = true;
-    this.stopCause = reason;
-    if (this.activeAttemptId) {
-      this.ports.turnAttempts.stopping(this.activeAttemptId);
-      if (reason === 'server_restart') this.finishStopped(reason);
-    }
-    const stopTurn = this.stopTurn;
-    // Never clear isRunning here: settle does, after exit, so processQueue cannot
-    // start while the old process lives (start()'s guard would drop the message).
-    stopTurn?.('SIGTERM');
-    host.policy.ended({ t: 'cancelled' });
-    escalateKill(proc, stopTurn, STOP_KILL_GRACE_MS, () =>
-      console.warn(`[${host.id}] Process did not exit after SIGTERM, sending SIGKILL`)
+    if (this.activeAttemptId) this.ports.turnAttempts.stopping(this.activeAttemptId);
+    void this.perform(
+      this.ports.executions.step(execution, { t: 'stop', intent: { t: 'user_stop' } }),
+      proc,
+      execution
     );
   }
 
@@ -751,14 +892,13 @@ export class TurnRunner {
     this.clearWatchdogs();
     this.providerUsageDirty = false;
     const proc = host.process;
-    if (!proc) return;
-    const stopTurn = this.stopTurn;
+    const execution = this.execution;
+    if (!proc || !execution) return;
     this.finishAttempt('interrupted', 'process_killed');
     this.runToken += 1;
-    stopTurn?.('SIGTERM');
-    escalateKill(proc, stopTurn, TURN_TIMEOUT_KILL_GRACE_MS, () =>
-      console.warn(`[${host.id}] Reset process did not exit after SIGTERM, sending SIGKILL`)
-    );
+    // `abandoned` first: a crash before it exits must not let the next backend adopt it beside
+    // the fresh turn that replaces it (execution-state.ts ADOPTIONS discards it).
+    void this.perform(this.ports.executions.step(execution, { t: 'abandon' }), proc, execution);
     this.detachProcess();
     host.isStreaming = false;
     host.isRunning = false;
@@ -766,28 +906,39 @@ export class TurnRunner {
   }
 
   /**
-   * A watchdog or run deadline expired. The user-visible turn ends now, as
-   * the timeout's own terminal cause (max_runtime_timeout for a deadline,
-   * never user_stop); ownership still waits for the joined drain.
+   * A watchdog or run deadline expired. The intent is on disk before the signal, with its exact
+   * message, so an adopting backend ends the turn the same way (2a). The user-visible turn ends
+   * now, as the timeout's own terminal cause (max_runtime_timeout for a deadline, never
+   * user_stop); the run settles at the joined drain.
    */
   timeout(kind: TurnTimeoutKind): void {
     const host = this.host;
     const proc = host.process;
-    if (!proc || !host.isRunning) return;
-    host.policy.revoke();
+    const execution = this.execution;
+    if (!proc || !execution || !host.isRunning || this.sealed) return;
     const idle = this.watchdog.idle();
-    const timeout = describeTurnTimeout(kind, {
-      ...idle,
-      sawMeaningfulOutput: this.sawMeaningfulOutput,
-    });
+    const intent: StopIntent = {
+      t: 'timeout',
+      ...describeTurnTimeout(kind, { ...idle, sawMeaningfulOutput: this.sawMeaningfulOutput }),
+    };
     const lastActivity = this.lastObservedActivity;
     console.error(
-      `[${host.id}] ${timeout.message} | timeoutKind=${kind} terminalCause=${timeout.terminalCause} sawMeaningfulOutput=${this.sawMeaningfulOutput} elapsed=${idle.elapsedSeconds}s bridgeIdle=${idle.bridgeIdleSeconds}s providerIdle=${idle.providerIdleSeconds}s lastActivitySource=${lastActivity?.source ?? 'none'} lastProviderEvent=${lastActivity?.providerEventType ?? 'none'} stderr=${this.stderrBuffer.length > 0 ? 'yes' : 'no'}`
+      `[${host.id}] ${intent.message} | timeoutKind=${kind} terminalCause=${intent.terminalCause} sawMeaningfulOutput=${this.sawMeaningfulOutput} elapsed=${idle.elapsedSeconds}s bridgeIdle=${idle.bridgeIdleSeconds}s providerIdle=${idle.providerIdleSeconds}s lastActivitySource=${lastActivity?.source ?? 'none'} lastProviderEvent=${lastActivity?.providerEventType ?? 'none'} stderr=${this.stderrBuffer.length > 0 ? 'yes' : 'no'}`
     );
+    void this.perform(
+      this.ports.executions.step(execution, { t: 'stop', intent }),
+      proc,
+      execution
+    );
+    this.showTimeout(intent);
+  }
+
+  /** A timed-out turn's end, shown now (live) or again (adopted while `stopping`). */
+  showTimeout(timeout: Extract<StopIntent, { t: 'timeout' }>): void {
+    const host = this.host;
     this.clearWatchdogs();
     this.surfaceError(timeout.message);
     this.finishAttempt('failed', timeout.terminalCause);
-
     const completedAt = new Date();
     this.closeAssistantMessage(completedAt, 'error');
     failRunningSubAgents(host.subAgents, completedAt);
@@ -797,17 +948,9 @@ export class TurnRunner {
     host.isRunning = false;
     this.releaseRunFlags();
     host.publishTurnEnd();
-    // Settle takes the fast path (no duplicate message); sealed drops late answers.
+    // The drain takes the clean path (no duplicate message); sealed drops late answers.
     this.sealed = true;
     this.completedCleanly = true;
-    host.policy.ended({ t: 'failed', detail: timeout.message });
-    host.emit('buddy-turn-failed', timeout.message);
-
-    const stopTurn = this.stopTurn;
-    stopTurn?.('SIGTERM');
-    escalateKill(proc, stopTurn, TURN_TIMEOUT_KILL_GRACE_MS, () =>
-      console.warn(`[${host.id}] Timeout kill escalation: sending SIGKILL`)
-    );
   }
 
   clearWatchdogs(): void {
@@ -817,7 +960,7 @@ export class TurnRunner {
   }
 
   private startWatchdogs(): void {
-    this.watchdog.start();
+    this.watchdog.start(this.processStartTime);
     this.stopSwarmWatch?.();
     this.stopSwarmWatch = watchSwarmRuns(
       this.ports.swarmObservers,
@@ -832,7 +975,6 @@ export class TurnRunner {
 
   private detachProcess(): void {
     this.host.process = null;
-    this.stopTurn = null;
   }
 
   // The local run ended: clear stale external-running flags and suppress
@@ -850,6 +992,77 @@ export class TurnRunner {
     last.completionReason = reason;
   }
 }
+
+type Completion = {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  sessionId: string;
+  reason: CompletionReason;
+};
+
+/** A process end read from its completion alone (a crash, or a reset turn's drain). */
+function crashed(completion: Completion): Extract<ExecutionOutcome, { t: 'failed' }> {
+  const cause = completion.reason === 'killed' ? 'process_killed' : 'process_exit';
+  return { t: 'failed', cause, detail: completion.reason };
+}
+
+// One straight-line handler per case; the dispatchers above only index these tables.
+type EffectHandlers = {
+  readonly [E in Effect as E['t']]: (
+    runner: TurnRunner,
+    effect: E,
+    handle: ExecutionHandle,
+    execution: Execution
+  ) => void | Promise<void>;
+};
+const EFFECTS: EffectHandlers = {
+  revoke_grant: (runner) => runner.revokeGrant(),
+  signal: (runner, _, handle) => runner.signal(handle),
+  arm_deadline: (runner) => runner.armDeadline(),
+  settle: (runner, { outcome }, handle, execution) =>
+    runner.settleOutcome(outcome, handle, execution),
+  remove: (runner, _, __, execution) => runner.removeJournal(execution),
+};
+
+/** How an adopted turn resumes, by the phase on disk (abandoned and settled are discarded). */
+const ADOPTED: {
+  readonly [P in Phase as P['t']]: (
+    runner: TurnRunner,
+    owner: TurnOwner,
+    phase: P,
+    follow: () => void
+  ) => void;
+} = {
+  running: (runner, owner, _, follow) => runner.adoptRunning(owner, follow),
+  stopping: (runner, owner, { intent }, follow) => runner.adoptStopping(owner, intent, follow),
+  ended: (runner, owner, _, follow) => runner.adoptEnded(owner, follow),
+  abandoned: () => {
+    throw new Error('an abandoned execution is discarded, never adopted');
+  },
+  settled: () => {
+    throw new Error('a settled execution is discarded, never adopted');
+  },
+};
+
+/** What an adopted `stopping` turn shows again: a live stop showed nothing until its drain. */
+const STOP_SHOWN: {
+  readonly [I in StopIntent as I['t']]: (runner: TurnRunner, intent: I) => void;
+} = {
+  user_stop: () => undefined,
+  timeout: (runner, intent) => runner.showTimeout(intent),
+};
+
+/** The attempt record and turn-end event of each outcome. */
+const SETTLED: {
+  readonly [O in ExecutionOutcome as O['t']]: (runner: TurnRunner, outcome: O) => void;
+} = {
+  complete: (runner, { text }) =>
+    runner.finishWith('succeeded', 'provider_complete', 'buddy-turn-complete', text),
+  failed: (runner, { cause, detail }) =>
+    runner.finishWith('failed', cause, 'buddy-turn-failed', detail),
+  cancelled: (runner, { detail }) =>
+    runner.finishWith('cancelled', 'user_stop', 'buddy-turn-failed', detail),
+};
 
 /** One turn's event stream folded into its runner: one handler per event type. */
 class EventFold {
@@ -983,18 +1196,16 @@ function crashMessage(
   };
 }
 
-function escalateKill(
-  proc: ChildProcess,
-  stopTurn: ((signal?: NodeJS.Signals) => void) | null,
-  graceMs: number,
-  warn: () => void
-): void {
+/** SIGKILL the execution's group if it has not ended within the grace. */
+function escalateKill(handle: ExecutionHandle, graceMs: number, warn: () => void): void {
   const killTimer = setTimeout(() => {
-    if (proc.exitCode !== null) return;
     warn();
-    stopTurn?.('SIGKILL');
+    handle.stop('SIGKILL');
   }, graceMs);
-  proc.once('close', () => clearTimeout(killTimer));
+  // The group runs on its own; this timer alone must not hold a backend (or a test) open.
+  killTimer.unref();
+  const clear = () => clearTimeout(killTimer);
+  handle.completed.then(clear, clear);
 }
 
 function stripAnsi(value: string): string {

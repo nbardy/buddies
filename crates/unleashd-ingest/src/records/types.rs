@@ -38,8 +38,8 @@ macro_rules! snake_enum {
 
 // `status`: a deleted record is a tombstone, kept so its transcripts stay recognisable.
 snake_enum!(RecordStatus { Active = "active", Deleted = "deleted" });
-// Who established the record's config: the owner, a legacy migration, or a sidecar created for a
-// transcript found on disk. Preserved verbatim by import; only `set_config` changes it (to `user`).
+// Who established the config: the owner, inference from prior usage/defaults, or a discovered
+// transcript. Thread inference reuses legacy_inferred; an explicit choice persists as user.
 snake_enum!(Provenance { User = "user", LegacyInferred = "legacy_inferred", ExternalDiscovered = "external_discovered" });
 snake_enum!(BuddyVisibility { Foreground = "foreground", Background = "background" });
 
@@ -333,12 +333,14 @@ pub struct SetConfig {
     pub expected_config_revision: i64,
     pub config: ConversationConfig,
     pub last_resolved_config: ResolvedExecutionConfig,
+    /// Inferred thread choices retain their origin; ordinary edits default to `user`.
+    pub provenance: Option<Provenance>,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "t", discriminant_case = "snake_case"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetConfigOutcome {
-    /// Written at `expected + 1`; provenance becomes `user`.
+    /// Written at `expected + 1`; provenance defaults to `user`.
     Committed {
         record: ConversationRecord,
     },

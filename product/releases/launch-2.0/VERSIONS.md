@@ -11,6 +11,19 @@ gitignored. The files a cut is built from are kept read-only in `renders/<cut>-c
 | v11 | not posted (step to v12) | `82af5d4` | logo holds 2 bars; swarm right after the home, 4 bars; benefits moved before the Vim line | `edit/stitch-v11.sh`: renders the open+home+swarm, features+subs and benefits; cuts every other section from the v10 picture | `launch-v11.mp4` (`1118a00a…`) |
 | v12 | 2026-10-05 14:17 | `9079273` | "Mobile Friendly!" first after the swarm, 2 bars, on footage P | `edit/stitch-v12.sh`: renders the mobile scene and the sound; cuts every other section from v11 | `launch-v12.mp4` (`92804ffb…`) |
 | v13 | 2026-10-05 14:50 | `432e886` | "Open Source" shimmers on the Vim card (owner pick); end card says github.com/nbardy/buddies | `edit/stitch-v13.sh`: renders vim+end; cuts frames 0–4965 from v12; v12's sound | `launch-v13.mp4` (`e98e9a83…`) |
+| v14 | 2026-10-05 19:30 | `235fc41` | the emblem shots cut from "They show their work" (8 bars → 2); everything after moves up 6 bars; 85.0 s | `edit/stitch-v14.sh`: no picture render; v13 frames 0–2828 + 3504–5775, the song re-timed | `launch-v14.mp4` (`2817b046…`) |
+
+## Reproducing v14
+
+`renders/v14-chain/` holds `launch-v13.mp4` (its source picture), `v14.wav` and `launch-v14.mp4`
+(`SHA256SUMS`). To re-make it: put `launch-v13.mp4` at `renders/v13-chain/`, check out `235fc41` and run
+`stitch-v14.sh`. Its one join (v14 frame 2829 = v13 frame 3504) was checked against the source frames:
+the exact frame wins (74 dB, against 18 dB for its neighbour).
+
+**X/Twitter upload:** `launch-v14-x.mp4` (`2304347a…`, also in the chain) is v14 with the settled Vim
+"Open Source" card (v14 frame 4455, the site poster's image) as its first 2 frames, so X's preview is
+that card, not the dark opening; the sound is delayed 2 frames to keep sync. Made by
+`edit/x-cover.sh out/launch-v14.mp4 4455 out/launch-v14-x.mp4`.
 
 ## Reproducing v13
 

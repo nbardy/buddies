@@ -94,7 +94,13 @@ export class TurnAttemptJournal {
     this.onSnapshot = onSnapshot;
   }
 
-  initialize(): Promise<{ recoveredAttempts: number }> {
+  /**
+   * `adopting`: attempts whose provider execution outlived the previous boot and is being
+   * adopted (turns/executions.ts). They stay open; every other open attempt of an earlier boot is
+   * recovered as interrupted. Sweeping them too marked still-running turns `server_restart`, the
+   * very symptom adoption removes (agent_notes/2026-08-21_turn-lifecycle-design.md, round 2).
+   */
+  initialize(adopting: ReadonlySet<string>): Promise<{ recoveredAttempts: number }> {
     return this.runExclusive(async () => {
       if (this.store) return { recoveredAttempts: 0 };
       await fs.promises.mkdir(this.directory, { recursive: true });
@@ -110,7 +116,9 @@ export class TurnAttemptJournal {
       await this.importLegacy(store);
       this.store = store;
       await this.appendEvent(this.baseEvent({ kind: 'server_boot' }));
-      const recoverable = (await store.recoverable(this.serverBootId)).map(parseSnapshot);
+      const recoverable = (await store.recoverable(this.serverBootId))
+        .map(parseSnapshot)
+        .filter((attempt) => !adopting.has(attempt.attemptId));
       for (const attempt of recoverable) {
         await this.appendEvent(
           this.baseEvent({
@@ -166,8 +174,14 @@ export class TurnAttemptJournal {
       });
     });
   }
+  /**
+   * The first terminal record wins; a later one is a replay and appends nothing. Settle effects
+   * repeat after a crash between the effect and the next phase write (execution-state.ts), and a
+   * timeout records its terminal before the drain's settle records it again.
+   */
   finishAttempt(input: FinishTurnAttemptInput): Promise<TurnAttemptSnapshot> {
     return this.mutate(input.attemptId, (current) => {
+      if (isTerminalAttemptState(current.state)) return null;
       assertTransition(current.state, input.state);
       return this.baseEvent({
         kind: 'attempt_terminal',
@@ -246,15 +260,18 @@ export class TurnAttemptJournal {
     return this.runExclusive(async () => undefined);
   }
 
+  /** `make` returns null when the attempt already holds what the event would record. */
   private mutate(
     id: string,
-    make: (current: TurnAttemptSnapshot) => TurnAttemptJournalEvent
+    make: (current: TurnAttemptSnapshot) => TurnAttemptJournalEvent | null
   ): Promise<TurnAttemptSnapshot> {
     return this.runExclusive(async () => {
       const value = await this.requireStore().get(required(id, 'attemptId'));
       if (!value) throw new Error(`Attempt not found: ${id}`);
       const current = parseSnapshot(value);
-      return (await this.appendEvent(make(current), current))!;
+      const event = make(current);
+      if (!event) return current;
+      return (await this.appendEvent(event, current))!;
     });
   }
   private async appendEvent(

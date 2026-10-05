@@ -10,7 +10,7 @@ the comment cites.
 of the normalized event stream, and session persistence is asynchronous. Releasing
 ownership before the event consumer drains could start the next queued turn while
 text/session/turn.complete events from this one were still being applied. One
-joined terminal path (`TurnRunner.start`: `await eventConsumption` then `settle`)
+joined terminal path (`TurnRunner.follow`: `await eventConsumption` then `settle`)
 is simpler than making every handler replay-safe.
 
 The same rule covers failures that happen before any child exists: a synchronous
@@ -23,6 +23,47 @@ its `runTurn` promise never waits for its outer timeout. History:
 Guards: `provider completion waits for the normalized event stream and session
 persistence`, `event-stream failure after turn.complete fails automation after
 joined drain`.
+
+## execution-adoption
+
+A turn outlives the backend that started it. agent-cli runs every provider under a
+detached `sh` wrapper whose stdout/stderr go to FILES in a journal directory
+(`vendor/agent-cli-tool/src/journal.ts`), never to pipes: a piped child died of
+SIGPIPE soon after its backend, so every backend death killed every turn (14 and 10
+orphaned runs on 2026-09-30). The server adds `owner.json` (conversation, attempt,
+the user row, the policy's run lease and grant; `server/src/turns/executions.ts`)
+before spawn.
+
+Every turn is READ from its journal, including one this backend spawned, so a
+replacement backend adopts a running turn by following the same directory from
+byte 0 through the same fold (`TurnRunner.follow`). Replaying into an empty overlay
+rebuilds exactly what a never-restarted backend would hold. The overlay's user row
+keeps its original text and time, so `mergeSessionMessages` pairs it with the
+native transcript as it did live.
+
+Boot order is the correctness argument (`server.ts`):
+1. Scan the journals.
+2. `turnAttemptJournal.initialize(adopting)` leaves adopted attempts open.
+3. Conversations load and adopt (`lifecycle/adopt-executions.ts`).
+4. `buddyRunner.start(adopted)` recovers every other run and keeps these.
+
+Adoption precedes any claim, so an adopted conversation is busy and nothing can
+start a second writer on its session. That second writer is the 2026-09-30 "already
+has an active writer" failure.
+
+- The grant is re-registered unchanged, and the Buddy MCP endpoint listens on its
+  last port (`buddy-mcp.json`), so the CLI's configured tools keep working.
+- A run's deadline is armed by the policy from an absolute time, so an adopting
+  backend re-arms the same deadline.
+- The journal is removed only after the drain settles. A re-adopted spent journal
+  settles again, and the crate lease (`settle_run`) rejects that second settle.
+- Explicit Stop still kills the group and revokes the grant.
+- A group SIGKILLed from outside leaves no `exit.json` and completes `lost`, never
+  success.
+
+Design and history: `agent_notes/2026-09-30_execution-adoption-design.md`.
+Guards: `server/test/execution-adoption.test.ts` (real backend SIGKILLed mid-turn,
+replaced on the same stores), `vendor/agent-cli-tool/test/journal.test.ts`.
 
 ## early-turn-complete
 

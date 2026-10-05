@@ -259,6 +259,8 @@ export function createBackendRunner({
       }
       case 'stopping':
         appendExit(exitsFile, record('stopped'));
+        // A second Ctrl+C escalates to SIGKILL; the signal (logged and in exits) shows which stop won.
+        log(`Backend stopped (${describeExit(code, signal)})`);
         finish();
         return;
     }

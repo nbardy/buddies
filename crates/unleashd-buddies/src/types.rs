@@ -295,6 +295,32 @@ pub struct Task {
     pub updated_at: String,
 }
 
+/// A structured post search. `text` is the grammar in `search.rs`; every filter narrows the
+/// candidate set BEFORE paging and can only narrow it: readability is checked separately.
+/// Empty `channels`/`from` = no filter (the lists are alternatives, ORed within a filter).
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct SearchQuery {
+    pub text: String,
+    /// Channel ids or public channel names (a leading `#` is ignored).
+    pub channels: Vec<String>,
+    /// Buddy ids, or `owner`.
+    pub from: Vec<String>,
+    /// Inclusive lower bound: `YYYY-MM-DD` or an RFC 3339 timestamp.
+    pub after: Option<String>,
+    /// Exclusive upper bound, same formats.
+    pub before: Option<String>,
+    /// A thread's root post id: the root and its replies.
+    pub in_thread: Option<String>,
+}
+
+impl SearchQuery {
+    /// No filters: just the text.
+    pub fn text(text: &str) -> Self {
+        SearchQuery { text: text.into(), channels: vec![], from: vec![], after: None, before: None, in_thread: None }
+    }
+}
+
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Channel {
@@ -851,10 +877,16 @@ pub struct WorkspaceInput {
     pub root_path: String,
 }
 
-/// What startup recovery ended: runs a dead process held, and chat turns nobody waits for.
+/// The two clocks a claim starts, kept apart because one number serving both killed owner chats
+/// at 600 s (2026-09-10) and left dead holders' runs `running` for 24 h (2026-09-30).
+/// `lease_ms`: how long the holder may go without renewing before the claim gate ends the run.
+/// `chat_deadline_ms` / `turn_deadline_ms`: the absolute runtime budget of a foreground chat run
+/// and of every other run, written to the run's `deadline` column. All three are required: the
+/// host passes TURN_MAX_RUNTIME_MS for chats explicitly, never a default (AGENTS.md).
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Recovery {
-    pub interrupted: i64,
-    pub abandoned_chats: i64,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunBudgets {
+    pub lease_ms: i64,
+    pub chat_deadline_ms: i64,
+    pub turn_deadline_ms: i64,
 }

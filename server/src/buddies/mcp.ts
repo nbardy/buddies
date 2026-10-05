@@ -1,5 +1,7 @@
+import fs from 'node:fs';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
@@ -359,13 +361,22 @@ const BUDDY_TOOLS = {
   }),
   channel_read: buddyTool({
     description:
-      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here for posts containing all the given words (newest first). Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
+      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here (newest first). Search text: words (all must match), "exact phrase", -excluded, OR; filters narrow before paging. Example: read:{search:{text:\'"deploy window" -draft\', channels:[\'ops\'], from:[\'owner\'], after:\'2026-10-01\'}}. Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
     writes: false,
     schema: z.object({
       read: z.union([
         z.object({ channelId: z.string().min(1) }),
         z.object({ threadId: z.string().min(1) }),
-        z.object({ search: z.string().min(1).max(200).describe('Words that must all appear') }),
+        z.object({
+          search: z.object({
+            text: z.string().min(1).max(200),
+            channels: z.array(z.string().min(1)).max(20).optional().describe('ids or public names'),
+            from: z.array(z.string().min(1)).max(20).optional().describe("buddy ids or 'owner'"),
+            after: z.string().optional().describe('YYYY-MM-DD or RFC 3339, inclusive'),
+            before: z.string().optional().describe('YYYY-MM-DD or RFC 3339, exclusive'),
+            inThread: z.string().optional().describe('root post id'),
+          }),
+        }),
       ]),
       before: z.object({ ord: z.string() }).optional().describe('next from the previous page'),
       limit: z.number().int().min(1).max(100).default(30),
@@ -375,7 +386,7 @@ const BUDDY_TOOLS = {
         return deps.core.searchPosts(
           grant.author,
           grant.workspaceId,
-          input.read.search,
+          { channels: [], from: [], ...input.read.search },
           input.before,
           input.limit
         );
@@ -676,7 +687,34 @@ export type McpEndpoint = {
 };
 
 /** Serve `/mcp` on 127.0.0.1 at an OS-assigned port. */
-export async function startMcpEndpoint(deps: ToolDeps & { grants: Grants }): Promise<McpEndpoint> {
+/**
+ * The port the previous backend listened on (absent on a first start). A turn's CLI was
+ * configured with this URL at spawn, and an adopted turn keeps calling it after the backend that
+ * spawned it is gone (turns/executions.ts), so every backend listens where the last one did.
+ */
+function lastPort(portFile: string): number | null {
+  try {
+    const { port } = JSON.parse(fs.readFileSync(portFile, 'utf8')) as { port: number };
+    return Number.isInteger(port) && port > 0 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+function listen(http: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const failed = (error: Error) => reject(error);
+    http.once('error', failed);
+    http.listen(port, '127.0.0.1', () => {
+      http.off('error', failed);
+      resolve();
+    });
+  });
+}
+
+export async function startMcpEndpoint(
+  deps: ToolDeps & { grants: Grants; portFile: string }
+): Promise<McpEndpoint> {
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
     const grant = bearer ? deps.grants.lookup(bearer) : null;
@@ -697,8 +735,22 @@ export async function startMcpEndpoint(deps: ToolDeps & { grants: Grants }): Pro
       if (!res.headersSent) res.writeHead(500).end(String(error));
     });
   });
-  await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
-  const url = `http://127.0.0.1:${(http.address() as AddressInfo).port}/mcp`;
+  const previous = lastPort(deps.portFile);
+  try {
+    await listen(http, previous ?? 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || previous === null) throw error;
+    // Loud, never silent: turns adopted from the previous backend call the old URL and will get
+    // connection errors from their Buddy tools until they end.
+    console.error(
+      `[buddies-mcp] port ${previous} is taken; adopted turns lose their Buddy tools. Listening on a new port.`
+    );
+    await listen(http, 0);
+  }
+  const port = (http.address() as AddressInfo).port;
+  fs.mkdirSync(path.dirname(deps.portFile), { recursive: true });
+  fs.writeFileSync(deps.portFile, `${JSON.stringify({ port })}\n`);
+  const url = `http://127.0.0.1:${port}/mcp`;
   return {
     url,
     spec: (grant) => ({

@@ -97,3 +97,19 @@ again: both retain the 24-hour foreground default and explicit budget forwarding
 Archive provenance now records clean source commit
 `bd6e61de4ff7e2a34f6d85de49ec6d53d51e2b95`; the initial local-snapshot caveat
 above describes the earlier packaging step.
+
+## Successor, 2026-10-01: the lease and the deadline are separate values
+
+The guard paragraph above says "the runner leases every chat run for exactly
+`TURN_MAX_RUNTIME_MS`, and that lease is the chat's deadline". That was true until 2026-10-01.
+Making the lease 24 h fixed this incident, but a run whose holder died then stayed `running`
+until the next boot. It was a 9.5 h overnight lie on 2026-09-30→10-01, and 14 and 10 runs were
+orphaned at 12:34Z/14:09Z on 09-30. The lease is now a 5-minute heartbeat renewed on the turn's
+bridge clock (`BUDDY_RUN_LEASE_MS`). The deadline is the run's own `deadline` column, set at claim
+from `TURN_MAX_RUNTIME_MS` passed explicitly as `chatDeadlineMs`.
+
+This incident's rule is unchanged: a foreground chat's deadline is `TURN_MAX_RUNTIME_MS`, and
+automatic expiry is `max_runtime_timeout`. `buddies-v2.test.ts` now asserts that budget on the
+run's `deadline` instead of its `leaseExpiresAt`, and that is the only line of the guard that
+moved. The runtime guards in `conversation-runtime.test.ts` are unchanged. Pattern:
+`docs/patterns.md#lease-heartbeat`. Decision: `agent_notes/2026-10-01_return-route-decision.md`.

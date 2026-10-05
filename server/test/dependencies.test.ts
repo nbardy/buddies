@@ -1,13 +1,14 @@
-import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { DependenciesSchema } from '@unleashd/shared';
+import { type Dependencies, DependenciesSchema } from '@unleashd/shared';
 import express from 'express';
 import { createDependencyChecks, registerDependencyRoutes } from '../src/providers/dependencies';
+import { installedAgent } from '../src/providers/installed-agent';
 
 test('readiness requires a successful Yes, missing and hanging agents remain actionable', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'deps-test-'));
@@ -25,7 +26,9 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
     await executable('cargo', 'echo cargo');
     await executable('claude', '[ -z "$CLAUDECODE" ] || exit 1; echo Yes');
     await checks.refresh();
-    let snapshot = DependenciesSchema.parse(await (await fetch(`${url}/api/dependencies`)).json());
+    let snapshot: Pick<Dependencies, 'checks'> = DependenciesSchema.parse(
+      await (await fetch(`${url}/api/dependencies`)).json()
+    );
     assert.deepEqual(
       snapshot.checks.map((c) => c.status),
       ['ready', 'ready', 'missing']
@@ -123,6 +126,37 @@ SCRIPT
   } finally {
     first.close();
     restarted.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+// Fresh-install trial 2026-10-05: with only Claude installed, an unpinned Buddy spawned the
+// hardcoded Codex (ENOENT). The agent is read from the real PATH on every request, so a
+// first-boot install that lands after startup is picked up without a restart, and a file that
+// is not executable (a half-written download) does not count.
+test('the installed agent follows PATH on every read: none, then claude, then codex first', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'installed-agent-'));
+  const env = { PATH: `${path.join(dir, 'absent')}${path.delimiter}${dir}`, HOME: dir };
+  const app = express();
+  const checks = createDependencyChecks({ ...env }, 1500);
+  registerDependencyRoutes(app, checks, () => installedAgent(env));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const agent = async () =>
+    DependenciesSchema.parse(await (await fetch(`${url}/api/dependencies`)).json()).agent;
+  try {
+    assert.deepEqual(await agent(), { kind: 'none' });
+    await fs.writeFile(path.join(dir, 'codex'), '#!/bin/sh\n', { mode: 0o644 });
+    assert.deepEqual(await agent(), { kind: 'none' }, 'a non-executable file is not installed');
+    await fs.writeFile(path.join(dir, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
+    assert.deepEqual(await agent(), { kind: 'agent', provider: 'claude' });
+    await fs.chmod(path.join(dir, 'codex'), 0o755);
+    // Both installed: Codex, the pre-existing fallback, so an install with both keeps its agent.
+    assert.deepEqual(await agent(), { kind: 'agent', provider: 'codex' });
+  } finally {
+    checks.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     await fs.rm(dir, { recursive: true, force: true });
   }
 });

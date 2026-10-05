@@ -87,7 +87,7 @@ impl BuddiesCore {
     }
 
     #[napi]
-    pub async fn search_posts(&self, actor: Actor, workspace_id: String, query: String, before: Option<Cursor>, limit: i64) -> napi::Result<PostPage> {
+    pub async fn search_posts(&self, actor: Actor, workspace_id: String, query: SearchQuery, before: Option<Cursor>, limit: i64) -> napi::Result<PostPage> {
         call(&self.store, move |s| s.search_posts(&actor, &workspace_id, &query, before, limit)).await
     }
 
@@ -177,8 +177,13 @@ impl BuddiesCore {
     }
 
     #[napi]
-    pub async fn claim_run(&self, lease_ms: i64) -> napi::Result<Option<Claim>> {
-        call(&self.store, move |s| s.claim_run(lease_ms)).await
+    pub async fn claim_run(&self, budgets: RunBudgets) -> napi::Result<Option<Claim>> {
+        call(&self.store, move |s| s.claim_run(budgets)).await
+    }
+
+    #[napi]
+    pub async fn renew_run(&self, run_id: String, lease_token: String, lease_ms: i64) -> napi::Result<Run> {
+        call(&self.store, move |s| s.renew_run(&run_id, &lease_token, lease_ms)).await
     }
 
     #[napi]
@@ -194,11 +199,6 @@ impl BuddiesCore {
     #[napi]
     pub async fn cancel_run(&self, actor: Actor, run_id: String) -> napi::Result<Run> {
         call(&self.store, move |s| s.cancel_run(&actor, &run_id)).await
-    }
-
-    #[napi]
-    pub async fn recover_runs(&self) -> napi::Result<Recovery> {
-        call(&self.store, move |s| s.recover_runs()).await
     }
 
     #[napi]

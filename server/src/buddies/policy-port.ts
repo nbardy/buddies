@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { McpServerSpec } from '@nbardy/agent-cli';
-import type { Returns } from '@unleashd/buddies-core';
+import type { Outcome, Returns } from '@unleashd/buddies-core';
 import type { BuddyContext, BuddyVisibility } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
+import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
-import { type Grants, INBOX, type TurnGrant } from './grants';
+import { type GrantRecord, type Grants, INBOX, type TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
 import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
-import type { ChatAdmission, Runner } from './runner';
+import type { ChatAdmission, LeaseRenewal, Runner } from './runner';
 
 /**
  * The narrow interface BuddyTurnPolicy (buddies/turn-policy.ts) calls for one Buddy turn.
@@ -33,18 +34,26 @@ export interface BuddyPolicyPort {
     owner: boolean;
     /** The conversation's placement; it fixes where answers to this turn's requests go. */
     visibility: BuddyVisibility;
-  }): Record<string, McpServerSpec>;
-  builderMcpServers(conversationId: string): Record<string, McpServerSpec>;
-  /** The turn ended: settle its run (which also revokes the run's grants). */
-  settle(
-    runId: string,
-    leaseToken: string,
-    status: 'complete' | 'failed' | 'cancelled',
-    detail: string
-  ): void;
+  }): TurnTools;
+  builderMcpServers(conversationId: string): TurnTools;
+  /** The turn's holder is alive: push its run's lease forward (Pattern: lease-heartbeat). */
+  renewLease(runId: string, leaseToken: string): Promise<LeaseRenewal>;
+  /**
+   * The turn of a chat run ended: settle it (which also revokes the run's grants). Resolves once
+   * the settle landed or the run had already ended (lease_lost); rejects on a transient failure.
+   */
+  settle(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void>;
+  /** A runner-owned run's turn ended: its completion step, then its settle, as `settle` resolves. */
+  finishRun(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void>;
   revoke(conversationId: string): void;
   /** After a successful turn: memory review. */
   afterTurn(turn: CompletedBuddyTurn): void;
+}
+
+/** One turn's MCP servers and the grant they carry (kept so the turn can be adopted). */
+export interface TurnTools {
+  servers: Record<string, McpServerSpec>;
+  grant: GrantRecord;
 }
 
 export function createBuddyPolicyPort(deps: {
@@ -55,10 +64,12 @@ export function createBuddyPolicyPort(deps: {
   spec(grant: TurnGrant): McpServerSpec;
 }): BuddyPolicyPort {
   const { runner, grants, briefings } = deps;
-  // A chat's deadline is its run's lease. A lease shorter than the turn budget killed healthy
-  // owner chats at 600 s on 2026-09-10; refuse to build that. Guard: buddies-v2.test.ts.
-  if (runner.leaseMs < TURN_MAX_RUNTIME_MS)
-    throw new Error(`Buddy run lease ${runner.leaseMs} ms < TURN_MAX_RUNTIME_MS`);
+  // A chat's deadline is its run's `deadline`, set at claim from this budget. A chat deadline
+  // shorter than the turn budget (a 600 s claim lease) killed healthy owner chats on 2026-09-10;
+  // refuse to build that. The lease is a separate, short heartbeat since 2026-10-01 and is
+  // deliberately NOT checked here. Guard: buddies-v2.test.ts.
+  if (runner.chatDeadlineMs < TURN_MAX_RUNTIME_MS)
+    throw new Error(`Buddy chat deadline ${runner.chatDeadlineMs} ms < TURN_MAX_RUNTIME_MS`);
   return {
     currentBriefing: (context) => briefings.current(context),
     enqueueChat(context, conversationId) {
@@ -80,23 +91,23 @@ export function createBuddyPolicyPort(deps: {
         returns: returnsFor(visibility, conversationId),
       });
       if (owner) grants.promoteToOwner(conversationId);
-      return { [MCP_SERVER_NAME]: deps.spec(grant) };
+      return {
+        servers: { [MCP_SERVER_NAME]: deps.spec(grant) },
+        grant: grants.record(grant.token),
+      };
     },
     builderMcpServers(conversationId) {
       grants.revokeConversation(conversationId);
-      return { [MCP_SERVER_NAME]: deps.spec(grants.issueBuilder(conversationId)) };
+      const grant = grants.issueBuilder(conversationId);
+      return {
+        servers: { [MCP_SERVER_NAME]: deps.spec(grant) },
+        grant: grants.record(grant.token),
+      };
     },
-    settle(runId, leaseToken, status, detail) {
-      const outcome =
-        status === 'complete'
-          ? ({ kind: 'complete', text: detail } as const)
-          : status === 'failed'
-            ? ({ kind: 'failed', code: 'execution_failed', error: detail } as const)
-            : ({ kind: 'cancelled', reason: detail } as const);
-      void runner
-        .finishChat(runId, leaseToken, outcome)
-        .catch((error) => console.error('[buddies] settle failed', runId, error));
-    },
+    renewLease: (runId, leaseToken) => runner.renew(runId, leaseToken),
+    settle: (runId, leaseToken, outcome) =>
+      runner.finishChat(runId, leaseToken, crateOutcome(outcome)),
+    finishRun: (runId, leaseToken, outcome) => runner.finishRun(runId, leaseToken, outcome),
     revoke: (conversationId) => grants.revokeConversation(conversationId),
     afterTurn: (turn) => deps.reviewer.enqueue(turn),
   };
@@ -122,5 +133,17 @@ export function returnsFor(visibility: BuddyVisibility, conversationId: string):
       return INBOX;
     case 'background':
       return { kind: 'conversation', id: conversationId };
+  }
+}
+
+/** A turn's outcome as the crate records a run's. */
+export function crateOutcome(outcome: ExecutionOutcome): Outcome {
+  switch (outcome.t) {
+    case 'complete':
+      return { kind: 'complete', text: outcome.text };
+    case 'failed':
+      return { kind: 'failed', code: 'execution_failed', error: outcome.detail };
+    case 'cancelled':
+      return { kind: 'cancelled', reason: outcome.detail };
   }
 }

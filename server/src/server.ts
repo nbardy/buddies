@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ProviderSchema, encodeRows } from '@unleashd/shared';
 
-import { executeCommand } from '@nbardy/agent-cli';
+import { attachExecution, executeCommand } from '@nbardy/agent-cli';
 import compression from 'compression';
 import express, { type ErrorRequestHandler } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -20,6 +20,7 @@ import { setIgnorePatterns, shouldIgnoreWorkingDirectory } from './config';
 import {
   BUDDY_BACKGROUND_TURN_MS,
   BUDDY_RUNNER_BACKSTOP_MS,
+  BUDDY_RUN_LEASE_MS,
   EXTERNAL_GRACE_MS,
   HOT_RELOAD_FORCE_EXIT_GRACE_MS,
   LOCAL_COMPLETION_SUPPRESS_MS,
@@ -60,6 +61,7 @@ import { type BootedIngest, bootIngest } from './ingest/boot';
 import type { ConversationList } from './ingest/conversation-list';
 import { currentIngest } from './ingest/instance';
 import { createRuntimeBuilder } from './ingest/runtimes';
+import { adoptExecutions, liveGrants } from './lifecycle/adopt-executions';
 import { type ShutdownController, registerShutdownHandlers } from './lifecycle/shutdown';
 import { runServerStartup } from './lifecycle/startup';
 import { registerStaticClient } from './lifecycle/static-client';
@@ -77,15 +79,18 @@ import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { createDependencyChecks, registerDependencyRoutes } from './providers/dependencies';
+import { installedAgent } from './providers/installed-agent';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
+import { type FoundExecution, createExecutionJournals } from './turns/executions';
 import { createUpstreamService } from './upstream/routes';
 
 import { type SessionRow, defaultRoots } from '@unleashd/ingest';
 import { validate as isUuid } from 'uuid';
 import { auditLocalAgents } from './audit.js';
 import { createBriefings } from './buddies/briefing';
+import { admitExecution, decideExecutionGate } from './buddies/execution-gate';
 import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
 import { createCliReplyGate } from './buddies/channel-reply-gate';
 import { createChannels } from './buddies/channels';
@@ -103,7 +108,7 @@ import { type McpEndpoint, startMcpEndpoint } from './buddies/mcp';
 import { createMemoryReviewer } from './buddies/memory-review';
 import { createBuddyPolicyPort } from './buddies/policy-port';
 import { registerBuddyRoutes } from './buddies/routes';
-import { type RunnerHost, createRunner } from './buddies/runner';
+import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { workerConversationConfig } from './buddies/worker-config';
 import { UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 
@@ -112,6 +117,26 @@ let startupAuditResults: ReturnType<typeof auditLocalAgents> = [];
 const app = express();
 const server = http.createServer(app);
 const APP_DATA_DIR = appDataDirectory();
+// Every provider execution is journaled here so the next backend can adopt it (turns/executions.ts).
+const executionJournals = createExecutionJournals(path.join(APP_DATA_DIR, 'executions'));
+/**
+ * A background CLI run with no conversation: journaled so the next boot kills, never adopts, it;
+ * its journal goes when it ends (the reviewer runs after every Buddy turn, so they add up).
+ */
+const ephemeralExecute =
+  (label: string): typeof executeCommand =>
+  (request) => {
+    const journalDir = executionJournals.ephemeral(label);
+    const remove = () => executionJournals.remove(journalDir);
+    try {
+      const handle = executeCommand({ ...request, journalDir });
+      handle.completed.then(remove, remove);
+      return handle;
+    } catch (error) {
+      remove();
+      throw error;
+    }
+  };
 const LISTEN_HOST = resolveListenHost();
 
 const DEV_CLIENT_PORT = 7489;
@@ -203,10 +228,7 @@ const pauseBuddyScheduler = () => {
   buddyRunner.pause();
   memoryReviewer.pause();
 };
-const resumeBuddyScheduler = () => {
-  buddyRunner.resume();
-  memoryReviewer.start();
-};
+const resumeBuddyScheduler = () => execution.resume();
 const stopBuddyScheduler = () => {
   memoryReviewer.stop();
   buddyRunner.stop();
@@ -305,7 +327,7 @@ const buddiesCore = lateBoundCore(buddiesReady);
 const buddyEvents = createBuddyEvents();
 // A grant lives as long as its run's lease at most; settle and turn end revoke it sooner.
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
-const buddyBriefings = createBriefings(buddiesCore);
+const buddyBriefings = createBriefings(buddiesCore, () => installedAgent());
 let buddyMcp: McpEndpoint | null = null;
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {
   if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
@@ -355,6 +377,7 @@ const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 const buddyCreationService: BuddyCreationService = createBuddyCreationService({
   configService: conversationConfigService,
   resolveBuddyConversation,
+  installedAgent: () => installedAgent(),
   resolveWorkingDirectory: resolveWorkingDirectoryInput,
   createId: uuidv4,
   getConversation: (id) => applicationContext.registry.get(id),
@@ -378,17 +401,13 @@ const buddyRunnerHost: RunnerHost = {
       visibility: 'background',
     });
   },
-  runTurn: async ({ conversationId, context, prompt, leaseToken, deadlineMs }) => {
+  runTurn: async ({ conversationId, context, prompt, leaseToken, deadline }) => {
     const registered = conversations.get(conversationId);
     if (!registered) throw new Error(`Run conversation ${conversationId} is not registered`);
     const conversation = await buddyCreationService.ensureConversationReady(registered);
-    // Automatic expiry is max_runtime_timeout, never stop()/user_stop (AGENTS.md).
-    const timer = setTimeout(() => conversation.expireCoordinationRun(), deadlineMs);
-    try {
-      return await conversation.runCoordinationMessage(prompt, context, leaseToken);
-    } finally {
-      clearTimeout(timer);
-    }
+    // Automatic expiry is max_runtime_timeout, never stop()/user_stop (AGENTS.md). The policy
+    // arms it from the run's own deadline, so an adopting backend re-arms the same instant.
+    return conversation.runCoordinationMessage(prompt, context, leaseToken, deadline);
   },
   stop: (id) => conversations.get(id)?.stop(),
 };
@@ -398,8 +417,11 @@ const buddyRunner = createRunner({
   grants: buddyGrants,
   events: buddyEvents,
   briefings: buddyBriefings,
-  // Explicit: a foreground chat's deadline is its lease (runner.ts, 2026-09-10 incident).
-  leaseMs: TURN_MAX_RUNTIME_MS,
+  // Two values, never one (Pattern: lease-heartbeat): the lease is a minutes-long heartbeat the
+  // turn renews on its bridge clock; a foreground chat's deadline is TURN_MAX_RUNTIME_MS, passed
+  // explicitly (2026-09-10: a 600 s claim lease used as the chat deadline killed live chats).
+  leaseMs: BUDDY_RUN_LEASE_MS,
+  chatDeadlineMs: TURN_MAX_RUNTIME_MS,
   backgroundTurnMs: BUDDY_BACKGROUND_TURN_MS,
   backstopMs: BUDDY_RUNNER_BACKSTOP_MS,
 });
@@ -407,6 +429,21 @@ const memoryReviewer = createMemoryReviewer({
   core: buddiesCore,
   grants: buddyGrants,
   spec: buddyMcpSpec,
+  execute: ephemeralExecute('memory-review'),
+});
+// Pattern: fix-guards (docs/patterns.md#fix-guards) — the ONE gate on Buddy execution (see
+// buddies/execution-gate.ts): scan/adopt, scheduler start, resume and the memory reviewer.
+const execution = admitExecution<FoundExecution, AdoptedRun>(decideExecutionGate(), {
+  scan: () => executionJournals.scan(),
+  start: async (adopted) => {
+    await buddyRunner.start(adopted);
+    memoryReviewer.start();
+  },
+  resume: () => {
+    buddyRunner.resume();
+    memoryReviewer.start();
+  },
+  started: 'Buddy runner started',
 });
 const buddyPolicyPort = createBuddyPolicyPort({
   runner: buddyRunner,
@@ -430,6 +467,7 @@ const Conversation = createConversationRuntime({
     await conversationConfigStore.setCurrentSessionUsage(conversationId, sessionId, usage);
   },
   getConversation: (id) => conversations.get(id),
+  executions: executionJournals,
   readLatestOompaRuntime: readLatestSwarmRuntime,
   createSessionId: uuidv4,
   turnAttempts: turnAttemptObserver,
@@ -572,14 +610,15 @@ const buddyConversations: StableConversationPorts = {
   getConversation: (id) => applicationContext.registry.get(id),
   ensureConversationReady: buddyCreationService.ensureConversationReady,
   createConversation: (input) => buddyCreationService.createServerBuddyConversation(input),
-  reconfigure: (conversation, config) =>
-    replaceRuntimeConfig(conversationConfigService, conversation, config),
+  reconfigure: (conversation, config, provenance) =>
+    replaceRuntimeConfig(conversationConfigService, conversation, config, provenance),
 };
 
 // One channel's posts or responders changed: clients refresh only that channel's views.
 const channelChanged = (channelId: string) =>
   applicationContext.broadcast({ type: 'channel_changed', channelId });
 const buddyChannels = createChannels({
+  installedAgent: () => installedAgent(),
   core: buddiesCore,
   events: buddyEvents,
   channelChanged,
@@ -588,6 +627,7 @@ const buddyChannels = createChannels({
   // Resolved by the same authority as conversations, so the gate runs exactly the
   // harness/model the Buddy's reply would.
   gate: createCliReplyGate({
+    execute: ephemeralExecute('reply-gate'),
     resolveExecution: async (config) => {
       const resolution = await conversationConfigService.resolve(config);
       if (resolution.status !== 'resolved') throw new Error(resolution.error.message);
@@ -690,7 +730,7 @@ const paletteService = createPaletteService({
   debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
   cwd: process.cwd(),
   ports: {
-    startGeneration: executeCommand,
+    startGeneration: ephemeralExecute('palette'),
     validateProvider: (provider) => {
       ProviderSchema.parse(provider);
     },
@@ -719,7 +759,7 @@ shutdownController = registerShutdownHandlers(
   },
   {
     conversations: () => conversations.values(),
-    activeSchedulerRuns: () => memoryReviewer.activeCount(),
+    activeSchedulerRuns: () => memoryReviewer.activeCount() + buddyRunner.settling(),
     pauseScheduler: pauseBuddyScheduler,
     resumeScheduler: resumeBuddyScheduler,
     stopScheduler: stopBuddyScheduler,
@@ -733,9 +773,6 @@ shutdownController = registerShutdownHandlers(
         list.stop();
         await ingest.stop();
       }
-    },
-    broadcastMessage: (conversationId, content) => {
-      applicationContext.broadcast({ type: 'message', conversationId, role: 'system', content });
     },
     exit: (code = 0) => process.exit(code),
   }
@@ -751,6 +788,10 @@ const runtimeBuilder = createRuntimeBuilder({
   dispatchInitialMessage: buddyCreationService.dispatchInitialMessageIfPending,
   broadcast: applicationContext.broadcast,
 });
+
+// Boot adoption state: journals found before the attempt sweep, runs their turns execute under.
+let foundExecutions: FoundExecution[] = [];
+let adoptedRuns: AdoptedRun[] = [];
 
 void runServerStartup(
   {
@@ -773,18 +814,29 @@ void runServerStartup(
       void reportBackendExits(errorJournal, path.join(APP_DATA_DIR, 'observability')).catch(
         (error) => console.error('[backend-exits] Failed to journal recorded backend exits:', error)
       );
+      // Journals the previous backend left: their open attempts are adopted, not swept. A live
+      // turn's grant is valid again BEFORE the tool endpoint answers (adopt-executions.ts).
+      foundExecutions = execution.scan();
+      for (const grant of liveGrants(foundExecutions)) buddyGrants.adopt(grant);
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).
       buddyMcp = await startMcpEndpoint({
         core: buddiesCore,
         events: buddyEvents,
         grants: buddyGrants,
         uploadsRoot: () => UPLOADS_DIR,
+        portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
       });
       // Background, never awaited: bootstrap and the upstream fetch must not
       // hold startup, and their failures are logged after capture is installed.
       upstream.start();
       startupAuditResults = auditLocalAgents();
-      await turnAttemptJournal.initialize();
+      await turnAttemptJournal.initialize(
+        new Set(
+          foundExecutions.flatMap((found) =>
+            found.t === 'turn' || found.t === 'unstarted' ? [found.owner.attemptId] : []
+          )
+        )
+      );
       await persistedServerState.initialize();
       await paletteService.initialize();
       // Uploads retention: a worker-thread pass now and daily. Every place a message or post can
@@ -808,9 +860,8 @@ void runServerStartup(
     startOptionalScheduler: async () => {
       try {
         await buddiesReady;
-        await buddyRunner.start();
-        memoryReviewer.start();
-        console.log('Buddy runner started');
+        await execution.start(adoptedRuns);
+        console.log(execution.started);
       } catch (error) {
         console.warn('[buddies] Runner unavailable:', error);
       }
@@ -834,6 +885,25 @@ void runServerStartup(
     loadConversations: async () => {
       await startIngestList();
       await runtimeBuilder.recover();
+      // Before the Buddy runner recovers or claims anything (lifecycle/adopt-executions.ts).
+      adoptedRuns = await adoptExecutions(foundExecutions, {
+        conversation: async (id) => {
+          const registered = conversations.get(id) ?? (await runtimeBuilder.materialize(id));
+          return registered && buddyCreationService.ensureConversationReady(registered);
+        },
+        attach: attachExecution,
+        discard: (found) => {
+          executionJournals.discard(found);
+          if (found.t === 'turn') buddyGrants.revokeConversation(found.owner.conversationId);
+        },
+        attemptInterrupted: (attemptId) =>
+          turnAttemptObserver.terminal({
+            attemptId,
+            state: 'interrupted',
+            terminalCause: 'server_restart',
+          }),
+        logger: console,
+      });
     },
   }
 )

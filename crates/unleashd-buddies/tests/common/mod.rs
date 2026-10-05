@@ -3,7 +3,7 @@
 use rusqlite::{Connection, params};
 use std::path::PathBuf;
 use unleashd_buddies::Store;
-use unleashd_buddies::types::Actor;
+use unleashd_buddies::types::{Actor, RunBudgets};
 
 /// A fresh store with one workspace and the org: lead → mid → ic, plus a peer and an archived buddy.
 pub struct Fixture {
@@ -13,6 +13,12 @@ pub struct Fixture {
 }
 
 pub const WS: &str = "ws_1";
+
+/// A claim's clocks with this lease; deadlines at their production values (24 h chat, 1 h turn).
+#[allow(dead_code)]
+pub fn lease(ms: i64) -> RunBudgets {
+    RunBudgets { lease_ms: ms, chat_deadline_ms: 86_400_000, turn_deadline_ms: 3_600_000 }
+}
 
 pub fn buddy(id: &str) -> Actor {
     Actor::Buddy { id: id.to_string() }
