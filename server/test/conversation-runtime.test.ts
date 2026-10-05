@@ -1744,7 +1744,20 @@ test('a missing provider binary settles the turn with a visible system message n
   const saved = process.env.PATH;
   process.env.PATH = '/nonexistent-dir';
   try {
-    const fixture = runtimeFixture({});
+    // The in-memory notice is gone after a backend restart; the attempt journal is what the DM
+    // rebuilds the message from, so a missing command must be journaled as spawn_failed.
+    const terminals: { terminalCause: string }[] = [];
+    const fixture = runtimeFixture({
+      turnAttempts: {
+        queued: () => {},
+        starting: () => {},
+        running: () => {},
+        stopping: () => {},
+        activity: () => {},
+        bindProviderSession: () => {},
+        terminal: (result) => terminals.push(result),
+      },
+    });
     let failure = '';
     fixture.conversation.once('buddy-turn-failed', (reason: string) => {
       failure = reason;
@@ -1757,6 +1770,10 @@ test('a missing provider binary settles the turn with a visible system message n
     assert.match(text, /codex/);
     assert.match(text, /Setup/);
     assert.equal(failure, text);
+    assert.deepEqual(
+      terminals.map((t) => t.terminalCause),
+      ['spawn_failed']
+    );
   } finally {
     process.env.PATH = saved;
   }

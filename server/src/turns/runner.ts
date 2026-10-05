@@ -119,6 +119,11 @@ export type TurnBroadcast =
       content: string;
     };
 
+/** The command named by a Node `spawn <cmd> ENOENT` failure, or null for any other message. */
+function missingCommand(message: string): string | null {
+  return /(?:^|[\s:])spawn (\S+) ENOENT$/.exec(message)?.[1] ?? null;
+}
+
 export class TurnRunner {
   // Per-run token: every late event/completion from a replaced handle is ignored.
   private runToken = 0;
@@ -578,10 +583,10 @@ export class TurnRunner {
    * "a missing provider binary".
    */
   private describeFailure(message: string): string {
-    const missing = /(?:^|[\s:])spawn (\S+) ENOENT$/.exec(message);
-    if (!missing) return message;
+    const command = missingCommand(message);
+    if (!command) return message;
     const provider = this.host.provider;
-    return `Couldn't start ${provider}: the \`${missing[1]}\` command was not found on this server's PATH. Open Setup to install it, then send your message again.`;
+    return `Couldn't start ${provider}: the \`${command}\` command was not found on this server's PATH. Open Setup to install it, then send your message again.`;
   }
 
   // --- drain -------------------------------------------------------------------------
@@ -723,8 +728,13 @@ export class TurnRunner {
     this.clearWatchdogs();
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[${host.id}] Process completion error: ${message}`);
-    this.finishAttempt('failed', 'process_exit');
     const shown = this.describeFailure(normalizeProviderErrorMessage(message));
+    // Fix guard: the failure text above lives only in the in-memory overlay, so after a backend
+    // restart a DM whose CLI is missing was an empty bubble again. The attempt journal is the one
+    // record that survives, so a missing command is journaled as `spawn_failed` (an existing
+    // cause, no schema change) and the DM view rebuilds the message from it. Guard:
+    // conversation-runtime.test.ts "a missing provider binary" (cause) + channel-dm.test.tsx.
+    this.finishAttempt('failed', missingCommand(message) ? 'spawn_failed' : 'process_exit');
     this.surfaceError(shown);
     host.isStreaming = false;
     host.isRunning = false;

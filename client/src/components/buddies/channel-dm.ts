@@ -44,13 +44,17 @@ function responseBody(group: Extract<MessageGroup, { type: 'assistant' }>): Mess
  * one per failed turn), so each becomes a `failure` row. They were once dropped here, and a Buddy
  * whose CLI was missing (`spawn codex ENOENT`) showed an empty reply bubble with the reason only
  * in the server log. Guard: channel-dm.test.tsx "a failed turn shows its system message".
+ * `startFailure` is the journaled `spawn_failed` attempt's message: the runner's own failure
+ * record lives only in server memory, so after a backend restart it is gone and this is all that
+ * is left of a Buddy whose CLI is missing. It shows only when no failure row survived.
  * `queued` is what the owner sent that the server has not
  * written to the transcript yet, so Send shows it at once.
  */
 export function dmRows(
   groups: readonly MessageGroup[],
   queued: readonly QueuedMessage[],
-  boundary?: { at: Date; label: string }
+  boundary?: { at: Date; label: string },
+  startFailure?: string
 ): DmRow[] {
   const rows: DmRow[] = [];
   // Fix guard: a reset belongs below its own date, even before the first message arrives.
@@ -129,8 +133,17 @@ export function dmRows(
         text: item.content,
       });
   }
+  if (startFailure && !rows.some((row) => row.kind === 'failure'))
+    rows.push({ kind: 'failure', key: 'start-failure', label: startFailure });
   return rows;
 }
+
+/**
+ * What a `spawn_failed` attempt tells the owner once the runner's live message is gone. The
+ * journal keeps the cause, not the command, so the wording stops at "its command".
+ */
+export const startFailureText = (provider: string) =>
+  `Couldn't start ${provider}: its command was not found on this server's PATH. Open Setup to install it, then send your message again.`;
 
 /** The owner's last message: what an out-of-tokens retry resends on the new harness. */
 export function lastOwnerText(messages: readonly Message[]): string | null {
