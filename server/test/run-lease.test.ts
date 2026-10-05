@@ -70,6 +70,8 @@ function startBackend(name: string, port: number, env: Record<string, string>): 
       PORT: String(port),
       // Its own data dir (executions, records, MCP port), the SHARED Buddies database under HOME.
       UNLEASHD_DATA_DIR: path.join(root, `data-${name}`),
+      // Non-default data dir: Buddy execution needs the opt-in (buddies/execution-gate.ts).
+      UNLEASHD_BUDDY_EXECUTION: '1',
       UNLEASHD_AUTH_TOKEN: TOKEN,
       FAKE_DIR: fakeDir,
       NODE_ENV: 'test',

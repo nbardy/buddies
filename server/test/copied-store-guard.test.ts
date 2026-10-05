@@ -128,6 +128,6 @@ test('a backend on a copied store launches no agent unless execution is opted in
   const guarded = await boot('guarded', false);
   t.after(guarded.stop);
   await sleep(5_000);
-  assert.match(guarded.log(), /Execution disabled/);
   assert.deepEqual(workerLaunches(guarded.marker), [], 'a copied store launched an agent');
+  assert.match(guarded.log(), /Execution disabled/);
 });
