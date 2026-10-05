@@ -481,6 +481,59 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
   }
 });
 
+// Durable intake, design Revision 3 (agent_notes/2026-09-30_pending-delivery-design.md): the build
+// that adds the crate's "a queued chat run carries its body" CHECK must accept every ordinary send.
+// The first draft let the only chat producer enqueue body-less runs, so every Buddy DM, Wake and
+// owner message would have failed at intake. A send that waits for a run slot is a queued run
+// WITH its input; a claimed run is stamped executed; settling clears the body.
+test('every Buddy chat send is a run with its input, also while it waits for a slot', async () => {
+  const w = await world();
+  try {
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.lead.id,
+      changes: { maxActiveRuns: 1 },
+      key: 'one-slot',
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    w.during.set(1, () => held);
+    const chat = await w.creation.createServerBuddyConversation({
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      conversationId: 'owner-chat',
+      commandId: 'owner-chat',
+      deferInitialMessage: true,
+    });
+    chat.sendMessage('Plan the launch', { origin: 'owner_input', inputId: 'owner-1' });
+    await until(() => w.turns.length === 1, 'the owner chat turn');
+    // The Wake button: a second conversation (the DM) of the same Buddy, behind its one slot.
+    await w.channels.wake(w.lead.id);
+    const waiting = await until(async () => {
+      const rows = await w.core.listRunRows({ kind: 'buddy', buddyId: w.lead.id }, 10);
+      return rows.find((row) => row.status === 'queued');
+    }, 'the Wake chat waiting for a slot');
+    assert.equal(waiting.waiting?.kind, 'pool_full');
+    const queued = await w.core.getRun(waiting.id);
+    assert.deepEqual(JSON.parse(queued.body ?? 'null')?.origin, 'owner_input');
+    assert.equal(queued.executingAt, undefined, 'nothing ran yet');
+
+    release();
+    const runs = await until(async () => {
+      const all = await w.runs(w.lead.id);
+      return all.length === 2 && all.every((run) => run.status === 'complete') && all;
+    }, 'both chat runs complete');
+    for (const run of runs) {
+      assert.equal(run.input.kind, 'chat');
+      assert.equal(run.body, undefined, 'the body goes at settle');
+      assert.ok(run.executingAt, 'a claimed chat run counts as executed');
+    }
+    assert.equal(w.turns.length, 2, 'the waiting send ran once its slot freed');
+  } finally {
+    await w.close();
+  }
+});
+
 // Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01 (agent_notes/2026-10-01_
 // unleashd_case_study_conversation_busy.md): answers to requests sent from an owner chat each
 // queued a `reply` run behind that chat (`conversation_busy`, up to 2h44m) only to settle as a
@@ -669,6 +722,7 @@ test('workspace run rows expose task_paused and clear it when the same run becom
         evidence: [],
         taskId: task.id,
         broadcast: false,
+        wakes: [],
         key: 'waiting-request',
       }
     );
@@ -788,6 +842,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         body: `[@Lead](buddy:${w.lead.id}) plan the launch`,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'owner-1',
       }
     );
@@ -829,6 +884,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         replyToId: root.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'designer-1',
       }
     );
@@ -861,6 +917,7 @@ test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs are not capped", 
         body: `[@Lead](buddy:${w.lead.id}) plan the launch`,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'owner-root',
       }
     );
@@ -916,7 +973,7 @@ test('a seat reply is what the Buddy posts; a turn that posts nothing leaves a f
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: body }
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, wakes: [], key: body }
       );
     const thread = async (rootId: string) =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
@@ -964,7 +1021,7 @@ test("an effort pick keeps the seat's session; a provider pick opens a new seat 
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `say-${++n}` }
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, wakes: [], key: `say-${++n}` }
       );
     const replies = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 100)).posts.filter(
@@ -1009,7 +1066,7 @@ test('a follow-up for a post a mention turn already read starts no second turn',
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `say-${++n}` }
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, wakes: [], key: `say-${++n}` }
       );
     const replies = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts.filter(
@@ -1059,6 +1116,7 @@ test('a harness failure is retried on another harness, in a new seat of the same
         body: `[@Lead](buddy:${w.lead.id}) ship it`,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'ask',
       }
     );
@@ -1096,6 +1154,7 @@ test('a harness failure is retried on another harness, in a new seat of the same
         replyToId: root.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'not-harness',
       }
     );
@@ -1117,7 +1176,7 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `priority-${++n}` }
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, wakes: [], key: `priority-${++n}` }
       );
     const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
     w.announce(root, new Map([[w.lead.id, createDefaultConversationConfig('claude')]]));
@@ -1147,6 +1206,7 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
         fromConversationId: latest.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'external-reply',
       }
     );
@@ -1196,6 +1256,7 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
         body: `[@Lead](buddy:${w.lead.id}) start`,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'gate-start',
       }
     );
@@ -1213,6 +1274,7 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
         replyToId: root.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'gate-next',
       }
     );
@@ -1248,6 +1310,7 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
         replyToId: root.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'buddy-gate-next',
       }
     );
@@ -2082,6 +2145,7 @@ test('an owner reply in a DM thread wakes the Buddy; its request, its answer and
       body: 'Approve the plan?',
       evidence: [],
       broadcast: false,
+      wakes: [],
       key: 'ask',
     });
     await announce(ask);
@@ -2091,6 +2155,7 @@ test('an owner reply in a DM thread wakes the Buddy; its request, its answer and
       replyToId: ask.id,
       evidence: [],
       broadcast: false,
+      wakes: [],
       key: 'nudge',
     });
     w.answers.set(1, 'Next: the plan');
@@ -2109,6 +2174,7 @@ test('an owner reply in a DM thread wakes the Buddy; its request, its answer and
         replyToId: ask.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'fyi',
       })
     );
@@ -2165,6 +2231,7 @@ test('a failed gate on an owner post is shown', async () => {
           replyToId,
           evidence: [],
           broadcast: false,
+          wakes: [],
           key: `${author}:${body}`,
         }
       );
@@ -2262,7 +2329,7 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     const ask = await w.post(
       buddyActor(w.lead.id),
       { kind: 'direct', members: [buddyActor(w.lead.id), OWNER] },
-      { kind: 'request', body: 'May I deploy?', evidence: [], broadcast: false, key: 'ask' }
+      { kind: 'request', body: 'May I deploy?', evidence: [], broadcast: false, wakes: [], key: 'ask' }
     );
     const inbox = await http('GET', `/api/buddies/workspaces/${w.ws}/inbox`);
     assert.deepEqual(
@@ -2541,7 +2608,7 @@ test('owner routes restore what the T11 client migration dropped: reply stats, t
       w.post(
         buddyActor(w.lead.id),
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, taskId, evidence: [], broadcast: false, key: body }
+        { kind: 'inform', body, replyToId, taskId, evidence: [], broadcast: false, wakes: [], key: body }
       );
     const root = await say('Launch plan', undefined, task.id);
     const replies = [];
@@ -2625,7 +2692,7 @@ test('owner channel replies stay in threads and reject old broadcast requests', 
     const root = await w.post(
       OWNER,
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: 'Thread root', evidence: [], broadcast: false, key: 'broadcast-root' }
+      { kind: 'inform', body: 'Thread root', evidence: [], broadcast: false, wakes: [], key: 'broadcast-root' }
     );
     const reply = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
       body: 'Do not broadcast this reply',
@@ -2693,6 +2760,7 @@ test('a thread read names each Buddy’s current seat, so the mention chip opens
         replyToId: root.id,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'designer-noted',
       }
     );
@@ -2748,6 +2816,7 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
         body: 'Keep this archive evidence',
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'archive-history',
       }
     );
@@ -2820,6 +2889,7 @@ test('Buddy MCP renames a public channel without changing its identity or histor
         body: 'Keep this rename evidence',
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'rename-history',
       }
     );
@@ -2876,6 +2946,7 @@ test('task comment mentions wake a Buddy and preserve replies in the task discus
         body: `[@Designer](buddy:${w.designer.id}) review this task`,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: 'task-mention',
       }
     );

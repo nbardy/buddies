@@ -32,6 +32,7 @@ str_enum!(TaskStatus { Open = "open", InProgress = "in_progress", Blocked = "blo
 str_enum!(RunStatus { Queued = "queued", Running = "running", CancelRequested = "cancel_requested", Complete = "complete", Failed = "failed", Cancelled = "cancelled" });
 str_enum!(DocKind { Soul = "soul", Working = "working", LongTerm = "long_term", Shared = "shared" });
 str_enum!(PostKind { Inform = "inform", Request = "request" });
+str_enum!(WakeKind { Mention = "mention", FollowUp = "follow_up" });
 str_enum!(Op { ReadDoc = "read_doc", WriteDoc = "write_doc", Post = "post", ReadChannel = "read_channel", SearchPosts = "search_posts", CreateChannel = "create_channel", ArchiveChannel = "archive_channel", RenameChannel = "rename_channel", WriteTask = "write_task", EnqueueRun = "enqueue_run", CancelRun = "cancel_run", WriteSchedule = "write_schedule", Admin = "admin" });
 
 /// Who acts. Stored as NULL (post author / channel creator) or the key `'owner'` (events, read
@@ -157,6 +158,15 @@ pub enum RunInput {
     FailureNotice {
         run_id: String,
     },
+    /// A post that @mentions the buddy, or the owner's plain post in a DM with it: it must answer.
+    /// Written with the post, in its transaction (`PostInput.wakes`).
+    Mention {
+        post_id: String,
+    },
+    /// A new post in a thread the buddy took part in: its reply gate decides whether to answer.
+    FollowUp {
+        post_id: String,
+    },
 }
 
 impl RunInput {
@@ -174,12 +184,19 @@ impl RunInput {
             RunInput::Reply { post_id } => ("reply", post_id, format!("reply:{post_id}")),
             RunInput::Schedule { schedule_id, slot } => ("schedule", schedule_id, format!("schedule:{schedule_id}:{slot}")),
             RunInput::FailureNotice { run_id } => ("failure_notice", run_id, format!("failure:{run_id}")),
+            RunInput::Mention { post_id } => ("mention", post_id, format!("mention:{post_id}:{buddy_id}")),
+            RunInput::FollowUp { post_id } => ("follow_up", post_id, format!("follow_up:{post_id}:{buddy_id}")),
         }
     }
     pub fn legacy_key(&self) -> Option<String> {
         match self {
             RunInput::Post { post_id } => Some(format!("post:{post_id}")),
-            RunInput::Chat { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } => None,
+            RunInput::Chat { .. }
+            | RunInput::Reply { .. }
+            | RunInput::Schedule { .. }
+            | RunInput::FailureNotice { .. }
+            | RunInput::Mention { .. }
+            | RunInput::FollowUp { .. } => None,
         }
     }
     /// A schedule run's slot is its `ready_at`.
@@ -190,6 +207,8 @@ impl RunInput {
             "reply" => Ok(RunInput::Reply { post_id: id }),
             "schedule" => Ok(RunInput::Schedule { schedule_id: id, slot: ready_at.to_string() }),
             "failure_notice" => Ok(RunInput::FailureNotice { run_id: id }),
+            "mention" => Ok(RunInput::Mention { post_id: id }),
+            "follow_up" => Ok(RunInput::FollowUp { post_id: id }),
             other => Err(CoreError::Corrupt(format!("run input_kind {other:?}"))),
         }
     }
@@ -434,6 +453,16 @@ pub struct Run {
     pub ended_at: Option<String>,
     /// Absent: the run executes on its buddy's profile.
     pub config: Option<RunConfig>,
+    /// The input that is not a post, as JSON (a chat's message and wording). Required while a chat
+    /// run is queued (it is the only copy of the owner's text); cleared at settle.
+    pub body: Option<String>,
+    /// Set just before the run's side-effecting spawn. NULL = nothing ran yet, so a dead holder's
+    /// run is requeued, never replayed or reported lost (Pattern: durable-intake).
+    pub executing_at: Option<String>,
+    /// The ordered queue the run belongs to (`conv:<conversation>`, `seat:<root>:<buddy>`); NULL =
+    /// pool order. Inside a lane `position` alone decides order, never a timestamp.
+    pub lane: Option<String>,
+    pub position: Option<i64>,
 }
 
 /// Why a queued run cannot be claimed yet. This is derived from the claim predicate on every
@@ -449,6 +478,8 @@ pub enum RunWaiting {
     ConversationBusy,
     PoolFull { active: i64, max: i64 },
     TaskPaused,
+    /// An earlier input of its lane (its conversation or thread seat) is live and goes first.
+    BehindInLane,
 }
 
 /// The bounded list projection. Full execution state and outcomes stay on `get_run`.
@@ -524,7 +555,32 @@ pub struct PostInput {
     pub run_config: Option<RunConfig>,
     /// A reply that also appears in the channel feed and its unread count. Invalid without `reply_to_id`.
     pub broadcast: bool,
+    /// The buddies this post wakes, planned by the host before the write and enqueued in the
+    /// post's own transaction, so an acknowledged post always has its runs (Pattern: durable-intake).
+    /// Required (empty allowed): a writer that skips the planner fails to compile, not silently.
+    pub wakes: Vec<Wake>,
     pub key: String,
+}
+
+/// One buddy a post wakes. `config`: the owner's chip pick for this buddy (absent: its seat's).
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Wake {
+    pub buddy_id: String,
+    pub kind: WakeKind,
+    pub config: Option<RunConfig>,
+}
+
+/// A foreground chat input, durable from the moment it is acknowledged. Every field is required:
+/// a chat run without its text cannot be resumed after a restart (8 owner chats lost 2026-09-29).
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct ChatEnqueue {
+    pub buddy_id: String,
+    pub conversation_id: String,
+    pub turn_id: String,
+    /// JSON; opaque to the crate (the host's message, wording and provenance).
+    pub body: String,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(object))]

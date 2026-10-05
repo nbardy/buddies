@@ -173,7 +173,7 @@ fn archive_side_effects(tx: &Transaction, buddy: &str, status: Option<BuddyStatu
     match status {
         Some(BuddyStatus::Archived) => {
             tx.execute(
-                "UPDATE run SET status = 'cancelled', error_code = 'archived', error = 'the buddy was archived', ended_at = ?2
+                "UPDATE run SET status = 'cancelled', error_code = 'archived', error = 'the buddy was archived', ended_at = ?2, body = NULL
                  WHERE buddy_id = ?1 AND status = 'queued'",
                 params![buddy, now_iso()],
             )?;

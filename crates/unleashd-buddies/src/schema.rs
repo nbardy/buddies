@@ -116,27 +116,6 @@ CREATE TABLE schedule (
 CREATE INDEX schedule_due ON schedule(next_run_at) WHERE enabled = 1 AND archived_at IS NULL;
 CREATE INDEX schedule_buddy ON schedule(buddy_id);
 
-CREATE TABLE run (
-  id TEXT PRIMARY KEY, input_key TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 1,
-  input_kind TEXT NOT NULL CHECK(input_kind IN ('chat','post','reply','schedule','failure_notice')),
-  input_id TEXT NOT NULL, buddy_id TEXT NOT NULL REFERENCES buddy(id), workspace_id TEXT NOT NULL,
-  conversation_id TEXT, task_id TEXT, task_epoch INTEGER, after_run_id TEXT,
-  status TEXT NOT NULL CHECK(status IN ('queued','running','cancel_requested','complete','failed','cancelled')),
-  lease_token TEXT, lease_expires_at TEXT, deadline TEXT,
-  snapshot TEXT, outcome TEXT, error_code TEXT, error TEXT,
-  ready_at TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT, legacy TEXT,
-  config TEXT,
-  UNIQUE(input_key, attempt)) STRICT;
-CREATE UNIQUE INDEX run_live_input ON run(input_key) WHERE status IN ('queued','running','cancel_requested');
-CREATE UNIQUE INDEX run_conversation_slot ON run(conversation_id)
-  WHERE conversation_id IS NOT NULL AND status IN ('running','cancel_requested');
-CREATE INDEX run_queue ON run(ready_at, id) WHERE status = 'queued';
-CREATE INDEX run_lease ON run(lease_expires_at) WHERE status IN ('running','cancel_requested');
-CREATE INDEX run_active_buddy ON run(buddy_id) WHERE status IN ('running','cancel_requested');
-CREATE INDEX run_buddy ON run(buddy_id, status, created_at);
-CREATE INDEX run_conversation ON run(conversation_id, created_at) WHERE conversation_id IS NOT NULL;
-CREATE INDEX run_task ON run(task_id, status) WHERE task_id IS NOT NULL;
-
 CREATE TABLE conversation (
   id TEXT PRIMARY KEY, buddy_id TEXT NOT NULL REFERENCES buddy(id), workspace_id TEXT NOT NULL,
   task_id TEXT, created_at TEXT NOT NULL, legacy TEXT) STRICT;
@@ -150,6 +129,61 @@ CREATE TABLE event (
 CREATE INDEX event_at ON event(at);
 CREATE INDEX event_buddy ON event(buddy_id, seq) WHERE buddy_id IS NOT NULL;
 "#;
+
+/// The `run` table, named `{table}` so the on-open rebuild creates `run_new` from the SAME text a
+/// fresh file gets. Pattern: durable-intake (docs/patterns.md#durable-intake). Changed 2026-10-05:
+/// - `mention` / `follow_up` kinds: a post's wakes are runs written in the post's transaction;
+/// - `body`: the input that is not a post. A queued chat run is the ONLY copy of the owner's text,
+///   so the CHECK refuses one without it (8 owner chats were lost at a restart on 2026-09-29). Only
+///   while queued: legacy running chats predate the column, and past `executing_at` the provider
+///   journal and transcript hold the prompt;
+/// - `executing_at`: set just before the side-effecting spawn. NULL = nothing ran, so a run whose
+///   holder died is requeued instead of replayed or reported lost (runs.rs `expire_leases`);
+/// - `lane` / `position`: one ordered queue per conversation or thread seat. Inside a lane only
+///   `position` orders: equal timestamps and promotes must not reorder a conversation's inputs.
+/// STRICT CHECKs cannot be ALTERed, hence one rebuild (`rebuild_run`), not ADD COLUMN.
+const RUN_TABLE: &str = r#"
+CREATE TABLE {table} (
+  id TEXT PRIMARY KEY, input_key TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 1,
+  input_kind TEXT NOT NULL CHECK(input_kind IN ('chat','post','reply','schedule','failure_notice','mention','follow_up')),
+  input_id TEXT NOT NULL, buddy_id TEXT NOT NULL REFERENCES buddy(id), workspace_id TEXT NOT NULL,
+  conversation_id TEXT, task_id TEXT, task_epoch INTEGER, after_run_id TEXT,
+  status TEXT NOT NULL CHECK(status IN ('queued','running','cancel_requested','complete','failed','cancelled')),
+  lease_token TEXT, lease_expires_at TEXT, deadline TEXT,
+  snapshot TEXT, outcome TEXT, error_code TEXT, error TEXT,
+  ready_at TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT, legacy TEXT,
+  config TEXT, body TEXT, executing_at TEXT, lane TEXT, position INTEGER,
+  CHECK(input_kind <> 'chat' OR status <> 'queued' OR body IS NOT NULL),
+  CHECK((lane IS NULL) = (position IS NULL)),
+  UNIQUE(input_key, attempt)) STRICT;
+"#;
+
+/// Every index of `run`, created on EVERY open (IF NOT EXISTS), never by a base DDL alone: the
+/// 2026-09-29 queue stall was an index only the base DDL created, so older files lacked it. The
+/// rebuild drops the indexes with the old table, and this list puts every one back.
+const RUN_INDEXES: &str = "
+CREATE UNIQUE INDEX IF NOT EXISTS run_live_input ON run(input_key) WHERE status IN ('queued','running','cancel_requested');
+CREATE UNIQUE INDEX IF NOT EXISTS run_conversation_slot ON run(conversation_id)
+  WHERE conversation_id IS NOT NULL AND status IN ('running','cancel_requested');
+CREATE INDEX IF NOT EXISTS run_queue ON run(ready_at, id) WHERE status = 'queued';
+CREATE INDEX IF NOT EXISTS run_lease ON run(lease_expires_at) WHERE status IN ('running','cancel_requested');
+CREATE INDEX IF NOT EXISTS run_active_buddy ON run(buddy_id) WHERE status IN ('running','cancel_requested');
+CREATE INDEX IF NOT EXISTS run_buddy ON run(buddy_id, status, created_at);
+CREATE INDEX IF NOT EXISTS run_conversation ON run(conversation_id, created_at) WHERE conversation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS run_task ON run(task_id, status) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS run_workspace_live ON run(workspace_id, status, created_at)
+  WHERE status IN ('queued','running','cancel_requested');
+CREATE INDEX IF NOT EXISTS run_workspace_ended ON run(workspace_id, ended_at) WHERE ended_at IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS run_lane_position ON run(lane, position)
+  WHERE lane IS NOT NULL AND status IN ('queued','running','cancel_requested');
+CREATE UNIQUE INDEX IF NOT EXISTS run_lane_running ON run(lane)
+  WHERE lane IS NOT NULL AND status IN ('running','cancel_requested');";
+
+/// The columns every `run` table has had since 2026-09-28 (after `drop_run_retry_of` and
+/// `ensure_run_config`), copied unchanged by the rebuild.
+const RUN_V1_COLUMNS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, \
+  task_id, task_epoch, after_run_id, status, lease_token, lease_expires_at, deadline, snapshot, outcome, error_code, \
+  error, ready_at, created_at, started_at, ended_at, legacy, config";
 
 /// Full-text search over post bodies: an external-content FTS5 index kept in step by triggers.
 /// Added after the T06b schema, so `open` creates it on a file that lacks it (and fills it once).
@@ -184,14 +218,11 @@ const TASK_LIVE_INDEX: &str = "
 CREATE INDEX IF NOT EXISTS task_live ON task(workspace_id, owner_id, status)
   WHERE parent_id IS NULL AND status IN ('open','in_progress','blocked','review');";
 
-/// The shared MCP list scopes. Without these, a workspace run/schedule read walks the entire
-/// table; `query_plan.rs` exercises every scope and rejects that regression.
+/// The shared MCP list scopes. Without these, a workspace schedule read walks the entire table;
+/// `query_plan.rs` exercises every scope and rejects that regression. Run scopes: RUN_INDEXES.
 const LIST_SCOPE_INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS schedule_task ON schedule(task_id) WHERE task_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS schedule_workspace ON schedule(workspace_id);
-CREATE INDEX IF NOT EXISTS run_workspace_live ON run(workspace_id, status, created_at)
-  WHERE status IN ('queued','running','cancel_requested');
-CREATE INDEX IF NOT EXISTS run_workspace_ended ON run(workspace_id, ended_at) WHERE ended_at IS NOT NULL;";
+CREATE INDEX IF NOT EXISTS schedule_workspace ON schedule(workspace_id);";
 
 /// A file imported before ordered ids has no `post.ord`: it cannot be ordered correctly, so it is
 /// refused with the fix (re-import), never opened half-working. No live file predates it (T15).
@@ -282,6 +313,59 @@ fn ensure_post_search(conn: &Connection) -> Result<()> {
     }
 }
 
+/// The 2026-10-05 `run` rebuild (Pattern: durable-intake), done once: a file whose `run` CHECK
+/// already names 'mention' has it. One transaction. An older build reading the result fails loudly
+/// on the new kinds (`RunInput::from_columns` → Corrupt) rather than losing rows.
+///
+/// What happens to the rows that exist (design 2026-09-30_pending-delivery-design.md, R1). No body
+/// is invented:
+/// - a QUEUED chat has no stored text anywhere (its only copy was the old backend's memory). It
+///   ends `cancelled` / `interrupted` with that reason. The text was lost when that process died;
+///   this says so, which is what the old boot sweep (later the claim gate) did to it anyway;
+/// - a RUNNING or CANCEL_REQUESTED run of any kind was spawned before `executing_at` existed, so it
+///   gets `executing_at = coalesce(started_at, created_at)` and counts as executed: the backend
+///   that adopted it settles it, or its lease ends it. It is never requeued. Without this backfill
+///   the rule "unexecuted → requeue" would REPLAY every legacy running turn (the August rule
+///   forbids it). Guard: `the_run_rebuild_keeps_every_row_and_requeues_no_legacy_running_run`;
+/// - every other row is copied unchanged (pool order, no lane, no body).
+fn rebuild_run(conn: &Connection) -> Result<()> {
+    let sql: String = conn.query_row("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'run'", [], |r| r.get(0))?;
+    if sql.contains("'mention'") {
+        return Ok(());
+    }
+    // Outside the transaction (SQLite ignores it inside one). Nothing references run(id); the
+    // check after the commit proves the swap left nothing dangling.
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let rebuilt = conn.execute_batch(&format!(
+        "BEGIN;
+         {new_table}
+         INSERT INTO run_new ({RUN_V1_COLUMNS}, executing_at)
+           SELECT {RUN_V1_COLUMNS},
+                  CASE WHEN status IN ('running','cancel_requested') THEN coalesce(started_at, created_at) END
+           FROM run WHERE NOT (input_kind = 'chat' AND status = 'queued');
+         INSERT INTO run_new ({RUN_V1_COLUMNS})
+           SELECT id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id,
+                  task_epoch, after_run_id, 'cancelled', NULL, NULL, deadline, snapshot, outcome, 'interrupted',
+                  'queued before durable intake; the text was never stored', ready_at, created_at, started_at,
+                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), legacy, config
+           FROM run WHERE input_kind = 'chat' AND status = 'queued';
+         DROP TABLE run;
+         ALTER TABLE run_new RENAME TO run;
+         COMMIT;",
+        new_table = RUN_TABLE.replace("{table}", "run_new"),
+    ));
+    if rebuilt.is_err() {
+        let _ = conn.execute_batch("ROLLBACK;");
+    }
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    rebuilt?;
+    let dangling: i64 = conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0))?;
+    match dangling {
+        0 => Ok(()),
+        n => Err(CoreError::Corrupt(format!("run rebuild left {n} dangling references"))),
+    }
+}
+
 fn configure(conn: &Connection) -> Result<()> {
     // checkpoint_fullfsync: macOS fsync() skips the drive cache, and a power cut mid-checkpoint
     // corrupted the attempt store on 2026-09-30. Only checkpoints pay for F_FULLFSYNC.
@@ -304,12 +388,15 @@ pub fn open(path: &str) -> Result<Connection> {
             drop_run_retry_of(&conn)?;
             drop_buddy_background_enabled(&conn)?;
             ensure_run_config(&conn)?;
+            rebuild_run(&conn)?;
+            conn.execute_batch(RUN_INDEXES)?;
             ensure_threads(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
         }
         (false, 0) => {
-            conn.execute_batch(&format!("BEGIN; {DDL} PRAGMA application_id = {APPLICATION_ID}; COMMIT;"))?;
+            let run = RUN_TABLE.replace("{table}", "run");
+            conn.execute_batch(&format!("BEGIN; {DDL} {run} {RUN_INDEXES} PRAGMA application_id = {APPLICATION_ID}; COMMIT;"))?;
             ensure_threads(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)

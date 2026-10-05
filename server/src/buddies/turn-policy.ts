@@ -372,14 +372,14 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   // --- admission -------------------------------------------------------------
 
-  gate(_input: TurnInput, fromQueue: boolean): TurnGate {
+  gate(input: TurnInput, fromQueue: boolean): TurnGate {
     // A runner-owned run already holds its slot; only chat turns queue for one.
     if (this.execution) return 'send';
     // Chat turns are admitted through the queue, so a turn waiting for a run slot is visible as
     // pending and later sends line up behind it. The queue keeps the input's provenance: a
     // 'buddy_post' seat turn dropped here would come back 'unknown'.
     if (!fromQueue) return 'enqueue';
-    const owned = this.admitChatRun();
+    const owned = this.admitChatRun(input);
     if (!owned) return 'wait';
     this.admittedChatRun = owned;
     return 'admitted';
@@ -389,9 +389,9 @@ export class BuddyTurnPolicy implements TurnPolicy {
   // re-runs processQueue. The run's deadline is TURN_MAX_RUNTIME_MS, passed explicitly to the
   // claim (runner.ts `chatDeadlineMs`; a 600 s claim lease used as the deadline killed live owner
   // chats on 2026-09-10). Its lease is a separate short heartbeat (bridgeAlive).
-  private admitChatRun(): OwnedChatRun | null {
+  private admitChatRun(input: TurnInput): OwnedChatRun | null {
     this.chatTicket ??= {
-      turnId: this.buddies.enqueueChat(this.turnContext(), this.host.id),
+      turnId: this.buddies.enqueueChat(this.turnContext(), this.host.id, input),
       stopWaiting: waitForChatRunSlot(() => this.host.processQueue()),
     };
     const admission = this.buddies.admission(this.chatTicket.turnId);

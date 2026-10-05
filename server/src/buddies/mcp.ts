@@ -327,6 +327,7 @@ const BUDDY_TOOLS = {
           returns: grant.returns,
           runConfig,
           broadcast: false,
+          wakes: [],
         }
       );
       // A replayed key (a retried tool call) announces nothing: it would wake everyone again.

@@ -417,6 +417,8 @@ export function createChannels(ports: ChannelsPorts) {
         replyToId: input.trigger.id,
         fromConversationId: conversationId ?? undefined,
         broadcast: false,
+        // A failure notice asks nobody to answer.
+        wakes: [],
         key: input.noticeKey,
         purpose: 'reply_failed',
         body: `Couldn’t reply: ${reason}`,

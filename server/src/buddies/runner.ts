@@ -310,6 +310,10 @@ export function createRunner(options: {
         return scheduleJob(run, input.scheduleId, input.slot);
       case 'chat':
         throw new Error('a chat run is admitted, not executed');
+      // Durable intake W0a: the kinds exist, nothing produces them until channels move onto runs.
+      case 'mention':
+      case 'follow_up':
+        throw new Error(`no job handles ${input.kind} runs in this build`);
     }
   }
 
@@ -478,12 +482,16 @@ export function createRunner(options: {
       while (draining) await draining;
     },
 
-    /** Line a foreground chat turn up behind its Buddy's run limit. Returns its ticket id. */
-    enqueueChat(context: BuddyContext, conversationId: string, turnId: string): void {
-      const run = core.enqueueRun(OWNER, {
+    /**
+     * Line a foreground chat turn up behind its Buddy's run limit. `body` is the input the run
+     * carries (durable intake: the crate refuses a queued chat run without it).
+     */
+    enqueueChat(context: BuddyContext, conversationId: string, turnId: string, body: string): void {
+      const run = core.enqueueChat(OWNER, {
         buddyId: context.buddyId,
-        input: { kind: 'chat', turnId },
         conversationId,
+        turnId,
+        body,
       });
       chats.set(turnId, { state: 'queued', context, conversationId, run });
       run.then(wake, (error) => {

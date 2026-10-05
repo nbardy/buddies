@@ -29,19 +29,17 @@ fn request(body: &str, key: &str) -> PostInput {
         returns: Some(Returns::Conversation { id: "conv-sender".into() }),
         run_config: None,
         broadcast: false,
+        wakes: vec![],
         key: key.into(),
     }
 }
 
-fn chat(buddy_id: &str, turn: &str, conversation: &str) -> EnqueueInput {
-    EnqueueInput {
+fn chat(buddy_id: &str, turn: &str, conversation: &str) -> ChatEnqueue {
+    ChatEnqueue {
         buddy_id: buddy_id.into(),
-        input: RunInput::Chat { turn_id: turn.into() },
-        conversation_id: Some(conversation.into()),
-        task_id: None,
-        after_run_id: None,
-        deadline: None,
-        config: None,
+        conversation_id: conversation.into(),
+        turn_id: turn.into(),
+        body: format!("{{\"text\":\"{turn}\"}}"),
     }
 }
 
@@ -310,7 +308,7 @@ fn two_claimers_one_winner() {
     let path = f.path.to_str().unwrap().to_string();
     let mut setup = Store::open(&path).unwrap();
     for round in 0..25 {
-        setup.enqueue_run(&Actor::Owner, chat("peer", &format!("turn-{round}"), &format!("conv-{round}"))).unwrap();
+        setup.enqueue_chat(&Actor::Owner, chat("peer", &format!("turn-{round}"), &format!("conv-{round}"))).unwrap();
         let barrier = Arc::new(Barrier::new(2));
         let winners: Vec<Option<Claim>> = (0..2)
             .map(|_| {
@@ -335,7 +333,7 @@ fn two_claimers_one_winner() {
 fn a_lease_is_the_only_way_to_settle_and_it_expires() {
     let mut f = fixture();
     let s = &mut f.store;
-    s.enqueue_run(&Actor::Owner, chat("peer", "t1", "c1")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "c1")).unwrap();
     let claim = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(1_000)).unwrap().unwrap();
     let wrong = s.settle_run(&claim.run.id, "not-the-token", Outcome::Complete { text: "x".into() }).unwrap_err();
     assert!(matches!(wrong, CoreError::LeaseLost(_)));
@@ -353,8 +351,8 @@ fn a_lease_is_the_only_way_to_settle_and_it_expires() {
 fn one_running_run_per_conversation() {
     let mut f = fixture();
     let s = &mut f.store;
-    s.enqueue_run(&Actor::Owner, chat("peer", "t1", "same")).unwrap();
-    s.enqueue_run(&Actor::Owner, chat("peer", "t2", "same")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "same")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "t2", "same")).unwrap();
     let first = s.claim_run(lease(60_000)).unwrap().unwrap();
     assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the conversation is busy");
     s.settle_run(&first.run.id, &first.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
@@ -513,7 +511,20 @@ fn pausing_a_task_cancels_its_queued_runs() {
             TaskWrite::Create { owner_id: "ic".into(), parent_id: None, title: "t".into(), done_criteria: "d".into(), key: "c".into() },
         )
         .unwrap();
-    let run = s.enqueue_run(&buddy("ic"), EnqueueInput { task_id: Some(task.id.clone()), ..chat("ic", "t1", "c1") }).unwrap();
+    let run = s
+        .enqueue_run(
+            &buddy("ic"),
+            EnqueueInput {
+                buddy_id: "ic".into(),
+                input: RunInput::Reply { post_id: "post_x".into() },
+                conversation_id: Some("c1".into()),
+                task_id: Some(task.id.clone()),
+                after_run_id: None,
+                deadline: None,
+                config: None,
+            },
+        )
+        .unwrap();
     s.upsert_task(
         &buddy("ic"),
         TaskWrite::Update {
@@ -617,7 +628,7 @@ fn team_admin_is_owner_only_and_refuses_a_reporting_cycle() {
     assert_eq!((mid.manager_id, mid.name.as_str(), mid.role.as_str()), (None, "Mid", "role"), "absent fields are unchanged");
 
     // Archiving cancels the buddy's queued runs: an archived buddy is never claimed again.
-    let queued = s.enqueue_run(&Actor::Owner, chat("peer", "t1", "c-peer")).unwrap();
+    let queued = s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "c-peer")).unwrap();
     let archive = BuddyUpdate {
         buddy_id: "peer".into(),
         changes: BuddyChanges { status: Some(BuddyStatus::Archived), ..BuddyChanges::default() },
@@ -667,7 +678,7 @@ fn an_expired_lease_ends_its_run_like_a_failed_settle() {
 fn a_renewed_lease_outlives_its_first_term() {
     let mut f = fixture();
     let s = &mut f.store;
-    s.enqueue_run(&Actor::Owner, chat("lead", "turn", "c-lead")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("lead", "turn", "c-lead")).unwrap();
     let chat_run = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
     assert_eq!(chat_run.run.deadline.as_deref(), Some("2099-01-02T00:00:00.000Z"), "24 h, from the chat budget");
     s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
@@ -886,6 +897,7 @@ fn task_posts_gather_one_tasks_posts_across_the_channels_a_reader_may_read() {
             returns: None,
             run_config: None,
             broadcast: false,
+            wakes: vec![],
             key: "task-channel".into(),
         },
     )
@@ -1148,7 +1160,7 @@ fn a_group_request_starts_one_run_per_recipient() {
         .unwrap();
     let again = f
         .store
-        .enqueue_run(&Actor::Owner, EnqueueInput { buddy_id: "ic".into(), input: RunInput::Post { post_id: solo.id.clone() }, ..chat("ic", "x", "c") })
+        .enqueue_run(&Actor::Owner, EnqueueInput { buddy_id: "ic".into(), input: RunInput::Post { post_id: solo.id.clone() }, conversation_id: Some("c".into()), task_id: None, after_run_id: None, deadline: None, config: None })
         .unwrap();
     assert_eq!(again.id, run.id, "a pre-fix run is still matched by its legacy key");
 }

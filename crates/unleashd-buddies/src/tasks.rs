@@ -196,7 +196,7 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
             ],
         )?;
         tx.execute(
-            "UPDATE run SET status = 'cancelled', error_code = 'task_epoch_stale', ended_at = ?3
+            "UPDATE run SET status = 'cancelled', error_code = 'task_epoch_stale', ended_at = ?3, body = NULL
              WHERE task_id = ?1 AND status = 'queued' AND task_epoch < ?2",
             params![task.id, epoch, next.updated_at],
         )?;

@@ -245,6 +245,7 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
         body: `Later channel activity ${index}`,
         evidence: [],
         broadcast: false,
+        wakes: [],
         key: `activity:${index}`,
       }
     );

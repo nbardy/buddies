@@ -226,7 +226,7 @@ export async function publishOwnerPost(
   const { post, created } = await deps.core.post(
     author,
     { kind: 'id', id: target.id },
-    { ...input, body }
+    { ...input, body, wakes: [] }
   );
   if (!created) return { post };
   deps.events.emit({ kind: 'changed' });

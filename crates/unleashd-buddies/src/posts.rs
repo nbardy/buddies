@@ -9,7 +9,7 @@
 //! a buddy author, all in one transaction.
 
 use crate::error::{CoreError, Result};
-use crate::runs::Enqueue;
+use crate::runs::{Enqueue, NewRun, Place};
 use crate::store::{Mutation, Store, collect, corrupt, get_buddy, idempotent, idempotent_write, new_id, now_iso, require};
 use crate::tasks::get_task;
 use crate::types::*;
@@ -706,6 +706,9 @@ fn insert_post(
         input.broadcast
     ])?;
     follow(tx, actor, root_id.as_deref().unwrap_or(&id), &ord)?;
+    for wake in &input.wakes {
+        enqueue_wake(tx, actor, channel, &id, root_id.as_deref().unwrap_or(&id), wake)?;
+    }
     for recipient in ask.owed_by().iter().filter_map(Actor::buddy_id) {
         tx.enqueue(EnqueueInput {
             buddy_id: recipient.to_string(),
@@ -718,6 +721,65 @@ fn insert_post(
         })?;
     }
     Ok(id)
+}
+
+// Pattern: durable-intake (docs/patterns.md#durable-intake)
+/// One buddy this post wakes, as a run in the post's own transaction: an acknowledged post always
+/// has its runs, and a refused wake rolls the post back. Until 2026-10-05 a post woke nobody in the
+/// core; the host started replies from an in-memory `posted` event, its pair queue and its gate
+/// promises, all lost at a restart (the post survived, its replies never came).
+///
+/// The run's lane is the (thread, buddy) seat: one reply at a time per seat, in post order. A
+/// follow-up supersedes the seat's older follow-ups still QUEUED: the gate is asked once, about the
+/// newest post (the old in-memory `deferred` slot). A queued mention is never superseded: a
+/// mention must be answered.
+fn enqueue_wake(
+    tx: &Transaction,
+    author: &Actor,
+    channel: &Channel,
+    post_id: &str,
+    root_id: &str,
+    wake: &Wake,
+) -> Result<()> {
+    let buddy = get_buddy(tx, &wake.buddy_id)?;
+    if buddy.workspace_id != channel.workspace_id {
+        return Err(CoreError::Invalid(format!("buddy {} is outside this channel's workspace", buddy.id)));
+    }
+    if buddy.status != BuddyStatus::Active {
+        return Err(CoreError::Invalid(format!("buddy {} is not active", buddy.id)));
+    }
+    if author.buddy_id() == Some(buddy.id.as_str()) {
+        return Err(CoreError::Invalid(format!("a post cannot wake its own author {}", buddy.id)));
+    }
+    let lane = format!("seat:{root_id}:{}", buddy.id);
+    let input = match wake.kind {
+        WakeKind::Mention => RunInput::Mention { post_id: post_id.to_string() },
+        WakeKind::FollowUp => {
+            tx.prepare_cached(
+                "UPDATE run SET status = 'cancelled', error_code = 'superseded', ended_at = ?2,
+                   error = 'a newer post in this thread asks the reply gate instead'
+                 WHERE lane = ?1 AND status = 'queued' AND input_kind = 'follow_up'",
+            )?
+            .execute(params![lane, now_iso()])?;
+            RunInput::FollowUp { post_id: post_id.to_string() }
+        }
+    };
+    tx.insert_run(NewRun {
+        input: EnqueueInput {
+            buddy_id: buddy.id,
+            input,
+            conversation_id: None,
+            // No task: a reply in a task's thread is not task work, and a paused task must not
+            // silence it (it never did when replies ran as chat turns).
+            task_id: None,
+            after_run_id: None,
+            deadline: None,
+            config: wake.config.clone(),
+        },
+        body: None,
+        lane: Some((lane, Place::Back)),
+    })?;
+    Ok(())
 }
 
 /// A worker: a request whose recipients' runs execute with `config`, not their profile. Only a

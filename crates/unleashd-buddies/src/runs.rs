@@ -15,7 +15,7 @@ use std::str::FromStr;
 
 const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, \
     task_epoch, after_run_id, status, deadline, lease_expires_at, snapshot, outcome, error_code, error, ready_at, \
-    created_at, started_at, ended_at, config";
+    created_at, started_at, ended_at, config, body, executing_at, lane, position";
 
 const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
     JOIN buddy b ON b.id = r.buddy_id
@@ -34,6 +34,11 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 // a conversation_id is a real turn in it. Do not admit a run here whose job is decided after the
 // claim: on 2026-10-01 no-op `reply` runs for answers to an owner chat's requests sat behind the
 // owner's turn up to 2h44m and read as "blocked" (a Buddy offered to cancel the owner's GPU turn).
+// `behind_in_lane` (Pattern: durable-intake): a lane is one conversation's or thread seat's queue,
+// and only its lowest live `position` may run, one at a time. It is last so a run that waits for
+// two reasons reports the pool-level one. `ready_at` orders runs ACROSS lanes only: inside a lane
+// it would reorder three sends written in the same millisecond, or undo a promote (review 2 of
+// the design). Guard: crate test `a_lane_claims_in_position_order_at_one_frozen_instant`.
 // The fix is upstream, not a special case in this gate: the route is fixed when the request is
 // sent (types.rs `Returns`), and an Inbox answer creates no run. Guard: buddies-v2 "an answer to
 // a request sent from a human chat starts no run and never queues behind that chat".
@@ -55,6 +60,11 @@ const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.task_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM task t WHERE t.id = r.task_id AND t.paused = 0
     ) THEN json_object('kind','task_paused')
+    WHEN r.lane IS NOT NULL AND EXISTS (
+        SELECT 1 FROM run l WHERE l.lane = r.lane AND l.id <> r.id
+          AND l.status IN ('queued','running','cancel_requested')
+          AND (l.position < r.position OR l.status <> 'queued')
+    ) THEN json_object('kind','behind_in_lane')
     ELSE NULL
 END"#;
 
@@ -84,6 +94,10 @@ fn run_row(r: &Row) -> rusqlite::Result<Run> {
         ended_at: r.get(21)?,
         // By name: it is the last column, and index shifts elsewhere must not move it.
         config: r.get::<_, Option<String>>("config")?.map(|json| run_config(&json)).transpose().map_err(corrupt)?,
+        body: r.get("body")?,
+        executing_at: r.get("executing_at")?,
+        lane: r.get("lane")?,
+        position: r.get("position")?,
     })
 }
 
@@ -103,13 +117,55 @@ fn plus_ms(now: &str, ms: i64) -> Result<String> {
     Ok((t.with_timezone(&Utc) + Duration::milliseconds(ms)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
 }
 
+/// Where an input joins its lane: behind every live input (a send), or ahead of them all (an
+/// interrupt, a promote). Computed inside the write transaction, so two writers never read the
+/// same end: the crate is one connection, one writer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Place {
+    Back,
+    Front,
+}
+
+/// The position an input takes in `lane`. Positions of live rows are never reused, so a requeued
+/// head keeps its place ahead of everything pushed after it.
+pub(crate) fn lane_position(tx: &Connection, lane: &str, place: Place) -> Result<i64> {
+    let (min, max): (Option<i64>, Option<i64>) = tx
+        .prepare_cached(
+            "SELECT min(position), max(position) FROM run INDEXED BY run_lane_position
+             WHERE lane = ?1 AND status IN ('queued','running','cancel_requested')",
+        )?
+        .query_row([lane], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(match place {
+        Place::Back => max.map_or(0, |m| m + 1),
+        Place::Front => min.map_or(0, |m| m - 1),
+    })
+}
+
+/// A run to insert: an `EnqueueInput` plus what only the crate's own producers set (a chat's body,
+/// a lane). Kept off the public `EnqueueInput` so no host write can place a run in a lane.
+pub(crate) struct NewRun {
+    pub input: EnqueueInput,
+    pub body: Option<String>,
+    pub lane: Option<(String, Place)>,
+}
+
+impl From<EnqueueInput> for NewRun {
+    fn from(input: EnqueueInput) -> Self {
+        NewRun { input, body: None, lane: None }
+    }
+}
+
 /// Enqueue is idempotent on the input key: the key's latest attempt is returned if it exists.
 pub(crate) trait Enqueue {
-    fn enqueue(&self, input: EnqueueInput) -> Result<Run>;
+    fn enqueue(&self, input: EnqueueInput) -> Result<Run> {
+        self.insert_run(input.into())
+    }
+    fn insert_run(&self, run: NewRun) -> Result<Run>;
 }
 
 impl Enqueue for Connection {
-    fn enqueue(&self, input: EnqueueInput) -> Result<Run> {
+    fn insert_run(&self, run: NewRun) -> Result<Run> {
+        let NewRun { input, body, lane } = run;
         let (kind, input_id, key) = input.input.columns(&input.buddy_id);
         let latest = format!("SELECT {RUN_COLS} FROM run WHERE input_key = ?1 AND buddy_id = ?2 ORDER BY attempt DESC LIMIT 1");
         let mut existing = self.prepare_cached(&latest)?.query_row([&key, &input.buddy_id], run_row).optional()?;
@@ -124,13 +180,22 @@ impl Enqueue for Connection {
         let now = now_iso();
         let ready_at = match &input.input {
             RunInput::Schedule { slot, .. } => slot.clone(),
-            RunInput::Chat { .. } | RunInput::Post { .. } | RunInput::Reply { .. } | RunInput::FailureNotice { .. } => now.clone(),
+            RunInput::Chat { .. }
+            | RunInput::Post { .. }
+            | RunInput::Reply { .. }
+            | RunInput::FailureNotice { .. }
+            | RunInput::Mention { .. }
+            | RunInput::FollowUp { .. } => now.clone(),
+        };
+        let (lane, position) = match &lane {
+            Some((lane, place)) => (Some(lane.as_str()), Some(lane_position(self, lane, *place)?)),
+            None => (None, None),
         };
         let id = new_id("run");
         self.prepare_cached(
             "INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, task_epoch,
-               after_run_id, status, deadline, ready_at, created_at, config)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', ?11, ?12, ?13, ?14)",
+               after_run_id, status, deadline, ready_at, created_at, config, body, lane, position)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         )?
         .execute(params![
             id,
@@ -146,17 +211,46 @@ impl Enqueue for Connection {
             input.deadline,
             ready_at,
             now,
-            input.config.as_ref().map(|c| serde_json::to_string(c).expect("run config serializes"))
+            input.config.as_ref().map(|c| serde_json::to_string(c).expect("run config serializes")),
+            body,
+            lane,
+            position
         ])?;
         get_run(self, &id)
     }
 }
 
 impl Store {
+    /// Any run but a chat: a chat carries the owner's text and goes through `enqueue_chat`.
     pub fn enqueue_run(&mut self, actor: &Actor, input: EnqueueInput) -> Result<Run> {
+        if let RunInput::Chat { .. } = input.input {
+            return Err(CoreError::Invalid("a chat run carries its message: use enqueue_chat".into()));
+        }
         self.write(|tx| {
             require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: input.buddy_id.clone() })?;
             tx.enqueue(input)
+        })
+    }
+
+    // Pattern: durable-intake (docs/patterns.md#durable-intake)
+    /// A foreground chat input, with its text, written before the send is acknowledged. The run IS
+    /// the queued message: nothing about it lives only in the host's memory.
+    pub fn enqueue_chat(&mut self, actor: &Actor, input: ChatEnqueue) -> Result<Run> {
+        self.write(|tx| {
+            require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: input.buddy_id.clone() })?;
+            tx.insert_run(NewRun {
+                input: EnqueueInput {
+                    buddy_id: input.buddy_id,
+                    input: RunInput::Chat { turn_id: input.turn_id },
+                    conversation_id: Some(input.conversation_id),
+                    task_id: None,
+                    after_run_id: None,
+                    deadline: None,
+                    config: None,
+                },
+                body: Some(input.body),
+                lane: None,
+            })
         })
     }
 
@@ -195,17 +289,24 @@ impl Store {
                 .query_row([now], |r| r.get(0))
                 .optional()?;
             let Some(id) = candidate else { return Ok(None) };
+            // A channel reply is a foreground turn in its seat: the chat budget, as when it ran
+            // as a chat run (before 2026-10-05).
             let deadline_ms = match get_run(tx, &id)?.input {
-                RunInput::Chat { .. } => budgets.chat_deadline_ms,
+                RunInput::Chat { .. } | RunInput::Mention { .. } | RunInput::FollowUp { .. } => budgets.chat_deadline_ms,
                 RunInput::Post { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } => {
                     budgets.turn_deadline_ms
                 }
             };
             let token = uuid::Uuid::new_v4().to_string();
             // An enqueue-time deadline (EnqueueInput.deadline; no caller sets one today) wins.
+            // `executing_at` at the claim (W0a of durable intake): every holder today spawns right
+            // after it with nothing undoable in between, so a claimed run counts as executed and a
+            // dead holder's run is never requeued. W0b moves the stamp to `mark_executing`, just
+            // before the spawn. A build that left it NULL here would have its running rows REPLAYED
+            // by the next build's requeue rule (design Revision 3).
             let claimed = tx.execute(
                 "UPDATE run SET status = 'running', lease_token = ?2, lease_expires_at = ?3, started_at = ?4,
-                   deadline = coalesce(deadline, ?5)
+                   deadline = coalesce(deadline, ?5), executing_at = ?4
                  WHERE id = ?1 AND status = 'queued'",
                 params![id, token, plus_ms(now, budgets.lease_ms)?, now, plus_ms(now, deadline_ms)?],
             )?;
@@ -258,7 +359,12 @@ impl Store {
                 RunInput::Post { post_id } => {
                     tx.execute("UPDATE post SET conversation_id = ?2 WHERE id = ?1", params![post_id, conversation_id])?;
                 }
-                RunInput::Chat { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } => {}
+                RunInput::Chat { .. }
+                | RunInput::Reply { .. }
+                | RunInput::Schedule { .. }
+                | RunInput::FailureNotice { .. }
+                | RunInput::Mention { .. }
+                | RunInput::FollowUp { .. } => {}
             }
             get_run(tx, run_id)
         })
@@ -271,7 +377,7 @@ impl Store {
             require(tx, actor, Op::CancelRun, &Subject::Buddy { id: run.buddy_id.clone() })?;
             match run.status {
                 RunStatus::Queued => tx.execute(
-                    "UPDATE run SET status = 'cancelled', error_code = 'user_stop', ended_at = ?2 WHERE id = ?1",
+                    "UPDATE run SET status = 'cancelled', error_code = 'user_stop', ended_at = ?2, body = NULL WHERE id = ?1",
                     params![run_id, now_iso()],
                 )?,
                 RunStatus::Running => tx.execute("UPDATE run SET status = 'cancel_requested' WHERE id = ?1", [run_id])?,
@@ -318,6 +424,7 @@ impl Store {
             WHEN r.input_kind = 'chat' THEN 'owner'
             WHEN r.input_kind = 'post' THEN (SELECT CASE WHEN p.author_id IS NULL THEN 'owner' ELSE p.author_id END FROM post p WHERE p.id = r.input_id)
             WHEN r.input_kind = 'reply' THEN (SELECT CASE WHEN a.author_id IS NULL THEN 'owner' ELSE a.author_id END FROM post p JOIN post a ON a.id = p.answer_id WHERE p.id = r.input_id)
+            WHEN r.input_kind IN ('mention','follow_up') THEN (SELECT CASE WHEN p.author_id IS NULL THEN 'owner' ELSE p.author_id END FROM post p WHERE p.id = r.input_id)
             ELSE NULL END";
         let sql = format!(
             "SELECT r.id, r.status, r.input_kind, r.input_id, r.ready_at, r.task_id,
@@ -488,8 +595,10 @@ fn end_run(tx: &Transaction, run: &Run, outcome: &Outcome, now: &str) -> Result<
         Outcome::Failed { code, error } => ("failed", None, Some(code.as_str()), Some(error.as_str())),
         Outcome::Cancelled { reason } => ("cancelled", None, Some("cancelled"), Some(reason.as_str())),
     };
+    // The body goes at settle: the transcript holds a finished input, and the table stays small.
     tx.execute(
-        "UPDATE run SET status = ?2, outcome = ?3, error_code = ?4, error = ?5, lease_token = NULL, ended_at = ?6 WHERE id = ?1",
+        "UPDATE run SET status = ?2, outcome = ?3, error_code = ?4, error = ?5, lease_token = NULL, ended_at = ?6, body = NULL
+         WHERE id = ?1",
         params![run.id, status, text, code, error, now],
     )?;
     after_settle(tx, run, outcome)
@@ -529,7 +638,15 @@ fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
         (RunInput::Post { post_id }, Outcome::Failed { .. }) => close_request(tx, post_id, "failed", Some(&run.id)),
         (RunInput::Post { post_id }, Outcome::Cancelled { .. }) => close_request(tx, post_id, "cancelled", None),
         (RunInput::Post { .. }, Outcome::Complete { .. })
-        | (RunInput::Chat { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. }, _) => Ok(()),
+        | (
+            RunInput::Chat { .. }
+            | RunInput::Reply { .. }
+            | RunInput::Schedule { .. }
+            | RunInput::FailureNotice { .. }
+            | RunInput::Mention { .. }
+            | RunInput::FollowUp { .. },
+            _,
+        ) => Ok(()),
     }
 }
 

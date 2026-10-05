@@ -4,6 +4,7 @@ import type { Outcome, Returns } from '@unleashd/buddies-core';
 import type { BuddyContext, BuddyVisibility } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
+import type { TurnInput } from '../turns/input';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
 import { type GrantRecord, type Grants, INBOX, type TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
@@ -18,8 +19,11 @@ import type { ChatAdmission, LeaseRenewal, Runner } from './runner';
 export interface BuddyPolicyPort {
   /** The briefing composed for this context right before its turn (synchronous; see briefing.ts). */
   currentBriefing(context: BuddyContext): ResolvedBuddyConversation;
-  /** Line a chat turn up behind its Buddy's run limit; poll `admission` with the returned id. */
-  enqueueChat(context: BuddyContext, conversationId: string): string;
+  /**
+   * Line a chat turn up behind its Buddy's run limit; poll `admission` with the returned id. The
+   * run is written with `input` as its body: a queued chat run without its input is refused.
+   */
+  enqueueChat(context: BuddyContext, conversationId: string, input: TurnInput): string;
   admission(turnId: string): ChatAdmission;
   abandon(turnId: string): void;
   /**
@@ -72,9 +76,9 @@ export function createBuddyPolicyPort(deps: {
     throw new Error(`Buddy chat deadline ${runner.chatDeadlineMs} ms < TURN_MAX_RUNTIME_MS`);
   return {
     currentBriefing: (context) => briefings.current(context),
-    enqueueChat(context, conversationId) {
+    enqueueChat(context, conversationId, input) {
       const turnId = randomUUID();
-      runner.enqueueChat(context, conversationId, turnId);
+      runner.enqueueChat(context, conversationId, turnId, JSON.stringify(input));
       return turnId;
     },
     admission: (turnId) => runner.chatAdmission(turnId),

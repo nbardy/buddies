@@ -177,6 +177,11 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn enqueue_chat(&self, actor: Actor, input: ChatEnqueue) -> napi::Result<Run> {
+        call(&self.store, move |s| s.enqueue_chat(&actor, input)).await
+    }
+
+    #[napi]
     pub async fn claim_run(&self, budgets: RunBudgets) -> napi::Result<Option<Claim>> {
         call(&self.store, move |s| s.claim_run(budgets)).await
     }

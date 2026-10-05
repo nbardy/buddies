@@ -31,6 +31,7 @@ export declare class BuddiesCore {
   listTasks(query: TaskQuery): Promise<Array<Task>>
   taskCounts(workspaceId: string): Promise<Array<TaskCount>>
   enqueueRun(actor: Actor, input: EnqueueInput): Promise<Run>
+  enqueueChat(actor: Actor, input: ChatEnqueue): Promise<Run>
   claimRun(budgets: RunBudgets): Promise<Claim | null>
   renewRun(runId: string, leaseToken: string, leaseMs: number): Promise<Run>
   settleRun(runId: string, leaseToken: string, outcome: Outcome): Promise<Run>
@@ -150,6 +151,18 @@ export interface ChannelUnread {
   unread: number
   /** The reader's cursor: the ordered id it has read through. Absent: it never read the channel. */
   lastReadOrd?: string
+}
+
+/**
+ * A foreground chat input, durable from the moment it is acknowledged. Every field is required:
+ * a chat run without its text cannot be resumed after a restart (8 owner chats lost 2026-09-29).
+ */
+export interface ChatEnqueue {
+  buddyId: string
+  conversationId: string
+  turnId: string
+  /** JSON; opaque to the crate (the host's message, wording and provenance). */
+  body: string
 }
 
 export interface Claim {
@@ -349,6 +362,12 @@ export interface PostInput {
   runConfig?: RunConfig
   /** A reply that also appears in the channel feed and its unread count. Invalid without `reply_to_id`. */
   broadcast: boolean
+  /**
+   * The buddies this post wakes, planned by the host before the write and enqueued in the
+   * post's own transaction, so an acknowledged post always has its runs (Pattern: durable-intake).
+   * Required (empty allowed): a writer that skips the planner fails to compile, not silently.
+   */
+  wakes: Array<Wake>
   key: string
 }
 
@@ -422,6 +441,22 @@ export interface Run {
   endedAt?: string
   /** Absent: the run executes on its buddy's profile. */
   config?: RunConfig
+  /**
+   * The input that is not a post, as JSON (a chat's message and wording). Required while a chat
+   * run is queued (it is the only copy of the owner's text); cleared at settle.
+   */
+  body?: string
+  /**
+   * Set just before the run's side-effecting spawn. NULL = nothing ran yet, so a dead holder's
+   * run is requeued, never replayed or reported lost (Pattern: durable-intake).
+   */
+  executingAt?: string
+  /**
+   * The ordered queue the run belongs to (`conv:<conversation>`, `seat:<root>:<buddy>`); NULL =
+   * pool order. Inside a lane `position` alone decides order, never a timestamp.
+   */
+  lane?: string
+  position?: number
 }
 
 /**
@@ -457,6 +492,8 @@ export type RunInput =
   | { kind: 'reply'; postId: string }
   | { kind: 'schedule'; scheduleId: string; slot: string }
   | { kind: 'failure_notice'; runId: string }
+  | { kind: 'mention'; postId: string }
+  | { kind: 'follow_up'; postId: string }
 
 export type RunQuery =
   | { kind: 'buddy'; buddyId: string }
@@ -495,6 +532,7 @@ export type RunWaiting =
   | { kind: 'conversation_busy' }
   | { kind: 'pool_full'; active: number; max: number }
   | { kind: 'task_paused' }
+  | { kind: 'behind_in_lane' }
 
 export interface Schedule {
   id: string
@@ -611,6 +649,15 @@ export interface ThreadStat {
 export type ThreadTail =
   | { kind: 'unread'; hidden: number; posts: Array<Post> }
   | { kind: 'caught_up'; hidden: number; posts: Array<Post> }
+
+/** One buddy a post wakes. `config`: the owner's chip pick for this buddy (absent: its seat's). */
+export interface Wake {
+  buddyId: string
+  kind: WakeKind
+  config?: RunConfig
+}
+
+export type WakeKind = 'mention' | 'follow_up'
 
 export interface Workspace {
   id: string

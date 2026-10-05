@@ -110,7 +110,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
         &ic,
         EnqueueInput {
             buddy_id: "ic".into(),
-            input: RunInput::Chat { turn_id: "u1".into() },
+            input: RunInput::Reply { post_id: "post_u1".into() },
             conversation_id: Some("c-ic".into()),
             task_id: Some(parent.id.clone()),
             after_run_id: Some(claim.run.id.clone()),
@@ -143,17 +143,9 @@ fn workload(s: &mut unleashd_buddies::Store) {
     s.post(&ic, ChannelRef::Task { task_id: parent.id.clone() }, input(PostKind::Inform, "comment", "p5")).unwrap();
 
     let run = s
-        .enqueue_run(
+        .enqueue_chat(
             &owner,
-            EnqueueInput {
-                buddy_id: "peer".into(),
-                input: RunInput::Chat { turn_id: "u2".into() },
-                conversation_id: None,
-                task_id: None,
-                after_run_id: None,
-                deadline: None,
-                config: None,
-            },
+            ChatEnqueue { buddy_id: "peer".into(), conversation_id: "c-peer".into(), turn_id: "u2".into(), body: "{}".into() },
         )
         .unwrap();
     s.cancel_run(&owner, &run.id).unwrap();
@@ -255,6 +247,7 @@ fn input(kind: PostKind, body: &str, key: &str) -> PostInput {
         returns: None,
         run_config: None,
         broadcast: false,
+        wakes: vec![],
         key: key.into(),
     }
 }
