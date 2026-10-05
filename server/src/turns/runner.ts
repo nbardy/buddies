@@ -128,6 +128,11 @@ export type TurnBroadcast =
       content: string;
     };
 
+/** The command named by a Node `spawn <cmd> ENOENT` failure, or null for any other message. */
+function missingCommand(message: string): string | null {
+  return /(?:^|[\s:])spawn (\S+) ENOENT$/.exec(message)?.[1] ?? null;
+}
+
 export class TurnRunner {
   // Per-run token: every late event/completion from a replaced handle is ignored.
   private runToken = 0;
@@ -421,7 +426,9 @@ export class TurnRunner {
       fold.streamError = err instanceof Error ? err : new Error(String(err));
       console.error(`[${host.id}] Event stream error: ${fold.streamError.message}`);
       this.terminalCauseHint = 'provider_error';
-      this.surfaceError(normalizeProviderErrorMessage(fold.streamError.message));
+      this.surfaceError(
+        this.describeFailure(normalizeProviderErrorMessage(fold.streamError.message))
+      );
     });
 
     const turnDrain = handle.completed
@@ -600,7 +607,7 @@ export class TurnRunner {
       this.host.markSessionStarted(false);
     }
     this.terminalCauseHint = cause;
-    this.providerFailureMessage = normalizeProviderErrorMessage(message);
+    this.providerFailureMessage = this.describeFailure(normalizeProviderErrorMessage(message));
     this.surfaceError(this.providerFailureMessage);
   }
 
@@ -711,11 +718,28 @@ export class TurnRunner {
   /** Surface provider errors (usage limits, auth failures, turn errors) as a system message. */
   surfaceError(message: string): void {
     console.error(`[${this.host.id}] Provider error: ${message}`);
+    // A failed spawn is reported by both the event stream and the completion promise.
+    const last = this.host.messages.at(-1);
+    if (last?.role === 'system' && last.body.t === 'text' && last.body.text === message) return;
     this.host.appendMessage({
       role: 'system',
       body: { t: 'text', text: message },
       timestamp: new Date(),
     });
+  }
+
+  /**
+   * Fix guard: a provider binary missing from PATH surfaced as the raw `spawn codex ENOENT`, which
+   * the DM view then hid, leaving an empty bubble (fresh-install trial 2026-10-05). Name the
+   * provider and the command and point at Setup, in the one text every shell and every path
+   * (chat, DM, @mention `Couldn't reply: …`) shows. Guard: conversation-runtime.test.ts
+   * "a missing provider binary".
+   */
+  private describeFailure(message: string): string {
+    const command = missingCommand(message);
+    if (!command) return message;
+    const provider = this.host.provider;
+    return `Couldn't start ${provider}: the \`${command}\` command was not found on this server's PATH. Open Setup to install it, then send your message again.`;
   }
 
   // --- drain -------------------------------------------------------------------------
@@ -843,7 +867,8 @@ export class TurnRunner {
     this.clearWatchdogs();
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[${host.id}] Process completion error: ${message}`);
-    this.surfaceError(normalizeProviderErrorMessage(message));
+    const shown = this.describeFailure(normalizeProviderErrorMessage(message));
+    this.surfaceError(shown);
     host.isStreaming = false;
     host.isRunning = false;
     this.detachProcess();
@@ -856,7 +881,13 @@ export class TurnRunner {
       );
       host.broadcastQueue();
     }
-    const observed: ExecutionOutcome = { t: 'failed', cause: 'process_exit', detail: message };
+    // Fix guard: the failure text above lives only in the in-memory overlay, so after a backend
+    // restart a DM whose CLI is missing was an empty bubble again. The attempt journal is the one
+    // record that survives, so a missing command settles as `spawn_failed` (an existing cause, no
+    // schema change) and the DM view rebuilds the message from it. Guard:
+    // conversation-runtime.test.ts "a missing provider binary" (cause) + channel-dm.test.tsx.
+    const cause = missingCommand(message) ? 'spawn_failed' : 'process_exit';
+    const observed: ExecutionOutcome = { t: 'failed', cause, detail: shown };
     return this.perform(
       this.ports.executions.step(execution, { t: 'drained', observed }),
       handle,

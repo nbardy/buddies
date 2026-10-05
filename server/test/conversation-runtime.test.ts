@@ -1714,3 +1714,44 @@ test('a Task tool starts a generic sub-agent that parent completion settles', as
   assert.equal(agent.status, 'completed');
   assert.equal(agent.statusSource, 'inferred_parent_completion');
 });
+
+// Regression: a provider binary absent from PATH showed an empty Buddy DM bubble; `spawn codex
+// ENOENT` reached only the server log (fresh-install trial 2026-10-05). Real executeTurn, empty PATH.
+test('a missing provider binary settles the turn with a visible system message naming it', async () => {
+  const saved = process.env.PATH;
+  process.env.PATH = '/nonexistent-dir';
+  try {
+    // The in-memory notice is gone after a backend restart; the attempt journal is what the DM
+    // rebuilds the message from, so a missing command must be journaled as spawn_failed.
+    const terminals: { terminalCause: string }[] = [];
+    const fixture = runtimeFixture({
+      turnAttempts: {
+        queued: () => {},
+        starting: () => {},
+        running: () => {},
+        stopping: () => {},
+        activity: () => {},
+        bindProviderSession: () => {},
+        terminal: (result) => terminals.push(result),
+      },
+    });
+    let failure = '';
+    fixture.conversation.once('buddy-turn-failed', (reason: string) => {
+      failure = reason;
+    });
+    fixture.conversation.sendMessage('hi');
+    await eventually(() => assert.notEqual(failure, ''));
+    const notices = fixture.conversation.messages.filter((m) => m.role === 'system');
+    assert.equal(notices.length, 1, 'one notice, not one per error channel');
+    const text = messageText(notices[0]);
+    assert.match(text, /codex/);
+    assert.match(text, /Setup/);
+    assert.equal(failure, text);
+    assert.deepEqual(
+      terminals.map((t) => t.terminalCause),
+      ['spawn_failed']
+    );
+  } finally {
+    process.env.PATH = saved;
+  }
+});
