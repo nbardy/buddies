@@ -23,6 +23,12 @@ static BUDDY_V2_HEADER: LazyLock<Regex> =
 const BUDDY_V2_SUFFIX: &str = "\n<!-- /unleashd:buddy-context-v2 -->\n\n";
 static BUILDER_V1_HEADER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^<!-- unleashd:buddy-builder-v1 ([0-9]+) -->\n").unwrap());
 const BUILDER_V1_SUFFIX: &str = "\n<!-- /unleashd:buddy-builder-v1 -->\n\n";
+// Fix-guard: 3c1d8d6..task_01a10d29 wrote the working directory AFTER the closing marker
+// (`-->\nWorking directory: …\n\n`), so the strict suffix failed and every Builder chat showed the
+// recovery placeholder and doubled replies. Those transcripts stay on disk; this reads them.
+// Guard: builder_envelope_strips_in_every_shape_the_server_has_written.
+static BUILDER_V1_SUFFIX_3C1D8D6: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\n<!-- /unleashd:buddy-builder-v1 -->\nWorking directory: [^\n]*\n\n").unwrap());
 static MERGE_V0: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^<!-- unleashd:merge-prefix -->\n(?s:.)*?\n<!-- /unleashd:merge-prefix -->\n\n").unwrap());
 const MERGE_V0_SUFFIX: &str = "\n<!-- /unleashd:merge-prefix -->\n\n";
@@ -116,8 +122,15 @@ fn strip_builder(content: &str) -> (String, bool) {
     let Some(header) = BUILDER_V1_HEADER.captures(content) else { return (content.to_string(), false) };
     let header_end = header.get(0).unwrap().end();
     let suffix_start = header[1].parse::<usize>().ok().and_then(|len| advance_utf16(content, header_end, len));
-    match suffix_start.filter(|&at| content[at..].starts_with(BUILDER_V1_SUFFIX)) {
-        Some(at) => (content[at + BUILDER_V1_SUFFIX.len()..].to_string(), true),
+    let suffix_end = suffix_start.and_then(|at| {
+        let rest = &content[at..];
+        match rest.starts_with(BUILDER_V1_SUFFIX) {
+            true => Some(at + BUILDER_V1_SUFFIX.len()),
+            false => BUILDER_V1_SUFFIX_3C1D8D6.find(rest).map(|m| at + m.end()),
+        }
+    });
+    match suffix_end {
+        Some(end) => (content[end..].to_string(), true),
         None => ("[Buddy Builder context recovery failed; hidden briefing removed]".to_string(), false),
     }
 }
@@ -383,6 +396,37 @@ mod tests {
         // An unversioned envelope whose closing marker also appears later is ambiguous: kept.
         let ambiguous = format!("<!-- unleashd:merge-prefix -->\na\n<!-- /unleashd:merge-prefix -->\n\nb{MERGE_V0_SUFFIX}");
         assert_eq!(strip_merge_prefix(&ambiguous), ambiguous);
+    }
+
+    /// `builderFirstTurnPrompt` (server/src/buddies/turn-policy.ts) as published from 3c1d8d6:
+    /// the working-directory line sat after the closing marker.
+    fn builder_prompt_3c1d8d6(briefing: &str, cwd: &str, visible: &str) -> String {
+        format!(
+            "<!-- unleashd:buddy-builder-v1 {} -->\n{briefing}\n<!-- /unleashd:buddy-builder-v1 -->\nWorking directory: {cwd}\n\n{visible}",
+            utf16_len(briefing)
+        )
+    }
+
+    /// `builderFirstTurnPrompt` now: the working-directory line is inside the counted body.
+    fn builder_prompt(briefing: &str, cwd: &str, visible: &str) -> String {
+        let body = format!("{briefing}\n\nWorking directory: {cwd}");
+        format!("<!-- unleashd:buddy-builder-v1 {} -->\n{body}{BUILDER_V1_SUFFIX}{visible}", utf16_len(&body))
+    }
+
+    #[test]
+    fn builder_envelope_strips_in_every_shape_the_server_has_written() {
+        // Regression (task_01a10d29, 2026-10-06): 3c1d8d6 wrote `-->\nWorking directory:` while
+        // this reader wanted `-->\n\n`, so every fresh Builder chat showed the recovery placeholder.
+        let shapes = [
+            builder_prompt("You are the Builder 😀", "/tmp/ws", "Kick off my Buddies"),
+            builder_prompt_3c1d8d6("You are the Builder 😀", "/tmp/ws", "Kick off my Buddies"),
+            format!("<!-- unleashd:buddy-builder-v1 2 -->\nhi{BUILDER_V1_SUFFIX}Kick off my Buddies"),
+        ];
+        for msg in shapes {
+            let mut v = Visible::default();
+            assert_eq!(v.user_message(&msg).unwrap(), "Kick off my Buddies", "{msg}");
+            assert_eq!(v.identity(), Identity::Builder);
+        }
     }
 
     #[test]

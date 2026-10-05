@@ -31,6 +31,12 @@ export declare class BuddiesCore {
   listTasks(query: TaskQuery): Promise<Array<Task>>
   taskCounts(workspaceId: string): Promise<Array<TaskCount>>
   enqueueRun(actor: Actor, input: EnqueueInput): Promise<Run>
+  /** A Buddy follows a thread from one conversation (follows.rs). */
+  followThread(actor: Actor, input: FollowInput): Promise<FollowRead>
+  /** A follow read's first step: the thread's unread posts for this Buddy, marked read. */
+  catchUpThread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
+  deliverFollow(followId: string, limit: number): Promise<FollowWake>
+  deliveringFollowers(rootId: string, ord: string): Promise<Array<string>>
   enqueueChat(actor: Actor, input: ChatEnqueue): Promise<Run>
   enqueueRetry(actor: Actor, noticeId: string, config: RunConfig): Promise<Run>
   threadReadThrough(reader: string, rootId: string): Promise<string | null>
@@ -299,6 +305,27 @@ export interface FollowedThreads {
   more: boolean
 }
 
+export interface FollowInput {
+  rootId: string
+  /** The conversation the wake goes to (the caller's background conversation). */
+  conversationId: string
+  /** RFC 3339; must be in the future and at most `MAX_FOLLOW_DAYS` ahead. */
+  until: string
+  /** The most unread posts returned inline (`FollowRead::Unread`). */
+  limit: number
+}
+
+/** A follow read's last step (follows.rs `follow_thread`). */
+export type FollowRead =
+  | { kind: 'unread'; posts: Array<Post>; unshown: number }
+  | { kind: 'following'; follow: ThreadFollow }
+
+/** What a claimed follow run shows (follows.rs `deliver_follow`). */
+export type FollowWake =
+  | { kind: 'posts'; follow: ThreadFollow; posts: Array<Post>; unshown: number }
+  | { kind: 'already_read'; follow: ThreadFollow }
+  | { kind: 'timeout'; follow: ThreadFollow }
+
 export interface Inbox {
   /** Requests addressed to the actor that still await its answer. */
   requests: Array<Post>
@@ -504,6 +531,7 @@ export type RunInput =
   | { kind: 'mention'; postId: string }
   | { kind: 'follow_up'; postId: string }
   | { kind: 'retry'; postId: string }
+  | { kind: 'follow'; followId: string }
 
 export type RunQuery =
   | { kind: 'buddy'; buddyId: string }
@@ -661,6 +689,23 @@ export type TaskWrite =
   | { kind: 'create'; ownerId: string; parentId?: string; title: string; doneCriteria: string; key: string }
   | { kind: 'update'; taskId: string; baseRevision: number; changes: TaskChanges; key: string }
 
+/**
+ * A follow of one thread by one conversation (follows.rs). Not `thread_read`, which is the
+ * owner's "followed threads" list and read cursor; this one wakes a Buddy's conversation.
+ */
+export interface ThreadFollow {
+  id: string
+  rootId: string
+  buddyId: string
+  /** The conversation the wake goes to: the one that asked to follow. */
+  conversationId: string
+  /** The thread's newest post when the follow was registered; only later posts wake it. */
+  throughOrd: string
+  until: string
+  createdAt: string
+  runId: string
+}
+
 /** A thread root's replies at a glance: the channel row's "3 replies · last reply 2m ago". */
 export interface ThreadStat {
   rootId: string
@@ -678,6 +723,15 @@ export interface ThreadStat {
 export type ThreadTail =
   | { kind: 'unread'; hidden: number; posts: Array<Post> }
   | { kind: 'caught_up'; hidden: number; posts: Array<Post> }
+
+/**
+ * A thread's unread posts for one Buddy, oldest first: the newest `limit`, and how many older
+ * unread ones were left out.
+ */
+export interface ThreadUnread {
+  posts: Array<Post>
+  unshown: number
+}
 
 /** One buddy a post wakes. `config`: the owner's chip pick for this buddy (absent: its seat's). */
 export interface Wake {

@@ -5,6 +5,7 @@ import { BuddyRunList } from './BuddyRunList';
 import { BuddyTaskCommentForm, BuddyTaskCommentList } from './BuddyTaskComments';
 import { buddyWrite } from './api';
 import { channelsHref } from './channels-view';
+import { byPosition, patchTask, reorderTasks } from './task-actions';
 import type { Task, TaskDetail, TaskStatus } from './types';
 import { TASK_STATUS, isTaskOpen } from './ui-contract';
 import { ActionError, useBuddyAction } from './useBuddyAction';
@@ -14,32 +15,7 @@ export const taskDetailUrl = (taskId: string): string =>
 
 const STATUSES = Object.keys(TASK_STATUS) as TaskStatus[];
 
-/**
- * Display order for siblings (top-level tasks, or one task's todos): `position`, then creation.
- * The crate creates every top-level task at position 0, so creation order breaks those ties until
- * the owner first reorders.
- */
-export const byPosition = (tasks: readonly Task[]): Task[] =>
-  [...tasks].sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
-
-/**
- * The writes that move `ordered[from]` one place up (-1) or down (+1): every sibling's position
- * becomes its index in the new order, and only the siblings whose position changes are written.
- * The first move renumbers a list of tied zeros; later moves write two tasks.
- */
-export function moveTask(
-  ordered: readonly Task[],
-  from: number,
-  delta: -1 | 1
-): { task: Task; position: number }[] {
-  const to = from + delta;
-  const next = [...ordered];
-  [next[from], next[to]] = [next[to], next[from]];
-  return next.flatMap((task, position) => (task.position === position ? [] : [{ task, position }]));
-}
-
-const patchTask = (task: Task, changes: Partial<Pick<Task, 'paused' | 'position'>>) =>
-  buddyWrite(taskDetailUrl(task.id), 'PATCH', { baseRevision: task.revision, changes });
+export { byPosition, moveTask } from './task-actions';
 
 /** Move up, move down and pause/resume for one task or todo among its ordered siblings. */
 function TaskControls({
@@ -54,9 +30,7 @@ function TaskControls({
   const task = ordered[index];
   const action = useBuddyAction(refresh);
   const move = (delta: -1 | 1) =>
-    void action.run('move', () =>
-      Promise.all(moveTask(ordered, index, delta).map((w) => patchTask(w.task, w)))
-    );
+    void action.run('move', () => reorderTasks(ordered, index, delta));
   // Rendered inside a card's <summary>: a click on a control must not also toggle the card.
   return (
     <span className="buddy-panel__actions" onClick={(event) => event.preventDefault()}>
@@ -105,12 +79,16 @@ export function NewTaskForm({
         event.preventDefault();
         void action
           .run('create', () =>
-            buddyWrite('/api/buddies/tasks', 'POST', {
-              ownerId,
-              ...(parentId === undefined ? {} : { parentId }),
-              title: title.trim(),
-              doneCriteria: doneCriteria.trim(),
-            })
+            buddyWrite(
+              'task.create',
+              {},
+              {
+                ownerId,
+                ...(parentId === undefined ? {} : { parentId }),
+                title: title.trim(),
+                doneCriteria: doneCriteria.trim(),
+              }
+            )
           )
           .then((ok) => {
             if (!ok) return;
@@ -160,7 +138,7 @@ export function TaskEditForm({
       onSubmit={(event) => {
         event.preventDefault();
         void action.run('task', () =>
-          buddyWrite(taskDetailUrl(task.id), 'PATCH', { baseRevision: task.revision, changes })
+          buddyWrite('task.update', { taskId: task.id }, { baseRevision: task.revision, changes })
         );
       }}
     >
@@ -300,13 +278,13 @@ export function TaskRows({
 }) {
   const ordered = byPosition(tasks);
   return (
-    <ul className="landing-requests">
+    <ul className="task-lines ui-card">
       {ordered.map((task, index) => {
         const status = TASK_STATUS[task.status];
         return (
           <li key={task.id} className="task-line">
             <Link
-              className="landing-request"
+              className="task-line-link ui-choice"
               to={
                 taskHref
                   ? taskHref(task.id)
@@ -317,7 +295,7 @@ export function TaskRows({
                 {status.glyph}
               </span>
               <span className="task-line-copy">
-                <span className="landing-thread-title">{task.title}</span>
+                <span className="task-line-title">{task.title}</span>
                 <span className="task-line-status">{task.paused ? 'Paused' : status.label}</span>
               </span>
               <span className="ui-badge">{task.paused ? 'Paused' : status.label}</span>

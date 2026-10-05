@@ -3,6 +3,7 @@ import type { Actor, Buddy, Channel, Cursor, Post } from '@unleashd/buddies-core
 import {
   type ConversationConfig,
   type InstalledAgent,
+  type ReplyRetryResult,
   isHarnessRetryFailure,
 } from '@unleashd/shared';
 import {
@@ -37,6 +38,9 @@ import type { BuddyEvents, MentionPicks } from './events';
 //   follow_up — a new reply in a thread asks each OTHER Buddy who posted there one gate question
 //               (channel-reply-gate.ts); only a strict <yes> starts a reply.
 //   direct    — the owner's plain post in a DM wakes the DM's Buddies (requests/answers excepted).
+// Not here: a thread FOLLOW (channel_read follow:{until}) is a durable crate run, woken inside the
+// post's own transaction, that wakes the conversation which followed (crate follows.rs, runner.ts
+// `followJob`). It replaces the follow_up gate for that Buddy on that post (`followUps`).
 // NO HOP BOUND (owner decision 2026-10-03, #bugfixes): Buddies may mention and follow each other
 // without pause and stop when they decide to. Until then a counter (3 hand-offs since the owner
 // last spoke) posted a "reply failed" notice and killed a live Designer/Engineer review thread.
@@ -114,9 +118,7 @@ export type SeatRequest =
   | { kind: 'keep' }
   | { kind: 'chosen'; config: ConversationConfig }
   | { kind: 'resolved'; seat: LiveConversation };
-export type MentionDispatch =
-  | { buddyId: string; status: 'started' }
-  | { buddyId: string; status: 'rejected'; reason: string };
+export type MentionDispatch = ReplyRetryResult;
 export type ChannelResponse = {
   channelId: string;
   threadRootId: string;
@@ -675,7 +677,12 @@ export function createChannels(ports: ChannelsPorts) {
     const talk = talkOf(await wholeThread(await core.getPost(OWNER, post.rootId)));
     // Only the newest post is followed up: a burst is gated once, against the latest message.
     if (talk[talk.length - 1].id !== post.id) return;
-    const skipped = new Set([...buddyAuthor(post), ...mentionedByPost(post)]);
+    // A Buddy whose thread follow will show this post (crate follows.rs `delivering_followers`)
+    // is not gated too: it asked to be told, and its follow run already wakes it with this post
+    // in the conversation that followed. The run is durable; this machine is not. A follow whose
+    // wake was composed before this post never saw it, so the gate still asks that Buddy.
+    const following = await core.deliveringFollowers(post.rootId, post.ord);
+    const skipped = new Set([...buddyAuthor(post), ...mentionedByPost(post), ...following]);
     const replying = [...pairs.values()]
       .filter((entry) => entry.threadRootId === post.rootId && entry.machine.queue.length > 0)
       .map((entry) => entry.buddyId);

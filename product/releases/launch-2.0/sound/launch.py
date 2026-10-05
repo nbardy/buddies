@@ -13,7 +13,8 @@ the Vim line; "They show their work" is 2 bars (the emblem shots were cut):
   bar  1        ROBOTS  five boops = the melody's first notes       (on the AI Overload screen)
   bar  2        BUILD   snare roll, riser, a beat of silence         (the robots gather)
   bar  3        DROP    full band + the hook                         (the logo)
-  bars 4-7      HOME    lighter: filtered chords, soft kick          ("buddies" holds, then the home)
+  bars 4-7      HOME    lighter: filtered chords, soft kick          ("buddies" holds, then the home);
+                        bars 4-5 crossfade from the full band into it, so the drop eases down
   bars 8-32     FULL    the groove; on each scene's downbeat a crash and the hook again
   bars 33-36    CODA    the home texture again, quiet                (the Vim line)
   bar  37       END     one ringing D chord, the hook on a pluck     (the end card), 6 s, faded
@@ -23,7 +24,7 @@ Writes launch.wav: stereo 48 kHz 16-bit, peak -3 dBFS.
 
 import numpy as np
 
-from edm import at, bass_note, chord, crash, hz, pluck, t_axis, write
+from edm import SR, at, bass_note, chord, crash, hz, pluck, t_axis, write
 from reveal import (
     BUILD,
     DROP,
@@ -62,13 +63,16 @@ def end_bar(mix: Mix, bar: int) -> None:
     hook(mix, bar, lambda n: pluck(hz(n), 0.8), 0.45)
 
 
-def render() -> np.ndarray:
+def render(soft_from: int) -> np.ndarray:
+    """The song with the home section starting at bar `soft_from` (bars before it play full)."""
     f = DROP_SONG
     mix = Mix(at(END) + RING, FADE)
     robots_bar(mix)
     build_bar(mix)
     f.drop(mix, DROP)
-    for bar in HOME:
+    for bar in range(HOME.start, soft_from):
+        f.full(mix, bar)
+    for bar in range(soft_from, HOME.stop):
         f.home(mix, bar)
     for bar in FULL:
         f.full(mix, bar)
@@ -82,5 +86,44 @@ def render() -> np.ndarray:
 
 assert BUILD == 2 and DROP == 3, "the picture locks the logo on bar 3"
 
+# Owner, 2026-10-05: the step down from the drop into the home "cuts in like a hard shift" at 0:16-0:17
+# (the bar line after the drop). The softer level is right for the visual scenes; the switch is not.
+# So bars 4-5 crossfade from a render where they still play full into the one where they are already
+# home. The renders are identical before bar 4 (same seeds, same order); master() normalises each, so
+# `full` is first matched to `soft` on the bars before the fade. The two share correlated parts (kick,
+# chords), so equal-power gains overshot (+1 dB at the start, a 2.4 dB step at the end): the fade is a
+# linear crossfade, then a gain curve steers its beat-smoothed level onto a straight line in dB from
+# the full level to the soft one. The correction is tapered to 0 at both ends of the fade.
+EASE_BARS = 2
+
+
+def level_db(x: np.ndarray, hop: int, window: int) -> np.ndarray:
+    """RMS level in dB every `hop` samples, averaged over `window` samples."""
+    power = np.convolve((x**2).mean(axis=0), np.ones(window) / window, mode="same")[::hop]
+    return 10 * np.log10(power + 1e-12)
+
+
+def eased_song() -> np.ndarray:
+    full, soft = render(soft_from=HOME.start + EASE_BARS), render(soft_from=HOME.start)
+    a, b = round(at(1) * SR), round(at(HOME.start) * SR)
+    full *= np.sum(full[:, a:b] * soft[:, a:b]) / np.sum(full[:, a:b] ** 2)
+    t0, t1 = round(at(HOME.start) * SR), round(at(HOME.start + EASE_BARS) * SR)
+    u = np.clip((np.arange(soft.shape[1]) - t0) / (t1 - t0), 0, 1)
+    out = full * (1 - u) + soft * u
+
+    hop, beat = 240, round(SR * 60 / 128)
+    lo, hi = t0 - beat, t1 + beat  # measure a beat past each end so the smoothing window is full
+    start = level_db(full[:, t0 - beat : t0 + beat], hop, beat).mean()
+    end = level_db(soft[:, t1 - beat : t1 + beat], hop, beat).mean()
+    have = level_db(out[:, lo:hi], hop, beat)
+    grid = lo + np.arange(have.size) * hop
+    v = np.clip((grid - t0) / (t1 - t0), 0, 1)
+    fix_db = np.clip(start + (end - start) * v - have, -6, 6) * np.sin(np.pi * v)
+    gain = 10 ** (np.interp(np.arange(lo, hi), grid, fix_db) / 20)
+    out[:, lo:hi] *= gain
+    ceiling = 10 ** (-1 / 20)
+    return out * min(1.0, ceiling / np.abs(out).max())
+
+
 if __name__ == "__main__":
-    write("launch", render())
+    write("launch", eased_song())

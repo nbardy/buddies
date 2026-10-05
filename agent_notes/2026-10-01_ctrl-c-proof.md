@@ -56,3 +56,9 @@ ignored; a later press still escalates to SIGKILL. `tools/watch-server.mjs` now 
 Reproduce: `pnpm exec tsx --test server/test/ctrl-c-adoption.test.ts` (4 cases, ~95 s);
 manual: `UNLEASHD_REAL_CLAUDE=1 UNLEASHD_REAL_CLAUDE_MODEL=claude-sonnet-5-5 CTRLC_LOG_FILE=/tmp/x.log`
 plus the same command with `--test-name-pattern=manual`.
+
+## Successor 2026-10-05: case 4 fixed by the Buddy MCP relay
+
+Branch `fix/outage-tool-delivery` (Task task_01a0f65c). A call made during the outage is now held by a
+detached relay that owns the tool port and is delivered by the relaunched backend. The case-4 test asserts that
+now, and FAILS on 3a21efd. Measurements and decision: `agent_notes/2026-10-05_outage-tool-delivery.md`.

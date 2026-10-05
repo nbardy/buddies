@@ -187,6 +187,8 @@ impl Enqueue for Connection {
             | RunInput::Mention { .. }
             | RunInput::FollowUp { .. }
             | RunInput::Retry { .. } => now.clone(),
+            // Due when the follow times out; a post in the thread makes it due sooner (follows.rs).
+            RunInput::Follow { follow_id } => crate::follows::due_at(self, follow_id)?,
         };
         let (lane, position) = match &lane {
             Some((lane, place)) => (Some(lane.as_str()), Some(lane_position(self, lane, *place)?)),
@@ -345,7 +347,11 @@ impl Store {
                 RunInput::Chat { .. } | RunInput::Mention { .. } | RunInput::FollowUp { .. } | RunInput::Retry { .. } => {
                     budgets.chat_deadline_ms
                 }
-                RunInput::Post { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } => {
+                RunInput::Post { .. }
+                | RunInput::Reply { .. }
+                | RunInput::Schedule { .. }
+                | RunInput::FailureNotice { .. }
+                | RunInput::Follow { .. } => {
                     budgets.turn_deadline_ms
                 }
             };
@@ -484,7 +490,8 @@ impl Store {
                 | RunInput::FailureNotice { .. }
                 | RunInput::Mention { .. }
                 | RunInput::FollowUp { .. }
-                | RunInput::Retry { .. } => {}
+                | RunInput::Retry { .. }
+                | RunInput::Follow { .. } => {}
             }
             get_run(tx, run_id)
         })
@@ -545,6 +552,8 @@ impl Store {
             WHEN r.input_kind = 'post' THEN (SELECT CASE WHEN p.author_id IS NULL THEN 'owner' ELSE p.author_id END FROM post p WHERE p.id = r.input_id)
             WHEN r.input_kind = 'reply' THEN (SELECT CASE WHEN a.author_id IS NULL THEN 'owner' ELSE a.author_id END FROM post p JOIN post a ON a.id = p.answer_id WHERE p.id = r.input_id)
             WHEN r.input_kind IN ('mention','follow_up') THEN (SELECT CASE WHEN p.author_id IS NULL THEN 'owner' ELSE p.author_id END FROM post p WHERE p.id = r.input_id)
+            WHEN r.input_kind = 'retry' THEN 'owner'
+            WHEN r.input_kind = 'follow' THEN r.buddy_id
             ELSE NULL END";
         let sql = format!(
             "SELECT r.id, r.status, r.input_kind, r.input_id, r.ready_at, r.task_id,
@@ -801,7 +810,8 @@ fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
             | RunInput::FailureNotice { .. }
             | RunInput::Mention { .. }
             | RunInput::FollowUp { .. }
-            | RunInput::Retry { .. },
+            | RunInput::Retry { .. }
+            | RunInput::Follow { .. },
             _,
         ) => Ok(()),
     }

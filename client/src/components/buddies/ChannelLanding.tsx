@@ -4,8 +4,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { forgetRetiredHomePins, retiredHomePinsAtom } from '../../atoms/ui';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { BuddySigil } from './BuddySigil';
-import { ChannelComposer } from './ChannelComposer';
 import { liveRunsUrl } from './BuddyWorkspaceActivity';
+import { ChannelComposer } from './ChannelComposer';
+import { TaskProgress } from './TaskProgress';
+import { buddyWrite } from './api';
 import {
   type WorkspaceDirectory,
   authorName,
@@ -19,14 +21,13 @@ import {
   type PinWrite,
   appendPin,
   excerpt,
+  homeTasks,
   importPins,
   movePin,
   unpin,
-  homeTasks,
 } from './home-view';
-import { ActionError, useBuddyAction } from './useBuddyAction';
-import { buddyWrite } from './api';
 import type { Inbox, Run, Task } from './types';
+import { ActionError, useBuddyAction } from './useBuddyAction';
 // Self-hosted variable fonts (unicode-range subsets, fetched only when Home renders). The app
 // named "Inter" but never shipped it, so Home fell back to the system UI font.
 import '@fontsource-variable/inter/wght.css';
@@ -129,10 +130,14 @@ function TaskSection({
   // Buddies use. One CAS update per Task whose key changes.
   const save = async (writes: readonly PinWrite[]) => {
     for (const { task, pin } of writes) {
-      await buddyWrite(`/api/buddies/tasks/${encodeURIComponent(task.id)}`, 'PATCH', {
-        baseRevision: task.revision,
-        changes: { pin },
-      });
+      await buddyWrite(
+        'task.update',
+        { taskId: task.id },
+        {
+          baseRevision: task.revision,
+          changes: { pin },
+        }
+      );
     }
   };
   const write = (writes: readonly PinWrite[]) => void action.run('pin', () => save(writes));
@@ -289,7 +294,7 @@ function TaskCard({
           {title}
         </Link>
       </div>
-      <ProgressFoot progress={progress} />
+      <TaskProgress progress={progress} />
     </li>
   );
 }
@@ -330,64 +335,6 @@ function ReorderMenu({
       )}
     </div>
   );
-}
-
-function ProgressFoot({ progress }: { progress: HomeTask['progress'] }) {
-  switch (progress.kind) {
-    case 'none':
-      return (
-        <div className="landing-foot ui-stack">
-          <span className="landing-progress-label ui-muted">No todos yet</span>
-          <span className="landing-bar landing-bar--dashed" aria-hidden="true" />
-        </div>
-      );
-    case 'no_active':
-      return (
-        <div className="landing-foot ui-stack">
-          <span className="landing-progress-label ui-muted">No active todos</span>
-          <span className="landing-bar landing-bar--dashed" aria-hidden="true" />
-        </div>
-      );
-    case 'counted': {
-      const share = (count: number) => `${(count / progress.total) * 100}%`;
-      // The bar's colours are the only status on a card (owner, 2026-10-01); the words live in the
-      // accessible value and the tooltip so colour is never the sole carrier.
-      const words = [
-        `${progress.done} of ${progress.total} todos done`,
-        progress.inProgress > 0 ? `${progress.inProgress} in progress` : null,
-        progress.blocked > 0 ? `${progress.blocked} blocked` : null,
-      ]
-        .filter((part) => part !== null)
-        .join(', ');
-      return (
-        <div className="landing-foot ui-stack">
-          <span className="landing-progress-label ui-row">
-            <span>
-              <strong>
-                {progress.done} of {progress.total}
-              </strong>{' '}
-              · {progress.percent}%
-            </span>
-          </span>
-          {/* Only green is progress; the tinted segments are unfinished work, named in the label. */}
-          <span
-            className="landing-bar"
-            role="progressbar"
-            aria-label="Todos done"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={progress.percent}
-            aria-valuetext={words}
-            title={words}
-          >
-            <span className="landing-bar-done" style={{ width: share(progress.done) }} />
-            <span className="landing-bar-active" style={{ width: share(progress.inProgress) }} />
-            <span className="landing-bar-blocked" style={{ width: share(progress.blocked) }} />
-          </span>
-        </div>
-      );
-    }
-  }
 }
 
 // ── Waiting on you ──────────────────────────────────────────────────────────

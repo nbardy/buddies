@@ -229,13 +229,10 @@ test('only a harness failure offers a retry on another harness', () => {
         />
       </Provider>
     );
-  assert.match(
-    failed('Couldn’t reply: Out of tokens: usage limit'),
-    />Retry with a different harness</
-  );
+  assert.match(failed('Couldn’t reply: Out of tokens: usage limit'), />Retry with model…</);
   assert.match(
     failed('Couldn’t reply: Provider completed the turn with reason: error'),
-    /Retry with a different harness/
+    /Retry with model…/
   );
   assert.equal(failed('Couldn’t reply: Buddy is not active'), '');
   assert.equal(failed('Couldn’t reply: the turn ended without a channel post'), '');
@@ -335,6 +332,72 @@ test('reset banners follow the date on desktop and in an empty new chat', async 
   assert.ok(html.indexOf(date) > html.indexOf('earlier chat'));
   assert.ok(html.indexOf('Context refreshed · New chat') > html.indexOf(date));
   assert.match(html, /class="channel-dm-notice"/);
+});
+
+// Regression: a missing provider CLI left the runner's system message in the transcript, but
+// dmRows dropped system records, so the DM showed an empty reply bubble (2026-10-05 trial).
+test('a failed turn shows its system message in the DM rows', async () => {
+  const { dmRows } = await import('../src/components/buddies/channel-dm');
+  const { groupChatMessages } = await import('../src/utils/chat-message-groups');
+  const rows = dmRows(
+    groupChatMessages(
+      [
+        message('user', 'hello', 1),
+        message('assistant', '', 1),
+        message('system', "Couldn't start codex: the `codex` command was not found.", 1),
+      ],
+      null
+    ),
+    []
+  );
+  const failures = rows.filter((row) => row.kind === 'failure');
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].kind === 'failure' ? failures[0].label : '', /codex/);
+});
+
+// Regression: the runner's failure message lives only in server memory, so after a backend
+// restart (the dev watcher restarts it often) a DM whose CLI was missing was an empty bubble again.
+// What survives is the journaled attempt (`spawn_failed`), so the DM rebuilds the row from it.
+test('a restarted backend still shows a missing-CLI failure from the journaled attempt', async () => {
+  await seed();
+  const codex = createDefaultConversationConfig('codex');
+  const failedStart = {
+    attemptId: 'a1',
+    conversationId: NEW,
+    queueMessageId: 'q1',
+    originServerBootId: 'boot',
+    stateTimestamps: {},
+    createdAt: at(1).toISOString(),
+    updatedAt: at(1).toISOString(),
+    state: 'failed',
+    terminalCause: 'spawn_failed',
+    terminalAt: at(1).toISOString(),
+  } as unknown as ReturnType<typeof syntheticDetail>['latestAttempt'];
+  const seedNew = (messages: Message[]) =>
+    jotaiStore.set(transcriptStore.patch, {
+      set: [
+        [
+          NEW,
+          {
+            tag: 'loaded' as const,
+            epoch: 0,
+            messages,
+            detail: syntheticDetail(NEW, {
+              config: { ...syntheticDetail(NEW).config, config: codex },
+              latestAttempt: failedStart,
+            }),
+          },
+        ],
+      ],
+      remove: [],
+    });
+  seedNew([]);
+  const html = desktop(NEW);
+  assert.match(html, /role="alert"[^>]*>Couldn&#x27;t start codex/);
+
+  // With the live message still present it is the one failure row, not two.
+  seedNew([message('system', "Couldn't start codex: the `codex` command was not found.", 2)]);
+  assert.equal(desktop(NEW).match(/role="alert"/g)?.length, 1);
 });
 
 test('a long DM draws only its newest rows, opening on a lead, with older ones paged on scroll-up', async () => {

@@ -8,6 +8,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
+import { freePortSync } from './free-port';
 
 /**
  * The owner's requirement (2026-09-30, #case-studies post_01a0f2bc): a web-server restart must not
@@ -26,7 +27,7 @@ const { DatabaseSync } = createRequire(__filename)('node:sqlite') as {
   DatabaseSync: new (file: string) => { exec(sql: string): void; close(): void };
 };
 
-const PORT = 7531;
+const PORT = freePortSync();
 const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'a7d3c0e9f2b14658a7d3c0e9f2b14658';
 

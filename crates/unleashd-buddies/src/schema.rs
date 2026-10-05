@@ -29,7 +29,8 @@ use rusqlite::Connection;
 /// 'BUDD'. Marks a file as this schema; a v33 file (application_id 0) is refused.
 pub const APPLICATION_ID: i64 = 0x4255_4444;
 
-pub const DDL: &str = r#"
+pub const DDL: &str = concat!(
+    r#"
 CREATE TABLE workspace (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,
   legacy TEXT) STRICT;
@@ -128,7 +129,8 @@ CREATE TABLE event (
   UNIQUE(actor, workspace_id, idem_key)) STRICT;
 CREATE INDEX event_at ON event(at);
 CREATE INDEX event_buddy ON event(buddy_id, seq) WHERE buddy_id IS NOT NULL;
-"#;
+"#
+);
 
 /// The `run` table, named `{table}` so the on-open rebuild creates `run_new` from the SAME text a
 /// fresh file gets. Pattern: durable-intake (docs/patterns.md#durable-intake). Changed 2026-10-05:
@@ -146,7 +148,7 @@ CREATE INDEX event_buddy ON event(buddy_id, seq) WHERE buddy_id IS NOT NULL;
 const RUN_TABLE: &str = r#"
 CREATE TABLE {table} (
   id TEXT PRIMARY KEY, input_key TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 1,
-  input_kind TEXT NOT NULL CHECK(input_kind IN ('chat','post','reply','schedule','failure_notice','mention','follow_up','retry')),
+  input_kind TEXT NOT NULL CHECK(input_kind IN ('chat','post','reply','schedule','failure_notice','follow','mention','follow_up','retry')),
   input_id TEXT NOT NULL, buddy_id TEXT NOT NULL REFERENCES buddy(id), workspace_id TEXT NOT NULL,
   conversation_id TEXT, task_id TEXT, task_epoch INTEGER, after_run_id TEXT,
   status TEXT NOT NULL CHECK(status IN ('queued','running','cancel_requested','complete','failed','cancelled')),
@@ -178,7 +180,8 @@ CREATE INDEX IF NOT EXISTS run_workspace_ended ON run(workspace_id, ended_at) WH
 CREATE UNIQUE INDEX IF NOT EXISTS run_lane_position ON run(lane, position)
   WHERE lane IS NOT NULL AND status IN ('queued','running','cancel_requested');
 CREATE UNIQUE INDEX IF NOT EXISTS run_lane_running ON run(lane)
-  WHERE lane IS NOT NULL AND status IN ('running','cancel_requested');";
+  WHERE lane IS NOT NULL AND status IN ('running','cancel_requested');
+CREATE INDEX IF NOT EXISTS run_follow_queued ON run(input_id) WHERE input_kind = 'follow' AND status = 'queued';";
 
 /// The columns every `run` table has had since 2026-09-28 (after `drop_run_retry_of` and
 /// `ensure_run_config`), copied unchanged by the rebuild.
@@ -188,8 +191,13 @@ const RUN_V1_COLUMNS: &str = "id, input_key, attempt, input_kind, input_id, budd
 
 /// Full-text search over post bodies: an external-content FTS5 index kept in step by triggers.
 /// Added after the T06b schema, so `open` creates it on a file that lacks it (and fills it once).
+/// `porter unicode61` stems at index AND query time ("posts" = "post", "marketing" = "market"),
+/// which is what lets a prefix term like `"market"*` find word forms; see `search.rs`. Files built
+/// with the plain tokenizer (before 2026-10-05) are rebuilt by `ensure_post_search`.
+/// `post_search_vocab` lists the index's terms; typo matching reads it.
 const POST_SEARCH: &str = r#"
-CREATE VIRTUAL TABLE post_search USING fts5(body, content='post', content_rowid='rowid');
+CREATE VIRTUAL TABLE post_search USING fts5(body, content='post', content_rowid='rowid', tokenize='porter unicode61');
+CREATE VIRTUAL TABLE post_search_vocab USING fts5vocab(post_search, 'row');
 CREATE TRIGGER post_search_insert AFTER INSERT ON post BEGIN
   INSERT INTO post_search(rowid, body) VALUES (new.rowid, new.body);
 END;
@@ -202,6 +210,14 @@ CREATE TRIGGER post_search_update AFTER UPDATE OF body ON post BEGIN
 END;
 INSERT INTO post_search(post_search) VALUES ('rebuild');
 "#;
+
+/// Removes the derived search index so POST_SEARCH can recreate it (triggers first: they name it).
+const DISCARD_POST_SEARCH: &str = "
+DROP TRIGGER IF EXISTS post_search_insert;
+DROP TRIGGER IF EXISTS post_search_delete;
+DROP TRIGGER IF EXISTS post_search_update;
+DROP TABLE IF EXISTS post_search_vocab;
+DROP TABLE IF EXISTS post_search;";
 
 /// `post_task` serves the Task filter (T22); without it the filter walked every post in ord order.
 /// Indexes for the self-references of `post`. With the search triggers in place SQLite plans the
@@ -303,19 +319,36 @@ fn ensure_threads(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// One row per `channel_read` follow (follows.rs). Additive: an older build ignores it.
+const THREAD_FOLLOW: &str = "
+CREATE TABLE IF NOT EXISTS thread_follow (
+  id TEXT PRIMARY KEY, root_id TEXT NOT NULL REFERENCES post(id), buddy_id TEXT NOT NULL REFERENCES buddy(id),
+  conversation_id TEXT NOT NULL, through_ord TEXT NOT NULL, until TEXT NOT NULL, delivered_through TEXT,
+  created_at TEXT NOT NULL) STRICT;
+CREATE INDEX IF NOT EXISTS thread_follow_root ON thread_follow(root_id, conversation_id);";
+
 fn ensure_post_search(conn: &Connection) -> Result<()> {
     conn.execute_batch(POST_REFERENCE_INDEXES)?;
     conn.execute_batch(TASK_LIVE_INDEX)?;
     conn.execute_batch(LIST_SCOPE_INDEXES)?;
-    let present: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'post_search')", [], |r| r.get(0))?;
-    match present {
-        true => Ok(()),
-        false => Ok(conn.execute_batch(&format!("BEGIN; {POST_SEARCH} COMMIT;"))?),
+    let sql: Option<String> = conn.query_row("SELECT (SELECT sql FROM sqlite_schema WHERE name = 'post_search')", [], |r| r.get(0))?;
+    match sql {
+        Some(sql) if sql.contains("porter") => Ok(()),
+        // The index predates the stemming tokenizer. It is derived data (`post` is the source of
+        // truth), so replace it in one transaction and let POST_SEARCH refill it: nothing is lost.
+        Some(_) => Ok(conn.execute_batch(&format!(
+            "BEGIN; {DISCARD_POST_SEARCH} {POST_SEARCH} COMMIT;"
+        ))?),
+        None => Ok(conn.execute_batch(&format!("BEGIN; {POST_SEARCH} COMMIT;"))?),
     }
 }
 
 /// The 2026-10-05 `run` rebuild (Pattern: durable-intake), done once: a file whose `run` CHECK
-/// already names 'mention' has it. One transaction. An older build reading the result fails loudly
+/// already names 'mention' has it. It replaces main's `widen_run_input_kind` (2026-10-04, which only
+/// added 'follow'): both rebuilt the same table, and two rebuilds keyed on different CHECK words
+/// would each have to know the other's columns. A file from either side of that change (with or
+/// without 'follow') has the same v1 columns, so this one copy covers both; its `follow` rows keep
+/// their kind. Guard: the `follow` variant of `the_run_rebuild_keeps_every_row_…`. One transaction. An older build reading the result fails loudly
 /// on the new kinds (`RunInput::from_columns` → Corrupt) rather than losing rows.
 ///
 /// What happens to the rows that exist (design 2026-09-30_pending-delivery-design.md, R1). No body
@@ -406,6 +439,7 @@ pub fn open(path: &str) -> Result<Connection> {
             ensure_run_config(&conn)?;
             rebuild_run(&conn, path)?;
             conn.execute_batch(RUN_INDEXES)?;
+            conn.execute_batch(THREAD_FOLLOW)?;
             ensure_threads(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
@@ -413,6 +447,7 @@ pub fn open(path: &str) -> Result<Connection> {
         (false, 0) => {
             let run = RUN_TABLE.replace("{table}", "run");
             conn.execute_batch(&format!("BEGIN; {DDL} {run} {RUN_INDEXES} PRAGMA application_id = {APPLICATION_ID}; COMMIT;"))?;
+            conn.execute_batch(THREAD_FOLLOW)?;
             ensure_threads(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
@@ -424,6 +459,61 @@ pub fn open(path: &str) -> Result<Connection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Regression guard for the 2026-09-29 queue stall (888861c): an index defined only in DDL is
+    // missing from every existing database. Drop each DDL index, reopen, and demand it back.
+    //
+    // Every live database was created by a DDL that already had BASELINE, so those need no on-open
+    // list. A new DDL index that is not in BASELINE must be recreated by open() or this fails.
+    #[test]
+    fn every_ddl_index_is_recreated_on_open() {
+        const BASELINE: &[&str] = &[
+            "buddy_manager",
+            "task_owner",
+            "task_workspace",
+            "task_parent",
+            "channel_member_by_member",
+            "post_channel",
+            "post_root",
+            "post_awaiting",
+            "post_awaiting_author",
+            "schedule_due",
+            "schedule_buddy",
+            "run_queue",
+            "run_lease",
+            "run_buddy",
+            "run_conversation",
+            "run_task",
+            "conversation_buddy",
+            "event_at",
+            "event_buddy",
+        ];
+        let names: Vec<&str> =
+            DDL.lines().filter_map(|l| l.strip_prefix("CREATE INDEX ")).map(|rest| rest.split_whitespace().next().unwrap()).collect();
+        // Run indexes are not in DDL since durable intake: RUN_INDEXES creates every one on open.
+        assert!(names.contains(&"post_root"), "the parser found the DDL indexes");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.sqlite");
+        let path = path.to_str().unwrap();
+        let conn = open(path).unwrap();
+        for n in &names {
+            conn.execute_batch(&format!("DROP INDEX {n};")).unwrap();
+        }
+        drop(conn);
+        let conn = open(path).unwrap();
+        let missing: Vec<&&str> = names
+            .iter()
+            .filter(|n| !BASELINE.contains(n))
+            .filter(|n| {
+                !conn
+                    .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?1)", [n], |r| {
+                        r.get::<_, bool>(0)
+                    })
+                    .unwrap()
+            })
+            .collect();
+        assert!(missing.is_empty(), "DDL-only indexes (add to an on-open IF NOT EXISTS list): {missing:?}");
+    }
 
     // A live file created before 2026-09-28 has no run.config; every run read names it.
     #[test]

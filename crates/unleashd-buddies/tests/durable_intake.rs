@@ -58,13 +58,23 @@ const fn old<'a>(id: &'a str, key: &'a str, kind: &'a str, input: &'a str, statu
 }
 
 /// Swap the fresh file's `run` for the frozen pre-intake table and seed `rows` into it. `variant`
-/// `"pre-0927"` also has `retry_of` and no `config` (a file from before 2026-09-27/28).
+/// `"pre-0927"` also has `retry_of` and no `config` (a file from before 2026-09-27/28); `"follow"`
+/// is what main's `widen_run_input_kind` (2026-10-04) left: the CHECK names 'follow' and a queued
+/// follow row exists. The live store has this shape once a main build with thread follows opened it.
 fn old_file(variant: &str, rows: &[Old]) -> (common::Fixture, String) {
     let f = fixture();
     let path = f.path.to_str().unwrap().to_string();
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch("PRAGMA foreign_keys = OFF; DROP TABLE run;").unwrap();
-    conn.execute_batch(OLD_RUN_DDL).unwrap();
+    match variant {
+        "follow" => conn
+            .execute_batch(&format!(
+                "{} CREATE INDEX run_follow_queued ON run(input_id) WHERE input_kind = 'follow' AND status = 'queued';",
+                OLD_RUN_DDL.replace("'failure_notice')", "'failure_notice','follow')")
+            ))
+            .unwrap(),
+        _ => conn.execute_batch(OLD_RUN_DDL).unwrap(),
+    }
     conn.execute("UPDATE buddy SET max_active_runs = 10", []).unwrap();
     let with_config = variant != "pre-0927";
     if !with_config {
@@ -136,8 +146,11 @@ fn run(s: &Store, id: &str) -> Run {
 // requeued below; drop the queued-chat disposition → the open fails on the body CHECK.
 #[test]
 fn the_run_rebuild_keeps_every_row_and_requeues_no_legacy_running_run() {
-    for variant in ["current", "pre-0927"] {
-        let rows = every_shape();
+    for variant in ["current", "pre-0927", "follow"] {
+        let mut rows = every_shape();
+        if variant == "follow" {
+            rows.push(old("follow-queued", "follow:f1", "follow", "f1", "queued"));
+        }
         let (f, path) = old_file(variant, &rows);
         drop(f.store);
         let mut s = Store::open(&path).unwrap();
@@ -161,6 +174,7 @@ fn the_run_rebuild_keeps_every_row_and_requeues_no_legacy_running_run() {
             "run_workspace_ended",
             "run_lane_position",
             "run_lane_running",
+            "run_follow_queued",
         ] {
             let present: bool =
                 conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?1)", [index], |r| r.get(0)).unwrap();
@@ -186,9 +200,13 @@ fn the_run_rebuild_keeps_every_row_and_requeues_no_legacy_running_run() {
             assert_eq!((queued.status, queued.executing_at, queued.lane), (RunStatus::Queued, None, None), "{id}");
         }
         assert_eq!(run(&s, "after-chain").after_run_id.as_deref(), Some("post-running"));
+        if variant == "follow" {
+            let follow = run(&s, "follow-queued");
+            assert_eq!((follow.status, follow.input), (RunStatus::Queued, RunInput::Follow { follow_id: "f1".into() }));
+        }
         assert!(run(&s, "imported").config.is_none());
         match variant {
-            "current" => assert_eq!(run(&s, "configured").config.map(|c| c.provider), Some("codex".into())),
+            "current" | "follow" => assert_eq!(run(&s, "configured").config.map(|c| c.provider), Some("codex".into())),
             _ => assert!(run(&s, "configured").config.is_none()),
         }
 

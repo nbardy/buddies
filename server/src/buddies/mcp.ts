@@ -1,7 +1,5 @@
-import fs from 'node:fs';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
@@ -25,6 +23,7 @@ import {
 } from './core';
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
 import type { BuddyGrant, Grants, Role, TurnGrant } from './grants';
+import { attachToRelay } from './mcp-relay';
 import { WorkerSchema, checkedRunConfig } from './worker-config';
 
 /**
@@ -115,6 +114,106 @@ function toChannelRef(author: Actor, ref: z.infer<typeof channelRef>): ChannelRe
   if ('id' in ref) return { kind: 'id', id: ref.id };
   if ('task' in ref) return { kind: 'task', taskId: ref.task };
   return { kind: 'direct', members: [author, ...ref.direct.map(actorOf)] };
+}
+
+/**
+ * How long a follow read holds the read open for a post before it registers the follow (owner,
+ * #channels-feature: "poll for a second or two see if anyone chimes in, or wait and let it cook
+ * another step"). Far under any provider tool timeout: a longer blocking wait was rejected on
+ * 2026-08-21 (agent_notes/2026-08-21_primitives-and-the-wait-design.md). Lead's choice, decision
+ * note 2026-10-04 Successor; revisit if handoffs routinely land at 3-10 s.
+ */
+export const FOLLOW_GRACE_MS = 2_000;
+
+/** Resolves on the first post in `rootId` by someone other than `author`, or after `ms`. */
+function postInThread(events: BuddyEvents, rootId: string, author: Actor, ms: number) {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      off();
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    const off = events.on((event) => {
+      if (event.kind !== 'posted' || event.post.rootId !== rootId) return;
+      if (
+        event.post.author.kind === 'buddy' &&
+        author.kind === 'buddy' &&
+        event.post.author.id === author.id
+      )
+        return;
+      done();
+    });
+  });
+}
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/**
+ * A follow read (`channel_read {threadId, follow:{until}}`), in three steps:
+ *   1. unread posts past the caller's read mark come back at once, no follow;
+ *   2. otherwise the read stays open FOLLOW_GRACE_MS, and a post in that window comes back inline;
+ *   3. otherwise the follow is registered and the read returns `following`, with no posts.
+ * Step 3 rechecks in the same crate transaction that registers, so a post between the grace
+ * window and the registration is returned, and a post after it finds the queued run.
+ *
+ * WAKE ROUTING. A registered follow wakes the conversation that called it, along the SAME route a
+ * request sent from this turn takes back (`grant.returns`, fixed when the turn started;
+ * policy-port.ts `returnsFor`), never a new conversation picked later. The crate keeps it as a
+ * queued `follow` run in that conversation (crates/unleashd-buddies/src/follows.rs), so:
+ *   - it survives a backend restart (a queued run outlives the process);
+ *   - it never runs concurrently with that conversation's own turn: the claim gate holds it as
+ *     `conversation_busy` until the turn ends (runs.rs `WAITING_REASON_SQL`);
+ *   - it counts against the Buddy's pool (`max_active_runs`) only while its wake runs;
+ *   - if the conversation is gone by then, the runner's `returnJob` opens a fresh turn, exactly
+ *     as for a request's answer (task_01a0f7c2, the return route).
+ * An Inbox route (a foreground chat: the owner's DM or a thread seat) takes no automated input
+ * (2026-10-01: no-op runs queued behind the owner's turn for hours), so steps 1 and 2 still run
+ * but step 3 answers `not_following` instead of registering a wake that could never be delivered.
+ * A thread seat needs none: the follow-up gate (channels.ts) asks it on every new post anyway.
+ * The follow-up gate is skipped for a follower whose wake shows the post (channels.ts
+ * `deliveringFollowers`): it asked to be told, so no yes/no question and no second wake.
+ */
+async function followThread(
+  deps: ToolDeps,
+  grant: BuddyGrant,
+  threadId: string,
+  follow: { until: string },
+  limit: number
+) {
+  const root = await deps.core.getPost(grant.author, threadId);
+  const unread = await deps.core.catchUpThread(grant.author, root.id, limit);
+  if (unread.posts.length > 0) return { kind: 'unread' as const, ...unread };
+  await postInThread(deps.events, root.id, grant.author, FOLLOW_GRACE_MS);
+  switch (grant.returns.kind) {
+    case 'inbox': {
+      const late = await deps.core.catchUpThread(grant.author, root.id, limit);
+      if (late.posts.length > 0) return { kind: 'unread' as const, ...late };
+      return {
+        kind: 'not_following' as const,
+        posts: [],
+        reason:
+          'a foreground chat takes no automated wake; follow from a background turn (worker, request, schedule). New posts in a thread you replied in already ask you whether to reply.',
+      };
+    }
+    case 'conversation': {
+      const read = await deps.core.followThread(grant.author, {
+        rootId: root.id,
+        conversationId: grant.returns.id,
+        until: follow.until,
+        limit,
+      });
+      switch (read.kind) {
+        case 'unread':
+          return { kind: 'unread' as const, posts: read.posts, unshown: read.unshown };
+        case 'following':
+          return {
+            kind: 'following' as const,
+            posts: [],
+            following: { until: read.follow.until, followId: read.follow.id },
+          };
+      }
+    }
+  }
 }
 
 const docKind = z.enum(['soul', 'working', 'long_term', 'shared']);
@@ -342,6 +441,22 @@ const BUDDY_TOOLS = {
     schema: z.object({}),
     handler: (deps, grant) => deps.core.inbox(grant.author, grant.workspaceId),
   }),
+  // Regression guard: 0fef9d4 (lean rewrite) dropped buddy.new_list, so Buddies could not create
+  // channels for ~10 days although the crate's create_channel is Rule::AnyBuddy. A separate tool
+  // (not a channel_admin variant) because admin acts on an existing channelId and a union at the
+  // top level would not be a JSON-schema object. Guard: buddies-v2.test.ts "Buddy MCP creates a channel".
+  channel_create: buddyTool({
+    description:
+      'Create a public channel in this workspace with a name and a one-line purpose. Idempotent on key: a retried call returns the same channel. Post in it with `post {channel:{id}}`.',
+    writes: true,
+    schema: z.object({
+      name: z.string().trim().min(1).max(80),
+      purpose: z.string().trim().min(1).max(500),
+      key,
+    }),
+    handler: (deps, grant, input) =>
+      deps.core.createChannel(grant.author, { ...input, workspaceId: grant.workspaceId }),
+  }),
   channel_admin: buddyTool({
     description:
       'Rename, archive or restore a public channel. Its identity and history stay intact; archived channels remain readable.',
@@ -362,12 +477,25 @@ const BUDDY_TOOLS = {
   }),
   channel_read: buddyTool({
     description:
-      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here (newest first). Search text: words (all must match), "exact phrase", -excluded, OR; filters narrow before paging. Example: read:{search:{text:\'"deploy window" -draft\', channels:[\'ops\'], from:[\'owner\'], after:\'2026-10-01\'}}. Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
+      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here (newest first). Search text: words (all must match; prefix, plural/stem and one-typo matches count: "market" finds marketing), "exact phrase", -excluded, OR, @Name or @"Two Words" (posts by that Buddy or by @owner; alone it lists them); filters narrow before paging. Example: read:{search:{text:\'"deploy window" -draft\', channels:[\'ops\'], from:[\'owner\'], after:\'2026-10-01\'}}. Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
     writes: false,
     schema: z.object({
       read: z.union([
         z.object({ channelId: z.string().min(1) }),
-        z.object({ threadId: z.string().min(1) }),
+        z.object({
+          threadId: z.string().min(1),
+          follow: z
+            .object({
+              until: z
+                .string()
+                .datetime({ offset: true })
+                .describe('ISO time, at most 7 days ahead: when to wake you if nobody posts'),
+            })
+            .optional()
+            .describe(
+              "Wait for this thread's next post by someone else. Returns {kind:'unread', posts} (oldest first) at once if there are posts you have not read, or if one arrives within 2 s. Otherwise returns {kind:'following', following:{until}} with no posts: keep working or end your turn; you will be woken in THIS conversation with the posts you have not read, or once at `until` with a timeout. One wake per follow; follow again to keep waiting. Not with `before`."
+            ),
+        }),
         z.object({
           search: z.object({
             text: z.string().min(1).max(200),
@@ -395,10 +523,18 @@ const BUDDY_TOOLS = {
         'channelId' in input.read
           ? ({ kind: 'channel', channelId: input.read.channelId } as const)
           : ({ kind: 'thread', rootId: input.read.threadId } as const);
+      if ('threadId' in input.read && input.read.follow) {
+        if (input.before) throw new Error('follow reads from the newest post: drop before');
+        return followThread(deps, grant, input.read.threadId, input.read.follow, input.limit);
+      }
       const page = await deps.core.listPosts(grant.author, query, input.before, input.limit);
       const newest = page.posts[0];
       if (query.kind === 'channel' && !input.before && newest)
         await deps.core.markRead(grant.author, query.channelId, newest.id);
+      // A Buddy's thread read moves its read mark (an existing `thread_read` row only), which is
+      // what lets a queued follow wake it already read settle without a turn (follows.rs).
+      if (query.kind === 'thread' && !input.before && newest)
+        await deps.core.markThreadRead(grant.author, query.rootId, newest.id);
       return page;
     },
   }),
@@ -682,37 +818,26 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 }
 
 export type McpEndpoint = {
-  url: string;
+  readonly url: string;
   close(): Promise<void>;
   spec(grant: TurnGrant): McpServerSpec;
 };
 
-/** Serve `/mcp` on 127.0.0.1 at an OS-assigned port. */
-/**
- * The port the previous backend listened on (absent on a first start). A turn's CLI was
- * configured with this URL at spawn, and an adopted turn keeps calling it after the backend that
- * spawned it is gone (turns/executions.ts), so every backend listens where the last one did.
- */
-function lastPort(portFile: string): number | null {
-  try {
-    const { port } = JSON.parse(fs.readFileSync(portFile, 'utf8')) as { port: number };
-    return Number.isInteger(port) && port > 0 ? port : null;
-  } catch {
-    return null;
-  }
-}
-
-function listen(http: Server, port: number): Promise<void> {
+function listen(http: Server): Promise<void> {
   return new Promise((resolve, reject) => {
-    const failed = (error: Error) => reject(error);
-    http.once('error', failed);
-    http.listen(port, '127.0.0.1', () => {
-      http.off('error', failed);
+    http.once('error', reject);
+    http.listen(0, '127.0.0.1', () => {
+      http.off('error', reject);
       resolve();
     });
   });
 }
 
+/**
+ * Serve `/mcp` on an OS-assigned internal loopback port, attached to the Buddy MCP relay. Turns
+ * call the relay's port, which outlives this backend (mcp-relay.ts), so a call made while no
+ * backend runs is held and delivered by the next one instead of meeting ECONNREFUSED.
+ */
 export async function startMcpEndpoint(
   deps: ToolDeps & { grants: Grants; portFile: string }
 ): Promise<McpEndpoint> {
@@ -736,30 +861,24 @@ export async function startMcpEndpoint(
       if (!res.headersSent) res.writeHead(500).end(String(error));
     });
   });
-  const previous = lastPort(deps.portFile);
-  try {
-    await listen(http, previous ?? 0);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || previous === null) throw error;
-    // Loud, never silent: turns adopted from the previous backend call the old URL and will get
-    // connection errors from their Buddy tools until they end.
-    console.error(
-      `[buddies-mcp] port ${previous} is taken; adopted turns lose their Buddy tools. Listening on a new port.`
-    );
-    await listen(http, 0);
-  }
-  const port = (http.address() as AddressInfo).port;
-  fs.mkdirSync(path.dirname(deps.portFile), { recursive: true });
-  fs.writeFileSync(deps.portFile, `${JSON.stringify({ port })}\n`);
-  const url = `http://127.0.0.1:${port}/mcp`;
+  await listen(http);
+  // Attach only now: the grants of adopted turns are restored before this (server.ts), so the
+  // first call the relay forwards already finds them.
+  const relay = await attachToRelay(deps.portFile, (http.address() as AddressInfo).port);
+  const url = () => `http://127.0.0.1:${relay.port}/mcp`;
   return {
-    url,
+    get url() {
+      return url();
+    },
     spec: (grant) => ({
       kind: 'http',
-      url,
+      url: url(),
       headers: { Authorization: `Bearer ${grant.token}` },
       required: true,
     }),
-    close: () => new Promise((resolve) => http.close(() => resolve())),
+    close: () => {
+      relay.close();
+      return new Promise((resolve) => http.close(() => resolve()));
+    },
   };
 }

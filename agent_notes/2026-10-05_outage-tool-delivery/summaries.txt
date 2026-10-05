@@ -1,0 +1,16 @@
+claude-503.summary: exit=0 elapsed=13s
+claude-hold.summary: exit=0 elapsed=74s
+claude-hold30.summary: exit=0 elapsed=41s
+claude-hold55.summary: exit=0 elapsed=65s
+claude-hold65.summary: exit=0 elapsed=71s
+claude-hold65env.summary: exit=0 elapsed=76s
+claude-ok.summary: exit=0 elapsed=12s
+claude-refuse.summary: exit=0 elapsed=13s
+claude-rpcerr.summary: exit=0 elapsed=10s
+codex-503.summary: exit=0 elapsed=21s
+codex-hold130.summary: exit=0 elapsed=148s
+codex-hold55.summary: exit=0 elapsed=80s
+codex-hold65.summary: exit=0 elapsed=83s
+codex-ok.summary: exit=0 elapsed=34s
+codex-refuse.summary: exit=0 elapsed=19s
+codex-rpcerr.summary: exit=0 elapsed=18s

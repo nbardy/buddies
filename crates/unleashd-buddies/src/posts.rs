@@ -17,7 +17,7 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_from_iter};
 use serde_json::json;
 
-const POST_COLS: &str = "p.id, p.channel_id, p.author_id, p.root_id, p.reply_to_id, p.task_id, p.purpose, p.body, p.evidence, \
+pub(crate) const POST_COLS: &str = "p.id, p.channel_id, p.author_id, p.root_id, p.reply_to_id, p.task_id, p.purpose, p.body, p.evidence, \
     p.request, p.answer_id, p.conversation_id, p.return_conversation_id, p.created_at, p.ord, p.broadcast";
 
 /// The channels `actor_param` (an actor key) may read: the owner every one, a buddy the public and
@@ -57,7 +57,7 @@ fn keyset_page(mut posts: Vec<Post>, limit: i64) -> PostPage {
 /// A channel feed row: a top-level post, or a reply also sent to the channel.
 const IN_CHANNEL_FEED: &str = "(p.root_id IS NULL OR p.broadcast = 1)";
 
-fn post_row(r: &Row) -> rusqlite::Result<Post> {
+pub(crate) fn post_row(r: &Row) -> rusqlite::Result<Post> {
     let request = match (r.get::<_, Option<String>>(9)?.as_deref(), r.get::<_, Option<String>>(10)?) {
         (None, None) => RequestState::None,
         (Some("awaiting"), None) => RequestState::Awaiting,
@@ -284,6 +284,7 @@ impl Store {
                     return Err(CoreError::Invalid(format!("post {} is not awaiting an answer: {:?}", request.id, request.request)));
                 }
                 follow(tx, actor, request.root_id.as_deref().unwrap_or(&request.id), &ord)?;
+                crate::follows::wake_followers(tx, actor, request.root_id.as_deref().unwrap_or(&request.id))?;
                 notify_author(tx, &request)?;
                 Ok(id)
             })?;
@@ -461,14 +462,42 @@ impl Store {
     /// Pages older with `before` (keyset on `ord`, like `task_posts`); until 2026-09-27 search took
     /// no cursor, so the MCP `before` was silently ignored and a Buddy could never see past the
     /// newest `limit` hits.
+    ///
+    /// Typo matching is a fallback, decided once per query and not per page: a query whose exact,
+    /// prefix and stem form finds nothing (ignoring the page cursor) is re-run with one-edit typo
+    /// terms. Mixed in always, typos of "market" (`marker`, `marked`) buried the real hits, and a
+    /// typo hit never outranks an exact one because the two never share a result list.
     pub fn search_posts(&self, actor: &Actor, workspace_id: &str, query: &SearchQuery, before: Option<Cursor>, limit: i64) -> Result<PostPage> {
         require(&self.conn, actor, Op::SearchPosts, &Subject::Owner)?;
-        let mut args: Vec<Value> = vec![crate::search::to_fts(&query.text)?.into(), workspace_id.to_string().into(), actor.key().to_string().into()];
+        let exact = crate::search::parse(&query.text, &|_| Ok(vec![]))?;
+        let parsed = match exact.fts.is_some() && self.search_with(actor, workspace_id, query, &exact, None, 1)?.posts.is_empty() {
+            true => crate::search::parse(&query.text, &|word| self.similar_terms(word))?,
+            false => exact,
+        };
+        self.search_with(actor, workspace_id, query, &parsed, before, limit)
+    }
+
+    /// One run of a parsed search: the match expression, the filters and the readability rule.
+    fn search_with(&self, actor: &Actor, workspace_id: &str, query: &SearchQuery, parsed: &crate::search::Parsed, before: Option<Cursor>, limit: i64) -> Result<PostPage> {
+        let mut args: Vec<Value> = vec![workspace_id.to_string().into(), actor.key().to_string().into()];
         let mut clauses = String::new();
         fn bind(args: &mut Vec<Value>, v: Value) -> String {
             args.push(v);
             format!("?{}", args.len())
         }
+        // `@Name` in the text is a `from` filter on top of the explicit ones (any of them may match).
+        let mut from = query.from.clone();
+        for name in &parsed.authors {
+            from.extend(self.author_keys(workspace_id, name)?);
+        }
+        let from_sql = match &parsed.fts {
+            Some(fts) => {
+                clauses += &format!(" AND post_search MATCH {}", bind(&mut args, fts.clone().into()));
+                "post_search s JOIN post p ON p.rowid = s.rowid"
+            }
+            // Only authors, no words: that author's posts, newest first, no FTS involved.
+            None => "post p",
+        };
         if let Some(Cursor { ord }) = before {
             clauses += &format!(" AND p.ord < {}", bind(&mut args, ord.into()));
         }
@@ -479,8 +508,8 @@ impl Store {
             });
             clauses += &format!(" AND ({})", slots.collect::<Vec<_>>().join(" OR "));
         }
-        if !query.from.is_empty() {
-            let slots = query.from.iter().map(|who| match who.as_str() {
+        if !from.is_empty() {
+            let slots = from.iter().map(|who| match who.as_str() {
                 OWNER_KEY => "p.author_id IS NULL".to_string(),
                 id => format!("p.author_id = {}", bind(&mut args, id.to_string().into())),
             });
@@ -498,12 +527,49 @@ impl Store {
         }
         args.push((limit + 1).into());
         let sql = format!(
-            "SELECT {POST_COLS} FROM post_search s JOIN post p ON p.rowid = s.rowid JOIN channel c ON c.id = p.channel_id
-             WHERE post_search MATCH ?1 AND c.workspace_id = ?2{clauses} AND {} ORDER BY p.ord DESC LIMIT ?{}",
-            readable_by("?3"),
+            "SELECT {POST_COLS} FROM {from_sql} JOIN channel c ON c.id = p.channel_id
+             WHERE c.workspace_id = ?1{clauses} AND {} ORDER BY p.ord DESC LIMIT ?{}",
+            readable_by("?2"),
             args.len()
         );
         Ok(keyset_page(collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?, limit))
+    }
+
+    /// The `from` keys of the Buddies in `workspace_id` called `name` (or slugged it), or the owner
+    /// for `owner`. An unknown name is an error the caller shows ("no Buddy named …"), never an
+    /// empty result that reads as "this person never said it".
+    fn author_keys(&self, workspace_id: &str, name: &str) -> Result<Vec<String>> {
+        if name.eq_ignore_ascii_case(OWNER_KEY) {
+            return Ok(vec![OWNER_KEY.to_string()]);
+        }
+        let ids = collect(
+            self.conn
+                .prepare_cached("SELECT id FROM buddy WHERE workspace_id = ?1 AND (lower(name) = lower(?2) OR lower(slug) = lower(?2))")?
+                .query_map(params![workspace_id, name], |r| r.get::<_, String>(0))?,
+        )?;
+        match ids.is_empty() {
+            true => Err(CoreError::Invalid(format!("no Buddy named \"{name}\""))),
+            false => Ok(ids),
+        }
+    }
+
+    /// Index terms one typo from `word` (lowercase, 5+ letters), most-used first, capped. Reads the
+    /// `post_search_vocab` view of the FTS index, so it sees stems and only words that exist.
+    /// The first letter is taken as typed: the vocabulary is read by term range, so the scan is one
+    /// letter's terms instead of every word ever posted (a typo rarely lands on the first letter).
+    fn similar_terms(&self, word: &str) -> Result<Vec<String>> {
+        let word: Vec<char> = word.chars().collect();
+        let first = word[0];
+        let after = char::from_u32(first as u32 + 1).unwrap_or(first);
+        let range = (first.to_string(), after.to_string());
+        let vocab = collect(
+            self.conn
+                .prepare_cached("SELECT term, doc FROM post_search_vocab WHERE term >= ?1 AND term < ?2")?
+                .query_map([range.0, range.1], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?,
+        )?;
+        let mut terms: Vec<_> = vocab.into_iter().filter(|(t, _)| crate::search::is_typo_of(&word, &t.chars().collect::<Vec<_>>())).collect();
+        terms.sort_by(|a, b| b.1.cmp(&a.1));
+        Ok(terms.into_iter().take(crate::search::TYPO_MAX_TERMS).map(|(t, _)| t).collect())
     }
 
     /// Moves the actor's cursor forward to `post_id`; an older post never moves it back.
@@ -745,6 +811,9 @@ fn insert_post(
     for wake in &input.wakes {
         enqueue_wake(tx, actor, channel, &id, root_id.as_deref().unwrap_or(&id), wake)?;
     }
+    if let Some(root) = &root_id {
+        crate::follows::wake_followers(tx, actor, root)?;
+    }
     for recipient in ask.owed_by().iter().filter_map(Actor::buddy_id) {
         tx.enqueue(EnqueueInput {
             buddy_id: recipient.to_string(),
@@ -832,7 +901,7 @@ fn require_worker_authority(tx: &Transaction, actor: &Actor, ask: &Ask, config: 
 }
 
 /// Writing in a thread follows it and reads it through the new post (THREADS_VIEW_2026-09-28.md).
-fn follow(tx: &Transaction, actor: &Actor, root_id: &str, ord: &str) -> Result<()> {
+pub(crate) fn follow(tx: &Transaction, actor: &Actor, root_id: &str, ord: &str) -> Result<()> {
     tx.prepare_cached(
         "INSERT INTO thread_read (reader, root_id, last_ord, updated_at) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(reader, root_id) DO UPDATE SET last_ord = excluded.last_ord, updated_at = excluded.updated_at

@@ -30,6 +30,7 @@ const RUN_KIND: Record<RunInput['kind'], string> = {
   mention: 'mention',
   follow_up: 'follow-up',
   retry: 'retry',
+  follow: 'follow',
 };
 
 /** A live run's state; finished runs never appear in a live listing. */

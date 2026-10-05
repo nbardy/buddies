@@ -20,7 +20,7 @@ import type {
   ThreadStat,
   Workspace,
 } from '@unleashd/buddies-core';
-import type { ConversationConfig } from '@unleashd/shared';
+import type { BuddyMutationResults, ConversationConfig } from '@unleashd/shared';
 
 // Pattern: one-type-source (docs/patterns.md#one-type-source)
 export type {
@@ -114,6 +114,4 @@ export interface ChannelResponse {
  * POST /api/buddies/channels/:channelId/posts (and /direct/posts). A mention's turn starts from
  * the server's post announcement; its reply, or a notice saying why not, lands in the thread.
  */
-export interface PostResult {
-  post: Post;
-}
+export type PostResult = BuddyMutationResults['channel.post'];

@@ -176,6 +176,28 @@ impl BuddiesCore {
         call(&self.store, move |s| s.enqueue_run(&actor, input)).await
     }
 
+    /// A Buddy follows a thread from one conversation (follows.rs).
+    #[napi]
+    pub async fn follow_thread(&self, actor: Actor, input: FollowInput) -> napi::Result<FollowRead> {
+        call(&self.store, move |s| s.follow_thread(&actor, input)).await
+    }
+
+    /// A follow read's first step: the thread's unread posts for this Buddy, marked read.
+    #[napi]
+    pub async fn catch_up_thread(&self, actor: Actor, root_id: String, limit: i64) -> napi::Result<ThreadUnread> {
+        call(&self.store, move |s| s.catch_up_thread(&actor, &root_id, limit)).await
+    }
+
+    #[napi]
+    pub async fn deliver_follow(&self, follow_id: String, limit: i64) -> napi::Result<FollowWake> {
+        call(&self.store, move |s| s.deliver_follow(&follow_id, limit)).await
+    }
+
+    #[napi]
+    pub async fn delivering_followers(&self, root_id: String, ord: String) -> napi::Result<Vec<String>> {
+        call(&self.store, move |s| s.delivering_followers(&root_id, &ord)).await
+    }
+
     #[napi]
     pub async fn enqueue_chat(&self, actor: Actor, input: ChatEnqueue) -> napi::Result<Run> {
         call(&self.store, move |s| s.enqueue_chat(&actor, input)).await

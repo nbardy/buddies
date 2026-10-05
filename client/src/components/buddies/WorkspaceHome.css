@@ -1,77 +1,109 @@
-/* Workspace home (`/`). Desktop renders it outside the shell, full height. */
+/* Workspace home (`/`). Desktop renders it outside the shell, full height. Built on the
+   workspace Home's vocabulary (.landing*, ChannelLanding.css): aurora hero, display type, cards. */
 .workspace-home {
   height: 100%;
   overflow-y: auto;
   background: var(--bg-base);
 }
-.workspace-home-nav,
-.workspace-home-body {
-  max-width: 880px;
+.workspace-home-nav {
+  justify-content: flex-end;
+  max-width: 1008px;
   margin: 0 auto;
   gap: var(--sp-8);
   padding: var(--sp-7) var(--sp-9);
+  font-family: "Inter Variable", Inter, system-ui, sans-serif;
 }
-.workspace-home-nav a,
-.workspace-home-brand,
-.workspace-home h2 {
+.workspace-home-nav a {
   color: var(--text-muted);
-  font: 600 var(--fs-3) var(--font-mono);
+  font-size: var(--fs-4);
+  font-weight: 500;
   text-decoration: none;
 }
-.workspace-home-brand {
-  flex: 1;
+.workspace-home-nav a:hover {
+  color: var(--text-bright);
 }
-.workspace-home-header,
-.workspace-home-actions {
-  justify-content: space-between;
-  gap: var(--sp-4);
+/* The Home's hero sits under a rail logo; this page has only the slim bar above. */
+.workspace-home .landing-hero {
+  gap: var(--sp-9);
+  padding-top: var(--sp-11);
 }
-.workspace-home-header h1 {
-  font-size: var(--fs-8);
+.workspace-home-lede {
+  max-width: 560px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-5);
+  line-height: 1.55;
 }
-.workspace-home h2 {
-  margin-bottom: var(--sp-5);
-  text-transform: uppercase;
-}
-.workspace-home-primary.workspace-home-primary,
-.workspace-home-badge {
-  justify-content: center;
-  background: var(--accent-primary);
-  color: var(--bg-base);
-}
+/* The one create-a-workspace form (WorkspaceTeamForm), raised like the Home composer. */
 .workspace-home-create {
-  gap: var(--sp-6);
-  padding: var(--sp-8);
-  background: var(--bg-content);
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  padding: var(--sp-10);
+  border-radius: var(--landing-radius);
+  background: radial-gradient(120% 60% at 0% 0%, rgb(124 140 255 / 14%), transparent 60%),
+    radial-gradient(90% 50% at 100% 100%, rgb(42 161 152 / 10%), transparent 60%),
+    color-mix(in srgb, var(--bg-base) 85%, black);
+  box-shadow: 0 0 0 1px var(--landing-line), 0 24px 70px -20px
+    color-mix(in srgb, var(--accent) 40%, transparent);
+  text-align: left;
+}
+.workspace-home-create .onboarding-team {
+  padding-bottom: 0;
+}
+.workspace-home-close {
+  position: absolute;
+  top: var(--sp-5);
+  right: var(--sp-5);
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-5);
+  cursor: pointer;
+}
+.workspace-home-close:hover {
+  color: var(--text-bright);
 }
 .workspace-home-error {
   color: var(--danger);
 }
 .workspace-home-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 }
 .workspace-home-tiles,
 .workspace-home-list {
   /* The rewrite dropped this reset and exposed bullets beside every card.
      Guard: tools/check-workspace-navigation.mjs and workspace-home screenshots. */
+  margin: 0;
+  padding: 0;
   list-style: none;
-  gap: var(--sp-6);
+  gap: var(--sp-7);
 }
+/* Cards share the Home's Task-card surface. */
 .workspace-home-link {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--sp-6);
-  padding: var(--sp-6);
+  padding: var(--sp-7) var(--sp-8);
+  border: 1px solid var(--landing-line);
+  border-radius: var(--landing-radius);
+  background: var(--landing-card);
   color: inherit;
   text-decoration: none;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
 }
 .workspace-home-link:hover {
-  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  background: color-mix(in srgb, var(--text-bright) 6%, transparent);
+  transform: translateY(-1px);
 }
 .workspace-home-tile {
   grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-7);
+  padding: var(--sp-8);
 }
 .workspace-home-tile :is(.workspace-home-copy, .workspace-home-activity) {
   grid-column: 1 / -1;
@@ -83,15 +115,23 @@
 .workspace-home-icon {
   width: 36px;
   height: 36px;
-  border-radius: var(--ui-radius);
+  border-radius: 10px;
 }
 .workspace-home-tile .workspace-home-icon {
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px -10px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.workspace-home-copy {
+  gap: var(--sp-1);
 }
 .workspace-home-name {
-  color: var(--text-emphasis);
-  font-weight: 600;
+  color: var(--text-bright);
+  font-family: var(--landing-display);
+  font-size: var(--fs-5);
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 .workspace-home-path,
 .workspace-home-activity,
@@ -106,8 +146,11 @@
   border-radius: 50%;
 }
 .workspace-home-badge {
+  justify-content: center;
   padding: 0 var(--sp-3);
   border-radius: 999px;
+  background: var(--accent-primary);
+  color: var(--bg-base);
 }
 .workspace-home-dot {
   width: 8px;

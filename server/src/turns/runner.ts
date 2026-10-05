@@ -128,6 +128,11 @@ export type TurnBroadcast =
       content: string;
     };
 
+/** The command named by agent-cli's canonical `spawn <cmd> ENOENT` failure, or null. */
+function missingCommand(message: string): string | null {
+  return /(?:^|[\s:])spawn (\S+) ENOENT$/.exec(message)?.[1] ?? null;
+}
+
 export class TurnRunner {
   // Per-run token: every late event/completion from a replaced handle is ignored.
   private runToken = 0;
@@ -599,8 +604,16 @@ export class TurnRunner {
       // Repair old phantom bindings so the next explicit retry starts a real thread.
       this.host.markSessionStarted(false);
     }
-    this.terminalCauseHint = cause;
-    this.providerFailureMessage = normalizeProviderErrorMessage(message);
+    const command = missingCommand(message);
+    // Fix guard: a provider binary missing from PATH reached the owner as nothing (an empty DM
+    // bubble, fresh-install trial 2026-10-05). The journaled wrapper is `/bin/sh`, so agent-cli
+    // reports exit 127 as `spawn <cmd> ENOENT` (execute.ts missingBinaryError); it becomes the
+    // journaled `spawn_failed` cause, which survives a restart, plus one text naming the provider.
+    // Guard: conversation-runtime.test.ts "a missing provider binary".
+    this.terminalCauseHint = command ? 'spawn_failed' : cause;
+    this.providerFailureMessage = command
+      ? `Couldn't start ${this.host.provider}: the \`${command}\` command was not found on this server's PATH. Open Setup to install it, then send your message again.`
+      : normalizeProviderErrorMessage(message);
     this.surfaceError(this.providerFailureMessage);
   }
 
@@ -783,7 +796,10 @@ export class TurnRunner {
     if (failure)
       return {
         t: 'failed',
-        cause: this.terminalCauseHint === 'out_of_tokens' ? 'out_of_tokens' : 'provider_error',
+        cause:
+          this.terminalCauseHint === 'out_of_tokens' || this.terminalCauseHint === 'spawn_failed'
+            ? this.terminalCauseHint
+            : 'provider_error',
         detail: failure,
       };
     // Review is enqueued before listeners or processQueue can start another turn. Not after a
@@ -827,8 +843,8 @@ export class TurnRunner {
     const cause: TurnTerminalCause =
       reason === 'out_of_tokens' || this.terminalCauseHint === 'out_of_tokens'
         ? 'out_of_tokens'
-        : this.terminalCauseHint === 'provider_error'
-          ? 'provider_error'
+        : this.terminalCauseHint === 'provider_error' || this.terminalCauseHint === 'spawn_failed'
+          ? this.terminalCauseHint
           : crashed(completion).cause;
     return { t: 'failed', cause, detail: reason };
   }
