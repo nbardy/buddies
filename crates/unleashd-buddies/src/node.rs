@@ -176,6 +176,22 @@ impl BuddiesCore {
         call(&self.store, move |s| s.enqueue_run(&actor, input)).await
     }
 
+    /// A Buddy follows a thread from one conversation (follows.rs).
+    #[napi]
+    pub async fn follow_thread(&self, actor: Actor, input: FollowInput) -> napi::Result<ThreadFollow> {
+        call(&self.store, move |s| s.follow_thread(&actor, input)).await
+    }
+
+    #[napi]
+    pub async fn deliver_follow(&self, follow_id: String, limit: i64) -> napi::Result<FollowDelivery> {
+        call(&self.store, move |s| s.deliver_follow(&follow_id, limit)).await
+    }
+
+    #[napi]
+    pub async fn delivering_followers(&self, root_id: String, ord: String) -> napi::Result<Vec<String>> {
+        call(&self.store, move |s| s.delivering_followers(&root_id, &ord)).await
+    }
+
     #[napi]
     pub async fn claim_run(&self, lease_ms: i64) -> napi::Result<Option<Claim>> {
         call(&self.store, move |s| s.claim_run(lease_ms)).await

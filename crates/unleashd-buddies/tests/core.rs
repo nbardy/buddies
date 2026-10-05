@@ -1107,3 +1107,77 @@ fn a_group_request_starts_one_run_per_recipient() {
         .unwrap();
     assert_eq!(again.id, run.id, "a pre-fix run is still matched by its legacy key");
 }
+
+// Thread follows (2026-10-04, follows.rs). Before them a Buddy waiting on another's work in a
+// thread had no wake at all: posts start nobody but mentions and gated participants.
+fn follow_fixture(s: &mut Store) -> (Post, impl Fn(&str, &str) -> PostInput + use<>) {
+    let general = s
+        .create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "p".into(), key: "g".into() })
+        .unwrap();
+    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, ..request(body, key) };
+    let root = s.post(&buddy("lead"), ChannelRef::Id { id: general.id }, say("ship the model", "root")).unwrap();
+    let root_id = root.id.clone();
+    (root, move |body: &str, key: &str| PostInput { reply_to_id: Some(root_id.clone()), ..say(body, key) })
+}
+
+fn soon(minutes: i64) -> String {
+    (chrono::Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339()
+}
+
+#[test]
+fn a_follow_wakes_its_conversation_on_anothers_post_with_only_the_unread_posts() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    let follow = s
+        .follow_thread(&buddy("mid"), FollowInput { root_id: root.id.clone(), conversation_id: "conv-mid".into(), through_ord: root.ord.clone(), until: soon(60) })
+        .unwrap();
+    s.post(&buddy("mid"), channel.clone(), reply("on it", "own")).unwrap();
+    assert!(s.claim_run(60_000).unwrap().is_none(), "the follower's own post wakes nobody");
+    let news = s.post(&buddy("peer"), channel.clone(), reply("model is green", "news")).unwrap();
+    assert_eq!(s.delivering_followers(&root.id, &news.ord).unwrap(), ["mid"], "its follow-up gate is skipped");
+
+    let claim = s.claim_run(60_000).unwrap().expect("another's post makes the follow due now");
+    assert_eq!(claim.run.input, RunInput::Follow { follow_id: follow.id.clone() });
+    assert_eq!(claim.run.conversation_id.as_deref(), Some("conv-mid"), "the wake goes to the conversation that followed");
+    let delivered = s.deliver_follow(&follow.id, 20).unwrap();
+    assert_eq!(delivered.posts.iter().map(|p| p.body.as_str()).collect::<Vec<_>>(), ["model is green"]);
+    let late = s.post(&buddy("peer"), channel, reply("one more thing", "late")).unwrap();
+    assert!(s.delivering_followers(&root.id, &late.ord).unwrap().is_empty(), "a composed wake never saw it: the gate must ask");
+}
+
+#[test]
+fn a_follow_with_no_post_is_due_once_at_until_and_survives_a_reopen() {
+    let mut f = fixture();
+    let (root, _) = follow_fixture(&mut f.store);
+    let until = chrono::Utc::now() + chrono::Duration::minutes(30);
+    let follow = f
+        .store
+        .follow_thread(&buddy("mid"), FollowInput { root_id: root.id.clone(), conversation_id: "conv-mid".into(), through_ord: root.ord.clone(), until: until.to_rfc3339() })
+        .unwrap();
+    let mut s = Store::open(f.path.to_str().unwrap()).unwrap();
+    s.recover_runs().unwrap();
+    let iso = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    assert!(s.claim_run_at(&iso(until - chrono::Duration::seconds(1)), 60_000).unwrap().is_none(), "not before until");
+    let claim = s.claim_run_at(&iso(until + chrono::Duration::seconds(1)), 60_000).unwrap().expect("due at until");
+    assert_eq!(claim.run.input, RunInput::Follow { follow_id: follow.id.clone() });
+    assert!(s.deliver_follow(&follow.id, 20).unwrap().posts.is_empty(), "no posts: the host reports a timeout");
+    assert!(s.claim_run_at(&iso(until + chrono::Duration::hours(1)), 60_000).unwrap().is_none(), "one wake per follow");
+}
+
+#[test]
+fn a_new_follow_replaces_the_queued_one_from_the_same_conversation() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let input = |until: String| FollowInput { root_id: root.id.clone(), conversation_id: "conv-mid".into(), through_ord: root.ord.clone(), until };
+    let first = s.follow_thread(&buddy("mid"), input(soon(10))).unwrap();
+    let second = s.follow_thread(&buddy("mid"), input(soon(20))).unwrap();
+    assert_eq!(s.get_run(&first.run_id).unwrap().error_code.as_deref(), Some("superseded"));
+    s.post(&buddy("peer"), ChannelRef::Id { id: root.channel_id.clone() }, reply("done", "d")).unwrap();
+    assert_eq!(s.claim_run(60_000).unwrap().unwrap().run.id, second.run_id);
+    assert!(s.claim_run(60_000).unwrap().is_none(), "two follow calls, one wake");
+    assert!(matches!(s.follow_thread(&Actor::Owner, input(soon(5))), Err(CoreError::Invalid(_))), "the owner is not woken");
+    assert!(matches!(s.follow_thread(&buddy("mid"), input(soon(60 * 24 * 8))), Err(CoreError::Invalid(_))), "longer than 7 days");
+}

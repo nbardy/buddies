@@ -31,6 +31,10 @@ export declare class BuddiesCore {
   listTasks(query: TaskQuery): Promise<Array<Task>>
   taskCounts(workspaceId: string): Promise<Array<TaskCount>>
   enqueueRun(actor: Actor, input: EnqueueInput): Promise<Run>
+  /** A Buddy follows a thread from one conversation (follows.rs). */
+  followThread(actor: Actor, input: FollowInput): Promise<ThreadFollow>
+  deliverFollow(followId: string, limit: number): Promise<FollowDelivery>
+  deliveringFollowers(rootId: string, ord: string): Promise<Array<string>>
   claimRun(leaseMs: number): Promise<Claim | null>
   settleRun(runId: string, leaseToken: string, outcome: Outcome): Promise<Run>
   bindRun(runId: string, leaseToken: string, conversationId: string): Promise<Run>
@@ -263,6 +267,16 @@ export interface EventInput {
   taskId?: string
 }
 
+/**
+ * What a claimed follow run delivers: the follow, and the thread's posts after its mark by anyone
+ * but the follower, oldest first (at most `limit`; `unshown` counts the rest).
+ */
+export interface FollowDelivery {
+  follow: ThreadFollow
+  posts: Array<Post>
+  unshown: number
+}
+
 /** One card of the Threads view: a thread with at least one reply that the actor follows. */
 export interface FollowedThread {
   channel: Channel
@@ -277,6 +291,15 @@ export interface FollowedThread {
 export interface FollowedThreads {
   threads: Array<FollowedThread>
   more: boolean
+}
+
+export interface FollowInput {
+  rootId: string
+  conversationId: string
+  /** The newest post the follower's read returned; only later posts wake it. */
+  throughOrd: string
+  /** RFC 3339; must be in the future and at most `MAX_FOLLOW_DAYS` ahead. */
+  until: string
 }
 
 export interface Inbox {
@@ -449,6 +472,7 @@ export type RunInput =
   | { kind: 'reply'; postId: string }
   | { kind: 'schedule'; scheduleId: string; slot: string }
   | { kind: 'failure_notice'; runId: string }
+  | { kind: 'follow'; followId: string }
 
 export type RunQuery =
   | { kind: 'buddy'; buddyId: string }
@@ -585,6 +609,23 @@ export type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'review' | 'done' 
 export type TaskWrite =
   | { kind: 'create'; ownerId: string; parentId?: string; title: string; doneCriteria: string; key: string }
   | { kind: 'update'; taskId: string; baseRevision: number; changes: TaskChanges; key: string }
+
+/**
+ * A follow of one thread by one conversation (follows.rs). Not `thread_read`, which is the
+ * owner's "followed threads" list and read cursor; this one wakes a Buddy's conversation.
+ */
+export interface ThreadFollow {
+  id: string
+  rootId: string
+  buddyId: string
+  /** The conversation the wake goes to: the one that asked to follow. */
+  conversationId: string
+  /** The newest post of the thread the follower was shown when it followed. */
+  throughOrd: string
+  until: string
+  createdAt: string
+  runId: string
+}
 
 /** A thread root's replies at a glance: the channel row's "3 replies · last reply 2m ago". */
 export interface ThreadStat {

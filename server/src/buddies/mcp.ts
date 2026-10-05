@@ -115,6 +115,45 @@ function toChannelRef(author: Actor, ref: z.infer<typeof channelRef>): ChannelRe
   return { kind: 'direct', members: [author, ...ref.direct.map(actorOf)] };
 }
 
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/**
+ * A follow wakes the conversation that asked, along the SAME route a request from this turn would
+ * take back (`grant.returns`, fixed when the turn started; policy-port.ts `returnsFor`). The crate
+ * keeps it as a queued `follow` run in that conversation (crates/unleashd-buddies/src/follows.rs),
+ * so it survives a restart, waits behind the conversation's running turn (`conversation_busy`)
+ * and counts against the Buddy's run pool only while its wake runs. An Inbox route (a foreground
+ * chat: the owner's DM or a thread seat) has no conversation to wake, so the follow is refused
+ * rather than silently never delivered. A thread seat needs none: the follow-up gate
+ * (channels.ts) already asks it on every new post in its thread.
+ * The read mark is the newest post this read returned, so a follow is only valid on a read from
+ * the newest post (no `before`).
+ */
+async function followThread(
+  deps: ToolDeps,
+  grant: BuddyGrant,
+  page: { posts: { ord: string }[] },
+  threadId: string,
+  follow: { until: string },
+  before: { ord: string } | undefined
+) {
+  if (before) throw new Error('follow reads from the newest post: drop before');
+  switch (grant.returns.kind) {
+    case 'inbox':
+      throw new Error(
+        'follow wakes a background conversation (a worker, request or scheduled turn); this is a foreground chat. In a thread you replied in, new posts already ask you whether to reply.'
+      );
+    case 'conversation': {
+      const root = await deps.core.getPost(grant.author, threadId);
+      return deps.core.followThread(grant.author, {
+        rootId: root.id,
+        conversationId: grant.returns.id,
+        throughOrd: page.posts[0]?.ord ?? root.ord,
+        until: follow.until,
+      });
+    }
+  }
+}
+
 const docKind = z.enum(['soul', 'working', 'long_term', 'shared']);
 const memoryKind = z.enum(['working', 'long_term']);
 // Soul and memory have one address, the Buddy. Only a shared doc may live in the workspace.
@@ -364,7 +403,20 @@ const BUDDY_TOOLS = {
     schema: z.object({
       read: z.union([
         z.object({ channelId: z.string().min(1) }),
-        z.object({ threadId: z.string().min(1) }),
+        z.object({
+          threadId: z.string().min(1),
+          follow: z
+            .object({
+              until: z
+                .string()
+                .datetime({ offset: true })
+                .describe('ISO time, at most 7 days ahead: when to wake you if nobody posts'),
+            })
+            .optional()
+            .describe(
+              "Wait for this thread's next post. End your turn after this read: the next post by anyone else wakes THIS conversation with the posts you have not seen, or `until` wakes it once with a timeout. One wake per follow; follow again to keep waiting. Background turns only (workers, requests, schedules)."
+            ),
+        }),
         z.object({ search: z.string().min(1).max(200).describe('Words that must all appear') }),
       ]),
       before: z.object({ ord: z.string() }).optional().describe('next from the previous page'),
@@ -387,6 +439,10 @@ const BUDDY_TOOLS = {
       const newest = page.posts[0];
       if (query.kind === 'channel' && !input.before && newest)
         await deps.core.markRead(grant.author, query.channelId, newest.id);
+      if ('threadId' in input.read && input.read.follow) {
+        const { threadId, follow } = input.read;
+        return { ...page, follow: await followThread(deps, grant, page, threadId, follow, input.before) };
+      }
       return page;
     },
   }),

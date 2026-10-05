@@ -27,6 +27,7 @@ const RUN_KIND: Record<RunInput['kind'], string> = {
   reply: 'reply',
   schedule: 'schedule',
   failure_notice: 'notice',
+  follow: 'follow',
 };
 
 /** A live run's state; finished runs never appear in a live listing. */

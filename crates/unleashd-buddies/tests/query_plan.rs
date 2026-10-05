@@ -241,6 +241,16 @@ fn workload(s: &mut unleashd_buddies::Store) {
     s.get_buddy("ic").unwrap();
     s.list_buddies(WS).unwrap();
     s.bind_conversation(&owner, ConversationInput { id: "c-new".into(), buddy_id: "ic".into(), task_id: None }).unwrap();
+    // Thread follows (follows.rs): follow, replace, the wake inside a post, delivery, the gate skip.
+    let until = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    let follow = FollowInput { root_id: top.id.clone(), conversation_id: "c-follow".into(), through_ord: top_reply.ord.clone(), until };
+    s.follow_thread(&mid, follow.clone()).unwrap();
+    let follow = s.follow_thread(&mid, follow).unwrap();
+    let woke = s
+        .post(&owner, ChannelRef::Id { id: channel.id.clone() }, PostInput { reply_to_id: Some(top.id.clone()), ..input(PostKind::Inform, "news", "pf") })
+        .unwrap();
+    s.delivering_followers(&top.id, &woke.ord).unwrap();
+    s.deliver_follow(&follow.id, 20).unwrap();
 }
 
 fn input(kind: PostKind, body: &str, key: &str) -> PostInput {

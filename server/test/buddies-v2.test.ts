@@ -145,8 +145,9 @@ async function probe(spec: McpServerSpec): Promise<number> {
   return response.status;
 }
 
-async function world() {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-v2-'));
+/** `reopen`: a scratch dir an earlier world used, as a restarted backend finds its stores. */
+async function world(reopen?: string) {
+  const scratch = reopen ?? mkdtempSync(join(tmpdir(), 'buddies-v2-'));
   const dbPath = join(scratch, 'buddies-v3.sqlite');
   const core = await BuddiesCore.open(dbPath);
   const ws = (await core.createWorkspace(OWNER, { name: 'Team', rootPath: scratch })).id;
@@ -385,6 +386,11 @@ async function world() {
     runner,
     scratch,
     runs: (buddyId: string) => core.listRuns({ kind: 'buddy', buddyId }, 50),
+    /** The backend dies: nothing in memory survives, the stores stay for `world(scratch)`. */
+    async stop() {
+      runner.stop();
+      await endpoint.close();
+    },
     async close() {
       runner.stop();
       await endpoint.close();
@@ -2892,6 +2898,156 @@ test('task comment mentions wake a Buddy and preserve replies in the task discus
     assert.equal(reply?.taskId, task.id);
     assert.equal(reply?.channelId, root.channelId);
     assert.equal(w.turns.length, 1);
+  } finally {
+    await w.close();
+  }
+});
+
+// Thread follows (2026-10-04, crates/unleashd-buddies/src/follows.rs). Before them a worker waiting
+// on someone else's work in a thread had no wake: posts start only mentions and gated participants,
+// and the gate's in-memory pairs die with the backend.
+type World = Awaited<ReturnType<typeof world>>;
+
+/** A Buddy's own tool endpoint, as its turn would hold it. */
+const asBuddy = (w: World, buddyId: string) =>
+  w.endpoint.spec(
+    w.grants.issueBuddy({
+      role: 'worker',
+      buddyId,
+      workspaceId: w.ws,
+      conversationId: `elsewhere-${buddyId}`,
+      runId: null,
+      returns: INBOX,
+    })
+  );
+
+/** Lead's scheduled (background) turn 1 starts a thread and follows it until `until`. */
+async function leadFollows(w: World, followUntil: string): Promise<{ rootId: string }> {
+  const thread = { rootId: '' };
+  w.during.set(1, async (turn) => {
+    const root = await call(turn.mcp, 'post', {
+      channel: { id: w.general.id },
+      body: 'Designer, send the mockups when ready',
+      key: 'ask-mockups',
+    });
+    const read = await call(turn.mcp, 'channel_read', {
+      read: { threadId: root.value.id, follow: { until: followUntil } },
+    });
+    assert.equal(read.isError, false, read.text);
+    assert.ok(read.value.follow?.runId, `the read answers with the follow: ${read.text}`);
+    thread.rootId = root.value.id;
+  });
+  const schedule = await w.core.putSchedule(OWNER, {
+    buddyId: w.lead.id,
+    name: 'mockups',
+    cron: '0 9 * * *',
+    timezone: 'UTC',
+    prompt: 'Get the mockups',
+    limits: '{}',
+    enabled: true,
+    key: 'mockups',
+  });
+  await w.core.enqueueRun(OWNER, {
+    buddyId: w.lead.id,
+    input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
+  });
+  w.emit({ kind: 'changed' });
+  await until(
+    async () =>
+      thread.rootId &&
+      (await w.runs(w.lead.id)).some((r) => r.input.kind === 'schedule' && r.status === 'complete'),
+    "Lead's following turn ends"
+  );
+  return thread;
+}
+
+const minutesAhead = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+
+test('a follow wakes the conversation that followed with the new post, not a gated reply', async () => {
+  const w = await world();
+  try {
+    const { rootId } = await leadFollows(w, minutesAhead(30));
+    // The woken turn does not reply, so a gate call could only be one asking Lead.
+    w.silent.add(2);
+    const posted = await call(asBuddy(w, w.designer.id), 'post', {
+      channel: { id: w.general.id },
+      replyToId: rootId,
+      body: 'Mockups are in /tmp/mockups',
+      key: 'mockups-done',
+    });
+    assert.equal(posted.isError, false, posted.text);
+    const woken = await until(() => w.turns[1], 'Lead woken by the follow');
+    assert.match(woken.request.prompt, /New posts in thread .*which you follow/);
+    assert.match(woken.request.prompt, /Mockups are in \/tmp\/mockups/);
+    assert.doesNotMatch(woken.request.prompt, /send the mockups when ready/, 'only unread posts');
+    assert.equal(woken.request.resumeSessionId, 'native-1', 'it resumes the conversation that followed');
+    assert.equal(w.gate.calls, 0, 'the follower is not also asked the follow-up gate');
+  } finally {
+    await w.close();
+  }
+});
+
+test("a post during the follower's own turn wakes it once that turn ends", async () => {
+  const w = await world();
+  try {
+    const follow = leadFollows(w, minutesAhead(30));
+    // Turn 1 is still running: the post lands while its conversation is busy.
+    const followed = w.during.get(1)!;
+    w.during.set(1, async (turn) => {
+      await followed(turn);
+      const thread = (await w.core.listPosts(OWNER, { kind: 'channel', channelId: w.general.id }, null, 1)).posts[0];
+      const posted = await call(asBuddy(w, w.designer.id), 'post', {
+        channel: { id: w.general.id },
+        replyToId: thread.id,
+        body: 'Already done',
+        key: 'early',
+      });
+      assert.equal(posted.isError, false, posted.text);
+    });
+    await follow;
+    const woken = await until(() => w.turns[1], 'Lead woken after its turn');
+    assert.match(woken.request.prompt, /Already done/);
+    assert.equal(woken.request.resumeSessionId, 'native-1');
+  } finally {
+    await w.close();
+  }
+});
+
+test('a follow nobody answers wakes its conversation once with a timeout', async () => {
+  const w = await world();
+  try {
+    await leadFollows(w, new Date(Date.now() + 1500).toISOString());
+    const woken = await until(() => w.turns[1], 'Lead woken at until');
+    assert.match(woken.request.prompt, /^follow_timeout: nobody else posted/);
+    assert.equal(woken.request.resumeSessionId, 'native-1');
+    await until(
+      async () => (await w.runs(w.lead.id)).every((r) => r.status === 'complete'),
+      'the follow run settles'
+    );
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.equal(w.turns.length, 2, 'one wake per follow');
+  } finally {
+    await w.close();
+  }
+});
+
+test('a follow survives a backend restart and still wakes on the next post', async () => {
+  const before = await world();
+  const { rootId } = await leadFollows(before, minutesAhead(30));
+  await before.stop();
+  const w = await world(before.scratch);
+  try {
+    const posted = await call(asBuddy(w, w.designer.id), 'post', {
+      channel: { id: w.general.id },
+      replyToId: rootId,
+      body: 'Mockups after the restart',
+      key: 'mockups-after',
+    });
+    assert.equal(posted.isError, false, posted.text);
+    // Its conversation is not loaded in the new process, so the wake takes the return route's
+    // fallback: a fresh background turn (runner.ts `returnJob`), carrying the post.
+    const woken = await until(() => w.turns[0], 'Lead woken after the restart');
+    assert.match(woken.request.prompt, /Mockups after the restart/);
   } finally {
     await w.close();
   }
