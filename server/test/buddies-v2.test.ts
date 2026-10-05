@@ -2092,6 +2092,7 @@ async function reviewOnce(dir: string, env: NodeJS.ProcessEnv) {
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => dir,
+    portFile: join(dir, 'buddy-mcp.json'),
   });
   const launches: Array<{ harness: string; model: string }> = [];
   const reviewer = createMemoryReviewer({
