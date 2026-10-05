@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { BuddySigil } from './BuddySigil';
 import { ChannelAuthor, type OpenDm } from './ChannelAuthor';
@@ -266,7 +267,11 @@ function rowUnread(post: Post, context: RowContext): 'true' | undefined {
   }
 }
 
-export function LeadRow({ post, context }: { post: Post; context: RowContext }) {
+export function LeadRow({
+  post,
+  context,
+  children,
+}: { post: Post; context: RowContext; children?: ReactNode }) {
   return (
     <li
       className="channel-browser-message channel-browser-message--lead"
@@ -295,6 +300,7 @@ export function LeadRow({ post, context }: { post: Post; context: RowContext }) 
         <PostBody post={post} context={context} />
         <ReplyRetry post={post} />
         <ThreadSummary post={post} context={context} />
+        {children}
       </div>
       <MessageActions post={post} context={context} />
     </li>

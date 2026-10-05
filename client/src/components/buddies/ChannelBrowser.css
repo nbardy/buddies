@@ -30,17 +30,10 @@
   gap: var(--sp-4);
 }
 
-.channel-browser-exit {
-  font: 500 11px / 1 var(--font-mono);
-  text-decoration: none;
-}
-
-.channel-browser-exit:hover {
-  color: var(--text-primary);
-}
-
 .channel-browser-switcher {
   position: relative;
+  flex: 1;
+  min-width: 0;
 }
 
 .channel-browser-workspace {
@@ -85,7 +78,15 @@
 
 .channel-browser-caret {
   flex: none;
-  font-size: var(--fs-2);
+  color: var(--text-bright);
+  font-size: var(--fs-4);
+}
+
+.channel-browser-switcher-menu .channel-browser-switcher-new {
+  margin-top: var(--sp-2);
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 6px 6px;
+  color: var(--text-emphasis);
 }
 
 .channel-browser-switcher-menu {
@@ -497,11 +498,13 @@
 }
 
 .channel-browser-message-content {
+  /* Fix guard: DM continuations omitted the gutter and collapsed into its 36px column.
+     screenshots DM layout check keeps lead and continuation bodies aligned. */
+  grid-column: 2;
   min-width: 0;
   max-width: 960px;
   width: 100%;
 }
-
 .channel-browser-message-heading {
   display: flex;
   flex-wrap: wrap;
@@ -509,12 +512,10 @@
   gap: var(--sp-2) var(--sp-4);
   line-height: 1.4;
 }
-
 .channel-browser-message--continuation {
   padding-top: var(--sp-2);
   padding-bottom: var(--sp-2);
 }
-
 .channel-browser-inline-meta {
   display: inline-flex;
   gap: var(--sp-3);

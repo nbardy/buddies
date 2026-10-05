@@ -36,6 +36,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WS_PATH } from '@unleashd/shared';
+import { inspectDmLayout } from './lib/dm-layout.mjs';
 import { openSession, resolveAuthToken, sleep } from './lib/headless-chrome.mjs';
 import { compareRuns } from './lib/screenshot-compare.mjs';
 
@@ -264,11 +265,20 @@ async function discover(api, args, token) {
   const channel = await discoverChannel(api, overview, args.workspace);
   const conversation = await discoverConversation(args.url, token);
   const buddy = firstBuddy(overview, channel.workspaceId);
+  // Task screenshots need a real checklist, rather than the first task mentioned in a post.
+  const tasks = await api(`/api/buddies/tasks?workspaceId=${encodeURIComponent(channel.workspaceId)}`);
+  const childCounts = new Map();
+  for (const task of tasks) {
+    if (task.parentId) childCounts.set(task.parentId, (childCounts.get(task.parentId) ?? 0) + 1);
+  }
+  const checklist = tasks.filter((task) => childCounts.has(task.id))
+    .sort((a, b) => childCounts.get(b.id) - childCounts.get(a.id))[0];
   const direct = buddy.buddyId
     ? await api(`/api/buddies/${encodeURIComponent(buddy.buddyId)}/direct/chain`)
     : null;
   return {
     ...channel,
+    taskId: checklist?.id ?? channel.taskId,
     // A pinned channel/thread replaces the richest one discovery picked.
     ...(args.channel ? { channelId: args.channel, channelName: args.channel } : {}),
     ...(args.thread ? { threadRootId: args.thread } : {}),
@@ -566,7 +576,16 @@ function buildScreens(found, focus) {
     },
     // ── Channels ──
     { name: 'channels', missing: null, views: onBoth(channels) },
-    { name: 'dm', missing: dm ? null : 'no Buddy DM', views: onBoth(dm) },
+    {
+      name: 'dm',
+      missing: dm ? null : 'no Buddy DM',
+      views: Object.fromEntries(
+        Object.entries(onBoth(dm)).map(([tree, view]) => [
+          tree,
+          { ...view, verify: `(${inspectDmLayout.toString()})()` },
+        ])
+      ),
+    },
     {
       name: 'dm-about',
       missing: dm ? null : 'no Buddy DM',
@@ -577,6 +596,23 @@ function buildScreens(found, focus) {
     // The workspace Home. Pins are `Task.pin` on the server and this session refuses writes, so
     // the stars and the reorder menu show only when the data already has pins (task_write or the
     // owner PATCH). Show all exists on desktop only; the phone row lists every card.
+    // The Home scrolled to its lower sections (requests, threads, working now).
+    {
+      name: 'landing-lower',
+      missing: null,
+      views: onBoth(
+        `${channels}?view=home`,
+        prep(`
+  for (const el of document.querySelectorAll('*')) {
+    if (el.scrollHeight > el.clientHeight + 40 && /auto|scroll/.test(getComputedStyle(el).overflowY)) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+  window.scrollTo(0, document.body.scrollHeight);
+  await tick(600);
+  return has('.landing');`)
+      ),
+    },
     { name: 'landing', missing: null, views: onBoth(`${channels}?view=home`) },
     {
       name: 'landing-menu',
@@ -620,13 +656,33 @@ function buildScreens(found, focus) {
         },
       },
     },
-    // The Task filter is desktop-only (the mobile channel screen has no picker).
+    // Task detail and discussion use the same view on both devices.
     {
       name: 'task-filter',
       missing: noChannel ?? (found.taskId ? null : 'no post about a Task in this channel'),
-      views: {
-        desktop: { path: `${channels}?${channel}&task=${enc(found.taskId)}`, prepare: null },
-      },
+      views: onBoth(`${channels}?${channel}&task=${enc(found.taskId)}`, prep(`
+        // Fresh screenshot storage opens onboarding; dismiss it to inspect the task itself.
+        document.querySelector('[aria-label="Close dependency checks"]')?.click();
+        await tick();
+        document.querySelector('[aria-labelledby="home-screen-guide-title"] button')?.click();
+        await tick();
+        return 'OK';
+      `)),
+    },
+    {
+      name: 'task-discussion',
+      missing: noChannel ?? (found.taskId ? null : 'no post about a Task in this channel'),
+      views: onBoth(
+        `${channels}?${channel}&task=${enc(found.taskId)}`,
+        prep(`
+        const heading = document.querySelector('[aria-label="Discussion"] h2');
+        if (!heading) return 'SKIP';
+        const pane = heading.closest('.task-page-scroll');
+        pane.scrollTop += heading.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+        await tick();
+        return 'OK';
+      `)
+      ),
     },
     {
       name: 'channel-search',
@@ -650,6 +706,11 @@ function buildScreens(found, focus) {
       missing: noChannel,
       views: onBoth(`${channels}?${channel}`, OPEN_MENTION_MODEL),
     },
+    {
+      name: 'image-viewer',
+      missing: noChannel,
+      views: onBoth(`${channels}?${channel}`, OPEN_IMAGE_VIEWER),
+    },
     { name: 'focus', missing: noFocus, views: onBoth(thread, focus && scrollToText(focus)) },
     { name: 'task-hover', missing: noFocus, views: onBoth(thread, focus && hoverTaskIn(focus)) },
     // ── Swarm (quarantined, still shipped) ──
@@ -667,11 +728,6 @@ function buildScreens(found, focus) {
 
 function escapeHtml(text) {
   return String(text).replace(
-    {
-      name: 'image-viewer',
-      missing: noChannel,
-      views: onBoth(`${channels}?${channel}`, OPEN_IMAGE_VIEWER),
-    },
     /[&<>"]/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
   );
@@ -813,13 +869,22 @@ async function capture(args) {
           await sleep(400);
           await session.evaluate(PIN_FOLLOWED_BOTTOMS);
           await sleep(100);
+          const verification = view.verify ? await session.evaluate(view.verify) : undefined;
           const file = `${screen.name}@${sizeName}.png`;
           await session.capture(path.join(args.out, file));
-          shots.push({ screen: screen.name, size: sizeName, file, path: view.path, pending });
+          shots.push({
+            screen: screen.name,
+            size: sizeName,
+            file,
+            path: view.path,
+            pending,
+            verification,
+          });
           const open = pending.length ? ` (still loading after 20s: ${pending.join(' ')})` : '';
           process.stdout.write(`saved ${file}${open}\n`);
         } catch (error) {
           record(`page failed: ${error.message}`);
+          if (view.verify) process.exitCode = 1;
         }
       }
     }

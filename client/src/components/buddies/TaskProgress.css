@@ -1,0 +1,42 @@
+.task-progress {
+  gap: var(--sp-4);
+}
+
+.task-progress-label {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-1) var(--sp-4);
+  padding: 0 var(--sp-8);
+  font-size: var(--fs-2);
+}
+
+/* Each half stays whole; the breakdown drops to its own line when the card is narrow. */
+.task-progress-label > span {
+  white-space: nowrap;
+}
+
+/* The bar runs the card's bottom edge, clipped by its rounded corners. */
+.task-progress-bar {
+  display: flex;
+  height: 6px;
+  background: color-mix(in srgb, var(--text-bright) 10%, transparent);
+}
+
+.task-progress-bar--dashed {
+  height: 0;
+  margin-bottom: var(--sp-3);
+  border-top: 1px dashed var(--border-emphasis);
+  background: none;
+}
+
+.task-progress-bar-done {
+  background: var(--success);
+}
+
+.task-progress-bar-active {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.task-progress-bar-blocked {
+  background: var(--warning);
+}
