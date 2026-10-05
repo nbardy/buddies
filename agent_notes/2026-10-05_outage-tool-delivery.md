@@ -88,3 +88,28 @@ watch reloads and not this case.
 - Claude's MCP client timeout drops below 60 s: lower the hold (`HOLD_MS` in mcp-relay).
 - A writing tool without an idempotency key appears: the resend after a mid-call death would
   duplicate its write.
+
+## Verification (2026-10-05, Sonnet follow-up worker; PARTIAL, blocked by a full disk)
+
+Method: each file run alone with `pnpm exec tsx --test`, 3x per tree (branch 2c9afd5, base 3a21efd).
+
+| Full-suite failure | Branch alone (x3) | Base alone (x3) | Disposition |
+|---|---|---|---|
+| first-boot tools install (`dependencies.test.ts`) | fails 3/3 | fails 3/3 | BASE failure (environment: tool states `missing` vs `ready`) |
+| task comment / gate (`buddies-v2.test.ts`, "a failed gate on an owner post is shown") | fails 2/3 | fails 1/3 | flaky on BASE too (31.7 s timeout under load) |
+| WS liveness half-open (`websocket-lifecycle.test.ts`) | 5/5 pass x3 | 5/5 pass x3 | load flake in the full suite, both trees |
+| swarm sub-agent row (`swarm-observer.test.ts`, `subagent-tools.test.ts`) | pass x3 | pass x3 | load flake in the full suite, both trees |
+| `one Ctrl+C on pnpm dev:server` (port 7541 held) | passed in 3/3 solo runs | not rerun | see below |
+
+Port 7541: the relay cannot take it. It listens on port 0 (OS ephemeral, 49152+) or on a port persisted
+in its own state file; nothing sets that to the backend's 7541. In solo runs the Ctrl+C file
+showed 7541 "already in use" once (run 1, right after a case's backend exit, PID 20048, holder not
+identified) and never again; the base-tree run of the same file uses the same fixed 7541, so two
+trees running it concurrently collide. NOT proven which; no code change made.
+
+Ctrl+C file x3 on 2c9afd5: run1 4 pass/2 fail (7541 held; stopped case), run2 6/6 pass, run3 4 pass/1 fail:
+`ENOSPC: no space left on device` writing dev-supervisor.lock.json. The disk was at 100% (169 MiB free;
+leftover `unleashd-lease-*` 1.2 GB x2 and `unleashd-adoption-*` temp dirs under $TMPDIR). Runs 1 and 3
+are therefore not trustworthy evidence either way. Not done: clean-tree full `test:server`, typecheck,
+`test:package`, a 3x rerun of the 3 new cases after freeing disk. The `rm -rf` of the stale temp dirs
+was blocked by the dcg hook; the owner must clear them.
