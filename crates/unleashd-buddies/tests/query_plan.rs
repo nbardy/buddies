@@ -66,9 +66,9 @@ fn workload(s: &mut unleashd_buddies::Store) {
     assert_eq!(s.followed_threads(&owner, WS, 5).unwrap().threads.len(), 1);
     s.followed_threads(&ic, WS, 5).unwrap();
     s.mark_thread_read(&owner, &top.id, &top_reply.id).unwrap();
-    assert_eq!(s.search_posts(&ic, WS, "reply", None, 5).unwrap().posts.len(), 1);
-    s.search_posts(&owner, WS, "on it", None, 5).unwrap();
-    s.search_posts(&owner, WS, "on it", cursor.clone(), 5).unwrap();
+    assert_eq!(s.search_posts(&ic, WS, &SearchQuery::text("reply"), None, 5).unwrap().posts.len(), 1);
+    s.search_posts(&owner, WS, &SearchQuery::text("on it"), None, 5).unwrap();
+    s.search_posts(&owner, WS, &SearchQuery::text("on it"), cursor.clone(), 5).unwrap();
     s.inbox(&owner, WS).unwrap();
     s.mark_read(&ic, &channel.id, &top.id).unwrap();
     s.mark_read(&ic, &ask.channel_id, &ask.id).unwrap();

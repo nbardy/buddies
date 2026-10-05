@@ -399,6 +399,8 @@ export interface SetConfig {
   expectedConfigRevision: number
   config: ConversationConfig
   lastResolvedConfig: ResolvedExecutionConfig
+  /** Inferred thread choices retain their origin; ordinary edits default to `user`. */
+  provenance?: Provenance
 }
 
 export type SetConfigOutcome =

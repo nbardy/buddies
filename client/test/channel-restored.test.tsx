@@ -6,7 +6,7 @@ import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import type { ChannelUnread, Post, ThreadStat } from '../src/components/buddies/types';
-import { buddyFixture, rosterFixture } from './fixtures/buddy-roster';
+import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { inboxFixture, postFixture, publicChannel } from './fixtures/channel-posts';
 register(
   `data:text/javascript,${encodeURIComponent(`
@@ -66,7 +66,12 @@ async function renderChannel(opts: {
       <Provider store={jotaiStore}>
         <ChannelBrowser
           workspaceId={opts.ws}
-          directory={workspaceDirectory([rosterFixture([lead], { id: opts.ws })], opts.ws, [])}
+          directory={workspaceDirectory(
+            [rosterFixture([lead], { id: opts.ws })],
+            opts.ws,
+            [],
+            CODEX_INSTALLED
+          )}
           availableConversationIds={new Set()}
         />
       </Provider>
@@ -216,7 +221,12 @@ test('the Task filter shows one Task across channels, each post linked into its 
       },
     }),
   });
-  const directory = workspaceDirectory([rosterFixture([lead], { id: ws })], ws, [task]);
+  const directory = workspaceDirectory(
+    [rosterFixture([lead], { id: ws })],
+    ws,
+    [task],
+    CODEX_INSTALLED
+  );
   const html = renderToStaticMarkup(
     <MemoryRouter initialEntries={['/?channel=ch_main&task=task-ship']}>
       <Provider store={jotaiStore}>

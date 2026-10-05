@@ -361,13 +361,22 @@ const BUDDY_TOOLS = {
   }),
   channel_read: buddyTool({
     description:
-      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here for posts containing all the given words (newest first). Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
+      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here (newest first). Search text: words (all must match), "exact phrase", -excluded, OR; filters narrow before paging. Example: read:{search:{text:\'"deploy window" -draft\', channels:[\'ops\'], from:[\'owner\'], after:\'2026-10-01\'}}. Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
     writes: false,
     schema: z.object({
       read: z.union([
         z.object({ channelId: z.string().min(1) }),
         z.object({ threadId: z.string().min(1) }),
-        z.object({ search: z.string().min(1).max(200).describe('Words that must all appear') }),
+        z.object({
+          search: z.object({
+            text: z.string().min(1).max(200),
+            channels: z.array(z.string().min(1)).max(20).optional().describe('ids or public names'),
+            from: z.array(z.string().min(1)).max(20).optional().describe("buddy ids or 'owner'"),
+            after: z.string().optional().describe('YYYY-MM-DD or RFC 3339, inclusive'),
+            before: z.string().optional().describe('YYYY-MM-DD or RFC 3339, exclusive'),
+            inThread: z.string().optional().describe('root post id'),
+          }),
+        }),
       ]),
       before: z.object({ ord: z.string() }).optional().describe('next from the previous page'),
       limit: z.number().int().min(1).max(100).default(30),
@@ -377,7 +386,7 @@ const BUDDY_TOOLS = {
         return deps.core.searchPosts(
           grant.author,
           grant.workspaceId,
-          input.read.search,
+          { channels: [], from: [], ...input.read.search },
           input.before,
           input.limit
         );

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { BuddyContext, ConversationConfig } from '@unleashd/shared';
 import type { ConversationRecord } from '../conversations/config-records';
+import type { ConfigProvenance } from '../conversations/config-records';
 import type { ConversationRuntime } from '../conversations/runtime';
 
 // A Buddy's STABLE conversations — its DM and its seat in each channel thread
@@ -19,12 +20,12 @@ import type { ConversationRuntime } from '../conversations/runtime';
 export type ConversationSlot =
   | { kind: 'absent' }
   | { kind: 'deleted' }
-  | { kind: 'live'; config: ConversationConfig };
+  | { kind: 'live'; config: ConversationConfig; provenance?: ConfigProvenance };
 
 export function slotOf(record: ConversationRecord | undefined): ConversationSlot {
   if (!record) return { kind: 'absent' };
   if (record.status === 'deleted') return { kind: 'deleted' };
-  return { kind: 'live', config: record.config };
+  return { kind: 'live', config: record.config, provenance: record.provenance };
 }
 
 export interface StableConversationPorts {
@@ -38,9 +39,14 @@ export interface StableConversationPorts {
     deferInitialMessage: true;
     /** Omitted: the Buddy's profile default, resolved by the creation service. */
     config?: ConversationConfig;
+    provenance?: ConfigProvenance;
   }): Promise<ConversationRuntime>;
   /** Run a live one on `config` from its next turn (runtime-config.ts `replaceRuntimeConfig`). */
-  reconfigure(conversation: ConversationRuntime, config: ConversationConfig): Promise<void>;
+  reconfigure(
+    conversation: ConversationRuntime,
+    config: ConversationConfig,
+    provenance?: ConfigProvenance
+  ): Promise<void>;
 }
 
 const MAX_GENERATIONS = 32;
@@ -53,7 +59,11 @@ export function stableConversationId(seed: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
-export type LiveConversation = { conversationId: string; config: ConversationConfig };
+export type LiveConversation = {
+  conversationId: string;
+  config: ConversationConfig;
+  provenance?: ConfigProvenance;
+};
 
 /**
  * One scan of a stable conversation's generations: the current one (null when none lives), every
@@ -75,7 +85,7 @@ export async function scanGenerations(
         current = null;
         break;
       case 'live':
-        current = { conversationId, config: slot.config };
+        current = { conversationId, config: slot.config, provenance: slot.provenance };
         live.push(conversationId);
         break;
     }
@@ -97,6 +107,7 @@ export async function openConversation(
     conversationId: string;
     commandId: string;
     config?: ConversationConfig;
+    provenance?: ConfigProvenance;
   }
 ): Promise<ConversationRuntime> {
   const existing = ports.getConversation(input.conversationId);

@@ -295,6 +295,32 @@ pub struct Task {
     pub updated_at: String,
 }
 
+/// A structured post search. `text` is the grammar in `search.rs`; every filter narrows the
+/// candidate set BEFORE paging and can only narrow it: readability is checked separately.
+/// Empty `channels`/`from` = no filter (the lists are alternatives, ORed within a filter).
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct SearchQuery {
+    pub text: String,
+    /// Channel ids or public channel names (a leading `#` is ignored).
+    pub channels: Vec<String>,
+    /// Buddy ids, or `owner`.
+    pub from: Vec<String>,
+    /// Inclusive lower bound: `YYYY-MM-DD` or an RFC 3339 timestamp.
+    pub after: Option<String>,
+    /// Exclusive upper bound, same formats.
+    pub before: Option<String>,
+    /// A thread's root post id: the root and its replies.
+    pub in_thread: Option<String>,
+}
+
+impl SearchQuery {
+    /// No filters: just the text.
+    pub fn text(text: &str) -> Self {
+        SearchQuery { text: text.into(), channels: vec![], from: vec![], after: None, before: None, in_thread: None }
+    }
+}
+
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Channel {
