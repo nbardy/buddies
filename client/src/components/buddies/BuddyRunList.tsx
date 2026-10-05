@@ -14,6 +14,7 @@ const RUN_INPUT_LABEL: { [K in RunInput['kind']]: string } = {
   reply: 'Channel reply',
   schedule: 'Scheduled run',
   failure_notice: 'Failure notice',
+  follow: 'Following a thread',
 };
 
 const RUN_STATUS_LABEL: Record<RunStatus, string> = {

@@ -125,6 +125,8 @@ impl Enqueue for Connection {
         let ready_at = match &input.input {
             RunInput::Schedule { slot, .. } => slot.clone(),
             RunInput::Chat { .. } | RunInput::Post { .. } | RunInput::Reply { .. } | RunInput::FailureNotice { .. } => now.clone(),
+            // Due when the follow times out; a post in the thread makes it due sooner (follows.rs).
+            RunInput::Follow { follow_id } => crate::follows::due_at(self, follow_id)?,
         };
         let id = new_id("run");
         self.prepare_cached(
@@ -197,7 +199,11 @@ impl Store {
             let Some(id) = candidate else { return Ok(None) };
             let deadline_ms = match get_run(tx, &id)?.input {
                 RunInput::Chat { .. } => budgets.chat_deadline_ms,
-                RunInput::Post { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } => {
+                RunInput::Post { .. }
+                | RunInput::Reply { .. }
+                | RunInput::Schedule { .. }
+                | RunInput::FailureNotice { .. }
+                | RunInput::Follow { .. } => {
                     budgets.turn_deadline_ms
                 }
             };
@@ -258,7 +264,11 @@ impl Store {
                 RunInput::Post { post_id } => {
                     tx.execute("UPDATE post SET conversation_id = ?2 WHERE id = ?1", params![post_id, conversation_id])?;
                 }
-                RunInput::Chat { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } => {}
+                RunInput::Chat { .. }
+                | RunInput::Reply { .. }
+                | RunInput::Schedule { .. }
+                | RunInput::FailureNotice { .. }
+                | RunInput::Follow { .. } => {}
             }
             get_run(tx, run_id)
         })
@@ -318,6 +328,7 @@ impl Store {
             WHEN r.input_kind = 'chat' THEN 'owner'
             WHEN r.input_kind = 'post' THEN (SELECT CASE WHEN p.author_id IS NULL THEN 'owner' ELSE p.author_id END FROM post p WHERE p.id = r.input_id)
             WHEN r.input_kind = 'reply' THEN (SELECT CASE WHEN a.author_id IS NULL THEN 'owner' ELSE a.author_id END FROM post p JOIN post a ON a.id = p.answer_id WHERE p.id = r.input_id)
+            WHEN r.input_kind = 'follow' THEN r.buddy_id
             ELSE NULL END";
         let sql = format!(
             "SELECT r.id, r.status, r.input_kind, r.input_id, r.ready_at, r.task_id,
@@ -529,7 +540,14 @@ fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
         (RunInput::Post { post_id }, Outcome::Failed { .. }) => close_request(tx, post_id, "failed", Some(&run.id)),
         (RunInput::Post { post_id }, Outcome::Cancelled { .. }) => close_request(tx, post_id, "cancelled", None),
         (RunInput::Post { .. }, Outcome::Complete { .. })
-        | (RunInput::Chat { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. }, _) => Ok(()),
+        | (
+            RunInput::Chat { .. }
+            | RunInput::Reply { .. }
+            | RunInput::Schedule { .. }
+            | RunInput::FailureNotice { .. }
+            | RunInput::Follow { .. },
+            _,
+        ) => Ok(()),
     }
 }
 

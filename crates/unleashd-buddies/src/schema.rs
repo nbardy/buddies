@@ -29,7 +29,38 @@ use rusqlite::Connection;
 /// 'BUDD'. Marks a file as this schema; a v33 file (application_id 0) is refused.
 pub const APPLICATION_ID: i64 = 0x4255_4444;
 
-pub const DDL: &str = r#"
+/// The run table and its indexes: in `DDL`, and re-created by `widen_run_input_kind` on a file
+/// whose CHECK predates an input kind (SQLite cannot alter a CHECK in place).
+macro_rules! run_table {
+    () => {
+        r#"
+CREATE TABLE run (
+  id TEXT PRIMARY KEY, input_key TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 1,
+  input_kind TEXT NOT NULL CHECK(input_kind IN ('chat','post','reply','schedule','failure_notice','follow')),
+  input_id TEXT NOT NULL, buddy_id TEXT NOT NULL REFERENCES buddy(id), workspace_id TEXT NOT NULL,
+  conversation_id TEXT, task_id TEXT, task_epoch INTEGER, after_run_id TEXT,
+  status TEXT NOT NULL CHECK(status IN ('queued','running','cancel_requested','complete','failed','cancelled')),
+  lease_token TEXT, lease_expires_at TEXT, deadline TEXT,
+  snapshot TEXT, outcome TEXT, error_code TEXT, error TEXT,
+  ready_at TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT, legacy TEXT,
+  config TEXT,
+  UNIQUE(input_key, attempt)) STRICT;
+CREATE UNIQUE INDEX run_live_input ON run(input_key) WHERE status IN ('queued','running','cancel_requested');
+CREATE UNIQUE INDEX run_conversation_slot ON run(conversation_id)
+  WHERE conversation_id IS NOT NULL AND status IN ('running','cancel_requested');
+CREATE INDEX run_queue ON run(ready_at, id) WHERE status = 'queued';
+CREATE INDEX run_lease ON run(lease_expires_at) WHERE status IN ('running','cancel_requested');
+CREATE INDEX run_active_buddy ON run(buddy_id) WHERE status IN ('running','cancel_requested');
+CREATE INDEX run_buddy ON run(buddy_id, status, created_at);
+CREATE INDEX run_conversation ON run(conversation_id, created_at) WHERE conversation_id IS NOT NULL;
+CREATE INDEX run_task ON run(task_id, status) WHERE task_id IS NOT NULL;
+CREATE INDEX run_follow_queued ON run(input_id) WHERE input_kind = 'follow' AND status = 'queued';
+"#
+    };
+}
+
+pub const DDL: &str = concat!(
+    r#"
 CREATE TABLE workspace (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,
   legacy TEXT) STRICT;
@@ -116,27 +147,9 @@ CREATE TABLE schedule (
 CREATE INDEX schedule_due ON schedule(next_run_at) WHERE enabled = 1 AND archived_at IS NULL;
 CREATE INDEX schedule_buddy ON schedule(buddy_id);
 
-CREATE TABLE run (
-  id TEXT PRIMARY KEY, input_key TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 1,
-  input_kind TEXT NOT NULL CHECK(input_kind IN ('chat','post','reply','schedule','failure_notice')),
-  input_id TEXT NOT NULL, buddy_id TEXT NOT NULL REFERENCES buddy(id), workspace_id TEXT NOT NULL,
-  conversation_id TEXT, task_id TEXT, task_epoch INTEGER, after_run_id TEXT,
-  status TEXT NOT NULL CHECK(status IN ('queued','running','cancel_requested','complete','failed','cancelled')),
-  lease_token TEXT, lease_expires_at TEXT, deadline TEXT,
-  snapshot TEXT, outcome TEXT, error_code TEXT, error TEXT,
-  ready_at TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT, legacy TEXT,
-  config TEXT,
-  UNIQUE(input_key, attempt)) STRICT;
-CREATE UNIQUE INDEX run_live_input ON run(input_key) WHERE status IN ('queued','running','cancel_requested');
-CREATE UNIQUE INDEX run_conversation_slot ON run(conversation_id)
-  WHERE conversation_id IS NOT NULL AND status IN ('running','cancel_requested');
-CREATE INDEX run_queue ON run(ready_at, id) WHERE status = 'queued';
-CREATE INDEX run_lease ON run(lease_expires_at) WHERE status IN ('running','cancel_requested');
-CREATE INDEX run_active_buddy ON run(buddy_id) WHERE status IN ('running','cancel_requested');
-CREATE INDEX run_buddy ON run(buddy_id, status, created_at);
-CREATE INDEX run_conversation ON run(conversation_id, created_at) WHERE conversation_id IS NOT NULL;
-CREATE INDEX run_task ON run(task_id, status) WHERE task_id IS NOT NULL;
-
+"#,
+    run_table!(),
+    r#"
 CREATE TABLE conversation (
   id TEXT PRIMARY KEY, buddy_id TEXT NOT NULL REFERENCES buddy(id), workspace_id TEXT NOT NULL,
   task_id TEXT, created_at TEXT NOT NULL, legacy TEXT) STRICT;
@@ -149,7 +162,8 @@ CREATE TABLE event (
   UNIQUE(actor, workspace_id, idem_key)) STRICT;
 CREATE INDEX event_at ON event(at);
 CREATE INDEX event_buddy ON event(buddy_id, seq) WHERE buddy_id IS NOT NULL;
-"#;
+"#
+);
 
 /// Full-text search over post bodies: an external-content FTS5 index kept in step by triggers.
 /// Added after the T06b schema, so `open` creates it on a file that lacks it (and fills it once).
@@ -284,6 +298,51 @@ fn ensure_threads(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Every `run` column, in `run_table!` order: the rebuild copies by name, never by position.
+const RUN_COLUMNS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, \
+    task_epoch, after_run_id, status, lease_token, lease_expires_at, deadline, snapshot, outcome, error_code, error, \
+    ready_at, created_at, started_at, ended_at, legacy, config";
+
+/// `run.input_kind` gained `follow` (thread follows, follows.rs, 2026-10-04). A CHECK cannot be
+/// altered in place, so a file whose CHECK lacks it gets the run table rebuilt in one
+/// transaction: old indexes dropped, table renamed, the current `run_table!` created, rows copied
+/// by column name, old table dropped. Nothing references `run`, so no foreign key moves. The
+/// workspace list indexes come back in `ensure_post_search`, which runs after this.
+/// Rollback note: an older build still opens the file, but a `follow` row reads as Corrupt
+/// there (`RunInput::from_columns`), so cancel live follows before downgrading.
+/// Guard: `run_input_kind_is_widened_without_losing_runs`.
+fn widen_run_input_kind(conn: &Connection) -> Result<()> {
+    let sql: String = conn.query_row("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'run'", [], |r| r.get(0))?;
+    if sql.contains("'follow'") {
+        return Ok(());
+    }
+    let indexes: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'run' AND sql IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    let drops: String = indexes.iter().map(|name| format!("DROP INDEX {name};\n")).collect();
+    conn.execute_batch(&format!(
+        "BEGIN;
+         {drops}
+         ALTER TABLE run RENAME TO run_before_follow;
+         {}
+         INSERT INTO run ({RUN_COLUMNS}) SELECT {RUN_COLUMNS} FROM run_before_follow;
+         DROP TABLE run_before_follow;
+         COMMIT;",
+        run_table!()
+    ))?;
+    Ok(())
+}
+
+/// One row per `channel_read` follow (follows.rs). Additive: an older build ignores it.
+const THREAD_FOLLOW: &str = "
+CREATE TABLE IF NOT EXISTS thread_follow (
+  id TEXT PRIMARY KEY, root_id TEXT NOT NULL REFERENCES post(id), buddy_id TEXT NOT NULL REFERENCES buddy(id),
+  conversation_id TEXT NOT NULL, through_ord TEXT NOT NULL, until TEXT NOT NULL, delivered_through TEXT,
+  created_at TEXT NOT NULL) STRICT;
+CREATE INDEX IF NOT EXISTS thread_follow_root ON thread_follow(root_id, conversation_id);";
+
 fn ensure_post_search(conn: &Connection) -> Result<()> {
     conn.execute_batch(POST_REFERENCE_INDEXES)?;
     conn.execute_batch(TASK_LIVE_INDEX)?;
@@ -322,12 +381,15 @@ pub fn open(path: &str) -> Result<Connection> {
             drop_run_retry_of(&conn)?;
             drop_buddy_background_enabled(&conn)?;
             ensure_run_config(&conn)?;
+            widen_run_input_kind(&conn)?;
+            conn.execute_batch(THREAD_FOLLOW)?;
             ensure_threads(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
         }
         (false, 0) => {
             conn.execute_batch(&format!("BEGIN; {DDL} PRAGMA application_id = {APPLICATION_ID}; COMMIT;"))?;
+            conn.execute_batch(THREAD_FOLLOW)?;
             ensure_threads(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
@@ -402,5 +464,42 @@ mod tests {
         ensure_column(&conn, "channel", "archived_at", "TEXT").unwrap();
         let row: (String, Option<String>) = conn.query_row("SELECT id, archived_at FROM channel", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         assert_eq!(row, ("kept".into(), None));
+    }
+
+    // A file created before 2026-10-04 has the old `run.input_kind` CHECK: opening rebuilds the
+    // run table with `follow` allowed and keeps every run row and every run index.
+    #[test]
+    fn run_input_kind_is_widened_without_losing_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.sqlite");
+        let path = path.to_str().unwrap();
+        let old = run_table!().replace(",'follow')", ")");
+        let indexes = |conn: &Connection| -> i64 {
+            conn.query_row("SELECT count(*) FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'run' AND sql IS NOT NULL", [], |r| r.get(0))
+                .unwrap()
+        };
+        let fresh = indexes(&open(path).unwrap());
+        open(path)
+            .unwrap()
+            .execute_batch(&format!(
+                "INSERT INTO workspace (id, name, root_path, created_at) VALUES ('w', 'w', '/w', 'now');
+                 INSERT INTO buddy (id, workspace_id, slug, name, role, status, created_at) VALUES ('b', 'w', 'b', 'B', 'r', 'active', 'now');
+                 DROP TABLE run;
+                 {old}
+                 INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, status, ready_at, created_at)
+                   VALUES ('r1', 'chat:t', 'chat', 't', 'b', 'w', 'complete', 'now', 'now');"
+            ))
+            .unwrap();
+        let conn = open(path).unwrap();
+        let kept: String = conn.query_row("SELECT input_key FROM run WHERE id = 'r1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, "chat:t");
+        assert_eq!(indexes(&conn), fresh);
+        conn.execute(
+            "INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, status, ready_at, created_at)
+             VALUES ('r2', 'follow:f', 'follow', 'f', 'b', 'w', 'queued', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+        open(path).unwrap();
     }
 }

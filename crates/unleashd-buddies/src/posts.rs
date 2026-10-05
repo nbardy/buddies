@@ -17,7 +17,7 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_from_iter};
 use serde_json::json;
 
-const POST_COLS: &str = "p.id, p.channel_id, p.author_id, p.root_id, p.reply_to_id, p.task_id, p.purpose, p.body, p.evidence, \
+pub(crate) const POST_COLS: &str = "p.id, p.channel_id, p.author_id, p.root_id, p.reply_to_id, p.task_id, p.purpose, p.body, p.evidence, \
     p.request, p.answer_id, p.conversation_id, p.return_conversation_id, p.created_at, p.ord, p.broadcast";
 
 /// The channels `actor_param` (an actor key) may read: the owner every one, a buddy the public and
@@ -57,7 +57,7 @@ fn keyset_page(mut posts: Vec<Post>, limit: i64) -> PostPage {
 /// A channel feed row: a top-level post, or a reply also sent to the channel.
 const IN_CHANNEL_FEED: &str = "(p.root_id IS NULL OR p.broadcast = 1)";
 
-fn post_row(r: &Row) -> rusqlite::Result<Post> {
+pub(crate) fn post_row(r: &Row) -> rusqlite::Result<Post> {
     let request = match (r.get::<_, Option<String>>(9)?.as_deref(), r.get::<_, Option<String>>(10)?) {
         (None, None) => RequestState::None,
         (Some("awaiting"), None) => RequestState::Awaiting,
@@ -284,6 +284,7 @@ impl Store {
                     return Err(CoreError::Invalid(format!("post {} is not awaiting an answer: {:?}", request.id, request.request)));
                 }
                 follow(tx, actor, request.root_id.as_deref().unwrap_or(&request.id), &ord)?;
+                crate::follows::wake_followers(tx, actor, request.root_id.as_deref().unwrap_or(&request.id))?;
                 notify_author(tx, &request)?;
                 Ok(id)
             })?;
@@ -807,6 +808,9 @@ fn insert_post(
         input.broadcast
     ])?;
     follow(tx, actor, root_id.as_deref().unwrap_or(&id), &ord)?;
+    if let Some(root) = &root_id {
+        crate::follows::wake_followers(tx, actor, root)?;
+    }
     for recipient in ask.owed_by().iter().filter_map(Actor::buddy_id) {
         tx.enqueue(EnqueueInput {
             buddy_id: recipient.to_string(),
@@ -835,7 +839,7 @@ fn require_worker_authority(tx: &Transaction, actor: &Actor, ask: &Ask, config: 
 }
 
 /// Writing in a thread follows it and reads it through the new post (THREADS_VIEW_2026-09-28.md).
-fn follow(tx: &Transaction, actor: &Actor, root_id: &str, ord: &str) -> Result<()> {
+pub(crate) fn follow(tx: &Transaction, actor: &Actor, root_id: &str, ord: &str) -> Result<()> {
     tx.prepare_cached(
         "INSERT INTO thread_read (reader, root_id, last_ord, updated_at) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(reader, root_id) DO UPDATE SET last_ord = excluded.last_ord, updated_at = excluded.updated_at
