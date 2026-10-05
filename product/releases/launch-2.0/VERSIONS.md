@@ -13,6 +13,18 @@ gitignored. The files a cut is built from are kept read-only in `renders/<cut>-c
 | v13 | 2026-10-05 14:50 | `432e886` | "Open Source" shimmers on the Vim card (owner pick); end card says github.com/nbardy/buddies | `edit/stitch-v13.sh`: renders vim+end; cuts frames 0–4965 from v12; v12's sound | `launch-v13.mp4` (`e98e9a83…`) |
 | v14 | 2026-10-05 19:30 | `235fc41` | the emblem shots cut from "They show their work" (8 bars → 2); everything after moves up 6 bars; 85.0 s | `edit/stitch-v14.sh`: no picture render; v13 frames 0–2828 + 3504–5775, the song re-timed | `launch-v14.mp4` (`2817b046…`) |
 | v15 | not posted (step to v16) | `852a1bf` | the drop → home step at 0:16–0:17 eased over 2 bars (owner: "hard shift"); 85.0 s | `edit/stitch-v15.sh`: no picture render; v14's video stream copied (stream MD5 identical); new sound only. Largest one-beat drop 3.2 dB in v14, 1.0 dB in v15; after 0:25 unchanged (corr 0.9998, 0.00 dB); −14.1 LUFS, peak −4.8 dBFS. No X file: v16 makes its own | `launch-v15.mp4` (`ea9e68c9…`), `v15.wav` (`41a3ba00…`), chain `renders/v15-chain/` |
+| v16 | 2026-10-06 02:00 | `4917ae9` | AI color themes, 4 bars after "Completely customizable" (the swear blurred); the song 4 bars longer, bit-identical to v15's through the insert; 92.5 s | `edit/stitch-v16.sh`: renders the palette section and the sound; v14 picture frames 0–4290 + 4291–5100; X version `x-cover.sh … 4905` | `launch-v16.mp4` (`45d834f6…`), `launch-v16-x.mp4` (`a8e5016f…`) |
+
+## Reproducing v16
+
+`renders/v16-chain/` (`SHA256SUMS`) holds v14 (the picture source), the rendered palette section and
+sound, the 4-bar clip, and both outputs. Re-make: copy them into `edit/out/` (the clip into `clips/`),
+check out `4917ae9` and run `stitch-v16.sh`. Checks on the kept file: 5,551 frames, 92.517 s, sound full
+length; each reused frame matches its own v14 frame best (50.7 dB at 4290, 55.5 vs 44.9 dB one frame off
+after the insert); the first 71.5 s of sound match v15 to −62.6 dB (the eased drop unchanged); the
+palette bars sit at the benefits' level (−11 dB per beat) and step to the coda at the Vim line as
+before; −14.0 LUFS, peak −2.5 dBFS. The site poster is unchanged: v16 frame 4905 is
+`brand/site-poster-v13.jpg` (51.7 dB).
 
 ## Reproducing v14
 
