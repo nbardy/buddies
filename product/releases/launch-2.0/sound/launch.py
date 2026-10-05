@@ -8,15 +8,15 @@ octave up, on the 8ths 0, 2, 3, 4, 6). It replaces the edm.py build version of t
 pop on the "AI Overload" screen during bar 1; the logo locks on the drop (bar 3). Cue bar b is
 Assembly bar b - 2 (Assembly's bar 1 is the lock). Order of 2026-10-05: the logo holds two bars,
 the swarm comes right after the home, then "Mobile Friendly!", and the benefits move to just before
-the Vim line:
+the Vim line; "They show their work" is 2 bars (the emblem shots were cut):
 
   bar  1        ROBOTS  five boops = the melody's first notes       (on the AI Overload screen)
   bar  2        BUILD   snare roll, riser, a beat of silence         (the robots gather)
   bar  3        DROP    full band + the hook                         (the logo)
   bars 4-7      HOME    lighter: filtered chords, soft kick          ("buddies" holds, then the home)
-  bars 8-38     FULL    the groove; on each scene's downbeat a crash and the hook again
-  bars 39-42    CODA    the home texture again, quiet                (the Vim line)
-  bar  43       END     one ringing D chord, the hook on a pluck     (the end card), 6 s, faded
+  bars 8-32     FULL    the groove; on each scene's downbeat a crash and the hook again
+  bars 33-36    CODA    the home texture again, quiet                (the Vim line)
+  bar  37       END     one ringing D chord, the hook on a pluck     (the end card), 6 s, faded
 
 Writes launch.wav: stereo 48 kHz 16-bit, peak -3 dBFS.
 """
@@ -39,10 +39,10 @@ from reveal import (
 
 DROP_SONG = next(f for f in FLAVOURS if f.name == "drop")
 HOME = range(4, 8)
-FULL = range(8, 39)
-SCENES = (8, 12, 14, 18, 26, 31, 35)  # swarms, mobile, ask, show their work, harness, fork, benefits
-CODA = range(39, 43)
-END = 43
+FULL = range(8, 33)
+SCENES = (8, 12, 14, 18, 20, 25, 29)  # swarms, mobile, ask, show their work, harness, fork, benefits
+CODA = range(33, 37)
+END = 37
 RING = 6.0
 FADE = 4.0
 
