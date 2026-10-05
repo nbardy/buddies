@@ -14,11 +14,13 @@ import { LOGIN_PATH } from './gate';
 export type LoginNotice =
   | { readonly kind: 'none' }
   | { readonly kind: 'invalid-key' }
-  | { readonly kind: 'signed-out' };
+  | { readonly kind: 'signed-out' }
+  | { readonly kind: 'pairing-expired' };
 
 export function loginNoticeFromQuery(value: string | undefined): LoginNotice {
   if (value === 'invalid-key') return { kind: 'invalid-key' };
   if (value === 'signed-out') return { kind: 'signed-out' };
+  if (value === 'pairing-expired') return { kind: 'pairing-expired' };
   return { kind: 'none' };
 }
 
@@ -28,6 +30,9 @@ function noticeMarkup(notice: LoginNotice): string {
   }
   if (notice.kind === 'signed-out') {
     return '<p class="notice notice-info" role="status">You have been signed out.</p>';
+  }
+  if (notice.kind === 'pairing-expired') {
+    return '<p class="notice notice-error" role="alert">That QR code was already used or has expired. Show a new one in Setup → Connect from mobile.</p>';
   }
   return '<p class="notice" role="alert" hidden></p>';
 }
@@ -203,8 +208,8 @@ export function loginPageHtml(options: {
     </div>
     <button id="submit" type="submit">Unlock</button>
   </form>
-  <p class="hint">The key is on the computer running Buddies, in
-    <code>~/.agent-viewer/auth-token</code>.</p>
+  <p class="hint">Easiest: on the computer running Buddies, open Setup → Connect from mobile
+    and scan the QR code. The key itself is in <code>~/.agent-viewer/auth-token</code>.</p>
 </main>
 <script>${ENHANCEMENT_SCRIPT}</script>
 </body>

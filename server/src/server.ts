@@ -13,7 +13,9 @@ import { createConversationApplicationContext } from './application/context';
 import { registerAuthRoutes } from './auth/express';
 import { authorizeUpgrade } from './auth/gate';
 import { TAILSCALE_CANDIDATES, registerMobileAccessRoutes } from './auth/mobile-access';
+import { PairingCodes } from './auth/pairing';
 import { describePolicy, keyLocation, resolveAuthPolicy } from './auth/policy';
+import { watchTailnetOwner } from './auth/tailnet-owner';
 import { setIgnorePatterns, shouldIgnoreWorkingDirectory } from './config';
 import {
   BUDDY_BACKGROUND_TURN_MS,
@@ -143,7 +145,6 @@ const portNumber = typeof PORT === 'string' ? Number.parseInt(PORT, 10) : PORT;
 
 const authResolution = resolveAuthPolicy({
   env: process.env,
-  listenHost: LISTEN_HOST,
   dataDirectory: APP_DATA_DIR,
 });
 if (!authResolution.ok) {
@@ -152,6 +153,13 @@ if (!authResolution.ok) {
 }
 const AUTH_POLICY = authResolution.policy;
 console.log(`[auth] ${describePolicy(AUTH_POLICY)}`);
+if (authResolution.key.kind === 'created') {
+  console.log(`[auth] created an access key at ${authResolution.key.path}`);
+}
+const TAILNET_OWNER = watchTailnetOwner(TAILSCALE_CANDIDATES, (owner) => {
+  console.log(`[auth] tailnet owner: ${owner.kind === 'known' ? owner.login : 'none'}`);
+});
+const PAIRING_CODES = new PairingCodes();
 
 // noServer + an explicit upgrade handler is what makes the WebSocket gateable:
 // `new WebSocketServer({ server })` accepts every upgrade before any of our
@@ -179,8 +187,9 @@ server.on('upgrade', (request, socket, head) => {
     method: request.method ?? 'GET',
     url: request.url ?? '/',
     headers: request.headers,
+    peer: request.socket.remoteAddress ?? '',
   };
-  if (!authorizeUpgrade(AUTH_POLICY, gateRequest)) {
+  if (!authorizeUpgrade(AUTH_POLICY, gateRequest, TAILNET_OWNER.current())) {
     socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
     socket.destroy();
     return;
@@ -495,7 +504,7 @@ registerConversationWebSocket(wss, {
 
 // Auth first: every route below (API, uploads, and the static app shell) is
 // unreachable without the shared secret.
-registerAuthRoutes(app, AUTH_POLICY);
+registerAuthRoutes(app, AUTH_POLICY, { owner: TAILNET_OWNER, pairing: PAIRING_CODES });
 
 // gzip/deflate every compressible response over 1 KB (JSON API, the app
 // shell's JS/CSS). Mounted AFTER the gate so an unauthenticated caller costs
@@ -551,6 +560,7 @@ registerMobileAccessRoutes(app, {
   uiPort: process.env.NODE_ENV === 'development' ? DEV_CLIENT_PORT : portNumber,
   auth: AUTH_POLICY,
   key: keyLocation(process.env, APP_DATA_DIR),
+  pairing: PAIRING_CODES,
 });
 registerConversationRoutes(
   app,

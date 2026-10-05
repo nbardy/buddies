@@ -1,6 +1,9 @@
 import { execFile } from 'node:child_process';
-import type { MobileAccess } from '@unleashd/shared';
+import type { MobileAccess, MobilePairing } from '@unleashd/shared';
 import type { Express } from 'express';
+import QRCode from 'qrcode';
+import { PAIR_PATH } from './gate';
+import type { PairingCodes } from './pairing';
 import type { AuthPolicy, KeyLocation } from './policy';
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
@@ -20,8 +23,14 @@ export type MobileAccessInput = {
   readonly timeoutMs?: number;
 };
 
-type TailscaleStatus = { BackendState?: string; Self?: { DNSName?: string } };
-type Cli = { kind: 'found'; path: string; status: TailscaleStatus } | { kind: 'missing' };
+export type MobileAccessDeps = MobileAccessInput & { readonly pairing: PairingCodes };
+
+export type TailscaleStatus = {
+  BackendState?: string;
+  Self?: { DNSName?: string; UserID?: number };
+  User?: Record<string, { LoginName?: string }>;
+};
+export type Cli = { kind: 'found'; path: string; status: TailscaleStatus } | { kind: 'missing' };
 type ServeConfig = {
   Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>;
   AllowFunnel?: Record<string, boolean>;
@@ -36,7 +45,7 @@ export const TAILSCALE_CANDIDATES = [
 // The parse stays inside the promise: a throw in execFile's callback is uncaught
 // and killed the whole server when the app-bundled CLI printed "The Tailscale
 // GUI failed to start" instead of JSON (2026-10-05). Guard: mobile-access.test.ts.
-function runJson<T>(file: string, args: string[], timeoutMs: number): Promise<T> {
+export function runJson<T>(file: string, args: string[], timeoutMs: number): Promise<T> {
   return new Promise((resolve, reject) => {
     execFile(file, args, { timeout: timeoutMs, maxBuffer: 4 << 20 }, (error, stdout) => {
       if (error) return reject(Object.assign(error, { stdout }));
@@ -49,7 +58,7 @@ function runJson<T>(file: string, args: string[], timeoutMs: number): Promise<T>
   });
 }
 
-async function findCli(candidates: readonly string[], timeoutMs: number): Promise<Cli> {
+export async function findCli(candidates: readonly string[], timeoutMs: number): Promise<Cli> {
   for (const path of candidates) {
     try {
       const status = await runJson<TailscaleStatus>(
@@ -89,11 +98,12 @@ export async function readMobileAccess(input: MobileAccessInput): Promise<Mobile
     if (state !== 'Running' || !host) return { kind: 'tailscale_stopped', state };
     const serve = await runJson<ServeConfig>(cli.path, ['serve', 'status', '--json'], timeoutMs);
     const serving = servesUi(serve, host, input.uiPort);
+    // A key is created on first run, so open auth means the owner turned it
+    // off. Serve connects from loopback, so it would publish the app unsigned.
     if (input.auth.kind === 'open') {
-      const keyFile = input.key.kind === 'file' ? input.key.path : '~/.agent-viewer/auth-token';
       return {
         kind: 'access_key_missing',
-        command: `openssl rand -hex 32 > ${keyFile}`,
+        command: 'unset UNLEASHD_AUTH_DISABLED',
         exposed: serving,
       };
     }
@@ -115,8 +125,31 @@ export async function readMobileAccess(input: MobileAccessInput): Promise<Mobile
   }
 }
 
-export function registerMobileAccessRoutes(app: Express, input: MobileAccessInput): void {
+/** The QR the phone scans: the Serve URL with a one-time code, never the key. */
+async function pairingFor(url: string, pairing: PairingCodes): Promise<MobilePairing> {
+  const { code, expiresAt } = pairing.issue();
+  const link = new URL(PAIR_PATH, url);
+  link.searchParams.set('code', code);
+  const svg = await QRCode.toString(link.toString(), {
+    type: 'svg',
+    margin: 1,
+    errorCorrectionLevel: 'M',
+  });
+  return { url: link.toString(), svg, expiresAt };
+}
+
+export function registerMobileAccessRoutes(app: Express, deps: MobileAccessDeps): void {
   app.get('/api/mobile-access', async (_req, res) => {
-    res.json(await readMobileAccess(input));
+    res.json(await readMobileAccess(deps));
+  });
+  // POST: it mints a code (the GET surface stays read-only). Only a caller
+  // already past the gate reaches it, so only the owner can pair a phone.
+  app.post('/api/mobile-access/pairing', async (_req, res) => {
+    const access = await readMobileAccess(deps);
+    if (access.kind !== 'ready') {
+      res.status(409).json({ error: 'not_ready', access });
+      return;
+    }
+    res.json(await pairingFor(access.url, deps.pairing));
   });
 }
