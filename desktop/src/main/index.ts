@@ -10,7 +10,8 @@ import { join } from 'node:path';
 // never in the CLI's ~/.agent-viewer or ~/.buddies, so the app and a source checkout
 // can run side by side without sharing SQLite stores.
 import Electrobun, { BrowserWindow, PATHS } from 'electrobun/main';
-import { mergePath, resolveLoginPath } from './login-path';
+import { resolveLoginPath } from './login-path';
+import { serverEnv } from './server-env';
 
 const startedAt = Date.now();
 const payload = join(PATHS.RESOURCES_FOLDER, 'app', 'payload');
@@ -86,19 +87,14 @@ log(
 
 const server = Bun.spawn([join(nodeBin, 'node'), join(payload, 'server', 'dist', 'server.js')], {
   cwd: payload,
-  env: {
-    ...process.env,
-    PATH: mergePath(nodeBin, login.path),
-    // A packaged app never builds from source, so Rust is not a prerequisite: the server
-    // neither probes nor installs it (UNLEASHD_SOURCE_BUILDS, dependencies.ts).
-    UNLEASHD_SOURCE_BUILDS: '0',
-    NODE_ENV: 'production',
-    PORT: String(port),
-    UNLEASHD_HOST: '127.0.0.1',
-    UNLEASHD_DATA_DIR: dataDir,
-    BUDDIES_HOME: buddiesHome,
-    UNLEASHD_BUDDIES_DB: join(buddiesHome, 'buddies-v3.sqlite'),
-  },
+  env: serverEnv({
+    inherited: process.env,
+    nodeBin,
+    loginPath: login.path,
+    port,
+    dataDir,
+    buddiesHome,
+  }),
   stdout: Bun.file(join(home, 'server.log')),
   stderr: Bun.file(join(home, 'server.err.log')),
 });
