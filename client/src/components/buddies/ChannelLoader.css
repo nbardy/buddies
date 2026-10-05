@@ -16,25 +16,9 @@
   height: 38px;
   overflow: visible;
   filter: drop-shadow(0 0 6px rgba(255, 140, 40, 0.45));
-}
-
-/* The whole flame leans from its base; the halves flicker out of phase. */
-.channel-loader-sway {
-  transform-box: fill-box;
+  /* The sway lives on the <svg> itself (see ChannelLoader.tsx fix-guard). */
   transform-origin: 50% 100%;
   animation: channel-loader-sway 1.6s ease-in-out infinite;
-}
-
-.channel-loader-outer {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  animation: channel-loader-flicker 0.9s ease-in-out infinite alternate;
-}
-
-.channel-loader-inner {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  animation: channel-loader-flicker 0.7s ease-in-out -0.35s infinite alternate;
 }
 
 .channel-loader-label {
@@ -48,17 +32,6 @@
   }
   50% {
     transform: rotate(4deg) skewX(-3deg);
-  }
-}
-
-@keyframes channel-loader-flicker {
-  from {
-    transform: scale(1, 1);
-    opacity: 1;
-  }
-  to {
-    transform: scale(0.92, 1.08);
-    opacity: 0.88;
   }
 }
 
@@ -109,9 +82,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .channel-loader-sway,
-  .channel-loader-outer,
-  .channel-loader-inner {
+  .channel-loader-flame {
     animation: none;
   }
 }
