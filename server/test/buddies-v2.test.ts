@@ -1695,6 +1695,10 @@ test('an unpinned Buddy runs the installed agent; a pinned one never moves', asy
     );
     assert.match(notice.body, /No agent is installed/);
     assert.equal(w.turns.length, 0, 'nothing was spawned');
+    // The thread still reads: its seats never consult the profile (it failed every read in the
+    // fresh-install trial, "Thread could not refresh: No agent is installed").
+    const read = await http('GET', `/api/buddies/posts/${asked.id}/thread`);
+    assert.equal(read.status, 200, JSON.stringify(read.body));
 
     // 2. Claude lands after startup: the next open and the next mention run it, no restart.
     install('claude');

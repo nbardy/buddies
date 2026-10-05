@@ -378,13 +378,16 @@ export function createChannels(ports: ChannelsPorts) {
     return null;
   }
 
-  async function seatConfig(
+  // What this thread already decided for the Buddy: the owner's pick, an explicit override, the
+  // model its latest reply ran, or its seat. `config: null` means nothing yet; only then does the
+  // profile decide. threadSeats reads this alone: it used to resolve the profile too and discard
+  // it, so a `no-agent` profile failed every thread read (fresh-install trial, 2026-10-05).
+  async function threadChoice(
     rootId: string,
     buddyId: string,
-    request: SeatRequest,
+    request: Exclude<SeatRequest, { kind: 'resolved' }>,
     thread?: Post[]
-  ): Promise<LiveConversation & { hasHistory: boolean }> {
-    if (request.kind === 'resolved') return { ...request.seat, hasHistory: true };
+  ) {
     const seats = await scanGenerations(ports.conversations, (g) =>
       threadConversationId(rootId, buddyId, g)
     );
@@ -399,20 +402,30 @@ export function createChannels(ports: ChannelsPorts) {
             buddyId
           )
         : null;
-    const config =
+    const config: ConversationConfig | null =
       request.kind === 'chosen'
         ? request.config
         : override
           ? seats.current!.config
-          : (history ?? seats.current?.config ?? profileConfig(await core.getBuddy(buddyId)));
+          : (history ?? seats.current?.config ?? null);
+    return { seats, explicit: request.kind === 'chosen' || override, config };
+  }
+
+  async function seatConfig(
+    rootId: string,
+    buddyId: string,
+    request: SeatRequest,
+    thread?: Post[]
+  ): Promise<LiveConversation> {
+    if (request.kind === 'resolved') return request.seat;
+    const choice = await threadChoice(rootId, buddyId, request, thread);
+    const { current, next } = choice.seats;
+    const config = choice.config ?? profileConfig(await core.getBuddy(buddyId));
     return {
       conversationId:
-        seats.current?.config.provider === config.provider
-          ? seats.current.conversationId
-          : seats.next(),
+        current?.config.provider === config.provider ? current.conversationId : next(),
       config,
-      provenance: request.kind === 'chosen' || override ? 'user' : 'legacy_inferred',
-      hasHistory: seats.current !== null || history !== null || request.kind === 'chosen',
+      provenance: choice.explicit ? 'user' : 'legacy_inferred',
     };
   }
 
@@ -776,8 +789,8 @@ export function createChannels(ports: ChannelsPorts) {
       }
       const seats: ThreadSeat[] = [];
       for (const buddyId of buddyIds) {
-        const seat = await seatConfig(rootId, buddyId, { kind: 'keep' }, thread);
-        if (seat.hasHistory) seats.push({ buddyId, config: seat.config });
+        const { config } = await threadChoice(rootId, buddyId, { kind: 'keep' }, thread);
+        if (config) seats.push({ buddyId, config });
       }
       return seats;
     },
