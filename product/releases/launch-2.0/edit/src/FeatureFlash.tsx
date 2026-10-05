@@ -1,4 +1,6 @@
-// Beat 7 flash card: "Mobile Friendly!", one bar. "Multiagent swarms" became its own two-bar scene
+// "Mobile Friendly!", two bars, the first scene after the swarm (owner, 2026-10-05: "that should be
+// first"), on the owner's own phone take of 2026-09-28 (footage P), the image grids scrolling at 1.7x. It
+// was one bar on a 1.9 s cut of the same thread, late in the video. "Multiagent swarms" became its own two-bar scene
 // (Swarm.tsx, from the owner's 2026-09-30 take; the old swarm screenshot was the previous product).
 // "Memory!" is out for now: its capture shows another Buddy's soul text and a local path, and the old
 // UI. "Familiar UI" went in script v2; the product scenes show it. Each card sits over a real capture of the running app
@@ -12,7 +14,7 @@ import { CardEdit, type Key, play, push, STILL, type Shot } from './card';
 export { FPS, HEIGHT, WIDTH } from './card';
 
 const BEAT = 60 / 128;
-const FLASH_BEATS = 4;
+const FLASH_BEATS = 8;
 // Round per boundary so the flashes fill whole bars (a bar is 112.5 frames).
 const boundary = (i: number) => Math.round(i * FLASH_BEATS * BEAT * 60);
 
@@ -22,12 +24,13 @@ const clip = (name: string) => staticFile(`2026-09-26_feature_${name}.mp4`);
 const column = (top: number, ox: number, oy: number): Shot => ({ focus: 1, x: 560, w: 2414, top, scale: 0.74, ...STILL, ox, oy });
 
 type Desktop = { kind: 'desktop'; name: string; from: number; shot: Shot };
-type Phone = { kind: 'phone'; name: string; from: number };
+type Phone = { kind: 'phone'; src: string; from: number; rate: number }; // from: source seconds
 type Footage = Desktop | Phone;
 type Flash = { text: string; fill: string; rot: number; footage: Footage };
 
 const FLASHES: Flash[] = [
-  { text: 'Mobile Friendly!', fill: '#859900', rot: 3, footage: { kind: 'phone', name: 'phone', from: 0 } },
+  // Footage P scrolls the art-direction thread for 6.4 s, then idles and ends on Control Center.
+  { text: 'Mobile Friendly!', fill: '#859900', rot: 3, footage: { kind: 'phone', src: staticFile('2026-09-28_mobile_P_art-direction-thread-scroll.mp4'), from: 0, rate: 1.7 } },
 ];
 
 export const DURATION = boundary(FLASHES.length);
@@ -57,7 +60,7 @@ const PhoneShot: React.FC<{ f: Phone; frames: number }> = ({ f, frames }) => {
           transform: `translateX(260px) scale(${lerp(1, 1.05, settle)})`,
         }}
       >
-        <OffthreadVideo src={clip(f.name)} trimBefore={Math.round(f.from * 60)} muted style={{ display: 'block', height: '100%' }} />
+        <OffthreadVideo src={f.src} trimBefore={Math.round(f.from * 60)} playbackRate={f.rate} muted style={{ display: 'block', height: '100%' }} />
       </div>
     </AbsoluteFill>
   );

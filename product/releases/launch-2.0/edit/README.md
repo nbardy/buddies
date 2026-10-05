@@ -14,6 +14,22 @@ pnpm run render:multi-harness            # -> out/multi-harness.mp4 (9.05 s, sil
 ./bank.sh                                # copy finished renders into ../clips/ (the clips bank)
 ```
 
+**Render through the queue, never `remotion render` directly.** `node render.mjs render|still …`
+takes the same arguments, runs at most 2 renders at once machine-wide (`REMOTION_MAX_RENDERS`),
+queues the rest, and gives each render its share of the cores (`--concurrency`, unless you pass
+one). All `pnpm run render:*` scripts use it. On 2026-10-04 six renders from several sessions ran
+together with Remotion's default concurrency (half the cores each), every Chrome fought for the
+CPU and GPU, and all of them crawled. Slots live in `$TMPDIR/remotion-render-slots/`; a slot whose
+pid is dead is reclaimed, so worktree renders share the same queue. `remotion.config.ts` enforces
+it: `render`, `still` and `benchmark` throw unless `render.mjs` started them (`REMOTION_RENDER_QUEUE`).
+
+**Where render time goes** (measured 2026-10-04, 120 frames each): pure animation ~13 fps,
+screen-recording scenes ~1.4 fps. `--gl=angle` (Metal) made no difference (123 s both ways): the
+cost is not WebGL. Each `CardEdit` frame extracts the full 2974×1882 source frame twice (the sharp
+card and the blurred backdrop), 300–900 ms per extraction under load, then CSS-blurs a 3K image on
+the CPU. Decoding the frame alone is ~12 ms. Fix the inputs, not the backend: crop-to-region proxies
+for the card, a small pre-blurred proxy for the backdrop.
+
 Licence: Remotion is source-available and free for individuals and companies of up to 3
 employees; a bigger company needs a paid licence (see `LICENSE.md` in `~/git/remotion`).
 

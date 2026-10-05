@@ -1,0 +1,8 @@
+.dependencies-dialog::backdrop {
+  background: rgb(3 7 12 / 78%);
+}
+
+.dependencies-dialog button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}

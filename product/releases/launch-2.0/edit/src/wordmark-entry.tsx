@@ -3,10 +3,8 @@
 // pnpm exec remotion still src/wordmark-entry.tsx BuddiesLogoSheet out/buddies-logo-sheet.png
 // pnpm exec remotion render src/wordmark-entry.tsx BuddiesLogoReel out/buddies-logo-reel.mp4 --crf=16
 // pnpm exec remotion render src/wordmark-entry.tsx KitReel out/buddies-kit-reel.mp4 --crf=16
-// pnpm exec remotion render src/wordmark-entry.tsx Intro-3 out/buddies-intro-3.mp4 --crf=16   (Intro-5 likewise)
 // pnpm exec remotion still src/wordmark-entry.tsx KitOg out/buddies-og.png   (also KitBanner, KitAvatar, Kit-<page>)
 import { Composition, registerRoot } from 'remotion';
-import * as I from './BuddiesIntro';
 import * as K from './BuddiesKit';
 import * as L from './BuddiesLogos';
 import * as W from './BuddiesWordmark';
@@ -31,9 +29,6 @@ registerRoot(() => (
       width={L.WIDTH}
       height={L.HEIGHT}
     />
-    {([3, 5] as const).map((n) => (
-      <Composition key={n} id={`Intro-${n}`} component={I.BuddiesIntro} defaultProps={{ count: n }} durationInFrames={I.frames(n)} fps={I.FPS} width={1920} height={1080} />
-    ))}
     <Composition id="KitReel" component={K.KitReel} durationInFrames={K.REEL_FRAMES} fps={K.FPS} width={1920} height={1080} />
     {K.PAGES.map((p) => (
       <Composition key={p} id={`Kit-${p}`} component={K.KitPage} defaultProps={{ page: p }} durationInFrames={K.frames(p)} fps={K.FPS} width={1920} height={1080} />

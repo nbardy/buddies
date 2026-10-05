@@ -15,7 +15,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>Unleashd</title>
+    <meta name="apple-mobile-web-app-title" content="Buddies" />
+    <title>Buddies</title>
     <script>
       if (window.location.protocol === 'file:') {
         window.location.replace('http://unleashd.localhost/');
@@ -53,7 +54,7 @@
   <body>
     <div id="root"></div>
     <div id="boot-diagnostic" role="alert" hidden>
-      <strong id="boot-diagnostic-title">Unleashd is loading slowly</strong>
+      <strong id="boot-diagnostic-title">Buddies is loading slowly</strong>
       <span id="boot-diagnostic-detail">The app is taking longer than expected to load.</span>
     </div>
     <script>
@@ -71,7 +72,7 @@
         };
 
         const slowTimer = window.setTimeout(() => {
-          show('Unleashd is loading slowly', 'Keep this page open while the app finishes loading.');
+          show('Buddies is loading slowly', 'Keep this page open while the app finishes loading.');
         }, 8_000);
         // Slow is not failed: this fires when the app has not rendered yet, which
         // right after a dev restart on a loaded machine is Vite transforming the
@@ -80,13 +81,13 @@
         // Real failures (script load errors, rejections) use fail() below.
         const timeout = window.setTimeout(() => {
           show(
-            'Unleashd is still loading',
+            'Buddies is still loading',
             'The server is busy (often right after a restart). This page will open by itself; reload only if nothing changes for a few minutes.'
           );
         }, 45_000);
 
         window.__unleashdBoot = {
-          fail: (message) => show('Unleashd did not start', message),
+          fail: (message) => show('Buddies did not start', message),
           ready: () => {
             booted = true;
             window.clearTimeout(slowTimer);
@@ -101,13 +102,13 @@
             const target = event.target;
             if (target instanceof HTMLScriptElement) {
               show(
-                'Unleashd did not start',
+                'Buddies did not start',
                 `Could not load ${target.src || 'the app module'}.`
               );
               return;
             }
             show(
-              'Unleashd did not start',
+              'Buddies did not start',
               event.message || 'Safari reported an unknown startup error.'
             );
           },
@@ -117,7 +118,7 @@
         window.addEventListener('unhandledrejection', (event) => {
           const reason = event.reason;
           show(
-            'Unleashd did not start',
+            'Buddies did not start',
             reason instanceof Error ? reason.message : String(reason || 'Unhandled startup error.')
           );
         });

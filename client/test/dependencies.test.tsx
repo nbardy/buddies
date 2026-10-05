@@ -22,6 +22,25 @@ test('dependency cards distinguish installed readiness and give usable setup act
   assert.match(missing, /href="https:\/\/code.claude.com\/docs\/en\/quickstart"/);
   assert.match(missing, /value="curl -fsSL https:\/\/claude.ai\/install.sh \| bash"/);
   assert.match(missing, /Copy Install Claude Code command/);
+  const login = renderToStaticMarkup(
+    <DependencyCard
+      check={{
+        id: 'claude',
+        status: 'failed',
+        failure: 'login',
+        message: 'Log in from your terminal.',
+      }}
+    />
+  );
+  assert.match(login, /Login required/);
+  assert.match(login, /value="claude auth login"/);
+  const installing = renderToStaticMarkup(
+    <DependencyCard
+      check={{ id: 'codex', status: 'installing', message: 'Installing automatically…' }}
+    />
+  );
+  assert.match(installing, /Installing automatically/);
+  assert.doesNotMatch(installing, /not installed/);
   const quota = renderToStaticMarkup(
     <DependencyCard
       check={{
@@ -32,6 +51,6 @@ test('dependency cards distinguish installed readiness and give usable setup act
       }}
     />
   );
-  assert.match(quota, /Installed — needs attention/);
+  assert.match(quota, /Installed · usage limit/);
   assert.doesNotMatch(quota, /not installed|value="claude auth login"/);
 });

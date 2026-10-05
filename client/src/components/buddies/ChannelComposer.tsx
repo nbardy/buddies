@@ -633,7 +633,7 @@ function SubmitHint({ submit }: { submit: ComposerSubmit }) {
     case 'button':
       return (
         <>
-          <kbd>@</kbd> mention a Buddy or Task
+          <kbd>@</kbd> Mention
         </>
       );
   }

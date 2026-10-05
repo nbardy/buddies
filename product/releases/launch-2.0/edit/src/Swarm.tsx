@@ -2,7 +2,7 @@
 // product, so this is the owner's live take of two Buddies answering an @-mention: (1) the thread
 // pane lifted out of the blurred frame, on "Wave_sim CEO and Wave Simulation Lead are replying…"
 // and the first reply landing; (2) the sidebar, with a focus ring on each Buddy's
-// background-worker count. Two bars, one per shot. Footage: ../footage/FOOTAGE.md, "Swarm".
+// background-worker count. Four bars, two per shot (owner, 2026-10-05: slower, "so you can see the swarm running"). Footage: ../footage/FOOTAGE.md, "Swarm".
 import type React from 'react';
 import { AbsoluteFill, Easing, Series, staticFile, useCurrentFrame } from 'remotion';
 import { INK } from './blocks';
@@ -37,15 +37,16 @@ const PARTS: Part[] = [
     rings: [{ x: 2200, y: 1530, w: 700, h: 110, at: 0.55 }],
   },
   {
-    from: 7.0,
+    from: 6.0, // two bars from here end at 9.75 s; the take is 9.8 s
     shot: SIDEBAR,
     enter: 0,
     note: 'the sidebar: background workers per Buddy',
-    rings: [badge(440, 1030, 76, 0.2), badge(448, 1456, 60, 0.45), badge(448, 1756, 60, 0.7), badge(448, 1814, 60, 0.95)],
+    rings: [badge(440, 1030, 76, 0.3), badge(448, 1456, 60, 0.9), badge(448, 1756, 60, 1.5), badge(448, 1814, 60, 2.1)],
   },
 ];
 
-const frames = Math.round(BAR * FPS);
+const PART = 2 * BAR;
+const frames = Math.round(PART * FPS);
 
 // Where a source rectangle lands on screen for a settled focus-1 card (card.tsx `Frame`, zoom 1).
 const onScreen = (s: Shot, r: Ring) => {
@@ -75,17 +76,17 @@ const FocusRing: React.FC<{ shot: Shot; ring: Ring }> = ({ shot, ring }) => {
 };
 
 const PartClip: React.FC<{ part: Part }> = ({ part }) => {
-  const cuts = [play(part.from, part.from + BAR, 1, part.note)];
+  const cuts = [play(part.from, part.from + PART, 1, part.note)];
   const camera: Key[] =
     part.enter > 0
       ? [
           { t: 0, shot: { ...part.shot, focus: 0 } },
           { t: part.enter, shot: part.shot },
-          { t: BAR, shot: part.shot },
+          { t: PART, shot: part.shot },
         ]
       : [
           { t: 0, shot: part.shot },
-          { t: BAR, shot: part.shot },
+          { t: PART, shot: part.shot },
         ];
   return (
     <AbsoluteFill>

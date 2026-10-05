@@ -1,15 +1,15 @@
 // Beats 1–5, the open. One agent chat: type, send, it pops, it minimizes. A second one. Then the
 // pace ramps (2, 4, 8, 16, 30 a second) until chat windows bury the frame. Hard cut to black:
-// "AI Overload! We're all feeling it." Then the title: the Buddies robot intro (BuddiesIntro.tsx,
-// 5 robots), which replaced "Introducing Unleashd 2.0" in the rename to Buddies (owner, 2026-10-03).
+// "AI Overload." Then the reveal in the same scene (OverloadReveal.tsx): the Buddies robots pop in
+// beside the line, gather into the logo, and the launch song drops on it (owner, 2026-10-05).
 // The windows are styled after the desktop agent apps people already juggle (a Claude-style
 // studio, a Codex-style workbench, a ChatGPT-style assistant, a CLI), per owner direction
 // 2026-09-26, with no product names or logos. Timeline is data (FOCUS, GAPS, T).
 import type React from 'react';
 import { AbsoluteFill, Easing, Sequence, interpolate, random, useCurrentFrame } from 'remotion';
-import * as Intro from './BuddiesIntro';
-import { Block, INK, clamp01, easeOutBack, lerp } from './blocks';
-import { type Cue, KEYS, MARIMBA, POPS, SFX, Soundtrack } from './soundtrack';
+import { clamp01, easeOutBack, lerp } from './blocks';
+import * as Reveal from './OverloadReveal';
+import { type Cue, KEYS, POPS, SFX, Soundtrack } from './soundtrack';
 
 export const FPS = 60;
 export const WIDTH = 1920;
@@ -17,14 +17,17 @@ export const HEIGHT = 1080;
 
 // Output seconds. Music should put a hit on every pile arrival up to the 1/16 s run.
 export const INTRO_ROBOTS = 5; // owner pick, 2026-10-03; the end card's mark matches it
+// Owner, 2026-10-05: "open faster". The two focus chats take 3.9 s (were 6.2).
+const CUT = 9.4; // hard cut to black; the riser ends here, 5.5 s after rampStart (riser.wav's length)
 const T = {
-  rampStart: 6.2, // first pile window; the ramp runs 5 s (sum of GAPS)
-  cut: 11.7, // hard cut to black and near silence
-  title: 15.0, // voice line "Don't worry, we've got you covered." sits ~13.4–15.0 over the card
-  end: 15.0 + Intro.frames(INTRO_ROBOTS) / Intro.FPS, // the robot intro plays out in full
+  rampStart: 3.9, // first pile window; the ramp runs 5 s (sum of GAPS)
+  cut: CUT,
+  end: CUT + Reveal.END, // the reveal: "AI Overload.", the robots, the logo, one bar on it
 };
-// Entrances inside the card and title scenes, in seconds from each scene's start.
-const CARD = { overload: 0.35, feeling: 0.95, covered: 1.7 };
+// The launch song (../../sound/launch.py) starts on the first robot and drops on the logo lock;
+// the edit's bar grid (Assembly.bar) counts from the lock.
+export const CUE_IN = T.cut + Reveal.CUE_IN;
+export const LOCK = T.cut + Reveal.LOCK;
 export const DURATION = Math.round(T.end * FPS);
 const frames = (s: number) => Math.round(s * FPS);
 
@@ -176,26 +179,26 @@ const recentsFrom = (start: number, n: number) =>
 type FocusSpec = WindowSpec & { place: Extract<Place, { kind: 'focus' }> };
 const FOCUS: FocusSpec[] = [
   {
-    at: 0.25,
+    at: 0.15,
     look: 'studioDark',
     repo: 'auth',
     prompt: 'Refactor the auth module and add tests',
     recents: recentsFrom(0, 6),
     status: { kind: 'thinking' },
-    typeAt: 0.45,
-    typeFor: 2.1,
-    place: { kind: 'focus', scale: 1.5, trayX: 150, trayY: 80, minimizeAt: 3.45 },
+    typeAt: 0.3,
+    typeFor: 1.3,
+    place: { kind: 'focus', scale: 1.5, trayX: 150, trayY: 80, minimizeAt: 2.0 },
   },
   {
-    at: 4.1,
+    at: 2.35,
     look: 'workbenchDark',
     repo: 'api-server',
     prompt: 'Why is CI failing on main?',
     recents: recentsFrom(3, 6),
     status: { kind: 'label', text: 'Running tool 3 of 14', tone: 'quiet' },
-    typeAt: 0.3,
-    typeFor: 0.95,
-    place: { kind: 'focus', scale: 1.4, trayX: 370, trayY: 80, minimizeAt: 1.8 },
+    typeAt: 0.2,
+    typeFor: 0.7,
+    place: { kind: 'focus', scale: 1.4, trayX: 370, trayY: 80, minimizeAt: 1.2 },
   },
 ];
 
@@ -537,18 +540,6 @@ const Pileup: React.FC = () => {
   );
 };
 
-const OverloadCard: React.FC = () => {
-  const t = useCurrentFrame() / FPS;
-  return (
-    <AbsoluteFill style={{ background: INK.night, alignItems: 'center', justifyContent: 'center', gap: 44 }}>
-      <Block text="AI Overload!" u={t - CARD.overload} size="xxl" fill={INK.red} ink={INK.cream} rot={-3} />
-      <Block text="We're all feeling it." u={t - CARD.feeling} size="md" fill={INK.surface} ink={INK.cream} rot={0} />
-      {/* The voice line, as type: there is no recording (owner, 2026-09-30, script v2). */}
-      <Block text="Don't worry, we've got you covered." u={t - CARD.covered} size="md" fill={INK.cyan} ink={INK.plate} rot={-1} />
-    </AbsoluteFill>
-  );
-};
-
 // ---- Sound: every cue is derived from the same timeline the picture uses -------------------------
 
 // One tick per character, at the moment typedText() reveals it.
@@ -574,37 +565,35 @@ const pileCues = (w: WindowSpec, i: number): Cue[] => [
   ...(i < 30 ? [{ at: w.at + sendAt(w), src: SFX.send, volume: 0.22 }] : []),
 ];
 
-// After the boom, the calm answer: soft marimba (owner pick, 2026-09-26, over a synthesized
-// guitar, electric piano and strings pad), a rising D arpeggio under the voice line. The title
-// brings its own sound (BuddiesIntro: boops in D pentatonic, a swell, the hit), so the old title's
-// G chord, "2.0" roll, pad and sparkle are gone. Grid: the title falls four eighths after CALM_IN.
-const EIGHTH = 0.4375; // ≈ 69 bpm
-const CALM_IN = T.title - 4 * EIGHTH; // 13.25 s, just after the thud
-type Mallet = keyof typeof MARIMBA;
-const picked = (at: number, notes: Mallet[], volume: number): Cue[] =>
-  notes.map((n, k) => ({ at: at + k * EIGHTH, src: MARIMBA[n], volume }));
-
+// After the boom the launch song takes over (Assembly places it): the robots' boops are its first notes.
 // Levels: the boom stays the loudest moment; stacked chords sum, so they sit lower than single notes.
 const OVERLOAD_CUES: Cue[] = [
   ...FOCUS.flatMap(focusCues),
   ...PILE.flatMap(pileCues),
   { at: T.rampStart, src: SFX.riser, volume: 0.6 }, // ends exactly on T.cut: the silence is the drop
-  { at: T.cut + CARD.overload, src: SFX.impact, volume: 1 },
-  { at: T.cut + CARD.feeling, src: SFX.thud, volume: 0.5 },
-  ...picked(CALM_IN, ['D4', 'Fs4', 'A4', 'D5'], 0.38),
+  { at: T.cut + Reveal.LEAD, src: SFX.impact, volume: 1 }, // "AI Overload."; the song starts a bar later
 ];
 
-export const Overload: React.FC = () => (
+// The reveal reads its own clock: seconds since the cut.
+const RevealScene: React.FC = () => <Reveal.OverloadReveal t={useCurrentFrame() / FPS} />;
+
+// Picture and sound are separate so the Assembly's sound renders without stepping through footage.
+export const OverloadSound: React.FC = () => <Soundtrack cues={OVERLOAD_CUES} fps={FPS} />;
+
+export const OverloadPicture: React.FC = () => (
   <AbsoluteFill>
-    <Soundtrack cues={OVERLOAD_CUES} fps={FPS} />
     <Sequence durationInFrames={frames(T.cut)}>
       <Pileup />
     </Sequence>
-    <Sequence from={frames(T.cut)} durationInFrames={frames(T.title - T.cut)}>
-      <OverloadCard />
+    <Sequence from={frames(T.cut)} durationInFrames={frames(T.end - T.cut)}>
+      <RevealScene />
     </Sequence>
-    <Sequence from={frames(T.title)} durationInFrames={frames(T.end - T.title)}>
-      <Intro.BuddiesIntro count={INTRO_ROBOTS} />
-    </Sequence>
+  </AbsoluteFill>
+);
+
+export const Overload: React.FC = () => (
+  <AbsoluteFill>
+    <OverloadSound />
+    <OverloadPicture />
   </AbsoluteFill>
 );

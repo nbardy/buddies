@@ -2,25 +2,17 @@
 // "Replying…" like the typing rows in a channel; the text rolls up, the faces simplify to plain
 // circles, and the circles slide together into the Huddle mark as "buddies" lands beside it.
 // Two cast sizes to compare, 3 and 5 (owner: "3 seems pretty good already").
-// Sound: synthesized by ../../sound/buddies_intro.py (boops, swell, hit) and synth.py (sparkle), so
-// we own all of it. The owner rejected the first sound (marimba "ding dong" = doorbell; blip pops too
-// quick), 2026-10-03.
+// The picture is silent: its sound is the music. On the score's 128 bpm grid the robots pop on the
+// melody's notes, "Replying…" rolls up in the build bar, and the discs lock on the drop, the first
+// downbeat of the song (owner, 2026-10-04, after rejecting one-shot stingers as kitsch; plan in
+// ../../sound/INTRO_SOUND_PLAN.md, music in ../../sound/reveal.py).
 import type React from 'react';
 import { AbsoluteFill, useCurrentFrame } from 'remotion';
 import { clamp01, easeOutBack, FONT, lerp } from './blocks';
 import { AURA, NIGHT } from './BuddiesLogos';
-import boop0 from '../../sound/boop-0.wav';
-import boop1 from '../../sound/boop-1.wav';
-import boop2 from '../../sound/boop-2.wav';
-import boop3 from '../../sound/boop-3.wav';
-import boop4 from '../../sound/boop-4.wav';
-import introHit from '../../sound/intro-hit.wav';
-import introSwell from '../../sound/intro-swell.wav';
-import { type Cue, SFX, Soundtrack } from './soundtrack';
 
-const BOOPS = [boop0, boop1, boop2, boop3, boop4]; // climbing D major pentatonic
-const SWELL_SECONDS = 1.1; // = SWELL_SECONDS in buddies_intro.py: the swell ends on the lock
-
+export const BEAT = 60 / 128; // = reveal.py and the score: one grid for picture and music
+export const BAR = 4 * BEAT;
 export const FPS = 60;
 const CREAM = '#fdf6e3';
 const PEACH = 'oklch(0.8 0.11 55)';
@@ -37,7 +29,7 @@ type Cast = {
   rowPitch: number; // px between "Replying…" rows
   avatar: number; // robot head radius in px while replying
   text: number; // "Replying…" font size
-  stagger: number; // seconds between pops
+  pops: number[]; // each robot's pop, in 8ths from the first: the melody's rhythm (reveal.py MELODY)
 };
 const ringOf = (n: number, ring: number, r: number): Spot[] =>
   Array.from({ length: n }, (_, k) => {
@@ -57,7 +49,7 @@ export const CAST: Record<Count, Cast> = {
     rowPitch: 230,
     avatar: 84,
     text: 84,
-    stagger: 0.32,
+    pops: [0, 2, 4],
   },
   5: {
     colors: [AURA.violet, AURA.blue, AURA.teal, AURA.pink, PEACH],
@@ -65,38 +57,44 @@ export const CAST: Record<Count, Cast> = {
     rowPitch: 172,
     avatar: 60,
     text: 66,
-    stagger: 0.3,
+    pops: [0, 2, 3, 4, 6],
   },
 };
 
-// ---- Timeline (seconds), derived from the cast so both versions keep the same rhythm.
-const POP_AT = 0.2;
+// ---- Timeline (seconds), on the music's grid. Bar 1 (from POP_AT): the robots pop on the melody.
+// Bar 2: they keep "replying" for a beat, roll up on beat 2, gather from beat 3. The lock is the drop,
+// bar 3's downbeat, where "buddies" lands too; one more bar holds the logo before the home scene.
+export const POP_AT = 0.2; // the music cue starts here (cue bar 1)
 type Beats = { pop: (i: number) => number; roll: number; gather: number; lock: number; word: number; tag: number; end: number };
 const beats = (c: Cast): Beats => {
-  const lastPop = POP_AT + (c.colors.length - 1) * c.stagger;
-  const roll = lastPop + 0.85; // let the last one "reply" for a beat
-  const gather = roll + 0.3;
-  const lock = gather + 0.8;
-  const word = gather + 0.55;
-  const tag = word + 0.85;
-  return { pop: (i) => POP_AT + i * c.stagger, roll, gather, lock, word, tag, end: tag + 1.4 };
+  const lock = POP_AT + 2 * BAR;
+  return {
+    pop: (i) => POP_AT + (c.pops[i] * BEAT) / 2,
+    roll: POP_AT + BAR + BEAT,
+    gather: POP_AT + BAR + 2 * BEAT,
+    lock,
+    word: lock,
+    tag: lock + 2 * BEAT,
+    end: lock + BAR,
+  };
 };
 export const frames = (n: Count) => Math.round(beats(CAST[n]).end * FPS);
+export const lockAt = (n: Count) => beats(CAST[n]).lock;
 
 // ---- Final lockup geometry (px): mark box, gap, lowercase "buddies".
-const MARK = 250;
-const WORD = 230;
+export const MARK = 250;
+export const WORD = 230;
 const WORD_EM = 3.32; // rendered width of "buddies" at 800 in ems, measured off the logo sheet
-const GAP = MARK * 0.22;
+export const GAP = MARK * 0.22;
 const LOCKUP_W = MARK + GAP + WORD * WORD_EM;
-const MARK_LEFT = 960 - LOCKUP_W / 2;
-const MARK_TOP = 540 - MARK / 2 - 40; // room for the tagline
-const CENTRE_SHIFT = 960 - (MARK_LEFT + MARK / 2); // mark alone sits centred, then slides left
+export const MARK_LEFT = 960 - LOCKUP_W / 2;
+export const MARK_TOP = 540 - MARK / 2 - 40; // room for the tagline
+export const CENTRE_SHIFT = 960 - (MARK_LEFT + MARK / 2); // mark alone sits centred, then slides left
 
 // ---- One robot: head, antenna, visor and eyes. `face` 1 → 0 simplifies it to a plain disc.
-type Pose = { x: number; y: number; r: number; face: number; blink: number; color: string };
+export type Pose = { x: number; y: number; r: number; face: number; blink: number; color: string };
 
-const Antenna: React.FC<{ p: Pose }> = ({ p }) => {
+export const Antenna: React.FC<{ p: Pose }> = ({ p }) => {
   const h = 0.48 * p.r * p.face;
   return (
     <g opacity={p.face}>
@@ -106,7 +104,7 @@ const Antenna: React.FC<{ p: Pose }> = ({ p }) => {
   );
 };
 
-const Face: React.FC<{ p: Pose }> = ({ p }) => {
+export const Face: React.FC<{ p: Pose }> = ({ p }) => {
   const eyeY = p.y + p.r * 0.06;
   const eyeR = p.r * 0.12;
   return (
@@ -194,7 +192,7 @@ export const HuddleMark: React.FC<{ count: Count; size: number; u: number }> = (
   );
 };
 
-export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
+export function BuddiesIntro({ count }: { count: Count }) {
   const t = useCurrentFrame() / FPS;
   const c = CAST[count];
   const b = beats(c);
@@ -206,7 +204,7 @@ export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
   const avatarX = 960 - blockW / 2 + c.avatar;
   const rowY = (i: number) => 540 + (i - (n - 1) / 2) * c.rowPitch;
 
-  const gather = easeInOut(span(t, b.gather, 0.8));
+  const gather = easeInOut(span(t, b.gather, b.lock - b.gather));
   const hug = 1 + 0.06 * Math.sin(Math.PI * span(t, b.lock - 0.05, 0.3));
   const slide = CENTRE_SHIFT * (1 - easeInOut(span(t, b.word - 0.2, 0.55)));
   const unit = (MARK / 100) * hug;
@@ -232,13 +230,6 @@ export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
 
   const glow = 0.14 + 0.22 * gather;
   const tag = easeOutCubic(span(t, b.tag, 0.5));
-
-  const cues: Cue[] = [
-    ...c.colors.map((_, i) => ({ at: b.pop(i), src: BOOPS[i], volume: 0.42 })),
-    { at: b.lock - SWELL_SECONDS, src: introSwell, volume: 0.5 },
-    { at: b.lock, src: introHit, volume: 1 },
-    { at: b.word + 0.1, src: SFX.sparkle, volume: 0.15 },
-  ];
 
   return (
     <AbsoluteFill style={{ background: NIGHT, overflow: 'hidden' }}>
@@ -288,7 +279,6 @@ export const BuddiesIntro: React.FC<{ count: Count }> = ({ count }) => {
       >
         your team of AI agents
       </div>
-      <Soundtrack cues={cues} fps={FPS} />
     </AbsoluteFill>
   );
-};
+}

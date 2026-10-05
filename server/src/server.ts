@@ -12,7 +12,8 @@ import { appDataDirectory, uploadsDirectory } from './app-data';
 import { createConversationApplicationContext } from './application/context';
 import { registerAuthRoutes } from './auth/express';
 import { authorizeUpgrade } from './auth/gate';
-import { describePolicy, resolveAuthPolicy } from './auth/policy';
+import { TAILSCALE_CANDIDATES, registerMobileAccessRoutes } from './auth/mobile-access';
+import { describePolicy, keyLocation, resolveAuthPolicy } from './auth/policy';
 import { setIgnorePatterns, shouldIgnoreWorkingDirectory } from './config';
 import {
   BUDDY_BACKGROUND_TURN_MS,
@@ -73,7 +74,7 @@ import {
 import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
-import { registerDependencyRoutes } from './providers/dependencies';
+import { createDependencyChecks, registerDependencyRoutes } from './providers/dependencies';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
@@ -110,6 +111,12 @@ const app = express();
 const server = http.createServer(app);
 const APP_DATA_DIR = appDataDirectory();
 const LISTEN_HOST = resolveListenHost();
+
+const DEV_CLIENT_PORT = 7489;
+const DEV_API_PORT = 7499;
+const PORT =
+  process.env.PORT || (process.env.NODE_ENV === 'development' ? DEV_API_PORT : DEV_CLIENT_PORT);
+const portNumber = typeof PORT === 'string' ? Number.parseInt(PORT, 10) : PORT;
 
 const authResolution = resolveAuthPolicy({
   env: process.env,
@@ -510,7 +517,17 @@ app.use((request, response, next) => {
 const UPLOADS_DIR = uploadsDirectory();
 registerUploadRoutes(app, UPLOADS_DIR);
 registerCoreRoutes(app, () => startupAuditResults);
-const dependencyChecks = registerDependencyRoutes(app);
+const dependencyChecks = registerDependencyRoutes(
+  app,
+  createDependencyChecks(process.env, 45_000, path.join(APP_DATA_DIR, 'dependency-setup'))
+);
+registerMobileAccessRoutes(app, {
+  tailscale: TAILSCALE_CANDIDATES,
+  // A phone must reach the CLIENT: Vite's port in development, not the API's.
+  uiPort: process.env.NODE_ENV === 'development' ? DEV_CLIENT_PORT : portNumber,
+  auth: AUTH_POLICY,
+  key: keyLocation(process.env, APP_DATA_DIR),
+});
 registerConversationRoutes(
   app,
   (id) => runtimeBuilder.materialize(id),
@@ -685,11 +702,6 @@ const captureUnhandledHttpError: ErrorRequestHandler = (error, request, response
 };
 app.use(captureUnhandledHttpError);
 
-const DEV_CLIENT_PORT = 7489;
-const DEV_API_PORT = 7499;
-const PORT =
-  process.env.PORT || (process.env.NODE_ENV === 'development' ? DEV_API_PORT : DEV_CLIENT_PORT);
-
 shutdownController = registerShutdownHandlers(
   {
     forceExitGraceMs: HOT_RELOAD_FORCE_EXIT_GRACE_MS,
@@ -730,7 +742,6 @@ const runtimeBuilder = createRuntimeBuilder({
   broadcast: applicationContext.broadcast,
 });
 
-const portNumber = typeof PORT === 'string' ? Number.parseInt(PORT, 10) : PORT;
 void runServerStartup(
   {
     port: portNumber,

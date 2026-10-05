@@ -41,9 +41,10 @@ test('missing Rust installs through brew or Claude and verifies the result', () 
     const write = (name, body) =>
       fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
     try {
-      const guard = installer === 'brew'
-        ? '[ "$1" = install ] && [ "$2" = rust ] || exit 1'
-        : '[ "$1" = -p ] && [ "$3" = --allowedTools ] && [ "$4" = Bash ] || exit 1';
+      const guard =
+        installer === 'brew'
+          ? '[ "$1" = install ] && [ "$2" = rust ] || exit 1'
+          : '[ "$1" = -p ] && [ "$3" = --allowedTools ] && [ "$4" = Bash ] || exit 1';
       write(
         installer,
         `if [ "$1" = --version ]; then exit 0; fi\n${guard}\nfor bin in rustc cargo; do\n/bin/echo '#!/bin/sh' > "$HOME/$bin"\n/bin/echo 'exit 0' >> "$HOME/$bin"\n/bin/chmod +x "$HOME/$bin"\ndone`
@@ -65,5 +66,35 @@ test('missing Rust installs through brew or Claude and verifies the result', () 
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  }
+});
+
+test('fresh machines without brew or Claude can build using the official rustup installer', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-rustup-'));
+  const write = (name, body) =>
+    fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  try {
+    write(
+      'curl',
+      `if [ "$1" = --version ]; then exit 0; fi
+      [ "$5" = https://sh.rustup.rs ] || exit 1
+      /bin/echo fixture > "$7"`
+    );
+    write(
+      'bash',
+      `if [ "$1" = --version ]; then exit 0; fi
+      [ "$2" = -y ] && [ "$3" = --profile ] && [ "$4" = minimal ] || exit 1
+      /bin/mkdir -p "$HOME/.cargo/bin"
+      for bin in rustc cargo; do
+        /bin/echo '#!/bin/sh' > "$HOME/.cargo/bin/$bin"
+        /bin/echo 'exit 0' >> "$HOME/.cargo/bin/$bin"
+        /bin/chmod +x "$HOME/.cargo/bin/$bin"
+      done`
+    );
+    checkDependencies({ env: { PATH: dir, HOME: dir }, log: () => {} });
+    assert.ok(fs.existsSync(path.join(dir, '.cargo/bin/rustc')));
+    assert.ok(fs.existsSync(path.join(dir, '.cargo/bin/cargo')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

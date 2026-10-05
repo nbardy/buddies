@@ -36,6 +36,7 @@ export function ThreadsScreen({
   return (
     <MobilePage
       title="Threads"
+      className="threads-mobile"
       subtitle={
         view !== null && view.newReplies > 0
           ? `${view.newReplies} new ${view.newReplies === 1 ? 'reply' : 'replies'}`
@@ -122,17 +123,21 @@ function ThreadCardMobile({
   });
   return (
     <li className="threads-card ui-card ui-surface ui-stack">
-      <Link className="threads-head ui-row" to={threadHref}>
-        <strong>
+      <Link
+        className="threads-head ui-row"
+        to={threadHref}
+        title={`${heading.mark}${heading.name}`}
+      >
+        <strong className="ui-truncate">
           {heading.mark}
           {heading.name}
         </strong>
-        {thread.channel.archivedAt && <span className="ui-muted">archived</span>}
-        <span className="ui-muted ui-truncate">
-          {joinNames(participantNames(thread, directory.buddyNames))}
-        </span>
-        <span className="threads-fold threads-open">Open thread ›</span>
+        <span className="threads-fold threads-open">Open ›</span>
       </Link>
+      <p className="threads-participants ui-muted ui-truncate">
+        {thread.channel.archivedAt && 'Archived · '}
+        {joinNames(participantNames(thread, directory.buddyNames))}
+      </p>
       <ol className="mobile-channel__posts">
         <Row row={{ kind: 'lead', key: rootId, post: thread.root }} context={context} />
       </ol>

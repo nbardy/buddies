@@ -4,18 +4,11 @@
   padding: var(--sp-6) var(--sp-5);
   list-style: none;
 }
-
-/* One left/right edge for everything in a card that is not a message row: header, fold,
-   replying line, composer. Messages pad by --sp-9 themselves; before this the header sat flush
-   on the card border, the fold at 12px, the replying line and composer touching the border
-   (owner: "replying here in the threads does not have balanced or aligned UI"). */
 .threads-card {
   --threads-inset: var(--sp-9);
 }
-
 .threads-head,
 .threads-fold {
-  gap: var(--sp-4);
   padding: var(--sp-4) var(--threads-inset) 0;
   border: 0;
   background: none;
@@ -23,48 +16,38 @@
   font-size: var(--fs-3);
   text-decoration: none;
 }
-
 .threads-fold {
   align-self: flex-start;
   color: var(--accent);
 }
-
 .threads-header {
   flex-wrap: nowrap;
   gap: var(--sp-5);
   min-width: 0;
   padding: var(--sp-6) var(--threads-inset) 0;
 }
-
-/* The header owns the inset; its children must not add their own (shared classes double-padded). */
 .threads-header .threads-head,
-.threads-header .threads-fold {
+.threads-header .threads-fold,
+[data-device="mobile"] .threads-open {
   padding: 0;
 }
-
 .threads-header .threads-head {
   white-space: nowrap;
   font-weight: 700;
 }
-
 .threads-card .channel-browser-replying {
   padding: var(--sp-4) var(--threads-inset) 0;
 }
-
 .threads-card .channel-composer {
   margin: var(--sp-5) var(--threads-inset) var(--sp-7);
 }
-
 .threads-open {
   margin-left: auto;
   white-space: nowrap;
 }
-
-/* This visit's new replies stay tinted until the view closes, even once read. */
 .threads-card [data-unread="true"] {
   background: color-mix(in srgb, var(--theme-user) 10%, transparent);
 }
-
 .threads-pill {
   align-self: center;
   margin: var(--sp-4) auto;
@@ -73,19 +56,91 @@
   border-radius: 999px;
   font-size: var(--fs-3);
 }
-
-/* Mobile: flat rows split by hairlines, not boxed cards (owner: "not flat, like separators"). */
 [data-device="mobile"] .threads-list {
   gap: 0;
   padding: 0;
 }
-
 [data-device="mobile"] .threads-card {
-  --threads-inset: var(--sp-7); /* mobile messages pad 16px, not 24px */
-  padding: var(--sp-5) 0;
+  --threads-inset: 0;
+  padding: var(--sp-7) 0 var(--sp-8);
   border: 0;
   border-bottom: 1px solid var(--border-subtle);
-  border-radius: 0;
   background: none;
-  box-shadow: none;
+}
+/* Fix guard: threads-align screenshots guard one phone gutter and full-width message bodies. */
+[data-device="mobile"] .threads-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-4);
+  padding: 0;
+  font-size: var(--fs-post);
+}
+[data-device="mobile"] .threads-open {
+  grid-column: 2;
+  grid-row: 1;
+}
+.threads-card .mobile-channel-post {
+  padding: var(--sp-2) 0;
+}
+.threads-card .mobile-channel-post__content {
+  display: contents;
+}
+.threads-card .mobile-channel-post__content > :not(.mobile-channel-post__heading) {
+  grid-column: 1 / -1;
+}
+.threads-card .mobile-channel__replying {
+  margin: 0;
+}
+
+.threads-mobile .mobile-ui-page__title {
+  font-size: var(--fs-8);
+}
+.threads-mobile .mobile-ui-page__header {
+  align-items: flex-start;
+  margin-bottom: var(--sp-6);
+}
+.threads-mobile .mobile-ui-page__aside {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+}
+.threads-mobile .mobile-ui-page__aside .threads-fold {
+  padding: 0;
+}
+.threads-participants {
+  margin: var(--sp-2) 0 var(--sp-3);
+  color: var(--text-muted);
+  font-size: var(--fs-2);
+}
+.threads-card .mobile-channel-post--lead {
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: var(--sp-4);
+}
+.threads-card .mobile-channel-post__avatar {
+  width: 28px;
+  height: 28px;
+}
+.threads-card .mobile-channel-post__heading {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.threads-card .mobile-channel-post__author {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.threads-card .mobile-channel-post__heading time {
+  flex: none;
+  white-space: nowrap;
+}
+.threads-card .mobile-channel-day span {
+  border: 0;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.threads-card .mobile-channel-compose:not(.mobile-channel-compose--editing) .channel-composer {
+  margin: var(--sp-6) 0 0;
 }

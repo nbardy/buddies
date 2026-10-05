@@ -1,7 +1,9 @@
 import { DependenciesSchema, type DependencyCheck } from '@unleashd/shared';
-import { useEffect, useRef, useState } from 'react';
-import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
+import { useAtomValue } from 'jotai';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { setSetupDismissed, setupDismissedAtom } from '../../atoms/ui';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
+import { DependencyCommand, SURFACE, buttonStyle } from './setup-ui';
 
 const STATUS = resource('/api/dependencies', async (signal) => {
   const response = await fetch('/api/dependencies', { signal });
@@ -33,104 +35,138 @@ const GUIDES = {
 const STATES = {
   ready: { icon: '✓', label: 'Yes — ready', color: '#22c55e' },
   missing: { icon: '✕', label: 'No — not installed', color: 'var(--danger)' },
-  failed: { icon: '✕', label: 'Installed — needs attention', color: 'var(--danger)' },
+  failed: { icon: '✕', label: 'Installed — needs attention', color: '#ff9b94' },
+  installing: { icon: '…', label: 'Installing automatically…', color: 'var(--warning)' },
   checking: { icon: '…', label: 'Checking…', color: 'var(--warning)' },
 };
-
-function DependencyCommand({ command, label }: { command: string; label: string }) {
-  const copy = useCopyAction(command);
-  return (
-    <div className="ui-row" style={{ gap: 'var(--sp-3)' }}>
-      <input
-        aria-label={label}
-        readOnly
-        value={command}
-        onFocus={(event) => event.currentTarget.select()}
-        style={{
-          minWidth: 0,
-          flex: 1,
-          fontFamily: 'monospace',
-          padding: 'var(--sp-3)',
-          color: 'var(--text-primary)',
-          background: 'var(--bg-raised-2)',
-          border: '1px solid var(--border-default)',
-        }}
-      />
-      <button
-        type="button"
-        className="ui-choice"
-        onClick={copy.copy}
-        aria-label={`${COPY_LABEL[copy.state]} ${label}`}
-      >
-        {COPY_LABEL[copy.state]}
-      </button>
-    </div>
-  );
-}
 
 export function DependencyCard({ check }: { check: DependencyCheck }) {
   const guide = GUIDES[check.id];
   const state = STATES[check.status];
+  const label =
+    check.status === 'failed'
+      ? check.failure === 'quota'
+        ? 'Installed · usage limit'
+        : check.failure === 'login'
+          ? 'Login required'
+          : 'Installed · check failed'
+      : state.label;
   return (
     <section
-      className="ui-card ui-stack"
-      style={{ padding: 'var(--sp-5)', gap: 'var(--sp-3)' }}
       aria-label={guide.name}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '28px minmax(0, 1fr)',
+        gap: 'var(--sp-6)',
+        padding: 'var(--sp-8) 0',
+        borderTop: `1px solid ${SURFACE.border}`,
+      }}
     >
-      <div
-        className="ui-row"
-        style={{ gap: 'var(--sp-3)', justifyContent: 'space-between', flexWrap: 'wrap' }}
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'grid',
+          placeItems: 'center',
+          width: 28,
+          height: 28,
+          borderRadius: '50%',
+          color: state.color,
+          background: `color-mix(in srgb, ${state.color} 12%, transparent)`,
+          fontWeight: 700,
+          fontSize: 'var(--fs-6)',
+        }}
       >
-        <strong>{guide.name}</strong>
-        <strong style={{ color: state.color }}>
-          <span aria-hidden="true">{state.icon} </span>
-          {state.label}
-        </strong>
-      </div>
-      <span>{check.message}</span>
-      {check.status === 'missing' && (
-        <>
-          <DependencyCommand command={guide.install} label={`Install ${guide.name} command`} />
-          <a href={guide.url} target="_blank" rel="noreferrer">
-            Install {guide.name} — official guide ↗
-          </a>
-          {check.id === 'rust' && (
-            <span className="ui-muted">
-              No Homebrew? The Rust guide includes the rustup installer.
-            </span>
-          )}
-          {guide.login && (
-            <DependencyCommand command={guide.login} label={`Sign in to ${guide.name} command`} />
-          )}
-        </>
-      )}
-      {check.status === 'failed' && guide.login && (
-        <>
-          {check.failure !== 'quota' && check.failure !== 'network' && (
+        {state.icon}
+      </span>
+      <div className="ui-stack" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
+        <div
+          className="ui-row"
+          style={{ justifyContent: 'space-between', gap: 'var(--sp-4)', flexWrap: 'wrap' }}
+        >
+          <strong
+            style={{
+              color: SURFACE.text,
+              fontSize: 'var(--fs-6)',
+              lineHeight: 1.5,
+              fontWeight: 500,
+            }}
+          >
+            {guide.name}
+          </strong>
+          <span style={{ color: state.color, fontSize: 'var(--fs-2)', lineHeight: 1.5 }}>
+            {label}
+          </span>
+        </div>
+        {check.status === 'failed' && (
+          <span
+            style={{
+              color: SURFACE.muted,
+              fontSize: 'var(--fs-4)',
+              lineHeight: 1.5,
+              marginTop: 'var(--sp-2)',
+            }}
+          >
+            {check.failure === 'quota'
+              ? 'This response check hit an account limit. Try again later.'
+              : check.message}
+          </span>
+        )}
+        {check.status === 'missing' && (
+          <>
+            <DependencyCommand command={guide.install} label={`Install ${guide.name} command`} />
+            {guide.login && (
+              <DependencyCommand command={guide.login} label={`Sign in to ${guide.name} command`} />
+            )}
+          </>
+        )}
+        {check.status === 'failed' &&
+          guide.login &&
+          check.failure !== 'quota' &&
+          check.failure !== 'network' && (
             <DependencyCommand
               command={check.failure === 'login' ? guide.login : check.id}
               label={`${check.failure === 'login' ? 'Sign in to' : 'Open'} ${guide.name} command`}
             />
           )}
-          <a href={guide.url} target="_blank" rel="noreferrer">
-            {guide.name} setup and sign-in help ↗
+        {(check.status === 'missing' || check.status === 'failed') && (
+          <a
+            href={guide.url}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              color: '#8bbcff',
+              fontSize: 'var(--fs-3)',
+              marginTop: 'var(--sp-5)',
+              textDecoration: 'none',
+            }}
+          >
+            {check.status === 'missing'
+              ? 'Installation guide'
+              : check.failure === 'login'
+                ? 'How to sign in'
+                : 'Account help'}{' '}
+            ↗
           </a>
-        </>
-      )}
+        )}
+      </div>
     </section>
   );
 }
 
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 // One app-wide prompt, shared by both shells. Polling reads the server's cached checks.
-export function DependenciesPrompt() {
-  const [dismissed, setDismissed] = useState(false);
+// `children`: device-specific sections after the checks (desktop: Connect from mobile).
+export function DependenciesPrompt({ children }: { children?: ReactNode }) {
+  const dismissed = useAtomValue(setupDismissedAtom);
   const status = usePolledFetch(STATUS, 2_000, !dismissed);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (!dismissed) dialog.current?.showModal();
+    if (!dismissed) {
+      dialog.current?.showModal();
+      dialog.current?.focus();
+    }
   }, [dismissed]);
 
   const retry = async () => {
@@ -146,27 +182,76 @@ export function DependenciesPrompt() {
       setRetrying(false);
     }
   };
-  const checking = !status.data || status.data.checks.some((check) => check.status === 'checking');
+  const checking =
+    !status.data ||
+    status.data.checks.some(
+      (check) => check.status === 'checking' || check.status === 'installing'
+    );
   if (dismissed) return null;
   return (
     <dialog
+      className="dependencies-dialog"
       ref={dialog}
-      className="ui-sheet"
+      tabIndex={-1}
+      aria-labelledby="dependencies-title"
+      onCancel={() => setSetupDismissed(true)}
       style={{
         margin: 'auto',
-        width: 'calc(100% - var(--sp-8))',
-        border: '1px solid var(--border-default)',
-        borderRadius: 'var(--ui-radius)',
+        width: 'min(420px, calc(100vw - var(--sp-9)))',
+        maxWidth: 'none',
+        padding: 0,
+        overflow: 'hidden',
+        border: 'none',
+        borderRadius: 0,
+        background: '#141b24',
+        borderTop: '2px solid #a6c7ff',
+        outline: 'none',
+        color: SURFACE.text,
+        boxShadow: '0 24px 80px rgb(0 0 0 / 35%)',
       }}
-      aria-labelledby="dependencies-title"
-      onCancel={() => setDismissed(true)}
     >
-      <div className="ui-sheet__inner ui-stack">
-        <h2 id="dependencies-title" className="ui-sheet__title">
-          Dependencies
-        </h2>
-        <p>Checked on the computer running Unleashd.</p>
-        <div aria-live="polite" className="ui-stack" style={{ gap: 'var(--sp-4)' }}>
+      <div className="ui-stack" style={{ maxHeight: '85dvh' }}>
+        <header style={{ padding: 'var(--sp-10) var(--sp-9) var(--sp-9)', flexShrink: 0 }}>
+          <div className="ui-row" style={{ justifyContent: 'space-between' }}>
+            <h2
+              id="dependencies-title"
+              style={{
+                fontSize: 'var(--fs-9)',
+                fontWeight: 500,
+                letterSpacing: '-0.04em',
+                color: SURFACE.text,
+                margin: 0,
+              }}
+            >
+              Setup
+            </h2>
+            <button
+              type="button"
+              aria-label="Close dependency checks"
+              onClick={() => setSetupDismissed(true)}
+              style={{
+                ...buttonStyle,
+                padding: 'var(--sp-4)',
+                fontSize: 'var(--fs-7)',
+                border: 'none',
+                background: 'transparent',
+                color: SURFACE.muted,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </header>
+        <div
+          aria-live="polite"
+          className="ui-stack"
+          style={{
+            gap: 0,
+            padding: '0 var(--sp-9)',
+            overflowY: 'auto',
+            minHeight: 0,
+          }}
+        >
           {status.data?.checks.map((check) => <DependencyCard key={check.id} check={check} />) ?? (
             <p>Checking dependencies…</p>
           )}
@@ -174,24 +259,40 @@ export function DependenciesPrompt() {
             <p>Could not load checks: {status.error.message}</p>
           )}
           {error && <p role="alert">{error}</p>}
+          {children}
         </div>
-        <p className="ui-muted">
-          You can continue using Unleashd. After resolving any checks above, click Check again.
-          Response checks use a little agent quota.
-        </p>
-        <div className="ui-row" style={{ gap: 'var(--sp-4)', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            className="ui-choice"
-            disabled={retrying || (checking && !!status.data)}
-            onClick={() => void retry()}
-          >
-            Check again
-          </button>
-          <button type="button" className="ui-choice" onClick={() => setDismissed(true)}>
-            Continue
-          </button>
-        </div>
+        <footer
+          style={{
+            margin: '0 var(--sp-9)',
+            padding: 'var(--sp-8) 0',
+            borderTop: `1px solid ${SURFACE.border}`,
+            flexShrink: 0,
+          }}
+        >
+          <div className="ui-row" style={{ gap: 'var(--sp-4)', justifyContent: 'space-between' }}>
+            <button
+              type="button"
+              style={buttonStyle}
+              disabled={retrying || (checking && !!status.data)}
+              onClick={() => void retry()}
+            >
+              ↻ Check again
+            </button>
+            <button
+              type="button"
+              style={{
+                ...buttonStyle,
+                background: '#d9e7ff',
+                color: '#162034',
+                padding: 'var(--sp-6) var(--sp-9)',
+                fontWeight: 600,
+              }}
+              onClick={() => setSetupDismissed(true)}
+            >
+              Continue →
+            </button>
+          </div>
+        </footer>
       </div>
     </dialog>
   );

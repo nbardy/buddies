@@ -1,72 +1,55 @@
-# unleashd
+# Buddies
 
-A SWARM FIRST ADE (Agent Development Environment) for running and managing agent swarms across Claude Code, Codex, Gemini, and OpenCode.
+> Vim is open source and it's still here decades later. Agent software should be too.
+
+**Free, open source, multi-harness agent team orchestration.** Run a team of AI agents (Buddies) with channels, tasks, threads and memory, on your own computer. Bring your own harness: Claude Code, Codex and Gemini work side by side, and OpenCode sessions show up read-only. Private, mobile friendly, and yours to fork.
 
 <p align="center">
-  <video
-    src="https://raw.githubusercontent.com/nbardy/unleashd/main/docs/resources/unleashd.mp4"
-    poster="https://raw.githubusercontent.com/nbardy/unleashd/main/docs/screenshots/gallery.png"
-    controls
-    muted
-    playsinline
-    preload="metadata"
-    width="100%">
-  </video>
+  <img src="docs/screenshots/hero.png" alt="Buddies workspace home: channels, tasks and a team of Buddies" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/nbardy/unleashd/main/docs/resources/unleashd.mp4">Download the unleashd demo video</a>
+  <a href="https://raw.githubusercontent.com/nbardy/buddies/main/docs/resources/unleashd-2.mp4">Watch the launch video</a>
 </p>
 
-## The problem
-
-You run agents from different CLIs — Claude Code, Codex, Gemini, OpenCode. Each has its own terminal, its own session history, its own way of showing what happened. When you're running a swarm of agents across a codebase, there's no single place to see what's going on, steer the work, or review what was done.
-
-## What unleashd does
-
-Two things:
-
-**1. Visibility and organization across all your agents.**
-See every conversation from every CLI agent, organized by project. Search across all of them. No more flipping between terminals trying to remember which agent you asked to do what.
-
-**2. Launch and manage long-running agent swarms.**
-Swarms are treated as two things at once:
-
-- **Background jobs** — they run in a loop, autonomously, without interruption.
-- **Artifacts** — they can be inspected, discussed, and steered through conversation.
-
-Swarms continue without you. But you guide them. From the same chat interface, you can launch a swarm, check its progress, debug a failing worker, or review its output.
-
-### Swarm Analytics
-
-Track multi-agent swarm runs — iterations, merges, rejections, per-worker timelines.
-
-![Swarm Analytics](docs/screenshots/swarm-analytics.png)
+- **Free, private, open source.** Fork it, add features, run it locally.
+- **Bring your own harness.** Use the best agent CLI for each model.
+- **Teams with memory.** Buddies share channels and tasks and remember across sessions.
 
 ## Quick Start
 
-**Prerequisites:** git, [Node](https://nodejs.org/) 22.13 or newer, [pnpm](https://pnpm.io/), [Rust and Cargo](https://rustup.rs/) (for the native addons), and at least one supported CLI agent installed and authenticated (e.g. `claude`).
+**Prerequisites:** git, [Node](https://nodejs.org/) 22.13 or newer, [pnpm](https://pnpm.io/), [Rust and Cargo](https://rustup.rs/) (for the native addons), and an account for at least one supported CLI agent (e.g. Claude Code or Codex). The app installs missing agent CLIs on first boot and guides you through login.
 
 Install and run (the same command as the website):
 
 ```bash
-git clone --recursive https://github.com/nbardy/unleashd && cd unleashd && pnpm install && pnpm build && pnpm start
+git clone --recursive https://github.com/nbardy/buddies && cd buddies && pnpm install && pnpm build && pnpm start
 ```
 
 The install preflight checks Rust, Claude Code and Codex. If Rust is missing it runs
 `brew install rust`; without Homebrew it asks an installed Claude Code to install
-Rust via rustup. If that fails, it prints the manual install steps. Packaged
+Rust via rustup. If Claude is missing or cannot install it, the official rustup
+installer runs directly. Failed installs print manual steps. Packaged
 installs with prebuilt addons do not require Rust.
 
-At app launch, the **Dependencies** window checks Rust and asks Claude and Codex
-to reply “Yes” once (this uses a small amount of agent quota). Missing agents and
-failed responses show installation/login guidance. Log in from your terminal
-with `claude auth login` or `codex login`, then click **Check again**. You can
-continue into the app while resolving dependencies.
+On first server boot, missing Claude Code and Codex are installed automatically
+using the official Claude installer and npm (Codex goes in `~/.local/bin`).
+Missing Rust uses Homebrew, or rustup when Homebrew is unavailable. Each tool's
+first-boot attempt is recorded in the app data directory, so restarts and
+**Check again** never repeat installers. Failed installs keep manual setup guidance.
+On **every server start**, Claude and Codex are asked to respond “Yes” to verify
+that they can actually answer. The **Setup** window shows progress and
+**Login required** with a copyable login command when authentication is missing.
+Usage limits and connection failures stay separate from login failures. Response
+checks time out after 45 seconds and use a little agent quota; installation steps
+allow up to 10 minutes each. You can continue while resolving a check.
+Continue, Close and Escape remember dismissal on this browser, so Setup stays
+closed across reloads and server restarts. Reopen it from **Settings → Setup**;
+startup checks still run in the background.
 
 To develop on it, use `pnpm install && pnpm dev` instead of build/start.
 
-Development uses [http://localhost:7489](http://localhost:7489) by default. Run `pnpm local-domain:setup` once if you prefer [http://unleashd.localhost](http://unleashd.localhost), and `pnpm local-domain:remove` to remove it. The setup command installs a persistent, loopback-only macOS port proxy; dev startup only detects it and never prompts for administrator access. Unleashd itself always runs as your normal user. In dev, the API server stays on port `7499` behind the Vite proxy.
+Development uses [http://localhost:7489](http://localhost:7489) by default. Run `pnpm local-domain:setup` once if you prefer [http://unleashd.localhost](http://unleashd.localhost), and `pnpm local-domain:remove` to remove it. The setup command installs a persistent, loopback-only macOS port proxy; dev startup only detects it and never prompts for administrator access. Buddies itself always runs as your normal user. In dev, the API server stays on port `7499` behind the Vite proxy.
 
 Frontend edits reload immediately. Backend edits are coalesced by the development watcher: if Codex or another provider has active turns, the current backend keeps owning their event streams until they finish, then exits and starts the updated server. An explicit `Ctrl-C`, `SIGTERM`, or `pnpm dev:replace` remains an intentional shutdown and stops active turns.
 
@@ -80,7 +63,7 @@ pnpm start     # serves built client + API on port 7489
 ### Access key
 
 By default both servers bind loopback only and no key is required. To reach
-unleashd from another device (Tailscale, LAN), set a shared secret first:
+Buddies from another device (Tailscale, LAN), set a shared secret first:
 
 ```bash
 openssl rand -hex 32 | tee ~/.agent-viewer/auth-token
@@ -107,7 +90,7 @@ memory docs, channels and runs live in `~/.buddies/buddies-v3.sqlite`
 (override with `UNLEASHD_BUDDIES_DB`).
 
 Each Buddy also has a private curated `MEMORY.md` plus append-only journal
-notes. Unleashd injects the bounded curated summary and recent journal excerpts
+notes. Buddies injects the bounded curated summary and recent journal excerpts
 into the first turn of each Buddy conversation. The `remember` operation
 records material outcomes, failures, durable decisions, and reusable lessons;
 `compact_memory` reconciles repetitive or stale history with source
@@ -130,6 +113,18 @@ live swap are in [crates/unleashd-buddies/README.md](crates/unleashd-buddies/REA
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `~/.gemini/tmp/` | Yes |
 
 The server auto-discovers conversations from each agent's disk format. No configuration needed — if the CLI has been used, its sessions show up.
+
+## Names: Buddies and unleashd
+
+Buddies was called Unleashd until October 2026. The public name changed; the
+internal names did not, so existing installs and their data keep working:
+
+- **npm package:** still `unleashd`. It installs two commands, `buddies` and
+  `unleashd`, which run the same server. Renaming the package would change what
+  `npm install` and the publish workflow resolve, so it waits for its own release.
+- **Kept on purpose:** the `@unleashd/*` workspace packages, `UNLEASHD_*`
+  environment variables, the `~/.agent-viewer` data folder, the
+  `unleashd.localhost` dev domain and the `crates/unleashd-*` crates.
 
 ## Project Structure
 
