@@ -131,7 +131,7 @@
         .pill svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
 
         /* Hero: the Vim line leads. */
-        .hero { text-align: center; padding: 4.5rem 0 3rem; }
+        .hero { text-align: center; padding: 4rem 0 1rem; }
 
         .tags { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2.25rem; }
 
@@ -243,7 +243,8 @@
 
         .btn-primary svg { width: 1.2rem; height: 1.2rem; fill: currentColor; }
 
-        /* Media frames: the launch video, then the product. */
+        /* Media frames: the launch video leads the page, right under the nav (owner, 2026-10-05:
+           text before the video read as "a wall of text"). */
         .frame {
             position: relative;
             border-radius: 20px;
@@ -257,7 +258,7 @@
 
         .frame video, .frame img { display: block; width: 100%; height: auto; }
 
-        .video-section { margin-top: 1rem; }
+        .video-section { margin-top: 0.5rem; }
 
         .caption {
             margin-top: 0.9rem;
@@ -378,6 +379,14 @@
             </a>
         </nav>
 
+        <div class="video-section">
+            <div class="frame">
+                <video autoplay muted loop playsinline controls preload="metadata" poster="screenshots/video-poster.jpg" aria-label="Buddies launch video">
+                    <source src="resources/unleashd-2.mp4" type="video/mp4">
+                </video>
+            </div>
+        </div>
+
         <header class="hero rise">
             <div class="tags">
                 <span class="pill glass">Open source</span>
@@ -400,14 +409,6 @@
             </div>
         </header>
 
-        <div class="video-section">
-            <div class="frame">
-                <video muted loop playsinline controls preload="metadata" poster="screenshots/video-poster.jpg" aria-label="Buddies launch video">
-                    <source src="resources/unleashd-2.mp4" type="video/mp4">
-                </video>
-            </div>
-            <p class="caption">The launch video</p>
-        </div>
 
         <section>
             <h2>One home for the whole <span class="accent-violet">team.</span></h2>
