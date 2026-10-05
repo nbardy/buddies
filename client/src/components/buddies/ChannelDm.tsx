@@ -475,6 +475,12 @@ function DmRowView({
       );
     case 'notice':
       return <li className="channel-dm-notice">{row.label}</li>;
+    case 'failure':
+      return (
+        <li className="channel-dm-failure" role="alert">
+          {row.label}
+        </li>
+      );
     case 'lead':
       return (
         <li className={frame.lead}>

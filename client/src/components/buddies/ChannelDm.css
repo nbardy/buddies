@@ -12,3 +12,12 @@
   font-size: var(--fs-3);
   box-sizing: border-box;
 }
+
+.channel-dm-failure {
+  margin: var(--sp-4) var(--sp-6);
+  padding: var(--sp-4) var(--sp-6);
+  border-left: 2px solid var(--theme-danger);
+  color: var(--text-secondary);
+  font-size: var(--fs-3);
+  overflow-wrap: anywhere;
+}

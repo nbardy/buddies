@@ -328,3 +328,24 @@ test('reset banners follow the date on desktop and in an empty new chat', async 
   assert.ok(html.indexOf('Context refreshed · New chat') > html.indexOf(date));
   assert.match(html, /class="channel-dm-notice"/);
 });
+
+// Regression: a missing provider CLI left the runner's system message in the transcript, but
+// dmRows dropped system records, so the DM showed an empty reply bubble (2026-10-05 trial).
+test('a failed turn shows its system message in the DM rows', async () => {
+  const { dmRows } = await import('../src/components/buddies/channel-dm');
+  const { groupChatMessages } = await import('../src/utils/chat-message-groups');
+  const rows = dmRows(
+    groupChatMessages(
+      [
+        message('user', 'hello', 1),
+        message('assistant', '', 1),
+        message('system', "Couldn't start codex: the `codex` command was not found.", 1),
+      ],
+      null
+    ),
+    []
+  );
+  const failures = rows.filter((row) => row.kind === 'failure');
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].kind === 'failure' ? failures[0].label : '', /codex/);
+});

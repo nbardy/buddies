@@ -21,7 +21,7 @@ const GROUP_WINDOW_MS = 5 * 60_000;
 export type DmAuthor = 'owner' | 'buddy';
 
 export type DmRow =
-  | { kind: 'day' | 'notice'; key: string; label: string }
+  | { kind: 'day' | 'notice' | 'failure'; key: string; label: string }
   | { kind: 'lead' | 'continuation'; key: string; author: DmAuthor; at: string; body: MessageBody };
 
 const dayLabel = (date: Date) =>
@@ -40,8 +40,11 @@ function responseBody(group: Extract<MessageGroup, { type: 'assistant' }>): Mess
 }
 
 /**
- * Rows for one DM generation. System records (errors, notices) are left out: a failed turn shows
- * its retry under the transcript instead. `queued` is what the owner sent that the server has not
+ * Rows for one DM generation. System records are the turn's own failure text (the runner appends
+ * one per failed turn), so each becomes a `failure` row. They were once dropped here, and a Buddy
+ * whose CLI was missing (`spawn codex ENOENT`) showed an empty reply bubble with the reason only
+ * in the server log. Guard: channel-dm.test.tsx "a failed turn shows its system message".
+ * `queued` is what the owner sent that the server has not
  * written to the transcript yet, so Send shows it at once.
  */
 export function dmRows(
@@ -90,8 +93,21 @@ export function dmRows(
         );
         break;
       case 'single':
-        if (first.role === 'user')
-          push(`m:${group.firstMessageIndex}`, 'owner', new Date(first.timestamp), first.body);
+        switch (first.role) {
+          case 'user':
+            push(`m:${group.firstMessageIndex}`, 'owner', new Date(first.timestamp), first.body);
+            break;
+          case 'system':
+            if (bodyText(first.body).trim())
+              rows.push({
+                kind: 'failure',
+                key: `m:${group.firstMessageIndex}`,
+                label: bodyText(first.body),
+              });
+            break;
+          case 'assistant':
+            break;
+        }
         break;
     }
   }
