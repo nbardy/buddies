@@ -12,6 +12,7 @@ gitignored. The files a cut is built from are kept read-only in `renders/<cut>-c
 | v12 | 2026-10-05 14:17 | `9079273` | "Mobile Friendly!" first after the swarm, 2 bars, on footage P | `edit/stitch-v12.sh`: renders the mobile scene and the sound; cuts every other section from v11 | `launch-v12.mp4` (`92804ffb…`) |
 | v13 | 2026-10-05 14:50 | `432e886` | "Open Source" shimmers on the Vim card (owner pick); end card says github.com/nbardy/buddies | `edit/stitch-v13.sh`: renders vim+end; cuts frames 0–4965 from v12; v12's sound | `launch-v13.mp4` (`e98e9a83…`) |
 | v14 | 2026-10-05 19:30 | `235fc41` | the emblem shots cut from "They show their work" (8 bars → 2); everything after moves up 6 bars; 85.0 s | `edit/stitch-v14.sh`: no picture render; v13 frames 0–2828 + 3504–5775, the song re-timed | `launch-v14.mp4` (`2817b046…`) |
+| v15 | not posted (step to v16) | `852a1bf` | the drop → home step at 0:16–0:17 eased over 2 bars (owner: "hard shift"); 85.0 s | `edit/stitch-v15.sh`: no picture render; v14's video stream copied (stream MD5 identical); new sound only. Largest one-beat drop 3.2 dB in v14, 1.0 dB in v15; after 0:25 unchanged (corr 0.9998, 0.00 dB); −14.1 LUFS, peak −4.8 dBFS. No X file: v16 makes its own | `launch-v15.mp4` (`ea9e68c9…`), `v15.wav` (`41a3ba00…`), chain `renders/v15-chain/` |
 
 ## Reproducing v14
 
