@@ -10,11 +10,7 @@ import { clamp01, easeOutBack, FONT, INK, lerp } from './blocks';
 import { Antenna, BAR, BEAT, CAST, CENTRE_SHIFT, Face, GAP, MARK, MARK_LEFT, MARK_TOP, type Pose, WORD, Wordmark } from './BuddiesIntro';
 import { AURA, NIGHT } from './BuddiesLogos';
 
-// Two type treatments for the three lines, to compare side by side (owner to pick).
-export type TypeStyle = 'slam' | 'glitch';
-
 const CREAM = '#fdf6e3';
-const MONO = '"SF Mono", Menlo, Consolas, monospace';
 const ROBOTS = CAST[5];
 
 // ---- Timeline (s from the cut). A breath of black, then "AI Overload." on the boom; the song
@@ -43,8 +39,7 @@ const easeOutCubic = (x: number) => 1 - (1 - x) ** 3;
 const easeInOut = (x: number) => (x < 0.5 ? 4 * x ** 3 : 1 - (-2 * x + 2) ** 3 / 2);
 const span = (t: number, from: number, dur: number) => clamp01((t - from) / dur);
 
-// ---- The lines. Each style is one handler with the same signature: t = seconds from the cut.
-type Lines = React.FC<{ t: number }>;
+// ---- The lines (owner pick 2026-10-05: "slam", over a red/cyan glitch with typed answers, in git history). t = seconds from the cut.
 
 // A word slams in from 1.6x with motion blur; the frame shakes once on the boom.
 const SlamWord: React.FC<{ t: number; at: number; children: React.ReactNode }> = ({ t, at, children }) => {
@@ -86,7 +81,7 @@ const AuraWord: React.FC<{ text: string }> = ({ text }) => (
   </span>
 );
 
-const SlamLines: Lines = ({ t }) => (
+const Lines: React.FC<{ t: number }> = ({ t }) => (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 26, fontFamily: FONT, color: CREAM }}>
     <div style={{ fontSize: 196, fontWeight: 800, fontStretch: '78%', letterSpacing: '-0.03em', lineHeight: 0.95, display: 'flex', gap: '0.22em' }}>
       <SlamWord t={t} at={R.slam}>AI</SlamWord>
@@ -103,52 +98,6 @@ const SlamLines: Lines = ({ t }) => (
   </div>
 );
 
-// Overload as signal noise: red and cyan copies split off and jitter, then lock into the cream
-// word; the answers are typed like a terminal.
-// side: +1 pulls the copy right, -1 left, so red and cyan always split apart.
-const glitchOffset = (t: number, at: number, seed: string, side: 1 | -1) => {
-  const settle = 1 - easeOutCubic(span(t, at, 0.55));
-  const frame = Math.floor(t * 30); // jitter steps at 30 fps, like a bad signal
-  const x = side * (14 + random(`${seed}x${frame}`) * 34) * settle;
-  return { x, y: (random(`${seed}y${frame}`) - 0.5) * 16 * settle };
-};
-
-const Typed: React.FC<{ t: number; at: number; text: string; dur: number }> = ({ t, at, text, dur }) => {
-  const n = Math.round(span(t, at, dur) * text.length);
-  const caret = t >= at && Math.floor((t - at) * 4) % 2 === 0;
-  return (
-    <span style={{ opacity: t >= at ? 1 : 0 }}>
-      {text.slice(0, n)}
-      <span style={{ opacity: caret ? 1 : 0 }}>▍</span>
-    </span>
-  );
-};
-
-const GlitchLines: Lines = ({ t }) => {
-  const word: React.CSSProperties = { fontSize: 210, fontWeight: 800, fontStretch: '75%', letterSpacing: '-0.02em', lineHeight: 0.92 };
-  const red = glitchOffset(t, R.slam, 'r', 1);
-  const cyan = glitchOffset(t, R.slam, 'c', -1);
-  const on = t >= R.slam ? 1 : 0;
-  const skew = (1 - easeOutCubic(span(t, R.slam, 0.3))) * -12;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 30, fontFamily: FONT, color: CREAM }}>
-      <div style={{ position: 'relative', opacity: on, transform: `skewX(${skew}deg)` }}>
-        <div style={{ ...word, position: 'absolute', color: INK.red, mixBlendMode: 'screen', transform: `translate(${red.x}px, ${red.y}px)` }}>AI OVERLOAD</div>
-        <div style={{ ...word, position: 'absolute', color: INK.cyan, mixBlendMode: 'screen', transform: `translate(${cyan.x}px, ${cyan.y}px)` }}>AI OVERLOAD</div>
-        <div style={{ ...word, position: 'relative', mixBlendMode: 'screen' }}>AI OVERLOAD</div>
-      </div>
-      <div style={{ fontFamily: MONO, fontSize: 46, fontWeight: 500, color: 'rgba(253,246,227,.62)' }}>
-        <Typed t={t} at={R.feeling} text="> we're all feeling it." dur={0.4} />
-      </div>
-      <div style={{ fontFamily: MONO, fontSize: 46, fontWeight: 600 }}>
-        <Typed t={t} at={R.covered} text="> don't worry, we've got you covered." dur={0.6} />
-      </div>
-    </div>
-  );
-};
-
-const LINES: Record<TypeStyle, Lines> = { slam: SlamLines, glitch: GlitchLines };
-
 // ---- The scene
 
 const ROW_PITCH = 150;
@@ -156,8 +105,7 @@ const HEAD = 58;
 const ROBOT_X = 330; // the robots' column, left of the lines
 const LINES_SHIFT = 250; // how far the lines move right to make room
 
-export const OverloadReveal: React.FC<{ t: number; type: TypeStyle }> = ({ t, type }) => {
-  const Text = LINES[type];
+export const OverloadReveal: React.FC<{ t: number }> = ({ t }) => {
   const n = ROBOTS.colors.length;
 
   // The frame shakes once on the boom.
@@ -222,7 +170,7 @@ export const OverloadReveal: React.FC<{ t: number; type: TypeStyle }> = ({ t, ty
             filter: `blur(${10 * exit}px)`,
           }}
         >
-          <Text t={t} />
+          <Lines t={t} />
         </AbsoluteFill>
         <svg width={1920} height={1080} style={{ position: 'absolute', inset: 0 }}>
           <circle cx={markCx} cy={markCy} r={lerp(MARK * 0.55, 1100, ring)} fill="none" stroke={CREAM} strokeWidth={lerp(10, 1, ring)} opacity={0.5 * (1 - ring) * (t >= R.lock ? 1 : 0)} />

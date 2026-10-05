@@ -1,10 +1,9 @@
 // The whole launch video, script v2 (../../SCRIPT_V2_2026-09-30.md). The open keeps its own sound
 // design; from the title one continuous EDM cue (../../sound/edm-full.wav, 128 BPM) runs to the end
 // card, and every scene after the open is one 4-bar phrase of it: a scene change anywhere else
-// read as "off step" (owner, 2026-09-30). Sections are data (sections()); a section
+// read as "off step" (owner, 2026-09-30). Sections are data (SECTIONS); a section
 // plays its clip from `offset` and holds the clip's last frame if its slot outlasts it.
 import type React from 'react';
-import { useMemo } from 'react';
 import { AbsoluteFill, Audio, Freeze, OffthreadVideo, Sequence, useCurrentFrame } from 'remotion';
 import beat9 from '../../beat9/beat9.mp4';
 import launchSong from '../../sound/launch.wav';
@@ -13,7 +12,6 @@ import * as DesignReview from './DesignReview';
 import * as FeatureFlash from './FeatureFlash';
 import * as HomeIntro from './HomeIntro';
 import * as Overload from './Overload';
-import type { TypeStyle } from './OverloadReveal';
 import * as PickerRefresh from './PickerRefresh';
 import * as Swarm from './Swarm';
 import { Block, INK } from './blocks';
@@ -49,9 +47,8 @@ const section = (id: string, from: number, to: number, C: React.FC, frames: numb
   offset,
 });
 
-// The open's type treatment is the one input that changes the picture (owner to pick).
-const sections = (type: TypeStyle): Section[] => [
-  section('overload', 0, Overload.DURATION, () => <Overload.Overload type={type} />, Overload.DURATION),
+export const SECTIONS: Section[] = [
+  section('overload', 0, Overload.DURATION, Overload.Overload, Overload.DURATION),
   section('home', bar(2), bar(5), HomeIntro.HomeIntro, HomeIntro.DURATION),
   section('benefits', bar(5), bar(9), PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
   section('ask', bar(9), bar(13), DesignReview.DesignReview, DesignReview.DURATION),
@@ -108,13 +105,10 @@ const Place: React.FC<{ s: Section }> = ({ s }) => {
 };
 
 // The score: launch.py's song under everything from the first robot to the end card.
-export type AssemblyProps = { type: TypeStyle };
-
-export const Assembly: React.FC<AssemblyProps> = ({ type }) => {
-  const list = useMemo(() => sections(type), [type]); // stable components, so nothing remounts per frame
+export const Assembly: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: '#000' }}>
-      {list.map((s) => (
+      {SECTIONS.map((s) => (
         <Place key={s.id} s={s} />
       ))}
       {CAPTIONS.map((c) => (

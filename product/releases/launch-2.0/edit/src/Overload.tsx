@@ -575,19 +575,16 @@ const OVERLOAD_CUES: Cue[] = [
 ];
 
 // The reveal reads its own clock: seconds since the cut.
-const RevealScene: React.FC<{ type: Reveal.TypeStyle }> = ({ type }) => (
-  <Reveal.OverloadReveal t={useCurrentFrame() / FPS} type={type} />
-);
+const RevealScene: React.FC = () => <Reveal.OverloadReveal t={useCurrentFrame() / FPS} />;
 
-export type OverloadProps = { type: Reveal.TypeStyle };
-export const Overload: React.FC<OverloadProps> = ({ type }) => (
+export const Overload: React.FC = () => (
   <AbsoluteFill>
     <Soundtrack cues={OVERLOAD_CUES} fps={FPS} />
     <Sequence durationInFrames={frames(T.cut)}>
       <Pileup />
     </Sequence>
     <Sequence from={frames(T.cut)} durationInFrames={frames(T.end - T.cut)}>
-      <RevealScene type={type} />
+      <RevealScene />
     </Sequence>
   </AbsoluteFill>
 );
