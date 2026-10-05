@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Install Buddies - Mac, Linux and Windows</title>
+    <meta name="description" content="Download the Buddies Mac app, or run Buddies from source on Linux and Windows (WSL).">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+    <meta name="theme-color" content="#0b0a14">
+    <style>
+        /* Same brand as index.html (product/releases/launch-2.0/brand/BUDDIES_BRAND.md), trimmed
+           to what a reading page needs: night ground, cream text, glass, Bricolage Grotesque. */
+        @font-face {
+            font-family: 'Bricolage Grotesque';
+            src: url('fonts/BricolageGrotesque.ttf') format('truetype');
+            font-weight: 200 800;
+            font-stretch: 75% 100%;
+            font-display: swap;
+        }
+
+        :root {
+            --night: #0b0a14;
+            --cream: #fdf6e3;
+            --quiet: rgba(253, 246, 227, 0.62);
+            --faint: rgba(253, 246, 227, 0.38);
+            --glass: rgba(253, 246, 227, 0.07);
+            --glass-border: rgba(253, 246, 227, 0.14);
+            --violet: oklch(0.62 0.2 300);
+            --teal: oklch(0.76 0.12 200);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Bricolage Grotesque', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-weight: 500;
+            background: var(--night);
+            color: var(--cream);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: -20%;
+            z-index: -1;
+            pointer-events: none;
+            background:
+                radial-gradient(40% 35% at 25% 15%, color-mix(in oklch, var(--violet) 30%, transparent), transparent 70%),
+                radial-gradient(35% 30% at 80% 12%, color-mix(in oklch, var(--teal) 20%, transparent), transparent 70%);
+            filter: blur(20px);
+        }
+
+        a { color: inherit; }
+
+        .page { max-width: 760px; margin: 0 auto; padding: 0 1.5rem 5rem; }
+
+        nav { display: flex; align-items: center; justify-content: space-between; padding: 1.5rem 0; }
+
+        .lockup {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.24em;
+            text-decoration: none;
+            font-weight: 700;
+            font-stretch: 92%;
+            font-variation-settings: 'opsz' 96;
+            font-size: 1.9rem;
+            letter-spacing: -0.026em;
+        }
+
+        .mark { width: 1em; height: 1em; display: block; flex: none; }
+
+        .pill {
+            padding: 0.4rem 0.95rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            text-decoration: none;
+            background: var(--glass);
+            border: 1.5px solid var(--glass-border);
+            border-radius: 999px;
+        }
+
+        h1 { font-size: clamp(2rem, 5vw, 2.8rem); line-height: 1.1; letter-spacing: -0.02em; margin: 2rem 0 0.75rem; }
+        .lede { color: var(--quiet); font-size: 1.15rem; }
+
+        section { margin-top: 3rem; }
+        h2 { font-size: 1.6rem; letter-spacing: -0.01em; margin-bottom: 0.75rem; }
+        h2 .tag { color: var(--faint); font-size: 1rem; font-weight: 500; margin-left: 0.4rem; }
+        p, li { color: var(--quiet); }
+        p + p, p + ol, p + pre, ol + p, pre + p { margin-top: 0.9rem; }
+        ol { padding-left: 1.3rem; }
+        li + li { margin-top: 0.35rem; }
+        strong { color: var(--cream); font-weight: 600; }
+
+        pre, code { font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; }
+        code { font-size: 0.88em; color: var(--cream); }
+        pre {
+            margin-top: 0.9rem;
+            padding: 0.9rem 1.1rem;
+            background: var(--glass);
+            border: 1.5px solid var(--glass-border);
+            border-radius: 14px;
+            font-size: 0.86rem;
+            color: var(--cream);
+            overflow-x: auto;
+            white-space: pre;
+        }
+
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-top: 1rem;
+            padding: 0.8rem 1.5rem;
+            border-radius: 999px;
+            background: var(--cream);
+            color: var(--night);
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .btn-primary svg { width: 1.15rem; height: 1.15rem; fill: currentColor; }
+    </style>
+</head>
+<body>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <defs>
+            <clipPath id="pair-left"><circle cx="37" cy="50" r="28"/></clipPath>
+            <symbol id="pair" viewBox="0 0 100 100">
+                <circle cx="37" cy="50" r="28" fill="oklch(0.62 0.2 300)"/>
+                <circle cx="63" cy="50" r="28" fill="oklch(0.76 0.12 200)"/>
+                <circle cx="63" cy="50" r="28" fill="oklch(0.9 0.06 260)" clip-path="url(#pair-left)"/>
+            </symbol>
+        </defs>
+    </svg>
+
+    <div class="page">
+        <nav>
+            <a class="lockup" href="./" aria-label="Buddies home">
+                <svg class="mark" viewBox="8 8 84 84" aria-hidden="true"><use href="#pair" width="100" height="100"/></svg>
+                Buddies
+            </a>
+            <a class="pill" href="https://github.com/nbardy/buddies">GitHub</a>
+        </nav>
+
+        <h1>Install Buddies</h1>
+        <p class="lede">The Mac app has everything inside it. On Linux and Windows, run Buddies from source; it serves the same app at <code>localhost:7489</code>.</p>
+
+        <section id="mac">
+            <h2>Mac <span class="tag">Apple Silicon</span></h2>
+            <a class="btn-primary" href="https://github.com/nbardy/buddies/releases/latest/download/Buddies-macos-arm64.dmg">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.37 12.6c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.77-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-2.99-.79-1.54.02-2.96.9-3.75 2.27-1.6 2.78-.41 6.89 1.15 9.14.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.39-.92-2.4-3.66zM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.02.61-2.67 1.37-.58.67-1.09 1.76-.96 2.8 1.02.08 2.06-.52 2.69-1.28z"/></svg>
+                Download for Mac
+            </a>
+            <ol style="margin-top: 1.1rem">
+                <li>Open the <code>.dmg</code> and drag <strong>Buddies</strong> into Applications.</li>
+                <li>Open Buddies. The first launch unpacks the app and takes about 15 seconds.</li>
+                <li>Setup checks Claude Code and Codex, installs whichever is missing, and shows the login command if you are not signed in.</li>
+            </ol>
+            <p><strong>First open:</strong> this early build is not notarized by Apple yet, so macOS says it cannot verify Buddies. Click <strong>Done</strong>, then open <strong>System Settings → Privacy &amp; Security</strong>, scroll to Buddies and click <strong>Open Anyway</strong>. Or, in Terminal:</p>
+            <pre>xattr -dr com.apple.quarantine /Applications/Buddies.app</pre>
+            <p>The app keeps its data in <code>~/Library/Application Support/Buddies</code>, separate from a source checkout. Intel Macs: run from source below.</p>
+        </section>
+
+        <section id="linux">
+            <h2>Linux <span class="tag">from source</span></h2>
+            <p>You need <strong>git</strong> and <strong>Node 22.13 or newer</strong>. <code>corepack enable</code> provides pnpm. Rust (for the native addons) is installed for you if it is missing.</p>
+            <pre>corepack enable
+git clone --recursive https://github.com/nbardy/buddies
+cd buddies
+pnpm install && pnpm build && pnpm start</pre>
+            <p>Then open <a href="http://localhost:7489">http://localhost:7489</a>. To change the code, run <code>pnpm dev</code> instead of build and start.</p>
+        </section>
+
+        <section id="windows">
+            <h2>Windows <span class="tag">WSL</span></h2>
+            <p>A Windows app is coming. Until then, run Buddies inside WSL (Windows Subsystem for Linux):</p>
+            <ol>
+                <li>In PowerShell as administrator: <code>wsl --install</code>, then restart and open <strong>Ubuntu</strong>.</li>
+                <li>Install Node 22.13 or newer inside Ubuntu (for example with <code>nvm</code>).</li>
+                <li>Run the Linux commands above inside Ubuntu.</li>
+                <li>Open <a href="http://localhost:7489">http://localhost:7489</a> in your Windows browser.</li>
+            </ol>
+        </section>
+
+        <section>
+            <h2>Your phone</h2>
+            <p>Buddies runs on your computer; your phone connects to it. In the app, open <strong>Setup → Connect mobile</strong> and scan the QR code.</p>
+        </section>
+    </div>
+</body>
+</html>
