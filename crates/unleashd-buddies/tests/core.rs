@@ -721,7 +721,10 @@ fn post_search_finds_words_only_in_channels_the_reader_may_read() {
     assert_eq!(hits(&buddy("peer"), "ranking"), ["Deploy the ranking model on Friday"], "a DM is private to its members");
     assert_eq!(hits(&buddy("ic"), "ranking").len(), 2, "a member finds its DM");
     assert_eq!(hits(&Actor::Owner, "ranking").len(), 2, "the owner reads every DM");
-    assert!(hits(&Actor::Owner, "rank* OR NEAR(").is_empty(), "operators are words, not syntax");
+    // FTS5 operators typed by the user are words: if any were syntax, these would find the ranking posts.
+    for typed in ["ranking AND friday", "ranking NOT zzzz", "body:ranking", "NEAR(ranking friday)"] {
+        assert!(hits(&Actor::Owner, typed).is_empty(), "{typed:?} is words, not syntax");
+    }
     assert!(matches!(s.search_posts(&buddy("gone"), WS, &SearchQuery::text("ranking"), None, 10), Err(CoreError::Denied(_))), "archived buddies cannot search");
 }
 

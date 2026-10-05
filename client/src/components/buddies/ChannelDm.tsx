@@ -38,7 +38,7 @@ import { CopyLinkButton } from './CopyLinkButton';
 import { HarnessPicker } from './HarnessPicker';
 import { buddyWrite, errorText } from './api';
 import { type OlderEdge, clockTime, useFollowBottom } from './channel-data';
-import { type DmRow, dmRows, lastOwnerText, tailRows } from './channel-dm';
+import { type DmRow, dmRows, lastOwnerText, startFailureText, tailRows } from './channel-dm';
 import { type ChannelTask, mediaMarkdown } from './channel-text';
 import './ChannelComposer.css';
 import './ChannelDm.css';
@@ -461,6 +461,7 @@ function DmGeneration({
     config && before && (config.provider !== before.provider || summary(config) !== summary(before))
       ? `${config.provider} · ${summary(config)}`
       : null;
+  const attempt = detailOf(useAtomValue(transcriptFamily(conversationId)))?.latestAttempt ?? null;
   const rows = dmRows(
     groups,
     queue,
@@ -471,6 +472,9 @@ function DmGeneration({
             ? `New chat · harness and model changed to ${changedTo}`
             : 'Context refreshed · New chat',
         }
+      : undefined,
+    config && attempt?.terminalCause === 'spawn_failed'
+      ? startFailureText(config.provider)
       : undefined
   );
   const shown = tailRows(rows, limit);
@@ -533,6 +537,12 @@ function DmRowView({
       );
     case 'notice':
       return <li className="channel-dm-notice">{row.label}</li>;
+    case 'failure':
+      return (
+        <li className="channel-dm-failure" role="alert">
+          {row.label}
+        </li>
+      );
     case 'lead':
       return (
         <li className={frame.lead}>

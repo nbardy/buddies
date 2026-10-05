@@ -153,8 +153,13 @@ CREATE INDEX event_buddy ON event(buddy_id, seq) WHERE buddy_id IS NOT NULL;
 
 /// Full-text search over post bodies: an external-content FTS5 index kept in step by triggers.
 /// Added after the T06b schema, so `open` creates it on a file that lacks it (and fills it once).
+/// `porter unicode61` stems at index AND query time ("posts" = "post", "marketing" = "market"),
+/// which is what lets a prefix term like `"market"*` find word forms; see `search.rs`. Files built
+/// with the plain tokenizer (before 2026-10-05) are rebuilt by `ensure_post_search`.
+/// `post_search_vocab` lists the index's terms; typo matching reads it.
 const POST_SEARCH: &str = r#"
-CREATE VIRTUAL TABLE post_search USING fts5(body, content='post', content_rowid='rowid');
+CREATE VIRTUAL TABLE post_search USING fts5(body, content='post', content_rowid='rowid', tokenize='porter unicode61');
+CREATE VIRTUAL TABLE post_search_vocab USING fts5vocab(post_search, 'row');
 CREATE TRIGGER post_search_insert AFTER INSERT ON post BEGIN
   INSERT INTO post_search(rowid, body) VALUES (new.rowid, new.body);
 END;
@@ -167,6 +172,14 @@ CREATE TRIGGER post_search_update AFTER UPDATE OF body ON post BEGIN
 END;
 INSERT INTO post_search(post_search) VALUES ('rebuild');
 "#;
+
+/// Removes the derived search index so POST_SEARCH can recreate it (triggers first: they name it).
+const DISCARD_POST_SEARCH: &str = "
+DROP TRIGGER IF EXISTS post_search_insert;
+DROP TRIGGER IF EXISTS post_search_delete;
+DROP TRIGGER IF EXISTS post_search_update;
+DROP TABLE IF EXISTS post_search_vocab;
+DROP TABLE IF EXISTS post_search;";
 
 /// `post_task` serves the Task filter (T22); without it the filter walked every post in ord order.
 /// Indexes for the self-references of `post`. With the search triggers in place SQLite plans the
@@ -275,10 +288,15 @@ fn ensure_post_search(conn: &Connection) -> Result<()> {
     conn.execute_batch(POST_REFERENCE_INDEXES)?;
     conn.execute_batch(TASK_LIVE_INDEX)?;
     conn.execute_batch(LIST_SCOPE_INDEXES)?;
-    let present: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'post_search')", [], |r| r.get(0))?;
-    match present {
-        true => Ok(()),
-        false => Ok(conn.execute_batch(&format!("BEGIN; {POST_SEARCH} COMMIT;"))?),
+    let sql: Option<String> = conn.query_row("SELECT (SELECT sql FROM sqlite_schema WHERE name = 'post_search')", [], |r| r.get(0))?;
+    match sql {
+        Some(sql) if sql.contains("porter") => Ok(()),
+        // The index predates the stemming tokenizer. It is derived data (`post` is the source of
+        // truth), so replace it in one transaction and let POST_SEARCH refill it: nothing is lost.
+        Some(_) => Ok(conn.execute_batch(&format!(
+            "BEGIN; {DISCARD_POST_SEARCH} {POST_SEARCH} COMMIT;"
+        ))?),
+        None => Ok(conn.execute_batch(&format!("BEGIN; {POST_SEARCH} COMMIT;"))?),
     }
 }
 
