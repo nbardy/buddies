@@ -10,6 +10,15 @@ gitignored. The files a cut is built from are kept read-only in `renders/<cut>-c
 | v10 | 2026-10-05 13:39 | picture `4d7f290`, sound `4af67b0` | Slam "AI Overload" blended with the robot reveal, the Drop launch song, the benefits marimba removed | full render (`render.mjs`, muted video + WAV), mux with `volume=-3.7dB`; details in `agent_notes/2026-10-05_launch-v10-render-provenance.md` | `launch-v10_4af67b0.mp4` (`06cfb007…`) |
 | v11 | not posted (step to v12) | `82af5d4` | logo holds 2 bars; swarm right after the home, 4 bars; benefits moved before the Vim line | `edit/stitch-v11.sh`: renders the open+home+swarm, features+subs and benefits; cuts every other section from the v10 picture | `launch-v11.mp4` (`1118a00a…`) |
 | v12 | 2026-10-05 14:17 | `9079273` | "Mobile Friendly!" first after the swarm, 2 bars, on footage P | `edit/stitch-v12.sh`: renders the mobile scene and the sound; cuts every other section from v11 | `launch-v12.mp4` (`92804ffb…`) |
+| v13 | 2026-10-05 14:50 | `432e886` | "Open Source" shimmers on the Vim card (owner pick); end card says github.com/nbardy/buddies | `edit/stitch-v13.sh`: renders vim+end; cuts frames 0–4965 from v12; v12's sound | `launch-v13.mp4` (`e98e9a83…`) |
+
+## Reproducing v13
+
+`renders/v13-chain/` holds the v12 chain plus `v13-vimend.video.mp4` (`eb22ac9e…`) and
+`launch-v13.mp4`. To re-make it: copy the chain into `edit/out/`, check out `432e886` and run
+`stitch-v13.sh`. Its join (v12 frame 4964 | new frame 4966) was checked by eye: the benefits frame
+is unchanged and the Vim card starts on black. The site poster is `brand/site-poster-v13.jpg`,
+frame 5130 (85.5 s).
 
 ## Reproducing v12
 
