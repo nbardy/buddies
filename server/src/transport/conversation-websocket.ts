@@ -6,8 +6,6 @@ import type {
   ConversationKind,
   ConversationRow,
   CreateKind,
-  ModelId,
-  Provider,
 } from '@unleashd/shared';
 import {
   CHAT_KIND,
@@ -52,9 +50,6 @@ export interface ResolvedBuddyConversation {
   context: BuddyContext;
   briefing: string;
   workingDirectory: string;
-  provider: Provider;
-  model?: ModelId;
-  reasoningEffort?: string;
 }
 
 export interface ConversationWebSocketDependencies {

@@ -4,7 +4,7 @@ import test from 'node:test';
 import { type Message, createDefaultConversationConfig } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { buddyFixture, rosterFixture } from './fixtures/buddy-roster';
+import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { inboxFixture, postFixture, publicChannel } from './fixtures/channel-posts';
 import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-conversations';
 register(
@@ -83,7 +83,12 @@ async function seed() {
 }
 
 const directory = () =>
-  workspaceDirectory([rosterFixture([lead], { id: WS, name: 'unleashd' })], WS, []);
+  workspaceDirectory(
+    [rosterFixture([lead], { id: WS, name: 'unleashd' })],
+    WS,
+    [],
+    CODEX_INSTALLED
+  );
 
 function desktop(dm: string) {
   return renderToStaticMarkup(

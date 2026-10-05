@@ -28,3 +28,6 @@ export function rosterFixture(
     ...overrides,
   };
 }
+
+/** The install agent every pre-2026-10-05 picker test assumed: Codex on PATH. */
+export const CODEX_INSTALLED = { kind: 'agent', provider: 'codex' } as const;

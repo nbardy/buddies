@@ -39,6 +39,8 @@ export const ChannelReferenceSchema = z.discriminatedUnion('kind', [
 export const ChannelComposerDraftSchema = z.object({
   text: z.string(),
   picked: z.array(ChannelReferenceSchema),
+  // Optional for old drafts. These are unsent explicit choices, never inferred seat copies.
+  mentionConfigs: z.array(OwnerPostMentionConfigSchema).optional(),
 });
 
 export type ChannelReference = z.infer<typeof ChannelReferenceSchema>;

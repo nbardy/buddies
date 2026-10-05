@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { ConversationBranch, ConversationConfig, ConversationKind } from '@unleashd/shared';
+import type { ConfigProvenance } from './config-records';
 import type { ConversationConfigService } from './config-service';
 import type { ConversationOptions, ConversationRuntime } from './runtime';
 
@@ -18,6 +19,7 @@ export interface CreateConversationInput extends CreationFingerprintInput {
   conversationId: string;
   commandId: string;
   buddyBriefing?: string;
+  provenance?: ConfigProvenance;
 }
 
 export interface ConversationCreationPorts {
@@ -58,6 +60,7 @@ export function createConversationService(ports: ConversationCreationPorts) {
       workingDirectory: input.workingDirectory,
       kind: input.kind,
       config: input.config,
+      provenance: input.provenance,
       creation: {
         commandId: input.commandId,
         fingerprint: creationFingerprint(input),
