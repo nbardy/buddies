@@ -1,7 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type { Actor, Buddy, Channel, Cursor, Post } from '@unleashd/buddies-core';
-import { type ConversationConfig, isHarnessRetryFailure } from '@unleashd/shared';
-import { buddyExecutionPreferences, configFromProviderPreferences } from '@unleashd/shared';
+import {
+  type ConversationConfig,
+  type InstalledAgent,
+  isHarnessRetryFailure,
+} from '@unleashd/shared';
+import {
+  NO_AGENT_INSTALLED,
+  buddyExecutionPreferences,
+  configFromProviderPreferences,
+} from '@unleashd/shared';
 import { awaitTurn } from '../conversations/await-turn';
 import type {
   ConversationRuntime,
@@ -136,6 +144,8 @@ export interface ChannelsPorts {
   conversations: StableConversationPorts;
   uploadsRoot(): string;
   gate: ReplyGate;
+  /** The agent an unpinned Buddy runs (providers/installed-agent.ts), read per resolution. */
+  installedAgent(): InstalledAgent;
   /** Who is replying changed, or a failure notice landed: push `channel_changed`. */
   channelChanged(channelId: string): void;
   logger?: Pick<Console, 'warn'>;
@@ -336,14 +346,24 @@ export function createChannels(ports: ChannelsPorts) {
     return { prompt: { fresh, resumed }, through };
   }
 
-  const profileConfig = (buddy: Buddy) =>
-    configFromProviderPreferences(
-      buddyExecutionPreferences({
+  // A `no-agent` profile throws inside runReply's try, so the thread gets a visible reply_failed
+  // notice and nothing is spawned (fresh-install trial 2026-10-05: an empty bubble).
+  const profileConfig = (buddy: Buddy): ConversationConfig => {
+    const execution = buddyExecutionPreferences(
+      {
         provider: buddy.provider ?? null,
         model: buddy.model ?? null,
         reasoning_effort: buddy.reasoningEffort ?? null,
-      })
+      },
+      ports.installedAgent()
     );
+    switch (execution.kind) {
+      case 'run':
+        return configFromProviderPreferences(execution);
+      case 'no-agent':
+        throw new Error(NO_AGENT_INSTALLED);
+    }
+  };
 
   // Pattern: one-definition (docs/patterns.md#one-definition)
   // A Buddy can post from a DM/worker rather than its derived thread seat. Following the stale

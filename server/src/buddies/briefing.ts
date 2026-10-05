@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Buddy, Doc } from '@unleashd/buddies-core';
-import type { BuddyContext, ModelId, Provider } from '@unleashd/shared';
+import type { BuddyContext, BuddyExecution, InstalledAgent } from '@unleashd/shared';
 import { buddyExecutionPreferences } from '@unleashd/shared';
 import { type BuddiesCore, buddyActor } from './core';
 
@@ -11,9 +11,8 @@ export interface ResolvedBuddyConversation {
   /** Opaque token the runtime compares to decide whether to re-brief (runtime.ts). */
   memoryGeneration: string;
   workingDirectory: string;
-  provider: Provider;
-  model?: ModelId;
-  reasoningEffort?: string;
+  /** The profile's harness/model, or `no-agent` (config-mapping.ts buddyExecutionPreferences). */
+  execution: BuddyExecution;
 }
 
 const MAX = { soul: 10_000, memory: 6_000, tasks: 4_000 } as const;
@@ -70,7 +69,8 @@ export async function readBuddyState(core: BuddiesCore, buddyId: string) {
  */
 export async function composeBriefing(
   core: BuddiesCore,
-  context: BuddyContext
+  context: BuddyContext,
+  installed: InstalledAgent
 ): Promise<ResolvedBuddyConversation> {
   const buddy: Buddy = await core.getBuddy(context.buddyId);
   if (buddy.status !== 'active')
@@ -133,11 +133,14 @@ export async function composeBriefing(
     // promptly (identity, soul, memory) and leaves out what changes every turn (tasks).
     memoryGeneration: `memory:${working?.revision ?? 0}:${longTerm?.revision ?? 0}:identity:${identity}`,
     workingDirectory: workspace.rootPath,
-    ...buddyExecutionPreferences({
-      provider: buddy.provider ?? null,
-      model: buddy.model ?? null,
-      reasoning_effort: buddy.reasoningEffort ?? null,
-    }),
+    execution: buddyExecutionPreferences(
+      {
+        provider: buddy.provider ?? null,
+        model: buddy.model ?? null,
+        reasoning_effort: buddy.reasoningEffort ?? null,
+      },
+      installed
+    ),
   };
 }
 
@@ -150,11 +153,11 @@ export type Briefings = ReturnType<typeof createBriefings>;
  * runner (and the conversation creator) warm the entry right before each turn, so `current` reads
  * what was just composed. A cold entry is an error, never an empty briefing.
  */
-export function createBriefings(core: BuddiesCore) {
+export function createBriefings(core: BuddiesCore, installed: () => InstalledAgent) {
   const cache = new Map<string, ResolvedBuddyConversation>();
   return {
     async warm(context: BuddyContext): Promise<ResolvedBuddyConversation> {
-      const resolved = await composeBriefing(core, context);
+      const resolved = await composeBriefing(core, context, installed());
       cache.set(keyOf(context), resolved);
       return resolved;
     },

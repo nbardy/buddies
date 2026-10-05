@@ -75,6 +75,7 @@ import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { createDependencyChecks, registerDependencyRoutes } from './providers/dependencies';
+import { installedAgent } from './providers/installed-agent';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
@@ -296,7 +297,7 @@ const buddiesCore = lateBoundCore(buddiesReady);
 const buddyEvents = createBuddyEvents();
 // A grant lives as long as its run's lease at most; settle and turn end revoke it sooner.
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
-const buddyBriefings = createBriefings(buddiesCore);
+const buddyBriefings = createBriefings(buddiesCore, () => installedAgent());
 let buddyMcp: McpEndpoint | null = null;
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {
   if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
@@ -570,6 +571,7 @@ const buddyConversations: StableConversationPorts = {
 const channelChanged = (channelId: string) =>
   applicationContext.broadcast({ type: 'channel_changed', channelId });
 const buddyChannels = createChannels({
+  installedAgent: () => installedAgent(),
   core: buddiesCore,
   events: buddyEvents,
   channelChanged,

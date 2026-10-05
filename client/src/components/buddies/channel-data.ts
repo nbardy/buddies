@@ -11,6 +11,7 @@
  */
 import {
   type BuddyMemberExecution,
+  type InstalledAgent,
   type MessageBody,
   ProviderSchema,
   buddyExecutionPreferences,
@@ -22,6 +23,7 @@ import { type UIEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } f
 import { type OutboxEntry, channelOutboxAtom, outboxDrop } from '../../atoms/channel-outbox';
 import { warmResources } from '../../atoms/prefetch';
 import { invalidateBuddyResources, seedResource } from '../../atoms/resources';
+import { DEPENDENCIES_STATUS } from '../../hooks/dependencies-status';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { type PolledState, resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import { buddyApi, buddyWrite } from './api';
@@ -502,29 +504,35 @@ export function postPurposeLabel(post: Post): string | null {
 
 /**
  * What a mentioned Buddy's reply runs on when nobody picks: its profile, the
- * shared profile mapping used by the server's seat creation. A provider the client's schema
- * does not know is `unreported` — the picker cannot open at it honestly.
+ * shared profile mapping used by the server's seat creation, given the same install agent
+ * the server reads (GET /api/dependencies `agent`). A provider the client's schema
+ * does not know is `unreported` — the picker cannot open at it honestly. `agent` is null
+ * until that read lands; a profile that needs it is `resolving` (sends wait, like a seat load).
  */
-function profileExecution(buddy: Buddy): BuddyMemberExecution {
+function profileExecution(buddy: Buddy, agent: InstalledAgent | null): BuddyMemberExecution {
   if (buddy.provider && !ProviderSchema.safeParse(buddy.provider).success)
     return { kind: 'unreported' };
-  return {
-    kind: 'profile',
-    config: configFromProviderPreferences(
-      buddyExecutionPreferences({
-        provider: buddy.provider ?? null,
-        model: buddy.model ?? null,
-        reasoning_effort: buddy.reasoningEffort ?? null,
-      })
-    ),
+  const profile = {
+    provider: buddy.provider ?? null,
+    model: buddy.model ?? null,
+    reasoning_effort: buddy.reasoningEffort ?? null,
   };
+  // A pinned profile never reads the agent, so it resolves even before the agent is known.
+  const execution = buddyExecutionPreferences(profile, agent ?? { kind: 'none' });
+  switch (execution.kind) {
+    case 'run':
+      return { kind: 'profile', config: configFromProviderPreferences(execution) };
+    case 'no-agent':
+      return agent === null ? { kind: 'resolving' } : { kind: 'no-agent' };
+  }
 }
 
 // The universal @ menu: active Buddies and every live top-level Task (todos
 // are child tasks and stay out); the fuzzy ranker orders them together.
 function channelReferences(
   members: readonly Buddy[],
-  tasks: readonly ChannelTask[]
+  tasks: readonly ChannelTask[],
+  agent: InstalledAgent | null
 ): ChannelReference[] {
   return [
     ...members.map(
@@ -533,7 +541,7 @@ function channelReferences(
         id: member.id,
         label: member.name,
         detail: member.role,
-        execution: profileExecution(member),
+        execution: profileExecution(member, agent),
       })
     ),
     ...tasks
@@ -571,7 +579,8 @@ const NO_OVERVIEW: BuddyOverview = [];
 export function workspaceDirectory(
   overview: BuddyOverview,
   workspaceId: string,
-  tasks: readonly Task[]
+  tasks: readonly Task[],
+  agent: InstalledAgent | null
 ): WorkspaceDirectory {
   const workspace = findWorkspace(overview, workspaceId);
   const buddyNames = buddyNamesOf(overview);
@@ -584,7 +593,7 @@ export function workspaceDirectory(
     taskById: new Map(viewed.map((task) => [task.id, task])),
     tasks,
     rootPath: workspace?.rootPath ?? null,
-    references: channelReferences(activeMembers, viewed),
+    references: channelReferences(activeMembers, viewed, agent),
   };
 }
 
@@ -596,9 +605,13 @@ export function workspaceTasksUrl(workspaceId: string): string {
 export function useWorkspaceDirectory(workspaceId: string): WorkspaceDirectory {
   const overview = useBuddyOverview(CHANNEL_BACKSTOP_MS);
   const tasks = usePolledFetch<Task[]>(workspaceTasksUrl(workspaceId), 15_000);
+  // Polled so a first-boot install that lands while a channel is open flips the picker
+  // from "Needs an agent" to the installed agent without a reload.
+  const agent = usePolledFetch(DEPENDENCIES_STATUS, 15_000).data?.agent ?? null;
   return useMemo(
-    () => workspaceDirectory(overview.data ?? NO_OVERVIEW, workspaceId, tasks.data ?? NO_TASKS),
-    [overview.data, workspaceId, tasks.data]
+    () =>
+      workspaceDirectory(overview.data ?? NO_OVERVIEW, workspaceId, tasks.data ?? NO_TASKS, agent),
+    [overview.data, workspaceId, tasks.data, agent]
   );
 }
 

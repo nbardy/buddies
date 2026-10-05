@@ -1,15 +1,12 @@
-import { DependenciesSchema, type DependencyCheck } from '@unleashd/shared';
+import type { DependencyCheck } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { setSetupDismissed, setupDismissedAtom } from '../../atoms/ui';
-import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
+import { DEPENDENCIES_STATUS } from '../../hooks/dependencies-status';
+import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { DependencyCommand, SURFACE, buttonStyle } from './setup-ui';
 
-const STATUS = resource('/api/dependencies', async (signal) => {
-  const response = await fetch('/api/dependencies', { signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return DependenciesSchema.parse(await response.json());
-});
+const STATUS = DEPENDENCIES_STATUS;
 
 // Pattern: table-driven (docs/patterns.md#table-driven)
 const GUIDES = {

@@ -24,7 +24,7 @@ export function fakeBuddyPort(
     currentBriefing: (context) => ({
       context,
       workingDirectory: '/tmp',
-      provider: 'codex',
+      execution: { kind: 'run', provider: 'codex', model: undefined, reasoningEffort: undefined },
       ...(options.briefing?.(context) ?? { briefing: 'FIXTURE_BRIEFING', memoryGeneration: '1' }),
     }),
     enqueueChat: options.enqueueChat ?? (() => `turn-${++turns}`),

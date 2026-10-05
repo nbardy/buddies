@@ -63,6 +63,12 @@ export function BuddyRailRow({
         </button>
       </span>
       <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
+      {/* The fresh-install trial's failures hid in a tooltip; "No agent is installed" must show. */}
+      {action.kind === 'failed' && (
+        <span className="channel-browser-buddy-error" role="alert">
+          {action.message}
+        </span>
+      )}
     </li>
   );
 }

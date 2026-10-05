@@ -62,6 +62,8 @@ import {
 } from '../src/conversations/runtime';
 import { replaceRuntimeConfig } from '../src/conversations/runtime-config';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
+import { installedAgent } from '../src/providers/installed-agent';
+import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
 import { recordStore } from './fixtures/records';
 
 // The Buddy server end to end through its real boundaries: the crate on a temp DB, the HTTP MCP
@@ -174,7 +176,13 @@ async function world() {
   const seen: BuddyEvent[] = [];
   events.on((event) => seen.push(event));
   const grants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
-  const briefings = createBriefings(core);
+  // The install's PATH, as real files: an unpinned Buddy runs what is here (installed-agent.ts).
+  // Codex by default, the behaviour every older test was written against.
+  const agentBin = join(scratch, 'agent-bin');
+  mkdirSync(agentBin);
+  writeFileSync(join(agentBin, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
+  const installed = () => installedAgent({ PATH: agentBin });
+  const briefings = createBriefings(core, installed);
   const endpoint = await startMcpEndpoint({
     core,
     events,
@@ -353,6 +361,7 @@ async function world() {
   const channels = createChannels({
     core,
     events,
+    installedAgent: installed,
     conversations: stable,
     uploadsRoot: () => join(scratch, 'uploads'),
     gate: async ({ config }) => {
@@ -374,6 +383,7 @@ async function world() {
     announce: (post: Post, picks: MentionPicks = NO_PICKS) =>
       events.emit({ kind: 'posted', post, channel: general, picks }),
     ws,
+    agentBin,
     lead,
     designer,
     general,
@@ -1323,6 +1333,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     const reloaded = createChannels({
       core: w.core,
       events,
+      installedAgent: () => installedAgent({ PATH: w.agentBin }),
       uploadsRoot: () => join(w.scratch, 'uploads'),
       conversations: { ...w.stable, slot: async (id) => slotOf(await reopened.getRecord(id)) },
       gate: async ({ config }) => {
@@ -1630,6 +1641,90 @@ test("a model-only Buddy profile opens its DM on the model's harness", async () 
     await assert.rejects(w.channels.openDirect(explicit.id), /Model is unavailable for codex/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await w.close();
+  }
+});
+
+// Fresh-install trial 2026-10-05 (todo_57268f4b): with only Claude installed, the bootstrap's
+// Product Dev ran a hardcoded Codex fallback, `spawn codex ENOENT`, and the owner saw an empty
+// bubble. An unpinned Buddy now runs what is on PATH, read per open (the first-boot install is
+// async), refuses visibly when nothing is, and an owner's pin is never replaced.
+// Design: agent_notes/2026-10-05_installed-provider-default-design.md.
+test('an unpinned Buddy runs the installed agent; a pinned one never moves', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  const install = (name: string) =>
+    writeFileSync(join(w.agentBin, name), '#!/bin/sh\n', { mode: 0o755 });
+  try {
+    rmSync(join(w.agentBin, 'codex'));
+    const home = await bootstrapUnleashdHome(w.core, w.scratch);
+    const upstream = await w.core.openChannel(OWNER, { kind: 'id', id: home.channelId });
+    const mention = async (key: string) => {
+      const post = await w.post(
+        OWNER,
+        { kind: 'id', id: upstream.id },
+        {
+          kind: 'inform',
+          body: `[@Product Dev](buddy:${home.productDevId}) status?`,
+          evidence: [],
+          broadcast: false,
+          key,
+        }
+      );
+      w.emit({ kind: 'posted', post, channel: upstream, picks: NO_PICKS });
+      return post;
+    };
+    const dmConfig = async (buddyId: string) => {
+      const opened = await http('POST', `/api/buddies/${buddyId}/direct`, {});
+      assert.equal(opened.status, 200, JSON.stringify(opened.body));
+      const id = (opened.body as unknown as { conversationId: string }).conversationId;
+      return { id, config: w.conversations.get(id)!.config };
+    };
+
+    // 1. Nothing installed: no spawn, and both entry points say why.
+    const refused = await http('POST', `/api/buddies/${home.productDevId}/direct`, {});
+    assert.notEqual(refused.status, 200);
+    assert.match(JSON.stringify(refused.body), /No agent is installed/);
+    const asked = await mention('no-agent');
+    const notice = await until(
+      async () =>
+        (await w.core.listPosts(OWNER, { kind: 'thread', rootId: asked.id }, null, 20)).posts.find(
+          (post) => post.purpose === 'reply_failed'
+        ),
+      'a visible reply_failed notice'
+    );
+    assert.match(notice.body, /No agent is installed/);
+    assert.equal(w.turns.length, 0, 'nothing was spawned');
+
+    // 2. Claude lands after startup: the next open and the next mention run it, no restart.
+    install('claude');
+    const productDm = await dmConfig(home.productDevId);
+    assert.equal(productDm.config.provider, 'claude');
+    await mention('claude-installed');
+    await until(() => w.turns.length === 1, 'the mention reply runs');
+    assert.equal(w.turns[0].request.harness, 'claude');
+
+    // 3. The owner pins the Release Manager to Codex while only Claude is installed. A bootstrap
+    // re-run and an open both keep the pin: it is the owner's, never the install's to replace.
+    const pinned = await http('PATCH', `/api/buddies/${home.releaseManagerId}`, {
+      provider: 'codex',
+      reasoningEffort: 'high',
+      key: 'pin-release-manager',
+    });
+    assert.equal(pinned.status, 200, JSON.stringify(pinned.body));
+    await bootstrapUnleashdHome(w.core, w.scratch);
+    const manager = await w.core.getBuddy(home.releaseManagerId);
+    assert.equal(manager.provider, 'codex');
+    assert.equal(manager.reasoningEffort, 'high');
+    const managerDm = await dmConfig(home.releaseManagerId);
+    assert.equal(managerDm.config.provider, 'codex');
+    assert.deepEqual(managerDm.config.reasoning, { mode: 'explicit', effort: 'high' });
+
+    // 4. Codex is installed later: the existing DM keeps the model it ran (owner rule step 1).
+    install('codex');
+    assert.deepEqual(await dmConfig(home.productDevId), productDm);
+  } finally {
+    server.close();
     await w.close();
   }
 });
@@ -2249,7 +2344,7 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     );
     assert.equal(JSON.parse(receipt.payload).status, 'complete');
 
-    const next = await composeBriefing(core, chat('chat-B'));
+    const next = await composeBriefing(core, chat('chat-B'), { kind: 'agent', provider: 'codex' });
     assert.match(next.briefing, /step 2 of 3 done/, 'working memory reaches the next chat');
     assert.match(next.briefing, /Owner prefers restrained UI/, 'long-term memory reaches it');
     const ownerTab = await core.readDoc(OWNER, {
@@ -2275,7 +2370,7 @@ test('briefing generation tracks its MCP guide and scope identity', async () => 
   const w = await world();
   const context = { buddyId: w.lead.id, workspaceId: w.ws };
   try {
-    const before = await composeBriefing(w.core, context);
+    const before = await composeBriefing(w.core, context, { kind: 'agent', provider: 'codex' });
     assert.match(before.briefing, new RegExp(`Your ids: buddyId ${w.lead.id}`));
     const identity = createHash('sha256')
       .update(JSON.stringify([w.lead.name, w.lead.role, 0, w.lead.id, w.ws, BUDDY_TOOL_GUIDE]))

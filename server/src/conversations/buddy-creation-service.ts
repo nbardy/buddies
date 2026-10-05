@@ -5,7 +5,7 @@ import type {
   ConversationConfig,
 } from '@unleashd/shared';
 import { bodyText, buddyKind } from '@unleashd/shared';
-import { configFromProviderPreferences } from '@unleashd/shared';
+import { NO_AGENT_INSTALLED, configFromProviderPreferences } from '@unleashd/shared';
 import type { ResolvedBuddyConversation } from '../buddies/briefing';
 import { type ConfigProvenance, INITIAL_MESSAGE_DISPATCH_LEASE_MS } from './config-records';
 import type { ConversationConfigService } from './config-service';
@@ -202,12 +202,15 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
     dispatchRetryTimers.set(conversation.id, timer);
   }
 
+  // Only a conversation with no config yet asks its profile, so `no-agent` refuses exactly the
+  // opens that would otherwise spawn a missing binary; existing conversations keep theirs.
   function resolveConfig(resolved: ResolvedBuddyConversation): ConversationConfig {
-    return configFromProviderPreferences({
-      provider: resolved.provider,
-      model: resolved.model,
-      reasoningEffort: resolved.reasoningEffort,
-    });
+    switch (resolved.execution.kind) {
+      case 'run':
+        return configFromProviderPreferences(resolved.execution);
+      case 'no-agent':
+        throw new Error(NO_AGENT_INSTALLED);
+    }
   }
 
   async function createServerBuddyConversation(

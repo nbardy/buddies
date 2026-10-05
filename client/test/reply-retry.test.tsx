@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { buddyFixture, rosterFixture } from './fixtures/buddy-roster';
+import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { postFixture } from './fixtures/channel-posts';
 
 register(
@@ -29,7 +29,8 @@ test('an unseated mention follows the model-only profile on its actual harness',
     model: 'claude-opus-5-5',
     reasoningEffort: 'high',
   });
-  const ref = workspaceDirectory([rosterFixture([buddy])], 'ws-1', []).references[0];
+  const ref = workspaceDirectory([rosterFixture([buddy])], 'ws-1', [], CODEX_INSTALLED)
+    .references[0];
   assert.equal(ref.kind, 'buddy');
   if (ref.kind !== 'buddy') throw new Error('missing Buddy');
   const choice = mentionChoice(ref, new Map(), []);
@@ -38,6 +39,27 @@ test('an unseated mention follows the model-only profile on its actual harness',
   assert.deepEqual(choice.config.model, { mode: 'explicit', modelId: 'claude-opus-5-5' });
   assert.deepEqual(choice.config.reasoning, { mode: 'explicit', effort: 'high' });
   assert.equal(choiceLabel(choice, null), 'claude-opus-5-5 · high');
+});
+
+// Fresh-install trial 2026-10-05: the chip of an unpinned Buddy said one model while a
+// hardcoded Codex ran. It now resolves from the install's agent, the same value the server
+// reads (GET /api/dependencies), and says "Needs an agent" when there is none.
+test('an unpinned mention follows the installed agent; a pinned one ignores it', () => {
+  const unpinned = buddyFixture({ id: 'dev', name: 'Product Dev' });
+  const pinned = buddyFixture({ id: 'rm', name: 'Release Manager', provider: 'codex' });
+  const label = (agent: Parameters<typeof workspaceDirectory>[3], index: number) => {
+    const ref = workspaceDirectory([rosterFixture([unpinned, pinned])], 'ws-1', [], agent)
+      .references[index];
+    if (ref.kind !== 'buddy') throw new Error('missing Buddy');
+    return choiceLabel(mentionChoice(ref, new Map(), []), null);
+  };
+  const claudeOnly = { kind: 'agent', provider: 'claude' } as const;
+  assert.match(label(claudeOnly, 0), /^claude/);
+  assert.match(label(claudeOnly, 1), /^codex/, 'the owner pin is not the install default');
+  assert.equal(label({ kind: 'none' }, 0), 'Needs an agent');
+  assert.match(label({ kind: 'none' }, 1), /^codex/);
+  assert.equal(label(null, 0), 'Loading model…', 'unknown agent waits, it does not guess');
+  assert.match(label(null, 1), /^codex/);
 });
 
 // The weekly-limit reply gate used a different error envelope and lost the retry button.

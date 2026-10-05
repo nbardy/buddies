@@ -393,13 +393,15 @@ export function parseChannelLink(href: string): ChannelLink {
 // showed the profile default there, the wrong baseline for a change). `profile`
 // is exact only when the Buddy has no seat here yet. `unreported` is a profile
 // whose harness this client's schema does not know (channel-data.ts
-// profileExecution); there is nothing honest to open the picker at.
+// profileExecution); there is nothing honest to open the picker at. `no-agent` is an
+// unpinned profile on an install with no agent: the reply would fail, so the chip says so.
 export type MentionChoice =
   | { kind: 'chosen'; config: ConversationConfig }
   | { kind: 'seat'; config: ConversationConfig }
   | { kind: 'profile'; config: ConversationConfig }
   | { kind: 'loading' }
-  | { kind: 'unreported' };
+  | { kind: 'unreported' }
+  | { kind: 'no-agent' };
 
 export function mentionChoice(
   buddy: BuddyReference,
@@ -416,10 +418,24 @@ export function mentionChoice(
       return { kind: 'profile', config: buddy.execution.config };
     case 'unreported':
       return { kind: 'unreported' };
+    case 'resolving':
+      return { kind: 'loading' };
+    case 'no-agent':
+      return { kind: 'no-agent' };
   }
 }
 
 export function choiceLabel(choice: MentionChoice, catalog: ProviderCatalog | null): string {
-  if (choice.kind === 'loading') return 'Loading model…';
-  return choice.kind === 'unreported' ? 'default' : modelSummary(choice.config, catalog);
+  switch (choice.kind) {
+    case 'loading':
+      return 'Loading model…';
+    case 'unreported':
+      return 'default';
+    case 'no-agent':
+      return 'Needs an agent';
+    case 'chosen':
+    case 'seat':
+    case 'profile':
+      return modelSummary(choice.config, catalog);
+  }
 }

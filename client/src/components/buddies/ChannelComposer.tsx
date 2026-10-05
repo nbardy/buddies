@@ -505,13 +505,18 @@ function MentionChip({
       data-chosen={choice.kind === 'chosen' || undefined}
       aria-haspopup="dialog"
       aria-expanded={open}
-      disabled={choice.kind === 'unreported' || choice.kind === 'loading'}
+      disabled={
+        choice.kind === 'unreported' || choice.kind === 'loading' || choice.kind === 'no-agent'
+      }
+      data-no-agent={choice.kind === 'no-agent' || undefined}
       title={
         choice.kind === 'loading'
           ? 'Loading this thread’s reply model'
           : choice.kind === 'unreported'
             ? 'This Buddy runs on a harness the picker does not know'
-            : `Choose the harness and model for ${buddy.label}’s reply`
+            : choice.kind === 'no-agent'
+              ? `No agent is installed, so ${buddy.label} cannot reply. Install Claude Code or Codex from Setup.`
+              : `Choose the harness and model for ${buddy.label}’s reply`
       }
       onMouseDown={(event) => event.preventDefault()}
       onClick={onOpen}
