@@ -328,11 +328,12 @@ fn ensure_post_search(conn: &Connection) -> Result<()> {
 ///   the rule "unexecuted → requeue" would REPLAY every legacy running turn (the August rule
 ///   forbids it). Guard: `the_run_rebuild_keeps_every_row_and_requeues_no_legacy_running_run`;
 /// - every other row is copied unchanged (pool order, no lane, no body).
-fn rebuild_run(conn: &Connection) -> Result<()> {
+fn rebuild_run(conn: &Connection, path: &str) -> Result<()> {
     let sql: String = conn.query_row("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'run'", [], |r| r.get(0))?;
     if sql.contains("'mention'") {
         return Ok(());
     }
+    backup_before_rebuild(conn, path)?;
     // Outside the transaction (SQLite ignores it inside one). Nothing references run(id); the
     // check after the commit proves the swap left nothing dangling.
     conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
@@ -366,6 +367,20 @@ fn rebuild_run(conn: &Connection) -> Result<()> {
     }
 }
 
+/// The pre-migration copy (owner requirement, 2026-10-05). After the rebuild an older build cannot
+/// read the `run` table (new kinds → Corrupt), so this file is the only way back to it. Taken
+/// before the rebuild's first write, next to the database, named after the schema it holds
+/// (`run-v1`: the table before durable intake) and the time. `VACUUM INTO` writes one consistent
+/// file that includes the WAL, unlike copying the main file. If it fails (a full disk), the open
+/// fails and nothing is migrated: a migration without its way back never runs.
+/// Guard: `the_run_rebuild_leaves_a_pre_migration_copy_at_the_old_schema`.
+fn backup_before_rebuild(conn: &Connection, path: &str) -> Result<()> {
+    let backup = format!("{path}.before-durable-intake.run-v1.{}.sqlite", chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ"));
+    conn.execute("VACUUM INTO ?1", [&backup])?;
+    eprintln!("[buddies-core] run table rebuild (durable intake): pre-migration copy at {backup}");
+    Ok(())
+}
+
 fn configure(conn: &Connection) -> Result<()> {
     // checkpoint_fullfsync: macOS fsync() skips the drive cache, and a power cut mid-checkpoint
     // corrupted the attempt store on 2026-09-30. Only checkpoints pay for F_FULLFSYNC.
@@ -388,7 +403,7 @@ pub fn open(path: &str) -> Result<Connection> {
             drop_run_retry_of(&conn)?;
             drop_buddy_background_enabled(&conn)?;
             ensure_run_config(&conn)?;
-            rebuild_run(&conn)?;
+            rebuild_run(&conn, path)?;
             conn.execute_batch(RUN_INDEXES)?;
             ensure_threads(&conn)?;
             ensure_post_search(&conn)?;

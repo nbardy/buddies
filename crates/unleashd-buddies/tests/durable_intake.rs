@@ -213,6 +213,38 @@ fn the_run_rebuild_keeps_every_row_and_requeues_no_legacy_running_run() {
 
 // Design Revision 3: the build that adds the CHECK must accept every chat send. A chat run is
 // written with its body by the typed API, refused without one by SQL, and loses it at settle.
+// Owner requirement 2026-10-05: once rebuilt, an older build cannot read the `run` table, so the
+// migration leaves the file it started from. The copy sits next to the database, holds the OLD
+// `run` DDL with every row as it was (the queued chat still queued), and a second open makes no
+// second copy. Mutation: take the copy after the rebuild and it holds 'mention' and the cancelled chat.
+#[test]
+fn the_run_rebuild_leaves_a_pre_migration_copy_at_the_old_schema() {
+    let rows = every_shape();
+    let (f, path) = old_file("current", &rows);
+    drop(f.store);
+    let copies = || -> Vec<std::path::PathBuf> {
+        let dir = std::path::Path::new(&path).parent().unwrap();
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.to_str().unwrap().contains(".before-durable-intake.run-v1."))
+            .collect()
+    };
+    assert!(copies().is_empty());
+    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap());
+    let copies = copies();
+    assert_eq!(copies.len(), 1, "one copy, taken once: {copies:?}");
+    let copy = Connection::open(&copies[0]).unwrap();
+    let sql: String = copy.query_row("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'run'", [], |r| r.get(0)).unwrap();
+    assert!(!sql.contains("'mention'"), "the copy holds the pre-rebuild run table");
+    let count: i64 = copy.query_row("SELECT count(*) FROM run", [], |r| r.get(0)).unwrap();
+    assert_eq!(count, rows.len() as i64);
+    let queued_chats: i64 =
+        copy.query_row("SELECT count(*) FROM run WHERE input_kind = 'chat' AND status = 'queued'", [], |r| r.get(0)).unwrap();
+    assert!(queued_chats > 0, "the copy predates the queued-chat disposition");
+}
+
 #[test]
 fn a_queued_chat_always_has_its_text_and_settling_clears_it() {
     let mut f = fixture();
