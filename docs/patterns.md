@@ -177,6 +177,8 @@ sat `conversation_busy` behind one owner turn for up to 2h44m and a Buddy offere
 Decision: `agent_notes/2026-10-01_return-route-decision.md`. Guards: buddies-v2 "an answer to a request
 sent from a human chat starts no run and never queues behind that chat"; crate
 `an_inbox_request_starts_no_run_for_its_answer_or_failure`.
+**Read answers:** a requester that reads its answer settles its own queued return run (`settle_read_returns`,
+`posts.rs`, `consumed`); guard `reading_an_answer_settles_its_queued_return_run`.
 
 ## store-descriptor-isolation
 **Smell:** backend code opens a file that happens to be a live SQLite store (or its `-wal`/`-shm`): a

@@ -2113,6 +2113,72 @@ test('runs retry re-runs a failed worker as attempt 2 on another model and wakes
   }
 });
 
+// Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01 (task_01a0f7ff-bbd6): a background
+// requester read its answer in the turn still running, yet the queued `reply` run stayed to resume
+// that turn with the same answer (cancelled by hand 17 minutes later). Reading the answer settles
+// the return with no model turn, while the original turn is still running. The unread case is
+// "runs retry ... wakes the requester with its answer" above.
+test('an answer the requester already read settles its return run with no model turn', async () => {
+  const w = await world();
+  try {
+    let request!: Post;
+    let whileRunning: Run[] = [];
+    w.during.set(1, async (turn) => {
+      const posted = await call(turn.mcp, 'post', {
+        channel: { direct: [w.designer.id] },
+        kind: 'request',
+        body: 'Draw the logo',
+        key: 'ask-logo',
+      });
+      assert.equal(posted.isError, false, posted.text);
+      request = posted.value;
+      await until(
+        async () => (await w.core.getPost(OWNER, request.id)).request.state === 'answered',
+        'the answer while the requester turn runs'
+      );
+      const read = await call(turn.mcp, 'channel_read', { read: { threadId: request.id } });
+      assert.equal(read.isError, false, read.text);
+      whileRunning = await w.runs(w.lead.id);
+    });
+    w.answers.set(2, 'Logo drawn');
+    const schedule = await w.core.putSchedule(OWNER, {
+      buddyId: w.lead.id,
+      name: 'logo',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      prompt: 'Get the logo drawn',
+      limits: '{}',
+      enabled: true,
+      key: 'logo',
+    });
+    await w.core.enqueueRun(OWNER, {
+      buddyId: w.lead.id,
+      input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
+    });
+    w.emit({ kind: 'changed' });
+
+    const leadRuns = await until(async () => {
+      const runs = await w.runs(w.lead.id);
+      return runs.length === 2 && runs.every((r) => r.status !== 'queued' && r.status !== 'running') && runs;
+    }, "the requester's schedule run and its settled return");
+    const returned = leadRuns.find((r) => r.input.kind === 'reply')!;
+    assert.equal(returned.status, 'cancelled');
+    assert.equal(returned.errorCode, 'consumed');
+    assert.equal(
+      whileRunning.find((r) => r.input.kind === 'reply')?.status,
+      'cancelled',
+      'settled by the read itself, not after the turn ended'
+    );
+    assert.equal(
+      w.turns.some((t) => t.request.prompt.includes('was answered')),
+      false,
+      'no model turn repeated the answer'
+    );
+  } finally {
+    await w.close();
+  }
+});
+
 /** A PATH of real executables: what the reviewer's harness probe walks (providers/installed-agent). */
 function binPath(dir: string, ...names: string[]): NodeJS.ProcessEnv {
   const bin = join(dir, 'review-bin');
