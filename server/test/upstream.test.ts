@@ -13,7 +13,7 @@ import { OWNER, managerRef } from '../src/buddies/core';
 import { createBuddyEvents } from '../src/buddies/events';
 import { checkUpstream, resolveCheckout } from '../src/upstream/git-upstream';
 import { createUpstreamService } from '../src/upstream/routes';
-import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
+import { BOOTSTRAP_KEY, bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
 
 // Real git repositories and a real Buddies core (the crate). The only stand-in
 // is the owner-mention responder, whose job is starting a provider turn.
@@ -171,6 +171,115 @@ test('bootstrap reuses an existing "Product Development Lead" as Product Dev', a
   assert.deepEqual(second, first);
   assert.deepEqual(await namedInWorkspace(core, workspace.id, 'Product Dev'), []);
   assert.equal((await core.listBuddies(workspace.id)).length, 2);
+});
+
+const soulOf = async (core: BuddiesCore, buddyId: string) =>
+  (await core.readDoc(OWNER, { buddyId, scope: { kind: 'buddy' }, kind: 'soul', name: '' }))
+    ?.content;
+
+test('bootstrap on a fresh store uses the Buddies copy', async (t) => {
+  const repoRoot = realpathSync(mkdtempSync(join(tmpdir(), 'unleashd-home-fresh-')));
+  t.after(() => rmSync(repoRoot, { recursive: true, force: true }));
+  const core = await openCore(repoRoot);
+  const home = await bootstrapUnleashdHome(core, repoRoot);
+  const [workspace] = await core.listWorkspaces();
+  assert.equal(workspace.name, 'Buddies');
+  const everyBuddy = await core.listBuddies(home.workspaceId);
+  const copy = [
+    ...everyBuddy.map((buddy) => buddy.role),
+    ...(await Promise.all(everyBuddy.map((buddy) => soulOf(core, buddy.id)))),
+    ...(await core.inbox(OWNER, home.workspaceId)).channels.map(({ channel }) =>
+      channel.kind.type === 'public' ? channel.kind.purpose : ''
+    ),
+  ].join('\n');
+  assert.match(copy, /Buddies install/);
+  assert.doesNotMatch(copy, /Unleashd/);
+});
+
+// Regression guard for the 2026-10 public rename: the bootstrap runs on every start, so
+// changing the copy constants must not rewrite or duplicate what a pre-rename install has.
+// A "find the workspace/seat by its new display name" implementation fails every assertion.
+test('bootstrap after the rename leaves a pre-rename install untouched', async (t) => {
+  const repoRoot = realpathSync(mkdtempSync(join(tmpdir(), 'unleashd-home-prerename-')));
+  t.after(() => rmSync(repoRoot, { recursive: true, force: true }));
+  const core = await openCore(repoRoot);
+
+  // The OLD bootstrap's output, byte for byte: old copy under the old keys.
+  const oldSoul = 'You are Product Dev for this Unleashd install.';
+  const workspace = await core.createWorkspace(OWNER, { name: 'unleashd', rootPath: repoRoot });
+  const channel = await core.createChannel(OWNER, {
+    workspaceId: workspace.id,
+    name: 'upstream',
+    purpose:
+      'Merging upstream Unleashd into this install: update requests, conflict reports and build results.',
+    key: `${BOOTSTRAP_KEY}:channel:upstream`,
+  });
+  const hire = async (slug: string, name: string) => {
+    const key = `${BOOTSTRAP_KEY}:buddy:${slug}`;
+    const buddy = await core.createBuddy(OWNER, {
+      workspaceId: workspace.id,
+      slug,
+      name,
+      role: 'Owns the product roadmap of this Unleashd install',
+      manager: managerRef(null),
+      key,
+    });
+    await core.writeDoc(OWNER, {
+      doc: { buddyId: buddy.id, scope: { kind: 'buddy' }, kind: 'soul', name: '' },
+      content: oldSoul,
+      baseRevision: 0,
+      reason: 'hired',
+      key: `${key}:soul`,
+    });
+    return buddy;
+  };
+  const productDev = await hire('product-dev', 'Product Dev');
+  const releaseManager = await hire('upstream-release-manager', 'Upstream Release Manager');
+  // Owner edits: a renamed Buddy with a rewritten soul, and a retired seat.
+  await core.updateBuddy(OWNER, {
+    buddyId: productDev.id,
+    changes: { name: 'Rowan' },
+    key: 'owner-rename',
+  });
+  await core.writeDoc(OWNER, {
+    doc: { buddyId: productDev.id, scope: { kind: 'buddy' }, kind: 'soul', name: '' },
+    content: 'Owner-written soul.',
+    baseRevision: 1,
+    reason: 'owner edit',
+    key: 'owner-soul',
+  });
+  await core.updateBuddy(OWNER, {
+    buddyId: releaseManager.id,
+    changes: { status: 'archived' },
+    key: 'owner-retire',
+  });
+  const before = JSON.stringify([
+    await core.listWorkspaces(),
+    await core.listBuddies(workspace.id),
+    (await core.inbox(OWNER, workspace.id)).channels,
+  ]);
+
+  const home = await bootstrapUnleashdHome(core, repoRoot);
+  const again = await bootstrapUnleashdHome(core, repoRoot);
+
+  assert.deepEqual(again, home);
+  assert.equal(home.workspaceId, workspace.id);
+  assert.equal(home.channelId, channel.id);
+  assert.equal(home.productDevId, productDev.id);
+  assert.equal(home.releaseManagerId, releaseManager.id);
+  assert.equal(
+    JSON.stringify([
+      await core.listWorkspaces(),
+      await core.listBuddies(workspace.id),
+      (await core.inbox(OWNER, workspace.id)).channels,
+    ]),
+    before,
+    'workspace, Buddy and channel rows are byte-identical (no rename, no rehire, no new channel)'
+  );
+  assert.equal((await core.listWorkspaces())[0].name, 'unleashd');
+  assert.equal((await core.getBuddy(releaseManager.id)).status, 'archived');
+  assert.equal(await soulOf(core, productDev.id), 'Owner-written soul.');
+  assert.equal(await soulOf(core, releaseManager.id), oldSoul);
 });
 
 test('update posts one @mention of the Release Manager per upstream sha', async (t) => {
