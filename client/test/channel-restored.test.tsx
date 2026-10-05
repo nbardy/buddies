@@ -161,7 +161,7 @@ test('a reply permalink opens the desktop thread on the linked reply', async () 
 
 // Feature 4: `?task=` swaps the channel transcript for one Task's posts across
 // every channel. Each row names its channel and links to the post there (a
-// reply's link opens its thread), and the picker offers the channel's Tasks.
+// reply's link opens its thread). The route opens the full task page.
 test('the Task filter shows one Task across channels, each post linked into its channel', async () => {
   const ws = 'ws-task';
   await loadResource({
@@ -208,6 +208,19 @@ test('the Task filter shows one Task across channels, each post linked into its 
     createdAt: at(0),
     updatedAt: at(0),
   };
+  await loadResource({
+    key: '/api/buddies/tasks/task-ship',
+    load: async () => ({
+      task,
+      children: [],
+      comments: [],
+      runs: [],
+      channel: {
+        ...publicChannel('task-channel', 'task', ws),
+        kind: { type: 'task', taskId: task.id },
+      },
+    }),
+  });
   const directory = workspaceDirectory(
     [rosterFixture([lead], { id: ws })],
     ws,
@@ -225,17 +238,20 @@ test('the Task filter shows one Task across channels, each post linked into its 
       </Provider>
     </MemoryRouter>
   );
-  assert.match(html, /<option value="task-ship" selected="">Task: Ship channels<\/option>/);
+  assert.match(html, /aria-label="Task details"/);
+  assert.match(html, /Ship channels/);
   assert.doesNotMatch(html, /Only in general\./, 'the channel transcript is replaced');
   const channels = `/buddies/workspaces/${ws}/channels`;
   assert.match(
     rowOf(html, 'ops-reply'),
     new RegExp(
-      `href="${channels}\\?channel=ch_ops&amp;thread=ops-root&amp;post=ops-reply"[^>]*>#ops<`
+      `href="${channels}\\?channel=ch_ops&amp;thread=ops-root&amp;post=ops-reply"[^>]*>View in channel<`
     )
   );
   assert.match(
     rowOf(html, 'about-task'),
-    new RegExp(`href="${channels}\\?channel=ch_main&amp;thread=about-task"[^>]*>#general<`)
+    new RegExp(
+      `href="${channels}\\?channel=ch_main&amp;thread=about-task&amp;post=about-task"[^>]*>View in channel<`
+    )
   );
 });

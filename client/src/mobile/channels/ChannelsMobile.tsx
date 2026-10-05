@@ -1,6 +1,7 @@
 import { useAtomValue } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { channelRailFamily } from '../../atoms/channel-rail';
 import { setConversationDone } from '../../atoms/actions';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
@@ -11,6 +12,7 @@ import { ChannelDm } from '../../components/buddies/ChannelDm';
 import { ChannelLanding } from '../../components/buddies/ChannelLanding';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
+import { ChannelStar } from '../../components/buddies/ChannelStar';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
 import { TaskPage } from '../../components/buddies/TaskPage';
@@ -237,12 +239,12 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
   const [switching, setSwitching] = useState(false);
   const [creating, setCreating] = useState(false);
   const { workspaceId, directory, inbox } = context;
-  const rail = railChannels(inbox);
+  const rail = useAtomValue(channelRailFamily(workspaceId));
   const row = (entry: ChannelUnread) => {
     const heading = channelHeading(entry.channel.kind, directory.buddyNames);
     const requests = channelRequestCount(inbox, entry.channel.id);
     return (
-      <li key={entry.channel.id}>
+      <li key={entry.channel.id} className="channel-star-row">
         <Link
           className="mobile-channels-row ui-row"
           data-unread={channelUnreadAttr(entry.unread)}
@@ -261,6 +263,7 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
             </span>
           )}
         </Link>
+        <ChannelStar channelId={entry.channel.id} name={heading.name} />
       </li>
     );
   };

@@ -1,6 +1,7 @@
 import { useAtomValue } from 'jotai';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { openSetupAt } from '../../atoms/ui';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
@@ -17,6 +18,7 @@ import { ChannelDm } from './ChannelDm';
 import { ChannelLanding } from './ChannelLanding';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { LeadRow, Replying, type RowContext, renderRow, renderRows } from './ChannelRows';
+import { ChannelStar } from './ChannelStar';
 import { ChannelSearch } from './ChannelSearch';
 import { ChannelWorkers } from './ChannelWorkers';
 import { CopyLinkButton } from './CopyLinkButton';
@@ -39,7 +41,6 @@ import {
   feedPhase,
   firstUnreadPostId,
   newestServedId,
-  railChannels,
   renderFeed,
   unreadThreadIds,
   useChannelFeed,
@@ -412,8 +413,8 @@ function WorkspaceSwitcher({
       >
         <BuddySigil name={workspaceName} className="channel-browser-workspace-emblem" />
         <h1>{workspaceName}</h1>
-        <span className="channel-browser-caret ui-muted" aria-hidden="true">
-          ▾
+        <span className="channel-browser-caret" aria-hidden="true">
+          ⇅
         </span>
       </button>
       {open && (
@@ -447,6 +448,14 @@ function WorkspaceSwitcher({
             onClick={() => setOpen(false)}
           >
             Workspace activity
+          </Link>
+          <Link
+            role="menuitem"
+            className="channel-browser-switcher-new"
+            to="/?new=1"
+            onClick={() => setOpen(false)}
+          >
+            + New workspace
           </Link>
         </div>
       )}
@@ -544,7 +553,7 @@ function RailChannel({
   onSelect(): void;
 }) {
   return (
-    <li>
+    <li className="channel-star-row">
       <button
         type="button"
         data-unread={channelUnreadAttr(entry.unread)}
@@ -558,6 +567,7 @@ function RailChannel({
         <span className="channel-browser-channel-name ui-truncate">{heading.name}</span>
         <RequestsBadge count={requests} />
       </button>
+      <ChannelStar channelId={entry.channel.id} name={heading.name} />
     </li>
   );
 }
@@ -611,7 +621,7 @@ export function ChannelBrowser({
 }) {
   const inbox = useWorkspaceInbox(workspaceId);
   const archived = useArchivedChannels(workspaceId);
-  const rail = useMemo(() => railChannels(inbox.data), [inbox.data]);
+  const rail = useAtomValue(channelRailFamily(workspaceId));
   useWarmChannelPosts(rail.channels);
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
@@ -675,12 +685,9 @@ export function ChannelBrowser({
       <nav className="channel-browser-rail ui-stack">
         <header className="channel-browser-rail-header ui-stack">
           <div className="channel-browser-rail-header-row ui-row">
-            <Link className="channel-browser-exit ui-muted" to="/" title="Back to workspaces">
-              ← Workspaces
-            </Link>
+            <WorkspaceSwitcher workspaceId={workspaceId} workspaceName={directory.workspaceName} />
             <AppSettingsDropdown />
           </div>
-          <WorkspaceSwitcher workspaceId={workspaceId} workspaceName={directory.workspaceName} />
         </header>
         <div className="channel-browser-rail-scroll ui-scroll-quiet" {...railScroll}>
           <ul className="channel-browser-channels channel-browser-rail-views">

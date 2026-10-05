@@ -263,49 +263,6 @@ a.landing-chip:hover {
   color: var(--accent);
 }
 
-.landing-foot {
-  gap: var(--sp-4);
-}
-
-.landing-progress-label {
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: var(--sp-1) var(--sp-4);
-  padding: 0 var(--sp-8);
-  font-size: var(--fs-2);
-}
-
-/* Each half stays whole; the breakdown drops to its own line when the card is narrow. */
-.landing-progress-label > span {
-  white-space: nowrap;
-}
-
-/* The bar runs the card's bottom edge, clipped by its rounded corners. */
-.landing-bar {
-  display: flex;
-  height: 6px;
-  background: color-mix(in srgb, var(--text-bright) 10%, transparent);
-}
-
-.landing-bar--dashed {
-  height: 0;
-  margin-bottom: var(--sp-3);
-  border-top: 1px dashed var(--border-emphasis);
-  background: none;
-}
-
-.landing-bar-done {
-  background: var(--success);
-}
-
-.landing-bar-active {
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-
-.landing-bar-blocked {
-  background: var(--warning);
-}
-
 .landing-card-actions {
   position: absolute;
   top: var(--sp-4);
