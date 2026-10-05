@@ -1273,3 +1273,16 @@ fn structured_search_filters_before_paging_and_never_leaves_readable_channels() 
     assert_eq!(pages, 2);
     assert_eq!(seen, (0..6).rev().map(|i| format!("deploy bulk {i}")).collect::<Vec<_>>());
 }
+
+// 2026-09-29 queue stall (888861c): a database created before run_active_buddy existed failed every
+// claim_run with "no such index" because the index was DDL-only.
+#[test]
+fn claim_run_works_on_a_database_missing_run_active_buddy() {
+    let f = fixture();
+    let (path, _dir) = (f.path.clone(), f.dir);
+    drop(f.store);
+    rusqlite::Connection::open(&path).unwrap().execute_batch("DROP INDEX run_active_buddy;").unwrap();
+    let mut s = Store::open(path.to_str().unwrap()).unwrap();
+    s.enqueue_run(&Actor::Owner, chat("peer", "t1", "conv")).unwrap();
+    assert!(s.claim_run(lease(60_000)).unwrap().is_some());
+}
