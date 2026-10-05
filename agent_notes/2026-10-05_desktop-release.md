@@ -47,3 +47,15 @@ desktop/test/server-env.test.ts runs the server's own decideExecutionGate on the
 - Disk hit 0 bytes during this work (other sessions growing too); see thread post_01a10c2b.
 - Mistake to avoid: a `screencapture -R` region shot captured the owner's screen instead of the
   app window; deleted unviewed-by-anyone-else. Use CDP/headless captures only.
+
+## Addendum: asset rebuilt from main 14de9f4 (2026-10-05 15:20Z)
+- Freed my own build/test dirs, rebuilt with `pnpm desktop:build` from the clean worktree at
+  14de9f4 (exit 0; payload smoke "listening after 7652ms", Buddies write+read).
+- Installed the new .dmg outside any checkout, launched with Finder PATH and a temp
+  BUDDIES_DESKTOP_HOME: server ready +2.7 s, /api/dependencies claude+codex ready,
+  "Buddy runner started", new workspace + buddy Pinger (claude/sonnet), DM -> reply `PONG`
+  at +4.75 s, run complete. App quit cleanly ("stopping server").
+- Replaced the release asset (`gh release upload --clobber`) and the notes' SHA-256.
+  GitHub asset digest = local tested build:
+  ea5178e4ffa212e1b4b6727b6dafab60fb5041e31cd1b289b9f90346b7504b91.
+- The earlier gap ("shipped .dmg predates 5487a28") is closed.
