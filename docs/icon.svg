@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- The Pair (brand/BUDDIES_BRAND.md): violet + teal, the lens is the overlap. Transparent ground. -->
+  <defs><clipPath id="l"><circle cx="37" cy="50" r="28"/></clipPath></defs>
+  <circle cx="37" cy="50" r="28" fill="oklch(0.62 0.2 300)"/>
+  <circle cx="63" cy="50" r="28" fill="oklch(0.76 0.12 200)"/>
+  <circle cx="63" cy="50" r="28" fill="oklch(0.9 0.06 260)" clip-path="url(#l)"/>
+</svg>

@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Buddies - your team of AI agents. Free, open source, multi harness.</title>
     <meta name="description" content="Buddies is a free, open source, multi-harness agent team orchestrator. Claude Code, Codex and Gemini side by side, OpenCode read-only. Runs on your own computer.">
-    <link rel="icon" type="image/png" href="icon-192.png">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
     <meta name="theme-color" content="#0b0a14">
 
     <!-- Open Graph / Meta Tags -->
@@ -97,10 +99,12 @@
         .lockup {
             display: inline-flex;
             align-items: center;
-            gap: 0.6rem;
+            gap: calc(2.4rem * 0.24); /* 0.24 x the mark (BuddiesKit Lockup) */
             text-decoration: none;
             font-weight: 700;
             font-stretch: 92%;
+            /* The kit pins opsz 96; auto optical sizing would pick ~24 at this size. */
+            font-variation-settings: 'opsz' 96;
             font-size: 1.5rem;
             letter-spacing: -0.026em;
         }
