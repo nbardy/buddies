@@ -155,21 +155,22 @@
             white-space: nowrap;
         }
 
+        /* Shimmer: the owner's pick for the video's Vim card (take 2, 2026-10-05). Same colours,
+           speed and glow as the video, so page and poster match (Designer's values). */
         .open-source {
-            background: linear-gradient(100deg,
-                var(--violet) 0%, var(--pink) 25%, var(--lens) 40%, var(--violet) 55%,
-                var(--pink) 80%, var(--violet) 100%);
-            background-size: 220% 100%;
+            background: linear-gradient(100deg, oklch(0.74 0.19 300) 0%, oklch(0.7 0.17 350) 25%,
+                oklch(0.74 0.19 300) 50%, oklch(0.76 0.12 200) 75%, oklch(0.74 0.19 300) 100%);
+            background-size: 200% 100%;
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
             padding-bottom: 0.08em; /* room for the "p" descender inside the clipped gradient */
-            filter: drop-shadow(0 0 0.18em color-mix(in oklch, var(--violet) 70%, transparent));
-            animation: shimmer 6s linear infinite;
+            filter: drop-shadow(0 0 22px oklch(0.62 0.2 300 / 0.6));
+            animation: shimmer 9s linear infinite;
         }
 
         @keyframes shimmer {
-            to { background-position: -220% 0; }
+            to { background-position: -200% 0; }
         }
 
         .sparkle {
