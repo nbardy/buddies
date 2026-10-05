@@ -661,6 +661,32 @@ fn an_expired_lease_ends_its_run_like_a_failed_settle() {
     );
 }
 
+// 2026-10-05: four cancelled worker runs held 24 h leases written by an older build (lease = the
+// deadline). With no process left they sat in `cancel_requested` and filled the Buddy's pool 5/5.
+// The gate clamps any lease to one heartbeat, so such a run ends one heartbeat later, while a
+// current holder's lease (never longer than one heartbeat) is untouched.
+#[test]
+fn a_lease_longer_than_one_heartbeat_ends_one_heartbeat_later() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
+    let legacy = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(86_400_000)).unwrap().unwrap();
+    assert_eq!(legacy.run.lease_expires_at.as_deref(), Some("2099-01-02T00:00:00.000Z"));
+    s.cancel_run(&Actor::Owner, &legacy.run.id).unwrap();
+    assert_eq!(s.get_run(&legacy.run.id).unwrap().status, RunStatus::CancelRequested);
+
+    s.enqueue_run(&Actor::Owner, chat("lead", "turn", "c-lead")).unwrap();
+    let current = s.claim_run_at("2099-01-01T00:01:00.000Z", lease(300_000)).unwrap().unwrap();
+    assert_eq!(current.run.lease_expires_at.as_deref(), Some("2099-01-01T00:06:00.000Z"), "a current lease is not moved");
+    assert_eq!(s.get_run(&legacy.run.id).unwrap().lease_expires_at.as_deref(), Some("2099-01-01T00:06:00.000Z"));
+
+    s.renew_run_at("2099-01-01T00:05:00.000Z", &current.run.id, &current.lease_token, 300_000).unwrap();
+    s.claim_run_at("2099-01-01T00:06:01.000Z", lease(300_000)).unwrap();
+    let run = s.get_run(&legacy.run.id).unwrap();
+    assert_eq!(run.status, RunStatus::Cancelled, "the stop finishes one heartbeat after the clamp, not a day later");
+    assert_eq!(s.get_run(&current.run.id).unwrap().status, RunStatus::Running, "a renewing holder keeps its run");
+}
+
 // The holder's renewals keep a run alive past any number of lease terms; a chat run's deadline is
 // the explicit chat budget, never the lease (2026-09-10: a 600 s claim lease killed owner chats).
 #[test]

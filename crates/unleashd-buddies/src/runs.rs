@@ -184,7 +184,7 @@ impl Store {
     // `a_renewed_lease_outlives_its_first_term`; server/test/run-lease.test.ts.
     pub fn claim_run_at(&mut self, now: &str, budgets: RunBudgets) -> Result<Option<Claim>> {
         self.write(|tx| {
-            expire_leases(tx, now)?;
+            expire_leases(tx, now, budgets.lease_ms)?;
             // Ready, predecessor finished, conversation free, buddy under its limit, task not paused.
             // Background work is always claimable: the old per-Buddy hold was removed 2026-09-29
             // (owner) after it silently parked requests as "delivered but held".
@@ -509,7 +509,18 @@ fn end_run(tx: &Transaction, run: &Run, outcome: &Outcome, now: &str) -> Result<
 /// The claim gate's first step (see `claim_run_at`): every held run whose lease ran out ends as a
 /// failed settle would, so its request stops awaiting and its sender gets a failure notice. Until
 /// 2026-10-01 this was a bare UPDATE that skipped `after_settle`, leaving requests awaiting forever.
-fn expire_leases(tx: &Transaction, now: &str) -> Result<()> {
+///
+/// First it clamps every held lease to at most one heartbeat (`lease_ms`) from now. A current
+/// holder never has a longer one (claim and renew both write now + lease_ms), so the clamp only
+/// touches leases written by an older build, which made the lease the 24 h deadline. On 2026-10-05
+/// four cancelled worker runs claimed with such leases sat in `cancel_requested` with no process for
+/// 1.5 h after their cancel, filled the Buddy's pool (5/5) and would have queued its work until the
+/// next day. Guard: crate test `a_lease_longer_than_one_heartbeat_ends_one_heartbeat_later`.
+fn expire_leases(tx: &Transaction, now: &str, lease_ms: i64) -> Result<()> {
+    tx.prepare_cached(
+        "UPDATE run SET lease_expires_at = ?1 WHERE status IN ('running','cancel_requested') AND lease_expires_at > ?1",
+    )?
+    .execute([plus_ms(now, lease_ms)?])?;
     let expired = collect(
         tx.prepare_cached(&format!(
             "SELECT {RUN_COLS} FROM run WHERE status IN ('running','cancel_requested') AND lease_expires_at < ?1"
