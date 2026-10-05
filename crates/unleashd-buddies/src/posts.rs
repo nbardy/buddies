@@ -29,6 +29,19 @@ fn readable_by(actor_param: &str) -> String {
     )
 }
 
+/// A search date bound in the stored `created_at` format (UTC, millisecond Z), so the comparison
+/// is plain text order. A bare date means midnight UTC.
+fn search_instant(field: &str, raw: &str) -> Result<String> {
+    use chrono::{DateTime, NaiveDate, Utc};
+    let instant = match NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        Ok(day) => day.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
+        Err(_) => DateTime::parse_from_rfc3339(raw)
+            .map_err(|_| CoreError::Invalid(format!("search {field}: `{raw}` is not YYYY-MM-DD or an RFC 3339 timestamp")))?
+            .with_timezone(&Utc),
+    };
+    Ok(instant.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+}
+
 /// A feed page from `limit + 1` rows, newest first: the extra row only says there is a next page.
 fn keyset_page(mut posts: Vec<Post>, limit: i64) -> PostPage {
     let next = match posts.len() as i64 > limit {
@@ -441,29 +454,52 @@ impl Store {
         Ok(Inbox { requests, waiting_on, channels, unread_threads })
     }
 
-    /// Posts in `workspace_id` whose body contains every word of `query` (literal words, not FTS
-    /// syntax), newest first, from the channels the actor may read: public and task channels, and
-    /// the direct channels it is a member of (the owner reads every one). Pages older with `before`
-    /// (keyset on `ord`, like `task_posts`); until 2026-09-27 search took no cursor, so the MCP
-    /// `before` was silently ignored and a Buddy could never see past the newest `limit` hits.
-    pub fn search_posts(&self, actor: &Actor, workspace_id: &str, query: &str, before: Option<Cursor>, limit: i64) -> Result<PostPage> {
+    /// Posts in `workspace_id` matching the structured `query` (grammar: `search.rs`), newest
+    /// first, from the channels the actor may read: public and task channels, and the direct
+    /// channels it is a member of (the owner reads every one). Every filter is a WHERE clause next
+    /// to the readability rule, so filters narrow BEFORE the keyset page and never widen access.
+    /// Pages older with `before` (keyset on `ord`, like `task_posts`); until 2026-09-27 search took
+    /// no cursor, so the MCP `before` was silently ignored and a Buddy could never see past the
+    /// newest `limit` hits.
+    pub fn search_posts(&self, actor: &Actor, workspace_id: &str, query: &SearchQuery, before: Option<Cursor>, limit: i64) -> Result<PostPage> {
         require(&self.conn, actor, Op::SearchPosts, &Subject::Owner)?;
-        let words: Vec<String> = query.split_whitespace().map(|w| format!("\"{}\"", w.replace('"', "\"\""))).collect();
-        if words.is_empty() {
-            return Err(CoreError::Invalid("an empty search".into()));
+        let mut args: Vec<Value> = vec![crate::search::to_fts(&query.text)?.into(), workspace_id.to_string().into(), actor.key().to_string().into()];
+        let mut clauses = String::new();
+        fn bind(args: &mut Vec<Value>, v: Value) -> String {
+            args.push(v);
+            format!("?{}", args.len())
         }
-        let mut args: Vec<Value> = vec![words.join(" ").into(), workspace_id.to_string().into(), actor.key().to_string().into()];
-        let keyset = match before {
-            None => "",
-            Some(Cursor { ord }) => {
-                args.push(ord.into());
-                " AND p.ord < ?4"
-            }
-        };
+        if let Some(Cursor { ord }) = before {
+            clauses += &format!(" AND p.ord < {}", bind(&mut args, ord.into()));
+        }
+        if !query.channels.is_empty() {
+            let slots = query.channels.iter().map(|c| {
+                let (id, name) = (bind(&mut args, c.clone().into()), bind(&mut args, c.trim_start_matches('#').to_string().into()));
+                format!("c.id = {id} OR c.name = {name}")
+            });
+            clauses += &format!(" AND ({})", slots.collect::<Vec<_>>().join(" OR "));
+        }
+        if !query.from.is_empty() {
+            let slots = query.from.iter().map(|who| match who.as_str() {
+                OWNER_KEY => "p.author_id IS NULL".to_string(),
+                id => format!("p.author_id = {}", bind(&mut args, id.to_string().into())),
+            });
+            clauses += &format!(" AND ({})", slots.collect::<Vec<_>>().join(" OR "));
+        }
+        if let Some(after) = &query.after {
+            clauses += &format!(" AND p.created_at >= {}", bind(&mut args, search_instant("after", after)?.into()));
+        }
+        if let Some(until) = &query.before {
+            clauses += &format!(" AND p.created_at < {}", bind(&mut args, search_instant("before", until)?.into()));
+        }
+        if let Some(root) = &query.in_thread {
+            let slot = bind(&mut args, root.clone().into());
+            clauses += &format!(" AND (p.id = {slot} OR p.root_id = {slot})");
+        }
         args.push((limit + 1).into());
         let sql = format!(
             "SELECT {POST_COLS} FROM post_search s JOIN post p ON p.rowid = s.rowid JOIN channel c ON c.id = p.channel_id
-             WHERE post_search MATCH ?1 AND c.workspace_id = ?2{keyset} AND {} ORDER BY p.ord DESC LIMIT ?{}",
+             WHERE post_search MATCH ?1 AND c.workspace_id = ?2{clauses} AND {} ORDER BY p.ord DESC LIMIT ?{}",
             readable_by("?3"),
             args.len()
         );

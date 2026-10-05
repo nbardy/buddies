@@ -408,7 +408,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         await core.searchPosts(
           OWNER,
           p(req, 'workspaceId'),
-          z.string().trim().min(1).parse(q(req, 'q')),
+          { text: z.string().trim().min(1).parse(q(req, 'q')), channels: [], from: [] },
           null,
           50
         )

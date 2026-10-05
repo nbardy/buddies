@@ -2,8 +2,9 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { Dependencies, DependencyCheck } from '@unleashd/shared';
+import type { Dependencies, DependencyCheck, InstalledAgent } from '@unleashd/shared';
 import type { Express } from 'express';
+import { installedAgent } from './installed-agent';
 
 // Fresh installs used to reach spawn ENOENT on their first message. Probe a real
 // response, not merely --version. Guard: dependencies.test.ts (real child processes).
@@ -24,6 +25,12 @@ export function createDependencyChecks(
       path.join(home, '.local', 'bin'),
     ]),
   ].join(path.delimiter);
+  // Rust is a SOURCE-BUILD tool, not a runtime prerequisite. A packaged app (desktop) never
+  // builds from source, so it sets UNLEASHD_SOURCE_BUILDS=0 and Rust is neither probed,
+  // installed (the spike's first launch ran `brew install rust`) nor shown as setup.
+  // This replaces the desktop's old pre-claimed rust.attempted marker file.
+  const checkIds: DependencyCheck['id'][] =
+    env.UNLEASHD_SOURCE_BUILDS === '0' ? ['claude', 'codex'] : ['rust', 'claude', 'codex'];
   const probeEnv: NodeJS.ProcessEnv = { ...env };
   // An app launched from Claude must not make this independent health probe
   // look like a nested interactive session. Guard: dependencies.test.ts.
@@ -237,8 +244,8 @@ export function createDependencyChecks(
   function refresh(): Promise<void> {
     if (pending) return pending;
     if (closed) return Promise.resolve();
-    checks = ['rust', 'claude', 'codex'].map((id) => ({
-      id: id as DependencyCheck['id'],
+    checks = checkIds.map((id) => ({
+      id,
       status: 'checking',
       message: 'Checking…',
     }));
@@ -268,7 +275,7 @@ export function createDependencyChecks(
     return pending;
   }
   return {
-    snapshot: (): Dependencies => ({ checks }),
+    snapshot: (): Pick<Dependencies, 'checks'> => ({ checks }),
     refresh,
     close: () => {
       closed = true;
@@ -277,12 +284,19 @@ export function createDependencyChecks(
   };
 }
 
-export function registerDependencyRoutes(app: Express, service = createDependencyChecks()) {
+export function registerDependencyRoutes(
+  app: Express,
+  service = createDependencyChecks(),
+  agent: () => InstalledAgent = installedAgent
+) {
   void service.refresh();
-  app.get('/api/dependencies', (_req, res) => res.json(service.snapshot()));
+  // `agent` rides along so the composer's picker resolves an unpinned Buddy exactly as the
+  // server will (shared buddyExecutionPreferences), from the same PATH read.
+  const status = (): Dependencies => ({ ...service.snapshot(), agent: agent() });
+  app.get('/api/dependencies', (_req, res) => res.json(status()));
   app.post('/api/dependencies/check', (_req, res) => {
     void service.refresh();
-    res.status(202).json(service.snapshot());
+    res.status(202).json(status());
   });
   return service;
 }

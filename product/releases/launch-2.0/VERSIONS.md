@@ -20,6 +20,11 @@ gitignored. The files a cut is built from are kept read-only in `renders/<cut>-c
 `stitch-v14.sh`. Its one join (v14 frame 2829 = v13 frame 3504) was checked against the source frames:
 the exact frame wins (74 dB, against 18 dB for its neighbour).
 
+**X/Twitter upload:** `launch-v14-x.mp4` (`2304347a…`, also in the chain) is v14 with the settled Vim
+"Open Source" card (v14 frame 4455, the site poster's image) as its first 2 frames, so X's preview is
+that card, not the dark opening; the sound is delayed 2 frames to keep sync. Made by
+`edit/x-cover.sh out/launch-v14.mp4 4455 out/launch-v14-x.mp4`.
+
 ## Reproducing v13
 
 `renders/v13-chain/` holds the v12 chain plus `v13-vimend.video.mp4` (`eb22ac9e…`) and

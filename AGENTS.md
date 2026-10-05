@@ -157,8 +157,15 @@ The session is READ-ONLY (the page refuses non-GET fetch/XHR/beacon and drops
 WS sends; the manifest lists what it refused), so pointing it at the owner's
 live dev server is safe. For a static baseline, prefer a throwaway server on a
 spare port against a COPY of `~/.agent-viewer` + `~/.buddies` (`BUDDIES_HOME`
-at the copy) with no agent CLIs on its PATH: the Buddy scheduler still runs
-there and would otherwise launch real agents.
+at the copy) with no agent CLIs on its PATH. Buddy execution (scheduler, recovery
+follow-ups, worker spawns, memory reviewer, adoption of journaled executions) is
+DISABLED on any backend whose `UNLEASHD_BUDDIES_DB`, `BUDDIES_HOME` or
+`UNLEASHD_DATA_DIR` is set to a non-default path (log: `[buddies] Execution
+disabled`), so a copy serves its data and launches nothing. Set
+`UNLEASHD_BUDDY_EXECUTION=1` only for tests that need Buddies to run on temp
+stores (`run-lease`, `ctrl-c-adoption`); never on a copy of the live stores. The
+incident (2026-09-30: 5 real codex workers from a copied DB) and the gate:
+`server/src/buddies/execution-gate.ts`, guard `server/test/copied-store-guard.test.ts`.
 
 ```bash
 pnpm screenshots                              # every client screen × every size
