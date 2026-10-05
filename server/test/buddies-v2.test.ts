@@ -1,16 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -76,6 +67,7 @@ import { installedAgent } from '../src/providers/installed-agent';
 import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
 import { testExecutions } from './fixtures/fake-turn';
 import { recordStore } from './fixtures/records';
+import { tempDir } from './fixtures/temp';
 
 // The Buddy server end to end through its real boundaries: the crate on a temp DB, the HTTP MCP
 // endpoint, the runner, the channels responder, the creation service and the conversation
@@ -161,7 +153,7 @@ async function probe(spec: McpServerSpec): Promise<number> {
 
 /** `reopen`: a scratch dir an earlier world used, as a restarted backend finds its stores. */
 async function world(reopen?: string) {
-  const scratch = reopen ?? mkdtempSync(join(tmpdir(), 'buddies-v2-'));
+  const scratch = reopen ?? tempDir('buddies-v2-');
   const dbPath = join(scratch, 'buddies-v3.sqlite');
   const core = await BuddiesCore.open(dbPath);
   const ws = (await core.createWorkspace(OWNER, { name: 'Team', rootPath: scratch })).id;
@@ -2124,7 +2116,7 @@ function binPath(dir: string, ...names: string[]): NodeJS.ProcessEnv {
 // The reviewer used to see prose only (tool calls dropped) in a private temp cwd, so it tried to
 // verify claims with file tools and the guard killed it (12 failed reviews, 2026-09 audit).
 test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs in the workspace, and curates memory on the same endpoint', async () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-review-'));
+  const scratch = tempDir('buddies-review-');
   const dbPath = join(scratch, 'db.sqlite');
   const core = await BuddiesCore.open(dbPath);
   const ws = (await core.createWorkspace(OWNER, { name: 'Team', rootPath: scratch })).id;
@@ -2320,7 +2312,7 @@ async function reviewOnce(dir: string, env: NodeJS.ProcessEnv) {
 }
 
 test('a reviewer whose harness is not installed records a skip and spawns nothing', async () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-review-claude-only-'));
+  const scratch = tempDir('buddies-review-claude-only-');
   try {
     const { launches, receipt } = await reviewOnce(scratch, binPath(scratch, 'claude'));
     assert.deepEqual(launches, []);
@@ -2332,7 +2324,7 @@ test('a reviewer whose harness is not installed records a skip and spawns nothin
 });
 
 test('a reviewer on a codex install still runs the owner-directed gpt-6-luna', async () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-review-codex-'));
+  const scratch = tempDir('buddies-review-codex-');
   try {
     const { launches, receipt } = await reviewOnce(scratch, binPath(scratch, 'codex', 'claude'));
     assert.deepEqual(launches, [{ harness: 'codex', model: 'gpt-6-luna' }]);
@@ -2425,7 +2417,7 @@ test('a reviewer with no memory reads retains bounded, redacted CLI failure evid
 // One 120 s budget used to cover the whole ladder, so a slow first rung starved the rest
 // (41 timed-out reviews). The budget is per rung, and a rung that times out climbs.
 test('a reviewer rung that outlives its timeout climbs to the next rung, which completes', async () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-review-timeout-'));
+  const scratch = tempDir('buddies-review-timeout-');
   const core = await BuddiesCore.open(join(scratch, 'db.sqlite'));
   const ws = (await core.createWorkspace(OWNER, { name: 'Team', rootPath: scratch })).id;
   const lead = await core.createBuddy(OWNER, {
@@ -2504,7 +2496,7 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
 // still has the v33 file (import it, never run empty over it), or this is a first-time install
 // (nothing to import; before 2026-09-26 it was told to import anyway and never got Buddies).
 test('a missing Buddies database with the v33 file present names the import command', async () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-location-'));
+  const scratch = tempDir('buddies-location-');
   try {
     const legacy = join(scratch, 'buddies.sqlite');
     writeFileSync(legacy, '');
@@ -2520,7 +2512,7 @@ test('a missing Buddies database with the v33 file present names the import comm
 });
 
 test('a first-time install with no Buddies database at all opens an empty one', async () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-location-'));
+  const scratch = tempDir('buddies-location-');
   try {
     const file = join(scratch, 'nested', 'buddies-v3.sqlite');
     const core = await openBuddiesCore(buddiesLocation(file, join(scratch, 'buddies.sqlite')));
@@ -2533,7 +2525,7 @@ test('a first-time install with no Buddies database at all opens an empty one', 
 // Regression (final review 2026-09-26): the v33 package kept its file under BUDDIES_HOME. Looking
 // only at ~/.buddies classified such an owner as `fresh` and ran an empty DB over their data.
 test('an unimported v33 file under BUDDIES_HOME is still found', async () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-location-'));
+  const scratch = tempDir('buddies-location-');
   try {
     writeFileSync(join(scratch, 'buddies.sqlite'), '');
     const legacy = legacyBuddiesDatabasePath({ BUDDIES_HOME: scratch });
@@ -2550,7 +2542,7 @@ test('an unimported v33 file under BUDDIES_HOME is still found', async () => {
 // piled up. This uses the real shape end to end: an owner chat turn's context, the reviewer
 // writing through its own grant, then a DIFFERENT chat's briefing and the owner's Memory tab row.
 test("memory the reviewer saves after one chat is in the next chat's briefing", async () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-carry-'));
+  const scratch = tempDir('buddies-carry-');
   const core = await BuddiesCore.open(join(scratch, 'db.sqlite'));
   const ws = (await core.createWorkspace(OWNER, { name: 'Team', rootPath: scratch })).id;
   const lead = await core.createBuddy(OWNER, {

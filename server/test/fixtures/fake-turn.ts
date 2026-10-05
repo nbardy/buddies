@@ -1,8 +1,6 @@
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import type { ExecuteCommandRequest, UnifiedAgentEvent, executeCommand } from '@nbardy/agent-cli';
 import { type ExecutionJournals, createExecutionJournals } from '../../src/turns/executions';
+import { tempDir } from './temp';
 
 /**
  * The part of an agent-cli turn handle the conversation runtime reads. Tests
@@ -35,5 +33,5 @@ export function fakeExecuteTurn(
 
 /** A throwaway executions root: each runtime turn writes its owner journal here. */
 export function testExecutions(): ExecutionJournals {
-  return createExecutionJournals(mkdtempSync(path.join(tmpdir(), 'unleashd-test-executions-')));
+  return createExecutionJournals(tempDir('unleashd-test-executions-'));
 }

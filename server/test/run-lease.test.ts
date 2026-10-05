@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 
 /**
  * A run's lease is its holder's heartbeat, separate from its deadline (decision:
@@ -65,6 +66,7 @@ function startBackend(name: string, port: number, env: Record<string, string>): 
     env: {
       ...process.env,
       HOME: home,
+      ...NO_AUTO_INSTALL,
       // Only the fakes and node: the Buddy scheduler must never reach a real agent CLI.
       PATH: [bin, path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter),
       PORT: String(port),

@@ -110,7 +110,7 @@ import { createBuddyPolicyPort } from './buddies/policy-port';
 import { registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { workerConversationConfig } from './buddies/worker-config';
-import { UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
+import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 
 let startupAuditResults: ReturnType<typeof auditLocalAgents> = [];
 
@@ -839,23 +839,34 @@ void runServerStartup(
       );
       await persistedServerState.initialize();
       await paletteService.initialize();
-      // Uploads retention: a worker-thread pass now and daily. Every place a message or post can
+      // Uploads retention: one child-process pass a day, 10 min after boot or a day after the last success. Every place a message or post can
       // name an upload is a reference root; see uploads/gc.ts for the deletion rule.
-      startUploadsGc(async () => ({
-        uploadsDir: UPLOADS_DIR,
-        referenceRoots: [
-          // The transcript roots the ingest store watches, plus Codex's archive (not ingested).
-          ...defaultRoots(os.homedir()).map((root) => root.path),
-          path.join(os.homedir(), '.codex', 'archived_sessions'),
-          APP_DATA_DIR,
-          path.dirname(buddiesDatabasePath()),
-        ],
-        protectedNames: [
-          ...(await conversationConfigStore.listSummaries()).map((record) => record.conversationId),
-          ...conversations.keys(),
-        ],
-        maxAgeMs: UPLOADS_RETENTION_MS,
-      }));
+      startUploadsGc(
+        async () => ({
+          uploadsDir: UPLOADS_DIR,
+          referenceRoots: [
+            // The transcript roots the ingest store watches, plus Codex's archive (not ingested).
+            ...defaultRoots(os.homedir()).map((root) => root.path),
+            path.join(os.homedir(), '.codex', 'archived_sessions'),
+            APP_DATA_DIR,
+            path.dirname(buddiesDatabasePath()),
+          ],
+          protectedNames: [
+            ...(await conversationConfigStore.listSummaries()).map(
+              (record) => record.conversationId
+            ),
+            ...conversations.keys(),
+          ],
+          maxAgeMs: UPLOADS_RETENTION_MS,
+        }),
+        {
+          stateFile: path.join(APP_DATA_DIR, 'uploads-gc.json'),
+          // Tests that need a pass at boot set UNLEASHD_UPLOADS_GC_DELAY_MS=0.
+          firstDelayMs: Number(
+            process.env.UNLEASHD_UPLOADS_GC_DELAY_MS ?? UPLOADS_GC_FIRST_DELAY_MS
+          ),
+        }
+      );
     },
     startOptionalScheduler: async () => {
       try {

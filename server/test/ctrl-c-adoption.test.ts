@@ -8,6 +8,7 @@ import { after, test } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
 import { freePortSync } from './free-port';
+import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 
 /**
  * The owner's question (2026-09-30, Task task_01a0f2cb): "if I ctrl+C the server and bring it back
@@ -160,6 +161,7 @@ function makeCase(name: string): Case {
     env: {
       ...process.env,
       HOME: home,
+      ...NO_AUTO_INSTALL,
       // The dev task's first step (tools/ensure-addons.mjs) keys the shared addon cache on rustc's
       // version, so the toolchain and that cache stay the real ones; no agent CLI lives there.
       PATH: [

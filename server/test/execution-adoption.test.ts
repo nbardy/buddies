@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
 import { freePortSync } from './free-port';
+import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 
 /**
  * The owner's requirement (2026-09-30, #case-studies post_01a0f2bc): a web-server restart must not
@@ -131,6 +132,7 @@ function startBackend(name: string, extraEnv: Record<string, string> = {}): Prom
     env: {
       ...process.env,
       HOME: home,
+      ...NO_AUTO_INSTALL,
       // Only the fakes and node: the Buddy scheduler must never reach a real agent CLI.
       PATH: [bin, path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter),
       PORT: String(PORT),

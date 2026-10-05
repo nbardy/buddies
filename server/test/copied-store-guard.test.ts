@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { BuddiesCore } from '@unleashd/buddies-core';
 import { OWNER, buddyActor } from '../src/buddies/core';
+import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 
 // Regression (incident 2026-09-30 22:09): a throwaway backend booted on a COPY of the live Buddies
 // DB with an agent CLI on PATH ended 10 'interrupted' runs, queued their failure notices and
@@ -75,6 +76,7 @@ async function boot(name: string, optIn: boolean) {
     cwd: SERVER_DIR,
     env: {
       HOME: home,
+      ...NO_AUTO_INSTALL,
       PATH: `${bin}:/usr/bin:/bin`,
       UNLEASHD_DATA_DIR: path.join(root, 'data'),
       BUDDIES_HOME: buddies,

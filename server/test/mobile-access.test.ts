@@ -7,11 +7,12 @@ import { MobileAccessSchema } from '@unleashd/shared';
 import { readMobileAccess } from '../src/auth/mobile-access';
 import { digestToken } from '../src/auth/policy';
 import { readTailnetOwner } from '../src/auth/tailnet-owner';
+import { tempDir } from './fixtures/temp';
 
 // A fake `tailscale` CLI replaying the JSON shapes captured from a real node on
 // 2026-10-05 (`status --json --peers=false`, `serve status --json`).
 async function fakeTailscale(status: object, serve: object, statusExit = 0) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mobile-access-'));
+  const dir = tempDir('mobile-access-');
   await fs.writeFile(path.join(dir, 'status.json'), JSON.stringify(status));
   await fs.writeFile(path.join(dir, 'serve.json'), JSON.stringify(serve));
   const bin = path.join(dir, 'tailscale');
@@ -115,7 +116,7 @@ test('missing CLI, logged-out node and open auth are actionable states, never a 
 test('a CLI that prints prose instead of JSON is a failed state, not a server crash', async () => {
   // 2026-10-05: the app-bundled CLI, started without the GUI, printed this and
   // exited 0. Parsing it inside execFile's callback threw past every handler.
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mobile-access-'));
+  const dir = tempDir('mobile-access-');
   const bin = path.join(dir, 'Tailscale');
   await fs.writeFile(bin, '#!/bin/sh\necho "The Tailscale GUI failed to start."\n', {
     mode: 0o755,
@@ -151,7 +152,7 @@ test('an unreadable CLI is an error, never "no owner"', async () => {
   // watchTailnetOwner keeps the last owner when a read fails. If this mapped to
   // `unknown` instead, one slow `tailscale status` would sign the owner's phone
   // out for a minute (seen as a 1-in-6 auth test flake, 2026-10-05).
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mobile-access-'));
+  const dir = tempDir('mobile-access-');
   const bin = path.join(dir, 'Tailscale');
   await fs.writeFile(bin, '#!/bin/sh\necho "The Tailscale GUI failed to start."\n', {
     mode: 0o755,
