@@ -133,7 +133,9 @@ console.log(`[auth] ${describePolicy(AUTH_POLICY)}`);
 if (authResolution.key.kind === 'created') {
   console.log(`[auth] created an access key at ${authResolution.key.path}`);
 }
-const TAILNET_OWNER = watchTailnetOwner(TAILSCALE_CANDIDATES);
+const TAILNET_OWNER = watchTailnetOwner(TAILSCALE_CANDIDATES, (owner) => {
+  console.log(`[auth] tailnet owner: ${owner.kind === 'known' ? owner.login : 'none'}`);
+});
 const PAIRING_CODES = new PairingCodes();
 
 // noServer + an explicit upgrade handler is what makes the WebSocket gateable:

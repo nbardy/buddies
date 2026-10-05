@@ -28,7 +28,7 @@ from what a web page cannot forge, and only `remote` needs a credential:
 | Source | Admitted without the key when |
 |---|---|
 | `local` — this machine's browser | the TCP peer is loopback, every `X-Forwarded-For` hop is loopback, the `Host` is a loopback name (`localhost`, `*.localhost`, `127.x`, `[::1]`), and any `Origin` is the request's own |
-| `tailnet` — forwarded by `tailscale serve` | the peer is loopback, `Tailscale-User-Login` names this machine's owner (read from `tailscale status`, refreshed every minute), and any `Origin` is the request's own |
+| `tailnet` — forwarded by `tailscale serve` | the peer is loopback, `Tailscale-User-Login` names this machine's owner (read from `tailscale status`, refreshed every minute; a failed read keeps the last owner, a logged-out node clears it), and any `Origin` is the request's own |
 | `remote` — LAN, Funnel, tagged devices, another tailnet user, any foreign `Origin` | never; key, cookie or pairing code |
 
 Why each check exists:

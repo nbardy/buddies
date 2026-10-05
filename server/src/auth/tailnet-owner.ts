@@ -15,17 +15,17 @@ export type TailnetOwner =
 const UNKNOWN: TailnetOwner = { kind: 'unknown' };
 const REFRESH_MS = 60_000;
 
-/** κ: `tailscale status --json` → owner. A tagged node has no owning user. */
+/**
+ * κ: `tailscale status --json` → owner. A tagged node has no owning user, and a
+ * logged-out node reports none. Throws when the CLI is present but cannot be
+ * read (timeout, prose instead of JSON): that says nothing about the owner.
+ */
 export async function readTailnetOwner(candidates: readonly string[]): Promise<TailnetOwner> {
-  try {
-    const cli = await findCli(candidates, 5_000);
-    if (cli.kind === 'missing') return UNKNOWN;
-    const userId = cli.status.Self?.UserID;
-    const login = userId === undefined ? undefined : cli.status.User?.[String(userId)]?.LoginName;
-    return login ? { kind: 'known', login } : UNKNOWN;
-  } catch {
-    return UNKNOWN;
-  }
+  const cli = await findCli(candidates, 5_000);
+  if (cli.kind === 'missing') return UNKNOWN;
+  const userId = cli.status.Self?.UserID;
+  const login = userId === undefined ? undefined : cli.status.User?.[String(userId)]?.LoginName;
+  return login ? { kind: 'known', login } : UNKNOWN;
 }
 
 export interface TailnetOwnerWatch {
@@ -37,15 +37,28 @@ export interface TailnetOwnerWatch {
  * The gate decides synchronously, so the owner is read in the background and
  * re-read every minute: Tailscale can be signed in or out while the server runs.
  * Until the first read lands, tailnet devices fall back to the key.
+ *
+ * A read that fails keeps the last value. Mapping a failure to `unknown` (as
+ * first written, 2026-10-05) signed the owner's phone out for up to a minute
+ * whenever one `tailscale status` call was slow; the auth test caught it as a
+ * 1-in-6 flake. A real sign-out still lands: a logged-out node reads `unknown`.
  */
 export function watchTailnetOwner(
-  candidates: readonly string[] = TAILSCALE_CANDIDATES
+  candidates: readonly string[] = TAILSCALE_CANDIDATES,
+  onChange: (owner: TailnetOwner) => void = () => {}
 ): TailnetOwnerWatch {
   let owner: TailnetOwner = UNKNOWN;
   const refresh = () => {
-    void readTailnetOwner(candidates).then((next) => {
-      owner = next;
-    });
+    readTailnetOwner(candidates).then(
+      (next) => {
+        const changed =
+          next.kind !== owner.kind ||
+          (next.kind === 'known' && owner.kind === 'known' && next.login !== owner.login);
+        owner = next;
+        if (changed) onChange(next);
+      },
+      () => {}
+    );
   };
   refresh();
   setInterval(refresh, REFRESH_MS).unref();

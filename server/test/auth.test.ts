@@ -86,8 +86,12 @@ function startServer(): Promise<void> {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const timer = setTimeout(() => reject(new Error('server did not start in 30s')), 30_000);
+    // Both lines: the tailnet test needs the owner read, which lands in the
+    // background and could trail "Server running" on a loaded machine.
+    let output = '';
     serverProcess.stdout?.on('data', (chunk: Buffer) => {
-      if (chunk.toString().includes('Server running')) {
+      output += chunk.toString();
+      if (output.includes('Server running') && output.includes(`tailnet owner: ${OWNER}`)) {
         clearTimeout(timer);
         setTimeout(resolve, 300);
       }

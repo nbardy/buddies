@@ -146,3 +146,15 @@ test("the tailnet owner is the login of the node's own user; a tagged node has n
     kind: 'unknown',
   });
 });
+
+test('an unreadable CLI is an error, never "no owner"', async () => {
+  // watchTailnetOwner keeps the last owner when a read fails. If this mapped to
+  // `unknown` instead, one slow `tailscale status` would sign the owner's phone
+  // out for a minute (seen as a 1-in-6 auth test flake, 2026-10-05).
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mobile-access-'));
+  const bin = path.join(dir, 'Tailscale');
+  await fs.writeFile(bin, '#!/bin/sh\necho "The Tailscale GUI failed to start."\n', {
+    mode: 0o755,
+  });
+  await assert.rejects(readTailnetOwner([bin]), /GUI failed to start/);
+});
