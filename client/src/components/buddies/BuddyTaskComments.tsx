@@ -61,9 +61,13 @@ export function BuddyTaskCommentForm({
         event.preventDefault();
         void action
           .run('comment', () =>
-            buddyWrite(`/api/buddies/channels/${encodeURIComponent(channelId)}/posts`, 'POST', {
-              body,
-            })
+            buddyWrite(
+              'channel.post',
+              { channelId },
+              {
+                body,
+              }
+            )
           )
           .then((ok) => ok && setBody(''));
       }}

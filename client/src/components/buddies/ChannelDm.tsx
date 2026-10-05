@@ -112,11 +112,7 @@ export async function startNewDirectChat(
   buddyId: string,
   input: { config: ConversationConfig; message?: string }
 ): Promise<string> {
-  const { conversationId } = await buddyWrite<{ conversationId: string }>(
-    `/api/buddies/${encodeURIComponent(buddyId)}/direct/new-chat`,
-    'POST',
-    input
-  );
+  const { conversationId } = await buddyWrite('direct.new', { buddyId }, input);
   // Fix guard: marking the visible DM done before its replacement arrives collapses the
   // channel while creation is pending (channel-dm.test.tsx).
   // Keep earlier generations available; the chain view already groups them as one DM.
@@ -131,7 +127,7 @@ const profileOf = (config: ConversationConfig) => ({
   reasoningEffort: config.reasoning.mode === 'explicit' ? config.reasoning.effort : null,
 });
 const saveBuddyDefault = (buddyId: string, config: ConversationConfig) =>
-  buddyWrite(`/api/buddies/${encodeURIComponent(buddyId)}`, 'PATCH', profileOf(config));
+  buddyWrite('buddy.update', { buddyId }, profileOf(config));
 
 export function ChannelDm({
   conversationId,

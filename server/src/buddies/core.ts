@@ -8,7 +8,8 @@ import {
   type ManagerRef,
   type Setting,
 } from '@unleashd/buddies-core';
-import { z } from 'zod';
+import type { BuddyChangesSchema } from '@unleashd/shared';
+import type { z } from 'zod';
 
 export type { BuddiesCore } from '@unleashd/buddies-core';
 
@@ -24,64 +25,16 @@ export const settingOf = (value: string | null | undefined): Setting | undefined
 
 // ---- κ shared by the owner routes and the Buddy tools: one definition of each write's fields ----
 
-export const key = z
-  .string()
-  .trim()
-  .min(1)
-  .max(200)
-  .describe('Idempotency key: the same key replays the first result');
-export const ChannelArchiveSchema = z.object({ archived: z.boolean(), key }).strict();
-export const ChannelRenameSchema = z
-  .object({ name: z.string().trim().min(1).max(80), key })
-  .strict();
-
-export const evidence = z.array(z.string().min(1).max(4000)).max(32).default([]);
-
-export const TaskChangesSchema = z.object({
-  title: z.string().optional(),
-  doneCriteria: z.string().optional(),
-  status: z.enum(['open', 'in_progress', 'blocked', 'review', 'done', 'cancelled']).optional(),
-  nextAction: z.string().optional(),
-  blockedReason: z.string().optional(),
-  evidence: z.array(z.string()).optional(),
-  paused: z.boolean().optional(),
-  position: z.number().int().optional(),
-  // Home pin: 0 unpins, N > 0 pins at order N (lower = earlier); top-level Tasks only (the crate refuses others).
-  pin: z.number().int().min(0).optional(),
-  ownerId: z.string().optional(),
-});
-
-export const ScheduleFieldsSchema = z.object({
-  taskId: z.string().min(1).optional(),
-  name: z.string().min(1).max(120),
-  cron: z.string().min(1),
-  timezone: z.string().min(1),
-  prompt: z.string().min(1).max(16_000),
-  enabled: z.boolean(),
-});
-
-const profile = z.string().min(1).nullable().optional().describe('null: back to the default');
-export const BuddyCreateFieldsSchema = z.object({
-  workspaceId: z.string().min(1),
-  slug: z.string().regex(/^[a-z0-9-]+$/),
-  name: z.string().min(1),
-  role: z.string().min(1),
-  managerId: z.string().min(1).nullable().optional(),
-  provider: z.string().min(1).optional(),
-  model: z.string().min(1).optional(),
-  reasoningEffort: z.string().min(1).optional(),
-});
-export const BuddyChangesSchema = z.object({
-  name: z.string().min(1).optional(),
-  role: z.string().min(1).optional(),
-  managerId: z.string().min(1).nullable().optional().describe('null: reports to nobody'),
-  provider: profile,
-  model: profile,
-  reasoningEffort: profile,
-  maxActiveRuns: z.number().int().positive().optional(),
-  status: z.enum(['active', 'archived']).optional(),
-});
-
+export {
+  key,
+  evidence,
+  ChannelArchiveSchema,
+  ChannelRenameSchema,
+  TaskChangesSchema,
+  ScheduleFieldsSchema,
+  BuddyCreateFieldsSchema,
+  BuddyChangesSchema,
+} from '@unleashd/shared';
 export const managerRef = (id: string | null): ManagerRef =>
   id === null ? { kind: 'nobody' } : { kind: 'buddy', id };
 

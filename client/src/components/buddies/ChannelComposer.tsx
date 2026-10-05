@@ -6,7 +6,7 @@ import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { newId } from '../../utils/ids';
 import { ConversationConfigPicker } from '../../views/config/ConversationConfigPicker';
 import { BuddySigil } from './BuddySigil';
-import { buddyApi, buddyWrite, errorText } from './api';
+import { buddyUpload, buddyWrite, errorText } from './api';
 import {
   type BuddyReference,
   type ChannelReference,
@@ -27,8 +27,6 @@ import {
 } from './channel-text';
 import type { PostResult, ThreadSeat } from './types';
 import './ChannelComposer.css';
-
-type UploadedFile = { originalName: string; absolutePath: string };
 
 const MAX_TEXTAREA_HEIGHT = 240;
 
@@ -222,10 +220,7 @@ export function ChannelComposer({
     setUploading((count) => count + 1);
     const form = new FormData();
     for (const file of files) form.append('files', file);
-    void buddyApi<{ files: UploadedFile[] }>(
-      `/api/buddies/channels/${encodeURIComponent(channelId)}/media`,
-      { method: 'POST', body: form }
-    )
+    void buddyUpload(channelId, form)
       .then((result) => insertAtCaret(result.files.map(mediaMarkdown).join('\n')))
       .catch((cause: unknown) => setProblem(errorText(cause)))
       .finally(() => setUploading((count) => count - 1));
@@ -259,9 +254,9 @@ export function ChannelComposer({
     setChoices(NO_CHOICES);
     setChoosingFor(null);
     setProblem(null);
-    void buddyWrite<PostResult>(
-      `/api/buddies/channels/${encodeURIComponent(channelId)}/posts`,
-      'POST',
+    void buddyWrite(
+      'channel.post',
+      { channelId },
       { key, body, mentionConfigs, ...(rootId === null ? {} : { replyToId: rootId }) }
     )
       .then((result) => {

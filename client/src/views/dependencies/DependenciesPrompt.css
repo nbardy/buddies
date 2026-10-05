@@ -144,6 +144,33 @@
   box-shadow: none;
 }
 
+.onboarding-team-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.onboarding-quiet {
+  padding: var(--sp-5) var(--sp-6);
+  border: 0;
+  background: transparent;
+  color: #9da8b5;
+  font: inherit;
+  font-size: var(--fs-4);
+  cursor: pointer;
+}
+
+.onboarding-quiet:not(:disabled):hover {
+  color: #f2f4f8;
+}
+
+.onboarding-team .onboarding-quiet:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .onboarding-card button:focus-visible {
   outline: 2px solid rgb(166 199 255 / 60%);
   outline-offset: 2px;

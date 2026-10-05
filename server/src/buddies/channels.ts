@@ -3,6 +3,7 @@ import type { Actor, Buddy, Channel, Cursor, Post } from '@unleashd/buddies-core
 import {
   type ConversationConfig,
   type InstalledAgent,
+  type ReplyRetryResult,
   isHarnessRetryFailure,
 } from '@unleashd/shared';
 import {
@@ -114,9 +115,7 @@ export type SeatRequest =
   | { kind: 'keep' }
   | { kind: 'chosen'; config: ConversationConfig }
   | { kind: 'resolved'; seat: LiveConversation };
-export type MentionDispatch =
-  | { buddyId: string; status: 'started' }
-  | { buddyId: string; status: 'rejected'; reason: string };
+export type MentionDispatch = ReplyRetryResult;
 export type ChannelResponse = {
   channelId: string;
   threadRootId: string;

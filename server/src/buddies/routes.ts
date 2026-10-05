@@ -5,7 +5,6 @@ import type {
   Actor,
   BuddyChanges,
   ChannelRef,
-  DocKind,
   DocScope,
   Post,
   PostQuery,
@@ -13,9 +12,28 @@ import type {
   TaskQuery,
 } from '@unleashd/buddies-core';
 import {
+  AnswerSchema,
+  BuddyCreateSchema,
+  type BuddyMediaResult,
+  type BuddyMutation,
+  type BuddyMutationResults,
+  type BuddyMutationRoute,
+  BuddyPatchSchema,
+  BuilderOpenSchema,
+  ChannelSchema,
   type ConversationConfig,
-  ConversationConfigSchema,
-  OwnerPostMentionConfigSchema,
+  DirectPostSchema,
+  DocWriteSchema,
+  NewDirectSchema,
+  PostBodySchema,
+  ReadSchema,
+  RetrySchema,
+  ScheduleSchema,
+  TaskCreateSchema,
+  TaskUpdateSchema,
+  WorkspaceSchema,
+  buddyMutationRoute,
+  BuddyDocKindSchema as docKind,
 } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import multer from 'multer';
@@ -30,19 +48,13 @@ import {
 import { type Channels, mentionedBuddyIds } from './channels';
 import {
   type BuddiesCore,
-  BuddyChangesSchema,
-  BuddyCreateFieldsSchema,
   ChannelArchiveSchema,
   ChannelRenameSchema,
   CoreError,
   OWNER,
-  ScheduleFieldsSchema,
-  TaskChangesSchema,
   buddyActor,
   buddyChanges,
   coreError,
-  evidence,
-  key,
   managerRef,
   taskDetail,
 } from './core';
@@ -70,63 +82,6 @@ export interface BuddyRouteDeps {
   createBuilderConversation(workingDirectory?: string): Promise<{ conversationId: string }>;
 }
 
-const docKind = z.enum(['soul', 'working', 'long_term', 'shared']);
-const BuddyPatchSchema = BuddyChangesSchema.extend({ key }).strict();
-const BuddyCreateSchema = BuddyCreateFieldsSchema.extend({ key }).strict();
-const TaskCreateSchema = z
-  .object({
-    ownerId: z.string().min(1),
-    parentId: z.string().min(1).optional(),
-    title: z.string().min(1),
-    doneCriteria: z.string().min(1),
-    key,
-  })
-  .strict();
-const TaskUpdateSchema = z
-  .object({ baseRevision: z.number().int().positive(), changes: TaskChangesSchema.strict(), key })
-  .strict();
-const PostBodySchema = z
-  .object({
-    body: z.string().trim().min(1).max(32_000),
-    kind: z.enum(['inform', 'request']).default('inform'),
-    replyToId: z.string().min(1).optional(),
-    // Fix-guard: the owner rejected channel broadcast replies (2026-09-29).
-    // Reject old clients that still request one; new replies stay in their thread.
-    broadcast: z.literal(false).default(false),
-    taskId: z.string().min(1).optional(),
-    purpose: z.string().trim().min(1).max(200).optional(),
-    evidence,
-    mentionConfigs: z.array(OwnerPostMentionConfigSchema).max(32).default([]),
-    // The owner writes as one of its Buddies (a standup, a handoff), as the Messages tab did before
-    // T11. The crate authorizes the Buddy as the author; its @mentions start as that Buddy's.
-    asBuddyId: z.string().min(1).optional(),
-    key,
-  })
-  .strict();
-const DocWriteSchema = z
-  .object({
-    scope: z.enum(['buddy', 'workspace']).default('buddy'),
-    scopeId: z.string().min(1).optional(),
-    name: z.string().default(''),
-    content: z.string().max(40_000),
-    baseRevision: z.number().int().nonnegative(),
-    reason: z.string().min(1),
-    key,
-  })
-  .strict();
-const ScheduleSchema = ScheduleFieldsSchema.extend({ key }).strict();
-const WorkspaceSchema = z
-  .object({
-    name: z.string().trim().min(1).max(120).optional(),
-    rootPath: z.string().trim().min(1),
-  })
-  .strict();
-// Slack "New Buddy" names the workspace on screen. Until 2026-09-27 the route
-// ignored the body and the Builder always opened in the unleashd checkout, so
-// a hire from Paint Live still landed in ~/git/unleashd. Guard: buddies-v2
-// "builder opened from a workspace uses that workspace root".
-const BuilderOpenSchema = z.object({ workspaceId: z.string().min(1).optional() }).strict();
-
 /**
  * κ for "New workspace" on the home screen (port of 6d04860): the folder is resolved to its real
  * path, because the crate's reuse key is the stored root_path string — `~/x`, `/x/` and a symlink
@@ -145,28 +100,6 @@ function workspaceInput(raw: unknown): { name: string; rootPath: string } {
     throw new CoreError('invalid', 'the filesystem root cannot be a workspace');
   return { name: input.name ?? path.basename(rootPath), rootPath };
 }
-const ChannelSchema = z
-  .object({
-    name: z.string().trim().min(1).max(80),
-    purpose: z.string().trim().min(1).max(500),
-    key,
-  })
-  .strict();
-const RetrySchema = z.object({ config: ConversationConfigSchema }).strict();
-const NewDirectSchema = z
-  .object({
-    config: ConversationConfigSchema.optional(),
-    message: z.string().trim().min(1).max(100_000).optional(),
-    // buddyWrite stamps every body with a `key`; .strict() rejected it as an unknown key (ZodError
-    // on every "New chat" from the client, 2026-09-30). Accepted, not used: each call opens a chat.
-    key,
-  })
-  .strict();
-const DirectPostSchema = PostBodySchema.extend({ members: z.array(z.string().min(1)).min(1) });
-const AnswerSchema = z
-  .object({ body: z.string().trim().min(1).max(32_000), evidence, key })
-  .strict();
-const ReadSchema = z.object({ postId: z.string().min(1) }).strict();
 // Keyset pages on the post's ordered id (`Post.ord`, a UUIDv7), never on timestamps.
 // `from` (a post id) is a permalink's page instead: that post and everything newer (T22).
 const CursorSchema = z.object({
@@ -298,7 +231,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     ['liveInWorkspace', (id) => ({ kind: 'live', workspaceId: id })],
   ];
 
-  const routes: Record<string, Handler> = {
+  const routes = {
     // ---- team -----------------------------------------------------------------------------------
     'GET 200 /api/buddies/overview': async () =>
       Promise.all(
@@ -309,36 +242,36 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
           taskCounts: await core.taskCounts(w.id),
         }))
       ),
-    'POST 201 /api/buddies/workspaces': async (req) =>
+    [buddyMutationRoute('workspace.create')]: async (req) =>
       write(core.createWorkspace(OWNER, workspaceInput(req.body))),
-    'POST 201 /api/buddies/builder': async (req) => {
+    [buddyMutationRoute('builder.open')]: async (req) => {
       const { workspaceId } = BuilderOpenSchema.parse(req.body ?? {});
       if (workspaceId === undefined) return deps.createBuilderConversation();
       const workspace = (await core.listWorkspaces()).find((item) => item.id === workspaceId);
       if (!workspace) throw new CoreError('not_found', `workspace ${workspaceId}`);
       return deps.createBuilderConversation(workspace.rootPath);
     },
-    'POST 201 /api/buddies': async (req) => {
+    [buddyMutationRoute('buddy.create')]: async (req) => {
       const { managerId, ...input } = BuddyCreateSchema.parse(req.body);
       return write(core.createBuddy(OWNER, { ...input, manager: managerRef(managerId ?? null) }));
     },
-    'POST 200 /api/buddies/:buddyId/direct': (req) => channels.openDirect(p(req, 'buddyId')),
+    [buddyMutationRoute('direct.open')]: (req) => channels.openDirect(p(req, 'buddyId')),
     'GET 200 /api/buddies/:buddyId/direct/chain': (req) => channels.directChain(p(req, 'buddyId')),
-    'POST 200 /api/buddies/:buddyId/direct/new-chat': (req) =>
+    [buddyMutationRoute('direct.new')]: (req) =>
       channels.newDirect(p(req, 'buddyId'), NewDirectSchema.parse(req.body ?? {})),
-    'POST 202 /api/buddies/:buddyId/wake': (req) => channels.wake(p(req, 'buddyId')),
+    [buddyMutationRoute('buddy.wake')]: (req) => channels.wake(p(req, 'buddyId')),
     // ---- docs -----------------------------------------------------------------------------------
     'GET 200 /api/buddies/:buddyId/docs/:kind': async (req) => {
       const buddyId = p(req, 'buddyId');
-      const kind = docKind.parse(p(req, 'kind')) as DocKind;
+      const kind = docKind.parse(p(req, 'kind'));
       if (q(req, 'all') === '1') return core.listDocs(OWNER, buddyId, kind);
       const scope = scopeOf(q(req, 'scope') ?? 'buddy', q(req, 'scopeId'));
       return core.readDoc(OWNER, { buddyId, scope, kind, name: q(req, 'name') ?? '' });
     },
-    'PUT 200 /api/buddies/:buddyId/docs/:kind': async (req) => {
+    [buddyMutationRoute('doc.write')]: async (req) => {
       const buddyId = p(req, 'buddyId');
       const { scope, scopeId, name, ...write_ } = DocWriteSchema.parse(req.body);
-      const kind = docKind.parse(p(req, 'kind')) as DocKind;
+      const kind = docKind.parse(p(req, 'kind'));
       const doc = { buddyId, scope: scopeOf(scope, scopeId), kind, name };
       return write(core.writeDoc(OWNER, { doc, ...write_ }));
     },
@@ -365,9 +298,9 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       const before = cursor.before === undefined ? null : { ord: cursor.before };
       return core.taskPosts(OWNER, p(req, 'taskId'), before, cursor.limit);
     },
-    'POST 201 /api/buddies/tasks': (req) =>
+    [buddyMutationRoute('task.create')]: (req) =>
       write(core.upsertTask(OWNER, { kind: 'create', ...TaskCreateSchema.parse(req.body) })),
-    'PATCH 200 /api/buddies/tasks/:taskId': (req) =>
+    [buddyMutationRoute('task.update')]: (req) =>
       write(
         core.upsertTask(OWNER, {
           kind: 'update',
@@ -382,14 +315,13 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       return core.listRuns(found[1](q(req, found[0])!), 100);
     },
     'GET 200 /api/buddies/runs/:runId': (req) => core.getRun(p(req, 'runId')),
-    'POST 200 /api/buddies/runs/:runId/cancel': (req) => runner.cancel(p(req, 'runId')),
+    [buddyMutationRoute('run.cancel')]: (req) => runner.cancel(p(req, 'runId')),
     // ---- schedules ------------------------------------------------------------------------------
     'GET 200 /api/buddies/:buddyId/schedules': (req) =>
       core.listSchedules({ kind: 'buddy', buddyId: p(req, 'buddyId') }),
-    'POST 201 /api/buddies/:buddyId/schedules': (req) => putSchedule(req, undefined),
-    'PUT 200 /api/buddies/:buddyId/schedules/:scheduleId': (req) =>
-      putSchedule(req, p(req, 'scheduleId')),
-    'POST 202 /api/buddies/:buddyId/schedules/:scheduleId/run': (req) =>
+    [buddyMutationRoute('schedule.create')]: (req) => putSchedule(req, undefined),
+    [buddyMutationRoute('schedule.update')]: (req) => putSchedule(req, p(req, 'scheduleId')),
+    [buddyMutationRoute('schedule.run')]: (req) =>
       write(
         core.enqueueRun(OWNER, {
           buddyId: p(req, 'buddyId'),
@@ -426,21 +358,21 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     },
     'GET 200 /api/buddies/workspaces/:workspaceId/channels/archived': (req) =>
       core.archivedChannels(OWNER, p(req, 'workspaceId')),
-    'POST 200 /api/buddies/channels/:channelId/archive': async (req) => {
+    [buddyMutationRoute('channel.archive')]: async (req) => {
       const { archived, key } = ChannelArchiveSchema.parse(req.body);
       const channelId = p(req, 'channelId');
       const channel = await write(core.setChannelArchived(OWNER, channelId, archived, key));
       deps.channelChanged(channelId);
       return channel;
     },
-    'POST 200 /api/buddies/channels/:channelId/rename': async (req) => {
+    [buddyMutationRoute('channel.rename')]: async (req) => {
       const { name, key } = ChannelRenameSchema.parse(req.body);
       const channelId = p(req, 'channelId');
       const channel = await write(core.renameChannel(OWNER, channelId, name, key));
       deps.channelChanged(channelId);
       return channel;
     },
-    'POST 201 /api/buddies/workspaces/:workspaceId/channels': (req) =>
+    [buddyMutationRoute('channel.create')]: (req) =>
       write(
         core.createChannel(OWNER, {
           ...ChannelSchema.parse(req.body),
@@ -465,25 +397,25 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         seats: await channels.threadSeats(root.id),
       };
     },
-    'POST 201 /api/buddies/channels/:channelId/posts': (req) =>
+    [buddyMutationRoute('channel.post')]: (req) =>
       ownerPost(req.body, { kind: 'id', id: p(req, 'channelId') }),
-    'POST 201 /api/buddies/direct/posts': (req) => {
+    [buddyMutationRoute('direct.post')]: (req) => {
       const { members, ...body } = DirectPostSchema.parse(req.body);
       return ownerPost(body, { kind: 'direct', members: [OWNER, ...members.map(buddyActor)] });
     },
     // A failed reply's retry on another harness (493c1c7); the new attempt is a later reply.
-    'POST 202 /api/buddies/posts/:postId/retry': async (req) =>
+    [buddyMutationRoute('reply.retry')]: async (req) =>
       channels.retryReply(
         await core.getPost(OWNER, p(req, 'postId')),
         RetrySchema.parse(req.body).config
       ),
-    'POST 201 /api/buddies/posts/:postId/answer': async (req) => {
+    [buddyMutationRoute('request.answer')]: async (req) => {
       const input = AnswerSchema.parse(req.body);
       return (await posted(core.answer(OWNER, { requestId: p(req, 'postId'), ...input }))).post;
     },
     // Read through `postId`, the newest post the client rendered: a post that landed after the
     // render stays unread. The push clears the channel on the owner's other devices.
-    'POST 200 /api/buddies/channels/:channelId/read': async (req) => {
+    [buddyMutationRoute('channel.read')]: async (req) => {
       const { postId } = ReadSchema.parse(req.body);
       await core.markRead(OWNER, p(req, 'channelId'), postId);
       deps.channelChanged(p(req, 'channelId'));
@@ -497,7 +429,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         z.coerce.number().int().min(1).max(200).default(30).parse(q(req, 'limit'))
       ),
     // Read a followed thread through `postId`; the channel's own cursor is left alone.
-    'POST 200 /api/buddies/threads/:rootId/read': async (req) => {
+    [buddyMutationRoute('thread.read')]: async (req) => {
       const { postId } = ReadSchema.parse(req.body);
       const root = await core.getPost(OWNER, p(req, 'rootId'));
       await core.markThreadRead(OWNER, root.id, postId);
@@ -517,28 +449,36 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       ]);
       return { buddy, tasks, schedules, runs };
     },
-    'PATCH 200 /api/buddies/:buddyId': (req) => {
+    [buddyMutationRoute('buddy.update')]: (req) => {
       const { key: changeKey, ...changes } = BuddyPatchSchema.parse(req.body);
       return archive(p(req, 'buddyId'), buddyChanges(changes), changeKey);
     },
-    'DELETE 200 /api/buddies/:buddyId': (req) =>
+    [buddyMutationRoute('buddy.archive')]: (req) =>
       archive(p(req, 'buddyId'), { status: 'archived' }, `archive:${p(req, 'buddyId')}`),
+  } satisfies Record<string, Handler> & {
+    [K in Exclude<BuddyMutation, 'upstream.update'> as BuddyMutationRoute<K>]: (
+      req: Request
+    ) => Promise<BuddyMutationResults[K]>;
   };
 
   // Each key is `METHOD STATUS path`; order matters (a `:buddyId` route comes last).
   for (const [route, handle] of Object.entries(routes)) {
     const [method, status, path] = route.split(' ');
     app[method.toLowerCase() as Method](path, (req: Request, res: Response) => {
-      handle(req).then(
-        (body) => res.status(Number(status)).json(body ?? null),
-        (error: unknown) => {
-          const typed = coreError(error);
-          const code = typed ? typed.httpStatus : error instanceof z.ZodError ? 400 : 500;
-          if (code >= 500) console.error('[buddies] request failed:', error);
-          const message = error instanceof Error ? error.message : String(error);
-          res.status(code).json({ error: typed?.message ?? message });
-        }
-      );
+      // Synchronous schema failures escaped to Express's HTML error page; the UI called them
+      // "feature unavailable". Guard: malformed task patch over owner HTTP (buddies-v2.test.ts).
+      Promise.resolve()
+        .then<unknown>(() => handle(req))
+        .then(
+          (body) => res.status(Number(status)).json(body ?? null),
+          (error: unknown) => {
+            const typed = coreError(error);
+            const code = typed ? typed.httpStatus : error instanceof z.ZodError ? 400 : 500;
+            if (code >= 500) console.error('[buddies] request failed:', error);
+            const message = error instanceof Error ? error.message : String(error);
+            res.status(code).json({ error: typed?.message ?? message });
+          }
+        );
     });
   }
 
@@ -576,6 +516,6 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       mimeType: f.mimetype,
       size: f.size,
     }));
-    res.status(201).json({ files: saved });
+    res.status(201).json({ files: saved } satisfies BuddyMediaResult);
   });
 }
