@@ -48,7 +48,7 @@
     "unleashd": "./bin/unleashd.js",
     "buddies": "./bin/unleashd.js"
   },
-  "files": ["bin", "tools/preflight.mjs", "server/dist", "client/dist"],
+  "files": ["bin", "tools/preflight.mjs", "server/dist", "server/relay", "client/dist"],
   "bundledDependencies": ["@nbardy/agent-cli", "@unleashd/buddies-core", "@unleashd/shared"],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
