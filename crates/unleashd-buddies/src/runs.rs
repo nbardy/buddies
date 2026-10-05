@@ -291,6 +291,88 @@ impl Store {
         })
     }
 
+    // Pattern: one-write-path (docs/patterns.md#one-write-path) — retry is a run enqueue, not a revive.
+    /// Re-enqueues a failed or cancelled run's input as a NEW run on the same input key.
+    ///
+    /// Attempt numbering: `UNIQUE(input_key, attempt)` means one key has a chain of attempts, and
+    /// `enqueue` returns the latest one. A retry is the next link, `max(attempt) + 1`; the failed
+    /// run stays as history and is never reset, so its error and conversation remain readable.
+    /// Only the LATEST attempt can be retried: retrying attempt 1 after attempt 2 exists would
+    /// fork the chain, so it is a typed error naming the newer attempt. A live or complete run is
+    /// a typed error too, never a silent no-op (the caller would believe work was restarted).
+    ///
+    /// The request the run answers goes back to `awaiting`. Settling the failure closed it
+    /// (`close_request`) and already sent the sender its failure notice, which stands: it was true
+    /// when sent. Without reopening, the retry's answer would find a closed request and the sender
+    /// would never be woken with it. The answer then returns along the route the request fixed at
+    /// send time (`Returns`), exactly as a first attempt's would.
+    ///
+    /// `config` None keeps the failed run's model/profile; Some moves the retry to another model.
+    /// Choosing a model is `EnqueueRun` authority over the run's Buddy (self or a manager), the same
+    /// bar as a worker request: the requester alone may retry but cannot move a peer's model.
+    /// Idempotent on `key`: a replayed call returns the retry it created.
+    pub fn retry_run(&mut self, actor: &Actor, run_id: &str, config: Option<RunConfig>, key: &str) -> Result<Run> {
+        self.write(|tx| {
+            let run = get_run(tx, run_id)?;
+            require(tx, actor, Op::RetryRun, &Subject::Run { id: run.id.clone() })?;
+            if config.is_some() {
+                require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: run.buddy_id.clone() })?;
+            }
+            let m = Mutation {
+                actor,
+                workspace_id: &run.workspace_id,
+                buddy_id: Some(&run.buddy_id),
+                task_id: run.task_id.as_deref(),
+                op: "run.retry",
+                payload: json!({"runId": run.id, "config": config}),
+                key: Some(key),
+            };
+            let id = idempotent(tx, &m, |tx| {
+                match run.status {
+                    RunStatus::Failed | RunStatus::Cancelled => {}
+                    RunStatus::Queued | RunStatus::Running | RunStatus::CancelRequested => {
+                        return Err(CoreError::Invalid(format!("run {run_id} is {} and still live; cancel it first or wait", run.status.as_str())));
+                    }
+                    RunStatus::Complete => return Err(CoreError::Invalid(format!("run {run_id} completed; there is nothing to retry"))),
+                }
+                let latest: i64 = tx.query_row("SELECT max(attempt) FROM run WHERE input_key = ?1", [&run.input_key], |r| r.get(0))?;
+                if latest != run.attempt {
+                    return Err(CoreError::Invalid(format!("run {run_id} is attempt {}; attempt {latest} of its input exists, retry that one", run.attempt)));
+                }
+                // A background kind opens its own conversation when claimed; a chat, reply or failure
+                // notice IS a turn in the conversation it was enqueued for.
+                let (conversation_id, reopen) = match &run.input {
+                    RunInput::Chat { .. } | RunInput::Reply { .. } | RunInput::FailureNotice { .. } => (run.conversation_id.clone(), None),
+                    RunInput::Post { post_id } => (None, Some(post_id.as_str())),
+                    RunInput::Schedule { .. } | RunInput::Follow { .. } => (None, None),
+                };
+                if let Some(post_id) = reopen {
+                    tx.execute("UPDATE post SET request = 'awaiting' WHERE id = ?1 AND request IN ('failed','cancelled')", [post_id])?;
+                }
+                let task_epoch = run.task_id.as_deref().map(|t| get_task(tx, t).map(|t| t.epoch)).transpose()?;
+                let now = now_iso();
+                let id = new_id("run");
+                tx.execute(
+                    "INSERT INTO run (id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id,
+                       task_epoch, status, ready_at, created_at, config)
+                     SELECT ?1, input_key, ?2, input_kind, input_id, buddy_id, workspace_id, ?3, task_id, ?4, 'queued', ?5, ?5, ?6
+                     FROM run WHERE id = ?7",
+                    params![
+                        id,
+                        run.attempt + 1,
+                        conversation_id,
+                        task_epoch,
+                        now,
+                        config.as_ref().or(run.config.as_ref()).map(|c| serde_json::to_string(c).expect("run config serializes")),
+                        run.id
+                    ],
+                )?;
+                Ok(id)
+            })?;
+            get_run(tx, &id)
+        })
+    }
+
     pub fn get_run(&self, id: &str) -> Result<Run> {
         get_run(&self.conn, id)
     }

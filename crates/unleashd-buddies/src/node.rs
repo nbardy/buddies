@@ -224,6 +224,11 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn retry_run(&self, actor: Actor, run_id: String, config: Option<RunConfig>, key: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.retry_run(&actor, &run_id, config, &key)).await
+    }
+
+    #[napi]
     pub async fn create_workspace(&self, actor: Actor, input: WorkspaceInput) -> napi::Result<Workspace> {
         call(&self.store, move |s| s.create_workspace(&actor, input)).await
     }

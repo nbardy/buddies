@@ -303,7 +303,7 @@ export function createRunner(options: {
     const failed = await core.getRun(failedRunId);
     return returnJob(
       run,
-      `The run ${failed.id} for your request failed (${failed.errorCode}): ${failed.error}. The request is closed as failed. Inspect its effects before asking again.`
+      `The run ${failed.id} for your request failed (${failed.errorCode}): ${failed.error}. The request is closed as failed. Inspect its effects before asking again; if it is safe to repeat, runs {kind:"retry", runId, key} re-runs it (optionally on another worker model) and reopens the request.`
     );
   }
 
