@@ -316,6 +316,7 @@ export function createRunner(options: {
       // Durable intake W0a: the kinds exist, nothing produces them until channels move onto runs.
       case 'mention':
       case 'follow_up':
+      case 'retry':
         throw new Error(`no job handles ${input.kind} runs in this build`);
     }
   }

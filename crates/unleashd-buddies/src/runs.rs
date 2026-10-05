@@ -185,7 +185,8 @@ impl Enqueue for Connection {
             | RunInput::Reply { .. }
             | RunInput::FailureNotice { .. }
             | RunInput::Mention { .. }
-            | RunInput::FollowUp { .. } => now.clone(),
+            | RunInput::FollowUp { .. }
+            | RunInput::Retry { .. } => now.clone(),
         };
         let (lane, position) = match &lane {
             Some((lane, place)) => (Some(lane.as_str()), Some(lane_position(self, lane, *place)?)),
@@ -259,6 +260,50 @@ impl Store {
         })
     }
 
+    // Pattern: durable-intake (docs/patterns.md#durable-intake)
+    /// The owner reruns a failed channel reply (`notice_id`, a `reply_failed` post by the buddy)
+    /// on `config`. Durable like a wake: the rerun is a run in the notice's seat lane, behind any
+    /// reply already queued there. A second click while it is live returns the same run (key
+    /// `retry:<notice>`).
+    pub fn enqueue_retry(&mut self, actor: &Actor, notice_id: &str, config: RunConfig) -> Result<Run> {
+        self.write(|tx| {
+            let notice = get_post(tx, notice_id)?;
+            let buddy_id = match (&notice.author, notice.purpose.as_deref()) {
+                (Actor::Buddy { id }, Some("reply_failed")) => id.clone(),
+                _ => return Err(CoreError::Invalid(format!("post {notice_id} is not a failed buddy reply"))),
+            };
+            require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: buddy_id.clone() })?;
+            let root = notice.root_id.clone().unwrap_or(notice.id.clone());
+            tx.insert_run(NewRun {
+                input: EnqueueInput {
+                    buddy_id: buddy_id.clone(),
+                    input: RunInput::Retry { post_id: notice.id },
+                    conversation_id: None,
+                    task_id: None,
+                    after_run_id: None,
+                    deadline: None,
+                    config: Some(config),
+                },
+                body: None,
+                lane: Some((format!("seat:{root}:{buddy_id}"), Place::Back)),
+            })
+        })
+    }
+
+    /// The newest post ord `reader` has handled in a thread (its cursor), if it follows it. A
+    /// resumed seat's prompt shows only the posts after it (design R2: prompt context, never the
+    /// disposition of a reply).
+    pub fn thread_read_through(&self, reader: &str, root_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT last_ord FROM thread_read WHERE reader = ?1 AND root_id = ?2",
+                params![reader, root_id],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
     /// Claims the oldest ready run, or None when nothing is claimable.
     pub fn claim_run(&mut self, budgets: RunBudgets) -> Result<Option<Claim>> {
         self.claim_run_at(&now_iso(), budgets)
@@ -297,7 +342,9 @@ impl Store {
             // A channel reply is a foreground turn in its seat: the chat budget, as when it ran
             // as a chat run (before 2026-10-05).
             let deadline_ms = match get_run(tx, &id)?.input {
-                RunInput::Chat { .. } | RunInput::Mention { .. } | RunInput::FollowUp { .. } => budgets.chat_deadline_ms,
+                RunInput::Chat { .. } | RunInput::Mention { .. } | RunInput::FollowUp { .. } | RunInput::Retry { .. } => {
+                    budgets.chat_deadline_ms
+                }
                 RunInput::Post { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } => {
                     budgets.turn_deadline_ms
                 }
@@ -348,10 +395,10 @@ impl Store {
         self.write(|tx| {
             let run = leased(tx, run_id, lease_token)?;
             let body = match (&run.input, read_through) {
-                (RunInput::Mention { .. } | RunInput::FollowUp { .. }, Some(ord)) => Some(json!({ "readThrough": ord }).to_string()),
+                (RunInput::Mention { .. } | RunInput::FollowUp { .. } | RunInput::Retry { .. }, Some(ord)) => Some(json!({ "readThrough": ord }).to_string()),
                 // Refused here, not at settle: a complete channel reply must move the cursor, and a
                 // missing one would only surface as a Corrupt error from `after_settle`.
-                (RunInput::Mention { .. } | RunInput::FollowUp { .. }, None) => {
+                (RunInput::Mention { .. } | RunInput::FollowUp { .. } | RunInput::Retry { .. }, None) => {
                     return Err(CoreError::Invalid(format!("channel reply {run_id} must say what its prompt read")));
                 }
                 (_, None) => run.body.clone(),
@@ -436,7 +483,8 @@ impl Store {
                 | RunInput::Schedule { .. }
                 | RunInput::FailureNotice { .. }
                 | RunInput::Mention { .. }
-                | RunInput::FollowUp { .. } => {}
+                | RunInput::FollowUp { .. }
+                | RunInput::Retry { .. } => {}
             }
             get_run(tx, run_id)
         })
@@ -726,7 +774,7 @@ fn expire_leases(tx: &Transaction, now: &str) -> Result<()> {
 /// transaction (design R2): the cursor follows completed handling, never the compose step, so a
 /// crash between composing and running can never read as "already handled".
 fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
-    if let (RunInput::Mention { post_id } | RunInput::FollowUp { post_id }, Some(body), Outcome::Complete { .. }) =
+    if let (RunInput::Mention { post_id } | RunInput::FollowUp { post_id } | RunInput::Retry { post_id }, Some(body), Outcome::Complete { .. }) =
         (&run.input, &run.body, outcome)
     {
         let through = serde_json::from_str::<serde_json::Value>(body)
@@ -752,7 +800,8 @@ fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
             | RunInput::Schedule { .. }
             | RunInput::FailureNotice { .. }
             | RunInput::Mention { .. }
-            | RunInput::FollowUp { .. },
+            | RunInput::FollowUp { .. }
+            | RunInput::Retry { .. },
             _,
         ) => Ok(()),
     }

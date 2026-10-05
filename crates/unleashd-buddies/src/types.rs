@@ -168,6 +168,13 @@ pub enum RunInput {
     FollowUp {
         post_id: String,
     },
+    /// The owner reran a failed channel reply on a harness they picked. `post_id` is the failure
+    /// notice; it answers that notice's trigger in the same seat lane. Its own kind, not a
+    /// `Mention`: the trigger's `mention:<post>:<buddy>` run already ended, and a reused key would
+    /// return that terminal row instead of starting the rerun (design Revision 7).
+    Retry {
+        post_id: String,
+    },
 }
 
 impl RunInput {
@@ -187,6 +194,7 @@ impl RunInput {
             RunInput::FailureNotice { run_id } => ("failure_notice", run_id, format!("failure:{run_id}")),
             RunInput::Mention { post_id } => ("mention", post_id, format!("mention:{post_id}:{buddy_id}")),
             RunInput::FollowUp { post_id } => ("follow_up", post_id, format!("follow_up:{post_id}:{buddy_id}")),
+            RunInput::Retry { post_id } => ("retry", post_id, format!("retry:{post_id}")),
         }
     }
     pub fn legacy_key(&self) -> Option<String> {
@@ -197,7 +205,8 @@ impl RunInput {
             | RunInput::Schedule { .. }
             | RunInput::FailureNotice { .. }
             | RunInput::Mention { .. }
-            | RunInput::FollowUp { .. } => None,
+            | RunInput::FollowUp { .. }
+            | RunInput::Retry { .. } => None,
         }
     }
     /// A schedule run's slot is its `ready_at`.
@@ -210,6 +219,7 @@ impl RunInput {
             "failure_notice" => Ok(RunInput::FailureNotice { run_id: id }),
             "mention" => Ok(RunInput::Mention { post_id: id }),
             "follow_up" => Ok(RunInput::FollowUp { post_id: id }),
+            "retry" => Ok(RunInput::Retry { post_id: id }),
             other => Err(CoreError::Corrupt(format!("run input_kind {other:?}"))),
         }
     }

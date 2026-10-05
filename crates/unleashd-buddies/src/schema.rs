@@ -133,6 +133,7 @@ CREATE INDEX event_buddy ON event(buddy_id, seq) WHERE buddy_id IS NOT NULL;
 /// The `run` table, named `{table}` so the on-open rebuild creates `run_new` from the SAME text a
 /// fresh file gets. Pattern: durable-intake (docs/patterns.md#durable-intake). Changed 2026-10-05:
 /// - `mention` / `follow_up` kinds: a post's wakes are runs written in the post's transaction;
+/// - `retry` kind: the owner's rerun of a failed reply (an owner action, not a post wake);
 /// - `body`: the input that is not a post. A queued chat run is the ONLY copy of the owner's text,
 ///   so the CHECK refuses one without it (8 owner chats were lost at a restart on 2026-09-29). Only
 ///   while queued: legacy running chats predate the column, and past `executing_at` the provider
@@ -145,7 +146,7 @@ CREATE INDEX event_buddy ON event(buddy_id, seq) WHERE buddy_id IS NOT NULL;
 const RUN_TABLE: &str = r#"
 CREATE TABLE {table} (
   id TEXT PRIMARY KEY, input_key TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 1,
-  input_kind TEXT NOT NULL CHECK(input_kind IN ('chat','post','reply','schedule','failure_notice','mention','follow_up')),
+  input_kind TEXT NOT NULL CHECK(input_kind IN ('chat','post','reply','schedule','failure_notice','mention','follow_up','retry')),
   input_id TEXT NOT NULL, buddy_id TEXT NOT NULL REFERENCES buddy(id), workspace_id TEXT NOT NULL,
   conversation_id TEXT, task_id TEXT, task_epoch INTEGER, after_run_id TEXT,
   status TEXT NOT NULL CHECK(status IN ('queued','running','cancel_requested','complete','failed','cancelled')),

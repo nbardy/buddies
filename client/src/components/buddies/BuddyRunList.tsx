@@ -16,6 +16,7 @@ const RUN_INPUT_LABEL: { [K in RunInput['kind']]: string } = {
   failure_notice: 'Failure notice',
   mention: 'Answering a mention',
   follow_up: 'Following up in a thread',
+  retry: 'Retrying a failed reply',
 };
 
 const RUN_STATUS_LABEL: Record<RunStatus, string> = {

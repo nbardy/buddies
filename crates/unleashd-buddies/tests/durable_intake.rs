@@ -521,3 +521,42 @@ fn a_reply_whose_seat_is_busy_goes_back_to_the_queue_bound_to_it() {
     s.mark_executing(&again.run.id, &again.lease_token, Some(hi.ord.clone())).unwrap();
     assert_eq!(s.release_run(&again.run.id, &again.lease_token, "seat-1").unwrap_err().code(), "invalid");
 }
+
+// The owner's retry of a failed reply is durable like a wake and runs in the same seat lane. Its
+// own key: the trigger's `mention:<post>:<buddy>` run already ended, so reusing it would hand back
+// that terminal row and rerun nothing (design Revision 7). A double click while it is live is the
+// same run; a post that is not a failed buddy reply cannot be retried.
+#[test]
+fn a_retry_reruns_a_failed_reply_once_in_its_seat_lane_and_moves_the_cursor() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let channel = public(s);
+    let id = ChannelRef::Id { id: channel };
+    let root = s.write_post(&Actor::Owner, id.clone(), inform("root", "r", None, vec![wake("ic", WakeKind::Mention)])).unwrap().post;
+    let mention = s.claim_run(lease(60_000)).unwrap().unwrap();
+    s.settle_run(&mention.run.id, &mention.lease_token, Outcome::Failed { code: "execution_failed".into(), error: "x".into() }).unwrap();
+    let notice = s
+        .write_post(
+            &Actor::Buddy { id: "ic".into() },
+            id.clone(),
+            PostInput { purpose: Some("reply_failed".into()), ..inform("Couldn’t reply: provider error", "n", Some(&root.id), vec![]) },
+        )
+        .unwrap()
+        .post;
+    // Posting the notice already read the buddy through it; the owner's later post is what the
+    // rerun's prompt reads, so the cursor must move past the notice only when the retry settles.
+    let later = s.write_post(&Actor::Owner, id.clone(), inform("try again", "l", Some(&root.id), vec![])).unwrap().post;
+    let config = RunConfig { provider: "codex".into(), model: "m".into(), reasoning_effort: None };
+    assert_eq!(s.enqueue_retry(&Actor::Owner, &root.id, config.clone()).unwrap_err().code(), "invalid");
+    let retry = s.enqueue_retry(&Actor::Owner, &notice.id, config.clone()).unwrap();
+    assert_eq!(s.enqueue_retry(&Actor::Owner, &notice.id, config.clone()).unwrap().id, retry.id, "a double click is one rerun");
+    assert_eq!(retry.lane.as_deref(), Some(format!("seat:{}:ic", root.id).as_str()));
+    assert_eq!(retry.config, Some(config));
+    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert_eq!(claim.run.id, retry.id);
+    assert_eq!(s.thread_read_through("ic", &root.id).unwrap(), Some(notice.ord.clone()));
+    s.mark_executing(&claim.run.id, &claim.lease_token, Some(later.ord.clone())).unwrap();
+    assert_eq!(s.thread_read_through("ic", &root.id).unwrap(), Some(notice.ord), "the cursor waits for settle (R2)");
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    assert_eq!(s.thread_read_through("ic", &root.id).unwrap(), Some(later.ord));
+}

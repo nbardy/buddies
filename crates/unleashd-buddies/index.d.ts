@@ -32,6 +32,8 @@ export declare class BuddiesCore {
   taskCounts(workspaceId: string): Promise<Array<TaskCount>>
   enqueueRun(actor: Actor, input: EnqueueInput): Promise<Run>
   enqueueChat(actor: Actor, input: ChatEnqueue): Promise<Run>
+  enqueueRetry(actor: Actor, noticeId: string, config: RunConfig): Promise<Run>
+  threadReadThrough(reader: string, rootId: string): Promise<string | null>
   markExecuting(runId: string, leaseToken: string, readThrough?: string | undefined | null): Promise<Run>
   releaseRun(runId: string, leaseToken: string, conversationId: string): Promise<Run>
   promoteRun(actor: Actor, runId: string): Promise<Run>
@@ -501,6 +503,7 @@ export type RunInput =
   | { kind: 'failure_notice'; runId: string }
   | { kind: 'mention'; postId: string }
   | { kind: 'follow_up'; postId: string }
+  | { kind: 'retry'; postId: string }
 
 export type RunQuery =
   | { kind: 'buddy'; buddyId: string }

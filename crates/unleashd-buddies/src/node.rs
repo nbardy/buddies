@@ -182,6 +182,16 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn enqueue_retry(&self, actor: Actor, notice_id: String, config: RunConfig) -> napi::Result<Run> {
+        call(&self.store, move |s| s.enqueue_retry(&actor, &notice_id, config)).await
+    }
+
+    #[napi]
+    pub async fn thread_read_through(&self, reader: String, root_id: String) -> napi::Result<Option<String>> {
+        call(&self.store, move |s| s.thread_read_through(&reader, &root_id)).await
+    }
+
+    #[napi]
     pub async fn mark_executing(&self, run_id: String, lease_token: String, read_through: Option<String>) -> napi::Result<Run> {
         call(&self.store, move |s| s.mark_executing(&run_id, &lease_token, read_through)).await
     }

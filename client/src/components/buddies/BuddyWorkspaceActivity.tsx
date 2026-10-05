@@ -29,6 +29,7 @@ const RUN_KIND: Record<RunInput['kind'], string> = {
   failure_notice: 'notice',
   mention: 'mention',
   follow_up: 'follow-up',
+  retry: 'retry',
 };
 
 /** A live run's state; finished runs never appear in a live listing. */
