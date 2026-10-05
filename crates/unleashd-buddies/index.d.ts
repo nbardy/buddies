@@ -506,7 +506,7 @@ export interface RunRow {
   waiting?: RunWaiting
   /** The thread the run worked in, so a reader can open or resume it. */
   conversationId?: string
-  /** What happened to a run that did not complete (e.g. `interrupted`: the host restarted). */
+  /** What happened to a run that did not complete (e.g. `lease_expired`: the host or holder died mid-run and the claim gate ended it). */
   errorCode?: string
   error?: string
 }

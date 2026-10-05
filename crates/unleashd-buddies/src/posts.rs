@@ -411,7 +411,7 @@ impl Store {
         Ok(keyset_page(collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?, limit))
     }
 
-    /// Requests the actor owes (across workspaces), its own open requests, and its channels in
+    /// Requests the actor owes (across workspaces), its own open requests in `workspace_id`, and its channels in
     /// `workspace_id` with unread counts.
     pub fn inbox(&self, actor: &Actor, workspace_id: &str) -> Result<Inbox> {
         let (me, my_buddy) = (actor.key(), actor.buddy_id());
@@ -424,12 +424,16 @@ impl Store {
                 ))?
                 .query_map(params![me, my_buddy], post_row)?,
         )?;
+        // Fix-guard: scoped to the turn's workspace like `channels` and `unread_threads`; it was
+        // buddy-wide, so another workspace's open requests leaked into this inbox (2026-10-06).
+        // Guard: `inbox_waiting_on_is_scoped_to_the_workspace`.
         let waiting_on = collect(
             self.conn
                 .prepare_cached(&format!(
-                    "SELECT {POST_COLS} FROM post p WHERE p.author_id IS ?1 AND p.request = 'awaiting' ORDER BY p.ord"
+                    "SELECT {POST_COLS} FROM post p JOIN channel c ON c.id = p.channel_id
+                     WHERE p.author_id IS ?1 AND p.request = 'awaiting' AND c.workspace_id = ?2 ORDER BY p.ord"
                 ))?
-                .query_map([my_buddy], post_row)?,
+                .query_map(params![my_buddy, workspace_id], post_row)?,
         )?;
         let channels = collect(
             self.conn

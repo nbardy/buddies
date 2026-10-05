@@ -3252,6 +3252,14 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       read: { search: { text: 'quarterly', from: ['owner'] } },
     });
     assert.deepEqual(byOwner.value.posts, []);
+    // 2026-10-06: a turn that cached the pre-74d1fd3 tool list sends `search: "string"`.
+    const legacy = await call(w.endpoint.spec(grant), 'channel_read', {
+      read: { search: 'quarterly' },
+    });
+    assert.deepEqual(
+      legacy.value.posts.map((post: Post) => post.id),
+      [written.post.id]
+    );
     const malformed = await call(w.endpoint.spec(grant), 'channel_read', {
       read: { search: { text: '"quarterly' } },
     });

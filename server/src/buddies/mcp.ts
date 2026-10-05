@@ -64,6 +64,18 @@ const teamTool = <S extends z.AnyZodObject>(t: ToolSpec<TurnGrant, S>) =>
 
 const actorOf = (id: string): Actor => (id === 'owner' ? OWNER : buddyActor(id));
 
+// Fix-guard: `read.search` was a bare string until 74d1fd3 made it {text, ...filters}. Agent CLIs
+// cache tools/list for a whole turn and adopted turns outlive backend versions, so a turn that
+// started before the reshape keeps sending `search: "string"` and every call failed validation
+// (2026-10-06, CEO feedback). Canonicalize at the input boundary so the handler sees one shape.
+// z.preprocess leaves the advertised JSON schema as the canonical union. Guard:
+// buddies-v2.test.ts (the `search: "quarterly"` call).
+function legacySearchToText(read: unknown): unknown {
+  if (typeof read !== 'object' || read === null) return read;
+  const { search, ...rest } = read as Record<string, unknown>;
+  return typeof search === 'string' ? { ...rest, search: { text: search } } : read;
+}
+
 const channelRef = z.union([
   z.object({ id: z.string().min(1) }).describe('A channel id (public, direct or task)'),
   z
@@ -479,33 +491,40 @@ const BUDDY_TOOLS = {
       'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here (newest first). Search text: words (all must match; prefix, plural/stem and one-typo matches count: "market" finds marketing), "exact phrase", -excluded, OR, @Name or @"Two Words" (posts by that Buddy or by @owner; alone it lists them); filters narrow before paging. Example: read:{search:{text:\'"deploy window" -draft\', channels:[\'ops\'], from:[\'owner\'], after:\'2026-10-01\'}}. Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
     writes: false,
     schema: z.object({
-      read: z.union([
-        z.object({ channelId: z.string().min(1) }),
-        z.object({
-          threadId: z.string().min(1),
-          follow: z
-            .object({
-              until: z
-                .string()
-                .datetime({ offset: true })
-                .describe('ISO time, at most 7 days ahead: when to wake you if nobody posts'),
-            })
-            .optional()
-            .describe(
-              "Wait for this thread's next post by someone else. Returns {kind:'unread', posts} (oldest first) at once if there are posts you have not read, or if one arrives within 2 s. Otherwise returns {kind:'following', following:{until}} with no posts: keep working or end your turn; you will be woken in THIS conversation with the posts you have not read, or once at `until` with a timeout. One wake per follow; follow again to keep waiting. Not with `before`."
-            ),
-        }),
-        z.object({
-          search: z.object({
-            text: z.string().min(1).max(200),
-            channels: z.array(z.string().min(1)).max(20).optional().describe('ids or public names'),
-            from: z.array(z.string().min(1)).max(20).optional().describe("buddy ids or 'owner'"),
-            after: z.string().optional().describe('YYYY-MM-DD or RFC 3339, inclusive'),
-            before: z.string().optional().describe('YYYY-MM-DD or RFC 3339, exclusive'),
-            inThread: z.string().optional().describe('root post id'),
+      read: z.preprocess(
+        legacySearchToText,
+        z.union([
+          z.object({ channelId: z.string().min(1) }),
+          z.object({
+            threadId: z.string().min(1),
+            follow: z
+              .object({
+                until: z
+                  .string()
+                  .datetime({ offset: true })
+                  .describe('ISO time, at most 7 days ahead: when to wake you if nobody posts'),
+              })
+              .optional()
+              .describe(
+                "Wait for this thread's next post by someone else. Returns {kind:'unread', posts} (oldest first) at once if there are posts you have not read, or if one arrives within 2 s. Otherwise returns {kind:'following', following:{until}} with no posts: keep working or end your turn; you will be woken in THIS conversation with the posts you have not read, or once at `until` with a timeout. One wake per follow; follow again to keep waiting. Not with `before`."
+              ),
           }),
-        }),
-      ]),
+          z.object({
+            search: z.object({
+              text: z.string().min(1).max(200),
+              channels: z
+                .array(z.string().min(1))
+                .max(20)
+                .optional()
+                .describe('ids or public names'),
+              from: z.array(z.string().min(1)).max(20).optional().describe("buddy ids or 'owner'"),
+              after: z.string().optional().describe('YYYY-MM-DD or RFC 3339, inclusive'),
+              before: z.string().optional().describe('YYYY-MM-DD or RFC 3339, exclusive'),
+              inThread: z.string().optional().describe('root post id'),
+            }),
+          }),
+        ])
+      ),
       before: z.object({ ord: z.string() }).optional().describe('next from the previous page'),
       limit: z.number().int().min(1).max(100).default(30),
     }),
@@ -568,7 +587,7 @@ const BUDDY_TOOLS = {
   }),
   runs: buddyTool({
     description:
-      'List run rows by {buddyId}, {taskId}, or {workspace} (yours: live runs first, then runs ended in the last 12 h) as {runs, truncated}. Each row says what happened: status, errorCode/error (errorCode "interrupted" = the host restarted mid-run) and conversationId. Get one full run, cancel one, or retry a failed or cancelled one (retry re-enqueues the same input as the next attempt, optionally on another `worker` model, and reopens the request it answers; a live or complete run is an error). Queued rows include waiting.',
+      'List run rows by {buddyId}, {taskId}, or {workspace} (yours: live runs first, then runs ended in the last 12 h) as {runs, truncated}. Each row says what happened: status, errorCode/error (errorCode "lease_expired" = the host or holder died mid-run) and conversationId. Get one full run, cancel one, or retry a failed or cancelled one (retry re-enqueues the same input as the next attempt, optionally on another `worker` model, and reopens the request it answers; a live or complete run is an error). Queued rows include waiting.',
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [

@@ -504,7 +504,7 @@ pub struct RunRow {
     pub waiting: Option<RunWaiting>,
     /// The thread the run worked in, so a reader can open or resume it.
     pub conversation_id: Option<String>,
-    /// What happened to a run that did not complete (e.g. `interrupted`: the host restarted).
+    /// What happened to a run that did not complete (e.g. `lease_expired`: the host or holder died mid-run and the claim gate ended it).
     pub error_code: Option<String>,
     pub error: Option<String>,
 }

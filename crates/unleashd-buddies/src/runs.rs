@@ -395,17 +395,20 @@ impl Store {
     }
 
     pub fn list_run_rows(&self, scope: ListScope, limit: i64) -> Result<Vec<RunRow>> {
-        let (filter, scope) = match scope {
-            ListScope::Buddy { buddy_id } => ("r.buddy_id = ?2", buddy_id),
-            ListScope::Task { task_id } => ("r.task_id = ?2", task_id),
-            // Live work, plus what ended in the last 12 h: a run whose holder died is `failed`
-            // (lease_expired) soon after, and a live-only view made such runs vanish (2026-09-30).
-            ListScope::Workspace { workspace_id } => (
-                "r.workspace_id = ?2 AND (r.status IN ('queued','running','cancel_requested')
-                   OR r.ended_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '-12 hours'))",
-                workspace_id,
-            ),
+        let (column, scope) = match scope {
+            ListScope::Buddy { buddy_id } => ("r.buddy_id", buddy_id),
+            ListScope::Task { task_id } => ("r.task_id", task_id),
+            ListScope::Workspace { workspace_id } => ("r.workspace_id", workspace_id),
         };
+        // Live work, plus what ended in the last 12 h: a run whose holder died is `failed`
+        // (lease_expired) soon after, and a live-only view made such runs vanish (2026-09-30).
+        // Fix-guard: the window applies to EVERY scope. Buddy/task scopes once returned the 20
+        // newest runs ever, each with its full error and input (60-95k chars, 2026-10-06);
+        // guard: `run_rows_share_one_window_across_scopes` in tests/core.rs.
+        let filter = format!(
+            "{column} = ?2 AND (r.status IN ('queued','running','cancel_requested')
+               OR r.ended_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '-12 hours'))"
+        );
         let requester = "CASE
             WHEN r.input_kind = 'chat' THEN 'owner'
             WHEN r.input_kind = 'post' THEN (SELECT CASE WHEN p.author_id IS NULL THEN 'owner' ELSE p.author_id END FROM post p WHERE p.id = r.input_id)

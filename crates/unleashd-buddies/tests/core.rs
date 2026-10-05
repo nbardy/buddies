@@ -1502,3 +1502,51 @@ fn retry_authority_is_the_requester_a_manager_or_the_owner_and_only_managers_pic
         .unwrap();
     assert_eq!(s.retry_run(&buddy("lead"), &failed2.id, None, "k3").unwrap().attempt, 3, "a transitive manager may retry");
 }
+
+// 2026-10-06: `inbox.waiting_on` was buddy-wide while `channels` and `unread_threads` were scoped to
+// the turn's workspace, so another workspace's open requests leaked into this inbox. The second
+// workspace is made by moving one DM channel; the post, author and awaiting state stay as written.
+#[test]
+fn inbox_waiting_on_is_scoped_to_the_workspace() {
+    let mut f = fixture();
+    let path = f.path.clone();
+    let s = &mut f.store;
+    s.post(&buddy("mid"), dm("mid", "ic"), request("here", "r-here")).unwrap();
+    let there = s.post(&buddy("mid"), dm("mid", "peer"), request("elsewhere", "r-there")).unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute("INSERT INTO workspace (id, name, root_path, created_at) VALUES ('ws_2', 'ws2', '/tmp/ws2', '2026-01-01T00:00:00.000Z')", [])
+        .unwrap();
+    conn.execute("UPDATE channel SET workspace_id = 'ws_2' WHERE id = ?1", [&there.channel_id]).unwrap();
+    drop(conn);
+    let here: Vec<_> = s.inbox(&buddy("mid"), WS).unwrap().waiting_on.into_iter().map(|p| p.id).collect();
+    assert_eq!(here.len(), 1);
+    assert!(!here.contains(&there.id));
+    assert_eq!(s.inbox(&buddy("mid"), "ws_2").unwrap().waiting_on.len(), 1);
+}
+
+// 2026-10-06: buddy and task run lists returned the 20 newest runs ever (60-95k chars of old
+// errors); only the workspace scope had the live-then-last-12h window. All scopes share it now.
+#[test]
+fn run_rows_share_one_window_across_scopes() {
+    let mut f = fixture();
+    let path = f.path.clone();
+    let s = &mut f.store;
+    s.enqueue_run(&Actor::Owner, chat("peer", "old", "old")).unwrap();
+    let old = s.claim_run(lease(60_000)).unwrap().unwrap();
+    s.settle_run(&old.run.id, &old.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
+    s.enqueue_run(&Actor::Owner, chat("peer", "new", "new")).unwrap();
+    let new = s.claim_run(lease(60_000)).unwrap().unwrap();
+    s.settle_run(&new.run.id, &new.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
+    s.enqueue_run(&Actor::Owner, chat("peer", "live", "live")).unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute("UPDATE run SET ended_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1", [&old.run.id]).unwrap();
+    drop(conn);
+    let ids = |q: ListScope| s.list_run_rows(q, 100).unwrap().into_iter().map(|r| r.id).collect::<Vec<_>>();
+    for rows in [
+        ids(ListScope::Buddy { buddy_id: "peer".into() }),
+        ids(ListScope::Workspace { workspace_id: WS.into() }),
+    ] {
+        assert_eq!(rows.len(), 2, "queued + recently ended; the 2020 run is outside the window");
+        assert!(rows.contains(&new.run.id) && !rows.contains(&old.run.id));
+    }
+}
