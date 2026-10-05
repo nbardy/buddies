@@ -435,6 +435,66 @@
   letter-spacing: 0.5px;
 }
 
+/* Idle hover hint (CookHint): label centred between two flex:1 sides, each a
+   star lane running from the button edge to a tiny pot. A trail is as wide as
+   its lane, so translateX(-100%) carries its star exactly to the edge. */
+.ai-cook-idle,
+.ai-cook-hint,
+.ai-cook-lane {
+  flex: 1;
+  align-self: stretch;
+}
+
+.ai-cook-idle {
+  gap: var(--sp-4);
+}
+
+.ai-cook-hint {
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.ai-cook-hint--right {
+  transform: scaleX(-1);
+}
+
+.ai-submit-btn:hover:not(:disabled) .ai-cook-hint,
+.ai-submit-btn:focus-visible .ai-cook-hint {
+  opacity: 1;
+}
+
+.ai-cook-lane {
+  position: relative;
+}
+
+.ai-cook-trail {
+  position: absolute;
+  inset: 0;
+  animation: ai-cook-trail 1.8s ease-in infinite both;
+}
+
+.ai-cook-star {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  font-size: var(--fs-5);
+  line-height: 1;
+  filter: drop-shadow(0 0 2px currentColor);
+}
+
+.ai-cook-pot {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  transform: scale(0.3) translateY(8px);
+  transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.5);
+}
+
+.ai-submit-btn:hover:not(:disabled) .ai-cook-pot,
+.ai-submit-btn:focus-visible .ai-cook-pot {
+  transform: none;
+}
+
 .ai-cook-arm {
   transform-origin: 92px 82px;
   animation: ai-cook-stir 0.9s ease-in-out infinite alternate;
@@ -448,6 +508,7 @@
 }
 .ai-cook-eye,
 .ai-cook-orb,
+.ai-cook-bubble,
 .ai-cook-sparkle {
   transform-box: fill-box;
   transform-origin: center;
@@ -458,6 +519,9 @@
 .ai-cook-orb {
   filter: drop-shadow(0 0 3px currentColor);
   animation: ai-cook-rise 2.4s ease-out infinite both;
+}
+.ai-cook-bubble {
+  animation: ai-cook-bubble 1.2s ease-out infinite both;
 }
 .ai-cook-sparkle {
   fill: #fff6c2;
@@ -507,6 +571,24 @@
     transform: translate(-3px, -84px) scale(0.5);
   }
 }
+@keyframes ai-cook-trail {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+}
+@keyframes ai-cook-bubble {
+  to {
+    opacity: 0;
+    transform: translateY(-7px) scale(1.4);
+  }
+}
 @keyframes ai-cook-twinkle {
   0%,
   100% {
@@ -522,7 +604,8 @@
 @media (prefers-reduced-motion: reduce) {
   .ai-submit-btn,
   .ai-cook-scene,
-  .ai-cook-scene * {
+  .ai-cook-scene *,
+  .ai-cook-hint * {
     transition: none;
     animation: none;
   }

@@ -380,6 +380,58 @@ const SPARKLES = [
   { x: 116, y: 52, delay: 1.3 },
 ];
 
+// Hover hint on the idle button: a tiny bubbling pot each side of the label,
+// streaming stars out to the button's edge. The right side is the left one
+// mirrored (scaleX(-1)), so its stars flow right.
+const HINT_STARS = [
+  { top: '30%', color: '#fff6c2', delay: 0 },
+  { top: '66%', color: '#5ef3c4', delay: 0.45 },
+  { top: '44%', color: '#ff5f8f', delay: 0.9 },
+  { top: '76%', color: '#ffd166', delay: 1.35 },
+];
+
+const HINT_BUBBLES = [
+  { cx: 9, r: 1.6, color: '#5ef3c4', delay: 0 },
+  { cx: 13.5, r: 1.2, color: '#ffd166', delay: 0.4 },
+  { cx: 16, r: 1.4, color: '#b388ff', delay: 0.8 },
+];
+
+function CookHint({ side }: { side: 'left' | 'right' }) {
+  return (
+    <span className={`ai-cook-hint ai-cook-hint--${side} ui-row`} aria-hidden="true">
+      <span className="ai-cook-lane">
+        {HINT_STARS.map((star) => (
+          <span
+            key={star.color}
+            className="ai-cook-trail"
+            style={{ animationDelay: `${star.delay}s` }}
+          >
+            <span className="ai-cook-star" style={{ top: star.top, color: star.color }}>
+              ✦
+            </span>
+          </span>
+        ))}
+      </span>
+      <svg className="ai-cook-pot" viewBox="0 0 24 24">
+        <ellipse cx="12" cy="13" rx="9" ry="2.6" fill="#3d3760" />
+        <ellipse className="ai-cook-hue" cx="12" cy="13" rx="7.2" ry="1.6" fill="#ff5f8f" />
+        {HINT_BUBBLES.map((bubble) => (
+          <circle
+            key={bubble.color}
+            className="ai-cook-bubble"
+            cx={bubble.cx}
+            cy="10"
+            r={bubble.r}
+            fill={bubble.color}
+            style={{ animationDelay: `${bubble.delay}s` }}
+          />
+        ))}
+        <path d="M3.5 13 C3.5 19 7 22 12 22 C17 22 20.5 19 20.5 13 Z" fill="#2b2640" />
+      </svg>
+    </span>
+  );
+}
+
 function CookingRobot() {
   return (
     <svg className="ai-cook-scene" viewBox="0 0 240 132" aria-hidden="true">
@@ -659,7 +711,11 @@ export function ColorPalettePicker({ onClose }: Props) {
                       <span className="ai-cook-caption">Cooking your palette…</span>
                     </>
                   ) : (
-                    'Let the AI Cook'
+                    <span className="ai-cook-idle ui-row">
+                      <CookHint side="left" />
+                      Let the AI Cook
+                      <CookHint side="right" />
+                    </span>
                   )}
                 </button>
                 {aiError && <div className="ai-error">{aiError}</div>}
