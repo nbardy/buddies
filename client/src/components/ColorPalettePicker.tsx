@@ -1,3 +1,5 @@
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/plus-jakarta-sans/wght.css';
 import { useRef, useState } from 'react';
 import { PALETTES, type Palette16, applyPalette, useSettingsStore } from '../stores/settingsStore';
 import './ColorPalettePicker.css';
@@ -412,7 +414,7 @@ function CookHint({ side }: { side: 'left' | 'right' }) {
           </span>
         ))}
       </span>
-      <svg className="ai-cook-pot" viewBox="0 0 24 24">
+      <svg className="ai-cook-pot" viewBox="0 0 24 24" aria-hidden="true">
         <ellipse cx="12" cy="13" rx="9" ry="2.6" fill="#3d3760" />
         <ellipse className="ai-cook-hue" cx="12" cy="13" rx="7.2" ry="1.6" fill="#ff5f8f" />
         {HINT_BUBBLES.map((bubble) => (
@@ -531,6 +533,7 @@ function CookingRobot() {
         <g key={`${s.x}-${s.y}`} transform={`translate(${s.x} ${s.y})`}>
           <path
             className="ai-cook-sparkle"
+            fill="#fff6c2"
             d="M0 -6 L1.5 -1.5 L6 0 L1.5 1.5 L0 6 L-1.5 1.5 L-6 0 L-1.5 -1.5 Z"
             style={{ animationDelay: `${s.delay}s` }}
           />
@@ -708,7 +711,7 @@ export function ColorPalettePicker({ onClose }: Props) {
                   {isGenerating ? (
                     <>
                       <CookingRobot />
-                      <span className="ai-cook-caption">Cooking your palette…</span>
+                      <span className="ai-cook-caption ai-cook-hue">Cooking your palette…</span>
                     </>
                   ) : (
                     <span className="ai-cook-idle ui-row">

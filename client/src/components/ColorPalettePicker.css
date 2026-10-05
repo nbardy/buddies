@@ -393,8 +393,9 @@
   background: var(--accent-primary);
   border: none;
   color: var(--text-on-accent);
-  font-size: var(--fs-5);
-  font-weight: 500;
+  font-family: "Plus Jakarta Sans Variable", "Inter Variable", system-ui, sans-serif;
+  font-size: var(--fs-6);
+  font-weight: 700;
   transition: height 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.25), background 0.3s, opacity 0.15s;
 }
 
@@ -430,9 +431,11 @@
 }
 
 .ai-cook-caption {
-  color: var(--text-secondary);
-  font-size: var(--fs-3);
-  letter-spacing: 0.5px;
+  font-size: var(--fs-4);
+  background: linear-gradient(90deg, #ff5f8f, #ffd166, #5ef3c4, #8f7bff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 /* Idle hover hint (CookHint): label centred between two flex:1 sides, each a
@@ -443,9 +446,6 @@
 .ai-cook-lane {
   flex: 1;
   align-self: stretch;
-}
-
-.ai-cook-idle {
   gap: var(--sp-4);
 }
 
@@ -524,7 +524,6 @@
   animation: ai-cook-bubble 1.2s ease-out infinite both;
 }
 .ai-cook-sparkle {
-  fill: #fff6c2;
   animation: ai-cook-twinkle 1.6s ease-in-out infinite both;
 }
 
