@@ -335,8 +335,8 @@ fn inform(body: &str, key: &str, reply_to: Option<&str>, wakes: Vec<Wake>) -> Po
     }
 }
 
-fn wake(buddy_id: &str, kind: WakeKind) -> Wake {
-    Wake { buddy_id: buddy_id.into(), kind, config: None }
+fn wake(buddy_id: &str) -> Wake {
+    Wake { buddy_id: buddy_id.into(), config: None }
 }
 
 fn seat_runs(s: &Store, buddy_id: &str) -> Vec<Run> {
@@ -355,22 +355,22 @@ fn a_post_and_its_wakes_commit_together_or_not_at_all() {
     let s = &mut f.store;
     let channel = public(s);
     let id = ChannelRef::Id { id: channel.clone() };
-    let refused = s.write_post(&Actor::Owner, id.clone(), inform("hi @gone", "k1", None, vec![wake("gone", WakeKind::Mention)]));
+    let refused = s.write_post(&Actor::Owner, id.clone(), inform("hi @gone", "k1", None, vec![wake("gone")]));
     assert!(matches!(refused, Err(CoreError::Invalid(_))));
     let posts = s.list_posts(&Actor::Owner, PostQuery::Channel { channel_id: channel.clone() }, None, 10).unwrap();
     assert!(posts.posts.is_empty(), "the refused wake rolled the post back");
 
-    let self_wake = s.write_post(&buddy("ic"), id.clone(), inform("me", "k2", None, vec![wake("ic", WakeKind::Mention)]));
+    let self_wake = s.write_post(&buddy("ic"), id.clone(), inform("me", "k2", None, vec![wake("ic")]));
     assert!(matches!(self_wake, Err(CoreError::Invalid(_))), "a post never wakes its own author");
 
-    let written = s.write_post(&Actor::Owner, id.clone(), inform("hi", "k3", None, vec![wake("ic", WakeKind::Mention)])).unwrap();
+    let written = s.write_post(&Actor::Owner, id.clone(), inform("hi", "k3", None, vec![wake("ic")])).unwrap();
     let runs = seat_runs(s, "ic");
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].input, RunInput::Mention { post_id: written.post.id.clone() });
     assert_eq!(runs[0].lane.as_deref(), Some(format!("seat:{}:ic", written.post.id).as_str()));
     assert_eq!(runs[0].input_key, format!("mention:{}:ic", written.post.id));
 
-    let replay = s.write_post(&Actor::Owner, id, inform("hi", "k3", None, vec![wake("ic", WakeKind::Mention)])).unwrap();
+    let replay = s.write_post(&Actor::Owner, id, inform("hi", "k3", None, vec![wake("ic")])).unwrap();
     assert!(!replay.created);
     assert_eq!(seat_runs(s, "ic").len(), 1, "a replayed key enqueues nothing");
 }
@@ -384,10 +384,11 @@ fn a_newer_follow_up_supersedes_queued_ones_but_never_a_mention() {
     let s = &mut f.store;
     let channel = public(s);
     let id = ChannelRef::Id { id: channel };
-    let root = s.write_post(&Actor::Owner, id.clone(), inform("root", "r", None, vec![wake("ic", WakeKind::Mention)])).unwrap().post;
+    let root = s.write_post(&Actor::Owner, id.clone(), inform("root", "r", None, vec![wake("ic")])).unwrap().post;
     let r = Some(root.id.as_str());
-    s.write_post(&Actor::Owner, id.clone(), inform("one", "1", r, vec![wake("ic", WakeKind::FollowUp)])).unwrap();
-    s.write_post(&Actor::Owner, id.clone(), inform("two", "2", r, vec![wake("ic", WakeKind::FollowUp)])).unwrap();
+    // `ic` has a live reply in this thread, so the crate derives its follow-ups (Option B).
+    s.write_post(&Actor::Owner, id.clone(), inform("one", "1", r, vec![])).unwrap();
+    s.write_post(&Actor::Owner, id.clone(), inform("two", "2", r, vec![])).unwrap();
     let runs = seat_runs(s, "ic");
     let states: Vec<(String, RunStatus, Option<String>)> =
         runs.iter().map(|r| (r.input_key.split(':').next().unwrap().to_string(), r.status, r.error_code.clone())).collect();
@@ -405,6 +406,49 @@ fn a_newer_follow_up_supersedes_queued_ones_but_never_a_mention() {
     let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "ic".into() }, 10).unwrap();
     let waiting = rows.iter().find(|r| r.status == RunStatus::Queued).unwrap().waiting.clone();
     assert_eq!(waiting, Some(RunWaiting::BehindInLane));
+}
+
+// Follow-up targeting is derived inside the post's transaction (design Revision 9, Option B), so
+// it cannot race a concurrent post and no writer can skip it. Guards the rule the in-memory
+// `followUps()` used to apply: participants (posters + live seat replies) minus the author, the
+// buddies this post must-answer wakes, failure-notice authors, and DMs; a notice wakes nobody.
+#[test]
+fn a_thread_reply_derives_follow_ups_for_participants_only() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let id = ChannelRef::Id { id: public(s) };
+    let follow_ups = |s: &Store| -> Vec<(String, String)> {
+        let mut out = vec![];
+        for b in ["lead", "mid", "ic", "peer"] {
+            for r in s.list_runs(RunQuery::Buddy { buddy_id: b.into() }, 50).unwrap() {
+                if let RunInput::FollowUp { post_id } = r.input {
+                    if r.status == RunStatus::Queued {
+                        out.push((b.to_string(), post_id));
+                    }
+                }
+            }
+        }
+        out.sort();
+        out
+    };
+    let root = s.write_post(&Actor::Owner, id.clone(), inform("root", "r", None, vec![])).unwrap().post;
+    let r = Some(root.id.as_str());
+    s.write_post(&buddy("lead"), id.clone(), inform("lead here", "a", r, vec![])).unwrap();
+    // A failure notice neither wakes nor makes `mid` a participant.
+    s.write_post(&buddy("mid"), id.clone(), PostInput { purpose: Some("reply_failed".into()), ..inform("Couldn’t reply", "n", r, vec![]) })
+        .unwrap();
+    assert_eq!(follow_ups(s), vec![], "neither the author's own post nor a notice gates anyone");
+    // `peer` is mentioned (must answer, no gate); `lead` posted, so it is gated.
+    let ask = s.write_post(&Actor::Owner, id.clone(), inform("@peer and all", "b", r, vec![wake("peer")])).unwrap().post;
+    assert_eq!(follow_ups(s), vec![("lead".into(), ask.id.clone())]);
+    // `peer` now has a live seat reply, so the next post gates it too, and supersedes lead's older one.
+    let next = s.write_post(&Actor::Owner, id.clone(), inform("more", "c", r, vec![])).unwrap().post;
+    assert_eq!(follow_ups(s), vec![("lead".into(), next.id.clone()), ("peer".into(), next.id.clone())]);
+    // A DM reply gates nobody: its members are woken as mentions by the host.
+    let dm = ChannelRef::Direct { members: vec![Actor::Owner, buddy("lead")] };
+    let dm_root = s.write_post(&buddy("lead"), dm.clone(), inform("hi owner", "d", None, vec![])).unwrap().post;
+    s.write_post(&Actor::Owner, dm, inform("hi lead", "e", Some(&dm_root.id), vec![])).unwrap();
+    assert_eq!(follow_ups(s), vec![("lead".into(), next.id.clone()), ("peer".into(), next.id)]);
 }
 
 fn chat_in(conversation: &str, turn: &str, placement: Placement) -> ChatEnqueue {
@@ -500,7 +544,7 @@ fn a_reply_marks_its_thread_read_only_when_it_settles_complete() {
     let s = &mut f.store;
     let channel = public(s);
     let id = ChannelRef::Id { id: channel };
-    let root = s.write_post(&Actor::Owner, id.clone(), inform("root", "r", None, vec![wake("ic", WakeKind::Mention)])).unwrap().post;
+    let root = s.write_post(&Actor::Owner, id.clone(), inform("root", "r", None, vec![wake("ic")])).unwrap().post;
     let conn = Connection::open(&f.path).unwrap();
     let read = || -> Option<String> {
         conn.query_row("SELECT last_ord FROM thread_read WHERE reader = 'ic' AND root_id = ?1", [&root.id], |r| r.get(0)).ok()
@@ -525,7 +569,7 @@ fn a_reply_whose_seat_is_busy_goes_back_to_the_queue_bound_to_it() {
     .unwrap();
     let typing = s.claim_run(lease(60_000)).unwrap().unwrap();
     let channel = public(s);
-    let hi = s.write_post(&Actor::Owner, ChannelRef::Id { id: channel }, inform("hi", "k", None, vec![wake("ic", WakeKind::Mention)])).unwrap().post;
+    let hi = s.write_post(&Actor::Owner, ChannelRef::Id { id: channel }, inform("hi", "k", None, vec![wake("ic")])).unwrap().post;
     let mention = s.claim_run(lease(60_000)).unwrap().unwrap();
     assert!(matches!(s.bind_run(&mention.run.id, &mention.lease_token, "seat-1"), Err(CoreError::ConversationBusy(_))));
     s.release_run(&mention.run.id, &mention.lease_token, "seat-1").unwrap();
@@ -550,7 +594,7 @@ fn a_retry_reruns_a_failed_reply_once_in_its_seat_lane_and_moves_the_cursor() {
     let s = &mut f.store;
     let channel = public(s);
     let id = ChannelRef::Id { id: channel };
-    let root = s.write_post(&Actor::Owner, id.clone(), inform("root", "r", None, vec![wake("ic", WakeKind::Mention)])).unwrap().post;
+    let root = s.write_post(&Actor::Owner, id.clone(), inform("root", "r", None, vec![wake("ic")])).unwrap().post;
     let mention = s.claim_run(lease(60_000)).unwrap().unwrap();
     s.settle_run(&mention.run.id, &mention.lease_token, Outcome::Failed { code: "execution_failed".into(), error: "x".into() }).unwrap();
     let notice = s

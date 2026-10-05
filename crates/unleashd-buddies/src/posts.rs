@@ -808,10 +808,14 @@ fn insert_post(
         input.broadcast
     ])?;
     follow(tx, actor, root_id.as_deref().unwrap_or(&id), &ord)?;
+    let thread = root_id.as_deref().unwrap_or(&id);
     for wake in &input.wakes {
-        enqueue_wake(tx, actor, channel, &id, root_id.as_deref().unwrap_or(&id), wake)?;
+        enqueue_wake(tx, actor, channel, &id, thread, &wake.buddy_id, Cause::Mention, wake.config.clone())?;
     }
     if let Some(root) = &root_id {
+        for buddy_id in follow_up_targets(tx, actor, channel, input, root, &ord)? {
+            enqueue_wake(tx, actor, channel, &id, root, &buddy_id, Cause::FollowUp, None)?;
+        }
         crate::follows::wake_followers(tx, actor, root)?;
     }
     for recipient in ask.owed_by().iter().filter_map(Actor::buddy_id) {
@@ -828,7 +832,64 @@ fn insert_post(
     Ok(id)
 }
 
+/// Why a post wakes a buddy: `Mention` must answer (host-planned `Wake`); `FollowUp` asks the
+/// reply gate first (derived here).
+#[derive(Clone, Copy)]
+enum Cause {
+    Mention,
+    FollowUp,
+}
+
 // Pattern: durable-intake (docs/patterns.md#durable-intake)
+// Pattern: one-write-path (docs/patterns.md#one-write-path)
+/// The buddies a thread reply asks the reply gate, derived INSIDE the post's write transaction
+/// (lead decision 2026-10-06, Option B, agent_notes/2026-09-30_pending-delivery-design.md Revision 9).
+/// Why here and not in the host: targeting needs the thread's participants and its delivering
+/// followers as of THIS post. A host that read them before the write (Option A) raced a concurrent
+/// post in the same thread and silently mis-targeted follow-ups; inside the transaction the thread
+/// cannot change under us, and every writer (MCP tool, owner route, runner) gets the same rule
+/// without calling a planner. The rule, unchanged from the in-memory `followUps()` it replaces:
+/// - only replies in public and task channels (a DM's owner post wakes its members as mentions;
+///   Buddies' DM informs wake nobody, so two Buddies cannot loop there);
+/// - a failure notice (`reply_failed`) wakes nobody and does not make its author a participant;
+/// - participants = buddies who posted in the thread, plus buddies with a live reply in a seat of
+///   this thread (mentioned, not yet posted);
+/// - minus the author, the buddies this post already wakes as mentions (they must answer anyway),
+///   inactive buddies, and buddies whose thread FOLLOW will deliver this post (follows.rs
+///   `delivering_followers`: they asked to be told, so the gate would be a second wake).
+/// "Only the newest post is gated" is `enqueue_wake`'s supersede of older queued follow-ups.
+fn follow_up_targets(tx: &Transaction, author: &Actor, channel: &Channel, input: &PostInput, root_id: &str, ord: &str) -> Result<Vec<String>> {
+    let gated = match &channel.kind {
+        ChannelKind::Public { .. } | ChannelKind::Task { .. } => input.purpose.as_deref() != Some("reply_failed"),
+        ChannelKind::Direct { .. } => false,
+    };
+    if !gated {
+        return Ok(vec![]);
+    }
+    // Seat lanes of this thread are `seat:<root>:<buddy>`: a range on the live-lane index.
+    let lanes = format!("seat:{root_id}:");
+    let mut targets: Vec<String> = collect(
+        tx.prepare_cached(
+            "SELECT b.id FROM buddy b
+             WHERE b.workspace_id = ?1 AND b.status = 'active' AND b.id IS NOT ?2
+               AND (b.id IN (SELECT p.author_id FROM post p
+                             WHERE (p.id = ?3 OR p.root_id = ?3) AND p.author_id IS NOT NULL
+                               AND (p.purpose IS NULL OR p.purpose <> 'reply_failed'))
+                    OR b.id IN (SELECT r.buddy_id FROM run r
+                                WHERE r.lane >= ?5 AND r.lane < ?5 || char(0x10FFFF)
+                                  AND r.status IN ('queued','running','cancel_requested')))
+               AND b.id NOT IN (SELECT f.buddy_id FROM thread_follow f JOIN run r ON r.input_key = 'follow:' || f.id
+                                WHERE f.root_id = ?3 AND f.through_ord < ?4
+                                  AND (f.delivered_through >= ?4
+                                       OR (f.delivered_through IS NULL AND r.status IN ('queued','running','cancel_requested'))))
+             ORDER BY b.id",
+        )?
+        .query_map(params![channel.workspace_id, author.buddy_id(), root_id, ord, lanes], |r| r.get(0))?,
+    )?;
+    targets.retain(|id| !input.wakes.iter().any(|wake| &wake.buddy_id == id));
+    Ok(targets)
+}
+
 /// One buddy this post wakes, as a run in the post's own transaction: an acknowledged post always
 /// has its runs, and a refused wake rolls the post back. Until 2026-10-05 a post woke nobody in the
 /// core; the host started replies from an in-memory `posted` event, its pair queue and its gate
@@ -838,15 +899,18 @@ fn insert_post(
 /// follow-up supersedes the seat's older follow-ups still QUEUED: the gate is asked once, about the
 /// newest post (the old in-memory `deferred` slot). A queued mention is never superseded: a
 /// mention must be answered.
+#[allow(clippy::too_many_arguments)]
 fn enqueue_wake(
     tx: &Transaction,
     author: &Actor,
     channel: &Channel,
     post_id: &str,
     root_id: &str,
-    wake: &Wake,
+    buddy_id: &str,
+    cause: Cause,
+    config: Option<RunConfig>,
 ) -> Result<()> {
-    let buddy = get_buddy(tx, &wake.buddy_id)?;
+    let buddy = get_buddy(tx, buddy_id)?;
     if buddy.workspace_id != channel.workspace_id {
         return Err(CoreError::Invalid(format!("buddy {} is outside this channel's workspace", buddy.id)));
     }
@@ -857,9 +921,9 @@ fn enqueue_wake(
         return Err(CoreError::Invalid(format!("a post cannot wake its own author {}", buddy.id)));
     }
     let lane = format!("seat:{root_id}:{}", buddy.id);
-    let input = match wake.kind {
-        WakeKind::Mention => RunInput::Mention { post_id: post_id.to_string() },
-        WakeKind::FollowUp => {
+    let input = match cause {
+        Cause::Mention => RunInput::Mention { post_id: post_id.to_string() },
+        Cause::FollowUp => {
             tx.prepare_cached(
                 "UPDATE run SET status = 'cancelled', error_code = 'superseded', ended_at = ?2,
                    error = 'a newer post in this thread asks the reply gate instead'
@@ -879,7 +943,7 @@ fn enqueue_wake(
             task_id: None,
             after_run_id: None,
             deadline: None,
-            config: wake.config.clone(),
+            config,
         },
         body: None,
         lane: Some((lane, Place::Back)),

@@ -32,7 +32,6 @@ str_enum!(TaskStatus { Open = "open", InProgress = "in_progress", Blocked = "blo
 str_enum!(RunStatus { Queued = "queued", Running = "running", CancelRequested = "cancel_requested", Complete = "complete", Failed = "failed", Cancelled = "cancelled" });
 str_enum!(DocKind { Soul = "soul", Working = "working", LongTerm = "long_term", Shared = "shared" });
 str_enum!(PostKind { Inform = "inform", Request = "request" });
-str_enum!(WakeKind { Mention = "mention", FollowUp = "follow_up" });
 str_enum!(Placement { Back = "back", Front = "front" });
 str_enum!(Op { ReadDoc = "read_doc", WriteDoc = "write_doc", Post = "post", ReadChannel = "read_channel", SearchPosts = "search_posts", CreateChannel = "create_channel", ArchiveChannel = "archive_channel", RenameChannel = "rename_channel", WriteTask = "write_task", EnqueueRun = "enqueue_run", CancelRun = "cancel_run", WriteSchedule = "write_schedule", Admin = "admin" });
 
@@ -607,12 +606,15 @@ pub struct PostInput {
     pub key: String,
 }
 
-/// One buddy a post wakes. `config`: the owner's chip pick for this buddy (absent: its seat's).
+/// One buddy a post wakes that MUST answer (a `mention` run): an @mention, or a DM member woken by
+/// the owner's plain post. The host plans these because only it parses mentions and knows the
+/// owner's chip picks. Follow-ups are not here: the crate derives them in the post's transaction
+/// (posts.rs `follow_up_targets`), so a host cannot plan one. `config`: the owner's chip pick for
+/// this buddy (absent: its seat's).
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Wake {
     pub buddy_id: String,
-    pub kind: WakeKind,
     pub config: Option<RunConfig>,
 }
 

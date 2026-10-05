@@ -733,14 +733,17 @@ export interface ThreadUnread {
   unshown: number
 }
 
-/** One buddy a post wakes. `config`: the owner's chip pick for this buddy (absent: its seat's). */
+/**
+ * One buddy a post wakes that MUST answer (a `mention` run): an @mention, or a DM member woken by
+ * the owner's plain post. The host plans these because only it parses mentions and knows the
+ * owner's chip picks. Follow-ups are not here: the crate derives them in the post's transaction
+ * (posts.rs `follow_up_targets`), so a host cannot plan one. `config`: the owner's chip pick for
+ * this buddy (absent: its seat's).
+ */
 export interface Wake {
   buddyId: string
-  kind: WakeKind
   config?: RunConfig
 }
-
-export type WakeKind = 'mention' | 'follow_up'
 
 export interface Workspace {
   id: string
