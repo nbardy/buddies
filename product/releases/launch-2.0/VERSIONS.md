@@ -26,6 +26,7 @@ the v10 picture. All of them are in `renders/v12-chain/` (11 files, `SHA256SUMS`
 
 To rebuild exactly: copy the chain files back into `edit/out/` and run the stitch script at its commit.
 To rebuild without the chain: a full render at `9079273` (`node render.mjs render src/index.ts Assembly`,
-as for v10) gives the same picture, frame for frame, but a different encode (and a 30-minute render).
+as for v10) should give the same picture in a different encode (a 30-minute render). That has not been
+checked end to end; spot checks of reused sections against fresh stills matched at 37–50 dB.
 The stitch joins were checked against their source frames: each join's exact frame wins over its
 neighbours (52–88 dB against 9–18 dB).
