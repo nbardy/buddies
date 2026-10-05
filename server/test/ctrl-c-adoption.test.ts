@@ -7,6 +7,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
+import { freePortSync } from './free-port';
 
 /**
  * The owner's question (2026-09-30, Task task_01a0f2cb): "if I ctrl+C the server and bring it back
@@ -22,7 +23,7 @@ import { WebSocket } from 'ws';
  * real agent CLI is reachable. Nothing here signals anything outside the groups it starts.
  */
 
-const PORT = 7541;
+const PORT = freePortSync();
 const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'c7c7c0e9f2b14658a7d3c0e9f2b14658';
 const REPO = path.resolve(__dirname, '..', '..');
