@@ -393,12 +393,15 @@ function parseEvent(line: string): ErrorJournalEvent | null {
   }
 }
 
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
+// Run ids in component names split identical capacity failures into at least seven live groups.
+// Guard: error-journal.test.ts groups provider failures across Buddy run ids after restart.
 function fingerprintError(component: string, message: string, stack?: string): string {
   const topFrame = stack
     ?.split('\n')
     .find((line) => /^\s*at\s+/.test(line) && !line.includes('error-journal'));
   const normalized = [
-    component,
+    normalizeVolatileText(component),
     normalizeVolatileText(message),
     normalizeVolatileText(topFrame ?? ''),
   ]

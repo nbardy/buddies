@@ -11,7 +11,7 @@ import {
 } from '../atoms/buddy-sidebar';
 import { createConversation } from '../atoms/commands';
 import { commandsAtom, connectionAtom, listField, pendingCreatesOf } from '../atoms/conversations';
-import { prefsAtom, toggleGalleryCollapsed } from '../atoms/ui';
+import { openSetupAt, prefsAtom, toggleGalleryCollapsed } from '../atoms/ui';
 import { useBuddyOverview } from '../hooks/useBuddyData';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useScrollActivity } from '../hooks/useScrollActivity';
@@ -765,6 +765,15 @@ export function Sidebar() {
           </>
         }
       </div>
+      <button
+        type="button"
+        className="sidebar-connect-mobile ui-row ui-muted"
+        onClick={() => openSetupAt('connect-mobile')}
+        title="Open Buddies on your phone"
+      >
+        <span aria-hidden="true">▯</span>
+        Connect mobile
+      </button>
     </div>
   );
 }

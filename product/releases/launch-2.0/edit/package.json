@@ -4,13 +4,13 @@
   "type": "module",
   "scripts": {
     "studio": "remotion studio src/index.ts",
-    "render:design-iteration": "remotion render src/index.ts DesignIteration out/design-iteration.mp4 --crf=16",
-    "render:design-review": "remotion render src/index.ts DesignReview out/design-review.mp4 --crf=16",
-    "render:multi-harness": "remotion render src/index.ts MultiHarness out/multi-harness.mp4 --crf=16",
-    "still:design-iteration": "remotion still src/index.ts DesignIteration out/design-iteration.png",
-    "render:native-multimedia": "remotion render src/index.ts NativeMultimedia out/native-multimedia.video.mp4 --crf=16 --muted && remotion render src/index.ts NativeMultimedia out/native-multimedia.wav --codec=wav && ffmpeg -y -loglevel error -i out/native-multimedia.video.mp4 -i out/native-multimedia.wav -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -movflags +faststart out/native-multimedia.mp4",
-    "render:overload": "remotion render src/index.ts Overload out/overload.video.mp4 --crf=16 --muted && remotion render src/index.ts Overload out/overload.wav --codec=wav && ffmpeg -y -loglevel error -i out/overload.video.mp4 -i out/overload.wav -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -movflags +faststart out/overload.mp4",
-    "render:assembly": "remotion render src/index.ts Assembly out/assembly.video.mp4 --crf=18 --muted && remotion render src/index.ts Assembly out/assembly.wav --codec=wav && ffmpeg -y -loglevel error -i out/assembly.video.mp4 -i out/assembly.wav -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -movflags +faststart out/assembly.mp4"
+    "render:design-iteration": "node render.mjs render src/index.ts DesignIteration out/design-iteration.mp4 --crf=16",
+    "render:design-review": "node render.mjs render src/index.ts DesignReview out/design-review.mp4 --crf=16",
+    "render:multi-harness": "node render.mjs render src/index.ts MultiHarness out/multi-harness.mp4 --crf=16",
+    "still:design-iteration": "node render.mjs still src/index.ts DesignIteration out/design-iteration.png",
+    "render:native-multimedia": "node render.mjs render src/index.ts NativeMultimedia out/native-multimedia.video.mp4 --crf=16 --muted && node render.mjs render src/index.ts NativeMultimedia out/native-multimedia.wav --codec=wav && ffmpeg -y -loglevel error -i out/native-multimedia.video.mp4 -i out/native-multimedia.wav -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -movflags +faststart out/native-multimedia.mp4",
+    "render:overload": "node render.mjs render src/index.ts Overload out/overload.video.mp4 --crf=16 --muted && node render.mjs render src/index.ts Overload out/overload.wav --codec=wav && ffmpeg -y -loglevel error -i out/overload.video.mp4 -i out/overload.wav -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -movflags +faststart out/overload.mp4",
+    "render:assembly": "node render.mjs render src/index.ts Assembly out/assembly.video.mp4 --crf=18 --muted && node render.mjs render src/index.ts Assembly out/assembly.wav --codec=wav && ffmpeg -y -loglevel error -i out/assembly.video.mp4 -i out/assembly.wav -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -movflags +faststart out/assembly.mp4"
   },
   "dependencies": {
     "@remotion/cli": "4.0.529",

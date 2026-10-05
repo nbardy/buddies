@@ -15,6 +15,7 @@ import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
 import { TaskPage } from '../../components/buddies/TaskPage';
 import { WakeIcon, WakeIndicator } from '../../components/buddies/WakeIndicator';
+import { WorkspaceTeamDialog } from '../../components/buddies/WorkspaceTeamForm';
 import { errorText } from '../../components/buddies/api';
 import { useBuddyDirectActions, useNewBuddy } from '../../components/buddies/buddy-direct-actions';
 import {
@@ -375,15 +376,21 @@ function BuddySection({
 }) {
   const openDm = useChannelsDm();
   const newBuddy = useNewBuddy(openDm, workspaceId);
+  const [teamCreator, setTeamCreator] = useState(false);
   const creating = useAtomValue(listField('builders')).find((entry) => !entry.done);
   return (
     <ul className="mobile-channels-list">
+      {teamCreator && (
+        <li>
+          <WorkspaceTeamDialog workspaceId={workspaceId} onClose={() => setTeamCreator(false)} />
+        </li>
+      )}
       <li>
         <button
           type="button"
           className="mobile-channels-row ui-row mobile-channels-row--add"
           disabled={newBuddy.state.kind === 'pending'}
-          onClick={newBuddy.start}
+          onClick={() => (members.length === 0 ? setTeamCreator(true) : newBuddy.start())}
         >
           <span className="mobile-channels-row__hash" aria-hidden="true">
             +

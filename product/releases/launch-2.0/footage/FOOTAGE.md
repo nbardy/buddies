@@ -174,3 +174,16 @@ image we dialed in"). 2804×1874 PNG, the unleashd workspace. Replaces 2026-10-0
 Privacy: the sidebar (workspace name "unleashd", channel and Buddy names) is blurred in both scenes.
 Still readable in the main area before the home scene softens: six task titles (one says "First-run
 unleashd workspace") and two "Waiting on you" rows, which include an automation id.
+
+## AI Color Palettes — `2026-10-05_color-palette_raw.mov` (29.7 s) → `2026-10-05_color-palette.mp4`
+
+Role: **AI Color Palettes** (proof for "Customizable"). The owner's screen recording, 2026-10-05 4.28.50 PM,
+posted in the final-video thread (post_01a10b2f-acd2-7205-8035-123a78fcb2a6), 2750×1812 @ 60 fps, no audio.
+The raw file is an APFS clone of the upload (sha256 `b5afca98…`), never edited.
+Timeline (source s): gear 1.3, Color Palette 2.5, dialog 2.75–3.3, AI Generate 4.25–4.9, typing 5.0–12.2,
+"Let the AI Cook" 12.4, chef cooks 13.6–20.3 (the wait), Matrix Rain palette lands ~20.4, Save 22.2–22.3,
+the app turns green and the owner tours Threads, #bugfixes, #case-studies, #channels-feature to 29.7.
+The `.mp4` is scaled to card.tsx's 2974×1882 (scale 1.0815, crop 39 px top and bottom), crf 12, for a Remotion scene.
+Review cut: `../edit/trim-palette.sh` → `../clips/10_ai-color-palettes.mp4`.
+Privacy: the typed prompt reads "Let's make this shit go matrix style"; the sidebar shows real channel and
+Buddy names; the tour shows real thread text and a dev-server log.

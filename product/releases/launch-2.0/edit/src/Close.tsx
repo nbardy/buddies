@@ -7,6 +7,7 @@ import type React from 'react';
 import { AbsoluteFill, Easing, Img, OffthreadVideo, Series, staticFile, useCurrentFrame } from 'remotion';
 import { Block, clamp01, FONT, INK, lerp } from './blocks';
 import * as Intro from './BuddiesIntro';
+import { AURA } from './BuddiesLogos';
 import { INTRO_ROBOTS } from './Overload';
 
 export const FPS = 60;
@@ -183,22 +184,122 @@ const QuietLine: React.FC<{ line: Quiet; t: number }> = ({ line, t }) => (
   </div>
 );
 
+// ---- "Open Source", shimmering (owner pick, 2026-10-05, from three takes in a2c102a): capitalised,
+// in the purple magic of the app's "Let the AI Cook" scene (ColorPalettePicker.tsx). The brew's
+// colours (violet, pink, teal) flow through the letters under a violet glow, one bright glint
+// crosses as it lands, and four-point sparkles twinkle around it. The site headline uses the same
+// gradient and speed (docs/index.html .open-source). -------------------------------------------------
+const VIOLET = 'oklch(0.74 0.19 300)'; // AURA.violet lifted: at 118px the base violet reads muddy
+const SPARK = '#fff6c2';
+const BREW = `linear-gradient(100deg, ${VIOLET} 0%, ${AURA.pink} 25%, ${VIOLET} 50%, ${AURA.teal} 75%, ${VIOLET} 100%)`;
+const FLOW = 22; // % of the 200%-wide gradient per second: one full cycle in ~9 s
+
+// x, y in % of the phrase box; each twinkles 0 → full → 0 with a quarter turn every 1.6 s.
+const SPARKLES = [
+  { x: -4, y: 6, s: 40, d: 0.0 },
+  { x: 22, y: -22, s: 30, d: 0.5 },
+  { x: 58, y: -28, s: 44, d: 1.0 },
+  { x: 97, y: -8, s: 34, d: 0.3 },
+  { x: 104, y: 70, s: 28, d: 1.3 },
+  { x: 40, y: 112, s: 24, d: 0.8 },
+  { x: 80, y: 108, s: 32, d: 0.15 },
+];
+const Sparkles: React.FC<{ t: number }> = ({ t }) => (
+  <>
+    {SPARKLES.map((s) => {
+      const since = t - s.d;
+      const p = (((since / 1.6) % 1) + 1) % 1;
+      const on = since >= 0 ? Math.sin(p * Math.PI) ** 0.7 : 0;
+      return (
+        <svg
+          key={`${s.x}-${s.y}`}
+          viewBox="-6 -6 12 12"
+          style={{
+            position: 'absolute',
+            left: `${s.x}%`,
+            top: `${s.y}%`,
+            width: s.s,
+            height: s.s,
+            opacity: on,
+            transform: `translate(-50%, -50%) scale(${lerp(0.2, 1, on)}) rotate(${p * 90}deg)`,
+            filter: `drop-shadow(0 0 8px ${VIOLET})`,
+          }}
+        >
+          <path d="M0 -6 L1.5 -1.5 L6 0 L1.5 1.5 L0 6 L-1.5 1.5 L-6 0 L-1.5 -1.5 Z" fill={SPARK} />
+        </svg>
+      );
+    })}
+  </>
+);
+
+type ShimmerSpec = { lead: string; phrase: string; at: number; size: number };
+
+// The lead words surface like a QuietLine; the phrase surfaces as the next word, one piece so the
+// gradient runs continuously across both of its words.
+const ShimmerLine: React.FC<{ line: ShimmerSpec; t: number }> = ({ line, t }) => {
+  const lead = line.lead.split(' ');
+  const at = line.at + lead.length * 0.12;
+  const u = Easing.out(Easing.cubic)(clamp01((t - at) / 0.6));
+  const glint = lerp(-30, 130, Easing.inOut(Easing.cubic)(clamp01((t - at - 0.3) / 0.8)));
+  return (
+    <div style={{ display: 'flex', gap: '0.26em', fontFamily: FONT, fontSize: line.size, fontWeight: 600, color: INK.cream, letterSpacing: -0.5 }}>
+      {lead.map((word, i) => {
+        const w = Easing.out(Easing.cubic)(clamp01((t - line.at - i * 0.12) / 0.6));
+        return (
+          <span key={`${i}-${word}`} style={{ opacity: w, filter: `blur(${lerp(10, 0, w)}px)`, transform: `translateY(${lerp(14, 0, w)}px)` }}>
+            {word}
+          </span>
+        );
+      })}
+      <span
+        style={{
+          position: 'relative',
+          opacity: u,
+          transform: `translateY(${lerp(14, 0, u)}px)`,
+          filter: `blur(${lerp(10, 0, u)}px) drop-shadow(0 0 22px ${AURA.violet})`,
+        }}
+      >
+        <span
+          style={{
+            fontWeight: 700,
+            backgroundImage: `linear-gradient(100deg, transparent ${glint - 8}%, rgba(255,250,240,.95) ${glint}%, transparent ${glint + 8}%), ${BREW}`,
+            backgroundSize: '100% 100%, 200% 100%',
+            backgroundPosition: `0 0, ${-(t * FLOW) % 200}% 0`,
+            WebkitBackgroundClip: 'text',
+            backgroundClip: 'text',
+            color: 'transparent',
+          }}
+        >
+          {line.phrase}
+        </span>
+        <Sparkles t={t - at - 0.5} />
+      </span>
+    </div>
+  );
+};
+
+// A card line is plain quiet type or the shimmer line; CardLine only picks the renderer.
+type CardLine = ({ kind: 'quiet' } & Quiet) | ({ kind: 'shimmer' } & ShimmerSpec);
+const CardLineView: React.FC<{ line: CardLine; t: number }> = ({ line, t }) =>
+  line.kind === 'quiet' ? <QuietLine line={line} t={t} /> : <ShimmerLine line={line} t={t} />;
+
 const QUIET_CREAM = 'rgba(253,246,227,.72)';
-const VIM_CARDS: Quiet[][] = [
+const VIM_CARDS: CardLine[][] = [
   [
-    { text: 'Vim is open source', at: 0.15, size: 118, weight: 600, color: INK.cream },
-    { text: "and it's still here decades later.", at: 1.0, size: 64, weight: 400, color: QUIET_CREAM },
+    { kind: 'shimmer', lead: 'Vim is', phrase: 'Open Source', at: 0.15, size: 118 },
+    { kind: 'quiet', text: "and it's still here decades later.", at: 1.0, size: 64, weight: 400, color: QUIET_CREAM },
   ],
   [
-    { text: 'Agent software', at: 0.15, size: 118, weight: 600, color: INK.cream },
-    { text: 'should be too.', at: 0.7, size: 118, weight: 600, color: INK.wordmarkOrange },
+    { kind: 'quiet', text: 'Agent software', at: 0.15, size: 118, weight: 600, color: INK.cream },
+    { kind: 'quiet', text: 'should be too.', at: 0.7, size: 118, weight: 600, color: INK.wordmarkOrange },
   ],
 ];
+const cardKey = (line: CardLine) => (line.kind === 'quiet' ? line.text : line.lead);
 const VIM_CARD = beats(8);
 const DISSOLVE = 0.35; // seconds: each card fades out before the next surfaces
 export const VIM_FRAMES = VIM_CARDS.length * VIM_CARD;
 
-const QuietCard: React.FC<{ lines: Quiet[] }> = ({ lines }) => {
+const QuietCard: React.FC<{ lines: CardLine[] }> = ({ lines }) => {
   const t = useCurrentFrame() / FPS;
   const len = VIM_CARD / FPS;
   return (
@@ -212,7 +313,7 @@ const QuietCard: React.FC<{ lines: Quiet[] }> = ({ lines }) => {
       }}
     >
       {lines.map((line) => (
-        <QuietLine key={line.text} line={line} t={t} />
+        <CardLineView key={cardKey(line)} line={line} t={t} />
       ))}
     </AbsoluteFill>
   );
@@ -222,7 +323,7 @@ export const Vim: React.FC = () => (
   <AbsoluteFill style={{ background: INK.night }}>
     <Series>
       {VIM_CARDS.map((lines) => (
-        <Series.Sequence key={lines[0].text} durationInFrames={VIM_CARD}>
+        <Series.Sequence key={cardKey(lines[0])} durationInFrames={VIM_CARD}>
           <QuietCard lines={lines} />
         </Series.Sequence>
       ))}
@@ -233,7 +334,7 @@ export const Vim: React.FC = () => (
 // ---- The end card, over the coda's final chord (6 s ring): the Buddies lockup builds (the title's
 // huddle discs drop in, "buddies" rises; it replaced the 3D Unleashd wordmark in the rename, 2026-10-03),
 // the call to action and the repo surface as plain type, and the frame fades to black with the chord.
-// The URL stays github.com/nbardy/unleashd until the repo is renamed (GitHub redirects it after). --
+// The repo was renamed to nbardy/buddies on 2026-10-05; the old URL redirects. ---------------------
 export const END_FRAMES = Math.round(6.0 * FPS);
 const END_FADE = 1.4;
 export const EndCard: React.FC = () => {
@@ -250,7 +351,7 @@ export const EndCard: React.FC = () => {
           </div>
         </div>
         <QuietLine line={{ text: 'Try Buddies today. Free.', at: 1.2, size: 56, weight: 600, color: INK.cream }} t={t} />
-        <QuietLine line={{ text: 'github.com/nbardy/unleashd', at: 1.9, size: 36, weight: 400, color: QUIET_CREAM }} t={t} />
+        <QuietLine line={{ text: 'github.com/nbardy/buddies', at: 1.9, size: 36, weight: 400, color: QUIET_CREAM }} t={t} />
       </AbsoluteFill>
     </AbsoluteFill>
   );

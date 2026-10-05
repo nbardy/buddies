@@ -1,7 +1,7 @@
 // The first product screen after the title (owner, 2026-10-02): the new workspace home fades in,
 // then softens behind plain type, "Swarms of Agents, organized around tasks and channels" and
 // "Manage your team of agents just like a team of employees", before the faster music starts.
-// One 4-bar phrase of calm (no beat yet: calm.py `opening`). The type is NOT the colour-slab
+// Three bars of the reveal song's lighter home section (sound/reveal.py HOME). The type is NOT the colour-slab
 // Block of the demo scenes: the owner wants a calmer treatment here, like the close.
 // Image: ../footage/2026-10-03_home_final.png, the home the owner dialed in (2026-10-03; it replaced
 // 2026-10-02_home_new.png). The sidebar is blurred throughout:
@@ -14,7 +14,8 @@ export const FPS = 60;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
 const BAR = (4 * 60) / 128;
-export const DURATION = Math.round(4 * BAR * FPS);
+// Three bars: the logo holds bar 1 of the song, the home bars 2-4 (2026-10-04; it was four bars).
+export const DURATION = Math.round(3 * BAR * FPS);
 
 export const HOME = staticFile('2026-10-03_home_final.png');
 export const HOME_SRC = { w: 2804, h: 1874 };
@@ -23,11 +24,11 @@ export const HOME_H = Math.round((HOME_W * HOME_SRC.h) / HOME_SRC.w);
 export const SIDEBAR_W = Math.round((375 / 2000) * HOME_W); // the sidebar's right edge in the screenshot
 
 // Seconds into the scene.
-const FADE_IN = 1.3;
-const SOFTEN_AT = 3.0;
-const SOFTEN_FOR = 0.9;
-const HEADLINE_AT = 3.3;
-const SUBLINE_AT = 5.0;
+const FADE_IN = 0.9;
+const SOFTEN_AT = 1.5;
+const SOFTEN_FOR = 0.7;
+const HEADLINE_AT = 1.7;
+const SUBLINE_AT = 3.0;
 
 type Word = { text: string; color: string; weight: number; italic?: boolean };
 const word = (text: string, color: string = INK.cream, weight = 600, italic = false): Word => ({ text, color, weight, italic });

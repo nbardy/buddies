@@ -5,7 +5,7 @@ import type React from 'react';
 import { AbsoluteFill, Img, Sequence, useCurrentFrame } from 'remotion';
 import { Block, INK, lerp } from './blocks';
 import { HOME, HOME_SRC, SIDEBAR_W } from './HomeIntro';
-import { MARIMBA, SFX, Soundtrack } from './soundtrack';
+import { SFX, Soundtrack } from './soundtrack';
 
 export const FPS = 60;
 export const WIDTH = 1920;
@@ -70,30 +70,13 @@ export const PostIntroBenefits: React.FC = () => {
   );
 };
 
-// The handoff: the intro's marimba keeps playing, in 8ths, over the build's Bm G D A, and thins
-// out bar by bar as the build's filter opens, so the calm melody becomes the build instead of
-// stopping for it (owner, 2026-09-30: "music transitions are pretty abrupt"). The build itself
-// (../../sound/edm-build.wav bars 1-4) is unchanged. One thud marks each benefit.
-type Mallet = keyof typeof MARIMBA;
-const EIGHTH = BEAT / 2;
-const UP_DOWN = [0, 1, 2, 3, 2, 1, 0, 1];
-const HANDOFF: { tones: Mallet[]; every: number; volume: number }[] = [
-  { tones: ['Fs4', 'B4', 'D5', 'Fs5'], every: 1, volume: 0.5 }, // Bm: 8ths
-  { tones: ['G3', 'D4', 'B4', 'D5'], every: 1, volume: 0.38 }, // G: 8ths, softer
-  { tones: ['D4', 'Fs4', 'A4', 'D5'], every: 2, volume: 0.28 }, // D: quarters
-  { tones: ['A4', 'A4', 'A4', 'A4'], every: 4, volume: 0.2 }, // A: two last notes, then the build alone
-];
-const handoff = HANDOFF.flatMap((bar, b) =>
-  UP_DOWN.filter((_, k) => k % bar.every === 0).map((step, i) => ({
-    at: boundary(b) / FPS + i * bar.every * EIGHTH,
-    src: MARIMBA[bar.tones[step]],
-    volume: bar.volume,
-  })),
-);
+// One soft thud marks each benefit. The marimba handoff that used to thin out here into the old EDM
+// build is gone (2026-10-05): the launch song now runs straight through, and the handoff's
+// Bm G D A clashed with the song's D A Bm G under these bars (G over A on the second benefit).
 export const BenefitsSound: React.FC = () => (
   <Soundtrack
     fps={FPS}
-    cues={[...handoff, ...TITLES.map((_, i) => ({ at: boundary(i) / FPS, src: SFX.thud, volume: 0.13 }))]}
+    cues={TITLES.map((_, i) => ({ at: boundary(i) / FPS, src: SFX.thud, volume: 0.13 }))}
   />
 );
 

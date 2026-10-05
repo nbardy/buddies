@@ -1,3 +1,5 @@
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/plus-jakarta-sans/wght.css';
 import { useRef, useState } from 'react';
 import { PALETTES, type Palette16, applyPalette, useSettingsStore } from '../stores/settingsStore';
 import './ColorPalettePicker.css';
@@ -357,6 +359,190 @@ function ChatPreview({ palette, derived }: { palette: Palette16; derived: Derive
   );
 }
 
+// ─── "Let the AI Cook" ──────────────────────────────────────────────────────
+// While a palette generates, the submit button grows into this scene: a chef
+// robot stirs a cauldron and magic colour orbs rise out of it. The button sits
+// on its own line below the textarea: beside it, the old "Generating..." label
+// widened on every dot and squeezed the textarea (owner report, 2026-10-05).
+
+const MAGIC_ORBS = [
+  { cx: 146, r: 5, color: '#ff5f8f', delay: 0 },
+  { cx: 168, r: 4, color: '#ffd166', delay: 0.4 },
+  { cx: 156, r: 6, color: '#5ef3c4', delay: 0.8 },
+  { cx: 178, r: 4, color: '#4fc3ff', delay: 1.2 },
+  { cx: 150, r: 4, color: '#b388ff', delay: 1.6 },
+  { cx: 172, r: 5, color: '#ff9f43', delay: 2 },
+];
+
+const SPARKLES = [
+  { x: 128, y: 24, delay: 0 },
+  { x: 204, y: 34, delay: 0.5 },
+  { x: 186, y: 12, delay: 1 },
+  { x: 214, y: 70, delay: 0.3 },
+  { x: 116, y: 52, delay: 1.3 },
+];
+
+// Hover hint on the idle button: a tiny bubbling pot each side of the label,
+// streaming stars out to the button's edge. The right side is the left one
+// mirrored (scaleX(-1)), so its stars flow right.
+const HINT_STARS = [
+  { top: '30%', color: '#fff6c2', delay: 0 },
+  { top: '66%', color: '#5ef3c4', delay: 0.45 },
+  { top: '44%', color: '#ff5f8f', delay: 0.9 },
+  { top: '76%', color: '#ffd166', delay: 1.35 },
+];
+
+const HINT_BUBBLES = [
+  { cx: 9, r: 1.6, color: '#5ef3c4', delay: 0 },
+  { cx: 13.5, r: 1.2, color: '#ffd166', delay: 0.4 },
+  { cx: 16, r: 1.4, color: '#b388ff', delay: 0.8 },
+];
+
+function CookHint({ side }: { side: 'left' | 'right' }) {
+  return (
+    <span className={`ai-cook-hint ai-cook-hint--${side} ui-row`} aria-hidden="true">
+      <span className="ai-cook-lane">
+        {HINT_STARS.map((star) => (
+          <span
+            key={star.color}
+            className="ai-cook-trail"
+            style={{ animationDelay: `${star.delay}s` }}
+          >
+            <span className="ai-cook-star" style={{ top: star.top, color: star.color }}>
+              ✦
+            </span>
+          </span>
+        ))}
+      </span>
+      <svg className="ai-cook-pot" viewBox="0 0 24 24" aria-hidden="true">
+        <ellipse cx="12" cy="13" rx="9" ry="2.6" fill="#3d3760" />
+        <ellipse className="ai-cook-hue" cx="12" cy="13" rx="7.2" ry="1.6" fill="#ff5f8f" />
+        {HINT_BUBBLES.map((bubble) => (
+          <circle
+            key={bubble.color}
+            className="ai-cook-bubble"
+            cx={bubble.cx}
+            cy="10"
+            r={bubble.r}
+            fill={bubble.color}
+            style={{ animationDelay: `${bubble.delay}s` }}
+          />
+        ))}
+        <path d="M3.5 13 C3.5 19 7 22 12 22 C17 22 20.5 19 20.5 13 Z" fill="#2b2640" />
+      </svg>
+    </span>
+  );
+}
+
+function CookingRobot() {
+  return (
+    <svg className="ai-cook-scene" viewBox="0 0 240 132" aria-hidden="true">
+      <defs>
+        <linearGradient id="ai-cook-brew" x1="0" x2="1">
+          <stop offset="0" stopColor="#ff5f8f" />
+          <stop offset="0.35" stopColor="#ffd166" />
+          <stop offset="0.65" stopColor="#5ef3c4" />
+          <stop offset="1" stopColor="#8f7bff" />
+        </linearGradient>
+        <filter id="ai-cook-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="7" />
+        </filter>
+      </defs>
+      {/* Chef robot */}
+      <line
+        x1="52"
+        y1="82"
+        x2="44"
+        y2="100"
+        stroke="#cfd7e8"
+        strokeWidth="7"
+        strokeLinecap="round"
+      />
+      <rect x="56" y="113" width="10" height="12" rx="3" fill="#aab3c7" />
+      <rect x="78" y="113" width="10" height="12" rx="3" fill="#aab3c7" />
+      <rect x="52" y="73" width="40" height="42" rx="10" fill="#cfd7e8" />
+      <rect x="60" y="86" width="24" height="27" rx="4" fill="#f6f4ff" />
+      <circle className="ai-cook-hue" cx="72" cy="97" r="4" fill="url(#ai-cook-brew)" />
+      <rect x="68" y="66" width="8" height="8" fill="#aab3c7" />
+      <rect x="52" y="38" width="40" height="30" rx="9" fill="#dfe5f1" />
+      <rect x="57" y="44" width="30" height="17" rx="6" fill="#1b1830" />
+      <rect className="ai-cook-eye" x="63" y="48" width="5" height="7" rx="2.5" fill="#7df9ff" />
+      <rect className="ai-cook-eye" x="76" y="48" width="5" height="7" rx="2.5" fill="#7df9ff" />
+      <path d="M67 57 q5 3 10 0" stroke="#7df9ff" strokeWidth="1.5" fill="none" />
+      <g className="ai-cook-hat" fill="#f6f4ff">
+        <circle cx="62" cy="30" r="8" />
+        <circle cx="72" cy="25" r="10" />
+        <circle cx="82" cy="30" r="8" />
+        <rect x="60" y="30" width="24" height="10" rx="2" />
+      </g>
+      {/* Blur on the group: the hue animation's CSS filter would replace it on the ellipse. */}
+      <g filter="url(#ai-cook-glow)" opacity="0.45">
+        <ellipse
+          className="ai-cook-hue"
+          cx="162"
+          cy="88"
+          rx="44"
+          ry="16"
+          fill="url(#ai-cook-brew)"
+        />
+      </g>
+      {/* Rim and brew sit behind the spoon; the pot body in front hides its tip. */}
+      <ellipse cx="162" cy="96" rx="36" ry="7" fill="#3d3760" />
+      <ellipse
+        className="ai-cook-hue"
+        cx="162"
+        cy="96"
+        rx="30"
+        ry="4.5"
+        fill="url(#ai-cook-brew)"
+      />
+      <g className="ai-cook-arm">
+        <line
+          x1="92"
+          y1="82"
+          x2="118"
+          y2="74"
+          stroke="#cfd7e8"
+          strokeWidth="7"
+          strokeLinecap="round"
+        />
+        <line
+          x1="106"
+          y1="67"
+          x2="158"
+          y2="99"
+          stroke="#c8915a"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+        />
+        <circle cx="118" cy="74" r="5" fill="#aab3c7" />
+      </g>
+      <path d="M126 96 C126 122 142 130 162 130 C182 130 198 122 198 96 Z" fill="#2b2640" />
+      {MAGIC_ORBS.map((orb) => (
+        <circle
+          key={orb.color}
+          className="ai-cook-orb"
+          cx={orb.cx}
+          cy="92"
+          r={orb.r}
+          fill={orb.color}
+          style={{ color: orb.color, animationDelay: `${orb.delay}s` }}
+        />
+      ))}
+      {SPARKLES.map((s) => (
+        <g key={`${s.x}-${s.y}`} transform={`translate(${s.x} ${s.y})`}>
+          <path
+            className="ai-cook-sparkle"
+            fill="#fff6c2"
+            d="M0 -6 L1.5 -1.5 L6 0 L1.5 1.5 L0 6 L-1.5 1.5 L-6 0 L-1.5 -1.5 Z"
+            style={{ animationDelay: `${s.delay}s` }}
+          />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 // ─── Main picker ─────────────────────────────────────────────────────────────
 
 export function ColorPalettePicker({ onClose }: Props) {
@@ -500,38 +686,41 @@ export function ColorPalettePicker({ onClose }: Props) {
           <div className="palette-preview-section ui-stack">
             {aiMode ? (
               <div className="ai-input-section ui-stack">
-                <div className="ai-chat-row">
-                  <textarea
-                    ref={aiInputRef}
-                    className="ai-chat-input"
-                    placeholder="Describe your color palette..."
-                    value={aiDescription}
-                    onChange={(e) => setAiDescription(e.target.value)}
-                    disabled={isGenerating}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleAiGenerate();
-                      }
-                    }}
-                    rows={3}
-                  />
-                  <button
-                    type="button"
-                    className="ai-submit-btn ui-control"
-                    onClick={handleAiGenerate}
-                    disabled={isGenerating || !aiDescription.trim()}
-                  >
-                    {isGenerating ? (
-                      <span className="ui-inline-row">
-                        Generating
-                        <span className="ai-dots" />
-                      </span>
-                    ) : (
-                      'Generate'
-                    )}
-                  </button>
-                </div>
+                <textarea
+                  ref={aiInputRef}
+                  className="ai-chat-input"
+                  placeholder="Describe your color palette..."
+                  value={aiDescription}
+                  onChange={(e) => setAiDescription(e.target.value)}
+                  disabled={isGenerating}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleAiGenerate();
+                    }
+                  }}
+                  rows={3}
+                />
+                <button
+                  type="button"
+                  className={`ai-submit-btn ui-control ui-stack ${isGenerating ? 'cooking' : ''}`}
+                  onClick={handleAiGenerate}
+                  disabled={isGenerating || !aiDescription.trim()}
+                  aria-busy={isGenerating}
+                >
+                  {isGenerating ? (
+                    <>
+                      <CookingRobot />
+                      <span className="ai-cook-caption ai-cook-hue">Cooking your palette…</span>
+                    </>
+                  ) : (
+                    <span className="ai-cook-idle ui-row">
+                      <CookHint side="left" />
+                      Let the AI Cook
+                      <CookHint side="right" />
+                    </span>
+                  )}
+                </button>
                 {aiError && <div className="ai-error">{aiError}</div>}
               </div>
             ) : (

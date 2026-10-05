@@ -129,3 +129,17 @@ The server environment includes ~/.local/bin and ~/.cargo/bin so normal agent tu
 Verification: real subprocess/filesystem fixture regression covers missing Rust/Claude/Codex installation, newly installed binary discovery using the same environment, login failure, restart probes, no repeated installation and no reinstall after a tool disappears. Render regression covers installing/login labels. Browser regression validates both screen sizes, centered alignment, visible actions and copy behavior; login screenshots in output/dependencies-firstboot-2026-10-04/ are explicitly fixtures, not host authentication results. Actual downloads/account logins were not exercised; existing host tools were not replaced. No push or forced live restart.
 
 Source-install follow-through: when Homebrew is absent and Claude is missing or unable to install Rust, preflight falls back to the official rustup download directly, without requiring an agent account before source builds can start. Executable-fixture regression verifies both rustc and Cargo appear under ~/.cargo/bin. The server first-boot regression additionally exercises missing Rust through Homebrew. Installer downloads remain fixture-tested rather than live downloads.
+
+## Setup header and release assessment (2026-10-04)
+
+Owner requested one Setup heading in place of the eyebrow/title/subtitle. Removed all three prior lines and retained the close control beside Setup. No server behavior change.
+
+Release assessment remains conditional: actual installer downloads and login-to-first-response onboarding are unverified. Current workspace create route delegates directly to the crate; create_workspace in crates/unleashd-buddies/src/team.rs inserts only the workspace, without a default channel. ChannelBrowser still derives Home's composer target from #general and explicitly has no composer when it is absent. The dependency-check work does not resolve that original onboarding blocker. Recommend a release candidate for validation, not a public-launch readiness claim.
+
+## Flat Setup surface (2026-10-04)
+
+Owner requested removal of row boxes, rounded corners and the bottom paragraph. Replaced row cards with inset horizontal dividers, removed outer border/gradient/shadow and backdrop blur, squared controls, and made command fields flat with a bottom rule. Setup remains centered with scrollable rows and visible actions. Removed the footer quota paragraph; README still documents probe quota. No dependency-check behavior changed. Verify the committed client with its browser-boundary regression and inspect phone/desktop fixture screenshots against the prior Setup renders.
+
+## Setup visual hierarchy refinement (2026-10-04)
+
+Owner found the flattened presentation unattractive. Kept square edges, inset dividers, a single Setup heading and no footer paragraph. Refined hierarchy with larger lighter heading type, tool names and compact statuses on one line, quieter separator contrast, a neutral dark surface with restrained depth and a narrow accent edge. Login commands now precede help links; copy actions have a distinct accent and Continue has a clearer primary treatment. Initial focus goes to the dialog instead of making Close appear selected, while native focus trapping and keyboard controls remain. Readiness behavior is unchanged. Browser checks and phone/desktop visual inspection must use fresh builds, not previously saved screenshots.

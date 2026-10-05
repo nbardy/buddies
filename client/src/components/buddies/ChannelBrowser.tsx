@@ -2,6 +2,7 @@ import { useAtomValue } from 'jotai';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { listField, rowFamily } from '../../atoms/conversations';
+import { openSetupAt } from '../../atoms/ui';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { rowBuddy } from '../../utils/conversation-row';
@@ -22,6 +23,7 @@ import { CopyLinkButton } from './CopyLinkButton';
 import { TaskFilter } from './TaskFilter';
 import { TaskPage } from './TaskPage';
 import { ThreadsPane } from './ThreadsPane';
+import { WorkspaceTeamDialog } from './WorkspaceTeamForm';
 import { errorText } from './api';
 import { useNewBuddy } from './buddy-direct-actions';
 import {
@@ -652,6 +654,7 @@ export function ChannelBrowser({
   const dmConversation = useAtomValue(rowFamily(dm ?? ''));
   const dmBuddyId = rowBuddy(dmConversation)?.buddyId;
   const newBuddy = useNewBuddy(openDm, workspaceId);
+  const [teamCreator, setTeamCreator] = useState(false);
   // The newest unfinished Buddy Builder chat, surfaced in the rail as "Creating buddy".
   const creatingBuddy = useAtomValue(listField('builders')).find((entry) => !entry.done);
   const railRow = (entry: ChannelUnread) => (
@@ -666,6 +669,9 @@ export function ChannelBrowser({
   );
   return (
     <div className="channel-browser" aria-label="Channels">
+      {teamCreator && (
+        <WorkspaceTeamDialog workspaceId={workspaceId} onClose={() => setTeamCreator(false)} />
+      )}
       <nav className="channel-browser-rail ui-stack">
         <header className="channel-browser-rail-header ui-stack">
           <div className="channel-browser-rail-header-row ui-row">
@@ -748,7 +754,9 @@ export function ChannelBrowser({
             <button
               type="button"
               className="channel-browser-rail-add ui-muted"
-              onClick={newBuddy.start}
+              onClick={() =>
+                directory.activeMembers.length === 0 ? setTeamCreator(true) : newBuddy.start()
+              }
               disabled={newBuddy.state.kind === 'pending'}
               title="New Buddy"
               aria-label="New Buddy"
@@ -784,6 +792,15 @@ export function ChannelBrowser({
             </ul>
           )}
         </div>
+        <button
+          type="button"
+          className="channel-browser-rail-connect ui-row ui-muted"
+          onClick={() => openSetupAt('connect-mobile')}
+          title="Open Buddies on your phone"
+        >
+          <span aria-hidden="true">▯</span>
+          Connect mobile
+        </button>
       </nav>
       <main className="channel-browser-main">
         {mainPane(view, {

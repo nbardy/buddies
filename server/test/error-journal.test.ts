@@ -54,6 +54,33 @@ test('error journal groups repeats, keeps stack context, redacts secrets, and re
   assert.match(persisted, /token=\[REDACTED\]/);
 });
 
+test('provider failures group across Buddy run ids and keep distinct causes separate after restart', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const journal = new ErrorJournal({ directory });
+  await journal.initialize();
+  const ids = [
+    'buddy-run-run_01a10b40-64b1-73a1-bdf2-61671350a6c0',
+    'buddy-run-run_01a10b2f-2be7-72c4-9db6-ec208cb3c64d',
+  ];
+  const target = { error: (..._values: unknown[]) => {}, warn: (..._values: unknown[]) => {} };
+  const restore = installConsoleErrorCapture(journal, target);
+  t.after(restore);
+  for (const id of ids) {
+    target.error(`[${id}] Provider error: Selected model is at capacity.`);
+  }
+  target.error(`[${ids[1]}] Provider error: 403 Forbidden`);
+  await journal.flush();
+
+  const recovered = new ErrorJournal({ directory });
+  await recovered.initialize();
+  const groups = await recovered.queryGroups();
+  assert.equal(groups.length, 2, 'run identity must not split the same provider failure');
+  const capacity = groups.find((group) => group.message.includes('at capacity'));
+  assert.equal(capacity?.count, 2);
+  assert.match(capacity?.message ?? '', new RegExp(ids[1]));
+  assert.match(capacity?.stack ?? '', /Provider error: Selected model is at capacity/);
+});
+
 test('error journal survives restart and bounds rotated files', async (t) => {
   const directory = await temporaryDirectory(t);
   const first = new ErrorJournal({

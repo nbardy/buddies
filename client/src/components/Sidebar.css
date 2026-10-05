@@ -158,6 +158,21 @@
   padding: var(--sp-2) var(--sp-3) var(--sp-6);
 }
 
+.sidebar-connect-mobile {
+  flex-shrink: 0;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-6);
+  border: none;
+  border-top: 1px solid var(--border-emphasis);
+  background: transparent;
+  font: 500 var(--fs-3) / 1 var(--font-mono);
+  cursor: pointer;
+}
+
+.sidebar-connect-mobile:hover {
+  color: var(--text-primary);
+}
+
 .pending-creation,
 .sidebar-buddy-project-header {
   width: 100%;
@@ -289,7 +304,8 @@
   --sidebar-row-fill: var(--sidebar-row-selection);
   background: var(--sidebar-row-selection);
   color: var(--sidebar-selection-text);
-  animation: conversation-row-pop 180ms /* keyframes: views/conversation-row */ cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: conversation-row-pop 180ms /* keyframes: views/conversation-row */
+    cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .sidebar-buddy-row-link {

@@ -1,7 +1,20 @@
 import { DependenciesSchema, type DependencyCheck } from '@unleashd/shared';
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
-import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
+import { useAtomValue } from 'jotai';
+import { type ReactNode, Suspense, lazy, useEffect, useRef, useState } from 'react';
+import {
+  setSetupDismissed,
+  setupDismissedAtom,
+  setupRevealAtom,
+  setupRevealed,
+} from '../../atoms/ui';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
+import { DependencyCommand, SURFACE, buttonStyle } from './setup-ui';
+
+const WorkspaceTeamForm = lazy(() =>
+  import('../../components/buddies/WorkspaceTeamForm').then((module) => ({
+    default: module.WorkspaceTeamForm,
+  }))
+);
 
 const STATUS = resource('/api/dependencies', async (signal) => {
   const response = await fetch('/api/dependencies', { signal });
@@ -33,61 +46,10 @@ const GUIDES = {
 const STATES = {
   ready: { icon: '✓', label: 'Yes — ready', color: '#22c55e' },
   missing: { icon: '✕', label: 'No — not installed', color: 'var(--danger)' },
-  failed: { icon: '✕', label: 'Installed — needs attention', color: 'var(--danger)' },
+  failed: { icon: '✕', label: 'Installed — needs attention', color: '#ff9b94' },
   installing: { icon: '…', label: 'Installing automatically…', color: 'var(--warning)' },
   checking: { icon: '…', label: 'Checking…', color: 'var(--warning)' },
 };
-
-const SURFACE = {
-  text: '#edf3fa',
-  muted: '#a4b4c5',
-  border: '#304052',
-  raised: '#1c2a3a',
-};
-const buttonStyle: CSSProperties = {
-  padding: 'var(--sp-4) var(--sp-6)',
-  border: `1px solid ${SURFACE.border}`,
-  borderRadius: 'var(--ui-radius)',
-  background: SURFACE.raised,
-  color: SURFACE.text,
-  cursor: 'pointer',
-  font: 'inherit',
-  fontSize: 'var(--fs-4)',
-};
-
-function DependencyCommand({ command, label }: { command: string; label: string }) {
-  const copy = useCopyAction(command);
-  return (
-    <div className="ui-row" style={{ gap: 'var(--sp-3)', marginTop: 'var(--sp-3)' }}>
-      <input
-        aria-label={label}
-        readOnly
-        value={command}
-        onFocus={(event) => event.currentTarget.select()}
-        style={{
-          minWidth: 0,
-          width: 0,
-          flex: 1,
-          fontFamily: 'monospace',
-          fontSize: 'var(--fs-3)',
-          padding: 'var(--sp-4)',
-          color: SURFACE.text,
-          background: '#0d1722',
-          border: `1px solid ${SURFACE.border}`,
-          borderRadius: 'var(--ui-radius)',
-        }}
-      />
-      <button
-        type="button"
-        style={buttonStyle}
-        onClick={copy.copy}
-        aria-label={`${COPY_LABEL[copy.state]} ${label}`}
-      >
-        {COPY_LABEL[copy.state]}
-      </button>
-    </div>
-  );
-}
 
 export function DependencyCard({ check }: { check: DependencyCheck }) {
   const guide = GUIDES[check.id];
@@ -107,11 +69,8 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
         display: 'grid',
         gridTemplateColumns: '28px minmax(0, 1fr)',
         gap: 'var(--sp-6)',
-        padding: 'var(--sp-7)',
-        border: `1px solid ${SURFACE.border}`,
-        borderRadius: 'var(--ui-radius)',
-        background: 'linear-gradient(135deg, #1b2939, #172332)',
-        boxShadow: '0 2px 8px rgb(0 0 0 / 12%)',
+        padding: 'var(--sp-8) 0',
+        borderTop: `1px solid ${SURFACE.border}`,
       }}
     >
       <span
@@ -131,10 +90,24 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
         {state.icon}
       </span>
       <div className="ui-stack" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
-        <strong style={{ color: SURFACE.text, fontSize: 'var(--fs-5)', lineHeight: 1.3 }}>
-          {guide.name}
-        </strong>
-        <span style={{ color: state.color, fontSize: 'var(--fs-3)' }}>{label}</span>
+        <div
+          className="ui-row"
+          style={{ justifyContent: 'space-between', gap: 'var(--sp-4)', flexWrap: 'wrap' }}
+        >
+          <strong
+            style={{
+              color: SURFACE.text,
+              fontSize: 'var(--fs-6)',
+              lineHeight: 1.5,
+              fontWeight: 500,
+            }}
+          >
+            {guide.name}
+          </strong>
+          <span style={{ color: state.color, fontSize: 'var(--fs-2)', lineHeight: 1.5 }}>
+            {label}
+          </span>
+        </div>
         {check.status === 'failed' && (
           <span
             style={{
@@ -157,16 +130,6 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
             )}
           </>
         )}
-        {(check.status === 'missing' || check.status === 'failed') && (
-          <a
-            href={guide.url}
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: '#8bbcff', fontSize: 'var(--fs-3)', marginTop: 'var(--sp-3)' }}
-          >
-            {check.status === 'missing' ? 'Installation guide' : 'Account & setup help'} ↗
-          </a>
-        )}
         {check.status === 'failed' &&
           guide.login &&
           check.failure !== 'quota' &&
@@ -176,22 +139,76 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
               label={`${check.failure === 'login' ? 'Sign in to' : 'Open'} ${guide.name} command`}
             />
           )}
+        {(check.status === 'missing' || check.status === 'failed') && (
+          <a
+            href={guide.url}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              color: '#8bbcff',
+              fontSize: 'var(--fs-3)',
+              marginTop: 'var(--sp-5)',
+              textDecoration: 'none',
+            }}
+          >
+            {check.status === 'missing'
+              ? 'Installation guide'
+              : check.failure === 'login'
+                ? 'How to sign in'
+                : 'Account help'}{' '}
+            ↗
+          </a>
+        )}
       </div>
     </section>
   );
 }
 
+const STEPS = ['welcome', 'setup', 'team'] as const;
+type Step = (typeof STEPS)[number];
+const STEP_TITLE: Record<Step, string> = {
+  welcome: 'Welcome',
+  setup: 'Setup',
+  team: 'Create your team',
+};
+
+const STEP_PILL: Record<Step, string> = { welcome: 'Welcome', setup: 'Setup', team: 'Team' };
+
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 // One app-wide prompt, shared by both shells. Polling reads the server's cached checks.
-export function DependenciesPrompt() {
-  const [dismissed, setDismissed] = useState(false);
+// `children`: device-specific sections after the checks (desktop: Connect from mobile).
+export function DependenciesPrompt({ children }: { children?: ReactNode }) {
+  const dismissed = useAtomValue(setupDismissedAtom);
   const status = usePolledFetch(STATUS, 2_000, !dismissed);
+  const reveal = useAtomValue(setupRevealAtom);
+  const [step, setStep] = useState<Step>('welcome');
+  // Fix guard: "Connect mobile" opened the wizard on Welcome, where its section is not
+  // mounted, so the reveal never ran and fired later on an unrelated visit to Setup.
+  // Every revealable section lives on the Setup step. Guard: dependencies-layout test.
+  if (reveal !== null && step !== 'setup') setStep('setup');
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (!dismissed) dialog.current?.showModal();
+    if (!dismissed) {
+      dialog.current?.showModal();
+      dialog.current?.focus();
+    }
   }, [dismissed]);
+  // Fix guard: scrolling when the section mounted did nothing (the dialog was not open yet)
+  // or was undone when the checks loaded above it. So reveal once the checks have settled,
+  // a frame after the dialog opens. Guard: tools/dependencies-layout.test.mjs (section in view).
+  const settled = status.kind !== 'idle' && status.kind !== 'loading';
+  useEffect(() => {
+    if (reveal === null || dismissed || !settled) return;
+    const frame = requestAnimationFrame(() => {
+      const section = dialog.current?.querySelector<HTMLElement>(`#${reveal}`);
+      section?.scrollIntoView({ block: 'start' });
+      section?.focus({ preventScroll: true });
+      setupRevealed();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [reveal, dismissed, settled]);
 
   const retry = async () => {
     setRetrying(true);
@@ -214,43 +231,33 @@ export function DependenciesPrompt() {
   if (dismissed) return null;
   return (
     <dialog
-      className="dependencies-dialog"
+      className="dependencies-dialog onboarding-card"
       ref={dialog}
+      tabIndex={-1}
       aria-labelledby="dependencies-title"
-      onCancel={() => setDismissed(true)}
+      onCancel={() => setSetupDismissed(true)}
       style={{
         margin: 'auto',
-        width: 'min(420px, calc(100vw - var(--sp-9)))',
+        width: 'min(560px, calc(100vw - var(--sp-9)))',
         maxWidth: 'none',
         padding: 0,
         overflow: 'hidden',
-        border: `1px solid ${SURFACE.border}`,
-        borderRadius: 'var(--sp-6)',
-        background: 'linear-gradient(145deg, #202e3e, #101a26)',
+        outline: 'none',
         color: SURFACE.text,
-        boxShadow: '0 32px 90px rgb(0 0 0 / 65%), inset 0 1px 0 rgb(255 255 255 / 6%)',
       }}
     >
       <div className="ui-stack" style={{ maxHeight: '85dvh' }}>
-        <header style={{ padding: 'var(--sp-9) var(--sp-9) var(--sp-7)', flexShrink: 0 }}>
+        <header style={{ padding: 'var(--sp-10) var(--sp-10) var(--sp-7)', flexShrink: 0 }}>
           <div className="ui-row" style={{ justifyContent: 'space-between' }}>
-            <span
-              style={{
-                fontSize: 'var(--fs-2)',
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-                color: SURFACE.muted,
-              }}
-            >
-              This computer
-            </span>
+            <h2 id="dependencies-title">{STEP_TITLE[step]}</h2>
             <button
               type="button"
               aria-label="Close dependency checks"
-              onClick={() => setDismissed(true)}
+              onClick={() => setSetupDismissed(true)}
               style={{
                 ...buttonStyle,
-                padding: 'var(--sp-2) var(--sp-4)',
+                padding: 'var(--sp-4)',
+                fontSize: 'var(--fs-7)',
                 border: 'none',
                 background: 'transparent',
                 color: SURFACE.muted,
@@ -259,80 +266,85 @@ export function DependenciesPrompt() {
               ✕
             </button>
           </div>
-          <h2
-            id="dependencies-title"
-            style={{
-              fontSize: 'var(--fs-8)',
-              letterSpacing: '-0.025em',
-              color: SURFACE.text,
-              margin: 'var(--sp-4) 0 var(--sp-3)',
-            }}
-          >
-            Dependencies
-          </h2>
-          <p style={{ fontSize: 'var(--fs-4)', color: SURFACE.muted, margin: 0, lineHeight: 1.5 }}>
-            Make sure your tools can respond.
-          </p>
         </header>
         <div
           aria-live="polite"
           className="ui-stack"
           style={{
-            gap: 'var(--sp-4)',
-            padding: '0 var(--sp-9) var(--sp-9)',
+            gap: 0,
+            padding: '0 var(--sp-10)',
             overflowY: 'auto',
             minHeight: 0,
           }}
         >
-          {status.data?.checks.map((check) => <DependencyCard key={check.id} check={check} />) ?? (
-            <p>Checking dependencies…</p>
+          <ol className="onboarding-steps">
+            {STEPS.map((name, index) => (
+              <li key={name} aria-current={name === step ? 'step' : undefined}>
+                {index + 1}. {STEP_PILL[name]}
+              </li>
+            ))}
+          </ol>
+          {step === 'welcome' && (
+            <p className="onboarding-lede">
+              Welcome to Buddies. Connect your AI tools, choose a project folder, and build a team
+              to work with you.
+            </p>
           )}
-          {(status.kind === 'failed' || status.kind === 'stale') && (
-            <p>Could not load checks: {status.error.message}</p>
+          {step === 'team' && (
+            <Suspense fallback={<p>Loading team creator…</p>}>
+              <WorkspaceTeamForm onStarted={() => setSetupDismissed(true)} />
+            </Suspense>
           )}
-          {error && <p role="alert">{error}</p>}
+          {step === 'setup' && (
+            <>
+              {status.data?.checks.map((check) => (
+                <DependencyCard key={check.id} check={check} />
+              )) ?? <p>Checking dependencies…</p>}
+              {(status.kind === 'failed' || status.kind === 'stale') && (
+                <p>Could not load checks: {status.error.message}</p>
+              )}
+              {error && <p role="alert">{error}</p>}
+              {children}
+            </>
+          )}
         </div>
         <footer
           style={{
-            padding: 'var(--sp-7) var(--sp-9)',
+            margin: '0 var(--sp-10)',
+            padding: 'var(--sp-8) 0 var(--sp-9)',
             borderTop: `1px solid ${SURFACE.border}`,
-            background: 'rgb(0 0 0 / 14%)',
             flexShrink: 0,
           }}
         >
           <div className="ui-row" style={{ gap: 'var(--sp-4)', justifyContent: 'space-between' }}>
             <button
               type="button"
-              style={buttonStyle}
-              disabled={retrying || (checking && !!status.data)}
-              onClick={() => void retry()}
+              style={{ ...buttonStyle, visibility: step === 'welcome' ? 'hidden' : 'visible' }}
+              disabled={step === 'setup' && (retrying || (checking && !!status.data))}
+              onClick={() =>
+                step === 'setup' ? void retry() : setStep(step === 'team' ? 'setup' : 'welcome')
+              }
             >
-              ↻ Check again
+              {step === 'setup' ? '↻ Check again' : step === 'team' ? '← Back' : 'Welcome'}
             </button>
             <button
               type="button"
-              style={{
-                ...buttonStyle,
-                background: '#a9c6ff',
-                color: '#102039',
-                borderColor: '#a9c6ff',
-                fontWeight: 600,
-              }}
-              onClick={() => setDismissed(true)}
+              // The team form owns the step's primary action; Skip stays quiet beside it.
+              className={step === 'team' ? undefined : 'onboarding-primary'}
+              style={
+                step === 'team'
+                  ? { ...buttonStyle, color: SURFACE.muted, borderRadius: 10 }
+                  : undefined
+              }
+              onClick={() =>
+                step === 'team'
+                  ? setSetupDismissed(true)
+                  : setStep(step === 'welcome' ? 'setup' : 'team')
+              }
             >
-              Continue →
+              {step === 'team' ? 'Skip for now' : 'Continue →'}
             </button>
           </div>
-          <p
-            style={{
-              color: SURFACE.muted,
-              fontSize: 'var(--fs-2)',
-              lineHeight: 1.4,
-              margin: 'var(--sp-6) 0 0',
-            }}
-          >
-            Response checks use a little agent quota. You can continue while resolving a check.
-          </p>
         </footer>
       </div>
     </dialog>
