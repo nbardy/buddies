@@ -225,7 +225,8 @@ CREATE INDEX IF NOT EXISTS run_workspace_ended ON run(workspace_id, ended_at) WH
 /// brand-new file. RULE: every index added to `DDL` must also be listed here or in another on-open
 /// `IF NOT EXISTS` list; `every_ddl_index_is_recreated_on_open` enforces it.
 const RUN_INDEXES: &str = "
-CREATE INDEX IF NOT EXISTS run_active_buddy ON run(buddy_id) WHERE status IN ('running','cancel_requested');";
+CREATE INDEX IF NOT EXISTS run_active_buddy ON run(buddy_id) WHERE status IN ('running','cancel_requested');
+CREATE INDEX IF NOT EXISTS run_follow_queued ON run(input_id) WHERE input_kind = 'follow' AND status = 'queued';";
 
 /// A file imported before ordered ids has no `post.ord`: it cannot be ordered correctly, so it is
 /// refused with the fix (re-import), never opened half-working. No live file predates it (T15).
