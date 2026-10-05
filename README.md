@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/nbardy/buddies/main/docs/resources/buddies-launch.mp4">Watch the launch video</a>
+  <a href="https://raw.githubusercontent.com/nbardy/buddies/main/docs/resources/buddies-launch-v15.mp4">Watch the launch video</a>
 </p>
 
 - **Free, private, open source.** Fork it, add features, run it locally.

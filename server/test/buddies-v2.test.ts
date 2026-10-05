@@ -421,9 +421,10 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     w.during.set(1, async (turn) => {
       // Owner-authored input: the grant is the owner's, so team_admin is listed.
       const names = await toolNames(turn.mcp);
-      assert.equal(names.length, 12);
+      assert.equal(names.length, 13);
       assert.ok(names.includes('team_admin'));
       assert.ok(names.includes('channel_admin'));
+      assert.ok(names.includes('channel_create'));
       for (const removed of ['answer', 'channel_archive', 'channel_rename'])
         assert.equal(names.includes(removed), false);
       assert.equal(await probe(turn.mcp), 200);
@@ -2845,8 +2846,38 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     assert.deepEqual(written.post.author, buddyActor(w.designer.id));
     const found = await http('GET', `/api/buddies/workspaces/${w.ws}/search?q=quarterly%20LOGO`);
     assert.deepEqual(
-      (found.body as unknown as Post[]).map((post) => post.id),
+      (found.body as unknown as { posts: Post[] }).posts.map((post) => post.id),
       [written.post.id]
+    );
+    // Fuzzy matching, @author and channel-name rows, through the real route.
+    type Found = { posts: Post[]; channels: Array<{ id: string }> };
+    const byAuthor = await http(
+      'GET',
+      `/api/buddies/workspaces/${w.ws}/search?q=${encodeURIComponent('@Designer logos')}`
+    );
+    assert.deepEqual(
+      (byAuthor.body as unknown as Found).posts.map((post) => post.id),
+      [written.post.id],
+      '@Name filters to the author, and "logos" reaches "logo" by stem'
+    );
+    const authorOnly = await http(
+      'GET',
+      `/api/buddies/workspaces/${w.ws}/search?q=${encodeURIComponent('@designer')}`
+    );
+    assert.ok(
+      (authorOnly.body as unknown as Found).posts.some((post) => post.id === written.post.id)
+    );
+    const unknownAuthor = await http(
+      'GET',
+      `/api/buddies/workspaces/${w.ws}/search?q=${encodeURIComponent('@Nobody logo')}`
+    );
+    assert.equal(unknownAuthor.status, 400);
+    assert.match(unknownAuthor.body.error, /no Buddy named "Nobody"/);
+    const named = await http('GET', `/api/buddies/workspaces/${w.ws}/search?q=gener`);
+    assert.deepEqual(
+      (named.body as unknown as Found).channels.map((c) => c.id),
+      [w.general.id],
+      'a channel the words name leads the results'
     );
     const grant = w.grants.issueBuddy({
       role: 'worker',
@@ -2873,7 +2904,9 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     // Typed filters and a typed error cross the real MCP boundary: a malformed query is refused
     // loudly, never matched as literal words (the old behaviour).
     const byDesigner = await call(w.endpoint.spec(grant), 'channel_read', {
-      read: { search: { text: '"quarterly logo" -draft', from: [w.designer.id], after: '2020-01-01' } },
+      read: {
+        search: { text: '"quarterly logo" -draft', from: [w.designer.id], after: '2020-01-01' },
+      },
     });
     assert.deepEqual(
       byDesigner.value.posts.map((post: Post) => post.id),
@@ -3403,6 +3436,41 @@ test('Buddy MCP renames a public channel without changing its identity or histor
       read: { channelId: w.general.id },
     });
     assert.equal(history.value.posts[0].id, post.id);
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
+// Regression: 0fef9d4 (lean rewrite) dropped buddy.new_list, so no Buddy turn could create a channel.
+test('Buddy MCP creates a channel, posts in it, and a replayed key returns the same channel', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const grant = w.grants.issueBuddy({
+      role: 'worker',
+      buddyId: w.lead.id,
+      workspaceId: w.ws,
+      conversationId: 'create-channel-test',
+      runId: null,
+      returns: INBOX,
+    });
+    const spec = w.endpoint.spec(grant);
+    const input = { name: 'launch-prep', purpose: 'Launch checklist', key: 'mk-launch' };
+    const created = await call(spec, 'channel_create', input);
+    assert.equal(created.isError, false, created.text);
+    assert.equal(created.value.kind.name, 'launch-prep');
+    const replay = await call(spec, 'channel_create', input);
+    assert.equal(replay.value.id, created.value.id);
+
+    const posted = await call(spec, 'post', {
+      channel: { id: created.value.id },
+      body: 'First post',
+      key: 'first',
+    });
+    assert.equal(posted.isError, false, posted.text);
+    const owner = await http('GET', `/api/buddies/channels/${created.value.id}`);
+    assert.equal(owner.status, 200);
   } finally {
     server.close();
     await w.close();

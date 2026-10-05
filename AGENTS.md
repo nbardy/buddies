@@ -21,7 +21,7 @@ server/src/ingest/*                → transcripts + list from the Rust ingest a
 server/src/auth/*                  → shared-secret gate (policy/gate/express)
 server/src/providers/*             → provider registry + catalog service (models from the generated catalog)
 server/src/buddies/*               → Buddy server over the crate: grants, mcp (one HTTP
-                                     endpoint, 12 tools), runner, channels, routes,
+                                     endpoint, 13 tools), runner, channels, routes,
                                      briefing, memory-review, policy-port (T08 seam)
 crates/unleashd-buddies/           → Buddies core (Rust, napi-rs addon): schema,
                                      authorize, posts/docs/tasks/runs
@@ -442,3 +442,18 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   so anything else anchored right sits under it and stops receiving clicks.
   Two-line rows hid this; single-line rows do not. Buttons on a row are
   siblings of its `<Link>`, never inside it (`conversation-row-links.test.tsx`).
+
+## Transient image dumps: WebP q95, then delete
+
+Screenshots, frame grabs and debug renders you save to inspect (not ship) are
+**WebP quality 95**, never PNG: `cwebp -q 95 in.png -o out.webp` (or CDP
+`Page.captureScreenshot {format: 'webp', quality: 95}`; Playwright's
+`page.screenshot` only does png/jpeg, so convert after capture and delete the
+PNG). Exception: images a pixel-diff compares (`pnpm screenshots --baseline`)
+stay lossless PNG, because lossy output would show up as diff noise. Write dumps
+under one dated, gitignored directory and delete it when the task closes. Never
+keep Playwright traces or browser profiles from passing runs (`trace:
+'retain-on-failure'`, `screenshot: 'only-on-failure'`).
+Why: on 2026-10-05 the disk hit 0 bytes with 10 GB in `wave_sim/output` (browser
+profiles + traces 0.9 GB, 6k JPEGs, full-page PNGs up to 6.5 MB) and 3.5 GB of
+`temp_paint_wt/*/shots`; agents never cleaned up after themselves.

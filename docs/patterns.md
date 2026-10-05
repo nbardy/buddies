@@ -94,6 +94,10 @@ List payloads carry summary rows; bodies load on demand.
 **Here:** `RowPatchSchema` / `applyRowPatch` / `applyDetailPatch` in `shared/src/conversation.ts`;
 `handlePatch` in `client/src/atoms/actions.ts`; the tail-only transcript refresh (`refreshTranscript`);
 T05's tail-only stream regroup. Guard: `server/test/wire-v3.test.ts`.
+A field a patch moves must not also sit in a server-side row cache that a later `hello` re-serves:
+the hello then contradicts the patch and nothing corrects it. `ListedRow` in
+`server/src/ingest/conversation-list.ts` omits `run` for this reason (stale "running" native
+children, 2026-10-01). Guard: `server/test/ingest-list.test.ts` "a hello after the quiet backstop…".
 
 ## ordered-ids
 **Smell:** ordering rows by a timestamp, with a random id as the tie-break: rows written in the same millisecond read

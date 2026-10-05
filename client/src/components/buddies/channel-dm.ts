@@ -21,7 +21,7 @@ const GROUP_WINDOW_MS = 5 * 60_000;
 export type DmAuthor = 'owner' | 'buddy';
 
 export type DmRow =
-  | { kind: 'day' | 'notice'; key: string; label: string }
+  | { kind: 'day' | 'notice' | 'failure'; key: string; label: string }
   | { kind: 'lead' | 'continuation'; key: string; author: DmAuthor; at: string; body: MessageBody };
 
 const dayLabel = (date: Date) =>
@@ -40,14 +40,21 @@ function responseBody(group: Extract<MessageGroup, { type: 'assistant' }>): Mess
 }
 
 /**
- * Rows for one DM generation. System records (errors, notices) are left out: a failed turn shows
- * its retry under the transcript instead. `queued` is what the owner sent that the server has not
+ * Rows for one DM generation. System records are the turn's own failure text (the runner appends
+ * one per failed turn), so each becomes a `failure` row. They were once dropped here, and a Buddy
+ * whose CLI was missing (`spawn codex ENOENT`) showed an empty reply bubble with the reason only
+ * in the server log. Guard: channel-dm.test.tsx "a failed turn shows its system message".
+ * `startFailure` is the journaled `spawn_failed` attempt's message: the runner's own failure
+ * record lives only in server memory, so after a backend restart it is gone and this is all that
+ * is left of a Buddy whose CLI is missing. It shows only when no failure row survived.
+ * `queued` is what the owner sent that the server has not
  * written to the transcript yet, so Send shows it at once.
  */
 export function dmRows(
   groups: readonly MessageGroup[],
   queued: readonly QueuedMessage[],
-  boundary?: { at: Date; label: string }
+  boundary?: { at: Date; label: string },
+  startFailure?: string
 ): DmRow[] {
   const rows: DmRow[] = [];
   // Fix guard: a reset belongs below its own date, even before the first message arrives.
@@ -90,8 +97,21 @@ export function dmRows(
         );
         break;
       case 'single':
-        if (first.role === 'user')
-          push(`m:${group.firstMessageIndex}`, 'owner', new Date(first.timestamp), first.body);
+        switch (first.role) {
+          case 'user':
+            push(`m:${group.firstMessageIndex}`, 'owner', new Date(first.timestamp), first.body);
+            break;
+          case 'system':
+            if (bodyText(first.body).trim())
+              rows.push({
+                kind: 'failure',
+                key: `m:${group.firstMessageIndex}`,
+                label: bodyText(first.body),
+              });
+            break;
+          case 'assistant':
+            break;
+        }
         break;
     }
   }
@@ -113,8 +133,17 @@ export function dmRows(
         text: item.content,
       });
   }
+  if (startFailure && !rows.some((row) => row.kind === 'failure'))
+    rows.push({ kind: 'failure', key: 'start-failure', label: startFailure });
   return rows;
 }
+
+/**
+ * What a `spawn_failed` attempt tells the owner once the runner's live message is gone. The
+ * journal keeps the cause, not the command, so the wording stops at "its command".
+ */
+export const startFailureText = (provider: string) =>
+  `Couldn't start ${provider}: its command was not found on this server's PATH. Open Setup to install it, then send your message again.`;
 
 /** The owner's last message: what an out-of-tokens retry resends on the new harness. */
 export function lastOwnerText(messages: readonly Message[]): string | null {
@@ -123,4 +152,14 @@ export function lastOwnerText(messages: readonly Message[]): string | null {
     if (message.role === 'user' && bodyText(message.body).trim()) return bodyText(message.body);
   }
   return null;
+}
+
+/**
+ * The newest `limit` rows, widened back to the run's lead so a window never opens on a headless
+ * continuation. `limit` Infinity keeps every row.
+ */
+export function tailRows(rows: readonly DmRow[], limit: number): readonly DmRow[] {
+  let start = Math.max(0, rows.length - limit);
+  while (start > 0 && rows[start].kind === 'continuation') start -= 1;
+  return rows.slice(start);
 }

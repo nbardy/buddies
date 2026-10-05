@@ -300,13 +300,13 @@ export function TaskRows({
 }) {
   const ordered = byPosition(tasks);
   return (
-    <ul className="landing-requests">
+    <ul className="task-lines ui-card">
       {ordered.map((task, index) => {
         const status = TASK_STATUS[task.status];
         return (
           <li key={task.id} className="task-line">
             <Link
-              className="landing-request"
+              className="task-line-link ui-choice"
               to={
                 taskHref
                   ? taskHref(task.id)
@@ -317,7 +317,7 @@ export function TaskRows({
                 {status.glyph}
               </span>
               <span className="task-line-copy">
-                <span className="landing-thread-title">{task.title}</span>
+                <span className="task-line-title">{task.title}</span>
                 <span className="task-line-status">{task.paused ? 'Paused' : status.label}</span>
               </span>
               <span className="ui-badge">{task.paused ? 'Paused' : status.label}</span>

@@ -12,6 +12,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import {
+  type ConversationRow,
+  EncodedRowsSchema,
+  applyRowPatch,
+  decodeRows,
+} from '@unleashd/shared';
 import { type ConversationBroadcast, conversationLabel } from '../src/conversations/runtime';
 import { bootIngest } from '../src/ingest/boot';
 import type { ListedRuntime } from '../src/ingest/conversation-list';
@@ -34,7 +40,8 @@ const bind = (provider: string, sessionId: string) => ({ provider, sessionId }) 
 function listDependencies(
   records: ReturnType<typeof recordStore>,
   sent: ConversationBroadcast[],
-  runtimes: Map<string, ListedRuntime> = new Map()
+  runtimes: Map<string, ListedRuntime> = new Map(),
+  externalGraceMs = 30_000
 ) {
   const external = new Map<string, number>();
   return {
@@ -48,7 +55,7 @@ function listDependencies(
       entries: () => external.entries(),
     },
     completionSuppression: { isSuppressed: () => false },
-    externalGraceMs: 30_000,
+    externalGraceMs,
     broadcast: (data: ConversationBroadcast) => sent.push(data),
     logger: { log: () => undefined, warn: () => undefined, error: () => undefined },
   };
@@ -225,6 +232,115 @@ test('a record created after boot joins the list and its overlapping sessions co
         text,
       }))
     );
+  } finally {
+    list.stop();
+    await ingest.stop();
+    fixture.cleanup();
+  }
+});
+
+/** A Codex rollout under the fixture HOME; `parent` makes it a native child (thread_spawn). */
+function codexRollout(home: string, sessionId: string, cwd: string, parent: string | null) {
+  const file = path.join(
+    home,
+    '.codex',
+    'sessions',
+    '2026',
+    '09',
+    '20',
+    `rollout-2026-09-20T12-00-00-${sessionId}.jsonl`
+  );
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const line = (at: number, type: string, payload: Record<string, unknown>) =>
+    `${JSON.stringify({ timestamp: new Date(at).toISOString(), type, payload })}\n`;
+  const source = parent ? { subagent: { thread_spawn: { parent_thread_id: parent } } } : 'exec';
+  fs.writeFileSync(
+    file,
+    line(T0, 'session_meta', { id: sessionId, cwd, source }) +
+      line(T0, 'event_msg', { type: 'user_message', message: 'go' })
+  );
+  return (at: number, text: string) =>
+    fs.appendFileSync(file, line(at, 'event_msg', { type: 'agent_message', message: text }));
+}
+
+/** What a connected tab holds: its hello, then every broadcast folded the way the client does. */
+function foldBroadcasts(hello: readonly ConversationRow[], sent: readonly ConversationBroadcast[]) {
+  const rows = new Map(hello.map((row) => [row.id, row]));
+  for (const data of sent) {
+    if (data.type === 'rows') {
+      for (const row of decodeRows(EncodedRowsSchema.parse(data))) rows.set(row.id, row);
+    } else if (data.type === 'patch') {
+      const row = rows.get(data.id);
+      if (row) rows.set(data.id, applyRowPatch(row, data.patch));
+    }
+  }
+  return rows;
+}
+
+// Incident 2026-10-01: native children stayed "running" in an open tab after their parents
+// finished, because a reconnect's hello re-served a `run` the list had cached (see ListedRow).
+test('a hello after the quiet backstop agrees with the patched tab; a child outliving its parent stays running', async () => {
+  const fixture = ingestHome('unleashd-ingest-run-');
+  const { home, appData, project } = fixture;
+  const PARENT = '55555555-5555-4555-8555-555555555555';
+  const CHILD = '66666666-6666-4666-8666-666666666666';
+  const PARENT_SESSION = '01a0f609-e694-7ee0-99fa-c9981c296d30';
+  const CHILD_SESSION = '01a0f60a-8c98-7ed3-9f2e-bcfcdfff4f0d';
+  const writeParent = codexRollout(home, PARENT_SESSION, project, null);
+  const writeChild = codexRollout(home, CHILD_SESSION, project, PARENT_SESSION);
+  const records = recordStore(appData);
+  const codex = { ...CONFIG, provider: 'codex' } as never;
+  await records.create({
+    conversationId: PARENT,
+    kind: { t: 'chat' },
+    currentSession: bind('codex', PARENT_SESSION),
+    config: codex,
+    provenance: 'external_discovered',
+  });
+  await records.create({
+    conversationId: CHILD,
+    kind: { t: 'chat' },
+    currentSession: bind('codex', CHILD_SESSION),
+    config: codex,
+    provenance: 'external_discovered',
+  });
+  const sent: ConversationBroadcast[] = [];
+  const GRACE_MS = 300;
+  const { ingest, list } = await bootIngest(
+    { home, appDataDir: appData },
+    listDependencies(records, sent, new Map(), GRACE_MS)
+  );
+  const runOf = (rows: ReadonlyMap<string, ConversationRow>, id: string) => rows.get(id)?.run;
+  const hello = () => new Map(list.rows().map((row) => [row.id, row]));
+  try {
+    const firstHello = list.rows();
+    assert.equal(hello().get(CHILD)?.parent, PARENT, 'the child joins its parent');
+    const tab = () => foldBroadcasts(firstHello, sent);
+
+    // Parent and native child both work, then both go quiet.
+    writeParent(T0 + 1_000, 'spawning a helper');
+    writeChild(T0 + 2_000, 'working');
+    await until(() => (runOf(tab(), CHILD) === 'running' ? true : undefined));
+    await until(() =>
+      runOf(tab(), CHILD) === 'idle' && runOf(tab(), PARENT) === 'idle' ? true : undefined
+    );
+    // The tab reconnects (no page reload): its new hello must say what the patches said.
+    assert.equal(runOf(hello(), CHILD), 'idle', 'a reconnect resurrects the finished child');
+    assert.equal(runOf(hello(), PARENT), 'idle');
+
+    // A child that keeps working after its parent finished is genuinely running.
+    const mark = sent.length;
+    writeChild(T0 + 3_000, 'still working');
+    await until(() =>
+      sent
+        .slice(mark)
+        .find((data) => data.type === 'patch' && data.id === CHILD && data.patch.t === 'run')
+    );
+    assert.equal(runOf(hello(), CHILD), 'running');
+    assert.equal(runOf(hello(), PARENT), 'idle');
+    assert.equal(runOf(tab(), CHILD), 'running');
+    await until(() => (runOf(tab(), CHILD) === 'idle' ? true : undefined));
+    assert.equal(runOf(hello(), CHILD), 'idle');
   } finally {
     list.stop();
     await ingest.stop();

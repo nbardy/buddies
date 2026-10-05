@@ -11,7 +11,13 @@ import { DependencyCommand, SURFACE, buttonStyle } from './setup-ui';
 
 const ACCESS = resource('/api/mobile-access', async (signal) => {
   const response = await fetch('/api/mobile-access', { signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new Error(
+      response.status === 404
+        ? 'The running server does not support this check yet. It will be available after the backend reloads.'
+        : `HTTP ${response.status}`
+    );
+  }
   return MobileAccessSchema.parse(await response.json());
 });
 
@@ -276,7 +282,13 @@ const LABEL: Record<MobileAccess['kind'], { text: string; color: string }> = {
 export function ConnectMobile() {
   const access = usePolledFetch(ACCESS, 3_000);
 
-  const label = access.data ? LABEL[access.data.kind] : { text: 'Checking…', color: SURFACE.muted };
+  // A missing backend route returned 404 but still showed "Looking for Tailscale…".
+  // Failed requests have settled; only idle/loading may show progress. Guard: dependencies-layout.
+  const label = access.data
+    ? LABEL[access.data.kind]
+    : access.kind === 'failed'
+      ? LABEL.failed
+      : { text: 'Checking…', color: SURFACE.muted };
   return (
     <section
       id={'connect-mobile' satisfies SetupSection}
@@ -300,9 +312,18 @@ export function ConnectMobile() {
         </strong>
         <span style={{ color: label.color, fontSize: 'var(--fs-2)' }}>{label.text}</span>
       </div>
-      {access.data ? body(access.data) : <p style={text}>Looking for Tailscale…</p>}
+      {access.data
+        ? body(access.data)
+        : access.kind !== 'failed' && <p style={text}>Looking for Tailscale…</p>}
       {(access.kind === 'failed' || access.kind === 'stale') && (
-        <p style={text}>Could not load: {access.error.message}</p>
+        <>
+          <p style={text} role="alert">
+            Could not load: {access.error.message}
+          </p>
+          <button type="button" style={buttonStyle} onClick={() => void access.refetch()}>
+            Retry mobile check
+          </button>
+        </>
       )}
     </section>
   );
