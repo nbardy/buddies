@@ -34,6 +34,8 @@ enum Rule {
     /// Public and task channels: any active buddy. Direct channels: members only.
     ChannelAccess,
     WorkspaceChannel,
+    /// A run: self-or-manager of its Buddy, or (for a request's run) the request's author.
+    RunRetry,
 }
 
 fn rule(op: Op) -> Rule {
@@ -42,6 +44,7 @@ fn rule(op: Op) -> Rule {
         Op::CreateChannel | Op::SearchPosts => Rule::AnyBuddy,
         Op::Post | Op::ReadChannel => Rule::ChannelAccess,
         Op::ArchiveChannel | Op::RenameChannel => Rule::WorkspaceChannel,
+        Op::RetryRun => Rule::RunRetry,
         Op::ReadDoc | Op::WriteDoc | Op::WriteTask | Op::EnqueueRun | Op::CancelRun | Op::WriteSchedule => Rule::SelfOrManager,
     }
 }
@@ -160,15 +163,31 @@ fn buddy_decision(conn: &Connection, actor: &str, rule: Rule, subject: &Subject)
             }
         }
         (_, Rule::WorkspaceChannel, _) => denied("archive needs a channel".into()),
+        (_, Rule::RunRetry, Subject::Run { id }) => run_retry_decision(conn, actor, id),
+        (_, Rule::RunRetry, _) => denied("retry needs a run".into()),
         (_, Rule::ChannelAccess, Subject::Channel { id }) => channel_access(conn, actor, id),
-        (_, Rule::ChannelAccess, Subject::Owner | Subject::Buddy { .. }) => denied("posts live in channels".into()),
+        (_, Rule::ChannelAccess, Subject::Owner | Subject::Buddy { .. } | Subject::Run { .. }) => denied("posts live in channels".into()),
         (_, Rule::SelfOrManager, Subject::Owner) => denied("the owner's resources are owner only".into()),
-        (_, Rule::SelfOrManager, Subject::Channel { .. }) => denied("a channel is not a buddy's resource".into()),
+        (_, Rule::SelfOrManager, Subject::Channel { .. } | Subject::Run { .. }) => denied("only a buddy's own resources".into()),
         (_, Rule::SelfOrManager, Subject::Buddy { id }) if id == actor => Ok(Decision::Allowed),
         (_, Rule::SelfOrManager, Subject::Buddy { id }) => match manages(conn, actor, id)? {
             true => Ok(Decision::Allowed),
             false => denied(format!("{actor} is neither {id} nor one of its managers")),
         },
+    }
+}
+
+/// Retry is open to whoever can already cancel the run (its Buddy, its managers) and to the one
+/// who asked for the work: the author of the request the run answers, who is waiting on it.
+fn run_retry_decision(conn: &Connection, actor: &str, run_id: &str) -> Result<Decision> {
+    let run = crate::runs::get_run(conn, run_id)?;
+    let requester = match &run.input {
+        RunInput::Post { post_id } => Some(crate::posts::get_post(conn, post_id)?.author),
+        RunInput::Chat { .. } | RunInput::Reply { .. } | RunInput::Schedule { .. } | RunInput::FailureNotice { .. } | RunInput::Follow { .. } => None,
+    };
+    match requester == Some(Actor::Buddy { id: actor.to_string() }) {
+        true => Ok(Decision::Allowed),
+        false => buddy_decision(conn, actor, Rule::SelfOrManager, &Subject::Buddy { id: run.buddy_id }),
     }
 }
 

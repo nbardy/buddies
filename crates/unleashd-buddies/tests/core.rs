@@ -1432,3 +1432,73 @@ fn claim_run_works_on_a_database_missing_run_active_buddy() {
     s.enqueue_run(&Actor::Owner, chat("peer", "t1", "conv")).unwrap();
     assert!(s.claim_run(lease(60_000)).unwrap().is_some());
 }
+
+// 2026-10-06: the lean rewrite (0fef9d4) dropped `buddy.retry_run` (17 uses); a Buddy whose worker
+// failed could only re-ask from scratch. A retry is the next attempt on the same input key, the
+// request goes back to awaiting, and the answer returns along the original route.
+#[test]
+fn retrying_a_failed_run_makes_attempt_two_and_reopens_the_request() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let fail = |s: &mut Store| {
+        let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+        s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap()
+    };
+    let asked = s.post(&buddy("mid"), dm("mid", "ic"), request("please do X", "r1")).unwrap();
+    let first = fail(s);
+    assert_eq!(s.get_post(&buddy("mid"), &asked.id).unwrap().request, RequestState::Failed);
+    let notice = s.claim_run(lease(60_000)).unwrap().unwrap();
+    s.settle_run(&notice.run.id, &notice.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
+
+    let sol = RunConfig { provider: "codex".into(), model: "gpt-6-sol".into(), reasoning_effort: None };
+    let retry = s.retry_run(&buddy("mid"), &first.id, Some(sol.clone()), "k1").unwrap();
+    assert_eq!((retry.attempt, retry.status, &retry.input, &retry.config), (2, RunStatus::Queued, &first.input, &Some(sol.clone())));
+    assert_eq!(retry.input_key, first.input_key);
+    assert_eq!(s.get_post(&buddy("mid"), &asked.id).unwrap().request, RequestState::Awaiting);
+    assert_eq!(s.retry_run(&buddy("mid"), &first.id, Some(sol), "k1").unwrap().id, retry.id, "a replayed key returns the same retry");
+
+    // Live, already-retried and complete runs are typed errors, never silent no-ops.
+    let live = s.retry_run(&buddy("mid"), &retry.id, None, "k2");
+    assert!(matches!(live, Err(CoreError::Invalid(_))), "{live:?}");
+    let stale = s.retry_run(&buddy("mid"), &first.id, None, "k3");
+    assert!(matches!(stale, Err(CoreError::Invalid(_))), "attempt 1 is not the latest: {stale:?}");
+
+    // The retry answers the request and wakes its sender in the sender's conversation.
+    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert_eq!(claim.run.id, retry.id);
+    s.answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec![], key: "a".into() }).unwrap();
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    let back = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert_eq!((back.run.buddy_id.as_str(), &back.run.input), ("mid", &RunInput::Reply { post_id: asked.id.clone() }));
+    let done = s.retry_run(&buddy("mid"), &retry.id, None, "k4");
+    assert!(matches!(done, Err(CoreError::Invalid(_))), "a complete run has nothing to retry: {done:?}");
+}
+
+#[test]
+fn retry_authority_is_the_requester_a_manager_or_the_owner_and_only_managers_pick_the_model() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let asked = s.post(&buddy("peer"), dm("peer", "ic"), request("please do X", "r1")).unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let failed = s
+        .settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() })
+        .unwrap();
+    assert_eq!(asked.request, RequestState::Awaiting);
+    let sol = RunConfig { provider: "codex".into(), model: "gpt-6-sol".into(), reasoning_effort: None };
+
+    let stranger = s.retry_run(&buddy("gone"), &failed.id, None, "k0");
+    assert!(matches!(stranger, Err(CoreError::Denied(_))), "{stranger:?}");
+    let requester_picks_model = s.retry_run(&buddy("peer"), &failed.id, Some(sol), "k1");
+    assert!(matches!(requester_picks_model, Err(CoreError::Denied(_))), "a requester cannot move a peer's run off its profile");
+    assert_eq!(s.retry_run(&buddy("peer"), &failed.id, None, "k2").unwrap().attempt, 2, "the requester may retry as-is");
+
+    let notice = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert_eq!(notice.run.input, RunInput::FailureNotice { run_id: failed.id.clone() });
+    s.settle_run(&notice.run.id, &notice.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert_eq!(claim.run.attempt, 2);
+    let failed2 = s
+        .settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() })
+        .unwrap();
+    assert_eq!(s.retry_run(&buddy("lead"), &failed2.id, None, "k3").unwrap().attempt, 3, "a transitive manager may retry");
+}
