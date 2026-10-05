@@ -113,3 +113,17 @@ leftover `unleashd-lease-*` 1.2 GB x2 and `unleashd-adoption-*` temp dirs under 
 are therefore not trustworthy evidence either way. Not done: clean-tree full `test:server`, typecheck,
 `test:package`, a 3x rerun of the 3 new cases after freeing disk. The `rm -rf` of the stale temp dirs
 was blocked by the dcg hook; the owner must clear them.
+
+## Verification follow-up (2026-10-06, Sonnet worker; STOPPED at disk floor, NOT pushed)
+
+- Merged origin/main (6990beb+) into the branch: clean, no conflicts (b990cb1). `pnpm typecheck` passes (server + agent-cli).
+- `ctrl-c-adoption.test.ts` (3 new outage cases + Ctrl+C cases) x3 on the merge: run1 5 pass/1 fail, run2 pass, run3 pass.
+  The run1 failure was "two Ctrl+C (supervisor escalates to SIGKILL)": backend B's supervisor refused to start,
+  "port 7541 (PID 56775) already in use by a process outside the dev runtime". PID gone by the time I looked. Not run on base.
+- Port 7541: the relay is not the holder by construction (listens on port 0 or its persisted ephemeral port,
+  never the backend's `PORT`; `server/relay/buddy-mcp-relay.mjs`). The test hardcodes `PORT = 7541`
+  (ctrl-c-adoption.test.ts:25), so any concurrent tree/session collides. The run1 holder is most likely the previous
+  case's backend still draining after SIGKILL of its watcher (race), UNPROVEN; the PID was not captured.
+- Full test:server, dev-supervisor, agent-cli, test:package: NOT RUN. `df` showed ~4 GB free (<5 GB floor); $TMPDIR is 36 GB
+  across 3353 dirs, mostly other sessions' `unleashd-lease-*` (1.2 GB each); I did not delete dirs I did not create.
+- Nothing pushed to origin/main.
