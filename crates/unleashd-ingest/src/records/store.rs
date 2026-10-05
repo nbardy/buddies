@@ -398,7 +398,7 @@ impl Records {
                     config: input.config,
                     config_revision: rev + 1,
                     last_resolved_config: Some(input.last_resolved_config),
-                    provenance: Provenance::User,
+                    provenance: input.provenance.unwrap_or(Provenance::User),
                     updated_at: validate::iso(at),
                     ..current.clone()
                 },

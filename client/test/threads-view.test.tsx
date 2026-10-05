@@ -4,7 +4,7 @@ import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import type { FollowedThread, Post } from '../src/components/buddies/types';
-import { buddyFixture, rosterFixture } from './fixtures/buddy-roster';
+import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { postFixture, publicChannel } from './fixtures/channel-posts';
 register(
   `data:text/javascript,${encodeURIComponent(`
@@ -149,7 +149,8 @@ test('the Threads pane renders the fold, tinted new replies and a real thread li
   const directory = workspaceDirectory(
     [rosterFixture([buddyFixture({ id: 'lead', name: 'Lead' })], { id: 'ws-threads' })],
     'ws-threads',
-    []
+    [],
+    CODEX_INSTALLED
   );
   const html = renderToStaticMarkup(
     <MemoryRouter>

@@ -1,8 +1,8 @@
 import { harnessMcpCapability } from '@nbardy/agent-cli';
 import type { RunConfig } from '@unleashd/buddies-core';
 import { type ConversationConfig, ProviderSchema } from '@unleashd/shared';
+import { configFromProviderPreferences } from '@unleashd/shared';
 import { z } from 'zod';
-import { configFromProviderPreferences } from '../conversations/config-mapping';
 import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-service';
 
 // A worker is a Buddy run on a model the spawner chose (a `post` request carrying `worker`), not

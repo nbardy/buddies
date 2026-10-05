@@ -28,7 +28,7 @@
     "screenshot:mobile": "node tools/screenshot-mobile.mjs",
     "screenshots": "node tools/screenshots.mjs",
     "test:dev-supervisor": "node --test tools/dev-supervisor.test.mjs tools/local-domain.test.mjs tools/shared-build.test.mjs tools/watch-server.test.mjs",
-    "test:tools": "node --test tools/preflight.test.mjs tools/lib/pixel-diff.test.mjs tools/ensure-addons.test.mjs",
+    "test:tools": "node --test tools/preflight.test.mjs tools/lib/pixel-diff.test.mjs tools/ensure-addons.test.mjs tools/screenshots.test.mjs",
     "test:cli": "pnpm --dir vendor/agent-cli-tool test",
     "test:api": "node test/api.test.js",
     "test:package": "pnpm build && node test/package-smoke.js",

@@ -23,7 +23,6 @@ import {
   mediaMarkdown,
   mentionChoice,
   mentionedBuddies,
-  pickerValue,
   rankReferences,
 } from './channel-text';
 import type { PostResult, ThreadSeat } from './types';
@@ -62,7 +61,7 @@ export function ChannelComposer({
   placeholder,
   rootId,
   references,
-  seats = NO_SEATS,
+  seats,
   autoFocus = false,
   submit,
   onPosted,
@@ -106,6 +105,7 @@ export function ChannelComposer({
       const restored = decodeChannelDraft(stored);
       setText(restored.text);
       setPicked(restored.picked);
+      setChoices(new Map(restored.mentionConfigs?.map(({ buddyId, config }) => [buddyId, config])));
       setCaret(restored.text.length);
     },
   });
@@ -121,9 +121,23 @@ export function ChannelComposer({
     [query, references]
   );
   const selected = matches[Math.min(highlight, matches.length - 1)];
-  const mentions = useMemo(() => mentionedBuddies(text, picked), [text, picked]);
+  const mentions = useMemo(
+    () => mentionedBuddies(text, picked, references),
+    [text, picked, references]
+  );
   const referenceMarks = useMemo(() => composerReferenceMarks(text, picked), [text, picked]);
-  const choosing = mentions.find((buddy) => buddy.id === choosingFor);
+  // Pattern: one-definition (docs/patterns.md#one-definition)
+  // A mention initializes the bottom picker from the thread, not an independent default.
+  // Guard: explicit thread choice survives a failed attempt; desktop/phone model captures.
+  const selections = mentions.map((buddy) => ({
+    buddy,
+    choice: mentionChoice(buddy, choices, rootId === null ? NO_SEATS : seats),
+  }));
+  const choosing = selections.find(({ buddy }) => buddy.id === choosingFor);
+  const openModel = (buddyId: string) => {
+    if (submit === 'button') textareaRef.current?.blur();
+    setChoosingFor(buddyId === choosingFor ? null : buddyId);
+  };
   // The model picker and the @ menu share the space above the composer.
   const showPicker = open && matches.length > 0 && !choosing;
 
@@ -152,7 +166,7 @@ export function ChannelComposer({
 
   const edit = (next: string, nextCaret: number, nextPicked: ChannelReference[] = picked) => {
     setText(next);
-    draft.setDraft(encodeChannelDraft({ text: next, picked: nextPicked }));
+    saveDraft(next, nextPicked, choices);
     setCaret(nextCaret);
     setHighlight(0);
     // React's onSelect fires during the same keydown (Enter in the @ menu)
@@ -165,6 +179,23 @@ export function ChannelComposer({
       node.setSelectionRange(nextCaret, nextCaret);
       setCaret(nextCaret);
     });
+  };
+
+  const saveDraft = (
+    text: string,
+    picked: ChannelReference[],
+    choices: ReadonlyMap<string, ConversationConfig>
+  ) =>
+    draft.setDraft(
+      encodeChannelDraft({
+        text,
+        picked,
+        mentionConfigs: [...choices].map(([buddyId, config]) => ({ buddyId, config })),
+      })
+    );
+  const changeChoices = (next: ReadonlyMap<string, ConversationConfig>) => {
+    setChoices(next);
+    saveDraft(text, picked, next);
   };
 
   const pick = (reference: ChannelReference) => {
@@ -206,11 +237,11 @@ export function ChannelComposer({
   // returns the text, unless the owner has already started a new message.
   const send = () => {
     const body = encodeReferences(text, picked).trim();
-    if (!body || uploading > 0) return;
-    const mentionConfigs = mentions.flatMap((buddy): OwnerPostMentionConfig[] => {
-      const config = choices.get(buddy.id);
-      return config ? [{ buddyId: buddy.id, config }] : [];
-    });
+    if (!body || uploading > 0 || selections.some(({ choice }) => choice.kind === 'loading'))
+      return;
+    const mentionConfigs = selections.flatMap(({ buddy, choice }): OwnerPostMentionConfig[] =>
+      choice.kind === 'chosen' ? [{ buddyId: buddy.id, config: choice.config }] : []
+    );
     const unsent = { text, picked, choices };
     const key = newId();
     outboxSending({
@@ -245,7 +276,7 @@ export function ChannelComposer({
         setCaret(unsent.text.length);
         setPicked(unsent.picked);
         setChoices(unsent.choices);
-        draft.setDraft(encodeChannelDraft({ text: unsent.text, picked: unsent.picked }));
+        saveDraft(unsent.text, unsent.picked, unsent.choices);
       });
   };
 
@@ -268,14 +299,14 @@ export function ChannelComposer({
     >
       {choosing && (
         <MentionModelPopover
-          buddy={choosing}
-          choice={mentionChoice(choosing, choices, seats)}
+          buddy={choosing.buddy}
+          choice={choosing.choice}
           catalog={catalog}
-          onChange={(config) => setChoices(new Map(choices).set(choosing.id, config))}
+          onChange={(config) => changeChoices(new Map(choices).set(choosing.buddy.id, config))}
           onReset={() => {
             const next = new Map(choices);
-            next.delete(choosing.id);
-            setChoices(next);
+            next.delete(choosing.buddy.id);
+            changeChoices(next);
           }}
           onClose={() => {
             setChoosingFor(null);
@@ -325,7 +356,7 @@ export function ChannelComposer({
           }}
           onChange={(event) => {
             setText(event.target.value);
-            draft.setDraft(encodeChannelDraft({ text: event.target.value, picked }));
+            saveDraft(event.target.value, picked, choices);
             setCaret(event.target.selectionStart);
             setHighlight(0);
             setDismissedAt(null);
@@ -391,20 +422,14 @@ export function ChannelComposer({
         />
         {mentions.length > 0 && (
           <div className="channel-composer-mentions">
-            {mentions.map((buddy) => (
+            {selections.map(({ buddy, choice }) => (
               <MentionChip
                 key={buddy.id}
                 buddy={buddy}
-                choice={mentionChoice(buddy, choices, seats)}
+                choice={choice}
                 catalog={catalog}
                 open={buddy.id === choosingFor}
-                onOpen={() => {
-                  // Touch: the keyboard pushed the picker above the screen,
-                  // out of reach (#bugfixes 2026-09-25). Dismiss it; the
-                  // picker opens as a bottom sheet (mobile-channels.css).
-                  if (submit === 'button') textareaRef.current?.blur();
-                  setChoosingFor(buddy.id === choosingFor ? null : buddy.id);
-                }}
+                onOpen={() => openModel(buddy.id)}
               />
             ))}
           </div>
@@ -424,7 +449,11 @@ export function ChannelComposer({
           type="button"
           className="channel-composer-send"
           onClick={send}
-          disabled={uploading > 0 || text.trim().length === 0}
+          disabled={
+            uploading > 0 ||
+            text.trim().length === 0 ||
+            selections.some(({ choice }) => choice.kind === 'loading')
+          }
         >
           Send
         </button>
@@ -476,11 +505,18 @@ function MentionChip({
       data-chosen={choice.kind === 'chosen' || undefined}
       aria-haspopup="dialog"
       aria-expanded={open}
-      disabled={choice.kind === 'unreported'}
+      disabled={
+        choice.kind === 'unreported' || choice.kind === 'loading' || choice.kind === 'no-agent'
+      }
+      data-no-agent={choice.kind === 'no-agent' || undefined}
       title={
-        choice.kind === 'unreported'
-          ? 'This Buddy runs on a harness the picker does not know'
-          : `Choose the harness and model for ${buddy.label}’s reply`
+        choice.kind === 'loading'
+          ? 'Loading this thread’s reply model'
+          : choice.kind === 'unreported'
+            ? 'This Buddy runs on a harness the picker does not know'
+            : choice.kind === 'no-agent'
+              ? `No agent is installed, so ${buddy.label} cannot reply. Install Claude Code or Codex from Setup.`
+              : `Choose the harness and model for ${buddy.label}’s reply`
       }
       onMouseDown={(event) => event.preventDefault()}
       onClick={onOpen}
@@ -509,7 +545,7 @@ function MentionModelPopover({
   onReset(): void;
   onClose(): void;
 }) {
-  const value = pickerValue(choice);
+  const value = 'config' in choice ? choice.config : null;
   return (
     <>
       <button
@@ -562,7 +598,7 @@ function MentionModelPopover({
             type="button"
             onClick={onReset}
             disabled={choice.kind !== 'chosen'}
-            aria-label="Reset to the Buddy's default settings"
+            aria-label="Discard this unsent model change"
           >
             Reset
           </button>

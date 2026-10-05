@@ -22,6 +22,7 @@ import {
   createDefaultConversationConfig,
 } from '@unleashd/shared';
 import express from 'express';
+import { choiceLabel, mentionChoice } from '../../client/src/components/buddies/channel-text';
 import { BUDDY_TOOL_GUIDE, composeBriefing, createBriefings } from '../src/buddies/briefing';
 import { type StableConversationPorts, slotOf } from '../src/buddies/buddy-conversation-slots';
 import {
@@ -60,6 +61,8 @@ import {
 } from '../src/conversations/runtime';
 import { replaceRuntimeConfig } from '../src/conversations/runtime-config';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
+import { installedAgent } from '../src/providers/installed-agent';
+import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
 import { testExecutions } from './fixtures/fake-turn';
 import { recordStore } from './fixtures/records';
 
@@ -171,7 +174,13 @@ async function world() {
   const seen: BuddyEvent[] = [];
   events.on((event) => seen.push(event));
   const grants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
-  const briefings = createBriefings(core);
+  // The install's PATH, as real files: an unpinned Buddy runs what is here (installed-agent.ts).
+  // Codex by default, the behaviour every older test was written against.
+  const agentBin = join(scratch, 'agent-bin');
+  mkdirSync(agentBin);
+  writeFileSync(join(agentBin, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
+  const installed = () => installedAgent({ PATH: agentBin });
+  const briefings = createBriefings(core, installed);
   const endpoint = await startMcpEndpoint({
     core,
     events,
@@ -189,6 +198,7 @@ async function world() {
   const silent = new Set<number>();
   // Turns that end out of tokens, as a harness at its usage limit reports it.
   const outOfTokens = new Set<number>();
+  const providerErrors = new Map<number, string>();
   // Turns whose provider process was told to stop.
   const stopped = new Set<number>();
   const seatPost = /post\(\{ channel: \{ id: "([^"]+)" \}, replyToId: "([^"]+)"/;
@@ -218,6 +228,13 @@ async function world() {
         yield { type: 'session.started' as const, sessionId };
         yield { type: 'turn.started' as const };
         await during.get(turn.n)?.(turn);
+        const error = providerErrors.get(turn.n);
+        if (error) {
+          yield { type: 'error' as const, message: error };
+          yield { type: 'turn.complete' as const, reason: 'error' as const };
+          finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
+          return;
+        }
         if (outOfTokens.has(turn.n)) {
           yield { type: 'out_of_tokens' as const, message: 'You have hit your usage limit' };
           yield { type: 'turn.complete' as const, reason: 'out_of_tokens' as const };
@@ -323,6 +340,7 @@ async function world() {
   const creation = createBuddyCreationService({
     configService,
     resolveBuddyConversation: (context) => briefings.warm(context),
+    installedAgent: installed,
     resolveWorkingDirectory: (directory) => directory,
     createId: () => `conversation-${++ids}`,
     getConversation: (id) => conversations.get(id),
@@ -337,12 +355,13 @@ async function world() {
     getConversation: (id) => conversations.get(id),
     ensureConversationReady: creation.ensureConversationReady,
     createConversation: (input) => creation.createServerBuddyConversation(input),
-    reconfigure: (conversation, config) =>
-      replaceRuntimeConfig(configService, conversation, config),
+    reconfigure: (conversation, config, provenance) =>
+      replaceRuntimeConfig(configService, conversation, config, provenance),
   };
   const channels = createChannels({
     core,
     events,
+    installedAgent: installed,
     conversations: stable,
     uploadsRoot: () => join(scratch, 'uploads'),
     gate: async ({ config }) => {
@@ -364,6 +383,7 @@ async function world() {
     announce: (post: Post, picks: MentionPicks = NO_PICKS) =>
       events.emit({ kind: 'posted', post, channel: general, picks }),
     ws,
+    agentBin,
     lead,
     designer,
     general,
@@ -376,9 +396,11 @@ async function world() {
     answers,
     silent,
     outOfTokens,
+    providerErrors,
     stopped,
     gate,
     channels,
+    stable,
     creation,
     conversations,
     runner,
@@ -1118,7 +1140,12 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
         { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `priority-${++n}` }
       );
     const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
-    w.announce(root, new Map([[w.lead.id, createDefaultConversationConfig('claude')]]));
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.lead.id,
+      changes: { provider: { kind: 'set', value: 'claude' } },
+      key: 'initial-profile',
+    });
+    w.announce(root);
     const thread = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
     await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
@@ -1153,7 +1180,34 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
       sol
     );
     w.gate.verdict = { kind: 'respond' };
+    let releaseGate!: () => void;
+    w.gate.hold = new Promise((resolve) => {
+      releaseGate = resolve;
+    });
     w.announce(await say('What next?', root.id));
+    await until(() => w.gate.configs.length === 1, 'gate selected Sol');
+    const duringGate = await w.creation.createServerBuddyConversation({
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      conversationId: 'during-gate-claude',
+      commandId: 'during-gate-claude',
+      config: createDefaultConversationConfig('claude'),
+      deferInitialMessage: true,
+    });
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'New history while the check is pending',
+        replyToId: root.id,
+        fromConversationId: duringGate.id,
+        evidence: [],
+        broadcast: false,
+        key: 'during-gate',
+      }
+    );
+    releaseGate();
+    w.gate.hold = Promise.resolve();
     await until(() => w.turns.length === 2, 'follow-up reply');
     assert.deepEqual(w.gate.configs[0], sol);
     assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
@@ -1177,6 +1231,295 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
       'remembered follow-up'
     );
     assert.deepEqual(w.gate.configs[1], explicit);
+  } finally {
+    await w.close();
+  }
+});
+
+test('explicit thread choice survives a failed attempt and records reopen; picker, gate and invocation agree', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const root = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) start`,
+        evidence: [],
+        broadcast: false,
+        key: 'selection-root',
+      }
+    );
+    const old = await w.creation.createServerBuddyConversation({
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      conversationId: 'old-claude',
+      commandId: 'old-claude',
+      config: createDefaultConversationConfig('claude'),
+      deferInitialMessage: true,
+    });
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Earlier Claude work',
+        purpose: 'reply',
+        replyToId: root.id,
+        fromConversationId: old.id,
+        evidence: [],
+        broadcast: false,
+        key: 'old-work',
+      }
+    );
+    const threadRead = async () => {
+      const response = await http('GET', `/api/buddies/posts/${root.id}/thread`);
+      assert.equal(response.status, 200);
+      return response.body as unknown as {
+        posts: Post[];
+        seats: { buddyId: string; config: ConversationConfig }[];
+      };
+    };
+    const buddy = {
+      kind: 'buddy' as const,
+      id: w.lead.id,
+      label: 'Lead',
+      detail: '',
+      execution: { kind: 'profile' as const, config: createDefaultConversationConfig('codex') },
+    };
+    const before = mentionChoice(buddy, new Map(), (await threadRead()).seats);
+    assert.equal(
+      ('config' in before ? before.config : null)?.provider,
+      'claude',
+      'old thread displays its actual next model'
+    );
+    const explicit: ConversationConfig = {
+      provider: 'codex',
+      model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
+      reasoning: { mode: 'explicit', effort: 'high' },
+    };
+    w.providerErrors.set(1, "You've hit your weekly limit · resets 7pm (Asia/Makassar)");
+    const response = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body: `[@Lead](buddy:${w.lead.id}) use the changed picker`,
+      replyToId: root.id,
+      mentionConfigs: [{ buddyId: w.lead.id, config: explicit }],
+      key: 'failed-choice',
+    });
+    assert.equal(response.status, 201);
+    const failed = await until(
+      async () => (await threadRead()).posts.find((p) => p.purpose === 'reply_failed'),
+      'chosen attempt fails'
+    );
+    assert.match(failed.body, /You've hit your weekly limit/);
+    await until(() => w.channels.responding(w.general.id).length === 0, 'failed pair idle');
+    const shown = mentionChoice(buddy, new Map(), (await threadRead()).seats);
+    assert.equal(
+      choiceLabel(shown, null),
+      `${w.turns[0].request.model} · high`,
+      'display equals failed invocation'
+    );
+    assert.deepEqual(
+      'config' in shown ? shown.config : null,
+      explicit,
+      'failure does not revert to old Claude history'
+    );
+
+    // Reopen the real records store and a fresh responder; no in-memory selection survives.
+    const reopened = new ConversationConfigService({
+      store: recordStore(join(w.scratch, 'config')),
+      resolver: { resolve: async (config) => resolveConfigAgainstProviderCatalog(config) },
+    });
+    const events = createBuddyEvents();
+    const configs: ConversationConfig[] = [];
+    const reloaded = createChannels({
+      core: w.core,
+      events,
+      installedAgent: () => installedAgent({ PATH: w.agentBin }),
+      uploadsRoot: () => join(w.scratch, 'uploads'),
+      conversations: { ...w.stable, slot: async (id) => slotOf(await reopened.getRecord(id)) },
+      gate: async ({ config }) => {
+        configs.push(config);
+        return { kind: 'respond' };
+      },
+      channelChanged: () => undefined,
+    });
+    assert.deepEqual(
+      (await reloaded.threadSeats(root.id)).find((s) => s.buddyId === w.lead.id)?.config,
+      explicit
+    );
+    const next = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Continue after failure',
+        replyToId: root.id,
+        evidence: [],
+        broadcast: false,
+        key: 'next-after-failure',
+      }
+    );
+    events.emit({ kind: 'posted', post: next, channel: w.general, picks: NO_PICKS });
+    await until(() => w.turns.length === 2, 'reloaded follow-up invokes');
+    assert.deepEqual(configs, [explicit], 'gate consumes the persisted override');
+    assert.equal(w.turns[1].request.harness, explicit.provider);
+    assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
+    assert.equal(w.turns[1].request.reasoningEffort, 'high');
+    await until(() => reloaded.responding(w.general.id).length === 0, 'reloaded reply idle');
+    const retry = await http('POST', `/api/buddies/posts/${failed.id}/retry`, { config: explicit });
+    assert.equal(retry.status, 202, JSON.stringify(retry.body));
+    await until(() => w.turns.length === 3, 'plain weekly-limit retry invokes');
+    assert.equal(w.turns[2].request.model, 'gpt-6.1-sol');
+    await until(() => w.channels.responding(w.general.id).length === 0, 'weekly retry idle');
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
+test('same-value picks become durable overrides, independent of another Buddy and deleted history', async () => {
+  const w = await world();
+  try {
+    let n = 0;
+    const say = (body: string, replyToId?: string) =>
+      w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          broadcast: false,
+          key: `scope-${++n}`,
+        }
+      );
+    const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
+    w.announce(root);
+    await until(
+      () => w.turns.length === 1 && w.channels.responding(w.general.id).length === 0,
+      'default reply'
+    );
+    const initial = (await w.channels.threadSeats(root.id)).find(
+      (s) => s.buddyId === w.lead.id
+    )!.config;
+    assert.deepEqual(
+      initial,
+      createDefaultConversationConfig('codex'),
+      'empty thread uses profile'
+    );
+    // The config is unchanged: only its origin changes, before the failed attempt.
+    w.outOfTokens.add(2);
+    w.announce(
+      await say(`[@Lead](buddy:${w.lead.id}) keep this model`, root.id),
+      new Map([[w.lead.id, initial]])
+    );
+    await until(
+      () => w.turns.length === 2 && w.channels.responding(w.general.id).length === 0,
+      'same-value pick fails'
+    );
+    const external = await w.creation.createServerBuddyConversation({
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      conversationId: 'later-external-claude',
+      commandId: 'later-external-claude',
+      config: createDefaultConversationConfig('claude'),
+      deferInitialMessage: true,
+    });
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Newer external Claude work',
+        replyToId: root.id,
+        fromConversationId: external.id,
+        evidence: [],
+        broadcast: false,
+        key: 'newer-external',
+      }
+    );
+    assert.deepEqual(
+      (await w.channels.threadSeats(root.id)).find((s) => s.buddyId === w.lead.id)?.config,
+      initial,
+      'explicit intent beats newer inferred history'
+    );
+    w.announce(
+      await say(`[@Designer](buddy:${w.designer.id}) use your own model`, root.id),
+      new Map([[w.designer.id, createDefaultConversationConfig('claude')]])
+    );
+    await until(
+      () => w.turns.length === 3 && w.channels.responding(w.general.id).length === 0,
+      'independent Designer reply'
+    );
+    const seats = await w.channels.threadSeats(root.id);
+    assert.equal(seats.find((s) => s.buddyId === w.designer.id)?.config.provider, 'claude');
+    assert.equal(seats.find((s) => s.buddyId === w.lead.id)?.config.provider, 'codex');
+
+    // A different, unseated thread falls back past a deleted latest reference.
+    const other = await say('A thread without an override');
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'History',
+        replyToId: other.id,
+        fromConversationId: external.id,
+        evidence: [],
+        broadcast: false,
+        key: 'history-other',
+      }
+    );
+    assert.equal((await w.channels.threadSeats(other.id))[0].config.provider, 'claude');
+    const records = recordStore(join(w.scratch, 'config'));
+    await records.delete(external.id);
+    assert.deepEqual(
+      await w.channels.threadSeats(other.id),
+      [],
+      'deleted historical config is skipped; composer uses profile'
+    );
+    const unavailable: ConversationConfig = {
+      provider: 'codex',
+      model: { mode: 'explicit', modelId: 'retired-model' },
+      reasoning: { mode: 'default' },
+    };
+    await records.create({
+      conversationId: 'retired-history',
+      kind: {
+        t: 'buddy',
+        context: { buddyId: w.lead.id, workspaceId: w.ws },
+        visibility: 'foreground',
+      },
+      config: unavailable,
+      provenance: 'external_discovered',
+    });
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Work on a now-retired model',
+        replyToId: other.id,
+        fromConversationId: 'retired-history',
+        evidence: [],
+        broadcast: false,
+        key: 'retired-history',
+      }
+    );
+    assert.deepEqual(
+      (await w.channels.threadSeats(other.id))[0].config,
+      unavailable,
+      'unavailable history is shown, not silently replaced'
+    );
+    w.announce(await say(`[@Lead](buddy:${w.lead.id}) continue here`, other.id));
+    await until(
+      async () =>
+        (await w.core.listPosts(OWNER, { kind: 'thread', rootId: other.id }, null, 50)).posts.some(
+          (p) => p.purpose === 'reply_failed' && /Model is unavailable/.test(p.body)
+        ),
+      'unavailable model fails visibly'
+    );
+    assert.equal(w.turns.length, 3, 'no provider substitution after resolution failure');
   } finally {
     await w.close();
   }
@@ -1299,6 +1642,94 @@ test("a model-only Buddy profile opens its DM on the model's harness", async () 
     await assert.rejects(w.channels.openDirect(explicit.id), /Model is unavailable for codex/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await w.close();
+  }
+});
+
+// Fresh-install trial 2026-10-05 (todo_57268f4b): with only Claude installed, the bootstrap's
+// Product Dev ran a hardcoded Codex fallback, `spawn codex ENOENT`, and the owner saw an empty
+// bubble. An unpinned Buddy now runs what is on PATH, read per open (the first-boot install is
+// async), refuses visibly when nothing is, and an owner's pin is never replaced.
+// Design: agent_notes/2026-10-05_installed-provider-default-design.md.
+test('an unpinned Buddy runs the installed agent; a pinned one never moves', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  const install = (name: string) =>
+    writeFileSync(join(w.agentBin, name), '#!/bin/sh\n', { mode: 0o755 });
+  try {
+    rmSync(join(w.agentBin, 'codex'));
+    const home = await bootstrapUnleashdHome(w.core, w.scratch);
+    const upstream = await w.core.openChannel(OWNER, { kind: 'id', id: home.channelId });
+    const mention = async (key: string) => {
+      const post = await w.post(
+        OWNER,
+        { kind: 'id', id: upstream.id },
+        {
+          kind: 'inform',
+          body: `[@Product Dev](buddy:${home.productDevId}) status?`,
+          evidence: [],
+          broadcast: false,
+          key,
+        }
+      );
+      w.emit({ kind: 'posted', post, channel: upstream, picks: NO_PICKS });
+      return post;
+    };
+    const dmConfig = async (buddyId: string) => {
+      const opened = await http('POST', `/api/buddies/${buddyId}/direct`, {});
+      assert.equal(opened.status, 200, JSON.stringify(opened.body));
+      const id = (opened.body as unknown as { conversationId: string }).conversationId;
+      return { id, config: w.conversations.get(id)!.config };
+    };
+
+    // 1. Nothing installed: no spawn, and both entry points say why.
+    const refused = await http('POST', `/api/buddies/${home.productDevId}/direct`, {});
+    assert.notEqual(refused.status, 200);
+    assert.match(JSON.stringify(refused.body), /No agent is installed/);
+    const asked = await mention('no-agent');
+    const notice = await until(
+      async () =>
+        (await w.core.listPosts(OWNER, { kind: 'thread', rootId: asked.id }, null, 20)).posts.find(
+          (post) => post.purpose === 'reply_failed'
+        ),
+      'a visible reply_failed notice'
+    );
+    assert.match(notice.body, /No agent is installed/);
+    assert.equal(w.turns.length, 0, 'nothing was spawned');
+    // The thread still reads: its seats never consult the profile (it failed every read in the
+    // fresh-install trial, "Thread could not refresh: No agent is installed").
+    const read = await http('GET', `/api/buddies/posts/${asked.id}/thread`);
+    assert.equal(read.status, 200, JSON.stringify(read.body));
+
+    // 2. Claude lands after startup: the next open and the next mention run it, no restart.
+    install('claude');
+    const productDm = await dmConfig(home.productDevId);
+    assert.equal(productDm.config.provider, 'claude');
+    await mention('claude-installed');
+    await until(() => w.turns.length === 1, 'the mention reply runs');
+    assert.equal(w.turns[0].request.harness, 'claude');
+
+    // 3. The owner pins the Release Manager to Codex while only Claude is installed. A bootstrap
+    // re-run and an open both keep the pin: it is the owner's, never the install's to replace.
+    const pinned = await http('PATCH', `/api/buddies/${home.releaseManagerId}`, {
+      provider: 'codex',
+      reasoningEffort: 'high',
+      key: 'pin-release-manager',
+    });
+    assert.equal(pinned.status, 200, JSON.stringify(pinned.body));
+    await bootstrapUnleashdHome(w.core, w.scratch);
+    const manager = await w.core.getBuddy(home.releaseManagerId);
+    assert.equal(manager.provider, 'codex');
+    assert.equal(manager.reasoningEffort, 'high');
+    const managerDm = await dmConfig(home.releaseManagerId);
+    assert.equal(managerDm.config.provider, 'codex');
+    assert.deepEqual(managerDm.config.reasoning, { mode: 'explicit', effort: 'high' });
+
+    // 4. Codex is installed later: the existing DM keeps the model it ran (owner rule step 1).
+    install('codex');
+    assert.deepEqual(await dmConfig(home.productDevId), productDm);
+  } finally {
+    server.close();
     await w.close();
   }
 });
@@ -1505,6 +1936,14 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
   }
 });
 
+/** A PATH of real executables: what the reviewer's harness probe walks (providers/installed-agent). */
+function binPath(dir: string, ...names: string[]): NodeJS.ProcessEnv {
+  const bin = join(dir, 'review-bin');
+  mkdirSync(bin, { recursive: true });
+  for (const name of names) writeFileSync(join(bin, name), '#!/bin/sh\n', { mode: 0o755 });
+  return { PATH: bin };
+}
+
 // The reviewer used to see prose only (tool calls dropped) in a private temp cwd, so it tried to
 // verify claims with file tools and the guard killed it (12 failed reviews, 2026-09 audit).
 test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs in the workspace, and curates memory on the same endpoint', async () => {
@@ -1536,6 +1975,7 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
     core,
     grants,
     spec: endpoint.spec,
+    env: binPath(scratch, 'codex'),
     logger: { warn: () => undefined },
     execute: ((request: ProviderRequest) => {
       harnesses.push(request.harness);
@@ -1633,6 +2073,97 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
   }
 });
 
+// Fresh-install trial 2026-10-05: on a Claude-only machine every turn ended in `spawn codex ENOENT`.
+// The owner directs the reviewer model, so a missing harness is a recorded skip, never a swap.
+async function reviewOnce(dir: string, env: NodeJS.ProcessEnv) {
+  const core = await BuddiesCore.open(join(dir, 'db.sqlite'));
+  const ws = (await core.createWorkspace(OWNER, { name: 'Team', rootPath: dir })).id;
+  const lead = await core.createBuddy(OWNER, {
+    workspaceId: ws,
+    slug: 'lead',
+    name: 'Lead',
+    role: 'r',
+    manager: { kind: 'nobody' },
+    key: 'lead',
+  });
+  const grants = createGrants({ ttlMs: 60_000 });
+  const endpoint = await startMcpEndpoint({
+    core,
+    events: createBuddyEvents(),
+    grants,
+    uploadsRoot: () => dir,
+  });
+  const launches: Array<{ harness: string; model: string }> = [];
+  const reviewer = createMemoryReviewer({
+    core,
+    grants,
+    spec: endpoint.spec,
+    env,
+    logger: { warn: () => undefined },
+    execute: ((request: ProviderRequest) => {
+      launches.push({ harness: request.harness, model: request.model! });
+      const spec = request.mcpServers!.unleashd_memory;
+      const completed = (async () => {
+        await call(spec, 'doc_read', { kind: 'working' });
+        return { exitCode: 0, signal: null, sessionId: 's', reason: 'success' };
+      })();
+      return {
+        child: { exitCode: 0 },
+        events: (async function* () {
+          await completed;
+          yield* [];
+        })(),
+        completed,
+        stop: () => undefined,
+      };
+    }) as never,
+  });
+  try {
+    reviewer.start();
+    reviewer.enqueue({
+      attemptId: 'a1',
+      conversationId: 'chat',
+      context: { buddyId: lead.id, workspaceId: ws, coordinationRunId: 'run-chat' },
+      completedAt: new Date().toISOString(),
+      messages: [{ role: 'user', body: { t: 'text', text: 'hello' } }],
+    });
+    const receipt = await until(
+      async () =>
+        (await core.listEvents(lead.id, Number.MAX_SAFE_INTEGER, 20)).find(
+          (e) => e.op === 'memory_review'
+        ),
+      'the review receipt'
+    );
+    return { launches, receipt: JSON.parse(receipt.payload) };
+  } finally {
+    reviewer.stop();
+    await endpoint.close();
+  }
+}
+
+test('a reviewer whose harness is not installed records a skip and spawns nothing', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'buddies-review-claude-only-'));
+  try {
+    const { launches, receipt } = await reviewOnce(scratch, binPath(scratch, 'claude'));
+    assert.deepEqual(launches, []);
+    assert.equal(receipt.status, 'skipped');
+    assert.deepEqual(receipt.skipReason, { kind: 'harness_missing', harness: 'codex' });
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('a reviewer on a codex install still runs the owner-directed gpt-6-luna', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'buddies-review-codex-'));
+  try {
+    const { launches, receipt } = await reviewOnce(scratch, binPath(scratch, 'codex', 'claude'));
+    assert.deepEqual(launches, [{ harness: 'codex', model: 'gpt-6-luna' }]);
+    assert.equal(receipt.status, 'complete');
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 // Required MCP discovery can succeed while a separate CLI tool host fails. Keep that evidence.
 test('a reviewer with no memory reads retains bounded, redacted CLI failure evidence', async () => {
   const w = await world();
@@ -1643,6 +2174,7 @@ test('a reviewer with no memory reads retains bounded, redacted CLI failure evid
     core: w.core,
     grants: w.grants,
     spec: w.endpoint.spec,
+    env: { PATH: w.agentBin },
     logger: { warn: (...args: unknown[]) => void warnings.push(args.map(String).join(' ')) },
     execute: ((request: ProviderRequest) => {
       launches += 1;
@@ -1739,6 +2271,7 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
     grants,
     spec: endpoint.spec,
     timeoutMs: 200,
+    env: binPath(scratch, 'codex'),
     logger: { warn: () => undefined },
     execute: ((request: ProviderRequest) => {
       const spec = request.mcpServers!.unleashd_memory;
@@ -1868,6 +2401,7 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     core,
     grants,
     spec: reviewEndpoint.spec,
+    env: binPath(scratch, 'codex'),
     logger: { warn: () => undefined },
     execute: ((request: ProviderRequest) => {
       const spec = request.mcpServers!.unleashd_memory;
@@ -1923,7 +2457,7 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     );
     assert.equal(JSON.parse(receipt.payload).status, 'complete');
 
-    const next = await composeBriefing(core, chat('chat-B'));
+    const next = await composeBriefing(core, chat('chat-B'), { kind: 'agent', provider: 'codex' });
     assert.match(next.briefing, /step 2 of 3 done/, 'working memory reaches the next chat');
     assert.match(next.briefing, /Owner prefers restrained UI/, 'long-term memory reaches it');
     const ownerTab = await core.readDoc(OWNER, {
@@ -1949,7 +2483,7 @@ test('briefing generation tracks its MCP guide and scope identity', async () => 
   const w = await world();
   const context = { buddyId: w.lead.id, workspaceId: w.ws };
   try {
-    const before = await composeBriefing(w.core, context);
+    const before = await composeBriefing(w.core, context, { kind: 'agent', provider: 'codex' });
     assert.match(before.briefing, new RegExp(`Your ids: buddyId ${w.lead.id}`));
     const identity = createHash('sha256')
       .update(JSON.stringify([w.lead.name, w.lead.role, 0, w.lead.id, w.ws, BUDDY_TOOL_GUIDE]))
@@ -2020,6 +2554,7 @@ test('native child events cannot bypass restricted Buddy runs', async () => {
     core: w.core,
     grants: w.grants,
     spec: w.endpoint.spec,
+    env: { PATH: w.agentBin },
     execute,
     logger: { warn: () => undefined },
   });

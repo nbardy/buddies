@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ExecuteCommandRequest, McpServerSpec } from '@nbardy/agent-cli';
-import { executeCommand } from '@nbardy/agent-cli';
+import { executeCommand, getHarness } from '@nbardy/agent-cli';
 import type { BuddyContext, Message } from '@unleashd/shared';
 import { redactAndBound } from '../observability/error-journal';
+import { onPath } from '../providers/installed-agent';
 import { readBuddyState } from './briefing';
 import { type BuddiesCore, buddyActor } from './core';
 import { runDetached } from './detached-cli';
@@ -66,6 +67,8 @@ export interface MemoryReviewReceipt {
   fallbackFrom?: string;
   writes: { working: number; longTerm: number };
   error?: string;
+  /** Typed cause of a 'skipped' receipt that is not the Buddy's state; absent otherwise. */
+  skipReason?: { kind: 'harness_missing'; harness: MemoryReviewModelChoice['harness'] };
   finishedAt: string;
 }
 
@@ -377,6 +380,8 @@ export function createMemoryReviewer(options: {
   /** Per ladder rung (MEMORY_REVIEW_TIMEOUT_MS). */
   timeoutMs?: number;
   logger?: Pick<Console, 'warn'>;
+  /** The PATH the reviewer's CLI is spawned with. Default: this process. */
+  env?: NodeJS.ProcessEnv;
 }) {
   const { core, grants } = options;
   const execute = options.execute ?? executeCommand;
@@ -405,6 +410,7 @@ export function createMemoryReviewer(options: {
     let calls = 0;
     let model = MEMORY_REVIEW_MODELS[0].model;
     let fallbackFrom: string | undefined;
+    let skipReason: MemoryReviewReceipt['skipReason'];
     const finish = (status: ReviewStatus, error?: string) =>
       receipt({
         id,
@@ -417,6 +423,7 @@ export function createMemoryReviewer(options: {
         fallbackFrom,
         writes,
         error: error?.slice(0, 1000),
+        skipReason,
         finishedAt: new Date().toISOString(),
       });
     const buddy = await core.getBuddy(buddyId);
@@ -424,6 +431,17 @@ export function createMemoryReviewer(options: {
       return finish('skipped', 'Buddy is inactive or outside this workspace');
     const workspace = (await core.listWorkspaces()).find((w) => w.id === workspaceId);
     if (!workspace) return finish('failed', `Buddy workspace ${workspaceId} not found`);
+    // The primary reviewer is owner-directed (codex gpt-6-luna). On an install without its binary
+    // every turn used to end in `spawn codex ENOENT` (fresh-install trial 2026-10-05). Skip with a
+    // recorded reason instead, and never substitute: the ladder below climbs only on
+    // out_of_tokens/timeout, and choosing another reviewer model is the owner's decision.
+    // Guard: buddies-v2 "a reviewer whose harness is not installed records a skip and spawns nothing".
+    const primary = MEMORY_REVIEW_MODELS[0];
+    if (!onPath(getHarness(primary.harness).binary, options.env ?? process.env)) {
+      skipReason = { kind: 'harness_missing', harness: primary.harness };
+      logger.warn(`[memory-review] skipped: ${primary.harness} is not installed`);
+      return finish('skipped', `Reviewer harness ${primary.harness} is not installed`);
+    }
     // The reviewer reads and writes the Buddy's one memory, the rows every briefing reads.
     const { soul, working, longTerm, tasks } = await readBuddyState(core, buddyId);
     const evidence = `EVIDENCE_JSON:\n${JSON.stringify({
