@@ -112,8 +112,12 @@ function ServeMissing({ host, command }: { host: string; command: string }) {
 }
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
+// The QR only works on a phone already on the tailnet, which this computer
+// cannot see, so the owner confirms that first ('phone-unconfirmed'). This
+// whole block renders only in the Ready state: Tailscale running here and
+// Serve answering, or there is nothing for the code to open.
 type Pairing =
-  | { readonly kind: 'idle' }
+  | { readonly kind: 'phone-unconfirmed' }
   | { readonly kind: 'loading' }
   | { readonly kind: 'shown'; readonly pairing: MobilePairing }
   | { readonly kind: 'failed'; readonly message: string };
@@ -132,52 +136,82 @@ async function requestPairing(): Promise<Pairing> {
 const expiryTime = (expiresAt: number) =>
   new Date(expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
+const centered: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  textAlign: 'center',
+  marginTop: 'var(--sp-6)',
+};
+const primaryButton: React.CSSProperties = {
+  ...buttonStyle,
+  padding: 'var(--sp-4) var(--sp-7)',
+  border: '1px solid #a6c7ff55',
+  borderRadius: 'var(--sp-4)',
+  color: '#a6c7ff',
+};
+const linkButton: React.CSSProperties = { ...buttonStyle, padding: 0, color: '#a6c7ff' };
+
 function PairingQr() {
-  const [pairing, setPairing] = useState<Pairing>({ kind: 'idle' });
+  const [pairing, setPairing] = useState<Pairing>({ kind: 'phone-unconfirmed' });
   const show = () => {
     setPairing({ kind: 'loading' });
     void requestPairing().then(setPairing);
   };
-  const button = (label: string) => (
-    <button
-      type="button"
-      style={{ ...buttonStyle, padding: 0, color: '#a6c7ff' }}
-      onClick={show}
-      disabled={pairing.kind === 'loading'}
-    >
-      {label}
-    </button>
-  );
   switch (pairing.kind) {
-    case 'idle':
-      return <p style={text}>{button('Show QR code')}</p>;
+    case 'phone-unconfirmed':
+      return (
+        <div style={centered}>
+          <p style={{ ...text, marginTop: 0 }}>
+            First, on your phone: install <Link href={INSTALL.iphone}>Tailscale for iPhone</Link> or{' '}
+            <Link href={INSTALL.android}>Android</Link> and sign in with the same account as this
+            computer. The QR code only opens on a phone that is on Tailscale.
+          </p>
+          <button
+            type="button"
+            style={{ ...primaryButton, marginTop: 'var(--sp-6)' }}
+            onClick={show}
+          >
+            Tailscale is set up on my phone
+          </button>
+        </div>
+      );
     case 'loading':
-      return <p style={text}>{button('Making a code…')}</p>;
+      return (
+        <div style={centered}>
+          <p style={{ ...text, marginTop: 0 }}>Making a code…</p>
+        </div>
+      );
     case 'failed':
       return (
-        <p style={text}>
-          Could not make a code: {pairing.message} {button('Try again')}
-        </p>
+        <div style={centered}>
+          <p style={{ ...text, marginTop: 0 }}>Could not make a code: {pairing.message}</p>
+          <button type="button" style={linkButton} onClick={show}>
+            Try again
+          </button>
+        </div>
       );
     case 'shown':
       return (
-        <>
+        <div style={centered}>
           <img
             src={`data:image/svg+xml;utf8,${encodeURIComponent(pairing.pairing.svg)}`}
             alt="QR code that signs your phone in"
             style={{
               display: 'block',
               width: 'min(220px, 60vw)',
-              marginTop: 'var(--sp-4)',
               background: '#fff',
               borderRadius: 'var(--sp-2)',
             }}
           />
           <p style={text}>
             Scan with your phone's camera. Works once, until {expiryTime(pairing.pairing.expiresAt)}
-            . {button('New code')}
+            .
           </p>
-        </>
+          <button type="button" style={linkButton} onClick={show}>
+            New code
+          </button>
+        </div>
       );
   }
 }
@@ -185,11 +219,8 @@ function PairingQr() {
 function Ready({ url, funnel, keyFile }: { url: string; funnel: boolean; keyFile: string }) {
   return (
     <>
-      <p style={text}>
-        Scan this with your phone (Tailscale connected) to open Buddies already signed in:
-      </p>
       <PairingQr />
-      <p style={text}>
+      <p style={{ ...text, marginTop: 'var(--sp-8)' }}>
         Or open the address yourself. Your own Tailscale devices get in without a key:
       </p>
       <DependencyCommand command={url} label="Mobile URL" />
@@ -201,7 +232,6 @@ function Ready({ url, funnel, keyFile }: { url: string; funnel: boolean; keyFile
           only thing in the way. Turn it off with <code>tailscale funnel off</code>.
         </p>
       )}
-      <PhoneApps />
     </>
   );
 }
