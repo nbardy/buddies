@@ -24,7 +24,8 @@ the v10 picture. All of them are in `renders/v12-chain/` (11 files, `SHA256SUMS`
 | `v12-mobile.video.mp4`, `v12.wav` | `stitch-v12.sh` at `9079273` | `stitch-v12.sh` mux |
 | `launch-v12.mp4` (`92804ffb…`) | `stitch-v12.sh` | the posted cut |
 
-To rebuild exactly: copy the chain files back into `edit/out/` and run the stitch script at its commit.
+The exact cut is the kept `launch-v12.mp4`. To re-make it: copy the chain's inputs back into `edit/out/`,
+check out `9079273` and run `stitch-v12.sh`, which re-renders only the mobile scene and the sound.
 To rebuild without the chain: a full render at `9079273` (`node render.mjs render src/index.ts Assembly`,
 as for v10) should give the same picture in a different encode (a 30-minute render). That has not been
 checked end to end; spot checks of reused sections against fresh stills matched at 37–50 dB.
