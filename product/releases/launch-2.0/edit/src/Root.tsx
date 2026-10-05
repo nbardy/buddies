@@ -98,7 +98,7 @@ export const Root: React.FC = () => (
       fps={VimHighlight.FPS}
       width={VimHighlight.WIDTH}
       height={VimHighlight.HEIGHT}
-      defaultProps={{ variant: 'marker' as VimHighlight.Variant }}
+      defaultProps={{ variant: 'glow' as VimHighlight.Variant }}
     />
   </>
 );
