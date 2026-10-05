@@ -48,6 +48,15 @@ The violet, blue and pink match the workspace-home aurora (`client/src/component
 
 - Video pages and graphics: `edit/src/BuddiesKit.tsx`. Renders come from `edit/src/wordmark-entry.tsx`
   (`KitReel`, `Kit-<page>`, `KitOg` 1200×630, `KitBanner` 1280×320, `KitAvatar` 512×512).
+- Icons (in this folder): `buddies-mark.svg` is the bare settled Pair, tightly cropped, with sRGB hex
+  for the oklch values. Use it as the favicon, with `buddies-mark-32.png` as the raster fallback.
+  `buddies-icon-192.png` / `-512.png` are `KitAvatar` (the mark on night with glow) for app and
+  touch icons. The Avatar's mark fills only about half the tile and turns to mush at 16 px, so never
+  use it as a favicon.
+- Lockup on the web: set the mark box to the word's font size (`width: 1em`), use a gap of `0.24em`,
+  and add `font-variation-settings: 'opsz' 96`. The font is variable, and without that setting a
+  browser picks the optical size from the px size (about 24 in a nav), which is a plainer cut than
+  the wordmark.
 
 ## Open
 

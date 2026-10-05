@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 8 84 84">
+  <!-- Buddies Pair mark, settled frame of BuddiesLogos.tsx MARK.pair. Hex = sRGB of the oklch brand values. -->
+  <defs><clipPath id="l"><circle cx="37" cy="50" r="28"/></clipPath></defs>
+  <circle cx="37" cy="50" r="28" fill="#9b61ea"/>
+  <circle cx="63" cy="50" r="28" fill="#30c8cf"/>
+  <circle cx="63" cy="50" r="28" fill="#c7dfff" clip-path="url(#l)"/>
+</svg>
