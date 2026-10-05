@@ -7,6 +7,7 @@ import * as FeatureFlash from './FeatureFlash';
 import * as MultiHarness from './MultiHarness';
 import * as NativeMultimedia from './NativeMultimedia';
 import * as Overload from './Overload';
+import * as PaletteShort from './PaletteShort';
 
 export const Root: React.FC = () => (
   <>
@@ -89,6 +90,14 @@ export const Root: React.FC = () => (
       fps={Close.FPS}
       width={Close.WIDTH}
       height={Close.HEIGHT}
+    />
+    <Composition
+      id="PaletteShort"
+      component={PaletteShort.PaletteShort}
+      durationInFrames={PaletteShort.DURATION}
+      fps={PaletteShort.FPS}
+      width={PaletteShort.WIDTH}
+      height={PaletteShort.HEIGHT}
     />
   </>
 );

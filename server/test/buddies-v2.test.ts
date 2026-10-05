@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,7 +30,10 @@ import {
   createDefaultConversationConfig,
 } from '@unleashd/shared';
 import express from 'express';
+import { buddyWrite, retryFailedReply } from '../../client/src/components/buddies/api';
 import { choiceLabel, mentionChoice } from '../../client/src/components/buddies/channel-text';
+import { scheduleFieldsOf } from '../../client/src/components/buddies/schedule-fields';
+import { reorderTasks } from '../../client/src/components/buddies/task-actions';
 import { BUDDY_TOOL_GUIDE, composeBriefing, createBriefings } from '../src/buddies/briefing';
 import { type StableConversationPorts, slotOf } from '../src/buddies/buddy-conversation-slots';
 import {
@@ -45,7 +56,7 @@ import {
   createBuddyEvents,
 } from '../src/buddies/events';
 import { INBOX, createGrants } from '../src/buddies/grants';
-import { startMcpEndpoint } from '../src/buddies/mcp';
+import { FOLLOW_GRACE_MS, startMcpEndpoint } from '../src/buddies/mcp';
 import { createMemoryReviewer } from '../src/buddies/memory-review';
 import { createBuddyPolicyPort } from '../src/buddies/policy-port';
 import { registerBuddyRoutes } from '../src/buddies/routes';
@@ -148,8 +159,9 @@ async function probe(spec: McpServerSpec): Promise<number> {
   return response.status;
 }
 
-async function world() {
-  const scratch = mkdtempSync(join(tmpdir(), 'buddies-v2-'));
+/** `reopen`: a scratch dir an earlier world used, as a restarted backend finds its stores. */
+async function world(reopen?: string) {
+  const scratch = reopen ?? mkdtempSync(join(tmpdir(), 'buddies-v2-'));
   const dbPath = join(scratch, 'buddies-v3.sqlite');
   const core = await BuddiesCore.open(dbPath);
   const ws = (await core.createWorkspace(OWNER, { name: 'Team', rootPath: scratch })).id;
@@ -177,7 +189,7 @@ async function world() {
   // The install's PATH, as real files: an unpinned Buddy runs what is here (installed-agent.ts).
   // Codex by default, the behaviour every older test was written against.
   const agentBin = join(scratch, 'agent-bin');
-  mkdirSync(agentBin);
+  mkdirSync(agentBin, { recursive: true });
   writeFileSync(join(agentBin, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
   const installed = () => installedAgent({ PATH: agentBin });
   const briefings = createBriefings(core, installed);
@@ -406,6 +418,11 @@ async function world() {
     runner,
     scratch,
     runs: (buddyId: string) => core.listRuns({ kind: 'buddy', buddyId }, 50),
+    /** The backend dies: nothing in memory survives, the stores stay for `world(scratch)`. */
+    async stop() {
+      runner.stop();
+      await endpoint.close();
+    },
     async close() {
       runner.stop();
       await endpoint.close();
@@ -1367,7 +1384,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     assert.equal(w.turns[1].request.model, 'gpt-6.1-sol');
     assert.equal(w.turns[1].request.reasoningEffort, 'high');
     await until(() => reloaded.responding(w.general.id).length === 0, 'reloaded reply idle');
-    const retry = await http('POST', `/api/buddies/posts/${failed.id}/retry`, { config: explicit });
+    const retry = await http('POST', `/api/buddies/posts/${failed.id}/retry`, {
+      config: explicit,
+      key: 'retry-explicit',
+    });
     assert.equal(retry.status, 202, JSON.stringify(retry.body));
     await until(() => w.turns.length === 3, 'plain weekly-limit retry invokes');
     assert.equal(w.turns[2].request.model, 'gpt-6.1-sol');
@@ -1526,9 +1546,9 @@ test('same-value picks become durable overrides, independent of another Buddy an
   }
 });
 
-test('a throwing reply gate leaves a retryable failure notice and can retry on the same harness', async () => {
+test('keyed retry over owner HTTP recovers a capacity-failed reply gate on the same harness', async () => {
   const w = await world();
-  const { server, http } = await ownerHttp(w);
+  const { server, withClient } = await ownerHttp(w);
   try {
     const root = await w.post(
       OWNER,
@@ -1545,7 +1565,9 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
     const thread = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
     await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
-    w.gate.error = new Error('Model is unavailable for codex: retired-model');
+    w.gate.error = new Error(
+      'gate run ended: error (Selected model is at capacity. Please try a different model.)'
+    );
     const trigger = await w.post(
       OWNER,
       { kind: 'id', id: w.general.id },
@@ -1563,13 +1585,15 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
       async () => (await thread()).find((p) => p.purpose === 'reply_failed'),
       'gate failure notice'
     );
-    assert.match(notice.body, /could not decide whether to reply.*retired-model/);
+    assert.match(notice.body, /could not decide whether to reply.*Selected model is at capacity/);
     const sol: ConversationConfig = {
       ...createDefaultConversationConfig('codex'),
       model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
     };
-    const retry = await http('POST', `/api/buddies/posts/${notice.id}/retry`, { config: sol });
-    assert.equal(retry.status, 202, JSON.stringify(retry.body));
+    const retry = await withClient(() =>
+      buddyWrite('reply.retry', { postId: notice.id }, { config: sol })
+    );
+    assert.deepEqual(retry, { buddyId: w.lead.id, status: 'started' });
     const answer = await until(
       async () =>
         (await thread()).find(
@@ -1600,6 +1624,15 @@ test('a throwing reply gate leaves a retryable failure notice and can retry on t
           (p) => p.replyToId === buddyFollowUp.id && p.purpose === 'reply_failed'
         ),
       'Buddy follow-up gate failure notice'
+    );
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.lead.id,
+      changes: { status: 'archived' },
+      key: 'archive-after-retry',
+    });
+    await assert.rejects(
+      withClient(() => retryFailedReply(notice.id, sol)),
+      /not active/
     );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -2761,8 +2794,176 @@ async function ownerHttp(w: Awaited<ReturnType<typeof world>>) {
       body: (await response.json()) as { error: string; requests: Post[] },
     };
   };
-  return { server, http, builderDirectories };
+  // Resolve browser-relative URLs onto this real HTTP server. No response is mocked.
+  const withClient = async <T>(work: () => Promise<T>): Promise<T> => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (input, init) =>
+      original(typeof input === 'string' && input.startsWith('/api/') ? base + input : input, init);
+    try {
+      return await work();
+    } finally {
+      globalThis.fetch = original;
+    }
+  };
+  return { server, http, withClient, builderDirectories };
 }
+
+test('client Buddy JSON mutations use the server contracts; task reorder reaches the store', async () => {
+  const w = await world();
+  const { server, http, withClient } = await ownerHttp(w);
+  try {
+    await withClient(async () => {
+      const workspace = await buddyWrite('workspace.create', {}, { rootPath: w.scratch });
+      assert.equal(workspace.rootPath, realpathSync(w.scratch));
+      assert.equal(
+        (await buddyWrite('workspace.create', {}, { rootPath: w.scratch })).id,
+        workspace.id
+      );
+      const builder = await buddyWrite('builder.open', {}, { workspaceId: w.ws });
+      assert.equal(builder.conversationId, 'builder');
+      const buddy = await buddyWrite(
+        'buddy.create',
+        {},
+        {
+          workspaceId: w.ws,
+          slug: 'contract',
+          name: 'Contract',
+          role: 'Check requests',
+        }
+      );
+      const updated = await buddyWrite(
+        'buddy.update',
+        { buddyId: buddy.id },
+        {
+          model: 'gpt-6.1-sol',
+          provider: 'codex',
+          reasoningEffort: null,
+        }
+      );
+      assert.equal(updated.model, 'gpt-6.1-sol');
+      assert.equal(updated.reasoningEffort, undefined);
+      const first = await buddyWrite(
+        'task.create',
+        {},
+        {
+          ownerId: w.lead.id,
+          title: 'First',
+          doneCriteria: 'First done',
+          key: undefined,
+        }
+      );
+      const second = await buddyWrite(
+        'task.create',
+        {},
+        {
+          ownerId: w.lead.id,
+          title: 'Second',
+          doneCriteria: 'Second done',
+        }
+      );
+      await reorderTasks([first, second], 1, -1);
+      assert.equal((await w.core.getTask(first.id)).position, 1);
+      assert.equal((await w.core.getTask(second.id)).position, 0);
+
+      const doc = await buddyWrite(
+        'doc.write',
+        { buddyId: buddy.id, kind: 'soul' },
+        {
+          content: 'Contract soul',
+          baseRevision: 0,
+          reason: 'Contract test',
+        }
+      );
+      assert.equal(doc.content, 'Contract soul');
+      const schedule = await buddyWrite(
+        'schedule.create',
+        { buddyId: w.lead.id },
+        {
+          taskId: first.id,
+          name: 'Check',
+          cron: '0 9 * * *',
+          timezone: 'UTC',
+          prompt: 'Check',
+          enabled: false,
+        }
+      );
+      const saved = await buddyWrite(
+        'schedule.update',
+        { buddyId: w.lead.id, scheduleId: schedule.id },
+        {
+          ...scheduleFieldsOf(schedule),
+          name: 'Updated',
+        }
+      );
+      assert.equal(saved.name, 'Updated');
+      assert.equal(saved.taskId, first.id, 'editing a linked schedule preserves its Task');
+      const channel = await buddyWrite(
+        'channel.create',
+        { workspaceId: w.ws },
+        {
+          name: 'contract',
+          purpose: 'Check HTTP contracts',
+        }
+      );
+      const post = await buddyWrite(
+        'channel.post',
+        { channelId: channel.id },
+        {
+          body: 'Hello',
+          key: 'contract-post',
+        }
+      );
+      const replay = await buddyWrite(
+        'channel.post',
+        { channelId: channel.id },
+        {
+          body: 'Hello',
+          key: 'contract-post',
+        }
+      );
+      assert.equal(replay.post.id, post.post.id, 'the client preserves caller keys');
+      await buddyWrite('channel.read', { channelId: channel.id }, { postId: post.post.id });
+      await buddyWrite('thread.read', { rootId: post.post.id }, { postId: post.post.id });
+      const renamed = await buddyWrite(
+        'channel.rename',
+        { channelId: channel.id },
+        { name: 'renamed' }
+      );
+      assert.equal(renamed.kind.type === 'public' && renamed.kind.name, 'renamed');
+      await buddyWrite('channel.archive', { channelId: channel.id }, { archived: true });
+      // A variable with extra fields passes TS structural assignability; strict shared parsing
+      // refuses it before a request can mutate the store.
+      const badChanges = { position: 2, task: first };
+      await assert.rejects(
+        buddyWrite(
+          'task.update',
+          { taskId: first.id },
+          {
+            baseRevision: 2,
+            changes: badChanges,
+          }
+        ),
+        /Unrecognized key.*task/
+      );
+      assert.equal((await w.core.getTask(first.id)).position, 1);
+      const malformed = await http('PATCH', `/api/buddies/tasks/${first.id}`, {
+        baseRevision: 2,
+        changes: badChanges,
+        key: 'malformed-changes',
+      });
+      assert.equal(malformed.status, 400);
+      assert.match(malformed.body.error, /Unrecognized key.*task/);
+      const direct = await buddyWrite('direct.open', { buddyId: buddy.id });
+      const next = await buddyWrite('direct.new', { buddyId: buddy.id }, {});
+      assert.notEqual(next.conversationId, direct.conversationId);
+      const archived = await buddyWrite('buddy.archive', { buddyId: buddy.id });
+      assert.equal(archived.status, 'archived');
+    });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await w.close();
+  }
+});
 
 test('builder opened from a workspace uses that workspace root', async () => {
   const w = await world();
@@ -3519,6 +3720,242 @@ test('task comment mentions wake a Buddy and preserve replies in the task discus
     assert.equal(reply?.taskId, task.id);
     assert.equal(reply?.channelId, root.channelId);
     assert.equal(w.turns.length, 1);
+  } finally {
+    await w.close();
+  }
+});
+
+// Thread follows (2026-10-04, crates/unleashd-buddies/src/follows.rs). Before them a worker waiting
+// on someone else's work in a thread had no wake: posts start only mentions and gated participants,
+// and the gate's in-memory pairs die with the backend.
+type World = Awaited<ReturnType<typeof world>>;
+
+/** A Buddy's own tool endpoint, as its turn would hold it. */
+const asBuddy = (w: World, buddyId: string) =>
+  w.endpoint.spec(
+    w.grants.issueBuddy({
+      role: 'worker',
+      buddyId,
+      workspaceId: w.ws,
+      conversationId: `elsewhere-${buddyId}`,
+      runId: null,
+      returns: INBOX,
+    })
+  );
+
+type ToolCall = Awaited<ReturnType<typeof call>>;
+
+/**
+ * Lead's scheduled (background) turn 1 starts a thread, runs `before(rootId)` (other Buddies'
+ * posts), then reads it with follow until `followUntil`, and `after(read)` runs inside the same
+ * turn. Resolves once turn 1's run completed, with the follow read's result.
+ */
+async function leadFollows(
+  w: World,
+  followUntil: string,
+  hooks: {
+    before?: (rootId: string, turn: Turn) => Promise<void>;
+    during?: (rootId: string) => Promise<void>;
+    after?: (rootId: string, turn: Turn) => Promise<void>;
+  } = {}
+): Promise<{ rootId: string; read: ToolCall; ms: number }> {
+  const out = { rootId: '', read: null as unknown as ToolCall, ms: 0 };
+  w.during.set(1, async (turn) => {
+    const root = await call(turn.mcp, 'post', {
+      channel: { id: w.general.id },
+      body: 'Designer, send the mockups when ready',
+      key: 'ask-mockups',
+    });
+    await hooks.before?.(root.value.id, turn);
+    const started = Date.now();
+    const [read] = await Promise.all([
+      call(turn.mcp, 'channel_read', {
+        read: { threadId: root.value.id, follow: { until: followUntil } },
+      }),
+      hooks.during?.(root.value.id),
+    ]);
+    assert.equal(read.isError, false, read.text);
+    Object.assign(out, { rootId: root.value.id, read, ms: Date.now() - started });
+    await hooks.after?.(root.value.id, turn);
+  });
+  const schedule = await w.core.putSchedule(OWNER, {
+    buddyId: w.lead.id,
+    name: 'mockups',
+    cron: '0 9 * * *',
+    timezone: 'UTC',
+    prompt: 'Get the mockups',
+    limits: '{}',
+    enabled: true,
+    key: 'mockups',
+  });
+  await w.core.enqueueRun(OWNER, {
+    buddyId: w.lead.id,
+    input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
+  });
+  w.emit({ kind: 'changed' });
+  await until(
+    async () =>
+      out.rootId &&
+      (await w.runs(w.lead.id)).some((r) => r.input.kind === 'schedule' && r.status === 'complete'),
+    "Lead's following turn ends"
+  );
+  return out;
+}
+
+const minutesAhead = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+const designerReplies = (w: World, rootId: string, body: string) =>
+  call(asBuddy(w, w.designer.id), 'post', {
+    channel: { id: w.general.id },
+    replyToId: rootId,
+    body,
+    key: body,
+  });
+const followRuns = async (w: World) =>
+  (await w.runs(w.lead.id)).filter((r) => r.input.kind === 'follow');
+
+test('follow (a): posts the caller has not read come back at once, and nothing is followed', async () => {
+  const w = await world();
+  try {
+    const { read, ms } = await leadFollows(w, minutesAhead(30), {
+      before: async (rootId) => {
+        assert.equal((await designerReplies(w, rootId, 'Mockups v1 attached')).isError, false);
+      },
+    });
+    assert.equal(read.value.kind, 'unread', read.text);
+    assert.deepEqual(
+      read.value.posts.map((p: { body: string }) => p.body),
+      ['Mockups v1 attached'],
+      'only the post Lead had not read: not its own root'
+    );
+    assert.ok(ms < FOLLOW_GRACE_MS, `returned without the grace wait (${ms} ms)`);
+    assert.deepEqual(await followRuns(w), [], 'no follow registered');
+  } finally {
+    await w.close();
+  }
+});
+
+test('follow (b): a post inside the grace window comes back inline, and nothing is followed', async () => {
+  const w = await world();
+  try {
+    const { read } = await leadFollows(w, minutesAhead(30), {
+      during: async (rootId) => {
+        await new Promise((resolve) => setTimeout(resolve, FOLLOW_GRACE_MS / 4));
+        assert.equal((await designerReplies(w, rootId, 'Chiming in quickly')).isError, false);
+      },
+    });
+    assert.equal(read.value.kind, 'unread', read.text);
+    assert.deepEqual(
+      read.value.posts.map((p: { body: string }) => p.body),
+      ['Chiming in quickly']
+    );
+    assert.deepEqual(await followRuns(w), [], 'no follow registered');
+    assert.equal(w.turns.length, 1, 'and no wake follows');
+  } finally {
+    await w.close();
+  }
+});
+
+test('follow (c): a post after the grace wakes the conversation that followed, not a gated reply', async () => {
+  const w = await world();
+  try {
+    const { rootId, read, ms } = await leadFollows(w, minutesAhead(30));
+    assert.equal(read.value.kind, 'following', read.text);
+    assert.deepEqual(read.value.posts, []);
+    assert.ok(ms >= FOLLOW_GRACE_MS - 50, `held the read open for the grace (${ms} ms)`);
+    // The woken turn does not reply, so a gate call could only be one asking Lead.
+    w.silent.add(2);
+    assert.equal((await designerReplies(w, rootId, 'Mockups are in /tmp/mockups')).isError, false);
+    const woken = await until(() => w.turns[1], 'Lead woken by the follow');
+    assert.match(woken.request.prompt, /New posts in thread .*which you follow/);
+    assert.match(woken.request.prompt, /Mockups are in \/tmp\/mockups/);
+    assert.doesNotMatch(woken.request.prompt, /send the mockups when ready/, 'only unread posts');
+    assert.equal(
+      woken.request.resumeSessionId,
+      'native-1',
+      'it resumes the conversation that followed'
+    );
+    assert.equal(w.gate.calls, 0, 'the follower is not also asked the follow-up gate');
+  } finally {
+    await w.close();
+  }
+});
+
+test("follow (c, mid-turn): a post during the follower's own turn wakes it only once that turn ends", async () => {
+  const w = await world();
+  try {
+    let postedAt = 0;
+    await leadFollows(w, minutesAhead(30), {
+      after: async (rootId) => {
+        assert.equal((await designerReplies(w, rootId, 'Already done')).isError, false);
+        postedAt = w.turns.length;
+        // Still inside turn 1: the wake must wait, never run beside it.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(w.turns.length, 1, 'no concurrent turn in the busy conversation');
+      },
+    });
+    assert.equal(postedAt, 1);
+    const woken = await until(() => w.turns[1], 'Lead woken after its turn');
+    assert.match(woken.request.prompt, /Already done/);
+    assert.equal(woken.request.resumeSessionId, 'native-1');
+  } finally {
+    await w.close();
+  }
+});
+
+test('follow (d): a follow whose posts the caller already read settles with no turn', async () => {
+  const w = await world();
+  try {
+    await leadFollows(w, minutesAhead(30), {
+      after: async (rootId, turn) => {
+        assert.equal((await designerReplies(w, rootId, 'Read me yourself')).isError, false);
+        const plain = await call(turn.mcp, 'channel_read', { read: { threadId: rootId } });
+        assert.equal(plain.isError, false, plain.text);
+      },
+    });
+    const settled = await until(
+      async () =>
+        (await followRuns(w)).find((r) => r.status !== 'queued' && r.status !== 'running'),
+      'the follow run settles'
+    );
+    assert.equal(settled.status, 'cancelled');
+    assert.match(settled.error ?? '', /already read/);
+    assert.equal(w.turns.length, 1, 'no model turn for posts already read');
+    assert.equal(w.gate.calls, 0);
+  } finally {
+    await w.close();
+  }
+});
+
+test('follow (e): a follow nobody answers wakes its conversation once with a timeout', async () => {
+  const w = await world();
+  try {
+    await leadFollows(w, new Date(Date.now() + FOLLOW_GRACE_MS + 1500).toISOString());
+    const woken = await until(() => w.turns[1], 'Lead woken at until');
+    assert.match(woken.request.prompt, /^follow_timeout: nobody else posted/);
+    assert.equal(woken.request.resumeSessionId, 'native-1');
+    await until(
+      async () => (await w.runs(w.lead.id)).every((r) => r.status === 'complete'),
+      'the follow run settles'
+    );
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.equal(w.turns.length, 2, 'one wake per follow');
+  } finally {
+    await w.close();
+  }
+});
+
+test('follow (f): a follow survives a backend restart and still wakes on the next post', async () => {
+  const before = await world();
+  const { rootId, read } = await leadFollows(before, minutesAhead(30));
+  assert.equal(read.value.kind, 'following', read.text);
+  await before.stop();
+  const w = await world(before.scratch);
+  try {
+    assert.equal((await designerReplies(w, rootId, 'Mockups after the restart')).isError, false);
+    // Its conversation is not loaded in the new process, so the wake takes the return route's
+    // fallback: a fresh background turn (runner.ts `returnJob`), carrying the post.
+    const woken = await until(() => w.turns[0], 'Lead woken after the restart');
+    assert.match(woken.request.prompt, /Mockups after the restart/);
   } finally {
     await w.close();
   }

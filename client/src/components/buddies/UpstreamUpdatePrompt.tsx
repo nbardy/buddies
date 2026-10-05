@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { markUpstreamHandled, upstreamHandledShaAtom } from '../../atoms/ui';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import type { DeviceKind } from '../../mobile/hooks/useDeviceKind';
-import { buddyApi } from './api';
+import { buddyApi, buddyWrite } from './api';
 import { channelLinkPath } from './channel-link';
 import './UpstreamUpdatePrompt.css';
 
@@ -50,9 +50,7 @@ export function UpstreamUpdatePrompt({ device }: { device: DeviceKind }) {
   const update = async () => {
     setPhase({ kind: 'posting' });
     try {
-      const result = UpstreamUpdateResultSchema.parse(
-        await buddyApi<unknown>('/api/upstream/update', { method: 'POST' })
-      );
+      const result = UpstreamUpdateResultSchema.parse(await buddyWrite('upstream.update', {}));
       markUpstreamHandled(offer.sha);
       setPhase({ kind: 'idle' });
       navigate(

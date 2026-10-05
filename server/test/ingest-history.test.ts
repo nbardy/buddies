@@ -27,6 +27,7 @@ import {
   createConversationRuntime,
   overlayHistoryFields,
 } from '../src/conversations/runtime';
+import { builderFirstTurnPrompt } from '../src/buddies/turn-policy';
 import { registerConversationRoutes } from '../src/http/conversation-routes';
 import { bootIngest } from '../src/ingest/boot';
 import type { ConversationList } from '../src/ingest/conversation-list';
@@ -279,6 +280,68 @@ test('the live-turn overlay shows once, then gives way to the provider rows at i
       'final answer',
     ]);
     assert.equal(conversation.toRow().messageCount, after.messages.length);
+  } finally {
+    await server.close();
+    fixture.cleanup();
+  }
+});
+
+// Regression (task_01a10d29, 2026-10-06): the Builder's first prompt carried its working directory
+// after the envelope, ingest could not strip it, and the transcript's user row became a recovery
+// placeholder. The overlay merge pairs turns by user text, so nothing paired: after a reload the
+// opening and final replies each showed twice. The transcript line is the server's own prompt.
+test('a Builder first turn shows once after idle, with the text the owner typed', async () => {
+  const fixture = ingestHome('unleashd-ingest-builder-');
+  const records = recordStore(fixture.appData);
+  const id = sessionId(11);
+  const file = fixture.transcript(id);
+  fs.writeFileSync(file, '');
+  await records.create({
+    conversationId: id,
+    kind: { t: 'builder' },
+    sessionBindings: [{ provider: 'claude', sessionId: id }],
+    currentSession: { provider: 'claude', sessionId: id },
+    config: createDefaultConversationConfig('claude'),
+    workingDirectory: fixture.project,
+    provenance: 'user',
+  });
+  const server = await serve(fixture);
+  try {
+    const conversation = await server.builder.materialize(id);
+    assert.ok(conversation);
+    const sentAt = Date.now();
+    conversation.process = {} as ExecutionHandle;
+    const live = ['Kick off my Buddies', 'I will hire one engineer.', 'Hired Notes Engineer.'];
+    live.forEach((text, n) =>
+      conversation.appendMessage({
+        role: n === 0 ? 'user' : 'assistant',
+        body: { t: 'text', text },
+        timestamp: new Date(sentAt + n * 10),
+      })
+    );
+    fs.appendFileSync(
+      file,
+      claudeLine(
+        id,
+        'user',
+        builderFirstTurnPrompt(live[0], true, fixture.project),
+        sentAt + 400,
+        fixture.project
+      ) +
+        claudeLine(id, 'assistant', live[1], sentAt + 2_000, fixture.project) +
+        claudeLine(id, 'assistant', live[2], sentAt + 9_000, fixture.project)
+    );
+    await until(() => server.list.joined(id)?.sessions[0]?.messageCount === 3 || undefined);
+
+    const sentBefore = server.sent.length;
+    conversation.process = null;
+    await until(() =>
+      server.sent
+        .slice(sentBefore)
+        .find((data) => data.type === 'patch' && data.patch.t === 'activity')
+    );
+    const after = await server.history(id);
+    assert.deepEqual(after.messages.map(textOf), live);
   } finally {
     await server.close();
     fixture.cleanup();

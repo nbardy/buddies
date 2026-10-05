@@ -116,6 +116,106 @@ function toChannelRef(author: Actor, ref: z.infer<typeof channelRef>): ChannelRe
   return { kind: 'direct', members: [author, ...ref.direct.map(actorOf)] };
 }
 
+/**
+ * How long a follow read holds the read open for a post before it registers the follow (owner,
+ * #channels-feature: "poll for a second or two see if anyone chimes in, or wait and let it cook
+ * another step"). Far under any provider tool timeout: a longer blocking wait was rejected on
+ * 2026-08-21 (agent_notes/2026-08-21_primitives-and-the-wait-design.md). Lead's choice, decision
+ * note 2026-10-04 Successor; revisit if handoffs routinely land at 3-10 s.
+ */
+export const FOLLOW_GRACE_MS = 2_000;
+
+/** Resolves on the first post in `rootId` by someone other than `author`, or after `ms`. */
+function postInThread(events: BuddyEvents, rootId: string, author: Actor, ms: number) {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      off();
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    const off = events.on((event) => {
+      if (event.kind !== 'posted' || event.post.rootId !== rootId) return;
+      if (
+        event.post.author.kind === 'buddy' &&
+        author.kind === 'buddy' &&
+        event.post.author.id === author.id
+      )
+        return;
+      done();
+    });
+  });
+}
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/**
+ * A follow read (`channel_read {threadId, follow:{until}}`), in three steps:
+ *   1. unread posts past the caller's read mark come back at once, no follow;
+ *   2. otherwise the read stays open FOLLOW_GRACE_MS, and a post in that window comes back inline;
+ *   3. otherwise the follow is registered and the read returns `following`, with no posts.
+ * Step 3 rechecks in the same crate transaction that registers, so a post between the grace
+ * window and the registration is returned, and a post after it finds the queued run.
+ *
+ * WAKE ROUTING. A registered follow wakes the conversation that called it, along the SAME route a
+ * request sent from this turn takes back (`grant.returns`, fixed when the turn started;
+ * policy-port.ts `returnsFor`), never a new conversation picked later. The crate keeps it as a
+ * queued `follow` run in that conversation (crates/unleashd-buddies/src/follows.rs), so:
+ *   - it survives a backend restart (a queued run outlives the process);
+ *   - it never runs concurrently with that conversation's own turn: the claim gate holds it as
+ *     `conversation_busy` until the turn ends (runs.rs `WAITING_REASON_SQL`);
+ *   - it counts against the Buddy's pool (`max_active_runs`) only while its wake runs;
+ *   - if the conversation is gone by then, the runner's `returnJob` opens a fresh turn, exactly
+ *     as for a request's answer (task_01a0f7c2, the return route).
+ * An Inbox route (a foreground chat: the owner's DM or a thread seat) takes no automated input
+ * (2026-10-01: no-op runs queued behind the owner's turn for hours), so steps 1 and 2 still run
+ * but step 3 answers `not_following` instead of registering a wake that could never be delivered.
+ * A thread seat needs none: the follow-up gate (channels.ts) asks it on every new post anyway.
+ * The follow-up gate is skipped for a follower whose wake shows the post (channels.ts
+ * `deliveringFollowers`): it asked to be told, so no yes/no question and no second wake.
+ */
+async function followThread(
+  deps: ToolDeps,
+  grant: BuddyGrant,
+  threadId: string,
+  follow: { until: string },
+  limit: number
+) {
+  const root = await deps.core.getPost(grant.author, threadId);
+  const unread = await deps.core.catchUpThread(grant.author, root.id, limit);
+  if (unread.posts.length > 0) return { kind: 'unread' as const, ...unread };
+  await postInThread(deps.events, root.id, grant.author, FOLLOW_GRACE_MS);
+  switch (grant.returns.kind) {
+    case 'inbox': {
+      const late = await deps.core.catchUpThread(grant.author, root.id, limit);
+      if (late.posts.length > 0) return { kind: 'unread' as const, ...late };
+      return {
+        kind: 'not_following' as const,
+        posts: [],
+        reason:
+          'a foreground chat takes no automated wake; follow from a background turn (worker, request, schedule). New posts in a thread you replied in already ask you whether to reply.',
+      };
+    }
+    case 'conversation': {
+      const read = await deps.core.followThread(grant.author, {
+        rootId: root.id,
+        conversationId: grant.returns.id,
+        until: follow.until,
+        limit,
+      });
+      switch (read.kind) {
+        case 'unread':
+          return { kind: 'unread' as const, posts: read.posts, unshown: read.unshown };
+        case 'following':
+          return {
+            kind: 'following' as const,
+            posts: [],
+            following: { until: read.follow.until, followId: read.follow.id },
+          };
+      }
+    }
+  }
+}
+
 const docKind = z.enum(['soul', 'working', 'long_term', 'shared']);
 const memoryKind = z.enum(['working', 'long_term']);
 // Soul and memory have one address, the Buddy. Only a shared doc may live in the workspace.
@@ -381,7 +481,20 @@ const BUDDY_TOOLS = {
     schema: z.object({
       read: z.union([
         z.object({ channelId: z.string().min(1) }),
-        z.object({ threadId: z.string().min(1) }),
+        z.object({
+          threadId: z.string().min(1),
+          follow: z
+            .object({
+              until: z
+                .string()
+                .datetime({ offset: true })
+                .describe('ISO time, at most 7 days ahead: when to wake you if nobody posts'),
+            })
+            .optional()
+            .describe(
+              "Wait for this thread's next post by someone else. Returns {kind:'unread', posts} (oldest first) at once if there are posts you have not read, or if one arrives within 2 s. Otherwise returns {kind:'following', following:{until}} with no posts: keep working or end your turn; you will be woken in THIS conversation with the posts you have not read, or once at `until` with a timeout. One wake per follow; follow again to keep waiting. Not with `before`."
+            ),
+        }),
         z.object({
           search: z.object({
             text: z.string().min(1).max(200),
@@ -409,10 +522,18 @@ const BUDDY_TOOLS = {
         'channelId' in input.read
           ? ({ kind: 'channel', channelId: input.read.channelId } as const)
           : ({ kind: 'thread', rootId: input.read.threadId } as const);
+      if ('threadId' in input.read && input.read.follow) {
+        if (input.before) throw new Error('follow reads from the newest post: drop before');
+        return followThread(deps, grant, input.read.threadId, input.read.follow, input.limit);
+      }
       const page = await deps.core.listPosts(grant.author, query, input.before, input.limit);
       const newest = page.posts[0];
       if (query.kind === 'channel' && !input.before && newest)
         await deps.core.markRead(grant.author, query.channelId, newest.id);
+      // A Buddy's thread read moves its read mark (an existing `thread_read` row only), which is
+      // what lets a queued follow wake it already read settle without a turn (follows.rs).
+      if (query.kind === 'thread' && !input.before && newest)
+        await deps.core.markThreadRead(grant.author, query.rootId, newest.id);
       return page;
     },
   }),

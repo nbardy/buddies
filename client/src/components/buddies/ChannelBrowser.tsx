@@ -26,6 +26,7 @@ import { TaskFilter } from './TaskFilter';
 import { TaskPage } from './TaskPage';
 import { ThreadsPane } from './ThreadsPane';
 import { WorkspaceTeamDialog } from './WorkspaceTeamForm';
+import { NEW_WORKSPACE_PATH } from './workspace-home';
 import { errorText } from './api';
 import { useNewBuddy } from './buddy-direct-actions';
 import {
@@ -452,7 +453,7 @@ function WorkspaceSwitcher({
           <Link
             role="menuitem"
             className="channel-browser-switcher-new"
-            to="/?new=1"
+            to={NEW_WORKSPACE_PATH}
             onClick={() => setOpen(false)}
           >
             + New workspace

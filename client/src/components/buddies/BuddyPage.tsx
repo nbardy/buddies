@@ -16,7 +16,7 @@ import type { UsePolledFetchResult } from '../../hooks/usePolledFetch';
 import { BuddyAbout } from './BuddyAboutCard';
 import { BuddySectionNav } from './BuddySectionNav';
 import { BuddyTabContent } from './BuddyTabContent';
-import { buddyAction, errorText } from './api';
+import { buddyWrite, errorText } from './api';
 import { buddyTabPath, parseEmployeeTab } from './buddy-tabs';
 import { directReportsOf, findBuddy } from './roster';
 import type { Buddy, BuddyOverview } from './types';
@@ -182,10 +182,9 @@ function BuddyPageActions({
   openConversation: (conversationId: string) => void;
 }) {
   const [state, setState] = useState<DirectAction>({ kind: 'idle' });
-  const base = `/api/buddies/${encodeURIComponent(buddy.id)}`;
   const request = (path: 'direct' | 'wake', then: (conversationId: string) => string | null) => {
     setState({ kind: 'pending' });
-    buddyAction<{ conversationId: string }>(`${base}/${path}`)
+    buddyWrite(path === 'direct' ? 'direct.open' : 'buddy.wake', { buddyId: buddy.id })
       .then(({ conversationId }) => {
         const message = then(conversationId);
         setState(message === null ? { kind: 'idle' } : { kind: 'done', message });

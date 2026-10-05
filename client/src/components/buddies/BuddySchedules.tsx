@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { BuddyRunList } from './BuddyRunList';
-import { buddyAction, buddyWrite } from './api';
+import { buddyWrite } from './api';
+import { type ScheduleFields, scheduleFieldsOf } from './schedule-fields';
 import type { Run, Schedule } from './types';
 import { ActionError, useBuddyAction } from './useBuddyAction';
-
-type ScheduleFields = Pick<Schedule, 'name' | 'cron' | 'timezone' | 'prompt' | 'enabled'>;
 
 const NEW_SCHEDULE = (): ScheduleFields => ({
   name: '',
@@ -13,16 +12,6 @@ const NEW_SCHEDULE = (): ScheduleFields => ({
   prompt: '',
   enabled: true,
 });
-
-const fieldsOf = (schedule: Schedule): ScheduleFields => ({
-  name: schedule.name,
-  cron: schedule.cron,
-  timezone: schedule.timezone,
-  prompt: schedule.prompt,
-  enabled: schedule.enabled,
-});
-
-const schedulesUrl = (buddyId: string) => `/api/buddies/${encodeURIComponent(buddyId)}/schedules`;
 
 /** Create (POST) or replace (PUT) a schedule; disabling is `enabled: false` — there is no delete. */
 function ScheduleForm({
@@ -99,7 +88,6 @@ function ScheduleCard({
   refresh: () => Promise<void>;
 }) {
   const action = useBuddyAction(refresh);
-  const url = `${schedulesUrl(schedule.buddyId)}/${encodeURIComponent(schedule.id)}`;
   const history = runs.filter(
     (run) => run.input.kind === 'schedule' && run.input.scheduleId === schedule.id
   );
@@ -116,7 +104,11 @@ function ScheduleCard({
         <button
           type="button"
           disabled={action.busy}
-          onClick={() => void action.run('run', () => buddyAction(`${url}/run`))}
+          onClick={() =>
+            void action.run('run', () =>
+              buddyWrite('schedule.run', { buddyId: schedule.buddyId, scheduleId: schedule.id })
+            )
+          }
         >
           Run now
         </button>
@@ -124,9 +116,15 @@ function ScheduleCard({
       <ActionError state={action.state} />
       <ScheduleForm
         key={`${schedule.id}:${schedule.enabled}:${schedule.cron}:${schedule.name}`}
-        initial={fieldsOf(schedule)}
+        initial={scheduleFieldsOf(schedule)}
         submitLabel="Save schedule"
-        save={(fields) => buddyWrite(url, 'PUT', fields)}
+        save={(fields) =>
+          buddyWrite(
+            'schedule.update',
+            { buddyId: schedule.buddyId, scheduleId: schedule.id },
+            fields
+          )
+        }
         refresh={refresh}
       />
       <h4 className="buddy-panel__heading">History</h4>
@@ -166,7 +164,7 @@ export function BuddySchedules({
           initial={NEW_SCHEDULE()}
           submitLabel="Create schedule"
           save={async (fields) => {
-            await buddyWrite(schedulesUrl(buddyId), 'POST', fields);
+            await buddyWrite('schedule.create', { buddyId }, fields);
             setCreating((count) => count + 1);
           }}
           refresh={refresh}

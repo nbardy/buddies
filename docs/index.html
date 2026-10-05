@@ -240,10 +240,9 @@
         .download-note a { color: var(--quiet); }
         .download-note code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.85rem; }
 
-        /* Media frames: the launch video leads the page. No autoplay: the poster is the video's Vim
-           card (73.5 s), shown until play, and the page no longer repeats it as text (owner, 2026-10-05).
-           The launch video leads the page, right under the nav (owner, 2026-10-05:
-           text before the video read as "a wall of text"). */
+        /* Media frames: the launch video leads the page, right under the nav (owner, 2026-10-05:
+           text before the video read as "a wall of text"). The poster is the video's Vim card,
+           shown while it loads; the page no longer repeats it as text (owner, 2026-10-05). */
         .frame {
             position: relative;
             border-radius: 20px;
@@ -258,6 +257,35 @@
         .frame video, .frame img { display: block; width: 100%; height: auto; }
 
         .video-section { margin-top: 0.5rem; }
+
+        /* Autoplay with sound (owner, 2026-10-06). Browsers refuse sound before the visitor has
+           touched the page (Safari and Firefox always; Chrome unless they have been here before),
+           so the script tries sound first and falls back to muted with this pill. The old markup
+           had a `muted` attribute, so even pressing Play gave a silent video. */
+        .sound-pill {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.7rem 1.25rem;
+            border: 0;
+            border-radius: 999px;
+            background: var(--cream);
+            color: var(--night);
+            font: inherit;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            box-shadow: 0 10px 30px -8px color-mix(in oklch, var(--violet) 80%, transparent);
+            animation: sound-pulse 1.6s ease-in-out infinite;
+        }
+
+        .sound-pill[hidden] { display: none; }
+        .sound-pill svg { width: 1.2rem; height: 1.2rem; fill: currentColor; }
+
+        @keyframes sound-pulse { 50% { transform: scale(1.06); } }
 
         .caption {
             margin-top: 0.9rem;
@@ -379,9 +407,13 @@
 
         <div class="video-section">
             <div class="frame">
-                <video muted loop playsinline controls preload="metadata" poster="screenshots/launch-poster.jpg" aria-label="Buddies launch video">
+                <video id="launch-video" playsinline controls preload="auto" poster="screenshots/launch-poster.jpg" aria-label="Buddies launch video">
                     <source src="resources/buddies-launch-v15.mp4" type="video/mp4">
                 </video>
+                <button class="sound-pill" id="sound-pill" type="button" hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23z"/></svg>
+                    Tap for sound
+                </button>
             </div>
         </div>
 
@@ -478,6 +510,30 @@
     </div>
 
     <script>
+        // Launch video: play with sound when the browser allows it; otherwise play muted, looping,
+        // with a "Tap for sound" pill that restarts it from the top with sound. Reduced-motion
+        // visitors get the poster and Play button instead.
+        (function() {
+            var video = document.getElementById('launch-video');
+            var pill = document.getElementById('sound-pill');
+            function soundOn() {
+                video.muted = false;
+                video.loop = false;
+                video.currentTime = 0;
+                pill.hidden = true;
+                video.play();
+            }
+            pill.addEventListener('click', soundOn);
+            video.addEventListener('volumechange', function() { if (!video.muted) pill.hidden = true; });
+            if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+            video.play().catch(function() {
+                video.muted = true;
+                video.loop = true;
+                pill.hidden = false;
+                video.play().catch(function() {});
+            });
+        })();
+
         function copyCmd() {
             var cmd = document.getElementById('install-cmd').textContent;
             navigator.clipboard.writeText(cmd).then(function() {

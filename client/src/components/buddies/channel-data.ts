@@ -33,7 +33,6 @@ import type {
   Actor,
   Buddy,
   BuddyOverview,
-  Channel,
   ChannelKind,
   ChannelPage,
   ChannelResponse,
@@ -152,11 +151,7 @@ export function useWarmChannelPosts(entries: readonly ChannelUnread[]): void {
 
 /** Create a public channel as the owner; resolves to the new channel. */
 export function createChannel(workspaceId: string, name: string, purpose: string) {
-  return buddyWrite<Channel>(
-    `/api/buddies/workspaces/${encodeURIComponent(workspaceId)}/channels`,
-    'POST',
-    { name, purpose }
-  );
+  return buddyWrite('channel.create', { workspaceId }, { name, purpose });
 }
 
 // ── Feeds ───────────────────────────────────────────────────────────────────
@@ -904,14 +899,18 @@ export function useMarkRead(
 ): void {
   const visible = useDocumentVisible();
   const url = readUrl(target);
+  const kind = target.kind;
+  const id = target.kind === 'channel' ? target.channelId : target.rootId;
   useEffect(() => {
     if (!visible || !hasUnread || newestPostId === null) return;
-    void buddyApi(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ postId: newestPostId }),
-    }).catch((error: unknown) => console.warn(`[channels] could not mark ${url} read:`, error));
-  }, [url, newestPostId, hasUnread, visible]);
+    const write =
+      kind === 'channel'
+        ? buddyWrite('channel.read', { channelId: id }, { postId: newestPostId })
+        : buddyWrite('thread.read', { rootId: id }, { postId: newestPostId });
+    void write.catch((error: unknown) =>
+      console.warn(`[channels] could not mark ${url} read:`, error)
+    );
+  }, [url, kind, id, newestPostId, hasUnread, visible]);
 }
 
 /**
@@ -961,8 +960,12 @@ export function useOwnerUnreadTitle(): void {
 
 /** Archive changes navigation and unread counts on both shells through the shared keyed cache. */
 export async function setChannelArchived(channelId: string, archived: boolean): Promise<void> {
-  await buddyWrite(`/api/buddies/channels/${encodeURIComponent(channelId)}/archive`, 'POST', {
-    archived,
-  });
+  await buddyWrite(
+    'channel.archive',
+    { channelId },
+    {
+      archived,
+    }
+  );
   invalidateBuddyResources();
 }

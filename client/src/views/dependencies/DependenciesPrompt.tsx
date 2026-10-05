@@ -1,21 +1,17 @@
 import type { DependencyCheck } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
-import { type ReactNode, Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   setSetupDismissed,
   setupDismissedAtom,
   setupRevealAtom,
   setupRevealed,
 } from '../../atoms/ui';
+import { NEW_WORKSPACE_PATH } from '../../components/buddies/workspace-home';
 import { DEPENDENCIES_STATUS } from '../../hooks/dependencies-status';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { DependencyCommand, SURFACE, buttonStyle } from './setup-ui';
-
-const WorkspaceTeamForm = lazy(() =>
-  import('../../components/buddies/WorkspaceTeamForm').then((module) => ({
-    default: module.WorkspaceTeamForm,
-  }))
-);
 
 const STATUS = DEPENDENCIES_STATUS;
 
@@ -161,20 +157,18 @@ export function DependencyCard({ check }: { check: DependencyCheck }) {
   );
 }
 
-const STEPS = ['welcome', 'setup', 'team'] as const;
+// The third step is not in this dialog: Setup's Continue closes it and lands on `/` with the
+// one create-a-workspace form open (owner, #buddies-dev 2026-10-05: one form, not two).
+const STEPS = ['welcome', 'setup'] as const;
 type Step = (typeof STEPS)[number];
-const STEP_TITLE: Record<Step, string> = {
-  welcome: 'Welcome',
-  setup: 'Setup',
-  team: 'Create your team',
-};
-
-const STEP_PILL: Record<Step, string> = { welcome: 'Welcome', setup: 'Setup', team: 'Team' };
+const STEP_TITLE: Record<Step, string> = { welcome: 'Welcome', setup: 'Setup' };
+const STEP_PILLS = ['Welcome', 'Setup', 'Workspace'] as const;
 
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 // One app-wide prompt, shared by both shells. Polling reads the server's cached checks.
 // `children`: device-specific sections after the checks (desktop: Connect from mobile).
 export function DependenciesPrompt({ children }: { children?: ReactNode }) {
+  const navigate = useNavigate();
   const dismissed = useAtomValue(setupDismissedAtom);
   const status = usePolledFetch(STATUS, 2_000, !dismissed);
   const reveal = useAtomValue(setupRevealAtom);
@@ -219,6 +213,10 @@ export function DependenciesPrompt({ children }: { children?: ReactNode }) {
     } finally {
       setRetrying(false);
     }
+  };
+  const finish = () => {
+    setSetupDismissed(true);
+    navigate(NEW_WORKSPACE_PATH);
   };
   const checking =
     !status.data ||
@@ -275,9 +273,9 @@ export function DependenciesPrompt({ children }: { children?: ReactNode }) {
           }}
         >
           <ol className="onboarding-steps">
-            {STEPS.map((name, index) => (
-              <li key={name} aria-current={name === step ? 'step' : undefined}>
-                {index + 1}. {STEP_PILL[name]}
+            {STEP_PILLS.map((name, index) => (
+              <li key={name} aria-current={name === STEP_TITLE[step] ? 'step' : undefined}>
+                {index + 1}. {name}
               </li>
             ))}
           </ol>
@@ -286,11 +284,6 @@ export function DependenciesPrompt({ children }: { children?: ReactNode }) {
               Welcome to Buddies. Connect your AI tools, choose a project folder, and build a team
               to work with you.
             </p>
-          )}
-          {step === 'team' && (
-            <Suspense fallback={<p>Loading team creator…</p>}>
-              <WorkspaceTeamForm onStarted={() => setSetupDismissed(true)} />
-            </Suspense>
           )}
           {step === 'setup' && (
             <>
@@ -318,28 +311,16 @@ export function DependenciesPrompt({ children }: { children?: ReactNode }) {
               type="button"
               style={{ ...buttonStyle, visibility: step === 'welcome' ? 'hidden' : 'visible' }}
               disabled={step === 'setup' && (retrying || (checking && !!status.data))}
-              onClick={() =>
-                step === 'setup' ? void retry() : setStep(step === 'team' ? 'setup' : 'welcome')
-              }
+              onClick={() => void retry()}
             >
-              {step === 'setup' ? '↻ Check again' : step === 'team' ? '← Back' : 'Welcome'}
+              ↻ Check again
             </button>
             <button
               type="button"
-              // The team form owns the step's primary action; Skip stays quiet beside it.
-              className={step === 'team' ? undefined : 'onboarding-primary'}
-              style={
-                step === 'team'
-                  ? { ...buttonStyle, color: SURFACE.muted, borderRadius: 10 }
-                  : undefined
-              }
-              onClick={() =>
-                step === 'team'
-                  ? setSetupDismissed(true)
-                  : setStep(step === 'welcome' ? 'setup' : 'team')
-              }
+              className="onboarding-primary"
+              onClick={() => (step === 'welcome' ? setStep('setup') : finish())}
             >
-              {step === 'team' ? 'Skip for now' : 'Continue →'}
+              {step === 'welcome' ? 'Continue →' : 'Create your workspace →'}
             </button>
           </div>
         </footer>

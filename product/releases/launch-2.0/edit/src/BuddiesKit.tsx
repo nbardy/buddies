@@ -18,7 +18,7 @@ export const FPS = 60;
 // ---- Tokens
 const CREAM = '#fdf6e3';
 const QUIET = 'rgba(253,246,227,.62)';
-type Tone = 'cream' | 'quiet' | 'violet' | 'teal' | 'pink';
+export type Tone = 'cream' | 'quiet' | 'violet' | 'teal' | 'pink';
 const TONE: Record<Tone, string> = { cream: CREAM, quiet: QUIET, violet: AURA.violet, teal: AURA.teal, pink: AURA.pink };
 const GLASS = { background: 'rgba(253,246,227,.07)', border: '1.5px solid rgba(253,246,227,.14)', backdropFilter: 'blur(14px)' };
 const DISPLAY = { fontWeight: 700, fontStretch: '92%', fontVariationSettings: "'opsz' 96" } as const;
@@ -32,7 +32,7 @@ const useT = () => useCurrentFrame() / FPS;
 // ---- Primitives
 
 // The ground: night plus three aurora glows that drift slowly with time.
-const Stage: React.FC<{ t: number; glow?: number; children: React.ReactNode }> = ({ t, glow = 0.3, children }) => {
+export const Stage: React.FC<{ t: number; glow?: number; children: React.ReactNode }> = ({ t, glow = 0.3, children }) => {
   const dx = Math.sin(t * 0.5) * 3;
   const dy = Math.cos(t * 0.4) * 2;
   return (
@@ -53,8 +53,8 @@ const Stage: React.FC<{ t: number; glow?: number; children: React.ReactNode }> =
 };
 
 // A line of words, each rising out of a blur `gap` seconds after the one before.
-type Seg = [string, Tone];
-const Words: React.FC<{ segs: Seg[]; t: number; at: number; size: number; weight?: number; gap?: number; display?: boolean }> = ({
+export type Seg = [string, Tone];
+export const Words: React.FC<{ segs: Seg[]; t: number; at: number; size: number; weight?: number; gap?: number; display?: boolean }> = ({
   segs,
   t,
   at,

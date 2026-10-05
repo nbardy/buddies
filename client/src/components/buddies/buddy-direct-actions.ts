@@ -12,7 +12,7 @@ import { useAtomValue } from 'jotai';
 import { useEffect, useState } from 'react';
 import { setConversationDone } from '../../atoms/actions';
 import { listField, rowFamily } from '../../atoms/conversations';
-import { buddyAction, errorText } from './api';
+import { buddyWrite, errorText } from './api';
 import { createBuddyViaBuilder } from './create-buddy-builder';
 
 export type DirectAction =
@@ -27,7 +27,7 @@ export function useBuddyDirectActions(buddyId: string) {
   const [action, setAction] = useState<DirectAction>({ kind: 'idle' });
   const [woken, setWoken] = useState<WakeAttempt | null>(null);
   const request = (path: 'direct' | 'wake') =>
-    buddyAction<{ conversationId: string }>(`/api/buddies/${encodeURIComponent(buddyId)}/${path}`);
+    buddyWrite(path === 'direct' ? 'direct.open' : 'buddy.wake', { buddyId });
   const fail = (cause: unknown) => setAction({ kind: 'failed', message: errorText(cause) });
   return {
     action,

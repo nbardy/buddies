@@ -2,7 +2,7 @@ import { useAtomValue } from 'jotai';
 import { Link } from 'react-router-dom';
 import { listField } from '../../atoms/conversations';
 import { formatTimeAgo } from '../../utils/time';
-import { buddyAction } from './api';
+import { buddyWrite } from './api';
 import { conversationPath } from './buddy-tabs';
 import type { Run, RunInput, RunStatus } from './types';
 import { ActionError, useBuddyAction } from './useBuddyAction';
@@ -14,6 +14,7 @@ const RUN_INPUT_LABEL: { [K in RunInput['kind']]: string } = {
   reply: 'Channel reply',
   schedule: 'Scheduled run',
   failure_notice: 'Failure notice',
+  follow: 'Following a thread',
 };
 
 const RUN_STATUS_LABEL: Record<RunStatus, string> = {
@@ -72,7 +73,7 @@ export function BuddyRunList({
                   disabled={action.busy}
                   onClick={() =>
                     void action.run(`cancel:${run.id}`, () =>
-                      buddyAction(`/api/buddies/runs/${encodeURIComponent(run.id)}/cancel`)
+                      buddyWrite('run.cancel', { runId: run.id })
                     )
                   }
                 >

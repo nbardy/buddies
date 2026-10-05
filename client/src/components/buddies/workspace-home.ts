@@ -93,3 +93,6 @@ function lastActive(row: WorkspaceHomeRow): number {
 export function createReady(folder: string, pathValid: boolean): boolean {
   return pathValid && folder.trim().length > 0;
 }
+
+/** `/?new=1` opens the create form: the channel rail's "New workspace" and onboarding land here. */
+export const NEW_WORKSPACE_PATH = '/?new=1';
