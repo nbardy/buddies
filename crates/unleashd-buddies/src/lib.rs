@@ -8,6 +8,7 @@ pub mod ids;
 pub mod node;
 pub mod posts;
 pub mod runs;
+pub mod search;
 pub mod schema;
 pub mod store;
 pub mod tasks;
