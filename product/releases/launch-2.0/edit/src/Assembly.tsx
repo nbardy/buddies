@@ -12,7 +12,6 @@ import * as DesignReview from './DesignReview';
 import * as FeatureFlash from './FeatureFlash';
 import * as HomeIntro from './HomeIntro';
 import * as Overload from './Overload';
-import * as Palette from './Palette';
 import * as PickerRefresh from './PickerRefresh';
 import * as Swarm from './Swarm';
 import { Block, INK } from './blocks';
@@ -51,8 +50,7 @@ const section = (id: string, from: number, to: number, C: React.FC, frames: numb
 // Order (owner, 2026-10-05): the logo holds 2 bars; then the real sell, swarms: the home statement
 // and the swarm running, slowed to 4 bars; then "Mobile Friendly!" first among the features; the
 // demos ("They show their work" is 2 bars since the emblem shots were cut, owner 2026-10-05); and the
-// benefits ("Open source"…) at the end, then AI color themes as the proof of "Customizable" (4 bars,
-// owner 2026-10-06), right before the Vim line ("Vim is open source…").
+// benefits ("Open source"…) at the end, right before the Vim line ("Vim is open source…").
 export const SECTIONS: Section[] = [
   section('overload', 0, Overload.DURATION, Overload.OverloadPicture, Overload.DURATION),
   section('home', bar(3), bar(6), HomeIntro.HomeIntro, HomeIntro.DURATION),
@@ -66,9 +64,8 @@ export const SECTIONS: Section[] = [
   section('fork', bar(23), bar(25), Close.Fork, Close.FORK_FRAMES),
   section('run', bar(25), bar(27), Close.Run, Close.RUN_FRAMES),
   section('benefits', bar(27), bar(31), PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
-  section('palette', bar(31), bar(35), Palette.Palette, Palette.DURATION),
-  section('vim', bar(35), bar(39), Close.Vim, Close.VIM_FRAMES),
-  section('end', bar(39), bar(39) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
+  section('vim', bar(31), bar(35), Close.Vim, Close.VIM_FRAMES),
+  section('end', bar(35), bar(35) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
 ];
 
 // One caption per product scene, always top left, in from the scene's second beat.
@@ -76,7 +73,6 @@ const CAPTIONS: { from: number; to: number; lines: [string, string] }[] = [
   { from: bar(6), to: bar(10), lines: ['Multi-agent swarms.', 'Agents @-mention each other.'] },
   { from: bar(12), to: bar(16), lines: ['Ask your agents.', 'In channels.'] },
   { from: bar(16), to: bar(18), lines: ['They show their work.', 'Images and video, right in the thread.'] },
-  { from: bar(31), to: bar(35), lines: ['AI color themes.', 'Let the AI cook.'] },
 ];
 const CAPTION_IN = (60 / 128) * 0.5; // seconds after the scene's downbeat
 
@@ -89,7 +85,7 @@ const Caption: React.FC<{ lines: [string, string] }> = ({ lines }) => {
     </div>
   );
 };
-export const DURATION = bar(39) + Close.END_FRAMES; // the end card's last frame
+export const DURATION = bar(35) + Close.END_FRAMES; // the end card's last frame
 
 const Place: React.FC<{ s: Section }> = ({ s }) => {
   const plays = Math.min(s.to - s.from, s.frames - s.offset);
