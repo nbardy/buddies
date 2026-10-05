@@ -292,11 +292,6 @@
   border: 1px solid color-mix(in srgb, white 20%, transparent);
 }
 
-.strip-swatch-glow {
-  /* Glow swatches show alpha channel — checkerboard bg would be ideal
-     but a solid dark bg with the transparent overlay works well enough */
-}
-
 /* ─── Color ramp (bg elevation, text, borders, message tints) ─── */
 
 .color-ramp {
@@ -361,14 +356,7 @@
   flex: 1;
 }
 
-.ai-chat-row {
-  display: flex;
-  gap: var(--sp-5);
-  align-items: flex-end;
-}
-
 .ai-chat-input {
-  flex: 1;
   padding: var(--sp-5) var(--sp-6);
   background: var(--bg-content);
   border: 1px solid var(--border-default);
@@ -395,17 +383,19 @@
   color: var(--text-muted);
 }
 
+/* Full width on its own line: the clicked button grows into the cooking
+   stage (CookingRobot) without ever resizing the textarea. */
 .ai-submit-btn {
-  padding: var(--sp-5) var(--sp-8);
+  justify-content: center;
+  align-items: center;
+  height: 42px;
+  overflow: hidden;
   background: var(--accent-primary);
   border: none;
   color: var(--text-on-accent);
   font-size: var(--fs-5);
   font-weight: 500;
-  transition: all 0.15s;
-  white-space: nowrap;
-  align-self: flex-end;
-  min-height: 42px;
+  transition: height 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.25), background 0.3s, opacity 0.15s;
 }
 
 .ai-submit-btn:hover:not(:disabled),
@@ -418,23 +408,123 @@
   cursor: not-allowed;
 }
 
-.ai-dots::after {
-  content: "";
-  animation: ai-dot-animation 1.4s infinite steps(4, end);
+.ai-submit-btn.cooking {
+  height: 230px;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  opacity: 1;
+  cursor: progress;
+  background: radial-gradient(
+    circle at 66% 62%,
+    color-mix(in srgb, var(--accent-primary) 30%, var(--bg-content)),
+    var(--bg-content) 70%
+  );
+  box-shadow: inset 0 0 0 1px var(--accent-primary);
 }
 
-@keyframes ai-dot-animation {
-  0% {
-    content: "";
+.ai-cook-scene {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  animation: ai-cook-reveal 0.5s ease-out both;
+}
+
+.ai-cook-caption {
+  color: var(--text-secondary);
+  font-size: var(--fs-3);
+  letter-spacing: 0.5px;
+}
+
+.ai-cook-arm {
+  transform-origin: 92px 82px;
+  animation: ai-cook-stir 0.9s ease-in-out infinite alternate;
+}
+.ai-cook-hat {
+  transform-origin: 72px 40px;
+  animation: ai-cook-stir 1.4s ease-in-out infinite alternate-reverse;
+}
+.ai-cook-hue {
+  animation: ai-cook-hue 3s linear infinite;
+}
+.ai-cook-eye,
+.ai-cook-orb,
+.ai-cook-sparkle {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ai-cook-eye {
+  animation: ai-cook-blink 3s infinite;
+}
+.ai-cook-orb {
+  filter: drop-shadow(0 0 3px currentColor);
+  animation: ai-cook-rise 2.4s ease-out infinite both;
+}
+.ai-cook-sparkle {
+  fill: #fff6c2;
+  animation: ai-cook-twinkle 1.6s ease-in-out infinite both;
+}
+
+@keyframes ai-cook-reveal {
+  from {
+    opacity: 0;
+    transform: scale(0.6) translateY(12px);
   }
-  25% {
-    content: ".";
+}
+@keyframes ai-cook-stir {
+  from {
+    transform: rotate(-7deg);
+  }
+  to {
+    transform: rotate(5deg);
+  }
+}
+@keyframes ai-cook-hue {
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+@keyframes ai-cook-blink {
+  92% {
+    transform: none;
+  }
+  95% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes ai-cook-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.3);
+  }
+  20% {
+    opacity: 1;
+  }
+  60% {
+    transform: translate(5px, -48px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-3px, -84px) scale(0.5);
+  }
+}
+@keyframes ai-cook-twinkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.2) rotate(0deg);
   }
   50% {
-    content: "..";
+    opacity: 1;
+    transform: scale(1) rotate(90deg);
   }
-  75% {
-    content: "...";
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-submit-btn,
+  .ai-cook-scene,
+  .ai-cook-scene * {
+    transition: none;
+    animation: none;
   }
 }
 
