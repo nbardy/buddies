@@ -400,6 +400,7 @@ async function world(reopen?: string) {
     post: async (...[author, ref, input]: Parameters<typeof core.post>) => {
       const channel = await core.openChannel(author, ref);
       const mentions = wakes(channel, author, input.kind, input.body, picks);
+      picks.clear(); // a chip pick belongs to the one post it was made on
       return (
         await core.post(author, ref, { ...input, mentions: [...input.mentions, ...mentions] })
       ).post;
@@ -1707,12 +1708,14 @@ test('same-value picks become durable overrides, independent of another Buddy an
       initial,
       'explicit intent beats newer inferred history'
     );
-    // Silent: its reply would be delivered to Lead's external conversation (it follows the thread).
-    w.silent.add(3);
+    // Lead's external conversation follows the thread now (it posted there), so the owner's post
+    // reaches Lead too; the turns are counted by harness, not by number.
     w.picks.set(w.designer.id, createDefaultConversationConfig('claude'));
     await say(`[@Designer](buddy:${w.designer.id}) use your own model`, root.id);
     await until(
-      async () => w.turns.length === 3 && (await w.channels.responding(w.general.id)).length === 0,
+      async () =>
+        w.turns.some((turn) => turn.request.harness === 'claude') &&
+        (await w.channels.responding(w.general.id)).length === 0,
       'independent Designer reply'
     );
     const seats = await w.channels.threadSeats(root.id);
@@ -1777,7 +1780,8 @@ test('same-value picks become durable overrides, independent of another Buddy an
       unavailable,
       'unavailable history is shown, not silently replaced'
     );
-    w.announce(await say(`[@Lead](buddy:${w.lead.id}) continue here`, other.id));
+    const turnsBefore = w.turns.length;
+    await say(`[@Lead](buddy:${w.lead.id}) continue here`, other.id);
     await until(
       async () =>
         (await w.core.listPosts(OWNER, { kind: 'thread', rootId: other.id }, null, 50)).posts.some(
@@ -1785,7 +1789,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
         ),
       'unavailable model fails visibly'
     );
-    assert.equal(w.turns.length, 3, 'no provider substitution after resolution failure');
+    assert.equal(w.turns.length, turnsBefore, 'no provider substitution after resolution failure');
   } finally {
     await w.close();
   }
