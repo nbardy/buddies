@@ -390,7 +390,6 @@ const buddyCreationService: BuddyCreationService = createBuddyCreationService({
 // One background Buddy turn = one conversation runtime turn (runCoordinationMessage).
 const buddyRunnerHost: RunnerHost = {
   registered: (id) => conversations.get(id) !== undefined,
-  providerOf: async (id) => (await conversationConfigService.getRecord(id))?.config.provider,
   defaultModel: providerDefaultModel,
   reconfigure: async (conversationId, config) => {
     const conversation = conversations.get(conversationId);

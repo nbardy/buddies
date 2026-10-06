@@ -310,7 +310,6 @@ async function world(reopen?: string) {
     logger: { warn: () => undefined, log: () => undefined },
     host: {
       registered: (id) => conversations.has(id),
-      providerOf: async (id) => (await configService.getRecord(id))?.config.provider,
       defaultModel: providerDefaultModel,
       reconfigure: async (conversationId, config) =>
         replaceRuntimeConfig(
@@ -1192,7 +1191,7 @@ test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs are not capped", 
         !(await toolNames(turn.mcp)).includes('team_admin'),
         'a Buddy-authored mention holds no owner authority'
       );
-      assert.match(turn.request.prompt, /Lead mentioned you in a new message/);
+      assert.match(turn.request.prompt, /your turn/, 'the mention is delivered to Designer');
       await handOff(w.lead, 'hop-2')(turn);
     });
     w.during.set(3, async (turn) => void (await handOff(w.designer, 'hop-3')(turn)));
@@ -1708,6 +1707,8 @@ test('same-value picks become durable overrides, independent of another Buddy an
       initial,
       'explicit intent beats newer inferred history'
     );
+    // Silent: its reply would be delivered to Lead's external conversation (it follows the thread).
+    w.silent.add(3);
     w.picks.set(w.designer.id, createDefaultConversationConfig('claude'));
     await say(`[@Designer](buddy:${w.designer.id}) use your own model`, root.id);
     await until(
@@ -3062,7 +3063,7 @@ test('native child events cannot bypass restricted Buddy runs', async () => {
 // and the tool announced it again, so a retried tool call re-ran every mention it held.
 // 2026-09-30: the dispatch returned on every non-public channel, so the owner's four replies (two
 // of them @mentions) in a DM thread under a Buddy's request started nothing and showed no error.
-test('an owner reply in a DM thread wakes the Buddy; its request, its answer and Buddy informs do not', async () => {
+test('an owner reply in a DM thread wakes the Buddy; its own inform wakes nobody and the owner’s answer is delivered', async () => {
   const w = await world();
   try {
     const dm = { kind: 'direct' as const, members: [buddyActor(w.lead.id), OWNER] };
@@ -3074,8 +3075,8 @@ test('an owner reply in a DM thread wakes the Buddy; its request, its answer and
       });
     const thread = async (rootId: string) =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
-    const directTurns = () =>
-      w.turns.filter((turn) => /in your direct messages/.test(turn.request.prompt));
+    const turnsAbout = (text: RegExp) => w.turns.filter((turn) => text.test(turn.request.prompt));
+    const directTurns = () => turnsAbout(/what's next/);
     const ask = await w.post(buddyActor(w.lead.id), dm, {
       kind: 'request',
       body: 'Approve the plan?',
@@ -3120,8 +3121,14 @@ test('an owner reply in a DM thread wakes the Buddy; its request, its answer and
     await announce(
       await w.core.answer(OWNER, { requestId: ask.id, body: 'Approved', evidence: [], key: 'yes' })
     );
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    assert.equal(directTurns().length, 1, 'a Buddy inform and an answer start no DM reply');
+    // Step 5: the owner's answer reaches the conversation that asked (the seat the nudge opened),
+    // as a delivery. Lead's own inform wakes nobody: a Buddy's post is never delivered to itself.
+    await until(
+      () => turnsAbout(/Approved/).length === 1,
+      'the answer is delivered to the conversation that follows the thread'
+    );
+    assert.equal(directTurns().length, 1, 'no second reply to the nudge');
+    assert.equal(turnsAbout(/FYI/).length, 0, 'a Buddy inform starts no DM reply');
   } finally {
     await w.close();
   }
@@ -3142,16 +3149,19 @@ test('a retried post (same key) wakes its mentioned Buddy once', async () => {
       body: `[@Designer](buddy:${w.designer.id}) the banner, please`,
       key: 'retried-call',
     };
+    // Designer says nothing: an answer would be delivered to Lead's conversation (it posted the
+    // mention, so it follows the thread), and that second turn is not what this test counts.
+    w.silent.add(1);
     const first = await call(w.endpoint.spec(grant), 'post', mention);
     await until(() => w.turns.length === 1, "Designer's turn");
-    // Retry once that turn is over: a queued duplicate is absorbed by the pair's queue anyway.
+    // Retry once that turn is over: the replayed key writes no post, so it wakes nobody.
     await until(
       async () => (await w.channels.responding(w.general.id)).length === 0,
       'the turn ends'
     );
     const again = await call(w.endpoint.spec(grant), 'post', mention);
     assert.equal(again.value.id, first.value.id, 'the replay returns the first post');
-    // A second turn would open the seat and poll it idle first: give it well over that.
+    // A second turn would open the seat first: give it well over that.
     await new Promise((resolve) => setTimeout(resolve, 1500));
     assert.equal(w.turns.length, 1, 'the replay started no second turn');
   } finally {
