@@ -43,6 +43,7 @@ import type {
   PostPage,
   Task,
   ThreadPage,
+  ThreadSeat,
   ThreadStat,
 } from './types';
 import { taskStatusView } from './ui-contract';
@@ -911,6 +912,22 @@ export function useMarkRead(
       console.warn(`[channels] could not mark ${url} read:`, error)
     );
   }, [url, kind, id, newestPostId, hasUnread, visible]);
+}
+
+/**
+ * A thread's Buddy seats, owned by whoever composes in it. Reads the same keyed resource as the
+ * open thread pane (`threadFeed(rootId, null)`), so the two share one cache entry and one poll.
+ * Undefined while loading, and at the top level (no thread, nothing to load).
+ * Fix-guard: composers used to take `seats` as a prop, and ThreadsPane / ThreadsMobile / TaskPage
+ * never passed it, so @mentioning a Buddy in their replies stuck Send on "Loading model…"
+ * (task_01a1100d). Guard: client/test/composer-thread-seats.test.tsx.
+ */
+export function useThreadSeats(rootId: string | null): readonly ThreadSeat[] | undefined {
+  const { data } = usePolledFetch(
+    rootId === null ? null : latestResource(threadFeed(rootId, null)),
+    CHANNEL_BACKSTOP_MS
+  );
+  return data?.seats;
 }
 
 /**

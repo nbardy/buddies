@@ -747,7 +747,6 @@ function ThreadScreen({
           rootId={rootId}
           placeholder="Reply…"
           references={directory.references}
-          seats={thread.latest.data?.seats}
           submit="button"
           onPosted={onPosted}
         />

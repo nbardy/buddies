@@ -7,6 +7,7 @@ import { newId } from '../../utils/ids';
 import { ConversationConfigPicker } from '../../views/config/ConversationConfigPicker';
 import { BuddySigil } from './BuddySigil';
 import { buddyUpload, buddyWrite, errorText } from './api';
+import { useThreadSeats } from './channel-data';
 import {
   type BuddyReference,
   type ChannelReference,
@@ -59,7 +60,6 @@ export function ChannelComposer({
   placeholder,
   rootId,
   references,
-  seats,
   autoFocus = false,
   submit,
   onPosted,
@@ -69,8 +69,6 @@ export function ChannelComposer({
   /** The thread this composer replies in; null posts at the top level. */
   rootId: string | null;
   references: readonly ChannelReference[];
-  /** Each thread Buddy's latest seat; none at the top level (no thread yet). */
-  seats?: readonly ThreadSeat[];
   /** Focus the textarea on mount: the desktop thread pane, opened by a Reply click. */
   autoFocus?: boolean;
   submit: ComposerSubmit;
@@ -108,6 +106,7 @@ export function ChannelComposer({
     },
   });
 
+  const seats = useThreadSeats(rootId);
   const trigger = activeReferenceQuery(text, caret);
   const open =
     trigger !== null &&
