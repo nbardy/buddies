@@ -38,8 +38,7 @@ export const BUDDY_TOOL_GUIDE = [
   'Background worker: post kind "request" with worker {provider, model} to {direct:[]} (you) or a report: a tracked run whose answer wakes you. Never shell out to agent CLIs.',
   'runs: scoped slim rows with waiting reasons, plus get/cancel. schedule: scoped cron runs. team: list rows, then get one body.',
   'Never edit the Buddies database or files to change Buddy state. A denied tool is an authority boundary; do not route around it.',
-  'Do not copy task status into memory; save shared work in files, linked from posts.',
-  'Workers: post a one-line progress note on the Task at each milestone; the final answer carries evidence paths (commits, files, test names), not prose.',
+  'Do not copy task status into memory; save shared work in files, linked from posts. Workers: post a one-line progress note on the Task at each milestone; the final answer carries evidence paths (commits, files, test names), not prose.',
   'Owner-needed action: request it in the owner DM ({direct:["owner"]}), naming the action and risk; act only after an explicit answer.',
 ].join('\n');
 

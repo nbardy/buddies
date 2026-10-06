@@ -3054,14 +3054,10 @@ test('a spawned worker is told to post progress notes and answer with evidence p
       cron: '0 9 * * *',
       timezone: 'UTC',
       prompt: 'Spawn one worker',
-      limits: '{}',
       enabled: true,
       key: 'progress-line',
     });
-    await w.core.enqueueRun(OWNER, {
-      buddyId: w.lead.id,
-      input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
-    });
+    await w.core.fireSchedule(OWNER, schedule.id);
     w.emit({ kind: 'changed' });
     const turn = await until(
       () => w.turns.find((t) => t.request.prompt.includes('Sweep progress-line')),
