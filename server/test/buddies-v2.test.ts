@@ -44,7 +44,7 @@ import { createMemoryReviewer } from '../src/buddies/memory-review';
 import { wakes } from '../src/buddies/mentions';
 import { createBuddyPolicyPort } from '../src/buddies/policy-port';
 import { registerBuddyRoutes } from '../src/buddies/routes';
-import { createRunner } from '../src/buddies/runner';
+import { ENVELOPE_CHARS, createRunner } from '../src/buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from '../src/buddies/worker-config';
 import { BUDDY_RUN_LEASE_MS, TURN_MAX_RUNTIME_MS } from '../src/constants/timeouts';
 import { createBuddyCreationService } from '../src/conversations/buddy-creation-service';
@@ -4654,6 +4654,61 @@ test('runs get {tail:n} returns the last n assistant entries with tool names and
     assert.equal(got.value.tail[2].tools[0].name, 'Bash');
     assert.ok(got.value.tail[2].tools[0].args.length <= 201, 'args are clipped');
     void request;
+  } finally {
+    await w.close();
+  }
+});
+
+// F3 (2026-10-06 CEO feedback, token acceptance): a resumed seat or delivery turn is sent only the
+// posts past its conversation's mark plus a fixed envelope, INCLUDING right after a backend
+// restart. Until step 5 the mark lived in the pair machine's memory, so every restart cost each
+// seat one full-context prompt (the last ten posts plus a 700-char instruction block). The mark is
+// a run column now. A reload is the in-memory conversation registry and the runner's claim state
+// gone while the crate's file stays. Guard: this test fails if a delivery re-sends the thread.
+test('a delivery after a backend restart sends one post, not the thread', async () => {
+  const w = await world();
+  try {
+    const say = (body: string, replyToId?: string, mention = false) =>
+      w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        {
+          kind: 'inform',
+          body: mention ? `[@Lead](buddy:${w.lead.id}) ${body}` : body,
+          replyToId,
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          key: `f3-${body}`,
+        }
+      );
+    const root = await say('Plan the launch', undefined, true);
+    await until(
+      async () => w.turns.length === 1 && (await w.channels.responding(w.general.id)).length === 0,
+      'the first turn'
+    );
+    for (let i = 0; i < 6; i++) await say(`filler ${i}`, root.id);
+    await until(
+      async () => w.turns.length >= 2 && (await w.channels.responding(w.general.id)).length === 0,
+      'the burst is answered'
+    );
+    const before = w.turns.length;
+    w.conversations.clear(); // the backend reloads: no conversation is in memory
+    await say('the one new post', root.id);
+    await until(() => w.turns.length === before + 1, 'the delivery after the reload');
+    const prompt = w.turns[before].request.prompt;
+    assert.match(prompt, /the one new post/);
+    assert.doesNotMatch(prompt, /Plan the launch|filler/, 'only the post past the mark');
+    // The briefing the runtime prepends is not the delivery's own text.
+    const envelope = prompt
+      .slice(prompt.indexOf('New posts in threads you follow'))
+      .split('\n')
+      .filter((line) => !/^\[20/.test(line))
+      .join('\n');
+    assert.ok(
+      envelope.length <= ENVELOPE_CHARS,
+      `the envelope is ${envelope.length} chars, over ${ENVELOPE_CHARS}`
+    );
   } finally {
     await w.close();
   }
