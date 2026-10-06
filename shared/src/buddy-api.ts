@@ -21,7 +21,7 @@ export const key = z
   .trim()
   .min(1)
   .max(200)
-  .describe('Idempotency key: the same key replays the first result');
+  .describe('A retried key replays the first result');
 export const ChannelArchiveSchema = z.object({ archived: z.boolean(), key }).strict();
 export const ChannelRenameSchema = z
   .object({ name: z.string().trim().min(1).max(80), key })

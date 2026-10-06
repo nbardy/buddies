@@ -11,9 +11,9 @@ import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-servic
 
 export const WorkerSchema = z
   .object({
-    provider: z.string().min(1).describe('A harness id, e.g. codex or claude'),
-    model: z.string().min(1).describe("A model id the provider's catalog offers"),
-    reasoningEffort: z.string().min(1).optional().describe("Absent: the model's default"),
+    provider: z.string().min(1).describe('Harness id, e.g. codex'),
+    model: z.string().min(1).describe('Catalog model id'),
+    reasoningEffort: z.string().min(1).optional().describe('Absent: default'),
   })
   .strict();
 

@@ -77,13 +77,11 @@ function legacySearchToText(read: unknown): unknown {
 }
 
 const channelRef = z.union([
-  z.object({ id: z.string().min(1) }).describe('A channel id (public, direct or task)'),
+  z.object({ id: z.string().min(1) }),
   z
     .object({ direct: z.array(z.string().min(1)) })
-    .describe(
-      "A direct channel with these members (buddy ids, 'owner'); you are always in it, so [] is you alone"
-    ),
-  z.object({ task: z.string().min(1) }).describe("A task's channel (its comments)"),
+    .describe("Buddy ids or 'owner'; you are always in it, so [] is you alone"),
+  z.object({ task: z.string().min(1) }),
 ]);
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
@@ -234,7 +232,7 @@ const memoryKind = z.enum(['working', 'long_term']);
 const docScopeInput = z
   .enum(['buddy', 'workspace'])
   .default('buddy')
-  .describe("Shared docs only: 'workspace' for one the whole workspace reads");
+  .describe("'workspace' for a shared doc");
 
 type Kinds = z.ZodType<DocRef['kind']>;
 const docReadSchema = (kinds: Kinds) =>
@@ -251,9 +249,7 @@ const docWriteSchema = (kinds: Kinds) =>
       .number()
       .int()
       .nonnegative()
-      .describe(
-        'The revision you read (0 = new). A stale write is a conflict: re-read and reconcile'
-      ),
+      .describe('The revision you read (0 = new); a stale write conflicts: re-read'),
     reason: z.string().min(1).max(2000),
     key,
   });
@@ -351,7 +347,7 @@ const readTaskRows = async (deps: ToolDeps, scope: Scope, include: TaskInclude) 
 
 const TASKS_TOOL = teamTool({
   description:
-    "List task rows by {buddyId}, {taskId} (children), or {workspace}; get one full task. Lists default to open tasks; include 'all' reaches closed ones.",
+    "List tasks by {buddyId}, {taskId} (children) or {workspace}, or get one; include:'all' adds closed ones.",
   writes: false,
   schema: z.object({
     action: z.discriminatedUnion('kind', [
@@ -369,23 +365,17 @@ const TASKS_TOOL = teamTool({
 const BUDDY_TOOLS = {
   post: buddyTool({
     description:
-      'Write to a channel, DM ({direct:[ids]}) or task, or answer one request with `answers`. A DM request starts its recipient; a Buddy-DM inform is inert, while a public or task post can wake @mentions and thread followers. Use replyToId for a thread and [@Name](buddy:<id>) to mention. Embed media as ![alt](/absolute/path). A request with `worker` runs on that model and returns here. Never shell out to agent CLIs.',
+      'Write to a channel, DM ({direct:[ids]}) or task, or answer a request with `answers`. A DM request starts its recipient; a Buddy-DM inform is inert; public and task posts wake @mentions and followers. Thread: replyToId; mention: [@Name](buddy:<id>); media: ![alt](/absolute/path). Never shell out to agent CLIs.',
     writes: true,
     schema: z.object({
-      channel: channelRef.optional().describe('Required unless answers is set'),
-      answers: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('A request id; mutually exclusive with channel'),
+      channel: channelRef.optional(),
+      answers: z.string().min(1).optional().describe('A request id; not with channel'),
       body: z.string().min(1).max(32_000),
       kind: z.enum(['inform', 'request']).default('inform'),
       replyToId: z.string().optional(),
       taskId: z.string().optional(),
       purpose: z.string().max(200).optional(),
-      worker: WorkerSchema.optional().describe(
-        "kind 'request' only: its runs execute on this model instead of the recipient's profile"
-      ),
+      worker: WorkerSchema.optional().describe("kind 'request' only: run on this model"),
       evidence,
       key,
     }),
@@ -457,8 +447,7 @@ const BUDDY_TOOLS = {
   // (not a channel_admin variant) because admin acts on an existing channelId and a union at the
   // top level would not be a JSON-schema object. Guard: buddies-v2.test.ts "Buddy MCP creates a channel".
   channel_create: buddyTool({
-    description:
-      'Create a public channel in this workspace with a name and a one-line purpose. Idempotent on key: a retried call returns the same channel. Post in it with `post {channel:{id}}`.',
+    description: 'Create a public channel (name and one-line purpose).',
     writes: true,
     schema: z.object({
       name: z.string().trim().min(1).max(80),
@@ -469,8 +458,7 @@ const BUDDY_TOOLS = {
       deps.core.createChannel(grant.author, { ...input, workspaceId: grant.workspaceId }),
   }),
   channel_admin: buddyTool({
-    description:
-      'Rename, archive or restore a public channel. Its identity and history stay intact; archived channels remain readable.',
+    description: 'Rename, archive or restore a public channel; history stays readable.',
     writes: true,
     schema: z.object({
       channelId: z.string().min(1),
@@ -488,7 +476,7 @@ const BUDDY_TOOLS = {
   }),
   channel_read: buddyTool({
     description:
-      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here (newest first). Search text: words (all must match; prefix, plural/stem and one-typo matches count: "market" finds marketing), "exact phrase", -excluded, OR, @Name or @"Two Words" (posts by that Buddy or by @owner; alone it lists them); filters narrow before paging. Example: read:{search:{text:\'"deploy window" -draft\', channels:[\'ops\'], from:[\'owner\'], after:\'2026-10-01\'}}. Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
+      'Read a channel (newest first), a thread, or search every channel here; returns {posts, next} (page older: `next` as `before`). Search text: words (all match; stems and one typo count), "phrase", -excluded, OR, @Name (posts by that Buddy or @owner). Reading from the newest post marks it read.',
     writes: false,
     schema: z.object({
       read: z.preprocess(
@@ -502,11 +490,11 @@ const BUDDY_TOOLS = {
                 until: z
                   .string()
                   .datetime({ offset: true })
-                  .describe('ISO time, at most 7 days ahead: when to wake you if nobody posts'),
+                  .describe('ISO time, at most 7 days ahead: wake you then if nobody posts'),
               })
               .optional()
               .describe(
-                "Wait for this thread's next post by someone else. Returns {kind:'unread', posts} (oldest first) at once if there are posts you have not read, or if one arrives within 2 s. Otherwise returns {kind:'following', following:{until}} with no posts: keep working or end your turn; you will be woken in THIS conversation with the posts you have not read, or once at `until` with a timeout. One wake per follow; follow again to keep waiting. Not with `before`."
+                "Wait for the next post by someone else: returns {kind:'unread', posts} if some are unread or one arrives within 2 s; else {kind:'following'} and THIS conversation wakes with the posts, or once at `until`."
               ),
           }),
           z.object({
@@ -525,7 +513,7 @@ const BUDDY_TOOLS = {
           }),
         ])
       ),
-      before: z.object({ ord: z.string() }).optional().describe('next from the previous page'),
+      before: z.object({ ord: z.string() }).optional(),
       limit: z.number().int().min(1).max(100).default(30),
     }),
     async handler(deps, grant, input) {
@@ -559,21 +547,21 @@ const BUDDY_TOOLS = {
   tasks: TASKS_TOOL,
   task_write: buddyTool({
     description:
-      'Create or compare-and-swap update a task. Pausing, cancelling or reassigning cancels queued runs. changes.pin pins a top-level task on the workspace Home: N>0 orders it (lower first; use max pin + 1 to append), 0 unpins. Comments use post {channel:{task}}.',
+      'Create or compare-and-swap update a task; pausing, cancelling or reassigning cancels queued runs. changes.pin: N>0 pins a top-level task on Home (lower first, max + 1 appends), 0 unpins. Comment with post {channel:{task}}.',
     writes: true,
     schema: taskWriteSchema(),
     handler: (deps, grant, input) => writeTask(deps, grant, input, grant.buddyId),
   }),
   doc_read: buddyTool({
     description:
-      'Read a doc: soul, working or long-term memory, or shared docs. Returns its revision for doc_write. Detailed notes are agent_notes/*.md files in the workspace: read and search them with your own file tools.',
+      'Read soul, working or long-term memory, or a shared doc; returns the revision for doc_write. Notes are agent_notes/*.md files: use your own file tools.',
     writes: false,
     schema: docReadSchema(docKind),
     handler: (deps, grant, input) => deps.core.readDoc(grant.principal, docRef(grant, input)),
   }),
   doc_write: buddyTool({
     description:
-      'Replace a doc with complete content (compare-and-swap on baseRevision; every revision is kept). Tasks own current work: never copy task status into memory.',
+      'Replace a doc with its complete content (compare-and-swap on baseRevision). Never copy task status into memory.',
     writes: true,
     schema: docWriteSchema(docKind),
     handler: (deps, grant, { content, baseRevision, reason, key, ...doc }) =>
@@ -587,7 +575,7 @@ const BUDDY_TOOLS = {
   }),
   runs: buddyTool({
     description:
-      'List run rows by {buddyId}, {taskId}, or {workspace} (yours: live runs first, then runs ended in the last 12 h) as {runs, truncated}. Each row says what happened: status, errorCode/error (errorCode "lease_expired" = the host or holder died mid-run) and conversationId. Get one full run, cancel one, or retry a failed or cancelled one (retry re-enqueues the same input as the next attempt, optionally on another `worker` model, and reopens the request it answers; a live or complete run is an error). Queued rows include waiting.',
+      'List runs by {buddyId}, {taskId} or {workspace} (live first, then ended in the last 12 h) as {runs, truncated}; rows give status, errorCode (lease_expired = the holder died mid-run), conversationId, waiting. Also get, cancel, or retry a failed or cancelled run (same input, optionally another `worker`; reopens the request it answers).',
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [
@@ -597,7 +585,7 @@ const BUDDY_TOOLS = {
         z.object({
           kind: z.literal('retry'),
           runId: z.string().min(1),
-          worker: WorkerSchema.optional().describe('Absent: the retry runs as the failed run did'),
+          worker: WorkerSchema.optional().describe('Absent: same as the failed run'),
           key,
         }),
       ]),
