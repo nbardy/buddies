@@ -76,7 +76,7 @@ export const BUDDY_BACKGROUND_TURN_MS = readPositiveIntEnv(
 );
 /** The runner's backstop tick: due schedules, runs no write woke (a freed slot), and the claim
  * gate's lease expiry, so a dead holder's run ends within BUDDY_RUN_LEASE_MS plus this. */
-export const BUDDY_RUNNER_BACKSTOP_MS = 5_000;
+export const BUDDY_RUNNER_BACKSTOP_MS = readPositiveIntEnv('CWV_BUDDY_RUNNER_BACKSTOP_MS', 5_000);
 export const SWARM_POLL_INTERVAL_MS = readPositiveIntEnv('CWV_SWARM_POLL_INTERVAL_MS', 2_000);
 export const SWARM_POLL_THROTTLE_MS = readPositiveIntEnv('CWV_SWARM_POLL_THROTTLE_MS', 1_500);
 export const SWARM_CONTEXT_COMMAND_TIMEOUT_MS = 8_000;

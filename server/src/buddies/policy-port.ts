@@ -40,6 +40,8 @@ export interface BuddyPolicyPort {
   builderMcpServers(conversationId: string): TurnTools;
   /** The turn's holder is alive: push its run's lease forward (Pattern: lease-heartbeat). */
   renewLease(runId: string, leaseToken: string): Promise<LeaseRenewal>;
+  /** This turn executes `runId`: claims first await `renewDue` until the release (runner `hold`). */
+  hold(runId: string, renewDue: () => Promise<void>): () => void;
   /**
    * The turn of a chat run ended: settle it (which also revokes the run's grants). Resolves once
    * the settle landed or the run had already ended (lease_lost); rejects on a transient failure.
@@ -112,6 +114,7 @@ export function createBuddyPolicyPort(deps: {
       };
     },
     renewLease: (runId, leaseToken) => runner.renew(runId, leaseToken),
+    hold: (runId, renewDue) => runner.hold(runId, renewDue),
     settle: (runId, leaseToken, outcome) =>
       runner.finishChat(runId, leaseToken, crateOutcome(outcome)),
     finishRun: (runId, leaseToken, outcome) => runner.finishRun(runId, leaseToken, outcome),

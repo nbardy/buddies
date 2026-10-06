@@ -177,6 +177,7 @@ export function createRunner(options: {
   let paused = true;
   let timer: ReturnType<typeof setInterval> | null = null;
   let unsubscribe: () => void = () => undefined;
+  const holds = new Map<string, () => Promise<void>>();
 
   // Pattern: wake-on-write (docs/patterns.md#wake-on-write)
   function wake(): void {
@@ -200,6 +201,12 @@ export function createRunner(options: {
     // indexed transaction (the crate's cron math, with IANA timezones). This replaced scheduler.ts,
     // its legacy executor and its 1 s tick, and since 2026-10-06 the `schedule` run kind.
     await core.dueSchedules(new Date().toISOString());
+    // Pattern: lease-heartbeat (docs/patterns.md#lease-heartbeat)
+    // The gate never ends a run this process drives. It compares leases with the WALL clock, so a
+    // lease that lapsed while this process was frozen (a 306 s macOS sleep, 2026-10-06 16:53Z) is
+    // no sign of a dead holder, and no timer order puts the heartbeat before the gate at wake.
+    // Renewing every live hold first does. Guard: run-lease.test.ts "...across a freeze...".
+    await Promise.all(Array.from(holds.values(), (renewDue) => renewDue()));
     for (let claim = await core.claimRun(budgets); claim; claim = await core.claimRun(budgets))
       void execute(claim);
   }
@@ -644,6 +651,14 @@ export function createRunner(options: {
     chatDeadlineMs: options.chatDeadlineMs,
     budgets,
     renew,
+
+    /** A live turn here executes `runId`: claims await `renewDue` until the release (`drain`). */
+    hold(runId: string, renewDue: () => Promise<void>): () => void {
+      holds.set(runId, renewDue);
+      return () => {
+        if (holds.get(runId) === renewDue) holds.delete(runId);
+      };
+    },
 
     /**
      * `adopted`: runs whose provider execution this backend adopted from the one before it

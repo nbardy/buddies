@@ -326,6 +326,8 @@ type RunExecution = RunRecord & {
   readonly deadlineTimer: { current: ReturnType<typeof setTimeout> | undefined };
   /** Told once the settle landed: a live runner-owned turn's `runCoordination` resolves here. */
   readonly landed: () => void;
+  /** Ends the runner's `hold`: from now on the claim gate may end this run. */
+  readonly release: () => void;
 };
 
 const nothingWaits = () => undefined;
@@ -348,7 +350,10 @@ const SETTLE_RUN: {
 };
 
 /** This holder's view of its run's lease: renewed at `renewedAt`, a renewal in flight, or gone. */
-type LeaseHold = { t: 'held'; renewedAt: number } | { t: 'renewing' } | { t: 'lost' };
+type LeaseHold =
+  | { t: 'held'; renewedAt: number }
+  | { t: 'renewing'; landed: Promise<void> }
+  | { t: 'lost' };
 
 export interface BuddyTurnPolicySeed {
   readonly memorySnapshot: MemorySnapshot | null;
@@ -585,13 +590,15 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   /** Hold the run a turn executes under. Its lease was just claimed, or renewed at adoption. */
   private arm(run: RunRecord, landed: () => void = nothingWaits): void {
-    this.execution = { ...run, deadlineTimer: { current: undefined }, landed };
+    const release = this.buddies.hold(run.runId, () => this.renewDue());
+    this.execution = { ...run, deadlineTimer: { current: undefined }, landed, release };
     this.lease = { t: 'held', renewedAt: Date.now() };
   }
 
   private disarm(): RunExecution | null {
     const execution = this.execution;
     if (execution) clearTimeout(execution.deadlineTimer.current);
+    execution?.release();
     this.execution = null;
     this.lease = null;
     return execution;
@@ -718,11 +725,17 @@ export class BuddyTurnPolicy implements TurnPolicy {
   // with no provider progress still dies of the idle timer" and "a holder that dies while the
   // backend stays up is cleared within the lease time".
   bridgeAlive(): void {
+    void this.renewDue();
+  }
+
+  // Also awaited before every claim gate (runner `drain`). Never rejects: that would stop claims.
+  private renewDue(): Promise<void> {
     const { execution, lease } = this;
-    if (!execution || lease?.t !== 'held') return;
-    if (Date.now() - lease.renewedAt < BUDDY_RUN_LEASE_RENEW_MS) return;
-    this.lease = { t: 'renewing' };
-    void this.buddies.renewLease(execution.runId, execution.leaseToken).then((renewal) => {
+    if (!execution || !lease || lease.t === 'lost') return Promise.resolve();
+    if (lease.t === 'renewing') return lease.landed;
+    if (Date.now() - lease.renewedAt < BUDDY_RUN_LEASE_RENEW_MS) return Promise.resolve();
+    const { runId, leaseToken } = execution;
+    const landed = this.buddies.renewLease(runId, leaseToken).then((renewal) => {
       if (this.execution !== execution) return; // drained meanwhile; the settle owns it now
       switch (renewal.kind) {
         case 'renewed':
@@ -744,6 +757,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
           return;
       }
     });
+    this.lease = { t: 'renewing', landed };
+    return landed;
   }
 
   stop(): boolean {
