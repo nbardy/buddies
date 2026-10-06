@@ -143,4 +143,36 @@ impl ConversationRecords {
     ) -> Result<Option<ConversationRecord>> {
         call(&self.records, move |r| r.complete_initial_message_dispatch(&conversation_id, &token, at)).await
     }
+
+    /// Queue an owner message at the back. false = the conversation is missing or deleted, or `id` exists.
+    #[napi]
+    pub async fn put_input(&self, conversation_id: String, id: String, body: String, queued_at: String) -> Result<bool> {
+        call(&self.records, move |r| r.put_input(&conversation_id, &id, &body, &queued_at)).await
+    }
+
+    #[napi]
+    pub async fn promote_input(&self, id: String) -> Result<bool> {
+        call(&self.records, move |r| r.promote_input(&id)).await
+    }
+
+    #[napi]
+    pub async fn mark_input_executing(&self, id: String, at: String) -> Result<bool> {
+        call(&self.records, move |r| r.mark_input_executing(&id, &at)).await
+    }
+
+    /// true exactly once per row.
+    #[napi]
+    pub async fn settle_input(&self, id: String) -> Result<bool> {
+        call(&self.records, move |r| r.settle_input(&id)).await
+    }
+
+    #[napi]
+    pub async fn list_inputs(&self, conversation_id: String) -> Result<Vec<ConversationInput>> {
+        call(&self.records, move |r| r.list_inputs(&conversation_id)).await
+    }
+
+    #[napi]
+    pub async fn conversations_with_inputs(&self) -> Result<Vec<String>> {
+        call(&self.records, |r| r.conversations_with_inputs()).await
+    }
 }

@@ -27,7 +27,11 @@ use std::path::Path;
 
 // 2 (T23b): `kind` is the stored `ConversationKind` JSON (T09's record v2), replacing the
 // derived general/buddy/buddy_builder tag and its `buddy_id` column.
-pub const RECORDS_SCHEMA_VERSION: i64 = 2;
+//
+// 3 (step 6, durable owner messages): `conversation_input`, the pending owner messages of ordinary
+// chats and the Builder (Buddy conversations carry theirs as crate `chat` runs). Additive, but an
+// older build refuses a v3 file, so the open takes a pre-migration copy first (`backup_v2`).
+pub const RECORDS_SCHEMA_VERSION: i64 = 3;
 
 /// A claimed-but-unacknowledged first-message delivery is re-claimable after this long.
 pub const INITIAL_MESSAGE_DISPATCH_LEASE_MS: i64 = 15_000;
@@ -60,6 +64,19 @@ CREATE TABLE IF NOT EXISTS conversation_session (
   PRIMARY KEY (provider, session_id, conversation_id)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS conversation_session_by_conversation ON conversation_session(conversation_id);
+-- One row per owner message that was sent and has not finished its turn. `body` is opaque to this
+-- crate (the server's QueuedMessage, provenance and both wordings); the row's identity, order and
+-- `executing_at` are what the store decides. `position` is the queue order: push back = max + 1,
+-- promote = min - 1.
+CREATE TABLE IF NOT EXISTS conversation_input (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(id) > 0),
+  conversation_id TEXT NOT NULL REFERENCES conversation_record(conversation_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  position INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  queued_at TEXT NOT NULL,
+  executing_at TEXT,
+  UNIQUE (conversation_id, position)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS conversation_record_reject (
   source_path TEXT PRIMARY KEY NOT NULL,
   reason TEXT NOT NULL,
@@ -234,6 +251,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     // store on 2026-09-30. F_FULLFSYNC on checkpoints keeps the main file consistent.
     conn.pragma_update(None, "checkpoint_fullfsync", "ON")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    // The v2 -> v3 step takes its copy BEFORE the first write, and outside any transaction
+    // (the copy statement refuses one). Two processes can both see v2 and both copy; each copy is
+    // consistent, so the race costs a file, not data.
+    backup_v2(&conn, path)?;
     // Pattern: fix-guards (docs/patterns.md#fix-guards). Two connections opening a NEW file at
     // once (two server processes, two test stores) both saw no `records_schema` row and the
     // second INSERT failed (`UNIQUE constraint failed: meta.key`, 2 of 30 concurrent opens,
@@ -242,12 +263,33 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute_batch(SCHEMA)?;
     tx.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('records_schema', ?1)", [RECORDS_SCHEMA_VERSION])?;
+    tx.execute("UPDATE meta SET value = ?1 WHERE key = 'records_schema' AND value = 2", [RECORDS_SCHEMA_VERSION])?;
     let version: i64 = tx.query_row("SELECT value FROM meta WHERE key = 'records_schema'", [], |r| r.get(0))?;
     tx.commit()?;
     match version {
         RECORDS_SCHEMA_VERSION => Ok(conn),
         other => Err(RecordsError::Schema(path.display().to_string(), other)),
     }
+}
+
+/// The pre-migration copy (owner rule, 2026-10-05: a migration without its way back never runs).
+/// A v3 file is refused by a v2 build, so before the first v3 write a file still at v2 is copied
+/// next to itself, named after the schema it holds and the time. The copy is one consistent file
+/// that includes the WAL. A failed copy (a full disk) fails the open. A new or current file takes
+/// no copy. Guard: `a_v2_file_is_copied_then_migrated_with_its_records_intact`.
+fn backup_v2(conn: &Connection, path: &Path) -> Result<()> {
+    let has_meta: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'meta')", [], |r| r.get(0))?;
+    if !has_meta {
+        return Ok(());
+    }
+    let version: Option<i64> = conn.query_row("SELECT value FROM meta WHERE key = 'records_schema'", [], |r| r.get(0)).optional()?;
+    if version != Some(2) {
+        return Ok(());
+    }
+    let backup = format!("{}.before-input-v3.records-v2.{}.sqlite", path.display(), chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ"));
+    conn.execute("VACUUM INTO ?1", [&backup])?;
+    eprintln!("[records] schema 2 -> 3: pre-migration copy at {backup}");
+    Ok(())
 }
 
 impl Records {
@@ -556,6 +598,64 @@ impl Records {
             }
         })?;
         Ok(found.record_if(|done| done))
+    }
+
+    // --- pending owner messages (ordinary chats and the Builder) --------------------------------
+    //
+    // Pattern: durable-intake (docs/patterns.md#durable-intake). The row is written when the owner
+    // sends, before the send is acknowledged, so a message queued behind a running turn survives
+    // any backend exit. `executing_at` is stamped just before the turn spawns (the August rule: an
+    // executed input is never replayed): at boot a row without it goes back to the queue, one with
+    // it is dropped by the server, because its turn was adopted from its journal or ended visibly.
+
+    /// Queue a message at the back. false = the conversation is missing or deleted, or `id` exists.
+    pub fn put_input(&mut self, conversation_id: &str, id: &str, body: &str, queued_at: &str) -> Result<bool> {
+        let n = self.conn.execute(
+            "INSERT OR IGNORE INTO conversation_input (id, conversation_id, position, body, queued_at)
+             SELECT ?1, ?2, coalesce((SELECT max(position) FROM conversation_input WHERE conversation_id = ?2), 0) + 1, ?3, ?4
+             WHERE EXISTS (SELECT 1 FROM conversation_record WHERE conversation_id = ?2 AND status = 'active')",
+            params![id, conversation_id, body, queued_at],
+        )?;
+        Ok(n == 1)
+    }
+
+    /// Move a not-yet-executing message first. false = unknown, or already executing.
+    pub fn promote_input(&mut self, id: &str) -> Result<bool> {
+        let n = self.conn.execute(
+            "UPDATE conversation_input SET position = (SELECT min(position) FROM conversation_input i WHERE i.conversation_id = conversation_input.conversation_id) - 1
+             WHERE id = ?1 AND executing_at IS NULL",
+            [id],
+        )?;
+        Ok(n == 1)
+    }
+
+    /// The turn is about to spawn. A second call keeps the first stamp. false = unknown.
+    pub fn mark_input_executing(&mut self, id: &str, at: &str) -> Result<bool> {
+        let n = self.conn.execute("UPDATE conversation_input SET executing_at = coalesce(executing_at, ?2) WHERE id = ?1", params![id, at])?;
+        Ok(n == 1)
+    }
+
+    /// Delete the row (the message finished, was cancelled, or its executed turn is accounted for).
+    /// true exactly once per row.
+    pub fn settle_input(&mut self, id: &str) -> Result<bool> {
+        Ok(self.conn.execute("DELETE FROM conversation_input WHERE id = ?1", [id])? == 1)
+    }
+
+    /// One conversation's messages in queue order.
+    pub fn list_inputs(&self, conversation_id: &str) -> Result<Vec<ConversationInput>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT id, conversation_id, body, queued_at, executing_at FROM conversation_input WHERE conversation_id = ?1 ORDER BY position",
+        )?;
+        let rows = stmt.query_map([conversation_id], |r| {
+            Ok(ConversationInput { id: r.get(0)?, conversation_id: r.get(1)?, body: r.get(2)?, queued_at: r.get(3)?, executing_at: r.get(4)? })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Every conversation that holds a message: what boot hydrates.
+    pub fn conversations_with_inputs(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare_cached("SELECT DISTINCT conversation_id FROM conversation_input ORDER BY conversation_id")?;
+        Ok(stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// `EXPLAIN QUERY PLAN` of every statement this module runs, except `list_summaries`' two

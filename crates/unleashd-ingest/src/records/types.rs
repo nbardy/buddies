@@ -353,3 +353,15 @@ pub enum SetConfigOutcome {
     },
     Missing,
 }
+
+/// One owner message that has been sent and has not finished its turn (`conversation_input`).
+/// `body` is the server's JSON, opaque here.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversationInput {
+    pub id: String,
+    pub conversation_id: String,
+    pub body: String,
+    pub queued_at: String,
+    pub executing_at: Option<String>,
+}
