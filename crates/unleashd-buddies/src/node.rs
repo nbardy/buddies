@@ -182,6 +182,12 @@ impl BuddiesCore {
         call(&self.store, move |s| s.enqueue_chat(&actor, input)).await
     }
 
+    /// The owner promoted a queued message: claimed before the conversation's other queued chats.
+    #[napi]
+    pub async fn promote_chat(&self, actor: Actor, run_id: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.promote_chat(&actor, &run_id)).await
+    }
+
     /// `channel_read {threadId, follow}`: subscribe (or, with no conversation, unsubscribe) this
     /// Buddy's conversation to a thread and return its unread posts, marked read (deliveries.rs).
     #[napi]

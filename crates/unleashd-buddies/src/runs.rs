@@ -43,19 +43,15 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 // chat that asked, owner chats included, so a human chat's queue holds real work. What keeps the
 // owner from waiting behind automation in their own chat is `owner_first`: a non-chat run (a
 // delivery, or a resumed request) waits while a `chat` run (an owner message for that
-// conversation) is queued. The message
-// still typed behind a running turn lives in the runtime's in-memory queue and has no run yet; it
-// gets one the moment the turn ends (turns/runner.ts `settleOutcome` calls processQueue BEFORE
-// the settle lands), so this clause is what the claim gate sees in that window. The owner's
-// messages typed while a turn runs therefore go before the returns that queued behind it.
-// Guard: buddies-v2 "a worker's answer returns to the owner chat that asked …".
+// conversation) is queued. Owner messages are durable at send (step 6): a message typed behind a
+// running turn is a queued chat run carrying its text, so this clause reads it exactly.
 //
-// Fix-guard (2026-10-06): a queued chat run is claimed only through the backend's in-memory chat
-// ticket, so one left queued by a backend that died can never run, and an unbounded clause would
-// hold every return in that conversation behind it forever. Only a chat run queued in the last
-// 15 minutes counts; past that, a live owner message loses only its place ahead of returns. Step 6
-// (owner messages durable at send, task_01a11013-bac6) makes queued chat runs claimable after a
-// restart and can drop this bound. Guard: `an_orphaned_owner_message_stops_holding_returns`.
+// There is NO age bound. From 2026-10-06 (0f13025) to step 6 a queued chat run counted only for 15
+// minutes: it was claimable only through the issuing backend's in-memory ticket, so a run left
+// queued by a dead backend could never run and an unbounded clause would have held every return in
+// that conversation forever. Now the next backend claims it (the runner hands its body to the
+// conversation), so a queued owner message always either runs or is cancelled, and it still goes
+// first after a restart. Guard: `a_queued_owner_message_survives_a_restart_and_still_goes_first`.
 const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
@@ -74,7 +70,6 @@ const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.conversation_id IS NOT NULL AND r.input_kind <> 'chat' AND EXISTS (
         SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
           AND c.input_kind = 'chat' AND c.status = 'queued'
-          AND c.created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '-15 minutes')
     ) THEN json_object('kind','owner_first')
     WHEN coalesce(activity.active, 0) >= b.max_active_runs THEN json_object(
         'kind','pool_full',
@@ -221,6 +216,27 @@ impl Store {
                 },
                 body: Some(input.body),
             })
+        })
+    }
+
+    /// The owner promoted a queued message: it is claimed before every other queued chat of its
+    /// conversation. Claims go in `ready_at` order, so the durable order IS the queue order and it
+    /// survives a restart; `ready_at` moves 1 ms before the earliest queued chat. Idempotent.
+    pub fn promote_chat(&mut self, actor: &Actor, run_id: &str) -> Result<Run> {
+        self.write(|tx| {
+            let run = get_run(tx, run_id)?;
+            require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: run.buddy_id.clone() })?;
+            let first: Option<String> = tx.query_row(
+                "SELECT min(ready_at) FROM run WHERE conversation_id = ?1 AND input_kind = 'chat' AND status = 'queued'",
+                [&run.conversation_id],
+                |r| r.get(0),
+            )?;
+            if let (RunStatus::Queued, Some(first)) = (run.status, first) {
+                if first != run.ready_at {
+                    tx.execute("UPDATE run SET ready_at = ?2 WHERE id = ?1", params![run_id, plus_ms(&first, -1)?])?;
+                }
+            }
+            get_run(tx, run_id)
         })
     }
 

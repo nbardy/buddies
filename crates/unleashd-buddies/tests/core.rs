@@ -466,10 +466,12 @@ fn a_queued_owner_message_goes_before_a_delivery_in_the_same_conversation() {
     assert_eq!(delivery(s).waiting, Some(RunWaiting::ConversationBusy), "running, the chat holds the conversation");
 }
 
-// Fix-guard (2026-10-06): a chat run orphaned in `queued` by a dead backend has no ticket left to
-// claim it; `owner_first` must stop counting it, or every delivery in that chat waits forever.
+// Pattern: durable-intake (docs/patterns.md#durable-intake). F5 (step 6): a queued owner message
+// goes before the deliveries behind it however old it is. The 15-minute bound (0f13025) existed
+// only because an orphaned chat run could never be claimed; the next backend claims it now.
+// Guard: with the bound back, the 2-hour-old message below stops holding the delivery.
 #[test]
-fn an_orphaned_owner_message_stops_holding_returns() {
+fn a_queued_owner_message_survives_a_restart_and_still_goes_first() {
     let mut f = fixture();
     let path = f.path.clone();
     let s = &mut f.store;
@@ -484,7 +486,21 @@ fn an_orphaned_owner_message_stops_holding_returns() {
     drop(conn);
     let rows = s.list_run_rows(&Actor::Owner, ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
     let delivery = rows.iter().find(|r| matches!(r.input, RunInput::Deliver { .. })).unwrap();
-    assert_eq!(delivery.waiting, None, "an orphaned owner message no longer holds the delivery");
+    assert_eq!(delivery.waiting, Some(RunWaiting::OwnerFirst), "an old owner message still goes first");
+    let claimed = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert_eq!(claimed.run.id, chat.id, "the queued message is the claimable run");
+}
+
+// Step 6: promoting a queued message makes it the first claim of its conversation, durably.
+#[test]
+fn a_promoted_chat_is_claimed_before_the_chats_queued_ahead_of_it() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let first = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "c1")).unwrap();
+    let second = s.enqueue_chat(&Actor::Owner, chat("mid", "t2", "c1")).unwrap();
+    s.promote_chat(&Actor::Owner, &second.id).unwrap();
+    assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.id, second.id);
+    assert_ne!(first.id, second.id);
 }
 
 // Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01 (task_01a0f7ff-bbd6): a background
