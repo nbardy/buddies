@@ -212,6 +212,10 @@ async function world(reopen?: string) {
   const stopped = new Set<number>();
   // A delivery prompt ends each post with `(post id[, thread root], channel id)`; the fake Buddy
   // answers the NEWEST one in its thread, as a real Buddy would (`silent` turns post nothing).
+  // The fake Buddy answers an owner post or a post that @mentions someone; a plain Buddy post or a
+  // notice it was merely delivered gets no answer (a real Buddy may end its turn silently).
+  const answersLastPost = (prompt: string) =>
+    /^\[[^\]]+\] (the owner:|[^:]+: .*\[@)/s.test(prompt.slice(prompt.lastIndexOf('\n[20') + 1));
   const deliveredPost = (prompt: string) => {
     const lines = [
       ...prompt.matchAll(/\((post_[\w-]+)(?:, thread (post_[\w-]+))?, channel ([\w-]+)\)/g),
@@ -259,7 +263,7 @@ async function world(reopen?: string) {
           return;
         }
         const answer = answers.get(turn.n) ?? `Answer ${turn.n}`;
-        const seat = deliveredPost(request.prompt);
+        const seat = answersLastPost(request.prompt) ? deliveredPost(request.prompt) : null;
         if (seat && !silent.has(turn.n)) {
           const posted = await call(turn.mcp, 'post', {
             channel: { id: seat[1] },
@@ -1088,7 +1092,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
       { kind: 'id', id: w.general.id },
       {
         kind: 'inform',
-        body: 'Lead, which date?',
+        body: `[@Lead](buddy:${w.lead.id}) which date?`,
         replyToId: root.id,
         evidence: [],
         mentions: [],
@@ -1102,7 +1106,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
     assert.equal(w.turns[1].request.resumeSessionId, 'native-1', 'the follow-up resumes the seat');
     assert.match(
       w.turns[1].request.prompt,
-      /New posts in threads you follow[\s\S]*Lead, which date\?/,
+      /New posts in threads you follow[\s\S]*which date\?/,
       'a resumed seat is sent only what is new'
     );
     assert.doesNotMatch(w.turns[1].request.prompt, /plan the launch/, 'not the whole thread again');
@@ -1301,7 +1305,6 @@ test("an effort pick keeps the seat's session; a provider pick opens a new seat"
     assert.match(w.turns[1].request.prompt, /New posts in threads you follow/);
     assert.doesNotMatch(w.turns[1].request.prompt, /Plan the barrel solver/, 'only what is new');
 
-    for (let i = 0; i < 12; i++) await say(`owner note ${i}`, root.id);
     await mention('now on claude', createDefaultConversationConfig('claude'), 3);
     const fresh = w.turns[2].request;
     assert.equal(fresh.harness, 'claude');
@@ -4252,7 +4255,13 @@ test('follow (a): posts the caller has not read come back at once', async () => 
       'only the post Lead had not read: not its own root'
     );
     assert.ok(ms < FOLLOW_GRACE_MS, `returned without the wait (${ms} ms)`);
-    assert.deepEqual(await deliveries(w), [], 'posted before the follow: nothing to deliver');
+    // Lead's own root subscribed its conversation (posting follows, step 5), so the designer's
+    // post was queued as a delivery, and the follow's read consumed it: no model turn.
+    assert.deepEqual(
+      (await deliveries(w)).map((r) => r.errorCode),
+      ['consumed'],
+      'posted before the follow: its delivery was read, not run'
+    );
   } finally {
     await w.close();
   }

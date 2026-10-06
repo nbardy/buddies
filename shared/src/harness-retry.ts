@@ -21,6 +21,8 @@ export function isHarnessRetryFailure(text: string): boolean {
     // render without recovery. Guard: ReplyRetry renders for failed should-reply checks.
     /could not decide whether to reply/i.test(text) ||
     /Model is unavailable for/i.test(text) ||
+    // A provider's capacity error ("Selected model is at capacity"): retry on another model.
+    /at capacity/i.test(text) ||
     /completed the turn with reason:\s*error/i.test(text) ||
     /not supported when using/i.test(text)
   );

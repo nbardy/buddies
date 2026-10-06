@@ -338,8 +338,15 @@ export function createRunner(options: {
     kind: 'turn',
     prompt,
     owner,
-    place: (pick) =>
-      host.openSeat({ buddyId: run.buddyId, workspaceId: run.workspaceId, rootId, pick }),
+    // The pick as the owner made it, not as J resolved it: a "default model" pick must stay
+    // default in the seat's record (the run row keeps the model that answered).
+    place: () =>
+      host.openSeat({
+        buddyId: run.buddyId,
+        workspaceId: run.workspaceId,
+        rootId,
+        pick: run.config,
+      }),
   });
 
   /**
