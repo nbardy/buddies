@@ -1126,7 +1126,14 @@ test('plain @Name mentions: a Buddy post stores the link form, wakes that Buddy,
     const root = await w.post(
       OWNER,
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: `[@Lead](buddy:${w.lead.id}) kickoff`, evidence: [], broadcast: false, key: 'plain-root' }
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) kickoff`,
+        evidence: [],
+        broadcast: false,
+        mentions: [],
+        key: 'plain-root',
+      }
     );
     let result: { body: string; mentioned: unknown; unresolved: unknown } | undefined;
     w.during.set(1, async (turn) => {
