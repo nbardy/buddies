@@ -35,8 +35,17 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 // claim: on 2026-10-01 no-op `reply` runs for answers to an owner chat's requests sat behind the
 // owner's turn up to 2h44m and read as "blocked" (a Buddy offered to cancel the owner's GPU turn).
 // The fix is upstream, not a special case in this gate: the route is fixed when the request is
-// sent (types.rs `Returns`), and an Inbox answer creates no run. Guard: buddies-v2 "an answer to
-// a request sent from a human chat starts no run and never queues behind that chat".
+// sent (types.rs `Returns`).
+//
+// SUCCESSOR 2026-10-06 (owner decision A, delivery design D0/D3): an answer now DOES run in the
+// chat that asked, owner chats included, so a human chat's queue holds real work. What keeps the
+// owner from waiting behind automation in their own chat is `owner_first`: a non-chat run waits
+// while a `chat` run (an owner message admitted for that conversation) is queued. The message
+// still typed behind a running turn lives in the runtime's in-memory queue and has no run yet; it
+// gets one the moment the turn ends (turns/runner.ts `settleOutcome` calls processQueue BEFORE
+// the settle lands), so this clause is what the claim gate sees in that window. The owner's
+// messages typed while a turn runs therefore go before the returns that queued behind it.
+// Guard: buddies-v2 "a worker's answer returns to the owner chat that asked …".
 const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
@@ -47,6 +56,10 @@ const WAITING_REASON_SQL: &str = r#"CASE
         SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
           AND c.status IN ('running','cancel_requested')
     ) THEN json_object('kind','conversation_busy')
+    WHEN r.conversation_id IS NOT NULL AND r.input_kind <> 'chat' AND EXISTS (
+        SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
+          AND c.input_kind = 'chat' AND c.status = 'queued'
+    ) THEN json_object('kind','owner_first')
     WHEN coalesce(activity.active, 0) >= b.max_active_runs THEN json_object(
         'kind','pool_full',
         'active',coalesce(activity.active, 0),

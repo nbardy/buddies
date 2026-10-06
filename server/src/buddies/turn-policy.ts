@@ -229,6 +229,7 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
     this.revoke();
     return true;
   }
+  ownerStopped(): void {}
   dropWaitingTurn(): boolean {
     return false;
   }
@@ -278,6 +279,22 @@ export function sessionAudienceKey(
 }
 
 // --- Buddy ---------------------------------------------------------------------
+
+// Pattern: sum-types (docs/patterns.md#sum-types)
+/**
+ * The origin of a runner-owned turn that returns into an existing conversation, by placement. It
+ * names which provider-session audience the turn resumes (`sessionAudienceKey`) and whether it
+ * can hold owner authority (`startTurn`: only `owner_input`).
+ *   foreground: `buddy_post`. The owner chat's own session (audience = this thread) resumes, so
+ *     the lead keeps its context instead of forking a fresh session (delivery design D9, 1(d)).
+ *     A worker's answer must NEVER run with the owner's grant in the owner's chat: `buddy_post`
+ *     is the B1 origin, "Buddy-authored text, conversation audience, no owner authority".
+ *   background: `buddy_message`, as before: a worker conversation's audience is its work.
+ */
+const RETURN_ORIGIN: { readonly [V in BuddyVisibility]: TurnInput['origin'] } = {
+  foreground: 'buddy_post',
+  background: 'buddy_message',
+};
 
 /**
  * The run a Buddy turn executes under, as data: a foreground chat's admitted run or a
@@ -378,9 +395,20 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   // --- admission -------------------------------------------------------------
 
-  gate(_input: TurnInput, fromQueue: boolean): TurnGate {
-    // A runner-owned run already holds its slot; only chat turns queue for one.
-    if (this.execution) return 'send';
+  gate(input: TurnInput, fromQueue: boolean): TurnGate {
+    // A run is still armed: either this very turn's own send (a runner-owned run holds its slot
+    // already; only chat turns queue for one), or the PREVIOUS turn's run whose settle has not
+    // landed yet (turns/runner.ts `settleOutcome` starts the queue head BEFORE the settle).
+    // Starting an owner message under that old run left it without a run of its own: no lease,
+    // no deadline, and invisible to the claim gate, which then saw the conversation free and
+    // claimed a queued RETURN beside it (delivery design D3, owner decision A, 2026-10-06). So an
+    // owner message waits for the settle, then gets its own chat run, which `owner_first` sees.
+    if (this.execution) {
+      if (input.inputId === this.execution.runId) return 'send';
+      if (!fromQueue) return 'enqueue';
+      this.host.releaseQueueHead(false);
+      return 'wait';
+    }
     // Chat turns are admitted through the queue, so a turn waiting for a run slot is visible as
     // pending and later sends line up behind it. The queue keeps the input's provenance: a
     // 'buddy_post' seat turn dropped here would come back 'unknown'.
@@ -533,7 +561,6 @@ export class BuddyTurnPolicy implements TurnPolicy {
       context,
       conversationId: this.host.id,
       owner: input.origin === 'owner_input',
-      visibility: this.host.visibility(),
     });
     this.grant = tools.grant;
     return { mcpServers: tools.servers, extraArgs: HARNESS_MEMORY_OFF[config.provider] };
@@ -591,7 +618,9 @@ export class BuddyTurnPolicy implements TurnPolicy {
   settle(outcome: ExecutionOutcome): Promise<void> {
     const execution = this.disarm();
     if (!execution) return Promise.resolve();
-    return SETTLE_RUN[execution.kind](this.buddies, execution, outcome).then(execution.landed);
+    return SETTLE_RUN[execution.kind](this.buddies, execution, outcome)
+      .then(execution.landed)
+      .then(() => this.host.processQueue()); // the owner message `gate` held for this settle
   }
 
   spawned(review: { attemptId: string; messageStart: number }): void {
@@ -720,6 +749,17 @@ export class BuddyTurnPolicy implements TurnPolicy {
     return true;
   }
 
+  // Pattern: route-at-send (docs/patterns.md#route-at-send)
+  // Delivery design D1: Stop means "quiet down now". Cancelling only the running turn would let
+  // the next queued return start a moment later, in the chat the owner just silenced. The posts
+  // stay unread, so they come back with the Buddy's next read. Only the owner's Stop button gets
+  // here: `stop()` also runs for an interrupt-and-send, where the queued returns must survive.
+  ownerStopped(): void {
+    this.buddies.cancelQueuedReturns(this.host.id).catch((error) => {
+      console.error(`[${this.host.id}] could not cancel queued returns`, error);
+    });
+  }
+
   // --- runner-owned runs --------------------------------------------------------
 
   /**
@@ -756,7 +796,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     };
     this.host.once('buddy-turn-failed', heard);
     try {
-      this.host.send(sameEitherWay(content), { origin: 'buddy_message', inputId: runId });
+      this.host.send(sameEitherWay(content), { origin: RETURN_ORIGIN[this.host.visibility()], inputId: runId });
     } catch (error) {
       this.disarm();
       return Promise.reject(error);

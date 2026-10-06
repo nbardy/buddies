@@ -169,13 +169,21 @@ were never work, and anyone reading the queue sees them as blocked.
 and store the decision as a sum type on it. Downstream code reads the stored route and never re-derives it;
 a route that needs no work creates no queued row at all.
 **Here:** `Returns = Inbox | Conversation(id)` (crate `types.rs`) is fixed by the sending turn's grant
-(`returnsFor` in `server/src/buddies/policy-port.ts`, from the conversation's visibility, which never
-changes) and kept on the request (`post.return_conversation_id`; NULL on a request is Inbox). The crate's
-`send_back` (`posts.rs`) is the one place an answer or failure notice becomes a run; Inbox enqueues none.
+(`returnsFor` in `server/src/buddies/policy-port.ts`) and kept on the request (`post.return_conversation_id`;
+NULL on a request is Inbox). The crate's `send_back` (`posts.rs`) is the one place an answer or failure
+notice becomes a run; Inbox enqueues none. **Since 2026-10-06 (owner decision A) `returnsFor` is always
+`Conversation(this conversation)`**, a foreground owner chat included; Inbox is left only for grants that
+belong to no conversation (the memory reviewer). Before that a foreground chat got Inbox, so the lead in the
+owner's chat could not continue when its worker finished. A return into a human chat is real work, ordered
+behind the owner: `owner_first` in the claim gate (`WAITING_REASON_SQL`), Stop cancels queued returns
+(`cancelQueuedReturns`), and the turn resumes the chat's session without the owner grant
+(`RETURN_ORIGIN` in `buddies/turn-policy.ts`).
 Replaced the runner's post-claim `placement()` and its `mailbox` job: on 2026-10-01 nine no-op replies
 sat `conversation_busy` behind one owner turn for up to 2h44m and a Buddy offered to cancel that turn.
-Decision: `agent_notes/2026-10-01_return-route-decision.md`. Guards: buddies-v2 "an answer to a request
-sent from a human chat starts no run and never queues behind that chat"; crate
+Decision: `agent_notes/2026-10-01_return-route-decision.md`. Guards (rewritten for decision A): buddies-v2 "a worker's answer returns to the owner chat that asked, after
+its running turn and after an owner message typed meanwhile", "one full chat turn …" (return session and
+no owner grant), "the owner's Stop cancels the queued return …"; crate
+`a_queued_owner_message_goes_before_a_return_in_the_same_conversation` and, for the Inbox route that is left,
 `an_inbox_request_starts_no_run_for_its_answer_or_failure`.
 **Read answers:** a requester that reads its answer settles its own queued return run (`settle_read_returns`,
 `posts.rs`, `consumed`); guard `reading_an_answer_settles_its_queued_return_run`.

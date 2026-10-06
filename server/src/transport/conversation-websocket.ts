@@ -225,7 +225,7 @@ export function registerConversationWebSocket(
           }
 
           case 'stop_conversation':
-            dependencies.registry.get(data.conversationId)?.stop();
+            dependencies.registry.get(data.conversationId)?.ownerStop();
             break;
 
           case 'delete_conversation': {

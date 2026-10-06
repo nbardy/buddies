@@ -339,7 +339,7 @@ a shared repository.
 | Separate Worker store, supervisor or memory system | Duplicates existing identity and lifecycle authority | Worker behavior must fit and improve shared boundaries |
 | Managed Document plus employee knowledge CRUD | Ordinary files/search already carry briefs and detailed knowledge | File discoverability, permissions and lifetime need care |
 | Separate Batch/Assignment truth for every handoff | Existing Task ownership and relationships express the motivating cases | Richer work graphs require their own demonstrated use case |
-| Autonomous turns in human chat | Couples owner access/history to background coordination | Background work needs its own inspectable execution context |
+| Autonomous turns in human chat | Couples owner access/history to background coordination | Background work needs its own inspectable execution context. **Superseded 2026-10-06 (owner decision A): see "October 6 successor" below; this row is kept as history.** |
 | New Worker lifetime budget ledger and candidate-acceptance protocol | The lean redo intentionally retained baseline work limits and completion | Advanced supervision and exact version acceptance are not promised |
 
 The first and third choices are explicit owner corrections. The remaining
@@ -396,6 +396,25 @@ requires the background lead context described in the motivating case above;
 the current implementation does not yet meet that complete contract. See the
 [dated implementation evidence](../../agent_notes/buddies/20260913_background-returns-inline-links.md)
 for tests, source hashes and the remaining live-provider verification limit.
+
+**October 6 successor (owner decision A, 2026-10-06; supersedes the September 13
+background-branch return and the "Autonomous turns in human chat" row above).**
+An answer, failure notice or follow wake now returns to the conversation that
+asked, an owner chat included. Reason: the owner and lead agreed the work in that
+chat, and a lead that cannot continue there when its worker finishes (U2) leaves
+the owner to relay results by hand. The September 13 concern, that the human must
+still be able to talk to the lead while work is in flight, is kept by ordering
+instead of exclusion: (1) an owner message queued in that chat runs before any
+queued return (`owner_first` in the claim gate); (2) the owner's Stop cancels that
+conversation's queued returns, whose posts stay unread (D1); (3) a return turn
+resumes the chat's own provider session and is Buddy-authored, so a worker's
+answer never runs with the owner's grant (D9, guard B1). Background
+conversations return as before. Accepted by the owner as decisions A, B and C of
+the delivery design review; design, alternatives and revisit conditions:
+`agent_notes/2026-10-06_delivery-model-design.md` (D0, D1, D3, D9; uncommitted at
+the time of writing). Revisit if the owner finds automated turns in their chat
+noisy even with these three protections. The September 13 text above is kept as
+history, not deleted.
 
 ## Reading map and decision evidence
 
