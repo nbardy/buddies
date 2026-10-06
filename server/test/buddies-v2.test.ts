@@ -1118,6 +1118,39 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
   }
 });
 
+// 2026-10-06: a Buddy wrote plain `@Wave Simulation Lead` and nobody was mentioned (no chip, no
+// wake) while `post` reported success. `post` now stores the link form and reports whom it woke.
+test('plain @Name mentions: a Buddy post stores the link form, wakes that Buddy, reports unresolved', async () => {
+  const w = await world();
+  try {
+    const root = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      { kind: 'inform', body: `[@Lead](buddy:${w.lead.id}) kickoff`, evidence: [], broadcast: false, key: 'plain-root' }
+    );
+    let result: { body: string; mentioned: unknown; unresolved: unknown } | undefined;
+    w.during.set(1, async (turn) => {
+      const posted = await call(turn.mcp, 'post', {
+        channel: { id: w.general.id },
+        body: `@${w.designer.name.toUpperCase()} please review; ask @Nobody Here, mail a@${w.lead.name}.com, \`@${w.lead.name}\` stays code`,
+        key: 'plain-mention',
+      });
+      assert.equal(posted.isError, false, posted.text);
+      result = posted.value as typeof result;
+    });
+    w.announce(root);
+    await until(async () => result !== undefined, 'the plain-mention post');
+    const link = `[@${w.designer.name}](buddy:${w.designer.id})`;
+    assert.ok(result?.body.startsWith(`${link} please review`), result?.body);
+    assert.ok(result?.body.includes(`\`@${w.lead.name}\` stays code`), 'code span untouched');
+    assert.deepEqual(result?.mentioned, [{ id: w.designer.id, name: w.designer.name }]);
+    assert.deepEqual(result?.unresolved, ['@Nobody']);
+    await until(async () => w.turns.length >= 2, 'the mentioned Buddy woke');
+  } finally {
+    await w.close();
+  }
+});
+
 // 2026-09-28: a Buddy's @mention dispatched nothing — a live-looking chip that woke nobody. It now
 // takes the owner's mention path (same seat, latest config), with Buddy authority and the chain cap.
 test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs are not capped", async () => {

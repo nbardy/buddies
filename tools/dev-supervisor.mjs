@@ -79,6 +79,8 @@ export function taskPlan(task, env = process.env) {
     case 'typecheck':
       return {
         steps: [
+          // Buddies line-count ratchet: fails before the slow checks when the code grew.
+          { command: 'bash', args: ['tools/check-buddies-line-ceiling.sh'] },
           buildShared,
           pnpm('--filter', '@unleashd/server', 'typecheck'),
           pnpm('--filter', '@unleashd/client', 'exec', 'tsc', '-b'),
