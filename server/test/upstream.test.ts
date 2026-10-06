@@ -8,9 +8,9 @@ import test from 'node:test';
 import { BuddiesCore } from '@unleashd/buddies-core';
 import { UpstreamStatusSchema, UpstreamUpdateResultSchema } from '@unleashd/shared';
 import express from 'express';
-import { mentionedBuddyIds } from '../src/buddies/channels';
 import { OWNER, managerRef } from '../src/buddies/core';
 import { createBuddyEvents } from '../src/buddies/events';
+import { mentionedBuddyIds } from '../src/buddies/mentions';
 import { checkUpstream, resolveCheckout } from '../src/upstream/git-upstream';
 import { createUpstreamService } from '../src/upstream/routes';
 import { BOOTSTRAP_KEY, bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
@@ -353,7 +353,8 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
         kind: 'inform',
         body: `Later channel activity ${index}`,
         evidence: [],
-        mentions: [], broadcast: false,
+        mentions: [],
+        broadcast: false,
         key: `activity:${index}`,
       }
     );

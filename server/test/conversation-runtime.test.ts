@@ -1384,7 +1384,8 @@ test('background deadline uses timeout classification and waits for provider dra
     'worker-token',
     // The run's deadline is armed by the policy (it used to be a server.ts timer that no
     // adopting backend could re-arm).
-    new Date(Date.now() + 1000).toISOString()
+    new Date(Date.now() + 1000).toISOString(),
+    false
   );
   await new Promise<void>((resolve) => setImmediate(resolve));
   t.mock.timers.tick(1000);

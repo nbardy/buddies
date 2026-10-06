@@ -46,6 +46,11 @@ export interface RunnerHost {
   /** The conversation is loaded here. Never its placement: a delivery goes where it subscribed. */
   registered(conversationId: string): boolean;
   /**
+   * The provider a conversation's session runs on. A started session cannot change provider, so a
+   * delivery whose pick names another one opens a seat instead of reconfiguring this conversation.
+   */
+  providerOf(conversationId: string): Promise<string | undefined>;
+  /**
    * The model a provider runs when none is named (its catalog default). A run whose config names
    * only a provider is resolved with this right after its claim, and the answer is recorded on
    * the run (decision J), so the run says which model answered.
@@ -408,7 +413,13 @@ export function createRunner(options: {
         const prompt = deliveryPrompt(delivery.posts, delivery.unshown);
         const owner = delivery.posts.every((post) => post.author.kind === 'owner');
         const origin = run.conversationId ?? delivery.subscribed;
-        if (origin && host.registered(origin)) return existingTurn(origin, prompt, owner);
+        const pick = run.config;
+        if (
+          origin &&
+          host.registered(origin) &&
+          (!pick || pick.provider === (await host.providerOf(origin)))
+        )
+          return existingTurn(origin, prompt, owner);
         const trigger = await core.getPost(OWNER, postId);
         return trigger.author.kind === 'buddy' && trigger.author.id === run.buddyId
           ? freshTurn(run, prompt, owner)

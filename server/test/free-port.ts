@@ -13,7 +13,7 @@ export function freePortSync(): number {
       '-e',
       "const s=require('node:net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})",
     ],
-    { encoding: 'utf8' },
+    { encoding: 'utf8' }
   );
   return Number(out.trim());
 }
