@@ -59,6 +59,7 @@ import {
 import { type BuddyEvents, type MentionPicks, NO_PICKS, announcePost } from './events';
 import type { Runner } from './runner';
 import { channelsNamed } from './search-channels';
+import { checkedEvidence } from './tool-views';
 
 /**
  * The owner's Buddy API over the crate, mounted behind the auth gate (server.ts registers it after
@@ -335,14 +336,15 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     },
     [buddyMutationRoute('task.create')]: (req) =>
       write(core.upsertTask(OWNER, { kind: 'create', ...TaskCreateSchema.parse(req.body) })),
-    [buddyMutationRoute('task.update')]: (req) =>
-      write(
-        core.upsertTask(OWNER, {
-          kind: 'update',
-          taskId: p(req, 'taskId'),
-          ...TaskUpdateSchema.parse(req.body),
-        })
-      ),
+    [buddyMutationRoute('task.update')]: (req) => {
+      const changes = TaskUpdateSchema.parse(req.body);
+      // The evidence cap holds on every write path, not only MCP `task_write`: an owner write of
+      // a long entry would otherwise bloat every later `tasks get` the same way (2026-10-06).
+      if (changes.changes.evidence) checkedEvidence(changes.changes.evidence);
+      return write(
+        core.upsertTask(OWNER, { kind: 'update', taskId: p(req, 'taskId'), ...changes })
+      );
+    },
     // ---- runs -----------------------------------------------------------------------------------
     'GET 200 /api/buddies/runs': async (req) => {
       const found = runQueries.find(([name]) => q(req, name));
