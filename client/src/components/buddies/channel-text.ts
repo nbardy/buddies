@@ -395,22 +395,42 @@ export function parseChannelLink(href: string): ChannelLink {
 // whose harness this client's schema does not know (channel-data.ts
 // profileExecution); there is nothing honest to open the picker at. `no-agent` is an
 // unpinned profile on an install with no agent: the reply would fail, so the chip says so.
+// `failed`: the thread's seats could not be read. Not `loading` (that waits forever) and not
+// the profile (it may not be the thread's model): the chip offers a retry and the server
+// resolves the seat when the post lands.
 export type MentionChoice =
   | { kind: 'chosen'; config: ConversationConfig }
   | { kind: 'seat'; config: ConversationConfig }
   | { kind: 'profile'; config: ConversationConfig }
   | { kind: 'loading' }
+  | { kind: 'failed' }
   | { kind: 'unreported' }
   | { kind: 'no-agent' };
+
+// A thread's seats as the composer holds them: still loading, read, or unreadable.
+export type ThreadSeats =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; seats: readonly ThreadSeat[] }
+  | { kind: 'failed' };
 
 export function mentionChoice(
   buddy: BuddyReference,
   choices: ReadonlyMap<string, ConversationConfig>,
-  seats: readonly ThreadSeat[] | undefined
+  threadSeats: ThreadSeats
 ): MentionChoice {
   const chosen = choices.get(buddy.id);
   if (chosen) return { kind: 'chosen', config: chosen };
-  if (seats === undefined) return { kind: 'loading' };
+  switch (threadSeats.kind) {
+    case 'loading':
+      return { kind: 'loading' };
+    case 'failed':
+      return { kind: 'failed' };
+    case 'loaded':
+      return profileOrSeat(buddy, threadSeats.seats);
+  }
+}
+
+function profileOrSeat(buddy: BuddyReference, seats: readonly ThreadSeat[]): MentionChoice {
   const seat = seats.find((entry) => entry.buddyId === buddy.id);
   if (seat) return { kind: 'seat', config: seat.config };
   switch (buddy.execution.kind) {
@@ -429,6 +449,8 @@ export function choiceLabel(choice: MentionChoice, catalog: ProviderCatalog | nu
   switch (choice.kind) {
     case 'loading':
       return 'Loading model…';
+    case 'failed':
+      return 'Model unavailable · retry';
     case 'unreported':
       return 'default';
     case 'no-agent':

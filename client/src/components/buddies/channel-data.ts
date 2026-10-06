@@ -27,7 +27,12 @@ import { DEPENDENCIES_STATUS } from '../../hooks/dependencies-status';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { type PolledState, resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import { buddyApi, buddyWrite } from './api';
-import { type ChannelReference, type ChannelTask, channelTasks } from './channel-text';
+import {
+  type ChannelReference,
+  type ChannelTask,
+  type ThreadSeats,
+  channelTasks,
+} from './channel-text';
 import { activeBuddies, buddyNamesOf, findWorkspace } from './roster';
 import type {
   Actor,
@@ -43,7 +48,6 @@ import type {
   PostPage,
   Task,
   ThreadPage,
-  ThreadSeat,
   ThreadStat,
 } from './types';
 import { taskStatusView } from './ui-contract';
@@ -917,17 +921,33 @@ export function useMarkRead(
 /**
  * A thread's Buddy seats, owned by whoever composes in it. Reads the same keyed resource as the
  * open thread pane (`threadFeed(rootId, null)`), so the two share one cache entry and one poll.
- * Undefined while loading, and at the top level (no thread, nothing to load).
+ * Loading until the first answer; `failed` when the read fails. At the top level (no thread) the
+ * composer ignores it.
  * Fix-guard: composers used to take `seats` as a prop, and ThreadsPane / ThreadsMobile / TaskPage
  * never passed it, so @mentioning a Buddy in their replies stuck Send on "Loading model…"
  * (task_01a1100d). Guard: client/test/composer-thread-seats.test.tsx.
  */
-export function useThreadSeats(rootId: string | null): readonly ThreadSeat[] | undefined {
-  const { data } = usePolledFetch(
+export function useThreadSeats(rootId: string | null): {
+  seats: ThreadSeats;
+  retry(): void;
+} {
+  const result = usePolledFetch(
     rootId === null ? null : latestResource(threadFeed(rootId, null)),
     CHANNEL_BACKSTOP_MS
   );
-  return data?.seats;
+  const retry = () => void result.refetch();
+  // Fix-guard: a failed thread GET used to read as `data?.seats === undefined`, i.e. `loading`,
+  // so Send stayed disabled forever. Failure is its own state. Guard: composer-thread-seats.test.tsx.
+  switch (result.kind) {
+    case 'ready':
+    case 'stale':
+      return { seats: { kind: 'loaded', seats: result.data.seats }, retry };
+    case 'failed':
+      return { seats: { kind: 'failed' }, retry };
+    case 'idle':
+    case 'loading':
+      return { seats: { kind: 'loading' }, retry };
+  }
 }
 
 /**

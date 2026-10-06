@@ -12,6 +12,7 @@ import {
   type BuddyReference,
   type ChannelReference,
   type MentionChoice,
+  type ThreadSeats,
   activeReferenceQuery,
   channelDraftId,
   choiceLabel,
@@ -26,13 +27,13 @@ import {
   mentionedBuddies,
   rankReferences,
 } from './channel-text';
-import type { PostResult, ThreadSeat } from './types';
+import type { PostResult } from './types';
 import './ChannelComposer.css';
 
 const MAX_TEXTAREA_HEIGHT = 240;
 
 const NO_CHOICES: ReadonlyMap<string, ConversationConfig> = new Map();
-const NO_SEATS: readonly ThreadSeat[] = [];
+const NO_SEATS: ThreadSeats = { kind: 'loaded', seats: [] };
 
 // The owner's composer. Posts as the owner (never a stand-in Buddy). One
 // universal @ menu fuzzy-finds Buddies and Tasks: a Buddy becomes a mention
@@ -106,7 +107,7 @@ export function ChannelComposer({
     },
   });
 
-  const seats = useThreadSeats(rootId);
+  const { seats, retry: retrySeats } = useThreadSeats(rootId);
   const trigger = activeReferenceQuery(text, caret);
   const open =
     trigger !== null &&
@@ -131,7 +132,9 @@ export function ChannelComposer({
     choice: mentionChoice(buddy, choices, rootId === null ? NO_SEATS : seats),
   }));
   const choosing = selections.find(({ buddy }) => buddy.id === choosingFor);
-  const openModel = (buddyId: string) => {
+  const openModel = (buddyId: string, choice: MentionChoice) => {
+    // A failed seat read has no model to pick from: the chip is its retry.
+    if (choice.kind === 'failed') return retrySeats();
     if (submit === 'button') textareaRef.current?.blur();
     setChoosingFor(buddyId === choosingFor ? null : buddyId);
   };
@@ -423,7 +426,7 @@ export function ChannelComposer({
                 choice={choice}
                 catalog={catalog}
                 open={buddy.id === choosingFor}
-                onOpen={() => openModel(buddy.id)}
+                onOpen={() => openModel(buddy.id, choice)}
               />
             ))}
           </div>
@@ -506,11 +509,13 @@ function MentionChip({
       title={
         choice.kind === 'loading'
           ? 'Loading this thread’s reply model'
-          : choice.kind === 'unreported'
-            ? 'This Buddy runs on a harness the picker does not know'
-            : choice.kind === 'no-agent'
-              ? `No agent is installed, so ${buddy.label} cannot reply. Install Claude Code or Codex from Setup.`
-              : `Choose the harness and model for ${buddy.label}’s reply`
+          : choice.kind === 'failed'
+            ? 'Could not read this thread’s reply model. Click to retry; Send still works and the server picks the seat.'
+            : choice.kind === 'unreported'
+              ? 'This Buddy runs on a harness the picker does not know'
+              : choice.kind === 'no-agent'
+                ? `No agent is installed, so ${buddy.label} cannot reply. Install Claude Code or Codex from Setup.`
+                : `Choose the harness and model for ${buddy.label}’s reply`
       }
       onMouseDown={(event) => event.preventDefault()}
       onClick={onOpen}

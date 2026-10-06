@@ -16,7 +16,7 @@ register(
 const { CHANNEL_PAGE, threadFeed, useThreadSeats, workspaceDirectory } = await import(
   '../src/components/buddies/channel-data'
 );
-const { mentionChoice } = await import('../src/components/buddies/channel-text');
+const { mentionChoice, choiceLabel } = await import('../src/components/buddies/channel-text');
 const { loadResource } = await import('../src/atoms/resources');
 const { jotaiStore } = await import('../src/atoms/store');
 const { Provider } = await import('jotai');
@@ -25,7 +25,7 @@ const { Provider } = await import('jotai');
 // with a rootId but no `seats`, so an @mention there read `loading` forever and Send stayed
 // disabled. The composer now loads its own thread's seats from the thread's shared resource.
 function Probe({ rootId }: { rootId: string }) {
-  const seats = useThreadSeats(rootId);
+  const { seats } = useThreadSeats(rootId);
   const buddy = workspaceDirectory(
     [rosterFixture([buddyFixture({ id: 'lead', name: 'Lead' })])],
     'ws-1',
@@ -33,7 +33,12 @@ function Probe({ rootId }: { rootId: string }) {
     CODEX_INSTALLED
   ).references[0];
   if (buddy.kind !== 'buddy') throw new Error('missing Buddy');
-  return <p>{mentionChoice(buddy, new Map(), seats).kind}</p>;
+  const choice = mentionChoice(buddy, new Map(), seats);
+  return (
+    <p>
+      {choice.kind}|{choiceLabel(choice, null)}
+    </p>
+  );
 }
 
 test('a reply composer given only a rootId resolves a mention from the thread seats', async () => {
@@ -61,4 +66,22 @@ test('a reply composer given only a rootId resolves a mention from the thread se
     }),
   });
   assert.match(render(), /seat/);
+});
+
+// A thread GET that fails used to read as `data?.seats === undefined`, i.e. `loading`: the chip
+// said "Loading model…" and Send stayed disabled forever. Failure is its own, retryable state.
+test('a failed thread read is not "loading"', async () => {
+  await loadResource({
+    key: `${threadFeed('thread-down', null).base}limit=${CHANNEL_PAGE}`,
+    load: async () => {
+      throw new Error('HTTP 500');
+    },
+  });
+  const html = renderToStaticMarkup(
+    <Provider store={jotaiStore}>
+      <Probe rootId="thread-down" />
+    </Provider>
+  );
+  assert.match(html, /failed\|Model unavailable · retry/);
+  assert.doesNotMatch(html, /Loading model/);
 });

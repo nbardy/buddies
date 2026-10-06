@@ -22,6 +22,8 @@ const { jotaiStore } = await import('../src/atoms/store');
 const { Provider } = await import('jotai');
 
 // Model-only profiles used to display Codex while server inference launched Claude.
+const LOADED_NONE = { kind: 'loaded', seats: [] } as const;
+
 test('an unseated mention follows the model-only profile on its actual harness', () => {
   const buddy = buddyFixture({
     id: 'lead',
@@ -33,7 +35,7 @@ test('an unseated mention follows the model-only profile on its actual harness',
     .references[0];
   assert.equal(ref.kind, 'buddy');
   if (ref.kind !== 'buddy') throw new Error('missing Buddy');
-  const choice = mentionChoice(ref, new Map(), []);
+  const choice = mentionChoice(ref, new Map(), LOADED_NONE);
   assert.ok('config' in choice);
   assert.equal(choice.config.provider, 'claude');
   assert.deepEqual(choice.config.model, { mode: 'explicit', modelId: 'claude-opus-5-5' });
@@ -51,7 +53,7 @@ test('an unpinned mention follows the installed agent; a pinned one ignores it',
     const ref = workspaceDirectory([rosterFixture([unpinned, pinned])], 'ws-1', [], agent)
       .references[index];
     if (ref.kind !== 'buddy') throw new Error('missing Buddy');
-    return choiceLabel(mentionChoice(ref, new Map(), []), null);
+    return choiceLabel(mentionChoice(ref, new Map(), LOADED_NONE), null);
   };
   const claudeOnly = { kind: 'agent', provider: 'claude' } as const;
   assert.match(label(claudeOnly, 0), /^claude/);

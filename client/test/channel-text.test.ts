@@ -15,6 +15,7 @@ import {
   mentionedBuddies,
   rankReferences,
 } from '../src/components/buddies/channel-text';
+import type { ThreadSeat } from '../src/components/buddies/types';
 
 const unreported = { kind: 'unreported' } as const;
 const lead: ChannelReference = {
@@ -41,6 +42,9 @@ const task: ChannelReference = {
 
 // A mention token is what starts a Buddy's turn server-side, so a wrong
 // encoding either wakes the wrong Buddy or silently wakes nobody.
+const LOADED_NONE = { kind: 'loaded', seats: [] } as const;
+const loaded = (seats: ThreadSeat[]) => ({ kind: 'loaded' as const, seats });
+
 test('encoding prefers the longest picked label and needs a word boundary', () => {
   assert.equal(
     encodeReferences('@Lead Designer and @Lead, see @Fix login (v2).', [lead, leadDesigner, task]),
@@ -131,7 +135,7 @@ test('a restored mention uses the current profile rather than its draft executio
   };
   const [mention] = mentionedBuddies('@Lead', [old], [current]);
   assert.equal(mention.label, 'Lead', 'retain the identity spelled in the draft');
-  assert.deepEqual(mentionChoice(mention, new Map(), []), {
+  assert.deepEqual(mentionChoice(mention, new Map(), LOADED_NONE), {
     kind: 'profile',
     config: current.execution.config,
   });
@@ -216,21 +220,23 @@ test('a mention chip opens on the thread seat; the profile applies only without 
   };
   const buddy = { ...lead, execution: { kind: 'profile', config: profile } } as const;
   assert.equal(
-    choiceLabel(mentionChoice(buddy, new Map(), undefined), null),
+    choiceLabel(mentionChoice(buddy, new Map(), { kind: 'loading' }), null),
     'Loading model…',
     'an unread thread must not advertise its profile as the next model'
   );
-  const none = mentionChoice(buddy, new Map(), []);
+  const none = mentionChoice(buddy, new Map(), LOADED_NONE);
   assert.deepEqual('config' in none ? none.config : null, profile);
   assert.equal(choiceLabel(none, null), 'gpt-5.6-sol');
 
-  const seated = mentionChoice(buddy, new Map(), [{ buddyId: 'b1', config: seat }]);
+  const seated = mentionChoice(buddy, new Map(), loaded([{ buddyId: 'b1', config: seat }]));
   assert.deepEqual('config' in seated ? seated.config : null, seat);
   assert.equal(choiceLabel(seated, null), 'opus · high');
 
-  const chosen = mentionChoice(buddy, new Map([['b1', profile]]), [
-    { buddyId: 'b1', config: seat },
-  ]);
+  const chosen = mentionChoice(
+    buddy,
+    new Map([['b1', profile]]),
+    loaded([{ buddyId: 'b1', config: seat }])
+  );
   assert.equal(chosen.kind, 'chosen', 'a pick in this composer beats the seat');
   assert.deepEqual(chosen.config, profile);
 });
