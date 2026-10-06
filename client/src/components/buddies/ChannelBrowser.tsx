@@ -18,15 +18,15 @@ import { ChannelDm } from './ChannelDm';
 import { ChannelLanding } from './ChannelLanding';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { LeadRow, Replying, type RowContext, renderRow, renderRows } from './ChannelRows';
-import { ChannelStar } from './ChannelStar';
 import { ChannelSearch } from './ChannelSearch';
+import { ChannelStar } from './ChannelStar';
 import { ChannelWorkers } from './ChannelWorkers';
 import { CopyLinkButton } from './CopyLinkButton';
+import { GroupDmNotice } from './GroupDmNotice';
 import { TaskFilter } from './TaskFilter';
 import { TaskPage } from './TaskPage';
 import { ThreadsPane } from './ThreadsPane';
 import { WorkspaceTeamDialog } from './WorkspaceTeamForm';
-import { NEW_WORKSPACE_PATH } from './workspace-home';
 import { errorText } from './api';
 import { useNewBuddy } from './buddy-direct-actions';
 import {
@@ -41,6 +41,7 @@ import {
   createChannel,
   feedPhase,
   firstUnreadPostId,
+  isGroupDm,
   newestServedId,
   renderFeed,
   unreadThreadIds,
@@ -59,6 +60,7 @@ import { mentionsABuddy, plainChannelText } from './channel-text';
 import { type ChannelsView, channelsHref, channelsView } from './channels-view';
 import type { Channel, ChannelUnread, Inbox } from './types';
 import { initials } from './ui-contract';
+import { NEW_WORKSPACE_PATH } from './workspace-home';
 import './ChannelBrowser.css';
 
 const NO_THREADS: ReadonlySet<string> = new Set();
@@ -141,7 +143,8 @@ function ThreadPane({
           </div>
         )}
       </div>
-      {!entry.channel.archivedAt && (
+      {isGroupDm(entry.channel.kind) && <GroupDmNotice />}
+      {!entry.channel.archivedAt && !isGroupDm(entry.channel.kind) && (
         <ChannelComposer
           key={rootId}
           channelId={channelId}
@@ -302,7 +305,8 @@ function ChannelPane({
             submit="enter"
           />
         )}
-        {taskFilter === null && !entry.channel.archivedAt && (
+        {taskFilter === null && isGroupDm(entry.channel.kind) && <GroupDmNotice />}
+        {taskFilter === null && !entry.channel.archivedAt && !isGroupDm(entry.channel.kind) && (
           <ChannelComposer
             channelId={channelId}
             rootId={null}

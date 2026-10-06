@@ -1,8 +1,8 @@
 import { useAtomValue } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { channelRailFamily } from '../../atoms/channel-rail';
 import { setConversationDone } from '../../atoms/actions';
+import { channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
 import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
@@ -14,6 +14,7 @@ import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelL
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { ChannelStar } from '../../components/buddies/ChannelStar';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
+import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
 import { TaskPage } from '../../components/buddies/TaskPage';
 import { WakeIcon, WakeIndicator } from '../../components/buddies/WakeIndicator';
@@ -30,6 +31,7 @@ import {
   channelUnreadAttr,
   createChannel,
   feedPhase,
+  isGroupDm,
   newestServedId,
   railChannels,
   renderFeed,
@@ -632,7 +634,8 @@ function ChannelScreen({ channelId, context }: { channelId: string; context: Scr
           ),
         })}
       </div>
-      {!entry?.channel.archivedAt && (
+      {entry && isGroupDm(entry.channel.kind) && <GroupDmNotice />}
+      {!entry?.channel.archivedAt && !(entry && isGroupDm(entry.channel.kind)) && (
         <ChannelComposerMobile
           title={title}
           channelId={channelId}
@@ -740,7 +743,8 @@ function ThreadScreen({
           </p>
         )}
       </div>
-      {!entry?.channel.archivedAt && (
+      {entry && isGroupDm(entry.channel.kind) && <GroupDmNotice />}
+      {!entry?.channel.archivedAt && !(entry && isGroupDm(entry.channel.kind)) && (
         <ChannelComposerMobile
           title={`Thread in ${heading.mark} ${heading.name}`}
           channelId={channelId}

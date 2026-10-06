@@ -369,7 +369,7 @@ const TASKS_TOOL = teamTool({
 const BUDDY_TOOLS = {
   post: buddyTool({
     description:
-      'Write to a channel, DM ({direct:[ids]}) or task, or answer one request with `answers`. A DM request starts its recipient; a Buddy-DM inform is inert, while a public or task post can wake @mentions and thread followers. Use replyToId for a thread and [@Name](buddy:<id>) to mention. Embed media as ![alt](/absolute/path). A request with `worker` runs on that model and returns here. Never shell out to agent CLIs.',
+      'Write to a channel, a one-to-one DM ({direct:[id]}; a group goes in a public channel) or task, or answer one request with `answers`. A DM request starts its recipient; a Buddy-DM inform is inert, while a public or task post can wake @mentions and thread followers. Use replyToId for a thread and [@Name](buddy:<id>) to mention. Embed media as ![alt](/absolute/path). A request with `worker` runs on that model and returns here. Never shell out to agent CLIs.',
     writes: true,
     schema: z.object({
       channel: channelRef.optional().describe('Required unless answers is set'),
