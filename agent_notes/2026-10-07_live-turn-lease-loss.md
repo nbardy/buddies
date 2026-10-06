@@ -87,3 +87,25 @@ Residual risk, accepted: two backends on one store (a worktree backend sharing `
 wake together may still race, with one backend's gate ending the other's runs. That is one gate
 against a different process, and the lease semantics there are correct ("that holder was silent for
 the lease").
+
+## Successor 2026-10-06T17:31Z: the TS-side renewal is not enough (worker finding)
+
+Commit f6d3bab renews every live hold at the start of each drain, before the claim. The new guard,
+`run-lease.test.ts` "a live turn keeps its run across a freeze of its backend longer than the
+lease" (SIGSTOP for 2× lease, then SIGCONT), **failed with f6d3bab**. The lease expired at
+17:30:04.579 and the gate ended the run at 17:30:07.541, at wake, without renewing. The SIGSTOP
+landed while a drain was already past its renewals and waiting on `claimRun` in the napi threadpool.
+At SIGCONT the threadpool ran that claim before any JS ran. This is also the likeliest production
+shape at 16:53:14.342: the gate ran 9 ms after the wake and ~230 ms before the first renewal landed.
+
+The same test **passed once on 97e337d**: whether a drain is in flight at the freeze is a matter of
+chance. So the test is not yet a deterministic failure on the base.
+
+Conclusion: any check-then-act in the TS layer can have the freeze between the check and the act.
+The fix has to be atomic in the gate. `claim_run_at` should take the caller's live holds
+(`[(run_id, lease_token)]`) and renew them inside the same transaction, before `expire_leases`
+(crate `runs.rs`). A process then cannot expire its own live runs, whatever it froze across. The
+runner's `holds` map from f6d3bab is the input this needs. Its pre-claim `Promise.all` renewal is
+replaced by passing the holds to `claimRun`. Next step, not done in this turn: change the crate and
+its napi binding, add a crate test that fails on the old `claim_run_at` (a held run whose lease
+lapsed is not ended when its holder passes the hold), and keep the SIGSTOP integration test.
