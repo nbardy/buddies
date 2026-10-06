@@ -141,6 +141,20 @@ export function channelHeading(
   }
 }
 
+/**
+ * A DM is one-to-one (agent_notes/2026-10-06_dm-is-one-to-one-decision.md). A direct channel with
+ * more than two members predates that rule: it stays readable, and the crate refuses new posts.
+ */
+export function isGroupDm(kind: ChannelKind): boolean {
+  switch (kind.type) {
+    case 'direct':
+      return kind.members.length > 2;
+    case 'public':
+    case 'task':
+      return false;
+  }
+}
+
 /** Warm every rail channel's newest page at idle, so a first switch renders from cache. */
 export function useWarmChannelPosts(entries: readonly ChannelUnread[]): void {
   const ids = entries.map((entry) => entry.channel.id).join('\n');
