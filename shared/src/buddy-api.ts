@@ -21,7 +21,7 @@ export const key = z
   .trim()
   .min(1)
   .max(200)
-  .describe('Idempotency key: the same key replays the first result');
+  .describe('A retried key replays the first result');
 export const ChannelArchiveSchema = z.object({ archived: z.boolean(), key }).strict();
 export const ChannelRenameSchema = z
   .object({ name: z.string().trim().min(1).max(80), key })
@@ -149,8 +149,10 @@ export const NewDirectSchema = z
     key,
   })
   .strict();
+// A DM is one-to-one (owner decision 2026-10-06, agent_notes/2026-10-06_dm-is-one-to-one-decision.md):
+// exactly one Buddy besides the owner. The crate refuses a group too; this rejects it at the wire.
 export const DirectPostSchema = PostBodySchema.extend({
-  members: z.array(z.string().min(1)).min(1),
+  members: z.array(z.string().min(1)).length(1),
 });
 export const AnswerSchema = z
   .object({ body: z.string().trim().min(1).max(32_000), evidence, key })

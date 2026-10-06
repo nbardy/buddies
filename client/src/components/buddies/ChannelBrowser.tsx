@@ -22,6 +22,7 @@ import { ChannelSearch } from './ChannelSearch';
 import { ChannelStar } from './ChannelStar';
 import { ChannelWorkers } from './ChannelWorkers';
 import { CopyLinkButton } from './CopyLinkButton';
+import { GroupDmNotice } from './GroupDmNotice';
 import { TaskFilter } from './TaskFilter';
 import { TaskPage } from './TaskPage';
 import { ThreadsPane } from './ThreadsPane';
@@ -40,6 +41,7 @@ import {
   createChannel,
   feedPhase,
   firstUnreadPostId,
+  isGroupDm,
   newestServedId,
   renderFeed,
   unreadThreadIds,
@@ -207,7 +209,8 @@ function ThreadPane({
           </div>
         )}
       </div>
-      {!entry.channel.archivedAt && (
+      {isGroupDm(entry.channel.kind) && <GroupDmNotice />}
+      {!entry.channel.archivedAt && !isGroupDm(entry.channel.kind) && (
         <ChannelComposer
           key={rootId}
           channelId={channelId}
@@ -372,7 +375,8 @@ function ChannelPane({
             submit="enter"
           />
         )}
-        {taskFilter === null && !entry.channel.archivedAt && (
+        {taskFilter === null && isGroupDm(entry.channel.kind) && <GroupDmNotice />}
+        {taskFilter === null && !entry.channel.archivedAt && !isGroupDm(entry.channel.kind) && (
           <ChannelComposer
             channelId={channelId}
             rootId={null}

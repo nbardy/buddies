@@ -1183,32 +1183,47 @@ fn a_database_from_before_threads_arrives_caught_up() {
     assert!(s.followed_threads(&buddy("ic"), WS, 10).unwrap().threads.is_empty(), "the backfill is the owner's only");
 }
 
-// Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01: a request to a group DM started
-// only its first recipient: the run key was `post:<id>`, so the second recipient's enqueue got the
-// first recipient's run back. Two recipients must get two runs; a single-recipient request keeps
-// the legacy `post:<id>` key so a replay of a pre-fix post still matches its run.
+// Decision 2026-10-06 (agent_notes/2026-10-06_dm-is-one-to-one-decision.md): a DM is one-to-one.
+// Before it, a request to a group DM started one run per member (2026-10-01) and the CEO's
+// duplicate Warp/PTX worker came from two owners of one request. A group is a public channel.
 #[test]
-fn a_group_request_starts_one_run_per_recipient() {
+fn a_dm_is_one_to_one_and_a_legacy_group_dm_is_read_only() {
     let mut f = fixture();
-    let s = &mut f.store;
     let group = ChannelRef::Direct { members: vec![buddy("mid"), buddy("ic"), buddy("peer")] };
-    let asked = s.post(&buddy("mid"), group.clone(), request("both of you", "g1")).unwrap();
-    let runs_for = |s: &Store| {
-        let mut runs = s.list_runs(RunQuery::Queued, 10).unwrap();
-        runs.sort_by(|a, b| a.buddy_id.cmp(&b.buddy_id));
-        runs
-    };
-    let runs = runs_for(s);
-    assert_eq!(runs.iter().map(|r| r.buddy_id.as_str()).collect::<Vec<_>>(), ["ic", "peer"]);
-    assert!(runs.iter().all(|r| r.input == RunInput::Post { post_id: asked.id.clone() }));
+    let refused = f.store.post(&buddy("mid"), group.clone(), request("both of you", "g1")).unwrap_err();
+    assert!(refused.to_string().contains("public channel"), "{refused}");
+    assert!(f.store.post(&buddy("mid"), group.clone(), PostInput { kind: PostKind::Inform, ..request("fyi", "g2") }).is_err(), "an inform is refused too");
+    assert!(f.store.open_channel(&buddy("mid"), group.clone()).is_err(), "the group channel is never created");
+    assert!(f.store.list_runs(RunQuery::Queued, 10).unwrap().is_empty());
 
-    s.post(&buddy("mid"), group, request("both of you", "g1")).unwrap();
-    assert_eq!(runs_for(s).len(), 2, "replaying the post creates no run");
+    // 1:1 and a note to self still work, and the single other member owes the answer.
+    let solo = f.store.post(&buddy("mid"), dm("mid", "ic"), request("just you", "s1")).unwrap();
+    f.store.post(&buddy("mid"), ChannelRef::Direct { members: vec![buddy("mid")] }, request("remember", "n1")).unwrap();
+    let owed: Vec<_> = f.store.list_runs(RunQuery::Queued, 10).unwrap().into_iter().map(|r| r.buddy_id).collect();
+    assert!(owed.contains(&"ic".to_string()) && owed.contains(&"mid".to_string()) && owed.len() == 2, "{owed:?}");
+
+    // A group DM written before the rule exists in the db: readable, but no new post.
+    let conn = rusqlite::Connection::open(&f.path).unwrap();
+    conn.execute(
+        "INSERT INTO channel (id, workspace_id, kind, member_key, created_by, created_at) VALUES ('dm_old', ?1, 'direct', 'ic,mid,peer', 'mid', '2026-01-01T00:00:00.000Z')",
+        [WS],
+    )
+    .unwrap();
+    for m in ["ic", "mid", "peer"] {
+        conn.execute("INSERT INTO channel_member (channel_id, member) VALUES ('dm_old', ?1)", [m]).unwrap();
+    }
+    conn.execute(
+        "INSERT INTO post (id, channel_id, author_id, body, evidence, created_at, ord) VALUES ('post_old', 'dm_old', 'mid', 'old chatter', '[]', '2026-01-01T00:00:00.000Z', '1')",
+        [],
+    )
+    .unwrap();
+    let page = f.store.list_posts(&buddy("peer"), PostQuery::Channel { channel_id: "dm_old".into() }, None, 10).unwrap();
+    assert_eq!(page.posts.len(), 1);
+    assert!(f.store.post(&buddy("peer"), ChannelRef::Id { id: "dm_old".into() }, PostInput { kind: PostKind::Inform, ..request("more", "g3") }).is_err());
 
     // A run written before the fix carries the bare `post:<id>` key; enqueueing the same post for
     // the same buddy must find it, not start a second run.
-    let solo = s.post(&buddy("mid"), dm("mid", "ic"), request("just you", "s1")).unwrap();
-    let run = s.list_runs(RunQuery::Queued, 10).unwrap().into_iter().find(|r| r.input_key.starts_with(&format!("post:{}", solo.id))).unwrap();
+    let run = f.store.list_runs(RunQuery::Queued, 10).unwrap().into_iter().find(|r| r.input_key.starts_with(&format!("post:{}", solo.id))).unwrap();
     rusqlite::Connection::open(&f.path)
         .unwrap()
         .execute("UPDATE run SET input_key = ?1 WHERE id = ?2", rusqlite::params![format!("post:{}", solo.id), run.id])

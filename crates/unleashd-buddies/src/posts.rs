@@ -145,6 +145,8 @@ fn direct_channel(tx: &Connection, actor: &Actor, members: &[Actor]) -> Result<C
         return Ok(found);
     }
     let members = members_of(&key);
+    // Creation is where a group DM would come into being; an existing one was found above.
+    require_pair(&members)?;
     for id in members.iter().filter_map(Actor::buddy_id) {
         get_buddy(tx, id)?;
     }
@@ -179,18 +181,48 @@ fn task_channel(tx: &Connection, actor: &Actor, task_id: &str) -> Result<Channel
 /// What a new post asks of the channel. Only a direct channel has members to owe an answer.
 enum Ask {
     Inform,
-    Request { owed_by: Vec<Actor> },
+    Request { owed_by: Actor },
+}
+
+/// A direct channel is one-to-one: the author and at most one other member (none for a note to
+/// self). Owner decision 2026-10-06 (agent_notes/2026-10-06_dm-is-one-to-one-decision.md): a group
+/// conversation is a public channel, so a request has exactly one possible owner and needs no
+/// mention rule. Existing multi-member DMs stay readable; only a NEW post is refused. Pattern: sum
+/// types (docs/patterns.md#sum-types), the channel kind decides, `ask` never branches on member count.
+fn counterpart(members: &[Actor], author: &Actor) -> Result<Actor> {
+    require_pair(members)?;
+    let others: Vec<&Actor> = members.iter().filter(|m| *m != author).collect();
+    match others.as_slice() {
+        // A channel with only the author in it is a note to self: the author owes the answer.
+        [] => Ok(author.clone()),
+        [one] => Ok((*one).clone()),
+        // Two members, neither the author: the owner (a non-member) asking inside a Buddy-to-Buddy DM.
+        _ => Err(CoreError::Invalid("a request needs a recipient: send it from inside a direct message you are in".into())),
+    }
+}
+
+/// The shape rule, for every post and for creation: at most two members.
+fn require_pair(members: &[Actor]) -> Result<()> {
+    match members.len() {
+        0..=2 => Ok(()),
+        n => Err(CoreError::Invalid(format!(
+            "a direct message is one-to-one but this one has {n} members: post in a public channel, or send one direct message per recipient"
+        ))),
+    }
+}
+
+/// Refuses a post into a group DM, request or inform alike.
+fn require_one_to_one(channel: &Channel) -> Result<()> {
+    match &channel.kind {
+        ChannelKind::Direct { members } => require_pair(members),
+        ChannelKind::Public { .. } | ChannelKind::Task { .. } => Ok(()),
+    }
 }
 
 fn ask(kind: PostKind, channel: &Channel, author: &Actor) -> Result<Ask> {
     match (kind, &channel.kind) {
         (PostKind::Inform, _) => Ok(Ask::Inform),
-        (PostKind::Request, ChannelKind::Direct { members }) => {
-            let others: Vec<Actor> = members.iter().filter(|m| *m != author).cloned().collect();
-            // A channel with only the author in it is a note to self: the author owes the answer.
-            let owed_by = if others.is_empty() { vec![author.clone()] } else { others };
-            Ok(Ask::Request { owed_by })
-        }
+        (PostKind::Request, ChannelKind::Direct { members }) => Ok(Ask::Request { owed_by: counterpart(members, author)? }),
         (PostKind::Request, other) => Err(CoreError::Invalid(format!("a request needs a direct channel, got {other:?}"))),
     }
 }
@@ -205,7 +237,7 @@ impl Ask {
     fn owed_by(&self) -> &[Actor] {
         match self {
             Ask::Inform => &[],
-            Ask::Request { owed_by } => owed_by,
+            Ask::Request { owed_by } => std::slice::from_ref(owed_by),
         }
     }
 }
@@ -222,6 +254,7 @@ impl Store {
         self.write(|tx| {
             let channel = open_channel(tx, actor, &channel)?;
             require(tx, actor, Op::Post, &Subject::Channel { id: channel.id.clone() })?;
+            require_one_to_one(&channel)?;
             let task_id = task_id_for_channel(&channel, input.task_id.as_deref())?;
             let m = Mutation {
                 actor,
@@ -836,10 +869,10 @@ fn insert_post(
 fn require_worker_authority(tx: &Transaction, actor: &Actor, ask: &Ask, config: &RunConfig) -> Result<()> {
     match ask {
         Ask::Inform => Err(CoreError::Invalid(format!("a run config needs a request; got one on an inform: {config:?}"))),
-        Ask::Request { owed_by } => owed_by.iter().try_for_each(|recipient| match recipient {
+        Ask::Request { owed_by } => match owed_by {
             Actor::Owner => Err(CoreError::Invalid("the owner runs no worker; a run config needs buddy recipients".into())),
             Actor::Buddy { id } => require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: id.clone() }),
-        }),
+        },
     }
 }
 

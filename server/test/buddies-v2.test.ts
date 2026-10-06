@@ -568,12 +568,12 @@ test('an answer to a request sent from a human chat starts no run and never queu
   }
 });
 
-// Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01: a request to a group DM started
-// only its first recipient (run key `post:<id>` was shared, so the second enqueue returned the
-// first recipient's run). Both recipients must run; one answer closes the request and the other
-// recipient's late answer is refused, not silently lost. Crate guard:
-// `a_group_request_starts_one_run_per_recipient` (crates/unleashd-buddies/tests/core.rs).
-test('a group-DM request starts a run for each recipient; the first answer wins and the late one is refused', async () => {
+// Pattern: fix-guards (docs/patterns.md#fix-guards). Owner decision 2026-10-06
+// (agent_notes/2026-10-06_dm-is-one-to-one-decision.md): a DM is one-to-one, so a request has one
+// possible owner. Through the real MCP endpoint a Buddy's group `direct:[a, b]` is a typed error
+// naming the alternative, starts no run and creates no channel; one DM per recipient works.
+// Crate guard: `a_dm_is_one_to_one_and_a_legacy_group_dm_is_read_only`.
+test('a group DM is refused through MCP; one DM per recipient is the alternative', async () => {
   const w = await world();
   try {
     const reviewer = await w.core.createBuddy(OWNER, {
@@ -585,53 +585,34 @@ test('a group-DM request starts a run for each recipient; the first answer wins 
       provider: 'codex',
       key: 'reviewer',
     });
-    let request!: Post;
-    w.during.set(1, async (turn) => {
-      const posted = await call(turn.mcp, 'post', {
-        channel: { direct: [w.designer.id, reviewer.id] },
+    const grant = w.grants.issueBuddy({
+      role: 'worker',
+      buddyId: w.lead.id,
+      workspaceId: w.ws,
+      conversationId: 'c',
+      runId: null,
+      returns: INBOX,
+    });
+    const spec = w.endpoint.spec(grant);
+    const group = await call(spec, 'post', {
+      channel: { direct: [w.designer.id, reviewer.id] },
+      kind: 'request',
+      body: 'Both of you: review the logo',
+      key: 'ask-group',
+    });
+    assert.equal(group.isError, true);
+    assert.match(group.text, /public channel/);
+    assert.match(group.text, /one direct message per recipient/);
+    assert.equal((await w.runs(w.designer.id)).length, 0, 'no run started for the refused request');
+    for (const recipient of [w.designer, reviewer]) {
+      const one = await call(spec, 'post', {
+        channel: { direct: [recipient.id] },
         kind: 'request',
-        body: 'Both of you: review the logo',
-        key: 'ask-group',
+        body: 'Review the logo',
+        key: `ask-${recipient.id}`,
       });
-      assert.equal(posted.isError, false, posted.text);
-      request = posted.value;
-    });
-    // Each recipient answers; the second to arrive is the late one. Answers are serialised on one
-    // tail so the outcome is deterministic whichever run the runner claims first.
-    const outcomes: boolean[] = [];
-    let tail: Promise<void> = Promise.resolve();
-    for (const n of [2, 3]) {
-      w.during.set(n, (turn) => {
-        const answered = tail.then(async () => {
-          const result = await call(turn.mcp, 'post', {
-            answers: request.id,
-            body: `Answer from turn ${n}`,
-            key: `answer-group-${n}`,
-          });
-          outcomes.push(!result.isError);
-        });
-        tail = answered;
-        return answered;
-      });
+      assert.equal(one.isError, false, one.text);
     }
-    const chat = await w.creation.createServerBuddyConversation({
-      context: { buddyId: w.lead.id, workspaceId: w.ws },
-      conversationId: 'owner-chat',
-      commandId: 'owner-chat',
-      deferInitialMessage: true,
-    });
-    chat.sendMessage('Ask Designer and Reviewer', { origin: 'owner_input', inputId: 'owner-1' });
-
-    const complete = (id: string) =>
-      w
-        .runs(id)
-        .then((runs) => runs.find((r) => r.status === 'complete' && r.input.kind === 'post'));
-    const designerRun = await until(() => complete(w.designer.id), "Designer's run");
-    const reviewerRun = await until(() => complete(reviewer.id), "Reviewer's run");
-    assert.deepEqual(designerRun.input, { kind: 'post', postId: request.id });
-    assert.deepEqual(reviewerRun.input, { kind: 'post', postId: request.id });
-    assert.deepEqual(outcomes.sort(), [false, true], 'one answer lands, the late one is refused');
-    assert.equal((await w.core.getPost(OWNER, request.id)).request.state, 'answered');
   } finally {
     await w.close();
   }
@@ -2151,7 +2132,11 @@ test('an answer the requester already read settles its return run with no model 
 
     const leadRuns = await until(async () => {
       const runs = await w.runs(w.lead.id);
-      return runs.length === 2 && runs.every((r) => r.status !== 'queued' && r.status !== 'running') && runs;
+      return (
+        runs.length === 2 &&
+        runs.every((r) => r.status !== 'queued' && r.status !== 'running') &&
+        runs
+      );
     }, "the requester's schedule run and its settled return");
     const returned = leadRuns.find((r) => r.input.kind === 'reply')!;
     assert.equal(returned.status, 'cancelled');
