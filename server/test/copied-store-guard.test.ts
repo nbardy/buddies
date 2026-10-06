@@ -45,14 +45,7 @@ async function seedStore(dir: string): Promise<void> {
     core.post(
       OWNER,
       { kind: 'direct', members: [OWNER, buddyActor(buddy.id)] },
-      {
-        kind: 'request',
-        body: `Do the thing ${key}`,
-        evidence: [],
-        mentions: [],
-        broadcast: false,
-        key,
-      }
+      { kind: 'request', body: `Do the thing ${key}`, evidence: [], mentions: [], broadcast: false, key }
     );
   await ask('stale'); // its run is claimed below and left running under a 1 ms lease
   const claimed = await core.claimRun({ leaseMs: 1, chatDeadlineMs: 1, turnDeadlineMs: 1 });
@@ -100,10 +93,7 @@ async function boot(name: string, optIn: boolean) {
   backend.stdout.on('data', (c: Buffer) => (log += c.toString()));
   backend.stderr.on('data', (c: Buffer) => (log += c.toString()));
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`backend never became ready:\n${log}`)),
-      60_000
-    );
+    const timer = setTimeout(() => reject(new Error(`backend never became ready:\n${log}`)), 60_000);
     const poll = setInterval(() => {
       if (log.includes('Initial load complete')) {
         clearTimeout(timer);
@@ -135,10 +125,7 @@ test('a backend on a copied store launches no agent unless execution is opted in
   t.after(control.stop);
   const deadline = Date.now() + 30_000;
   while (workerLaunches(control.marker).length === 0 && Date.now() < deadline) await sleep(100);
-  assert.ok(
-    workerLaunches(control.marker).length > 0,
-    `bait store never launched the fake CLI:\n${control.log()}`
-  );
+  assert.ok(workerLaunches(control.marker).length > 0, `bait store never launched the fake CLI:\n${control.log()}`);
 
   const guarded = await boot('guarded', false);
   t.after(guarded.stop);

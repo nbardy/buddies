@@ -8,8 +8,8 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
-import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 import { freePortSync } from './free-port';
+import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 
 /**
  * The owner's requirement (2026-09-30, #case-studies post_01a0f2bc): a web-server restart must not

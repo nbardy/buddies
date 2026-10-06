@@ -7,8 +7,8 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
-import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 import { freePortSync } from './free-port';
+import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 
 /**
  * The owner's question (2026-09-30, Task task_01a0f2cb): "if I ctrl+C the server and bring it back

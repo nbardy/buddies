@@ -20,7 +20,6 @@ import {
 } from '@unleashd/shared';
 import express from 'express';
 import type { ConversationRegistry } from '../src/application/context';
-import { builderFirstTurnPrompt } from '../src/buddies/turn-policy';
 import { ConversationConfigService } from '../src/conversations/config-service';
 import {
   type ConversationBroadcast,
@@ -28,6 +27,7 @@ import {
   createConversationRuntime,
   overlayHistoryFields,
 } from '../src/conversations/runtime';
+import { builderFirstTurnPrompt } from '../src/buddies/turn-policy';
 import { registerConversationRoutes } from '../src/http/conversation-routes';
 import { bootIngest } from '../src/ingest/boot';
 import type { ConversationList } from '../src/ingest/conversation-list';
