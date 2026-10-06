@@ -28,18 +28,19 @@ function bounded(text: string, max: number): string {
 // written here, so its size is a test invariant, not a runtime throw: a runtime throw failed every
 // owner-thread turn on 2026-09-21 when one feature line pushed it over.
 export const BUDDY_TOOL_GUIDE = [
-  'BUDDY TOOLS (the `unleashd_buddy` MCP server, already bound to you, this workspace and this turn)',
+  'BUDDY TOOLS (`unleashd_buddy` MCP server, bound to you, this workspace and this turn)',
   'inbox: requests you owe, your open requests, unread channels. Start there.',
-  'post: write in a channel, a one-to-one DM ({direct:[id]}) or a task; `answers` replies to one request you owe and wakes its requester. kind "request" (DMs only) starts the recipient; "inform" wakes nobody.',
+  'post: write in a channel, a DM ({direct:[id]}) or a task; `answers` replies to one request you owe and wakes its requester. kind "request" (DMs only) starts the recipient; "inform" wakes nobody.',
   'channel_read: read a channel or thread, or search every channel you can read ({search}). channel: create a public channel, or rename/archive/restore one.',
-  'tasks: list rows by {buddyId}|{taskId}|{workspace}, then get one task (children and comments as previews). task_write: create/update; comments use post {channel:{task}}.',
-  'doc_read / doc_write: soul, working and long-term memory. Compare-and-swap on the revision you read; a conflict means re-read and reconcile.',
-  'Detailed notes (decisions, evidence, failed attempts) are agent_notes/<date>_<topic>.md files you write and search with your own file tools.',
-  'Background worker: post kind "request" with worker {provider, model} to {direct:[]} (you) or a report. Each is a tracked run; its answer wakes you. Never shell out to agent CLIs.',
+  'tasks: list rows by {buddyId}|{taskId}|{workspace}, then get one task (children, comments as previews). task_write: create/update; comments use post {channel:{task}}.',
+  'doc_read / doc_write: soul, working and long-term memory. Compare-and-swap on the revision you read; on conflict, re-read and reconcile.',
+  'Detailed notes: agent_notes/<date>_<topic>.md, written and searched with file tools.',
+  'Background worker: post kind "request" with worker {provider, model} to {direct:[]} (you) or a report: a tracked run whose answer wakes you. Never shell out to agent CLIs.',
   'runs: scoped slim rows with waiting reasons, plus get/cancel. schedule: scoped cron runs. team: list rows, then get one body.',
   'Never edit the Buddies database or files to change Buddy state. A denied tool is an authority boundary; do not route around it.',
-  'Do not copy task status into memory. Save collaborative work in files and link them in posts or task comments.',
-  'An action that needs the owner: post a request in your DM with the owner ({direct:["owner"]}) naming the exact action and risk, and act only after an explicit answer.',
+  'Do not copy task status into memory; save shared work in files, linked from posts.',
+  'Workers: post a one-line progress note on the Task at each milestone; the final answer carries evidence paths (commits, files, test names), not prose.',
+  'Owner-needed action: request it in the owner DM ({direct:["owner"]}), naming the action and risk; act only after an explicit answer.',
 ].join('\n');
 
 const memoryText = (doc: Doc | null, empty: string) =>
