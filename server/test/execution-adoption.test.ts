@@ -101,6 +101,16 @@ async function main() {
     say({ type: 'result', subtype: 'success' });
     return mark('settler.exited', process.pid);
   }
+  if (scenario === 'holder') {
+    await until('holder.go');
+    say({ type: 'result', subtype: 'success' });
+    return mark('holder.exited', process.pid);
+  }
+  if (scenario === 'second') {
+    text('queued ran;');
+    say({ type: 'result', subtype: 'success' });
+    return mark('second.exited', process.pid);
+  }
   if (scenario === 'quick') {
     await until('quick.go');
     text('quick done;');
@@ -218,6 +228,25 @@ const alive = (pid: number) => {
     return false;
   }
 };
+
+function queueMessage(conversationId: string, content: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${PORT}${WS_PATH}`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    const commandId = crypto.randomUUID();
+    socket.on('open', () =>
+      socket.send(JSON.stringify({ type: 'queue_message', commandId, conversationId, content }))
+    );
+    socket.on('message', (raw) => {
+      const frame = JSON.parse(String(raw)) as { type: string; commandId?: string; ok?: boolean };
+      if (frame.type !== 'ack' || frame.commandId !== commandId) return;
+      socket.close();
+      frame.ok === false ? reject(new Error(String(raw))) : resolve();
+    });
+    socket.on('error', reject);
+  });
+}
 
 function createChat(conversationId: string, message: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -684,5 +713,40 @@ test(
       (left) => left.length === 0,
       'journal removed once settled'
     );
+  }
+);
+
+// Step 6 (task_01a11013-bac6, durable owner messages). Until then a message typed behind a running
+// turn lived only in the backend's memory: a reload waited for it, and a crash lost it silently.
+// It is a records row now (an ordinary chat) or a `chat` run (a Buddy conversation), written when
+// it was sent. Guard: the message survives the SIGKILL, waits behind the ADOPTED turn, and runs
+// exactly once after it. A replay (the row requeued although its turn ran) would spawn twice.
+test(
+  'an owner message queued behind a running turn survives a backend SIGKILL and runs exactly once',
+  { timeout: 120_000 },
+  async () => {
+    await killBackend();
+    await startBackend('Q1');
+    const chatId = crypto.randomUUID();
+    await createChat(chatId, 'Hold the turn. SCENARIO:holder');
+    await eventually(() => exists('holder.midturn'), Boolean, 'holder mid-turn');
+    await queueMessage(chatId, 'Then run this. SCENARIO:second');
+    // The running turn is the queue's sending head; the message is the pending entry behind it.
+    const pending = async () =>
+      ((await http('GET', `/api/conversations/${chatId}`)).body.queue ?? []).filter(
+        (m: { status: string }) => m.status === 'pending'
+      ).length;
+    await eventually(pending, (n) => n === 1, 'the message is queued behind the running turn');
+
+    await killBackend();
+    await startBackend('Q2');
+    assert.equal(await pending(), 1, 'the queued message came back from its row');
+    assert.equal(spawns().filter((l) => l.startsWith('second ')).length, 0, 'it waits for the turn');
+
+    fs.writeFileSync(path.join(fakeDir, 'holder.go'), '');
+    await eventually(() => exists('second.exited'), Boolean, 'the queued message ran');
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    assert.equal(spawns().filter((l) => l.startsWith('second ')).length, 1, 'it ran exactly once');
+    assert.equal(await pending(), 0, 'and left the queue');
   }
 );
