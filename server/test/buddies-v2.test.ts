@@ -210,7 +210,15 @@ async function world(reopen?: string) {
   const providerErrors = new Map<number, string>();
   // Turns whose provider process was told to stop.
   const stopped = new Set<number>();
-  const seatPost = /post\(\{ channel: \{ id: "([^"]+)" \}, replyToId: "([^"]+)"/;
+  // A delivery prompt ends each post with `(post id[, thread root], channel id)`; the fake Buddy
+  // answers the NEWEST one in its thread, as a real Buddy would (`silent` turns post nothing).
+  const deliveredPost = (prompt: string) => {
+    const lines = [
+      ...prompt.matchAll(/\((post_[\w-]+)(?:, thread (post_[\w-]+))?, channel ([\w-]+)\)/g),
+    ];
+    const last = lines.at(-1);
+    return last ? [last[0], last[3], last[2] ?? last[1]] : null;
+  };
   const executeTurn = ((request: ProviderRequest) => {
     const turn: Turn = { n: turns.length + 1, request, mcp: request.mcpServers!.unleashd_buddy };
     turns.push(turn);
@@ -251,7 +259,7 @@ async function world(reopen?: string) {
           return;
         }
         const answer = answers.get(turn.n) ?? `Answer ${turn.n}`;
-        const seat = seatPost.exec(request.prompt);
+        const seat = deliveredPost(request.prompt);
         if (seat && !silent.has(turn.n)) {
           const posted = await call(turn.mcp, 'post', {
             channel: { id: seat[1] },
