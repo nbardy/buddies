@@ -25,7 +25,7 @@ import {
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
 import type { BuddyGrant, Grants, Role, TurnGrant } from './grants';
 import { attachToRelay } from './mcp-relay';
-import { type MentionResolution, resolveMentions } from './mentions';
+import { type MentionResolution, resolveMentions, wakes } from './mentions';
 import {
   TAIL_MAX,
   checkedEvidence,
@@ -34,7 +34,6 @@ import {
   runTail,
   taskDetailView,
 } from './tool-views';
-import { seatWoken } from './channels';
 import { WorkerSchema, checkedRunConfig } from './worker-config';
 
 /**
@@ -469,8 +468,7 @@ const BUDDY_TOOLS = {
             evidence: input.evidence,
             fromConversationId: grant.conversationId,
             key: input.key,
-          }),
-          NO_PICKS
+          })
         );
         return withMentions(post, resolved);
       }
@@ -494,13 +492,13 @@ const BUDDY_TOOLS = {
           body,
           // Provenance, and in a DM the conversation later posts there are delivered to.
           fromConversationId: grant.conversationId,
-          mentions: seatWoken(channel, grant.author, input.kind, body),
+          mentions: wakes(channel, grant.author, input.kind, body, NO_PICKS),
           runConfig,
           broadcast: false,
         }
       );
       // A replayed key (a retried tool call) announces nothing: it would wake everyone again.
-      if (created) deps.events.emit({ kind: 'posted', post, channel, picks: NO_PICKS });
+      if (created) deps.events.emit({ kind: 'posted', post, channel });
       return withMentions(post, resolved);
     },
   }),
@@ -667,9 +665,9 @@ const BUDDY_TOOLS = {
         case 'list': {
           const scope = scopeQuery(checkedScope(grant, input.action.scope));
           const limit = RUN_ROW_LIMIT[scope.kind];
-          const rows = await deps.core.listRunRows(scope, limit + 1);
+          const rows = await deps.core.listRunRows(grant.author, scope, limit + 1);
           return {
-            runs: await runRowsView(deps.core, grant.author, rows.slice(0, limit)),
+            runs: runRowsView(rows.slice(0, limit)),
             truncated: rows.length > limit,
           };
         }

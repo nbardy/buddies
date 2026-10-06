@@ -43,7 +43,7 @@ import {
   channelMediaDirectory,
   requireCanonicalPostMedia,
 } from './channel-media';
-import { type Channels, mentionedBuddyIds, seatWoken } from './channels';
+import type { Channels } from './channels';
 import {
   type BuddiesCore,
   ChannelArchiveSchema,
@@ -56,7 +56,8 @@ import {
   managerRef,
   taskDetail,
 } from './core';
-import { type BuddyEvents, type MentionPicks, NO_PICKS, announcePost } from './events';
+import { type BuddyEvents, type MentionPicks, announcePost } from './events';
+import { mentionedBuddyIds, wakes } from './mentions';
 import type { Runner } from './runner';
 import { channelsNamed } from './search-channels';
 import { checkedEvidence } from './tool-views';
@@ -159,13 +160,13 @@ export async function publishOwnerPost(
   const { post, created } = await deps.core.post(
     author,
     { kind: 'id', id: target.id },
-    // The Buddies its @mentions (or, in a DM, the owner's plain post) wake through their thread
-    // seats: the crate's delivery skips them for this post (channels.ts `seatWoken`).
-    { ...input, body, mentions: seatWoken(target, author, input.kind, body) }
+    // The Buddies its @mentions (or, in a DM, the owner's plain post) wake, on the owner's chip
+    // picks: one `deliver` run each, written with the post (mentions.ts `wakes`).
+    { ...input, body, mentions: wakes(target, author, input.kind, body, picks) }
   );
   if (!created) return { post };
   deps.events.emit({ kind: 'changed' });
-  await announcePost(deps, OWNER, post, picks);
+  await announcePost(deps, OWNER, post);
   return { post };
 }
 
@@ -203,7 +204,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
   };
   const posted = async <T extends Post>(post: Promise<T>) => {
     const written = await write(post);
-    return announcePost(deps, OWNER, written, NO_PICKS);
+    return announcePost(deps, OWNER, written);
   };
   // `answers` takes the same road as every post (one write path), then lands in the request's own
   // thread; the channel in the path must be that request's, so a stale or forged id fails loudly.

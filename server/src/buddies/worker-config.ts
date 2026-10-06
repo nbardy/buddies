@@ -27,6 +27,19 @@ export function workerConversationConfig(config: RunConfig): ConversationConfig 
 }
 
 /**
+ * The owner's mention-chip pick as a run's config, so it rides the `deliver` run the mention
+ * writes. An unnamed model or effort stays absent: the provider's default, resolved at claim
+ * (decision J). A pick that disables reasoning becomes the default effort.
+ */
+export function runConfigOfPick(pick: ConversationConfig): RunConfig {
+  return {
+    provider: pick.provider,
+    model: pick.model.mode === 'explicit' ? pick.model.modelId : undefined,
+    reasoningEffort: pick.reasoning.mode === 'explicit' ? pick.reasoning.effort : undefined,
+  };
+}
+
+/**
  * Decision J (2026-10-06): the model a run that names only its provider runs on, the catalog's
  * default for it right now. The runner records it on the run at claim (crate `record_run_model`),
  * so a later catalog change never rewrites which model a run used. Before J, `RunConfig.model`

@@ -1,11 +1,15 @@
 // Pattern: one write path (docs/patterns.md#one-write-path)
 //
 // Fix-guard (2026-10-06): a Buddy wrote plain `@Wave Simulation Lead` in two root posts. A mention
-// exists only in the link form `[@Name](buddy:id)` (channels.ts MENTION), so the posts stored
+// exists only in the link form `[@Name](buddy:id)` (MENTION below), so the posts stored
 // literally: no chip, no wake, and `post` still reported success. The author never learned it
 // had mentioned nobody. This is the ONE canonicalizer at the Buddy post write boundary: the stored
 // body is already link-form, so the chip and the wake both come from the one existing regex.
 // Guard: `plain @Name mentions` in server/test/buddies-v2.test.ts.
+
+import type { Actor, Channel, Mention, PostKind } from '@unleashd/buddies-core';
+import type { MentionPicks } from './events';
+import { runConfigOfPick } from './worker-config';
 
 export type Roster = ReadonlyArray<{ id: string; name: string }>;
 
@@ -71,4 +75,42 @@ export function resolveMentions(body: string, roster: Roster): MentionResolution
   }
   result += plain(body.slice(cursor));
   return { body: result, mentioned: [...mentioned.values()], unresolved: [...unresolved] };
+}
+
+const MENTION = /\[@([^\]]+)\]\(buddy:([A-Za-z0-9_-]+)\)/g;
+
+export function mentionedBuddyIds(body: string): string[] {
+  return [...new Set([...body.matchAll(MENTION)].map((match) => match[2]))];
+}
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/**
+ * The Buddies a post wakes, as the crate's `Mention`s: the @mentions of a public or task post, and
+ * the DM's Buddies for the owner's plain DM post (a request or an answer starts its own run; a
+ * Buddy's DM inform wakes nobody, so two Buddies cannot wake each other). Every writer passes the
+ * result in `PostInput.mentions`; the crate writes one `deliver` run per Buddy in the post's own
+ * transaction. The owner's chip pick for a Buddy rides its run.
+ */
+export function wakes(
+  channel: Channel,
+  author: Actor,
+  kind: PostKind,
+  body: string,
+  picks: MentionPicks
+): Mention[] {
+  const ids = (() => {
+    switch (channel.kind.type) {
+      case 'public':
+      case 'task':
+        return mentionedBuddyIds(body).filter((id) => author.kind !== 'buddy' || author.id !== id);
+      case 'direct':
+        return author.kind === 'owner' && kind === 'inform'
+          ? channel.kind.members.flatMap((member) => (member.kind === 'buddy' ? [member.id] : []))
+          : [];
+    }
+  })();
+  return ids.map((buddyId) => {
+    const pick = picks.get(buddyId);
+    return { buddyId, config: pick && runConfigOfPick(pick) };
+  });
 }

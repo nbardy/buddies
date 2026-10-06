@@ -1,7 +1,7 @@
 import type { Actor, BuddiesCore, Channel, Post, Run } from '@unleashd/buddies-core';
 import type { ConversationConfig } from '@unleashd/shared';
 
-/** The owner's mention-chip picks: the harness each mentioned Buddy answers on. */
+/** The owner's mention-chip picks: the harness each mentioned Buddy answers on (ride the post's wake). */
 export type MentionPicks = ReadonlyMap<string, ConversationConfig>;
 export const NO_PICKS: MentionPicks = new Map();
 
@@ -14,8 +14,10 @@ export const NO_PICKS: MentionPicks = new Map();
  */
 export type BuddyEvent =
   | { kind: 'changed' }
-  /** A CREATED post (never a replayed key): channels.ts starts its mentions and follow-ups. */
-  | { kind: 'posted'; post: Post; channel: Channel; picks: MentionPicks }
+  /** A CREATED post (never a replayed key): the channel's views refresh. */
+  | { kind: 'posted'; post: Post; channel: Channel }
+  /** A delivery started or ended: who is replying in this channel changed. */
+  | { kind: 'responding'; channelId: string }
   /** A cancel was recorded (owner route or a Buddy's `runs` tool); the runner stops its turn. */
   | { kind: 'cancelled'; run: Run };
 
@@ -40,10 +42,9 @@ export function createBuddyEvents() {
 export async function announcePost<T extends Post>(
   deps: { core: BuddiesCore; events: BuddyEvents },
   reader: Actor,
-  post: T,
-  picks: MentionPicks
+  post: T
 ): Promise<{ post: T; channel: Channel }> {
   const channel = await deps.core.openChannel(reader, { kind: 'id', id: post.channelId });
-  deps.events.emit({ kind: 'posted', post, channel, picks });
+  deps.events.emit({ kind: 'posted', post, channel });
   return { post, channel };
 }

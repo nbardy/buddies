@@ -6,7 +6,7 @@ import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import type { TurnInput } from '../turns/input';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
-import { type GrantRecord, type Grants, type TurnGrant } from './grants';
+import type { GrantRecord, Grants, TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
 import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
 import type { ChatAdmission, LeaseRenewal, Runner } from './runner';

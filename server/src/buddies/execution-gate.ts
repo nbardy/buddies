@@ -24,9 +24,7 @@ import { APP_DATA_DIR_ENV } from '../app-data';
  */
 export const BUDDY_EXECUTION_ENV = 'UNLEASHD_BUDDY_EXECUTION';
 
-export type ExecutionGate =
-  | { t: 'enabled' }
-  | { t: 'disabled'; reason: string };
+export type ExecutionGate = { t: 'enabled' } | { t: 'disabled'; reason: string };
 
 const resolved = (value: string | undefined) => (value?.trim() ? path.resolve(value) : null);
 

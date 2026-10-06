@@ -91,7 +91,6 @@ import { validate as isUuid } from 'uuid';
 import { auditLocalAgents } from './audit.js';
 import { createBriefings } from './buddies/briefing';
 import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
-import { createCliReplyGate } from './buddies/channel-reply-gate';
 import { createChannels } from './buddies/channels';
 import {
   OWNER,
@@ -401,6 +400,13 @@ const buddyRunnerHost: RunnerHost = {
       workerConversationConfig(config)
     );
   },
+  openSeat: async ({ buddyId, workspaceId, rootId, pick }) =>
+    buddyChannels.openSeat({
+      buddyId,
+      workspaceId,
+      rootId,
+      pick: pick && workerConversationConfig(pick),
+    }),
   openBackground: async ({ conversationId, context, commandId, config }) => {
     await buddyCreationService.createServerBuddyConversation({
       context,
@@ -411,13 +417,13 @@ const buddyRunnerHost: RunnerHost = {
       visibility: 'background',
     });
   },
-  runTurn: async ({ conversationId, context, prompt, leaseToken, deadline }) => {
+  runTurn: async ({ conversationId, context, prompt, leaseToken, deadline, owner }) => {
     const registered = conversations.get(conversationId);
     if (!registered) throw new Error(`Run conversation ${conversationId} is not registered`);
     const conversation = await buddyCreationService.ensureConversationReady(registered);
     // Automatic expiry is max_runtime_timeout, never stop()/user_stop (AGENTS.md). The policy
     // arms it from the run's own deadline, so an adopting backend re-arms the same instant.
-    return conversation.runCoordinationMessage(prompt, context, leaseToken, deadline);
+    return conversation.runCoordinationMessage(prompt, context, leaseToken, deadline, owner);
   },
   stop: (id) => conversations.get(id)?.stop(),
 };
@@ -633,17 +639,6 @@ const buddyChannels = createChannels({
   events: buddyEvents,
   channelChanged,
   conversations: buddyConversations,
-  uploadsRoot: () => UPLOADS_DIR,
-  // Resolved by the same authority as conversations, so the gate runs exactly the
-  // harness/model the Buddy's reply would.
-  gate: createCliReplyGate({
-    execute: ephemeralExecute('reply-gate'),
-    resolveExecution: async (config) => {
-      const resolution = await conversationConfigService.resolve(config);
-      if (resolution.status !== 'resolved') throw new Error(resolution.error.message);
-      return resolution.value;
-    },
-  }),
 });
 buddyEvents.on((event) => {
   if (event.kind === 'changed') buddiesChanged();

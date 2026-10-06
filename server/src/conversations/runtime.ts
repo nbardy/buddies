@@ -418,7 +418,8 @@ export class Conversation extends EventEmitter {
     content: string,
     context: BuddyContext,
     claimToken: string,
-    deadline: string
+    deadline: string,
+    owner: boolean
   ): Promise<void> {
     if (this._kind.t !== 'buddy') {
       return Promise.reject(new Error('Automated Buddy inputs require a Buddy conversation'));
@@ -432,7 +433,7 @@ export class Conversation extends EventEmitter {
     if (this.process || this.isRunning) {
       return Promise.reject(new Error('Conversation is busy'));
     }
-    return this._policy.runCoordination(content, context, claimToken, deadline);
+    return this._policy.runCoordination(content, context, claimToken, deadline, owner);
   }
 
   sendMessage(content: string, ownerInput?: OwnerInput): void {

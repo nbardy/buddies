@@ -775,7 +775,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
     content: string,
     context: BuddyContext,
     leaseToken: string,
-    deadline: string
+    deadline: string,
+    owner: boolean
   ): Promise<void> {
     if (this.execution) return Promise.reject(new Error('Conversation is busy'));
     if (
@@ -800,7 +801,10 @@ export class BuddyTurnPolicy implements TurnPolicy {
     this.host.once('buddy-turn-failed', heard);
     try {
       this.host.send(sameEitherWay(content), {
-        origin: RETURN_ORIGIN[this.host.visibility()],
+        // D9: owner authority only when every post the turn shows is the owner's (the runner
+        // decides, from the posts as stored); anything else gets the placement's Buddy origin.
+        // Guard: buddies-v2 "B1: a seat turn holds owner authority only when …".
+        origin: owner ? 'owner_input' : RETURN_ORIGIN[this.host.visibility()],
         inputId: runId,
       });
     } catch (error) {

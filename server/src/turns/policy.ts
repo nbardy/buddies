@@ -120,7 +120,9 @@ export interface TurnPolicy {
     content: string,
     context: BuddyContext,
     claimToken: string,
-    deadline: string
+    deadline: string,
+    /** The turn answers the owner's own post: it may hold owner authority (delivery design D9). */
+    owner: boolean
   ): Promise<void>;
   sendAutomation(content: string): void;
   stopAutomation(): void;

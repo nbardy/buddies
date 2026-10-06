@@ -42,8 +42,10 @@ export declare class BuddiesCore {
   catchUpThread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
   /** What a claimed delivery shows (deliveries.rs `compose`). */
   deliverPosts(runId: string): Promise<Delivery>
-  /** The Buddies a post was delivered to (the host's follow-up gate skips them until step 5). */
-  deliveredTo(postId: string): Promise<Array<string>>
+  /** The Buddies replying in a channel: its queued and running deliveries. */
+  responding(channelId: string): Promise<Array<Responding>>
+  /** The owner reruns a failed reply on another model (deliveries.rs `retry_delivery`). */
+  retryDelivery(actor: Actor, postId: string, buddyId: string, config: RunConfig): Promise<Run>
   /** The holder is about to spawn (Pattern: durable-intake). */
   markExecuting(runId: string, leaseToken: string): Promise<Run>
   /** The provider default a model-less run config resolved to at claim (decision J). */
@@ -59,7 +61,7 @@ export declare class BuddiesCore {
   updateBuddy(actor: Actor, input: BuddyUpdate): Promise<Buddy>
   getRun(id: string): Promise<Run>
   listRuns(query: RunQuery, limit: number): Promise<Array<Run>>
-  listRunRows(scope: ListScope, limit: number): Promise<Array<RunRow>>
+  listRunRows(reader: Actor, scope: ListScope, limit: number): Promise<Array<RunRow>>
   putSchedule(actor: Actor, input: ScheduleInput): Promise<Schedule>
   listSchedules(query: ListScope): Promise<Array<Schedule>>
   /** "Run now": the schedule fires at once (a post in its thread, delivered to its Buddy). */
@@ -214,7 +216,7 @@ export type Decision =
 
 /** What a claimed delivery shows (deliveries.rs `compose`). */
 export type Delivery =
-  | { kind: 'posts'; posts: Array<Post>; unshown: number }
+  | { kind: 'posts'; posts: Array<Post>; unshown: number; subscribed?: string }
   | { kind: 'consumed' }
 
 export interface Doc {
@@ -336,6 +338,12 @@ export type ManagerRef =
   | { kind: 'nobody' }
   | { kind: 'buddy'; id: string }
 
+/** A Buddy a post wakes. `config`: the owner's mention-chip pick, which the delivery turn runs on. */
+export interface Mention {
+  buddyId: string
+  config?: RunConfig
+}
+
 export type Op = 'read_doc' | 'write_doc' | 'post' | 'read_channel' | 'search_posts' | 'create_channel' | 'archive_channel' | 'rename_channel' | 'write_task' | 'enqueue_run' | 'cancel_run' | 'retry_run' | 'write_schedule' | 'admin'
 
 /** How a run ended, reported by the runner. */
@@ -378,11 +386,10 @@ export interface PostInput {
    */
   fromConversationId?: string
   /**
-   * Buddies the host wakes itself for this post through a thread seat (its @mentions; the
-   * Buddies of a DM the owner wrote in). Their subscriptions get no delivery for it, so nobody
-   * is woken twice. Until step 5 moves mentions and seats onto `deliver` (task_01a11013-b205).
+   * The Buddies this post wakes (its @mentions; the Buddies of a DM the owner wrote in), each a
+   * `deliver` run written in the post's own transaction (deliveries.rs `wake`).
    */
-  mentions: Array<string>
+  mentions: Array<Mention>
   /**
    * A `Request` only: its recipients' runs execute with this instead of their profile (a
    * worker). Every recipient must be the author or report to it (`EnqueueRun`).
@@ -417,6 +424,14 @@ export type RequestState =
   | { state: 'answered'; answerId: string }
   | { state: 'cancelled' }
   | { state: 'failed' }
+
+/** A queued or running delivery: "X is replying…" for a channel (deliveries.rs `responding`). */
+export interface Responding {
+  buddyId: string
+  threadRootId: string
+  startedAt: string
+  running: boolean
+}
 
 export interface Run {
   id: string
@@ -524,6 +539,9 @@ export interface RunRow {
   /** What happened to a run that did not complete (e.g. `lease_expired`: the host or holder died mid-run and the claim gate ended it). */
   errorCode?: string
   error?: string
+  /** What the run is FOR: the `purpose` of its post, when the reader may read that post's channel. */
+  purpose?: string
+  taskTitle?: string
 }
 
 export type RunStatus = 'queued' | 'running' | 'cancel_requested' | 'complete' | 'failed' | 'cancelled'

@@ -1,15 +1,7 @@
-import type {
-  Actor,
-  BuddiesCore as Core,
-  Inbox,
-  Post,
-  Run,
-  RunRow,
-  Task,
-} from '@unleashd/buddies-core';
+import type { Inbox, Post, Run, RunRow, Task } from '@unleashd/buddies-core';
 import { bodyText } from '@unleashd/shared';
 import type { MessageSource } from '../conversations/messages';
-import { CoreError, coreError } from './core';
+import { CoreError } from './core';
 
 /**
  * What a Buddy's tools show of a record. Every view here is a SLIM projection: the full record is
@@ -106,52 +98,20 @@ export const taskDetailView = ({ task, channel, children, comments }: TaskDetail
 
 // ---- runs ------------------------------------------------------------------------------------
 
-const requestPostId = (row: RunRow): string | null =>
-  row.input.kind === 'post' || row.input.kind === 'deliver' ? row.input.postId : null;
-
 /**
- * Run rows with what each run is FOR: the request's `purpose` and its Task's title. The crate row
- * carries ids only, so a reader had to open every run to learn what it was doing. Absence is
- * meaning here: `purpose` is null when the run has no post (a chat, a retired kind) or when the post is not one this Buddy may read (a DM between others) or no longer exists. The error is
- * clipped; `runs get` returns the whole one.
+ * Run rows with what each run is FOR: the post's `purpose` and its Task's title, joined by the
+ * crate's row SQL (F4, 2026-10-06; it was one `getPost` and one `getTask` per row). Absence is
+ * meaning: `purpose` is null when the run has no post (a chat, a retired kind) or the post is not
+ * one this Buddy may read (a DM between others). The error is clipped; `runs get` returns the
+ * whole one.
  */
-export async function runRowsView(core: Core, reader: Actor, rows: RunRow[]) {
-  const posts = new Map<string, Promise<string | null>>();
-  const purposeOf = (postId: string) => {
-    let known = posts.get(postId);
-    if (!known) {
-      known = core.getPost(reader, postId).then(
-        (post) => post.purpose ?? null,
-        (error: unknown) => {
-          const code = coreError(error)?.code;
-          if (code === 'denied' || code === 'not_found') return null;
-          throw error;
-        }
-      );
-      posts.set(postId, known);
-    }
-    return known;
-  };
-  const titles = new Map<string, Promise<string>>();
-  const titleOf = (taskId: string) => {
-    let known = titles.get(taskId);
-    if (!known) {
-      known = core.getTask(taskId).then((task) => task.title);
-      titles.set(taskId, known);
-    }
-    return known;
-  };
-  return Promise.all(
-    rows.map(async (row) => {
-      const postId = requestPostId(row);
-      return {
-        ...row,
-        purpose: postId === null ? null : await purposeOf(postId),
-        taskTitle: row.taskId === undefined ? null : await titleOf(row.taskId),
-        error: row.error === undefined ? undefined : clip(row.error, ERROR_CHARS),
-      };
-    })
-  );
+export function runRowsView(rows: RunRow[]) {
+  return rows.map((row) => ({
+    ...row,
+    purpose: row.purpose ?? null,
+    taskTitle: row.taskTitle ?? null,
+    error: row.error === undefined ? undefined : clip(row.error, ERROR_CHARS),
+  }));
 }
 
 export const TAIL_MAX = 20;
