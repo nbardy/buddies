@@ -272,12 +272,13 @@ export function createRunner(options: {
 
   // Pattern: route-at-send (docs/patterns.md#route-at-send)
   /**
-   * A return (answer or failure) is a turn in the background conversation the request was sent
-   * from. Only a request sent with `Returns.conversation` has a return run at all (crate
-   * `send_back`), so this never asks whether the origin is a human chat. It used to, after the
-   * claim, and its `mailbox` answer ("nothing to do") came only once the run had waited behind
-   * the owner's turn: 9 such runs up to 2h44m on 2026-10-01. Guard: buddies-v2 "an answer to a
-   * request sent from a human chat starts no run …". What is left after the claim is existence:
+   * A return (answer or failure) is a turn in the conversation the request was sent from, a human
+   * chat included (owner decision A, 2026-10-06). Every Buddy request carries `Returns.conversation`
+   * (policy-port.ts `returnsFor`), so this never asks what kind of conversation the origin is. It
+   * used to, after the claim, and its `mailbox` answer ("nothing to do") came only once the run
+   * had waited behind the owner's turn: 9 such runs up to 2h44m on 2026-10-01. The turn that runs
+   * here is real work and resumes the chat's own session (turn-policy.ts `RETURN_ORIGIN`). What is
+   * left after the claim is existence:
    * an origin deleted since then (or none, on a row queued before routes were stamped) gets a
    * fresh turn, as before.
    */
@@ -593,6 +594,19 @@ export function createRunner(options: {
       return tracked(
         core.getRun(runId).then((run) => FINISH[outcome.t](run, leaseToken, outcome as never))
       );
+    },
+
+    /**
+     * The owner's Stop in a conversation: every queued run there that is not an owner message
+     * (a return: answer, failure notice or follow wake) ends now (delivery design D1). The posts
+     * stay unread. Chat runs are the owner's own messages and keep today's rule: Stop ends the
+     * turn, not the queue behind it.
+     */
+    async cancelQueuedReturns(conversationId: string): Promise<void> {
+      const runs = await core.listRuns({ kind: 'conversation', conversationId }, 100);
+      const returns = runs.filter((r) => r.status === 'queued' && r.input.kind !== 'chat');
+      await Promise.all(returns.map((r) => core.cancelRun(OWNER, r.id)));
+      if (returns.length > 0) events.emit({ kind: 'changed' });
     },
 
     /** Owner stop: a queued run ends now; a running one is asked to stop and its turn is killed. */

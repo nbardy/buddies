@@ -187,10 +187,9 @@ function postInThread(events: BuddyEvents, rootId: string, author: Actor, ms: nu
  *   - it counts against the Buddy's pool (`max_active_runs`) only while its wake runs;
  *   - if the conversation is gone by then, the runner's `returnJob` opens a fresh turn, exactly
  *     as for a request's answer (task_01a0f7c2, the return route).
- * An Inbox route (a foreground chat: the owner's DM or a thread seat) takes no automated input
- * (2026-10-01: no-op runs queued behind the owner's turn for hours), so steps 1 and 2 still run
- * but step 3 answers `not_following` instead of registering a wake that could never be delivered.
- * A thread seat needs none: the follow-up gate (channels.ts) asks it on every new post anyway.
+ * Every Buddy conversation, a foreground chat included, takes this wake since 2026-10-06 (owner
+ * decision A): `grant.returns` is always `conversation` there. The `inbox` branch below is only
+ * for a grant that belongs to no conversation (the memory reviewer): no wake could be delivered.
  * The follow-up gate is skipped for a follower whose wake shows the post (channels.ts
  * `deliveringFollowers`): it asked to be told, so no yes/no question and no second wake.
  */
@@ -213,7 +212,7 @@ async function followThread(
         kind: 'not_following' as const,
         posts: [],
         reason:
-          'a foreground chat takes no automated wake; follow from a background turn (worker, request, schedule). New posts in a thread you replied in already ask you whether to reply.',
+          'this turn belongs to no conversation, so there is nowhere to wake it; read the thread again instead.',
       };
     }
     case 'conversation': {

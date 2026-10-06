@@ -420,10 +420,16 @@ export class Conversation extends EventEmitter {
     claimToken: string,
     deadline: string
   ): Promise<void> {
-    if (this._kind.t !== 'buddy' || this._kind.visibility !== 'background') {
-      return Promise.reject(new Error('Automated Buddy inputs require a background conversation'));
+    if (this._kind.t !== 'buddy') {
+      return Promise.reject(new Error('Automated Buddy inputs require a Buddy conversation'));
     }
-    if (this.process || this.isRunning || this.turnQueue.length) {
+    // Owner decision A, 2026-10-06 (delivery design D0): a foreground chat takes returns too, so
+    // the "background only" guard that stood here since the 09-13 follow-up is gone. This is a
+    // backstop for the claim gate, which already holds a run while this conversation has a
+    // running run or an owner message queued (`conversation_busy`, `owner_first`). It no longer
+    // looks at the owner's pending queue: a message typed behind the turn waits on its own chat
+    // run instead, and rejecting here would fail the return instead of ordering it.
+    if (this.process || this.isRunning) {
       return Promise.reject(new Error('Conversation is busy'));
     }
     return this._policy.runCoordination(content, context, claimToken, deadline);
@@ -649,6 +655,12 @@ export class Conversation extends EventEmitter {
 
   stop(): void {
     if (this._policy.stop()) this.stopOwnedTurn();
+  }
+
+  /** The owner's Stop button: stop, and end the returns queued behind this turn (design D1). */
+  ownerStop(): void {
+    this.stop();
+    this._policy.ownerStopped();
   }
 
   /** Coordinator-only process stop (see BuddyTurnPolicy.stopAutomation). */
