@@ -489,6 +489,19 @@ pub struct RunRow {
     /// What happened to a run that did not complete (e.g. `lease_expired`: the host or holder died mid-run and the claim gate ended it).
     pub error_code: Option<String>,
     pub error: Option<String>,
+    /// What the run is FOR: the `purpose` of its post, when the reader may read that post's channel.
+    pub purpose: Option<String>,
+    pub task_title: Option<String>,
+}
+
+/// A queued or running delivery: "X is replying…" for a channel (deliveries.rs `responding`).
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct Responding {
+    pub buddy_id: String,
+    pub thread_root_id: String,
+    pub started_at: String,
+    pub running: bool,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
@@ -525,6 +538,14 @@ pub struct Conversation {
 
 // ---- inputs and query shapes ----------------------------------------------------------------
 
+/// A Buddy a post wakes. `config`: the owner's mention-chip pick, which the delivery turn runs on.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct Mention {
+    pub buddy_id: String,
+    pub config: Option<RunConfig>,
+}
+
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct PostInput {
@@ -539,10 +560,9 @@ pub struct PostInput {
     /// The conversation the post was written from: provenance, and in a direct channel (or any
     /// thread it follows) the conversation later posts by others there are delivered to.
     pub from_conversation_id: Option<String>,
-    /// Buddies the host wakes itself for this post through a thread seat (its @mentions; the
-    /// Buddies of a DM the owner wrote in). Their subscriptions get no delivery for it, so nobody
-    /// is woken twice. Until step 5 moves mentions and seats onto `deliver` (task_01a11013-b205).
-    pub mentions: Vec<String>,
+    /// The Buddies this post wakes (its @mentions; the Buddies of a DM the owner wrote in), each a
+    /// `deliver` run written in the post's own transaction (deliveries.rs `wake`).
+    pub mentions: Vec<Mention>,
     /// A `Request` only: its recipients' runs execute with this instead of their profile (a
     /// worker). Every recipient must be the author or report to it (`EnqueueRun`).
     pub run_config: Option<RunConfig>,
@@ -902,7 +922,9 @@ pub struct ThreadUnread {
 pub enum Delivery {
     /// Posts the conversation has not read, oldest first, across every thread it subscribes to;
     /// `unshown` older ones were left out (they are read with channel_read).
-    Posts { posts: Vec<Post>, unshown: i64 },
+    /// `subscribed`: the conversation the Buddy follows the trigger's thread in, for a delivery
+    /// that was queued with none (a mention): the host runs it there, not in a new seat.
+    Posts { posts: Vec<Post>, unshown: i64, subscribed: Option<String> },
     /// Everything it would show was read meanwhile: the run settles with no turn.
     Consumed,
 }

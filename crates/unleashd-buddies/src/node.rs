@@ -201,10 +201,16 @@ impl BuddiesCore {
         call(&self.store, move |s| s.deliver_posts(&run_id)).await
     }
 
-    /// The Buddies a post was delivered to (the host's follow-up gate skips them until step 5).
+    /// The Buddies replying in a channel: its queued and running deliveries.
     #[napi]
-    pub async fn delivered_to(&self, post_id: String) -> napi::Result<Vec<String>> {
-        call(&self.store, move |s| s.delivered_to(&post_id)).await
+    pub async fn responding(&self, channel_id: String) -> napi::Result<Vec<Responding>> {
+        call(&self.store, move |s| s.responding(&channel_id)).await
+    }
+
+    /// The owner reruns a failed reply on another model (deliveries.rs `retry_delivery`).
+    #[napi]
+    pub async fn retry_delivery(&self, actor: Actor, post_id: String, buddy_id: String, config: RunConfig) -> napi::Result<Run> {
+        call(&self.store, move |s| s.retry_delivery(&actor, &post_id, &buddy_id, config)).await
     }
 
     /// The holder is about to spawn (Pattern: durable-intake).
@@ -275,8 +281,8 @@ impl BuddiesCore {
     }
 
     #[napi]
-    pub async fn list_run_rows(&self, scope: ListScope, limit: i64) -> napi::Result<Vec<RunRow>> {
-        call(&self.store, move |s| s.list_run_rows(scope, limit)).await
+    pub async fn list_run_rows(&self, reader: Actor, scope: ListScope, limit: i64) -> napi::Result<Vec<RunRow>> {
+        call(&self.store, move |s| s.list_run_rows(&reader, scope, limit)).await
     }
 
     #[napi]

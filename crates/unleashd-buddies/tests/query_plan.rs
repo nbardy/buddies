@@ -165,7 +165,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
         ListScope::Task { task_id: parent.id.clone() },
         ListScope::Workspace { workspace_id: WS.into() },
     ] {
-        s.list_run_rows(q, 10).unwrap();
+        s.list_run_rows(&Actor::Owner, q, 10).unwrap();
     }
     s.create_workspace(&owner, WorkspaceInput { name: "w2".into(), root_path: "/tmp/w2".into() }).unwrap();
     let hired = s
@@ -244,7 +244,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
         .unwrap();
     s.post(&ic, ChannelRef::Id { id: channel.id.clone() }, PostInput { reply_to_id: Some(top.id.clone()), ..input(PostKind::Inform, "more", "pg") })
         .unwrap();
-    s.delivered_to(&woke.id).unwrap();
+    s.responding(&channel.id).unwrap();
     s.mark_thread_read(&mid, &top.id, &woke.id).unwrap();
     while let Some(claim) = s.claim_run(lease(60_000)).unwrap() {
         if let RunInput::Deliver { .. } = claim.run.input {

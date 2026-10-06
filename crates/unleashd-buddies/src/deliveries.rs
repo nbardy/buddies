@@ -14,12 +14,14 @@
 //!
 //! This one rule replaced the request return route (`Returns`, `post.return_conversation_id`,
 //! `send_back`), the follow table and its runs (`thread_follow`, follows.rs) and the reply /
-//! failure-notice / follow / schedule run kinds. Mentions and thread seats still run on the host's
-//! pair machine until step 5 (task_01a11013-b205); they reach the crate as `PostInput.mentions`.
+//! failure-notice / follow / schedule run kinds, and (step 5) the host's pair machine and
+//! follow-up gate: an @mention or the owner's DM post is a delivery too (`wake`), to the thread's
+//! subscription or, with none, to a run with no conversation, for which the host opens the
+//! Buddy's seat when it claims it.
 
 use crate::error::{CoreError, Result};
 use crate::posts::{POST_COLS, post_row};
-use crate::runs::Enqueue;
+use crate::runs::{Enqueue, RUN_COLS, run_row};
 use crate::store::{Store, collect, now_iso, require};
 use crate::types::*;
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -128,7 +130,7 @@ pub(crate) fn catch_up(tx: &Transaction, reader: &Actor, root_id: &str, ord: &st
 /// Rule 1: a post by someone else in a subscribed thread is delivered to the subscribed
 /// conversation, one `deliver` run per (post, Buddy). Called inside the post's transaction.
 /// `skip`: Buddies already woken another way for this post (a request's recipient gets its `post`
-/// run; the host's mention/DM seat path until step 5), so nobody is woken twice.
+/// run, a mention gets `wake`'s), so nobody is woken twice.
 pub(crate) fn fan_out(tx: &Transaction, post: &Post, skip: &[String]) -> Result<()> {
     let subscribers = collect(
         tx.prepare_cached(
@@ -141,6 +143,35 @@ pub(crate) fn fan_out(tx: &Transaction, post: &Post, skip: &[String]) -> Result<
         enqueue_delivery(tx, &buddy_id, post, Some(conversation_id))?;
     }
     Ok(())
+}
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/// An @mention, or the owner's plain post in a DM, wakes its Buddy: one `deliver` run in the post's
+/// own transaction, on the owner's chip pick (`config`). It goes to the conversation the Buddy
+/// follows that thread in; with none it carries no conversation, and the host opens the Buddy's
+/// seat when it claims the run (runner.ts `deliverJob`). Until 2026-10-06 the host's pair machine
+/// did this from memory, one post behind every restart, and a second path (the follow-up gate)
+/// asked each other participant a model question per post; both are this one rule now.
+/// A Buddy outside the channel's workspace, or archived, is skipped: an unknown mention is the
+/// resolver's `unresolved` (mentions.ts), never an error that fails the post.
+pub(crate) fn wake(tx: &Transaction, channel: &Channel, post: &Post, mention: &Mention) -> Result<()> {
+    let wakeable: bool = tx
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM buddy WHERE id = ?1 AND workspace_id = ?2 AND status = 'active')")?
+        .query_row(params![mention.buddy_id, channel.workspace_id], |r| r.get(0))?;
+    if !wakeable || post.author.buddy_id() == Some(mention.buddy_id.as_str()) {
+        return Ok(());
+    }
+    let conversation = subscription(tx, &mention.buddy_id, root_of(post))?;
+    tx.enqueue(EnqueueInput {
+        buddy_id: mention.buddy_id.clone(),
+        input: RunInput::Deliver { post_id: post.id.clone() },
+        conversation_id: conversation,
+        task_id: post.task_id.clone(),
+        after_run_id: None,
+        deadline: None,
+        config: mention.config.clone(),
+    })
+    .map(|_| ())
 }
 
 pub(crate) fn enqueue_delivery(tx: &Transaction, buddy_id: &str, post: &Post, conversation_id: Option<String>) -> Result<Run> {
@@ -192,10 +223,13 @@ pub(crate) fn subscription(tx: &Transaction, buddy_id: &str, root_id: &str) -> R
 /// move at `mark_executing`, once the turn is certain to run (design R2: a holder that dies before
 /// it must leave the posts unread, or the requeued run would show nothing).
 pub(crate) fn compose(tx: &Transaction, run: &Run, post: &Post) -> Result<Delivery> {
-    let args = params![run.buddy_id, run.conversation_id, root_of(post), run.through_ord];
+    // A retried attempt always shows its trigger: the failed attempt marked it read when it started
+    // (`delivered`), and a retry that showed nothing would settle "already read" and answer nothing.
+    let retried = (run.attempt > 1).then_some(post.id.as_str());
+    let args = params![run.buddy_id, run.conversation_id, root_of(post), run.through_ord, retried];
     let window = "(?4 IS NULL OR p.ord <= ?4)";
     let select = |what: &str, join: &str| {
-        format!("SELECT {what} FROM covered h JOIN post p ON {join} WHERE {SHOWABLE} AND {window}")
+        format!("SELECT {what} FROM covered h JOIN post p ON {join} WHERE ({SHOWABLE} OR p.id = ?5) AND {window}")
     };
     let mut posts = collect(
         tx.prepare_cached(&format!(
@@ -219,7 +253,11 @@ pub(crate) fn compose(tx: &Transaction, run: &Run, post: &Post) -> Result<Delive
         .execute(params![run.id, newest.ord])?;
     posts.reverse();
     let unshown = total - posts.len() as i64;
-    Ok(Delivery::Posts { posts, unshown })
+    let subscribed = match run.conversation_id {
+        Some(_) => None,
+        None => subscription(tx, &run.buddy_id, root_of(post))?,
+    };
+    Ok(Delivery::Posts { posts, unshown, subscribed })
 }
 
 /// The delivery is about to run: every thread it covers is read through its `through_ord`, which
@@ -307,14 +345,52 @@ impl Store {
         })
     }
 
-    /// The Buddies a post was delivered to (any outcome). The host's follow-up gate skips them: a
-    /// subscriber hears of the post through its delivery, and a gate would wake it twice (step 5
-    /// deletes the gate, task_01a11013-b205).
-    pub fn delivered_to(&self, post_id: &str) -> Result<Vec<String>> {
+    /// The Buddies replying in a channel: its queued and running deliveries, by the thread of the
+    /// post that triggered them ("X is replying…", derived from runs, not from host memory).
+    pub fn responding(&self, channel_id: &str) -> Result<Vec<Responding>> {
         collect(
             self.conn
-                .prepare_cached("SELECT DISTINCT buddy_id FROM run WHERE input_kind = 'deliver' AND input_id = ?1")?
-                .query_map([post_id], |r| r.get(0))?,
+                .prepare_cached(
+                    "SELECT r.buddy_id, coalesce(p.root_id, p.id), coalesce(r.started_at, r.created_at), r.status <> 'queued'
+                     FROM run r JOIN post p ON p.id = r.input_id
+                     WHERE r.input_kind = 'deliver' AND r.status IN ('queued','running','cancel_requested') AND p.channel_id = ?1
+                     ORDER BY r.created_at",
+                )?
+                .query_map([channel_id], |r| {
+                    Ok(Responding { buddy_id: r.get(0)?, thread_root_id: r.get(1)?, started_at: r.get(2)?, running: r.get(3)? })
+                })?,
         )
+    }
+
+    /// The owner reruns a reply that failed on another model: the next attempt of the delivery of
+    /// `post_id` to `buddy_id` (or a first one, when the failure predates deliveries), in the same
+    /// conversation unless the provider changes (a started session cannot change provider; the
+    /// host opens a new seat for a run with none). A delivery still queued or running starts
+    /// nothing new, so a double click runs once.
+    pub fn retry_delivery(&mut self, actor: &Actor, post_id: &str, buddy_id: &str, config: RunConfig) -> Result<Run> {
+        self.write(|tx| {
+            require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: buddy_id.to_string() })?;
+            let post = crate::posts::get_post(tx, post_id)?;
+            let latest = |tx: &Transaction| -> Result<Option<Run>> {
+                Ok(tx
+                    .prepare_cached(&format!("SELECT {RUN_COLS} FROM run WHERE input_kind = 'deliver' AND input_id = ?1 AND buddy_id = ?2 ORDER BY attempt DESC LIMIT 1"))?
+                    .query_row(params![post_id, buddy_id], run_row)
+                    .optional()?)
+            };
+            let id = match latest(tx)? {
+                None => {
+                    let mention = Mention { buddy_id: buddy_id.to_string(), config: Some(config) };
+                    wake(tx, &crate::posts::get_channel(tx, &post.channel_id)?, &post, &mention)?;
+                    return latest(tx)?.ok_or_else(|| CoreError::Invalid(format!("{buddy_id} cannot be woken for post {post_id}")));
+                }
+                Some(run) if matches!(run.status, RunStatus::Queued | RunStatus::Running | RunStatus::CancelRequested) => return Ok(run),
+                Some(run) => {
+                    let same_provider = run.config.as_ref().is_some_and(|old| old.provider == config.provider);
+                    let conversation = if same_provider { run.conversation_id.clone() } else { None };
+                    crate::runs::next_attempt(tx, &run, conversation, Some(&config))?
+                }
+            };
+            crate::runs::get_run(tx, &id)
+        })
     }
 }

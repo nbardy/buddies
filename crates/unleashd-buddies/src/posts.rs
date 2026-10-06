@@ -22,7 +22,7 @@ pub(crate) const POST_COLS: &str = "p.id, p.channel_id, p.author_id, p.root_id, 
 
 /// The channels `actor_param` (an actor key) may read: the owner every one, a buddy the public and
 /// task channels and the direct channels it is a member of. `c` is the channel.
-fn readable_by(actor_param: &str) -> String {
+pub(crate) fn readable_by(actor_param: &str) -> String {
     format!(
         "({actor_param} = 'owner' OR c.kind != 'direct'
           OR EXISTS (SELECT 1 FROM channel_member m WHERE m.channel_id = c.id AND m.member = {actor_param}))"
@@ -841,8 +841,13 @@ fn insert_post(
         input.broadcast
     ])?;
     let owed: Vec<String> = ask.owed_by().iter().filter_map(Actor::buddy_id).map(str::to_owned).collect();
-    let skip: Vec<String> = owed.iter().chain(&input.mentions).cloned().collect();
-    after_write(tx, actor, channel, &get_post(tx, &id)?, input.from_conversation_id.as_deref(), &skip, false)?;
+    let woken: Vec<String> = input.mentions.iter().map(|m| m.buddy_id.clone()).collect();
+    let skip: Vec<String> = owed.iter().chain(&woken).cloned().collect();
+    let post = get_post(tx, &id)?;
+    after_write(tx, actor, channel, &post, input.from_conversation_id.as_deref(), &skip, false)?;
+    for mention in input.mentions.iter().filter(|m| !owed.contains(&m.buddy_id)) {
+        crate::deliveries::wake(tx, channel, &post, mention)?;
+    }
     for recipient in &owed {
         tx.enqueue(EnqueueInput {
             buddy_id: recipient.to_string(),
@@ -878,9 +883,8 @@ fn require_worker_authority(tx: &Transaction, actor: &Actor, ask: &Ask, config: 
 ///    thread (rule 1; the last writer wins, decision F). This replaced the request's stored return
 ///    route (`Returns`, `post.return_conversation_id`): an answer reaches the conversation that
 ///    asked because that conversation posted the request, and so does any later post there.
-///    Public and task threads subscribe only by `follow` until step 5: their replies still run on
-///    the host's seat machine (mentions, the follow-up gate), and a seat that subscribed by
-///    posting would be woken by both (task_01a11013-b205 moves seats onto delivery);
+///    Public and task threads subscribe by `follow`, or when a delivery opens the conversation
+///    (`bind_run`): a Buddy that merely posts there from a chat is not pulled into every reply;
 /// 3. every other subscribed Buddy gets a delivery (`fan_out`), except `skip`.
 /// A Buddy's self-spawned worker writing in its request's thread does neither 1 nor 2: the thread's
 /// subscription and mark are its spawner's (deliveries.rs `from_own_worker`).

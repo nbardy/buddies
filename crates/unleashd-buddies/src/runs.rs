@@ -15,7 +15,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_f
 use serde_json::json;
 use std::str::FromStr;
 
-const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, \
+pub(crate) const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, \
     task_epoch, after_run_id, status, deadline, lease_expires_at, outcome, error_code, error, ready_at, \
     created_at, started_at, ended_at, config, body, executing_at, through_ord";
 
@@ -66,6 +66,11 @@ const WAITING_REASON_SQL: &str = r#"CASE
         SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
           AND c.status IN ('running','cancel_requested')
     ) THEN json_object('kind','conversation_busy')
+    WHEN r.conversation_id IS NULL AND r.input_kind = 'deliver' AND EXISTS (
+        SELECT 1 FROM run c JOIN post cp ON cp.id = c.input_id JOIN post rp ON rp.id = r.input_id
+        WHERE c.buddy_id = r.buddy_id AND c.input_kind = 'deliver' AND c.status IN ('running','cancel_requested')
+          AND coalesce(cp.root_id, cp.id) = coalesce(rp.root_id, rp.id)
+    ) THEN json_object('kind','conversation_busy')
     WHEN r.conversation_id IS NOT NULL AND r.input_kind <> 'chat' AND EXISTS (
         SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
           AND c.input_kind = 'chat' AND c.status = 'queued'
@@ -82,7 +87,7 @@ const WAITING_REASON_SQL: &str = r#"CASE
     ELSE NULL
 END"#;
 
-fn run_row(r: &Row) -> rusqlite::Result<Run> {
+pub(crate) fn run_row(r: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
         id: r.get(0)?,
         input_key: r.get(1)?,
@@ -460,10 +465,10 @@ impl Store {
                     (RunInput::Retired { input_kind, .. }, ..) => {
                         return Err(CoreError::Invalid(format!("a {input_kind} run is history; its posts are delivered as `deliver` runs now")));
                     }
-                    (RunInput::Chat { .. } | RunInput::Deliver { .. }, ..) => run.conversation_id.clone(),
-                    (RunInput::Post { .. }, None, _) => run.conversation_id.clone(),
-                    (RunInput::Post { .. }, Some(new), Some(old)) if new.provider == old.provider => run.conversation_id.clone(),
-                    (RunInput::Post { .. }, Some(_), _) => None,
+                    (RunInput::Chat { .. }, ..) => run.conversation_id.clone(),
+                    (RunInput::Post { .. } | RunInput::Deliver { .. }, None, _) => run.conversation_id.clone(),
+                    (RunInput::Post { .. } | RunInput::Deliver { .. }, Some(new), Some(old)) if new.provider == old.provider => run.conversation_id.clone(),
+                    (RunInput::Post { .. } | RunInput::Deliver { .. }, Some(_), _) => None,
                 };
                 if let RunInput::Post { post_id } = &run.input {
                     tx.execute("UPDATE post SET request = 'awaiting' WHERE id = ?1 AND request IN ('failed','cancelled')", [post_id])?;
@@ -495,7 +500,7 @@ impl Store {
         collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), run_row)?)
     }
 
-    pub fn list_run_rows(&self, scope: ListScope, limit: i64) -> Result<Vec<RunRow>> {
+    pub fn list_run_rows(&self, reader: &Actor, scope: ListScope, limit: i64) -> Result<Vec<RunRow>> {
         let (column, scope) = match scope {
             ListScope::Buddy { buddy_id } => ("r.buddy_id", buddy_id),
             ListScope::Task { task_id } => ("r.task_id", task_id),
@@ -515,16 +520,26 @@ impl Store {
             WHEN r.input_kind = 'chat' THEN 'owner'
             WHEN r.input_kind IN ('post','deliver') THEN (SELECT CASE WHEN p.author_id IS NULL THEN 'owner' ELSE p.author_id END FROM post p WHERE p.id = r.input_id)
             ELSE NULL END";
+        // Pattern: one-definition (docs/patterns.md#one-definition). What the run is FOR, joined here
+        // so a reader never opens each run (it was one `getPost` plus one `getTask` per row in
+        // tool-views.ts, the F4 N+1). NULL when the post's channel is not the reader's to read (a
+        // DM between others), as `readable_by` decides for every other post read.
+        let purpose = format!(
+            "(SELECT p.purpose FROM post p JOIN channel c ON c.id = p.channel_id
+              WHERE p.id = r.input_id AND r.input_kind IN ('post','deliver') AND {})",
+            crate::posts::readable_by("?4")
+        );
         let sql = format!(
             "SELECT r.id, r.status, r.input_kind, r.input_id, NULL, r.task_id,
                     {requester}, r.started_at, r.ended_at,
                     CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END,
-                    r.conversation_id, r.error_code, r.error
+                    r.conversation_id, r.error_code, r.error,
+                    {purpose}, (SELECT t.title FROM task t WHERE t.id = r.task_id)
              {RUN_WITH_ACTIVITY_SQL}
              WHERE {filter}
              ORDER BY r.status IN ('queued','running','cancel_requested') DESC, r.created_at DESC, r.id DESC LIMIT ?3"
         );
-        collect(self.conn.prepare_cached(&sql)?.query_map(params![now_iso(), scope, limit], |r| {
+        collect(self.conn.prepare_cached(&sql)?.query_map(params![now_iso(), scope, limit, reader.key()], |r| {
             let waiting = r
                 .get::<_, Option<String>>(9)?
                 .map(|json| {
@@ -544,6 +559,8 @@ impl Store {
                 conversation_id: r.get(10)?,
                 error_code: r.get(11)?,
                 error: r.get(12)?,
+                purpose: r.get(13)?,
+                task_title: r.get(14)?,
             })
         })?)
     }
@@ -716,7 +733,7 @@ fn end_run(tx: &Transaction, run: &Run, outcome: &Outcome, now: &str) -> Result<
 
 /// The next attempt of `run`'s input: a new queued row on the same key, the failed one kept as
 /// history. Shared by a manual retry and the one automatic resume (decision G).
-fn next_attempt(tx: &Transaction, run: &Run, conversation_id: Option<String>, config: Option<&RunConfig>) -> Result<String> {
+pub(crate) fn next_attempt(tx: &Transaction, run: &Run, conversation_id: Option<String>, config: Option<&RunConfig>) -> Result<String> {
     let task_epoch = run.task_id.as_deref().map(|t| get_task(tx, t).map(|t| t.epoch)).transpose()?;
     let now = now_iso();
     let id = new_id("run");

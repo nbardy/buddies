@@ -459,7 +459,7 @@ fn a_queued_owner_message_goes_before_a_delivery_in_the_same_conversation() {
     s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     let chat = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "owner-chat")).unwrap();
     let delivery = |s: &Store| {
-        s.list_run_rows(ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap().into_iter().find(|r| matches!(r.input, RunInput::Deliver { .. })).unwrap()
+        s.list_run_rows(&Actor::Owner, ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap().into_iter().find(|r| matches!(r.input, RunInput::Deliver { .. })).unwrap()
     };
     assert_eq!(delivery(s).waiting, Some(RunWaiting::OwnerFirst), "the delivery waits for the owner message");
     assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.id, chat.id, "the owner message is claimed first");
@@ -482,7 +482,7 @@ fn an_orphaned_owner_message_stops_holding_returns() {
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute("UPDATE run SET created_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1", [&chat.id]).unwrap();
     drop(conn);
-    let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
+    let rows = s.list_run_rows(&Actor::Owner, ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
     let delivery = rows.iter().find(|r| matches!(r.input, RunInput::Deliver { .. })).unwrap();
     assert_eq!(delivery.waiting, None, "an orphaned owner message no longer holds the delivery");
 }
@@ -549,7 +549,7 @@ fn a_burst_in_two_subscribed_threads_costs_one_delivery_turn() {
     s.settle_run(&busy.run.id, &busy.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
 
     let turn = s.claim_run_at("2099-01-01T00:00:02.000Z", lease(600_000)).unwrap().unwrap();
-    let Delivery::Posts { posts, unshown } = s.deliver_posts(&turn.run.id).unwrap() else { panic!("nothing shown") };
+    let Delivery::Posts { posts, unshown, .. } = s.deliver_posts(&turn.run.id).unwrap() else { panic!("nothing shown") };
     assert_eq!((posts.iter().map(|p| p.body.as_str()).collect::<Vec<_>>(), unshown), (vec!["p0", "p1", "p2", "p3", "p4"], 0));
     s.mark_executing(&turn.run.id, &turn.lease_token).unwrap();
     assert_eq!(queued(s, "mid"), 0, "the other four were fenced: shown in this turn");
@@ -826,7 +826,7 @@ fn an_expired_lease_ends_its_run_like_a_failed_settle() {
     s.claim_run_at("2099-01-01T00:05:01.000Z", lease(300_000)).unwrap();
     let run = s.get_run(&claim.run.id).unwrap();
     assert_eq!((run.status, run.error_code.as_deref()), (RunStatus::Failed, Some("lease_expired")));
-    let rows = s.list_run_rows(ListScope::Workspace { workspace_id: WS.into() }, 100).unwrap();
+    let rows = s.list_run_rows(&Actor::Owner, ListScope::Workspace { workspace_id: WS.into() }, 100).unwrap();
     let row = rows.iter().find(|r| r.id == claim.run.id).expect("expired run left the workspace list");
     assert_eq!((row.status, row.error_code.as_deref()), (RunStatus::Failed, Some("lease_expired")));
     assert_eq!(
@@ -1597,7 +1597,7 @@ fn a_follow_returns_the_unread_posts_once_and_subscribes() {
     s.post(&buddy("peer"), channel.clone(), reply("first", "a")).unwrap();
     s.post(&buddy("mid"), channel.clone(), reply("mine", "m")).unwrap();
     s.post(&buddy("peer"), channel, reply("second", "b")).unwrap();
-    assert!(s.delivered_to(&root.id).unwrap().is_empty(), "a public thread subscribes only by follow until step 5");
+    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "a Buddy that never followed a public thread is delivered nothing");
     // "mine" was written without "first" being shown, so it did not read past it (decision K).
     let read = s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
     assert_eq!((bodies(&read.posts), read.unshown), (vec!["first", "second"], 0));
@@ -1615,7 +1615,7 @@ fn a_followed_thread_delivers_anothers_post_to_the_following_conversation() {
     s.post(&buddy("mid"), channel.clone(), reply("on it", "own")).unwrap();
     assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the follower's own post wakes nobody");
     let news = s.post(&buddy("peer"), channel.clone(), reply("model is green", "news")).unwrap();
-    assert_eq!(s.delivered_to(&news.id).unwrap(), ["mid"], "its follow-up gate is skipped");
+    assert_eq!(s.responding(&root.channel_id).unwrap().iter().map(|r| r.buddy_id.as_str()).collect::<Vec<_>>(), ["mid"], "the delivery is what shows mid replying");
 
     let claim = s.claim_run(lease(60_000)).unwrap().expect("another's post is delivered now");
     assert_eq!((&claim.run.input, claim.run.conversation_id.as_deref()), (&RunInput::Deliver { post_id: news.id.clone() }, Some("conv-mid")));
@@ -1776,7 +1776,7 @@ fn run_rows_share_one_window_across_scopes() {
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute("UPDATE run SET ended_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1", [&old.run.id]).unwrap();
     drop(conn);
-    let ids = |q: ListScope| s.list_run_rows(q, 100).unwrap().into_iter().map(|r| r.id).collect::<Vec<_>>();
+    let ids = |q: ListScope| s.list_run_rows(&Actor::Owner, q, 100).unwrap().into_iter().map(|r| r.id).collect::<Vec<_>>();
     for rows in [
         ids(ListScope::Buddy { buddy_id: "peer".into() }),
         ids(ListScope::Workspace { workspace_id: WS.into() }),
@@ -1784,4 +1784,65 @@ fn run_rows_share_one_window_across_scopes() {
         assert_eq!(rows.len(), 2, "queued + recently ended; the 2020 run is outside the window");
         assert!(rows.contains(&new.run.id) && !rows.contains(&old.run.id));
     }
+}
+
+// Step 5 (task_01a11013-b205): an @mention is a delivery, in the post's own transaction.
+#[test]
+fn a_mention_is_a_delivery_with_no_conversation_until_the_buddy_has_one_in_the_thread() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    let pick = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    let mention = |config: Option<RunConfig>| PostInput { mentions: vec![Mention { buddy_id: "peer".into(), config }], ..reply("peer, look", "m1") };
+    s.post(&Actor::Owner, channel.clone(), mention(Some(pick.clone()))).unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().expect("the mention woke peer");
+    assert_eq!((claim.run.buddy_id.as_str(), claim.run.conversation_id.as_deref()), ("peer", None));
+    assert_eq!(claim.run.config, Some(pick), "the owner's chip pick rides the run");
+    let Delivery::Posts { posts, subscribed, .. } = s.deliver_posts(&claim.run.id).unwrap() else { panic!() };
+    assert_eq!((bodies(&posts), subscribed), (vec!["ship the model", "peer, look"], None));
+    // Once peer follows the thread from a conversation, the next mention goes there, once.
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    s.follow_thread(&buddy("peer"), &root.id, Some("conv-peer".into()), 20).unwrap();
+    s.post(&Actor::Owner, channel, PostInput { mentions: vec![Mention { buddy_id: "peer".into(), config: None }], ..reply("again", "m2") }).unwrap();
+    let again = s.claim_run(lease(60_000)).unwrap().expect("delivered once");
+    assert_eq!(again.run.conversation_id.as_deref(), Some("conv-peer"));
+    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the fan-out skipped the mentioned subscriber: no second run");
+}
+
+// A failed attempt marked its trigger read when it started; its retry must still show it.
+#[test]
+fn a_retried_delivery_shows_its_trigger_and_a_second_click_starts_nothing() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    let trigger = s.post(&Actor::Owner, channel, PostInput { mentions: vec![Mention { buddy_id: "peer".into(), config: None }], ..reply("peer, please", "m1") }).unwrap();
+    let claim = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(60_000));
+    s.deliver_posts(&claim.run.id).unwrap();
+    s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "execution_failed".into(), error: "out of tokens".into() }).unwrap();
+    let to = |model: &str| RunConfig { provider: "claude".into(), model: Some(model.into()), reasoning_effort: None };
+    let retry = s.retry_delivery(&Actor::Owner, &trigger.id, "peer", to("opus")).unwrap();
+    assert_eq!(retry.attempt, 2);
+    assert_eq!(s.retry_delivery(&Actor::Owner, &trigger.id, "peer", to("sonnet")).unwrap().id, retry.id, "a queued retry is not doubled");
+    let again = s.claim_run(lease(60_000)).unwrap().expect("the retry runs");
+    let Delivery::Posts { posts, .. } = s.deliver_posts(&again.run.id).unwrap() else { panic!("a retry showing nothing would answer nothing") };
+    assert!(posts.iter().any(|p| p.id == trigger.id));
+}
+
+// Two mentions of one Buddy in one thread must not open its seat twice (both would reply).
+#[test]
+fn deliveries_to_one_buddy_in_one_thread_run_one_at_a_time_until_it_has_a_conversation() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    let wake = || vec![Mention { buddy_id: "peer".into(), config: None }];
+    s.post(&Actor::Owner, channel.clone(), PostInput { mentions: wake(), ..reply("one", "m1") }).unwrap();
+    s.post(&Actor::Owner, channel, PostInput { mentions: wake(), ..reply("two", "m2") }).unwrap();
+    let first = s.claim_run(lease(60_000)).unwrap().expect("the first");
+    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the second waits for the first's conversation");
+    s.settle_run(&first.run.id, &first.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    assert!(s.claim_run(lease(60_000)).unwrap().is_some());
 }
