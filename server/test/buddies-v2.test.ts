@@ -3032,6 +3032,48 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
   }
 });
 
+// F2 (agent_notes/2026-10-06_ceo-feedback-retrospective.md): CEO feedback said workers answered
+// with prose and no progress. The nudge lives in the briefing, so it must reach a WORKER's turn.
+test('a spawned worker is told to post progress notes and answer with evidence paths', async () => {
+  const w = await world();
+  try {
+    const worker = { provider: 'codex', model: 'gpt-6-luna', reasoningEffort: 'low' };
+    w.during.set(1, async (turn) => {
+      const posted = await call(turn.mcp, 'post', {
+        channel: { direct: [] },
+        kind: 'request',
+        body: 'Sweep progress-line',
+        worker,
+        key: 'progress-line',
+      });
+      assert.equal(posted.isError, false, posted.text);
+    });
+    const schedule = await w.core.putSchedule(OWNER, {
+      buddyId: w.lead.id,
+      name: 'progress-line',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      prompt: 'Spawn one worker',
+      limits: '{}',
+      enabled: true,
+      key: 'progress-line',
+    });
+    await w.core.enqueueRun(OWNER, {
+      buddyId: w.lead.id,
+      input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
+    });
+    w.emit({ kind: 'changed' });
+    const turn = await until(
+      () => w.turns.find((t) => t.request.prompt.includes('Sweep progress-line')),
+      'the worker turn'
+    );
+    assert.match(turn.request.prompt, /progress note on the Task at each milestone/);
+    assert.match(turn.request.prompt, /evidence paths/);
+  } finally {
+    await w.close();
+  }
+});
+
 test('the briefing tool guide stays inside its budget', () => {
   // A runtime throw on this budget failed every owner-thread turn on 2026-09-21; it is a test now.
   assert.ok(BUDDY_TOOL_GUIDE.length <= 3_000, `${BUDDY_TOOL_GUIDE.length} chars`);
