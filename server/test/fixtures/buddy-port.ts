@@ -3,6 +3,7 @@ import type { GrantRecord } from '../../src/buddies/grants';
 import type { CompletedBuddyTurn } from '../../src/buddies/memory-review';
 import type { BuddyPolicyPort } from '../../src/buddies/policy-port';
 import { TURN_MAX_RUNTIME_MS } from '../../src/constants/timeouts';
+import { Conversation } from '../../src/conversations/runtime';
 
 const FIXTURE_GRANT = { token: 'fixture-grant' } as GrantRecord;
 
@@ -12,6 +13,14 @@ const FIXTURE_GRANT = { token: 'fixture-grant' } as GrantRecord;
 // claimed at once (as if the Buddy had a free slot) with a TURN_MAX_RUNTIME_MS deadline, and a turn
 // gets no MCP server. The claim reaches the conversation through `fixtureConversations`: a test
 // registers the conversation it builds, as the server's RunnerHost does by id.
+// A conversation registers itself the first time it queues a message, so a test needs no wiring.
+const proto = Conversation.prototype as unknown as { enqueuePrompt(...args: unknown[]): void };
+const enqueuePrompt = proto.enqueuePrompt;
+proto.enqueuePrompt = function (this: Conversation, ...args: unknown[]) {
+  fixtureConversations.set(this.id, this);
+  return enqueuePrompt.apply(this, args);
+};
+
 export const fixtureConversations = new Map<
   string,
   {

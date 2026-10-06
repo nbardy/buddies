@@ -524,32 +524,25 @@ test(
   }
 );
 
+// Step 6 (2026-10-07): this test used to be "two Ctrl+C", because a message queued behind the
+// running turn was memory-only work that the first press waited 3 s for, and a second press cut the
+// wait short with SIGKILL. A queued message is a durable row now, so nothing holds the reload: the
+// first press exits at once, with the message still queued, and the relaunched backend adopts the
+// turn and keeps the message (execution-adoption.test.ts runs it exactly once).
 test(
-  'two Ctrl+C (supervisor escalates to SIGKILL): agents survive and are adopted',
+  'one Ctrl+C with a message queued behind the turn: no wait, the turn is adopted and the message kept',
   { timeout: 300_000 },
   async () => {
     const c = makeCase('double');
     const first = launch(c, 'A');
     await first.ready;
     const work = await startWork(c, 'worker');
-    // A message queued behind the running turn is in-memory work: the first press waits up to
-    // 3 s for it (lifecycle/shutdown.ts), which is the wait a user cuts short by pressing again.
     await wsCommand({ type: 'queue_message', conversationId: work.chatId, content: 'queued' });
     signalGroup(first.pgid, 'SIGINT');
-    await eventually(
-      c,
-      () => c.log.some((l) => l.includes('SIGINT — shutting down')),
-      Boolean,
-      'backend saw SIGINT'
-    );
-    // A human second press: well outside the supervisor's relay window.
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    signalGroup(first.pgid, 'SIGINT');
     await assertGroupGoneAgentsJournaling(c, first, work);
-    // The supervisor's escalation, not the backend's own SIGINT exit, is what ended the backend.
     assert.ok(
-      c.log.some((l) => l.includes('Backend stopped (signal SIGKILL)')),
-      `second Ctrl+C escalated to SIGKILL:\n${c.log.filter((l) => l.includes('server-watch')).join('\n')}`
+      c.log.some((l) => l.includes('Backend stopped (exit 0)')),
+      `a queued message does not hold the reload:\n${c.log.filter((l) => l.includes('server-watch')).join('\n')}`
     );
     const second = launch(c, 'B');
     await second.ready;
