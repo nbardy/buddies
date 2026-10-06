@@ -879,12 +879,12 @@ fn require_worker_authority(tx: &Transaction, actor: &Actor, ask: &Ask, config: 
 /// What every written post does to the delivery state, in the post's own transaction:
 /// 1. the author has read the thread through its post, unless that would skip a post it was never
 ///    shown (decision K, deliveries.rs `catch_up`);
-/// 2. a Buddy posting from a conversation in a direct channel SUBSCRIBES that conversation to the
-///    thread (rule 1; the last writer wins, decision F). This replaced the request's stored return
-///    route (`Returns`, `post.return_conversation_id`): an answer reaches the conversation that
-///    asked because that conversation posted the request, and so does any later post there.
-///    Public and task threads subscribe by `follow`, or when a delivery opens the conversation
-///    (`bind_run`): a Buddy that merely posts there from a chat is not pulled into every reply;
+/// 2. a Buddy posting from a conversation SUBSCRIBES that conversation to the thread, in every
+///    kind of channel (rule 1; the last writer wins, decision F). This replaced the request's
+///    stored return route (`Returns`, `post.return_conversation_id`): an answer reaches the
+///    conversation that asked because that conversation posted the request, and so does any later
+///    post there. Until step 5 only direct channels subscribed by posting, while public and task
+///    threads ran on the host's seat machine; with that gone one rule covers all three;
 /// 3. every other subscribed Buddy gets a delivery (`fan_out`), except `skip`.
 /// A Buddy's self-spawned worker writing in its request's thread does neither 1 nor 2: the thread's
 /// subscription and mark are its spawner's (deliveries.rs `from_own_worker`).
@@ -892,7 +892,7 @@ fn after_write(tx: &Transaction, actor: &Actor, channel: &Channel, post: &Post, 
     let root = post.root_id.as_deref().unwrap_or(&post.id);
     if !spawner_owns && !crate::deliveries::from_own_worker(tx, actor, post, from)? {
         crate::deliveries::catch_up(tx, actor, root, &post.ord)?;
-        if let (Actor::Buddy { id }, Some(conversation), ChannelKind::Direct { .. }) = (actor, from, &channel.kind) {
+        if let (Actor::Buddy { id }, Some(conversation)) = (actor, from) {
             crate::deliveries::subscribe(tx, id, root, Some(conversation))?;
         }
     }

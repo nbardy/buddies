@@ -985,7 +985,7 @@ fn post_search_finds_words_only_in_channels_the_reader_may_read() {
             ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "p".into(), key: "g".into() },
         )
         .unwrap();
-    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, ..request(body, key) };
+    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, from_conversation_id: None, ..request(body, key) };
     s.post(&buddy("lead"), ChannelRef::Id { id: general.id.clone() }, say("Deploy the ranking model on Friday", "p1")).unwrap();
     s.post(&buddy("mid"), dm("mid", "ic"), say("secret ranking numbers", "p2")).unwrap();
     // Every word must match, in any order, case-insensitively; FTS syntax in the query is literal.
@@ -1012,7 +1012,7 @@ fn post_search_pages_older_hits_with_its_cursor() {
             ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "p".into(), key: "g".into() },
         )
         .unwrap();
-    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, ..request(body, key) };
+    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, from_conversation_id: None, ..request(body, key) };
     for i in 0..5 {
         s.post(&Actor::Owner, ChannelRef::Id { id: general.id.clone() }, say(&format!("rollout note {i}"), &format!("n{i}"))).unwrap();
     }
@@ -1486,7 +1486,7 @@ fn structured_search_filters_before_paging_and_never_leaves_readable_channels() 
             .unwrap()
     }).into();
     let on = |c: &Channel| ChannelRef::Id { id: c.id.clone() };
-    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, ..request(body, key) };
+    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, from_conversation_id: None, ..request(body, key) };
     let s = &mut f.store;
     let mut put = |who: Actor, ch: ChannelRef, body: &str, day: &str| {
         let id = s.post(&who, ch, say(body, &format!("k-{body}"))).unwrap().id;
@@ -1578,7 +1578,7 @@ fn follow_fixture(s: &mut Store) -> (Post, impl Fn(&str, &str) -> PostInput + us
     let general = s
         .create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "p".into(), key: "g".into() })
         .unwrap();
-    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, ..request(body, key) };
+    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, from_conversation_id: None, ..request(body, key) };
     let root = s.post(&buddy("mid"), ChannelRef::Id { id: general.id }, say("ship the model", "root")).unwrap();
     let root_id = root.id.clone();
     (root, move |body: &str, key: &str| PostInput { reply_to_id: Some(root_id.clone()), ..say(body, key) })
@@ -1845,4 +1845,17 @@ fn deliveries_to_one_buddy_in_one_thread_run_one_at_a_time_until_it_has_a_conver
     assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the second waits for the first's conversation");
     s.settle_run(&first.run.id, &first.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     assert!(s.claim_run(lease(60_000)).unwrap().is_some());
+}
+
+// Step 5 removed step 4's seam: posting subscribes in public and task threads too (decision F).
+#[test]
+fn a_buddy_posting_from_a_conversation_in_a_public_thread_follows_it() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    s.post(&buddy("peer"), channel.clone(), PostInput { from_conversation_id: Some("conv-peer".into()), ..reply("on it", "p1") }).unwrap();
+    s.post(&Actor::Owner, channel, reply("and then?", "o1")).unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().expect("peer's conversation follows the thread it posted in");
+    assert_eq!((claim.run.buddy_id.as_str(), claim.run.conversation_id.as_deref()), ("peer", Some("conv-peer")));
 }
