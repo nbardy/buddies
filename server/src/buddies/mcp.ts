@@ -503,7 +503,7 @@ const BUDDY_TOOLS = {
   }),
   inbox: buddyTool({
     description:
-      'Requests you owe, your open requests (clipped) and your channels here with unread counts.',
+      'Requests you owe, your open requests (clipped), channels with unread posts (readChannels counts the rest).',
     writes: false,
     schema: z.object({}),
     handler: async (deps, grant) =>
@@ -640,7 +640,7 @@ const BUDDY_TOOLS = {
   }),
   runs: buddyTool({
     description:
-      'List runs by {buddyId}, {taskId} or {workspace} (live first, then ended in the last 12 h) as {runs, truncated}; rows give purpose, taskTitle, status, errorCode (lease_expired = the holder died mid-run), conversationId, waiting. get {tail:n} adds its last n assistant entries. Also cancel, or retry a failed or cancelled run (same input, optionally another `worker`; reopens the request it answers).',
+      'List runs by {buddyId}, {taskId} or {workspace} (live first, then ended in the last 12 h) as {runs, truncated}; rows give purpose, taskTitle, status, errorCode (lease_expired = the holder died mid-run), conversationId, waiting. get {tail:n} adds its last n assistant entries as {at, text?, tools:[{name,args}]}. Also cancel, or retry a failed or cancelled run (same input, optionally another `worker`; reopens the request it answers).',
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [
