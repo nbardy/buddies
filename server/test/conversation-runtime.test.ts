@@ -53,7 +53,7 @@ function runtimeFixture(
   const aliases: Array<[string, string]> = [];
   const broadcasts: unknown[] = [];
   const config = options.config ?? createDefaultConversationConfig(options.provider ?? 'codex');
-  const Conversation = createConversationRuntime({
+  const Base = createConversationRuntime({
     executions: testExecutions(),
     broadcast: (message) => broadcasts.push(message),
     registerSessionAlias: (sessionId, conversationId) => {
@@ -85,6 +85,13 @@ function runtimeFixture(
       briefing: options.readCurrentBuddyContext,
     }),
   });
+  // Every conversation a test builds is claimable by the fake Buddy port, as the host finds one by id.
+  const Conversation = class extends Base {
+    constructor(opts: ConstructorParameters<typeof Base>[0]) {
+      super(opts);
+      fixtureConversations.set(this.id, this);
+    }
+  };
   const configState = {
     config,
     revision: 0,
@@ -97,7 +104,6 @@ function runtimeFixture(
     configState,
     kind: options.buddyContext ? buddyKind(options.buddyContext) : { t: 'chat' },
   });
-  fixtureConversations.set(conversation.id, conversation);
   return { aliases, broadcasts, configState, Conversation, conversation };
 }
 

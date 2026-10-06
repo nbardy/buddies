@@ -615,6 +615,8 @@ test("a worker's answer returns to the owner chat that asked, after its running 
     assert.deepEqual(
       whileRunning.map((r) => [r.input.kind, r.status]).sort(),
       [
+        // Step 6: the message typed meanwhile is a queued chat run the moment it is sent.
+        ['chat', 'queued'],
         ['chat', 'running'],
         ['deliver', 'queued'],
       ],
