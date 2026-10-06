@@ -136,3 +136,26 @@ decision. Each says what would justify revisiting it.
 - The owner-chat 15-minute `owner_first` bound stays until step 6.
 - `migrate.rs` (268 lines) is one-time code. Delete it after the live migration has run everywhere,
   like the v33 importer (delete-and-migrate).
+
+## Lead verification of the live migration (2026-10-06 ~15:35Z)
+
+- **Owner "go"** at 13:22:58Z (#case-studies post_01a11161). Pushed e20519e. Backend pid 62036 drained at 13:34:17Z.
+  The new backend wrote `~/.buddies/buddies-v3.sqlite.before-delivery.run-v1.20261006T133419.419Z.sqlite` (170 MB)
+  and migrated. Clean drains followed at 15:28 and 15:31Z. `pnpm errors:list` shows no new non-event-loop error group
+  since 13:30Z.
+- **Live:**
+  - run rows show `deliver` and `retired` kinds;
+  - a 3-party DM post is refused with the typed one-to-one error;
+  - answers to this lead's requests route to the asking conversation.
+- **FINDING: the migration silently dropped one delivery.** The one queued legacy `reply`, the F2 worker's answer
+  post_01a11167-ab26 (a self-request, written by the same Buddy at 13:29Z), became `deliver` run_01a1116c. That run was
+  cancelled at claim with "every post it would show was already read". Cause, in brief:
+  - Under the old code, a post moved its author's own `thread_read` past the post.
+  - The answer's author IS the requester, the same Buddy.
+  - So the mark was already past the answer when the migration converted the row.
+  - The migration Report counted it as `replies_delivered: 1`, and nothing was shown.
+
+  **Impact:** that one answer. The lead read it by hand and merged F2. The migration is one-time and has already run, so
+  this cannot recur on this store. **Lesson** for any future row conversion: a self-request answer must be delivered
+  explicitly (`deliver_to_spawner`), not through the read fence. The new-code path for self-worker answers is being
+  checked live by the F1 worker (post_01a111db-6641), whose answer has to wake the lead in the asking conversation.
