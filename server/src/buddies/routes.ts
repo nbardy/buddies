@@ -43,7 +43,7 @@ import {
   channelMediaDirectory,
   requireCanonicalPostMedia,
 } from './channel-media';
-import { type Channels, mentionedBuddyIds } from './channels';
+import { type Channels, mentionedBuddyIds, seatWoken } from './channels';
 import {
   type BuddiesCore,
   ChannelArchiveSchema,
@@ -159,7 +159,9 @@ export async function publishOwnerPost(
   const { post, created } = await deps.core.post(
     author,
     { kind: 'id', id: target.id },
-    { ...input, body }
+    // The Buddies its @mentions (or, in a DM, the owner's plain post) wake through their thread
+    // seats: the crate's delivery skips them for this post (channels.ts `seatWoken`).
+    { ...input, body, mentions: seatWoken(target, author, input.kind, body) }
   );
   if (!created) return { post };
   deps.events.emit({ kind: 'changed' });
@@ -249,7 +251,6 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         ...ScheduleSchema.parse(req.body),
         id,
         buddyId: p(req, 'buddyId'),
-        limits: '{}',
       })
     );
   const runQueries: Array<[string, (id: string) => RunQuery]> = [
@@ -359,16 +360,8 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     [buddyMutationRoute('schedule.create')]: (req) => putSchedule(req, undefined),
     [buddyMutationRoute('schedule.update')]: (req) => putSchedule(req, p(req, 'scheduleId')),
     [buddyMutationRoute('schedule.run')]: (req) =>
-      write(
-        core.enqueueRun(OWNER, {
-          buddyId: p(req, 'buddyId'),
-          input: {
-            kind: 'schedule',
-            scheduleId: p(req, 'scheduleId'),
-            slot: new Date().toISOString(),
-          },
-        })
-      ),
+      // "Run now": a fire, posted in the schedule's thread and delivered to its Buddy (decision I).
+      write(core.fireSchedule(OWNER, p(req, 'scheduleId'))),
     // ---- channels, DMs and the owner's inbox (everything is a post in a channel) ----------------
     'GET 200 /api/buddies/workspaces/:workspaceId/inbox': (req) =>
       core.inbox(OWNER, p(req, 'workspaceId')),

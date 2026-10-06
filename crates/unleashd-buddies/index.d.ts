@@ -31,12 +31,23 @@ export declare class BuddiesCore {
   listTasks(query: TaskQuery): Promise<Array<Task>>
   taskCounts(workspaceId: string): Promise<Array<TaskCount>>
   enqueueRun(actor: Actor, input: EnqueueInput): Promise<Run>
-  /** A Buddy follows a thread from one conversation (follows.rs). */
-  followThread(actor: Actor, input: FollowInput): Promise<FollowRead>
-  /** A follow read's first step: the thread's unread posts for this Buddy, marked read. */
+  /** A foreground chat input with its text (the queued run is the owner's message). */
+  enqueueChat(actor: Actor, input: ChatEnqueue): Promise<Run>
+  /**
+   * `channel_read {threadId, follow}`: subscribe (or, with no conversation, unsubscribe) this
+   * Buddy's conversation to a thread and return its unread posts, marked read (deliveries.rs).
+   */
+  followThread(actor: Actor, rootId: string, conversationId: string | undefined | null, limit: number): Promise<ThreadUnread>
+  /** The thread's unread posts for this Buddy, marked read (the follow wait's re-read). */
   catchUpThread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
-  deliverFollow(followId: string, limit: number): Promise<FollowWake>
-  deliveringFollowers(rootId: string, ord: string): Promise<Array<string>>
+  /** What a claimed delivery shows (deliveries.rs `compose`). */
+  deliverPosts(runId: string): Promise<Delivery>
+  /** The Buddies a post was delivered to (the host's follow-up gate skips them until step 5). */
+  deliveredTo(postId: string): Promise<Array<string>>
+  /** The holder is about to spawn (Pattern: durable-intake). */
+  markExecuting(runId: string, leaseToken: string): Promise<Run>
+  /** The provider default a model-less run config resolved to at claim (decision J). */
+  recordRunModel(runId: string, leaseToken: string, model: string): Promise<Run>
   claimRun(budgets: RunBudgets): Promise<Claim | null>
   renewRun(runId: string, leaseToken: string, leaseMs: number): Promise<Run>
   settleRun(runId: string, leaseToken: string, outcome: Outcome): Promise<Run>
@@ -51,6 +62,8 @@ export declare class BuddiesCore {
   listRunRows(scope: ListScope, limit: number): Promise<Array<RunRow>>
   putSchedule(actor: Actor, input: ScheduleInput): Promise<Schedule>
   listSchedules(query: ListScope): Promise<Array<Schedule>>
+  /** "Run now": the schedule fires at once (a post in its thread, delivered to its Buddy). */
+  fireSchedule(actor: Actor, scheduleId: string): Promise<Run>
   dueSchedules(now: string): Promise<Array<Run>>
   appendEvent(actor: Actor, input: EventInput): Promise<Event>
   listEvents(buddyId: string, beforeSeq: number, limit: number): Promise<Array<Event>>
@@ -72,6 +85,8 @@ export interface AnswerInput {
   requestId: string
   body: string
   evidence: Array<string>
+  /** The conversation that answered: provenance, and it subscribes to the request's thread. */
+  fromConversationId?: string
   key: string
 }
 
@@ -159,6 +174,15 @@ export interface ChannelUnread {
   lastReadOrd?: string
 }
 
+/** A foreground chat input, with its text: the queued run IS the owner's message. */
+export interface ChatEnqueue {
+  buddyId: string
+  conversationId: string
+  turnId: string
+  /** The message as the host serialized it; never read by the crate. */
+  body: string
+}
+
 export interface Claim {
   run: Run
   leaseToken: string
@@ -187,6 +211,11 @@ export interface Cursor {
 export type Decision =
   | { kind: 'allowed' }
   | { kind: 'denied'; reason: string }
+
+/** What a claimed delivery shows (deliveries.rs `compose`). */
+export type Delivery =
+  | { kind: 'posts'; posts: Array<Post>; unshown: number }
+  | { kind: 'consumed' }
 
 export interface Doc {
   id: string
@@ -286,27 +315,6 @@ export interface FollowedThreads {
   more: boolean
 }
 
-export interface FollowInput {
-  rootId: string
-  /** The conversation the wake goes to (the caller's background conversation). */
-  conversationId: string
-  /** RFC 3339; must be in the future and at most `MAX_FOLLOW_DAYS` ahead. */
-  until: string
-  /** The most unread posts returned inline (`FollowRead::Unread`). */
-  limit: number
-}
-
-/** A follow read's last step (follows.rs `follow_thread`). */
-export type FollowRead =
-  | { kind: 'unread'; posts: Array<Post>; unshown: number }
-  | { kind: 'following'; follow: ThreadFollow }
-
-/** What a claimed follow run shows (follows.rs `deliver_follow`). */
-export type FollowWake =
-  | { kind: 'posts'; follow: ThreadFollow; posts: Array<Post>; unshown: number }
-  | { kind: 'already_read'; follow: ThreadFollow }
-  | { kind: 'timeout'; follow: ThreadFollow }
-
 export interface Inbox {
   /** Requests addressed to the actor that still await its answer. */
   requests: Array<Post>
@@ -348,8 +356,6 @@ export interface Post {
   evidence: Array<string>
   request: RequestState
   conversationId?: string
-  /** Where a request's answer goes (`Returns`); absent on an inform, which has no answer. */
-  returns?: Returns
   createdAt: string
   /** The post's ordered id (UUIDv7): threads, pages and read cursors order by it. */
   ord: string
@@ -366,10 +372,17 @@ export interface PostInput {
   /** A reply in a thread: the post it responds to, in the same channel. Absent = a new top-level post. */
   replyToId?: string
   taskId?: string
-  /** Provenance: the conversation the post was written from (a thread seat skips its own posts). */
+  /**
+   * The conversation the post was written from: provenance, and in a direct channel (or any
+   * thread it follows) the conversation later posts by others there are delivered to.
+   */
   fromConversationId?: string
-  /** The sending turn's `Returns`, stamped by its host; only a `Request` keeps it. Absent = Inbox. */
-  returns?: Returns
+  /**
+   * Buddies the host wakes itself for this post through a thread seat (its @mentions; the
+   * Buddies of a DM the owner wrote in). Their subscriptions get no delivery for it, so nobody
+   * is woken twice. Until step 5 moves mentions and seats onto `deliver` (task_01a11013-b205).
+   */
+  mentions: Array<string>
   /**
    * A `Request` only: its recipients' runs execute with this instead of their profile (a
    * worker). Every recipient must be the author or report to it (`EnqueueRun`).
@@ -405,27 +418,6 @@ export type RequestState =
   | { state: 'cancelled' }
   | { state: 'failed' }
 
-/**
- * Where a request's answer, and the failure notice if its run fails, goes. The sender's host
- * fixes it when the request is SENT, from the sending conversation's placement, and nothing
- * after that asks again. Stored in `post.return_conversation_id`: NULL on a request is `Inbox`.
- *
- * Why at send time: until 2026-10-01 every Buddy request queued a `reply` run tagged with its
- * origin conversation, and only after claiming it did the runner learn the origin was a human
- * chat and the run had nothing to do (the old `mailbox` job). A run with a conversation waits
- * behind that conversation's running turn (`WAITING_REASON_SQL`), so in wave_sim 9 such no-op
- * replies sat `queued / conversation_busy` for up to 2h44m behind one owner turn, then all
- * settled in ~70 ms when it ended. Reading "9 blocked", a CEO Buddy told the owner the chat was
- * stuck and offered to cancel a productive GPU turn. Deciding the route before any run exists
- * means an Inbox answer never enters the model-work queue at all.
- * (agent_notes/2026-10-01_return-route-decision.md, _unleashd_case_study_conversation_busy.md)
- * Guards: `an_inbox_request_starts_no_run_for_its_answer_or_failure` (tests/core.rs) and
- * "an answer to a request sent from a human chat starts no run …" (server/test/buddies-v2).
- */
-export type Returns =
-  | { kind: 'inbox' }
-  | { kind: 'conversation'; id: string }
-
 export interface Run {
   id: string
   inputKey: string
@@ -440,7 +432,6 @@ export interface Run {
   status: RunStatus
   deadline?: string
   leaseExpiresAt?: string
-  snapshot?: string
   outcome?: string
   errorCode?: string
   error?: string
@@ -450,6 +441,18 @@ export interface Run {
   endedAt?: string
   /** Absent: the run executes on its buddy's profile. */
   config?: RunConfig
+  /**
+   * A chat run's input (the owner's message, JSON the host wrote) while it can still be
+   * requeued. The schema refuses a queued chat run without it (Pattern: durable-intake).
+   */
+  body?: string
+  /**
+   * When the holder was about to spawn (`mark_executing`). Absent: nothing ran yet, so a dead
+   * holder's run goes back to the queue instead of being replayed or reported lost.
+   */
+  executingAt?: string
+  /** A delivery's newest shown post, fixed by its first compose (deliveries.rs). */
+  throughOrd?: string
 }
 
 /**
@@ -473,19 +476,31 @@ export interface RunBudgets {
  */
 export interface RunConfig {
   provider: string
-  model: string
+  /**
+   * Absent: the provider's default model, resolved by the host when the run is claimed and
+   * written back onto the run (`record_run_model`), so the run says which model answered
+   * (owner decision J, 2026-10-06). A "default" chip pick could not ride a run before this.
+   */
+  model?: string
   /** Absent: the provider's default effort. */
   reasoningEffort?: string
 }
 
-/** Why a run exists. Columns: (input_kind, input_id); the input_key is derived from it. */
+/**
+ * Why a run exists. Columns: (input_kind, input_id); the input_key is derived from it.
+ *
+ * Three live kinds since the 2026-10-06 rebuild (owner decisions H, I; delivery design §3):
+ * `chat` (an owner message), `post` (a request the Buddy owes) and `deliver` (a post in a thread
+ * one of the Buddy's conversations subscribes to). `reply`, `failure_notice`, `follow` and
+ * `schedule` were folded into `deliver`: an answer, a failure notice, a followed thread's new post
+ * and a schedule fire are all posts now. Their ended rows stay as `Retired` history; the schema
+ * CHECK refuses a queued one, so a retired kind is never claimed.
+ */
 export type RunInput =
   | { kind: 'chat'; turnId: string }
   | { kind: 'post'; postId: string }
-  | { kind: 'reply'; postId: string }
-  | { kind: 'schedule'; scheduleId: string; slot: string }
-  | { kind: 'failure_notice'; runId: string }
-  | { kind: 'follow'; followId: string }
+  | { kind: 'deliver'; postId: string }
+  | { kind: 'retired'; inputKind: string; inputId: string }
 
 export type RunQuery =
   | { kind: 'buddy'; buddyId: string }
@@ -535,9 +550,10 @@ export interface Schedule {
   cron: string
   timezone: string
   prompt: string
-  limits: string
   enabled: boolean
   nextRunAt?: string
+  /** The thread its fires post in (owner decision I): absent until the first fire. */
+  rootId?: string
   archivedAt?: string
   createdAt: string
 }
@@ -551,7 +567,6 @@ export interface ScheduleInput {
   cron: string
   timezone: string
   prompt: string
-  limits: string
   enabled: boolean
   key: string
 }
@@ -643,23 +658,6 @@ export type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'review' | 'done' 
 export type TaskWrite =
   | { kind: 'create'; ownerId: string; parentId?: string; title: string; doneCriteria: string; key: string }
   | { kind: 'update'; taskId: string; baseRevision: number; changes: TaskChanges; key: string }
-
-/**
- * A follow of one thread by one conversation (follows.rs). Not `thread_read`, which is the
- * owner's "followed threads" list and read cursor; this one wakes a Buddy's conversation.
- */
-export interface ThreadFollow {
-  id: string
-  rootId: string
-  buddyId: string
-  /** The conversation the wake goes to: the one that asked to follow. */
-  conversationId: string
-  /** The thread's newest post when the follow was registered; only later posts wake it. */
-  throughOrd: string
-  until: string
-  createdAt: string
-  runId: string
-}
 
 /** A thread root's replies at a glance: the channel row's "3 replies · last reply 2m ago". */
 export interface ThreadStat {

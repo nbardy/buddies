@@ -163,7 +163,13 @@ const killGroup = (scenario: string) => {
 };
 
 type Http = ReturnType<typeof api>;
-type RunRow = { id: string; status: string; errorCode?: string | null; error?: string | null };
+type RunRow = {
+  id: string;
+  status: string;
+  errorCode?: string | null;
+  error?: string | null;
+  conversationId?: string | null;
+};
 
 async function workspace(http: Http, name: string) {
   const ws = await http('POST', '/api/buddies/workspaces', { name, rootPath: workspaceDir });
@@ -195,10 +201,11 @@ async function ask(http: Http, buddyId: string, scenario: string) {
   return (posted.body.post ?? posted.body) as { id: string };
 }
 
-async function runOf(http: Http, buddyId: string): Promise<RunRow | undefined> {
+async function runOf(http: Http, buddyId: string, attempt = 1): Promise<RunRow | undefined> {
   const runs = await http('GET', `/api/buddies/runs?buddyId=${buddyId}`);
   return (runs.body.runs ?? runs.body).find(
-    (run: { input: { kind: string } }) => run.input.kind === 'post'
+    (run: { input: { kind: string }; attempt: number }) =>
+      run.input.kind === 'post' && run.attempt === attempt
   );
 }
 
@@ -255,9 +262,14 @@ test(
     assert.ok(Date.now() - diedAt < LEASE_MS + 10_000);
     assert.equal(run?.status, 'failed', JSON.stringify(run));
     assert.equal(run?.errorCode, 'lease_expired', JSON.stringify(run));
-    // Cleared like any failed settle: the request stops awaiting, so its sender is not left waiting.
+    // Cleared like any failed settle, and then (decision G, owner 2026-10-06) the request it was
+    // executing continues once, so its sender is not left waiting. Before G this asserted the
+    // request `failed`; a second death fails it. It re-enters the SAME conversation where that
+    // conversation exists (crate `a_request_whose_holder_died_resumes_once_in_its_conversation_then_fails`);
+    // here B has its own records store, so it never knew A's conversation and opens a fresh one.
+    await eventually(() => runOf(httpB, held, 2), Boolean, 'the one resume of the request');
     const thread = await httpB('GET', `/api/buddies/posts/${request.id}/thread`);
-    assert.equal(thread.body.root.request.state, 'failed', JSON.stringify(thread.body.root));
+    assert.equal(thread.body.root.request.state, 'awaiting', JSON.stringify(thread.body.root));
     await killBackend('B');
   }
 );

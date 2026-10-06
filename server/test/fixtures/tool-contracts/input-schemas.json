@@ -130,17 +130,24 @@
                   "minLength": 1
                 },
                 "follow": {
-                  "type": "object",
-                  "properties": {
-                    "until": {
-                      "type": "string",
-                      "format": "date-time"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "wait": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 30,
+                          "default": 2
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "boolean",
+                      "const": false
                     }
-                  },
-                  "required": [
-                    "until"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               },
               "required": [
@@ -406,8 +413,7 @@
             }
           },
           "required": [
-            "provider",
-            "model"
+            "provider"
           ],
           "additionalProperties": false
         },
@@ -564,8 +570,7 @@
                     }
                   },
                   "required": [
-                    "provider",
-                    "model"
+                    "provider"
                   ],
                   "additionalProperties": false
                 },
@@ -1139,17 +1144,24 @@
                   "minLength": 1
                 },
                 "follow": {
-                  "type": "object",
-                  "properties": {
-                    "until": {
-                      "type": "string",
-                      "format": "date-time"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "wait": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 30,
+                          "default": 2
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "boolean",
+                      "const": false
                     }
-                  },
-                  "required": [
-                    "until"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               },
               "required": [
@@ -1415,8 +1427,7 @@
             }
           },
           "required": [
-            "provider",
-            "model"
+            "provider"
           ],
           "additionalProperties": false
         },
@@ -1573,8 +1584,7 @@
                     }
                   },
                   "required": [
-                    "provider",
-                    "model"
+                    "provider"
                   ],
                   "additionalProperties": false
                 },

@@ -13,7 +13,7 @@ fn post(body: &str, key: &str) -> PostInput {
         reply_to_id: None,
         task_id: None,
         from_conversation_id: None,
-        returns: None,
+        mentions: vec![],
         run_config: None,
         broadcast: false,
         key: key.into(),

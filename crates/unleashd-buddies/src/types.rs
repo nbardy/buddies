@@ -138,6 +138,13 @@ pub enum RequestState {
 }
 
 /// Why a run exists. Columns: (input_kind, input_id); the input_key is derived from it.
+///
+/// Three live kinds since the 2026-10-06 rebuild (owner decisions H, I; delivery design §3):
+/// `chat` (an owner message), `post` (a request the Buddy owes) and `deliver` (a post in a thread
+/// one of the Buddy's conversations subscribes to). `reply`, `failure_notice`, `follow` and
+/// `schedule` were folded into `deliver`: an answer, a failure notice, a followed thread's new post
+/// and a schedule fire are all posts now. Their ended rows stay as `Retired` history; the schema
+/// CHECK refuses a queued one, so a retired kind is never claimed.
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunInput {
@@ -148,23 +155,21 @@ pub enum RunInput {
     Post {
         post_id: String,
     },
-    /// The buddy's request was answered; `post_id` is the request.
-    Reply {
+    /// A post by someone else in a thread the run's conversation subscribes to (or, with no
+    /// conversation yet, a schedule fire the runner opens one for). The turn shows every post the
+    /// conversation has not read, not only this one (deliveries.rs `compose`).
+    Deliver {
         post_id: String,
     },
-    Schedule {
-        schedule_id: String,
-        slot: String,
-    },
-    FailureNotice {
-        run_id: String,
-    },
-    /// The buddy follows a thread (`thread_follow`): due at its `until`, or now once someone else
-    /// posts there (follows.rs).
-    Follow {
-        follow_id: String,
+    /// A row of a kind folded away by the rebuild. Read-only: never enqueued, claimed or retried.
+    Retired {
+        input_kind: String,
+        input_id: String,
     },
 }
+
+/// The run kinds a row may still be enqueued as; any other stored kind is history (`Retired`).
+pub const RETIRED_KINDS: [&str; 4] = ["reply", "failure_notice", "follow", "schedule"];
 
 impl RunInput {
     /// The input_key is per recipient for a `Post`: `post:<id>:<buddy>`.
@@ -174,35 +179,27 @@ impl RunInput {
     /// still matches it (for the same buddy) so a replay of an old post finds its run instead of
     /// starting a second one. Only the recipient is added, never the legacy form dropped.
     /// Guard: `a_group_request_starts_one_run_per_recipient` (tests/core.rs).
-    pub fn columns(&self, buddy_id: &str) -> (&'static str, &str, String) {
+    /// A delivery is one run per (post, recipient), so a retried post write wakes nobody twice.
+    pub fn columns(&self, buddy_id: &str) -> Result<(&str, &str, String)> {
         match self {
-            RunInput::Chat { turn_id } => ("chat", turn_id, format!("chat:{turn_id}")),
-            RunInput::Post { post_id } => ("post", post_id, format!("post:{post_id}:{buddy_id}")),
-            RunInput::Reply { post_id } => ("reply", post_id, format!("reply:{post_id}")),
-            RunInput::Schedule { schedule_id, slot } => ("schedule", schedule_id, format!("schedule:{schedule_id}:{slot}")),
-            RunInput::FailureNotice { run_id } => ("failure_notice", run_id, format!("failure:{run_id}")),
-            RunInput::Follow { follow_id } => ("follow", follow_id, format!("follow:{follow_id}")),
+            RunInput::Chat { turn_id } => Ok(("chat", turn_id, format!("chat:{turn_id}"))),
+            RunInput::Post { post_id } => Ok(("post", post_id, format!("post:{post_id}:{buddy_id}"))),
+            RunInput::Deliver { post_id } => Ok(("deliver", post_id, format!("deliver:{post_id}:{buddy_id}"))),
+            RunInput::Retired { input_kind, .. } => Err(CoreError::Invalid(format!("a {input_kind} run is history; it cannot be enqueued"))),
         }
     }
     pub fn legacy_key(&self) -> Option<String> {
         match self {
             RunInput::Post { post_id } => Some(format!("post:{post_id}")),
-            RunInput::Chat { .. }
-            | RunInput::Reply { .. }
-            | RunInput::Schedule { .. }
-            | RunInput::FailureNotice { .. }
-            | RunInput::Follow { .. } => None,
+            RunInput::Chat { .. } | RunInput::Deliver { .. } | RunInput::Retired { .. } => None,
         }
     }
-    /// A schedule run's slot is its `ready_at`.
-    pub fn from_columns(kind: &str, id: String, ready_at: &str) -> Result<RunInput> {
+    pub fn from_columns(kind: &str, id: String) -> Result<RunInput> {
         match kind {
             "chat" => Ok(RunInput::Chat { turn_id: id }),
             "post" => Ok(RunInput::Post { post_id: id }),
-            "reply" => Ok(RunInput::Reply { post_id: id }),
-            "schedule" => Ok(RunInput::Schedule { schedule_id: id, slot: ready_at.to_string() }),
-            "failure_notice" => Ok(RunInput::FailureNotice { run_id: id }),
-            "follow" => Ok(RunInput::Follow { follow_id: id }),
+            "deliver" => Ok(RunInput::Deliver { post_id: id }),
+            retired if RETIRED_KINDS.contains(&retired) => Ok(RunInput::Retired { input_kind: retired.to_string(), input_id: id }),
             other => Err(CoreError::Corrupt(format!("run input_kind {other:?}"))),
         }
     }
@@ -225,7 +222,10 @@ pub enum Outcome {
 #[serde(rename_all = "camelCase")]
 pub struct RunConfig {
     pub provider: String,
-    pub model: String,
+    /// Absent: the provider's default model, resolved by the host when the run is claimed and
+    /// written back onto the run (`record_run_model`), so the run says which model answered
+    /// (owner decision J, 2026-10-06). A "default" chip pick could not ride a run before this.
+    pub model: Option<String>,
     /// Absent: the provider's default effort.
     pub reasoning_effort: Option<String>,
 }
@@ -353,34 +353,6 @@ pub struct PostWrite {
     pub created: bool,
 }
 
-// Pattern: route-at-send (docs/patterns.md#route-at-send)
-/// Where a request's answer, and the failure notice if its run fails, goes. The sender's host
-/// fixes it when the request is SENT, from the sending conversation's placement, and nothing
-/// after that asks again. Stored in `post.return_conversation_id`: NULL on a request is `Inbox`.
-///
-/// Why at send time: until 2026-10-01 every Buddy request queued a `reply` run tagged with its
-/// origin conversation, and only after claiming it did the runner learn the origin was a human
-/// chat and the run had nothing to do (the old `mailbox` job). A run with a conversation waits
-/// behind that conversation's running turn (`WAITING_REASON_SQL`), so in wave_sim 9 such no-op
-/// replies sat `queued / conversation_busy` for up to 2h44m behind one owner turn, then all
-/// settled in ~70 ms when it ended. Reading "9 blocked", a CEO Buddy told the owner the chat was
-/// stuck and offered to cancel a productive GPU turn. Deciding the route before any run exists
-/// means an Inbox answer never enters the model-work queue at all.
-/// (agent_notes/2026-10-01_return-route-decision.md, _unleashd_case_study_conversation_busy.md)
-/// Guards: `an_inbox_request_starts_no_run_for_its_answer_or_failure` (tests/core.rs) and
-/// "an answer to a request sent from a human chat starts no run …" (server/test/buddies-v2).
-#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Returns {
-    /// Sent by the owner, or by a turn with no conversation (the memory reviewer): the answer post
-    /// IS the delivery and the sender reads it in its inbox. No run. Since 2026-10-06 (owner
-    /// decision A) no Buddy conversation, human chat or not, takes this route.
-    Inbox,
-    /// Sent from a Buddy conversation of either placement: the answer wakes a turn in THAT
-    /// conversation, behind its busy gate and after any owner message queued there (`owner_first`).
-    Conversation { id: String },
-}
-
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Post {
@@ -395,8 +367,6 @@ pub struct Post {
     pub evidence: Vec<String>,
     pub request: RequestState,
     pub conversation_id: Option<String>,
-    /// Where a request's answer goes (`Returns`); absent on an inform, which has no answer.
-    pub returns: Option<Returns>,
     pub created_at: String,
     /// The post's ordered id (UUIDv7): threads, pages and read cursors order by it.
     pub ord: String,
@@ -442,9 +412,10 @@ pub struct Schedule {
     pub cron: String,
     pub timezone: String,
     pub prompt: String,
-    pub limits: String,
     pub enabled: bool,
     pub next_run_at: Option<String>,
+    /// The thread its fires post in (owner decision I): absent until the first fire.
+    pub root_id: Option<String>,
     pub archived_at: Option<String>,
     pub created_at: String,
 }
@@ -465,7 +436,6 @@ pub struct Run {
     pub status: RunStatus,
     pub deadline: Option<String>,
     pub lease_expires_at: Option<String>,
-    pub snapshot: Option<String>,
     pub outcome: Option<String>,
     pub error_code: Option<String>,
     pub error: Option<String>,
@@ -475,6 +445,14 @@ pub struct Run {
     pub ended_at: Option<String>,
     /// Absent: the run executes on its buddy's profile.
     pub config: Option<RunConfig>,
+    /// A chat run's input (the owner's message, JSON the host wrote) while it can still be
+    /// requeued. The schema refuses a queued chat run without it (Pattern: durable-intake).
+    pub body: Option<String>,
+    /// When the holder was about to spawn (`mark_executing`). Absent: nothing ran yet, so a dead
+    /// holder's run goes back to the queue instead of being replayed or reported lost.
+    pub executing_at: Option<String>,
+    /// A delivery's newest shown post, fixed by its first compose (deliveries.rs).
+    pub through_ord: Option<String>,
 }
 
 /// Why a queued run cannot be claimed yet. This is derived from the claim predicate on every
@@ -558,10 +536,13 @@ pub struct PostInput {
     /// A reply in a thread: the post it responds to, in the same channel. Absent = a new top-level post.
     pub reply_to_id: Option<String>,
     pub task_id: Option<String>,
-    /// Provenance: the conversation the post was written from (a thread seat skips its own posts).
+    /// The conversation the post was written from: provenance, and in a direct channel (or any
+    /// thread it follows) the conversation later posts by others there are delivered to.
     pub from_conversation_id: Option<String>,
-    /// The sending turn's `Returns`, stamped by its host; only a `Request` keeps it. Absent = Inbox.
-    pub returns: Option<Returns>,
+    /// Buddies the host wakes itself for this post through a thread seat (its @mentions; the
+    /// Buddies of a DM the owner wrote in). Their subscriptions get no delivery for it, so nobody
+    /// is woken twice. Until step 5 moves mentions and seats onto `deliver` (task_01a11013-b205).
+    pub mentions: Vec<String>,
     /// A `Request` only: its recipients' runs execute with this instead of their profile (a
     /// worker). Every recipient must be the author or report to it (`EnqueueRun`).
     pub run_config: Option<RunConfig>,
@@ -576,7 +557,20 @@ pub struct AnswerInput {
     pub request_id: String,
     pub body: String,
     pub evidence: Vec<String>,
+    /// The conversation that answered: provenance, and it subscribes to the request's thread.
+    pub from_conversation_id: Option<String>,
     pub key: String,
+}
+
+/// A foreground chat input, with its text: the queued run IS the owner's message.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct ChatEnqueue {
+    pub buddy_id: String,
+    pub conversation_id: String,
+    pub turn_id: String,
+    /// The message as the host serialized it; never read by the crate.
+    pub body: String,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
@@ -790,7 +784,6 @@ pub struct ScheduleInput {
     pub cron: String,
     pub timezone: String,
     pub prompt: String,
-    pub limits: String,
     pub enabled: bool,
     pub key: String,
 }
@@ -894,35 +887,6 @@ pub struct WorkspaceInput {
     pub root_path: String,
 }
 
-/// A follow of one thread by one conversation (follows.rs). Not `thread_read`, which is the
-/// owner's "followed threads" list and read cursor; this one wakes a Buddy's conversation.
-#[cfg_attr(feature = "node", napi_derive::napi(object))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ThreadFollow {
-    pub id: String,
-    pub root_id: String,
-    pub buddy_id: String,
-    /// The conversation the wake goes to: the one that asked to follow.
-    pub conversation_id: String,
-    /// The thread's newest post when the follow was registered; only later posts wake it.
-    pub through_ord: String,
-    pub until: String,
-    pub created_at: String,
-    pub run_id: String,
-}
-
-#[cfg_attr(feature = "node", napi_derive::napi(object))]
-#[derive(Debug, Clone)]
-pub struct FollowInput {
-    pub root_id: String,
-    /// The conversation the wake goes to (the caller's background conversation).
-    pub conversation_id: String,
-    /// RFC 3339; must be in the future and at most `MAX_FOLLOW_DAYS` ahead.
-    pub until: String,
-    /// The most unread posts returned inline (`FollowRead::Unread`).
-    pub limit: i64,
-}
-
 /// A thread's unread posts for one Buddy, oldest first: the newest `limit`, and how many older
 /// unread ones were left out.
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
@@ -932,28 +896,16 @@ pub struct ThreadUnread {
     pub unshown: i64,
 }
 
-/// A follow read's last step (follows.rs `follow_thread`).
+/// What a claimed delivery shows (deliveries.rs `compose`).
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
 #[derive(Debug, Clone)]
-pub enum FollowRead {
-    /// Someone else posted past the read mark: returned now, no follow registered.
-    Unread { posts: Vec<Post>, unshown: i64 },
-    /// Nothing unread: the follow is registered and the caller's conversation wakes once.
-    Following { follow: ThreadFollow },
+pub enum Delivery {
+    /// Posts the conversation has not read, oldest first, across every thread it subscribes to;
+    /// `unshown` older ones were left out (they are read with channel_read).
+    Posts { posts: Vec<Post>, unshown: i64 },
+    /// Everything it would show was read meanwhile: the run settles with no turn.
+    Consumed,
 }
-
-/// What a claimed follow run shows (follows.rs `deliver_follow`).
-#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
-#[derive(Debug, Clone)]
-pub enum FollowWake {
-    /// Posts by others the follower has not read, oldest first (`unshown` older ones left out).
-    Posts { follow: ThreadFollow, posts: Vec<Post>, unshown: i64 },
-    /// Others posted, but the follower read them itself before the run fired: no turn.
-    AlreadyRead { follow: ThreadFollow },
-    /// `until` passed with no post by anyone else.
-    Timeout { follow: ThreadFollow },
-}
-
 
 /// The two clocks a claim starts, kept apart because one number serving both killed owner chats
 /// at 600 s (2026-09-10) and left dead holders' runs `running` for 24 h (2026-09-30).

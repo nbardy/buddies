@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Actor, Buddy, Channel, Cursor, Post } from '@unleashd/buddies-core';
+import type { Actor, Buddy, Channel, Cursor, Post, PostKind } from '@unleashd/buddies-core';
 import {
   type ConversationConfig,
   type InstalledAgent,
@@ -38,9 +38,13 @@ import type { BuddyEvents, MentionPicks } from './events';
 //   follow_up — a new reply in a thread asks each OTHER Buddy who posted there one gate question
 //               (channel-reply-gate.ts); only a strict <yes> starts a reply.
 //   direct    — the owner's plain post in a DM wakes the DM's Buddies (requests/answers excepted).
-// Not here: a thread FOLLOW (channel_read follow:{until}) is a durable crate run, woken inside the
-// post's own transaction, that wakes the conversation which followed (crate follows.rs, runner.ts
-// `followJob`). It replaces the follow_up gate for that Buddy on that post (`followUps`).
+// Not here: DELIVERY (2026-10-06). A conversation subscribed to a thread (it posted in a DM there,
+// was opened for a request, or followed it) gets every post by someone else as a durable crate
+// `deliver` run, written in the post's own transaction (crate deliveries.rs, runner.ts
+// `deliverJob`). It replaces the follow_up gate for that Buddy on that post (`followUps` skips
+// `deliveredTo`), and the crate skips a subscription this module wakes itself (`seatWoken`).
+// Step 5 (task_01a11013-b205) moves mentions, DM posts and seats onto `deliver` and deletes the
+// pair machine and the gate.
 // NO HOP BOUND (owner decision 2026-10-03, #bugfixes): Buddies may mention and follow each other
 // without pause and stop when they decide to. Until then a counter (3 hand-offs since the owner
 // last spoke) posted a "reply failed" notice and killed a live Designer/Engineer review thread.
@@ -69,6 +73,24 @@ const TASK_REFERENCE = /\[([^\]]+)\]\(task:([A-Za-z0-9_-]+)\)/g;
 
 export function mentionedBuddyIds(body: string): string[] {
   return [...new Set([...body.matchAll(MENTION)].map((match) => match[2]))];
+}
+
+/**
+ * The Buddies this module wakes itself for a post, through a thread seat: the @mentions of a
+ * public or task post, and the DM's Buddies for the owner's plain DM post (must match the `posted`
+ * handler below). Writers pass it as `PostInput.mentions`, and the crate's delivery skips those
+ * Buddies' subscriptions for that post, so nobody hears of it twice. Until step 5.
+ */
+export function seatWoken(channel: Channel, author: Actor, kind: PostKind, body: string): string[] {
+  switch (channel.kind.type) {
+    case 'public':
+    case 'task':
+      return mentionedBuddyIds(body).filter((id) => author.kind !== 'buddy' || author.id !== id);
+    case 'direct':
+      return author.kind === 'owner' && kind === 'inform'
+        ? channel.kind.members.flatMap((member) => (member.kind === 'buddy' ? [member.id] : []))
+        : [];
+  }
 }
 
 export function readableChannelText(body: string): string {
@@ -276,7 +298,7 @@ export function createChannels(ports: ChannelsPorts) {
   async function seatPrompt(
     input: Reply,
     seatId: string
-  ): Promise<{ prompt: SessionRelativePrompt; through: string }> {
+  ): Promise<{ prompt: SessionRelativePrompt; through: string; throughId: string }> {
     const nameMap = await names(input.channel.workspaceId);
     const { channel, trigger } = input;
     const where = `#${channel.kind.type === 'public' ? channel.kind.name : channel.id} (channel ${channel.id})`;
@@ -306,10 +328,15 @@ export function createChannels(ports: ChannelsPorts) {
         `The ${posts.length} most recent top-level posts, oldest first:`,
         lines(posts.reverse())
       );
-      return { prompt: { resumed: text, fresh: text }, through: trigger.ord };
+      return {
+        prompt: { resumed: text, fresh: text },
+        through: trigger.ord,
+        throughId: trigger.id,
+      };
     }
     const thread = await wholeThread(await core.getPost(OWNER, input.rootId));
     const through = thread[thread.length - 1].ord;
+    const throughId = thread[thread.length - 1].id;
     const context = tail(thread, trigger);
     const own = ownHistory(input, context.earlier);
     const fresh = compose('a thread', 'The root, then its most recent replies, oldest first:', [
@@ -327,7 +354,7 @@ export function createChannels(ports: ChannelsPorts) {
     ]);
     const mark =
       pairs.get(pairKey(input.rootId, input.buddyId))?.machine.readThrough ?? NOTHING_READ;
-    if (mark === NOTHING_READ) return { prompt: { fresh, resumed: fresh }, through };
+    if (mark === NOTHING_READ) return { prompt: { fresh, resumed: fresh }, through, throughId };
     const unseen = thread.filter(
       (post) => post.ord > mark && post.id !== trigger.id && post.conversationId !== seatId
     );
@@ -337,7 +364,7 @@ export function createChannels(ports: ChannelsPorts) {
       `You have seen this thread through your last turn. Replies since then, oldest first (${shown.length}):`,
       [...omitted(unseen.length - shown.length, 'earlier new replies'), ...lines(shown)]
     );
-    return { prompt: { fresh, resumed }, through };
+    return { prompt: { fresh, resumed }, through, throughId };
   }
 
   // A `no-agent` profile throws inside runReply's try, so the thread gets a visible reply_failed
@@ -437,6 +464,8 @@ export function createChannels(ports: ChannelsPorts) {
         evidence: [],
         replyToId: input.trigger.id,
         fromConversationId: conversationId ?? undefined,
+        // A failure notice asks nobody to answer; a subscriber still hears of it.
+        mentions: [],
         broadcast: false,
         key: input.noticeKey,
         purpose: 'reply_failed',
@@ -496,7 +525,7 @@ export function createChannels(ports: ChannelsPorts) {
         await ports.conversations.reconfigure(conversation, seat.config, seat.provenance);
         composed = await seatPrompt(input, conversation.id);
       } while (!idle(conversation));
-      const { prompt, through } = composed;
+      const { prompt, through, throughId } = composed;
       let untrack: () => void = () => undefined;
       await awaitTurn(
         conversation,
@@ -509,6 +538,12 @@ export function createChannels(ports: ChannelsPorts) {
         untrack();
       });
       shown = through;
+      // The seat was shown the thread through `through`. Its own post no longer reads the thread
+      // for it past posts the crate never saw it shown (decision K), so the seat says so here,
+      // as the pair machine's mark does in memory. Step 5 makes this a delivery's `through_ord`.
+      await core
+        .markThreadRead(buddyActor(input.buddyId), input.rootId, throughId)
+        .catch((error) => logger.warn(`[channels] seat mark for ${input.buddyId} failed:`, error));
       if (await repliedSince(input, conversation.id, through)) return shown;
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
@@ -667,11 +702,10 @@ export function createChannels(ports: ChannelsPorts) {
     const talk = talkOf(await wholeThread(await core.getPost(OWNER, post.rootId)));
     // Only the newest post is followed up: a burst is gated once, against the latest message.
     if (talk[talk.length - 1].id !== post.id) return;
-    // A Buddy whose thread follow will show this post (crate follows.rs `delivering_followers`)
-    // is not gated too: it asked to be told, and its follow run already wakes it with this post
-    // in the conversation that followed. The run is durable; this machine is not. A follow whose
-    // wake was composed before this post never saw it, so the gate still asks that Buddy.
-    const following = await core.deliveringFollowers(post.rootId, post.ord);
+    // A Buddy subscribed to this thread got the post as a delivery (crate deliveries.rs, written
+    // in the post's own transaction) in the conversation that subscribed: it is not gated too,
+    // or it would be woken twice. The delivery is durable; this machine is not.
+    const following = await core.deliveredTo(post.id);
     const skipped = new Set([...buddyAuthor(post), ...mentionedByPost(post), ...following]);
     const replying = [...pairs.values()]
       .filter((entry) => entry.threadRootId === post.rootId && entry.machine.queue.length > 0)

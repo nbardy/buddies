@@ -53,9 +53,9 @@ function storeWithLive() {
 function scheduleRun(id: string, conversationId: string): Run {
   return {
     id,
-    inputKey: `schedule:${id}`,
+    inputKey: `deliver:${id}:lead`,
     attempt: 1,
-    input: { kind: 'schedule', scheduleId: 'nightly', slot: '2026-09-15T22:00:00Z' },
+    input: { kind: 'deliver', postId: `post-${id}` },
     buddyId: 'lead',
     workspaceId: 'ws-1',
     conversationId,

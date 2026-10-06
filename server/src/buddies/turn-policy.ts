@@ -282,7 +282,8 @@ export function sessionAudienceKey(
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
 /**
- * The origin of a runner-owned turn that returns into an existing conversation, by placement. It
+ * The origin of a runner-owned turn delivered into an existing conversation (a `deliver` run, or
+ * a request resumed where it ran), by placement. It
  * names which provider-session audience the turn resumes (`sessionAudienceKey`) and whether it
  * can hold owner authority (`startTurn`: only `owner_input`).
  *   foreground: `buddy_post`. The owner chat's own session (audience = this thread) resumes, so
@@ -413,7 +414,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     // pending and later sends line up behind it. The queue keeps the input's provenance: a
     // 'buddy_post' seat turn dropped here would come back 'unknown'.
     if (!fromQueue) return 'enqueue';
-    const owned = this.admitChatRun();
+    const owned = this.admitChatRun(input);
     if (!owned) return 'wait';
     this.admittedChatRun = owned;
     return 'admitted';
@@ -423,9 +424,10 @@ export class BuddyTurnPolicy implements TurnPolicy {
   // re-runs processQueue. The run's deadline is TURN_MAX_RUNTIME_MS, passed explicitly to the
   // claim (runner.ts `chatDeadlineMs`; a 600 s claim lease used as the deadline killed live owner
   // chats on 2026-09-10). Its lease is a separate short heartbeat (bridgeAlive).
-  private admitChatRun(): OwnedChatRun | null {
+  private admitChatRun(input: TurnInput): OwnedChatRun | null {
     this.chatTicket ??= {
-      turnId: this.buddies.enqueueChat(this.turnContext(), this.host.id),
+      // The queue head IS the run's body: a queued chat run without it is refused by the crate.
+      turnId: this.buddies.enqueueChat(this.turnContext(), this.host.id, input),
       stopWaiting: waitForChatRunSlot(() => this.host.processQueue()),
     };
     const admission = this.buddies.admission(this.chatTicket.turnId);
@@ -750,13 +752,14 @@ export class BuddyTurnPolicy implements TurnPolicy {
   }
 
   // Pattern: route-at-send (docs/patterns.md#route-at-send)
-  // Delivery design D1: Stop means "quiet down now". Cancelling only the running turn would let
-  // the next queued return start a moment later, in the chat the owner just silenced. The posts
-  // stay unread, so they come back with the Buddy's next read. Only the owner's Stop button gets
-  // here: `stop()` also runs for an interrupt-and-send, where the queued returns must survive.
+  // Decision C (delivery design D1): Stop means "quiet down now". Cancelling only the running turn
+  // would let the next queued delivery start a moment later, in the chat the owner just silenced.
+  // The posts stay unread, so they come back with the Buddy's next delivery or read. Only the
+  // owner's Stop button gets here: `stop()` also runs for an interrupt-and-send, where the queued
+  // deliveries must survive.
   ownerStopped(): void {
-    this.buddies.cancelQueuedReturns(this.host.id).catch((error) => {
-      console.error(`[${this.host.id}] could not cancel queued returns`, error);
+    this.buddies.cancelQueuedDeliveries(this.host.id).catch((error) => {
+      console.error(`[${this.host.id}] could not cancel queued deliveries`, error);
     });
   }
 
@@ -796,7 +799,10 @@ export class BuddyTurnPolicy implements TurnPolicy {
     };
     this.host.once('buddy-turn-failed', heard);
     try {
-      this.host.send(sameEitherWay(content), { origin: RETURN_ORIGIN[this.host.visibility()], inputId: runId });
+      this.host.send(sameEitherWay(content), {
+        origin: RETURN_ORIGIN[this.host.visibility()],
+        inputId: runId,
+      });
     } catch (error) {
       this.disarm();
       return Promise.reject(error);

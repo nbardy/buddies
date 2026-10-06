@@ -2,7 +2,7 @@
 //! 1 s timer ran full-table scans and took 0.6–20 s per tick. Every statement a workload of every
 //! public function executes is traced, then `EXPLAIN QUERY PLAN`ned; a plain `SCAN <table>` fails.
 //! A walk of a whole index (`SCAN t USING INDEX`) is a scan too, except the partial run-queue walks;
-//! a CTE scan and the one list-everything read are fine.
+//! a CTE scan (the manager walk, a delivery's covered threads) and the one list-everything read are fine.
 
 mod common;
 
@@ -32,7 +32,9 @@ const INDEX_WALKS_BY_DESIGN: &[&str] = &[
 /// Plan lines that scan no table: the manager-walk CTE and its constant seed row, and the FTS
 /// vocabulary read by term range (`term >= 'r' AND term < 's'`, INDEX 6) for typo matching: it
 /// walks one letter's terms. An unconstrained vocab read plans as `INDEX 0:` and would still fail.
-const NOT_TABLES: &[&str] = &["SCAN up", "SCAN CONSTANT ROW", "SCAN post_search_vocab VIRTUAL TABLE INDEX 6:"];
+/// `covered`/`h` is a delivery's CTE of the threads its conversation subscribes to (deliveries.rs).
+const NOT_TABLES: &[&str] =
+    &["SCAN up", "SCAN CONSTANT ROW", "SCAN post_search_vocab VIRTUAL TABLE INDEX 6:", "SCAN covered", "SCAN h"];
 
 fn workload(s: &mut unleashd_buddies::Store) {
     let ic = buddy("ic");
@@ -48,7 +50,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
     let top_reply = s.post(&ic, public, PostInput { reply_to_id: Some(top.id.clone()), ..input(PostKind::Inform, "reply", "p2") }).unwrap();
     let dm = ChannelRef::Direct { members: vec![mid.clone(), ic.clone()] };
     let ask =
-        s.post(&mid, dm.clone(), PostInput { from_conversation_id: Some("c-mid".into()), returns: Some(Returns::Conversation { id: "c-mid".into() }), ..input(PostKind::Request, "do", "p3") }).unwrap();
+        s.post(&mid, dm.clone(), PostInput { from_conversation_id: Some("c-mid".into()), ..input(PostKind::Request, "do", "p3") }).unwrap();
     s.post(&ic, dm, input(PostKind::Inform, "on it", "p4")).unwrap();
     let cursor = Some(Cursor { ord: "ffffffff-ffff-7fff-bfff-ffffffffffff".into() });
     for q in [
@@ -78,7 +80,8 @@ fn workload(s: &mut unleashd_buddies::Store) {
     let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
     s.bind_run(&claim.run.id, &claim.lease_token, "c-ic").unwrap();
     s.renew_run(&claim.run.id, &claim.lease_token, 60_000).unwrap();
-    s.answer(&ic, AnswerInput { request_id: ask.id.clone(), body: "done".into(), evidence: vec![], key: "r".into() }).unwrap();
+    s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
+    s.answer(&ic, AnswerInput { request_id: ask.id.clone(), body: "done".into(), evidence: vec![], from_conversation_id: Some("c-ic".into()), key: "r".into() }).unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "x".into(), error: "y".into() }).unwrap();
 
     let doc = DocRef { buddy_id: "ic".into(), scope: DocScope::Buddy, kind: DocKind::Working, name: String::new() };
@@ -112,7 +115,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
         &ic,
         EnqueueInput {
             buddy_id: "ic".into(),
-            input: RunInput::Chat { turn_id: "u1".into() },
+            input: RunInput::Deliver { post_id: top.id.clone() },
             conversation_id: Some("c-ic".into()),
             task_id: Some(parent.id.clone()),
             after_run_id: Some(claim.run.id.clone()),
@@ -145,18 +148,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
     s.post(&ic, ChannelRef::Task { task_id: parent.id.clone() }, input(PostKind::Inform, "comment", "p5")).unwrap();
 
     let run = s
-        .enqueue_run(
-            &owner,
-            EnqueueInput {
-                buddy_id: "peer".into(),
-                input: RunInput::Chat { turn_id: "u2".into() },
-                conversation_id: None,
-                task_id: None,
-                after_run_id: None,
-                deadline: None,
-                config: None,
-            },
-        )
+        .enqueue_chat(&owner, ChatEnqueue { buddy_id: "peer".into(), conversation_id: "c-peer".into(), turn_id: "u2".into(), body: "{}".into() })
         .unwrap();
     s.cancel_run(&owner, &run.id).unwrap();
     for q in [
@@ -216,7 +208,6 @@ fn workload(s: &mut unleashd_buddies::Store) {
             cron: "0 * * * *".into(),
             timezone: "UTC".into(),
             prompt: "p".into(),
-            limits: "{}".into(),
             enabled: true,
             key: "s".into(),
         },
@@ -243,17 +234,34 @@ fn workload(s: &mut unleashd_buddies::Store) {
     s.get_buddy("ic").unwrap();
     s.list_buddies(WS).unwrap();
     s.bind_conversation(&owner, ConversationInput { id: "c-new".into(), buddy_id: "ic".into(), task_id: None }).unwrap();
-    // Thread follows (follows.rs): follow, replace, the wake inside a post, delivery, the gate skip.
-    let until = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    // Delivery (deliveries.rs): subscribe by follow, the fan-out inside a post, who it reached, the
+    // compose across subscribed threads, the fence at mark_executing and at a thread read, the
+    // author mark (K), a model-less config resolved at claim, and the gate's requeue / resume.
     s.catch_up_thread(&mid, &top.id, 20).unwrap();
-    let follow = FollowInput { root_id: top.id.clone(), conversation_id: "c-follow".into(), until, limit: 20 };
-    s.follow_thread(&mid, follow.clone()).unwrap();
-    let FollowRead::Following { follow } = s.follow_thread(&mid, follow).unwrap() else { panic!("nothing unread after the catch-up") };
+    s.follow_thread(&mid, &top.id, Some("c-follow".into()), 20).unwrap();
     let woke = s
         .post(&owner, ChannelRef::Id { id: channel.id.clone() }, PostInput { reply_to_id: Some(top.id.clone()), ..input(PostKind::Inform, "news", "pf") })
         .unwrap();
-    s.delivering_followers(&top.id, &woke.ord).unwrap();
-    s.deliver_follow(&follow.id, 20).unwrap();
+    s.post(&ic, ChannelRef::Id { id: channel.id.clone() }, PostInput { reply_to_id: Some(top.id.clone()), ..input(PostKind::Inform, "more", "pg") })
+        .unwrap();
+    s.delivered_to(&woke.id).unwrap();
+    s.mark_thread_read(&mid, &top.id, &woke.id).unwrap();
+    while let Some(claim) = s.claim_run(lease(60_000)).unwrap() {
+        if let RunInput::Deliver { .. } = claim.run.input {
+            s.deliver_posts(&claim.run.id).unwrap();
+        }
+        s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
+        s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    }
+    s.follow_thread(&mid, &top.id, None, 20).unwrap();
+    let codex = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    s.post(&mid, ChannelRef::Direct { members: vec![mid.clone()] }, PostInput { run_config: Some(codex), from_conversation_id: Some("c-mid".into()), ..input(PostKind::Request, "w", "pw") })
+        .unwrap();
+    let worker = s.claim_run_at("2998-01-01T00:00:00.000Z", lease(60_000)).unwrap().unwrap();
+    s.record_run_model(&worker.run.id, &worker.lease_token, "gpt").unwrap();
+    s.bind_run(&worker.run.id, &worker.lease_token, "c-worker").unwrap();
+    s.mark_executing(&worker.run.id, &worker.lease_token).unwrap();
+    s.claim_run_at("2999-01-01T00:00:00.000Z", lease(60_000)).unwrap();
 }
 
 fn input(kind: PostKind, body: &str, key: &str) -> PostInput {
@@ -265,7 +273,7 @@ fn input(kind: PostKind, body: &str, key: &str) -> PostInput {
         reply_to_id: None,
         task_id: None,
         from_conversation_id: None,
-        returns: None,
+        mentions: vec![],
         run_config: None,
         broadcast: false,
         key: key.into(),
@@ -302,6 +310,9 @@ fn every_statement_uses_an_index() {
         plan.into_iter()
             // An FTS5 MATCH plans as "SCAN <fts> VIRTUAL TABLE INDEX n:M..": an index lookup.
             .filter(|line| line.starts_with("SCAN ") && !line.contains("VIRTUAL TABLE INDEX 0:M"))
+            // A materialized subquery holds only rows its own (checked) plan already selected: a
+            // delivery's unread posts, sorted after the indexed reads that found them.
+            .filter(|line| !line.starts_with("SCAN (subquery-"))
             .filter(|line| {
                 ![WHOLE_TABLE_BY_DESIGN, NOT_TABLES, INDEX_WALKS_BY_DESIGN].iter().any(|allowed| allowed.contains(&line.as_str()))
             })

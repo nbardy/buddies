@@ -176,26 +176,47 @@ impl BuddiesCore {
         call(&self.store, move |s| s.enqueue_run(&actor, input)).await
     }
 
-    /// A Buddy follows a thread from one conversation (follows.rs).
+    /// A foreground chat input with its text (the queued run is the owner's message).
     #[napi]
-    pub async fn follow_thread(&self, actor: Actor, input: FollowInput) -> napi::Result<FollowRead> {
-        call(&self.store, move |s| s.follow_thread(&actor, input)).await
+    pub async fn enqueue_chat(&self, actor: Actor, input: ChatEnqueue) -> napi::Result<Run> {
+        call(&self.store, move |s| s.enqueue_chat(&actor, input)).await
     }
 
-    /// A follow read's first step: the thread's unread posts for this Buddy, marked read.
+    /// `channel_read {threadId, follow}`: subscribe (or, with no conversation, unsubscribe) this
+    /// Buddy's conversation to a thread and return its unread posts, marked read (deliveries.rs).
+    #[napi]
+    pub async fn follow_thread(&self, actor: Actor, root_id: String, conversation_id: Option<String>, limit: i64) -> napi::Result<ThreadUnread> {
+        call(&self.store, move |s| s.follow_thread(&actor, &root_id, conversation_id, limit)).await
+    }
+
+    /// The thread's unread posts for this Buddy, marked read (the follow wait's re-read).
     #[napi]
     pub async fn catch_up_thread(&self, actor: Actor, root_id: String, limit: i64) -> napi::Result<ThreadUnread> {
         call(&self.store, move |s| s.catch_up_thread(&actor, &root_id, limit)).await
     }
 
+    /// What a claimed delivery shows (deliveries.rs `compose`).
     #[napi]
-    pub async fn deliver_follow(&self, follow_id: String, limit: i64) -> napi::Result<FollowWake> {
-        call(&self.store, move |s| s.deliver_follow(&follow_id, limit)).await
+    pub async fn deliver_posts(&self, run_id: String) -> napi::Result<Delivery> {
+        call(&self.store, move |s| s.deliver_posts(&run_id)).await
     }
 
+    /// The Buddies a post was delivered to (the host's follow-up gate skips them until step 5).
     #[napi]
-    pub async fn delivering_followers(&self, root_id: String, ord: String) -> napi::Result<Vec<String>> {
-        call(&self.store, move |s| s.delivering_followers(&root_id, &ord)).await
+    pub async fn delivered_to(&self, post_id: String) -> napi::Result<Vec<String>> {
+        call(&self.store, move |s| s.delivered_to(&post_id)).await
+    }
+
+    /// The holder is about to spawn (Pattern: durable-intake).
+    #[napi]
+    pub async fn mark_executing(&self, run_id: String, lease_token: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.mark_executing(&run_id, &lease_token)).await
+    }
+
+    /// The provider default a model-less run config resolved to at claim (decision J).
+    #[napi]
+    pub async fn record_run_model(&self, run_id: String, lease_token: String, model: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.record_run_model(&run_id, &lease_token, &model)).await
     }
 
     #[napi]
@@ -266,6 +287,12 @@ impl BuddiesCore {
     #[napi]
     pub async fn list_schedules(&self, query: ListScope) -> napi::Result<Vec<Schedule>> {
         call(&self.store, move |s| s.list_schedules(query)).await
+    }
+
+    /// "Run now": the schedule fires at once (a post in its thread, delivered to its Buddy).
+    #[napi]
+    pub async fn fire_schedule(&self, actor: Actor, schedule_id: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.fire_schedule(&actor, &schedule_id)).await
     }
 
     #[napi]

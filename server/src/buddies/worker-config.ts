@@ -12,7 +12,7 @@ import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-servic
 export const WorkerSchema = z
   .object({
     provider: z.string().min(1).describe('Harness id, e.g. codex'),
-    model: z.string().min(1).describe('Catalog model id'),
+    model: z.string().min(1).optional().describe("Catalog model id; absent: the harness's default"),
     reasoningEffort: z.string().min(1).optional().describe('Absent: default'),
   })
   .strict();
@@ -21,9 +21,25 @@ export const WorkerSchema = z
 export function workerConversationConfig(config: RunConfig): ConversationConfig {
   return configFromProviderPreferences({
     provider: ProviderSchema.parse(config.provider),
-    model: config.model,
+    model: config.model ?? undefined,
     reasoningEffort: config.reasoningEffort,
   });
+}
+
+/**
+ * Decision J (2026-10-06): the model a run that names only its provider runs on, the catalog's
+ * default for it right now. The runner records it on the run at claim (crate `record_run_model`),
+ * so a later catalog change never rewrites which model a run used. Before J, `RunConfig.model`
+ * was required: a "default" chip pick could not ride a run (durable-pending Rev 10, Finding 1),
+ * and worker model ids drifted with nothing on the run saying which ran (Wave Sim, 2026-09-29).
+ */
+export function providerDefaultModel(provider: string): string {
+  const resolution = resolveConfigAgainstProviderCatalog(
+    workerConversationConfig({ provider, model: undefined })
+  );
+  if (resolution.status !== 'resolved')
+    throw new Error(`worker provider "${provider}": ${resolution.error.message}`);
+  return resolution.value.modelId;
 }
 
 /**

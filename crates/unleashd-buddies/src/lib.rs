@@ -2,9 +2,10 @@
 //! Buddy functions. The one-time v33 importer was deleted after the 2026-09-27 swap (last at 03fc931).
 
 pub mod docs;
-pub mod follows;
+pub mod deliveries;
 pub mod error;
 pub mod ids;
+pub mod migrate;
 #[cfg(feature = "node")]
 pub mod node;
 pub mod posts;

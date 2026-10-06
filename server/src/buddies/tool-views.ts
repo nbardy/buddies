@@ -107,13 +107,12 @@ export const taskDetailView = ({ task, channel, children, comments }: TaskDetail
 // ---- runs ------------------------------------------------------------------------------------
 
 const requestPostId = (row: RunRow): string | null =>
-  row.input.kind === 'post' || row.input.kind === 'reply' ? row.input.postId : null;
+  row.input.kind === 'post' || row.input.kind === 'deliver' ? row.input.postId : null;
 
 /**
  * Run rows with what each run is FOR: the request's `purpose` and its Task's title. The crate row
  * carries ids only, so a reader had to open every run to learn what it was doing. Absence is
- * meaning here: `purpose` is null when the run has no request post (a chat, a schedule, a
- * follow) or when the post is not one this Buddy may read (a DM between others) or no longer exists. The error is
+ * meaning here: `purpose` is null when the run has no post (a chat, a retired kind) or when the post is not one this Buddy may read (a DM between others) or no longer exists. The error is
  * clipped; `runs get` returns the whole one.
  */
 export async function runRowsView(core: Core, reader: Actor, rows: RunRow[]) {

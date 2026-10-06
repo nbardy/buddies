@@ -48,13 +48,13 @@ import {
   NO_PICKS,
   createBuddyEvents,
 } from '../src/buddies/events';
-import { INBOX, createGrants } from '../src/buddies/grants';
+import { createGrants } from '../src/buddies/grants';
 import { FOLLOW_GRACE_MS, startMcpEndpoint } from '../src/buddies/mcp';
 import { createMemoryReviewer } from '../src/buddies/memory-review';
 import { createBuddyPolicyPort } from '../src/buddies/policy-port';
 import { registerBuddyRoutes } from '../src/buddies/routes';
 import { createRunner } from '../src/buddies/runner';
-import { workerConversationConfig } from '../src/buddies/worker-config';
+import { providerDefaultModel, workerConversationConfig } from '../src/buddies/worker-config';
 import { BUDDY_RUN_LEASE_MS, TURN_MAX_RUNTIME_MS } from '../src/constants/timeouts';
 import { createBuddyCreationService } from '../src/conversations/buddy-creation-service';
 import { ConversationConfigService } from '../src/conversations/config-service';
@@ -320,6 +320,13 @@ async function world(reopen?: string) {
     logger: { warn: () => undefined, log: () => undefined },
     host: {
       registered: (id) => conversations.has(id),
+      defaultModel: providerDefaultModel,
+      reconfigure: async (conversationId, config) =>
+        replaceRuntimeConfig(
+          configService,
+          conversations.get(conversationId)!,
+          workerConversationConfig(config)
+        ),
       openBackground: async ({ conversationId, context, commandId, config }) => {
         await creation.createServerBuddyConversation({
           context,
@@ -525,17 +532,17 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     assert.equal(answer.body, 'Logo drawn');
     assert.deepEqual(answer.author, buddyActor(w.designer.id));
 
-    // (a) The request was sent from Lead's owner chat, so its answer returns THERE: a `reply` run
-    // bound to 'owner-chat', and a third turn that carries the answer.
+    // (a) The request was sent from Lead's owner chat, so that chat is subscribed to its thread and
+    // the answer is delivered THERE: a `deliver` run bound to 'owner-chat', and a third turn that
+    // carries the answer.
     const leadRuns = await until(async () => {
       const runs = await w.runs(w.lead.id);
       return runs.length === 2 && runs.every((r) => r.status === 'complete') && runs;
     }, "Lead's chat run and its return");
-    assert.deepEqual(done.returns, { kind: 'conversation', id: 'owner-chat' });
-    const returned = leadRuns.find((r) => r.input.kind === 'reply')!;
+    const returned = leadRuns.find((r) => r.input.kind === 'deliver')!;
     assert.equal(returned.conversationId, 'owner-chat');
     assert.equal(w.turns.length, 3, 'one automated turn, in the owner chat');
-    assert.match(w.turns[2].request.prompt, /was answered/);
+    assert.match(w.turns[2].request.prompt, /New posts in threads this conversation follows/);
     assert.match(w.turns[2].request.prompt, /Logo drawn/);
     // (d) The return resumes the chat's own provider session (no fork into a worker audience) and
     // is a Buddy-authored turn: a worker's answer never runs with the owner's grant (B1, D9).
@@ -608,18 +615,18 @@ test("a worker's answer returns to the owner chat that asked, after its running 
       whileRunning.map((r) => [r.input.kind, r.status]).sort(),
       [
         ['chat', 'running'],
-        ['reply', 'queued'],
+        ['deliver', 'queued'],
       ],
       'the answer waits for the running owner turn instead of running beside it'
     );
     assert.deepEqual(
-      whileRunning.find((r) => r.input.kind === 'reply')?.waiting,
+      whileRunning.find((r) => r.input.kind === 'deliver')?.waiting,
       { kind: 'conversation_busy' },
       'and says why'
     );
     // Turn 2 is Designer's. Then the owner's message runs BEFORE the queued return.
     assert.match(w.turns[2].request.prompt, /Also make it blue/, 'owner message first');
-    assert.match(w.turns[3].request.prompt, /was answered/, 'the return after it');
+    assert.match(w.turns[3].request.prompt, /Logo drawn/, 'the delivery after it');
     assert.equal(w.turns[3].request.resumeSessionId, 'native-1');
   } finally {
     await w.close();
@@ -663,7 +670,7 @@ test('a foreground requester that reads its answer mid-turn settles the return w
         all.length === 2 && all.every((r) => r.status !== 'queued' && r.status !== 'running') && all
       );
     }, 'the owner turn and its settled return');
-    assert.equal(runs.find((r) => r.input.kind === 'reply')?.errorCode, 'consumed');
+    assert.equal(runs.find((r) => r.input.kind === 'deliver')?.errorCode, 'consumed');
     assert.equal(w.turns.length, 2, 'no model turn repeated the answer');
   } finally {
     await w.close();
@@ -697,12 +704,14 @@ test('a failed worker run reaches the owner chat that asked', async () => {
     const notice = await until(
       async () =>
         (await w.runs(w.lead.id)).find(
-          (r) => r.input.kind === 'failure_notice' && r.status === 'complete'
+          (r) => r.input.kind === 'deliver' && r.status === 'complete'
         ),
       'the failure notice turn'
     );
+    // The failure notice is a `run_failed` post by the worker in the request's thread, delivered
+    // to the subscribed owner chat like an answer.
     assert.equal(notice.conversationId, 'owner-chat');
-    assert.match(w.turns[2].request.prompt, /failed/);
+    assert.match(w.turns[2].request.prompt, /failed \(execution_failed\)/);
     assert.equal(w.turns[2].request.resumeSessionId, 'native-1');
   } finally {
     await w.close();
@@ -726,14 +735,16 @@ test("the owner's Stop cancels the queued return and no turn follows it", async 
       request = posted.value;
       await until(
         async () =>
-          (await w.runs(w.lead.id)).some((r) => r.input.kind === 'reply' && r.status === 'queued'),
+          (await w.runs(w.lead.id)).some(
+            (r) => r.input.kind === 'deliver' && r.status === 'queued'
+          ),
         'the return queued behind the running turn'
       );
       chat.ownerStop();
       await until(
         async () =>
           (await w.runs(w.lead.id)).some(
-            (r) => r.input.kind === 'reply' && r.status === 'cancelled'
+            (r) => r.input.kind === 'deliver' && r.status === 'cancelled'
           ),
         'Stop cancelling the return'
       );
@@ -777,12 +788,7 @@ test('follow from an owner chat registers and wakes that chat', async () => {
         key: 'ask-mockups',
       });
       rootId = root.value.id;
-      read = await call(turn.mcp, 'channel_read', {
-        read: {
-          threadId: rootId,
-          follow: { until: new Date(Date.now() + 30 * 60_000).toISOString() },
-        },
-      });
+      read = await call(turn.mcp, 'channel_read', { read: { threadId: rootId, follow: {} } });
     });
     let woken!: { names: string[] };
     w.during.set(2, async (turn) => {
@@ -801,7 +807,7 @@ test('follow from an owner chat registers and wakes that chat', async () => {
         (await w.runs(w.lead.id)).some((r) => r.input.kind === 'chat' && r.status === 'complete'),
       'the owner turn'
     );
-    assert.equal(read.value.kind, 'following', read.text);
+    assert.equal(read.value.kind, 'subscribed', read.text);
     assert.equal(
       (
         await call(asBuddy(w, w.designer.id), 'post', {
@@ -846,7 +852,6 @@ test('a group DM is refused through MCP; one DM per recipient is the alternative
       workspaceId: w.ws,
       conversationId: 'c',
       runId: null,
-      returns: INBOX,
     });
     const spec = w.endpoint.spec(grant);
     const group = await call(spec, 'post', {
@@ -882,7 +887,6 @@ test('an MCP write fires the change bus in this process (B2)', async () => {
       workspaceId: w.ws,
       conversationId: 'c',
       runId: null,
-      returns: INBOX,
     });
     const before = w.events.length;
     const posted = await call(w.endpoint.spec(grant), 'post', {
@@ -934,6 +938,7 @@ test('workspace run rows expose task_paused and clear it when the same run becom
         body: 'Held work',
         evidence: [],
         taskId: task.id,
+        mentions: [],
         broadcast: false,
         key: 'waiting-request',
       }
@@ -945,7 +950,6 @@ test('workspace run rows expose task_paused and clear it when the same run becom
         workspaceId: w.ws,
         conversationId: 'waiting-view',
         runId: null,
-        returns: INBOX,
       })
     );
     const listed = await call(spec, 'runs', {
@@ -1053,6 +1057,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         kind: 'inform',
         body: `[@Lead](buddy:${w.lead.id}) plan the launch`,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'owner-1',
       }
@@ -1094,6 +1099,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         body: 'Lead, which date?',
         replyToId: root.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'designer-1',
       }
@@ -1126,6 +1132,7 @@ test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs are not capped", 
         kind: 'inform',
         body: `[@Lead](buddy:${w.lead.id}) plan the launch`,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'owner-root',
       }
@@ -1182,7 +1189,7 @@ test('a seat reply is what the Buddy posts; a turn that posts nothing leaves a f
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: body }
+        { kind: 'inform', body, replyToId, evidence: [], mentions: [], broadcast: false, key: body }
       );
     const thread = async (rootId: string) =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
@@ -1230,7 +1237,15 @@ test("an effort pick keeps the seat's session; a provider pick opens a new seat 
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `say-${++n}` }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          key: `say-${++n}`,
+        }
       );
     const replies = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 100)).posts.filter(
@@ -1275,7 +1290,15 @@ test('a follow-up for a post a mention turn already read starts no second turn',
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `say-${++n}` }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          key: `say-${++n}`,
+        }
       );
     const replies = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts.filter(
@@ -1324,6 +1347,7 @@ test('a harness failure is retried on another harness, in a new seat of the same
         kind: 'inform',
         body: `[@Lead](buddy:${w.lead.id}) ship it`,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'ask',
       }
@@ -1361,6 +1385,7 @@ test('a harness failure is retried on another harness, in a new seat of the same
         body: 'Couldn’t reply: Buddy is not active',
         replyToId: root.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'not-harness',
       }
@@ -1383,7 +1408,15 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
       w.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `priority-${++n}` }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          key: `priority-${++n}`,
+        }
       );
     const root = await say(`[@Lead](buddy:${w.lead.id}) start`);
     await w.core.updateBuddy(OWNER, {
@@ -1417,6 +1450,7 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
         replyToId: root.id,
         fromConversationId: latest.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'external-reply',
       }
@@ -1448,6 +1482,7 @@ test('latest thread reply model drives the picker, should-reply gate and answer;
         replyToId: root.id,
         fromConversationId: duringGate.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'during-gate',
       }
@@ -1493,6 +1528,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
         kind: 'inform',
         body: `[@Lead](buddy:${w.lead.id}) start`,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'selection-root',
       }
@@ -1514,6 +1550,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
         replyToId: root.id,
         fromConversationId: old.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'old-work',
       }
@@ -1533,7 +1570,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
       detail: '',
       execution: { kind: 'profile' as const, config: createDefaultConversationConfig('codex') },
     };
-    const before = mentionChoice(buddy, new Map(), { kind: 'loaded', seats: (await threadRead()).seats });
+    const before = mentionChoice(buddy, new Map(), {
+      kind: 'loaded',
+      seats: (await threadRead()).seats,
+    });
     assert.equal(
       ('config' in before ? before.config : null)?.provider,
       'claude',
@@ -1558,7 +1598,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     );
     assert.match(failed.body, /You've hit your weekly limit/);
     await until(() => w.channels.responding(w.general.id).length === 0, 'failed pair idle');
-    const shown = mentionChoice(buddy, new Map(), { kind: 'loaded', seats: (await threadRead()).seats });
+    const shown = mentionChoice(buddy, new Map(), {
+      kind: 'loaded',
+      seats: (await threadRead()).seats,
+    });
     assert.equal(
       choiceLabel(shown, null),
       `${w.turns[0].request.model} · high`,
@@ -1601,6 +1644,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
         body: 'Continue after failure',
         replyToId: root.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'next-after-failure',
       }
@@ -1639,6 +1683,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
           body,
           replyToId,
           evidence: [],
+          mentions: [],
           broadcast: false,
           key: `scope-${++n}`,
         }
@@ -1683,6 +1728,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
         replyToId: root.id,
         fromConversationId: external.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'newer-external',
       }
@@ -1715,6 +1761,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
         replyToId: other.id,
         fromConversationId: external.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'history-other',
       }
@@ -1751,6 +1798,7 @@ test('same-value picks become durable overrides, independent of another Buddy an
         replyToId: other.id,
         fromConversationId: 'retired-history',
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'retired-history',
       }
@@ -1785,6 +1833,7 @@ test('keyed retry over owner HTTP recovers a capacity-failed reply gate on the s
         kind: 'inform',
         body: `[@Lead](buddy:${w.lead.id}) start`,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'gate-start',
       }
@@ -1804,6 +1853,7 @@ test('keyed retry over owner HTTP recovers a capacity-failed reply gate on the s
         body: 'What next?',
         replyToId: root.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'gate-next',
       }
@@ -1841,6 +1891,7 @@ test('keyed retry over owner HTTP recovers a capacity-failed reply gate on the s
         body: 'Lead, review this next',
         replyToId: root.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'buddy-gate-next',
       }
@@ -1930,6 +1981,7 @@ test('an unpinned Buddy runs the installed agent; a pinned one never moves', asy
           kind: 'inform',
           body: `[@Product Dev](buddy:${home.productDevId}) status?`,
           evidence: [],
+          mentions: [],
           broadcast: false,
           key,
         }
@@ -2058,14 +2110,10 @@ test('a scheduled run asks for help in the background and its answer comes back 
       cron: '0 9 * * *',
       timezone: 'UTC',
       prompt: 'Run the daily review',
-      limits: '{}',
       enabled: true,
       key: 'daily',
     });
-    await w.core.enqueueRun(OWNER, {
-      buddyId: w.lead.id,
-      input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
-    });
+    await w.core.fireSchedule(OWNER, schedule.id);
     w.emit({ kind: 'changed' });
     const returned = await until(() => w.turns[2], "Lead's return turn");
     assert.match(returned.request.prompt, /Metrics are up 4%/);
@@ -2138,7 +2186,7 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
     const route = async (turn: Turn) => {
       if (turn.request.prompt.includes('Sweep B'))
         return void (await until(() => w.stopped.has(turn.n), 'the stop to reach worker B'));
-      if (turn.request.prompt.includes(`Your request ${a().id} was answered`)) {
+      if (delivered(turn, a().id)) {
         const cancelled = await call(turn.mcp, 'runs', {
           action: { kind: 'cancel', runId: (await runOf(b()))!.id },
         });
@@ -2153,14 +2201,10 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
       cron: '0 9 * * *',
       timezone: 'UTC',
       prompt: 'Run the sweeps',
-      limits: '{}',
       enabled: true,
       key: 'sweep',
     });
-    await w.core.enqueueRun(OWNER, {
-      buddyId: w.lead.id,
-      input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
-    });
+    await w.core.fireSchedule(OWNER, schedule.id);
     w.emit({ kind: 'changed' });
 
     const cancelledB = await until(async () => {
@@ -2185,9 +2229,7 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
     }
     const lead = w.turns[0].request as { model?: string };
     assert.notEqual(lead.model, 'gpt-6-luna', 'the spawner itself stays on its profile');
-    const returned = w.turns.find((t) =>
-      t.request.prompt.includes(`Your request ${a().id} was answered`)
-    )!;
+    const returned = w.turns.find((t) => delivered(t, a().id))!;
     assert.equal(
       returned.request.resumeSessionId,
       'native-1',
@@ -2212,7 +2254,6 @@ test('a worker turn can still create channels, search and follow, spawn and retr
         workspaceId: w.ws,
         conversationId: 'capability-guard',
         runId: null,
-        returns: INBOX,
       })
     );
     const client = await connect(spec);
@@ -2232,7 +2273,7 @@ test('a worker turn can still create channels, search and follow, spawn and retr
     const capabilities: Array<[string, string, RegExp[]]> = [
       ['create a channel', 'channel', [/"create"/, /"name"/, /"purpose"/]],
       ['search by channel and author', 'channel_read', [/"search"/, /"channels"/, /"from"/]],
-      ['follow a thread', 'channel_read', [/"follow"/, /"until"/]],
+      ['follow a thread', 'channel_read', [/"follow"/, /"wait"/]],
       ['request a worker on a chosen model', 'post', [/"worker"/, /"request"/, /"answers"/]],
       ['cancel a run', 'runs', [/"cancel"/]],
       ['retry a run on another model', 'runs', [/"retry"/, /"worker"/]],
@@ -2281,7 +2322,7 @@ test('runs retry re-runs a failed worker as attempt 2 on another model and wakes
           key: 'swept',
         });
         assert.equal(answered.isError, false, answered.text);
-      } else if (prompt.includes('for your request failed')) {
+      } else if (prompt.includes('for this request failed')) {
         const failed = (await w.runs(w.lead.id)).find(
           (r) => r.input.kind === 'post' && r.status === 'failed'
         )!;
@@ -2304,14 +2345,10 @@ test('runs retry re-runs a failed worker as attempt 2 on another model and wakes
       cron: '0 9 * * *',
       timezone: 'UTC',
       prompt: 'Run the sweep',
-      limits: '{}',
       enabled: true,
       key: 'sweep',
     });
-    await w.core.enqueueRun(OWNER, {
-      buddyId: w.lead.id,
-      input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
-    });
+    await w.core.fireSchedule(OWNER, schedule.id);
     w.emit({ kind: 'changed' });
 
     const retried = await until(async () => {
@@ -2321,7 +2358,10 @@ test('runs retry re-runs a failed worker as attempt 2 on another model and wakes
     assert.deepEqual(retried.config, sol, 'the retry runs on the model it was moved to');
     const returned = await until(
       () =>
-        w.turns.find((t) => t.request.prompt.includes(`Your request ${spawned.id} was answered`)),
+        w.turns.find(
+          (t) =>
+            t.request.prompt.includes('New posts in threads') && t.request.prompt.includes('Swept')
+        ),
       "the requester's wake with the retry's answer"
     );
     assert.equal(
@@ -2375,14 +2415,10 @@ test('an answer the requester already read settles its return run with no model 
       cron: '0 9 * * *',
       timezone: 'UTC',
       prompt: 'Get the logo drawn',
-      limits: '{}',
       enabled: true,
       key: 'logo',
     });
-    await w.core.enqueueRun(OWNER, {
-      buddyId: w.lead.id,
-      input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
-    });
+    await w.core.fireSchedule(OWNER, schedule.id);
     w.emit({ kind: 'changed' });
 
     const leadRuns = await until(async () => {
@@ -2393,16 +2429,18 @@ test('an answer the requester already read settles its return run with no model 
         runs
       );
     }, "the requester's schedule run and its settled return");
-    const returned = leadRuns.find((r) => r.input.kind === 'reply')!;
+    // Newest first: the answer's delivery, then the schedule fire's own.
+    const returned = leadRuns.find((r) => r.input.kind === 'deliver')!;
     assert.equal(returned.status, 'cancelled');
     assert.equal(returned.errorCode, 'consumed');
     assert.equal(
-      whileRunning.find((r) => r.input.kind === 'reply')?.status,
+      whileRunning.find((r) => r.input.kind === 'deliver')?.status,
       'cancelled',
       'settled by the read itself, not after the turn ended'
     );
+    // Turn 1 is itself the schedule fire's delivery; no later turn carries the answer.
     assert.equal(
-      w.turns.some((t) => t.request.prompt.includes('was answered')),
+      w.turns.some((t) => t.request.prompt.includes('Logo drawn')),
       false,
       'no model turn repeated the answer'
     );
@@ -3094,6 +3132,7 @@ test('an owner reply in a DM thread wakes the Buddy; its request, its answer and
       kind: 'request',
       body: 'Approve the plan?',
       evidence: [],
+      mentions: [],
       broadcast: false,
       key: 'ask',
     });
@@ -3103,6 +3142,7 @@ test('an owner reply in a DM thread wakes the Buddy; its request, its answer and
       body: "what's next?",
       replyToId: ask.id,
       evidence: [],
+      mentions: [],
       broadcast: false,
       key: 'nudge',
     });
@@ -3121,6 +3161,7 @@ test('an owner reply in a DM thread wakes the Buddy; its request, its answer and
         body: 'FYI',
         replyToId: ask.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'fyi',
       })
@@ -3144,7 +3185,6 @@ test('a retried post (same key) wakes its mentioned Buddy once', async () => {
       workspaceId: w.ws,
       conversationId: 'lead-chat',
       runId: null,
-      returns: INBOX,
     });
     const mention = {
       channel: { id: w.general.id },
@@ -3177,6 +3217,7 @@ test('a failed gate on an owner post is shown', async () => {
           body,
           replyToId,
           evidence: [],
+          mentions: [],
           broadcast: false,
           key: `${author}:${body}`,
         }
@@ -3443,7 +3484,14 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     const ask = await w.post(
       buddyActor(w.lead.id),
       { kind: 'direct', members: [buddyActor(w.lead.id), OWNER] },
-      { kind: 'request', body: 'May I deploy?', evidence: [], broadcast: false, key: 'ask' }
+      {
+        kind: 'request',
+        body: 'May I deploy?',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        key: 'ask',
+      }
     );
     const inbox = await http('GET', `/api/buddies/workspaces/${w.ws}/inbox`);
     assert.deepEqual(
@@ -3533,7 +3581,6 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       workspaceId: w.ws,
       conversationId: 'c',
       runId: null,
-      returns: INBOX,
     });
     const searched = await call(w.endpoint.spec(grant), 'channel_read', {
       read: { search: { text: 'quarterly' } },
@@ -3616,7 +3663,6 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
         workspaceId: w.ws,
         conversationId: 'c',
         runId: null,
-        returns: INBOX,
       })
     );
     const ids = (listed: { value: Array<{ id: string }> }) => listed.value.map((t) => t.id).sort();
@@ -3739,7 +3785,6 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       cron: '0 9 * * *',
       timezone: 'UTC',
       prompt: 'Check the logo',
-      limits: '{}',
       enabled: true,
       key: 'logo-check',
     });
@@ -3782,7 +3827,16 @@ test('owner routes restore what the T11 client migration dropped: reply stats, t
       w.post(
         buddyActor(w.lead.id),
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, taskId, evidence: [], broadcast: false, key: body }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          taskId,
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          key: body,
+        }
       );
     const root = await say('Launch plan', undefined, task.id);
     const replies = [];
@@ -3866,7 +3920,14 @@ test('owner channel replies stay in threads and reject old broadcast requests', 
     const root = await w.post(
       OWNER,
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: 'Thread root', evidence: [], broadcast: false, key: 'broadcast-root' }
+      {
+        kind: 'inform',
+        body: 'Thread root',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        key: 'broadcast-root',
+      }
     );
     const reply = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
       body: 'Do not broadcast this reply',
@@ -3933,6 +3994,7 @@ test('a thread read names each Buddy’s current seat, so the mention chip opens
         body: 'noted',
         replyToId: root.id,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'designer-noted',
       }
@@ -3988,6 +4050,7 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
         kind: 'inform',
         body: 'Keep this archive evidence',
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'archive-history',
       }
@@ -3998,7 +4061,6 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
       workspaceId: w.ws,
       conversationId: 'archive-test',
       runId: null,
-      returns: INBOX,
     });
     const archived = await call(w.endpoint.spec(grant), 'channel_admin', {
       channelId: w.general.id,
@@ -4060,6 +4122,7 @@ test('Buddy MCP renames a public channel without changing its identity or histor
         kind: 'inform',
         body: 'Keep this rename evidence',
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'rename-history',
       }
@@ -4070,7 +4133,6 @@ test('Buddy MCP renames a public channel without changing its identity or histor
       workspaceId: w.ws,
       conversationId: 'rename-test',
       runId: null,
-      returns: INBOX,
     });
     const renamed = await call(w.endpoint.spec(grant), 'channel_admin', {
       channelId: w.general.id,
@@ -4109,7 +4171,6 @@ test('Buddy MCP creates a channel, posts in it, and a replayed key returns the s
       workspaceId: w.ws,
       conversationId: 'create-channel-test',
       runId: null,
-      returns: INBOX,
     });
     const spec = w.endpoint.spec(grant);
     const input = { name: 'launch-prep', purpose: 'Launch checklist', key: 'mk-launch' };
@@ -4151,6 +4212,7 @@ test('task comment mentions wake a Buddy and preserve replies in the task discus
         kind: 'inform',
         body: `[@Designer](buddy:${w.designer.id}) review this task`,
         evidence: [],
+        mentions: [],
         broadcast: false,
         key: 'task-mention',
       }
@@ -4185,6 +4247,11 @@ test('task comment mentions wake a Buddy and preserve replies in the task discus
 // and the gate's in-memory pairs die with the backend.
 type World = Awaited<ReturnType<typeof world>>;
 
+/** A delivery turn (runner.ts `deliveryPrompt`) that shows a post of the thread rooted at `rootId`. */
+const delivered = (turn: { request: { prompt: string } }, rootId: string) =>
+  turn.request.prompt.includes('New posts in threads') &&
+  turn.request.prompt.includes(`thread ${rootId}`);
+
 /** A Buddy's own tool endpoint, as its turn would hold it. */
 const asBuddy = (w: World, buddyId: string) =>
   w.endpoint.spec(
@@ -4194,7 +4261,6 @@ const asBuddy = (w: World, buddyId: string) =>
       workspaceId: w.ws,
       conversationId: `elsewhere-${buddyId}`,
       runId: null,
-      returns: INBOX,
     })
   );
 
@@ -4202,12 +4268,12 @@ type ToolCall = Awaited<ReturnType<typeof call>>;
 
 /**
  * Lead's scheduled (background) turn 1 starts a thread, runs `before(rootId)` (other Buddies'
- * posts), then reads it with follow until `followUntil`, and `after(read)` runs inside the same
- * turn. Resolves once turn 1's run completed, with the follow read's result.
+ * posts), then reads it with `follow` (a subscription plus a bounded wait, delivery design Task 3),
+ * and `after(read)` runs inside the same turn. Resolves once turn 1's run completed.
  */
 async function leadFollows(
   w: World,
-  followUntil: string,
+  follow: unknown,
   hooks: {
     before?: (rootId: string, turn: Turn) => Promise<void>;
     during?: (rootId: string) => Promise<void>;
@@ -4224,9 +4290,7 @@ async function leadFollows(
     await hooks.before?.(root.value.id, turn);
     const started = Date.now();
     const [read] = await Promise.all([
-      call(turn.mcp, 'channel_read', {
-        read: { threadId: root.value.id, follow: { until: followUntil } },
-      }),
+      call(turn.mcp, 'channel_read', { read: { threadId: root.value.id, follow } }),
       hooks.during?.(root.value.id),
     ]);
     assert.equal(read.isError, false, read.text);
@@ -4239,25 +4303,18 @@ async function leadFollows(
     cron: '0 9 * * *',
     timezone: 'UTC',
     prompt: 'Get the mockups',
-    limits: '{}',
     enabled: true,
     key: 'mockups',
   });
-  await w.core.enqueueRun(OWNER, {
-    buddyId: w.lead.id,
-    input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
-  });
+  await w.core.fireSchedule(OWNER, schedule.id);
   w.emit({ kind: 'changed' });
   await until(
-    async () =>
-      out.rootId &&
-      (await w.runs(w.lead.id)).some((r) => r.input.kind === 'schedule' && r.status === 'complete'),
+    async () => out.rootId && (await w.runs(w.lead.id)).at(-1)?.status === 'complete',
     "Lead's following turn ends"
   );
   return out;
 }
 
-const minutesAhead = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
 const designerReplies = (w: World, rootId: string, body: string) =>
   call(asBuddy(w, w.designer.id), 'post', {
     channel: { id: w.general.id },
@@ -4265,63 +4322,76 @@ const designerReplies = (w: World, rootId: string, body: string) =>
     body,
     key: body,
   });
-const followRuns = async (w: World) =>
-  (await w.runs(w.lead.id)).filter((r) => r.input.kind === 'follow');
+/** Lead's deliveries after its scheduled turn's own (runs list newest first; the fire's is last). */
+const deliveries = async (w: World) =>
+  (await w.runs(w.lead.id)).filter((r) => r.input.kind === 'deliver').slice(0, -1);
 
-test('follow (a): posts the caller has not read come back at once, and nothing is followed', async () => {
+test('follow (a): posts the caller has not read come back at once', async () => {
   const w = await world();
   try {
-    const { read, ms } = await leadFollows(w, minutesAhead(30), {
-      before: async (rootId) => {
-        assert.equal((await designerReplies(w, rootId, 'Mockups v1 attached')).isError, false);
-      },
-    });
+    const { read, ms } = await leadFollows(
+      w,
+      {},
+      {
+        before: async (rootId) => {
+          assert.equal((await designerReplies(w, rootId, 'Mockups v1 attached')).isError, false);
+        },
+      }
+    );
     assert.equal(read.value.kind, 'unread', read.text);
     assert.deepEqual(
       read.value.posts.map((p: { body: string }) => p.body),
       ['Mockups v1 attached'],
       'only the post Lead had not read: not its own root'
     );
-    assert.ok(ms < FOLLOW_GRACE_MS, `returned without the grace wait (${ms} ms)`);
-    assert.deepEqual(await followRuns(w), [], 'no follow registered');
+    assert.ok(ms < FOLLOW_GRACE_MS, `returned without the wait (${ms} ms)`);
+    assert.deepEqual(await deliveries(w), [], 'posted before the follow: nothing to deliver');
   } finally {
     await w.close();
   }
 });
 
-test('follow (b): a post inside the grace window comes back inline, and nothing is followed', async () => {
+test('follow (b): a post inside the wait comes back inline and its delivery is consumed', async () => {
   const w = await world();
   try {
-    const { read } = await leadFollows(w, minutesAhead(30), {
-      during: async (rootId) => {
-        await new Promise((resolve) => setTimeout(resolve, FOLLOW_GRACE_MS / 4));
-        assert.equal((await designerReplies(w, rootId, 'Chiming in quickly')).isError, false);
-      },
-    });
+    const { read } = await leadFollows(
+      w,
+      {},
+      {
+        during: async (rootId) => {
+          await new Promise((resolve) => setTimeout(resolve, FOLLOW_GRACE_MS / 4));
+          assert.equal((await designerReplies(w, rootId, 'Chiming in quickly')).isError, false);
+        },
+      }
+    );
     assert.equal(read.value.kind, 'unread', read.text);
     assert.deepEqual(
       read.value.posts.map((p: { body: string }) => p.body),
       ['Chiming in quickly']
     );
-    assert.deepEqual(await followRuns(w), [], 'no follow registered');
-    assert.equal(w.turns.length, 1, 'and no wake follows');
+    const [delivery] = await until(async () => {
+      const found = await deliveries(w);
+      return found.length === 1 && found[0].status === 'cancelled' && found;
+    }, 'the inline post fenced its delivery');
+    assert.equal(delivery.errorCode, 'consumed');
+    assert.equal(w.turns.length, 1, 'and no second turn repeats it');
   } finally {
     await w.close();
   }
 });
 
-test('follow (c): a post after the grace wakes the conversation that followed, not a gated reply', async () => {
+test('follow (c): a post after the wait is delivered to the conversation that followed, not a gated reply', async () => {
   const w = await world();
   try {
-    const { rootId, read, ms } = await leadFollows(w, minutesAhead(30));
-    assert.equal(read.value.kind, 'following', read.text);
+    const { rootId, read, ms } = await leadFollows(w, {});
+    assert.equal(read.value.kind, 'subscribed', read.text);
     assert.deepEqual(read.value.posts, []);
-    assert.ok(ms >= FOLLOW_GRACE_MS - 50, `held the read open for the grace (${ms} ms)`);
-    // The woken turn does not reply, so a gate call could only be one asking Lead.
+    assert.ok(ms >= FOLLOW_GRACE_MS - 50, `held the read open for the default wait (${ms} ms)`);
+    // The delivered turn does not reply, so a gate call could only be one asking Lead.
     w.silent.add(2);
     assert.equal((await designerReplies(w, rootId, 'Mockups are in /tmp/mockups')).isError, false);
-    const woken = await until(() => w.turns[1], 'Lead woken by the follow');
-    assert.match(woken.request.prompt, /New posts in thread .*which you follow/);
+    const woken = await until(() => w.turns[1], 'Lead woken by the delivery');
+    assert.match(woken.request.prompt, /New posts in threads this conversation follows/);
     assert.match(woken.request.prompt, /Mockups are in \/tmp\/mockups/);
     assert.doesNotMatch(woken.request.prompt, /send the mockups when ready/, 'only unread posts');
     assert.equal(
@@ -4329,25 +4399,29 @@ test('follow (c): a post after the grace wakes the conversation that followed, n
       'native-1',
       'it resumes the conversation that followed'
     );
-    assert.equal(w.gate.calls, 0, 'the follower is not also asked the follow-up gate');
+    assert.equal(w.gate.calls, 0, 'the subscriber is not also asked the follow-up gate');
   } finally {
     await w.close();
   }
 });
 
-test("follow (c, mid-turn): a post during the follower's own turn wakes it only once that turn ends", async () => {
+test("follow (c, mid-turn): a post during the follower's own turn is delivered only once that turn ends", async () => {
   const w = await world();
   try {
     let postedAt = 0;
-    await leadFollows(w, minutesAhead(30), {
-      after: async (rootId) => {
-        assert.equal((await designerReplies(w, rootId, 'Already done')).isError, false);
-        postedAt = w.turns.length;
-        // Still inside turn 1: the wake must wait, never run beside it.
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        assert.equal(w.turns.length, 1, 'no concurrent turn in the busy conversation');
-      },
-    });
+    await leadFollows(
+      w,
+      {},
+      {
+        after: async (rootId) => {
+          assert.equal((await designerReplies(w, rootId, 'Already done')).isError, false);
+          postedAt = w.turns.length;
+          // Still inside turn 1: the delivery must wait, never run beside it.
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          assert.equal(w.turns.length, 1, 'no concurrent turn in the busy conversation');
+        },
+      }
+    );
     assert.equal(postedAt, 1);
     const woken = await until(() => w.turns[1], 'Lead woken after its turn');
     assert.match(woken.request.prompt, /Already done/);
@@ -4357,21 +4431,24 @@ test("follow (c, mid-turn): a post during the follower's own turn wakes it only 
   }
 });
 
-test('follow (d): a follow whose posts the caller already read settles with no turn', async () => {
+test('follow (d): a delivery whose posts the caller already read settles with no turn', async () => {
   const w = await world();
   try {
-    await leadFollows(w, minutesAhead(30), {
-      after: async (rootId, turn) => {
-        assert.equal((await designerReplies(w, rootId, 'Read me yourself')).isError, false);
-        const plain = await call(turn.mcp, 'channel_read', { read: { threadId: rootId } });
-        assert.equal(plain.isError, false, plain.text);
-      },
-    });
-    const settled = await until(
-      async () =>
-        (await followRuns(w)).find((r) => r.status !== 'queued' && r.status !== 'running'),
-      'the follow run settles'
+    await leadFollows(
+      w,
+      {},
+      {
+        after: async (rootId, turn) => {
+          assert.equal((await designerReplies(w, rootId, 'Read me yourself')).isError, false);
+          const plain = await call(turn.mcp, 'channel_read', { read: { threadId: rootId } });
+          assert.equal(plain.isError, false, plain.text);
+        },
+      }
     );
+    const [settled] = await until(async () => {
+      const found = await deliveries(w);
+      return found.length === 1 && found[0].status !== 'queued' && found;
+    }, 'the delivery settles');
     assert.equal(settled.status, 'cancelled');
     assert.match(settled.error ?? '', /already read/);
     assert.equal(w.turns.length, 1, 'no model turn for posts already read');
@@ -4381,34 +4458,73 @@ test('follow (d): a follow whose posts the caller already read settles with no t
   }
 });
 
-test('follow (e): a follow nobody answers wakes its conversation once with a timeout', async () => {
+// Delivery design Task 3 criterion: the bounded wait is real, up to 30 s (owner, "wait for a
+// message in thread"). 25 s of wait, a post at 20 s: returned inline, no extra turn.
+test('follow (g): a 25 s wait returns a post that arrives at 20 s', async () => {
   const w = await world();
   try {
-    await leadFollows(w, new Date(Date.now() + FOLLOW_GRACE_MS + 1500).toISOString());
-    const woken = await until(() => w.turns[1], 'Lead woken at until');
-    assert.match(woken.request.prompt, /^follow_timeout: nobody else posted/);
-    assert.equal(woken.request.resumeSessionId, 'native-1');
-    await until(
-      async () => (await w.runs(w.lead.id)).every((r) => r.status === 'complete'),
-      'the follow run settles'
+    const { read, ms } = await leadFollows(
+      w,
+      { wait: 25 },
+      {
+        during: async (rootId) => {
+          await new Promise((resolve) => setTimeout(resolve, 20_000));
+          assert.equal((await designerReplies(w, rootId, 'Twenty seconds in')).isError, false);
+        },
+      }
     );
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    assert.equal(w.turns.length, 2, 'one wake per follow');
+    assert.equal(read.value.kind, 'unread', read.text);
+    assert.deepEqual(
+      read.value.posts.map((p: { body: string }) => p.body),
+      ['Twenty seconds in']
+    );
+    assert.ok(ms >= 19_900 && ms < 25_000, `returned when the post arrived (${ms} ms)`);
   } finally {
     await w.close();
   }
 });
 
-test('follow (f): a follow survives a backend restart and still wakes on the next post', async () => {
+test('follow (h): follow:false unsubscribes, so later posts are not delivered', async () => {
+  const w = await world();
+  try {
+    await leadFollows(
+      w,
+      { wait: 0 },
+      {
+        after: async (rootId, turn) => {
+          const off = await call(turn.mcp, 'channel_read', {
+            read: { threadId: rootId, follow: false },
+          });
+          assert.equal(off.value.kind, 'unsubscribed', off.text);
+        },
+      }
+    );
+    const root = (
+      await w.core.listPosts(OWNER, { kind: 'channel', channelId: w.general.id }, null, 5)
+    ).posts[0];
+    assert.equal((await designerReplies(w, root.id, 'Nobody is listening')).isError, false);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.deepEqual(await deliveries(w), []);
+    assert.equal(w.turns.length, 1);
+  } finally {
+    await w.close();
+  }
+});
+
+// The subscription is durable (a `thread_read` row), so a restart loses nothing: the next post is
+// delivered even though the conversation that followed is not loaded in the new process, which
+// takes the fresh-turn fallback (runner.ts `deliverJob`). The follow here is the LEGACY form
+// `{until}` an adopted turn may still send (tool contract, LEGACY_FORMS): it subscribes too.
+test('follow (f): a subscription survives a backend restart and still delivers the next post', async () => {
   const before = await world();
-  const { rootId, read } = await leadFollows(before, minutesAhead(30));
-  assert.equal(read.value.kind, 'following', read.text);
+  const { rootId, read } = await leadFollows(before, {
+    until: new Date(Date.now() + 30 * 60_000).toISOString(),
+  });
+  assert.equal(read.value.kind, 'subscribed', read.text);
   await before.stop();
   const w = await world(before.scratch);
   try {
     assert.equal((await designerReplies(w, rootId, 'Mockups after the restart')).isError, false);
-    // Its conversation is not loaded in the new process, so the wake takes the return route's
-    // fallback: a fresh background turn (runner.ts `returnJob`), carrying the post.
     const woken = await until(() => w.turns[0], 'Lead woken after the restart');
     assert.match(woken.request.prompt, /Mockups after the restart/);
   } finally {
@@ -4455,6 +4571,7 @@ test('slim read surface: tasks get, inbox and runs list stay small and runs say 
           kind: 'inform',
           body: 'c'.repeat(5000),
           evidence: [],
+          mentions: [],
           broadcast: false,
           key: `slim-c-${i}`,
         }
@@ -4469,6 +4586,7 @@ test('slim read surface: tasks get, inbox and runs list stay small and runs say 
           purpose: `Purpose ${i}`,
           taskId: task.id,
           evidence: [],
+          mentions: [],
           broadcast: false,
           key: `slim-req-${i}`,
         }
@@ -4480,7 +4598,6 @@ test('slim read surface: tasks get, inbox and runs list stay small and runs say 
         workspaceId: w.ws,
         conversationId: 'slim-view',
         runId: null,
-        returns: INBOX,
       })
     );
     const size = (value: unknown) => JSON.stringify(value).length;
@@ -4562,7 +4679,14 @@ test('runs get {tail:n} returns the last n assistant entries with tool names and
     const request = await w.post(
       buddyActor(w.lead.id),
       { kind: 'direct', members: [buddyActor(w.lead.id), buddyActor(w.designer.id)] },
-      { kind: 'request', body: 'Work', evidence: [], broadcast: false, key: 'tail-req' }
+      {
+        kind: 'request',
+        body: 'Work',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        key: 'tail-req',
+      }
     );
     const run = await until(
       async () => (await w.runs(w.designer.id)).find((r) => r.conversationId),
@@ -4593,7 +4717,6 @@ test('runs get {tail:n} returns the last n assistant entries with tool names and
         workspaceId: w.ws,
         conversationId: 'tail-view',
         runId: null,
-        returns: INBOX,
       })
     );
     const got = await call(spec, 'runs', { action: { kind: 'get', runId: run.id, tail: 3 } });

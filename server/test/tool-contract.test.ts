@@ -67,6 +67,14 @@ const LEGACY_FORMS: ReadonlyArray<{
     legacy: { read: { search: 'quarterly' } },
     canonical: { read: { search: { text: 'quarterly' } }, limit: 30 },
   },
+  {
+    tool: 'channel_read',
+    path: 'read',
+    reason:
+      '2026-10-06 (delivery design Task 3): follow was {until}, a durable wake at a deadline; it is a subscription with a bounded wait now, and {until} reads as the default wait',
+    legacy: { read: { threadId: 'post_1', follow: { until: '2099-01-01T00:00:00Z' } } },
+    canonical: { read: { threadId: 'post_1', follow: { wait: 2 } }, limit: 30 },
+  },
 ];
 
 const isObj = (node: Json | undefined): node is Obj =>

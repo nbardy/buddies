@@ -88,9 +88,14 @@ function ScheduleCard({
   refresh: () => Promise<void>;
 }) {
   const action = useBuddyAction(refresh);
-  const history = runs.filter(
-    (run) => run.input.kind === 'schedule' && run.input.scheduleId === schedule.id
+  // A fire is a post in the schedule's thread, delivered to the conversation that took the first
+  // one (decision I, 2026-10-06): that conversation's runs are the schedule's history.
+  const first = runs.find(
+    (run) => run.input.kind === 'deliver' && run.input.postId === schedule.rootId
   );
+  const history = first?.conversationId
+    ? runs.filter((run) => run.conversationId === first.conversationId)
+    : [];
   return (
     <details className="buddy-work-disclosure">
       <summary>
@@ -133,7 +138,7 @@ function ScheduleCard({
   );
 }
 
-/** A Buddy's schedules (they replaced automations); history is its schedule-input runs. */
+/** A Buddy's schedules (they replaced automations); history is its schedule conversation's runs. */
 export function BuddySchedules({
   buddyId,
   schedules,

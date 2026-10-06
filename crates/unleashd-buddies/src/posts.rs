@@ -2,11 +2,11 @@
 //! decision T06b: "direct messages between two buddies or messages to a channel … the same table
 //! and the same data type"). A channel is public, direct (a member set) or a task's.
 //!
-//! A `Request` lives in a direct channel. The other members owe the answer, and each buddy among
-//! them gets a `Post` run. The answer is an ordinary post (`reply_to_id` = the request, in its
-//! thread). `answer` inserts it, flips the request to answered and queues the `Reply` run back to
+//! A `Request` lives in a direct channel. The other member owes the answer and, if a buddy, gets a
+//! `Post` run. The answer is an ordinary post (`reply_to_id` = the request, in its thread):
+//! `answer` inserts it and flips the request to answered in one transaction, and the asker's
+//! subscription to the thread delivers it (deliveries.rs), like any other post there.
 //! Pattern: one-write-path (docs/patterns.md#one-write-path)
-//! a buddy author, all in one transaction.
 
 use crate::error::{CoreError, Result};
 use crate::runs::Enqueue;
@@ -18,7 +18,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_f
 use serde_json::json;
 
 pub(crate) const POST_COLS: &str = "p.id, p.channel_id, p.author_id, p.root_id, p.reply_to_id, p.task_id, p.purpose, p.body, p.evidence, \
-    p.request, p.answer_id, p.conversation_id, p.return_conversation_id, p.created_at, p.ord, p.broadcast";
+    p.request, p.answer_id, p.conversation_id, p.created_at, p.ord, p.broadcast";
 
 /// The channels `actor_param` (an actor key) may read: the owner every one, a buddy the public and
 /// task channels and the direct channels it is a member of. `c` is the channel.
@@ -66,7 +66,6 @@ pub(crate) fn post_row(r: &Row) -> rusqlite::Result<Post> {
         (Some("failed"), None) => RequestState::Failed,
         (state, answer) => return Err(corrupt(CoreError::Corrupt(format!("request {state:?} with answer {answer:?}")))),
     };
-    let returns = returns_of(&request, r.get(12)?);
     Ok(Post {
         id: r.get(0)?,
         channel_id: r.get(1)?,
@@ -79,21 +78,10 @@ pub(crate) fn post_row(r: &Row) -> rusqlite::Result<Post> {
         evidence: parse_evidence(&r.get::<_, String>(8)?).map_err(corrupt)?,
         request,
         conversation_id: r.get(11)?,
-        returns,
-        created_at: r.get(13)?,
-        ord: r.get(14)?,
-        broadcast: r.get(15)?,
+        created_at: r.get(12)?,
+        ord: r.get(13)?,
+        broadcast: r.get(14)?,
     })
-}
-
-/// A request's stored route: `return_conversation_id` NULL is `Inbox` (see `Returns`).
-fn returns_of(request: &RequestState, conversation: Option<String>) -> Option<Returns> {
-    match request {
-        RequestState::None => None,
-        RequestState::Awaiting | RequestState::Answered { .. } | RequestState::Cancelled | RequestState::Failed => {
-            Some(conversation.map_or(Returns::Inbox, |id| Returns::Conversation { id }))
-        }
-    }
 }
 
 pub(crate) fn get_post(conn: &Connection, id: &str) -> Result<Post> {
@@ -165,7 +153,7 @@ fn direct_channel(tx: &Connection, actor: &Actor, members: &[Actor]) -> Result<C
     get_channel(tx, &id)
 }
 
-fn task_channel(tx: &Connection, actor: &Actor, task_id: &str) -> Result<Channel> {
+pub(crate) fn task_channel(tx: &Connection, actor: &Actor, task_id: &str) -> Result<Channel> {
     if let Some(found) = find_channel(tx, "task_id", task_id)? {
         return Ok(found);
     }
@@ -272,8 +260,8 @@ impl Store {
         })
     }
 
-    /// Answers a request: the answer post, the request's flip to answered and the `Reply` run back
-    /// to a buddy author commit together or not at all.
+    /// Answers a request: the answer post, the request's flip to answered and the delivery to the
+    /// asker's subscribed conversation commit together or not at all.
     pub fn answer(&mut self, actor: &Actor, input: AnswerInput) -> Result<Post> {
         self.write(|tx| {
             let request = get_post(tx, &input.request_id)?;
@@ -293,18 +281,20 @@ impl Store {
                 // the flip, and the error rolls the answer back with the transaction: one answer each.
                 let ord = crate::ids::next().to_string();
                 let id = format!("post_{ord}");
+                let root = request.root_id.clone().unwrap_or(request.id.clone());
                 tx.execute(
-                    "INSERT INTO post (id, channel_id, author_id, root_id, reply_to_id, task_id, body, evidence, created_at, ord)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    "INSERT INTO post (id, channel_id, author_id, root_id, reply_to_id, task_id, body, evidence, conversation_id, created_at, ord)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         id,
                         request.channel_id,
                         actor.buddy_id(),
-                        request.root_id.as_deref().unwrap_or(&request.id),
+                        root,
                         request.id,
                         request.task_id,
                         input.body,
                         evidence_json(&input.evidence),
+                        input.from_conversation_id,
                         now_iso(),
                         ord
                     ],
@@ -316,9 +306,16 @@ impl Store {
                 if flipped != 1 {
                     return Err(CoreError::Invalid(format!("post {} is not awaiting an answer: {:?}", request.id, request.request)));
                 }
-                follow(tx, actor, request.root_id.as_deref().unwrap_or(&request.id), &ord)?;
-                crate::follows::wake_followers(tx, actor, request.root_id.as_deref().unwrap_or(&request.id))?;
-                notify_author(tx, &request)?;
+                // A request lives in a direct channel, so answering subscribes like any DM post.
+                let channel = get_channel(tx, &request.channel_id)?;
+                let answer = get_post(tx, &id)?;
+                let own = request.author == *actor;
+                after_write(tx, actor, &channel, &answer, input.from_conversation_id.as_deref(), &[], own)?;
+                // A Buddy answering a request it sent itself (its worker): the fan-out never
+                // delivers a Buddy's own post to it, so its spawner is told here.
+                if let (Actor::Buddy { id: answerer }, true) = (actor, own) {
+                    crate::deliveries::deliver_to_spawner(tx, answerer, &answer)?;
+                }
                 Ok(id)
             })?;
             get_post(tx, &id)
@@ -685,7 +682,8 @@ impl Store {
     }
 
     /// Moves the actor's cursor in a thread it follows forward to `post_id` (the root or a reply).
-    /// Never creates a row: reading a thread is not following it.
+    /// Never creates a row: reading a thread is not following it. A Buddy's read fences the
+    /// deliveries it covers (deliveries.rs `fence`).
     pub fn mark_thread_read(&mut self, actor: &Actor, root_id: &str, post_id: &str) -> Result<()> {
         self.write(|tx| {
             let post = get_post(tx, post_id)?;
@@ -693,12 +691,14 @@ impl Store {
                 return Err(CoreError::Invalid(format!("post {post_id} is not in thread {root_id}")));
             }
             require(tx, actor, Op::ReadChannel, &Subject::Channel { id: post.channel_id.clone() })?;
-            tx.execute(
+            let moved = tx.execute(
                 "UPDATE thread_read SET last_ord = ?3, updated_at = ?4 WHERE reader = ?1 AND root_id = ?2 AND last_ord < ?3",
                 params![actor.key(), root_id, post.ord, now_iso()],
             )?;
-            settle_read_returns(tx, actor, root_id, &post.ord)?;
-            Ok(())
+            match (moved, actor) {
+                (1, Actor::Buddy { id }) => crate::deliveries::fence(tx, id, root_id, &post.ord),
+                _ => Ok(()),
+            }
         })
     }
 
@@ -819,8 +819,8 @@ fn insert_post(
     let id = format!("post_{ord}");
     tx.prepare_cached(
         "INSERT INTO post (id, channel_id, author_id, root_id, reply_to_id, task_id, purpose, body, evidence, request,
-           conversation_id, return_conversation_id, created_at, ord, broadcast)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+           conversation_id, created_at, ord, broadcast)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
     )?
     .execute(params![
         id,
@@ -834,22 +834,16 @@ fn insert_post(
         evidence_json(&input.evidence),
         ask.column(),
         // Provenance: the conversation the post was written from. A thread seat reads it to skip
-        // its own posts. It is NOT the return route: an owner chat is provenance too, and its
-        // answers must not come back as runs (`Returns`).
+        // its own posts; in a DM it is also where later posts by others are delivered.
         input.from_conversation_id,
-        ask.column().and(match &input.returns {
-            Some(Returns::Conversation { id }) => Some(id.as_str()),
-            Some(Returns::Inbox) | None => None,
-        }),
         now_iso(),
         ord,
         input.broadcast
     ])?;
-    follow(tx, actor, root_id.as_deref().unwrap_or(&id), &ord)?;
-    if let Some(root) = &root_id {
-        crate::follows::wake_followers(tx, actor, root)?;
-    }
-    for recipient in ask.owed_by().iter().filter_map(Actor::buddy_id) {
+    let owed: Vec<String> = ask.owed_by().iter().filter_map(Actor::buddy_id).map(str::to_owned).collect();
+    let skip: Vec<String> = owed.iter().chain(&input.mentions).cloned().collect();
+    after_write(tx, actor, channel, &get_post(tx, &id)?, input.from_conversation_id.as_deref(), &skip, false)?;
+    for recipient in &owed {
         tx.enqueue(EnqueueInput {
             buddy_id: recipient.to_string(),
             input: RunInput::Post { post_id: id.clone() },
@@ -876,15 +870,57 @@ fn require_worker_authority(tx: &Transaction, actor: &Actor, ask: &Ask, config: 
     }
 }
 
-/// Writing in a thread follows it and reads it through the new post (THREADS_VIEW_2026-09-28.md).
-pub(crate) fn follow(tx: &Transaction, actor: &Actor, root_id: &str, ord: &str) -> Result<()> {
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/// What every written post does to the delivery state, in the post's own transaction:
+/// 1. the author has read the thread through its post, unless that would skip a post it was never
+///    shown (decision K, deliveries.rs `catch_up`);
+/// 2. a Buddy posting from a conversation in a direct channel SUBSCRIBES that conversation to the
+///    thread (rule 1; the last writer wins, decision F). This replaced the request's stored return
+///    route (`Returns`, `post.return_conversation_id`): an answer reaches the conversation that
+///    asked because that conversation posted the request, and so does any later post there.
+///    Public and task threads subscribe only by `follow` until step 5: their replies still run on
+///    the host's seat machine (mentions, the follow-up gate), and a seat that subscribed by
+///    posting would be woken by both (task_01a11013-b205 moves seats onto delivery);
+/// 3. every other subscribed Buddy gets a delivery (`fan_out`), except `skip`.
+/// A Buddy's self-spawned worker writing in its request's thread does neither 1 nor 2: the thread's
+/// subscription and mark are its spawner's (deliveries.rs `from_own_worker`).
+fn after_write(tx: &Transaction, actor: &Actor, channel: &Channel, post: &Post, from: Option<&str>, skip: &[String], spawner_owns: bool) -> Result<()> {
+    let root = post.root_id.as_deref().unwrap_or(&post.id);
+    if !spawner_owns && !crate::deliveries::from_own_worker(tx, actor, post, from)? {
+        crate::deliveries::catch_up(tx, actor, root, &post.ord)?;
+        if let (Actor::Buddy { id }, Some(conversation), ChannelKind::Direct { .. }) = (actor, from, &channel.kind) {
+            crate::deliveries::subscribe(tx, id, root, Some(conversation))?;
+        }
+    }
+    crate::deliveries::fan_out(tx, post, skip)
+}
+
+/// A post the system writes for a Buddy: a failed request's `run_failed` notice, a schedule
+/// fire. The Buddy did not write it in a turn, so its read mark and subscriptions stay as they
+/// were (its own mark moving past the post would fence the post's own delivery). Delivered to
+/// every subscriber but the author, like any post.
+pub(crate) fn system_post(tx: &Transaction, author: &str, channel: &Channel, reply_to: Option<&Post>, purpose: &str, body: &str) -> Result<Post> {
+    let ord = crate::ids::next().to_string();
+    let id = format!("post_{ord}");
+    let root = reply_to.map(|p| p.root_id.clone().unwrap_or(p.id.clone()));
+    let task_id = match &channel.kind {
+        ChannelKind::Task { task_id } => Some(task_id.clone()),
+        ChannelKind::Public { .. } | ChannelKind::Direct { .. } => reply_to.and_then(|p| p.task_id.clone()),
+    };
     tx.prepare_cached(
-        "INSERT INTO thread_read (reader, root_id, last_ord, updated_at) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(reader, root_id) DO UPDATE SET last_ord = excluded.last_ord, updated_at = excluded.updated_at
-         WHERE excluded.last_ord > thread_read.last_ord",
+        "INSERT INTO post (id, channel_id, author_id, root_id, reply_to_id, task_id, purpose, body, created_at, ord)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )?
-    .execute(params![actor.key(), root_id, ord, now_iso()])?;
-    Ok(())
+    .execute(params![id, channel.id, author, root, reply_to.map(|p| &p.id), task_id, purpose, body, now_iso(), ord])?;
+    let post = get_post(tx, &id)?;
+    crate::deliveries::fan_out(tx, &post, &[])?;
+    Ok(post)
+}
+
+/// The direct channel a Buddy talks to itself in (its own DM, `member_key` = its id).
+pub(crate) fn own_channel(tx: &Transaction, buddy_id: &str) -> Result<Channel> {
+    let me = Actor::Buddy { id: buddy_id.to_string() };
+    direct_channel(tx, &me, std::slice::from_ref(&me))
 }
 
 /// A reply joins its parent's thread, which must be in the same channel.
@@ -893,62 +929,5 @@ fn thread_root(tx: &Transaction, parent_id: &str, channel_id: &str) -> Result<St
     match parent.channel_id == channel_id {
         true => Ok(parent.root_id.unwrap_or(parent.id)),
         false => Err(CoreError::Invalid(format!("post {parent_id} is in another channel"))),
-    }
-}
-
-/// An answer goes back along the route its request fixed when it was sent.
-fn notify_author(tx: &Transaction, request: &Post) -> Result<()> {
-    send_back(tx, request, RunInput::Reply { post_id: request.id.clone() })
-}
-
-/// Reading an answer is receiving it, so a Buddy that reads one settles its own queued return run:
-/// the `reply` run `send_back` queued to tell it the same thing. "Read" is the cursor the server
-/// already keeps: the thread's `thread_read`, which a Buddy's `channel_read` of the thread moves to
-/// the newest post it was shown. An answer is a reply in its request's thread, so it is never on a
-/// channel's feed page: a channel read does not show it and does not count. An inbox listing does
-/// not count either: it carries no answer text. Settling here, at the read, and not when the run is
-/// claimed, is what makes it work while the reader's own turn is still running, when the run would
-/// otherwise sit `conversation_busy` and then spend a model turn repeating the answer.
-/// Incident: 2026-10-01, answer post_01a0f62f-c576 was read by its running background requester at
-/// 06:39:42Z and its return run_01a0f62f-c579 stayed queued until cancelled by hand at 06:56Z.
-/// Only a queued run is touched; a run already claimed is delivering and finishes. `reply` is the
-/// only input kind (a failure notice carries no answer). Guards: crate test
-/// `reading_an_answer_settles_its_queued_return_run`, buddies-v2 "an answer the requester already
-/// read settles its return run with no model turn".
-fn settle_read_returns(tx: &Transaction, reader: &Actor, root_id: &str, through_ord: &str) -> Result<()> {
-    tx.execute(
-        "UPDATE run SET status = 'cancelled', error_code = 'consumed', error = 'the requester already read the answer', ended_at = ?4
-         WHERE input_kind = 'reply' AND status = 'queued' AND buddy_id IS ?1
-           AND input_id IN (SELECT req.id FROM post req JOIN post ans ON ans.id = req.answer_id
-                            WHERE ans.root_id = ?2 AND ans.ord <= ?3)",
-        params![reader.buddy_id(), root_id, through_ord, now_iso()],
-    )?;
-    Ok(())
-}
-
-// Pattern: route-at-send (docs/patterns.md#route-at-send)
-/// The one place a request's answer or failure notice becomes a run, shared by `notify_author`
-/// and the failure path (runs.rs `close_request`). It reads the route the request was sent with
-/// and asks nothing else: whether the sender's conversation is a human chat was settled at send.
-/// An `Inbox` route enqueues NOTHING. Before 2026-10-01 it enqueued a run tagged with the origin
-/// conversation and let the runner discover after claim that it was a no-op; those runs waited
-/// behind the owner's turn up to 2h44m and read as "blocked" (see `Returns`). A run here is real
-/// model work in a background conversation, so serializing it behind that conversation is right.
-/// Guard: `an_inbox_request_starts_no_run_for_its_answer_or_failure` (tests/core.rs).
-pub(crate) fn send_back(tx: &Transaction, request: &Post, input: RunInput) -> Result<()> {
-    match (&request.author, &request.returns) {
-        (Actor::Buddy { id }, Some(Returns::Conversation { id: conversation })) => tx
-            .enqueue(EnqueueInput {
-                buddy_id: id.clone(),
-                input,
-                conversation_id: Some(conversation.clone()),
-                task_id: request.task_id.clone(),
-                after_run_id: None,
-                deadline: None,
-                config: None,
-            })
-            .map(|_| ()),
-        // The owner reads answers in the UI; an Inbox sender reads its inbox. Neither is a run.
-        (Actor::Owner, _) | (Actor::Buddy { .. }, Some(Returns::Inbox) | None) => Ok(()),
     }
 }

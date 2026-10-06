@@ -11,10 +11,8 @@ import { ActionError, useBuddyAction } from './useBuddyAction';
 const RUN_INPUT_LABEL: { [K in RunInput['kind']]: string } = {
   chat: 'Chat turn',
   post: 'Answering a post',
-  reply: 'Channel reply',
-  schedule: 'Scheduled run',
-  failure_notice: 'Failure notice',
-  follow: 'Following a thread',
+  deliver: 'New posts in a thread',
+  retired: 'Earlier run',
 };
 
 const RUN_STATUS_LABEL: Record<RunStatus, string> = {

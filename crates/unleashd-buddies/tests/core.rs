@@ -26,23 +26,26 @@ fn request(body: &str, key: &str) -> PostInput {
         reply_to_id: None,
         task_id: None,
         from_conversation_id: Some("conv-sender".into()),
-        returns: Some(Returns::Conversation { id: "conv-sender".into() }),
+        mentions: vec![],
         run_config: None,
         broadcast: false,
         key: key.into(),
     }
 }
 
-fn chat(buddy_id: &str, turn: &str, conversation: &str) -> EnqueueInput {
-    EnqueueInput {
-        buddy_id: buddy_id.into(),
-        input: RunInput::Chat { turn_id: turn.into() },
-        conversation_id: Some(conversation.into()),
-        task_id: None,
-        after_run_id: None,
-        deadline: None,
-        config: None,
-    }
+fn chat(buddy_id: &str, turn: &str, conversation: &str) -> ChatEnqueue {
+    ChatEnqueue { buddy_id: buddy_id.into(), conversation_id: conversation.into(), turn_id: turn.into(), body: "{}".into() }
+}
+
+fn answer(request_id: &str, body: &str, key: &str) -> AnswerInput {
+    AnswerInput { request_id: request_id.into(), body: body.into(), evidence: vec![], from_conversation_id: None, key: key.into() }
+}
+
+/// Claims the next run and marks it executing, as every holder does right before its spawn.
+fn claim_executing(s: &mut Store, at: &str, budgets: RunBudgets) -> Claim {
+    let claim = s.claim_run_at(at, budgets).unwrap().expect("a claimable run");
+    s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
+    claim
 }
 
 #[test]
@@ -310,7 +313,7 @@ fn two_claimers_one_winner() {
     let path = f.path.to_str().unwrap().to_string();
     let mut setup = Store::open(&path).unwrap();
     for round in 0..25 {
-        setup.enqueue_run(&Actor::Owner, chat("peer", &format!("turn-{round}"), &format!("conv-{round}"))).unwrap();
+        setup.enqueue_chat(&Actor::Owner, chat("peer", &format!("turn-{round}"), &format!("conv-{round}"))).unwrap();
         let barrier = Arc::new(Barrier::new(2));
         let winners: Vec<Option<Claim>> = (0..2)
             .map(|_| {
@@ -335,8 +338,8 @@ fn two_claimers_one_winner() {
 fn a_lease_is_the_only_way_to_settle_and_it_expires() {
     let mut f = fixture();
     let s = &mut f.store;
-    s.enqueue_run(&Actor::Owner, chat("peer", "t1", "c1")).unwrap();
-    let claim = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(1_000)).unwrap().unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "c1")).unwrap();
+    let claim = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(1_000));
     let wrong = s.settle_run(&claim.run.id, "not-the-token", Outcome::Complete { text: "x".into() }).unwrap_err();
     assert!(matches!(wrong, CoreError::LeaseLost(_)));
     // The next claim after expiry fails the abandoned run instead of leaving it running forever.
@@ -353,8 +356,8 @@ fn a_lease_is_the_only_way_to_settle_and_it_expires() {
 fn one_running_run_per_conversation() {
     let mut f = fixture();
     let s = &mut f.store;
-    s.enqueue_run(&Actor::Owner, chat("peer", "t1", "same")).unwrap();
-    s.enqueue_run(&Actor::Owner, chat("peer", "t2", "same")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "same")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "t2", "same")).unwrap();
     let first = s.claim_run(lease(60_000)).unwrap().unwrap();
     assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the conversation is busy");
     s.settle_run(&first.run.id, &first.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
@@ -378,7 +381,7 @@ fn request_answer_round_trip_and_failure_notice() {
     let answer = s
         .answer(
             &buddy("ic"),
-            AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec!["a.md".into()], key: "rep".into() },
+            AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec!["a.md".into()], from_conversation_id: None, key: "rep".into() },
         )
         .unwrap();
     assert_eq!(
@@ -387,13 +390,15 @@ fn request_answer_round_trip_and_failure_notice() {
         "the answer is a reply post in the request's thread"
     );
     assert_eq!(s.get_post(&buddy("mid"), &asked.id).unwrap().request, RequestState::Answered { answer_id: answer.id.clone() });
-    let again =
-        s.answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "twice".into(), evidence: vec![], key: "rep2".into() });
+    let again = s.answer(&buddy("ic"), answer_input(&asked.id, "twice", "rep2"));
     assert!(matches!(again, Err(CoreError::Invalid(_))), "a request is answered once");
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     let back = s.claim_run(lease(60_000)).unwrap().unwrap();
-    assert_eq!((back.run.buddy_id.as_str(), back.run.conversation_id.as_deref()), ("mid", Some("conv-sender")));
-    assert_eq!(back.run.input, RunInput::Reply { post_id: asked.id.clone() });
+    assert_eq!(
+        (back.run.buddy_id.as_str(), back.run.conversation_id.as_deref(), &back.run.input),
+        ("mid", Some("conv-sender"), &RunInput::Deliver { post_id: answer.id.clone() }),
+        "the answer is delivered to the conversation that posted the request"
+    );
     s.settle_run(&back.run.id, &back.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
 
     s.mark_read(&buddy("ic"), &asked.channel_id, &answer.id).unwrap();
@@ -405,133 +410,177 @@ fn request_answer_round_trip_and_failure_notice() {
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap();
     assert_eq!(s.get_post(&buddy("mid"), &failing.id).unwrap().request, RequestState::Failed);
     let notice = s.claim_run(lease(60_000)).unwrap().unwrap();
-    assert_eq!((notice.run.buddy_id.as_str(), notice.run.input), ("mid", RunInput::FailureNotice { run_id: claim.run.id }));
+    let RunInput::Deliver { post_id } = &notice.run.input else { panic!("{:?}", notice.run.input) };
+    let posted = s.get_post(&buddy("mid"), post_id).unwrap();
+    assert_eq!(
+        (posted.purpose.as_deref(), &posted.author, posted.reply_to_id.as_deref(), notice.run.conversation_id.as_deref()),
+        (Some("run_failed"), &buddy("ic"), Some(failing.id.as_str()), Some("conv-sender")),
+        "the failure notice is the recipient's post in the request's thread, delivered like an answer"
+    );
+    assert!(posted.body.contains("provider_error") && posted.body.contains(&claim.run.id), "{}", posted.body);
 }
 
 // Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01: answers to requests sent from an
-// owner chat each queued a no-op `reply` run behind that chat (`conversation_busy`, up to 2h44m).
-// A request sent with `Returns::Inbox` must leave nothing in the run queue, answered or failed.
+// owner chat each queued a no-op `reply` run (`conversation_busy`, up to 2h44m). A run must be
+// real work: a request with no subscribed conversation behind it (the owner's, from the app) leaves
+// nothing in the run queue when it is answered or fails; the owner reads both in the thread.
 #[test]
-fn an_inbox_request_starts_no_run_for_its_answer_or_failure() {
+fn a_request_from_no_conversation_starts_no_run_for_its_answer_or_failure() {
     let mut f = fixture();
     let s = &mut f.store;
-    let from_chat = |body: &str, key: &str| PostInput { returns: Some(Returns::Inbox), ..request(body, key) };
-    let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat("please do X", "r1")).unwrap();
-    assert_eq!(asked.returns, Some(Returns::Inbox));
+    let to_ic = || ChannelRef::Direct { members: vec![Actor::Owner, buddy("ic")] };
+    let from_app = |body: &str, key: &str| PostInput { from_conversation_id: None, ..request(body, key) };
+    let asked = s.post(&Actor::Owner, to_ic(), from_app("please do X", "r1")).unwrap();
     let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
-    let answer = s
-        .answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec![], key: "a".into() })
-        .unwrap();
+    let answer = s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-    assert_eq!(s.get_post(&buddy("mid"), &asked.id).unwrap().request, RequestState::Answered { answer_id: answer.id }, "the post is the delivery");
+    assert_eq!(s.get_post(&Actor::Owner, &asked.id).unwrap().request, RequestState::Answered { answer_id: answer.id });
 
-    let failing = s.post(&buddy("mid"), dm("mid", "ic"), from_chat("will fail", "r2")).unwrap();
+    let failing = s.post(&Actor::Owner, to_ic(), from_app("will fail", "r2")).unwrap();
     let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap();
-    assert_eq!(s.get_post(&buddy("mid"), &failing.id).unwrap().request, RequestState::Failed);
+    assert_eq!(s.get_post(&Actor::Owner, &failing.id).unwrap().request, RequestState::Failed);
     assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "neither the answer nor the failure queued a run");
-    assert!(s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 10).unwrap().is_empty());
+    let notices = s.list_posts(&Actor::Owner, PostQuery::Thread { root_id: failing.id.clone() }, None, 5).unwrap().posts;
+    assert_eq!(notices.iter().map(|p| p.purpose.as_deref()).collect::<Vec<_>>(), [Some("run_failed")], "the failure is visible in the thread");
 }
 
-// Owner decision A (2026-10-06, delivery design D3): an answer returns into the chat that asked,
-// so a human chat's queue holds real work. The owner's queued message still goes first: a return
-// waits as `owner_first` while a chat run is queued in its conversation, and is claimable after.
+// Owner decision A (2026-10-06, delivery design D3): an answer is delivered into the chat that
+// asked, so a human chat's queue holds real work. The owner's queued message still goes first: a
+// delivery waits as `owner_first` while a chat run is queued in its conversation.
 #[test]
-fn a_queued_owner_message_goes_before_a_return_in_the_same_conversation() {
+fn a_queued_owner_message_goes_before_a_delivery_in_the_same_conversation() {
     let mut f = fixture();
     let s = &mut f.store;
-    let from_chat = PostInput { returns: Some(Returns::Conversation { id: "owner-chat".into() }), ..request("do X", "r1") };
+    let from_chat = PostInput { from_conversation_id: Some("owner-chat".into()), ..request("do X", "r1") };
     let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat).unwrap();
     let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
-    s.answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec![], key: "a".into() }).unwrap();
+    s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
     s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-    let chat = s
-        .enqueue_run(&Actor::Owner, EnqueueInput {
-            buddy_id: "mid".into(),
-            input: RunInput::Chat { turn_id: "t1".into() },
-            conversation_id: Some("owner-chat".into()),
-            task_id: None,
-            after_run_id: None,
-            deadline: None,
-            config: None,
-        })
-        .unwrap();
-    let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
-    let reply = rows.iter().find(|r| matches!(r.input, RunInput::Reply { .. })).unwrap();
-    assert_eq!(reply.waiting, Some(RunWaiting::OwnerFirst), "the return waits for the owner message");
+    let chat = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "owner-chat")).unwrap();
+    let delivery = |s: &Store| {
+        s.list_run_rows(ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap().into_iter().find(|r| matches!(r.input, RunInput::Deliver { .. })).unwrap()
+    };
+    assert_eq!(delivery(s).waiting, Some(RunWaiting::OwnerFirst), "the delivery waits for the owner message");
     assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.id, chat.id, "the owner message is claimed first");
-    // Running, the chat holds the conversation; settled, the return is free to run.
-    let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
-    assert_eq!(rows.iter().find(|r| matches!(r.input, RunInput::Reply { .. })).unwrap().waiting, Some(RunWaiting::ConversationBusy));
+    assert_eq!(delivery(s).waiting, Some(RunWaiting::ConversationBusy), "running, the chat holds the conversation");
 }
 
 // Fix-guard (2026-10-06): a chat run orphaned in `queued` by a dead backend has no ticket left to
-// claim it; `owner_first` must stop counting it, or every return in that chat waits forever.
+// claim it; `owner_first` must stop counting it, or every delivery in that chat waits forever.
 #[test]
 fn an_orphaned_owner_message_stops_holding_returns() {
     let mut f = fixture();
     let path = f.path.clone();
     let s = &mut f.store;
-    let from_chat = PostInput { returns: Some(Returns::Conversation { id: "owner-chat".into() }), ..request("do X", "r1") };
+    let from_chat = PostInput { from_conversation_id: Some("owner-chat".into()), ..request("do X", "r1") };
     let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat).unwrap();
     let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
-    s.answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec![], key: "a".into() }).unwrap();
+    s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
     s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-    let chat = s
-        .enqueue_run(&Actor::Owner, EnqueueInput {
-            buddy_id: "mid".into(),
-            input: RunInput::Chat { turn_id: "t1".into() },
-            conversation_id: Some("owner-chat".into()),
-            task_id: None,
-            after_run_id: None,
-            deadline: None,
-            config: None,
-        })
-        .unwrap();
+    let chat = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "owner-chat")).unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute("UPDATE run SET created_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1", [&chat.id]).unwrap();
     drop(conn);
     let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
-    let reply = rows.iter().find(|r| matches!(r.input, RunInput::Reply { .. })).unwrap();
-    assert_eq!(reply.waiting, None, "an orphaned owner message no longer holds the return");
+    let delivery = rows.iter().find(|r| matches!(r.input, RunInput::Deliver { .. })).unwrap();
+    assert_eq!(delivery.waiting, None, "an orphaned owner message no longer holds the delivery");
 }
 
 // Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01 (task_01a0f7ff-bbd6): a background
-// requester read its answer in the still-running turn, yet the queued `reply` run stayed to resume
-// that turn with the same answer until it was cancelled by hand 17 minutes later. Reading the answer
-// IS the delivery, so reading settles the queued return with no model turn; an unread answer still
-// returns exactly once.
+// requester read its answer in its still-running turn, yet the queued return run stayed to resume
+// that turn with the same answer until cancelled by hand 17 minutes later. The read fence
+// (deliveries.rs `fence`) generalizes it: whatever moves a Buddy's mark in a thread settles every
+// queued delivery it covers `consumed`, with no turn; a delivery past the mark still runs once.
 #[test]
-fn reading_an_answer_settles_its_queued_return_run() {
+fn a_mark_advance_consumes_every_covered_delivery() {
     let mut f = fixture();
     let s = &mut f.store;
     let read = s.post(&buddy("mid"), dm("mid", "ic"), request("read me", "r1")).unwrap();
     let unread = s.post(&buddy("mid"), dm("mid", "ic"), request("leave me", "r2")).unwrap();
     let (c1, c2) = (s.claim_run(lease(60_000)).unwrap().unwrap(), s.claim_run(lease(60_000)).unwrap().unwrap());
-    let answer = |s: &mut Store, id: &str, key: &str| {
-        s.answer(&buddy("ic"), AnswerInput { request_id: id.into(), body: "done".into(), evidence: vec![], key: key.into() }).unwrap()
-    };
-    let (a1, _a2) = (answer(s, &read.id, "a1"), answer(s, &unread.id, "a2"));
+    let a1 = s.answer(&buddy("ic"), answer_input(&read.id, "done", "a1")).unwrap();
+    let a2 = s.answer(&buddy("ic"), answer_input(&unread.id, "done", "a2")).unwrap();
     s.settle_run(&c1.run.id, &c1.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     s.settle_run(&c2.run.id, &c2.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
 
     s.mark_thread_read(&buddy("ic"), &read.id, &a1.id).unwrap();
     s.mark_read(&buddy("mid"), &read.channel_id, &read.id).unwrap();
-    assert_eq!(queued_returns(s), 2, "another reader's cursor, and a channel read that never shows the answer, settle nothing");
+    assert_eq!(queued(s, "mid"), 2, "another reader's cursor, and a channel read that never shows the answer, settle nothing");
     s.mark_thread_read(&buddy("mid"), &read.id, &a1.id).unwrap();
 
     let runs = s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 10).unwrap();
-    let returned = |post: &str| runs.iter().find(|r| r.input == RunInput::Reply { post_id: post.into() }).unwrap();
-    assert_eq!(returned(&read.id).status, RunStatus::Cancelled, "the answer was read: no turn");
-    assert_eq!(returned(&read.id).error_code.as_deref(), Some("consumed"));
-    assert_eq!(returned(&unread.id).status, RunStatus::Queued, "an answer past the cursor still returns");
-    let back = s.claim_run(lease(60_000)).unwrap().unwrap();
-    assert_eq!(back.run.input, RunInput::Reply { post_id: unread.id.clone() });
+    let delivered = |post: &str| runs.iter().find(|r| r.input == RunInput::Deliver { post_id: post.into() }).unwrap();
+    assert_eq!((delivered(&a1.id).status, delivered(&a1.id).error_code.as_deref()), (RunStatus::Cancelled, Some("consumed")));
+    assert_eq!(delivered(&a2.id).status, RunStatus::Queued, "an answer past the mark still delivers");
+    assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.input, RunInput::Deliver { post_id: a2.id.clone() });
     assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "exactly once");
 }
 
-fn queued_returns(s: &Store) -> usize {
-    s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 10).unwrap().iter().filter(|r| r.status == RunStatus::Queued).count()
+fn queued(s: &Store, buddy_id: &str) -> usize {
+    s.list_runs(RunQuery::Buddy { buddy_id: buddy_id.into() }, 50).unwrap().iter().filter(|r| r.status == RunStatus::Queued).count()
+}
+
+fn answer_input(request_id: &str, body: &str, key: &str) -> AnswerInput {
+    answer(request_id, body, key)
+}
+
+// Delivery design Task 2 criterion (2026-10-06): a busy conversation takes ONE turn per burst. Five
+// posts in two subscribed threads arrive while its turn runs; afterwards one delivery shows all
+// five and fences the other four, so the burst costs exactly one turn.
+#[test]
+fn a_burst_in_two_subscribed_threads_costs_one_delivery_turn() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let t1 = s.post(&buddy("mid"), dm("mid", "ic"), request("thread one", "r1")).unwrap();
+    let t2 = s.post(&buddy("mid"), dm("mid", "ic"), request("thread two", "r2")).unwrap();
+    for _ in 0..2 {
+        let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
+        s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    }
+    s.enqueue_chat(&Actor::Owner, chat("mid", "busy", "conv-sender")).unwrap();
+    let busy = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(600_000));
+    let inform = |root: &Post, body: &str, key: &str| PostInput { kind: PostKind::Inform, reply_to_id: Some(root.id.clone()), from_conversation_id: None, ..request(body, key) };
+    for (i, root) in [&t1, &t1, &t1, &t2, &t2].into_iter().enumerate() {
+        s.post(&buddy("ic"), dm("mid", "ic"), inform(root, &format!("p{i}"), &format!("p{i}"))).unwrap();
+    }
+    assert_eq!(queued(s, "mid"), 5, "one durable delivery per post");
+    assert!(s.claim_run_at("2099-01-01T00:00:01.000Z", lease(600_000)).unwrap().is_none(), "all wait for the busy conversation");
+    s.settle_run(&busy.run.id, &busy.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+
+    let turn = s.claim_run_at("2099-01-01T00:00:02.000Z", lease(600_000)).unwrap().unwrap();
+    let Delivery::Posts { posts, unshown } = s.deliver_posts(&turn.run.id).unwrap() else { panic!("nothing shown") };
+    assert_eq!((posts.iter().map(|p| p.body.as_str()).collect::<Vec<_>>(), unshown), (vec!["p0", "p1", "p2", "p3", "p4"], 0));
+    s.mark_executing(&turn.run.id, &turn.lease_token).unwrap();
+    assert_eq!(queued(s, "mid"), 0, "the other four were fenced: shown in this turn");
+    assert!(s.claim_run_at("2099-01-01T00:00:03.000Z", lease(600_000)).unwrap().is_none(), "one turn for the burst");
+}
+
+// Decision K (2026-10-06; durable-pending Rev 10, Finding 2, which blocked test 11): a turn composed
+// before P2 and P3 arrived replied after them, and its post moved its read mark past both, so their
+// deliveries settled "already read" though the Buddy never saw them.
+#[test]
+fn posting_never_marks_read_a_post_its_author_was_not_shown() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let root = s.post(&buddy("mid"), dm("mid", "ic"), request("thread", "r1")).unwrap();
+    let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
+    s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    let say = |author: &str, body: &str, key: &str| PostInput {
+        kind: PostKind::Inform,
+        reply_to_id: Some(root.id.clone()),
+        from_conversation_id: Some(format!("conv-{author}")),
+        ..request(body, key)
+    };
+    s.post(&buddy("ic"), dm("mid", "ic"), say("ic", "P2", "p2")).unwrap();
+    s.post(&buddy("ic"), dm("mid", "ic"), say("ic", "P3", "p3")).unwrap();
+    s.post(&buddy("mid"), dm("mid", "ic"), say("sender", "reply composed before P2", "late")).unwrap();
+    assert_eq!(queued(s, "mid"), 2, "P2 and P3 are still owed to the Buddy");
+    let unread = s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts;
+    assert_eq!(unread.iter().map(|p| p.body.as_str()).collect::<Vec<_>>(), ["P2", "P3"]);
+    assert_eq!(queued(s, "mid"), 0, "reading them fenced their deliveries");
+    s.post(&buddy("mid"), dm("mid", "ic"), say("sender", "caught up now", "now")).unwrap();
+    assert!(s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts.is_empty(), "with nothing unseen, its post reads the thread");
 }
 
 // 2026-09-28: no run could choose its model, so a Buddy launched four untracked `codex exec`
@@ -541,7 +590,7 @@ fn queued_returns(s: &Store) -> usize {
 fn a_worker_request_runs_on_its_own_config_and_returns_to_the_spawner() {
     let mut f = fixture();
     let s = &mut f.store;
-    let sol = RunConfig { provider: "codex".into(), model: "gpt-6-sol".into(), reasoning_effort: Some("high".into()) };
+    let sol = RunConfig { provider: "codex".into(), model: Some("gpt-6-sol".into()), reasoning_effort: Some("high".into()) };
     let work = |body: &str, key: &str| PostInput { run_config: Some(sol.clone()), ..request(body, key) };
     let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
 
@@ -554,14 +603,27 @@ fn a_worker_request_runs_on_its_own_config_and_returns_to_the_spawner() {
         [(&RunInput::Post { post_id: first.id.clone() }, &Some(sol.clone())), (&RunInput::Post { post_id: second.id.clone() }, &Some(sol.clone()))],
         "each worker is its own tracked run of the spawner, on the chosen model, in parallel"
     );
-    s.answer(&buddy("mid"), AnswerInput { request_id: first.id.clone(), body: "A done".into(), evidence: vec![], key: "a1".into() }).unwrap();
+    // Spawner and worker are one Buddy in one thread: the worker's progress note and answer keep
+    // the thread's subscription and read mark the spawner's, so the answer reaches the spawner and
+    // is SHOWN there (2026-10-06: an author-based rule delivered it nowhere, or marked it read).
+    s.bind_run(&a.run.id, &a.lease_token, "worker-a").unwrap();
+    let from_worker = |body: &str, key: &str| PostInput {
+        kind: PostKind::Inform,
+        reply_to_id: Some(first.id.clone()),
+        from_conversation_id: Some("worker-a".into()),
+        ..request(body, key)
+    };
+    s.post(&buddy("mid"), me_only(), from_worker("halfway", "n1")).unwrap();
+    let done = s.answer(&buddy("mid"), AnswerInput { from_conversation_id: Some("worker-a".into()), ..answer_input(&first.id, "A done", "a1") }).unwrap();
     s.settle_run(&a.run.id, &a.lease_token, Outcome::Complete { text: "A done".into() }).unwrap();
     let back = s.claim_run(lease(60_000)).unwrap().unwrap();
     assert_eq!(
         (&back.run.input, back.run.conversation_id.as_deref(), &back.run.config),
-        (&RunInput::Reply { post_id: first.id.clone() }, Some("conv-sender"), &None),
+        (&RunInput::Deliver { post_id: done.id.clone() }, Some("conv-sender"), &None),
         "the result wakes the spawning conversation, on the spawner's own profile"
     );
+    let Delivery::Posts { posts, .. } = s.deliver_posts(&back.run.id).unwrap() else { panic!("the answer was not shown") };
+    assert_eq!(bodies(&posts), ["A done"], "the spawner is shown the answer, not its worker's own notes");
 
     let report = s.post(&buddy("mid"), dm("mid", "ic"), work("for my report", "w3")).unwrap();
     assert_eq!(s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 5).unwrap()[0].input, RunInput::Post { post_id: report.id });
@@ -589,7 +651,7 @@ fn two_answerers_race_and_exactly_one_answer_lands() {
                     let mut store = Store::open(&path).unwrap();
                     barrier.wait();
                     store
-                        .answer(&who, AnswerInput { request_id: id, body: format!("{who:?}"), evidence: vec![], key: format!("a-{round}") })
+                        .answer(&who, AnswerInput { request_id: id, body: format!("{who:?}"), evidence: vec![], from_conversation_id: None, key: format!("a-{round}") })
                 })
             })
             .collect::<Vec<_>>()
@@ -614,7 +676,7 @@ fn pausing_a_task_cancels_its_queued_runs() {
             TaskWrite::Create { owner_id: "ic".into(), parent_id: None, title: "t".into(), done_criteria: "d".into(), key: "c".into() },
         )
         .unwrap();
-    let run = s.enqueue_run(&buddy("ic"), EnqueueInput { task_id: Some(task.id.clone()), ..chat("ic", "t1", "c1") }).unwrap();
+    let asked = s.post(&buddy("mid"), dm("mid", "ic"), PostInput { task_id: Some(task.id.clone()), ..request("x", "k") }).unwrap();
     s.upsert_task(
         &buddy("ic"),
         TaskWrite::Update {
@@ -625,12 +687,15 @@ fn pausing_a_task_cancels_its_queued_runs() {
         },
     )
     .unwrap();
-    let run = s.get_run(&run.id).unwrap();
-    assert_eq!((run.status, run.error_code.as_deref()), (RunStatus::Cancelled, Some("task_epoch_stale")));
+    let run = s.list_runs(RunQuery::Task { task_id: task.id.clone() }, 5).unwrap().remove(0);
+    assert_eq!((&run.input, run.status, run.error_code.as_deref()), (&RunInput::Post { post_id: asked.id }, RunStatus::Cancelled, Some("task_epoch_stale")));
 }
 
+// Owner decision I (2026-10-06): a schedule fire is a post in the schedule's thread, delivered to
+// its Buddy. The first fire's conversation subscribes, so the next slot continues it instead of
+// opening a fresh conversation per slot (todo_3c1e58c6), and missed slots still collapse into one.
 #[test]
-fn due_schedules_enqueue_once_per_slot() {
+fn due_schedules_fire_once_per_slot_as_posts_in_one_thread() {
     let mut f = fixture();
     let s = &mut f.store;
     let schedule = s
@@ -644,7 +709,6 @@ fn due_schedules_enqueue_once_per_slot() {
                 cron: "0 * * * *".into(),
                 timezone: "Asia/Seoul".into(),
                 prompt: "check".into(),
-                limits: "{}".into(),
                 enabled: true,
                 key: "s".into(),
             },
@@ -654,13 +718,24 @@ fn due_schedules_enqueue_once_per_slot() {
     assert!(slot.ends_with(":00:00.000Z"), "{slot}");
     let later = "2099-01-01T00:30:00.000Z";
     let runs = s.due_schedules(later).unwrap();
-    assert_eq!(runs.len(), 1, "missed slots collapse into one run");
-    assert_eq!(runs[0].input, RunInput::Schedule { schedule_id: schedule.id.clone(), slot });
+    assert_eq!(runs.len(), 1, "missed slots collapse into one fire");
+    let RunInput::Deliver { post_id } = &runs[0].input else { panic!("{:?}", runs[0].input) };
+    let fired = s.get_post(&buddy("ic"), post_id).unwrap();
+    assert_eq!((fired.purpose.as_deref(), &fired.author, runs[0].conversation_id.as_deref()), (Some("schedule"), &buddy("ic"), None));
+    assert!(fired.body.contains(&slot) && fired.body.ends_with("check"), "{}", fired.body);
     assert!(s.due_schedules(later).unwrap().is_empty(), "the schedule advanced past now");
-    assert_eq!(
-        s.list_schedules(ListScope::Buddy { buddy_id: "ic".into() }).unwrap()[0].next_run_at.as_deref(),
-        Some("2099-01-01T01:00:00.000Z")
-    );
+
+    let claim = s.claim_run_at(later, lease(60_000)).unwrap().unwrap();
+    let Delivery::Posts { posts, .. } = s.deliver_posts(&claim.run.id).unwrap() else { panic!("the fire was not shown") };
+    assert_eq!(posts.iter().map(|p| &p.id).collect::<Vec<_>>(), [&fired.id], "its own Buddy is shown the fire");
+    s.bind_run(&claim.run.id, &claim.lease_token, "schedule-conv").unwrap();
+    s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+
+    let next = s.due_schedules("2099-01-01T01:30:00.000Z").unwrap().remove(0);
+    let RunInput::Deliver { post_id } = &next.input else { panic!() };
+    assert_eq!(s.get_post(&buddy("ic"), post_id).unwrap().root_id.as_deref(), Some(fired.id.as_str()), "later fires reply in its thread");
+    assert_eq!(next.conversation_id.as_deref(), Some("schedule-conv"), "and continue the conversation that took the first");
 }
 
 #[test]
@@ -718,7 +793,7 @@ fn team_admin_is_owner_only_and_refuses_a_reporting_cycle() {
     assert_eq!((mid.manager_id, mid.name.as_str(), mid.role.as_str()), (None, "Mid", "role"), "absent fields are unchanged");
 
     // Archiving cancels the buddy's queued runs: an archived buddy is never claimed again.
-    let queued = s.enqueue_run(&Actor::Owner, chat("peer", "t1", "c-peer")).unwrap();
+    let queued = s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "c-peer")).unwrap();
     let archive = BuddyUpdate {
         buddy_id: "peer".into(),
         changes: BuddyChanges { status: Some(BuddyStatus::Archived), ..BuddyChanges::default() },
@@ -730,14 +805,15 @@ fn team_admin_is_owner_only_and_refuses_a_reporting_cycle() {
 
 // 2026-10-01 (Pattern: lease-heartbeat): the claim gate is the ONE way a dead holder's run ends.
 // It used to be a startup sweep, and the gate's own expiry was a bare UPDATE that left the run's
-// request awaiting forever. An expired run must end exactly as a failed settle would: the request
-// stops awaiting, the sender gets a failure notice, the row says why, a late settle is rejected.
+// request awaiting forever. An expired executed run ends exactly as a failed settle would: the row
+// says why, it leaves the workspace list only as ended, a late settle is rejected, and its request
+// goes on (decision G: once in the same conversation, see the test below).
 #[test]
 fn an_expired_lease_ends_its_run_like_a_failed_settle() {
     let mut f = fixture();
     let s = &mut f.store;
     let ask = s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
-    let claim = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
+    let claim = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(300_000));
     assert_eq!(claim.run.input, RunInput::Post { post_id: ask.id.clone() });
     // The lease is not the deadline: minutes of lease, an hour of turn budget.
     assert_eq!(claim.run.lease_expires_at.as_deref(), Some("2099-01-01T00:05:00.000Z"));
@@ -753,13 +829,83 @@ fn an_expired_lease_ends_its_run_like_a_failed_settle() {
     let rows = s.list_run_rows(ListScope::Workspace { workspace_id: WS.into() }, 100).unwrap();
     let row = rows.iter().find(|r| r.id == claim.run.id).expect("expired run left the workspace list");
     assert_eq!((row.status, row.error_code.as_deref()), (RunStatus::Failed, Some("lease_expired")));
-    assert!(matches!(s.get_post(&Actor::Owner, &ask.id).unwrap().request, RequestState::Failed));
-    let notice = s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 5).unwrap();
-    assert!(notice.iter().any(|r| r.input == RunInput::FailureNotice { run_id: claim.run.id.clone() }));
     assert_eq!(
         s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "late".into() }).unwrap_err().code(),
         "lease_lost"
     );
+}
+
+// Durable intake W0b (745515f), kept by the 2026-10-06 rebuild: a run whose holder died BEFORE
+// `mark_executing` never ran, so the gate puts it back in the queue (nothing replayed, nothing
+// lost, nothing reported failed); one that had executed ends `lease_expired`.
+#[test]
+fn a_dead_holder_requeues_an_unexecuted_run_and_fails_an_executed_one() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    s.enqueue_chat(&Actor::Owner, chat("lead", "never-ran", "c-lead")).unwrap();
+    let unexecuted = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "ran", "c-peer")).unwrap();
+    let executed = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(300_000));
+    s.claim_run_at("2099-01-01T00:05:01.000Z", lease(300_000)).unwrap();
+    let (again, ended) = (s.get_run(&unexecuted.run.id).unwrap(), s.get_run(&executed.run.id).unwrap());
+    // The gate requeued it and, in the same call, claimed it again: it is running under a new lease.
+    assert_eq!((again.status, again.attempt, again.executing_at.as_deref()), (RunStatus::Running, 1, None));
+    let void = s.renew_run_at("2099-01-01T00:05:02.000Z", &again.id, &unexecuted.lease_token, 300_000).unwrap_err();
+    assert_eq!(void.code(), "lease_lost", "the dead holder's token is void");
+    assert_eq!((ended.status, ended.error_code.as_deref()), (RunStatus::Failed, Some("lease_expired")));
+}
+
+// Decision G (owner, 2026-10-06): a request whose run had started and whose holder died continues
+// ONCE in the SAME conversation (it keeps its context); a second death sends the failure post; an
+// explicit stop is never undone. Before: every restart-killed worker ended `lease_expired` and its
+// asker had to notice and retry by hand.
+#[test]
+fn a_request_whose_holder_died_resumes_once_in_its_conversation_then_fails() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let ask = s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
+    let first = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
+    s.bind_run(&first.run.id, &first.lease_token, "worker-conv").unwrap();
+    s.mark_executing(&first.run.id, &first.lease_token).unwrap();
+    let resumed = s.claim_run_at("2099-01-01T00:05:01.000Z", lease(300_000)).unwrap().expect("the resume is claimable at once");
+    assert_eq!(s.get_run(&first.run.id).unwrap().error_code.as_deref(), Some("lease_expired"));
+    assert_eq!(
+        (resumed.run.attempt, resumed.run.conversation_id.as_deref(), &resumed.run.input),
+        (2, Some("worker-conv"), &RunInput::Post { post_id: ask.id.clone() }),
+        "the same request continues in the same conversation"
+    );
+    assert_eq!(s.get_post(&Actor::Owner, &ask.id).unwrap().request, RequestState::Awaiting, "the asker is told nothing yet");
+    assert_eq!(queued(s, "mid"), 0);
+
+    s.mark_executing(&resumed.run.id, &resumed.lease_token).unwrap();
+    let notice = s.claim_run_at("2099-01-01T00:10:02.000Z", lease(300_000)).unwrap().expect("the failure post is delivered");
+    assert_eq!(notice.run.buddy_id, "mid");
+    s.settle_run(&notice.run.id, &notice.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
+    assert_eq!(s.get_post(&Actor::Owner, &ask.id).unwrap().request, RequestState::Failed, "a second death fails it");
+    assert_eq!(s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 10).unwrap().len(), 2, "no third attempt");
+
+    let stopped = s.post(&buddy("mid"), dm("mid", "ic"), request("stop me", "ask2")).unwrap();
+    let run = claim_executing(s, "2099-01-01T01:00:00.000Z", lease(300_000));
+    s.cancel_run(&Actor::Owner, &run.run.id).unwrap();
+    s.claim_run_at("2099-01-01T01:05:01.000Z", lease(300_000)).unwrap();
+    assert_eq!(s.get_run(&run.run.id).unwrap().status, RunStatus::Cancelled);
+    assert_eq!(s.get_post(&Actor::Owner, &stopped.id).unwrap().request, RequestState::Cancelled, "a stop is never undone");
+}
+
+// Decision J (2026-10-06): a worker may name only its provider; the model is the provider default,
+// written onto the run by its holder at claim so the run says which model answered.
+#[test]
+fn a_model_less_run_records_the_model_it_resolved_once() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let codex = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    s.post(&buddy("mid"), dm("mid", "ic"), PostInput { run_config: Some(codex), ..request("go", "w") }).unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert_eq!(claim.run.config.as_ref().unwrap().model, None);
+    let run = s.record_run_model(&claim.run.id, &claim.lease_token, "gpt-6.1-sol").unwrap();
+    assert_eq!(run.config.unwrap().model.as_deref(), Some("gpt-6.1-sol"));
+    let again = s.record_run_model(&claim.run.id, &claim.lease_token, "other");
+    assert!(matches!(again, Err(CoreError::Invalid(_))), "a named model is never overwritten: {again:?}");
 }
 
 // 2026-10-05: four cancelled worker runs held 24 h leases written by an older build (lease = the
@@ -776,7 +922,7 @@ fn a_lease_longer_than_one_heartbeat_ends_one_heartbeat_later() {
     s.cancel_run(&Actor::Owner, &legacy.run.id).unwrap();
     assert_eq!(s.get_run(&legacy.run.id).unwrap().status, RunStatus::CancelRequested);
 
-    s.enqueue_run(&Actor::Owner, chat("lead", "turn", "c-lead")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("lead", "turn", "c-lead")).unwrap();
     let current = s.claim_run_at("2099-01-01T00:01:00.000Z", lease(300_000)).unwrap().unwrap();
     assert_eq!(current.run.lease_expires_at.as_deref(), Some("2099-01-01T00:06:00.000Z"), "a current lease is not moved");
     assert_eq!(s.get_run(&legacy.run.id).unwrap().lease_expires_at.as_deref(), Some("2099-01-01T00:06:00.000Z"));
@@ -794,11 +940,11 @@ fn a_lease_longer_than_one_heartbeat_ends_one_heartbeat_later() {
 fn a_renewed_lease_outlives_its_first_term() {
     let mut f = fixture();
     let s = &mut f.store;
-    s.enqueue_run(&Actor::Owner, chat("lead", "turn", "c-lead")).unwrap();
-    let chat_run = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("lead", "turn", "c-lead")).unwrap();
+    let chat_run = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(300_000));
     assert_eq!(chat_run.run.deadline.as_deref(), Some("2099-01-02T00:00:00.000Z"), "24 h, from the chat budget");
     s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
-    let orphan = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
+    let orphan = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(300_000));
 
     for minute in [4, 8, 12] {
         let at = format!("2099-01-01T00:{minute:02}:00.000Z");
@@ -1013,7 +1159,7 @@ fn task_posts_gather_one_tasks_posts_across_the_channels_a_reader_may_read() {
             reply_to_id: None,
             task_id: None,
             from_conversation_id: None,
-            returns: None,
+            mentions: vec![],
             run_config: None,
             broadcast: false,
             key: "task-channel".into(),
@@ -1293,7 +1439,15 @@ fn a_dm_is_one_to_one_and_a_legacy_group_dm_is_read_only() {
         .unwrap();
     let again = f
         .store
-        .enqueue_run(&Actor::Owner, EnqueueInput { buddy_id: "ic".into(), input: RunInput::Post { post_id: solo.id.clone() }, ..chat("ic", "x", "c") })
+        .enqueue_run(&Actor::Owner, EnqueueInput {
+            buddy_id: "ic".into(),
+            input: RunInput::Post { post_id: solo.id.clone() },
+            conversation_id: Some("c".into()),
+            task_id: None,
+            after_run_id: None,
+            deadline: None,
+            config: None,
+        })
         .unwrap();
     assert_eq!(again.id, run.id, "a pre-fix run is still matched by its legacy key");
 }
@@ -1416,8 +1570,10 @@ fn structured_search_filters_before_paging_and_never_leaves_readable_channels() 
     assert_eq!(seen, (0..6).rev().map(|i| format!("deploy bulk {i}")).collect::<Vec<_>>());
 }
 
-// Thread follows (2026-10-04, follows.rs). Before them a Buddy waiting on another's work in a
-// thread had no wake at all: posts start nobody but mentions and gated participants.
+// Thread follows (2026-10-04) became subscriptions (2026-10-06, decision D2 and delivery design
+// Task 3): `follow` subscribes the reading conversation, `follow:false` unsubscribes it, and a post
+// by someone else is a durable delivery to that conversation. Before follows a Buddy waiting on
+// another's work in a thread had no wake at all.
 fn follow_fixture(s: &mut Store) -> (Post, impl Fn(&str, &str) -> PostInput + use<>) {
     let general = s
         .create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "p".into(), key: "g".into() })
@@ -1428,27 +1584,12 @@ fn follow_fixture(s: &mut Store) -> (Post, impl Fn(&str, &str) -> PostInput + us
     (root, move |body: &str, key: &str| PostInput { reply_to_id: Some(root_id.clone()), ..say(body, key) })
 }
 
-fn follow_input(root: &Post, until: String) -> FollowInput {
-    FollowInput { root_id: root.id.clone(), conversation_id: "conv-mid".into(), until, limit: 20 }
-}
-
-fn following(read: FollowRead) -> ThreadFollow {
-    match read {
-        FollowRead::Following { follow } => follow,
-        FollowRead::Unread { posts, .. } => panic!("expected a registered follow, got unread {posts:?}"),
-    }
-}
-
-fn soon(minutes: i64) -> String {
-    (chrono::Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339()
-}
-
 fn bodies(posts: &[Post]) -> Vec<&str> {
     posts.iter().map(|p| p.body.as_str()).collect()
 }
 
 #[test]
-fn a_follow_read_returns_unread_posts_instead_of_following() {
+fn a_follow_returns_the_unread_posts_once_and_subscribes() {
     let mut f = fixture();
     let s = &mut f.store;
     let (root, reply) = follow_fixture(s);
@@ -1456,84 +1597,52 @@ fn a_follow_read_returns_unread_posts_instead_of_following() {
     s.post(&buddy("peer"), channel.clone(), reply("first", "a")).unwrap();
     s.post(&buddy("mid"), channel.clone(), reply("mine", "m")).unwrap();
     s.post(&buddy("peer"), channel, reply("second", "b")).unwrap();
-    // "mine" moved the mark past "first": only "second" is unread.
-    match s.follow_thread(&buddy("mid"), follow_input(&root, soon(30))).unwrap() {
-        FollowRead::Unread { posts, unshown } => assert_eq!((bodies(&posts), unshown), (vec!["second"], 0)),
-        other => panic!("{other:?}"),
-    }
+    assert!(s.delivered_to(&root.id).unwrap().is_empty(), "a public thread subscribes only by follow until step 5");
+    // "mine" was written without "first" being shown, so it did not read past it (decision K).
+    let read = s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
+    assert_eq!((bodies(&read.posts), read.unshown), (vec!["first", "second"], 0));
     assert!(s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts.is_empty(), "returning them read them");
-    following(s.follow_thread(&buddy("mid"), follow_input(&root, soon(30))).unwrap());
+    assert!(matches!(s.follow_thread(&Actor::Owner, &root.id, Some("c".into()), 20), Err(CoreError::Invalid(_))), "the owner reads in the app");
 }
 
 #[test]
-fn a_follow_wakes_its_conversation_on_anothers_post_with_only_the_unread_posts() {
+fn a_followed_thread_delivers_anothers_post_to_the_following_conversation() {
     let mut f = fixture();
     let s = &mut f.store;
     let (root, reply) = follow_fixture(s);
     let channel = ChannelRef::Id { id: root.channel_id.clone() };
-    let follow = following(s.follow_thread(&buddy("mid"), follow_input(&root, soon(60))).unwrap());
+    s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
     s.post(&buddy("mid"), channel.clone(), reply("on it", "own")).unwrap();
     assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the follower's own post wakes nobody");
     let news = s.post(&buddy("peer"), channel.clone(), reply("model is green", "news")).unwrap();
-    assert_eq!(s.delivering_followers(&root.id, &news.ord).unwrap(), ["mid"], "its follow-up gate is skipped");
+    assert_eq!(s.delivered_to(&news.id).unwrap(), ["mid"], "its follow-up gate is skipped");
 
-    let claim = s.claim_run(lease(60_000)).unwrap().expect("another's post makes the follow due now");
-    assert_eq!(claim.run.input, RunInput::Follow { follow_id: follow.id.clone() });
-    assert_eq!(claim.run.conversation_id.as_deref(), Some("conv-mid"), "the wake goes to the conversation that followed");
-    let late = s.post(&buddy("peer"), channel, reply("one more thing", "late")).unwrap();
-    match s.deliver_follow(&follow.id, 20).unwrap() {
-        FollowWake::Posts { posts, .. } => assert_eq!(bodies(&posts), ["model is green", "one more thing"]),
-        other => panic!("{other:?}"),
-    }
-    // The runner composes the job again when an adopted turn finishes: the bound is fixed, so a
-    // post during the wake turn is neither shown nor marked read by that second call.
-    let during = s.post(&buddy("peer"), ChannelRef::Id { id: root.channel_id.clone() }, reply("during the wake", "during")).unwrap();
-    assert!(matches!(s.deliver_follow(&follow.id, 20).unwrap(), FollowWake::AlreadyRead { .. }));
-    assert_eq!(bodies(&s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts), ["during the wake"]);
-    assert!(s.delivering_followers(&root.id, &late.ord).unwrap() == ["mid"], "composed after it: shown");
-    assert!(s.delivering_followers(&root.id, &during.ord).unwrap().is_empty(), "composed before it: the gate must ask");
+    let claim = s.claim_run(lease(60_000)).unwrap().expect("another's post is delivered now");
+    assert_eq!((&claim.run.input, claim.run.conversation_id.as_deref()), (&RunInput::Deliver { post_id: news.id.clone() }, Some("conv-mid")));
+    s.post(&buddy("peer"), channel.clone(), reply("one more thing", "late")).unwrap();
+    let Delivery::Posts { posts, .. } = s.deliver_posts(&claim.run.id).unwrap() else { panic!() };
+    assert_eq!(bodies(&posts), ["model is green", "one more thing"]);
+    s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
+    // The runner composes the job again when an adopted turn finishes: `through_ord` is fixed, so a
+    // post during the turn is neither shown nor marked read by that second call.
+    s.post(&buddy("peer"), channel, reply("during the turn", "during")).unwrap();
+    assert!(matches!(s.deliver_posts(&claim.run.id).unwrap(), Delivery::Consumed));
+    assert_eq!(bodies(&s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts), ["during the turn"]);
 }
 
 #[test]
-fn a_follow_whose_posts_were_read_first_delivers_already_read() {
+fn follow_false_unsubscribes_and_a_read_first_delivery_is_consumed() {
     let mut f = fixture();
     let s = &mut f.store;
     let (root, reply) = follow_fixture(s);
-    let follow = following(s.follow_thread(&buddy("mid"), follow_input(&root, soon(60))).unwrap());
-    let news = s.post(&buddy("peer"), ChannelRef::Id { id: root.channel_id.clone() }, reply("done", "d")).unwrap();
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
+    let news = s.post(&buddy("peer"), channel.clone(), reply("done", "d")).unwrap();
     s.mark_thread_read(&buddy("mid"), &root.id, &news.id).unwrap();
-    assert!(matches!(s.deliver_follow(&follow.id, 20).unwrap(), FollowWake::AlreadyRead { .. }));
-}
-
-#[test]
-fn a_follow_with_no_post_is_due_once_at_until_and_survives_a_reopen() {
-    let mut f = fixture();
-    let (root, _) = follow_fixture(&mut f.store);
-    let until = chrono::Utc::now() + chrono::Duration::minutes(30);
-    let follow = following(f.store.follow_thread(&buddy("mid"), follow_input(&root, until.to_rfc3339())).unwrap());
-    let mut s = Store::open(f.path.to_str().unwrap()).unwrap();
-    let iso = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    assert!(s.claim_run_at(&iso(until - chrono::Duration::seconds(1)), lease(60_000)).unwrap().is_none(), "not before until");
-    let claim = s.claim_run_at(&iso(until + chrono::Duration::seconds(1)), lease(60_000)).unwrap().expect("due at until");
-    assert_eq!(claim.run.input, RunInput::Follow { follow_id: follow.id.clone() });
-    assert!(matches!(s.deliver_follow(&follow.id, 20).unwrap(), FollowWake::Timeout { .. }));
-    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-    assert!(s.claim_run_at(&iso(until + chrono::Duration::hours(1)), lease(60_000)).unwrap().is_none(), "one wake per follow");
-}
-
-#[test]
-fn a_new_follow_replaces_the_queued_one_from_the_same_conversation() {
-    let mut f = fixture();
-    let s = &mut f.store;
-    let (root, reply) = follow_fixture(s);
-    let first = following(s.follow_thread(&buddy("mid"), follow_input(&root, soon(10))).unwrap());
-    let second = following(s.follow_thread(&buddy("mid"), follow_input(&root, soon(20))).unwrap());
-    assert_eq!(s.get_run(&first.run_id).unwrap().error_code.as_deref(), Some("superseded"));
-    s.post(&buddy("peer"), ChannelRef::Id { id: root.channel_id.clone() }, reply("done", "d")).unwrap();
-    assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.id, second.run_id);
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "two follow calls, one wake");
-    assert!(matches!(s.follow_thread(&Actor::Owner, follow_input(&root, soon(5))), Err(CoreError::Invalid(_))), "the owner is not woken");
-    assert!(matches!(s.follow_thread(&buddy("mid"), follow_input(&root, soon(60 * 24 * 8))), Err(CoreError::Invalid(_))), "longer than 7 days");
+    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "read first: the delivery settled consumed");
+    s.follow_thread(&buddy("mid"), &root.id, None, 20).unwrap();
+    s.post(&buddy("peer"), channel, reply("after", "a")).unwrap();
+    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "unsubscribed: nothing is delivered");
 }
 
 // 2026-09-29 queue stall (888861c): a database created before run_active_buddy existed failed every
@@ -1545,33 +1654,39 @@ fn claim_run_works_on_a_database_missing_run_active_buddy() {
     drop(f.store);
     rusqlite::Connection::open(&path).unwrap().execute_batch("DROP INDEX run_active_buddy;").unwrap();
     let mut s = Store::open(path.to_str().unwrap()).unwrap();
-    s.enqueue_run(&Actor::Owner, chat("peer", "t1", "conv")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "conv")).unwrap();
     assert!(s.claim_run(lease(60_000)).unwrap().is_some());
 }
 
 // 2026-10-06: the lean rewrite (0fef9d4) dropped `buddy.retry_run` (17 uses); a Buddy whose worker
 // failed could only re-ask from scratch. A retry is the next attempt on the same input key, the
-// request goes back to awaiting, and the answer returns along the original route.
+// request goes back to awaiting, and the answer reaches the asker's subscribed conversation. Rule 5:
+// it stays in the failed attempt's conversation unless it moves to another provider.
 #[test]
 fn retrying_a_failed_run_makes_attempt_two_and_reopens_the_request() {
     let mut f = fixture();
     let s = &mut f.store;
-    let fail = |s: &mut Store| {
+    let fail = |s: &mut Store, conversation: &str| {
         let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+        s.bind_run(&claim.run.id, &claim.lease_token, conversation).unwrap();
         s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap()
     };
+    let read_notice = |s: &mut Store| {
+        let notice = s.claim_run(lease(60_000)).unwrap().unwrap();
+        assert_eq!(notice.run.buddy_id, "mid", "the failure post is delivered to the asker");
+        s.settle_run(&notice.run.id, &notice.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
+    };
     let asked = s.post(&buddy("mid"), dm("mid", "ic"), request("please do X", "r1")).unwrap();
-    let first = fail(s);
+    let first = fail(s, "w1");
     assert_eq!(s.get_post(&buddy("mid"), &asked.id).unwrap().request, RequestState::Failed);
-    let notice = s.claim_run(lease(60_000)).unwrap().unwrap();
-    s.settle_run(&notice.run.id, &notice.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
+    read_notice(s);
 
-    let sol = RunConfig { provider: "codex".into(), model: "gpt-6-sol".into(), reasoning_effort: None };
+    let sol = RunConfig { provider: "codex".into(), model: Some("gpt-6-sol".into()), reasoning_effort: None };
     let retry = s.retry_run(&buddy("mid"), &first.id, Some(sol.clone()), "k1").unwrap();
     assert_eq!((retry.attempt, retry.status, &retry.input, &retry.config), (2, RunStatus::Queued, &first.input, &Some(sol.clone())));
-    assert_eq!(retry.input_key, first.input_key);
+    assert_eq!((retry.input_key.as_str(), retry.conversation_id.as_deref()), (first.input_key.as_str(), None), "a profile run moved to a worker model starts fresh");
     assert_eq!(s.get_post(&buddy("mid"), &asked.id).unwrap().request, RequestState::Awaiting);
-    assert_eq!(s.retry_run(&buddy("mid"), &first.id, Some(sol), "k1").unwrap().id, retry.id, "a replayed key returns the same retry");
+    assert_eq!(s.retry_run(&buddy("mid"), &first.id, Some(sol.clone()), "k1").unwrap().id, retry.id, "a replayed key returns the same retry");
 
     // Live, already-retried and complete runs are typed errors, never silent no-ops.
     let live = s.retry_run(&buddy("mid"), &retry.id, None, "k2");
@@ -1579,15 +1694,19 @@ fn retrying_a_failed_run_makes_attempt_two_and_reopens_the_request() {
     let stale = s.retry_run(&buddy("mid"), &first.id, None, "k3");
     assert!(matches!(stale, Err(CoreError::Invalid(_))), "attempt 1 is not the latest: {stale:?}");
 
-    // The retry answers the request and wakes its sender in the sender's conversation.
+    let second = fail(s, "w2");
+    read_notice(s);
+    let third = s.retry_run(&buddy("mid"), &second.id, None, "k4").unwrap();
+    assert_eq!((third.attempt, third.conversation_id.as_deref()), (3, Some("w2")), "same model: same conversation");
+
     let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
-    assert_eq!(claim.run.id, retry.id);
-    s.answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec![], key: "a".into() }).unwrap();
+    assert_eq!(claim.run.id, third.id);
+    let done = s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     let back = s.claim_run(lease(60_000)).unwrap().unwrap();
-    assert_eq!((back.run.buddy_id.as_str(), &back.run.input), ("mid", &RunInput::Reply { post_id: asked.id.clone() }));
-    let done = s.retry_run(&buddy("mid"), &retry.id, None, "k4");
-    assert!(matches!(done, Err(CoreError::Invalid(_))), "a complete run has nothing to retry: {done:?}");
+    assert_eq!((back.run.buddy_id.as_str(), &back.run.input), ("mid", &RunInput::Deliver { post_id: done.id }));
+    let complete = s.retry_run(&buddy("mid"), &third.id, None, "k5");
+    assert!(matches!(complete, Err(CoreError::Invalid(_))), "a complete run has nothing to retry: {complete:?}");
 }
 
 #[test]
@@ -1600,7 +1719,7 @@ fn retry_authority_is_the_requester_a_manager_or_the_owner_and_only_managers_pic
         .settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() })
         .unwrap();
     assert_eq!(asked.request, RequestState::Awaiting);
-    let sol = RunConfig { provider: "codex".into(), model: "gpt-6-sol".into(), reasoning_effort: None };
+    let sol = RunConfig { provider: "codex".into(), model: Some("gpt-6-sol".into()), reasoning_effort: None };
 
     let stranger = s.retry_run(&buddy("gone"), &failed.id, None, "k0");
     assert!(matches!(stranger, Err(CoreError::Denied(_))), "{stranger:?}");
@@ -1609,7 +1728,7 @@ fn retry_authority_is_the_requester_a_manager_or_the_owner_and_only_managers_pic
     assert_eq!(s.retry_run(&buddy("peer"), &failed.id, None, "k2").unwrap().attempt, 2, "the requester may retry as-is");
 
     let notice = s.claim_run(lease(60_000)).unwrap().unwrap();
-    assert_eq!(notice.run.input, RunInput::FailureNotice { run_id: failed.id.clone() });
+    assert_eq!(notice.run.buddy_id, "peer", "the requester is told by the failure post");
     s.settle_run(&notice.run.id, &notice.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
     let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
     assert_eq!(claim.run.attempt, 2);
@@ -1647,13 +1766,13 @@ fn run_rows_share_one_window_across_scopes() {
     let mut f = fixture();
     let path = f.path.clone();
     let s = &mut f.store;
-    s.enqueue_run(&Actor::Owner, chat("peer", "old", "old")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "old", "old")).unwrap();
     let old = s.claim_run(lease(60_000)).unwrap().unwrap();
     s.settle_run(&old.run.id, &old.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
-    s.enqueue_run(&Actor::Owner, chat("peer", "new", "new")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "new", "new")).unwrap();
     let new = s.claim_run(lease(60_000)).unwrap().unwrap();
     s.settle_run(&new.run.id, &new.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
-    s.enqueue_run(&Actor::Owner, chat("peer", "live", "live")).unwrap();
+    s.enqueue_chat(&Actor::Owner, chat("peer", "live", "live")).unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute("UPDATE run SET ended_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1", [&old.run.id]).unwrap();
     drop(conn);

@@ -10,7 +10,7 @@ import { onPath } from '../providers/installed-agent';
 import { readBuddyState } from './briefing';
 import { type BuddiesCore, buddyActor } from './core';
 import { runDetached } from './detached-cli';
-import { type BuddyGrant, type Grants, INBOX } from './grants';
+import type { BuddyGrant, Grants } from './grants';
 import { HARNESS_MEMORY_OFF } from './harness-memory';
 
 /**
@@ -476,7 +476,6 @@ export function createMemoryReviewer(options: {
           workspaceId,
           conversationId: `memory-review:${id}`,
           runId: null,
-          returns: INBOX,
           observe: (tool, input) => {
             if (++calls > MAX_TOOL_CALLS) throw new Error('Memory review tool-call limit reached');
             const kind = (input as { kind?: string }).kind;

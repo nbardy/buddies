@@ -165,28 +165,53 @@ allowed a px font-size/padding/gap) and `client/src/ui/primitives.css` (layer 2:
 **Smell:** work is queued first and its kind is discovered after it is claimed ("is the origin a human
 chat? then there was nothing to do"). The queue's gates (busy conversation, pool cap) then hold rows that
 were never work, and anyone reading the queue sees them as blocked.
-**Pattern:** decide where a result goes when the thing that will produce it is created, from stable data,
-and store the decision as a sum type on it. Downstream code reads the stored route and never re-derives it;
-a route that needs no work creates no queued row at all.
-**Here:** `Returns = Inbox | Conversation(id)` (crate `types.rs`) is fixed by the sending turn's grant
-(`returnsFor` in `server/src/buddies/policy-port.ts`) and kept on the request (`post.return_conversation_id`;
-NULL on a request is Inbox). The crate's `send_back` (`posts.rs`) is the one place an answer or failure
-notice becomes a run; Inbox enqueues none. **Since 2026-10-06 (owner decision A) `returnsFor` is always
-`Conversation(this conversation)`**, a foreground owner chat included; Inbox is left only for grants that
-belong to no conversation (the memory reviewer). Before that a foreground chat got Inbox, so the lead in the
-owner's chat could not continue when its worker finished. A return into a human chat is real work, ordered
-behind the owner: `owner_first` in the claim gate (`WAITING_REASON_SQL`), Stop cancels queued returns
-(`cancelQueuedReturns`), and the turn resumes the chat's session without the owner grant
-(`RETURN_ORIGIN` in `buddies/turn-policy.ts`).
-Replaced the runner's post-claim `placement()` and its `mailbox` job: on 2026-10-01 nine no-op replies
-sat `conversation_busy` behind one owner turn for up to 2h44m and a Buddy offered to cancel that turn.
-Decision: `agent_notes/2026-10-01_return-route-decision.md`. Guards (rewritten for decision A): buddies-v2 "a worker's answer returns to the owner chat that asked, after
-its running turn and after an owner message typed meanwhile", "one full chat turn …" (return session and
-no owner grant), "the owner's Stop cancels the queued return …"; crate
-`a_queued_owner_message_goes_before_a_return_in_the_same_conversation` and, for the Inbox route that is left,
-`an_inbox_request_starts_no_run_for_its_answer_or_failure`.
-**Read answers:** a requester that reads its answer settles its own queued return run (`settle_read_returns`,
-`posts.rs`, `consumed`); guard `reading_an_answer_settles_its_queued_return_run`.
+**Pattern:** decide where a result goes from stable data stored before it is produced, and let one rule
+read that data. Downstream code never re-derives the route; a post that reaches nobody queues nothing.
+**Here (since 2026-10-06, owner decisions A–K; agent_notes/2026-10-06_buddies-target-system-review.md):
+one delivery rule.** A Buddy's `thread_read` row is its read mark in a thread AND, when
+`conversation_id` is set, the conversation SUBSCRIBED to it (one per Buddy and thread; the last writer
+wins, decision F). A conversation subscribes when it posts in a DM thread (a request included), when it
+is opened for a request (`bind_run`), or by `channel_read {follow}`. Every post by someone else in the
+thread becomes a durable `deliver` run for that conversation, in the post's own transaction
+(crate `deliveries.rs` `fan_out`, called from `posts.rs` `after_write`). A claimed delivery shows every
+unread post of the threads its conversation subscribes to (`compose`), so a burst costs one turn. A
+request's failure is a `run_failed` post (`runs.rs` `close_request`), delivered the same way. A
+self-spawned worker writes in its spawner's thread without taking the subscription
+(`from_own_worker`). Public and task threads subscribe only by `follow` until step 5 moves mentions
+and seats onto delivery.
+**Read fence:** whatever moves a Buddy's mark in a thread (a thread read, a follow, a delivery at
+`mark_executing`, its own post) settles every queued delivery it covers `consumed`, with no turn
+(`deliveries.rs` `fence`). Posting never moves the author's mark past a post it was not shown
+(decision K, `catch_up`).
+Replaced: the request's stored route (`Returns = Inbox | Conversation`, `post.return_conversation_id`,
+`send_back`, 2026-10-01) and the `reply` / `failure_notice` / `follow` / `schedule` run kinds. Before
+the stored route, the runner's post-claim `placement()` and its `mailbox` job let nine no-op replies sit
+`conversation_busy` behind one owner turn for up to 2h44m (2026-10-01). A delivery into a human chat
+is real work, ordered behind the owner: `owner_first` in the claim gate (`WAITING_REASON_SQL`), Stop
+cancels queued deliveries (`cancelQueuedDeliveries`), and the turn resumes the chat's session without
+the owner grant (`RETURN_ORIGIN` in `buddies/turn-policy.ts`).
+Guards: crate `a_mark_advance_consumes_every_covered_delivery`,
+`a_burst_in_two_subscribed_threads_costs_one_delivery_turn`,
+`posting_never_marks_read_a_post_its_author_was_not_shown`,
+`a_queued_owner_message_goes_before_a_delivery_in_the_same_conversation`,
+`a_request_from_no_conversation_starts_no_run_for_its_answer_or_failure`,
+`a_worker_request_runs_on_its_own_config_and_returns_to_the_spawner`; buddies-v2 "a worker's answer
+returns to the owner chat that asked …", "one full chat turn …", the follow (a)–(h) suite.
+
+## durable-intake
+**Smell:** an input lives only in a process's memory until it runs (a queued owner message, a wake), so
+a restart loses it; or an input that may already have run is replayed after a crash.
+**Pattern:** every input is a row before it is acknowledged, and the row says whether it has executed.
+`executing_at` is stamped as the holder's LAST await before the side-effecting spawn
+(`mark_executing`). A dead holder's run with no stamp goes back to the queue (nothing ran); one with
+the stamp is adopted from its journal or ends visibly, never replayed.
+**Here:** crate `runs.rs` (`enqueue_chat`, `mark_executing`, the requeue in `expire_leases`) and
+`schema.rs` `RUN_TABLE` (a queued chat run must carry its `body`). Callers: `buddies/runner.ts`
+(`admitChat`, `runJob`). From durable-pending W0a/W0b (95028f0, 745515f), shipped in the 2026-10-06
+delivery rebuild (`migrate.rs`, ONE live migration with a pre-migration `VACUUM INTO` copy). Step 6
+(task_01a11013-bac6) makes queued chat runs claimable after a restart.
+Guards: crate `a_dead_holder_requeues_an_unexecuted_run_and_fails_an_executed_one`,
+`without_the_executing_backfill_a_legacy_running_turn_would_be_replayed` (tests/migration.rs).
 
 ## store-descriptor-isolation
 **Smell:** backend code opens a file that happens to be a live SQLite store (or its `-wal`/`-shm`): a
@@ -219,6 +244,10 @@ most once a minute. Renewal rides the bridge clock and not provider progress, be
 silently for the 60-min idle budget while agent-cli heartbeats keep ticking. The runner's `start` renews
 adopted turns before its first claim. The deadline is the run's `deadline` column, `TURN_MAX_RUNTIME_MS` for a
 chat (passed explicitly) and `BUDDY_BACKGROUND_TURN_MS` otherwise.
+What the gate does to a dead holder's run depends on `executing_at` (Pattern: durable-intake): unexecuted
+→ back to the queue; executed → `lease_expired`, and an executed REQUEST then continues once in its own
+conversation (decision G, `runs.rs` `resume`; a second death sends the failure post, a stop is never
+undone).
 History: on 2026-09-10 a 600 s lease used as a chat deadline killed healthy owner chats. The fix made the lease
 24 h, and dead holders' runs then stayed `running` until the next boot: a 9.5 h overnight lie on 09-30→10-01,
 and 14 and 10 orphaned runs at 12:34Z/14:09Z on 09-30. The boot sweep also ended runs a second live backend held.

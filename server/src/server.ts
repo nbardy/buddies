@@ -109,7 +109,7 @@ import { createMemoryReviewer } from './buddies/memory-review';
 import { createBuddyPolicyPort } from './buddies/policy-port';
 import { registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
-import { workerConversationConfig } from './buddies/worker-config';
+import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 
 let startupAuditResults: ReturnType<typeof auditLocalAgents> = [];
@@ -391,6 +391,16 @@ const buddyCreationService: BuddyCreationService = createBuddyCreationService({
 // One background Buddy turn = one conversation runtime turn (runCoordinationMessage).
 const buddyRunnerHost: RunnerHost = {
   registered: (id) => conversations.get(id) !== undefined,
+  defaultModel: providerDefaultModel,
+  reconfigure: async (conversationId, config) => {
+    const conversation = conversations.get(conversationId);
+    if (!conversation) throw new Error(`Run conversation ${conversationId} is not registered`);
+    await replaceRuntimeConfig(
+      conversationConfigService,
+      conversation,
+      workerConversationConfig(config)
+    );
+  },
   openBackground: async ({ conversationId, context, commandId, config }) => {
     await buddyCreationService.createServerBuddyConversation({
       context,

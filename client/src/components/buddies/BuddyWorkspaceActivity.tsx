@@ -24,10 +24,8 @@ export function liveRunsUrl(workspaceId: string): string {
 const RUN_KIND: Record<RunInput['kind'], string> = {
   chat: 'chat',
   post: 'post',
-  reply: 'reply',
-  schedule: 'schedule',
-  failure_notice: 'notice',
-  follow: 'follow',
+  deliver: 'delivery',
+  retired: 'earlier',
 };
 
 /** A live run's state; finished runs never appear in a live listing. */

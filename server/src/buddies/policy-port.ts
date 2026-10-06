@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { McpServerSpec } from '@nbardy/agent-cli';
-import type { Outcome, Returns } from '@unleashd/buddies-core';
+import type { Outcome } from '@unleashd/buddies-core';
 import type { BuddyContext } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
+import type { TurnInput } from '../turns/input';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
 import { type GrantRecord, type Grants, type TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
@@ -18,8 +19,11 @@ import type { ChatAdmission, LeaseRenewal, Runner } from './runner';
 export interface BuddyPolicyPort {
   /** The briefing composed for this context right before its turn (synchronous; see briefing.ts). */
   currentBriefing(context: BuddyContext): ResolvedBuddyConversation;
-  /** Line a chat turn up behind its Buddy's run limit; poll `admission` with the returned id. */
-  enqueueChat(context: BuddyContext, conversationId: string): string;
+  /**
+   * Line a chat turn up behind its Buddy's run limit; poll `admission` with the returned id. The
+   * run is written with `input` as its body: a queued chat run without its input is refused.
+   */
+  enqueueChat(context: BuddyContext, conversationId: string, input: TurnInput): string;
   admission(turnId: string): ChatAdmission;
   abandon(turnId: string): void;
   /**
@@ -45,11 +49,11 @@ export interface BuddyPolicyPort {
   finishRun(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void>;
   revoke(conversationId: string): void;
   /**
-   * The owner pressed Stop in this conversation: end its queued returns (design D1). The posts
-   * stay unread, so they reach the Buddy with its next read or wake; Stop means "quiet down now",
-   * not "never tell me". Resolves once they are cancelled.
+   * The owner pressed Stop in this conversation: end its queued deliveries (decision C). The posts
+   * stay unread, so they reach the Buddy with its next delivery or read; Stop means "quiet down
+   * now", not "never tell me". Resolves once they are cancelled.
    */
-  cancelQueuedReturns(conversationId: string): Promise<void>;
+  cancelQueuedDeliveries(conversationId: string): Promise<void>;
   /** After a successful turn: memory review. */
   afterTurn(turn: CompletedBuddyTurn): void;
 }
@@ -76,9 +80,9 @@ export function createBuddyPolicyPort(deps: {
     throw new Error(`Buddy chat deadline ${runner.chatDeadlineMs} ms < TURN_MAX_RUNTIME_MS`);
   return {
     currentBriefing: (context) => briefings.current(context),
-    enqueueChat(context, conversationId) {
+    enqueueChat(context, conversationId, input) {
       const turnId = randomUUID();
-      runner.enqueueChat(context, conversationId, turnId);
+      runner.enqueueChat(context, conversationId, turnId, JSON.stringify(input));
       return turnId;
     },
     admission: (turnId) => runner.chatAdmission(turnId),
@@ -92,7 +96,6 @@ export function createBuddyPolicyPort(deps: {
         workspaceId: context.workspaceId,
         conversationId,
         runId: context.coordinationRunId ?? null,
-        returns: returnsFor(conversationId),
       });
       if (owner) grants.promoteToOwner(conversationId);
       return {
@@ -113,28 +116,9 @@ export function createBuddyPolicyPort(deps: {
       runner.finishChat(runId, leaseToken, crateOutcome(outcome)),
     finishRun: (runId, leaseToken, outcome) => runner.finishRun(runId, leaseToken, outcome),
     revoke: (conversationId) => grants.revokeConversation(conversationId),
-    cancelQueuedReturns: (conversationId) => runner.cancelQueuedReturns(conversationId),
+    cancelQueuedDeliveries: (conversationId) => runner.cancelQueuedDeliveries(conversationId),
     afterTurn: (turn) => deps.reviewer.enqueue(turn),
   };
-}
-
-// Pattern: route-at-send (docs/patterns.md#route-at-send)
-/**
- * Where answers to a turn's requests go, decided here, before the request exists: ALWAYS the
- * conversation that sent it, a human chat included (owner decision A, 2026-10-06; delivery design
- * D0). The crate keeps it on the request, and nothing downstream re-derives it.
- *
- * History: until 2026-10-01 the runner asked after claiming a `reply` run, and for a human chat
- * the answer was "nothing to do": 9 no-op replies waited up to 2h44m behind one owner turn and
- * read as "blocked". The fix then was `Inbox` for foreground chats (no run). That made the lead in
- * the owner's chat unable to continue when its worker finished (U2). The queue was never the
- * problem; a run with nothing to do was. A return is real work now, so the foreground chat takes
- * it, and the owner is protected by ordering instead of by exclusion: `owner_first` in the claim
- * gate (crate runs.rs), and the owner's Stop cancelling queued returns (`cancelQueuedReturns`).
- * Guard: buddies-v2 "a worker's answer returns to the owner chat that asked …".
- */
-export function returnsFor(conversationId: string): Returns {
-  return { kind: 'conversation', id: conversationId };
 }
 
 /** A turn's outcome as the crate records a run's. */
