@@ -1,18 +1,20 @@
+import { WAKE_MESSAGE } from '@unleashd/shared';
 /**
  * client/src/components/buddies/buddy-direct-actions.ts
  *
  * DM and Wake for one Buddy, shared by the desktop channel rail, the desktop
  * sidebar and the mobile channels home. No JSX, no CSS (mobile-safe).
- * Server: server/src/buddies/channels.ts (openDirect / wake). No body: the
- * chat lives in the Buddy's home workspace.
+ * Server: server/src/buddies/channels.ts (openDirect). No body: the chat lives
+ * in the Buddy's home workspace.
  *   DM   — POST /api/buddies/:id/direct → the one ongoing owner chat (history kept)
- *   Wake — POST /api/buddies/:id/wake   → catch-up instruction queued in that chat
+ *   Wake — an ordinary post of WAKE_MESSAGE to the Buddy's 1:1 DM channel
+ *          (postToBuddyDm): a DM post wakes its Buddy, so wake has no route
  */
 import { useAtomValue } from 'jotai';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { setConversationDone } from '../../atoms/actions';
-import { listField, rowFamily } from '../../atoms/conversations';
-import { buddyWrite, errorText } from './api';
+import { listField } from '../../atoms/conversations';
+import { buddyWrite, errorText, postToBuddyDm } from './api';
 import { createBuddyViaBuilder } from './create-buddy-builder';
 
 export type DirectAction =
@@ -20,14 +22,12 @@ export type DirectAction =
   | { kind: 'pending'; action: 'dm' | 'wake' }
   | { kind: 'failed'; message: string };
 
-// Each wake gets a fresh attempt number so its status view remounts clean.
-export type WakeAttempt = { conversationId: string; attempt: number };
+// Each wake gets a fresh attempt number so its status mark remounts clean.
+export type WakeAttempt = { attempt: number };
 
 export function useBuddyDirectActions(buddyId: string) {
   const [action, setAction] = useState<DirectAction>({ kind: 'idle' });
   const [woken, setWoken] = useState<WakeAttempt | null>(null);
-  const request = (path: 'direct' | 'wake') =>
-    buddyWrite(path === 'direct' ? 'direct.open' : 'buddy.wake', { buddyId });
   const fail = (cause: unknown) => setAction({ kind: 'failed', message: errorText(cause) });
   return {
     action,
@@ -35,7 +35,7 @@ export function useBuddyDirectActions(buddyId: string) {
     /** Resolve the DM, then hand its id to the caller's navigation. */
     openDm(open: (conversationId: string) => void) {
       setAction({ kind: 'pending', action: 'dm' });
-      request('direct')
+      buddyWrite('direct.open', { buddyId })
         .then(({ conversationId }) => {
           setAction({ kind: 'idle' });
           open(conversationId);
@@ -44,41 +44,14 @@ export function useBuddyDirectActions(buddyId: string) {
     },
     wake() {
       setAction({ kind: 'pending', action: 'wake' });
-      request('wake')
-        .then(({ conversationId }) => {
-          setWoken((current) => ({ conversationId, attempt: (current?.attempt ?? 0) + 1 }));
+      postToBuddyDm(buddyId, { body: WAKE_MESSAGE })
+        .then(() => {
+          setWoken((current) => ({ attempt: (current?.attempt ?? 0) + 1 }));
           setAction({ kind: 'idle' });
         })
         .catch(fail);
     },
   };
-}
-
-// Wake progress, read from the DM's own run state. The queued message may
-// reach the client a beat after the HTTP reply, so 'waiting' holds until the
-// DM is first seen busy; only a busy → idle edge means the check finished.
-export type WakePhase =
-  | { kind: 'waiting' }
-  | { kind: 'running' }
-  | { kind: 'done'; available: boolean };
-
-export function useWakePhase(conversationId: string): WakePhase {
-  const conversation = useAtomValue(rowFamily(conversationId));
-  const busy = conversation !== null && conversation.run !== 'idle';
-  const [seen, setSeen] = useState<'waiting' | 'running' | 'done'>('waiting');
-  useEffect(() => {
-    if (busy) setSeen('running');
-    else setSeen((current) => (current === 'running' ? 'done' : current));
-  }, [busy]);
-  switch (seen) {
-    case 'waiting':
-      return { kind: 'waiting' };
-    case 'running':
-      return { kind: 'running' };
-    case 'done':
-      // Availability-checked: the atom is null once the client no longer holds it.
-      return { kind: 'done', available: conversation !== null };
-  }
 }
 
 /**

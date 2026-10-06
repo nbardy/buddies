@@ -372,10 +372,12 @@ pub struct PostWrite {
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Returns {
-    /// Sent from a human (foreground) chat, or by the owner: the answer post IS the delivery and
-    /// the sender reads it in its inbox. No run: a human chat never takes automated input.
+    /// Sent by the owner, or by a turn with no conversation (the memory reviewer): the answer post
+    /// IS the delivery and the sender reads it in its inbox. No run. Since 2026-10-06 (owner
+    /// decision A) no Buddy conversation, human chat or not, takes this route.
     Inbox,
-    /// Sent from a background conversation: the answer wakes a turn there, behind its busy gate.
+    /// Sent from a Buddy conversation of either placement: the answer wakes a turn in THAT
+    /// conversation, behind its busy gate and after any owner message queued there (`owner_first`).
     Conversation { id: String },
 }
 
@@ -486,6 +488,8 @@ pub enum RunWaiting {
     BuddyArchived,
     AfterRun { run_id: String },
     ConversationBusy,
+    /// A non-chat run (a return) waits while an owner message is queued in its conversation.
+    OwnerFirst,
     PoolFull { active: i64, max: i64 },
     TaskPaused,
 }

@@ -90,7 +90,6 @@ import { type SessionRow, defaultRoots } from '@unleashd/ingest';
 import { validate as isUuid } from 'uuid';
 import { auditLocalAgents } from './audit.js';
 import { createBriefings } from './buddies/briefing';
-import { admitExecution, decideExecutionGate } from './buddies/execution-gate';
 import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
 import { createCliReplyGate } from './buddies/channel-reply-gate';
 import { createChannels } from './buddies/channels';
@@ -103,6 +102,7 @@ import {
   openBuddiesCore,
 } from './buddies/core';
 import { createBuddyEvents } from './buddies/events';
+import { admitExecution, decideExecutionGate } from './buddies/execution-gate';
 import { createGrants } from './buddies/grants';
 import { type McpEndpoint, startMcpEndpoint } from './buddies/mcp';
 import { createMemoryReviewer } from './buddies/memory-review';
@@ -824,6 +824,7 @@ void runServerStartup(
         events: buddyEvents,
         grants: buddyGrants,
         uploadsRoot: () => UPLOADS_DIR,
+        messages: async (id, page) => (await listReady).page(id, page),
         portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
       });
       // Background, never awaited: bootstrap and the upstream fetch must not

@@ -24,7 +24,7 @@ test('built dependency dialog stays compact, aligned, and actionable on both scr
   app.get('/api/buddies/workspaces/project_fixture/inbox', (_req, res) =>
     res.json({ requests: [], waitingOn: [], channels: [], unreadThreads: 0 })
   );
-  app.get('/api/buddies/workspaces/project_fixture/channels/archived', (_req, res) => res.json([]));
+  app.get('/api/buddies/workspaces/project_fixture/channels', (_req, res) => res.json([]));
   app.get('/api/buddies/tasks', (_req, res) => res.json([]));
   app.get('/api/buddies/runs', (_req, res) => res.json([]));
   app.get('/api/mobile-access', (_req, res) => res.json({ kind: 'tailscale_missing' }));

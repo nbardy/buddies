@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { actorName } from './BuddyTaskComments';
-import { buddyWrite } from './api';
+import { buddyWrite, postToBuddyDm } from './api';
 import type {
   Actor,
   ChannelPage,
@@ -52,11 +52,9 @@ function AnswerForm({ request, refresh }: { request: Post; refresh: () => Promis
         event.preventDefault();
         void action.run('answer', () =>
           buddyWrite(
-            'request.answer',
-            { postId: request.id },
-            {
-              body,
-            }
+            'channel.post',
+            { channelId: request.channelId },
+            { body, answers: request.id }
           )
         );
       }}
@@ -86,17 +84,7 @@ function SendForm({ buddyId, refresh }: { buddyId: string; refresh: () => Promis
       onSubmit={(event) => {
         event.preventDefault();
         void action
-          .run('send', () =>
-            buddyWrite(
-              'direct.post',
-              {},
-              {
-                members: [buddyId],
-                body,
-                kind: request ? 'request' : 'inform',
-              }
-            )
-          )
+          .run('send', () => postToBuddyDm(buddyId, { body, kind: request ? 'request' : 'inform' }))
           .then((ok) => ok && setBody(''));
       }}
     >
@@ -388,7 +376,7 @@ function DirectChannel({
   // Seeing the DM reads it through the newest post rendered; a later post stays unread.
   useEffect(() => {
     if (newest === undefined || direct.unread === 0) return;
-    void buddyWrite('channel.read', { channelId }, { postId: newest }).catch((error: unknown) =>
+    void buddyWrite('read', {}, { channelId, postId: newest }).catch((error: unknown) =>
       console.warn('[buddies] could not mark the DM read:', error)
     );
   }, [channelId, newest, direct.unread]);

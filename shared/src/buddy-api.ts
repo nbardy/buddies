@@ -103,6 +103,9 @@ export const PostBodySchema = z
     // The owner writes as one of its Buddies (a standup, a handoff), as the Messages tab did before
     // T11. The crate authorizes the Buddy as the author; its @mentions start as that Buddy's.
     asBuddyId: z.string().min(1).optional(),
+    // Answers one request the poster owes: the post lands in that request's thread, so it takes only
+    // body, evidence and key (the server refuses the rest rather than dropping them silently).
+    answers: z.string().min(1).optional(),
     key,
   })
   .strict();
@@ -149,15 +152,22 @@ export const NewDirectSchema = z
     key,
   })
   .strict();
-// A DM is one-to-one (owner decision 2026-10-06, agent_notes/2026-10-06_dm-is-one-to-one-decision.md):
-// exactly one Buddy besides the owner. The crate refuses a group too; this rejects it at the wire.
-export const DirectPostSchema = PostBodySchema.extend({
-  members: z.array(z.string().min(1)).length(1),
-});
-export const AnswerSchema = z
-  .object({ body: z.string().trim().min(1).max(32_000), evidence, key })
-  .strict();
-export const ReadSchema = z.object({ postId: z.string().min(1) }).strict();
+// One read mark for both feeds: a channel's, or a followed thread's (which leaves the channel's
+// cursor alone). `postId` is the newest post the client rendered; a later one stays unread.
+export const ReadSchema = z.union([
+  z.object({ channelId: z.string().min(1), postId: z.string().min(1) }).strict(),
+  z.object({ rootId: z.string().min(1), postId: z.string().min(1) }).strict(),
+]);
+
+// The owner's "wake" is an ordinary DM post carrying this text (rule 1: a DM post wakes its Buddy),
+// not a route of its own. The channel feed shows it, so the catch-up summary lands under it.
+export const WAKE_MESSAGE = [
+  'Wake-up check: catch up on the workspace channels and act on what matters to you.',
+  '1. Call inbox: requests you owe, and every channel with your unread count.',
+  '2. Read each channel with unread posts with channel_read (reading from the top marks it read); open threads with channel_read({read:{threadId}}).',
+  '3. For each thing that concerns you: answer it in its thread (post with replyToId) when a reply helps, create/update the work (task_write) and comment via post {channel:{task}}, hand it to its owner (post a request in a DM), or leave it.',
+  '4. Finish with a short summary: what you read, what you replied to, what work you started (with ids).',
+].join('\n');
 
 const NoBodySchema = z.undefined();
 export const BuddyDocKindSchema = z.enum(['soul', 'working', 'long_term', 'shared']);
@@ -200,12 +210,6 @@ export const buddyMutations = {
     path: '/api/buddies/:buddyId/direct/new-chat',
     status: 200,
     body: NewDirectSchema,
-  },
-  'buddy.wake': {
-    method: 'POST',
-    path: '/api/buddies/:buddyId/wake',
-    status: 202,
-    body: NoBodySchema,
   },
   'doc.write': {
     method: 'PUT',
@@ -273,33 +277,16 @@ export const buddyMutations = {
     status: 201,
     body: PostBodySchema,
   },
-  'direct.post': {
-    method: 'POST',
-    path: '/api/buddies/direct/posts',
-    status: 201,
-    body: DirectPostSchema,
-  },
   'reply.retry': {
     method: 'POST',
     path: '/api/buddies/posts/:postId/retry',
     status: 202,
     body: RetrySchema,
   },
-  'request.answer': {
+  // The one read mark: {channelId, postId} or {rootId, postId}.
+  read: {
     method: 'POST',
-    path: '/api/buddies/posts/:postId/answer',
-    status: 201,
-    body: AnswerSchema,
-  },
-  'channel.read': {
-    method: 'POST',
-    path: '/api/buddies/channels/:channelId/read',
-    status: 200,
-    body: ReadSchema,
-  },
-  'thread.read': {
-    method: 'POST',
-    path: '/api/buddies/threads/:rootId/read',
+    path: '/api/buddies/read',
     status: 200,
     body: ReadSchema,
   },
@@ -346,9 +333,10 @@ export interface BuddyMutationResults {
   'buddy.create': Buddy;
   'buddy.update': Buddy;
   'buddy.archive': Buddy;
-  'direct.open': ConversationOpened;
+  // `channelId` is the 1:1 DM channel itself: write to it with `channel.post` (there is no
+  // separate direct-post route).
+  'direct.open': ConversationOpened & { channelId: string };
   'direct.new': ConversationOpened;
-  'buddy.wake': ConversationOpened;
   'doc.write': Doc;
   'task.create': Task;
   'task.update': Task;
@@ -360,11 +348,8 @@ export interface BuddyMutationResults {
   'channel.rename': Channel;
   'channel.create': Channel;
   'channel.post': { post: Post };
-  'direct.post': { post: Post };
   'reply.retry': ReplyRetryResult;
-  'request.answer': Post;
-  'channel.read': { ok: boolean };
-  'thread.read': { ok: boolean };
+  read: { ok: boolean };
   'upstream.update': UpstreamUpdateResult;
 }
 export type BuddyMutationRoute<K extends BuddyMutation> =

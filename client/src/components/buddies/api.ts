@@ -1,3 +1,4 @@
+import type { Post } from '@unleashd/buddies-core';
 import {
   type BuddyMediaResult,
   type BuddyMutation,
@@ -77,6 +78,19 @@ export async function buddyWrite<K extends BuddyMutation>(
           body: JSON.stringify(body),
         }),
   });
+}
+
+/**
+ * One owner message to a Buddy's 1:1 DM: open the DM (idempotent), then write to its channel. This
+ * is the only way to post "to a Buddy"; a wake is the same post with WAKE_MESSAGE as its body.
+ */
+export async function postToBuddyDm(
+  buddyId: string,
+  input: BuddyMutationInput<'channel.post'>
+): Promise<{ channelId: string; post: Post }> {
+  const { channelId } = await buddyWrite('direct.open', { buddyId });
+  const { post } = await buddyWrite('channel.post', { channelId }, input);
+  return { channelId, post };
 }
 
 /** Multipart media is the one non-JSON write in the Buddy UI. */

@@ -924,8 +924,8 @@ export function useMarkRead(
     if (!visible || !hasUnread || newestPostId === null) return;
     const write =
       kind === 'channel'
-        ? buddyWrite('channel.read', { channelId: id }, { postId: newestPostId })
-        : buddyWrite('thread.read', { rootId: id }, { postId: newestPostId });
+        ? buddyWrite('read', {}, { channelId: id, postId: newestPostId })
+        : buddyWrite('read', {}, { rootId: id, postId: newestPostId });
     void write.catch((error: unknown) =>
       console.warn(`[channels] could not mark ${url} read:`, error)
     );

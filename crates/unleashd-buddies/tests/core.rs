@@ -433,6 +433,69 @@ fn an_inbox_request_starts_no_run_for_its_answer_or_failure() {
     assert!(s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 10).unwrap().is_empty());
 }
 
+// Owner decision A (2026-10-06, delivery design D3): an answer returns into the chat that asked,
+// so a human chat's queue holds real work. The owner's queued message still goes first: a return
+// waits as `owner_first` while a chat run is queued in its conversation, and is claimable after.
+#[test]
+fn a_queued_owner_message_goes_before_a_return_in_the_same_conversation() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let from_chat = PostInput { returns: Some(Returns::Conversation { id: "owner-chat".into() }), ..request("do X", "r1") };
+    let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat).unwrap();
+    let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
+    s.answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec![], key: "a".into() }).unwrap();
+    s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    let chat = s
+        .enqueue_run(&Actor::Owner, EnqueueInput {
+            buddy_id: "mid".into(),
+            input: RunInput::Chat { turn_id: "t1".into() },
+            conversation_id: Some("owner-chat".into()),
+            task_id: None,
+            after_run_id: None,
+            deadline: None,
+            config: None,
+        })
+        .unwrap();
+    let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
+    let reply = rows.iter().find(|r| matches!(r.input, RunInput::Reply { .. })).unwrap();
+    assert_eq!(reply.waiting, Some(RunWaiting::OwnerFirst), "the return waits for the owner message");
+    assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.id, chat.id, "the owner message is claimed first");
+    // Running, the chat holds the conversation; settled, the return is free to run.
+    let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
+    assert_eq!(rows.iter().find(|r| matches!(r.input, RunInput::Reply { .. })).unwrap().waiting, Some(RunWaiting::ConversationBusy));
+}
+
+// Fix-guard (2026-10-06): a chat run orphaned in `queued` by a dead backend has no ticket left to
+// claim it; `owner_first` must stop counting it, or every return in that chat waits forever.
+#[test]
+fn an_orphaned_owner_message_stops_holding_returns() {
+    let mut f = fixture();
+    let path = f.path.clone();
+    let s = &mut f.store;
+    let from_chat = PostInput { returns: Some(Returns::Conversation { id: "owner-chat".into() }), ..request("do X", "r1") };
+    let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat).unwrap();
+    let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
+    s.answer(&buddy("ic"), AnswerInput { request_id: asked.id.clone(), body: "done".into(), evidence: vec![], key: "a".into() }).unwrap();
+    s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    let chat = s
+        .enqueue_run(&Actor::Owner, EnqueueInput {
+            buddy_id: "mid".into(),
+            input: RunInput::Chat { turn_id: "t1".into() },
+            conversation_id: Some("owner-chat".into()),
+            task_id: None,
+            after_run_id: None,
+            deadline: None,
+            config: None,
+        })
+        .unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute("UPDATE run SET created_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1", [&chat.id]).unwrap();
+    drop(conn);
+    let rows = s.list_run_rows(ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
+    let reply = rows.iter().find(|r| matches!(r.input, RunInput::Reply { .. })).unwrap();
+    assert_eq!(reply.waiting, None, "an orphaned owner message no longer holds the return");
+}
+
 // Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01 (task_01a0f7ff-bbd6): a background
 // requester read its answer in the still-running turn, yet the queued `reply` run stayed to resume
 // that turn with the same answer until it was cancelled by hand 17 minutes later. Reading the answer

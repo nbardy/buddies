@@ -12,7 +12,6 @@ import type {
   TaskQuery,
 } from '@unleashd/buddies-core';
 import {
-  AnswerSchema,
   BuddyCreateSchema,
   type BuddyMediaResult,
   type BuddyMutation,
@@ -22,7 +21,6 @@ import {
   BuilderOpenSchema,
   ChannelSchema,
   type ConversationConfig,
-  DirectPostSchema,
   DocWriteSchema,
   NewDirectSchema,
   PostBodySchema,
@@ -61,6 +59,7 @@ import {
 import { type BuddyEvents, type MentionPicks, NO_PICKS, announcePost } from './events';
 import type { Runner } from './runner';
 import { channelsNamed } from './search-channels';
+import { checkedEvidence } from './tool-views';
 
 /**
  * The owner's Buddy API over the crate, mounted behind the auth gate (server.ts registers it after
@@ -204,8 +203,37 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     const written = await write(post);
     return announcePost(deps, OWNER, written, NO_PICKS);
   };
+  // `answers` takes the same road as every post (one write path), then lands in the request's own
+  // thread; the channel in the path must be that request's, so a stale or forged id fails loudly.
+  const ownerAnswer = async (channelId: string, input: z.infer<typeof PostBodySchema>) => {
+    const { answers: requestId, body, evidence, key } = input;
+    const extras = Object.entries({
+      replyToId: input.replyToId,
+      taskId: input.taskId,
+      purpose: input.purpose,
+      asBuddyId: input.asBuddyId,
+      'kind request': input.kind === 'request' || undefined,
+      mentionConfigs: input.mentionConfigs.length > 0 || undefined,
+    }).flatMap(([name, value]) => (value === undefined ? [] : [name]));
+    if (extras.length)
+      throw new CoreError(
+        'invalid',
+        `answers takes only body, evidence and key; drop ${extras.join(', ')}`
+      );
+    const request = await core.getPost(OWNER, requestId as string);
+    if (request.channelId !== channelId)
+      throw new CoreError('invalid', `request ${request.id} is not in channel ${channelId}`);
+    return {
+      post: (await posted(core.answer(OWNER, { requestId: request.id, body, evidence, key }))).post,
+    };
+  };
   const ownerPost = async (raw: unknown, ref: ChannelRef) => {
-    const { asBuddyId, ...input } = PostBodySchema.parse(raw);
+    const parsed = PostBodySchema.parse(raw);
+    if (parsed.answers !== undefined) {
+      if (ref.kind !== 'id') throw new Error('an answer is posted to its request channel by id');
+      return ownerAnswer(ref.id, parsed);
+    }
+    const { asBuddyId, answers: _answers, ...input } = parsed;
     const author = asBuddyId === undefined ? OWNER : buddyActor(asBuddyId);
     const chosen = mentionConfigsByBuddy(input.body, input.mentionConfigs);
     return publishOwnerPost(deps, author, ref, input, chosen);
@@ -255,11 +283,19 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       const { managerId, ...input } = BuddyCreateSchema.parse(req.body);
       return write(core.createBuddy(OWNER, { ...input, manager: managerRef(managerId ?? null) }));
     },
-    [buddyMutationRoute('direct.open')]: (req) => channels.openDirect(p(req, 'buddyId')),
+    // The owner's ongoing chat with the Buddy, plus the 1:1 DM CHANNEL (opened on demand, one per
+    // pair) that `channel.post` writes to: there is no direct-post route, and a wake is a post.
+    [buddyMutationRoute('direct.open')]: async (req) => {
+      const buddyId = p(req, 'buddyId');
+      const [chat, channel] = await Promise.all([
+        channels.openDirect(buddyId),
+        core.openChannel(OWNER, { kind: 'direct', members: [OWNER, buddyActor(buddyId)] }),
+      ]);
+      return { ...chat, channelId: channel.id };
+    },
     'GET 200 /api/buddies/:buddyId/direct/chain': (req) => channels.directChain(p(req, 'buddyId')),
     [buddyMutationRoute('direct.new')]: (req) =>
       channels.newDirect(p(req, 'buddyId'), NewDirectSchema.parse(req.body ?? {})),
-    [buddyMutationRoute('buddy.wake')]: (req) => channels.wake(p(req, 'buddyId')),
     // ---- docs -----------------------------------------------------------------------------------
     'GET 200 /api/buddies/:buddyId/docs/:kind': async (req) => {
       const buddyId = p(req, 'buddyId');
@@ -300,14 +336,15 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     },
     [buddyMutationRoute('task.create')]: (req) =>
       write(core.upsertTask(OWNER, { kind: 'create', ...TaskCreateSchema.parse(req.body) })),
-    [buddyMutationRoute('task.update')]: (req) =>
-      write(
-        core.upsertTask(OWNER, {
-          kind: 'update',
-          taskId: p(req, 'taskId'),
-          ...TaskUpdateSchema.parse(req.body),
-        })
-      ),
+    [buddyMutationRoute('task.update')]: (req) => {
+      const changes = TaskUpdateSchema.parse(req.body);
+      // The evidence cap holds on every write path, not only MCP `task_write`: an owner write of
+      // a long entry would otherwise bloat every later `tasks get` the same way (2026-10-06).
+      if (changes.changes.evidence) checkedEvidence(changes.changes.evidence);
+      return write(
+        core.upsertTask(OWNER, { kind: 'update', taskId: p(req, 'taskId'), ...changes })
+      );
+    },
     // ---- runs -----------------------------------------------------------------------------------
     'GET 200 /api/buddies/runs': async (req) => {
       const found = runQueries.find(([name]) => q(req, name));
@@ -356,8 +393,13 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         posts: page.posts,
       };
     },
-    'GET 200 /api/buddies/workspaces/:workspaceId/channels/archived': (req) =>
-      core.archivedChannels(OWNER, p(req, 'workspaceId')),
+    // `?archived=1` is the archive; without it the channels the owner can post in now.
+    'GET 200 /api/buddies/workspaces/:workspaceId/channels': async (req) =>
+      q(req, 'archived') === '1'
+        ? core.archivedChannels(OWNER, p(req, 'workspaceId'))
+        : (await core.inbox(OWNER, p(req, 'workspaceId'))).channels
+            .map((row) => row.channel)
+            .filter((channel) => channel.archivedAt === undefined),
     [buddyMutationRoute('channel.archive')]: async (req) => {
       const { archived, key } = ChannelArchiveSchema.parse(req.body);
       const channelId = p(req, 'channelId');
@@ -399,26 +441,25 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     },
     [buddyMutationRoute('channel.post')]: (req) =>
       ownerPost(req.body, { kind: 'id', id: p(req, 'channelId') }),
-    [buddyMutationRoute('direct.post')]: (req) => {
-      const { members, ...body } = DirectPostSchema.parse(req.body);
-      return ownerPost(body, { kind: 'direct', members: [OWNER, ...members.map(buddyActor)] });
-    },
     // A failed reply's retry on another harness (493c1c7); the new attempt is a later reply.
     [buddyMutationRoute('reply.retry')]: async (req) =>
       channels.retryReply(
         await core.getPost(OWNER, p(req, 'postId')),
         RetrySchema.parse(req.body).config
       ),
-    [buddyMutationRoute('request.answer')]: async (req) => {
-      const input = AnswerSchema.parse(req.body);
-      return (await posted(core.answer(OWNER, { requestId: p(req, 'postId'), ...input }))).post;
-    },
     // Read through `postId`, the newest post the client rendered: a post that landed after the
-    // render stays unread. The push clears the channel on the owner's other devices.
-    [buddyMutationRoute('channel.read')]: async (req) => {
-      const { postId } = ReadSchema.parse(req.body);
-      await core.markRead(OWNER, p(req, 'channelId'), postId);
-      deps.channelChanged(p(req, 'channelId'));
+    // render stays unread. A channel read clears the channel on the owner's other devices; a
+    // followed thread's read leaves the channel's own cursor alone.
+    [buddyMutationRoute('read')]: async (req) => {
+      const read = ReadSchema.parse(req.body);
+      if ('channelId' in read) {
+        await core.markRead(OWNER, read.channelId, read.postId);
+        deps.channelChanged(read.channelId);
+      } else {
+        const root = await core.getPost(OWNER, read.rootId);
+        await core.markThreadRead(OWNER, root.id, read.postId);
+        deps.channelChanged(root.channelId);
+      }
       return { ok: true };
     },
     // The Threads view (THREADS_VIEW_2026-09-28.md): followed threads, unread first.
@@ -428,14 +469,6 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         p(req, 'workspaceId'),
         z.coerce.number().int().min(1).max(200).default(30).parse(q(req, 'limit'))
       ),
-    // Read a followed thread through `postId`; the channel's own cursor is left alone.
-    [buddyMutationRoute('thread.read')]: async (req) => {
-      const { postId } = ReadSchema.parse(req.body);
-      const root = await core.getPost(OWNER, p(req, 'rootId'));
-      await core.markThreadRead(OWNER, root.id, postId);
-      deps.channelChanged(root.channelId);
-      return { ok: true };
-    },
     'GET 200 /api/buddies/channels/:channelId/responding': async (req) =>
       channels.responding(p(req, 'channelId')),
     // ---- one buddy: last, so `/api/buddies/tasks` and friends never read as a buddy id ----------
