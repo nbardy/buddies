@@ -1533,7 +1533,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
       detail: '',
       execution: { kind: 'profile' as const, config: createDefaultConversationConfig('codex') },
     };
-    const before = mentionChoice(buddy, new Map(), { kind: 'loaded', seats: (await threadRead()).seats });
+    const before = mentionChoice(buddy, new Map(), {
+      kind: 'loaded',
+      seats: (await threadRead()).seats,
+    });
     assert.equal(
       ('config' in before ? before.config : null)?.provider,
       'claude',
@@ -1558,7 +1561,10 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     );
     assert.match(failed.body, /You've hit your weekly limit/);
     await until(() => w.channels.responding(w.general.id).length === 0, 'failed pair idle');
-    const shown = mentionChoice(buddy, new Map(), { kind: 'loaded', seats: (await threadRead()).seats });
+    const shown = mentionChoice(buddy, new Map(), {
+      kind: 'loaded',
+      seats: (await threadRead()).seats,
+    });
     assert.equal(
       choiceLabel(shown, null),
       `${w.turns[0].request.model} · high`,

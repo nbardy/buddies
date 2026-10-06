@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
-import type { Actor, ChannelRef, DocRef, DocScope, ListScope } from '@unleashd/buddies-core';
+import type { Actor, ChannelRef, DocRef, DocScope, ListScope, Post } from '@unleashd/buddies-core';
 import { z } from 'zod';
 import type { MessageSource } from '../conversations/messages';
 import { requireCanonicalPostMedia } from './channel-media';
@@ -25,6 +25,7 @@ import {
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
 import type { BuddyGrant, Grants, Role, TurnGrant } from './grants';
 import { attachToRelay } from './mcp-relay';
+import { type MentionResolution, resolveMentions } from './mentions';
 import {
   TAIL_MAX,
   checkedEvidence,
@@ -432,6 +433,13 @@ export const LEGACY_TOOLS: Readonly<
   },
 };
 
+/** The author learns whom the post woke; an unresolved `@Token` is data, not a silent no-op. */
+const withMentions = (post: Post, { mentioned, unresolved }: MentionResolution) => ({
+  ...post,
+  mentioned,
+  unresolved,
+});
+
 // Pattern: table-driven (docs/patterns.md#table-driven)
 const BUDDY_TOOLS = {
   post: buddyTool({
@@ -441,7 +449,7 @@ const BUDDY_TOOLS = {
     schema: z.object({
       channel: channelRef.optional(),
       answers: z.string().min(1).optional().describe('A request id; not with channel'),
-      body: z.string().min(1).max(32_000),
+      body: z.string().min(1).max(32_000).describe('Exact @Name mentions; see `unresolved`'),
       kind: z.enum(['inform', 'request']).default('inform'),
       replyToId: z.string().optional(),
       taskId: z.string().optional(),
@@ -466,27 +474,34 @@ const BUDDY_TOOLS = {
           throw new Error(
             `post answers takes only body, evidence and key; drop ${dropped.join(', ')}`
           );
-        return (
-          await announcePost(
-            deps,
-            grant.author,
-            await deps.core.answer(grant.author, {
-              requestId: answers,
-              body: input.body,
-              evidence: input.evidence,
-              key: input.key,
-            }),
-            NO_PICKS
-          )
-        ).post;
+        const resolved = resolveMentions(
+          input.body,
+          await deps.core.listBuddies(grant.workspaceId)
+        );
+        const { post } = await announcePost(
+          deps,
+          grant.author,
+          await deps.core.answer(grant.author, {
+            requestId: answers,
+            body: resolved.body,
+            evidence: input.evidence,
+            key: input.key,
+          }),
+          NO_PICKS
+        );
+        return withMentions(post, resolved);
       }
       if (!ref) throw new Error('post needs channel or answers');
       const runConfig = worker && checkedRunConfig(worker);
       const channel = await deps.core.openChannel(grant.author, toChannelRef(grant.author, ref));
-      const body = requireCanonicalPostMedia(input.body, {
-        uploadsRoot: deps.uploadsRoot(),
-        channelId: channel.id,
-      });
+      const resolved = resolveMentions(
+        requireCanonicalPostMedia(input.body, {
+          uploadsRoot: deps.uploadsRoot(),
+          channelId: channel.id,
+        }),
+        await deps.core.listBuddies(grant.workspaceId)
+      );
+      const body = resolved.body;
       const { post, created } = await deps.core.post(
         grant.author,
         { kind: 'id', id: channel.id },
@@ -503,7 +518,7 @@ const BUDDY_TOOLS = {
       );
       // A replayed key (a retried tool call) announces nothing: it would wake everyone again.
       if (created) deps.events.emit({ kind: 'posted', post, channel, picks: NO_PICKS });
-      return post;
+      return withMentions(post, resolved);
     },
   }),
   inbox: buddyTool({
