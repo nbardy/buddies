@@ -43,6 +43,7 @@ const LOADING_ENTRY: ResourceEntry<never> = Object.freeze({ kind: 'loading' });
  * out from under a visible view.
  */
 const RETAINED_KEY_LIMIT = 300;
+const RESOURCE_TIMEOUT_MS = 30_000;
 
 const resourceCacheAtom = atom(new Map<string, ResourceEntry<unknown>>());
 
@@ -180,6 +181,7 @@ function normalizeError(cause: unknown): Error {
  * request. Resolves when the entry has settled; the value is read from the
  * store, not returned, so every consumer sees the same snapshot.
  */
+// Pattern: one-write-path (docs/patterns.md#one-write-path)
 export function loadResource<T>(resource: Resource<T>): Promise<void> {
   loaders.set(resource.key, resource as Resource<unknown>);
 
@@ -191,8 +193,20 @@ export function loadResource<T>(resource: Resource<T>): Promise<void> {
   if (!current) writeEntry(resource.key, LOADING_ENTRY);
 
   const controller = new AbortController();
-  const promise = resource
-    .load(controller.signal)
+  // Unbounded reads hold the shared in-flight slot forever: polls/retries join it and model
+  // chips could never leave Loading. Guard: resource-cache.test.ts bounds even an inert loader.
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      reject(new Error('Request timed out. Please retry.'));
+    }, RESOURCE_TIMEOUT_MS);
+  });
+  const promise = Promise.race([
+    new Promise<T>((resolve) => resolve(resource.load(controller.signal))),
+    deadline,
+  ])
     .then((value) => {
       if (controller.signal.aborted) return;
       writeEntry(
@@ -202,13 +216,15 @@ export function loadResource<T>(resource: Resource<T>): Promise<void> {
     })
     .catch((cause) => {
       const error = normalizeError(cause);
-      if (controller.signal.aborted || error.name === 'AbortError') return;
+      if (controller.signal.aborted) return;
       writeEntry(
         resource.key,
         failureEntry(jotaiStore.get(resourceCacheAtom).get(resource.key), error)
       );
     })
     .finally(() => {
+      clearTimeout(timeout);
+      if (timedOut) controller.abort();
       const settled = inFlight.get(resource.key);
       if (settled?.promise !== promise) return;
       inFlight.delete(resource.key);

@@ -107,6 +107,42 @@ test('concurrent readers of one key share a single request', async () => {
   assert.equal(calls, 1, 'two subscribers, one fetch');
 });
 
+test('a hung read releases its shared slot, reports failure and can retry', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const hung = deferred<string>();
+  let signal!: AbortSignal;
+  const key = '/api/buddies/posts/hung/thread?limit=50';
+  const pending = loadResource({
+    key,
+    load: (requestSignal) => {
+      signal = requestSignal;
+      return hung.promise; // Deliberately ignores abort, as a stalled loader might.
+    },
+  });
+  t.mock.timers.tick(30_000);
+  await pending;
+  const failed = read(key);
+  assert.equal(failed.kind, 'failed');
+  assert.match(failed.kind === 'failed' ? failed.error.message : '', /timed out/);
+  assert.equal(signal.aborted, true);
+  await loadResource({ key, load: async () => 'retried' });
+  hung.resolve('late obsolete answer');
+  await new Promise((resolve) => setImmediate(resolve));
+  const retried = read<string>(key);
+  assert.equal(retried.kind === 'ready' && retried.value, 'retried');
+});
+
+test('a loader AbortError without cache cancellation is a visible failure', async () => {
+  const key = '/api/aborted-read';
+  await loadResource({
+    key,
+    load: async () => {
+      throw new DOMException('Read aborted', 'AbortError');
+    },
+  });
+  assert.equal(read(key).kind, 'failed', 'never leaves the cache stuck loading');
+});
+
 // Guards the deleted `prevProjectsRef` in useSwarmProjects: a failed refresh
 // must keep the last-known value on screen rather than blanking the view, and
 // must still report the error.
