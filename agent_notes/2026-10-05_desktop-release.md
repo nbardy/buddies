@@ -122,3 +122,45 @@ The sidebar also keeps an italic "Creating buddy" row after the Builder finishes
   including 098c83b (onboarding lands on / with one create-a-workspace form) and 23aab00
   (keyed model retry). They are not in this DMG. If they are launch content, they need a push
   and another rebuild/test.
+
+## Addendum: asset rebuilt from origin/main 2871789 (2026-10-06 ~22:27Z)
+Source: 2871789d132841ec1ba3dcb1470edd27cc49c7f2 (= origin/main at build time), clean worktree
+/tmp/unleashd-desktop-app (detached, `git status --porcelain` empty, submodule 7a41287). Includes
+caaffa2 (Builder first-prompt envelope fix, task_01a10d29) and 098c83b (onboarding form on /).
+- `pnpm desktop:build` exit 0; payload smoke "listening after 2051ms". Ingest addon: cache hit
+  key 97600c7ba86d (key = sha256 over crate src/**, so markers.rs is an input). The cached and the
+  installed app's `payload/crates/unleashd-ingest/ingest.node` are the same file (sha256 b9323388…)
+  and contain the new `-->\nWorking directory: [^\n]*` suffix regex.
+- **DMG sha256 86d48d6bc8546ae50ce65ce82645cdf7377e90c3b88534b9f5877a139711996a, 160971946 bytes.**
+- Uploaded with `gh release upload --clobber` (asset digest equals it); release notes now name
+  2871789 and this digest. `releases/latest/download/Buddies-macos-arm64.dmg` downloaded in full
+  (HTTP 200, 160971946 bytes) has the same sha256. Tag still at 14de9f4.
+
+### Evidence (installed via ditto from the .dmg, Finder PATH, temp BUDDIES_DESKTOP_HOME, real HOME)
+Screenshots: `agent_notes/2026-10-06_desktop-release-2871789/`.
+- No key: server ready +1.0–1.5 s; `/` and `/api/dependencies` 200 with no token; claude + codex
+  ready; "Buddy runner started" (d1).
+- Onboarding changed (098c83b): Welcome → Setup ("Create your workspace") → a form on `/`. The CDP
+  scripts were updated for it (kept in /tmp/rel-cdp-keep/cdp; verify script /tmp/rel-verify2.sh).
+- Builder: first assistant text +8.0 s, completed 45 s, hired Notes Engineer (codex, gpt-6.1-sol) (d3).
+- DM "Reply with exactly the word PONG…" → PONG at +9.3 s (d4).
+- **Builder reload (task_01a10d29): PASS.** Builder chat opened after its reply, page reloaded:
+  the "You" row shows the visible prompt ("A tiny notes CLI…"), no "[Buddy Builder context recovery
+  failed…]" row, one assistant reply (b1 before, b2 after). Baselines with the defect:
+  `2026-10-06_desktop-release-afd4f65/d7-builder-after-reload.webp`.
+- Missing CLIs (simulated, temp HOME, installers suppressed; temp HOME held only `.cache` after):
+  both `missing`, agent `none`; Setup shows install + login commands; DM error "Couldn't start
+  claude: the `claude` command was not found…" at +2.3 s, and the empty Buddy bubble seen on
+  e09802b is gone (m2).
+
+### Observed, not blocking
+- Kicking off the Builder while the server is still in startup ingest shows the raw code
+  `server_starting` under the form and does not retry (x-kickoff-server-starting.webp). Seen once:
+  this Mac ingests 11.6k real transcripts (12.7–65 s, the 65 s run during maintenance-sleep cycles);
+  a fresh install has none. The client retries `server_starting` only after a reconnect
+  (`RETRYABLE_CREATION_CODES`, client/src/atoms/commands.ts). Rerun under `caffeinate -is`, driven
+  after "Initial load complete": pass.
+- Quitting the app leaves `payload/server/relay/buddy-mcp-relay.mjs` running (orphaned to launchd)
+  until killed; seen on all three runs.
+- Sidebar still keeps the italic "Creating buddy" row after the Builder finishes.
+- The Setup step prints the machine's tailnet hostname; those shots (d2/m1) are not committed.

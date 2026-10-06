@@ -433,6 +433,44 @@ fn an_inbox_request_starts_no_run_for_its_answer_or_failure() {
     assert!(s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 10).unwrap().is_empty());
 }
 
+// Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01 (task_01a0f7ff-bbd6): a background
+// requester read its answer in the still-running turn, yet the queued `reply` run stayed to resume
+// that turn with the same answer until it was cancelled by hand 17 minutes later. Reading the answer
+// IS the delivery, so reading settles the queued return with no model turn; an unread answer still
+// returns exactly once.
+#[test]
+fn reading_an_answer_settles_its_queued_return_run() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let read = s.post(&buddy("mid"), dm("mid", "ic"), request("read me", "r1")).unwrap();
+    let unread = s.post(&buddy("mid"), dm("mid", "ic"), request("leave me", "r2")).unwrap();
+    let (c1, c2) = (s.claim_run(lease(60_000)).unwrap().unwrap(), s.claim_run(lease(60_000)).unwrap().unwrap());
+    let answer = |s: &mut Store, id: &str, key: &str| {
+        s.answer(&buddy("ic"), AnswerInput { request_id: id.into(), body: "done".into(), evidence: vec![], key: key.into() }).unwrap()
+    };
+    let (a1, _a2) = (answer(s, &read.id, "a1"), answer(s, &unread.id, "a2"));
+    s.settle_run(&c1.run.id, &c1.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    s.settle_run(&c2.run.id, &c2.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+
+    s.mark_thread_read(&buddy("ic"), &read.id, &a1.id).unwrap();
+    s.mark_read(&buddy("mid"), &read.channel_id, &read.id).unwrap();
+    assert_eq!(queued_returns(s), 2, "another reader's cursor, and a channel read that never shows the answer, settle nothing");
+    s.mark_thread_read(&buddy("mid"), &read.id, &a1.id).unwrap();
+
+    let runs = s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 10).unwrap();
+    let returned = |post: &str| runs.iter().find(|r| r.input == RunInput::Reply { post_id: post.into() }).unwrap();
+    assert_eq!(returned(&read.id).status, RunStatus::Cancelled, "the answer was read: no turn");
+    assert_eq!(returned(&read.id).error_code.as_deref(), Some("consumed"));
+    assert_eq!(returned(&unread.id).status, RunStatus::Queued, "an answer past the cursor still returns");
+    let back = s.claim_run(lease(60_000)).unwrap().unwrap();
+    assert_eq!(back.run.input, RunInput::Reply { post_id: unread.id.clone() });
+    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "exactly once");
+}
+
+fn queued_returns(s: &Store) -> usize {
+    s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 10).unwrap().iter().filter(|r| r.status == RunStatus::Queued).count()
+}
+
 // 2026-09-28: no run could choose its model, so a Buddy launched four untracked `codex exec`
 // workers from a thread (agent_notes/2026-09-28_buddy-worker-spawn-gap.md). A worker is a request
 // with a run config: its run carries the config, and the answer returns to the spawning call.

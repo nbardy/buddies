@@ -664,6 +664,7 @@ impl Store {
                 "UPDATE thread_read SET last_ord = ?3, updated_at = ?4 WHERE reader = ?1 AND root_id = ?2 AND last_ord < ?3",
                 params![actor.key(), root_id, post.ord, now_iso()],
             )?;
+            settle_read_returns(tx, actor, root_id, &post.ord)?;
             Ok(())
         })
     }
@@ -865,6 +866,31 @@ fn thread_root(tx: &Transaction, parent_id: &str, channel_id: &str) -> Result<St
 /// An answer goes back along the route its request fixed when it was sent.
 fn notify_author(tx: &Transaction, request: &Post) -> Result<()> {
     send_back(tx, request, RunInput::Reply { post_id: request.id.clone() })
+}
+
+/// Reading an answer is receiving it, so a Buddy that reads one settles its own queued return run:
+/// the `reply` run `send_back` queued to tell it the same thing. "Read" is the cursor the server
+/// already keeps: the thread's `thread_read`, which a Buddy's `channel_read` of the thread moves to
+/// the newest post it was shown. An answer is a reply in its request's thread, so it is never on a
+/// channel's feed page: a channel read does not show it and does not count. An inbox listing does
+/// not count either: it carries no answer text. Settling here, at the read, and not when the run is
+/// claimed, is what makes it work while the reader's own turn is still running, when the run would
+/// otherwise sit `conversation_busy` and then spend a model turn repeating the answer.
+/// Incident: 2026-10-01, answer post_01a0f62f-c576 was read by its running background requester at
+/// 06:39:42Z and its return run_01a0f62f-c579 stayed queued until cancelled by hand at 06:56Z.
+/// Only a queued run is touched; a run already claimed is delivering and finishes. `reply` is the
+/// only input kind (a failure notice carries no answer). Guards: crate test
+/// `reading_an_answer_settles_its_queued_return_run`, buddies-v2 "an answer the requester already
+/// read settles its return run with no model turn".
+fn settle_read_returns(tx: &Transaction, reader: &Actor, root_id: &str, through_ord: &str) -> Result<()> {
+    tx.execute(
+        "UPDATE run SET status = 'cancelled', error_code = 'consumed', error = 'the requester already read the answer', ended_at = ?4
+         WHERE input_kind = 'reply' AND status = 'queued' AND buddy_id IS ?1
+           AND input_id IN (SELECT req.id FROM post req JOIN post ans ON ans.id = req.answer_id
+                            WHERE ans.root_id = ?2 AND ans.ord <= ?3)",
+        params![reader.buddy_id(), root_id, through_ord, now_iso()],
+    )?;
+    Ok(())
 }
 
 // Pattern: route-at-send (docs/patterns.md#route-at-send)
