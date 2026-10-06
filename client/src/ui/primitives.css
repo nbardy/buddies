@@ -166,12 +166,19 @@
  * scrolls (useScrollActivity sets data-scrolling). Owner, 2026-09-27: the channel rail
  * still had the global 8px square bar, always on and over the unread badges. Chrome 121+
  * IGNORES ::-webkit-scrollbar once scrollbar-width/-color is set, so those are Firefox-only. */
+@property --ui-scroll-thumb {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
 .ui-scroll-quiet {
   overflow: hidden auto;
+  --ui-scroll-thumb: transparent;
+  transition: --ui-scroll-thumb 160ms ease-out;
 }
 
 .ui-scroll-quiet::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .ui-scroll-quiet::-webkit-scrollbar-track,
@@ -179,9 +186,16 @@
   border-radius: 999px;
   background: transparent;
 }
-
-.ui-scroll-quiet[data-scrolling]::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text-emphasis) 32%, transparent);
+.ui-scroll-quiet::-webkit-scrollbar-track {
+  margin-block: var(--sp-3);
+}
+.ui-scroll-quiet::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  background: var(--ui-scroll-thumb);
+  background-clip: padding-box;
+}
+.ui-scroll-quiet[data-scrolling] {
+  --ui-scroll-thumb: color-mix(in srgb, var(--text-emphasis) 24%, transparent);
 }
 
 @supports not selector(::-webkit-scrollbar) {

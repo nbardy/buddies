@@ -109,7 +109,7 @@ class Cdp {
   }
 }
 
-async function launchChrome(chromePath) {
+async function launchChrome(chromePath, showScrollbars) {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unleashd-shots-'));
   const child = spawn(
     chromePath,
@@ -120,7 +120,7 @@ async function launchChrome(chromePath) {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-extensions',
-      '--hide-scrollbars',
+      ...(showScrollbars ? [] : ['--hide-scrollbars']),
       // Software raster and WebGL: on the GPU path the Buddy sigil shader
       // rendered a few hundred different speckle pixels per card between two
       // runs, and status-dot edges antialiased differently (2026-09-25).
@@ -235,8 +235,8 @@ function stabilisingScript(clockMs) {
 }
 
 /** One blank headless tab: the base both the app session and the comparer use. */
-async function openTab() {
-  const { child, userDataDir, port } = await launchChrome(findChrome());
+async function openTab(showScrollbars = false) {
+  const { child, userDataDir, port } = await launchChrome(findChrome(), showScrollbars);
   let cdp;
   const exited = new Promise((resolve) => child.once('exit', resolve));
   // Wait for Chrome to exit before deleting its profile: a killed Chrome still
@@ -303,8 +303,8 @@ export async function openBlankTab() {
  * `await close()` must run (use try/finally) or a Chrome process outlives the
  * script.
  */
-export async function openSession({ baseUrl, token, clockMs }) {
-  const { cdp, sessionId, evaluate, close } = await openTab();
+export async function openSession({ baseUrl, token, clockMs, showScrollbars = false }) {
+  const { cdp, sessionId, evaluate, close } = await openTab(showScrollbars);
   try {
     // In-flight HTTP requests, for waitForNetworkIdle. WebSocket and
     // EventSource streams never finish, so they are not counted.

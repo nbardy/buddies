@@ -81,6 +81,8 @@ function ThreadPane({
   const paneId = useId();
   const paneRef = useRef<HTMLElement>(null);
   const drag = useRef<{ x: number; width: number } | null>(null);
+  const [resizing, setResizing] = useState(false);
+  const scrollActivity = useScrollActivity();
   const { thread, root, replying, replyRows, follow, onPosted } = useThreadView(
     channelId,
     rootId,
@@ -96,12 +98,14 @@ function ThreadPane({
       style={{ width: `min(${width}px, calc(100% - min(320px, 45%)))` }}
     >
       {/* Keep the channel readable when a saved width exceeds the current window.
-          Guard: thread-resize.test.mjs exercises drag, keyboard, reload and narrow windows. */}
+          Hover/focus left a full-height purple stripe after release; only active drag glows.
+          Guard: thread-resize.test.mjs checks release, scrolling, reload and narrow windows. */}
       <div
         className="channel-thread-resize"
         role="separator"
         tabIndex={0}
         aria-label="Resize thread"
+        data-resizing={resizing || undefined}
         aria-orientation="vertical"
         aria-controls={paneId}
         aria-valuemin={320}
@@ -113,6 +117,7 @@ function ThreadPane({
           event.preventDefault();
           event.currentTarget.focus();
           event.currentTarget.setPointerCapture(event.pointerId);
+          setResizing(true);
           drag.current = {
             x: event.clientX,
             width: paneRef.current?.getBoundingClientRect().width ?? width,
@@ -123,11 +128,14 @@ function ThreadPane({
         }}
         onPointerUp={(event) => {
           drag.current = null;
+          setResizing(false);
+          event.currentTarget.blur();
           if (event.currentTarget.hasPointerCapture(event.pointerId))
             event.currentTarget.releasePointerCapture(event.pointerId);
         }}
         onLostPointerCapture={() => {
           drag.current = null;
+          setResizing(false);
         }}
         onDoubleClick={() => setThreadWidth(420)}
         onKeyDown={(event) => {
@@ -159,9 +167,13 @@ function ThreadPane({
         </div>
       </header>
       <div
-        className="channel-browser-scroll ui-stack"
+        className="channel-browser-scroll ui-stack ui-scroll-quiet"
+        data-scrolling={scrollActivity['data-scrolling']}
         ref={follow.scrollRef}
-        onScroll={follow.onScroll}
+        onScroll={(event) => {
+          follow.onScroll(event);
+          scrollActivity.onScroll();
+        }}
       >
         {(thread.latest.kind === 'failed' || thread.latest.kind === 'stale') && (
           <p className="channel-browser-error" role="alert">
@@ -243,6 +255,7 @@ function ChannelPane({
   const posts = useWithOutbox(channelId, null, feed.posts);
   const rows = useMemo(() => channelRows(posts ?? []), [posts]);
   const follow = useFollowBottom(rows.length, posts, null);
+  const scrollActivity = useScrollActivity();
   // What was unread when the owner arrived; this visit's read marks never move it.
   const [arrival] = useState(() => arrivalOf(entry));
   const [opened, setOpened] = useState<ReadonlySet<string>>(NO_THREADS);
@@ -310,9 +323,13 @@ function ChannelPane({
         </header>
         {taskFilter === null ? (
           <div
-            className="channel-browser-scroll ui-stack"
+            className="channel-browser-scroll ui-stack ui-scroll-quiet"
+            data-scrolling={scrollActivity['data-scrolling']}
             ref={follow.scrollRef}
-            onScroll={follow.onScroll}
+            onScroll={(event) => {
+              follow.onScroll(event);
+              scrollActivity.onScroll();
+            }}
           >
             {(feed.latest.kind === 'failed' || feed.latest.kind === 'stale') && (
               <p className="channel-browser-error" role="alert">

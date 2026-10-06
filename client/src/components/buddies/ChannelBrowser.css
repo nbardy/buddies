@@ -107,12 +107,10 @@
 .channel-browser-switcher-menu a[aria-current="page"] {
   color: var(--text-bright);
 }
-
 .channel-browser-switcher-check {
   margin-left: auto;
   font-size: var(--fs-3);
 }
-
 .channel-browser-switcher-menu .channel-browser-switcher-activity {
   margin-top: 4px;
   border-top: 1px solid var(--border-subtle);
@@ -121,13 +119,11 @@
   color: var(--text-muted);
   font-size: var(--fs-4);
 }
-
 .channel-browser-rail-scroll {
   flex: 1;
   min-height: 0;
   padding: var(--sp-7) var(--sp-5) var(--sp-9);
 }
-
 .channel-browser-rail-connect {
   flex-shrink: 0;
   gap: var(--sp-4);
@@ -138,11 +134,9 @@
   font: 500 var(--fs-3) / 1 var(--font-mono);
   cursor: pointer;
 }
-
 .channel-browser-rail-connect:hover {
   color: var(--text-primary);
 }
-
 .channel-browser-rail-section {
   margin: 0;
   padding: 0 var(--sp-4);
@@ -150,13 +144,11 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-
 .channel-browser-rail-empty {
   margin: 0;
   padding: var(--sp-2) var(--sp-4);
   font-size: var(--fs-4);
 }
-
 .channel-browser-switcher-menu ul,
 .channel-browser-channels,
 .channel-browser-buddies {
@@ -166,7 +158,6 @@
   padding: 0;
   list-style: none;
 }
-
 .channel-browser-channels button,
 .channel-browser-buddy-link {
   display: flex;
@@ -187,44 +178,36 @@
   text-decoration: none;
   cursor: pointer;
 }
-
 .channel-browser-channels button:hover,
 .channel-browser-buddy-link:hover {
   background: color-mix(in srgb, var(--text-emphasis) 6%, transparent);
   color: var(--text-emphasis);
 }
-
 .channel-browser-channels button[aria-current="page"],
 .channel-browser-buddy-link[aria-current="page"] {
   background: color-mix(in srgb, var(--theme-user) 28%, transparent);
   color: var(--text-bright);
 }
-
 .channel-browser-hash {
   width: 14px;
   font-size: var(--fs-post);
   text-align: center;
 }
-
 .channel-browser-channels button[aria-current="page"] .channel-browser-hash {
   color: inherit;
 }
-
 .channel-browser-channel-name {
   flex: 1;
   min-width: 0;
 }
-
 /* Owner unread (Slack): new → bold and bright, read → dimmed. */
 .channel-browser-channels button[data-unread="new"] {
   color: var(--text-bright);
   font-weight: 700;
 }
-
 .channel-browser-channels button[data-unread="read"]:not([aria-current="page"]) {
   color: var(--text-muted);
 }
-
 /* Replies waiting on the owner. Only this is counted; plain new posts are bold. */
 .channel-browser-badge {
   min-width: 18px;
@@ -235,7 +218,6 @@
   font: 700 11px / 1 var(--font-mono);
   text-align: center;
 }
-
 .channel-browser-workspace-mark {
   display: grid;
   flex: none;
@@ -248,7 +230,6 @@
   font-size: var(--fs-1);
   font-weight: 700;
 }
-
 /* ── Channel pane ─────────────────────────────────────────────────────── */
 
 .channel-browser-main {
@@ -908,11 +889,16 @@ a.channel-browser-buddy-done {
   cursor: col-resize;
   touch-action: none;
   user-select: none;
-}
-.channel-thread-resize:hover,
-.channel-thread-resize:focus-visible {
-  background: color-mix(in srgb, var(--accent) 40%, transparent);
   outline: none;
+}
+.channel-thread-resize[data-resizing],
+.channel-thread-resize:focus-visible {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    transparent
+  );
 }
 .channel-thread-header {
   flex: none;

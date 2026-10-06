@@ -12,7 +12,11 @@ test(
   { skip: !url },
   async () => {
     const target = new URL(url);
-    const session = await openSession({ baseUrl: target.origin, token: resolveAuthToken() });
+    const session = await openSession({
+      baseUrl: target.origin,
+      token: resolveAuthToken(),
+      showScrollbars: true,
+    });
     const selector = '.channel-thread-resize';
     const capture = async (name) => {
       const file = `output/screenshots/thread-resize-review-20261006/${name}`;
@@ -49,6 +53,47 @@ test(
       await session.drag(selector, -180);
       await sleep(100);
       assert.equal(await width(), 600);
+      assert.equal(
+        await session.evaluate(
+          "getComputedStyle(document.querySelector('.channel-thread-resize')).backgroundImage"
+        ),
+        'none'
+      );
+      await session.evaluate(`document.querySelectorAll('.channel-browser-scroll').forEach(el => {
+        el.scrollTop += el.scrollTop > 100 ? -100 : 100;
+        el.dispatchEvent(new Event('scroll', {bubbles:true}));
+      })`);
+      await sleep(100);
+      assert.equal(
+        await session.evaluate(
+          "document.querySelectorAll('.channel-browser-scroll[data-scrolling]').length"
+        ),
+        2
+      );
+      const thumb = await session.evaluate(
+        `(() => { const s=getComputedStyle(document.querySelector('.channel-thread .channel-browser-scroll'),'::-webkit-scrollbar-thumb'); return {radius:s.borderRadius, border:s.borderRightWidth, clip:s.backgroundClip}; })()`
+      );
+      assert.deepEqual(thumb, { radius: '999px', border: '3px', clip: 'padding-box' });
+      assert.notEqual(
+        await session.evaluate(
+          "getComputedStyle(document.querySelector('.channel-thread .channel-browser-scroll'),'::-webkit-scrollbar-thumb').backgroundColor"
+        ),
+        'rgba(0, 0, 0, 0)'
+      );
+      await capture('scroll-active');
+      await sleep(1000);
+      assert.equal(
+        await session.evaluate(
+          "document.querySelectorAll('.channel-browser-scroll[data-scrolling]').length"
+        ),
+        0
+      );
+      assert.equal(
+        await session.evaluate(
+          "getComputedStyle(document.querySelector('.channel-thread .channel-browser-scroll'),'::-webkit-scrollbar-thumb').backgroundColor"
+        ),
+        'rgba(0, 0, 0, 0)'
+      );
       await key('ArrowLeft');
       assert.equal(await width(), 624);
       await key('ArrowRight');
