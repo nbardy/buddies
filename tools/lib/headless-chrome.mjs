@@ -407,8 +407,35 @@ export async function openSession({ baseUrl, token, clockMs }) {
       })()`);
       await cdp.send('Page.bringToFront', {}, sessionId);
       for (const type of ['mousePressed', 'mouseReleased']) {
-        await cdp.send('Input.dispatchMouseEvent', {type, ...point, button: 'left', clickCount: 1}, sessionId);
+        await cdp.send(
+          'Input.dispatchMouseEvent',
+          { type, ...point, button: 'left', clickCount: 1 },
+          sessionId
+        );
       }
+    };
+
+    const drag = async (selector, deltaX) => {
+      const point = await evaluate(`(() => {
+        const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+        return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2};
+      })()`);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point }, sessionId);
+      await cdp.send(
+        'Input.dispatchMouseEvent',
+        { type: 'mousePressed', ...point, button: 'left', clickCount: 1 },
+        sessionId
+      );
+      await cdp.send(
+        'Input.dispatchMouseEvent',
+        { type: 'mouseMoved', x: point.x + deltaX, y: point.y, button: 'left', buttons: 1 },
+        sessionId
+      );
+      await cdp.send(
+        'Input.dispatchMouseEvent',
+        { type: 'mouseReleased', x: point.x + deltaX, y: point.y, button: 'left', clickCount: 1 },
+        sessionId
+      );
     };
 
     const capture = async (file) => {
@@ -429,7 +456,17 @@ export async function openSession({ baseUrl, token, clockMs }) {
       );
     }
 
-    return { goto, evaluate, setViewport, waitForNetworkIdle, capture, click, blockedWrites, close };
+    return {
+      goto,
+      evaluate,
+      setViewport,
+      waitForNetworkIdle,
+      capture,
+      click,
+      drag,
+      blockedWrites,
+      close,
+    };
   } catch (error) {
     await close();
     throw error;

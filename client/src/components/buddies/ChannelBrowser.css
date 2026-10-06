@@ -8,15 +8,12 @@
   background: var(--bg-base);
   color: var(--text-primary);
 }
-
 /* ── Rail ─────────────────────────────────────────────────────────────── */
-
 .channel-browser-rail {
   min-height: 0;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-subtle);
 }
-
 .channel-browser-rail-header {
   justify-content: center;
   gap: var(--sp-2);
@@ -24,18 +21,15 @@
   padding: var(--sp-5) var(--sp-8);
   border-bottom: 1px solid var(--border-subtle);
 }
-
 .channel-browser-rail-header-row {
   justify-content: space-between;
   gap: var(--sp-4);
 }
-
 .channel-browser-switcher {
   position: relative;
   flex: 1;
   min-width: 0;
 }
-
 .channel-browser-workspace {
   gap: var(--sp-3);
   max-width: 100%;
@@ -49,12 +43,10 @@
   text-align: left;
   cursor: pointer;
 }
-
 .channel-browser-workspace:hover,
 .channel-browser-workspace[aria-expanded="true"] {
   background: color-mix(in srgb, var(--text-emphasis) 7%, transparent);
 }
-
 /* The workspace logo sits with its name in the switcher, not over Home's headline
    (owner, 2026-10-03: the centred hero logo looked out of place). */
 .channel-browser-workspace-emblem {
@@ -64,7 +56,6 @@
   margin-right: var(--sp-2);
   border-radius: 8px;
 }
-
 .channel-browser-workspace h1 {
   margin: 0;
   overflow: hidden;
@@ -75,20 +66,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .channel-browser-caret {
   flex: none;
   color: var(--text-bright);
   font-size: var(--fs-4);
 }
-
 .channel-browser-switcher-menu .channel-browser-switcher-new {
   margin-top: var(--sp-2);
   border-top: 1px solid var(--border-subtle);
   border-radius: 0 0 6px 6px;
   color: var(--text-emphasis);
 }
-
 .channel-browser-switcher-menu {
   position: absolute;
   top: calc(100% + 6px);
@@ -101,7 +89,6 @@
   background: var(--bg-panel);
   box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
 }
-
 .channel-browser-switcher-menu a {
   display: flex;
   align-items: center;
@@ -113,12 +100,10 @@
   font-size: var(--fs-5);
   text-decoration: none;
 }
-
 .channel-browser-switcher-menu a:hover {
   background: color-mix(in srgb, var(--text-emphasis) 7%, transparent);
   color: var(--text-emphasis);
 }
-
 .channel-browser-switcher-menu a[aria-current="page"] {
   color: var(--text-bright);
 }
@@ -909,10 +894,25 @@ a.channel-browser-buddy-done {
   font-style: italic;
 }
 .channel-thread {
+  position: relative;
   flex: none;
-  width: min(420px, 42vw);
+  min-width: 0;
   min-height: 0;
   border-left: 1px solid var(--border-subtle);
+}
+.channel-thread-resize {
+  position: absolute;
+  inset: 0 auto 0 -4px;
+  width: 8px;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.channel-thread-resize:hover,
+.channel-thread-resize:focus-visible {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  outline: none;
 }
 .channel-thread-header {
   flex: none;

@@ -1,9 +1,9 @@
 import { useAtomValue } from 'jotai';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
-import { openSetupAt } from '../../atoms/ui';
+import { openSetupAt, setThreadWidth, threadWidthAtom } from '../../atoms/ui';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { rowBuddy } from '../../utils/conversation-row';
@@ -18,15 +18,14 @@ import { ChannelDm } from './ChannelDm';
 import { ChannelLanding } from './ChannelLanding';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { LeadRow, Replying, type RowContext, renderRow, renderRows } from './ChannelRows';
-import { ChannelStar } from './ChannelStar';
 import { ChannelSearch } from './ChannelSearch';
+import { ChannelStar } from './ChannelStar';
 import { ChannelWorkers } from './ChannelWorkers';
 import { CopyLinkButton } from './CopyLinkButton';
 import { TaskFilter } from './TaskFilter';
 import { TaskPage } from './TaskPage';
 import { ThreadsPane } from './ThreadsPane';
 import { WorkspaceTeamDialog } from './WorkspaceTeamForm';
-import { NEW_WORKSPACE_PATH } from './workspace-home';
 import { errorText } from './api';
 import { useNewBuddy } from './buddy-direct-actions';
 import {
@@ -59,6 +58,7 @@ import { mentionsABuddy, plainChannelText } from './channel-text';
 import { type ChannelsView, channelsHref, channelsView } from './channels-view';
 import type { Channel, ChannelUnread, Inbox } from './types';
 import { initials } from './ui-contract';
+import { NEW_WORKSPACE_PATH } from './workspace-home';
 import './ChannelBrowser.css';
 
 const NO_THREADS: ReadonlySet<string> = new Set();
@@ -77,6 +77,10 @@ function ThreadPane({
   onClose(): void;
 }) {
   const channelId = entry.channel.id;
+  const width = useAtomValue(threadWidthAtom);
+  const paneId = useId();
+  const paneRef = useRef<HTMLElement>(null);
+  const drag = useRef<{ x: number; width: number } | null>(null);
   const { thread, root, replying, replyRows, follow, onPosted } = useThreadView(
     channelId,
     rootId,
@@ -84,7 +88,57 @@ function ThreadPane({
     context.directory.buddyNames
   );
   return (
-    <aside className="channel-thread ui-stack" aria-label="Thread">
+    <aside
+      id={paneId}
+      ref={paneRef}
+      className="channel-thread ui-stack"
+      aria-label="Thread"
+      style={{ width: `min(${width}px, calc(100% - min(320px, 45%)))` }}
+    >
+      {/* Keep the channel readable when a saved width exceeds the current window.
+          Guard: thread-resize.test.mjs exercises drag, keyboard, reload and narrow windows. */}
+      <div
+        className="channel-thread-resize"
+        role="separator"
+        tabIndex={0}
+        aria-label="Resize thread"
+        aria-orientation="vertical"
+        aria-controls={paneId}
+        aria-valuemin={320}
+        aria-valuemax={960}
+        aria-valuenow={width}
+        title="Drag to resize thread. Arrow keys adjust; double-click resets."
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.currentTarget.focus();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          drag.current = {
+            x: event.clientX,
+            width: paneRef.current?.getBoundingClientRect().width ?? width,
+          };
+        }}
+        onPointerMove={(event) => {
+          if (drag.current) setThreadWidth(drag.current.width + drag.current.x - event.clientX);
+        }}
+        onPointerUp={(event) => {
+          drag.current = null;
+          if (event.currentTarget.hasPointerCapture(event.pointerId))
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onLostPointerCapture={() => {
+          drag.current = null;
+        }}
+        onDoubleClick={() => setThreadWidth(420)}
+        onKeyDown={(event) => {
+          const next = { ArrowLeft: width + 24, ArrowRight: width - 24, Home: 320, End: 960 }[
+            event.key
+          ];
+          if (next === undefined) return;
+          event.preventDefault();
+          setThreadWidth(next);
+        }}
+      />
       <header className="channel-thread-header ui-row">
         <div>
           <h2>Thread</h2>

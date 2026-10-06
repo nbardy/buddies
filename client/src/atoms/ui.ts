@@ -314,3 +314,18 @@ export function toggleChannelStar(channelId: string): void {
     toggleInList(jotaiStore.get(starredChannelIdsAtom), channelId)
   );
 }
+
+// Pattern: one-write-path (docs/patterns.md#one-write-path)
+/** Desktop thread width belongs to this device, across workspaces and reloads. */
+export const threadWidthAtom = atomWithStorage<number>(
+  'unleashd-thread-width',
+  420,
+  validatedStorage<number>((raw) =>
+    typeof raw === 'number' && Number.isFinite(raw) && raw >= 320 && raw <= 960 ? raw : null
+  ),
+  { getOnInit: true }
+);
+
+export function setThreadWidth(width: number): void {
+  jotaiStore.set(threadWidthAtom, Math.max(320, Math.min(960, width)));
+}
