@@ -196,7 +196,6 @@ function postInThread(events: BuddyEvents, rootId: string, author: Actor, ms: nu
  *   - `follow: false` unsubscribes ("notify only" is unsubscribing, decision D2/D).
  * Subscribing BEFORE the wait means a post during it is both returned and queued as a delivery;
  * returning it reads it, and the read fences that delivery, so it is heard once.
- * The follow-up gate skips a subscriber (channels.ts, `deliveredTo`): it hears through delivery.
  */
 async function followThread(
   deps: ToolDeps,

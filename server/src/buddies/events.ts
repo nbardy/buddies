@@ -9,7 +9,7 @@ export const NO_PICKS: MentionPicks = new Map();
  * The in-process change bus. Every Buddy write (MCP tool, owner route, runner, responder) now
  * runs in this process, so a listener here sees all of them. B2: the old buses fired inside the
  * per-turn MCP helper process, where nothing listened, so a Buddy's MCP post never pushed
- * `channel_changed` or woke the follow-up gate. Guard: `buddies-v2.test.ts` "an MCP write fires
+ * `channel_changed`. Guard: `buddies-v2.test.ts` "an MCP write fires
  * the change bus".
  */
 export type BuddyEvent =

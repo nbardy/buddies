@@ -43,6 +43,13 @@ remain the three core components.
 
 ## Mention replies (host policy, `server/src/buddies/channels.ts` since T11)
 
+> **SUCCESSOR 2026-10-06 (step 5, task_01a11013-b205; owner decisions A–K, delivery design Task 4).**
+> The pair machine (`channel-pair.ts`) and the follow-up gate (`channel-reply-gate.ts`) described below
+> are deleted. A mention, a task-comment mention, the owner's DM post and a retry are `deliver` runs
+> written with the post (crate `wake`); the Buddy's seat opens when the run is claimed
+> (`channels.ts openSeat`, same ids), and a thread participant is a subscriber that gets one coalesced
+> delivery per burst. The text below is history, kept for why the old rules existed.
+
 1. Every author's mention dispatches, through ONE function
    (`respondToMentions`): the owner's post route calls it with the chip picks,
    the `posted` event calls it for a Buddy's post with none, so an un-picked

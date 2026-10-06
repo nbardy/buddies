@@ -401,7 +401,7 @@ export function createRunner(options: {
    * and schedule fires; owner decisions A–K). It is a turn in the conversation that follows the
    * thread, a human chat included (decision A), claimed only once the conversation is idle
    * (`conversation_busy`) and after any owner message queued there (`owner_first`). With no
-   * conversation yet it opens the Buddy's SEAT in the thread (the same ids the pair machine used);
+   * conversation yet it opens the Buddy's SEAT in the thread (the same ids the deleted pair machine used);
    * a schedule fire, which the Buddy itself wrote, opens a fresh background conversation. Either
    * is subscribed by `bindRun`. Everything it would show was read meanwhile: no turn (the fence).
    * The turn holds owner authority only when every post it shows is the owner's (D9, B1).

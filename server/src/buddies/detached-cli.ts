@@ -10,7 +10,7 @@ const CURSOR_PROJECTS_DIR = path.join(os.homedir(), '.cursor', 'projects');
  * or codex `--ephemeral`: every run writes
  * `~/.cursor/projects/<encoded cwd>/agent-transcripts/<sessionId>/`, and the
  * Cursor disk adapter imports that as a conversation. A background run that
- * must stay invisible (the reply gate, the memory reviewer) therefore deletes
+ * must stay invisible (the memory reviewer) therefore deletes
  * its own files, found by session id, once the process has exited.
  *
  * Found by session id rather than by re-encoding the cwd: the directory name
@@ -59,7 +59,7 @@ type Completion = Awaited<Turn['completed']>;
 const STOP_GRACE_MS = 5_000;
 
 /**
- * One background CLI run that must stay invisible: the reply gate and the memory reviewer.
+ * One background CLI run that must stay invisible: the memory reviewer.
  * `onEvent` sees every event and may `stop` the run; an aborted `signal` stops it too, and a
  * stopped run is killed after STOP_GRACE_MS. Resolves once the process exited AND its events
  * drained (it keeps process ownership until then). The returned `result` rethrows a failed run,
