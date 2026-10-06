@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { recordsCarrier } from './turns/intake';
 import os from 'node:os';
 import path from 'node:path';
 import { ProviderSchema, encodeRows } from '@unleashd/shared';
@@ -389,6 +390,12 @@ const buddyCreationService: BuddyCreationService = createBuddyCreationService({
 
 // One background Buddy turn = one conversation runtime turn (runCoordinationMessage).
 const buddyRunnerHost: RunnerHost = {
+  admitChat: ({ conversationId, turnId, body, run }) => {
+    const conversation = conversations.get(conversationId);
+    // A deleted conversation's queued message has nowhere to run; its run ends at its lease.
+    if (!conversation) throw new Error(`Chat conversation ${conversationId} is not registered`);
+    conversation.admitChatClaim(turnId, body, run);
+  },
   registered: (id) => conversations.get(id) !== undefined,
   defaultModel: providerDefaultModel,
   reconfigure: async (conversationId, config) => {
@@ -469,6 +476,8 @@ const buddyPolicyPort = createBuddyPolicyPort({
   spec: buddyMcpSpec,
 });
 const Conversation = createConversationRuntime({
+  // Chat and Builder owner messages are rows of the records store (turns/intake.ts).
+  inputs: recordsCarrier(conversationConfigStore),
   // BuddyTurnPolicy (buddies/turn-policy.ts) reaches the Buddy module only through this port.
   buddies: buddyPolicyPort,
   broadcast: applicationContext.broadcast,
@@ -763,7 +772,6 @@ shutdownController = registerShutdownHandlers(
     flushGraceMs: SHUTDOWN_FLUSH_GRACE_MS,
   },
   {
-    conversations: () => conversations.values(),
     activeSchedulerRuns: () => memoryReviewer.activeCount() + buddyRunner.settling(),
     pauseScheduler: pauseBuddyScheduler,
     resumeScheduler: resumeBuddyScheduler,
@@ -902,6 +910,12 @@ void runServerStartup(
     loadConversations: async () => {
       await startIngestList();
       await runtimeBuilder.recover();
+      // Ordinary chats and Builders: queue the owner messages that were sent and never started.
+      // After `recover` (the runtimes exist) and before adoption, whose turns settle their own.
+      for (const id of await conversationConfigStore.conversationsWithInputs()) {
+        const conversation = conversations.get(id) ?? (await runtimeBuilder.materialize(id));
+        conversation?.hydrateInputs(await conversationConfigStore.listInputs(id));
+      }
       // Before the Buddy runner recovers or claims anything (lifecycle/adopt-executions.ts).
       adoptedRuns = await adoptExecutions(foundExecutions, {
         conversation: async (id) => {

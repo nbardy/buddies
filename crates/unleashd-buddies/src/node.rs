@@ -184,8 +184,14 @@ impl BuddiesCore {
 
     /// The owner promoted a queued message: claimed before the conversation's other queued chats.
     #[napi]
-    pub async fn promote_chat(&self, actor: Actor, run_id: String) -> napi::Result<Run> {
-        call(&self.store, move |s| s.promote_chat(&actor, &run_id)).await
+    pub async fn promote_chat(&self, actor: Actor, turn_id: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.promote_chat(&actor, &turn_id)).await
+    }
+
+    /// The owner cancelled a queued message.
+    #[napi]
+    pub async fn cancel_chat(&self, actor: Actor, turn_id: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.cancel_chat(&actor, &turn_id)).await
     }
 
     /// `channel_read {threadId, follow}`: subscribe (or, with no conversation, unsubscribe) this

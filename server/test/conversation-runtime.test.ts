@@ -8,7 +8,6 @@ import type { Message, Provider } from '@unleashd/shared';
 import { type ConversationConfig, createDefaultConversationConfig } from '@unleashd/shared';
 import type { CompletedBuddyTurn } from '../src/buddies/memory-review';
 import type { BuddyPolicyPort } from '../src/buddies/policy-port';
-import type { ChatAdmission } from '../src/buddies/runner';
 import {
   type ConversationOptions,
   type ConversationRuntimeDependencies,
@@ -16,7 +15,7 @@ import {
 } from '../src/conversations/runtime';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { type TurnTimeoutKind, TurnWatchdog } from '../src/turns/watchdog';
-import { fakeBuddyPort } from './fixtures/buddy-port';
+import { fakeBuddyPort, fixtureConversations } from './fixtures/buddy-port';
 import { fakeExecuteTurn, testExecutions } from './fixtures/fake-turn';
 
 const BACKGROUND_AGENT_FIXTURE = join(
@@ -42,9 +41,8 @@ function runtimeFixture(
     executeTurn?: ConversationRuntimeDependencies['executeTurn'];
     turnAttempts?: ConversationRuntimeDependencies['turnAttempts'];
     revokeBuddyControlCapability?: (conversationId: string) => void;
-    enqueueBuddyChatRun?: () => { id: string };
-    startBuddyChatRun?: (turnId: string) => ChatAdmission;
-    abandonBuddyChatRun?: (turnId: string) => void;
+    queueBuddyChat?: (turnId: string, body: string) => void;
+    cancelBuddyChat?: (turnId: string) => void;
     finishBuddyChatRun?: BuddyPolicyPort['settle'];
     finishBuddyRun?: BuddyPolicyPort['finishRun'];
     reviewCompletedBuddyTurn?: (turn: CompletedBuddyTurn) => void;
@@ -76,9 +74,10 @@ function runtimeFixture(
     executeTurn: options.executeTurn,
     turnAttempts: options.turnAttempts,
     buddies: fakeBuddyPort({
-      enqueueChat: options.enqueueBuddyChatRun && (() => options.enqueueBuddyChatRun!().id),
-      admission: options.startBuddyChatRun,
-      abandon: options.abandonBuddyChatRun,
+      queueChat:
+        options.queueBuddyChat &&
+        ((_context, _conversationId, turnId, body) => options.queueBuddyChat!(turnId, body)),
+      cancelChat: options.cancelBuddyChat,
       settle: options.finishBuddyChatRun,
       finishRun: options.finishBuddyRun,
       revoke: options.revokeBuddyControlCapability,
@@ -98,6 +97,7 @@ function runtimeFixture(
     configState,
     kind: options.buddyContext ? buddyKind(options.buddyContext) : { t: 'chat' },
   });
+  fixtureConversations.set(conversation.id, conversation);
   return { aliases, broadcasts, configState, Conversation, conversation };
 }
 
@@ -660,13 +660,12 @@ test('unsupported Buddy provider leaves a queued message retryable', () => {
 });
 
 // Owner decision 2026-09-25: a Buddy at its run limit delays a chat/channel turn
-// instead of failing it. Before this, the turn threw "Conversation execution
-// slot is unavailable" and the channel posted "Couldn't reply".
-test('a foreground Buddy turn over capacity waits pending, then starts once admitted', async () => {
-  let free = false;
+// instead of failing it. Step 6 (2026-10-07): the waiting message is a queued chat run carrying its
+// text; the runner's CLAIM starts it (no admission tick), and a backend that never saw the message
+// (a restart) starts it from the run's body alone.
+test('a foreground Buddy turn over capacity waits pending, then starts when its run is claimed', () => {
   let providerStarts = 0;
-  const abandoned: string[] = [];
-  const settlements: unknown[][] = [];
+  const queued: Array<{ turnId: string; body: string }> = [];
   const executeTurn = fakeExecuteTurn(() => {
     providerStarts += 1;
     return {
@@ -683,93 +682,37 @@ test('a foreground Buddy turn over capacity waits pending, then starts once admi
       stop: () => undefined,
     };
   });
-  const fixture = runtimeFixture({
-    buddyContext: { buddyId: 'busy-buddy', workspaceId: 'workspace-1' },
-    enqueueBuddyChatRun: () => ({ id: 'queued-turn' }),
-    startBuddyChatRun: (runId) =>
-      free
-        ? {
-            kind: 'admitted',
-            run: {
-              id: runId,
-              claim_token: 'claim',
-              deadline: new Date(Date.now() + 60_000).toISOString(),
-            },
-          }
-        : { kind: 'waiting', reason: 'Waiting for a run slot: 5 of 5 active.' },
-    abandonBuddyChatRun: (runId) => abandoned.push(runId),
-    finishBuddyChatRun: async (...args) => {
-      settlements.push(args);
-    },
-    executeTurn,
-  });
+  const buddyContext = { buddyId: 'busy-buddy', workspaceId: 'workspace-1' };
+  const queueBuddyChat = (turnId: string, body: string) => queued.push({ turnId, body });
+  const fixture = runtimeFixture({ buddyContext, queueBuddyChat, executeTurn });
   const { conversation } = fixture;
+  const run = { id: 'run-1', claim_token: 'claim', deadline: new Date(Date.now() + 60_000).toISOString() };
 
-  // A direct send (the channel responder's path) lines up in the queue too.
   conversation.sendMessage('Reply in the thread', { origin: 'owner_input', inputId: 'post-1' });
-  assert.equal(providerStarts, 0);
-  assert.equal(conversation.queue.length, 1);
-  assert.equal(conversation.queue[0]?.status, 'pending');
-  assert.equal(conversation.isRunning, false);
+  assert.equal(providerStarts, 0, 'no claim, no turn');
+  assert.deepEqual(conversation.queue.map((m) => m.status), ['pending']);
+  assert.equal(queued.length, 1, 'the message is a run from the moment it was sent');
+  assert.equal(queued[0].turnId, conversation.queue[0].id);
 
-  free = true;
-  await new Promise((resolve) => setTimeout(resolve, 1300));
-  assert.equal(providerStarts, 1, 'the poller starts the turn once its Buddy has a slot');
-  assert.deepEqual(abandoned, []);
+  // The backend restarts: a conversation that never queued the message gets the claim and the body.
+  const restarted = runtimeFixture({ buddyContext, queueBuddyChat, executeTurn });
+  restarted.conversation.admitChatClaim(queued[0].turnId, queued[0].body, run);
+  assert.equal(providerStarts, 1, 'the claimed run starts from its body alone');
+  assert.match(messageText(restarted.conversation.messages[0]), /Reply in the thread/);
 });
 
-test('stopping a turn that waits for a run slot drops it and releases its place', () => {
-  const abandoned: string[] = [];
+test('stopping a turn that waits for its run cancels the message and its run', () => {
+  const cancelled: string[] = [];
   const fixture = runtimeFixture({
     buddyContext: { buddyId: 'busy-buddy', workspaceId: 'workspace-1' },
-    enqueueBuddyChatRun: () => ({ id: 'queued-turn' }),
-    startBuddyChatRun: () => ({ kind: 'waiting', reason: 'full' }),
-    abandonBuddyChatRun: (runId) => abandoned.push(runId),
+    queueBuddyChat: () => undefined,
+    cancelBuddyChat: (turnId) => cancelled.push(turnId),
   });
   fixture.conversation.enqueueMessage('Wait for me', { origin: 'owner_input', inputId: 'owner' });
-  assert.equal(fixture.conversation.queue.length, 1);
+  const id = fixture.conversation.queue[0].id;
   fixture.conversation.stop();
   assert.equal(fixture.conversation.queue.length, 0);
-  assert.deepEqual(abandoned, ['queued-turn'], 'a waiting row left behind would pin the FIFO line');
-});
-
-test('waiting Buddy chats share one admission tick, which stops when the last one leaves', () => {
-  // Regression guard for 03-app-core.md §5 #2: each waiting conversation used
-  // to own a 1 s setInterval into sync SQLite, so N queued chats meant N timers.
-  const realSetInterval = globalThis.setInterval;
-  const realClearInterval = globalThis.clearInterval;
-  const ticks = new Set<unknown>();
-  let cleared = 0;
-  globalThis.setInterval = ((handler: () => void, ms?: number) => {
-    const timer = realSetInterval(handler, ms);
-    if (ms === 1000) ticks.add(timer);
-    return timer;
-  }) as typeof setInterval;
-  globalThis.clearInterval = ((timer: Parameters<typeof clearInterval>[0]) => {
-    if (ticks.has(timer)) cleared += 1;
-    realClearInterval(timer);
-  }) as typeof clearInterval;
-  try {
-    const waiting = ['a', 'b', 'c'].map((id) => {
-      const fixture = runtimeFixture({
-        buddyContext: { buddyId: 'busy-buddy', workspaceId: 'workspace-1' },
-        enqueueBuddyChatRun: () => ({ id: `queued-${id}` }),
-        startBuddyChatRun: () => ({ kind: 'waiting', reason: 'full' }),
-        abandonBuddyChatRun: () => undefined,
-      });
-      fixture.conversation.enqueueMessage('Wait', { origin: 'owner_input', inputId: id });
-      return fixture.conversation;
-    });
-    assert.equal(ticks.size, 1, 'three waiting chats must share one admission timer');
-    waiting[0].stop();
-    waiting[1].stop();
-    assert.equal(cleared, 0, 'the tick must survive while a chat still waits');
-    waiting[2].stop();
-    assert.equal(cleared, 1, 'the tick must stop once nobody waits');
-  } finally {
-    globalThis.setInterval = realSetInterval;
-    globalThis.clearInterval = realClearInterval;
-  }
+  assert.deepEqual(cancelled, [id], 'a queued run left behind would still run after a restart');
 });
 
 test('historical automation transcripts refuse every user turn-admission path', () => {
@@ -1262,20 +1205,18 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
   >[0][] = [];
   const settlements: Parameters<BuddyPolicyPort['settle']>[] = [];
   let release = false;
+  let foreground:
+    | { admitChatClaim: Parameters<typeof fixtureConversations.set>[1]['admitChatClaim'] }
+    | undefined;
   const fixture = runtimeFixture({
-    enqueueBuddyChatRun: () => ({ id: 'owned-run' }),
-    // The run's lease is the chat's deadline (the runner leases for TURN_MAX_RUNTIME_MS; guard in
-    // buddies-v2.test.ts). A short lease exercises the same callback without waiting a day.
-    startBuddyChatRun: () => {
-      return {
-        kind: 'admitted',
-        run: {
-          id: 'owned-run',
-          claim_token: 'private-fixture-token',
-          deadline: new Date(Date.now() + 1000).toISOString(),
-        },
-      };
-    },
+    // The run's deadline is the chat's deadline (the runner sets it from TURN_MAX_RUNTIME_MS; guard
+    // in buddies-v2.test.ts). A short one exercises the same callback without waiting a day.
+    queueBuddyChat: (turnId, body) =>
+      foreground?.admitChatClaim(turnId, body, {
+        id: 'owned-run',
+        claim_token: 'private-fixture-token',
+        deadline: new Date(Date.now() + 1000).toISOString(),
+      }),
     finishBuddyChatRun: async (...args) => {
       settlements.push(args);
     },
@@ -1308,6 +1249,7 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
     configState: fixture.configState,
     kind: buddyKind({ buddyId: 'buddy-fixture', workspaceId: 'workspace-fixture' }),
   });
+  foreground = conversation;
   conversation.sendMessage('Keep working');
   await new Promise<void>((resolve) => setImmediate(resolve));
   t.mock.timers.tick(1000);

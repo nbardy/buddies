@@ -12,7 +12,6 @@ import type {
 import { parseBuddyBuilderToolResult } from '@unleashd/shared';
 import { BUDDY_RUN_LEASE_RENEW_MS } from '../constants/timeouts';
 import type { ConversationRuntimeView } from '../conversations/runtime';
-import { noteActivity } from '../observability/event-loop-stall';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import { type SessionRelativePrompt, type TurnInput, sameEitherWay } from '../turns/input';
 import {
@@ -28,6 +27,7 @@ import type { GrantRecord } from './grants';
 import { HARNESS_MEMORY_OFF } from './harness-memory';
 import type { BuddyPolicyPort } from './policy-port';
 import type { OwnedChatRun } from './runner';
+import { type InputCarrier, encodeEntry } from '../turns/intake';
 
 /**
  * The Buddy and Buddy Builder turn policies: what a Buddy thread adds to a turn (run-slot
@@ -110,35 +110,6 @@ export function builderFirstTurnPrompt(
   return `<!-- unleashd:buddy-builder-v1 ${body.length} -->\n${body}\n<!-- /unleashd:buddy-builder-v1 -->\n\n${content}`;
 }
 
-// --- Run-slot admission tick -----------------------------------------------
-
-const CHAT_ADMISSION_POLL_MS = 1000;
-
-/**
- * ONE admission tick shared by every Buddy chat waiting for a run slot (until 2026-09-25 each
- * waiting conversation owned its own 1 s interval). It exists only while someone waits. The
- * runner admits a chat when it claims its run, which any write or settle can trigger; the tick
- * reads that synchronous admission for the conversations still waiting.
- */
-// Pattern: wake-on-write (docs/patterns.md#wake-on-write)
-const admissionWaiters = new Set<() => void>();
-let admissionTick: ReturnType<typeof setInterval> | null = null;
-
-/** Retry `admit` on the shared tick until the returned function is called. */
-function waitForChatRunSlot(admit: () => void): () => void {
-  admissionWaiters.add(admit);
-  admissionTick ??= setInterval(() => {
-    noteActivity('timer buddy-chat-admission');
-    for (const waiter of [...admissionWaiters]) waiter();
-  }, CHAT_ADMISSION_POLL_MS);
-  return () => {
-    admissionWaiters.delete(admit);
-    if (admissionWaiters.size > 0 || !admissionTick) return;
-    clearInterval(admissionTick);
-    admissionTick = null;
-  };
-}
-
 /**
  * Buddy identity is an authority boundary, so Buddy turns require a harness with an explicit
  * required-MCP contract rather than best-effort injection (invariant I11 in
@@ -165,11 +136,16 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
 
   constructor(
     private readonly host: BuddyPolicyHost,
-    private readonly dependencies: BuddyTurnPolicyDependencies
+    private readonly dependencies: BuddyTurnPolicyDependencies,
+    // The Builder has no Buddy, so no run: its pending messages are records rows like a chat's.
+    readonly carrier: InputCarrier
   ) {}
 
   gate(): TurnGate {
     return 'send';
+  }
+  admitClaim(): void {
+    throw new Error('The Buddy Builder has no chat runs');
   }
   releaseUnspawned(): void {}
   prepare(): boolean {
@@ -233,10 +209,6 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
   dropWaitingTurn(): boolean {
     return false;
   }
-  waitingForRunSlot(): boolean {
-    return false;
-  }
-  queueEmptied(): void {}
   bridgeAlive(): void {}
   sessionReset(): void {}
   audienceKey(): string | undefined {
@@ -363,9 +335,9 @@ export class BuddyTurnPolicy implements TurnPolicy {
   // Memory generation the current provider session was last briefed with; null means
   // "unknown" (new, reset, restored, or failed spawn) and forces one re-brief.
   private briefedMemoryGeneration: string | null = null;
-  // A chat turn waits here for a run slot; the queue head stays pending meanwhile. On
-  // admission its run is held in admittedChatRun until startTurn takes it.
-  private chatTicket: { turnId: string; stopWaiting: () => void } | null = null;
+  // The chat run the runner claimed for a queued message: held here, by that message's id, until
+  // the runtime starts it (`gate` hands it on as `admittedChatRun`, `startTurn` takes it).
+  private claimed: { entryId: string; run: OwnedChatRun } | null = null;
   private admittedChatRun: OwnedChatRun | null = null;
   private execution: RunExecution | null = null;
   // The execution's lease, as this holder last knew it (see bridgeAlive).
@@ -396,6 +368,32 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   // --- admission -------------------------------------------------------------
 
+  // Pattern: durable-intake (docs/patterns.md#durable-intake). Every queued owner message of a
+  // Buddy conversation is a crate `chat` run carrying its text, written when it was sent. The
+  // TurnQueue entry is its projection: the run is claimed when the Buddy has a slot and the
+  // conversation is free (`conversation_busy`, `owner_first`), and the runner hands the claim to
+  // `admitClaim`. Nothing waits here on a timer: the claim is the wake. The stamp is the claim:
+  // the runner marks the run executing right before it admits, so `stamp` is just "do I hold it".
+  readonly carrier: InputCarrier = {
+    put: (conversationId, entry) =>
+      this.buddies.queueChat(
+        this.turnContext(),
+        conversationId,
+        entry.message.id,
+        encodeEntry(entry)
+      ),
+    promote: (entry) => this.buddies.promoteChat(entry.message.id),
+    cancel: (entry) => this.buddies.cancelChat(entry.message.id),
+    // The run settles through this policy's `settle`, so the entry's end needs nothing here.
+    settle: () => undefined,
+    stamp: (entry) => this.claimed?.entryId === entry.message.id,
+  };
+
+  admitClaim(entryId: string, run: OwnedChatRun): void {
+    this.claimed = { entryId, run };
+    this.host.processQueue();
+  }
+
   gate(input: TurnInput, fromQueue: boolean): TurnGate {
     // A run is still armed: either this very turn's own send (a runner-owned run holds its slot
     // already; only chat turns queue for one), or the PREVIOUS turn's run whose settle has not
@@ -410,50 +408,16 @@ export class BuddyTurnPolicy implements TurnPolicy {
       this.host.releaseQueueHead(false);
       return 'wait';
     }
-    // Chat turns are admitted through the queue, so a turn waiting for a run slot is visible as
-    // pending and later sends line up behind it. The queue keeps the input's provenance: a
-    // 'buddy_post' seat turn dropped here would come back 'unknown'.
+    // Chat turns go through the queue, so a message waiting for its run is visible as pending and
+    // later sends line up behind it. The queue keeps the input's provenance: a 'buddy_post' seat
+    // turn dropped here would come back 'unknown'. The runtime asks `carrier.stamp` first, so a
+    // queue head arrives here only once its run is claimed.
     if (!fromQueue) return 'enqueue';
-    const owned = this.admitChatRun(input);
-    if (!owned) return 'wait';
-    this.admittedChatRun = owned;
+    const held = this.claimed;
+    if (!held) return 'wait';
+    this.claimed = null;
+    this.admittedChatRun = held.run;
     return 'admitted';
-  }
-
-  // Admitted: the owned run. Otherwise the queue head goes back to pending and the shared tick
-  // re-runs processQueue. The run's deadline is TURN_MAX_RUNTIME_MS, passed explicitly to the
-  // claim (runner.ts `chatDeadlineMs`; a 600 s claim lease used as the deadline killed live owner
-  // chats on 2026-09-10). Its lease is a separate short heartbeat (bridgeAlive).
-  private admitChatRun(input: TurnInput): OwnedChatRun | null {
-    this.chatTicket ??= {
-      // The queue head IS the run's body: a queued chat run without it is refused by the crate.
-      turnId: this.buddies.enqueueChat(this.turnContext(), this.host.id, input),
-      stopWaiting: waitForChatRunSlot(() => this.host.processQueue()),
-    };
-    const admission = this.buddies.admission(this.chatTicket.turnId);
-    switch (admission.kind) {
-      case 'admitted':
-        this.releaseChatTicket(false);
-        return admission.run;
-      case 'waiting':
-        this.host.releaseQueueHead(true);
-        return null;
-      case 'gone':
-        // Lost its place; rejoin at the back of the line on the next poll.
-        this.chatTicket.stopWaiting();
-        this.chatTicket = null;
-        setTimeout(() => this.host.processQueue(), CHAT_ADMISSION_POLL_MS);
-        this.host.releaseQueueHead(false);
-        return null;
-    }
-  }
-
-  private releaseChatTicket(abandon: boolean): void {
-    const ticket = this.chatTicket;
-    if (!ticket) return;
-    ticket.stopWaiting();
-    this.chatTicket = null;
-    if (abandon) this.buddies.abandon(ticket.turnId);
   }
 
   // An admitted turn can return before spawning (preflight refusal, rejected fork). Its run
@@ -467,20 +431,11 @@ export class BuddyTurnPolicy implements TurnPolicy {
       .catch((error) => console.error('[buddies] unspawned run not settled', owned.id, error));
   }
 
-  waitingForRunSlot(): boolean {
-    return this.chatTicket !== null && !this.host.hasProcess();
-  }
-
+  // Stop while the head waits for its run: the message is dropped, and its run cancelled.
   dropWaitingTurn(): boolean {
-    if (!this.chatTicket || this.host.hasProcess()) return false;
-    // Stopping a turn that is still waiting for a run slot drops that turn.
+    if (this.host.hasProcess() || this.claimed) return false;
     this.host.dropPendingHead();
-    this.releaseChatTicket(true);
     return true;
-  }
-
-  queueEmptied(): void {
-    this.releaseChatTicket(true);
   }
 
   // --- context and briefing ----------------------------------------------------

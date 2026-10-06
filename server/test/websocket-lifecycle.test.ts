@@ -48,7 +48,6 @@ test(
     const controller = createShutdownController(
       { forceExitGraceMs: 60_000, flushGraceMs: 60_000 },
       {
-        conversations: () => [],
         activeSchedulerRuns: () => 0,
         pauseScheduler: () => undefined,
         resumeScheduler: () => undefined,

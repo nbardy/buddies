@@ -33,6 +33,10 @@ export declare class BuddiesCore {
   enqueueRun(actor: Actor, input: EnqueueInput): Promise<Run>
   /** A foreground chat input with its text (the queued run is the owner's message). */
   enqueueChat(actor: Actor, input: ChatEnqueue): Promise<Run>
+  /** The owner promoted a queued message: claimed before the conversation's other queued chats. */
+  promoteChat(actor: Actor, turnId: string): Promise<Run>
+  /** The owner cancelled a queued message. */
+  cancelChat(actor: Actor, turnId: string): Promise<Run>
   /**
    * `channel_read {threadId, follow}`: subscribe (or, with no conversation, unsubscribe) this
    * Buddy's conversation to a thread and return its unread posts, marked read (deliveries.rs).

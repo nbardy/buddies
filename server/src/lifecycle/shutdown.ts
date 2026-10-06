@@ -1,14 +1,4 @@
-export interface ShutdownConversation {
-  /**
-   * Work that exists only in this backend's memory: a queued message not yet sent, or a chat
-   * waiting for a run slot. A running provider turn is NOT such work: it is journaled on disk
-   * and the next backend adopts it (turns/executions.ts), so exits never wait for or stop it.
-   */
-  holdsUnadoptableWork(): boolean;
-}
-
 export interface ShutdownPorts {
-  conversations(): Iterable<ShutdownConversation>;
   activeSchedulerRuns(): number;
   pauseScheduler(): void;
   resumeScheduler(): void;
@@ -61,10 +51,12 @@ export function createShutdownController(
   let schedulerStopped = false;
   let exitPromise: Promise<void> | null = null;
 
-  const unadoptable = () =>
-    Array.from(ports.conversations()).filter((item) => item.holdsUnadoptableWork());
+  // Pattern: durable-intake (docs/patterns.md#durable-intake). A reload no longer waits for empty
+  // queues: a queued owner message is a durable row (a Buddy `chat` run, or a records
+  // `conversation_input`) and the next backend runs it once; a running turn is adopted. Until step 6
+  // (2026-10-07) pending messages lived in memory, so every reload waited for them to drain.
   const activeWorkCount = () =>
-    unadoptable().length + ports.activeSchedulerRuns() + activeMutations + (startupPending ? 1 : 0);
+    ports.activeSchedulerRuns() + activeMutations + (startupPending ? 1 : 0);
   const clearTimers = () => {
     if (drainInterval) clearInterval(drainInterval);
     if (forceExitTimeout) clearTimeout(forceExitTimeout);
@@ -123,9 +115,9 @@ export function createShutdownController(
     return exitPromise;
   };
   const forceShutdownDrain = (graceMs: number) => {
-    // Queued sends and waiting chats are lost here, as they always were; running turns are not.
+    // Running turns are adopted and queued messages are durable rows: nothing is lost here.
     console.warn(
-      `Backend exiting after ${graceMs}ms grace (${activeWorkCount()} in-memory operation(s) still pending)`
+      `Backend exiting after ${graceMs}ms grace (${activeWorkCount()} operation(s) still pending)`
     );
     stopScheduler();
     startupPending = false;

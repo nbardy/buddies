@@ -23,6 +23,14 @@ export declare class ConversationRecords {
   claimInitialMessageDispatch(conversationId: string, token: string, at: number): Promise<ConversationRecord | null>
   /** null = `token` does not hold the lease, or the message was already delivered. */
   completeInitialMessageDispatch(conversationId: string, token: string, at: number): Promise<ConversationRecord | null>
+  /** Queue an owner message at the back. false = the conversation is missing or deleted, or `id` exists. */
+  putInput(conversationId: string, id: string, body: string, queuedAt: string): Promise<boolean>
+  promoteInput(id: string): Promise<boolean>
+  markInputExecuting(id: string, at: string): Promise<boolean>
+  /** true exactly once per row. */
+  settleInput(id: string): Promise<boolean>
+  listInputs(conversationId: string): Promise<Array<ConversationInput>>
+  conversationsWithInputs(): Promise<Array<string>>
 }
 
 export declare class Ingest {
@@ -143,6 +151,18 @@ export interface ConversationCreation {
   initialMessageDispatchedAt?: string
   swarmDebugPrefix?: string
   resumedFromConversationId?: string
+}
+
+/**
+ * One owner message that has been sent and has not finished its turn (`conversation_input`).
+ * `body` is the server's JSON, opaque here.
+ */
+export interface ConversationInput {
+  id: string
+  conversationId: string
+  body: string
+  queuedAt: string
+  executingAt?: string
 }
 
 /**

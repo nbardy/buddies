@@ -52,6 +52,7 @@ import {
   sameEitherWay,
 } from '../turns/input';
 import { ChatTurnPolicy, type MemorySnapshot, type TurnPolicy } from '../turns/policy';
+import { decodeEntry, type InputCarrier, volatileCarrier } from '../turns/intake';
 import { type QueueEntry, TurnQueue } from '../turns/queue';
 import { type TurnBroadcast, TurnRunner, type TurnRunnerPorts } from '../turns/runner';
 
@@ -103,6 +104,8 @@ export interface ConversationRuntimeDependencies
   /** Test seam for the real provider boundary; production uses agent-cli directly. */
   executeTurn?: typeof executeCommand;
   turnAttempts?: RuntimeTurnAttemptObserver;
+  /** Where chat and Builder owner messages are durable (turns/intake.ts); absent = nowhere. */
+  inputs?: InputCarrier;
   /** The ingest list (production); absent = a host with no transcripts (the overlay is all). */
   history?: RuntimeHistory;
 }
@@ -351,12 +354,17 @@ export class Conversation extends EventEmitter {
   /** One policy per kind; Buddy code lives only in buddies/turn-policy.ts. */
   private policyFor(kind: ConversationKind, seed: BuddyTurnPolicySeed): TurnPolicy {
     return matchConversationKind<TurnPolicy>(kind, {
-      chat: () => new ChatTurnPolicy(() => this.swarmDebugPrefix),
+      chat: () => new ChatTurnPolicy(() => this.swarmDebugPrefix, this.inputCarrier()),
       buddy: (buddyKind) => new BuddyTurnPolicy(buddyKind, this.policyHost(), this.env.deps, seed),
-      builder: () => new BuddyBuilderTurnPolicy(this.policyHost(), this.env.deps),
+      builder: () =>
+        new BuddyBuilderTurnPolicy(this.policyHost(), this.env.deps, this.inputCarrier()),
       // A swarm worker is an external oompa transcript; typing into it is a plain chat turn.
-      worker: () => new ChatTurnPolicy(() => null),
+      worker: () => new ChatTurnPolicy(() => null, this.inputCarrier()),
     });
+  }
+
+  private inputCarrier(): InputCarrier {
+    return this.env.deps.inputs ?? volatileCarrier;
   }
 
   private policyHost(): BuddyPolicyHost {
@@ -735,6 +743,7 @@ export class Conversation extends EventEmitter {
   private retireInFlightHead(): void {
     const retired = this.turnQueue.retireInFlightHead();
     if (retired) {
+      this._policy.carrier.settle(retired);
       console.log(
         `[${this.id}] Retiring interrupted in-flight message id=${retired.message.id.substring(0, 8)}`
       );
@@ -750,6 +759,7 @@ export class Conversation extends EventEmitter {
     if (this.refusesUserInput()) return;
     const entry = this.createQueueEntry(prompt, input);
     this.turnQueue.pushBack(entry);
+    this._policy.carrier.put(this.id, entry);
     this.logEntry('Queued message', entry);
     this.broadcastQueue();
     this.processQueue();
@@ -766,6 +776,9 @@ export class Conversation extends EventEmitter {
 
     const entry = this.createQueueEntry(sameEitherWay(content), ownerInput ?? unknownInput());
     this.turnQueue.pushFront(entry);
+    // Durable order: written at the back, then moved first (a promote), like the queue itself.
+    this._policy.carrier.put(this.id, entry);
+    this._policy.carrier.promote(entry);
     this.logEntry('interrupt_and_send', entry);
     this.broadcastQueue();
     this.processQueue();
@@ -776,6 +789,7 @@ export class Conversation extends EventEmitter {
     if (this.refusesUserInput()) return;
     const promoted = this.turnQueue.promote(messageId);
     if (!promoted) return;
+    this._policy.carrier.promote(promoted);
     console.log(
       `[${this.id}] Promoted queued message id=${promoted.message.id.substring(0, 8)} to front, queueDepth=${this.turnQueue.length}`
     );
@@ -799,7 +813,6 @@ export class Conversation extends EventEmitter {
   clearQueue(): void {
     const removed = this.turnQueue.clearPending();
     for (const entry of removed) this.runner.cancelQueuedAttempt(entry);
-    if (this.turnQueue.length === 0) this._policy.queueEmptied();
     console.log(`[${this.id}] Cleared queue: removed ${removed.length} messages`);
     this.broadcastQueue();
   }
@@ -814,6 +827,13 @@ export class Conversation extends EventEmitter {
     if (this.process || this.isRunning) return;
     const next = this.turnQueue.startHead();
     if (!next) return; // empty, or the head is already in flight
+    // The head starts only once its durable row says it executes (turns/intake.ts, `stamp`): a
+    // turn spawned before that could be adopted after a crash AND requeued, and run twice. Not
+    // yet: it stays pending, and the carrier's landing (or the runner's claim) calls this again.
+    if (!this._policy.carrier.stamp(next, () => this.processQueue())) {
+      this.turnQueue.releaseHead();
+      return;
+    }
 
     this.runner.prepareQueuedAttempt(next);
     this.logEntry('processQueue sending', next);
@@ -839,13 +859,36 @@ export class Conversation extends EventEmitter {
     return this.process !== null;
   }
 
-  waitingForRunSlot(): boolean {
-    return this._policy.waitingForRunSlot();
+  /**
+   * The runner claimed the `chat` run of one queued owner message of this Buddy conversation. After
+   * a restart the message is not in memory: it comes back from the run's body. The durable claim
+   * order is the queue order, so the claimed message goes first (nothing is running: the claim gate
+   * lets one chat run per conversation).
+   */
+  admitChatClaim(
+    turnId: string,
+    body: string,
+    run: { id: string; claim_token: string; deadline: string }
+  ): void {
+    if (!this.turnQueue.has(turnId)) this.turnQueue.pushBack(decodeEntry(turnId, body));
+    this.turnQueue.moveFirst(turnId);
+    this.broadcastQueue();
+    this._policy.admitClaim(turnId, run);
   }
 
-  /** What a backend exit would drop (lifecycle/shutdown.ts); a running turn is adopted instead. */
-  holdsUnadoptableWork(): boolean {
-    return this.waitingForRunSlot() || this.turnQueue.hasPending();
+  /**
+   * Boot: this conversation's owner messages from the records store. A row stamped executing ran
+   * in the previous backend (adopted from its journal, or ended visibly there), so it is only
+   * settled; the rest are queued again, in order, and run once.
+   */
+  hydrateInputs(rows: readonly { id: string; body: string; executingAt?: string | null }[]): void {
+    for (const row of rows) {
+      const entry = decodeEntry(row.id, row.body);
+      if (row.executingAt) this._policy.carrier.settle(entry);
+      else this.turnQueue.pushBack(entry);
+    }
+    this.broadcastQueue();
+    this.processQueue();
   }
 
   async waitForTurnDrain(): Promise<void> {

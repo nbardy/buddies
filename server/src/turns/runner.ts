@@ -232,7 +232,20 @@ export class TurnRunner {
     this.providerFailureMessage = null;
   }
 
+  /** The turn ended: drop its queue head, settle its durable row, tell the clients. */
+  private finishHead(): void {
+    const done = this.host.turnQueue.finishHead();
+    if (!done) return;
+    this.host.policy.carrier.settle(done);
+    this.host.broadcastQueue();
+  }
+
+  /**
+   * An entry left the queue unsent (cancelled, cleared, dropped): its attempt ends cancelled and
+   * its durable row ends with it. Every removal path calls this one function.
+   */
   cancelQueuedAttempt(entry: QueueEntry): void {
+    this.host.policy.carrier.cancel(entry);
     if (!entry.attemptId) return;
     this.ports.turnAttempts.terminal({
       attemptId: entry.attemptId,
@@ -783,7 +796,7 @@ export class TurnRunner {
     this.detachProcess();
     this.ports.clearExternalRunningStatus(host.id, host.sessionId);
     this.ports.markLocalCompletionSuppression(host.id, host.sessionId);
-    if (host.turnQueue.finishHead()) host.broadcastQueue();
+    this.finishHead();
     const failure =
       this.providerFailureMessage ??
       fold.streamError?.message ??
@@ -839,7 +852,7 @@ export class TurnRunner {
     host.isRunning = false;
     this.detachProcess();
     this.releaseRunFlags();
-    if (host.turnQueue.finishHead()) host.broadcastQueue();
+    this.finishHead();
     const cause: TurnTerminalCause =
       reason === 'out_of_tokens' || this.terminalCauseHint === 'out_of_tokens'
         ? 'out_of_tokens'

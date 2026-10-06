@@ -123,6 +123,13 @@ pub(crate) fn get_run(conn: &Connection, id: &str) -> Result<Run> {
         .ok_or_else(|| CoreError::not_found("run", id))
 }
 
+fn chat_run(tx: &Transaction, turn_id: &str) -> Result<Run> {
+    tx.prepare_cached(&format!("SELECT {RUN_COLS} FROM run WHERE input_key = ?1 ORDER BY attempt DESC LIMIT 1"))?
+        .query_row([format!("chat:{turn_id}")], run_row)
+        .optional()?
+        .ok_or_else(|| CoreError::NotFound { kind: "chat turn", id: turn_id.to_string() })
+}
+
 fn plus_ms(now: &str, ms: i64) -> Result<String> {
     let t = DateTime::parse_from_rfc3339(now).map_err(|e| CoreError::Invalid(format!("time {now:?}: {e}")))?;
     Ok((t.with_timezone(&Utc) + Duration::milliseconds(ms)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
@@ -219,12 +226,14 @@ impl Store {
         })
     }
 
-    /// The owner promoted a queued message: it is claimed before every other queued chat of its
-    /// conversation. Claims go in `ready_at` order, so the durable order IS the queue order and it
-    /// survives a restart; `ready_at` moves 1 ms before the earliest queued chat. Idempotent.
-    pub fn promote_chat(&mut self, actor: &Actor, run_id: &str) -> Result<Run> {
+    /// The owner promoted a queued message (named by its turn id, the message id the conversation
+    /// holds): it is claimed before every other queued chat of its conversation. Claims go in
+    /// `ready_at` order, so the durable order IS the queue order and it survives a restart;
+    /// `ready_at` moves 1 ms before the earliest queued chat. Idempotent.
+    pub fn promote_chat(&mut self, actor: &Actor, turn_id: &str) -> Result<Run> {
         self.write(|tx| {
-            let run = get_run(tx, run_id)?;
+            let run = chat_run(tx, turn_id)?;
+            let run_id = run.id.as_str();
             require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: run.buddy_id.clone() })?;
             let first: Option<String> = tx.query_row(
                 "SELECT min(ready_at) FROM run WHERE conversation_id = ?1 AND input_kind = 'chat' AND status = 'queued'",
@@ -238,6 +247,13 @@ impl Store {
             }
             get_run(tx, run_id)
         })
+    }
+
+    /// The owner cancelled a queued message, named by its turn id. A chat already running is asked
+    /// to stop like any run; one already over is left alone.
+    pub fn cancel_chat(&mut self, actor: &Actor, turn_id: &str) -> Result<Run> {
+        let id = self.write(|tx| chat_run(tx, turn_id).map(|run| run.id))?;
+        self.cancel_run(actor, &id)
     }
 
     /// Claims the oldest ready run, or None when nothing is claimable.

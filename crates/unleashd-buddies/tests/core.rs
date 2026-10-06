@@ -498,7 +498,7 @@ fn a_promoted_chat_is_claimed_before_the_chats_queued_ahead_of_it() {
     let s = &mut f.store;
     let first = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "c1")).unwrap();
     let second = s.enqueue_chat(&Actor::Owner, chat("mid", "t2", "c1")).unwrap();
-    s.promote_chat(&Actor::Owner, &second.id).unwrap();
+    s.promote_chat(&Actor::Owner, "t2").unwrap();
     assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.id, second.id);
     assert_ne!(first.id, second.id);
 }
