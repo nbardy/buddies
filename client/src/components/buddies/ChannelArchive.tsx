@@ -8,7 +8,7 @@ import type { Channel } from './types';
 import './ChannelHeaderControls.css';
 
 export const archivedChannelsUrl = (workspaceId: string) =>
-  `/api/buddies/workspaces/${encodeURIComponent(workspaceId)}/channels/archived`;
+  `/api/buddies/workspaces/${encodeURIComponent(workspaceId)}/channels?archived=1`;
 
 export function useArchivedChannels(workspaceId: string) {
   return usePolledFetch<Channel[]>(archivedChannelsUrl(workspaceId), CHANNEL_BACKSTOP_MS);

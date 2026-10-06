@@ -18,6 +18,7 @@ import {
 import {
   type BuddyContext,
   type ConversationConfig,
+  type MessagePage,
   createDefaultConversationConfig,
 } from '@unleashd/shared';
 import express from 'express';
@@ -39,6 +40,7 @@ import {
   buddyActor,
   legacyBuddiesDatabasePath,
   openBuddiesCore,
+  taskDetail,
 } from '../src/buddies/core';
 import {
   type BuddyEvent,
@@ -185,11 +187,23 @@ async function world(reopen?: string) {
   writeFileSync(join(agentBin, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
   const installed = () => installedAgent({ PATH: agentBin });
   const briefings = createBriefings(core, installed);
+  // A transcript per conversation id, read through the same MessageSource shape production uses.
+  const transcripts = new Map<string, MessagePage['messages']>();
   const endpoint = await startMcpEndpoint({
     core,
     events,
     grants,
     uploadsRoot: () => join(scratch, 'uploads'),
+    messages: async (id, { afterSeq, limit }) => {
+      const all = transcripts.get(id);
+      if (!all) return null;
+      return {
+        epoch: 0,
+        total: all.length,
+        afterSeq,
+        messages: all.slice(afterSeq + 1, afterSeq + 1 + limit),
+      };
+    },
     portFile: join(scratch, 'buddy-mcp.json'),
   });
 
@@ -381,6 +395,7 @@ async function world(reopen?: string) {
   await runner.start([]);
   return {
     core,
+    transcripts,
     /** A crate post, unwrapped from its PostWrite. */
     post: async (...args: Parameters<typeof core.post>) => (await core.post(...args)).post,
     /** Announce a post in #general, as every post writer does: the one dispatch entry. */
@@ -430,11 +445,17 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     w.during.set(1, async (turn) => {
       // Owner-authored input: the grant is the owner's, so team_admin is listed.
       const names = await toolNames(turn.mcp);
-      assert.equal(names.length, 13);
+      assert.equal(names.length, 12);
       assert.ok(names.includes('team_admin'));
-      assert.ok(names.includes('channel_admin'));
-      assert.ok(names.includes('channel_create'));
-      for (const removed of ['answer', 'channel_archive', 'channel_rename'])
+      assert.ok(names.includes('channel'));
+      // The merged names stay callable for adopted turns but are never advertised (mcp.ts LEGACY_TOOLS).
+      for (const removed of [
+        'answer',
+        'channel_archive',
+        'channel_rename',
+        'channel_admin',
+        'channel_create',
+      ])
         assert.equal(names.includes(removed), false);
       assert.equal(await probe(turn.mcp), 200);
       const posted = await call(turn.mcp, 'post', {
@@ -1975,7 +1996,7 @@ test('a worker turn can still create channels, search and follow, spawn and retr
       return found;
     };
     const capabilities: Array<[string, string, RegExp[]]> = [
-      ['create a channel', 'channel_create', [/"name"/, /"purpose"/]],
+      ['create a channel', 'channel', [/"create"/, /"name"/, /"purpose"/]],
       ['search by channel and author', 'channel_read', [/"search"/, /"channels"/, /"from"/]],
       ['follow a thread', 'channel_read', [/"follow"/, /"until"/]],
       ['request a worker on a chosen model', 'post', [/"worker"/, /"request"/, /"answers"/]],
@@ -2186,6 +2207,7 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
     events,
     grants,
     uploadsRoot: () => scratch,
+    messages: async () => null,
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   const harnesses: string[] = [];
@@ -2312,6 +2334,7 @@ async function reviewOnce(dir: string, env: NodeJS.ProcessEnv) {
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => dir,
+    messages: async () => null,
     portFile: join(dir, 'buddy-mcp.json'),
   });
   const launches: Array<{ harness: string; model: string }> = [];
@@ -2485,6 +2508,7 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => scratch,
+    messages: async () => null,
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   const reviewer = createMemoryReviewer({
@@ -2610,6 +2634,7 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => scratch,
+    messages: async () => null,
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   // An owner chat turn's context: the conversation's, plus its admitted chat run.
@@ -3108,8 +3133,8 @@ test('client Buddy JSON mutations use the server contracts; task reorder reaches
         }
       );
       assert.equal(replay.post.id, post.post.id, 'the client preserves caller keys');
-      await buddyWrite('channel.read', { channelId: channel.id }, { postId: post.post.id });
-      await buddyWrite('thread.read', { rootId: post.post.id }, { postId: post.post.id });
+      await buddyWrite('read', {}, { channelId: channel.id, postId: post.post.id });
+      await buddyWrite('read', {}, { rootId: post.post.id, postId: post.post.id });
       const renamed = await buddyWrite(
         'channel.rename',
         { channelId: channel.id },
@@ -3191,14 +3216,16 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       inbox.body.requests.map((p: Post) => p.id),
       [ask.id]
     );
-    const answered = await http('POST', `/api/buddies/posts/${ask.id}/answer`, {
+    const answered = await http('POST', `/api/buddies/channels/${ask.channelId}/posts`, {
       body: 'Yes',
+      answers: ask.id,
       key: 'yes',
     });
     assert.equal(answered.status, 201, JSON.stringify(answered.body));
     assert.equal((await w.core.getPost(OWNER, ask.id)).request.state, 'answered');
-    const again = await http('POST', `/api/buddies/posts/${ask.id}/answer`, {
+    const again = await http('POST', `/api/buddies/channels/${ask.channelId}/posts`, {
       body: 'Yes again',
+      answers: ask.id,
       key: 'yes-2',
     });
     assert.equal(again.status, 400, 'one answer per request');
@@ -3534,7 +3561,7 @@ test('owner routes restore what the T11 client migration dropped: reply stats, t
       [[root.id, 4, replies[3].ord]]
     );
     // 2. The inbox names the owner's read cursor, which "New messages" is drawn against.
-    await json('POST', `/api/buddies/channels/${w.general.id}/read`, { postId: replies[1].id });
+    await json('POST', '/api/buddies/read', { channelId: w.general.id, postId: replies[1].id });
     const inbox = await json<Inbox>('GET', `/api/buddies/workspaces/${w.ws}/inbox`);
     const general = inbox.channels.find((entry) => entry.channel.id === w.general.id);
     assert.equal(general?.lastReadOrd, replies[1].ord);
@@ -3746,7 +3773,7 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
     });
     assert.equal(archived.isError, false, archived.text);
     assert.ok(archived.value.archivedAt);
-    const listed = await http('GET', `/api/buddies/workspaces/${w.ws}/channels/archived`);
+    const listed = await http('GET', `/api/buddies/workspaces/${w.ws}/channels?archived=1`);
     assert.equal(listed.status, 200);
     assert.equal((listed.body as unknown as { id: string }[])[0].id, w.general.id);
     const inbox = await w.core.inbox(OWNER, w.ws);
@@ -4150,6 +4177,198 @@ test('follow (f): a follow survives a backend restart and still wakes on the nex
     // fallback: a fresh background turn (runner.ts `returnJob`), carrying the post.
     const woken = await until(() => w.turns[0], 'Lead woken after the restart');
     assert.match(woken.request.prompt, /Mockups after the restart/);
+  } finally {
+    await w.close();
+  }
+});
+
+// Fix-guard: the slim read surface (Step 7, decision S1). Until 2026-10-06 `tasks get` returned
+// 60-95k chars (20 full comments + every child + uncapped evidence), `inbox` carried each owed
+// request's full body and `runs list` rows could not say what a run was for. The raw crate reads
+// below ARE the old tool results, so the printed SIZES line is a before/after on one seeded store.
+test('slim read surface: tasks get, inbox and runs list stay small and runs say what they are for', async () => {
+  const w = await world();
+  try {
+    w.runner.stop();
+    const task = await w.core.upsertTask(OWNER, {
+      kind: 'create',
+      ownerId: w.designer.id,
+      title: 'Big task',
+      doneCriteria: 'Read it cheaply',
+      key: 'slim-task',
+    });
+    for (let i = 0; i < 12; i++)
+      await w.core.upsertTask(OWNER, {
+        kind: 'create',
+        ownerId: w.designer.id,
+        parentId: task.id,
+        title: `Child ${i}`,
+        doneCriteria: 'x'.repeat(2000),
+        key: `slim-child-${i}`,
+      });
+    const withEvidence = await w.core.upsertTask(OWNER, {
+      kind: 'update',
+      taskId: task.id,
+      baseRevision: task.revision,
+      changes: { evidence: Array.from({ length: 32 }, (_, i) => `${i}:${'e'.repeat(495)}`) },
+      key: 'slim-evidence',
+    });
+    for (let i = 0; i < 20; i++)
+      await w.post(
+        buddyActor(w.lead.id),
+        { kind: 'task', taskId: task.id },
+        {
+          kind: 'inform',
+          body: 'c'.repeat(5000),
+          evidence: [],
+          broadcast: false,
+          key: `slim-c-${i}`,
+        }
+      );
+    for (let i = 0; i < 6; i++)
+      await w.post(
+        buddyActor(w.lead.id),
+        { kind: 'direct', members: [buddyActor(w.lead.id), buddyActor(w.designer.id)] },
+        {
+          kind: 'request',
+          body: 'r'.repeat(20_000),
+          purpose: `Purpose ${i}`,
+          taskId: task.id,
+          evidence: [],
+          broadcast: false,
+          key: `slim-req-${i}`,
+        }
+      );
+    const spec = w.endpoint.spec(
+      w.grants.issueBuddy({
+        role: 'worker',
+        buddyId: w.designer.id,
+        workspaceId: w.ws,
+        conversationId: 'slim-view',
+        runId: null,
+        returns: INBOX,
+      })
+    );
+    const size = (value: unknown) => JSON.stringify(value).length;
+
+    const got = await call(spec, 'tasks', { action: { kind: 'get', taskId: task.id } });
+    const oldGet = await taskDetail(w.core, buddyActor(w.designer.id), task.id, 20);
+    const inbox = await call(spec, 'inbox', {});
+    const oldInbox = await w.core.inbox(buddyActor(w.designer.id), w.ws);
+    const runs = await call(spec, 'runs', { action: { kind: 'list', scope: { workspace: w.ws } } });
+    const oldRuns = await w.core.listRunRows({ kind: 'workspace', workspaceId: w.ws }, 101);
+    console.log(
+      `SIZES tasks.get ${size(oldGet)} -> ${size(got.value)}; inbox ${size(oldInbox)} -> ${size(inbox.value)}; runs.list ${size(oldRuns)} -> ${size(runs.value)}`
+    );
+
+    // Worst case by construction: the evidence cap alone allows 16k, the 20 previews about 8k.
+    assert.ok(size(got.value) < 32_000, `tasks get is ${size(got.value)} chars`);
+    assert.equal(got.value.children.length, 12);
+    assert.equal(got.value.comments.length, 20);
+    assert.equal(got.value.comments[0].bodyChars, 5000, 'a preview says how much it left out');
+    assert.ok(size(inbox.value) < 6_000, `inbox is ${size(inbox.value)} chars`);
+    assert.equal(inbox.value.requests.length, 6);
+    const rows = runs.value.runs.filter(
+      (row: { taskTitle: string | null }) => row.taskTitle === 'Big task'
+    );
+    assert.equal(rows.length, 6);
+    assert.ok(
+      rows.every((row: { purpose: string }) => /^Purpose \d$/.test(row.purpose)),
+      'rows carry the request purpose'
+    );
+
+    // Evidence is capped where it is written, with a typed error naming the entry.
+    const tooMany = await call(spec, 'task_write', {
+      write: {
+        kind: 'update',
+        taskId: task.id,
+        baseRevision: withEvidence.revision,
+        changes: { evidence: Array.from({ length: 33 }, () => 'x') },
+      },
+      key: 'ev-33',
+    });
+    assert.match(tooMany.text, /^\[invalid\] task evidence takes at most 32/);
+    const tooLong = await call(spec, 'task_write', {
+      write: {
+        kind: 'update',
+        taskId: task.id,
+        baseRevision: withEvidence.revision,
+        changes: { evidence: ['ok', 'y'.repeat(501)] },
+      },
+      key: 'ev-long',
+    });
+    assert.match(tooLong.text, /^\[invalid\] task evidence entry 1 is 501 chars/);
+
+    // The merged channel tool, and the old names an adopted turn still sends.
+    const made = await call(spec, 'channel', {
+      action: { kind: 'create', name: 'slim-merged', purpose: 'the one channel tool' },
+      key: 'merged-create',
+    });
+    assert.equal(made.isError, false, made.text);
+    const renamed = await call(spec, 'channel', {
+      action: { kind: 'rename', channelId: made.value.id, name: 'slim-renamed' },
+      key: 'merged-rename',
+    });
+    assert.equal(renamed.value.kind.name, 'slim-renamed');
+    const legacy = await call(spec, 'channel_create', {
+      name: 'slim-legacy',
+      purpose: 'old name, still callable',
+      key: 'legacy-create',
+    });
+    assert.equal(legacy.isError, false, legacy.text);
+  } finally {
+    await w.close();
+  }
+});
+
+// `runs get {tail}` reads the run's conversation through MessageSource, bounded by n.
+test('runs get {tail:n} returns the last n assistant entries with tool names and clipped args', async () => {
+  const w = await world();
+  try {
+    const request = await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'direct', members: [buddyActor(w.lead.id), buddyActor(w.designer.id)] },
+      { kind: 'request', body: 'Work', evidence: [], broadcast: false, key: 'tail-req' }
+    );
+    const run = await until(
+      async () => (await w.runs(w.designer.id)).find((r) => r.conversationId),
+      'the designer run gets a conversation'
+    );
+    const at = new Date('2026-10-06T08:00:00Z');
+    w.transcripts.set(
+      run.conversationId!,
+      Array.from({ length: 40 }, (_, i) => ({
+        role: 'assistant' as const,
+        timestamp: at,
+        body:
+          i % 2 === 0
+            ? { t: 'text' as const, text: `step ${i}` }
+            : {
+                t: 'parts' as const,
+                parts: [
+                  { t: 'text' as const, text: `think ${i}` },
+                  { t: 'tool' as const, name: 'Bash', input: { command: 'z'.repeat(2000) } },
+                ],
+              },
+      }))
+    );
+    const spec = w.endpoint.spec(
+      w.grants.issueBuddy({
+        role: 'worker',
+        buddyId: w.lead.id,
+        workspaceId: w.ws,
+        conversationId: 'tail-view',
+        runId: null,
+        returns: INBOX,
+      })
+    );
+    const got = await call(spec, 'runs', { action: { kind: 'get', runId: run.id, tail: 3 } });
+    assert.equal(got.isError, false, got.text);
+    assert.equal(got.value.tail.length, 3);
+    assert.equal(got.value.tail[2].text, 'think 39');
+    assert.equal(got.value.tail[2].tools[0].name, 'Bash');
+    assert.ok(got.value.tail[2].tools[0].args.length <= 201, 'args are clipped');
+    void request;
   } finally {
     await w.close();
   }

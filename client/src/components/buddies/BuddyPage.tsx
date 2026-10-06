@@ -1,3 +1,4 @@
+import { WAKE_MESSAGE } from '@unleashd/shared';
 /**
  * client/src/components/buddies/BuddyPage.tsx
  *
@@ -16,7 +17,7 @@ import type { UsePolledFetchResult } from '../../hooks/usePolledFetch';
 import { BuddyAbout } from './BuddyAboutCard';
 import { BuddySectionNav } from './BuddySectionNav';
 import { BuddyTabContent } from './BuddyTabContent';
-import { buddyWrite, errorText } from './api';
+import { buddyWrite, errorText, postToBuddyDm } from './api';
 import { buddyTabPath, parseEmployeeTab } from './buddy-tabs';
 import { directReportsOf, findBuddy } from './roster';
 import type { Buddy, BuddyOverview } from './types';
@@ -169,7 +170,7 @@ type DirectAction = { kind: 'idle' } | { kind: 'pending' } | { kind: 'done'; mes
 
 /**
  * Start a new chat, open the owner's ongoing chat with the Buddy (`/direct`),
- * or wake it (`/wake` queues a catch-up turn in that chat). Buttons, not links:
+ * or wake it (a DM post of WAKE_MESSAGE). Buttons, not links:
  * the click creates or resolves the thread, so there is no id for an href yet.
  */
 function BuddyPageActions({
@@ -182,13 +183,10 @@ function BuddyPageActions({
   openConversation: (conversationId: string) => void;
 }) {
   const [state, setState] = useState<DirectAction>({ kind: 'idle' });
-  const request = (path: 'direct' | 'wake', then: (conversationId: string) => string | null) => {
+  const request = (write: () => Promise<string | null>) => {
     setState({ kind: 'pending' });
-    buddyWrite(path === 'direct' ? 'direct.open' : 'buddy.wake', { buddyId: buddy.id })
-      .then(({ conversationId }) => {
-        const message = then(conversationId);
-        setState(message === null ? { kind: 'idle' } : { kind: 'done', message });
-      })
+    write()
+      .then((message) => setState(message === null ? { kind: 'idle' } : { kind: 'done', message }))
       .catch((cause) => setState({ kind: 'done', message: errorText(cause) }));
   };
   const pending = state.kind === 'pending';
@@ -201,8 +199,10 @@ function BuddyPageActions({
         type="button"
         disabled={pending}
         onClick={() =>
-          request('direct', (conversationId) => {
-            openConversation(conversationId);
+          request(async () => {
+            openConversation(
+              (await buddyWrite('direct.open', { buddyId: buddy.id })).conversationId
+            );
             return null;
           })
         }
@@ -212,7 +212,12 @@ function BuddyPageActions({
       <button
         type="button"
         disabled={pending}
-        onClick={() => request('wake', () => `${buddy.name} is catching up in your chat.`)}
+        onClick={() =>
+          request(async () => {
+            await postToBuddyDm(buddy.id, { body: WAKE_MESSAGE });
+            return `${buddy.name} is catching up; its summary lands in your DM.`;
+          })
+        }
       >
         Wake
       </button>

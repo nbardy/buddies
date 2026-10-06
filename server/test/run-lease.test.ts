@@ -185,8 +185,8 @@ async function hire(http: Http, ws: string, slug: string) {
 }
 
 async function ask(http: Http, buddyId: string, scenario: string) {
-  const posted = await http('POST', '/api/buddies/direct/posts', {
-    members: [buddyId],
+  const dm = await http('POST', `/api/buddies/${buddyId}/direct`);
+  const posted = await http('POST', `/api/buddies/channels/${dm.body.channelId}/posts`, {
     kind: 'request',
     body: `Please work. SCENARIO:${scenario}`,
     key: `ask-${scenario}`,

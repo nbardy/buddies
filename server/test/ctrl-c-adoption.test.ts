@@ -347,8 +347,8 @@ async function startWork(c: Case, workerScenario: string) {
   const worker = hired.body.id as string;
   const chatId = crypto.randomUUID();
   await createChat(c, chatId, 'Hello. SCENARIO:chat');
-  const posted = await http('POST', '/api/buddies/direct/posts', {
-    members: [worker],
+  const dm = await http('POST', `/api/buddies/${worker}/direct`);
+  const posted = await http('POST', `/api/buddies/channels/${dm.body.channelId}/posts`, {
     kind: 'request',
     body: `Please work. SCENARIO:${workerScenario}`,
     key: `ask-${workerScenario}`,
@@ -755,8 +755,8 @@ test(
     });
     assert.equal(hired.status, 201, JSON.stringify(hired.body));
     const buddy = hired.body.id as string;
-    const posted = await http('POST', '/api/buddies/direct/posts', {
-      members: [buddy],
+    const buddyDm = await http('POST', `/api/buddies/${buddy}/direct`);
+    const posted = await http('POST', `/api/buddies/channels/${buddyDm.body.channelId}/posts`, {
       kind: 'request',
       body: [
         'Manual continuity check. Do exactly these steps and nothing else:',

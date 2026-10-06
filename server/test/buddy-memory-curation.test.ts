@@ -205,6 +205,7 @@ async function runCase(c: CurationCase, repeat: number, warnings: string[]): Pro
     events: createBuddyEvents(),
     grants,
     uploadsRoot: () => scratch,
+    messages: async () => null,
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   const rungs: Rung[] = [];

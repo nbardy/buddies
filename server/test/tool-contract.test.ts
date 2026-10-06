@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import type { Role } from '../src/buddies/grants';
-import { toolsFor } from '../src/buddies/mcp';
+import { LEGACY_TOOLS, toolsFor } from '../src/buddies/mcp';
 
 // Fix-guard: the Buddy MCP tool contract. Agent CLIs cache `tools/list` for a whole turn and an
 // adopted turn outlives the backend that started it, so a turn keeps sending the inputs it was
@@ -126,10 +126,14 @@ function breakages(old: Json | undefined, next: Json | undefined, path: string):
   return out;
 }
 
+// A tool merged into another (decision L1) vanishes from toolsFor but stays callable by name
+// (LEGACY_TOOLS), so its removal is covered; the test below proves the old input still works.
 const legacyCovers = (tool: string, problem: string) =>
-  LEGACY_FORMS.some(
-    ({ tool: name, path }) => name === tool && problem.startsWith(`${tool}.${path}`)
-  );
+  problem === `${tool}: removed` && tool in LEGACY_TOOLS
+    ? true
+    : LEGACY_FORMS.some(
+        ({ tool: name, path }) => name === tool && problem.startsWith(`${tool}.${path}`)
+      );
 
 function contractProblems(before: Snapshot, after: Snapshot): string[] {
   return ROLES.flatMap((role) =>
@@ -174,6 +178,19 @@ test('every registered legacy input still parses to its canonical form through t
     const parsed = toolsFor('worker')[tool].schema.safeParse(legacy);
     assert.ok(parsed.success, `${tool} rejects its legacy form (${reason})`);
     assert.deepEqual(parsed.data, canonical, `${tool} canonicalized differently (${reason})`);
+  }
+});
+
+test('a merged tool is not advertised, and its old input still reaches the canonical tool', () => {
+  const channel = toolsFor('worker').channel;
+  for (const [name, { schema, canonical }] of Object.entries(LEGACY_TOOLS)) {
+    assert.equal(name in toolsFor('worker'), false, `${name} must not be advertised`);
+    const legacy =
+      name === 'channel_create'
+        ? { name: 'Ops', purpose: 'Run it', key: 'k1' }
+        : { channelId: 'c1', change: { kind: 'rename', name: 'Ops2' }, key: 'k2' };
+    const parsed = channel.schema.safeParse(canonical(schema.parse(legacy) as never));
+    assert.ok(parsed.success, `${name} no longer reaches channel: ${JSON.stringify(parsed)}`);
   }
 });
 

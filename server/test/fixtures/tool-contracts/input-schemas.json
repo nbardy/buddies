@@ -1,20 +1,45 @@
 {
   "worker": {
-    "channel_admin": {
+    "channel": {
       "type": "object",
       "properties": {
-        "channelId": {
-          "type": "string",
-          "minLength": 1
-        },
-        "change": {
+        "action": {
           "anyOf": [
             {
               "type": "object",
               "properties": {
                 "kind": {
                   "type": "string",
+                  "const": "create"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "purpose": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "kind",
+                "name",
+                "purpose"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
                   "const": "rename"
+                },
+                "channelId": {
+                  "type": "string",
+                  "minLength": 1
                 },
                 "name": {
                   "type": "string",
@@ -24,6 +49,7 @@
               },
               "required": [
                 "kind",
+                "channelId",
                 "name"
               ],
               "additionalProperties": false
@@ -34,10 +60,15 @@
                 "kind": {
                   "type": "string",
                   "const": "archive"
+                },
+                "channelId": {
+                  "type": "string",
+                  "minLength": 1
                 }
               },
               "required": [
-                "kind"
+                "kind",
+                "channelId"
               ],
               "additionalProperties": false
             },
@@ -47,10 +78,15 @@
                 "kind": {
                   "type": "string",
                   "const": "restore"
+                },
+                "channelId": {
+                  "type": "string",
+                  "minLength": 1
                 }
               },
               "required": [
-                "kind"
+                "kind",
+                "channelId"
               ],
               "additionalProperties": false
             }
@@ -63,34 +99,7 @@
         }
       },
       "required": [
-        "channelId",
-        "change",
-        "key"
-      ],
-      "additionalProperties": false
-    },
-    "channel_create": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 80
-        },
-        "purpose": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 500
-        },
-        "key": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
-        }
-      },
-      "required": [
-        "name",
-        "purpose",
+        "action",
         "key"
       ],
       "additionalProperties": false
@@ -496,6 +505,11 @@
                 "runId": {
                   "type": "string",
                   "minLength": 1
+                },
+                "tail": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 20
                 }
               },
               "required": [
@@ -995,21 +1009,46 @@
     }
   },
   "owner": {
-    "channel_admin": {
+    "channel": {
       "type": "object",
       "properties": {
-        "channelId": {
-          "type": "string",
-          "minLength": 1
-        },
-        "change": {
+        "action": {
           "anyOf": [
             {
               "type": "object",
               "properties": {
                 "kind": {
                   "type": "string",
+                  "const": "create"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "purpose": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "kind",
+                "name",
+                "purpose"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
                   "const": "rename"
+                },
+                "channelId": {
+                  "type": "string",
+                  "minLength": 1
                 },
                 "name": {
                   "type": "string",
@@ -1019,6 +1058,7 @@
               },
               "required": [
                 "kind",
+                "channelId",
                 "name"
               ],
               "additionalProperties": false
@@ -1029,10 +1069,15 @@
                 "kind": {
                   "type": "string",
                   "const": "archive"
+                },
+                "channelId": {
+                  "type": "string",
+                  "minLength": 1
                 }
               },
               "required": [
-                "kind"
+                "kind",
+                "channelId"
               ],
               "additionalProperties": false
             },
@@ -1042,10 +1087,15 @@
                 "kind": {
                   "type": "string",
                   "const": "restore"
+                },
+                "channelId": {
+                  "type": "string",
+                  "minLength": 1
                 }
               },
               "required": [
-                "kind"
+                "kind",
+                "channelId"
               ],
               "additionalProperties": false
             }
@@ -1058,34 +1108,7 @@
         }
       },
       "required": [
-        "channelId",
-        "change",
-        "key"
-      ],
-      "additionalProperties": false
-    },
-    "channel_create": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 80
-        },
-        "purpose": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 500
-        },
-        "key": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
-        }
-      },
-      "required": [
-        "name",
-        "purpose",
+        "action",
         "key"
       ],
       "additionalProperties": false
@@ -1491,6 +1514,11 @@
                 "runId": {
                   "type": "string",
                   "minLength": 1
+                },
+                "tail": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 20
                 }
               },
               "required": [

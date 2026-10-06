@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { Actor, ChannelRef, DocRef, DocScope, ListScope } from '@unleashd/buddies-core';
 import { z } from 'zod';
+import type { MessageSource } from '../conversations/messages';
 import { requireCanonicalPostMedia } from './channel-media';
 import {
   type BuddiesCore,
@@ -24,6 +25,14 @@ import {
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
 import type { BuddyGrant, Grants, Role, TurnGrant } from './grants';
 import { attachToRelay } from './mcp-relay';
+import {
+  TAIL_MAX,
+  checkedEvidence,
+  inboxView,
+  runRowsView,
+  runTail,
+  taskDetailView,
+} from './tool-views';
 import { WorkerSchema, checkedRunConfig } from './worker-config';
 
 /**
@@ -40,6 +49,8 @@ export interface ToolDeps {
   core: BuddiesCore;
   events: BuddyEvents;
   uploadsRoot(): string;
+  /** The one source of message bodies; `runs get {tail}` reads a run's transcript through it. */
+  messages: MessageSource;
 }
 
 type Tool<G extends TurnGrant> = {
@@ -314,6 +325,7 @@ async function writeTask(
         key: input.key,
       });
     case 'update':
+      if (write.changes.evidence) checkedEvidence(write.changes.evidence);
       return deps.core.upsertTask(grant.principal, { ...write, key: input.key });
   }
 }
@@ -355,11 +367,71 @@ const TASKS_TOOL = teamTool({
       z.object({ kind: z.literal('get'), taskId: z.string().min(1) }),
     ]),
   }),
-  handler: (deps, grant, { action }) =>
+  handler: async (deps, grant, { action }) =>
     action.kind === 'get'
-      ? taskDetail(deps.core, grant.author, action.taskId, 20)
+      ? taskDetailView(await taskDetail(deps.core, grant.author, action.taskId, 20))
       : readTaskRows(deps, checkedScope(grant, action.scope), action.include),
 });
+
+const channelToolSchema = z.object({
+  action: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('create'),
+      name: z.string().trim().min(1).max(80),
+      purpose: z.string().trim().min(1).max(500),
+    }),
+    z.object({
+      kind: z.literal('rename'),
+      channelId: z.string().min(1),
+      name: z.string().trim().min(1).max(80),
+    }),
+    z.object({ kind: z.literal('archive'), channelId: z.string().min(1) }),
+    z.object({ kind: z.literal('restore'), channelId: z.string().min(1) }),
+  ]),
+  key,
+});
+
+// Fix-guard: `channel_create` and `channel_admin` became one `channel` tool (decision L1). An
+// adopted turn keeps the tool list it started with (agent CLIs cache tools/list for the turn, and
+// the turn outlives the backend that started it, see legacySearchToText), so it keeps calling the
+// old names with the old inputs. Each stays CALLABLE, routed to the `channel` handler through the
+// input rewrite below, but is not ADVERTISED: toolsFor lists only `channel`, so no new turn
+// pays for the old descriptions or schemas (the 3,000-char budget). mcpServerFor registers one
+// only when the request is a call to it. Guard: tool-contract.test.ts (LEGACY_TOOLS).
+export const LEGACY_TOOLS: Readonly<
+  Record<string, { readonly schema: z.AnyZodObject; readonly canonical: (input: never) => unknown }>
+> = {
+  channel_create: {
+    schema: z.object({
+      name: z.string().trim().min(1).max(80),
+      purpose: z.string().trim().min(1).max(500),
+      key,
+    }),
+    canonical: ({ name, purpose, key }: { name: string; purpose: string; key: string }) => ({
+      action: { kind: 'create', name, purpose },
+      key,
+    }),
+  },
+  channel_admin: {
+    schema: z.object({
+      channelId: z.string().min(1),
+      change: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('rename'), name: z.string().trim().min(1).max(80) }),
+        z.object({ kind: z.literal('archive') }),
+        z.object({ kind: z.literal('restore') }),
+      ]),
+      key,
+    }),
+    canonical: ({
+      channelId,
+      change,
+      key,
+    }: { channelId: string; change: { kind: string; name?: string }; key: string }) => ({
+      action: { ...change, channelId },
+      key,
+    }),
+  },
+};
 
 // Pattern: table-driven (docs/patterns.md#table-driven)
 const BUDDY_TOOLS = {
@@ -437,42 +509,41 @@ const BUDDY_TOOLS = {
   }),
   inbox: buddyTool({
     description:
-      'Requests you owe an answer, your own open requests, and your channels here with unread counts.',
+      'Requests you owe, your open requests (clipped) and your channels here with unread counts.',
     writes: false,
     schema: z.object({}),
-    handler: (deps, grant) => deps.core.inbox(grant.author, grant.workspaceId),
+    handler: async (deps, grant) =>
+      inboxView(await deps.core.inbox(grant.author, grant.workspaceId)),
   }),
   // Regression guard: 0fef9d4 (lean rewrite) dropped buddy.new_list, so Buddies could not create
-  // channels for ~10 days although the crate's create_channel is Rule::AnyBuddy. A separate tool
-  // (not a channel_admin variant) because admin acts on an existing channelId and a union at the
-  // top level would not be a JSON-schema object. Guard: buddies-v2.test.ts "Buddy MCP creates a channel".
-  channel_create: buddyTool({
-    description: 'Create a public channel (name and one-line purpose).',
+  // channels for ~10 days although the crate's create_channel is Rule::AnyBuddy. Guard:
+  // buddies-v2.test.ts "Buddy MCP creates a channel". One tool per noun (decision L1): the former
+  // channel_create and channel_admin are this tool's `create` and `rename|archive|restore`.
+  channel: buddyTool({
+    description: 'Create a public channel, or rename, archive or restore one.',
     writes: true,
-    schema: z.object({
-      name: z.string().trim().min(1).max(80),
-      purpose: z.string().trim().min(1).max(500),
-      key,
-    }),
-    handler: (deps, grant, input) =>
-      deps.core.createChannel(grant.author, { ...input, workspaceId: grant.workspaceId }),
-  }),
-  channel_admin: buddyTool({
-    description: 'Rename, archive or restore a public channel; history stays readable.',
-    writes: true,
-    schema: z.object({
-      channelId: z.string().min(1),
-      change: z.discriminatedUnion('kind', [
-        z.object({ kind: z.literal('rename'), name: z.string().trim().min(1).max(80) }),
-        z.object({ kind: z.literal('archive') }),
-        z.object({ kind: z.literal('restore') }),
-      ]),
-      key,
-    }),
-    handler: (deps, grant, { channelId, change, key }) =>
-      change.kind === 'rename'
-        ? deps.core.renameChannel(grant.author, channelId, change.name, key)
-        : deps.core.setChannelArchived(grant.author, channelId, change.kind === 'archive', key),
+    schema: channelToolSchema,
+    handler: (deps, grant, { action, key }) => {
+      switch (action.kind) {
+        case 'create':
+          return deps.core.createChannel(grant.author, {
+            name: action.name,
+            purpose: action.purpose,
+            key,
+            workspaceId: grant.workspaceId,
+          });
+        case 'rename':
+          return deps.core.renameChannel(grant.author, action.channelId, action.name, key);
+        case 'archive':
+        case 'restore':
+          return deps.core.setChannelArchived(
+            grant.author,
+            action.channelId,
+            action.kind === 'archive',
+            key
+          );
+      }
+    },
   }),
   channel_read: buddyTool({
     description:
@@ -575,12 +646,16 @@ const BUDDY_TOOLS = {
   }),
   runs: buddyTool({
     description:
-      'List runs by {buddyId}, {taskId} or {workspace} (live first, then ended in the last 12 h) as {runs, truncated}; rows give status, errorCode (lease_expired = the holder died mid-run), conversationId, waiting. Also get, cancel, or retry a failed or cancelled run (same input, optionally another `worker`; reopens the request it answers).',
+      'List runs by {buddyId}, {taskId} or {workspace} (live first, then ended in the last 12 h) as {runs, truncated}; rows give purpose, taskTitle, status, errorCode (lease_expired = the holder died mid-run), conversationId, waiting. get {tail:n} adds its last n assistant entries. Also cancel, or retry a failed or cancelled run (same input, optionally another `worker`; reopens the request it answers).',
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('list'), scope: scopeSchema }),
-        z.object({ kind: z.literal('get'), runId: z.string().min(1) }),
+        z.object({
+          kind: z.literal('get'),
+          runId: z.string().min(1),
+          tail: z.number().int().min(1).max(TAIL_MAX).optional(),
+        }),
         z.object({ kind: z.literal('cancel'), runId: z.string().min(1) }),
         z.object({
           kind: z.literal('retry'),
@@ -596,10 +671,18 @@ const BUDDY_TOOLS = {
           const scope = scopeQuery(checkedScope(grant, input.action.scope));
           const limit = RUN_ROW_LIMIT[scope.kind];
           const rows = await deps.core.listRunRows(scope, limit + 1);
-          return { runs: rows.slice(0, limit), truncated: rows.length > limit };
+          return {
+            runs: await runRowsView(deps.core, grant.author, rows.slice(0, limit)),
+            truncated: rows.length > limit,
+          };
         }
-        case 'get':
-          return deps.core.getRun(input.action.runId);
+        case 'get': {
+          const run = await deps.core.getRun(input.action.runId);
+          const { tail } = input.action;
+          return tail === undefined
+            ? run
+            : { ...run, tail: await runTail(deps.messages, run, tail) };
+        }
         case 'cancel': {
           const run = await deps.core.cancelRun(grant.principal, input.action.runId);
           deps.events.emit({ kind: 'cancelled', run });
@@ -791,7 +874,10 @@ export function toolManifest(role: Role): string {
 // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys) — every writing tool takes a `key`
 // the crate records once per (actor, workspace); a retried call replays the first result.
 export async function callTool(deps: ToolDeps, grant: TurnGrant, name: string, input: unknown) {
-  const selected = toolsFor(grant.role)[name];
+  const advertised = toolsFor(grant.role);
+  // A legacy name is its canonical tool called with the rewritten input (LEGACY_TOOLS).
+  const legacy = name in LEGACY_TOOLS && advertised.channel ? LEGACY_TOOLS[name] : undefined;
+  const selected = legacy ? advertised.channel : advertised[name];
   if (!selected)
     return {
       isError: true,
@@ -799,7 +885,10 @@ export async function callTool(deps: ToolDeps, grant: TurnGrant, name: string, i
     };
   try {
     grant.observe(name, input);
-    const result = await selected.handler(deps, grant, input as never);
+    const canonical = legacy
+      ? selected.schema.parse(legacy.canonical(legacy.schema.parse(input) as never))
+      : input;
+    const result = await selected.handler(deps, grant, canonical as never);
     if (selected.writes) deps.events.emit({ kind: 'changed' });
     return { content: [{ type: 'text' as const, text: JSON.stringify(result ?? null) }] };
   } catch (error) {
@@ -819,17 +908,31 @@ type ToolRegistry = {
   ): unknown;
 };
 
-function mcpServerFor(deps: ToolDeps, grant: TurnGrant): McpServer {
+function mcpServerFor(deps: ToolDeps, grant: TurnGrant, calling: string | null): McpServer {
   const server = new McpServer({ name: MCP_SERVER_NAME, version: '3' });
   const registry = server as unknown as ToolRegistry;
+  const run = (name: string) => (input: unknown) => callTool(deps, grant, name, input);
   for (const [name, entry] of Object.entries(toolsFor(grant.role))) {
     registry.registerTool(
       name,
       { description: entry.description, inputSchema: entry.schema },
-      (input: unknown) => callTool(deps, grant, name, input)
+      run(name)
     );
   }
+  // A legacy tool exists only for the request that calls it, so tools/list never shows it.
+  if (calling !== null && calling in LEGACY_TOOLS)
+    registry.registerTool(
+      calling,
+      { description: 'Legacy name', inputSchema: LEGACY_TOOLS[calling].schema },
+      run(calling)
+    );
   return server;
+}
+
+/** The tool a JSON-RPC `tools/call` body names; null for every other request. */
+function calledTool(body: unknown): string | null {
+  const { method, params } = (body ?? {}) as { method?: unknown; params?: { name?: unknown } };
+  return method === 'tools/call' && typeof params?.name === 'string' ? params.name : null;
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -867,14 +970,15 @@ export async function startMcpEndpoint(
     const grant = bearer ? deps.grants.lookup(bearer) : null;
     if (!grant) return void res.writeHead(401).end('unknown, expired or revoked turn grant');
     if (req.method !== 'POST' || req.url !== '/mcp') return void res.writeHead(405).end();
-    const server = mcpServerFor(deps, grant);
+    const body = await readJson(req);
+    const server = mcpServerFor(deps, grant, calledTool(body));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       void transport.close();
       void server.close();
     });
     await server.connect(transport);
-    await transport.handleRequest(req, res, await readJson(req));
+    await transport.handleRequest(req, res, body);
   };
   const http: Server = createServer((req, res) => {
     handle(req, res).catch((error) => {
