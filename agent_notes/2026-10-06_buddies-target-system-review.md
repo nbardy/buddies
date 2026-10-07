@@ -363,3 +363,74 @@ mp4 in /tmp was removed only after confirming identical copies elsewhere (sha b1
 - 56 merged local branches deleted with `git branch -d`.
 - Unmerged dead branches are archive-tagged. Branch deletion with `-D` is blocked by the safety hook, so the branches
   are left in place.
+
+## Decision successor, 2026-10-07 07:23Z: decision A reversed. Deliveries stay out of owner chats
+
+Decision-maker: the owner. Status: ACCEPTED. File before this append: sha256 prefix `b36df33b5278edf6`.
+
+**What happened.** The owner was shown a worker-answer delivery in their DM with the Wave_sim CEO. It rendered as a "You"
+message containing the raw delivery envelope (screenshot in #case-studies post_01a1151c-e9d6, 2026-10-07 06:46Z).
+
+**Options offered** (lead, post_01a1151d-5d6e):
+1. Keep A and render deliveries as a collapsed event row. This was the lead's recommendation.
+2. Keep deliveries out of owner chats and run them in a background branch.
+
+**Owner's choice:** "it should be out of our chats should show up as background worker" (post_01a1153e-e5f3).
+
+**Effect:**
+- **Decision A is superseded.** Deliveries for a conversation the owner talks in run in a background branch of that
+  conversation, which is visible as a background worker. They never run as turns in the owner's chat.
+- **Restored:** CORE_DESIGN's 09-13 "background branch" return and the "Autonomous turns in human chat" row become
+  current again. A successor paragraph is needed there.
+- **Unchanged:** the delivery rule itself (one rule, subscriptions, the fence) stays. Only the subscribed conversation
+  changes: an owner chat's subscriptions point at its background branch. This is the delivery design's own "Revisit if
+  the owner rejects A" path.
+- **Moot for owner chats:** decisions B and C (owner-first ordering, and Stop cancelling queued deliveries), since
+  deliveries no longer queue there.
+
+**Why the lead's recommendation lost:** the owner does not want automated turns in their own chats, even when they are
+displayed well. This matches their September 13 request.
+
+## Behavior freeze, 2026-10-07 07:26Z
+
+Owner (#case-studies post_01a1153f-c17b): "I'm a little worried in general any other behavior like that we changed, tbh I
+really liked the setup we had and didn't want any big changes."
+
+**Lead response** (post_01a11541-3dae):
+- Listed the 10 user-visible behavior changes since 3838b65.
+- Froze further behavior-changing merges until the owner chooses.
+- Recommended reverting 2 (wake posts a DM message), 3 (schedules fire as posts), 6 (follow-up gate deleted),
+  7 (posting subscribes in every channel) and 8 (replies follow the last writer).
+- Recommended keeping 4 (1:1 DMs), 5 (plain @Name), 9 (restart resume and failure post) and 10 (progress line).
+- Item 1 (decision A) is already being reverted.
+
+**Lesson for the lead.** The review doc presented A–P as architecture choices. Several of them (E, F, I, M-wake) changed
+how the product feels to the owner, and the doc did not label them as user-visible behavior changes. Future decision
+tables mark each row "visible to the owner: yes/no" and default visible changes to opt-in.
+
+## Decision, 2026-10-07 07:31Z: revert the DM-stuffing and thread-noise changes (ACCEPTED)
+
+Owner, replying to the inventory (post_01a11546-7ff9): "yes revert changes that started just stuffing things in the DMs for
+sure, seems like you understand the goal, stay simple, don't overload DMs".
+
+Read as **"as recommended"**, which the lead stated back in the thread.
+
+**Revert:**
+- **1. Deliveries in owner chats.** Already in progress.
+- **2. The wake button posts a DM message.** It goes back to a silent wake.
+- **3. Schedule fires post.** They go back to silent background runs, with no posts. Proposal: a `chat` run with the
+  prompt as its body, in the schedule's own background conversation. This needs no schema change.
+- **6. The follow-up gate was deleted.** Restore the old yes/no gate before a participant gets a delivery turn in a
+  public or task thread.
+- **7. Posting subscribes the poster in every channel.** Back to the step-4 seam: only DMs, requests and follows subscribe.
+- **8. Replies follow the last writer.** Public and task thread deliveries go to the Buddy's thread seat.
+
+**Keep:**
+- 4. One-to-one DMs.
+- 5. Plain @Name mentions.
+- 9. Restart resume, plus the failure post in the request thread.
+- 10. The progress line.
+- The tool trims and every invisible reliability fix.
+
+**Principle, in the owner's words:** "stay simple, don't overload DMs". Every future change states whether the owner will
+notice it, and changes the owner would notice are opt-in.
