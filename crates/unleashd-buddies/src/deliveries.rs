@@ -38,7 +38,7 @@ const COVERED: &str = "covered(root, mark) AS (
     SELECT ?3, coalesce((SELECT t.last_ord FROM thread_read t WHERE t.reader = ?1 AND t.root_id = ?3), ''))";
 
 /// What a delivery shows from a covered thread: past the mark, and either by someone else or a
-/// post still being delivered to this Buddy (a schedule fire, which the Buddy itself authored).
+/// post still being delivered to this Buddy (a note to self, which the Buddy itself authored).
 const SHOWABLE: &str = "p.ord > h.mark AND (p.author_id IS NOT ?1 OR EXISTS (
     SELECT 1 FROM run d WHERE d.input_kind = 'deliver' AND d.input_id = p.id AND d.buddy_id = ?1
       AND d.status IN ('queued','running','cancel_requested')))";

@@ -36,11 +36,8 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 // a conversation_id is a real turn in it. Do not admit a run here whose job is decided after the
 // claim: on 2026-10-01 no-op `reply` runs for answers to an owner chat's requests sat behind the
 // owner's turn up to 2h44m and read as "blocked" (a Buddy offered to cancel the owner's GPU turn).
-// The fix is upstream, not a special case in this gate: the route is fixed when the request is
-// sent (types.rs `Returns`).
-//
-// SUCCESSOR 2026-10-07 (task_01a1153f): decision A's `owner_first` clause is gone. Deliveries for
-// an owner chat run in its background branch, so an owner chat's queue holds only owner messages.
+// The fix was upstream, not a special case in this gate. Since 2026-10-07 (task_01a1153f)
+// deliveries for an owner chat run in its background branch, so its queue holds only owner messages.
 const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
@@ -376,8 +373,8 @@ impl Store {
 
     /// Binds a claimed run to the conversation the runner opened for it. That conversation is the
     /// one the run's thread delivers to from now on (subscription case 2): a request's recipient
-    /// conversation, which has read the request; or a delivery's fresh conversation (a schedule's
-    /// first fire, or one whose conversation was deleted).
+    /// conversation, which has read the request; or a delivery's fresh conversation (one whose
+    /// subscribed conversation was deleted).
     pub fn bind_run(&mut self, run_id: &str, lease_token: &str, conversation_id: &str) -> Result<Run> {
         self.write(|tx| {
             let run = leased(tx, run_id, lease_token)?;
@@ -402,7 +399,7 @@ impl Store {
                 }
                 RunInput::Deliver { post_id } if run.conversation_id.as_deref() != Some(conversation_id) => {
                     let post = get_post(tx, post_id)?;
-                    // Only a DM, or the Buddy's own post (a schedule fire), binds a subscription. A
+                    // Only a DM, or the Buddy's own post (a note to self), binds a subscription. A
                     // public or task thread's follow-up opens the Buddy's SEAT without subscribing
                     // it: a subscribed seat is delivered every later post without the follow-up
                     // gate (owner decision 2026-10-07; guard `a_seat_bound_in_a_public_thread_is_not_subscribed`).

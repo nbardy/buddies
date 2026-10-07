@@ -254,12 +254,19 @@ type RunExecution = RunRecord & {
   readonly landed: () => void;
   /** Ends the runner's `hold`: from now on the claim gate may end this run. */
   readonly release: () => void;
+  /** This holder's view of the run's lease (see bridgeAlive). */
+  lease: LeaseHold;
 };
 
 const nothingWaits = () => undefined;
 
 /** This holder's view of its run's lease: renewed at `renewedAt`, a renewal in flight, or gone. */
 type LeaseHold = { t: 'held'; renewedAt: number } | { t: 'renewing' } | { t: 'lost' };
+
+/** A chat run waiting to start. Separate from `execution`: its claim arrives before the previous settle lands. */
+type Pending =
+  | { t: 'claimed'; entryId: string; run: OwnedChatRun }
+  | { t: 'admitted'; run: OwnedChatRun };
 
 export interface BuddyTurnPolicySeed {
   readonly memorySnapshot: MemorySnapshot | null;
@@ -275,12 +282,9 @@ export class BuddyTurnPolicy implements TurnPolicy {
   // "unknown" (new, reset, restored, or failed spawn) and forces one re-brief.
   private briefedMemoryGeneration: string | null = null;
   // The chat run the runner claimed for a queued message: held here, by that message's id, until
-  // the runtime starts it (`gate` hands it on as `admittedChatRun`, `startTurn` takes it).
-  private claimed: { entryId: string; run: OwnedChatRun } | null = null;
-  private admittedChatRun: OwnedChatRun | null = null;
+  // the runtime starts it (`gate` admits it, `startTurn` takes it).
+  private pending: Pending | null = null;
   private execution: RunExecution | null = null;
-  // The execution's lease, as this holder last knew it (see bridgeAlive).
-  private lease: LeaseHold | null = null;
   // This turn's grant, held as data so the turn can be adopted.
   private grant: GrantRecord | null = null;
   private reviewTicket: { attemptId: string; messageStart: number; context: BuddyContext } | null =
@@ -325,11 +329,11 @@ export class BuddyTurnPolicy implements TurnPolicy {
     cancel: (entry) => this.buddies.cancelChat(entry.message.id),
     // The run settles through this policy's `settle`, so the entry's end needs nothing here.
     settle: () => undefined,
-    stamp: (entry) => this.claimed?.entryId === entry.message.id,
+    stamp: (entry) => this.pending?.t === 'claimed' && this.pending.entryId === entry.message.id,
   };
 
   admitClaim(entryId: string, run: OwnedChatRun): void {
-    this.claimed = { entryId, run };
+    this.pending = { t: 'claimed', entryId, run };
     this.host.processQueue();
   }
 
@@ -352,19 +356,17 @@ export class BuddyTurnPolicy implements TurnPolicy {
     // turn dropped here would come back 'unknown'. The runtime asks `carrier.stamp` first, so a
     // queue head arrives here only once its run is claimed.
     if (!fromQueue) return 'enqueue';
-    const held = this.claimed;
-    if (!held) return 'wait';
-    this.claimed = null;
-    this.admittedChatRun = held.run;
+    if (this.pending?.t !== 'claimed') return 'wait';
+    this.pending = { t: 'admitted', run: this.pending.run };
     return 'admitted';
   }
 
   // An admitted turn can return before spawning (preflight refusal, rejected fork). Its run
   // must be settled here, or it holds one of its Buddy's slots until the lease expires.
   releaseUnspawned(): void {
-    const owned = this.admittedChatRun;
-    if (!owned) return;
-    this.admittedChatRun = null;
+    if (this.pending?.t !== 'admitted') return;
+    const owned = this.pending.run;
+    this.pending = null;
     this.buddies
       .finishRun(owned.id, owned.claim_token, { t: 'cancelled', detail: 'Turn did not start' })
       .catch((error) => console.error('[buddies] unspawned run not settled', owned.id, error));
@@ -372,7 +374,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   // Stop while the head waits for its run: the message is dropped, and its run cancelled.
   dropWaitingTurn(): boolean {
-    if (this.host.hasProcess() || this.claimed) return false;
+    if (this.host.hasProcess() || this.pending?.t === 'claimed') return false;
     this.host.dropPendingHead();
     return true;
   }
@@ -448,9 +450,11 @@ export class BuddyTurnPolicy implements TurnPolicy {
   // One MCP server with one fresh grant. `owner` only for an owner-authored input (B1): a seat
   // answering another Buddy's post never holds owner authority.
   startTurn(input: TurnInput, config: ResolvedExecutionConfig) {
-    const owned = this.admittedChatRun;
-    this.admittedChatRun = null;
-    if (owned) this.ownChatRun(owned);
+    const owned = this.pending?.t === 'admitted' ? this.pending.run : null;
+    if (owned) {
+      this.pending = null;
+      this.ownChatRun(owned);
+    }
     assertBuddyProviderSupportsMcp(config.provider);
     const context = this.turnContext();
     const tools = this.buddies.mcpServers({
@@ -481,8 +485,13 @@ export class BuddyTurnPolicy implements TurnPolicy {
   /** Hold the run a turn executes under. Its lease was just claimed, or renewed at adoption. */
   private arm(run: RunRecord, landed: () => void = nothingWaits): void {
     const release = this.buddies.hold(run.runId, run.leaseToken);
-    this.execution = { ...run, deadlineTimer: { current: undefined }, landed, release };
-    this.lease = { t: 'held', renewedAt: Date.now() };
+    this.execution = {
+      ...run,
+      deadlineTimer: { current: undefined },
+      landed,
+      release,
+      lease: { t: 'held', renewedAt: Date.now() },
+    };
   }
 
   private disarm(): RunExecution | null {
@@ -490,7 +499,6 @@ export class BuddyTurnPolicy implements TurnPolicy {
     if (execution) clearTimeout(execution.deadlineTimer.current);
     execution?.release();
     this.execution = null;
-    this.lease = null;
     return execution;
   }
 
@@ -623,15 +631,15 @@ export class BuddyTurnPolicy implements TurnPolicy {
   // with no provider progress still dies of the idle timer" and "a holder that dies while the
   // backend stays up is cleared within the lease time".
   bridgeAlive(): void {
-    const { execution, lease } = this;
-    if (!execution || lease?.t !== 'held') return;
-    if (Date.now() - lease.renewedAt < BUDDY_RUN_LEASE_RENEW_MS) return;
-    this.lease = { t: 'renewing' };
+    const { execution } = this;
+    if (!execution || execution.lease.t !== 'held') return;
+    if (Date.now() - execution.lease.renewedAt < BUDDY_RUN_LEASE_RENEW_MS) return;
+    execution.lease = { t: 'renewing' };
     void this.buddies.renewLease(execution.runId, execution.leaseToken).then((renewal) => {
       if (this.execution !== execution) return; // drained meanwhile; the settle owns it now
       switch (renewal.kind) {
         case 'renewed':
-          this.lease = { t: 'held', renewedAt: Date.now() };
+          execution.lease = { t: 'held', renewedAt: Date.now() };
           return;
         case 'failed':
           // Retry one renewal interval later: the lease still has four intervals to run.
@@ -639,13 +647,13 @@ export class BuddyTurnPolicy implements TurnPolicy {
             `[${this.host.id}] lease renewal failed for ${execution.runId}:`,
             renewal.error
           );
-          this.lease = { t: 'held', renewedAt: Date.now() };
+          execution.lease = { t: 'held', renewedAt: Date.now() };
           return;
         case 'lost':
           console.error(
             `[${this.host.id}] run ${execution.runId} lost its lease: the claim gate ended it; the turn continues unowned`
           );
-          this.lease = { t: 'lost' };
+          execution.lease = { t: 'lost' };
           return;
       }
     });

@@ -67,7 +67,7 @@ export declare class BuddiesCore {
   listRunRows(reader: Actor, scope: ListScope, limit: number): Promise<Array<RunRow>>
   putSchedule(actor: Actor, input: ScheduleInput): Promise<Schedule>
   listSchedules(query: ListScope): Promise<Array<Schedule>>
-  /** "Run now": the schedule fires at once (a post in its thread, delivered to its Buddy). */
+  /** "Run now": the schedule fires at once (one silent chat run, no post). */
   fireSchedule(actor: Actor, scheduleId: string): Promise<Run>
   dueSchedules(now: string): Promise<Array<Run>>
   appendEvent(actor: Actor, input: EventInput): Promise<Event>

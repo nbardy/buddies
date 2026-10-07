@@ -8,6 +8,7 @@ import {
 } from '@unleashd/shared';
 import { NO_AGENT_INSTALLED, WAKE_MESSAGE, configFromProviderPreferences } from '@unleashd/shared';
 import type { ConversationRuntime } from '../conversations/runtime';
+import { profileExecution } from './briefing';
 import {
   type LiveConversation,
   type StableConversationPorts,
@@ -15,7 +16,6 @@ import {
   scanGenerations,
   stableConversationId,
 } from './buddy-conversation-slots';
-import { profileExecution } from './briefing';
 import type { ReplyGate } from './channel-reply-gate';
 import { type BuddiesCore, OWNER } from './core';
 import type { BuddyEvents } from './events';

@@ -302,7 +302,7 @@ impl BuddiesCore {
         call(&self.store, move |s| s.list_schedules(query)).await
     }
 
-    /// "Run now": the schedule fires at once (a post in its thread, delivered to its Buddy).
+    /// "Run now": the schedule fires at once (one silent chat run, no post).
     #[napi]
     pub async fn fire_schedule(&self, actor: Actor, schedule_id: String) -> napi::Result<Run> {
         call(&self.store, move |s| s.fire_schedule(&actor, &schedule_id)).await

@@ -8,6 +8,7 @@ import type { BuddyContext, ContentPart, Message } from '@unleashd/shared';
 import { redactAndBound } from '../observability/error-journal';
 import { onPath } from '../providers/installed-agent';
 import { readBuddyState } from './briefing';
+import { RESTRICTED_FLAGS } from './channel-reply-gate';
 import { type BuddiesCore, buddyActor } from './core';
 import { runDetached } from './detached-cli';
 import type { BuddyGrant, Grants } from './grants';
@@ -208,7 +209,7 @@ const HARNESSES: Record<MemoryReviewModelChoice['harness'], Harness> = {
       reasoningEffort: l.choice.reasoningEffort,
       yolo: false,
       extraArgs: [
-        ...['--ignore-user-config', '--ignore-rules', '--ephemeral', '-s', 'read-only'],
+        ...RESTRICTED_FLAGS.codex,
         ...[
           `model_instructions_file=${JSON.stringify(l.instructionsPath)}`,
           'project_doc_max_bytes=0',
@@ -233,15 +234,7 @@ const HARNESSES: Record<MemoryReviewModelChoice['harness'], Harness> = {
       ...base(l, `${MEMORY_REVIEW_INSTRUCTIONS}\n\n${l.evidence}`),
       reasoningEffort: l.choice.reasoningEffort,
       yolo: false,
-      extraArgs: [
-        '--no-foreign-personal-context',
-        '--no-session-log',
-        '--disable-web-tools',
-        '--disable-shell',
-        '--disable-write',
-        '--approval-mode',
-        'never',
-      ],
+      extraArgs: [...RESTRICTED_FLAGS.muse, '--approval-mode', 'never'],
     }),
     authorizes: (name) =>
       name === 'mcp_tool' || /^model\./.test(name) || isMemoryTool(name.replace(/^tool:/, '')),
@@ -255,10 +248,8 @@ const HARNESSES: Record<MemoryReviewModelChoice['harness'], Harness> = {
       extraArgs: [
         '--system-prompt',
         MEMORY_REVIEW_INSTRUCTIONS,
-        '--setting-sources',
-        '',
+        ...RESTRICTED_FLAGS.claude,
         ...HARNESS_MEMORY_OFF.claude,
-        '--no-session-persistence',
         '--allowedTools',
         ...[...TOOL_NAMES].map((name) => `mcp__${SERVER}__${name}`),
         ...CLAUDE_READ,
@@ -275,7 +266,7 @@ const HARNESSES: Record<MemoryReviewModelChoice['harness'], Harness> = {
       harness: 'cursor',
       ...base(l, `${MEMORY_REVIEW_INSTRUCTIONS}\n\n${l.evidence}`),
       yolo: true,
-      extraArgs: ['--mode', 'ask'],
+      extraArgs: RESTRICTED_FLAGS.cursor,
     }),
     authorizes: (name) => name === 'getMcpTools' || CURSOR_READ.has(name) || isMemoryTool(name),
   },

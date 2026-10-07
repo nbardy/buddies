@@ -19,7 +19,7 @@ export type GateVerdict =
   | { kind: 'unparseable'; output: string }
   | { kind: 'failed'; reason: string };
 
-// `config` is the Buddy's seat config in the thread (channel-responder.ts), so
+// `config` is the Buddy's seat config in the thread (runner.ts), so
 // a Buddy the owner moved onto another harness is asked there too — not on a
 // profile harness that may be down.
 export type ReplyGate = (input: {
@@ -52,27 +52,31 @@ export function parseGateVerdict(output: string): GateVerdict {
 // session persistence: a persisted gate transcript would be imported by the disk adapters and
 // show up as a conversation. `null`: no reply gate on that harness.
 // Pattern: table-driven (docs/patterns.md#table-driven)
+/** The read-only, no-persistence flags per harness; the memory reviewer restricts itself the same way. */
+export const RESTRICTED_FLAGS = {
+  claude: ['--setting-sources', '', '--no-session-persistence'],
+  codex: ['--ephemeral', '--ignore-user-config', '--ignore-rules', '-s', 'read-only'],
+  muse: [
+    '--no-session-log',
+    '--no-foreign-personal-context',
+    '--disable-shell',
+    '--disable-write',
+    '--disable-web-tools',
+  ],
+  cursor: ['--mode', 'ask'],
+};
+
 const GATE_HARNESSES: Record<Provider, { args: string[]; effort: boolean } | null> = {
-  claude: {
-    args: ['--tools', '', '--setting-sources', '', '--no-session-persistence'],
-    effort: true,
-  },
-  codex: {
-    args: ['--ephemeral', '--ignore-user-config', '--ignore-rules', '-s', 'read-only'],
-    effort: true,
-  },
-  muse: {
-    args: `--no-session-log --no-foreign-personal-context --disable-shell --disable-write
-      --disable-web-tools`.split(/\s+/),
-    effort: true,
-  },
+  claude: { args: ['--tools', '', ...RESTRICTED_FLAGS.claude], effort: true },
+  codex: { args: RESTRICTED_FLAGS.codex, effort: true },
+  muse: { args: RESTRICTED_FLAGS.muse, effort: true },
   // Cursor has no flag to drop tools or persistence. `--mode ask` makes it read-only and, without
   // `--force`, nothing needing approval executes; any tool.use still ends the gate as
   // unparseable. The cwd is a fresh temp dir, so Cursor refuses to start unless `--trust` is
   // passed — a real seat turn runs in a directory the owner already trusted, which is why the
   // same harness answers a mention and then fails this gate. Its transcript is deleted after
   // exit (runDetached), and effort lives in the model id.
-  cursor: { args: ['--mode', 'ask', '--trust'], effort: false },
+  cursor: { args: [...RESTRICTED_FLAGS.cursor, '--trust'], effort: false },
   opencode: null,
   gemini: null,
 };
