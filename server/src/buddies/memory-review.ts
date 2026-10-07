@@ -477,12 +477,14 @@ export function createMemoryReviewer(options: {
           conversationId: `memory-review:${id}`,
           runId: null,
           subscribes: 'self',
-          observe: (tool, input) => {
+          observe: async (tool, input, call) => {
             if (++calls > MAX_TOOL_CALLS) throw new Error('Memory review tool-call limit reached');
             const kind = (input as { kind?: string }).kind;
             if (tool === 'doc_read' && (kind === 'working' || kind === 'long_term'))
               memoryRead = true;
+            const result = await call();
             if (tool === 'doc_write') writes[kind === 'working' ? 'working' : 'longTerm'] += 1;
+            return result;
           },
         });
         try {

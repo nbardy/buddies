@@ -906,11 +906,12 @@ export async function callTool(deps: ToolDeps, grant: TurnGrant, name: string, i
       content: [{ type: 'text' as const, text: `[denied] ${name} is not available to this turn` }],
     };
   try {
-    grant.observe(name, input);
-    const canonical = legacy
-      ? selected.schema.parse(legacy.canonical(legacy.schema.parse(input) as never))
-      : input;
-    const result = await selected.handler(deps, grant, canonical as never);
+    const result = await grant.observe(name, input, async () => {
+      const canonical = legacy
+        ? selected.schema.parse(legacy.canonical(legacy.schema.parse(input) as never))
+        : input;
+      return selected.handler(deps, grant, canonical as never);
+    });
     if (selected.writes) deps.events.emit({ kind: 'changed' });
     return { content: [{ type: 'text' as const, text: JSON.stringify(result ?? null) }] };
   } catch (error) {

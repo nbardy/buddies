@@ -213,7 +213,10 @@ export function createRunner(options: {
         budgets,
         Array.from(holds, ([runId, leaseToken]) => ({ runId, leaseToken }))
       );
-    for (let claim = await claimed(); claim; claim = await claimed()) void execute(claim);
+    // `paused` is re-read per claim: a reload pausing mid-drain claimed the rest of the queue
+    // on the exiting backend (core review I2). Guard: buddies-v2 "pausing the runner mid-drain".
+    for (let claim = await claimed(); claim; claim = paused ? null : await claimed())
+      void execute(claim);
   }
 
   // Turn endings in flight (completion step + settle): a graceful backend exit waits for them

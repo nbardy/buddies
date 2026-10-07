@@ -320,7 +320,7 @@ export class TurnRunner {
       });
       // One request shape for every harness; the cast covers agent-cli's `never` effort typing
       // on harnesses without effort (docs/turn-lifecycle.md#one-request-shape).
-      handle = this.ports.executeTurn({
+      handle = this.spawnInto(execution, {
         harness: turn.config.provider,
         mode: 'conversation',
         prompt: turn.content,
@@ -351,6 +351,20 @@ export class TurnRunner {
     // Spawn only: an adopted attempt is already running in the journal of the boot that spawned it.
     if (this.activeAttemptId) this.ports.turnAttempts.running(this.activeAttemptId, host.sessionId);
     this.follow(handle, runToken, execution);
+  }
+
+  /**
+   * A spawn that throws has no child, so no drain will ever remove the journal `forTurn` just
+   * wrote; it would sit on disk until the next boot discarded it as `unstarted` (core review I1,
+   * 2026-10-07). Guard: conversation-runtime "a spawn that throws leaves no execution journal".
+   */
+  private spawnInto(execution: Execution, request: ExecuteCommandRequest): ExecutionHandle {
+    try {
+      return this.ports.executeTurn(request);
+    } catch (error) {
+      this.ports.executions.remove(execution.dir);
+      throw error;
+    }
   }
 
   /**

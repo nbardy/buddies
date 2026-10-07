@@ -742,6 +742,43 @@ test("follow from an owner chat registers and wakes the chat's branch", async ()
 // possible owner. Through the real MCP endpoint a Buddy's group `direct:[a, b]` is a typed error
 // naming the alternative, starts no run and creates no channel; one DM per recipient works.
 // Crate guard: `a_dm_is_one_to_one_and_a_legacy_group_dm_is_read_only`.
+// Regression (core review I2, 2026-10-07): pause() is the reload boundary ("nothing new is
+// claimed"), but a drain already in its claim loop kept claiming until the queue was empty.
+test('pausing the runner mid-drain stops further claims', async () => {
+  const w = await world();
+  try {
+    w.runner.pause();
+    for (const buddy of [w.lead, w.designer])
+      await w.post(
+        OWNER,
+        { kind: 'direct', members: [buddyActor(buddy.id), OWNER] },
+        {
+          kind: 'inform',
+          body: 'hello',
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          key: `hello-${buddy.slug}`,
+        }
+      );
+    const claim = w.core.claimRun.bind(w.core);
+    let claims = 0;
+    w.core.claimRun = async (...args) => {
+      claims += 1;
+      const claimed = await claim(...args);
+      w.runner.pause(); // the reload arrives while this claim's turn starts
+      return claimed;
+    };
+    w.runner.resume();
+    await w.runner.settled();
+    assert.equal(claims, 1);
+    const queued = [...(await w.runs(w.lead.id)), ...(await w.runs(w.designer.id))];
+    assert.equal(queued.filter((run) => run.status === 'queued').length, 1);
+  } finally {
+    await w.close();
+  }
+});
+
 test('a group DM is refused through MCP; one DM per recipient is the alternative', async () => {
   const w = await world();
   try {
@@ -2433,6 +2470,16 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
         if (!exhausted) {
           const read = await call(spec, 'doc_read', { kind: 'working' });
           assert.equal(read.isError, false, read.text);
+          // A write that fails (stale revision) must not count on the receipt (core review I3:
+          // receipts counted attempted writes, so this one made it 2).
+          const stale = await call(spec, 'doc_write', {
+            kind: 'working',
+            content: 'stale',
+            baseRevision: 7,
+            reason: 'stale read',
+            key: 'w0',
+          });
+          assert.equal(stale.isError, true, stale.text);
           const write = await call(spec, 'doc_write', {
             kind: 'working',
             content: 'Owner prefers dark mode',
@@ -3051,7 +3098,10 @@ test('a thread follow-up is gated: <no> runs no turn, <yes> replies in the seat,
     const turnsBefore = w.turns.length;
     const passed = await until(
       async () =>
-        (await w.runs(lead.id)).find((r) => r.input.kind === 'deliver' && r.input.postId === quiet.id && r.status === 'cancelled'),
+        (await w.runs(lead.id)).find(
+          (r) =>
+            r.input.kind === 'deliver' && r.input.postId === quiet.id && r.status === 'cancelled'
+        ),
       'the gated run settles with no turn'
     );
     assert.equal(w.turns.length, turnsBefore, 'a <no> starts no turn');
@@ -3062,11 +3112,17 @@ test('a thread follow-up is gated: <no> runs no turn, <yes> replies in the seat,
     w.gate.verdicts.push({ kind: 'respond' });
     w.answers.set(2, 'On it');
     await say('Lead, what is the ETA?', root.id);
-    await until(async () => (await thread(root.id)).some((p) => p.body === 'On it'), 'the follow-up reply');
+    await until(
+      async () => (await thread(root.id)).some((p) => p.body === 'On it'),
+      'the follow-up reply'
+    );
     assert.equal(w.gate.asked.length, 2);
     w.gate.verdicts.push({ kind: 'pass' });
     await say('ok', root.id);
-    await until(async () => w.gate.asked.length === 3, 'a seat that posted is still gated, not subscribed');
+    await until(
+      async () => w.gate.asked.length === 3,
+      'a seat that posted is still gated, not subscribed'
+    );
 
     // A gate that cannot decide is a visible notice, never silence.
     w.gate.verdicts.push({ kind: 'failed', reason: 'no answer' });

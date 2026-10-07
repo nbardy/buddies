@@ -47,13 +47,14 @@ function runtimeFixture(
     reviewCompletedBuddyTurn?: (turn: CompletedBuddyTurn) => void;
     readCurrentBuddyContext?: () => { briefing: string; memoryGeneration: string };
     buddyContext?: CompletedBuddyTurn['context'];
+    executions?: ConversationRuntimeDependencies['executions'];
   } = {}
 ) {
   const aliases: Array<[string, string]> = [];
   const broadcasts: unknown[] = [];
   const config = options.config ?? createDefaultConversationConfig(options.provider ?? 'codex');
   const Base = createConversationRuntime({
-    executions: testExecutions(),
+    executions: options.executions ?? testExecutions(),
     broadcast: (message) => broadcasts.push(message),
     registerSessionAlias: (sessionId, conversationId) => {
       if (sessionId) aliases.push([sessionId, conversationId]);
@@ -1667,6 +1668,20 @@ test('a Task tool starts a generic sub-agent that parent completion settles', as
   assert.equal(agent.toolUses, 1);
   assert.equal(agent.status, 'completed');
   assert.equal(agent.statusSource, 'inferred_parent_completion');
+});
+
+// Regression (core review I1, 2026-10-07): a synchronous spawn failure left the journal the
+// turn created on disk; nothing removed it until the next boot discarded it as `unstarted`.
+test('a spawn that throws leaves no execution journal behind', () => {
+  const executions = testExecutions();
+  const fixture = runtimeFixture({
+    executions,
+    executeTurn: (() => {
+      throw new Error('spawn refused');
+    }) as never,
+  });
+  assert.throws(() => fixture.conversation.sendMessage('hi'), /spawn refused/);
+  assert.deepEqual(executions.scan(), []);
 });
 
 // Regression: a provider binary absent from PATH showed an empty Buddy DM bubble; `spawn codex

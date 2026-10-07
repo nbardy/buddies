@@ -24,8 +24,8 @@ interface GrantBase {
   readonly expiresAt: number;
   readonly author: Actor;
   readonly principal: Actor;
-  /** Called before each tool call; the reviewer counts calls and records its reads here. */
-  readonly observe: (tool: string, input: unknown) => void;
+  /** Wraps each tool call: the reviewer counts calls before `call`, landed writes after (I3). */
+  readonly observe: Observe;
 }
 
 /** A Buddy's turn: a worker, an owner-authored turn, or the post-turn memory reviewer. */
@@ -51,6 +51,8 @@ export type TurnGrant = BuddyGrant | BuilderGrant;
  */
 export type GrantRecord = Omit<BuddyGrant, 'observe'> | Omit<BuilderGrant, 'observe'>;
 
+export type Observe = <T>(tool: string, input: unknown, call: () => Promise<T>) => Promise<T>;
+
 export type BuddyGrantInput = {
   role: 'worker' | 'reviewer';
   buddyId: string;
@@ -58,10 +60,10 @@ export type BuddyGrantInput = {
   conversationId: string;
   runId: string | null;
   subscribes: Subscribes;
-  observe?: (tool: string, input: unknown) => void;
+  observe?: Observe;
 };
 
-const ignore = () => undefined;
+const ignore: Observe = (_tool, _input, call) => call();
 
 export type Grants = ReturnType<typeof createGrants>;
 
