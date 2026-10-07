@@ -67,7 +67,8 @@
   color: var(--text-bright);
 }
 
-.channel-composer-highlight mark[data-kind="task"] {
+.channel-composer-highlight mark[data-kind="task"],
+.channel-composer-highlight mark[data-kind="foreign"] {
   background: color-mix(in srgb, var(--text-muted) 22%, transparent);
 }
 

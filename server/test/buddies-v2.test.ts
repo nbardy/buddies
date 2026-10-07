@@ -1117,21 +1117,8 @@ test('owner and Buddy posts store the same canonical mentions, and wake once eve
       changes: { name: 'Chief' },
       key: 'rename-lead',
     });
-    const elsewhere = await w.core.createWorkspace(OWNER, {
-      name: 'Elsewhere',
-      rootPath: tempDir('elsewhere-'),
-    });
-    const stranger = await w.core.createBuddy(OWNER, {
-      workspaceId: elsewhere.id,
-      slug: 'stranger',
-      name: 'Stranger',
-      role: 'Stranger role',
-      manager: { kind: 'nobody' },
-      provider: 'codex',
-      key: 'stranger',
-    });
-    const body = `@chief look; again [@Lead](buddy:${w.lead.id}); not [@Stranger](buddy:${stranger.id}); mail a@chief.com; \`@Chief\` is code`;
-    const canonical = `[@Chief](buddy:${w.lead.id}) look; again [@Chief](buddy:${w.lead.id}); not @Stranger; mail a@chief.com; \`@Chief\` is code`;
+    const body = `@chief look; again [@Lead](buddy:${w.lead.id}); mail a@chief.com; \`@Chief\` is code`;
+    const canonical = `[@Chief](buddy:${w.lead.id}) look; again [@Chief](buddy:${w.lead.id}); mail a@chief.com; \`@Chief\` is code`;
 
     let viaTool: string | undefined;
     w.during.set(1, async (turn) => {
@@ -1169,6 +1156,86 @@ test('owner and Buddy posts store the same canonical mentions, and wake once eve
     );
     assert.equal(deliveries.length, 1, 'one delivery for the owner post, replay included');
     assert.equal((await w.runs(w.designer.id)).length, 0, 'nobody else was woken');
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
+// Fix-guard 2026-10-08: an explicit `buddy:<id>` the workspace does not hold (another workspace's
+// Buddy, an archived one) dissolved to `@Label` and was then read BY NAME, so a pasted foreign
+// `@Lead` woke the local Lead. It is now refused at the one write boundary (owner post, owner
+// answer, Buddy tool): no post, no delivery, and a replay of the same key stays refused.
+test('an explicit id that is not on the roster is refused, never retargeted to a same-named Buddy', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const elsewhere = await w.core.createWorkspace(OWNER, {
+      name: 'Elsewhere',
+      rootPath: tempDir('elsewhere-'),
+    });
+    const foreignLead = await w.core.createBuddy(OWNER, {
+      workspaceId: elsewhere.id,
+      slug: 'lead',
+      name: 'Lead',
+      role: 'Their lead',
+      manager: { kind: 'nobody' },
+      provider: 'codex',
+      key: 'foreign-lead',
+    });
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.designer.id,
+      changes: { status: 'archived' },
+      key: 'archive-designer',
+    });
+    const before = (
+      await w.core.listPosts(OWNER, { kind: 'channel', channelId: w.general.id }, null, 50)
+    ).posts.length;
+    const attempts = [
+      ['foreign', `look [@Lead](buddy:${foreignLead.id}) here`, 'Lead'],
+      ['archived', `look [@Designer](buddy:${w.designer.id}) here`, 'Designer'],
+    ];
+    for (const [name, body, label] of attempts) {
+      for (const round of [1, 2]) {
+        const sent = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+          body,
+          key: `refused-${name}`,
+        });
+        assert.equal(sent.status, 400, `${name} round ${round}: ${JSON.stringify(sent.body)}`);
+        assert.match(String(sent.body.error), new RegExp(`@${label} names a Buddy that is not`));
+      }
+    }
+    // The Buddy tool shares the boundary: a woken Lead cannot post the foreign token either.
+    let viaTool: { isError: boolean; text: string } | undefined;
+    w.during.set(1, async (turn) => {
+      viaTool = await call(turn.mcp, 'post', {
+        channel: { id: w.general.id },
+        body: `[@Lead](buddy:${foreignLead.id}) hi`,
+        key: 'tool-foreign',
+      });
+    });
+    const woke = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body: `[@Lead](buddy:${w.lead.id}) go`,
+      key: 'wake-lead',
+    });
+    assert.equal(woke.status, 201, JSON.stringify(woke.body));
+    await until(async () => viaTool !== undefined, 'the woken Lead tried to post');
+    assert.equal(viaTool?.isError, true, viaTool?.text);
+    assert.match(viaTool?.text ?? '', /not in this workspace/);
+    await until(
+      async () => (await w.runs(w.lead.id)).every((r) => r.status === 'complete'),
+      'the delivery settles'
+    );
+    const posts = (
+      await w.core.listPosts(OWNER, { kind: 'channel', channelId: w.general.id }, null, 50)
+    ).posts;
+    assert.equal(posts.length, before + 1, 'only the legitimate wake post exists');
+    assert.equal(
+      (await w.runs(w.lead.id)).length,
+      1,
+      'the local Lead ran once, for its own mention'
+    );
+    assert.equal((await w.runs(w.designer.id)).length, 0);
   } finally {
     server.close();
     await w.close();

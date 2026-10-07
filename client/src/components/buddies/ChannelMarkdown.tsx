@@ -56,7 +56,9 @@ function TaskCardBody({ task }: { task: ChannelTask }) {
   const status = taskStatusView(task.status);
   return (
     <>
-      <span className="channel-task-card-title">{task.title}</span>
+      <span className="channel-task-card-title" {...{ [REF_ATTRIBUTE]: `task:${task.id}` }}>
+        {task.title}
+      </span>
       <span className="channel-task-card-status" data-tone={status.tone}>
         {status.glyph} {status.label}
         <span className="channel-task-card-owner ui-muted"> · {task.ownerName}</span>
@@ -114,7 +116,9 @@ function TaskChip({
         <span className="channel-task-chip-glyph" aria-hidden="true">
           ?
         </span>
-        <span className="channel-task-chip-title">{label}</span>
+        <span className="channel-task-chip-title" {...{ [REF_ATTRIBUTE]: `task:${taskId}` }}>
+          {label}
+        </span>
       </span>
     );
   }
@@ -144,7 +148,9 @@ function TaskChip({
         <span className="channel-task-chip-glyph" aria-hidden="true">
           {status.glyph}
         </span>
-        <span className="channel-task-chip-title">{task.title}</span>
+        <span className="channel-task-chip-title" {...{ [REF_ATTRIBUTE]: `task:${task.id}` }}>
+          {task.title}
+        </span>
       </button>
       {placement &&
         createPortal(

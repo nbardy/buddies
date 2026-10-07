@@ -7,6 +7,7 @@ import {
   decodeChannelDraft,
   draftView,
   encodeChannelDraft,
+  foreignMentions,
   inputEdit,
   mentionedBuddies,
   pastedBody,
@@ -104,20 +105,46 @@ test('copy then paste keeps the local id, follows a rename, and never trusts a f
   const renamed: NamedRef[] = [{ kind: 'buddy', id: 'b1', name: 'Chief' }];
   assert.equal(
     pastedBody(copied.text, copied.html, renamed),
-    'ask [@Chief](buddy:b1) about @Lead Designer'
+    `ask [@Chief](buddy:b1) about ${tokenDesigner}`
   );
 
-  // Another install's / workspace's id is not a Buddy here: it becomes text, then reads like text.
+  // Another install's / workspace's id is not a Buddy here. Fix-guard 2026-10-08: it used to dissolve
+  // to `@Lead` and retarget to the local Lead by name. The token now stays as written.
   const foreign = copied.html.replace('buddy:b1', 'buddy:elsewhere');
-  assert.equal(
-    pastedBody(copied.text, foreign, roster),
-    `ask ${tokenLead} about ${tokenDesigner}`,
-    'the dissolved @Lead is the exact unique name of the local Lead'
+  const kept = pastedBody(copied.text, foreign, roster);
+  assert.equal(kept, `ask [@Lead](buddy:elsewhere) about ${tokenDesigner}`);
+  assert.equal(pastedBody(kept, '', roster), kept, 'pasting it again changes nothing');
+  // Preview, chips and Send agree: the foreign mention is flagged, is no recipient, and wakes nobody.
+  const pasted = draftView(kept, roster);
+  assert.deepEqual(foreignMentions(pasted), ['@Lead']);
+  assert.deepEqual(
+    mentionedBuddies(pasted, [lead, leadDesigner]).map((b) => b.id),
+    ['b2']
   );
+  assert.equal(sendBody(pasted, roster), kept);
+  assert.deepEqual(foreignMentions(draftView(`ask ${tokenLead}`, roster)), []);
+  // An intentional edit dissolves the identity to plain text, which then reads like any typed name.
+  const edited = type(kept, (d) => ({ value: d.replace('@Lead about', '@Lea about'), caret: 8 }));
+  assert.equal(edited.raw, `ask @Lea about ${tokenDesigner}`);
+  assert.deepEqual(foreignMentions(draftView(edited.raw, roster)), []);
   assert.equal(
     pastedBody(copied.text, foreign, [{ kind: 'buddy', id: 'b9', name: 'Other' }]),
-    copied.text
+    `ask [@Lead](buddy:elsewhere) about ${tokenDesigner}`,
+    'ids stay as written even when no roster Buddy shares the name'
   );
+});
+
+test('a rendered Task chip pastes with its id; Task identity survives a copy from the composer', () => {
+  // ChannelMarkdown puts the attribute on the chip's title span, beside a decorative glyph.
+  const html =
+    '<span class="channel-task-chip"><span class="glyph">◇</span><span class="channel-task-chip-title" data-unleashd-ref="task:t1">Fix login (v2)</span></span>';
+  assert.equal(
+    pastedBody('◇ Fix login (v2) is blocked', html, roster),
+    '◇ [Fix login (v2)](task:t1) is blocked'
+  );
+  const view = draftView('see [Fix login (v2)](task:t1) now', roster);
+  const copied = copyPayload(view, 0, view.display.length);
+  assert.equal(pastedBody(copied.text, copied.html, roster), view.raw);
 });
 
 test('a partial selection copies the readable text, not half an identity', () => {

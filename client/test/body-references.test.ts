@@ -29,10 +29,17 @@ test('code, links and e-mail are never read', () => {
 
 test('tokens are trusted only for ids on the roster, and take the current name', () => {
   assert.equal(resolveReferences('[@Old name](buddy:b1) hi', roster).body, '[@Lead](buddy:b1) hi');
-  // Unknown id: dissolved to text, then read like text.
+  // Fix-guard 2026-10-08: an unknown explicit id used to dissolve to `@Lead` and then resolve by NAME
+  // to the local Lead, silently retargeting a removed/foreign Buddy. It now stays as written and is
+  // reported as rejected; nobody is mentioned.
   const stranger = resolveReferences('[@Lead](buddy:elsewhere) and [@Ghost](buddy:g1)', roster);
-  assert.equal(stranger.body, '[@Lead](buddy:b1) and @Ghost');
-  assert.deepEqual(stranger.unresolved, ['@Ghost']);
+  assert.equal(stranger.body, '[@Lead](buddy:elsewhere) and [@Ghost](buddy:g1)');
+  assert.deepEqual(stranger.rejected, [
+    { id: 'elsewhere', label: 'Lead' },
+    { id: 'g1', label: 'Ghost' },
+  ]);
+  assert.deepEqual(stranger.mentioned, []);
+  assert.deepEqual(resolveReferences(stranger.body, roster), stranger, 'a fixpoint');
   // Task tokens pass through untouched; their text is not read for names.
   assert.equal(resolveReferences('[@Lead task](task:t1)', roster).body, '[@Lead task](task:t1)');
 });

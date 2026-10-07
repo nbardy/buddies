@@ -8,7 +8,10 @@
 //   `[Title](task:<id>)`   a Task chip
 // A plain `@Name` is a mention only when it equals exactly ONE roster name (case-insensitive,
 // longest name first, ending at a word boundary). Unknown and ambiguous names stay text: nothing
-// here guesses a recipient. Code spans, fences, e-mail addresses and other links are never read.
+// here guesses a recipient. An explicit `buddy:<id>` the roster lacks is neither trusted nor
+// retargeted by its label: it stays as written, is reported in `rejected`, and writers refuse the
+// post. An EDIT is the only thing that changes identity: typing inside a token dissolves it to
+// plain text (composer-draft.ts `spliceDraft`), and that text then reads like any typed name. Code spans, fences, e-mail addresses and other links are never read.
 //
 // History (2026-10-06 → 10-08): the composer kept `@Label` text plus hidden picked snapshots, and the
 // server resolved names on the Buddy path only, so a pasted `@Name` highlighted and mentioned nobody.
@@ -137,19 +140,29 @@ export type Resolution = {
   mentioned: Array<{ id: string; name: string }>;
   unresolved: string[];
   ambiguous: string[];
+  /**
+   * Explicit Buddy tokens whose id is not on the roster (archived, another workspace, another
+   * install). Their tokens stay in `body` untouched: a writer must refuse the post, never deliver it.
+   */
+  rejected: Array<{ id: string; label: string }>;
 };
 
 /**
  * The stored form of a body. A Buddy token whose id is on the roster is rewritten with the Buddy's
  * CURRENT name (a rename never breaks a pasted mention). One whose id is not (archived, another
- * workspace, another install) dissolves to plain `@Label` text and is then read like any other
- * name — never trusted. Task tokens pass through. Plain exact names become tokens. Idempotent.
+ * workspace, another install) stays EXACTLY as written and is reported in `rejected`: an explicit
+ * id is never retargeted to a roster Buddy that merely shares its label (fix-guard 2026-10-08: it
+ * dissolved to `@Label`, then resolved by name, so a pasted foreign `@Lead` woke the local Lead).
+ * The owner resolves it by editing the mention — an edit inside a token dissolves it to plain text
+ * (composer-draft.ts `spliceDraft`), which is an intentional new name and reads like any name.
+ * Task tokens pass through. Plain exact names become tokens. Idempotent.
  */
 export function resolveReferences(body: string, roster: readonly NamedRef[]): Resolution {
   const buddies = new Map(roster.filter((ref) => ref.kind === 'buddy').map((ref) => [ref.id, ref]));
   const mentioned = new Map<string, { id: string; name: string }>();
   const unresolved = new Set<string>();
   const ambiguous = new Set<string>();
+  const rejected = new Map<string, { id: string; label: string }>();
   let out = '';
   let prose = '';
 
@@ -179,11 +192,12 @@ export function resolveReferences(body: string, roster: readonly NamedRef[]): Re
         break;
       case 'buddy': {
         const current = buddies.get(piece.id);
+        flush();
         if (!current) {
-          prose += `@${piece.label}`;
+          rejected.set(piece.id, { id: piece.id, label: piece.label });
+          out += piece.raw;
           break;
         }
-        flush();
         mentioned.set(current.id, { id: current.id, name: current.name });
         out += referenceToken(current);
         break;
@@ -196,5 +210,6 @@ export function resolveReferences(body: string, roster: readonly NamedRef[]): Re
     mentioned: [...mentioned.values()],
     unresolved: [...unresolved],
     ambiguous: [...ambiguous],
+    rejected: [...rejected.values()],
   };
 }

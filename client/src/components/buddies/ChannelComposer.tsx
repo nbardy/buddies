@@ -35,6 +35,7 @@ import {
   decodeChannelDraft,
   draftView,
   encodeChannelDraft,
+  foreignMentions,
   inputEdit,
   mentionedBuddies,
   pastedBody,
@@ -138,6 +139,7 @@ export function ChannelComposer({
   const selected = matches[Math.min(highlight, matches.length - 1)];
   const mentions = useMemo(() => mentionedBuddies(view, references), [view, references]);
   const ambiguous = useMemo(() => ambiguousNames(view, roster), [view, roster]);
+  const foreign = useMemo(() => foreignMentions(view), [view]);
   // Pattern: one-definition (docs/patterns.md#one-definition)
   // A mention initializes the bottom picker from the thread, not an independent default.
   // Guard: explicit thread choice survives a failed attempt; desktop/phone model captures.
@@ -252,7 +254,12 @@ export function ChannelComposer({
   // returns the text, unless the owner has already started a new message.
   const send = () => {
     const body = sendBody(view, roster);
-    if (!body || uploading > 0 || selections.some(({ choice }) => choice.kind === 'loading'))
+    if (
+      !body ||
+      foreign.length > 0 ||
+      uploading > 0 ||
+      selections.some(({ choice }) => choice.kind === 'loading')
+    )
       return;
     const mentionConfigs = selections.flatMap(({ buddy, choice }): OwnerPostMentionConfig[] =>
       choice.kind === 'chosen' ? [{ buddyId: buddy.id, config: choice.config }] : []
@@ -463,6 +470,8 @@ export function ChannelComposer({
             </span>
           ) : uploading > 0 ? (
             'Uploading…'
+          ) : foreign.length > 0 ? (
+            `${foreign[0]} is not a Buddy in this workspace; edit it to mention someone else`
           ) : ambiguous.length > 0 ? (
             `${ambiguous[0]} names more than one Buddy; pick one from the @ menu`
           ) : mentions.length > 0 ? null : (
@@ -475,6 +484,7 @@ export function ChannelComposer({
           onClick={send}
           disabled={
             uploading > 0 ||
+            foreign.length > 0 ||
             text.trim().length === 0 ||
             selections.some(({ choice }) => choice.kind === 'loading')
           }
@@ -498,7 +508,7 @@ function ComposerHighlight({
   for (const [index, mark] of marks.entries()) {
     if (mark.start > cursor) parts.push(text.slice(cursor, mark.start));
     parts.push(
-      <mark key={index} data-kind={mark.kind}>
+      <mark key={index} data-kind={mark.foreign ? 'foreign' : mark.kind}>
         {text.slice(mark.start, mark.end)}
       </mark>
     );

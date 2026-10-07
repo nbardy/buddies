@@ -32,6 +32,8 @@ export type DraftMark = {
   id: string;
   label: string;
   origin: 'token' | 'name';
+  /** A Buddy token whose id is not on the roster: kept as written, never a recipient, Send is blocked. */
+  foreign: boolean;
 };
 
 type TokenRun = { rawStart: number; rawEnd: number; shownStart: number; shownEnd: number };
@@ -54,6 +56,7 @@ export function draftView(raw: string, roster: readonly NamedRef[]): DraftView {
   let rawCursor = 0;
   const marks: DraftMark[] = [];
   const tokens: TokenRun[] = [];
+  const buddyIds = new Set(roster.flatMap((ref) => (ref.kind === 'buddy' ? [ref.id] : [])));
   for (const piece of bodyPieces(raw)) {
     switch (piece.kind) {
       case 'text':
@@ -65,6 +68,7 @@ export function draftView(raw: string, roster: readonly NamedRef[]): DraftView {
             id: ref.id,
             label: ref.name,
             origin: 'name',
+            foreign: false,
           });
         display += piece.raw;
         break;
@@ -88,6 +92,7 @@ export function draftView(raw: string, roster: readonly NamedRef[]): DraftView {
           id: piece.id,
           label: piece.label,
           origin: 'token',
+          foreign: piece.kind === 'buddy' && !buddyIds.has(piece.id),
         });
         display += shown;
         break;
@@ -105,11 +110,10 @@ export function mentionedBuddies(
 ): BuddyReference[] {
   const seen = new Set<string>();
   return view.marks.flatMap((mark): BuddyReference[] => {
-    if (mark.kind !== 'buddy' || seen.has(mark.id)) return [];
+    if (mark.kind !== 'buddy' || mark.foreign || seen.has(mark.id)) return [];
     seen.add(mark.id);
     const known = directory.find((entry) => entry.kind === 'buddy' && entry.id === mark.id);
-    // Not in the directory (still loading, or archived): the token still names the Buddy; the
-    // server decides whether it can be addressed. Its model is unreported until the directory knows it.
+    // The roster is the directory, so `known` is set; the fallback only satisfies the type.
     return [
       known?.kind === 'buddy'
         ? known
@@ -122,6 +126,15 @@ export function mentionedBuddies(
           },
     ];
   });
+}
+
+/**
+ * Mentions of Buddies this workspace does not have (removed, archived, copied from elsewhere).
+ * They keep their id and are NOT retargeted to a local Buddy with the same name; the server refuses
+ * the post, so the composer blocks Send and says so. Editing the mention dissolves it to text.
+ */
+export function foreignMentions(view: DraftView): string[] {
+  return [...new Set(view.marks.filter((mark) => mark.foreign).map((mark) => `@${mark.label}`))];
 }
 
 /** The body that is sent: the stored form for this roster (the server applies the same rule). */
@@ -284,7 +297,9 @@ export function copyPayload(
   };
 }
 
-const ANCHOR = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+// A rendered mention is an `<a>`; a rendered Task chip carries the attribute on its title `<span>`.
+// Only elements naming a reference (attribute or href) match, so the copy wrapper span is skipped.
+const ANCHOR = /<(a|span)\b((?=[^>]*(?:data-unleashd-ref|href=))[^>]*)>([\s\S]*?)<\/\1>/gi;
 const REF_VALUE = new RegExp(`${REF_ATTRIBUTE}="(buddy|task):([A-Za-z0-9_-]+)"`, 'i');
 // A rendered mention is a router link; some browsers drop unknown attributes, never the href.
 const BUDDY_HREF = /href="(?:[^"]*\/)?buddies\/([A-Za-z0-9_-]+)"/i;
@@ -293,10 +308,10 @@ type HtmlRef = { kind: 'buddy' | 'task'; id: string; shown: string };
 
 function referencesInHtml(html: string): HtmlRef[] {
   return [...html.matchAll(ANCHOR)].flatMap((anchor): HtmlRef[] => {
-    const shown = unescapeHtml(anchor[2].replace(/<[^>]*>/g, ''));
-    const attribute = REF_VALUE.exec(anchor[1]);
+    const shown = unescapeHtml(anchor[3].replace(/<[^>]*>/g, ''));
+    const attribute = REF_VALUE.exec(anchor[2]);
     if (attribute) return [{ kind: attribute[1] as HtmlRef['kind'], id: attribute[2], shown }];
-    const href = BUDDY_HREF.exec(anchor[1]);
+    const href = BUDDY_HREF.exec(anchor[2]);
     return href && shown.startsWith('@') ? [{ kind: 'buddy', id: href[1], shown }] : [];
   });
 }
@@ -304,8 +319,10 @@ function referencesInHtml(html: string): HtmlRef[] {
 /**
  * Pasted clipboard into the stored form. The plain text is the base (it is what every browser
  * would paste); each HTML reference, in order, claims the next occurrence of its shown text and
- * becomes a token with its LOCAL id. Then the roster rule runs: tokens are checked and renamed,
- * unknown ids dissolve, exact unique `@Name`s resolve, code and e-mail stay text.
+ * becomes a token with the id it carried. Then the roster rule runs: tokens are checked and
+ * renamed, an id the roster lacks stays as written (shown as foreign, Send blocked, server refuses —
+ * never retargeted to a same-named local Buddy), exact unique `@Name`s resolve, code and e-mail
+ * stay text. Task chips round-trip the same way (`task:<id>`).
  */
 export function pastedBody(plain: string, html: string, roster: readonly NamedRef[]): string {
   let joined = '';
@@ -313,6 +330,7 @@ export function pastedBody(plain: string, html: string, roster: readonly NamedRe
   for (const ref of referencesInHtml(html)) {
     const at = plain.indexOf(ref.shown, cursor);
     if (at < 0) continue;
+    // The composer shows a Task as `@Title`; a rendered chip shows `Title`. Both paste as the title.
     const label = ref.shown.replace(/^@/, '');
     joined += plain.slice(cursor, at) + referenceToken({ kind: ref.kind, id: ref.id, name: label });
     cursor = at + ref.shown.length;

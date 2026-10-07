@@ -125,6 +125,11 @@ projection), the owner post/answer routes and the Buddy MCP `post` (`server/src/
 the Buddy path resolved names, so a pasted `@Name` highlighted and mentioned nobody. Never add a second reader of
 mention syntax or a second copy of a mention beside the text. Guards: `client/test/composer-draft.test.ts`,
 `client/test/body-references.test.ts`, buddies-v2 "owner and Buddy posts store the same canonical mentions".
+An explicit `buddy:<id>` the workspace lacks (removed, archived, another workspace) is never dissolved and re-read
+by name — that retargeted a pasted foreign `@Lead` to the local Lead (2026-10-08). It stays as written, the composer
+flags it and blocks Send, and `resolveForWorkspace` refuses the write (owner post, answer and Buddy tool alike).
+Only an edit changes identity: typing inside a token dissolves it to plain text, which then resolves as a typed name.
+Guards: buddies-v2 "an explicit id that is not on the roster is refused", composer-draft "never trusts a foreign id".
 The Buddy run queue's `WAITING_REASON_SQL` in `crates/unleashd-buddies/src/runs.rs` is both the
 list reason and the claim predicate (`reason IS NULL`), so an observation cannot drift from admission.
 

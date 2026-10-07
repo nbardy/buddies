@@ -10,22 +10,34 @@
 
 import type { Actor, BuddiesCore, Buddy, Channel, Mention, PostKind } from '@unleashd/buddies-core';
 import { type Resolution, mentionedIds, resolveReferences } from '@unleashd/shared';
+import { CoreError } from './core';
 import type { MentionPicks } from './events';
 import { runConfigOfPick } from './worker-config';
 
-/** The stored body for `workspaceId`'s roster (archived Buddies cannot be addressed). */
+/**
+ * The stored body for `workspaceId`'s roster (archived Buddies cannot be addressed). An explicit
+ * `buddy:<id>` token for a Buddy that is not on it is REFUSED, never delivered or retargeted by its
+ * label: a pasted foreign `@Lead` once woke the local Lead (fix-guard 2026-10-08). Guards:
+ * `an explicit id that is not on the roster is refused` in server/test/buddies-v2.test.ts.
+ */
 export async function resolveForWorkspace(
   core: Pick<BuddiesCore, 'listBuddies'>,
   workspaceId: string,
   body: string
 ): Promise<Resolution> {
   const buddies: Buddy[] = await core.listBuddies(workspaceId);
-  return resolveReferences(
+  const resolved = resolveReferences(
     body,
     buddies
       .filter((buddy) => buddy.status !== 'archived')
       .map((buddy) => ({ kind: 'buddy', id: buddy.id, name: buddy.name }))
   );
+  if (resolved.rejected.length > 0)
+    throw new CoreError(
+      'invalid',
+      `${resolved.rejected.map(({ label }) => `@${label}`).join(', ')} names a Buddy that is not in this workspace (removed, archived, or from elsewhere); nothing was posted. Edit the mention to pick a current Buddy.`
+    );
+  return resolved;
 }
 
 // Pattern: route-at-send (docs/patterns.md#route-at-send)
