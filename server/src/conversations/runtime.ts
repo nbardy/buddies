@@ -506,7 +506,7 @@ export class Conversation extends EventEmitter {
     const resume = this.resumesProviderSession(forkSourceSessionId);
     const content = resume ? prompt.resumed : prompt.fresh;
 
-    this.runner.beginAttempt();
+    const attemptId = this.runner.beginAttempt();
     const executionConfig = this.preflightExecution();
     if (!executionConfig) return;
 
@@ -527,6 +527,7 @@ export class Conversation extends EventEmitter {
     this._policy.admitted(input, content);
     // Provenance comes from the host producer, never transcript text.
     this.runner.start({
+      attemptId,
       content: cliContent,
       config: executionConfig,
       forkSourceSessionId,

@@ -201,10 +201,12 @@ export class TurnRunner {
     this.nextAttempt = entry.attemptId;
   }
 
-  /** Make the prepared (or a new) attempt the active one. */
-  beginAttempt(): void {
-    this.activeAttemptId = this.nextAttempt ?? this.createQueuedAttempt();
+  /** Make the prepared (or a new) attempt the active one; `start` takes its id (core review T5). */
+  beginAttempt(): string {
+    const attemptId = this.nextAttempt ?? this.createQueuedAttempt();
+    this.activeAttemptId = attemptId;
     this.nextAttempt = null;
+    return attemptId;
   }
 
   finishAttempt(state: AttemptState, terminalCause: TurnTerminalCause): void {
@@ -252,6 +254,7 @@ export class TurnRunner {
   // --- start ---------------------------------------------------------------------
 
   start(turn: {
+    attemptId: string;
     content: string;
     config: ResolvedExecutionConfig;
     forkSourceSessionId: string | undefined;
@@ -260,11 +263,8 @@ export class TurnRunner {
     /** The user row this turn appended (history text and time), kept for adoption. */
     userMessage: { text: string; timestamp: Date };
   }): void {
+    // Busy is refused once, at sendMessageInternal (runtime.ts), its only caller's caller.
     const host = this.host;
-    if (host.process || host.isRunning) {
-      console.warn(`[${host.id}] Already processing a message, ignoring`);
-      return;
-    }
     const runToken = ++this.runToken;
 
     const forking = !!turn.forkSourceSessionId;
@@ -275,21 +275,19 @@ export class TurnRunner {
     console.log(`[${host.id}] Message: "${turn.content.substring(0, 50)}"`);
 
     this.beginTurnState(turn.config.provider, Date.now());
-    const attemptId = this.activeAttemptId ?? crypto.randomUUID();
-    if (this.activeAttemptId) {
-      this.ports.turnAttempts.starting(this.activeAttemptId);
-      this.ports.turnAttempts.activity(
-        this.activeAttemptId,
-        {
-          source: 'runtime',
-          providerEventType: `execution.${executionMode}`,
-          providerEventSource: host.resumedFromConversationId
-            ? `parent-conversation:${host.resumedFromConversationId}`
-            : 'unleashd.runtime',
-        },
-        host.sessionId
-      );
-    }
+    const { attemptId } = turn;
+    this.ports.turnAttempts.starting(attemptId);
+    this.ports.turnAttempts.activity(
+      attemptId,
+      {
+        source: 'runtime',
+        providerEventType: `execution.${executionMode}`,
+        providerEventSource: host.resumedFromConversationId
+          ? `parent-conversation:${host.resumedFromConversationId}`
+          : 'unleashd.runtime',
+      },
+      host.sessionId
+    );
 
     let handle: ExecutionHandle;
     let execution: Execution;
@@ -338,7 +336,7 @@ export class TurnRunner {
       messageStart: Math.max(0, host.messages.length - 1),
     });
     // Spawn only: an adopted attempt is already running in the journal of the boot that spawned it.
-    if (this.activeAttemptId) this.ports.turnAttempts.running(this.activeAttemptId, host.sessionId);
+    this.ports.turnAttempts.running(attemptId, host.sessionId);
     this.follow(handle, runToken, execution);
   }
 
