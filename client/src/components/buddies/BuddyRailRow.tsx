@@ -45,8 +45,10 @@ export function BuddyRailRow({
       {direct.woken && (
         <WakeIndicator
           key={direct.woken.attempt}
+          conversationId={direct.woken.conversationId}
           name={member.name}
           className="channel-browser-buddy-status ui-inline-row ui-muted"
+          doneClassName="channel-browser-buddy-done"
         />
       )}
       <span className="channel-browser-buddy-actions">

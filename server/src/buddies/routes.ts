@@ -286,7 +286,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       return write(core.createBuddy(OWNER, { ...input, manager: managerRef(managerId ?? null) }));
     },
     // The owner's ongoing chat with the Buddy, plus the 1:1 DM CHANNEL (opened on demand, one per
-    // pair) that `channel.post` writes to: there is no direct-post route, and a wake is a post.
+    // pair) that `channel.post` writes to: there is no direct-post route.
     [buddyMutationRoute('direct.open')]: async (req) => {
       const buddyId = p(req, 'buddyId');
       const [chat, channel] = await Promise.all([
@@ -295,6 +295,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       ]);
       return { ...chat, channelId: channel.id };
     },
+    [buddyMutationRoute('buddy.wake')]: (req) => channels.wake(p(req, 'buddyId')),
     'GET 200 /api/buddies/:buddyId/direct/chain': (req) => channels.directChain(p(req, 'buddyId')),
     [buddyMutationRoute('direct.new')]: (req) =>
       channels.newDirect(p(req, 'buddyId'), NewDirectSchema.parse(req.body ?? {})),
@@ -361,7 +362,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     [buddyMutationRoute('schedule.create')]: (req) => putSchedule(req, undefined),
     [buddyMutationRoute('schedule.update')]: (req) => putSchedule(req, p(req, 'scheduleId')),
     [buddyMutationRoute('schedule.run')]: (req) =>
-      // "Run now": a fire, posted in the schedule's thread and delivered to its Buddy (decision I).
+      // "Run now": one silent fire, as a due slot would.
       write(core.fireSchedule(OWNER, p(req, 'scheduleId'))),
     // ---- channels, DMs and the owner's inbox (everything is a post in a channel) ----------------
     'GET 200 /api/buddies/workspaces/:workspaceId/inbox': (req) =>

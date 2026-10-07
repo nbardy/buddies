@@ -1936,6 +1936,67 @@ test('a DM new chat opens the next generation; the chain keeps every earlier one
   }
 });
 
+// Owner, 2026-10-07 ("stay simple, don't overload DMs"): a schedule fire and the Wake button post
+// nothing. 2026-10-06 made each a post in a DM or thread, which the owner did not want.
+test('a schedule fire runs silently: one chat run, a background turn, no post anywhere', async () => {
+  const w = await world();
+  try {
+    const schedule = await w.core.putSchedule(OWNER, {
+      buddyId: w.lead.id,
+      name: 'quiet',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      prompt: 'Check the board',
+      enabled: true,
+      key: 'quiet',
+    });
+    await w.core.fireSchedule(OWNER, schedule.id);
+    w.emit({ kind: 'changed' });
+    const [run] = await until(async () => {
+      const runs = await w.runs(w.lead.id);
+      return runs.length === 1 && runs[0].status === 'complete' && runs;
+    }, 'the fire settles');
+    assert.equal(run.input.kind, 'chat');
+    assert.ok(run.input.kind === 'chat' && run.input.turnId.startsWith(`schedule:${schedule.id}:`));
+    assert.match(w.turns[0].request.prompt, /Scheduled run "quiet"[\s\S]*Check the board/);
+    const own = await w.core.openChannel(OWNER, {
+      kind: 'direct',
+      members: [buddyActor(w.lead.id), buddyActor(w.lead.id)],
+    });
+    for (const channel of [own, w.general])
+      assert.deepEqual(
+        (await w.core.listPosts(OWNER, { kind: 'channel', channelId: channel.id }, null, 50)).posts,
+        [],
+        'a fire posts nothing'
+      );
+  } finally {
+    await w.close();
+  }
+});
+
+test('Wake starts one turn in the Buddy chat and posts nothing to its DM channel', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const woken = await http('POST', `/api/buddies/${w.lead.id}/wake`);
+    assert.equal(woken.status, 202, JSON.stringify(woken.body));
+    await until(() => w.turns.length === 1, 'the wake turn');
+    assert.match(w.turns[0].request.prompt, /Wake-up check/);
+    const dm = await w.core.openChannel(OWNER, {
+      kind: 'direct',
+      members: [OWNER, buddyActor(w.lead.id)],
+    });
+    assert.deepEqual(
+      (await w.core.listPosts(OWNER, { kind: 'channel', channelId: dm.id }, null, 50)).posts,
+      [],
+      'the instruction lives in the chat, not the DM channel'
+    );
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
 test('a scheduled run asks for help in the background and its answer comes back as a turn there', async () => {
   const w = await world();
   try {
@@ -2278,7 +2339,7 @@ test('an answer the requester already read settles its return run with no model 
         runs
       );
     }, "the requester's schedule run and its settled return");
-    // Newest first: the answer's delivery, then the schedule fire's own.
+    // Newest first: the answer's delivery, then the schedule fire's own run.
     const returned = leadRuns.find((r) => r.input.kind === 'deliver')!;
     assert.equal(returned.status, 'cancelled');
     assert.equal(returned.errorCode, 'consumed');
@@ -2287,7 +2348,7 @@ test('an answer the requester already read settles its return run with no model 
       'cancelled',
       'settled by the read itself, not after the turn ended'
     );
-    // Turn 1 is itself the schedule fire's delivery; no later turn carries the answer.
+    // Turn 1 is itself the schedule fire's (chat) run; no later turn carries the answer.
     assert.equal(
       w.turns.some((t) => t.request.prompt.includes('Logo drawn')),
       false,
@@ -4163,9 +4224,9 @@ const designerReplies = (w: World, rootId: string, body: string) =>
     body,
     key: body,
   });
-/** Lead's deliveries after its scheduled turn's own (runs list newest first; the fire's is last). */
+/** Lead's deliveries; its scheduled turn (a silent chat run) is not one. */
 const deliveries = async (w: World) =>
-  (await w.runs(w.lead.id)).filter((r) => r.input.kind === 'deliver').slice(0, -1);
+  (await w.runs(w.lead.id)).filter((r) => r.input.kind === 'deliver');
 
 test('follow (a): posts the caller has not read come back at once', async () => {
   const w = await world();

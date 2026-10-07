@@ -505,11 +505,12 @@ export interface RunConfig {
  * Why a run exists. Columns: (input_kind, input_id); the input_key is derived from it.
  *
  * Three live kinds since the 2026-10-06 rebuild (owner decisions H, I; delivery design §3):
- * `chat` (an owner message), `post` (a request the Buddy owes) and `deliver` (a post in a thread
- * one of the Buddy's conversations subscribes to). `reply`, `failure_notice`, `follow` and
- * `schedule` were folded into `deliver`: an answer, a failure notice, a followed thread's new post
- * and a schedule fire are all posts now. Their ended rows stay as `Retired` history; the schema
- * CHECK refuses a queued one, so a retired kind is never claimed.
+ * `chat` (an owner message, or, with no conversation, a schedule fire: `fire_slot`), `post` (a
+ * request the Buddy owes) and `deliver` (a post in a thread one of the Buddy's conversations
+ * subscribes to). `reply`, `failure_notice` and `follow` were folded into `deliver`: an answer, a
+ * failure notice and a followed thread's new post are all posts now. `schedule` became a silent
+ * `chat` run again (2026-10-07). Their ended rows stay as `Retired` history; the schema CHECK
+ * refuses a queued one, so a retired kind is never claimed.
  */
 export type RunInput =
   | { kind: 'chat'; turnId: string }
@@ -569,8 +570,6 @@ export interface Schedule {
   prompt: string
   enabled: boolean
   nextRunAt?: string
-  /** The thread its fires post in (owner decision I): absent until the first fire. */
-  rootId?: string
   archivedAt?: string
   createdAt: string
 }

@@ -8,6 +8,7 @@ import {
 } from '@unleashd/shared';
 import {
   NO_AGENT_INSTALLED,
+  WAKE_MESSAGE,
   buddyExecutionPreferences,
   configFromProviderPreferences,
 } from '@unleashd/shared';
@@ -344,6 +345,16 @@ export function createChannels(ports: ChannelsPorts) {
     /** The owner's ongoing chat with a Buddy (not a channel DM): open it. */
     async openDirect(buddyId: string): Promise<{ conversationId: string }> {
       return { conversationId: (await directConversation(buddyId)).id };
+    },
+
+    /** Queue the wake-up check in that chat, after any turn already running there. */
+    async wake(buddyId: string): Promise<{ conversationId: string }> {
+      const conversation = await directConversation(buddyId);
+      conversation.enqueueMessage(WAKE_MESSAGE, {
+        origin: 'owner_input',
+        inputId: `wake-${randomUUID()}`,
+      });
+      return { conversationId: conversation.id };
     },
   };
 }

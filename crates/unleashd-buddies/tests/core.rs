@@ -1,6 +1,7 @@
 mod common;
 
 use common::{WS, buddy, fixture, lease};
+use chrono::DateTime;
 use std::sync::{Arc, Barrier};
 use unleashd_buddies::types::*;
 use unleashd_buddies::{CoreError, Store};
@@ -649,11 +650,11 @@ fn pausing_a_task_cancels_its_queued_runs() {
     assert_eq!((&run.input, run.status, run.error_code.as_deref()), (&RunInput::Post { post_id: asked.id }, RunStatus::Cancelled, Some("task_epoch_stale")));
 }
 
-// Owner decision I (2026-10-06): a schedule fire is a post in the schedule's thread, delivered to
-// its Buddy. The first fire's conversation subscribes, so the next slot continues it instead of
-// opening a fresh conversation per slot (todo_3c1e58c6), and missed slots still collapse into one.
+// Owner decision, 2026-10-07 ("stay simple, don't overload DMs"): a schedule fire posts nothing. It
+// is one body-carrying chat run with no conversation, once per slot, and missed slots still
+// collapse into one. Before: a post in the schedule's thread (decision I, 2026-10-06).
 #[test]
-fn due_schedules_fire_once_per_slot_as_posts_in_one_thread() {
+fn a_schedule_fire_posts_nothing_and_queues_one_silent_run() {
     let mut f = fixture();
     let s = &mut f.store;
     let schedule = s
@@ -677,23 +678,20 @@ fn due_schedules_fire_once_per_slot_as_posts_in_one_thread() {
     let later = "2099-01-01T00:30:00.000Z";
     let runs = s.due_schedules(later).unwrap();
     assert_eq!(runs.len(), 1, "missed slots collapse into one fire");
-    let RunInput::Deliver { post_id } = &runs[0].input else { panic!("{:?}", runs[0].input) };
-    let fired = s.get_post(&buddy("ic"), post_id).unwrap();
-    assert_eq!((fired.purpose.as_deref(), &fired.author, runs[0].conversation_id.as_deref()), (Some("schedule"), &buddy("ic"), None));
-    assert!(fired.body.contains(&slot) && fired.body.ends_with("check"), "{}", fired.body);
+    let run = &runs[0];
+    assert_eq!(run.input, RunInput::Chat { turn_id: format!("schedule:{}:{slot}", schedule.id) });
+    assert!(run.conversation_id.is_none(), "a fire opens its own background conversation");
+    let body = run.body.as_deref().unwrap();
+    assert!(body.contains(&slot) && body.ends_with("check"), "{body}");
     assert!(s.due_schedules(later).unwrap().is_empty(), "the schedule advanced past now");
+    let posts = s.search_posts(&buddy("ic"), WS, &SearchQuery::text("Scheduled"), None, 50).unwrap();
+    assert!(posts.posts.is_empty(), "no post anywhere: {:?}", posts.posts);
 
     let claim = s.claim_run_at(later, lease(60_000)).unwrap().unwrap();
-    let Delivery::Posts { posts, .. } = s.deliver_posts(&claim.run.id).unwrap() else { panic!("the fire was not shown") };
-    assert_eq!(posts.iter().map(|p| &p.id).collect::<Vec<_>>(), [&fired.id], "its own Buddy is shown the fire");
-    s.bind_run(&claim.run.id, &claim.lease_token, "schedule-conv").unwrap();
-    s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
-    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-
-    let next = s.due_schedules("2099-01-01T01:30:00.000Z").unwrap().remove(0);
-    let RunInput::Deliver { post_id } = &next.input else { panic!() };
-    assert_eq!(s.get_post(&buddy("ic"), post_id).unwrap().root_id.as_deref(), Some(fired.id.as_str()), "later fires reply in its thread");
-    assert_eq!(next.conversation_id.as_deref(), Some("schedule-conv"), "and continue the conversation that took the first");
+    assert_eq!(claim.run.id, run.id, "the runner claims it like any background run");
+    let deadline = DateTime::parse_from_rfc3339(claim.run.deadline.as_deref().unwrap()).unwrap();
+    let started = DateTime::parse_from_rfc3339(claim.run.started_at.as_deref().unwrap()).unwrap();
+    assert!((deadline - started).num_milliseconds() < 24 * 3_600_000, "background budget, not an owner chat's");
 }
 
 #[test]
