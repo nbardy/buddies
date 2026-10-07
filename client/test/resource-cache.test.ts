@@ -212,7 +212,7 @@ test('eviction never discards a key a mounted view is reading', async () => {
     await loadResource({ key: `/api/filler/${i}`, load: async () => i });
   }
 
-  assert.ok(resourceCacheSize() <= 300, 'cache stays bounded');
+  assert.ok(resourceCacheSize() <= 100, 'cache stays bounded');
   const pinned = read<string>('/api/pinned');
   assert.equal(pinned.kind === 'ready' && pinned.value, 'pinned');
   release();
@@ -336,4 +336,32 @@ test('an unchanged refresh still counts as recent use for eviction', async () =>
 
   assert.ok(isResourceCached('/api/favourite'), 'the recently used key survives');
   assert.ok(!isResourceCached('/api/filler/0'), 'the least recently used key goes');
+});
+
+// Regression (2026-10-08 audit: a threads tab reached ~17GB): a hidden tab refetched every matching
+// key on every push. A push while hidden must not load; visibility return refreshes via
+// usePolledFetch, so nothing is lost.
+test('a push while the tab is hidden does not refetch mounted keys', async () => {
+  const key = '/api/buddies/channels/ch_hidden';
+  let loads = 0;
+  const resource: Resource<number> = { key, load: async () => ++loads };
+  const release = retainResourceKey(key);
+  await loadResource(resource);
+  assert.equal(loads, 1);
+
+  const realDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', { value: { hidden: true }, configurable: true });
+  try {
+    invalidateChannelResources('ch_hidden');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(loads, 1, 'hidden: no refetch');
+  } finally {
+    if (realDocument) Object.defineProperty(globalThis, 'document', realDocument);
+    else Reflect.deleteProperty(globalThis, 'document');
+  }
+
+  invalidateChannelResources('ch_hidden');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(loads, 2, 'visible: refetched');
+  release();
 });

@@ -379,6 +379,16 @@ export const unreadFamily = atomFamily((id: string) =>
   )
 );
 
+/**
+ * Free the derived groups built from an evicted transcript. The atom families hold their atoms
+ * (and each atom's last value) strongly, so an absent transcript alone leaves the old message
+ * groups resident.
+ */
+export function releaseTranscriptDerived(id: string): void {
+  settledGroupsFamily.remove(id);
+  groupsFamily.remove(id);
+}
+
 /** Free every per-id atom memoized for a removed conversation. */
 export function forgetConversationAtoms(id: string): void {
   rowStore.forget(id);

@@ -33,6 +33,7 @@ import {
   defaultCwdOf,
   forgetConversationAtoms,
   loadedOf,
+  releaseTranscriptDerived,
   rowStore,
   rowsAtom,
   streamStore,
@@ -115,10 +116,45 @@ function removeConversations(ids: readonly string[]): void {
   if (ids.length === 0) return;
   jotaiStore.set(rowStore.patch, { set: [], remove: ids });
   jotaiStore.set(transcriptStore.patch, { set: [], remove: ids });
+  for (const id of ids) loadedOrder.delete(id);
 }
+
+// Fix-guard (2026-10-08 audit: a threads tab reached ~17GB): a tab kept the full transcript of every
+// conversation it ever opened until the socket reconnected. Past this many, the least recently
+// written ones go back to `absent`; the open view's `useConversationBodies` reloads on demand.
+// Above PREFETCH_CONVERSATION_LIMIT (12) so warming never evicts the open chat.
+// Guard: client/test/transcript-eviction.test.ts.
+const LOADED_TRANSCRIPT_LIMIT = 24;
+/** Loaded ids, least recently written first (a Set iterates in insertion order). */
+const loadedOrder = new Set<string>();
 
 function putTranscript(id: string, transcript: Transcript): void {
   jotaiStore.set(transcriptStore.patch, { set: [[id, transcript]], remove: [] });
+  loadedOrder.delete(id);
+  if (transcript.tag !== 'loaded') return;
+  loadedOrder.add(id);
+  evictStaleTranscripts(id);
+}
+
+/** Ids a mounted view is showing (useConversationBodies); an idle open chat is the oldest write. */
+const viewedTranscripts = new Set<string>();
+export function setTranscriptViewed(id: string, viewed: boolean): void {
+  if (viewed) viewedTranscripts.add(id);
+  else viewedTranscripts.delete(id);
+}
+
+/** A viewed chat, a streaming reply or an in-flight load is never evicted from under its reader. */
+function evictStaleTranscripts(justWritten: string): void {
+  let over = loadedOrder.size - LOADED_TRANSCRIPT_LIMIT;
+  for (const id of loadedOrder) {
+    if (over <= 0) return;
+    if (id === justWritten || viewedTranscripts.has(id)) continue;
+    if (jotaiStore.get(streamStore.byKey(id)) !== '' || transcriptRequests.has(id)) continue;
+    loadedOrder.delete(id);
+    jotaiStore.set(transcriptStore.patch, { set: [], remove: [id] });
+    releaseTranscriptDerived(id);
+    over -= 1;
+  }
 }
 
 // =============================================================================
@@ -280,11 +316,22 @@ function flushChunkBuffer(): void {
   if (updates.length > 0) jotaiStore.set(streamStore.patch, { set: updates, remove: [] });
 }
 
+// Fix-guard (2026-10-08 audit: a threads tab reached ~17GB): the flush rode requestAnimationFrame
+// alone, and browsers never fire it in a hidden tab. The server sends every conversation's chunks
+// to every tab, so a background tab buffered all agents' streamed text without bound. The timer
+// fires in hidden tabs (throttled to ~1s); whichever of frame/timer comes first flushes, and
+// flushChunkBuffer drops text for conversations that are not streaming here.
+// Guard: client/test/chunk-flush-hidden.test.ts.
+const CHUNK_FLUSH_FALLBACK_MS = 100;
+
 function scheduleChunkFlush(): void {
-  if (!chunkFlushScheduled) {
-    chunkFlushScheduled = true;
-    requestAnimationFrame(flushChunkBuffer);
-  }
+  if (chunkFlushScheduled) return;
+  chunkFlushScheduled = true;
+  const flushIfPending = () => {
+    if (chunkFlushScheduled) flushChunkBuffer();
+  };
+  requestAnimationFrame(flushIfPending);
+  setTimeout(flushIfPending, CHUNK_FLUSH_FALLBACK_MS);
 }
 
 // =============================================================================
@@ -397,6 +444,7 @@ function handleHello(data: Extract<ServerMessage, { type: 'hello' }>): void {
   jotaiStore.set(rowsAtom, next);
   // Bodies belong to the previous epoch; the open view reloads them.
   jotaiStore.set(transcriptStore.all, new Map());
+  loadedOrder.clear();
   chunkBuffer.clear();
   jotaiStore.set(streamStore.all, new Map());
   reconcileCommandsOnHello((id) => next.has(id));

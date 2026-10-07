@@ -1,6 +1,8 @@
 import { WebSocket, type WebSocketServer } from 'ws';
 import type { ConversationBroadcast } from '../conversations/runtime';
 
+const MAX_CLIENT_BACKLOG_BYTES = 8 * 1024 * 1024;
+
 export interface ConversationIdentity {
   id: string;
   sessionId: string;
@@ -165,12 +167,16 @@ export function createConversationApplicationContext<
     },
   };
 
+  // Fix-guard (2026-10-08 audit): `client.send` queues in node's heap while a tab is frozen or on a
+  // slow link, and every broadcast goes to every tab, so one stalled tab grew the server without
+  // bound. Past this backlog the socket is dropped; the client reconnects and gets a fresh `hello`.
+  // Guard: server/test/websocket-backpressure.test.ts.
   function send(data: ConversationBroadcast, excludedClient?: WebSocket): void {
     const payload = JSON.stringify(data);
     options.webSocketServer.clients.forEach((client) => {
-      if (client !== excludedClient && client.readyState === WebSocket.OPEN) {
-        client.send(payload);
-      }
+      if (client === excludedClient || client.readyState !== WebSocket.OPEN) return;
+      if (client.bufferedAmount > MAX_CLIENT_BACKLOG_BYTES) client.terminate();
+      else client.send(payload);
     });
   }
 

@@ -42,7 +42,7 @@ const LOADING_ENTRY: ResourceEntry<never> = Object.freeze({ kind: 'loading' });
  * evicted, so this bounds a long-lived PWA session without ever pulling data
  * out from under a visible view.
  */
-const RETAINED_KEY_LIMIT = 300;
+const RETAINED_KEY_LIMIT = 100;
 const RESOURCE_TIMEOUT_MS = 30_000;
 
 const resourceCacheAtom = atom(new Map<string, ResourceEntry<unknown>>());
@@ -257,6 +257,11 @@ export function seedResource<T>(resource: Resource<T>, value: T): void {
  * resources.
  */
 export function invalidateResources(matches: (key: string) => boolean): void {
+  // Fix-guard (2026-10-08 audit: a threads tab reached ~17GB): a hidden tab used to refetch and
+  // re-diff every matching mounted key on every push, all night, for a page nobody sees. Skipping
+  // loses nothing: usePolledFetch refreshes its key on `visibilitychange` back to visible, and
+  // mounted keys exist only through usePolledFetch. Guard: client/test/resource-cache.test.ts.
+  if (typeof document !== 'undefined' && document.hidden) return;
   for (const key of mounted.keys()) {
     const resource = loaders.get(key);
     if (!resource || !matches(key)) continue;

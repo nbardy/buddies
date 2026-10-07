@@ -1,6 +1,6 @@
 import { useAtomValue } from 'jotai';
 import { useEffect } from 'react';
-import { loadConversationDetails, refreshTranscript } from '../atoms/actions';
+import { loadConversationDetails, refreshTranscript, setTranscriptViewed } from '../atoms/actions';
 import { type Transcript, rowFamily, transcriptFamily } from '../atoms/conversations';
 
 export type BodiesStep = 'load' | 'refresh' | 'none';
@@ -36,6 +36,11 @@ export function useConversationBodies(conversationId: string | null): {
   const messageCount = useAtomValue(rowFamily(id))?.messageCount ?? null;
   const transcript = useAtomValue(transcriptFamily(id));
   const step = messageCount === null ? 'none' : bodiesStep(transcript, messageCount);
+  useEffect(() => {
+    if (!conversationId) return;
+    setTranscriptViewed(conversationId, true);
+    return () => setTranscriptViewed(conversationId, false);
+  }, [conversationId]);
   useEffect(() => {
     if (!conversationId) return;
     switch (step) {

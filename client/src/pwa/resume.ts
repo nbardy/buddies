@@ -38,6 +38,30 @@ export function createResumeTracker(windowMs: number): {
   };
 }
 
+/** A timer gap longer than this means the page was frozen, not merely busy. */
+export const WAKE_GAP_MS = 5_000;
+
+/**
+ * Detects a frozen page by the gap between two looks at the clock. macOS sleep, lid-close and a
+ * tab stalled in swap never fire `visibilitychange` (the page stays "visible"), so the Vite
+ * disconnect reload used to fire on wake. Timers do not run while frozen, so the first look after
+ * wake sees a large gap. Guard: client/test/keep-on-resume.test.ts.
+ */
+export function createWakeDetector(
+  thresholdMs: number,
+  now: () => number
+): { gapExceeded: () => boolean } {
+  let last = now();
+  return {
+    gapExceeded() {
+      const at = now();
+      const gap = at - last;
+      last = at;
+      return gap > thresholdMs;
+    },
+  };
+}
+
 /** WebSocket.CONNECTING and WebSocket.OPEN, as numbers so this file stays DOM-free. */
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;

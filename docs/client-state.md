@@ -128,7 +128,10 @@ reconciliation.
 (`hooks/useWebSocket.ts`) checks the type tag and two string fields, and every
 other frame still gets the whole schema (`stream-frame-validation.test.ts`).
 Chunks accumulate in a buffer outside React state; the animation-frame flush
-writes only `streamFamily(id)`. Never append chunks to the transcript.
+writes only `streamFamily(id)`. Never append chunks to the transcript. The flush
+also has a 100 ms timer, because a hidden tab never gets an animation frame and
+the server sends every conversation's chunks to every tab: before 2026-10-08 a
+background tab buffered them without bound (`chunk-flush-hidden.test.ts`).
 
 A frame rebuilds only the last message group (`withStreamingTail` in
 `utils/chat-message-groups.ts`); every earlier group is the settled object, so
@@ -151,6 +154,13 @@ to it, or a `message` event was missed). `refreshTranscript` pages in only the
 last held message and after, keeping the history on screen; a moved epoch
 reloads it. The WS spine never fetches bodies, so a count moving on a chat
 nobody shows costs nothing (`summary-history-refresh.test.ts`).
+
+Loaded transcripts are capped: past `LOADED_TRANSCRIPT_LIMIT` (24, above the
+prefetch's 12) the least recently written one returns to `absent` and its
+derived groups are released, and `bodiesStep` reloads it if it is opened again.
+The one just written, a streaming reply and an in-flight load are pinned. Until
+2026-10-08 a tab held every chat it had opened until the socket reconnected
+(`transcript-eviction.test.ts`).
 
 ## Server resources: one keyed local store
 
@@ -279,7 +289,9 @@ than a lazy load. It reuses `loadConversationDetails`, so a warm request that
 collides with the user opening that chat joins it rather than racing it.
 
 `invalidateResources(predicate)` re-runs the loaders for matching MOUNTED keys
-in place, so subscribed panels update with no spinner. `invalidateBuddyResources()`
+in place, so subscribed panels update with no spinner. While the tab is hidden it
+does nothing: `usePolledFetch` refreshes every mounted key when the tab becomes
+visible, and a hidden tab used to refetch and re-diff on every push all night. `invalidateBuddyResources()`
 is the named predicate for Buddy data. It fires from the WS spine on
 `buddies_changed` — the server's debounced change feed
 (the Buddy change bus in `server/src/server.ts`), which announces every Buddy-store write

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import {
   createResumeTracker,
+  createWakeDetector,
   isViteClientModule,
   patchViteResumeReload,
   resumeNeedsSocketReconnect,
@@ -92,4 +93,17 @@ test('resume reconnects a closed socket and leaves an open one alone', () => {
   assert.equal(resumeNeedsSocketReconnect(3), true);
   assert.equal(resumeNeedsSocketReconnect(0), false);
   assert.equal(resumeNeedsSocketReconnect(1), false);
+});
+
+// Regression (2026-10-08): a Mac sleep or a tab stalled in swap never fires visibilitychange, so
+// the dev client reloaded a "visible" page on wake. A frozen page shows as a large timer gap.
+test('a long gap between clock looks reads as a wake; a normal tick does not', () => {
+  let clock = 0;
+  const wake = createWakeDetector(5_000, () => clock);
+  clock += 1_000;
+  assert.equal(wake.gapExceeded(), false);
+  clock += 60_000;
+  assert.equal(wake.gapExceeded(), true);
+  clock += 1_000;
+  assert.equal(wake.gapExceeded(), false, 'the gap is consumed once');
 });
