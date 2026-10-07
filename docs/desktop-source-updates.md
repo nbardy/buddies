@@ -33,6 +33,12 @@ upstream, builds, and runs the app's publishing helper (`node <bundled
 payload>/tools/desktop-source.mjs --publish`). It reports the verified revision
 and tells the owner to reopen the app. The helper repeats typecheck/build before
 staging and smoke, so publishing is independently gated by actual build success.
+Before installation/build (including `--publish`), it refuses outer or nested
+uncommitted edits, reconciles recursive submodules to committed gitlinks, and
+installs the frozen dependencies. Clean nested checkouts must be ancestors of
+their new pins; divergent local commits and backwards pin changes are refused
+for manual review. No force checkout, reset, or automatic nested merge is used.
+Failure leaves the previous runtime selected.
 Installing a different native release selects its bundled runtime while retaining
 the checkout for the normal upstream merge workflow.
 
