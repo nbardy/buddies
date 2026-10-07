@@ -13,9 +13,8 @@ export const OwnerPostMentionConfigSchema = z.object({
 
 export type OwnerPostMentionConfig = z.infer<typeof OwnerPostMentionConfigSchema>;
 
-// A reference picked from the channel composer's @ menu. The composer shows
-// `@Label` and swaps it for the token on send, so the pick is state beside
-// the text, not part of it.
+// A reference the channel composer's @ menu offers: a Buddy or a Task. Picking one inserts its
+// token into the draft's Markdown (body-references.ts); this record is the menu's entry, not state.
 export const ChannelReferenceSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('buddy'),
@@ -33,12 +32,14 @@ export const ChannelReferenceSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
-// An unsent channel/thread composer draft (device-local, localStorage
-// `draft:channel:…`). It keeps the picks with the text: text alone would
-// restore `@Lead` as plain words and the post would mention nobody.
+// An unsent channel/thread composer draft (device-local, localStorage `draft:channel:…`).
+// `text` is the post body in the stored Markdown contract, references included, so the draft
+// owns its own mention identities. `picked` is LEGACY: drafts saved before 2026-10-08 kept
+// `@Label` text with the picks beside it. It is read once to fold the picks into tokens
+// (decodeChannelDraft) and never written.
 export const ChannelComposerDraftSchema = z.object({
   text: z.string(),
-  picked: z.array(ChannelReferenceSchema),
+  picked: z.array(ChannelReferenceSchema).optional(),
   // Optional for old drafts. These are unsent explicit choices, never inferred seat copies.
   mentionConfigs: z.array(OwnerPostMentionConfigSchema).optional(),
 });

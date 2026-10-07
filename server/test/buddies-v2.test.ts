@@ -1104,6 +1104,77 @@ test('plain @Name mentions: a Buddy post stores the link form, wakes that Buddy,
   }
 });
 
+// 2026-10-08: the owner route stored a pasted plain `@Name` literally (no chip, no wake) and trusted
+// stale ids as written, while the Buddy tool resolved names. Both now store what the one shared
+// `resolveReferences` returns: current name for a renamed Buddy, foreign ids dissolved, exact unique
+// names resolved, code and e-mail untouched; and the owner's post wakes the Buddy exactly once.
+test('owner and Buddy posts store the same canonical mentions, and wake once even on replay', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.lead.id,
+      changes: { name: 'Chief' },
+      key: 'rename-lead',
+    });
+    const elsewhere = await w.core.createWorkspace(OWNER, {
+      name: 'Elsewhere',
+      rootPath: tempDir('elsewhere-'),
+    });
+    const stranger = await w.core.createBuddy(OWNER, {
+      workspaceId: elsewhere.id,
+      slug: 'stranger',
+      name: 'Stranger',
+      role: 'Stranger role',
+      manager: { kind: 'nobody' },
+      provider: 'codex',
+      key: 'stranger',
+    });
+    const body = `@chief look; again [@Lead](buddy:${w.lead.id}); not [@Stranger](buddy:${stranger.id}); mail a@chief.com; \`@Chief\` is code`;
+    const canonical = `[@Chief](buddy:${w.lead.id}) look; again [@Chief](buddy:${w.lead.id}); not @Stranger; mail a@chief.com; \`@Chief\` is code`;
+
+    let viaTool: string | undefined;
+    w.during.set(1, async (turn) => {
+      const posted = await call(turn.mcp, 'post', {
+        channel: { id: w.general.id },
+        body,
+        key: 'same-body-by-tool',
+      });
+      assert.equal(posted.isError, false, posted.text);
+      viaTool = (posted.value as { body: string }).body;
+    });
+    const sent = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body,
+      key: 'owner-stale-mentions',
+    });
+    assert.equal(sent.status, 201, JSON.stringify(sent.body));
+    const post = (sent.body as unknown as { post: Post }).post;
+    assert.equal(post.body, canonical, 'the owner route stores the canonical body');
+    await until(async () => viaTool !== undefined, 'the woken Buddy posted the same text');
+    assert.equal(viaTool, canonical, 'the Buddy tool stores the identical body');
+
+    // A retried request replays the first post and creates no second delivery.
+    const replay = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body,
+      key: 'owner-stale-mentions',
+    });
+    assert.equal(replay.status, 201, JSON.stringify(replay.body));
+    assert.equal((replay.body as unknown as { post: Post }).post.id, post.id);
+    await until(
+      async () => (await w.runs(w.lead.id)).every((r) => r.status === 'complete'),
+      'the delivery settles'
+    );
+    const deliveries = (await w.runs(w.lead.id)).filter(
+      (r) => r.input.kind === 'deliver' && r.input.postId === post.id
+    );
+    assert.equal(deliveries.length, 1, 'one delivery for the owner post, replay included');
+    assert.equal((await w.runs(w.designer.id)).length, 0, 'nobody else was woken');
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
 // 2026-09-28: a Buddy's @mention dispatched nothing — a live-looking chip that woke nobody. It now
 // takes the owner's mention path (same seat, latest config), with Buddy authority and the chain cap.
 test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs are not capped", async () => {

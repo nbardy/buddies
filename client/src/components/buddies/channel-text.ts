@@ -8,23 +8,15 @@
  *   `[Title](task:<id>)`    a Task, rendered as a live status chip
  *   `![alt](/abs/path)`     inline image or video, served through /api/files
  *
- * The composer never shows raw tokens: picking from the universal @ menu
- * inserts `@Label` and records the reference; `encodeReferences` swaps the
- * labels for tokens on send.
+ * Their one interpretation is shared/src/body-references.ts; the composer's draft is
+ * composer-draft.ts. This file keeps the @ menu ranking, media, tasks and the mention chip.
  */
-import {
-  type ChannelComposerDraft,
-  ChannelComposerDraftSchema,
-  type ChannelReference,
-  type ConversationConfig,
-  type ProviderCatalog,
-} from '@unleashd/shared';
+import type { ChannelReference, ConversationConfig, ProviderCatalog } from '@unleashd/shared';
 import { modelSummary } from '../../views/config/config-options';
 import type { Task, TaskStatus, ThreadSeat } from './types';
 
 // A Buddy carries what its turn runs on by default, so the composer's mention
-// chip can show it and open the harness/model picker from it. The type is the
-// shared schema's, because composer drafts persist picks (see Drafts below).
+// chip can show it and open the harness/model picker from it.
 export type { ChannelReference };
 
 // ── Fuzzy matching ─────────────────────────────────────────────────────────
@@ -108,162 +100,7 @@ export function activeReferenceQuery(
   return { start: at, query };
 }
 
-/**
- * True when the @ query is a reference the owner already picked: picking
- * inserts `@Label `, and because a query may contain spaces that text is
- * itself a live query that still fuzzy-matches everything, so the menu stayed
- * open after Enter and covered the mention chip's model picker (2026-09-24).
- * A query that is still the start of some label ("Lead Des" toward "Lead
- * Designer" after picking "Lead") keeps the menu open.
- */
-export function completesPickedReference(
-  query: string,
-  picked: readonly ChannelReference[],
-  references: readonly ChannelReference[]
-): boolean {
-  const typed = query.toLowerCase();
-  return (
-    picked.some((reference) => query.startsWith(`${reference.label} `)) &&
-    !references.some((reference) => reference.label.toLowerCase().startsWith(typed))
-  );
-}
-
-export function insertReference(
-  text: string,
-  trigger: { start: number; query: string },
-  reference: ChannelReference
-): { text: string; caret: number } {
-  const inserted = `@${reference.label} `;
-  const end = trigger.start + 1 + trigger.query.length;
-  return {
-    text: text.slice(0, trigger.start) + inserted + text.slice(end),
-    caret: trigger.start + inserted.length,
-  };
-}
-
-// ── Encoding ───────────────────────────────────────────────────────────────
-
-function linkText(label: string): string {
-  return label.replace(/[[\]]/g, '');
-}
-
-export function referenceToken(reference: ChannelReference): string {
-  switch (reference.kind) {
-    case 'buddy':
-      return `[@${linkText(reference.label)}](buddy:${reference.id})`;
-    case 'task':
-      return `[${linkText(reference.label)}](task:${reference.id})`;
-  }
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * The same match `encodeReferences` turns into a token: longer labels first,
- * and a label must end at a boundary. The composer highlight uses these
- * ranges so `@Lead` is marked in the input exactly when send will mention Lead.
- */
-function pickedReferencePattern(references: readonly ChannelReference[]): {
-  pattern: RegExp;
-  byLabel: Map<string, ChannelReference>;
-} | null {
-  const unique = new Map(
-    references.map((reference) => [`${reference.kind}:${reference.id}`, reference])
-  );
-  const ordered = [...unique.values()].sort((a, b) => b.label.length - a.label.length);
-  if (ordered.length === 0) return null;
-  return {
-    pattern: new RegExp(
-      `(^|\\s)@(${ordered.map((reference) => escapeRegExp(reference.label)).join('|')})(?=$|[\\s.,:;!?)])`,
-      'g'
-    ),
-    byLabel: new Map(ordered.map((reference) => [reference.label, reference])),
-  };
-}
-
-/**
- * Replace every `@Label` the user picked with its token. Longer labels go
- * first and a label must end at a word boundary, so picking both "Lead" and
- * "Lead Designer" never turns "@Lead Designer" into "[@Lead](…) Designer".
- * References whose label was deleted from the text simply do not appear.
- */
-export function encodeReferences(text: string, references: readonly ChannelReference[]): string {
-  const matched = pickedReferencePattern(references);
-  if (!matched) return text;
-  const { pattern, byLabel } = matched;
-  return text.replace(pattern, (_whole, lead: string, label: string) => {
-    const reference = byLabel.get(label);
-    return reference ? `${lead}${referenceToken(reference)}` : _whole;
-  });
-}
-
-export type ComposerReferenceMark = {
-  start: number;
-  end: number;
-  kind: ChannelReference['kind'];
-};
-
-/** `@Label` spans in the composer that send will turn into mention or Task tokens. */
-export function composerReferenceMarks(
-  text: string,
-  references: readonly ChannelReference[]
-): ComposerReferenceMark[] {
-  const matched = pickedReferencePattern(references);
-  if (!matched) return [];
-  const { pattern, byLabel } = matched;
-  const marks: ComposerReferenceMark[] = [];
-  for (const match of text.matchAll(pattern)) {
-    const lead = match[1] ?? '';
-    const label = match[2];
-    const reference = label ? byLabel.get(label) : undefined;
-    if (!reference || match.index === undefined || !label) continue;
-    const start = match.index + lead.length;
-    marks.push({ start, end: start + 1 + label.length, kind: reference.kind });
-  }
-  return marks;
-}
-
 export type BuddyReference = Extract<ChannelReference, { kind: 'buddy' }>;
-
-const MENTION_TOKEN = /\]\(buddy:([A-Za-z0-9_-]+)\)/g;
-
-/** Whether a post body @mentions a Buddy: its reply (or a notice) will land in the post's thread. */
-export const mentionsABuddy = (body: string) => /\]\(buddy:[A-Za-z0-9_-]+\)/.test(body);
-
-/**
- * The picked Buddies whose mention survives in the text, in mention order:
- * the composer's mention chips. Derived from the same encoding as send, so a
- * chip exists exactly when the post will start that Buddy's turn — and a model
- * choice is never sent for a Buddy the post no longer mentions (the server
- * rejects that post).
- */
-export function mentionedBuddies(
-  text: string,
-  picked: readonly ChannelReference[],
-  directory: readonly ChannelReference[] = picked
-): BuddyReference[] {
-  const byId = new Map(
-    picked
-      .filter((reference): reference is BuddyReference => reference.kind === 'buddy')
-      .map((reference) => [reference.id, reference])
-  );
-  const ids = new Set([...encodeReferences(text, picked).matchAll(MENTION_TOKEN)].map((m) => m[1]));
-  return [...ids].flatMap((id) => {
-    const reference = byId.get(id);
-    if (!reference) return [];
-    // Drafts retain mention identity, not a second owner of the Buddy's current default.
-    // Guard: restored mention uses current profile rather than its stored execution snapshot.
-    const current = directory.find((entry) => entry.kind === 'buddy' && entry.id === id);
-    return [
-      {
-        ...reference,
-        execution: current?.kind === 'buddy' ? current.execution : { kind: 'unreported' as const },
-      },
-    ];
-  });
-}
 
 // ── Drafts ─────────────────────────────────────────────────────────────────
 
@@ -275,31 +112,11 @@ export function channelDraftId(channelId: string, rootId: string | null): string
   return rootId === null ? `channel:${channelId}` : `channel:${channelId}:thread:${rootId}`;
 }
 
-export const EMPTY_CHANNEL_DRAFT: ChannelComposerDraft = { text: '', picked: [] };
-
-/** Empty text stores '' so the draft hook deletes the key instead of keeping `{}`. */
-export function encodeChannelDraft(draft: ChannelComposerDraft): string {
-  return draft.text === '' ? '' : JSON.stringify(draft);
-}
-
-/**
- * A stored draft back into composer state. Local storage is outside the type
- * system: a blob that is not a draft (hand-edited, or an older shape) is
- * discarded whole, the same policy as atoms/ui.ts validatedStorage.
- */
-export function decodeChannelDraft(stored: string): ChannelComposerDraft {
-  if (stored === '') return EMPTY_CHANNEL_DRAFT;
-  try {
-    const parsed = ChannelComposerDraftSchema.safeParse(JSON.parse(stored));
-    return parsed.success ? parsed.data : EMPTY_CHANNEL_DRAFT;
-  } catch {
-    return EMPTY_CHANNEL_DRAFT;
-  }
-}
-
 // ── Media ──────────────────────────────────────────────────────────────────
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov']);
+
+const linkText = (label: string) => label.replace(/[[\]]/g, '');
 
 export function mediaMarkdown(file: { originalName: string; absolutePath: string }): string {
   const alt = linkText(file.originalName.replace(/\.[^.]+$/, ''));

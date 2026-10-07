@@ -253,8 +253,8 @@ test('posts render markdown mentions, Task chips and media; the rail keeps one B
   );
   const html = render('ws-rich', directory, '/?channel=ch_rich');
   assert.match(html, /class="channel-browser-author">You</);
-  assert.match(html, /<a class="channel-mention" href="\/buddies\/lead"[^>]*>@Lead<\/a>/);
-  assert.doesNotMatch(html, /buddy:lead/);
+  assert.match(html, /<a class="channel-mention"[^>]*href="\/buddies\/lead"[^>]*>@Lead<\/a>/);
+  assert.doesNotMatch(html, /\]\(buddy:lead\)/, 'no raw token text');
   // Live chip: in-progress tone; a click opens the Task overlay in place (493c1c7).
   assert.match(html, /<button[^>]*class="channel-task-chip" data-tone="active"/);
   // Local media goes through the authenticated file route; .mp4 is a player.

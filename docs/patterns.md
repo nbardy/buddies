@@ -117,6 +117,14 @@ keep an older id carry the ordered id in a separate column assigned in their ori
 **Smell:** the same helper, regex or constant pasted inline in many files.
 **Pattern:** one named definition, imported everywhere.
 **Here:** `shortenHomePath` in `client/src/utils/directories.ts` (it was inline in 13 files).
+A post body's references (`[@Name](buddy:id)`, `[Title](task:id)`, exact `@Name`) are read by ONE module,
+`shared/src/body-references.ts` (`bodyPieces`, `findNames`, `resolveReferences`), used by the owner composer
+(`client/src/components/buddies/composer-draft.ts`: the draft IS the stored Markdown, the textarea shows a
+projection), the owner post/answer routes and the Buddy MCP `post` (`server/src/buddies/mentions.ts`
+`resolveForWorkspace`). Until 2026-10-08 the composer kept `@Label` text plus hidden `picked` snapshots and only
+the Buddy path resolved names, so a pasted `@Name` highlighted and mentioned nobody. Never add a second reader of
+mention syntax or a second copy of a mention beside the text. Guards: `client/test/composer-draft.test.ts`,
+`client/test/body-references.test.ts`, buddies-v2 "owner and Buddy posts store the same canonical mentions".
 The Buddy run queue's `WAITING_REASON_SQL` in `crates/unleashd-buddies/src/runs.rs` is both the
 list reason and the claim predicate (`reason IS NULL`), so an observation cannot drift from admission.
 

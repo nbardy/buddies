@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { Actor, ChannelRef, DocRef, DocScope, ListScope, Post } from '@unleashd/buddies-core';
 import type { TaskQuery } from '@unleashd/buddies-core';
+import type { Resolution } from '@unleashd/shared';
 import { z } from 'zod';
 import type { MessageSource } from '../conversations/messages';
 import { requireCanonicalPostMedia } from './channel-media';
@@ -26,7 +27,7 @@ import {
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
 import type { BuddyGrant, Grants, OwnerChat, Role, TurnGrant } from './grants';
 import { attachToRelay } from './mcp-relay';
-import { type MentionResolution, resolveMentions, wakes } from './mentions';
+import { resolveForWorkspace, wakes } from './mentions';
 import {
   TAIL_MAX,
   checkedEvidence,
@@ -380,10 +381,10 @@ const channelToolSchema = z.object({
 });
 
 /** The author learns whom the post woke; an unresolved `@Token` is data, not a silent no-op. */
-const withMentions = (post: Post, { mentioned, unresolved }: MentionResolution) => ({
+const withMentions = (post: Post, { mentioned, unresolved, ambiguous }: Resolution) => ({
   ...post,
   mentioned,
-  unresolved,
+  unresolved: [...unresolved, ...ambiguous],
 });
 
 // Pattern: table-driven (docs/patterns.md#table-driven)
@@ -420,10 +421,7 @@ const BUDDY_TOOLS = {
           throw new Error(
             `post answers takes only body, evidence and key; drop ${dropped.join(', ')}`
           );
-        const resolved = resolveMentions(
-          input.body,
-          await deps.core.listBuddies(grant.workspaceId)
-        );
+        const resolved = await resolveForWorkspace(deps.core, grant.workspaceId, input.body);
         const { post } = await announcePost(
           deps,
           grant.author,
@@ -440,12 +438,13 @@ const BUDDY_TOOLS = {
       if (!ref) throw new Error('post needs channel or answers');
       const runConfig = worker && checkedRunConfig(worker);
       const channel = await deps.core.openChannel(grant.author, toChannelRef(grant.author, ref));
-      const resolved = resolveMentions(
+      const resolved = await resolveForWorkspace(
+        deps.core,
+        grant.workspaceId,
         requireCanonicalPostMedia(input.body, {
           uploadsRoot: deps.uploadsRoot(),
           channelId: channel.id,
-        }),
-        await deps.core.listBuddies(grant.workspaceId)
+        })
       );
       const body = resolved.body;
       const { post, created } = await deps.core.post(

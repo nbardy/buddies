@@ -7,14 +7,13 @@ import type {
   RunConfig,
   RunInput,
 } from '@unleashd/buddies-core';
-import type { BuddyContext } from '@unleashd/shared';
+import { type BuddyContext, mentionedIds } from '@unleashd/shared';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings } from './briefing';
 import type { GateVerdict } from './channel-reply-gate';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
 import { type BuddyEvents, announcePost } from './events';
 import type { Grants, OwnerChat } from './grants';
-import { mentionedBuddyIds } from './mentions';
 
 /**
  * The one executor over the crate's `run` queue. It replaces run-executor, dispatch-service,
@@ -421,7 +420,7 @@ export function createRunner(options: {
   // gets the visible "Couldn't reply" notice, as before.
   async function followUpGate(run: Run, trigger: Post): Promise<string | null> {
     if (!trigger.rootId || run.config || run.attempt > 1) return null;
-    if (mentionedBuddyIds(trigger.body).includes(run.buddyId)) return null;
+    if (mentionedIds(trigger.body).includes(run.buddyId)) return null;
     const channel = await core.openChannel(OWNER, { kind: 'id', id: trigger.channelId });
     if (channel.kind.type === 'direct') return null;
     const page = await core.listPosts(
@@ -545,7 +544,7 @@ export function createRunner(options: {
     const channel = await core.openChannel(OWNER, { kind: 'id', id: trigger.channelId });
     const owed =
       trigger.author.kind === 'owner' &&
-      (channel.kind.type === 'direct' || mentionedBuddyIds(trigger.body).includes(run.buddyId));
+      (channel.kind.type === 'direct' || mentionedIds(trigger.body).includes(run.buddyId));
     return async () => {
       if (!owed) return;
       const page = await core.listPosts(

@@ -24,6 +24,7 @@ import { AskUserQuestionWidget } from '../AskUserQuestion';
 import { BuddyBuilderResultCard } from './BuddyBuilderResultCard';
 import { ChannelTaskOverlay } from './ChannelTaskOverlay';
 import { type ChannelTask, isVideoSource, mediaUrl, parseChannelLink } from './channel-text';
+import { REF_ATTRIBUTE } from './composer-draft';
 import { taskStatusView } from './ui-contract';
 import './ChannelContent.css';
 
@@ -241,7 +242,12 @@ function ChannelLink({ href, children }: { href?: string; children?: ReactNode }
   switch (link.kind) {
     case 'buddy':
       return (
-        <Link className="channel-mention" to={`/buddies/${encodeURIComponent(link.id)}`}>
+        // Copying a rendered mention carries its id: the composer's paste reads this attribute.
+        <Link
+          className="channel-mention"
+          to={`/buddies/${encodeURIComponent(link.id)}`}
+          {...{ [REF_ATTRIBUTE]: `buddy:${link.id}` }}
+        >
           @{buddyNames[link.id] ?? String(children).replace(/^@/, '')}
         </Link>
       );

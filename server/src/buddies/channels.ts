@@ -6,7 +6,12 @@ import {
   type ReplyRetryResult,
   isHarnessRetryFailure,
 } from '@unleashd/shared';
-import { NO_AGENT_INSTALLED, WAKE_MESSAGE, configFromProviderPreferences } from '@unleashd/shared';
+import {
+  NO_AGENT_INSTALLED,
+  WAKE_MESSAGE,
+  configFromProviderPreferences,
+  mentionedIds,
+} from '@unleashd/shared';
 import type { ConversationRuntime } from '../conversations/runtime';
 import { profileExecution } from './briefing';
 import {
@@ -19,7 +24,6 @@ import {
 import type { ReplyGate } from './channel-reply-gate';
 import { type BuddiesCore, OWNER } from './core';
 import type { BuddyEvents } from './events';
-import { mentionedBuddyIds } from './mentions';
 import { runConfigOfPick } from './worker-config';
 
 // Thread seats and DM chats: WHICH conversation a Buddy answers a thread in. A post wakes nobody
@@ -273,7 +277,7 @@ export function createChannels(ports: ChannelsPorts) {
       const buddyIds = new Set<string>();
       for (const post of thread) {
         for (const id of buddyAuthor(post)) buddyIds.add(id);
-        for (const id of mentionedBuddyIds(post.body)) buddyIds.add(id);
+        for (const id of mentionedIds(post.body)) buddyIds.add(id);
       }
       const seats: ThreadSeat[] = [];
       for (const buddyId of buddyIds) {

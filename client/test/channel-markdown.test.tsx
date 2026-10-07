@@ -15,6 +15,7 @@ register(
 );
 const { ChannelMarkdown } = await import('../src/components/buddies/ChannelMarkdown');
 const { ChannelTaskOverlay } = await import('../src/components/buddies/ChannelTaskOverlay');
+const { pastedBody } = await import('../src/components/buddies/composer-draft');
 const { Provider } = await import('jotai');
 const { jotaiStore } = await import('../src/atoms/store');
 const { loadResource } = await import('../src/atoms/resources');
@@ -206,4 +207,16 @@ test('the Task overlay shows the Task detail in place, with a way on to Work', a
   assert.match(html, /Write the test/);
   assert.match(html, /href="\/buddies\/lead\/work"[^>]*>Open in Work</);
   assert.match(html, /aria-label="Close task"/);
+});
+
+// 2026-10-08: copying a rendered mention and pasting it into the composer pasted plain "@Name" and
+// lost the Buddy. The composer reads the id from the markup the post actually renders (the router
+// link's data attribute), so renaming or restyling that link must keep it.
+test('a copied rendered mention pastes into the composer as its Buddy', () => {
+  const html = renderChannel('[@Old name](buddy:b9) please look');
+  const roster = [{ kind: 'buddy' as const, id: 'b9', name: 'Reviewer' }];
+  assert.equal(
+    pastedBody('@Old name please look', html, roster),
+    '[@Reviewer](buddy:b9) please look'
+  );
 });

@@ -510,6 +510,7 @@ export type {
 
 export * from './buddy-workspace-activity.js';
 export * from './buddy-channel-posts.js';
+export * from './body-references.js';
 export * from './buddy-api.js';
 export * from './harness-retry.js';
 

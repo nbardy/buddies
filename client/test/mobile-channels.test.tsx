@@ -149,7 +149,7 @@ test('mobile channel screen: back to Home, thread link, touch composer', async (
     /class="mobile-channel-header__back"[^>]*href="\/buddies\/workspaces\/ws-phone\/channels"/
   );
   assert.match(html, /<h1># general<\/h1>/);
-  assert.match(html, /<a class="channel-mention" href="\/buddies\/lead"[^>]*>@Lead<\/a>/);
+  assert.match(html, /<a class="channel-mention"[^>]*href="\/buddies\/lead"[^>]*>@Lead<\/a>/);
   // Every root opens its thread screen at the shared URL (posts carry no reply count).
   assert.match(
     html,

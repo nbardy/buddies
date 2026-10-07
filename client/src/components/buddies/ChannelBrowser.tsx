@@ -1,3 +1,4 @@
+import { mentionsABuddy } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
@@ -56,7 +57,7 @@ import {
   useWorkspaceInbox,
 } from './channel-data';
 import { channelLinkPath } from './channel-link';
-import { mentionsABuddy, plainChannelText } from './channel-text';
+import { plainChannelText } from './channel-text';
 import { type ChannelsView, channelsHref, channelsView } from './channels-view';
 import type { Channel, ChannelUnread, Inbox } from './types';
 import { initials } from './ui-contract';

@@ -23,6 +23,7 @@ import {
   type ConversationConfig,
   DocWriteSchema,
   NewDirectSchema,
+  type OwnerPostMentionConfig,
   PostBodySchema,
   ReadSchema,
   RetrySchema,
@@ -56,8 +57,8 @@ import {
   managerRef,
   taskDetail,
 } from './core';
-import { type BuddyEvents, type MentionPicks, announcePost } from './events';
-import { mentionedBuddyIds, wakes } from './mentions';
+import { type BuddyEvents, announcePost } from './events';
+import { resolveForWorkspace, wakes } from './mentions';
 import type { Runner } from './runner';
 import { channelsNamed } from './search-channels';
 import { checkedEvidence } from './tool-views';
@@ -121,10 +122,10 @@ function scopeOf(scope: string, scopeId: string | undefined): DocScope {
 
 /** κ for the owner's per-mention model picks: one per Buddy, and only for a mentioned Buddy. */
 function mentionConfigsByBuddy(
-  body: string,
+  mentionedIds: readonly string[],
   entries: readonly { buddyId: string; config: ConversationConfig }[]
 ) {
-  const mentioned = new Set(mentionedBuddyIds(body));
+  const mentioned = new Set(mentionedIds);
   const byBuddy = new Map<string, ConversationConfig>();
   for (const entry of entries) {
     if (!mentioned.has(entry.buddyId) || byBuddy.has(entry.buddyId))
@@ -139,10 +140,12 @@ function mentionConfigsByBuddy(
 export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 'mentionConfigs'>;
 
 /**
- * The one way an owner-side post enters a channel: canonical media, the crate write and the
- * announcement, which carries the owner's mention-chip picks to the Buddy turns its @mentions
- * start (channels.ts, the one dispatch entry for every author). A replayed key announces nothing.
- * The owner post routes and the upstream update (upstream/routes.ts) both come here.
+ * The one way an owner-side post enters a channel: canonical media and mentions (the same
+ * `resolveReferences` the Buddy MCP applies, so a pasted `@Name` stores as the token and wakes that
+ * Buddy exactly once), the crate write and the announcement, which carries the owner's
+ * mention-chip picks to the Buddy turns its @mentions start (channels.ts, the one dispatch entry
+ * for every author). A replayed key announces nothing. The owner post routes and the upstream
+ * update (upstream/routes.ts) both come here.
  */
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 export async function publishOwnerPost(
@@ -150,13 +153,22 @@ export async function publishOwnerPost(
   author: Actor,
   ref: ChannelRef,
   input: OwnerPostInput,
-  picks: MentionPicks
+  chosen: readonly OwnerPostMentionConfig[]
 ): Promise<{ post: Post }> {
   const target = await deps.core.openChannel(OWNER, ref);
-  const body = requireCanonicalPostMedia(input.body, {
-    uploadsRoot: deps.uploadsRoot(),
-    channelId: target.id,
-  });
+  const resolved = await resolveForWorkspace(
+    deps.core,
+    target.workspaceId,
+    requireCanonicalPostMedia(input.body, {
+      uploadsRoot: deps.uploadsRoot(),
+      channelId: target.id,
+    })
+  );
+  const body = resolved.body;
+  const picks = mentionConfigsByBuddy(
+    resolved.mentioned.map((buddy) => buddy.id),
+    chosen
+  );
   const { post, created } = await deps.core.post(
     author,
     { kind: 'id', id: target.id },
@@ -226,8 +238,14 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     const request = await core.getPost(OWNER, requestId as string);
     if (request.channelId !== channelId)
       throw new CoreError('invalid', `request ${request.id} is not in channel ${channelId}`);
+    const channel = await core.openChannel(OWNER, { kind: 'id', id: channelId });
+    const resolved = await resolveForWorkspace(core, channel.workspaceId, body);
     return {
-      post: (await posted(core.answer(OWNER, { requestId: request.id, body, evidence, key }))).post,
+      post: (
+        await posted(
+          core.answer(OWNER, { requestId: request.id, body: resolved.body, evidence, key })
+        )
+      ).post,
     };
   };
   const ownerPost = async (raw: unknown, channelId: string) => {
@@ -235,8 +253,13 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     if (parsed.answers !== undefined) return ownerAnswer(channelId, parsed);
     const { asBuddyId, answers: _answers, ...input } = parsed;
     const author = asBuddyId === undefined ? OWNER : buddyActor(asBuddyId);
-    const chosen = mentionConfigsByBuddy(input.body, input.mentionConfigs);
-    return publishOwnerPost(deps, author, { kind: 'id', id: channelId }, input, chosen);
+    return publishOwnerPost(
+      deps,
+      author,
+      { kind: 'id', id: channelId },
+      input,
+      input.mentionConfigs
+    );
   };
   const archive = async (buddyId: string, changes: BuddyChanges, changeKey: string) => {
     const buddy = await write(core.updateBuddy(OWNER, { buddyId, changes, key: changeKey }));

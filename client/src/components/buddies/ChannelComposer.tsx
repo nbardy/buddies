@@ -1,5 +1,12 @@
 import type { ConversationConfig, OwnerPostMentionConfig, ProviderCatalog } from '@unleashd/shared';
-import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ClipboardEvent,
+  type ReactNode,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { outboxDrop, outboxSending, outboxSent } from '../../atoms/channel-outbox';
 import { useConversationDraft } from '../../hooks/useConversationDraft';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
@@ -13,20 +20,30 @@ import {
   type ChannelReference,
   type MentionChoice,
   type ThreadSeats,
-  activeReferenceQuery,
   channelDraftId,
   choiceLabel,
-  completesPickedReference,
-  composerReferenceMarks,
-  decodeChannelDraft,
-  encodeChannelDraft,
-  encodeReferences,
-  insertReference,
   mediaMarkdown,
   mentionChoice,
-  mentionedBuddies,
   rankReferences,
 } from './channel-text';
+import {
+  type DraftEdit,
+  type DraftMark,
+  activeTrigger,
+  ambiguousNames,
+  copyPayload,
+  decodeChannelDraft,
+  draftView,
+  encodeChannelDraft,
+  inputEdit,
+  mentionedBuddies,
+  pastedBody,
+  pickReference,
+  rosterOf,
+  sendBody,
+  shownOffset,
+  spliceDraft,
+} from './composer-draft';
 import type { PostResult } from './types';
 import './ChannelComposer.css';
 
@@ -49,8 +66,9 @@ const NO_SEATS: ThreadSeats = { kind: 'loaded', seats: [] };
 // continues from there instead of the profile default.
 //
 // Unsent text survives navigation and reload through the chat's own draft
-// hook (useConversationDraft), one draft per channel and per thread. The
-// picks are saved with the text, so a restored `@Lead` still mentions Lead.
+// hook (useConversationDraft), one draft per channel and per thread. The draft
+// is the post body in its stored Markdown form (composer-draft.ts), so a
+// restored, pasted or copied mention keeps the Buddy it names.
 //
 // submit: 'enter' (desktop — Enter sends, Shift+Enter breaks a line) or
 // 'button' (touch — Return is a newline, as in Slack mobile; Send sends).
@@ -75,9 +93,9 @@ export function ChannelComposer({
   submit: ComposerSubmit;
   onPosted(result: PostResult): void;
 }) {
-  const [text, setText] = useState('');
+  // The draft: the post body in its stored Markdown form. `view` is what the textarea shows.
+  const [raw, setRaw] = useState('');
   const [caret, setCaret] = useState(0);
-  const [picked, setPicked] = useState<ChannelReference[]>([]);
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [uploading, setUploading] = useState(0);
@@ -89,9 +107,12 @@ export function ChannelComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // The POST settles after later renders; its failure path reads the text now.
-  const textRef = useRef(text);
-  textRef.current = text;
+  const roster = useMemo(() => rosterOf(references), [references]);
+  const view = useMemo(() => draftView(raw, roster), [raw, roster]);
+  const text = view.display;
+  // The POST and an upload settle after later renders; they read the draft as it is then.
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const draft = useConversationDraft({
     conversationId: channelDraftId(channelId, rootId),
     textareaRef,
@@ -100,30 +121,23 @@ export function ChannelComposer({
     maxHeight: MAX_TEXTAREA_HEIGHT,
     onDraftLoaded: (stored) => {
       const restored = decodeChannelDraft(stored);
-      setText(restored.text);
-      setPicked(restored.picked);
+      setRaw(restored.text);
       setChoices(new Map(restored.mentionConfigs?.map(({ buddyId, config }) => [buddyId, config])));
-      setCaret(restored.text.length);
+      setCaret(draftView(restored.text, roster).display.length);
     },
   });
 
   const { seats, retry: retrySeats } = useThreadSeats(rootId);
-  const trigger = activeReferenceQuery(text, caret);
-  const open =
-    trigger !== null &&
-    trigger.start !== dismissedAt &&
-    !completesPickedReference(trigger.query, picked, references);
+  const trigger = activeTrigger(view, caret);
+  const open = trigger !== null && trigger.start !== dismissedAt;
   const query = open && trigger ? trigger.query : null;
   const matches = useMemo(
     () => (query === null ? [] : rankReferences(query, references)),
     [query, references]
   );
   const selected = matches[Math.min(highlight, matches.length - 1)];
-  const mentions = useMemo(
-    () => mentionedBuddies(text, picked, references),
-    [text, picked, references]
-  );
-  const referenceMarks = useMemo(() => composerReferenceMarks(text, picked), [text, picked]);
+  const mentions = useMemo(() => mentionedBuddies(view, references), [view, references]);
+  const ambiguous = useMemo(() => ambiguousNames(view, roster), [view, roster]);
   // Pattern: one-definition (docs/patterns.md#one-definition)
   // A mention initializes the bottom picker from the thread, not an independent default.
   // Guard: explicit thread choice survives a failed attempt; desktop/phone model captures.
@@ -164,11 +178,26 @@ export function ChannelComposer({
     return () => observer.disconnect();
   }, [text, placeholder]);
 
-  const edit = (next: string, nextCaret: number, nextPicked: ChannelReference[] = picked) => {
-    setText(next);
-    saveDraft(next, nextPicked, choices);
-    setCaret(nextCaret);
+  const saveDraft = (body: string, picks: ReadonlyMap<string, ConversationConfig>) =>
+    draft.setDraft(
+      encodeChannelDraft({
+        text: body,
+        mentionConfigs: [...picks].map(([buddyId, config]) => ({ buddyId, config })),
+      })
+    );
+  const changeChoices = (next: ReadonlyMap<string, ConversationConfig>) => {
+    setChoices(next);
+    saveDraft(raw, next);
+  };
+
+  // Every change to the draft comes through here as a splice of the display text.
+  const apply = (edit: DraftEdit) => {
+    setRaw(edit.raw);
+    saveDraft(edit.raw, choices);
+    const shown = shownOffset(draftView(edit.raw, roster), edit.caret);
+    setCaret(shown);
     setHighlight(0);
+    setDismissedAt(null);
     // React's onSelect fires during the same keydown (Enter in the @ menu)
     // with the DOM caret from BEFORE the edit, overwriting the caret set
     // above; the menu then saw an empty query and stayed open after a pick.
@@ -176,44 +205,33 @@ export function ChannelComposer({
     requestAnimationFrame(() => {
       const node = textareaRef.current;
       if (!node) return;
-      node.setSelectionRange(nextCaret, nextCaret);
-      setCaret(nextCaret);
+      node.setSelectionRange(shown, shown);
+      setCaret(shown);
     });
-  };
-
-  const saveDraft = (
-    text: string,
-    picked: ChannelReference[],
-    choices: ReadonlyMap<string, ConversationConfig>
-  ) =>
-    draft.setDraft(
-      encodeChannelDraft({
-        text,
-        picked,
-        mentionConfigs: [...choices].map(([buddyId, config]) => ({ buddyId, config })),
-      })
-    );
-  const changeChoices = (next: ReadonlyMap<string, ConversationConfig>) => {
-    setChoices(next);
-    saveDraft(text, picked, next);
   };
 
   const pick = (reference: ChannelReference) => {
     if (!trigger) return;
-    const result = insertReference(text, trigger, reference);
-    const nextPicked = [...picked, reference];
-    setPicked(nextPicked);
-    edit(result.text, result.caret, nextPicked);
+    apply(pickReference(view, trigger, reference));
     textareaRef.current?.focus();
   };
 
   const insertAtCaret = (snippet: string) => {
-    const node = textareaRef.current;
-    const at = node?.selectionStart ?? text.length;
-    const before = text.slice(0, at);
+    const current = viewRef.current;
+    const at = textareaRef.current?.selectionStart ?? current.display.length;
+    const before = current.display.slice(0, at);
     const spacer = before.length === 0 || /\s$/.test(before) ? '' : '\n';
-    const inserted = `${spacer}${snippet}\n`;
-    edit(before + inserted + text.slice(at), at + inserted.length);
+    apply(spliceDraft(current, at, at, `${spacer}${snippet}\n`));
+  };
+
+  const copySelection = (event: ClipboardEvent<HTMLTextAreaElement>, cut: boolean) => {
+    const { selectionStart, selectionEnd } = event.currentTarget;
+    if (selectionStart === selectionEnd) return;
+    const payload = copyPayload(view, selectionStart, selectionEnd);
+    event.clipboardData.setData('text/plain', payload.text);
+    event.clipboardData.setData('text/html', payload.html);
+    event.preventDefault();
+    if (cut) apply(spliceDraft(view, selectionStart, selectionEnd, ''));
   };
 
   const upload = (files: readonly File[]) => {
@@ -233,13 +251,13 @@ export function ChannelComposer({
   // whenever the server was busy. A failed POST takes the post back out and
   // returns the text, unless the owner has already started a new message.
   const send = () => {
-    const body = encodeReferences(text, picked).trim();
+    const body = sendBody(view, roster);
     if (!body || uploading > 0 || selections.some(({ choice }) => choice.kind === 'loading'))
       return;
     const mentionConfigs = selections.flatMap(({ buddy, choice }): OwnerPostMentionConfig[] =>
       choice.kind === 'chosen' ? [{ buddyId: buddy.id, config: choice.config }] : []
     );
-    const unsent = { text, picked, choices };
+    const unsent = { raw: view.raw, choices };
     const key = newId();
     outboxSending({
       kind: 'sending',
@@ -250,9 +268,8 @@ export function ChannelComposer({
       createdAt: new Date().toISOString(),
     });
     draft.clear();
-    setText('');
+    setRaw('');
     setCaret(0);
-    setPicked([]);
     setChoices(NO_CHOICES);
     setChoosingFor(null);
     setProblem(null);
@@ -268,12 +285,11 @@ export function ChannelComposer({
       .catch((cause: unknown) => {
         outboxDrop(new Set([key]));
         setProblem(errorText(cause));
-        if (textRef.current.trim().length > 0) return;
-        setText(unsent.text);
-        setCaret(unsent.text.length);
-        setPicked(unsent.picked);
+        if (viewRef.current.raw.trim().length > 0) return;
+        setRaw(unsent.raw);
+        setCaret(draftView(unsent.raw, roster).display.length);
         setChoices(unsent.choices);
-        saveDraft(unsent.text, unsent.picked, unsent.choices);
+        saveDraft(unsent.raw, unsent.choices);
       });
   };
 
@@ -337,7 +353,7 @@ export function ChannelComposer({
       <div className="channel-composer-field">
         {text.length > 0 && (
           <div ref={highlightRef} className="channel-composer-highlight" aria-hidden="true">
-            <ComposerHighlight text={text} marks={referenceMarks} />
+            <ComposerHighlight text={text} marks={view.marks} />
           </div>
         )}
         <textarea
@@ -352,18 +368,27 @@ export function ChannelComposer({
             if (mirror) mirror.scrollTop = event.currentTarget.scrollTop;
           }}
           onChange={(event) => {
-            setText(event.target.value);
-            saveDraft(event.target.value, picked, choices);
-            setCaret(event.target.selectionStart);
-            setHighlight(0);
-            setDismissedAt(null);
+            const { value, selectionStart } = event.target;
+            const change = inputEdit(view.display, value, selectionStart);
+            apply(spliceDraft(view, change.start, change.end, change.replacement));
           }}
           onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+          onCopy={(event) => copySelection(event, false)}
+          onCut={(event) => copySelection(event, true)}
           onPaste={(event) => {
             const files = [...event.clipboardData.files];
-            if (files.length === 0) return;
+            if (files.length > 0) {
+              event.preventDefault();
+              upload(files);
+              return;
+            }
+            const plain = event.clipboardData.getData('text/plain');
+            const body = pastedBody(plain, event.clipboardData.getData('text/html'), roster);
+            // Nothing in it to interpret: the browser pastes and onChange diffs it like typing.
+            if (body === plain) return;
             event.preventDefault();
-            upload(files);
+            const { selectionStart, selectionEnd } = event.currentTarget;
+            apply(spliceDraft(view, selectionStart, selectionEnd, body));
           }}
           onKeyDown={(event) => {
             if (showPicker) {
@@ -438,6 +463,8 @@ export function ChannelComposer({
             </span>
           ) : uploading > 0 ? (
             'Uploading…'
+          ) : ambiguous.length > 0 ? (
+            `${ambiguous[0]} names more than one Buddy; pick one from the @ menu`
           ) : mentions.length > 0 ? null : (
             <SubmitHint submit={submit} />
           )}
@@ -464,7 +491,7 @@ function ComposerHighlight({
   marks,
 }: {
   text: string;
-  marks: ReturnType<typeof composerReferenceMarks>;
+  marks: readonly DraftMark[];
 }): ReactNode {
   const parts: ReactNode[] = [];
   let cursor = 0;

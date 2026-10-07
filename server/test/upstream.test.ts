@@ -6,11 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { BuddiesCore } from '@unleashd/buddies-core';
-import { UpstreamStatusSchema, UpstreamUpdateResultSchema } from '@unleashd/shared';
+import { UpstreamStatusSchema, UpstreamUpdateResultSchema, mentionedIds } from '@unleashd/shared';
 import express from 'express';
 import { OWNER, managerRef } from '../src/buddies/core';
 import { createBuddyEvents } from '../src/buddies/events';
-import { mentionedBuddyIds } from '../src/buddies/mentions';
 import { checkUpstream, resolveCheckout } from '../src/upstream/git-upstream';
 import { createUpstreamService } from '../src/upstream/routes';
 import { BOOTSTRAP_KEY, bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
@@ -293,7 +292,7 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
   const turns: string[] = [];
   const events = createBuddyEvents();
   events.on((event) => {
-    if (event.kind === 'posted') turns.push(...mentionedBuddyIds(event.post.body));
+    if (event.kind === 'posted') turns.push(...mentionedIds(event.post.body));
   });
   const service = createUpstreamService({
     serverDirectory: install,
@@ -340,7 +339,7 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
     50
   );
   assert.equal(posts.length, 1);
-  assert.deepEqual(mentionedBuddyIds(posts[0].body), [home.releaseManagerId]);
+  assert.deepEqual(mentionedIds(posts[0].body), [home.releaseManagerId]);
   assert.match(posts[0].body, new RegExp(`For folder ${install}: fetch upstream origin/main`));
   assert.deepEqual(posts[0].evidence, [`upstream origin/main ${sha}`]);
 
