@@ -264,13 +264,25 @@ What the gate does to a dead holder's run depends on `executing_at` (Pattern: du
 → back to the queue; executed → `lease_expired`, and an executed REQUEST then continues once in its own
 conversation (decision G, `runs.rs` `resume`; a second death sends the failure post, a stop is never
 undone).
+The gate never ends a run its OWN process drives: `claim_run_at(now, budgets, held)` renews the caller's
+`held` runs `(run_id, lease_token)` in its own transaction BEFORE `expire_leases`. The runner's `holds` map
+(`BuddyTurnPolicy.arm` → `hold`, released at `disarm`) is passed with every `claimRun`. The lease is compared
+with the wall clock, so a process frozen longer than the lease (macOS Maintenance Sleep: 306 s against the
+300 s lease, 2026-10-06 16:53Z; five live runs ended 9 ms after the wake) finds it lapsed at wake. A renewal
+awaited in TypeScript before the claim (f6d3bab) is check-then-act and failed the SIGSTOP guard: the freeze
+lands between check and act and the napi threadpool runs the queued claim before any JS. Only the crate
+transaction has no gap. Never move it back to the host. Accepted residual: a DIFFERENT backend's gate on the
+same store still ends this one's lapsed runs.
+Findings: `agent_notes/2026-10-07_live-turn-lease-loss.md`.
 History: on 2026-09-10 a 600 s lease used as a chat deadline killed healthy owner chats. The fix made the lease
 24 h, and dead holders' runs then stayed `running` until the next boot: a 9.5 h overnight lie on 09-30→10-01,
 and 14 and 10 orphaned runs at 12:34Z/14:09Z on 09-30. The boot sweep also ended runs a second live backend held.
 Decision: `agent_notes/2026-10-01_return-route-decision.md`, "Successor 14:48Z" and its successor.
 Guards: `server/test/run-lease.test.ts` (a dead holder is cleared within the lease while the backend stays up;
 a heartbeating silent turn outlives its lease; the idle timer still kills a turn with no provider progress),
-plus crate tests `an_expired_lease_ends_its_run_like_a_failed_settle` and `a_renewed_lease_outlives_its_first_term`.
+plus crate tests `an_expired_lease_ends_its_run_like_a_failed_settle`, `a_renewed_lease_outlives_its_first_term` and
+`a_held_run_is_renewed_by_the_gate_before_it_can_expire`; run-lease.test.ts "a live turn keeps its run across a freeze
+of its backend longer than the lease" (SIGSTOP 2× lease).
 
 ## persisted-state-machine
 **Smell:** one thing's truth is spread over several stores (an in-memory flag, a file, a DB row) that are
