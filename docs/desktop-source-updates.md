@@ -8,7 +8,7 @@ opens or copies those stores.
 On first launch the bundled server opens normally, including offline. A separate
 Node process clones the repository recursively at the exact bundled source
 revision, installs pnpm 9.15.0 under the app's `toolchain` directory, installs
-source dependencies (the existing preflight sets up Rust), typechecks and builds.
+source dependencies (the existing preflight sets up Rust), builds and typechecks.
 Node and npm ship in the bundle. Git and Apple's compiler/command-line tools
 must work on the host; a missing tool or failed installation leaves the bundled
 runtime usable. Setup progress and failures are in `source-update.log` and

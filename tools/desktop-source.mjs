@@ -123,8 +123,9 @@ async function buildSource({ home, bundle, publishOnly = false }) {
     console.log('Installing source dependencies and building (Rust may need first-time setup)…');
     run('pnpm', ['install', '--frozen-lockfile']);
   }
-  run('pnpm', ['typecheck']);
+  // A fresh clone has no CLI/shared dist yet; build establishes those before test typecheck.
   run('pnpm', ['build']);
+  run('pnpm', ['typecheck']);
   return publishRuntime({ home, bundle, source, run });
 }
 
