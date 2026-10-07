@@ -434,3 +434,24 @@ Read as **"as recommended"**, which the lead stated back in the thread.
 
 **Principle, in the owner's words:** "stay simple, don't overload DMs". Every future change states whether the owner will
 notice it, and changes the owner would notice are opt-in.
+
+## Decision, 2026-10-07 08:38Z: step 6 go, keep-awake yes, wrap up (ACCEPTED)
+
+The lead asked two yes/no questions (post_01a11565-ecac): (1) merge step 6, which migrates the records store once with a
+backup first; (2) keep the Mac awake (`caffeinate -i`) only while a Buddy turn runs. The owner replied in the same thread
+(post_01a11583-b669): "yes wrap up the work".
+
+Read as **yes to both** and **finish and push what is in flight**. The lead stated this reading back in the thread.
+
+**Scope of "wrap up":**
+- Merge the silent wake and schedule revert (`fix/silent-wake-and-schedules` @61dd44f).
+- Merge the thread-noise revert (`fix/thread-noise-revert` @27e97f6).
+- Merge step 6 (`feat/durable-owner-messages` @864c925), then check the live migration after the reload.
+- Finish the lease fix (`fix/live-turn-lease` @74598d5). Its worker ended at 04:38Z while waiting on the port lock,
+  leaving `runner.ts` and `index.d.ts` uncommitted. Then merge it.
+- Add keep-awake as a new Task.
+
+**Keep-awake is a machine-level change, not a fix for the lease bug.** The lease fix still has to make a turn survive a
+sleep. Keep-awake only makes such a sleep rare.
+
+**Revisit keep-awake if** the owner wants the Mac to sleep during long turns, or the battery cost shows up.
