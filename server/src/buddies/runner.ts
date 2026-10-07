@@ -177,7 +177,7 @@ export function createRunner(options: {
   let paused = true;
   let timer: ReturnType<typeof setInterval> | null = null;
   let unsubscribe: () => void = () => undefined;
-  const holds = new Map<string, () => Promise<void>>();
+  const holds = new Map<string, string>(); // runId → lease token of a turn this process drives
 
   // Pattern: wake-on-write (docs/patterns.md#wake-on-write)
   function wake(): void {
@@ -202,13 +202,14 @@ export function createRunner(options: {
     // its legacy executor and its 1 s tick, and since 2026-10-06 the `schedule` run kind.
     await core.dueSchedules(new Date().toISOString());
     // Pattern: lease-heartbeat (docs/patterns.md#lease-heartbeat)
-    // The gate never ends a run this process drives. It compares leases with the WALL clock, so a
-    // lease that lapsed while this process was frozen (a 306 s macOS sleep, 2026-10-06 16:53Z) is
-    // no sign of a dead holder, and no timer order puts the heartbeat before the gate at wake.
-    // Renewing every live hold first does. Guard: run-lease.test.ts "...across a freeze...".
-    await Promise.all(Array.from(holds.values(), (renewDue) => renewDue()));
-    for (let claim = await core.claimRun(budgets); claim; claim = await core.claimRun(budgets))
-      void execute(claim);
+    // Every claim carries the runs this process drives: the gate renews them before expiring
+    // leases (a 306 s sleep outlasted the 300 s lease, 2026-10-06). Read per claim, not per drain.
+    const claimed = () =>
+      core.claimRun(
+        budgets,
+        Array.from(holds, ([runId, leaseToken]) => ({ runId, leaseToken }))
+      );
+    for (let claim = await claimed(); claim; claim = await claimed()) void execute(claim);
   }
 
   // Turn endings in flight (completion step + settle): a graceful backend exit waits for them
@@ -652,11 +653,11 @@ export function createRunner(options: {
     budgets,
     renew,
 
-    /** A live turn here executes `runId`: claims await `renewDue` until the release (`drain`). */
-    hold(runId: string, renewDue: () => Promise<void>): () => void {
-      holds.set(runId, renewDue);
+    /** A live turn here executes `runId`: claims pass it to the gate until the release (`drain`). */
+    hold(runId: string, leaseToken: string): () => void {
+      holds.set(runId, leaseToken);
       return () => {
-        if (holds.get(runId) === renewDue) holds.delete(runId);
+        if (holds.get(runId) === leaseToken) holds.delete(runId);
       };
     },
 

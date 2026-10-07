@@ -982,7 +982,7 @@ test('workspace run rows expose task_paused and clear it when the same run becom
     });
     const releasedRow = released.value.runs.find((item: { id: string }) => item.id === row.id);
     assert.equal(releasedRow.waiting ?? null, null);
-    assert.equal((await w.core.claimRun(w.runner.budgets))?.run.id, row.id);
+    assert.equal((await w.core.claimRun(w.runner.budgets, []))?.run.id, row.id);
 
     const missing = await w.core.enqueueRun(OWNER, {
       buddyId: w.designer.id,

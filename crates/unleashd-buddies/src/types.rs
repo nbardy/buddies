@@ -929,8 +929,7 @@ pub enum Delivery {
     Consumed,
 }
 
-/// A run its caller's own live turn executes: passed to the claim gate, which renews its lease in
-/// the gate's own transaction before expiring anything (Pattern: lease-heartbeat).
+/// A run the caller's live turn executes; the claim gate renews it before expiring leases.
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunHold {
