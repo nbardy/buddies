@@ -20,8 +20,8 @@ import {
   scanGenerations,
   stableConversationId,
 } from './buddy-conversation-slots';
-import { type BuddiesCore, OWNER } from './core';
 import type { ReplyGate } from './channel-reply-gate';
+import { type BuddiesCore, OWNER } from './core';
 import type { BuddyEvents } from './events';
 import { mentionedBuddyIds } from './mentions';
 import { runConfigOfPick } from './worker-config';
