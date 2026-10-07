@@ -343,15 +343,15 @@ export class TurnRunner {
   }
 
   /**
-   * A spawn that throws has no child, so no drain will ever remove the journal `forTurn` just
-   * wrote; it would sit on disk until the next boot discarded it as `unstarted` (core review I1,
-   * 2026-10-07). Guard: conversation-runtime "a spawn that throws leaves no execution journal".
+   * A spawn that throws is never followed, so no drain will ever remove the journal `forTurn` just
+   * wrote (core review I1, 2026-10-07). It may still have a child: `discardAt` kills one the journal
+   * names before removing it. Guards: conversation-runtime "a spawn that throws …" (both tests).
    */
   private spawnInto(execution: Execution, request: ExecuteCommandRequest): ExecutionHandle {
     try {
       return this.ports.executeTurn(request);
     } catch (error) {
-      this.ports.executions.remove(execution.dir);
+      this.ports.executions.discardAt(execution.dir);
       throw error;
     }
   }

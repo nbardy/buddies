@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { type UnifiedAgentEvent, createParser } from '@nbardy/agent-cli';
 import { buddyKind } from '@unleashd/shared';
 import type { Message, Provider } from '@unleashd/shared';
@@ -1681,6 +1683,32 @@ test('a spawn that throws leaves no execution journal behind', () => {
     }) as never,
   });
   assert.throws(() => fixture.conversation.sendMessage('hi'), /spawn refused/);
+  assert.deepEqual(executions.scan(), []);
+});
+
+// Regression (core review, 2026-10-07): I1 removed the journal whenever executeTurn threw, but
+// agent-cli can throw after the child exists (it opens the journal tails once the pid is on disk;
+// EMFILE there throws). The removal left that live child untracked: no journal, no kill.
+test('a spawn that throws after its child started leaves no process running', async () => {
+  const executions = testExecutions();
+  let child: ChildProcess | undefined;
+  const fixture = runtimeFixture({
+    executions,
+    executeTurn: ((request: { journalDir: string }) => {
+      // `; :` keeps sh from exec'ing sleep, so the command line still names the journal dir.
+      child = spawn('/bin/sh', ['-c', 'sleep 30; :', 'agent-cli-journal', request.journalDir], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      writeFileSync(join(request.journalDir, 'pid'), String(child.pid));
+      throw new Error('EMFILE after spawn');
+    }) as never,
+  });
+  assert.throws(() => fixture.conversation.sendMessage('hi'), /EMFILE after spawn/);
+  const exited = new Promise((resolve) => child?.once('exit', resolve));
+  const outcome = await Promise.race([exited, delay(2000).then(() => 'still running')]);
+  if (outcome === 'still running') child?.kill('SIGKILL');
+  assert.notEqual(outcome, 'still running');
   assert.deepEqual(executions.scan(), []);
 });
 

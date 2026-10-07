@@ -112,6 +112,12 @@ export function createExecutionJournals(root: string) {
     }
   }
 
+  function discard(found: Pick<FoundExecution, 'dir' | 'process'>): void {
+    // SIGKILL after the grace checks the pid is still our wrapper (review of P1, 2026-10-01).
+    if (found.process.t === 'live') killExecution(found.process.pid, found.dir);
+    fs.rmSync(found.dir, { recursive: true, force: true });
+  }
+
   return {
     root,
 
@@ -146,10 +152,17 @@ export function createExecutionJournals(root: string) {
     },
 
     /** Kill a journal's process group (if it runs) and remove it: nothing untracked survives. */
-    discard(found: FoundExecution): void {
-      // SIGKILL after the grace checks the pid is still our wrapper (review of P1, 2026-10-01).
-      if (found.process.t === 'live') killExecution(found.process.pid, found.dir);
-      fs.rmSync(found.dir, { recursive: true, force: true });
+    discard,
+
+    /**
+     * A spawn threw: the turn already failed, so whatever it started must not outlive it. The
+     * process is read from the journal, not assumed absent: agent-cli can throw after the pid is
+     * on disk (opening the journal tails), and removing the journal then orphaned a live child
+     * (core review, 2026-10-07). Guard: conversation-runtime "a spawn that throws after its child
+     * started leaves no process running".
+     */
+    discardAt(dir: string): void {
+      discard({ dir, process: executionProcess(dir) });
     },
 
     /** The turn settled: its journal has nothing left to tell anyone. */
