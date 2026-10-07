@@ -238,8 +238,8 @@ impl BuddiesCore {
     }
 
     #[napi]
-    pub async fn claim_run(&self, budgets: RunBudgets) -> napi::Result<Option<Claim>> {
-        call(&self.store, move |s| s.claim_run(budgets)).await
+    pub async fn claim_run(&self, budgets: RunBudgets, held: Vec<RunHold>) -> napi::Result<Option<Claim>> {
+        call(&self.store, move |s| s.claim_run(budgets, &held)).await
     }
 
     #[napi]

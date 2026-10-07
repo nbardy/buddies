@@ -187,7 +187,7 @@ fn the_live_shaped_store_migrates_once_with_every_queued_row_converted() {
         // After the migration the queue works: the three deliveries and the schedule fire claim; the legacy running rows,
         // executed, end at the gate as lease_expired instead of being requeued and replayed.
         let mut claimed = vec![];
-        while let Some(claim) = s.claim_run_at("2099-01-02T00:00:00.000Z", lease(300_000)).unwrap() {
+        while let Some(claim) = s.claim_run_at("2099-01-02T00:00:00.000Z", lease(300_000), &[]).unwrap() {
             claimed.push(claim.run.input.clone());
             if let RunInput::Deliver { .. } = claim.run.input {
                 assert!(matches!(s.deliver_posts(&claim.run.id).unwrap(), Delivery::Posts { .. }), "{:?}", claim.run);
@@ -217,7 +217,7 @@ fn without_the_executing_backfill_a_legacy_running_turn_would_be_replayed() {
     legacy_store(path, false);
     let mut s = Store::open(path).unwrap();
     Connection::open(path).unwrap().execute("UPDATE run SET executing_at = NULL WHERE id IN ('w3', 'live-chat')", []).unwrap();
-    while s.claim_run_at("2099-01-02T00:00:00.000Z", lease(300_000)).unwrap().is_some() {}
+    while s.claim_run_at("2099-01-02T00:00:00.000Z", lease(300_000), &[]).unwrap().is_some() {}
     let (w3, chat) = (s.get_run("w3").unwrap(), s.get_run("live-chat").unwrap());
     assert_eq!((w3.status, w3.attempt), (RunStatus::Running, 1), "requeued and claimed again: the backfill is what prevents this replay");
     assert_eq!(chat.status, RunStatus::Failed, "a chat with no stored text is never requeued, and the gate keeps working");

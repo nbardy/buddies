@@ -177,6 +177,7 @@ export function createRunner(options: {
   let paused = true;
   let timer: ReturnType<typeof setInterval> | null = null;
   let unsubscribe: () => void = () => undefined;
+  const holds = new Map<string, string>(); // runId → lease token of a turn this process drives
 
   // Pattern: wake-on-write (docs/patterns.md#wake-on-write)
   function wake(): void {
@@ -199,8 +200,15 @@ export function createRunner(options: {
     // with the schedule's prompt, and the schedule advances, in one indexed transaction (the
     // crate's cron math, IANA timezones). A fire posts nothing (owner, 2026-10-07).
     await core.dueSchedules(new Date().toISOString());
-    for (let claim = await core.claimRun(budgets); claim; claim = await core.claimRun(budgets))
-      void execute(claim);
+    // Pattern: lease-heartbeat (docs/patterns.md#lease-heartbeat)
+    // Every claim carries the runs this process drives: the gate renews them before expiring
+    // leases (a 306 s sleep outlasted the 300 s lease, 2026-10-06). Read per claim, not per drain.
+    const claimed = () =>
+      core.claimRun(
+        budgets,
+        Array.from(holds, ([runId, leaseToken]) => ({ runId, leaseToken }))
+      );
+    for (let claim = await claimed(); claim; claim = await claimed()) void execute(claim);
   }
 
   // Turn endings in flight (completion step + settle): a graceful backend exit waits for them
@@ -725,6 +733,14 @@ export function createRunner(options: {
     chatDeadlineMs: options.chatDeadlineMs,
     budgets,
     renew,
+
+    /** A live turn here executes `runId`: claims pass it to the gate until the release (`drain`). */
+    hold(runId: string, leaseToken: string): () => void {
+      holds.set(runId, leaseToken);
+      return () => {
+        if (holds.get(runId) === leaseToken) holds.delete(runId);
+      };
+    },
 
     /**
      * `adopted`: runs whose provider execution this backend adopted from the one before it

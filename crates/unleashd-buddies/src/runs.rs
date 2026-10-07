@@ -244,8 +244,8 @@ impl Store {
     }
 
     /// Claims the oldest ready run, or None when nothing is claimable.
-    pub fn claim_run(&mut self, budgets: RunBudgets) -> Result<Option<Claim>> {
-        self.claim_run_at(&now_iso(), budgets)
+    pub fn claim_run(&mut self, budgets: RunBudgets, held: &[RunHold]) -> Result<Option<Claim>> {
+        self.claim_run_at(&now_iso(), budgets, held)
     }
 
     // Pattern: lease-heartbeat (docs/patterns.md#lease-heartbeat)
@@ -261,10 +261,22 @@ impl Store {
     // same store (a worktree server) still held. The reverse mistake was the 2026-09-10 incident:
     // a 600 s claim lease used as a foreground chat's deadline killed healthy chats. Keeping the
     // two values apart is what lets the lease be short and the deadline long.
-    // Guards: crate tests `an_expired_lease_ends_its_run_like_a_failed_settle` and
-    // `a_renewed_lease_outlives_its_first_term`; server/test/run-lease.test.ts.
-    pub fn claim_run_at(&mut self, now: &str, budgets: RunBudgets) -> Result<Option<Claim>> {
+    // `held`: runs the CALLER's own live turns execute; the gate renews them first, in this same
+    // transaction, so a process never expires a run it drives. The lease is compared with the WALL
+    // clock, and a process frozen longer than the lease finds it lapsed at wake: macOS Maintenance
+    // Sleep ran 306 s against the 300 s lease (2026-10-06 16:53Z) and the gate ended five live
+    // runs 9 ms after the wake, ~230 ms before the heartbeat's renewal. A host "renew, then claim"
+    // is check-then-act: the freeze lands between, and the threadpool runs the queued claim before
+    // any JS. A hold whose run already ended is skipped, never resurrected (a stop is never undone).
+    // Accepted: ANOTHER backend's gate on the same store still ends lapsed runs; that holder was
+    // silent. Guard: `a_held_run_is_renewed_by_the_gate_before_it_can_expire`, run-lease.test.ts.
+    pub fn claim_run_at(&mut self, now: &str, budgets: RunBudgets, held: &[RunHold]) -> Result<Option<Claim>> {
         self.write(|tx| {
+            let until = plus_ms(now, budgets.lease_ms)?;
+            for hold in held {
+                tx.prepare_cached("UPDATE run SET lease_expires_at = ?3 WHERE id = ?1 AND lease_token = ?2 AND status IN ('running','cancel_requested')")?
+                    .execute(params![hold.run_id, hold.lease_token, until])?;
+            }
             expire_leases(tx, now, budgets.lease_ms)?;
             // Ready, predecessor finished, conversation free, buddy under its limit, task not paused.
             // Background work is always claimable: the old per-Buddy hold was removed 2026-09-29

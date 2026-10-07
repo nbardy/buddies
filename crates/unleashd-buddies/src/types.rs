@@ -922,6 +922,14 @@ pub enum Delivery {
     Consumed,
 }
 
+/// A run the caller's live turn executes; the claim gate renews it before expiring leases.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunHold {
+    pub run_id: String,
+    pub lease_token: String,
+}
+
 /// The two clocks a claim starts, kept apart because one number serving both killed owner chats
 /// at 600 s (2026-09-10) and left dead holders' runs `running` for 24 h (2026-09-30).
 /// `lease_ms`: how long the holder may go without renewing before the claim gate ends the run.

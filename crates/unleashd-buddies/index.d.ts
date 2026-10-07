@@ -54,7 +54,7 @@ export declare class BuddiesCore {
   markExecuting(runId: string, leaseToken: string): Promise<Run>
   /** The provider default a model-less run config resolved to at claim (decision J). */
   recordRunModel(runId: string, leaseToken: string, model: string): Promise<Run>
-  claimRun(budgets: RunBudgets): Promise<Claim | null>
+  claimRun(budgets: RunBudgets, held: Array<RunHold>): Promise<Claim | null>
   renewRun(runId: string, leaseToken: string, leaseMs: number): Promise<Run>
   settleRun(runId: string, leaseToken: string, outcome: Outcome): Promise<Run>
   bindRun(runId: string, leaseToken: string, conversationId: string): Promise<Run>
@@ -503,6 +503,12 @@ export interface RunConfig {
   model?: string
   /** Absent: the provider's default effort. */
   reasoningEffort?: string
+}
+
+/** A run the caller's live turn executes; the claim gate renews it before expiring leases. */
+export interface RunHold {
+  runId: string
+  leaseToken: string
 }
 
 /**

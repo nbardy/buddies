@@ -48,7 +48,7 @@ async function seedStore(dir: string): Promise<void> {
       { kind: 'request', body: `Do the thing ${key}`, evidence: [], mentions: [], broadcast: false, key }
     );
   await ask('stale'); // its run is claimed below and left running under a 1 ms lease
-  const claimed = await core.claimRun({ leaseMs: 1, chatDeadlineMs: 1, turnDeadlineMs: 1 });
+  const claimed = await core.claimRun({ leaseMs: 1, chatDeadlineMs: 1, turnDeadlineMs: 1 }, []);
   assert.equal(claimed?.run.status, 'running');
   await ask('queued'); // a request nobody has claimed yet
 }

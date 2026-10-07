@@ -296,6 +296,8 @@ type RunExecution = RunRecord & {
   readonly deadlineTimer: { current: ReturnType<typeof setTimeout> | undefined };
   /** Told once the settle landed: a live runner-owned turn's `runCoordination` resolves here. */
   readonly landed: () => void;
+  /** Ends the runner's `hold`: from now on the claim gate may end this run. */
+  readonly release: () => void;
 };
 
 const nothingWaits = () => undefined;
@@ -540,13 +542,15 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   /** Hold the run a turn executes under. Its lease was just claimed, or renewed at adoption. */
   private arm(run: RunRecord, landed: () => void = nothingWaits): void {
-    this.execution = { ...run, deadlineTimer: { current: undefined }, landed };
+    const release = this.buddies.hold(run.runId, run.leaseToken);
+    this.execution = { ...run, deadlineTimer: { current: undefined }, landed, release };
     this.lease = { t: 'held', renewedAt: Date.now() };
   }
 
   private disarm(): RunExecution | null {
     const execution = this.execution;
     if (execution) clearTimeout(execution.deadlineTimer.current);
+    execution?.release();
     this.execution = null;
     this.lease = null;
     return execution;

@@ -45,7 +45,7 @@ async function main() {
   mark(scenario + '.pgid', execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
   text('one;');
   mark(scenario + '.midturn', process.pid);
-  if (scenario === 'held' || scenario === 'stuck') return setInterval(() => {}, 1000);
+  if (scenario === 'held' || scenario === 'stuck' || scenario === 'frozen') return setInterval(() => {}, 1000);
   await until(scenario + '.go');
   text('done;');
   say({ type: 'result', subtype: 'success' });
@@ -227,7 +227,7 @@ before(() => {
 
 after(async () => {
   for (const name of [...backends.keys()]) await killBackend(name);
-  for (const scenario of ['held', 'silent', 'stuck']) killGroup(scenario);
+  for (const scenario of ['held', 'silent', 'stuck', 'frozen']) killGroup(scenario);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -315,5 +315,37 @@ test(
     assert.equal(killed?.status, 'failed', JSON.stringify(killed));
     assert.equal(killed?.errorCode, 'execution_failed', JSON.stringify(killed));
     assert.match(String(killed?.error), /no provider event/, JSON.stringify(killed));
+  }
+);
+
+test(
+  'a live turn keeps its run across a freeze of its backend longer than the lease',
+  { timeout: 120_000 },
+  async () => {
+    // Incident 2026-10-06T16:53:14Z (agent_notes/2026-10-07_live-turn-lease-loss.md): the Mac
+    // slept 306 s, longer than the 300 s lease, with the backend and its turns frozen together.
+    // At wake the backend's overdue claim-gate tick ran before the turns' heartbeat renewals and
+    // ended five live runs as lease_expired; decision G then resumed one into its own busy
+    // conversation ("Conversation is busy"). SIGSTOP is that sleep for one process: wall time
+    // runs, the backend does not. A 100 ms backstop makes the gate's tick the first one due at
+    // wake, as the 5 s tick was against the 30 s heartbeat in production.
+    const http = api(7554);
+    await startBackend('D', 7554, { CWV_BUDDY_RUNNER_BACKSTOP_MS: '100' });
+    const ws = await workspace(http, 'freeze');
+    const frozen = await hire(http, ws, 'frozen');
+    await ask(http, frozen, 'frozen');
+    await eventually(() => exists('frozen.midturn'), Boolean, 'frozen mid-turn');
+    await staysRunning(http, frozen, LEASE_MS, 'renewing before the freeze');
+
+    const backend = backends.get('D');
+    assert.ok(backend?.pid);
+    process.kill(backend.pid, 'SIGSTOP');
+    await new Promise((resolve) => setTimeout(resolve, 2 * LEASE_MS));
+    process.kill(backend.pid, 'SIGCONT');
+
+    await staysRunning(http, frozen, 2 * LEASE_MS, 'a live turn after its backend woke');
+    assert.equal(await runOf(http, frozen, 2), undefined, 'no resume of a run that never died');
+    killGroup('frozen');
+    await killBackend('D');
   }
 );
