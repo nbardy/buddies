@@ -71,7 +71,10 @@ export class TurnQueue {
     return true;
   }
 
-  /** Drop the sending head once its turn ended. Returns it, for its durable row to settle. */
+  /**
+   * Drop the sending head once its turn ended, or when its provider turn is being killed (a stale
+   * entry left behind would strand everything queued after it). Returns it, for its row to settle.
+   */
   finishHead(): QueueEntry | null {
     if (this.entries[0]?.message.status !== 'sending') return null;
     return this.entries.shift() ?? null;
@@ -98,23 +101,12 @@ export class TurnQueue {
     return this.entries.shift() ?? null;
   }
 
-  /**
-   * Retire the head when its provider turn is being killed. The close handler
-   * consumes a 'sending' head on its own, so a stale entry left behind would
-   * strand everything queued after it. The attempt record is finished once by
-   * the close handler; only the queue slot is dropped here.
-   */
-  retireInFlightHead(): QueueEntry | null {
-    if (this.entries[0]?.message.status !== 'sending') return null;
-    return this.entries.shift() ?? null;
-  }
-
   /** Move a pending item to the front, retiring the in-flight head. Unknown or non-pending ids: null. */
   promote(messageId: string): QueueEntry | null {
     const index = this.pendingIndex(messageId);
     if (index === -1) return null;
     const [entry] = this.entries.splice(index, 1);
-    this.retireInFlightHead();
+    this.finishHead();
     this.entries.unshift(entry);
     return entry;
   }

@@ -37,6 +37,7 @@ import type {
 } from '../conversations/runtime';
 import { updateRuntimeConfig } from '../conversations/runtime-config';
 import { noteActivity } from '../observability/event-loop-stall';
+import type { OwnerInput } from '../turns/input';
 import {
   sendAck,
   sendCommandAccepted,
@@ -78,7 +79,7 @@ export interface ConversationWebSocketDependencies {
   cancelBuddyConversation(conversation: ConversationRuntime): void;
   dispatchInitialMessage(
     conversation: ConversationRuntime,
-    options?: { ownerInput: Readonly<{ origin: 'owner_input'; inputId: string }> }
+    options?: { ownerInput: OwnerInput }
   ): Promise<void>;
   broadcast(data: ConversationBroadcast): void;
   broadcastExcept(excludedClient: WebSocket, data: ConversationBroadcast): void;

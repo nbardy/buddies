@@ -54,14 +54,14 @@ import { type InputCarrier, decodeEntry, volatileCarrier } from '../turns/intake
 import { keepAwake } from '../turns/keep-awake';
 import { ChatTurnPolicy, type MemorySnapshot, type TurnPolicy } from '../turns/policy';
 import { type QueueEntry, TurnQueue } from '../turns/queue';
-import { type TurnBroadcast, TurnRunner, type TurnRunnerPorts } from '../turns/runner';
+import { TurnRunner, type TurnRunnerPorts } from '../turns/runner';
 
 // The conversation: record + queue + kind policy + the runner of its current turn. Turn
 // mechanics live in turns/, kind behavior in the policy chosen once by kind.
 
 export type { SessionRelativePrompt } from '../turns/input';
 
-export type ConversationBroadcast = ServerMessageInput | TurnBroadcast;
+export type ConversationBroadcast = ServerMessageInput;
 
 export interface ConversationRuntimeView {
   id: string;
@@ -277,15 +277,11 @@ export class Conversation extends EventEmitter {
   private _sendingFromQueue = false;
   private readonly runner: TurnRunner;
 
-  // The one identity; setting it re-selects the turn policy (`policyFor`).
-  private _kind: ConversationKind;
+  // The one identity, fixed at construction; it selects the turn policy (`policyFor`).
+  private readonly _kind: ConversationKind;
   private _policy: TurnPolicy;
   get kind(): ConversationKind {
     return this._kind;
-  }
-  set kind(value: ConversationKind) {
-    this._kind = value;
-    this._policy = this.policyFor(value, { memorySnapshot: null, audienceKey: null });
   }
   get buddyContext(): BuddyContext | null {
     return kindBuddyContext(this._kind);
@@ -713,7 +709,7 @@ export class Conversation extends EventEmitter {
   }
 
   private retireInFlightHead(): void {
-    const retired = this.turnQueue.retireInFlightHead();
+    const retired = this.turnQueue.finishHead();
     if (retired) {
       this._policy.carrier.settle(retired);
       console.log(

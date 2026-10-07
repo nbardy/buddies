@@ -10,6 +10,7 @@ import { bodyText, buddyExecutionPreferences, buddyKind } from '@unleashd/shared
 import { NO_AGENT_INSTALLED, configFromProviderPreferences } from '@unleashd/shared';
 import type { ResolvedBuddyConversation } from '../buddies/briefing';
 import { stableConversationId } from '../buddies/buddy-conversation-slots';
+import type { OwnerInput } from '../turns/input';
 import { type ConfigProvenance, INITIAL_MESSAGE_DISPATCH_LEASE_MS } from './config-records';
 import type { ConversationConfigService } from './config-service';
 import { createConversationService } from './creation-service';
@@ -34,11 +35,11 @@ export interface CreateServerBuddyConversationInput {
   branch?: ConversationBranch;
   /** Fork this conversation's provider session on the first turn (runtime `chatForkSource`). */
   resumedFromConversationId?: string;
-  ownerInput?: Readonly<{ origin: 'owner_input'; inputId: string }>;
+  ownerInput?: OwnerInput;
 }
 
 export interface InitialMessageDispatchOptions {
-  ownerInput?: Readonly<{ origin: 'owner_input'; inputId: string }>;
+  ownerInput?: OwnerInput;
   /**
    * Run the synchronous enqueue inside the caller's authority transaction.
    * Throwing leaves the child dormant and disables automatic retry.

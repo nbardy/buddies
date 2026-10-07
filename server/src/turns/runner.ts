@@ -95,7 +95,7 @@ export interface TurnRunnerHost {
 
 /** The host server's ports a turn uses. */
 export interface TurnRunnerPorts {
-  broadcast(data: ServerMessageInput | TurnBroadcast): void;
+  broadcast(data: ServerMessageInput): void;
   registerSessionAlias(sessionId: string | null | undefined, conversationId: string): void;
   unregisterSessionAlias(
     sessionId: string | null | undefined,
@@ -116,17 +116,6 @@ export interface TurnRunnerPorts {
   turnAttempts: RuntimeTurnAttemptObserver;
   swarmObservers: SwarmObservers;
 }
-
-/** Streaming frames that are not (yet) part of the shared ServerMessage schema. */
-export type TurnBroadcast =
-  | { type: 'chunk'; conversationId: string; text: string }
-  | { type: 'message_complete'; conversationId: string; reason?: CompletionReason }
-  | {
-      type: 'message';
-      conversationId: string;
-      role: 'user' | 'assistant' | 'system';
-      content: string;
-    };
 
 /** The command named by agent-cli's canonical `spawn <cmd> ENOENT` failure, or null. */
 function missingCommand(message: string): string | null {

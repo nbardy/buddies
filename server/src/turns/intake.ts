@@ -85,7 +85,10 @@ export interface InputRows {
  * row). A failed write is loud (the error journal captures console.error) and never thrown into
  * the runtime: the message still runs from memory, and only its durability is lost.
  */
-export function recordsCarrier(rows: InputRows, logger: Pick<Console, 'error'> = console): InputCarrier {
+export function recordsCarrier(
+  rows: InputRows,
+  logger: Pick<Console, 'error'> = console
+): InputCarrier {
   let tail: Promise<unknown> = Promise.resolve();
   const stamped = new Set<string>();
   const write = (what: string, op: () => Promise<unknown>): Promise<void> => {
