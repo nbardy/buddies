@@ -29,6 +29,11 @@ import { scheduleFieldsOf } from '../../client/src/components/buddies/schedule-f
 import { reorderTasks } from '../../client/src/components/buddies/task-actions';
 import { BUDDY_TOOL_GUIDE, composeBriefing, createBriefings } from '../src/buddies/briefing';
 import { type StableConversationPorts, slotOf } from '../src/buddies/buddy-conversation-slots';
+import {
+  type GateVerdict,
+  createCliReplyGate,
+  parseGateVerdict,
+} from '../src/buddies/channel-reply-gate';
 import { createChannels } from '../src/buddies/channels';
 import {
   OWNER,
@@ -300,6 +305,8 @@ async function world(reopen?: string) {
     store: recordStore(join(scratch, 'config')),
     resolver: { resolve: async (config) => resolveConfigAgainstProviderCatalog(config) },
   });
+  // The thread follow-up gate, scripted: each call takes the next verdict (default `<no>`).
+  const gate = { asked: [] as string[], verdicts: [] as GateVerdict[] };
   const runner = createRunner({
     core,
     grants,
@@ -319,6 +326,7 @@ async function world(reopen?: string) {
           conversations.get(conversationId)!,
           workerConversationConfig(config)
         ),
+      askGate: (input) => channels.askGate(input),
       openSeat: ({ buddyId, workspaceId, rootId, pick }) =>
         channels.openSeat({
           buddyId,
@@ -390,6 +398,10 @@ async function world(reopen?: string) {
     installedAgent: installed,
     conversations: stable,
     channelChanged: () => undefined,
+    gate: async ({ prompt }) => {
+      gate.asked.push(prompt);
+      return gate.verdicts.shift() ?? { kind: 'pass' };
+    },
   });
   await runner.start([]);
   return {
@@ -427,6 +439,7 @@ async function world(reopen?: string) {
     outOfTokens,
     providerErrors,
     stopped,
+    gate,
     channels,
     stable,
     creation,
@@ -1341,8 +1354,9 @@ test('latest thread reply model drives the picker and the next delivery; explici
       (await w.channels.threadSeats(root.id)).find((s) => s.buddyId === w.lead.id)?.config,
       sol
     );
-    // The conversation Lead last spoke from follows the thread (decision F, step 5: posting
-    // subscribes everywhere), so the owner's next post is delivered THERE, on Sol.
+    // Posting subscribes nothing in a public thread (owner decision 2026-10-07): the owner's next
+    // post is a follow-up for Lead's SEAT, which the gate admits, and the seat runs on Sol.
+    w.gate.verdicts.push({ kind: 'respond' });
     await w.post(
       OWNER,
       { kind: 'id', id: w.general.id },
@@ -1370,6 +1384,7 @@ test('latest thread reply model drives the picker and the next delivery; explici
       'explicit reply'
     );
     assert.equal(w.turns[2].request.harness, 'claude', 'a pick on another provider opens a seat');
+    w.gate.verdicts.push({ kind: 'respond' });
     await say('Continue without repeating the model', root.id);
     await until(
       async () => (await thread()).filter((p) => p.purpose === 'reply').length === 5,
@@ -1495,11 +1510,13 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
       installedAgent: () => installedAgent({ PATH: w.agentBin }),
       conversations: { ...w.stable, slot: async (id) => slotOf(await reopened.getRecord(id)) },
       channelChanged: () => undefined,
+      gate: async () => ({ kind: 'pass' }),
     });
     assert.deepEqual(
       (await reloaded.threadSeats(root.id)).find((s) => s.buddyId === w.lead.id)?.config,
       explicit
     );
+    w.gate.verdicts.push({ kind: 'respond' });
     const next = await w.post(
       OWNER,
       { kind: 'id', id: w.general.id },
@@ -1712,7 +1729,8 @@ test('keyed retry over owner HTTP recovers a capacity-failed reply on the same h
     const thread = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
     await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
-    // Step 5: the follow-up gate is gone; the delivered turn itself hits the capacity error.
+    // The gate (restored 2026-10-07) says yes; the delivered turn itself hits the capacity error.
+    w.gate.verdicts.push({ kind: 'respond' });
     w.providerErrors.set(2, 'Selected model is at capacity. Please try a different model.');
     const trigger = await w.post(
       OWNER,
@@ -2911,6 +2929,95 @@ test('briefing generation tracks its MCP guide and scope identity', async () => 
   }
 });
 
+// 2026-09-25 (92e8692): Claude reports a session-limit 429 as a successful
+// result with no text. The gate read the empty answer as `unparseable` and an
+// untagged owner follow-up stayed quiet instead of showing "Couldn't reply".
+// Only the CLI process is stubbed.
+test('a reply gate with no answer, or out of tokens, fails with the provider message', async () => {
+  assert.deepEqual(parseGateVerdict('  \n'), { kind: 'failed', reason: 'no answer' });
+  assert.equal(parseGateVerdict('<yes> because I own it').kind, 'unparseable');
+  const gate = createCliReplyGate({
+    resolveExecution: async () => ({ provider: 'claude', modelId: 'claude-opus-5-5' }),
+    execute: (() => {
+      async function* events() {
+        yield {
+          type: 'out_of_tokens',
+          message: "Out of tokens: You've hit your session limit · resets 2am (Asia/Makassar)",
+        };
+        yield { type: 'turn.complete', reason: 'out_of_tokens' };
+      }
+      return {
+        events: events(),
+        completed: Promise.resolve({ reason: 'out_of_tokens', sessionId: 'gate-session' }),
+        stop: () => undefined,
+      };
+    }) as never,
+  });
+  const verdict = await gate({ config: createDefaultConversationConfig('claude'), prompt: 'p' });
+  assert.equal(verdict.kind, 'failed');
+  assert.match(verdict.kind === 'failed' ? verdict.reason : '', /out_of_tokens.*session limit/);
+});
+
+// Owner decision 2026-10-07 (items 6-8): in a public or task thread a participant that follows no
+// conversation there is asked one yes/no question per new post before it gets a turn. Through the
+// real crate, runner and channels: only the model call is scripted.
+test('a thread follow-up is gated: <no> runs no turn, <yes> replies in the seat, a mention skips the gate', async () => {
+  const w = await world();
+  try {
+    const say = async (body: string, replyToId?: string) => {
+      const post = await w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        { kind: 'inform', body, replyToId, evidence: [], mentions: [], broadcast: false, key: body }
+      );
+      w.announce(post);
+      return post;
+    };
+    const thread = async (rootId: string) =>
+      (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
+    const lead = (await w.core.listBuddies(w.ws)).find((b) => b.id === w.lead.id)!;
+    w.answers.set(1, 'Shipped');
+    const root = await say(`[@Lead](buddy:${lead.id}) status?`);
+    await until(async () => (await thread(root.id)).length === 1, 'the mention reply');
+    assert.deepEqual(w.gate.asked, [], 'a mention is never gated');
+
+    // <no>: the gate is asked and no turn starts.
+    w.gate.verdicts.push({ kind: 'pass' });
+    const quiet = await say('thanks, nice', root.id);
+    await until(async () => w.gate.asked.length === 1, 'the gate was asked');
+    const turnsBefore = w.turns.length;
+    const passed = await until(
+      async () =>
+        (await w.runs(lead.id)).find((r) => r.input.kind === 'deliver' && r.input.postId === quiet.id && r.status === 'cancelled'),
+      'the gated run settles with no turn'
+    );
+    assert.equal(w.turns.length, turnsBefore, 'a <no> starts no turn');
+    assert.match(w.gate.asked[0], /Should you respond/);
+    assert.ok(passed);
+
+    // <yes>: the seat answers, and posting did not subscribe it (the next post is gated again).
+    w.gate.verdicts.push({ kind: 'respond' });
+    w.answers.set(2, 'On it');
+    await say('Lead, what is the ETA?', root.id);
+    await until(async () => (await thread(root.id)).some((p) => p.body === 'On it'), 'the follow-up reply');
+    assert.equal(w.gate.asked.length, 2);
+    w.gate.verdicts.push({ kind: 'pass' });
+    await say('ok', root.id);
+    await until(async () => w.gate.asked.length === 3, 'a seat that posted is still gated, not subscribed');
+
+    // A gate that cannot decide is a visible notice, never silence.
+    w.gate.verdicts.push({ kind: 'failed', reason: 'no answer' });
+    await say('and the budget?', root.id);
+    const notice = await until(
+      async () => (await thread(root.id)).find((p) => p.purpose === 'reply_failed'),
+      'the gate failure notice'
+    );
+    assert.match(notice.body, /could not decide whether to reply/);
+  } finally {
+    await w.close();
+  }
+});
+
 test('native child events cannot bypass restricted Buddy runs', async () => {
   const w = await world();
   let stops = 0;
@@ -2947,6 +3054,12 @@ test('native child events cannot bypass restricted Buddy runs', async () => {
     logger: { warn: () => undefined },
   });
   try {
+    const gate = createCliReplyGate({
+      resolveExecution: async () => ({ provider: 'codex', modelId: 'gpt-6-luna' }),
+      execute,
+    });
+    const verdict = await gate({ config: createDefaultConversationConfig('codex'), prompt: 'p' });
+    assert.equal(verdict.kind, 'unparseable', 'a yes after tool activity is not admitted');
     reviewer.start();
     reviewer.enqueue({
       attemptId: 'native-child-violation',
@@ -2965,8 +3078,8 @@ test('native child events cannot bypass restricted Buddy runs', async () => {
     const body = JSON.parse(receipt.payload);
     assert.equal(body.status, 'failed');
     assert.match(body.error, /sub-agent operation/);
-    assert.equal(launches, 1, 'one review; violations do not climb the ladder');
-    assert.equal(stops, 1);
+    assert.equal(launches, 2, 'one gate and one review; violations do not climb the ladder');
+    assert.equal(stops, 2);
   } finally {
     reviewer.stop();
     await w.close();
@@ -4186,12 +4299,13 @@ test('follow (a): posts the caller has not read come back at once', async () => 
       'only the post Lead had not read: not its own root'
     );
     assert.ok(ms < FOLLOW_GRACE_MS, `returned without the wait (${ms} ms)`);
-    // Lead's own root subscribed its conversation (posting follows, step 5), so the designer's
-    // post was queued as a delivery, and the follow's read consumed it: no model turn.
+    // Lead's own root subscribes nothing in a public thread (owner decision 2026-10-07), so the
+    // designer's post is a gate-bound follow-up for Lead, and the scripted gate says no: no model
+    // turn, and the follow still returned the post. (The read fence is the crate's own test.)
     assert.deepEqual(
-      (await deliveries(w)).map((r) => r.errorCode),
-      ['consumed'],
-      'posted before the follow: its delivery was read, not run'
+      (await deliveries(w)).map((r) => [r.conversationId ?? null, r.error]),
+      [[null, 'the follow-up gate said no']],
+      'posted before the follow: gated, not run'
     );
   } finally {
     await w.close();
@@ -4349,7 +4463,11 @@ test('follow (h): follow:false unsubscribes, so later posts are not delivered', 
     ).posts[0];
     assert.equal((await designerReplies(w, root.id, 'Nobody is listening')).isError, false);
     await new Promise((resolve) => setTimeout(resolve, 600));
-    assert.deepEqual(await deliveries(w), []);
+    // Not delivered to the unsubscribed conversation: Lead (a participant) is only asked the gate.
+    assert.deepEqual(
+      (await deliveries(w)).map((r) => [r.conversationId ?? null, r.error]),
+      [[null, 'the follow-up gate said no']]
+    );
     assert.equal(w.turns.length, 1);
   } finally {
     await w.close();
@@ -4624,6 +4742,8 @@ test('a delivery after a backend restart sends one post, not the thread', async 
       async () => w.turns.length === 1 && (await w.channels.responding(w.general.id)).length === 0,
       'the first turn'
     );
+    // The gate admits the burst; only the newest post is asked (runner.ts `followUpGate`).
+    w.gate.verdicts.push(...Array.from({ length: 12 }, () => ({ kind: 'respond' }) as const));
     for (let i = 0; i < 6; i++) await say(`filler ${i}`, root.id);
     await until(
       async () => w.turns.length >= 2 && (await w.channels.responding(w.general.id)).length === 0,
@@ -4631,6 +4751,7 @@ test('a delivery after a backend restart sends one post, not the thread', async 
     );
     const before = w.turns.length;
     w.conversations.clear(); // the backend reloads: no conversation is in memory
+    w.gate.verdicts.push({ kind: 'respond' });
     await say('the one new post', root.id);
     await until(() => w.turns.length === before + 1, 'the delivery after the reload');
     const prompt = w.turns[before].request.prompt;

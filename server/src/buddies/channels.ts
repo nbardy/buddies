@@ -20,6 +20,7 @@ import {
   stableConversationId,
 } from './buddy-conversation-slots';
 import { type BuddiesCore, OWNER } from './core';
+import type { ReplyGate } from './channel-reply-gate';
 import type { BuddyEvents } from './events';
 import { mentionedBuddyIds } from './mentions';
 import { runConfigOfPick } from './worker-config';
@@ -27,10 +28,12 @@ import { runConfigOfPick } from './worker-config';
 // Thread seats and DM chats: WHICH conversation a Buddy answers a thread in. A post wakes nobody
 // here. Since step 5 (2026-10-06) a mention, a task-comment mention, the owner's DM post and a
 // retry are all `deliver` runs (crate deliveries.rs `wake`, runner.ts `deliverJob`); the runner
-// asks `openSeat` for the conversation of one that follows no thread yet. Deleted with step 5:
-// the pair machine (channel-pair.ts) and the follow-up gate (channel-reply-gate.ts). The gate was a
-// model call per participant per post; a participant is a subscriber now, its post arrives as one
-// coalesced delivery, and it may end its turn without posting.
+// asks `openSeat` for the conversation of one that follows no thread yet. Step 5 deleted the pair
+// machine (channel-pair.ts), which stays deleted. It also deleted the follow-up gate
+// (channel-reply-gate.ts); the owner restored it on 2026-10-07 ("stay simple, don't overload
+// DMs"): in a public or task thread a participant that did not subscribe is asked one yes/no
+// question per new post before it gets a turn, now as a step of its `deliver` run (runner.ts
+// `followUpGate`) instead of host memory. `askGate` below resolves the model it runs on.
 // NO HOP BOUND (owner decision 2026-10-03, #bugfixes): Buddies may mention each other without
 // pause and stop when they decide to. The brakes are the delivery's coalescing, `follow:false`,
 // the run limits and the owner's Stop.
@@ -77,6 +80,8 @@ export interface ChannelsPorts {
   installedAgent(): InstalledAgent;
   /** A post landed or who is replying changed: push `channel_changed`. */
   channelChanged(channelId: string): void;
+  /** The thread follow-up gate (runner.ts `followUpGate`), resolved like the seat's own turn. */
+  gate: ReplyGate;
 }
 
 export type Channels = ReturnType<typeof createChannels>;
@@ -256,6 +261,16 @@ export function createChannels(ports: ChannelsPorts) {
       });
       await ports.conversations.reconfigure(conversation, seat.config, seat.provenance);
       return conversation.id;
+    },
+
+    /**
+     * The thread follow-up gate for one Buddy: asked on the config its seat would run (the thread's
+     * decided model, else its profile), so a Buddy the owner moved to another harness is asked
+     * there, not on a profile harness that may be down.
+     */
+    async askGate(input: { buddyId: string; rootId: string; prompt: string }) {
+      const seat = await seatConfig(input.rootId, input.buddyId, { kind: 'keep' });
+      return ports.gate({ config: seat.config, prompt: input.prompt });
     },
 
     /**
