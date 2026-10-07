@@ -141,20 +141,15 @@ export function commonToolResultParts(output: unknown): ContentPart[] {
   return parseBuddyWorkerToolResult(output).map((thread) => ({ t: 'buddy_worker_thread', thread }));
 }
 
-/** A general chat: no admission, briefing, grants or memory. */
-export class ChatTurnPolicy implements TurnPolicy {
+/**
+ * A kind with no Buddy runs (a general chat, the Buddy Builder): no admission, briefing, memory,
+ * lease or coordination. Subclasses add what their kind does differently.
+ */
+export abstract class NoRunPolicy {
   readonly acceptsUserInput = true;
-
-  constructor(
-    private readonly swarmDebugPrefix: () => string | null,
-    readonly carrier: InputCarrier
-  ) {}
 
   gate(): TurnGate {
     return 'send';
-  }
-  admitClaim(): void {
-    throw new Error('A chat has no chat runs');
   }
   releaseUnspawned(): void {}
   prepare(): boolean {
@@ -163,38 +158,13 @@ export class ChatTurnPolicy implements TurnPolicy {
   memorySnapshot(): MemorySnapshot | null {
     return null;
   }
-  providerPrompt(turn: { content: string; messageCount: number; hasStartedSession: boolean }) {
-    return chatFirstTurnPrompt({
-      content: turn.content,
-      firstUnstartedTurn: turn.messageCount === 0 && !turn.hasStartedSession,
-      swarmDebugPrefix: this.swarmDebugPrefix(),
-    });
-  }
   admitted(): void {}
-  preflight(): void {}
-  startTurn() {
-    return {};
-  }
   spawned(): void {}
-  adoptionRecord(): PolicyAdoption {
-    return { t: 'chat' };
-  }
-  adopt(record: PolicyAdoption): void {
-    if (record.t !== 'chat') throw new Error(`A chat cannot adopt a ${record.t} turn`);
-  }
   armDeadline(): void {}
-  spawnFailed(): void {}
-  toolResultParts(output: unknown): ContentPart[] {
-    return commonToolResultParts(output);
-  }
   streamCompleted(): void {}
   reviewCompleted(): void {}
   settle(): Promise<void> {
     return Promise.resolve();
-  }
-  revoke(): void {}
-  stop(): boolean {
-    return true;
   }
   dropWaitingTurn(): boolean {
     return false;
@@ -206,5 +176,44 @@ export class ChatTurnPolicy implements TurnPolicy {
   }
   runCoordination(): Promise<void> {
     return Promise.reject(new Error('Coordination identity or claim is missing'));
+  }
+}
+
+/** A general chat: no admission, briefing, grants or memory. */
+export class ChatTurnPolicy extends NoRunPolicy implements TurnPolicy {
+  constructor(
+    private readonly swarmDebugPrefix: () => string | null,
+    readonly carrier: InputCarrier
+  ) {
+    super();
+  }
+
+  admitClaim(): void {
+    throw new Error('A chat has no chat runs');
+  }
+  providerPrompt(turn: { content: string; messageCount: number; hasStartedSession: boolean }) {
+    return chatFirstTurnPrompt({
+      content: turn.content,
+      firstUnstartedTurn: turn.messageCount === 0 && !turn.hasStartedSession,
+      swarmDebugPrefix: this.swarmDebugPrefix(),
+    });
+  }
+  preflight(): void {}
+  startTurn() {
+    return {};
+  }
+  adoptionRecord(): PolicyAdoption {
+    return { t: 'chat' };
+  }
+  adopt(record: PolicyAdoption): void {
+    if (record.t !== 'chat') throw new Error(`A chat cannot adopt a ${record.t} turn`);
+  }
+  spawnFailed(): void {}
+  toolResultParts(output: unknown): ContentPart[] {
+    return commonToolResultParts(output);
+  }
+  revoke(): void {}
+  stop(): boolean {
+    return true;
   }
 }

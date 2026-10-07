@@ -17,6 +17,7 @@ import { type InputCarrier, encodeEntry } from '../turns/intake';
 import {
   type AdoptedReview,
   type MemorySnapshot,
+  NoRunPolicy,
   type PolicyAdoption,
   type TurnGate,
   type TurnPolicy,
@@ -119,8 +120,7 @@ function assertBuddyProviderSupportsMcp(provider: ProviderName): void {
 // --- Buddy Builder -------------------------------------------------------------
 
 /** The Buddy Builder thread: team tools on owner input, its own briefing, no Buddy identity. */
-export class BuddyBuilderTurnPolicy implements TurnPolicy {
-  readonly acceptsUserInput = true;
+export class BuddyBuilderTurnPolicy extends NoRunPolicy implements TurnPolicy {
   // This turn's team-tools grant; null when its input was not the owner's (no tools).
   private grant: GrantRecord | null = null;
 
@@ -129,20 +129,12 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
     private readonly dependencies: BuddyTurnPolicyDependencies,
     // The Builder has no Buddy, so no run: its pending messages are records rows like a chat's.
     readonly carrier: InputCarrier
-  ) {}
-
-  gate(): TurnGate {
-    return 'send';
+  ) {
+    super();
   }
+
   admitClaim(): void {
     throw new Error('The Buddy Builder has no chat runs');
-  }
-  releaseUnspawned(): void {}
-  prepare(): boolean {
-    return false;
-  }
-  memorySnapshot(): MemorySnapshot | null {
-    return null;
   }
   providerPrompt(turn: { content: string; messageCount: number; hasStartedSession: boolean }) {
     return builderFirstTurnPrompt(
@@ -151,7 +143,6 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
       this.host.workingDirectory
     );
   }
-  admitted(): void {}
   preflight(provider: ProviderName): void {
     assertBuddyProviderSupportsMcp(provider);
   }
@@ -164,7 +155,6 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
     this.grant = tools.grant;
     return { mcpServers: tools.servers };
   }
-  spawned(): void {}
   adoptionRecord(): PolicyAdoption {
     return { t: 'builder', grant: this.grant };
   }
@@ -173,7 +163,6 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
       throw new Error(`The Buddy Builder cannot adopt a ${record.t} turn`);
     this.grant = record.grant;
   }
-  armDeadline(): void {}
   spawnFailed(): void {
     this.revoke();
   }
@@ -183,28 +172,12 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
     const event = parseBuddyBuilderToolResult(output);
     return event ? [{ t: 'buddy_builder_result', event }] : [];
   }
-  streamCompleted(): void {}
-  reviewCompleted(): void {}
-  settle(): Promise<void> {
-    return Promise.resolve();
-  }
   revoke(): void {
     this.dependencies.buddies.revoke(this.host.id);
   }
   stop(): boolean {
     this.revoke();
     return true;
-  }
-  dropWaitingTurn(): boolean {
-    return false;
-  }
-  bridgeAlive(): void {}
-  sessionReset(): void {}
-  audienceKey(): string | undefined {
-    return undefined;
-  }
-  runCoordination(): Promise<void> {
-    return Promise.reject(new Error('Coordination identity or claim is missing'));
   }
 }
 
