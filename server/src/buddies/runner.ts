@@ -11,6 +11,7 @@ import type { BuddyContext } from '@unleashd/shared';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings } from './briefing';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
+import type { GateVerdict } from './channel-reply-gate';
 import { type BuddyEvents, announcePost } from './events';
 import type { Grants, OwnerChat } from './grants';
 import { mentionedBuddyIds } from './mentions';
@@ -68,6 +69,8 @@ export interface RunnerHost {
     rootId: string;
     pick: RunConfig | undefined;
   }): Promise<string>;
+  /** The thread follow-up gate for one Buddy: one yes/no model call (channels.ts `askGate`). */
+  askGate(input: { buddyId: string; rootId: string; prompt: string }): Promise<GateVerdict>;
   /** An owner chat's background branch, opened or reused (as for mcp.ts `subscriber`). */
   openBranch(chat: OwnerChat): Promise<string>;
   /** `config`: a worker run's own provider/model; absent, the Buddy's profile. */
@@ -396,6 +399,69 @@ export function createRunner(options: {
   }
 
   // Pattern: route-at-send (docs/patterns.md#route-at-send)
+  // The thread follow-up gate (owner decision 2026-10-07, restoring channel-reply-gate.ts, deleted
+  // by step 5): in a public or task thread, a participant that follows no conversation in it and
+  // is not @mentioned is asked "should you respond?" before it gets a turn. The crate enqueues
+  // that delivery for every other Buddy that posted there (deliveries.rs `follow_ups`); only a
+  // strict <yes> opens its seat. Not gated: a mention, a subscribed conversation (an explicit
+  // follow), a DM, and a retry (its first attempt already said yes; the owner's pick rides it).
+  // Only the newest post is gated: a burst is asked once, against the latest message. A `<no>`
+  // settles the run with no turn and leaves the posts unread. A failed gate throws, so the thread
+  // gets the visible "Couldn't reply" notice, as before.
+  async function followUpGate(run: Run, trigger: Post): Promise<string | null> {
+    if (!trigger.rootId || run.config || run.attempt > 1) return null;
+    if (mentionedBuddyIds(trigger.body).includes(run.buddyId)) return null;
+    const channel = await core.openChannel(OWNER, { kind: 'id', id: trigger.channelId });
+    if (channel.kind.type === 'direct') return null;
+    const page = await core.listPosts(OWNER, { kind: 'thread', rootId: trigger.rootId }, undefined, 12);
+    const talk = page.posts.filter((post) => post.purpose !== 'reply_failed'); // newest first
+    if (talk[0]?.id !== trigger.id) return 'a newer post in the thread is gated instead';
+    const root = await core.getPost(OWNER, trigger.rootId);
+    const buddies = await core.listBuddies(channel.workspaceId);
+    const nameOf = (author: Post['author']) =>
+      author.kind === 'owner' ? 'Owner' : (buddies.find((b) => b.id === author.id)?.name ?? author.id);
+    const line = (post: Post) =>
+      `[${post.createdAt}] ${nameOf(post.author)} (${post.id}): ${post.body.slice(0, 4000)}`;
+    const me = buddies.find((b) => b.id === run.buddyId);
+    const others = [...new Set(talk.flatMap((p) => (p.author.kind === 'buddy' ? [p.author.id] : [])))]
+      .filter((id) => id !== run.buddyId)
+      .map((id) => buddies.find((b) => b.id === id))
+      .flatMap((b) => (b ? [`${b.name} (${b.role})`] : []));
+    const where = channel.kind.type === 'public' ? `#${channel.kind.name}` : channel.id;
+    const verdict = await host.askGate({
+      buddyId: run.buddyId,
+      rootId: trigger.rootId,
+      prompt: [
+        `You are ${me ? `${me.name} (${me.role})` : run.buddyId}, one member of a team in the channel ${where}.`,
+        'A new message was just posted in a thread you have posted in. The root, then its most recent replies, oldest first:',
+        '',
+        line(root),
+        ...talk.slice(0, 8).reverse().map(line),
+        '',
+        `New message, from ${nameOf(trigger.author)}:`,
+        trigger.body,
+        '',
+        `Also in this thread: the Owner${others.length ? `, ${others.join(', ')}` : ''}.`,
+        '',
+        'Should you respond, or leave it to another team member? Say yes only when the thread needs something from you specifically: a question aimed at you or your role, a correction only you can make, or work you own. Do not reply just to acknowledge or agree.',
+        '',
+        'Answer with exactly <yes> or <no> and nothing else.',
+      ].join('\n'),
+    });
+    switch (verdict.kind) {
+      case 'respond':
+        return null;
+      case 'pass':
+        return 'the follow-up gate said no';
+      case 'unparseable':
+        logger.warn(`[buddies-runner] ${run.buddyId} gave no <yes>/<no> for ${trigger.id}: ${JSON.stringify(verdict.output)}`);
+        return 'the follow-up gate gave no yes or no';
+      case 'failed':
+        throw new Error(`could not decide whether to reply (${verdict.reason})`);
+    }
+  }
+
+  // Pattern: route-at-send (docs/patterns.md#route-at-send)
   /**
    * A post in a thread this Buddy's conversation subscribes to, or that @mentions the Buddy, or
    * the owner's post in its DM (one rule for answers, failure posts, followed threads, mentions
@@ -417,11 +483,15 @@ export function createRunner(options: {
         const prompt = deliveryPrompt(delivery.posts, delivery.unshown);
         const owner = delivery.posts.every((post) => post.author.kind === 'owner');
         const origin = run.conversationId ?? delivery.subscribed;
+        const trigger = await core.getPost(OWNER, postId);
+        if (!origin) {
+          const passed = await followUpGate(run, trigger);
+          if (passed) return { kind: 'skip', reason: passed };
+        }
         // An owner's chip pick (or a retry's model) applies to the thread's SEAT, never to a chat
         // that merely follows the thread: it must not move the owner's own chat onto a model.
         if (origin && host.registered(origin) && !run.config)
           return existingTurn(await outOfOwnerChat(run, origin), prompt, owner);
-        const trigger = await core.getPost(OWNER, postId);
         return trigger.author.kind === 'buddy' && trigger.author.id === run.buddyId
           ? freshTurn(run, prompt, owner)
           : seatTurn(run, trigger.rootId ?? trigger.id, prompt, owner);

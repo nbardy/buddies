@@ -366,7 +366,14 @@ impl Store {
                 }
                 RunInput::Deliver { post_id } if run.conversation_id.as_deref() != Some(conversation_id) => {
                     let post = get_post(tx, post_id)?;
-                    deliveries::subscribe(tx, &run.buddy_id, post.root_id.as_deref().unwrap_or(&post.id), Some(conversation_id))?;
+                    // Only a DM, or the Buddy's own post (a schedule fire), binds a subscription. A
+                    // public or task thread's follow-up opens the Buddy's SEAT without subscribing
+                    // it: a subscribed seat is delivered every later post without the follow-up
+                    // gate (owner decision 2026-10-07; guard `a_seat_bound_in_a_public_thread_is_not_subscribed`).
+                    let direct = matches!(crate::posts::get_channel(tx, &post.channel_id)?.kind, ChannelKind::Direct { .. });
+                    if direct || post.author.buddy_id() == Some(run.buddy_id.as_str()) {
+                        deliveries::subscribe(tx, &run.buddy_id, post.root_id.as_deref().unwrap_or(&post.id), Some(conversation_id))?;
+                    }
                 }
                 RunInput::Deliver { .. } | RunInput::Chat { .. } | RunInput::Retired { .. } => {}
             }

@@ -170,17 +170,24 @@ read that data. Downstream code never re-derives the route; a post that reaches 
 **Here (since 2026-10-06, owner decisions A–K; agent_notes/2026-10-06_buddies-target-system-review.md):
 one delivery rule.** A Buddy's `thread_read` row is its read mark in a thread AND, when
 `conversation_id` is set, the conversation SUBSCRIBED to it (one per Buddy and thread; the last writer
-wins, decision F). A conversation subscribes when it posts in any thread (a request included), when it
-is opened for a request or a delivery (`bind_run`), or by `channel_read {follow}`. Every post by someone
+wins, decision F). A conversation subscribes when it posts in a DIRECT thread (a request included), when
+it is opened for a request or a DM delivery (`bind_run`), or by `channel_read {follow}`. Posting in a
+public or task thread subscribes nothing, and a seat opened there is bound but not subscribed (owner
+decision 2026-10-07, reverting step 5's "every channel"), so a thread's deliveries go to the Buddy's
+thread seat, never to whichever conversation wrote last. Every post by someone
 else in the thread becomes a durable `deliver` run for that conversation, in the post's own transaction
 (crate `deliveries.rs` `fan_out`, called from `posts.rs` `after_write`). An @mention, a task-comment
 mention and the owner's plain post in a DM are deliveries too (`PostInput.mentions`, crate `wake`, host
 `mentions.ts wakes`): to the Buddy's subscription, or with none to a run with no conversation, for which
 the runner opens the Buddy's SEAT (`channels.ts openSeat`, same ids as before) when it claims it. An
 owner's chip pick or a retry's model rides the run's config and applies to the seat, never to a chat that
-merely follows the thread. Step 5 (2026-10-06) deleted the host's pair machine (`channel-pair.ts`) and its
-follow-up gate (`channel-reply-gate.ts`): a participant is a subscriber, and its next post arrives as one
-coalesced delivery that it may answer silently, except that the owner's @mention or DM post must end with
+merely follows the thread. Step 5 (2026-10-06) deleted the host's pair machine (`channel-pair.ts`), which stays
+deleted. It also deleted the follow-up gate (`channel-reply-gate.ts`); the owner restored it on
+2026-10-07: in a public or task thread every other Buddy that posted there gets a delivery with no
+conversation (crate `follow_ups`), and the runner asks it one yes/no question (`followUpGate`) before
+opening its seat; `<no>` settles the run with no turn. Mentions, subscribed conversations, DMs and
+retries skip the gate. A subscribed delivery arrives as one coalesced delivery that it may answer
+silently, except that the owner's @mention or DM post must end with
 a post, else the thread shows a `reply_failed` notice (D10, runner `deliveryEnding`). A failed delivery
 turn always leaves that notice (`noticeFailure`), which the owner's "retry on another harness" reruns
 (`retry_delivery`). A delivery turn holds owner authority only when every post it shows is the owner's

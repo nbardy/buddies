@@ -91,6 +91,7 @@ import { validate as isUuid } from 'uuid';
 import { auditLocalAgents } from './audit.js';
 import { createBriefings } from './buddies/briefing';
 import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
+import { createCliReplyGate } from './buddies/channel-reply-gate';
 import { createChannels } from './buddies/channels';
 import {
   OWNER,
@@ -400,6 +401,7 @@ const buddyRunnerHost: RunnerHost = {
       workerConversationConfig(config)
     );
   },
+  askGate: (input) => buddyChannels.askGate(input),
   openSeat: async ({ buddyId, workspaceId, rootId, pick }) =>
     buddyChannels.openSeat({
       buddyId,
@@ -640,6 +642,16 @@ const buddyChannels = createChannels({
   events: buddyEvents,
   channelChanged,
   conversations: buddyConversations,
+  // Resolved by the same authority as conversations, so the gate runs exactly the
+  // harness/model the Buddy's reply would.
+  gate: createCliReplyGate({
+    execute: ephemeralExecute('reply-gate'),
+    resolveExecution: async (config) => {
+      const resolution = await conversationConfigService.resolve(config);
+      if (resolution.status !== 'resolved') throw new Error(resolution.error.message);
+      return resolution.value;
+    },
+  }),
 });
 buddyEvents.on((event) => {
   if (event.kind === 'changed') buddiesChanged();
