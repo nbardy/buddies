@@ -17,8 +17,7 @@ const clip = (text: string, max: number) => (text.length <= max ? text : `${text
 
 export const PREVIEW_CHARS = 300;
 const ERROR_CHARS = 500;
-
-/** A Task's evidence is a list of pointers (a commit, a file path, a test run), not a transcript. */
+/** A Task's evidence is pointers (a commit, a path, a test run), not a transcript. */
 export const EVIDENCE_MAX_ENTRIES = 32;
 export const EVIDENCE_MAX_CHARS = 500;
 
@@ -58,9 +57,11 @@ const postPreview = (post: Post) => ({
   body: clip(post.body, PREVIEW_CHARS),
 });
 
-/** Owed and waiting requests as previews; read the post (`channel_read`) for the whole body. */
-export const inboxView = (inbox: Inbox) => ({
+/** Requests as previews (`channel_read` has the body); channels only if unread (F8: 17k inbox). */
+export const inboxView = ({ channels, ...inbox }: Inbox) => ({
   ...inbox,
+  channels: channels.filter((row) => row.unread > 0),
+  readChannels: channels.filter((row) => row.unread === 0).length,
   requests: inbox.requests.map(postPreview),
   waitingOn: inbox.waitingOn.map(postPreview),
 });
@@ -117,9 +118,8 @@ export function runRowsView(rows: RunRow[]) {
 export const TAIL_MAX = 20;
 const TAIL_TEXT_CHARS = 600;
 const TAIL_ARGS_CHARS = 200;
-// A message is one transcript row, and an assistant turn is several (text, then each tool call):
-// reading four rows per wanted entry always reaches `n` assistant entries in practice, and bounds
-// the read whatever the transcript length.
+// An assistant turn is several rows (text, then each tool call): four rows per wanted entry reach
+// `n` entries in practice and bound the read.
 const TAIL_ROWS_PER_ENTRY = 4;
 
 /**
@@ -135,11 +135,11 @@ export async function runTail(messages: MessageSource, run: Run, n: number) {
   const afterSeq = Math.max(-1, probe.total - 1 - n * TAIL_ROWS_PER_ENTRY);
   const page = await messages(run.conversationId, { afterSeq, limit: n * TAIL_ROWS_PER_ENTRY });
   return (page?.messages ?? [])
-    .filter((message) => message.role === 'assistant')
+    .filter((m) => m.role === 'assistant' && (m.body.t === 'parts' || m.body.text !== ''))
     .slice(-n)
     .map((message) => ({
       at: message.timestamp,
-      text: clip(bodyText(message.body), TAIL_TEXT_CHARS),
+      text: clip(bodyText(message.body), TAIL_TEXT_CHARS) || undefined,
       tools:
         message.body.t === 'text'
           ? []
