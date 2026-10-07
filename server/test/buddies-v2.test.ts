@@ -4547,6 +4547,17 @@ test('slim read surface: tasks get, inbox and runs list stay small and runs say 
     assert.equal(got.value.comments[0].bodyChars, 5000, 'a preview says how much it left out');
     assert.ok(size(inbox.value) < 6_000, `inbox is ${size(inbox.value)} chars`);
     assert.equal(inbox.value.requests.length, 6);
+    // F8: only channels with unread posts are listed; the rest are a count.
+    assert.ok(
+      inbox.value.channels.every((row: { unread: number }) => row.unread > 0),
+      'a read channel is not listed'
+    );
+    assert.equal(
+      inbox.value.channels.length + inbox.value.readChannels,
+      oldInbox.channels.length,
+      'every channel is listed or counted'
+    );
+    assert.ok(inbox.value.readChannels > 0, 'the seeded workspace has read channels');
     const rows = runs.value.runs.filter(
       (row: { taskTitle: string | null }) => row.taskTitle === 'Big task'
     );
@@ -4625,14 +4636,14 @@ test('runs get {tail:n} returns the last n assistant entries with tool names and
       run.conversationId!,
       Array.from({ length: 40 }, (_, i) => ({
         role: 'assistant' as const,
-        timestamp: at,
+        timestamp: new Date(at.getTime() + i * 1000),
         body:
           i % 2 === 0
             ? { t: 'text' as const, text: `step ${i}` }
             : {
                 t: 'parts' as const,
                 parts: [
-                  { t: 'text' as const, text: `think ${i}` },
+                  ...(i === 37 ? [] : [{ t: 'text' as const, text: `think ${i}` }]),
                   { t: 'tool' as const, name: 'Bash', input: { command: 'z'.repeat(2000) } },
                 ],
               },
@@ -4653,6 +4664,13 @@ test('runs get {tail:n} returns the last n assistant entries with tool names and
     assert.equal(got.value.tail[2].text, 'think 39');
     assert.equal(got.value.tail[2].tools[0].name, 'Bash');
     assert.ok(got.value.tail[2].tools[0].args.length <= 201, 'args are clipped');
+    // F8: each entry carries its own row's timestamp, and a text-less entry has no empty `text`.
+    assert.deepEqual(
+      got.value.tail.map((entry: { at: string }) => entry.at),
+      [37, 38, 39].map((i) => new Date(at.getTime() + i * 1000).toISOString())
+    );
+    assert.equal(got.value.tail[0].text, undefined);
+    assert.equal(got.value.tail[0].tools[0].name, 'Bash');
     void request;
   } finally {
     await w.close();

@@ -503,7 +503,7 @@ const BUDDY_TOOLS = {
   }),
   inbox: buddyTool({
     description:
-      'Requests you owe, your open requests (clipped) and your channels here with unread counts.',
+      'Requests you owe, your open requests (clipped), channels with unread posts (readChannels counts the rest).',
     writes: false,
     schema: z.object({}),
     handler: async (deps, grant) =>
