@@ -44,6 +44,7 @@ import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-servic
 import { SwarmObservers } from '../swarm';
 import type { Effect, Phase } from '../turns/execution-state';
 import type { TurnOwner } from '../turns/executions';
+import { keepAwake } from '../turns/keep-awake';
 import {
   type OwnerInput,
   type SeatTurnInput,
@@ -713,6 +714,7 @@ export class Conversation extends EventEmitter {
     const run = this.runState();
     if (run === this._publishedRun) return;
     this._publishedRun = run;
+    keepAwake.setRunning(this.id, run === 'running' || run === 'streaming');
     this.publish({ t: 'run', run });
   }
 
