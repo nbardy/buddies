@@ -92,7 +92,9 @@ function ScheduleCard({
   // A fire is a silent chat run keyed `schedule:<id>:<slot>` (crate runs.rs `fire_slot`), each in
   // its own background conversation: the schedule's history is the runs under its prefix.
   const prefix = scheduleTurnPrefix(schedule.id);
-  const history = runs.filter((run) => run.input.kind === 'chat' && run.input.turnId.startsWith(prefix));
+  const history = runs.filter(
+    (run) => run.input.kind === 'chat' && run.input.turnId.startsWith(prefix)
+  );
   return (
     <details className="buddy-work-disclosure">
       <summary>

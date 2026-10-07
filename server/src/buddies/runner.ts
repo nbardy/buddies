@@ -496,7 +496,7 @@ export function createRunner(options: {
         });
       // Only a schedule fire (runs.rs `fire_slot`): an owner's chat has a conversation (`execute`).
       case 'chat':
-        if (run.body === undefined) throw new Error('a schedule fire carries its prompt as its body');
+        if (run.body === undefined) throw new Error('a schedule fire has no prompt');
         return Promise.resolve(freshTurn(run, run.body, false));
     }
   }
