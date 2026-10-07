@@ -24,13 +24,20 @@ test('production desktop helper reinstalls dev tools without an interactive purg
       JSON.stringify({ name: 'desktop-build-fixture', version: '1.0.0', main: 'index.js' })
     );
     fs.writeFileSync(path.join(source, 'dev-tool/index.js'), "module.exports = 'compiled';");
+    fs.mkdirSync(path.join(source, 'runtime-tool'));
+    fs.writeFileSync(
+      path.join(source, 'runtime-tool/package.json'),
+      JSON.stringify({ name: 'desktop-runtime-fixture', version: '1.0.0' })
+    );
     fs.writeFileSync(path.join(source, '.gitignore'), 'node_modules\ncompiled\n');
+    fs.writeFileSync(path.join(source, 'pnpm-workspace.yaml'), 'packages:\n  - dev-tool\n');
     fs.writeFileSync(
       path.join(source, 'package.json'),
       JSON.stringify({
         name: 'desktop-install-fixture',
         version: '1.0.0',
         packageManager: 'pnpm@9.15.0',
+        dependencies: { 'desktop-runtime-fixture': 'file:./runtime-tool' },
         devDependencies: { 'desktop-build-fixture': 'file:./dev-tool' },
         scripts: { build: 'node build.cjs', typecheck: 'node build.cjs' },
       })
@@ -42,6 +49,7 @@ test('production desktop helper reinstalls dev tools without an interactive purg
     );
     run('pnpm', ['install', '--lockfile-only']);
     run('pnpm', ['install', '--frozen-lockfile']);
+    assert.ok(fs.existsSync(path.join(source, 'node_modules/desktop-runtime-fixture')));
     assert.ok(!fs.existsSync(path.join(source, 'node_modules/desktop-build-fixture')));
     run('git', ['init', '-q']);
     run('git', ['config', 'user.name', 'Fixture']);
