@@ -339,7 +339,7 @@ a shared repository.
 | Separate Worker store, supervisor or memory system | Duplicates existing identity and lifecycle authority | Worker behavior must fit and improve shared boundaries |
 | Managed Document plus employee knowledge CRUD | Ordinary files/search already carry briefs and detailed knowledge | File discoverability, permissions and lifetime need care |
 | Separate Batch/Assignment truth for every handoff | Existing Task ownership and relationships express the motivating cases | Richer work graphs require their own demonstrated use case |
-| Autonomous turns in human chat | Couples owner access/history to background coordination | Background work needs its own inspectable execution context. **Superseded 2026-10-06 (owner decision A): see "October 6 successor" below; this row is kept as history.** |
+| Autonomous turns in human chat | Couples owner access/history to background coordination | Background work needs its own inspectable execution context. **Superseded 2026-10-06 (owner decision A), restored 2026-10-07: see the "October 6" and "October 7" successors below; this row is kept as history.** |
 | New Worker lifetime budget ledger and candidate-acceptance protocol | The lean redo intentionally retained baseline work limits and completion | Advanced supervision and exact version acceptance are not promised |
 
 The first and third choices are explicit owner corrections. The remaining
@@ -415,6 +415,25 @@ the delivery design review; design, alternatives and revisit conditions:
 the time of writing). Revisit if the owner finds automated turns in their chat
 noisy even with these three protections. The September 13 text above is kept as
 history, not deleted.
+
+**October 7 successor (owner decision, 2026-10-07 07:23Z, #case-studies
+post_01a1153e-e5f3; supersedes the October 6 successor and restores the September
+13 background-branch return and the "Autonomous turns in human chat" row).** The
+owner saw a worker's answer in their DM with a Buddy, rendered as a "You" message
+holding the raw delivery envelope, and decided: "it should be out of our chats
+should show up as background worker". The October 6 revisit condition was met.
+Deliveries for a chat the owner talks in now run in that chat's **background
+branch**: one background conversation per owner chat, a child of it, which the
+chat lists as a worker with its state and a link. It forks the chat's provider
+session on its first turn, so it keeps the lead's context, and it never holds the
+owner's grant (B1). The delivery rule itself is unchanged; only the subscribed
+conversation moves. A turn the owner typed subscribes the branch at the write
+(`server/src/buddies/mcp.ts` `subscriber`). A subscription from before this date
+that names an owner chat is redirected at delivery (`runner.ts` `outOfOwnerChat`).
+The October 6 protections (1) `owner_first` and (2) Stop cancelling queued
+returns are removed, because nothing queues in an owner chat any more. Decision
+record: `agent_notes/2026-10-06_buddies-target-system-review.md` (last successor);
+implementation note: `agent_notes/2026-10-07_deliveries-off-owner-chats.md`.
 
 ## Reading map and decision evidence
 
