@@ -1036,8 +1036,13 @@ fn posts_read_back_in_write_order_within_a_millisecond() {
         .unwrap();
     let to = || ChannelRef::Id { id: general.id.clone() };
     let say = |body: &str, reply: Option<String>| PostInput { kind: PostKind::Inform, reply_to_id: reply, ..request(body, body) };
+    // Rounds run until two posts did share a millisecond (at least 20, at most 2,000): under a
+    // parallel `cargo test` a fixed 20 rounds sometimes never shared one and the guard below failed
+    // although every round read back in order (2026-10-07, base 82f8279).
     let mut same_millisecond = 0;
-    for round in 0..20 {
+    let mut round = 0;
+    while round < 20 || (same_millisecond == 0 && round < 2000) {
+        round += 1;
         let root = s.post(&Actor::Owner, to(), say(&format!("root {round}"), None)).unwrap();
         // Written back to back: most land in the same millisecond.
         let written: Vec<Post> =
