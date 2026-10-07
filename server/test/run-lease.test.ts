@@ -329,6 +329,9 @@ test(
     // conversation ("Conversation is busy"). SIGSTOP is that sleep for one process: wall time
     // runs, the backend does not. A 100 ms backstop makes the gate's tick the first one due at
     // wake, as the 5 s tick was against the 30 s heartbeat in production.
+    // C (the previous test's backend) shares D's Buddies store: a SECOND live backend's gate sees a
+    // frozen holder's lapsed lease and rightly ends it, which looked like the bug under test.
+    await killBackend('C');
     const http = api(7554);
     await startBackend('D', 7554, { CWV_BUDDY_RUNNER_BACKSTOP_MS: '100' });
     const ws = await workspace(http, 'freeze');
