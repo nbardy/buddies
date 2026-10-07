@@ -499,7 +499,9 @@ export function createRunner(options: {
   // chat's branch, and `bindRun` moves the subscription there, so this fires once per thread.
   async function outOfOwnerChat(run: Run, conversationId: string): Promise<string> {
     const runs = await core.listRuns({ kind: 'conversation', conversationId }, 100);
-    return runs.some((r) => r.input.kind === 'chat')
+    // A schedule fire is a `chat` run too (runs.rs `fire_slot`, turn id `schedule:…`) in a silent
+    // background conversation: its returns resume it. Guard: buddies-v2 "a scheduled run asks for help".
+    return runs.some((r) => r.input.kind === 'chat' && !r.input.turnId.startsWith('schedule:'))
       ? host.openBranch({ conversationId, buddyId: run.buddyId, workspaceId: run.workspaceId })
       : conversationId;
   }
