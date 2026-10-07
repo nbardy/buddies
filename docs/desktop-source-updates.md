@@ -11,9 +11,11 @@ revision, installs pnpm 9.15.0 under the app's `toolchain` directory, installs
 source dependencies (the existing preflight sets up Rust), builds and typechecks.
 Node and npm ship in the bundle. Git and Apple's compiler/command-line tools
 must work on the host; a missing tool or failed installation leaves the bundled
-runtime usable. Setup progress and failures are in `source-update.log` and
-`source-update.err.log`; setup retries when the app is reopened without a
-verified runtime. `BUDDIES_DESKTOP_SOURCE_SETUP=0` disables automatic setup.
+runtime usable. The Buddies menu shows preparing, ready and failed setup states. Completion or
+failure opens a native status dialog with Quit to reopen, Retry setup and setup-log
+actions. A failed/interrupted attempt waits for Retry; the bundled or previous
+runtime stays usable. Detailed logs are `source-update.log` and
+`source-update.err.log`. `BUDDIES_DESKTOP_SOURCE_SETUP=0` disables automatic setup.
 
 A successful build is deployed into a unique runtime directory and smoke-tested
 using temporary stores, no agent installation, and no Buddy execution. Only then
@@ -37,8 +39,7 @@ the checkout for the normal upstream merge workflow.
 This updates the server and web UI. The native shell and Chromium still require
 a DMG release. Retaining old runtime files is not a promise of database rollback:
 a new version can migrate authoritative stores when opened. No automatic rollback
-runs after a new backend has opened app data. Fully unattended merging, a visual
-setup-progress panel, and native-shell auto-update are separate work.
+runs after a new backend has opened app data. Fully unattended merging and native-shell auto-update are separate work.
 
 Validation: `pnpm test:desktop` includes the filesystem/Git A→B publishing test,
 failed smoke and dirty-source refusal, newer-native selection, and live/dead setup

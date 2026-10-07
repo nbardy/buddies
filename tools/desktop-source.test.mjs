@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { readSourceStatus, sourceStatusView, writeSourceStatus } from './desktop-source-status.mjs';
 import { prepareSource, publishRuntime, selectedRuntime } from './desktop-source.mjs';
 
 // Real filesystem/git boundary: version A survives failed staging/smoke and source edits;
@@ -83,7 +84,41 @@ test('another live setup holds the source lock; a dead setup is recovered withou
     fs.writeFileSync(path.join(lock, 'owner'), '2147483647');
     await assert.rejects(prepareSource({ home, bundle }), /source.json/);
     assert.ok(!fs.existsSync(lock));
+    assert.equal(readSourceStatus(home).kind, 'failed');
+    assert.equal(sourceStatusView(readSourceStatus(home), bundle).action, 'retry');
     assert.deepEqual(selectedRuntime(home, bundle), { runtime: bundle, source: null });
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// PM review: silent interrupted setup left no recovery affordance. Progress must
+// survive reopening, distinguish a live helper from a dead one, and expose Retry.
+test('persisted source progress exposes preparation, interruption recovery and reopen activation', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-source-progress-'));
+  try {
+    writeSourceStatus(home, { kind: 'preparing', pid: process.pid, phase: 'Building the update' });
+    assert.equal(readSourceStatus(home).kind, 'preparing');
+    assert.equal(sourceStatusView(readSourceStatus(home), '/bundle').action, null);
+    writeSourceStatus(home, { kind: 'preparing', pid: 2147483647, phase: 'Building the update' });
+    const interrupted = readSourceStatus(home);
+    assert.equal(interrupted.kind, 'failed');
+    assert.equal(sourceStatusView(interrupted, '/bundle').action, 'retry');
+    writeSourceStatus(home, {
+      kind: 'ready',
+      runtime: '/verified-runtime',
+      revision: '1234567890',
+    });
+    const ready = readSourceStatus(home);
+    assert.equal(sourceStatusView(ready, '/bundle').action, 'quit');
+    assert.equal(sourceStatusView(ready, '/verified-runtime').action, null);
+    assert.equal(
+      sourceStatusView({ ...ready, bundleRevision: 'old-native' }, '/new-native', 'new-native')
+        .action,
+      null
+    );
+    fs.writeFileSync(path.join(home, 'source-update-status.json'), '{broken');
+    assert.equal(sourceStatusView(readSourceStatus(home), '/bundle').action, 'retry');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

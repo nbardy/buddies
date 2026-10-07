@@ -11,8 +11,10 @@ import { join } from 'node:path';
 // can run side by side without sharing SQLite stores.
 import Electrobun, { BrowserWindow, PATHS } from 'electrobun/main';
 import { selectedRuntime } from '../../../tools/desktop-selection.mjs';
+import { readSourceStatus } from '../../../tools/desktop-source-status.mjs';
 import { resolveLoginPath } from './login-path';
 import { serverEnv } from './server-env';
+import { installSourceUpdatesMenu } from './source-updates';
 
 const startedAt = Date.now();
 const payload = join(PATHS.RESOURCES_FOLDER, 'app', 'payload');
@@ -153,9 +155,12 @@ window.webview.on('dom-ready', () => {
 });
 window.webview.loadURL(`${origin}/__auth/logout`);
 
-// Setup never blocks offline launch or writes into the selected runtime. Only prepare when
-// there is no verified checkout yet; later merges belong to the owner-requested manager.
-if (!selected.source && process.env.BUDDIES_DESKTOP_SOURCE_SETUP !== '0') {
+// Setup never blocks offline launch or rewrites the selected runtime. Native status
+// remains available when the bundled server cannot bootstrap an upstream workspace.
+let setupRunning = false;
+function startSetup() {
+  if (setupRunning || stopping) return;
+  setupRunning = true;
   const setup = Bun.spawn([join(nodeBin, 'node'), join(payload, 'tools', 'desktop-source.mjs')], {
     cwd: home,
     env: environment,
@@ -163,7 +168,20 @@ if (!selected.source && process.env.BUDDIES_DESKTOP_SOURCE_SETUP !== '0') {
     stderr: Bun.file(join(home, 'source-update.err.log')),
   });
   log(`managed source setup pid=${setup.pid}; see source-update.log`);
-  setup.exited.then((code) =>
-    log(`managed source setup finished code=${code}; reopen to activate`)
-  );
+  setup.exited.then((code) => {
+    setupRunning = false;
+    log(`managed source setup finished code=${code}; reopen to activate`);
+  });
 }
+installSourceUpdatesMenu({
+  home,
+  runtime,
+  startSetup,
+  bundleRevision: JSON.parse(readFileSync(join(payload, 'source.json'), 'utf8')).revision,
+});
+if (
+  !selected.source &&
+  readSourceStatus(home).kind === 'idle' &&
+  process.env.BUDDIES_DESKTOP_SOURCE_SETUP !== '0'
+)
+  startSetup();

@@ -27,7 +27,8 @@ export default {
     mac: {
       bundleCEF: true,
       defaultRenderer: 'cef',
-      createDmg: true,
+      // Native UI previews build an app without replacing the review/release DMG.
+      createDmg: process.env.BUDDIES_DESKTOP_SKIP_DMG !== '1',
       // BUDDIES_DESKTOP_CDP=<port> at build time: inspect the window over CDP.
       chromiumFlags: process.env.BUDDIES_DESKTOP_CDP
         ? { 'remote-debugging-port': process.env.BUDDIES_DESKTOP_CDP }

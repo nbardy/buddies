@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { smokeRuntime, stageRuntime } from './desktop-runtime.mjs';
+import { writeSourceStatus } from './desktop-source-status.mjs';
 
 export { selectedRuntime } from './desktop-selection.mjs';
 
@@ -62,6 +63,8 @@ export async function publishRuntime({
 }
 
 async function buildSource({ home, bundle, publishOnly = false }) {
+  const progress = (phase) =>
+    writeSourceStatus(home, { kind: 'preparing', pid: process.pid, phase });
   const source = path.join(home, 'source');
   const node = path.join(bundle, 'node', 'bin', 'node');
   const toolchain = path.join(home, 'toolchain');
@@ -86,12 +89,14 @@ async function buildSource({ home, bundle, publishOnly = false }) {
       ...options,
     });
   // OS Git (including Apple's first-use command-line-tools requirement) must work before cloning.
+  progress('Checking Git and build tools');
   run('git', ['--version'], { cwd: home, timeout: 15_000 });
   if (!publishOnly) {
     const metadata = JSON.parse(fs.readFileSync(path.join(bundle, 'source.json'), 'utf8'));
     if (!fs.existsSync(path.join(source, '.git'))) {
       const temporary = path.join(home, `source-${randomUUID()}.pending`);
       try {
+        progress('Cloning Buddies');
         console.log('Cloning the managed Buddies checkout…');
         run('git', ['clone', '--recursive', metadata.repository, temporary], { cwd: home });
         // Start from exactly the bundled release, never silently downgrade to origin/main.
@@ -104,6 +109,7 @@ async function buildSource({ home, bundle, publishOnly = false }) {
     }
     const pnpm = path.join(toolchain, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs');
     if (!fs.existsSync(pnpm)) {
+      progress('Installing pnpm');
       console.log('Installing pnpm 9.15.0 in the app toolchain…');
       run(
         node,
@@ -120,13 +126,25 @@ async function buildSource({ home, bundle, publishOnly = false }) {
       );
     }
     // Preflight owns Rust setup. Never launch an agent CLI to install it from the desktop helper.
+    progress('Installing dependencies and Rust');
     console.log('Installing source dependencies and building (Rust may need first-time setup)…');
     run('pnpm', ['install', '--frozen-lockfile']);
   }
   // A fresh clone has no CLI/shared dist yet; build establishes those before test typecheck.
+  progress('Building the update');
   run('pnpm', ['build']);
+  progress('Checking the build');
   run('pnpm', ['typecheck']);
-  return publishRuntime({ home, bundle, source, run });
+  progress('Verifying the staged runtime');
+  const runtime = await publishRuntime({ home, bundle, source, run });
+  const active = JSON.parse(fs.readFileSync(path.join(home, 'active-runtime.json'), 'utf8'));
+  writeSourceStatus(home, {
+    kind: 'ready',
+    runtime,
+    revision: active.revision,
+    bundleRevision: active.bundleRevision,
+  });
+  return runtime;
 }
 
 // Serialize first-run setup and explicit publishing, including a reopened app while setup runs.
@@ -159,6 +177,12 @@ export async function prepareSource(options) {
   fs.writeFileSync(owner, String(process.pid));
   try {
     return await buildSource(options);
+  } catch (error) {
+    writeSourceStatus(options.home, {
+      kind: 'failed',
+      message: String(error.message || error).slice(0, 800),
+    });
+    throw error;
   } finally {
     fs.rmSync(lock, { recursive: true, force: true });
   }
