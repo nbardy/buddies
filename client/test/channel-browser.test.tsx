@@ -162,7 +162,7 @@ test('channel home keeps archived channels out of the rail and in the scrollable
       inboxFixture([{ channel: publicChannel('ch_active', 'general', 'ws-archive'), unread: 0 }]),
   });
   await loadResource({
-    key: '/api/buddies/workspaces/ws-archive/channels?archived=1',
+    key: '/api/buddies/workspaces/ws-archive/channels/archived',
     load: async () => [archived],
   });
   const html = render(

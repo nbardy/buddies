@@ -921,12 +921,6 @@ pub(crate) fn system_post(tx: &Transaction, author: &str, channel: &Channel, rep
     Ok(post)
 }
 
-/// The direct channel a Buddy talks to itself in (its own DM, `member_key` = its id).
-pub(crate) fn own_channel(tx: &Transaction, buddy_id: &str) -> Result<Channel> {
-    let me = Actor::Buddy { id: buddy_id.to_string() };
-    direct_channel(tx, &me, std::slice::from_ref(&me))
-}
-
 /// A reply joins its parent's thread, which must be in the same channel.
 fn thread_root(tx: &Transaction, parent_id: &str, channel_id: &str) -> Result<String> {
     let parent = get_post(tx, parent_id)?;

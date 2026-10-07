@@ -621,7 +621,7 @@ impl Store {
         })
     }
 
-    /// Fires every due schedule (`fire`) and advances it to its next slot after `now`. Missed slots
+    /// Fires every due schedule (`fire_slot`) and advances it to its next slot after `now`. Missed slots
     /// collapse into one fire. Returns the runs queued.
     pub fn due_schedules(&mut self, now: &str) -> Result<Vec<Run>> {
         self.write(|tx| {
@@ -631,26 +631,22 @@ impl Store {
                 ))?
                 .query_map([now], schedule_row)?,
             )?;
-            due.into_iter().map(|s| fire(tx, s, now)).collect()
+            due.into_iter()
+                .map(|s| {
+                    let slot = s.next_run_at.clone().ok_or_else(|| CoreError::Corrupt(format!("due schedule {} has no slot", s.id)))?;
+                    let run = fire_slot(tx, &s, &slot)?;
+                    tx.execute("UPDATE schedule SET next_run_at = ?2 WHERE id = ?1", params![s.id, next_run(&s.cron, &s.timezone, now)?])?;
+                    Ok(run)
+                })
+                .collect()
         })
     }
 }
 
-fn fire(tx: &Transaction, s: Schedule, now: &str) -> Result<Run> {
-    let slot = s.next_run_at.clone().ok_or_else(|| CoreError::Corrupt(format!("due schedule {} has no slot", s.id)))?;
-    let run = fire_slot(tx, &s, &slot)?;
-    tx.execute("UPDATE schedule SET next_run_at = ?2 WHERE id = ?1", params![s.id, next_run(&s.cron, &s.timezone, now)?])?;
-    Ok(run)
-}
-
-/// A schedule fire is silent: it posts nothing anywhere. It is one `chat` run carrying the
-/// schedule's prompt as its body and no conversation, which the runner claims and opens as a fresh
-/// background conversation, as every fire did before 2026-10-06. Owner decision, 2026-10-07 ("stay
-/// simple, don't overload DMs") reversed decision I, which posted each fire in a thread (a task's
-/// channel or the Buddy's own DM). The turn id `schedule:<id>:<slot>` keys the fire once per
-/// slot and is how the Schedules panel finds a schedule's runs. A chat run with no conversation is
-/// always a fire; an owner's chat is enqueued with its conversation (`enqueue_chat`).
-/// Guard: `a_schedule_fire_posts_nothing_and_queues_one_silent_run` (tests/core.rs).
+/// A schedule fire is silent: no post anywhere. One `chat` run per slot, the prompt as its body and
+/// no conversation (the runner opens a background one). Owner, 2026-10-07 ("stay simple, don't
+/// overload DMs"), reversed decision I. The turn id keys the slot and finds it in the Schedules
+/// panel. Guard: `a_schedule_fire_posts_nothing_and_queues_one_silent_run` (tests/core.rs).
 pub(crate) fn fire_slot(tx: &Transaction, s: &Schedule, slot: &str) -> Result<Run> {
     let body = format!("Scheduled run \"{}\" ({}, {}), slot {slot}:\n{}", s.name, s.cron, s.timezone, s.prompt);
     tx.insert_run(NewRun {

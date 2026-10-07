@@ -159,8 +159,13 @@ export const ReadSchema = z.union([
   z.object({ rootId: z.string().min(1), postId: z.string().min(1) }).strict(),
 ]);
 
-// The owner's "wake" is an ordinary DM post carrying this text (rule 1: a DM post wakes its Buddy),
-// not a route of its own. The channel feed shows it, so the catch-up summary lands under it.
+/**
+ * The turn id of a schedule's fire (crate runs.rs `fire_slot` writes `schedule:<id>:<slot>`): the
+ * Schedules panel finds a schedule's runs by this prefix.
+ */
+export const scheduleTurnPrefix = (scheduleId: string): string => `schedule:${scheduleId}:`;
+
+// Wake is silent (owner, 2026-10-07): this text is queued into the ongoing owner chat, no post.
 export const WAKE_MESSAGE = [
   'Wake-up check: catch up on the workspace channels and act on what matters to you.',
   '1. Call inbox: requests you owe, and every channel with your unread count.',
@@ -210,6 +215,12 @@ export const buddyMutations = {
     path: '/api/buddies/:buddyId/direct/new-chat',
     status: 200,
     body: NewDirectSchema,
+  },
+  'buddy.wake': {
+    method: 'POST',
+    path: '/api/buddies/:buddyId/wake',
+    status: 202,
+    body: NoBodySchema,
   },
   'doc.write': {
     method: 'PUT',
@@ -337,6 +348,7 @@ export interface BuddyMutationResults {
   // separate direct-post route).
   'direct.open': ConversationOpened & { channelId: string };
   'direct.new': ConversationOpened;
+  'buddy.wake': ConversationOpened;
   'doc.write': Doc;
   'task.create': Task;
   'task.update': Task;

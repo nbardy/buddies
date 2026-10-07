@@ -1,24 +1,44 @@
+import { Link } from 'react-router-dom';
 import { TypingDots } from './ChannelMarkdown';
+import { useWakePhase } from './buddy-direct-actions';
 
-// A wake is a DM post (buddy-direct-actions.ts), so there is no chat to watch for progress: the
-// mark says the post went out, and the Buddy's catch-up summary lands in its DM. Shared by the
-// desktop rail, the desktop sidebar and mobile; each passes its own class for placement.
+// Wake progress next to a Buddy: dots while it checks the channels, then a
+// check linking to the DM where its summary landed. Shared by the desktop rail,
+// the desktop sidebar and mobile; each passes its own class for placement.
 export function WakeIndicator({
+  conversationId,
   name,
   className,
+  doneClassName,
+  linkState,
 }: {
+  conversationId: string;
   name: string;
   className: string;
+  doneClassName: string;
+  linkState?: unknown;
 }) {
-  return (
-    <span
-      className={className}
-      title={`${name} was woken: its catch-up summary lands in your DM`}
-      aria-live="polite"
-    >
-      <TypingDots />
-    </span>
-  );
+  const phase = useWakePhase(conversationId);
+  switch (phase.kind) {
+    case 'waiting':
+    case 'running':
+      return (
+        <span className={className} title={`${name} is checking the channels`} aria-live="polite">
+          <TypingDots />
+        </span>
+      );
+    case 'done':
+      return phase.available ? (
+        <Link
+          className={`${className} ${doneClassName}`}
+          to={`/chat/${encodeURIComponent(conversationId)}`}
+          state={linkState}
+          title={`${name} finished checking — read the summary`}
+        >
+          ✓
+        </Link>
+      ) : null;
+  }
 }
 
 export function DmIcon() {

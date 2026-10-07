@@ -269,8 +269,8 @@ does not push a client refresh. Both tools are in the default run policy
 - **DM** (`POST /api/buddies/:id/direct`) is ONE ongoing owner conversation per
   (workspace, Buddy): a derived id, reused on every open so history persists;
   if the owner deletes it, the next open advances to a fresh generation.
-- **Wake** (route removed 2026-10-06, Step 7: a wake is now an ordinary post of
-  `WAKE_MESSAGE` to the Buddy's 1:1 DM channel, `postToBuddyDm`) used to queue a
+- **Wake** (`POST /api/buddies/:id/wake`; removed in 7A 2026-10-06 as a DM post, restored silent
+  2026-10-07 by owner decision "stay simple, don't overload DMs") queues a
   catch-up instruction INTO that DM as owner input: read unread channels and active threads (`get_inbox`,
   `get_list`), then per item reply in the thread, start background work, hand
   off with `send`, or leave it, and end with a summary. No new run type — the

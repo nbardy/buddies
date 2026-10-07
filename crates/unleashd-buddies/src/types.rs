@@ -139,13 +139,11 @@ pub enum RequestState {
 
 /// Why a run exists. Columns: (input_kind, input_id); the input_key is derived from it.
 ///
-/// Three live kinds since the 2026-10-06 rebuild (owner decisions H, I; delivery design §3):
-/// `chat` (an owner message, or, with no conversation, a schedule fire: `fire_slot`), `post` (a
-/// request the Buddy owes) and `deliver` (a post in a thread one of the Buddy's conversations
-/// subscribes to). `reply`, `failure_notice` and `follow` were folded into `deliver`: an answer, a
-/// failure notice and a followed thread's new post are all posts now. `schedule` became a silent
-/// `chat` run again (2026-10-07). Their ended rows stay as `Retired` history; the schema CHECK
-/// refuses a queued one, so a retired kind is never claimed.
+/// Three live kinds (owner decisions H, I; delivery design §3): `chat` (an owner message, or with no
+/// conversation a schedule fire, `fire_slot`), `post` (a request the Buddy owes) and `deliver` (a
+/// post in a thread a conversation subscribes to). `reply`, `failure_notice` and `follow` were
+/// folded into `deliver`; `schedule` is a silent `chat` again. Their ended rows stay `Retired`
+/// history; the schema CHECK refuses a queued one, so it is never claimed.
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunInput {
@@ -156,9 +154,7 @@ pub enum RunInput {
     Post {
         post_id: String,
     },
-    /// A post by someone else in a thread the run's conversation subscribes to (or, with no
-    /// conversation yet, a schedule fire the runner opens one for). The turn shows every post the
-    /// conversation has not read, not only this one (deliveries.rs `compose`).
+    /// A post in a thread the run's conversation subscribes to; the turn shows every unread one (`compose`).
     Deliver {
         post_id: String,
     },

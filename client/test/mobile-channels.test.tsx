@@ -412,7 +412,7 @@ test('archived channel links retain history and hide channel/thread composers on
     load: async () => inboxFixture([]),
   });
   await loadResource({
-    key: `/api/buddies/workspaces/${WS}/channels?archived=1`,
+    key: `/api/buddies/workspaces/${WS}/channels/archived`,
     load: async () => [channel],
   });
   const render = (search: string) =>

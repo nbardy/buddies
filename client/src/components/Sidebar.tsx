@@ -790,8 +790,10 @@ function SidebarBuddyActions({ item }: { item: BuddySidebarItemData }) {
       {direct.woken && (
         <WakeIndicator
           key={direct.woken.attempt}
+          conversationId={direct.woken.conversationId}
           name={item.buddyName}
           className="sidebar-buddy-wake ui-inline-row ui-muted"
+          doneClassName="sidebar-buddy-wake-done"
         />
       )}
       <span

@@ -441,6 +441,7 @@ function BuddySection({
 function BuddyRow({ member }: { member: Buddy }) {
   // The DM opens inside Channels; Back returns here, not to the Buddies tab.
   const openDm = useChannelsDm();
+  const location = useLocation();
   const direct = useBuddyDirectActions(member.id);
   const { action } = direct;
   return (
@@ -481,8 +482,11 @@ function BuddyRow({ member }: { member: Buddy }) {
         {direct.woken && (
           <WakeIndicator
             key={direct.woken.attempt}
+            conversationId={direct.woken.conversationId}
             name={member.name}
             className="mobile-channels-wake-status ui-muted"
+            doneClassName="mobile-channels-wake-done"
+            linkState={mobileConversationRouteState(location)}
           />
         )}
       </span>

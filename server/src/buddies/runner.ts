@@ -195,10 +195,9 @@ export function createRunner(options: {
 
   async function drain(): Promise<void> {
     again = false;
-    // Schedules only post: every due slot becomes one post in the schedule's thread, delivered to
-    // its Buddy (missed slots collapse into one; decision I), and the schedule advances, in one
-    // indexed transaction (the crate's cron math, with IANA timezones). This replaced scheduler.ts,
-    // its legacy executor and its 1 s tick, and since 2026-10-06 the `schedule` run kind.
+    // Schedules only enqueue: every due slot (missed ones collapse) becomes one silent chat run
+    // with the schedule's prompt, and the schedule advances, in one indexed transaction (the
+    // crate's cron math, IANA timezones). A fire posts nothing (owner, 2026-10-07).
     await core.dueSchedules(new Date().toISOString());
     for (let claim = await core.claimRun(budgets); claim; claim = await core.claimRun(budgets))
       void execute(claim);
@@ -397,13 +396,13 @@ export function createRunner(options: {
   // Pattern: route-at-send (docs/patterns.md#route-at-send)
   /**
    * A post in a thread this Buddy's conversation subscribes to, or that @mentions the Buddy, or
-   * the owner's post in its DM (one rule for answers, failure posts, followed threads, mentions
-   * and schedule fires; owner decisions A–K). It is a turn in the conversation that follows the
-   * thread, a human chat included (decision A), claimed only once the conversation is idle
+   * the owner's post in its DM (one rule for answers, failure posts, followed threads and
+   * mentions; owner decisions A–K). It is a turn in the conversation that follows the thread, a
+   * human chat included (decision A), claimed only once the conversation is idle
    * (`conversation_busy`) and after any owner message queued there (`owner_first`). With no
-   * conversation yet it opens the Buddy's SEAT in the thread (the same ids the deleted pair machine used);
-   * a schedule fire, which the Buddy itself wrote, opens a fresh background conversation. Either
-   * is subscribed by `bindRun`. Everything it would show was read meanwhile: no turn (the fence).
+   * conversation yet it opens the Buddy's SEAT in the thread (the same ids the deleted pair
+   * machine used), or a fresh background conversation for the Buddy's own post. Either is
+   * subscribed by `bindRun`. Everything it would show was read meanwhile: no turn (the fence).
    * The turn holds owner authority only when every post it shows is the owner's (D9, B1).
    */
   async function deliverJob(run: Run, postId: string): Promise<Job> {
@@ -495,8 +494,10 @@ export function createRunner(options: {
           kind: 'skip',
           reason: `a ${input.inputKind} run has no completion step`,
         });
+      // Only a schedule fire (runs.rs `fire_slot`): an owner's chat has a conversation (`execute`).
       case 'chat':
-        throw new Error('a chat run is admitted, not executed');
+        if (run.body === undefined) throw new Error('a schedule fire carries its prompt as its body');
+        return Promise.resolve(freshTurn(run, run.body, false));
     }
   }
 
@@ -509,9 +510,8 @@ export function createRunner(options: {
       case 'deliver':
         return deliveryEnding(run, input.postId);
       case 'retired':
-        return Promise.resolve(nothingAfter);
       case 'chat':
-        throw new Error('a chat run is admitted, not executed');
+        return Promise.resolve(nothingAfter);
     }
   }
 
@@ -631,8 +631,9 @@ export function createRunner(options: {
 
   function execute(claim: Claim): Promise<void> {
     const input = claim.run.input;
+    // A chat run with a conversation is an owner's message; with none, a schedule fire.
     const done =
-      input.kind === 'chat'
+      input.kind === 'chat' && claim.run.conversationId
         ? admitChat(claim, input.turnId)
         : respondingChanged(claim.run).then(() => runJob(claim));
     return done.catch((error) =>
