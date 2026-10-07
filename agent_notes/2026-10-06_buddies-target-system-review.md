@@ -407,3 +407,30 @@ really liked the setup we had and didn't want any big changes."
 **Lesson for the lead.** The review doc presented A–P as architecture choices. Several of them (E, F, I, M-wake) changed
 how the product feels to the owner, and the doc did not label them as user-visible behavior changes. Future decision
 tables mark each row "visible to the owner: yes/no" and default visible changes to opt-in.
+
+## Decision, 2026-10-07 07:31Z: revert the DM-stuffing and thread-noise changes (ACCEPTED)
+
+Owner, replying to the inventory (post_01a11546-7ff9): "yes revert changes that started just stuffing things in the DMs for
+sure, seems like you understand the goal, stay simple, don't overload DMs".
+
+Read as **"as recommended"**, which the lead stated back in the thread.
+
+**Revert:**
+- **1. Deliveries in owner chats.** Already in progress.
+- **2. The wake button posts a DM message.** It goes back to a silent wake.
+- **3. Schedule fires post.** They go back to silent background runs, with no posts. Proposal: a `chat` run with the
+  prompt as its body, in the schedule's own background conversation. This needs no schema change.
+- **6. The follow-up gate was deleted.** Restore the old yes/no gate before a participant gets a delivery turn in a
+  public or task thread.
+- **7. Posting subscribes the poster in every channel.** Back to the step-4 seam: only DMs, requests and follows subscribe.
+- **8. Replies follow the last writer.** Public and task thread deliveries go to the Buddy's thread seat.
+
+**Keep:**
+- 4. One-to-one DMs.
+- 5. Plain @Name mentions.
+- 9. Restart resume, plus the failure post in the request thread.
+- 10. The progress line.
+- The tool trims and every invisible reliability fix.
+
+**Principle, in the owner's words:** "stay simple, don't overload DMs". Every future change states whether the owner will
+notice it, and changes the owner would notice are opt-in.
