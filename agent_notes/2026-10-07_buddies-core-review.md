@@ -218,3 +218,86 @@ its "shared a millisecond" guard whenever the machine is loaded (suite time 39�
 1.5 s); it passes alone on every commit here. Server tests that failed only under load and passed
 3/3 alone: run-lease freeze, buddies-v2 briefing (ENOTEMPTY in scratch cleanup), dependencies
 "first boot installs missing tools once".
+
+### Phase 2, worker 3 (run_01a11617, 2026-10-07)
+
+**ctrl-c-adoption timeout: I1 had a real bug, but it did not cause the timeout.**
+- agent-cli can throw after the child exists. `spawnJournaled` writes `pid` after `spawn()`, and
+  `followJournal` then opens the stdout/stderr tails with a synchronous `openSync` (EMFILE throws).
+  e59dd0d's `spawnInto` removed the journal on any throw. That left such a child running with
+  nothing to adopt or kill it.
+- 97c2579 fixes it. `executions.discardAt(dir)` reads the process from the journal and discards it
+  as boot does: kill a live wrapper, then remove. Killing is chosen over keeping because the
+  runner has already reported the turn failed; adopting it later would give its run a second
+  terminal result.
+- One residual case cannot be fixed here: a throw on the `pid` write itself (vendor code).
+  Nothing then names the child, both before and after I1.
+- Guard: conversation-runtime "a spawn that throws after its child started leaves no process
+  running". It is red at 5a58839, where the child is still alive after 2 s.
+- The timeout itself is not a regression of I1. That path runs only when `executeTurn` throws,
+  and the Ctrl+C tests spawn successfully. The full suite at ed6a23e
+  (`/tmp/core-review-logs/server-ed6a23e.log`) passed both Ctrl+C tests in 8.2 s / 5.6 s. Its one
+  failure was "a missing provider binary…" (an `eventually` timeout under load).
+- At e031f57 (`server-e031f57.log`), with load average ~7 from other sessions, both Ctrl+C tests
+  passed in 21.7 s / 21.1 s.
+- At ae5881f (`server-ae5881f.log`) the single-turn test timed out again at 300 s. Its backend
+  log shows when it went wrong: the worker turn spawned at 40:53.656 and was declared
+  `claude execution was lost: its process group was killed without an exit record` at 40:54.972.
+  SIGINT only arrived at 40:54.988, so the turn was gone before Ctrl+C. With no journal left to
+  adopt, the test waits forever.
+- Lead, unconfirmed: agent-cli `followJournal` checks liveness every 20 ticks with
+  `isOwnWrapper`. That runs `ps` via execFileSync and treats ANY error as "not our wrapper"
+  (vendor `src/journal.ts` isOwnWrapper). Under load a failing `ps` would end a healthy turn as
+  `lost`. Next step: log the swallowed error, or retry once before declaring `lost`. That is a
+  submodule change.
+- Verdict: **still unexplained**. It is not an I1/T5 regression (no throw path is involved), and
+  it is intermittent: it passed at ed6a23e and e031f57 and failed at 52dbbc0, 5a58839 and
+  ae5881f.
+
+**Commits:**
+- 97c2579: the I1 follow-up above.
+- e031f57: B10, B11 rest, B13; ceiling 11243 (−13).
+  - B10: the gate's default paths come from the resolvers.
+  - B11: the archived re-filters are dead (the inbox SQL already excludes archived), the
+    `ownerPost` kind check was unreachable, and the `MentionDispatch` alias and `Exclude` are
+    gone. `publishOwnerPost` announces with the channel it opened.
+  - B13: exhaustive `PART_LINES`.
+- ae5881f: T5. `start` takes `beginAttempt`'s id; the `?? randomUUID()` fallback, three guards
+  and the duplicate busy check are gone.
+
+**Dropped, with the reason:**
+- The 11 caller-less exports: dropping `export` saves no line.
+- T8: two provider checks (a gemini warning source, a codex rollout repair), where a table would
+  be no shorter.
+
+**Lines, 5a58839 → ae5881f:**
+
+| area | 5a58839 | ae5881f |
+|---|---|---|
+| crate `src` | 5573 | 5573 |
+| `server/src/buddies` | 5951 | 5938 |
+| `server/src/turns` | 2869 | 2880 |
+| `server/src/conversations` | 2519 | 2520 |
+| `shared/src` | 3450 | 3450 |
+| gated | 11256 | 11243 (ceiling 11243) |
+
+The `turns` growth is the I1 follow-up (`discardAt` plus why-comments). T5 removed 2 lines.
+
+**Checks at ae5881f** (clean tree):
+- typecheck: pass.
+- Crate tests: buddies cargo 79 + node 2; ingest cargo 60 + node 3. All pass.
+- Client: 241/241.
+- Invariants: pass. Line gate: 11243/11243.
+- Server: 317 tests, 294 pass, 2 fail, 19 cancelled, 2 skipped.
+  - auth: "server did not start in 30 s" under load. It cancels the 18 subtests; it passes alone
+    and passed at ed6a23e.
+  - The Ctrl+C single-turn test: above.
+  - dependencies, 2 tests: 4/4 alone twice; a known load flake.
+
+**Still left:**
+- B9 (the lead runs it after 14:00Z).
+- K2/K3/K7. These are crate changes, which mean an addon rebuild plus the cargo suite.
+- B5 `Slot`, B6, B7, B12.
+- The delivery `route` type move.
+- The stale Rust doc comments.
+- The owner's V/O decisions.
