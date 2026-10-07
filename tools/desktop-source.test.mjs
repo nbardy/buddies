@@ -100,10 +100,15 @@ test('persisted source progress exposes preparation, interruption recovery and r
     writeSourceStatus(home, { kind: 'preparing', pid: process.pid, phase: 'Building the update' });
     assert.equal(readSourceStatus(home).kind, 'preparing');
     assert.equal(sourceStatusView(readSourceStatus(home), '/bundle').action, null);
+    assert.match(
+      sourceStatusView(readSourceStatus(home), '/bundle').message,
+      /Building the update/
+    );
     writeSourceStatus(home, { kind: 'preparing', pid: 2147483647, phase: 'Building the update' });
     const interrupted = readSourceStatus(home);
     assert.equal(interrupted.kind, 'failed');
     assert.equal(sourceStatusView(interrupted, '/bundle').action, 'retry');
+    assert.match(sourceStatusView(interrupted, '/bundle').message, /Setup was interrupted.*Retry/s);
     writeSourceStatus(home, {
       kind: 'ready',
       runtime: '/verified-runtime',
@@ -111,6 +116,7 @@ test('persisted source progress exposes preparation, interruption recovery and r
     });
     const ready = readSourceStatus(home);
     assert.equal(sourceStatusView(ready, '/bundle').action, 'quit');
+    assert.match(sourceStatusView(ready, '/bundle').message, /Quit and reopen Buddies/);
     assert.equal(sourceStatusView(ready, '/verified-runtime').action, null);
     assert.equal(
       sourceStatusView({ ...ready, bundleRevision: 'old-native' }, '/new-native', 'new-native')

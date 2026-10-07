@@ -24,7 +24,6 @@ export function installSourceUpdatesMenu(input: {
       const { response } = await Electrobun.Utils.showMessageBox({
         title: 'Buddies source updates',
         message: view.message,
-        detail: view.detail,
         buttons: view.buttons,
         defaultId: view.action ? 1 : 0,
         cancelId: view.action ? 1 : 0,

@@ -52,7 +52,7 @@ export function readSourceStatus(home) {
 }
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
-export function sourceStatusView(state, currentRuntime, bundleRevision = null) {
+function statusContent(state, currentRuntime, bundleRevision) {
   switch (state.kind) {
     case 'preparing':
       return {
@@ -104,4 +104,11 @@ export function sourceStatusView(state, currentRuntime, bundleRevision = null) {
         buttons: ['Start setup', 'Later'],
       };
   }
+}
+
+// macOS native dialogs omit Electrobun's detail field. Keep recovery instructions
+// in the visible message; guard: persisted source progress / native preview.
+export function sourceStatusView(state, currentRuntime, bundleRevision = null) {
+  const view = statusContent(state, currentRuntime, bundleRevision);
+  return { ...view, message: `${view.message}\n\n${view.detail}` };
 }
