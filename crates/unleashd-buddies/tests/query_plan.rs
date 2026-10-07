@@ -111,19 +111,6 @@ fn workload(s: &mut unleashd_buddies::Store) {
         },
     )
     .unwrap();
-    s.enqueue_run(
-        &ic,
-        EnqueueInput {
-            buddy_id: "ic".into(),
-            input: RunInput::Deliver { post_id: top.id.clone() },
-            conversation_id: Some("c-ic".into()),
-            task_id: Some(parent.id.clone()),
-            after_run_id: Some(claim.run.id.clone()),
-            deadline: None,
-            config: None,
-        },
-    )
-    .unwrap();
     s.upsert_task(
         &ic,
         TaskWrite::Update {
@@ -155,7 +142,6 @@ fn workload(s: &mut unleashd_buddies::Store) {
         RunQuery::Buddy { buddy_id: "ic".into() },
         RunQuery::Conversation { conversation_id: "c-ic".into() },
         RunQuery::Task { task_id: parent.id.clone() },
-        RunQuery::Queued,
         RunQuery::Live { workspace_id: WS.into() },
     ] {
         s.list_runs(q, 10).unwrap();

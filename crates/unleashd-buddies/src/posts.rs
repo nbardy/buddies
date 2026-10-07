@@ -815,8 +815,6 @@ fn insert_post(
             input: RunInput::Post { post_id: id.clone() },
             conversation_id: None,
             task_id: task_id.map(str::to_owned),
-            after_run_id: None,
-            deadline: None,
             config: input.run_config.clone(),
         })?;
     }

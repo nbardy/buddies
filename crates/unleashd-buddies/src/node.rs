@@ -42,11 +42,6 @@ impl BuddiesCore {
     }
 
     #[napi]
-    pub async fn authorize(&self, actor: Actor, op: Op, subject: Subject) -> napi::Result<Decision> {
-        call(&self.store, move |s| s.authorize(&actor, op, &subject)).await
-    }
-
-    #[napi]
     pub async fn post(&self, actor: Actor, channel: ChannelRef, input: PostInput) -> napi::Result<PostWrite> {
         call(&self.store, move |s| s.write_post(&actor, channel, input)).await
     }

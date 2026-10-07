@@ -4,7 +4,6 @@
 export declare class BuddiesCore {
   /** Opens (or creates) the database. Refuses a file that is not a buddies-core database. */
   static open(path: string): Promise<BuddiesCore>
-  authorize(actor: Actor, op: Op, subject: Subject): Promise<Decision>
   post(actor: Actor, channel: ChannelRef, input: PostInput): Promise<PostWrite>
   answer(actor: Actor, input: AnswerInput): Promise<Post>
   getPost(actor: Actor, id: string): Promise<Post>
@@ -278,8 +277,6 @@ export interface EnqueueInput {
   input: RunInput
   conversationId?: string
   taskId?: string
-  afterRunId?: string
-  deadline?: string
   config?: RunConfig
 }
 
@@ -530,7 +527,6 @@ export type RunQuery =
   | { kind: 'buddy'; buddyId: string }
   | { kind: 'conversation'; conversationId: string }
   | { kind: 'task'; taskId: string }
-  | { kind: 'queued' }
   | { kind: 'live'; workspaceId: string }
 
 /** The bounded list projection. Full execution state and outcomes stay on `get_run`. */
@@ -562,7 +558,6 @@ export type RunStatus = 'queued' | 'running' | 'cancel_requested' | 'complete' |
 export type RunWaiting =
   | { kind: 'not_before'; at: string }
   | { kind: 'buddy_archived' }
-  | { kind: 'after_run'; runId: string }
   | { kind: 'conversation_busy' }
   | { kind: 'pool_full'; active: number; max: number }
   | { kind: 'task_paused' }

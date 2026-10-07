@@ -196,8 +196,6 @@ pub(crate) fn wake(tx: &Transaction, channel: &Channel, post: &Post, mention: &M
         input: RunInput::Deliver { post_id: post.id.clone() },
         conversation_id: conversation,
         task_id: post.task_id.clone(),
-        after_run_id: None,
-        deadline: None,
         config: mention.config.clone(),
     })
     .map(|_| ())
@@ -209,8 +207,6 @@ pub(crate) fn enqueue_delivery(tx: &Transaction, buddy_id: &str, post: &Post, co
         input: RunInput::Deliver { post_id: post.id.clone() },
         conversation_id,
         task_id: post.task_id.clone(),
-        after_run_id: None,
-        deadline: None,
         config: None,
     })
 }

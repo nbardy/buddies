@@ -28,11 +28,6 @@ test('a request, its run and its answer cross the napi boundary', async () => {
     });
   const a = { kind: 'buddy', id: (await hire('a')).id };
   const b = { kind: 'buddy', id: (await hire('b')).id };
-  assert.deepEqual(await core.authorize(a, 'write_doc', b), {
-    kind: 'denied',
-    reason: `${a.id} is neither ${b.id} nor one of its managers`,
-  });
-
   const { post } = await core.post(
     a,
     { kind: 'direct', members: [a, b] },

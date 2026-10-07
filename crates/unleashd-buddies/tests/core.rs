@@ -1394,18 +1394,26 @@ fn a_database_from_before_threads_arrives_caught_up() {
 // duplicate Warp/PTX worker came from two owners of one request. A group is a public channel.
 #[test]
 fn a_dm_is_one_to_one_and_a_legacy_group_dm_is_read_only() {
+    fn queued_runs(f: &common::Fixture, buddies: &[&str]) -> Vec<String> {
+        buddies
+            .iter()
+            .flat_map(|id| f.store.list_runs(RunQuery::Buddy { buddy_id: (*id).into() }, 10).unwrap())
+            .filter(|r| r.status == RunStatus::Queued)
+            .map(|r| r.buddy_id)
+            .collect()
+    }
     let mut f = fixture();
     let group = ChannelRef::Direct { members: vec![buddy("mid"), buddy("ic"), buddy("peer")] };
     let refused = f.store.post(&buddy("mid"), group.clone(), request("both of you", "g1")).unwrap_err();
     assert!(refused.to_string().contains("public channel"), "{refused}");
     assert!(f.store.post(&buddy("mid"), group.clone(), PostInput { kind: PostKind::Inform, ..request("fyi", "g2") }).is_err(), "an inform is refused too");
     assert!(f.store.open_channel(&buddy("mid"), group.clone()).is_err(), "the group channel is never created");
-    assert!(f.store.list_runs(RunQuery::Queued, 10).unwrap().is_empty());
+    assert!(queued_runs(&f, &["mid", "ic", "peer"]).is_empty());
 
     // 1:1 and a note to self still work, and the single other member owes the answer.
     f.store.post(&buddy("mid"), dm("mid", "ic"), request("just you", "s1")).unwrap();
     f.store.post(&buddy("mid"), ChannelRef::Direct { members: vec![buddy("mid")] }, request("remember", "n1")).unwrap();
-    let owed: Vec<_> = f.store.list_runs(RunQuery::Queued, 10).unwrap().into_iter().map(|r| r.buddy_id).collect();
+    let owed = queued_runs(&f, &["mid", "ic", "peer"]);
     assert!(owed.contains(&"ic".to_string()) && owed.contains(&"mid".to_string()) && owed.len() == 2, "{owed:?}");
 
     // A group DM written before the rule exists in the db: readable, but no new post.

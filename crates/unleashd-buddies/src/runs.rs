@@ -44,9 +44,6 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
-    WHEN r.after_run_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM run a WHERE a.id = r.after_run_id AND a.status IN ('complete','failed','cancelled')
-    ) THEN json_object('kind','after_run','runId',r.after_run_id)
     WHEN r.conversation_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
           AND c.status IN ('running','cancel_requested')
@@ -147,8 +144,8 @@ pub(crate) fn insert_run(conn: &Connection, run: NewRun) -> Result<Run> {
     let id = new_id("run");
     conn.prepare_cached(
         "INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, task_epoch,
-           after_run_id, status, deadline, ready_at, created_at, config, body)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', ?11, ?12, ?12, ?13, ?14)",
+           status, ready_at, created_at, config, body)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'queued', ?10, ?10, ?11, ?12)",
     )?
     .execute(params![
         id,
@@ -160,8 +157,6 @@ pub(crate) fn insert_run(conn: &Connection, run: NewRun) -> Result<Run> {
         input.conversation_id,
         input.task_id,
         task_epoch,
-        input.after_run_id,
-        input.deadline,
         now,
         input.config.as_ref().map(|c| serde_json::to_string(c).expect("run config serializes")),
         body
@@ -195,8 +190,6 @@ impl Store {
                     input: RunInput::Chat { turn_id: input.turn_id },
                     conversation_id: Some(input.conversation_id),
                     task_id: None,
-                    after_run_id: None,
-                    deadline: None,
                     config: None,
                 },
                 body: Some(input.body),
@@ -297,10 +290,9 @@ impl Store {
             // spawn. Until then it may still compose a prompt, open its conversation or resolve its
             // model, all of which a successor can redo, so a holder that dies here gets the run
             // requeued (`expire_leases`), never replayed. (W0b of durable intake, 745515f.)
-            // An enqueue-time deadline (EnqueueInput.deadline; no caller sets one today) wins.
             let claimed = tx.execute(
                 "UPDATE run SET status = 'running', lease_token = ?2, lease_expires_at = ?3, started_at = ?4,
-                   deadline = coalesce(deadline, ?5)
+                   deadline = ?5
                  WHERE id = ?1 AND status = 'queued'",
                 params![id, token, plus_ms(now, budgets.lease_ms)?, now, plus_ms(now, deadline_ms)?],
             )?;
@@ -521,7 +513,6 @@ impl Store {
                 ("conversation_id = ? ORDER BY created_at DESC, id DESC", vec![conversation_id.into()])
             }
             RunQuery::Task { task_id } => ("task_id = ? ORDER BY created_at DESC, id DESC", vec![task_id.into()]),
-            RunQuery::Queued => ("status = 'queued' ORDER BY ready_at, id", vec![]),
             RunQuery::Live { workspace_id } => {
                 ("status IN ('running','cancel_requested') AND workspace_id = ? ORDER BY started_at", vec![workspace_id.into()])
             }
@@ -675,8 +666,6 @@ pub(crate) fn fire_slot(tx: &Transaction, s: &Schedule, slot: &str) -> Result<Ru
             input: RunInput::Chat { turn_id: format!("schedule:{}:{slot}", s.id) },
             conversation_id: None,
             task_id: s.task_id.clone(),
-            after_run_id: None,
-            deadline: None,
             config: None,
         },
         body: Some(body),
@@ -838,8 +827,8 @@ fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
         (RunInput::Post { post_id }, Outcome::Failed { code, .. }) if code == "lease_expired" && !resumed_before(tx, run)? => {
             resume(tx, run, post_id)
         }
-        (RunInput::Post { post_id }, Outcome::Failed { code, error }) => close_request(tx, post_id, "failed", Some((run, code, error))),
-        (RunInput::Post { post_id }, Outcome::Cancelled { .. }) => close_request(tx, post_id, "cancelled", None),
+        (RunInput::Post { post_id }, Outcome::Failed { code, error }) => close_request(tx, post_id, Closed::Failed { run, code, error }),
+        (RunInput::Post { post_id }, Outcome::Cancelled { .. }) => close_request(tx, post_id, Closed::Cancelled),
         (RunInput::Post { .. }, Outcome::Complete { .. })
         | (RunInput::Chat { .. } | RunInput::Deliver { .. } | RunInput::Retired { .. }, _) => Ok(()),
     }
@@ -869,13 +858,23 @@ fn resume(tx: &Transaction, run: &Run, post_id: &str) -> Result<()> {
     }
 }
 
+/// How an awaiting request ends: a failure carries the run it tells the sender about.
+enum Closed<'a> {
+    Failed { run: &'a Run, code: &'a str, error: &'a str },
+    Cancelled,
+}
+
 /// Closes an awaiting request. A failure is told as a `run_failed` post by the recipient in the
 /// request's thread (decision: the failure notice is a post), which the asker's subscription
 /// delivers like the answer would have been. It replaced the `failure_notice` run kind.
-fn close_request(tx: &Transaction, post_id: &str, state: &str, failed: Option<(&Run, &str, &str)>) -> Result<()> {
+fn close_request(tx: &Transaction, post_id: &str, how: Closed) -> Result<()> {
+    let state = match how {
+        Closed::Failed { .. } => "failed",
+        Closed::Cancelled => "cancelled",
+    };
     let closed = tx.execute("UPDATE post SET request = ?2 WHERE id = ?1 AND request = 'awaiting'", params![post_id, state])?;
-    match (closed, failed) {
-        (1, Some((run, code, error))) => {
+    match (closed, how) {
+        (1, Closed::Failed { run, code, error }) => {
             let request = get_post(tx, post_id)?;
             let channel = get_channel(tx, &request.channel_id)?;
             let body = format!(

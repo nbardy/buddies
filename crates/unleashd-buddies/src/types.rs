@@ -457,7 +457,6 @@ pub struct Run {
 pub enum RunWaiting {
     NotBefore { at: String },
     BuddyArchived,
-    AfterRun { run_id: String },
     ConversationBusy,
     PoolFull { active: i64, max: i64 },
     TaskPaused,
@@ -643,8 +642,6 @@ pub struct EnqueueInput {
     pub input: RunInput,
     pub conversation_id: Option<String>,
     pub task_id: Option<String>,
-    pub after_run_id: Option<String>,
-    pub deadline: Option<String>,
     pub config: Option<RunConfig>,
 }
 
@@ -660,7 +657,6 @@ pub enum RunQuery {
     Task {
         task_id: String,
     },
-    Queued,
     /// Running (or cancel-requested) runs in a workspace: what its buddies are doing now.
     Live {
         workspace_id: String,
