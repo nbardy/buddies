@@ -122,8 +122,6 @@ export interface TurnPolicy {
     /** The turn answers the owner's own post: it may hold owner authority (delivery design D9). */
     owner: boolean
   ): Promise<void>;
-  sendAutomation(content: string): void;
-  stopAutomation(): void;
 }
 
 /** The first-turn prefix a general chat carries: the swarm debug header, once. */
@@ -208,11 +206,5 @@ export class ChatTurnPolicy implements TurnPolicy {
   }
   runCoordination(): Promise<void> {
     return Promise.reject(new Error('Coordination identity or claim is missing'));
-  }
-  sendAutomation(): void {
-    throw new Error('Automation turn requires current server-private execution authority');
-  }
-  stopAutomation(): void {
-    throw new Error('Automation stop requires current server-private execution authority');
   }
 }

@@ -44,23 +44,22 @@ import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-servic
 import { SwarmObservers } from '../swarm';
 import type { Effect, Phase } from '../turns/execution-state';
 import type { TurnOwner } from '../turns/executions';
-import { keepAwake } from '../turns/keep-awake';
 import {
   type OwnerInput,
-  type SeatTurnInput,
   type SessionRelativePrompt,
   type TurnInput,
   sameEitherWay,
 } from '../turns/input';
+import { type InputCarrier, decodeEntry, volatileCarrier } from '../turns/intake';
+import { keepAwake } from '../turns/keep-awake';
 import { ChatTurnPolicy, type MemorySnapshot, type TurnPolicy } from '../turns/policy';
-import { decodeEntry, type InputCarrier, volatileCarrier } from '../turns/intake';
 import { type QueueEntry, TurnQueue } from '../turns/queue';
 import { type TurnBroadcast, TurnRunner, type TurnRunnerPorts } from '../turns/runner';
 
 // The conversation: record + queue + kind policy + the runner of its current turn. Turn
 // mechanics live in turns/, kind behavior in the policy chosen once by kind.
 
-export type { SeatTurnInput, SessionRelativePrompt } from '../turns/input';
+export type { SessionRelativePrompt } from '../turns/input';
 
 export type ConversationBroadcast = ServerMessageInput | TurnBroadcast;
 
@@ -375,9 +374,7 @@ export class Conversation extends EventEmitter {
     return {
       id: this.id,
       workingDirectory: this.workingDirectory,
-      view: this,
       visibility: () => (this._kind.t === 'buddy' ? this._kind.visibility : 'foreground'),
-      provider: () => this.provider,
       hasProcess: () => this.process !== null,
       hasStartedSession: () => this._hasStartedSession,
       resetProcess: () => this.resetProcess(),
@@ -392,12 +389,9 @@ export class Conversation extends EventEmitter {
       },
       processQueue: () => this.processQueue(),
       maxRuntimeReached: () => this.runner.timeout('max'),
-      refuseAutomationTranscript: (message) => this.refuseAutomationTranscript(message),
       send: (prompt, input) => this.sendMessageInternal(prompt, input),
-      on: (event, listener) => this.on(event, listener),
       once: (event, listener) => this.once(event, listener),
       off: (event, listener) => this.off(event, listener),
-      emit: (event, ...args) => this.emit(event, ...args),
     };
   }
 
@@ -450,17 +444,6 @@ export class Conversation extends EventEmitter {
     this.sendMessageInternal(sameEitherWay(content), ownerInput ?? unknownInput());
   }
 
-  // Both wordings: resume is decided at admission (docs/turn-lifecycle.md#session-relative-prompt).
-  sendSessionRelativeMessage(prompt: SessionRelativePrompt, input: SeatTurnInput): void {
-    if (this.refusesUserInput()) return;
-    this.sendMessageInternal(prompt, input);
-  }
-
-  /** Coordinator-only admission for an owned automation occurrence (see BuddyTurnPolicy). */
-  sendAutomationMessage(content: string): void {
-    this._policy.sendAutomation(content);
-  }
-
   /** Automation transcripts are read-only: refuse (with a system line) and report it. */
   private refusesUserInput(): boolean {
     if (this._policy.acceptsUserInput) return false;
@@ -468,10 +451,9 @@ export class Conversation extends EventEmitter {
     return true;
   }
 
-  private refuseAutomationTranscript(message?: string): void {
+  private refuseAutomationTranscript(): void {
     this.addSystemMessage(
-      message ??
-        'This automation transcript is read-only. Start an ordinary Buddy conversation to continue working.'
+      'This automation transcript is read-only. Start an ordinary Buddy conversation to continue working.'
     );
   }
 
@@ -665,12 +647,6 @@ export class Conversation extends EventEmitter {
 
   stop(): void {
     if (this._policy.stop()) this.stopOwnedTurn();
-  }
-
-  /** Coordinator-only process stop (see BuddyTurnPolicy.stopAutomation). */
-  stopAutomationTurn(): void {
-    this._policy.stopAutomation();
-    this.stopOwnedTurn();
   }
 
   private stopOwnedTurn(): void {

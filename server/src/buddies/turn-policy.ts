@@ -11,9 +11,9 @@ import type {
 } from '@unleashd/shared';
 import { parseBuddyBuilderToolResult } from '@unleashd/shared';
 import { BUDDY_RUN_LEASE_RENEW_MS } from '../constants/timeouts';
-import type { ConversationRuntimeView } from '../conversations/runtime';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import { type SessionRelativePrompt, type TurnInput, sameEitherWay } from '../turns/input';
+import { type InputCarrier, encodeEntry } from '../turns/intake';
 import {
   type AdoptedReview,
   type MemorySnapshot,
@@ -27,7 +27,6 @@ import type { GrantRecord } from './grants';
 import { HARNESS_MEMORY_OFF } from './harness-memory';
 import type { BuddyPolicyPort } from './policy-port';
 import type { OwnedChatRun } from './runner';
-import { type InputCarrier, encodeEntry } from '../turns/intake';
 
 /**
  * The Buddy and Buddy Builder turn policies: what a Buddy thread adds to a turn (run-slot
@@ -48,9 +47,7 @@ export interface BuddyTurnPolicyDependencies {
 export interface BuddyPolicyHost {
   readonly id: string;
   readonly workingDirectory: string;
-  readonly view: ConversationRuntimeView;
   visibility(): BuddyVisibility;
-  provider(): ProviderName;
   hasProcess(): boolean;
   hasStartedSession(): boolean;
   resetProcess(): void;
@@ -60,12 +57,9 @@ export interface BuddyPolicyHost {
   dropPendingHead(): void;
   processQueue(): void;
   maxRuntimeReached(): void;
-  refuseAutomationTranscript(message?: string): void;
   send(prompt: SessionRelativePrompt, input: TurnInput): void;
-  on(event: string, listener: (...args: string[]) => void): void;
   once(event: string, listener: (...args: string[]) => void): void;
   off(event: string, listener: (...args: string[]) => void): void;
-  emit(event: string, ...args: string[]): void;
 }
 
 // --- Memory snapshots -----------------------------------------------------
@@ -120,10 +114,6 @@ function assertBuddyProviderSupportsMcp(provider: ProviderName): void {
   throw new Error(
     `Provider "${provider}" cannot start Buddy conversations because its harness cannot guarantee required Buddy state tools.`
   );
-}
-
-function rejectAutomation(): never {
-  throw new Error('Legacy automation transcripts are read-only; schedules run as Buddy runs now');
 }
 
 // --- Buddy Builder -------------------------------------------------------------
@@ -215,12 +205,6 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
   }
   runCoordination(): Promise<void> {
     return Promise.reject(new Error('Coordination identity or claim is missing'));
-  }
-  sendAutomation(): void {
-    rejectAutomation();
-  }
-  stopAutomation(): void {
-    this.revoke();
   }
 }
 
@@ -769,13 +753,5 @@ export class BuddyTurnPolicy implements TurnPolicy {
       return Promise.reject(new Error(refusal));
     }
     return settled;
-  }
-
-  sendAutomation(): void {
-    rejectAutomation();
-  }
-
-  stopAutomation(): void {
-    this.revoke();
   }
 }

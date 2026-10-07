@@ -17,9 +17,6 @@ export type TurnInput = Readonly<{
 
 export type OwnerInput = Readonly<{ origin: 'owner_input'; inputId: string }>;
 
-/** A channel seat turn, attributed by the author of its stored trigger post. */
-export type SeatTurnInput = Readonly<{ origin: 'owner_input' | 'buddy_post'; inputId: string }>;
-
 /**
  * One turn's input worded for the provider session it reaches: `resumed` for a
  * session that already holds this conversation's earlier turns, `fresh` for a
