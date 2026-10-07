@@ -81,6 +81,9 @@ async function buildSource({ home, bundle, publishOnly = false, run: execute, st
     UNLEASHD_SOURCE_BUILDS: '1',
     UNLEASHD_INSTALL_RUST_DIRECT: '1',
   };
+  // Packaged servers use production mode, but source builds need devDependencies.
+  // Guard: desktop-source-install regression starts from a production-only install.
+  env.NODE_ENV = undefined;
   const run =
     execute ||
     ((command, args, options = {}) =>
@@ -134,7 +137,8 @@ async function buildSource({ home, bundle, publishOnly = false, run: execute, st
   // Preflight owns Rust setup. Never launch an agent CLI to install it from the desktop helper.
   progress('Installing dependencies and Rust');
   console.log('Installing source dependencies and building (Rust may need first-time setup)…');
-  run('pnpm', ['install', '--frozen-lockfile']);
+  // A non-TTY purge prompt can exit 0 without reinstalling a failed production install.
+  run('pnpm', ['install', '--frozen-lockfile', '--config.confirmModulesPurge=false']);
   // A fresh clone has no CLI/shared dist yet; build establishes those before test typecheck.
   progress('Building the update');
   run('pnpm', ['build']);
