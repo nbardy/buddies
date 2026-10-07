@@ -1537,7 +1537,7 @@ fn follow_fixture(s: &mut Store) -> (Post, impl Fn(&str, &str) -> PostInput + us
         .create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "p".into(), key: "g".into() })
         .unwrap();
     let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, from_conversation_id: None, ..request(body, key) };
-    let root = s.post(&buddy("mid"), ChannelRef::Id { id: general.id }, say("ship the model", "root")).unwrap();
+    let root = s.post(&Actor::Owner, ChannelRef::Id { id: general.id }, say("ship the model", "root")).unwrap();
     let root_id = root.id.clone();
     (root, move |body: &str, key: &str| PostInput { reply_to_id: Some(root_id.clone()), ..say(body, key) })
 }
@@ -1555,10 +1555,18 @@ fn a_follow_returns_the_unread_posts_once_and_subscribes() {
     s.post(&buddy("peer"), channel.clone(), reply("first", "a")).unwrap();
     s.post(&buddy("mid"), channel.clone(), reply("mine", "m")).unwrap();
     s.post(&buddy("peer"), channel, reply("second", "b")).unwrap();
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "a Buddy that never followed a public thread is delivered nothing");
+    // A Buddy that never followed a public thread is delivered nothing in a conversation. A
+    // participant gets only the follow-up gate's run (no conversation; owner decision 2026-10-07).
+    let mut gated = Vec::new();
+    while let Some(claim) = s.claim_run(lease(60_000)).unwrap() {
+        gated.push((claim.run.buddy_id.clone(), claim.run.conversation_id.clone()));
+        s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Cancelled { reason: "gate said no".into() }).unwrap();
+    }
+    gated.sort();
+    assert_eq!(gated, [("mid".to_string(), None), ("peer".to_string(), None)]);
     // "mine" was written without "first" being shown, so it did not read past it (decision K).
     let read = s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
-    assert_eq!((bodies(&read.posts), read.unshown), (vec!["first", "second"], 0));
+    assert_eq!((bodies(&read.posts), read.unshown), (vec!["ship the model", "first", "second"], 0));
     assert!(s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts.is_empty(), "returning them read them");
     assert!(matches!(s.follow_thread(&Actor::Owner, &root.id, Some("c".into()), 20), Err(CoreError::Invalid(_))), "the owner reads in the app");
 }
@@ -1805,15 +1813,22 @@ fn deliveries_to_one_buddy_in_one_thread_run_one_at_a_time_until_it_has_a_conver
     assert!(s.claim_run(lease(60_000)).unwrap().is_some());
 }
 
-// Step 5 removed step 4's seam: posting subscribes in public and task threads too (decision F).
+// Owner decision 2026-10-07 (agent_notes/2026-10-06_buddies-target-system-review.md, item 7 and 8):
+// step 5 made posting subscribe in public and task threads too, so replies followed whichever
+// conversation wrote last. Back to step 4's seam: a thread's follow-up reaches the Buddy's seat
+// (a run with no conversation), and only DMs, requests and explicit follows subscribe.
 #[test]
-fn a_buddy_posting_from_a_conversation_in_a_public_thread_follows_it() {
+fn posting_in_a_public_thread_does_not_subscribe_and_a_follow_up_goes_to_the_seat() {
     let mut f = fixture();
     let s = &mut f.store;
     let (root, reply) = follow_fixture(s);
     let channel = ChannelRef::Id { id: root.channel_id.clone() };
     s.post(&buddy("peer"), channel.clone(), PostInput { from_conversation_id: Some("conv-peer".into()), ..reply("on it", "p1") }).unwrap();
-    s.post(&Actor::Owner, channel, reply("and then?", "o1")).unwrap();
-    let claim = s.claim_run(lease(60_000)).unwrap().expect("peer's conversation follows the thread it posted in");
-    assert_eq!((claim.run.buddy_id.as_str(), claim.run.conversation_id.as_deref()), ("peer", Some("conv-peer")));
+    s.post(&Actor::Owner, channel.clone(), reply("and then?", "o1")).unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().expect("peer posted here, so the gate is asked");
+    assert_eq!((claim.run.buddy_id.as_str(), claim.run.conversation_id.as_deref()), ("peer", None));
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Cancelled { reason: "gate said no".into() }).unwrap();
+    // A failure notice is not announced: it starts no gate.
+    s.post(&buddy("mid"), channel, PostInput { purpose: Some("reply_failed".into()), ..reply("Couldn't reply", "f1") }).unwrap();
+    assert!(s.claim_run(lease(60_000)).unwrap().is_none());
 }

@@ -139,8 +139,43 @@ pub(crate) fn fan_out(tx: &Transaction, post: &Post, skip: &[String]) -> Result<
         )?
         .query_map(params![root_of(post), post.author.buddy_id()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?,
     )?;
-    for (buddy_id, conversation_id) in subscribers.into_iter().filter(|(b, _)| !skip.contains(b)) {
-        enqueue_delivery(tx, &buddy_id, post, Some(conversation_id))?;
+    for (buddy_id, conversation_id) in subscribers.iter().filter(|(b, _)| !skip.contains(b)) {
+        enqueue_delivery(tx, buddy_id, post, Some(conversation_id.clone()))?;
+    }
+    follow_ups(tx, post, skip, &subscribers)
+}
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/// Public and task threads (owner decision 2026-10-07, restoring the follow-up gate of 2026-09):
+/// a reply there reaches every OTHER Buddy that has posted in the thread and is not subscribed or
+/// woken another way, as a delivery with no conversation. The host asks that Buddy "should you
+/// respond?" before it opens its seat (runner.ts `followUpGate`); a `<no>` settles the run with no
+/// turn. Direct channels have no participants beyond their members, who subscribe by posting.
+/// A failure notice is not announced, so it starts no gate (it would answer a notice with a turn).
+fn follow_ups(tx: &Transaction, post: &Post, skip: &[String], subscribed: &[(String, String)]) -> Result<()> {
+    let Some(root_id) = &post.root_id else { return Ok(()) };
+    if post.purpose.as_deref() == Some("reply_failed") {
+        return Ok(());
+    }
+    let direct: bool = tx
+        .prepare_cached("SELECT kind = 'direct' FROM channel WHERE id = ?1")?
+        .query_row(params![post.channel_id], |r| r.get(0))?;
+    if direct {
+        return Ok(());
+    }
+    let participants = collect(
+        tx.prepare_cached(
+            "SELECT DISTINCT p.author_id FROM post p JOIN buddy b ON b.id = p.author_id
+             WHERE (p.root_id = ?1 OR p.id = ?1) AND b.status = 'active' AND p.author_id IS NOT ?2
+               AND coalesce(p.purpose, '') <> 'reply_failed'",
+        )?
+        .query_map(params![root_id, post.author.buddy_id()], |r| r.get::<_, String>(0))?,
+    )?;
+    for buddy_id in participants {
+        if skip.contains(&buddy_id) || subscribed.iter().any(|(b, _)| *b == buddy_id) {
+            continue;
+        }
+        enqueue_delivery(tx, &buddy_id, post, None)?;
     }
     Ok(())
 }
