@@ -404,13 +404,13 @@ impl Store {
                 RunInput::Post { post_id } => {
                     tx.execute("UPDATE post SET conversation_id = ?2 WHERE id = ?1", params![post_id, conversation_id])?;
                     let request = get_post(tx, post_id)?;
-                    let root = request.root_id.clone().unwrap_or(request.id.clone());
+                    let root = request.root();
                     let me = Actor::Buddy { id: run.buddy_id.clone() };
                     // A Buddy's own worker leaves the thread's subscription and mark to its spawner
                     // (deliveries.rs `from_own_worker`).
                     if request.author != me {
-                        deliveries::subscribe(tx, &run.buddy_id, &root, Some(conversation_id))?;
-                        deliveries::catch_up(tx, &me, &root, &request.ord)?;
+                        deliveries::subscribe(tx, &run.buddy_id, root, Some(conversation_id))?;
+                        deliveries::catch_up(tx, &me, root, &request.ord)?;
                     }
                 }
                 RunInput::Deliver { post_id } if run.conversation_id.as_deref() != Some(conversation_id) => {
@@ -421,7 +421,7 @@ impl Store {
                     // gate (owner decision 2026-10-07; guard `a_seat_bound_in_a_public_thread_is_not_subscribed`).
                     let direct = matches!(crate::posts::get_channel(tx, &post.channel_id)?.kind, ChannelKind::Direct { .. });
                     if direct || post.author.buddy_id() == Some(run.buddy_id.as_str()) {
-                        deliveries::subscribe(tx, &run.buddy_id, post.root_id.as_deref().unwrap_or(&post.id), Some(conversation_id))?;
+                        deliveries::subscribe(tx, &run.buddy_id, post.root(), Some(conversation_id))?;
                     }
                 }
                 RunInput::Deliver { .. } | RunInput::Chat { .. } | RunInput::Retired { .. } => {}

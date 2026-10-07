@@ -279,26 +279,17 @@ impl Store {
             let id = idempotent(tx, &m, |tx| {
                 // Insert, then flip only an awaiting request. A request that is no longer awaiting fails
                 // the flip, and the error rolls the answer back with the transaction: one answer each.
-                let ord = crate::ids::next().to_string();
-                let id = format!("post_{ord}");
-                let root = request.root_id.clone().unwrap_or(request.id.clone());
-                tx.execute(
-                    "INSERT INTO post (id, channel_id, author_id, root_id, reply_to_id, task_id, body, evidence, conversation_id, created_at, ord)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                    params![
-                        id,
-                        request.channel_id,
-                        actor.buddy_id(),
-                        root,
-                        request.id,
-                        request.task_id,
-                        input.body,
-                        evidence_json(&input.evidence),
-                        input.from_conversation_id,
-                        now_iso(),
-                        ord
-                    ],
-                )?;
+                let id = write_post(tx, NewPost {
+                    channel_id: &request.channel_id,
+                    author: actor.buddy_id(),
+                    root_id: Some(request.root()),
+                    reply_to_id: Some(&request.id),
+                    task_id: request.task_id.as_deref(),
+                    body: &input.body,
+                    evidence: &input.evidence,
+                    conversation_id: input.from_conversation_id.as_deref(),
+                    ..NewPost::default()
+                })?;
                 let flipped = tx.execute(
                     "UPDATE post SET request = 'answered', answer_id = ?2 WHERE id = ?1 AND request = 'awaiting'",
                     params![request.id, id],
@@ -815,31 +806,19 @@ fn insert_post(
     if input.broadcast && root_id.is_none() {
         return Err(CoreError::Invalid("only a reply can also be sent to the channel".into()));
     }
-    let ord = crate::ids::next().to_string();
-    let id = format!("post_{ord}");
-    tx.prepare_cached(
-        "INSERT INTO post (id, channel_id, author_id, root_id, reply_to_id, task_id, purpose, body, evidence, request,
-           conversation_id, created_at, ord, broadcast)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-    )?
-    .execute(params![
-        id,
-        channel.id,
-        actor.buddy_id(),
-        root_id,
-        input.reply_to_id,
+    let id = write_post(tx, NewPost {
+        channel_id: &channel.id,
+        author: actor.buddy_id(),
+        root_id: root_id.as_deref(),
+        reply_to_id: input.reply_to_id.as_deref(),
         task_id,
-        input.purpose,
-        input.body,
-        evidence_json(&input.evidence),
-        ask.column(),
-        // Provenance: the conversation the post was written from. A thread seat reads it to skip
-        // its own posts; in a DM it is also where later posts by others are delivered.
-        input.from_conversation_id,
-        now_iso(),
-        ord,
-        input.broadcast
-    ])?;
+        purpose: input.purpose.as_deref(),
+        body: &input.body,
+        evidence: &input.evidence,
+        request: ask.column(),
+        conversation_id: input.from_conversation_id.as_deref(),
+        broadcast: input.broadcast,
+    })?;
     let owed: Vec<String> = ask.owed_by().iter().filter_map(Actor::buddy_id).map(str::to_owned).collect();
     let woken: Vec<String> = input.mentions.iter().map(|m| m.buddy_id.clone()).collect();
     let skip: Vec<String> = owed.iter().chain(&woken).cloned().collect();
@@ -891,7 +870,7 @@ fn require_worker_authority(tx: &Transaction, actor: &Actor, ask: &Ask, config: 
 /// A Buddy's self-spawned worker writing in its request's thread does neither 1 nor 2: the thread's
 /// subscription and mark are its spawner's (deliveries.rs `from_own_worker`).
 fn after_write(tx: &Transaction, actor: &Actor, channel: &Channel, post: &Post, from: Option<&str>, skip: &[String], spawner_owns: bool) -> Result<()> {
-    let root = post.root_id.as_deref().unwrap_or(&post.id);
+    let root = post.root();
     if !spawner_owns && !crate::deliveries::from_own_worker(tx, actor, post, from)? {
         crate::deliveries::catch_up(tx, actor, root, &post.ord)?;
         if let (Actor::Buddy { id }, Some(conversation), ChannelKind::Direct { .. }) = (actor, from, &channel.kind) {
@@ -906,28 +885,76 @@ fn after_write(tx: &Transaction, actor: &Actor, channel: &Channel, post: &Post, 
 /// were (its own mark moving past the post would fence the post's own delivery). Delivered to
 /// every subscriber but the author, like any post.
 pub(crate) fn system_post(tx: &Transaction, author: &str, channel: &Channel, reply_to: Option<&Post>, purpose: &str, body: &str) -> Result<Post> {
-    let ord = crate::ids::next().to_string();
-    let id = format!("post_{ord}");
-    let root = reply_to.map(|p| p.root_id.clone().unwrap_or(p.id.clone()));
     let task_id = match &channel.kind {
-        ChannelKind::Task { task_id } => Some(task_id.clone()),
-        ChannelKind::Public { .. } | ChannelKind::Direct { .. } => reply_to.and_then(|p| p.task_id.clone()),
+        ChannelKind::Task { task_id } => Some(task_id.as_str()),
+        ChannelKind::Public { .. } | ChannelKind::Direct { .. } => reply_to.and_then(|p| p.task_id.as_deref()),
     };
-    tx.prepare_cached(
-        "INSERT INTO post (id, channel_id, author_id, root_id, reply_to_id, task_id, purpose, body, created_at, ord)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-    )?
-    .execute(params![id, channel.id, author, root, reply_to.map(|p| &p.id), task_id, purpose, body, now_iso(), ord])?;
+    let id = write_post(tx, NewPost {
+        channel_id: &channel.id,
+        author: Some(author),
+        root_id: reply_to.map(Post::root),
+        reply_to_id: reply_to.map(|p| p.id.as_str()),
+        task_id,
+        purpose: Some(purpose),
+        body,
+        ..NewPost::default()
+    })?;
     let post = get_post(tx, &id)?;
     crate::deliveries::fan_out(tx, &post, &[])?;
     Ok(post)
+}
+
+/// One `post` row. Pattern: one-write-path (docs/patterns.md#one-write-path): the only
+/// `INSERT INTO post`, so the answer, a post and a system post cannot drift in how they fill it.
+/// `conversation_id` is provenance: the conversation the post was written from. A thread seat reads
+/// it to skip its own posts; in a DM it is also where later posts by others are delivered.
+#[derive(Default)]
+struct NewPost<'a> {
+    channel_id: &'a str,
+    author: Option<&'a str>,
+    root_id: Option<&'a str>,
+    reply_to_id: Option<&'a str>,
+    task_id: Option<&'a str>,
+    purpose: Option<&'a str>,
+    body: &'a str,
+    evidence: &'a [String],
+    request: Option<&'static str>,
+    conversation_id: Option<&'a str>,
+    broadcast: bool,
+}
+
+fn write_post(tx: &Transaction, p: NewPost) -> Result<String> {
+    let ord = crate::ids::next().to_string();
+    let id = format!("post_{ord}");
+    tx.prepare_cached(
+        "INSERT INTO post (id, channel_id, author_id, root_id, reply_to_id, task_id, purpose, body, evidence, request,
+           conversation_id, created_at, ord, broadcast)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+    )?
+    .execute(params![
+        id,
+        p.channel_id,
+        p.author,
+        p.root_id,
+        p.reply_to_id,
+        p.task_id,
+        p.purpose,
+        p.body,
+        evidence_json(p.evidence),
+        p.request,
+        p.conversation_id,
+        now_iso(),
+        ord,
+        p.broadcast
+    ])?;
+    Ok(id)
 }
 
 /// A reply joins its parent's thread, which must be in the same channel.
 fn thread_root(tx: &Transaction, parent_id: &str, channel_id: &str) -> Result<String> {
     let parent = get_post(tx, parent_id)?;
     match parent.channel_id == channel_id {
-        true => Ok(parent.root_id.unwrap_or(parent.id)),
+        true => Ok(parent.root().to_owned()),
         false => Err(CoreError::Invalid(format!("post {parent_id} is in another channel"))),
     }
 }

@@ -43,10 +43,6 @@ const SHOWABLE: &str = "p.ord > h.mark AND (p.author_id IS NOT ?1 OR EXISTS (
     SELECT 1 FROM run d WHERE d.input_kind = 'deliver' AND d.input_id = p.id AND d.buddy_id = ?1
       AND d.status IN ('queued','running','cancel_requested')))";
 
-fn root_of(post: &Post) -> &str {
-    post.root_id.as_deref().unwrap_or(&post.id)
-}
-
 /// Moves `reader`'s mark in a thread forward to `ord` (never back), creating the row, then fences
 /// a Buddy's deliveries. The subscription column is left as it is.
 pub(crate) fn advance(tx: &Transaction, reader: &Actor, root_id: &str, ord: &str) -> Result<()> {
@@ -137,7 +133,7 @@ pub(crate) fn fan_out(tx: &Transaction, post: &Post, skip: &[String]) -> Result<
             "SELECT t.reader, t.conversation_id FROM thread_read t JOIN buddy b ON b.id = t.reader
              WHERE t.root_id = ?1 AND t.conversation_id IS NOT NULL AND b.status = 'active' AND t.reader IS NOT ?2",
         )?
-        .query_map(params![root_of(post), post.author.buddy_id()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?,
+        .query_map(params![post.root(), post.author.buddy_id()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?,
     )?;
     for (buddy_id, conversation_id) in subscribers.iter().filter(|(b, _)| !skip.contains(b)) {
         enqueue_delivery(tx, buddy_id, post, Some(conversation_id.clone()))?;
@@ -196,7 +192,7 @@ pub(crate) fn wake(tx: &Transaction, channel: &Channel, post: &Post, mention: &M
     if !wakeable || post.author.buddy_id() == Some(mention.buddy_id.as_str()) {
         return Ok(());
     }
-    let conversation = subscription(tx, &mention.buddy_id, root_of(post))?;
+    let conversation = subscription(tx, &mention.buddy_id, post.root())?;
     tx.enqueue(EnqueueInput {
         buddy_id: mention.buddy_id.clone(),
         input: RunInput::Deliver { post_id: post.id.clone() },
@@ -238,7 +234,7 @@ pub(crate) fn from_own_worker(tx: &Transaction, actor: &Actor, post: &Post, from
 /// Delivers a post its author's own spawner must hear: a self-request's answer or failure. The
 /// author-based fan-out never delivers a Buddy's post to that same Buddy.
 pub(crate) fn deliver_to_spawner(tx: &Transaction, buddy_id: &str, post: &Post) -> Result<()> {
-    let conversation = subscription(tx, buddy_id, root_of(post))?;
+    let conversation = subscription(tx, buddy_id, post.root())?;
     enqueue_delivery(tx, buddy_id, post, conversation).map(|_| ())
 }
 
@@ -261,7 +257,7 @@ pub(crate) fn compose(tx: &Transaction, run: &Run, post: &Post) -> Result<Delive
     // A retried attempt always shows its trigger: the failed attempt marked it read when it started
     // (`delivered`), and a retry that showed nothing would settle "already read" and answer nothing.
     let retried = (run.attempt > 1).then_some(post.id.as_str());
-    let args = params![run.buddy_id, run.conversation_id, root_of(post), run.through_ord, retried];
+    let args = params![run.buddy_id, run.conversation_id, post.root(), run.through_ord, retried];
     let window = "(?4 IS NULL OR p.ord <= ?4)";
     let select = |what: &str, join: &str| {
         format!("SELECT {what} FROM covered h JOIN post p ON {join} WHERE ({SHOWABLE} OR p.id = ?5) AND {window}")
@@ -290,7 +286,7 @@ pub(crate) fn compose(tx: &Transaction, run: &Run, post: &Post) -> Result<Delive
     let unshown = total - posts.len() as i64;
     let subscribed = match run.conversation_id {
         Some(_) => None,
-        None => subscription(tx, &run.buddy_id, root_of(post))?,
+        None => subscription(tx, &run.buddy_id, post.root())?,
     };
     Ok(Delivery::Posts { posts, unshown, subscribed })
 }
@@ -301,7 +297,7 @@ pub(crate) fn delivered(tx: &Transaction, run: &Run, post: &Post) -> Result<()> 
     let Some(through) = &run.through_ord else { return Ok(()) };
     let roots = collect(
         tx.prepare_cached(&format!("WITH {COVERED} SELECT root FROM covered"))?
-            .query_map(params![run.buddy_id, run.conversation_id, root_of(post)], |r| r.get::<_, String>(0))?,
+            .query_map(params![run.buddy_id, run.conversation_id, post.root()], |r| r.get::<_, String>(0))?,
     )?;
     let reader = Actor::Buddy { id: run.buddy_id.clone() };
     for root in roots {

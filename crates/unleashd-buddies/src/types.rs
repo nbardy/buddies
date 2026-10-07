@@ -362,6 +362,13 @@ pub struct Post {
     pub broadcast: bool,
 }
 
+impl Post {
+    /// The thread this post belongs to: its root's id, or its own for a root.
+    pub fn root(&self) -> &str {
+        self.root_id.as_deref().unwrap_or(&self.id)
+    }
+}
+
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Doc {
