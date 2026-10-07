@@ -101,6 +101,7 @@ async function main() {
   });
   for (const file of [
     'desktop-source.mjs',
+    'desktop-source-git.mjs',
     'desktop-runtime.mjs',
     'desktop-selection.mjs',
     'desktop-source-status.mjs',

@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { smokeRuntime, stageRuntime } from './desktop-runtime.mjs';
+import { reconcileSource } from './desktop-source-git.mjs';
 import { writeSourceStatus } from './desktop-source-status.mjs';
 
 export { selectedRuntime } from './desktop-selection.mjs';
@@ -62,7 +63,7 @@ export async function publishRuntime({
   }
 }
 
-async function buildSource({ home, bundle, publishOnly = false }) {
+async function buildSource({ home, bundle, publishOnly = false, run: execute, stage, smoke }) {
   const progress = (phase) =>
     writeSourceStatus(home, { kind: 'preparing', pid: process.pid, phase });
   const source = path.join(home, 'source');
@@ -80,14 +81,16 @@ async function buildSource({ home, bundle, publishOnly = false }) {
     UNLEASHD_SOURCE_BUILDS: '1',
     UNLEASHD_INSTALL_RUST_DIRECT: '1',
   };
-  const run = (command, args, options = {}) =>
-    execFileSync(command, args, {
-      cwd: source,
-      env,
-      stdio: 'inherit',
-      timeout: 30 * 60_000,
-      ...options,
-    });
+  const run =
+    execute ||
+    ((command, args, options = {}) =>
+      execFileSync(command, args, {
+        cwd: source,
+        env,
+        stdio: 'inherit',
+        timeout: 30 * 60_000,
+        ...options,
+      }));
   // OS Git (including Apple's first-use command-line-tools requirement) must work before cloning.
   progress('Checking Git and build tools');
   run('git', ['--version'], { cwd: home, timeout: 15_000 });
@@ -107,36 +110,38 @@ async function buildSource({ home, bundle, publishOnly = false }) {
         fs.rmSync(temporary, { recursive: true, force: true });
       }
     }
-    const pnpm = path.join(toolchain, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs');
-    if (!fs.existsSync(pnpm)) {
-      progress('Installing pnpm');
-      console.log('Installing pnpm 9.15.0 in the app toolchain…');
-      run(
-        node,
-        [
-          path.join(bundle, 'node', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-          'install',
-          '--prefix',
-          toolchain,
-          '--no-audit',
-          '--no-fund',
-          'pnpm@9.15.0',
-        ],
-        { cwd: home }
-      );
-    }
-    // Preflight owns Rust setup. Never launch an agent CLI to install it from the desktop helper.
-    progress('Installing dependencies and Rust');
-    console.log('Installing source dependencies and building (Rust may need first-time setup)…');
-    run('pnpm', ['install', '--frozen-lockfile']);
   }
+  progress('Reconciling source submodules');
+  reconcileSource(source, run);
+  const pnpm = path.join(toolchain, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs');
+  if (!fs.existsSync(pnpm)) {
+    progress('Installing pnpm');
+    console.log('Installing pnpm 9.15.0 in the app toolchain…');
+    run(
+      node,
+      [
+        path.join(bundle, 'node', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+        'install',
+        '--prefix',
+        toolchain,
+        '--no-audit',
+        '--no-fund',
+        'pnpm@9.15.0',
+      ],
+      { cwd: home }
+    );
+  }
+  // Preflight owns Rust setup. Never launch an agent CLI to install it from the desktop helper.
+  progress('Installing dependencies and Rust');
+  console.log('Installing source dependencies and building (Rust may need first-time setup)…');
+  run('pnpm', ['install', '--frozen-lockfile']);
   // A fresh clone has no CLI/shared dist yet; build establishes those before test typecheck.
   progress('Building the update');
   run('pnpm', ['build']);
   progress('Checking the build');
   run('pnpm', ['typecheck']);
   progress('Verifying the staged runtime');
-  const runtime = await publishRuntime({ home, bundle, source, run });
+  const runtime = await publishRuntime({ home, bundle, source, run, stage, smoke });
   const active = JSON.parse(fs.readFileSync(path.join(home, 'active-runtime.json'), 'utf8'));
   writeSourceStatus(home, {
     kind: 'ready',
