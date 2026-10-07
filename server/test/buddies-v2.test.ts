@@ -5174,3 +5174,104 @@ test('channel files: arbitrary uploads post durable links and download without e
     await w.close();
   }
 });
+
+// Cross-root seat busy (2026-10-07, task_01a117e5): a seat that is mid-turn on a delivery from
+// ANOTHER thread. The follow-up in this thread is queued with no conversation (a public seat is
+// unsubscribed, 5d75897), so the claim gate cannot see the collision; the runner finds out at
+// bind. It must wait for the seat, never post "Couldn't reply: conversation_busy".
+// The setup: Lead's seat of thread A follows thread B (a tool follow), so a B post runs in A's seat.
+async function busyCrossRootSeat(w: Awaited<ReturnType<typeof world>>) {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let arrived!: () => void;
+  const started = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  const say = async (body: string, replyToId?: string) => {
+    const post = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      { kind: 'inform', body, replyToId, evidence: [], mentions: [], broadcast: false, key: body }
+    );
+    w.announce(post);
+    return post;
+  };
+  const rootB = await say('Thread B: unrelated work');
+  w.during.set(1, async (turn) => {
+    // Unfollow A (the seat must stay unsubscribed there) and follow B: B's posts run in this seat.
+    await call(turn.mcp, 'channel_read', { read: { threadId: rootA.id, follow: false } });
+    await call(turn.mcp, 'channel_read', { read: { threadId: rootB.id, follow: { wait: 0 } } });
+  });
+  // Turn 2 makes no Buddy tool call (a reply post would be one), so nothing steers it.
+  w.silent.add(2);
+  w.during.set(2, async () => {
+    arrived();
+    await blocked;
+  });
+  const rootA = await say(`[@Lead](buddy:${w.lead.id}) thread A first ask`);
+  await until(
+    async () => w.turns.length === 1 && (await w.channels.responding(w.general.id)).length === 0,
+    'turn 1'
+  );
+  const fromB = await say('news in thread B', rootB.id);
+  await started;
+  const followUp = await say(`[@Lead](buddy:${w.lead.id}) thread A follow-up`, rootA.id);
+  return { rootA, fromB, followUp, release, wait: blocked };
+}
+
+const runOf = async (w: Awaited<ReturnType<typeof world>>, postId: string) =>
+  (await w.runs(w.lead.id)).find((r) => r.input.kind === 'deliver' && r.input.postId === postId)!;
+
+test('a follow-up whose seat is busy on another thread waits, then runs, with no failure notice', async () => {
+  const w = await world();
+  let release = () => {};
+  try {
+    const s = await busyCrossRootSeat(w);
+    release = s.release;
+    const rows = await until(async () => {
+      const id = (await runOf(w, s.followUp.id)).id;
+      const found = await w.core.listRunRows(OWNER, { kind: 'workspace', workspaceId: w.ws }, 50);
+      return found.find((r) => r.id === id && r.waiting) ?? false;
+    }, 'the follow-up to wait');
+    assert.deepEqual(rows.waiting, { kind: 'conversation_busy' });
+    assert.equal(w.turns.length, 2, 'it did not start a second turn in the busy seat');
+    release();
+    await until(async () => (await runOf(w, s.followUp.id)).status === 'complete', 'it runs after');
+    assert.equal(w.turns.length, 3);
+    assert.match(w.turns[2].request.prompt, /thread A follow-up/);
+    const page = await w.core.listPosts(OWNER, { kind: 'thread', rootId: s.rootA.id }, null, 50);
+    assert.ok(!page.posts.some((p) => p.purpose === 'reply_failed'));
+  } finally {
+    release();
+    await w.close();
+  }
+});
+
+test('a follow-up waiting on a busy seat is consumed when the busy turn reads its thread', async () => {
+  const w = await world();
+  let release = () => {};
+  try {
+    const s = await busyCrossRootSeat(w);
+    release = s.release;
+    await until(
+      async () => (await runOf(w, s.followUp.id)).status === 'queued',
+      'the follow-up to wait'
+    );
+    // The busy turn now reads thread A through a Buddy tool: it has seen the post.
+    await call(w.turns[1].mcp, 'channel_read', { read: { threadId: s.rootA.id, follow: false } });
+    release();
+    await until(
+      async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+      'the busy turn to end'
+    );
+    const run = await runOf(w, s.followUp.id);
+    assert.equal(run.status, 'cancelled');
+    assert.match(run.error ?? '', /already read/);
+    assert.equal(w.turns.length, 2, 'no second turn for a post already read');
+  } finally {
+    release();
+    await w.close();
+  }
+});

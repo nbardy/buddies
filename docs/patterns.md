@@ -268,6 +268,24 @@ SIGKILL", crate `a_queued_owner_message_survives_a_restart_and_still_goes_first`
 `a_v2_file_is_copied_then_migrated_with_its_records_intact`, crate `a_dead_holder_requeues_an_unexecuted_run_and_fails_an_executed_one`,
 `without_the_executing_backfill_a_legacy_running_turn_would_be_replayed` (tests/migration.rs).
 
+## thread-seat-busy
+**Smell:** a run is claimed, then fails `conversation_busy` because the seat the HOST picks after the
+claim is mid-turn. A public or task thread's seat is unsubscribed on purpose (5d75897: later posts go
+through the follow-up gate), so its run is queued with `conversation_id` NULL and the claim gate cannot
+know where it will run. The same-root rule only sees a running delivery of the SAME thread; a seat
+busy on a delivery from another root (a tool `follow` binds one seat to several threads) slipped
+through and posted "Couldn't reply: conversation_busy" (2026-10-07, three launch-thread replies).
+**Pattern:** the one gate, made to know. When `bind_run` says `conversation_busy`, the holder calls
+`defer_run`: the run goes back to the queue naming the seat, and the existing `conversation_busy` rule
+shows it waiting and releases it when the live turn ends. A turn that reads the thread meanwhile
+(MCP steering, aa19d5a) fences the posts and the re-claim settles it as already read, with no second
+turn. Chosen over computing the seat id in the crate: the id derives from host state (generations,
+the thread's decided model), so a crate copy would be a second definition.
+**Here:** crate `runs.rs` `defer_run`; caller `buddies/runner.ts` `runJob`.
+Guards: crate `a_run_placed_in_a_busy_seat_waits_for_it_instead_of_failing`; buddies-v2 "a follow-up
+whose seat is busy on another thread waits, then runs, with no failure notice" and "a follow-up waiting
+on a busy seat is consumed when the busy turn reads its thread".
+
 ## store-descriptor-isolation
 **Smell:** backend code opens a file that happens to be a live SQLite store (or its `-wal`/`-shm`): a
 second SQLite library, a directory walk that reads every file, a copy, a hash, a file watcher.

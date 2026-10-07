@@ -57,6 +57,7 @@ export declare class BuddiesCore {
   renewRun(runId: string, leaseToken: string, leaseMs: number): Promise<Run>
   settleRun(runId: string, leaseToken: string, outcome: Outcome): Promise<Run>
   bindRun(runId: string, leaseToken: string, conversationId: string): Promise<Run>
+  deferRun(runId: string, leaseToken: string, conversationId: string): Promise<Run>
   cancelRun(actor: Actor, runId: string): Promise<Run>
   retryRun(actor: Actor, runId: string, config: RunConfig | undefined | null, key: string): Promise<Run>
   createWorkspace(actor: Actor, input: WorkspaceInput): Promise<Workspace>
