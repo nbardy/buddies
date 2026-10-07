@@ -228,6 +228,9 @@ importers:
       '@unleashd/buddies-core':
         specifier: workspace:*
         version: link:../crates/unleashd-buddies
+      '@unleashd/ingest':
+        specifier: workspace:*
+        version: link:../crates/unleashd-ingest
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

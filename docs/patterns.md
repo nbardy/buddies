@@ -28,7 +28,7 @@ Updates cost what changed, not n.
 **Smell:** nullable field bags, and "what kind / which provider is this?" checks inside core logic.
 **Pattern:** the kinds are a sum type, fixed once at the boundary. One thin exhaustive dispatcher picks a handler,
 and each handler has one clean path with no structural branching (see ~/.claude/CLAUDE.md "One Clean Path").
-**Here:** `ConversationKindSchema` (chat | buddy | builder | worker, `shared/src/conversation-config.ts`) and its
+**Here:** `ConversationKind` (chat | buddy | builder | worker; the records crate's generated type, re-exported by `shared/src/conversation-config.ts`) and its
 list projection `RowKind`; crate `types.rs` (`ChannelKind`, `RequestState`, `RunInput`, `RunWaiting`); `McpServerSpec {kind:'stdio'|'http'}` in
 agent-cli; the conversation's `TurnPolicy`, chosen once by kind (`policyFor` in `conversations/runtime.ts`:
 `ChatTurnPolicy` / `BuddyTurnPolicy` / `BuddyBuilderTurnPolicy`).

@@ -1,3 +1,4 @@
+import type { ConversationKind } from '@unleashd/ingest';
 import { z } from 'zod';
 import { BuddyKnowledgeScopeSchema } from './buddy-knowledge-scope.js';
 import {
@@ -154,27 +155,11 @@ export type BuddyVisibility = z.infer<typeof BuddyVisibilitySchema>;
 
 export const WorkerRoleSchema = z.enum(['work', 'review', 'fix']);
 
-export const ConversationKindSchema = z.discriminatedUnion('t', [
-  z.object({ t: z.literal('chat') }),
-  z.object({
-    t: z.literal('buddy'),
-    // Buddy run data (delegation, automation, allowed ops), owned by the Buddy
-    // module. It never goes on the wire: the list row carries only the ids.
-    context: BuddyContextSchema,
-    visibility: BuddyVisibilitySchema,
-  }),
-  z.object({ t: z.literal('builder') }),
-  // Quarantined swarm (DESIGN C.5): classified once from the oompa tag when a
-  // transcript is discovered. Null ids mean an untagged `[oompa]`; a null role
-  // means the first message did not say.
-  z.object({
-    t: z.literal('worker'),
-    swarmId: z.string().nullable(),
-    workerId: z.string().nullable(),
-    role: WorkerRoleSchema.nullable(),
-  }),
-]);
-export type ConversationKind = z.infer<typeof ConversationKindSchema>;
+// The type is the records store's own (crates/unleashd-ingest `ConversationKind`, generated into
+// its index.d.ts): Rust stores and validates it, so TS no longer re-declares it (core review §3).
+// The quarantined swarm `worker` variant is classified once from the oompa tag; null ids mean an
+// untagged `[oompa]`, a null role that the first message did not say.
+export type { ConversationKind };
 export type BuddyKind = Extract<ConversationKind, { t: 'buddy' }>;
 export type WorkerKind = Extract<ConversationKind, { t: 'worker' }>;
 
