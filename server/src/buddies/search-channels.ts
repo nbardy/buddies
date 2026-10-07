@@ -16,7 +16,7 @@ export function searchWords(text: string): string[] {
 }
 
 /**
- * Live public channels whose name matches EVERY word: a word matches when a hyphen/space
+ * Public channels (callers pass the inbox, which holds live ones only) whose name matches EVERY word: a word matches when a hyphen/space
  * separated part of the name starts with it (`market` → `marketing-website`). A text with no
  * plain words (just `@author`) names no channel.
  */
@@ -24,7 +24,7 @@ export function channelsNamed(channels: readonly Channel[], text: string): Chann
   const words = searchWords(text);
   if (words.length === 0) return [];
   return channels.filter((channel) => {
-    if (channel.kind.type !== 'public' || channel.archivedAt !== undefined) return false;
+    if (channel.kind.type !== 'public') return false;
     const parts = channel.kind.name.toLowerCase().split(/[^a-z0-9]+/);
     return words.every((word) => parts.some((part) => part.startsWith(word)));
   });

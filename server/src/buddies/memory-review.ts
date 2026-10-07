@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ExecuteCommandRequest, McpServerSpec } from '@nbardy/agent-cli';
 import { executeCommand, getHarness } from '@nbardy/agent-cli';
-import type { BuddyContext, Message } from '@unleashd/shared';
+import type { BuddyContext, ContentPart, Message } from '@unleashd/shared';
 import { redactAndBound } from '../observability/error-journal';
 import { onPath } from '../providers/installed-agent';
 import { readBuddyState } from './briefing';
@@ -99,10 +99,7 @@ const cleanProse = (text: string) =>
   text
     .replace(/<!-- unleashd:buddy-context-v2[\s\S]*?<!-- \/unleashd:buddy-context-v2 -->/g, '')
     .trim();
-function toolLine({
-  name,
-  input,
-}: Extract<Message['body'], { t: 'parts' }>['parts'][number] & { t: 'tool' }): string {
+function toolLine({ name, input }: Extract<ContentPart, { t: 'tool' }>): string {
   const text = input === undefined ? '' : typeof input === 'string' ? input : JSON.stringify(input);
   const shown =
     text.length > TOOL_INPUT_MAX
@@ -110,6 +107,18 @@ function toolLine({
       : text;
   return `[tool call] ${name} ${shown}`.trimEnd();
 }
+// One line per part kind; a new kind fails typecheck here instead of rendering as a swarm launch
+// (core review B13).
+const PART_LINES: { [K in ContentPart['t']]: (part: Extract<ContentPart, { t: K }>) => string } = {
+  text: (part) => cleanProse(part.text),
+  tool: toolLine,
+  question: (part) => `[question] ${JSON.stringify(part.question)}`,
+  buddy_builder_result: (part) => `[Buddy Builder result] ${JSON.stringify(part.event)}`,
+  buddy_worker_thread: (part) => `[Buddy worker thread] ${JSON.stringify(part.thread)}`,
+  swarm_launch: (part) => `[swarm launch] ${part.command}`,
+};
+const partLine = <P extends ContentPart>(part: P) =>
+  (PART_LINES[part.t] as (part: P) => string)(part);
 
 /** Bound prompt bytes, retaining recent messages and declaring omitted history. */
 export function reviewTranscript(messages: CompletedBuddyTurn['messages']) {
@@ -124,19 +133,7 @@ export function reviewTranscript(messages: CompletedBuddyTurn['messages']) {
       continue;
     }
     const prose = message.body.t === 'text' ? cleanProse(message.body.text) : '';
-    const parts =
-      message.body.t === 'parts'
-        ? message.body.parts.map((part) => {
-            if (part.t === 'text') return cleanProse(part.text);
-            if (part.t === 'tool') return toolLine(part);
-            if (part.t === 'question') return `[question] ${JSON.stringify(part.question)}`;
-            if (part.t === 'buddy_builder_result')
-              return `[Buddy Builder result] ${JSON.stringify(part.event)}`;
-            if (part.t === 'buddy_worker_thread')
-              return `[Buddy worker thread] ${JSON.stringify(part.thread)}`;
-            return `[swarm launch] ${part.command}`;
-          })
-        : [];
+    const parts = message.body.t === 'parts' ? message.body.parts.map(partLine) : [];
     const clean = [prose, ...parts].filter(Boolean).join('\n');
     const bytes = Buffer.from(clean);
     const content =

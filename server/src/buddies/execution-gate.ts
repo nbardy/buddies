@@ -1,6 +1,6 @@
-import os from 'node:os';
 import path from 'node:path';
-import { APP_DATA_DIR_ENV } from '../app-data';
+import { APP_DATA_DIR_ENV, appDataDirectory } from '../app-data';
+import { buddiesDatabasePath, legacyBuddiesDatabasePath } from './core';
 
 /**
  * Pattern: fix-guards (docs/patterns.md#fix-guards) — Buddy execution admission, decided once.
@@ -30,15 +30,11 @@ const resolved = (value: string | undefined) => (value?.trim() ? path.resolve(va
 
 export function decideExecutionGate(env: NodeJS.ProcessEnv = process.env): ExecutionGate {
   if (env[BUDDY_EXECUTION_ENV] === '1') return { t: 'enabled' };
-  const home = os.homedir();
+  // Defaults come from the store resolvers themselves (an empty env), never a restated path.
   const stores: Array<[name: string, value: string | null, fallback: string]> = [
-    [
-      'UNLEASHD_BUDDIES_DB',
-      resolved(env.UNLEASHD_BUDDIES_DB),
-      path.join(home, '.buddies', 'buddies-v3.sqlite'),
-    ],
-    ['BUDDIES_HOME', resolved(env.BUDDIES_HOME), path.join(home, '.buddies')],
-    [APP_DATA_DIR_ENV, resolved(env[APP_DATA_DIR_ENV]), path.join(home, '.agent-viewer')],
+    ['UNLEASHD_BUDDIES_DB', resolved(env.UNLEASHD_BUDDIES_DB), buddiesDatabasePath({})],
+    ['BUDDIES_HOME', resolved(env.BUDDIES_HOME), path.dirname(legacyBuddiesDatabasePath({}))],
+    [APP_DATA_DIR_ENV, resolved(env[APP_DATA_DIR_ENV]), appDataDirectory({})],
   ];
   const moved = stores.find(([, value, fallback]) => value !== null && value !== fallback);
   return moved

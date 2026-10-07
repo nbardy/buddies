@@ -166,7 +166,7 @@ export async function publishOwnerPost(
   );
   if (!created) return { post };
   deps.events.emit({ kind: 'changed' });
-  await announcePost(deps, OWNER, post);
+  deps.events.emit({ kind: 'posted', post, channel: target });
   return { post };
 }
 
@@ -230,16 +230,13 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       post: (await posted(core.answer(OWNER, { requestId: request.id, body, evidence, key }))).post,
     };
   };
-  const ownerPost = async (raw: unknown, ref: ChannelRef) => {
+  const ownerPost = async (raw: unknown, channelId: string) => {
     const parsed = PostBodySchema.parse(raw);
-    if (parsed.answers !== undefined) {
-      if (ref.kind !== 'id') throw new Error('an answer is posted to its request channel by id');
-      return ownerAnswer(ref.id, parsed);
-    }
+    if (parsed.answers !== undefined) return ownerAnswer(channelId, parsed);
     const { asBuddyId, answers: _answers, ...input } = parsed;
     const author = asBuddyId === undefined ? OWNER : buddyActor(asBuddyId);
     const chosen = mentionConfigsByBuddy(input.body, input.mentionConfigs);
-    return publishOwnerPost(deps, author, ref, input, chosen);
+    return publishOwnerPost(deps, author, { kind: 'id', id: channelId }, input, chosen);
   };
   const archive = async (buddyId: string, changes: BuddyChanges, changeKey: string) => {
     const buddy = await write(core.updateBuddy(OWNER, { buddyId, changes, key: changeKey }));
@@ -388,13 +385,12 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         posts: page.posts,
       };
     },
-    // `?archived=1` is the archive; without it the channels the owner can post in now.
+    // `?archived=1` is the archive; without it the channels the owner can post in now (the inbox
+    // read excludes archived channels in SQL).
     'GET 200 /api/buddies/workspaces/:workspaceId/channels': async (req) =>
       q(req, 'archived') === '1'
         ? core.archivedChannels(OWNER, p(req, 'workspaceId'))
-        : (await core.inbox(OWNER, p(req, 'workspaceId'))).channels
-            .map((row) => row.channel)
-            .filter((channel) => channel.archivedAt === undefined),
+        : (await core.inbox(OWNER, p(req, 'workspaceId'))).channels.map((row) => row.channel),
     [buddyMutationRoute('channel.archive')]: async (req) => {
       const { archived, key } = ChannelArchiveSchema.parse(req.body);
       const channelId = p(req, 'channelId');
@@ -434,8 +430,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         seats: await channels.threadSeats(root.id),
       };
     },
-    [buddyMutationRoute('channel.post')]: (req) =>
-      ownerPost(req.body, { kind: 'id', id: p(req, 'channelId') }),
+    [buddyMutationRoute('channel.post')]: (req) => ownerPost(req.body, p(req, 'channelId')),
     // A failed reply's retry on another harness (493c1c7); the new attempt is a later reply.
     [buddyMutationRoute('reply.retry')]: async (req) =>
       channels.retryReply(

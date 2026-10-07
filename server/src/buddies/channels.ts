@@ -55,7 +55,6 @@ const talkOf = (thread: Post[]) => thread.filter((post) => post.purpose !== 'rep
 
 export type ThreadSeat = { buddyId: string; config: ConversationConfig };
 type SeatRequest = { kind: 'keep' } | { kind: 'chosen'; config: ConversationConfig };
-export type MentionDispatch = ReplyRetryResult;
 export type ChannelResponse = {
   channelId: string;
   threadRootId: string;
@@ -158,7 +157,7 @@ export function createChannels(ports: ChannelsPorts) {
   async function threadChoice(
     rootId: string,
     buddyId: string,
-    request: Exclude<SeatRequest, { kind: 'resolved' }>,
+    request: SeatRequest,
     thread?: Post[]
   ) {
     const seats = await scanGenerations(ports.conversations, (g) =>
@@ -301,7 +300,7 @@ export function createChannels(ports: ChannelsPorts) {
      * the seat, while a provider change opens a new one. A second click while the rerun is queued
      * or running starts nothing (crate `retry_delivery`).
      */
-    async retryReply(failed: Post, config: ConversationConfig): Promise<MentionDispatch> {
+    async retryReply(failed: Post, config: ConversationConfig): Promise<ReplyRetryResult> {
       if (failed.purpose !== 'reply_failed' || failed.author.kind !== 'buddy' || !failed.replyToId)
         throw new Error('Only a failed Buddy reply can be retried');
       if (!isHarnessRetryFailure(failed.body))

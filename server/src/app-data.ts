@@ -5,8 +5,8 @@ import path from 'node:path';
 // on the HTTP MCP endpoint, so no child needs it passed down any more.)
 export const APP_DATA_DIR_ENV = 'UNLEASHD_DATA_DIR';
 
-export function appDataDirectory(): string {
-  return path.resolve(process.env[APP_DATA_DIR_ENV] ?? path.join(os.homedir(), '.agent-viewer'));
+export function appDataDirectory(env: NodeJS.ProcessEnv = process.env): string {
+  return path.resolve(env[APP_DATA_DIR_ENV] ?? path.join(os.homedir(), '.agent-viewer'));
 }
 
 export function uploadsDirectory(): string {
