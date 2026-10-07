@@ -253,6 +253,11 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn defer_run(&self, run_id: String, lease_token: String, conversation_id: String) -> napi::Result<Run> {
+        call(&self.store, move |s| s.defer_run(&run_id, &lease_token, &conversation_id)).await
+    }
+
+    #[napi]
     pub async fn cancel_run(&self, actor: Actor, run_id: String) -> napi::Result<Run> {
         call(&self.store, move |s| s.cancel_run(&actor, &run_id)).await
     }

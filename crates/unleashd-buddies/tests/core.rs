@@ -1916,3 +1916,32 @@ fn a_subscribed_delivery_waits_for_an_unbound_claim_in_the_same_thread() {
     assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "the bound delivery must wait for the unbound claim");
     s.bind_run(&claim.run.id, &claim.lease_token, "seat-peer").unwrap();
 }
+
+// 2026-10-07: a seat mid-turn on a delivery from another root. The unbound delivery of this root
+// is claimed (the gate cannot know its seat), `bind_run` says conversation_busy, and the holder
+// defers it NAMING that seat: it then waits with a visible reason and is not failed or lost.
+#[test]
+fn a_run_placed_in_a_busy_seat_waits_for_it_instead_of_failing() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    let mention = |input: PostInput| PostInput { mentions: vec![Mention { buddy_id: "peer".into(), config: None }], ..input };
+    // Thread 1's delivery holds the seat.
+    s.post(&Actor::Owner, channel.clone(), mention(reply("peer, thread one", "one"))).unwrap();
+    let holder = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    s.bind_run(&holder.run.id, &holder.lease_token, "seat-x").unwrap();
+    // Thread 2 (another root) is claimed unbound and then finds the seat busy.
+    let other = mention(PostInput { reply_to_id: None, ..reply("peer, thread two", "two") });
+    s.post(&Actor::Owner, channel, other).unwrap();
+    let waiter = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    assert_eq!(waiter.run.conversation_id, None);
+    assert!(matches!(s.bind_run(&waiter.run.id, &waiter.lease_token, "seat-x"), Err(CoreError::ConversationBusy(_))));
+    let deferred = s.defer_run(&waiter.run.id, &waiter.lease_token, "seat-x").unwrap();
+    assert_eq!((deferred.status, deferred.conversation_id.as_deref()), (RunStatus::Queued, Some("seat-x")));
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "it waits for the live turn");
+    s.settle_run(&holder.run.id, &holder.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
+    let again = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    assert_eq!(again.run.id, waiter.run.id);
+    s.bind_run(&again.run.id, &again.lease_token, "seat-x").unwrap();
+}

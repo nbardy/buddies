@@ -416,6 +416,30 @@ impl Store {
         })
     }
 
+    // Pattern: thread-seat-busy (docs/patterns.md#thread-seat-busy)
+    /// The holder's `bind_run` said `conversation_busy`: the seat it must run in is mid-turn. The
+    /// run goes back to the queue NAMING that seat, so the claim gate shows `conversation_busy`
+    /// until the turn ends. Why not the gate alone: a public or task thread's seat is unsubscribed
+    /// (5d75897), so the run has no conversation until the host computes the seat after the claim,
+    /// and the same-root rule cannot see a seat busy on another root's delivery (2026-10-07: three
+    /// launch-thread replies failed "Couldn't reply: conversation_busy"). Never failed, never
+    /// retried in a loop. Only a run that has not executed may go back. Does not subscribe.
+    /// Guard: `a_run_placed_in_a_busy_seat_waits_for_it_instead_of_failing`.
+    pub fn defer_run(&mut self, run_id: &str, lease_token: &str, conversation_id: &str) -> Result<Run> {
+        self.write(|tx| {
+            let run = leased(tx, run_id, lease_token)?;
+            if run.executing_at.is_some() {
+                return Err(CoreError::Invalid(format!("run {run_id} already executed; it cannot wait for a seat")));
+            }
+            tx.execute(
+                "UPDATE run SET status = 'queued', lease_token = NULL, lease_expires_at = NULL, started_at = NULL,
+                   deadline = NULL, conversation_id = ?2 WHERE id = ?1",
+                params![run_id, conversation_id],
+            )?;
+            get_run(tx, run_id)
+        })
+    }
+
     /// Queued runs end now; running ones are asked to stop and end when the runner settles them.
     pub fn cancel_run(&mut self, actor: &Actor, run_id: &str) -> Result<Run> {
         self.write(|tx| {

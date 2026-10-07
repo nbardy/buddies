@@ -614,7 +614,15 @@ export function createRunner(options: {
         case 'turn': {
           const context = contextFor(run);
           const conversationId = await job.place(await resolvedConfig(claim));
-          await core.bindRun(run.id, claim.leaseToken, conversationId);
+          // Pattern: thread-seat-busy (docs/patterns.md#thread-seat-busy). The seat can be mid-turn
+          // on another root's delivery, which the gate could not see: wait for it by name, never fail.
+          try {
+            await core.bindRun(run.id, claim.leaseToken, conversationId);
+          } catch (error) {
+            if (coreError(error)?.code !== 'conversation_busy') throw error;
+            await core.deferRun(run.id, claim.leaseToken, conversationId);
+            return;
+          }
           await briefings.warm(context);
           // Pattern: durable-intake (docs/patterns.md#durable-intake). The last await before the
           // spawn: until here a dead backend's run goes back to the queue (nothing ran); from
