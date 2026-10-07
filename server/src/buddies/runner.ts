@@ -15,16 +15,8 @@ import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
 import { type BuddyEvents, announcePost } from './events';
 import type { Grants, OwnerChat } from './grants';
 
-/**
- * The one executor over the crate's `run` queue. It replaces run-executor, dispatch-service,
- * chat-run-admission, the legacy automation executor and the per-conversation admission polls.
- *
- *   wake() on every write (the change bus) and settle, plus ONE backstop tick that also
- *   enqueues due schedules → claimRun until nothing is claimable → one handler per RunInput.
- *
- * Every claim is indexed (crates/unleashd-buddies/tests/query_plan.rs), so a wake costs a few
- * off-loop SQLite calls. There is no startup recovery: a run whose holder died ends at the claim
- * gate when its lease runs out (Pattern: lease-heartbeat, docs/patterns.md#lease-heartbeat).
+/** One executor over the crate's durable queue: wake on writes and settle, then claim to idle.
+ * The backstop also enqueues schedules. Dead holders expire at the lease gate, never at boot.
  */
 
 /** An admitted chat's run: `deadline` is the run's own (TURN_MAX_RUNTIME_MS), not its lease. */
@@ -317,8 +309,6 @@ export function createRunner(options: {
     return run.config;
   }
 
-  // The three places a background turn can run (`Job.place`): the run's own new conversation, one
-  // that already exists (a subscription, a resumed request), or the Buddy's seat in a thread.
   const freshTurn = (run: Run, prompt: string, owner: boolean): Job => ({
     kind: 'turn',
     prompt,
@@ -483,16 +473,9 @@ export function createRunner(options: {
   }
 
   // Pattern: route-at-send (docs/patterns.md#route-at-send)
-  /**
-   * A post in a thread this Buddy's conversation subscribes to, or that @mentions the Buddy, or
-   * the owner's post in its DM (one rule for answers, failure posts, followed threads, mentions
-   * and schedule fires; owner decisions A–K). It is a turn in the conversation that follows the
-   * thread, claimed only once that conversation is idle (`conversation_busy`); for a chat the owner talks in, that is its
-   * background branch (mcp.ts `subscriber`). With no conversation yet it opens the Buddy's SEAT
-   * in the thread (the same ids the deleted pair machine used); a schedule fire, which the Buddy
-   * itself wrote, opens a fresh background conversation. Either is subscribed by `bindRun`.
-   * Everything it would show was read meanwhile: no turn (the fence).
-   * The turn holds owner authority only when every post it shows is the owner's (D9, B1).
+  /** Deliver unread posts in the subscribed conversation or the Buddy's thread seat.
+   * Owner chats use their background branch. Only all-owner posts grant owner authority.
+   * A read fence skips consumed posts; active thread turns receive steering through MCP.
    */
   async function deliverJob(run: Run, postId: string): Promise<Job> {
     const delivery = await core.deliverPosts(run.id);

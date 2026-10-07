@@ -110,7 +110,7 @@ async function call(spec: McpServerSpec, name: string, args: Record<string, unkn
     };
     const text = result.content[0].text;
     const isError = result.isError === true;
-    return { isError, text, value: isError ? null : JSON.parse(text) };
+    return { isError, text, content: result.content, value: isError ? null : JSON.parse(text) };
   } finally {
     await client.close();
   }
@@ -5011,6 +5011,83 @@ test('a delivery after a backend restart sends one post, not the thread', async 
       `the envelope is ${envelope.length} chars, over ${ENVELOPE_CHARS}`
     );
   } finally {
+    await w.close();
+  }
+});
+
+test('new thread messages steer the live reply once, without a second run or busy failure', async () => {
+  const w = await world();
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let arrived!: () => void;
+  const started = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  try {
+    w.during.set(1, async () => {
+      arrived();
+      await blocked;
+    });
+    const say = async (body: string, replyToId?: string) => {
+      const post = await w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          key: body,
+        }
+      );
+      w.announce(post);
+      return post;
+    };
+    const root = await say(`[@Lead](buddy:${w.lead.id}) implement the fix`);
+    await started;
+    const turn = w.turns[0];
+    // Subscribe the running seat, then send a bound delivery and an unbound one
+    // (unfollowing changes the route while the seat's first run is still live).
+    await call(turn.mcp, 'channel_read', { read: { threadId: root.id, follow: { wait: 0 } } });
+    const first = await say('Keep the existing work and add a regression', root.id);
+    await call(turn.mcp, 'channel_read', { read: { threadId: root.id, follow: false } });
+    const second = await say(`[@Lead](buddy:${w.lead.id}) also check repeated requests`, root.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(w.turns.length, 1);
+    const tool = await call(turn.mcp, 'doc_read', { kind: 'working' });
+    assert.equal(tool.isError, false, tool.text);
+    const steering = tool.content
+      .slice(1)
+      .map((c) => c.text)
+      .join('\n');
+    assert.match(steering, /While you were working/);
+    assert.match(steering, /preserving the current task/);
+    assert.ok(steering.includes(second.body));
+    // first was read by the explicit unfollow read; it must not be injected again.
+    assert.ok(!steering.includes(first.body));
+    const again = await call(turn.mcp, 'doc_read', { kind: 'working' });
+    assert.equal(again.content.length, 1);
+    for (const post of [first, second]) {
+      const delivery = (await w.runs(w.lead.id)).find(
+        (r) => r.input.kind === 'deliver' && r.input.postId === post.id
+      )!;
+      assert.equal(delivery.status, 'cancelled');
+      assert.equal(delivery.errorCode, 'consumed');
+    }
+    release();
+    await until(
+      async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+      'reply settled'
+    );
+    assert.equal(w.turns.length, 1);
+    const page = await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50);
+    assert.ok(!page.posts.some((p) => p.purpose === 'reply_failed'));
+  } finally {
+    release();
     await w.close();
   }
 });

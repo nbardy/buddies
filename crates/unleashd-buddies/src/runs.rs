@@ -38,6 +38,8 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 // owner's turn up to 2h44m and read as "blocked" (a Buddy offered to cancel the owner's GPU turn).
 // The fix was upstream, not a special case in this gate. Since 2026-10-07 (task_01a1153f)
 // deliveries for an owner chat run in its background branch, so its queue holds only owner messages.
+// A bound seat and an unbound mention can target the same thread. Serialize both before
+// placement, or bind_run fails conversation_busy. Guard: live thread steering (buddies-v2).
 const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
@@ -45,7 +47,7 @@ const WAITING_REASON_SQL: &str = r#"CASE
         SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
           AND c.status IN ('running','cancel_requested')
     ) THEN json_object('kind','conversation_busy')
-    WHEN r.conversation_id IS NULL AND r.input_kind = 'deliver' AND EXISTS (
+    WHEN r.input_kind = 'deliver' AND EXISTS (
         SELECT 1 FROM run c JOIN post cp ON cp.id = c.input_id JOIN post rp ON rp.id = r.input_id
         WHERE c.buddy_id = r.buddy_id AND c.input_kind = 'deliver' AND c.status IN ('running','cancel_requested')
           AND coalesce(cp.root_id, cp.id) = coalesce(rp.root_id, rp.id)

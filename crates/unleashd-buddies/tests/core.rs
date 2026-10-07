@@ -1897,3 +1897,22 @@ fn a_background_run_can_have_no_deadline_while_its_lease_still_expires() {
     s.claim_run_at("2099-01-02T01:06:00.000Z", budgets, &[]).unwrap();
     assert_eq!(s.get_run(&live.run.id).unwrap().status, RunStatus::Failed);
 }
+
+#[test]
+fn a_subscribed_delivery_waits_for_an_unbound_claim_in_the_same_thread() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    s.post(&Actor::Owner, channel.clone(), PostInput {
+        mentions: vec![Mention { buddy_id: "peer".into(), config: None }],
+        ..reply("peer, look", "race-first")
+    }).unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    assert_eq!(claim.run.conversation_id, None);
+    // A tool's follow can bind the subscription while the runner is opening its seat.
+    s.follow_thread(&buddy("peer"), &root.id, Some("seat-peer".into()), 20).unwrap();
+    s.post(&Actor::Owner, channel, reply("also check this", "race-second")).unwrap();
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "the bound delivery must wait for the unbound claim");
+    s.bind_run(&claim.run.id, &claim.lease_token, "seat-peer").unwrap();
+}

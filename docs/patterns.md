@@ -208,8 +208,16 @@ turn always leaves that notice (`noticeFailure`), which the owner's "retry on an
 envelope of at most 400 chars, also right after a backend restart (guard: buddies-v2 "a delivery after a
 backend restart sends one post, not the thread"). A request's failure is a `run_failed` post (`runs.rs` `close_request`), delivered the same way. A
 self-spawned worker writes in its spawner's thread without taking the subscription
-(`from_own_worker`). Two deliveries of one Buddy to one thread with no conversation yet run one at a
-time (`WAITING_REASON_SQL`), or both would open the seat and answer twice.
+(`from_own_worker`). Two deliveries of one Buddy to one thread run one at a time (`WAITING_REASON_SQL`), including
+when only one is bound: the subscription can change while a claimed run opens its seat. Before
+2026-10-08 a bound delivery could overtake an unbound claim and fail `conversation_busy` at bind.
+At each Buddy MCP tool response, a live delivery/request reads the new posts in its own thread
+(`mcp.ts liveThreadPosts`, the existing `catchUpThread` read fence) and appends a steering envelope:
+adjust to the new message while preserving current work and authority. Consumed deliveries run no
+second turn. Owner chats and memory review are excluded; a queued explicit model pick waits for
+a new turn. A tool-free stretch receives its durable queued delivery when idle. Guards:
+buddies-v2 "new thread messages steer the live reply once", crate
+`a_subscribed_delivery_waits_for_an_unbound_claim_in_the_same_thread`.
 unread post of the threads its conversation subscribes to (`compose`), so a burst costs one turn. A
 request's failure is a `run_failed` post (`runs.rs` `close_request`), delivered the same way. A
 self-spawned worker writes in its spawner's thread without taking the subscription

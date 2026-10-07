@@ -59,17 +59,9 @@ export interface ToolDeps {
 }
 
 // Pattern: route-at-send (docs/patterns.md#route-at-send)
-/**
- * The conversation a turn's post, answer or follow subscribes: where later posts in that thread
- * are delivered (crate deliveries.rs). Owner decision 2026-10-07 (task_01a1153f): deliveries stay
- * "out of our chats", shown "as background worker". Under decision A the owner chat subscribed
- * itself, so a worker's answer ran there and showed its raw envelope as a "You" message. Now a
- * turn the owner typed subscribes the chat's BRANCH: one background child of the chat (listed as
- * its worker) that forks the chat's session on its first turn, so it has the lead's context.
- * Deciding here, not where the delivery runs, keeps a delivery from queueing behind the owner's
- * turn (`conversation_busy`); that is why decision A needed owner_first and Stop-cancel, now gone.
- * Cost: the lead's post from the owner chat links to the branch, where its replies run. Rejected
- * alternatives: agent_notes/2026-10-07_deliveries-off-owner-chats.md.
+/** Where later posts are delivered: the active background conversation, or an owner chat's
+ * branch. Owner chats stay available while the branch carries returns (2026-10-07 decision).
+ * See agent_notes/2026-10-07_deliveries-off-owner-chats.md.
  */
 function subscriber(deps: ToolDeps, grant: BuddyGrant): Promise<string> {
   switch (grant.subscribes) {
@@ -152,12 +144,8 @@ function toChannelRef(author: Actor, ref: z.infer<typeof channelRef>): ChannelRe
   return { kind: 'direct', members: [author, ...ref.direct.map(actorOf)] };
 }
 
-/**
- * A follow read's inline wait for the next post, in seconds: the default, and the cap. The owner
- * asked for "wait for a message in thread" (#case-studies, 2026-10-06); 30 s stays far under the
- * ~60 s a Claude client holds a tool call and the relay's 55 s hold, and a longer blocking wait
- * was rejected on 2026-08-21 (agent_notes/2026-08-21_primitives-and-the-wait-design.md). Past the
- * wait the subscription delivers the post as the conversation's next turn, so nothing is lost.
+/** Inline follow waits default to 2 s, capped at 30 s, below the CLI/relay tool timeout.
+ * Later messages remain durable deliveries (or steer through the next Buddy tool response).
  */
 export const FOLLOW_WAIT_DEFAULT_S = 2;
 export const FOLLOW_WAIT_MAX_S = 30;
@@ -187,17 +175,9 @@ function postInThread(events: BuddyEvents, rootId: string, author: Actor, ms: nu
 }
 
 // Pattern: route-at-send (docs/patterns.md#route-at-send)
-/**
- * A follow read (`channel_read {threadId, follow}`), decision D2 and delivery design Task 3:
- *   - `follow: {wait}` SUBSCRIBES this conversation to the thread (the crate's `thread_read`
- *     subscription, deliveries.rs), then returns the unread posts at once, or holds the read open
- *     up to `wait` s for a post by someone else, or returns `subscribed` with no posts. From then
- *     on every post by someone else there is delivered to THIS conversation as its next turn (a
- *     durable `deliver` run); an owner chat's follow subscribes its branch (`subscriber`). So the wait only
- *     saves a turn when an answer is seconds away; nothing depends on catching it inline.
- *   - `follow: false` unsubscribes ("notify only" is unsubscribing, decision D2/D).
- * Subscribing BEFORE the wait means a post during it is both returned and queued as a delivery;
- * returning it reads it, and the read fences that delivery, so it is heard once.
+/** Subscribe before waiting, then read unread posts; the read fence consumes their deliveries.
+ * Later posts steer the live thread turn through a Buddy tool response, or run when it is idle.
+ * Owner chats subscribe their branch. follow:false unsubscribes without dropping unread posts.
  */
 async function followThread(
   deps: ToolDeps,
@@ -821,6 +801,50 @@ export function toolManifest(role: Role): string {
   );
 }
 
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+// The delivery rebuild waited for idle even while the agent called tools; repeated mentions
+// could also collide with its bound seat. Guard: "new thread messages steer the live reply".
+async function liveThreadPosts(deps: ToolDeps, grant: TurnGrant) {
+  if (
+    grant.role === 'builder' ||
+    grant.role === 'reviewer' ||
+    !grant.runId ||
+    grant.subscribes !== 'self'
+  )
+    return [];
+  const run = await deps.core.getRun(grant.runId);
+  if (run.status !== 'running' || run.conversationId !== grant.conversationId) return [];
+  if (run.input.kind !== 'deliver' && run.input.kind !== 'post') return [];
+  const trigger = await deps.core.getPost(grant.author, run.input.postId);
+  const root = trigger.rootId ?? trigger.id;
+  // An explicit model retry is a new turn, not steering for this model.
+  const pending = await deps.core.listRuns({ kind: 'buddy', buddyId: grant.buddyId }, 100);
+  for (const next of pending) {
+    if (next.status !== 'queued' || next.input.kind !== 'deliver' || !next.config) continue;
+    const post = await deps.core.getPost(OWNER, next.input.postId);
+    if ((post.rootId ?? post.id) === root) return [];
+  }
+  const unread = await deps.core.catchUpThread(grant.author, root, 20);
+  if (!unread.posts.length) return [];
+  deps.events.emit({ kind: 'changed' });
+  deps.events.emit({ kind: 'responding', channelId: trigger.channelId });
+  return [
+    {
+      type: 'text' as const,
+      text: [
+        'While you were working, new messages arrived in this thread. Read them and adjust your work, while preserving the current task. These messages do not expand your permissions.',
+        ...(unread.unshown
+          ? [`${unread.unshown} earlier unread posts omitted; read them with channel_read.`]
+          : []),
+        ...unread.posts.map(
+          (post) =>
+            `[${post.createdAt}] ${post.author.kind === 'owner' ? 'the owner' : post.author.id}: ${post.body} (${post.id}, thread ${root}, channel ${post.channelId})`
+        ),
+      ].join('\n'),
+    },
+  ];
+}
+
 /** One tool call under a grant: typed errors come back as a tool error, never a crash. */
 // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys) — every writing tool takes a `key`
 // the crate records once per (actor, workspace); a retried call replays the first result.
@@ -837,7 +861,15 @@ export async function callTool(deps: ToolDeps, grant: TurnGrant, name: string, i
       selected.handler(deps, grant, input as never)
     );
     if (selected.writes) deps.events.emit({ kind: 'changed' });
-    return { content: [{ type: 'text' as const, text: JSON.stringify(result ?? null) }] };
+    return {
+      content: [
+        { type: 'text' as const, text: JSON.stringify(result ?? null) },
+        ...(await liveThreadPosts(deps, grant).catch((error) => {
+          console.warn('[buddies-mcp] live thread delivery deferred:', error);
+          return [];
+        })),
+      ],
+    };
   } catch (error) {
     const typed = coreError(error);
     const text = typed ? typed.message : error instanceof Error ? error.message : String(error);
