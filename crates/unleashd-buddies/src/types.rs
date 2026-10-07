@@ -172,9 +172,6 @@ impl RunInput {
     /// The input_key is per recipient for a `Post`: `post:<id>:<buddy>`.
     /// Bug (2026-10-01): the key was `post:<id>`, so in a group DM the second recipient's enqueue
     /// matched the first recipient's run and got no run of its own.
-    /// `legacy_key` is the pre-fix `post:<id>`: rows written before the fix carry it, and enqueue
-    /// still matches it (for the same buddy) so a replay of an old post finds its run instead of
-    /// starting a second one. Only the recipient is added, never the legacy form dropped.
     /// Guard: `a_group_request_starts_one_run_per_recipient` (tests/core.rs).
     /// A delivery is one run per (post, recipient), so a retried post write wakes nobody twice.
     pub fn columns(&self, buddy_id: &str) -> Result<(&str, &str, String)> {
@@ -183,12 +180,6 @@ impl RunInput {
             RunInput::Post { post_id } => Ok(("post", post_id, format!("post:{post_id}:{buddy_id}"))),
             RunInput::Deliver { post_id } => Ok(("deliver", post_id, format!("deliver:{post_id}:{buddy_id}"))),
             RunInput::Retired { input_kind, .. } => Err(CoreError::Invalid(format!("a {input_kind} run is history; it cannot be enqueued"))),
-        }
-    }
-    pub fn legacy_key(&self) -> Option<String> {
-        match self {
-            RunInput::Post { post_id } => Some(format!("post:{post_id}")),
-            RunInput::Chat { .. } | RunInput::Deliver { .. } | RunInput::Retired { .. } => None,
         }
     }
     pub fn from_columns(kind: &str, id: String) -> Result<RunInput> {

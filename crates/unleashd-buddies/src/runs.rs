@@ -140,11 +140,9 @@ impl Enqueue for Connection {
         let NewRun { input, body } = run;
         let (kind, input_id, key) = input.input.columns(&input.buddy_id)?;
         let latest = format!("SELECT {RUN_COLS} FROM run WHERE input_key = ?1 AND buddy_id = ?2 ORDER BY attempt DESC LIMIT 1");
-        let mut existing = self.prepare_cached(&latest)?.query_row([&key, &input.buddy_id], run_row).optional()?;
-        if let (None, Some(legacy)) = (&existing, input.input.legacy_key()) {
-            existing = self.prepare_cached(&latest)?.query_row([&legacy, &input.buddy_id], run_row).optional()?;
-        }
-        if let Some(run) = existing {
+        // Old rows keyed `post:<id>` (before 2026-10-01) never match: a post run is only enqueued
+        // for a post inserted in the same write, so its id is new.
+        if let Some(run) = self.prepare_cached(&latest)?.query_row([&key, &input.buddy_id], run_row).optional()? {
             return Ok(run);
         }
         let buddy = get_buddy(self, &input.buddy_id)?;

@@ -1398,7 +1398,7 @@ fn a_dm_is_one_to_one_and_a_legacy_group_dm_is_read_only() {
     assert!(f.store.list_runs(RunQuery::Queued, 10).unwrap().is_empty());
 
     // 1:1 and a note to self still work, and the single other member owes the answer.
-    let solo = f.store.post(&buddy("mid"), dm("mid", "ic"), request("just you", "s1")).unwrap();
+    f.store.post(&buddy("mid"), dm("mid", "ic"), request("just you", "s1")).unwrap();
     f.store.post(&buddy("mid"), ChannelRef::Direct { members: vec![buddy("mid")] }, request("remember", "n1")).unwrap();
     let owed: Vec<_> = f.store.list_runs(RunQuery::Queued, 10).unwrap().into_iter().map(|r| r.buddy_id).collect();
     assert!(owed.contains(&"ic".to_string()) && owed.contains(&"mid".to_string()) && owed.len() == 2, "{owed:?}");
@@ -1421,27 +1421,6 @@ fn a_dm_is_one_to_one_and_a_legacy_group_dm_is_read_only() {
     let page = f.store.list_posts(&buddy("peer"), PostQuery::Channel { channel_id: "dm_old".into() }, None, 10).unwrap();
     assert_eq!(page.posts.len(), 1);
     assert!(f.store.post(&buddy("peer"), ChannelRef::Id { id: "dm_old".into() }, PostInput { kind: PostKind::Inform, ..request("more", "g3") }).is_err());
-
-    // A run written before the fix carries the bare `post:<id>` key; enqueueing the same post for
-    // the same buddy must find it, not start a second run.
-    let run = f.store.list_runs(RunQuery::Queued, 10).unwrap().into_iter().find(|r| r.input_key.starts_with(&format!("post:{}", solo.id))).unwrap();
-    rusqlite::Connection::open(&f.path)
-        .unwrap()
-        .execute("UPDATE run SET input_key = ?1 WHERE id = ?2", rusqlite::params![format!("post:{}", solo.id), run.id])
-        .unwrap();
-    let again = f
-        .store
-        .enqueue_run(&Actor::Owner, EnqueueInput {
-            buddy_id: "ic".into(),
-            input: RunInput::Post { post_id: solo.id.clone() },
-            conversation_id: Some("c".into()),
-            task_id: None,
-            after_run_id: None,
-            deadline: None,
-            config: None,
-        })
-        .unwrap();
-    assert_eq!(again.id, run.id, "a pre-fix run is still matched by its legacy key");
 }
 
 // Regression guard (fresh-install trial 2026-10-05): a new workspace had no #general, so Home had

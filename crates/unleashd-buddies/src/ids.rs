@@ -60,10 +60,3 @@ pub fn next() -> Uuid {
 pub fn ceiling(ms: u64) -> Uuid {
     layout(ms, 0x0fff, [0xff; 16])
 }
-
-/// Unix milliseconds of an RFC 3339 time.
-pub fn millis(time: &str) -> crate::Result<u64> {
-    chrono::DateTime::parse_from_rfc3339(time)
-        .map(|t| t.timestamp_millis() as u64)
-        .map_err(|e| crate::CoreError::Invalid(format!("time {time:?}: {e}")))
-}
