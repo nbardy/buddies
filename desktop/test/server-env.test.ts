@@ -30,3 +30,22 @@ test('the desktop server env runs Buddies on the app-owned stores', () => {
   const { UNLEASHD_BUDDY_EXECUTION: _, ...withoutOptIn } = env;
   assert.equal(decideExecutionGate(withoutOptIn).t, 'disabled');
 });
+
+// The immutable payload is not a checkout. Upstream must work in the managed source,
+// and manager turns must inherit both the publishing command and app-local pnpm.
+test('managed desktop environment points upstream at source and keeps the stores separate', () => {
+  const env = serverEnv({
+    inherited: {},
+    nodeBin: '/app/node/bin',
+    loginPath: '/usr/bin:/bin',
+    port: 1234,
+    dataDir: '/app-home/agent-viewer',
+    buddiesHome: '/app-home/buddies',
+    managed: { home: '/app-home', bundle: '/app', source: '/app-home/source' },
+  });
+  assert.equal(env.UNLEASHD_CHECKOUT_ROOT, '/app-home/source');
+  assert.equal(env.BUDDIES_DESKTOP_PUBLISH, '/app/tools/desktop-source.mjs');
+  assert.equal(env.BUDDIES_MANAGED_HOME, '/app-home');
+  assert.equal(env.PATH, '/app/node/bin:/app-home/toolchain/node_modules/.bin:/usr/bin:/bin');
+  assert.equal(env.UNLEASHD_BUDDIES_DB, '/app-home/buddies/buddies-v3.sqlite');
+});

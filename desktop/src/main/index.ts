@@ -10,6 +10,7 @@ import { join } from 'node:path';
 // never in the CLI's ~/.agent-viewer or ~/.buddies, so the app and a source checkout
 // can run side by side without sharing SQLite stores.
 import Electrobun, { BrowserWindow, PATHS } from 'electrobun/main';
+import { selectedRuntime } from '../../../tools/desktop-selection.mjs';
 import { resolveLoginPath } from './login-path';
 import { serverEnv } from './server-env';
 
@@ -85,20 +86,24 @@ log(
     : `PATH FALLBACK (${login.reason}): ${login.path}`
 );
 
-const server = Bun.spawn([join(nodeBin, 'node'), join(payload, 'server', 'dist', 'server.js')], {
-  cwd: payload,
-  env: serverEnv({
-    inherited: process.env,
-    nodeBin,
-    loginPath: login.path,
-    port,
-    dataDir,
-    buddiesHome,
-  }),
+const selected = selectedRuntime(home, payload);
+const runtime = selected.runtime;
+const environment = serverEnv({
+  inherited: process.env,
+  nodeBin,
+  loginPath: login.path,
+  port,
+  dataDir,
+  buddiesHome,
+  managed: { home, bundle: payload, source: selected.source },
+});
+const server = Bun.spawn([join(nodeBin, 'node'), join(runtime, 'server', 'dist', 'server.js')], {
+  cwd: runtime,
+  env: environment,
   stdout: Bun.file(join(home, 'server.log')),
   stderr: Bun.file(join(home, 'server.err.log')),
 });
-log(`spawned server pid=${server.pid} port=${port} payload=${payload}`);
+log(`spawned server pid=${server.pid} port=${port} runtime=${runtime}`);
 
 let stopping = false;
 function stopServer() {
@@ -147,3 +152,18 @@ window.webview.on('dom-ready', () => {
   window.webview.loadURL(signIn);
 });
 window.webview.loadURL(`${origin}/__auth/logout`);
+
+// Setup never blocks offline launch or writes into the selected runtime. Only prepare when
+// there is no verified checkout yet; later merges belong to the owner-requested manager.
+if (!selected.source && process.env.BUDDIES_DESKTOP_SOURCE_SETUP !== '0') {
+  const setup = Bun.spawn([join(nodeBin, 'node'), join(payload, 'tools', 'desktop-source.mjs')], {
+    cwd: home,
+    env: environment,
+    stdout: Bun.file(join(home, 'source-update.log')),
+    stderr: Bun.file(join(home, 'source-update.err.log')),
+  });
+  log(`managed source setup pid=${setup.pid}; see source-update.log`);
+  setup.exited.then((code) =>
+    log(`managed source setup finished code=${code}; reopen to activate`)
+  );
+}

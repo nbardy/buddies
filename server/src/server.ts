@@ -696,7 +696,8 @@ registerBuddyRoutes(app, {
 // First-run "unleashd" workspace + fetch-only upstream check (upstream/routes.ts).
 // The update action posts through the same owner-post path as the routes above.
 const upstream = createUpstreamService({
-  serverDirectory: __dirname,
+  serverDirectory: process.env.UNLEASHD_CHECKOUT_ROOT ?? __dirname,
+  desktopPublish: process.env.BUDDIES_DESKTOP_PUBLISH,
   core: buddiesCore,
   events: buddyEvents,
   uploadsRoot: () => UPLOADS_DIR,

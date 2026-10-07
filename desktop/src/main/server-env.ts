@@ -8,16 +8,26 @@ export interface ServerEnvInput {
   port: number;
   dataDir: string;
   buddiesHome: string;
+  managed?: { home: string; bundle: string; source: string | null };
 }
 
 /** The environment the bundled server runs with. One function, so the test checks what ships. */
 export function serverEnv(input: ServerEnvInput): Record<string, string | undefined> {
   return {
     ...input.inherited,
-    PATH: mergePath(input.nodeBin, input.loginPath),
-    // A packaged app never builds from source, so Rust is not a prerequisite: the server
-    // neither probes nor installs it (UNLEASHD_SOURCE_BUILDS, dependencies.ts).
+    PATH: mergePath(
+      input.nodeBin,
+      ...(input.managed ? [join(input.managed.home, 'toolchain', 'node_modules', '.bin')] : []),
+      input.loginPath
+    ),
+    // Runtime needs no Rust; the separate source helper owns build setup.
     UNLEASHD_SOURCE_BUILDS: '0',
+    UNLEASHD_CHECKOUT_ROOT: input.managed?.source ?? undefined,
+    BUDDIES_MANAGED_HOME: input.managed?.home,
+    BUDDIES_MANAGED_BUNDLE: input.managed?.bundle,
+    BUDDIES_DESKTOP_PUBLISH: input.managed
+      ? join(input.managed.bundle, 'tools', 'desktop-source.mjs')
+      : undefined,
     NODE_ENV: 'production',
     PORT: String(input.port),
     UNLEASHD_HOST: '127.0.0.1',

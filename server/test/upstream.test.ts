@@ -296,6 +296,7 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
   });
   const service = createUpstreamService({
     serverDirectory: install,
+    desktopPublish: '/Applications/Buddies App/payload/tools/desktop-source.mjs',
     core,
     events,
     uploadsRoot: () => join(root, 'uploads'),
@@ -341,6 +342,12 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
   assert.equal(posts.length, 1);
   assert.deepEqual(mentionedIds(posts[0].body), [home.releaseManagerId]);
   assert.match(posts[0].body, new RegExp(`For folder ${install}: fetch upstream origin/main`));
+  assert.ok(
+    posts[0].body.includes(
+      "node '/Applications/Buddies App/payload/tools/desktop-source.mjs' --publish"
+    )
+  );
+  assert.ok(posts[0].body.includes('reopen Buddies'));
   assert.deepEqual(posts[0].evidence, [`upstream origin/main ${sha}`]);
 
   // The original request may age beyond the newest page before another device answers.

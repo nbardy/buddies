@@ -59,7 +59,7 @@ export function checkDependencies({ env = process.env, log = console.warn } = {}
         timeout: 600_000,
         stdio: 'inherit',
       });
-    } else if (available('claude')) {
+    } else if (env.UNLEASHD_INSTALL_RUST_DIRECT !== '1' && available('claude')) {
       log('Homebrew is unavailable. Asking Claude Code to install Rust with rustup…');
       result = spawnSync(
         'claude',

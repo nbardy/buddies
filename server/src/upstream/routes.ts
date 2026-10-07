@@ -27,6 +27,7 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export interface UpstreamServiceDependencies {
   /** Where this server's code lives; the checkout is resolved from here, never process.cwd(). */
   serverDirectory: string;
+  desktopPublish?: string;
   core: BuddiesCore;
   events: BuddyEvents;
   uploadsRoot(): string;
@@ -40,9 +41,15 @@ function updateBody(input: {
   releaseManager: { id: string; name: string };
   repoRoot: string;
   remote: string;
+  desktopPublish?: string;
 }): string {
   const mention = `[@${input.releaseManager.name.replace(/[[\]]/g, '')}](buddy:${input.releaseManager.id})`;
-  return `${mention} For folder ${input.repoRoot}: fetch upstream ${input.remote}/${UPSTREAM_BRANCH} and merge in our changes. Commit any local edits first, merge (never reset or rebase), resolve conflicts, run pnpm install && pnpm build, then report what changed.`;
+  const desktopPublish = input.desktopPublish;
+  const quotedPublish = desktopPublish ? `'${desktopPublish.replace(/'/g, "'\"'\"'")}'` : '';
+  const handoff = desktopPublish
+    ? ` Then run node ${quotedPublish} --publish to stage and smoke-check the desktop runtime. Report the verified revision and ask the owner to reopen Buddies to activate it. If publishing fails, report the error; the previous runtime stays selected.`
+    : '';
+  return `${mention} For folder ${input.repoRoot}: fetch upstream ${input.remote}/${UPSTREAM_BRANCH} and merge in our changes. Commit any local edits first, merge (never reset or rebase), resolve conflicts, run pnpm install && pnpm build, then report what changed.${handoff}`;
 }
 
 export function createUpstreamService(dependencies: UpstreamServiceDependencies) {
@@ -112,7 +119,12 @@ export function createUpstreamService(dependencies: UpstreamServiceDependencies)
       { kind: 'id', id: channelId },
       {
         kind: 'inform',
-        body: updateBody({ releaseManager, repoRoot, remote }),
+        body: updateBody({
+          releaseManager,
+          repoRoot,
+          remote,
+          desktopPublish: dependencies.desktopPublish,
+        }),
         purpose: 'message',
         evidence: [marker],
         broadcast: false,
