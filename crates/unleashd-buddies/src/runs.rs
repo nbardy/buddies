@@ -220,15 +220,17 @@ impl Store {
             let run = chat_run(tx, turn_id)?;
             let run_id = run.id.as_str();
             require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: run.buddy_id.clone() })?;
-            let first: Option<String> = tx.query_row(
-                "SELECT min(ready_at) FROM run WHERE conversation_id = ?1 AND input_kind = 'chat' AND status = 'queued'",
-                [&run.conversation_id],
-                |r| r.get(0),
+            // Strictly first means no other queued chat is ready at or before this one: a TIE is not
+            // first (two sends in one millisecond share a ready_at, and the claim order between
+            // them is then arbitrary). Guard: `a_promoted_chat_is_claimed_before_the_chats_queued_ahead_of_it`
+            // failed about half its runs when the check was `first != run.ready_at`.
+            let (first, ahead): (Option<String>, i64) = tx.query_row(
+                "SELECT min(ready_at), count(*) FROM run WHERE conversation_id = ?1 AND input_kind = 'chat' AND status = 'queued' AND id <> ?3 AND ready_at <= ?2",
+                params![&run.conversation_id, &run.ready_at, run_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
-            if let (RunStatus::Queued, Some(first)) = (run.status, first) {
-                if first != run.ready_at {
-                    tx.execute("UPDATE run SET ready_at = ?2 WHERE id = ?1", params![run_id, plus_ms(&first, -1)?])?;
-                }
+            if let (RunStatus::Queued, Some(first), true) = (run.status, first, ahead > 0) {
+                tx.execute("UPDATE run SET ready_at = ?2 WHERE id = ?1", params![run_id, plus_ms(&first, -1)?])?;
             }
             get_run(tx, run_id)
         })
