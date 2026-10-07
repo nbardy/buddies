@@ -910,12 +910,6 @@ void runServerStartup(
     loadConversations: async () => {
       await startIngestList();
       await runtimeBuilder.recover();
-      // Ordinary chats and Builders: queue the owner messages that were sent and never started.
-      // After `recover` (the runtimes exist) and before adoption, whose turns settle their own.
-      for (const id of await conversationConfigStore.conversationsWithInputs()) {
-        const conversation = conversations.get(id) ?? (await runtimeBuilder.materialize(id));
-        conversation?.hydrateInputs(await conversationConfigStore.listInputs(id));
-      }
       // Before the Buddy runner recovers or claims anything (lifecycle/adopt-executions.ts).
       adoptedRuns = await adoptExecutions(foundExecutions, {
         conversation: async (id) => {
@@ -935,6 +929,15 @@ void runServerStartup(
           }),
         logger: console,
       });
+      // Ordinary chats and Builders: queue the owner messages that were sent and never started.
+      // AFTER adoption: queueing starts the head at once, and a turn started before its predecessor
+      // is adopted makes adoption fail ("already running") and discards the live turn's journal, so
+      // the first turn never ends and the queued one runs beside it (ctrl-c-adoption, 2026-10-07).
+      // An adopted conversation is running, so its queue waits for that turn to settle.
+      for (const id of await conversationConfigStore.conversationsWithInputs()) {
+        const conversation = conversations.get(id) ?? (await runtimeBuilder.materialize(id));
+        conversation?.hydrateInputs(await conversationConfigStore.listInputs(id));
+      }
     },
   }
 )
