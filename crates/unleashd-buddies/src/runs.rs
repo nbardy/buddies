@@ -225,8 +225,8 @@ impl Store {
     }
 
     /// Claims the oldest ready run, or None when nothing is claimable.
-    pub fn claim_run(&mut self, budgets: RunBudgets) -> Result<Option<Claim>> {
-        self.claim_run_at(&now_iso(), budgets)
+    pub fn claim_run(&mut self, budgets: RunBudgets, held: &[RunHold]) -> Result<Option<Claim>> {
+        self.claim_run_at(&now_iso(), budgets, held)
     }
 
     // Pattern: lease-heartbeat (docs/patterns.md#lease-heartbeat)
@@ -242,10 +242,31 @@ impl Store {
     // same store (a worktree server) still held. The reverse mistake was the 2026-09-10 incident:
     // a 600 s claim lease used as a foreground chat's deadline killed healthy chats. Keeping the
     // two values apart is what lets the lease be short and the deadline long.
-    // Guards: crate tests `an_expired_lease_ends_its_run_like_a_failed_settle` and
-    // `a_renewed_lease_outlives_its_first_term`; server/test/run-lease.test.ts.
-    pub fn claim_run_at(&mut self, now: &str, budgets: RunBudgets) -> Result<Option<Claim>> {
+    //
+    // `held`: the runs the CALLER's own live turns execute. The gate renews them first, in this
+    // same transaction, so a process can never expire a run it is itself driving. Why it must be
+    // here and not a renewal the host awaits before calling: the lease is compared with the WALL
+    // clock, and a process frozen longer than the lease (macOS Maintenance Sleep ran 306 s against
+    // the 300 s lease, 2026-10-06 16:53Z; five live runs ended 9 ms after the wake, ~230 ms before
+    // the heartbeat's renewal landed) finds its leases lapsed at wake. A host-side
+    // "renew, then claim" is check-then-act: the freeze can land between the two, and the napi
+    // threadpool then runs the already-queued claim before any JS. Inside one transaction there is
+    // no between. A hold whose run was already ended (token mismatch, not running) is skipped: the
+    // holder learns `lease_lost` from its own renewal, and a stop is never undone.
+    // Residual, accepted: a DIFFERENT backend's gate on the same store still ends this one's
+    // lapsed runs (that holder really was silent for the lease).
+    // Guards: crate tests `an_expired_lease_ends_its_run_like_a_failed_settle`,
+    // `a_renewed_lease_outlives_its_first_term` and `a_held_run_is_renewed_by_the_gate_before_it_can_expire`;
+    // server/test/run-lease.test.ts (SIGSTOP freeze).
+    pub fn claim_run_at(&mut self, now: &str, budgets: RunBudgets, held: &[RunHold]) -> Result<Option<Claim>> {
         self.write(|tx| {
+            let mut renew = tx.prepare_cached(
+                "UPDATE run SET lease_expires_at = ?3 WHERE id = ?1 AND lease_token = ?2 AND status IN ('running','cancel_requested')",
+            )?;
+            let until = plus_ms(now, budgets.lease_ms)?;
+            for hold in held {
+                renew.execute(params![hold.run_id, hold.lease_token, until])?;
+            }
             expire_leases(tx, now, budgets.lease_ms)?;
             // Ready, predecessor finished, conversation free, buddy under its limit, task not paused.
             // Background work is always claimable: the old per-Buddy hold was removed 2026-09-29

@@ -43,7 +43,7 @@ fn answer(request_id: &str, body: &str, key: &str) -> AnswerInput {
 
 /// Claims the next run and marks it executing, as every holder does right before its spawn.
 fn claim_executing(s: &mut Store, at: &str, budgets: RunBudgets) -> Claim {
-    let claim = s.claim_run_at(at, budgets).unwrap().expect("a claimable run");
+    let claim = s.claim_run_at(at, budgets, &[]).unwrap().expect("a claimable run");
     s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
     claim
 }
@@ -321,7 +321,7 @@ fn two_claimers_one_winner() {
                 std::thread::spawn(move || {
                     let mut store = Store::open(&path).unwrap();
                     barrier.wait();
-                    store.claim_run(lease(60_000)).unwrap()
+                    store.claim_run(lease(60_000), &[]).unwrap()
                 })
             })
             .collect::<Vec<_>>()
@@ -343,7 +343,7 @@ fn a_lease_is_the_only_way_to_settle_and_it_expires() {
     let wrong = s.settle_run(&claim.run.id, "not-the-token", Outcome::Complete { text: "x".into() }).unwrap_err();
     assert!(matches!(wrong, CoreError::LeaseLost(_)));
     // The next claim after expiry fails the abandoned run instead of leaving it running forever.
-    assert!(s.claim_run_at("2099-01-01T00:00:05.000Z", lease(1_000)).unwrap().is_none());
+    assert!(s.claim_run_at("2099-01-01T00:00:05.000Z", lease(1_000), &[]).unwrap().is_none());
     let expired = s.get_run(&claim.run.id).unwrap();
     assert_eq!((expired.status, expired.error_code.as_deref()), (RunStatus::Failed, Some("lease_expired")));
     assert!(matches!(
@@ -358,10 +358,10 @@ fn one_running_run_per_conversation() {
     let s = &mut f.store;
     s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "same")).unwrap();
     s.enqueue_chat(&Actor::Owner, chat("peer", "t2", "same")).unwrap();
-    let first = s.claim_run(lease(60_000)).unwrap().unwrap();
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the conversation is busy");
+    let first = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "the conversation is busy");
     s.settle_run(&first.run.id, &first.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
-    assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.input, RunInput::Chat { turn_id: "t2".into() });
+    assert_eq!(s.claim_run(lease(60_000), &[]).unwrap().unwrap().run.input, RunInput::Chat { turn_id: "t2".into() });
 }
 
 #[test]
@@ -376,7 +376,7 @@ fn request_answer_round_trip_and_failure_notice() {
     let unread = |s: &Store, who: &str| s.inbox(&buddy(who), WS).unwrap().channels.iter().map(|c| c.unread).sum::<i64>();
     assert_eq!((unread(s, "ic"), unread(s, "mid")), (1, 0), "a direct channel has read cursors like any channel");
 
-    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!((claim.run.buddy_id.as_str(), &claim.run.input), ("ic", &RunInput::Post { post_id: asked.id.clone() }));
     let answer = s
         .answer(
@@ -393,7 +393,7 @@ fn request_answer_round_trip_and_failure_notice() {
     let again = s.answer(&buddy("ic"), answer_input(&asked.id, "twice", "rep2"));
     assert!(matches!(again, Err(CoreError::Invalid(_))), "a request is answered once");
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-    let back = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let back = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!(
         (back.run.buddy_id.as_str(), back.run.conversation_id.as_deref(), &back.run.input),
         ("mid", Some("conv-sender"), &RunInput::Deliver { post_id: answer.id.clone() }),
@@ -406,10 +406,10 @@ fn request_answer_round_trip_and_failure_notice() {
     assert_eq!(unread(s, "ic"), 0, "a cursor only moves forward");
 
     let failing = s.post(&buddy("mid"), dm("mid", "ic"), request("will fail", "r2")).unwrap();
-    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap();
     assert_eq!(s.get_post(&buddy("mid"), &failing.id).unwrap().request, RequestState::Failed);
-    let notice = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let notice = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     let RunInput::Deliver { post_id } = &notice.run.input else { panic!("{:?}", notice.run.input) };
     let posted = s.get_post(&buddy("mid"), post_id).unwrap();
     assert_eq!(
@@ -431,16 +431,16 @@ fn a_request_from_no_conversation_starts_no_run_for_its_answer_or_failure() {
     let to_ic = || ChannelRef::Direct { members: vec![Actor::Owner, buddy("ic")] };
     let from_app = |body: &str, key: &str| PostInput { from_conversation_id: None, ..request(body, key) };
     let asked = s.post(&Actor::Owner, to_ic(), from_app("please do X", "r1")).unwrap();
-    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     let answer = s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     assert_eq!(s.get_post(&Actor::Owner, &asked.id).unwrap().request, RequestState::Answered { answer_id: answer.id });
 
     let failing = s.post(&Actor::Owner, to_ic(), from_app("will fail", "r2")).unwrap();
-    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap();
     assert_eq!(s.get_post(&Actor::Owner, &failing.id).unwrap().request, RequestState::Failed);
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "neither the answer nor the failure queued a run");
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "neither the answer nor the failure queued a run");
     let notices = s.list_posts(&Actor::Owner, PostQuery::Thread { root_id: failing.id.clone() }, None, 5).unwrap().posts;
     assert_eq!(notices.iter().map(|p| p.purpose.as_deref()).collect::<Vec<_>>(), [Some("run_failed")], "the failure is visible in the thread");
 }
@@ -454,7 +454,7 @@ fn a_queued_owner_message_goes_before_a_delivery_in_the_same_conversation() {
     let s = &mut f.store;
     let from_chat = PostInput { from_conversation_id: Some("owner-chat".into()), ..request("do X", "r1") };
     let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat).unwrap();
-    let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let worker = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
     s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     let chat = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "owner-chat")).unwrap();
@@ -462,7 +462,7 @@ fn a_queued_owner_message_goes_before_a_delivery_in_the_same_conversation() {
         s.list_run_rows(&Actor::Owner, ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap().into_iter().find(|r| matches!(r.input, RunInput::Deliver { .. })).unwrap()
     };
     assert_eq!(delivery(s).waiting, Some(RunWaiting::OwnerFirst), "the delivery waits for the owner message");
-    assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.id, chat.id, "the owner message is claimed first");
+    assert_eq!(s.claim_run(lease(60_000), &[]).unwrap().unwrap().run.id, chat.id, "the owner message is claimed first");
     assert_eq!(delivery(s).waiting, Some(RunWaiting::ConversationBusy), "running, the chat holds the conversation");
 }
 
@@ -475,7 +475,7 @@ fn an_orphaned_owner_message_stops_holding_returns() {
     let s = &mut f.store;
     let from_chat = PostInput { from_conversation_id: Some("owner-chat".into()), ..request("do X", "r1") };
     let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat).unwrap();
-    let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let worker = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
     s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     let chat = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "owner-chat")).unwrap();
@@ -498,7 +498,7 @@ fn a_mark_advance_consumes_every_covered_delivery() {
     let s = &mut f.store;
     let read = s.post(&buddy("mid"), dm("mid", "ic"), request("read me", "r1")).unwrap();
     let unread = s.post(&buddy("mid"), dm("mid", "ic"), request("leave me", "r2")).unwrap();
-    let (c1, c2) = (s.claim_run(lease(60_000)).unwrap().unwrap(), s.claim_run(lease(60_000)).unwrap().unwrap());
+    let (c1, c2) = (s.claim_run(lease(60_000), &[]).unwrap().unwrap(), s.claim_run(lease(60_000), &[]).unwrap().unwrap());
     let a1 = s.answer(&buddy("ic"), answer_input(&read.id, "done", "a1")).unwrap();
     let a2 = s.answer(&buddy("ic"), answer_input(&unread.id, "done", "a2")).unwrap();
     s.settle_run(&c1.run.id, &c1.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
@@ -513,8 +513,8 @@ fn a_mark_advance_consumes_every_covered_delivery() {
     let delivered = |post: &str| runs.iter().find(|r| r.input == RunInput::Deliver { post_id: post.into() }).unwrap();
     assert_eq!((delivered(&a1.id).status, delivered(&a1.id).error_code.as_deref()), (RunStatus::Cancelled, Some("consumed")));
     assert_eq!(delivered(&a2.id).status, RunStatus::Queued, "an answer past the mark still delivers");
-    assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.input, RunInput::Deliver { post_id: a2.id.clone() });
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "exactly once");
+    assert_eq!(s.claim_run(lease(60_000), &[]).unwrap().unwrap().run.input, RunInput::Deliver { post_id: a2.id.clone() });
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "exactly once");
 }
 
 fn queued(s: &Store, buddy_id: &str) -> usize {
@@ -535,7 +535,7 @@ fn a_burst_in_two_subscribed_threads_costs_one_delivery_turn() {
     let t1 = s.post(&buddy("mid"), dm("mid", "ic"), request("thread one", "r1")).unwrap();
     let t2 = s.post(&buddy("mid"), dm("mid", "ic"), request("thread two", "r2")).unwrap();
     for _ in 0..2 {
-        let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
+        let worker = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
         s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     }
     s.enqueue_chat(&Actor::Owner, chat("mid", "busy", "conv-sender")).unwrap();
@@ -545,15 +545,15 @@ fn a_burst_in_two_subscribed_threads_costs_one_delivery_turn() {
         s.post(&buddy("ic"), dm("mid", "ic"), inform(root, &format!("p{i}"), &format!("p{i}"))).unwrap();
     }
     assert_eq!(queued(s, "mid"), 5, "one durable delivery per post");
-    assert!(s.claim_run_at("2099-01-01T00:00:01.000Z", lease(600_000)).unwrap().is_none(), "all wait for the busy conversation");
+    assert!(s.claim_run_at("2099-01-01T00:00:01.000Z", lease(600_000), &[]).unwrap().is_none(), "all wait for the busy conversation");
     s.settle_run(&busy.run.id, &busy.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
 
-    let turn = s.claim_run_at("2099-01-01T00:00:02.000Z", lease(600_000)).unwrap().unwrap();
+    let turn = s.claim_run_at("2099-01-01T00:00:02.000Z", lease(600_000), &[]).unwrap().unwrap();
     let Delivery::Posts { posts, unshown, .. } = s.deliver_posts(&turn.run.id).unwrap() else { panic!("nothing shown") };
     assert_eq!((posts.iter().map(|p| p.body.as_str()).collect::<Vec<_>>(), unshown), (vec!["p0", "p1", "p2", "p3", "p4"], 0));
     s.mark_executing(&turn.run.id, &turn.lease_token).unwrap();
     assert_eq!(queued(s, "mid"), 0, "the other four were fenced: shown in this turn");
-    assert!(s.claim_run_at("2099-01-01T00:00:03.000Z", lease(600_000)).unwrap().is_none(), "one turn for the burst");
+    assert!(s.claim_run_at("2099-01-01T00:00:03.000Z", lease(600_000), &[]).unwrap().is_none(), "one turn for the burst");
 }
 
 // Decision K (2026-10-06; durable-pending Rev 10, Finding 2, which blocked test 11): a turn composed
@@ -564,7 +564,7 @@ fn posting_never_marks_read_a_post_its_author_was_not_shown() {
     let mut f = fixture();
     let s = &mut f.store;
     let root = s.post(&buddy("mid"), dm("mid", "ic"), request("thread", "r1")).unwrap();
-    let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let worker = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     let say = |author: &str, body: &str, key: &str| PostInput {
         kind: PostKind::Inform,
@@ -596,8 +596,8 @@ fn a_worker_request_runs_on_its_own_config_and_returns_to_the_spawner() {
 
     let first = s.post(&buddy("mid"), me_only(), work("sweep A", "w1")).unwrap();
     let second = s.post(&buddy("mid"), me_only(), work("sweep B", "w2")).unwrap();
-    let a = s.claim_run(lease(60_000)).unwrap().unwrap();
-    let b = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let a = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    let b = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!(
         [(&a.run.input, &a.run.config), (&b.run.input, &b.run.config)],
         [(&RunInput::Post { post_id: first.id.clone() }, &Some(sol.clone())), (&RunInput::Post { post_id: second.id.clone() }, &Some(sol.clone()))],
@@ -616,7 +616,7 @@ fn a_worker_request_runs_on_its_own_config_and_returns_to_the_spawner() {
     s.post(&buddy("mid"), me_only(), from_worker("halfway", "n1")).unwrap();
     let done = s.answer(&buddy("mid"), AnswerInput { from_conversation_id: Some("worker-a".into()), ..answer_input(&first.id, "A done", "a1") }).unwrap();
     s.settle_run(&a.run.id, &a.lease_token, Outcome::Complete { text: "A done".into() }).unwrap();
-    let back = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let back = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!(
         (&back.run.input, back.run.conversation_id.as_deref(), &back.run.config),
         (&RunInput::Deliver { post_id: done.id.clone() }, Some("conv-sender"), &None),
@@ -725,7 +725,7 @@ fn due_schedules_fire_once_per_slot_as_posts_in_one_thread() {
     assert!(fired.body.contains(&slot) && fired.body.ends_with("check"), "{}", fired.body);
     assert!(s.due_schedules(later).unwrap().is_empty(), "the schedule advanced past now");
 
-    let claim = s.claim_run_at(later, lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run_at(later, lease(60_000), &[]).unwrap().unwrap();
     let Delivery::Posts { posts, .. } = s.deliver_posts(&claim.run.id).unwrap() else { panic!("the fire was not shown") };
     assert_eq!(posts.iter().map(|p| &p.id).collect::<Vec<_>>(), [&fired.id], "its own Buddy is shown the fire");
     s.bind_run(&claim.run.id, &claim.lease_token, "schedule-conv").unwrap();
@@ -820,10 +820,10 @@ fn an_expired_lease_ends_its_run_like_a_failed_settle() {
     assert_eq!(claim.run.deadline.as_deref(), Some("2099-01-01T01:00:00.000Z"));
 
     // Still inside the lease: the gate leaves a held run alone (no boot-style blanket sweep).
-    s.claim_run_at("2099-01-01T00:04:59.000Z", lease(300_000)).unwrap();
+    s.claim_run_at("2099-01-01T00:04:59.000Z", lease(300_000), &[]).unwrap();
     assert_eq!(s.get_run(&claim.run.id).unwrap().status, RunStatus::Running);
 
-    s.claim_run_at("2099-01-01T00:05:01.000Z", lease(300_000)).unwrap();
+    s.claim_run_at("2099-01-01T00:05:01.000Z", lease(300_000), &[]).unwrap();
     let run = s.get_run(&claim.run.id).unwrap();
     assert_eq!((run.status, run.error_code.as_deref()), (RunStatus::Failed, Some("lease_expired")));
     let rows = s.list_run_rows(&Actor::Owner, ListScope::Workspace { workspace_id: WS.into() }, 100).unwrap();
@@ -843,10 +843,10 @@ fn a_dead_holder_requeues_an_unexecuted_run_and_fails_an_executed_one() {
     let mut f = fixture();
     let s = &mut f.store;
     s.enqueue_chat(&Actor::Owner, chat("lead", "never-ran", "c-lead")).unwrap();
-    let unexecuted = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
+    let unexecuted = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000), &[]).unwrap().unwrap();
     s.enqueue_chat(&Actor::Owner, chat("peer", "ran", "c-peer")).unwrap();
     let executed = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(300_000));
-    s.claim_run_at("2099-01-01T00:05:01.000Z", lease(300_000)).unwrap();
+    s.claim_run_at("2099-01-01T00:05:01.000Z", lease(300_000), &[]).unwrap();
     let (again, ended) = (s.get_run(&unexecuted.run.id).unwrap(), s.get_run(&executed.run.id).unwrap());
     // The gate requeued it and, in the same call, claimed it again: it is running under a new lease.
     assert_eq!((again.status, again.attempt, again.executing_at.as_deref()), (RunStatus::Running, 1, None));
@@ -864,10 +864,10 @@ fn a_request_whose_holder_died_resumes_once_in_its_conversation_then_fails() {
     let mut f = fixture();
     let s = &mut f.store;
     let ask = s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
-    let first = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000)).unwrap().unwrap();
+    let first = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(300_000), &[]).unwrap().unwrap();
     s.bind_run(&first.run.id, &first.lease_token, "worker-conv").unwrap();
     s.mark_executing(&first.run.id, &first.lease_token).unwrap();
-    let resumed = s.claim_run_at("2099-01-01T00:05:01.000Z", lease(300_000)).unwrap().expect("the resume is claimable at once");
+    let resumed = s.claim_run_at("2099-01-01T00:05:01.000Z", lease(300_000), &[]).unwrap().expect("the resume is claimable at once");
     assert_eq!(s.get_run(&first.run.id).unwrap().error_code.as_deref(), Some("lease_expired"));
     assert_eq!(
         (resumed.run.attempt, resumed.run.conversation_id.as_deref(), &resumed.run.input),
@@ -878,7 +878,7 @@ fn a_request_whose_holder_died_resumes_once_in_its_conversation_then_fails() {
     assert_eq!(queued(s, "mid"), 0);
 
     s.mark_executing(&resumed.run.id, &resumed.lease_token).unwrap();
-    let notice = s.claim_run_at("2099-01-01T00:10:02.000Z", lease(300_000)).unwrap().expect("the failure post is delivered");
+    let notice = s.claim_run_at("2099-01-01T00:10:02.000Z", lease(300_000), &[]).unwrap().expect("the failure post is delivered");
     assert_eq!(notice.run.buddy_id, "mid");
     s.settle_run(&notice.run.id, &notice.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
     assert_eq!(s.get_post(&Actor::Owner, &ask.id).unwrap().request, RequestState::Failed, "a second death fails it");
@@ -887,7 +887,7 @@ fn a_request_whose_holder_died_resumes_once_in_its_conversation_then_fails() {
     let stopped = s.post(&buddy("mid"), dm("mid", "ic"), request("stop me", "ask2")).unwrap();
     let run = claim_executing(s, "2099-01-01T01:00:00.000Z", lease(300_000));
     s.cancel_run(&Actor::Owner, &run.run.id).unwrap();
-    s.claim_run_at("2099-01-01T01:05:01.000Z", lease(300_000)).unwrap();
+    s.claim_run_at("2099-01-01T01:05:01.000Z", lease(300_000), &[]).unwrap();
     assert_eq!(s.get_run(&run.run.id).unwrap().status, RunStatus::Cancelled);
     assert_eq!(s.get_post(&Actor::Owner, &stopped.id).unwrap().request, RequestState::Cancelled, "a stop is never undone");
 }
@@ -900,7 +900,7 @@ fn a_model_less_run_records_the_model_it_resolved_once() {
     let s = &mut f.store;
     let codex = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
     s.post(&buddy("mid"), dm("mid", "ic"), PostInput { run_config: Some(codex), ..request("go", "w") }).unwrap();
-    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!(claim.run.config.as_ref().unwrap().model, None);
     let run = s.record_run_model(&claim.run.id, &claim.lease_token, "gpt-6.1-sol").unwrap();
     assert_eq!(run.config.unwrap().model.as_deref(), Some("gpt-6.1-sol"));
@@ -917,18 +917,18 @@ fn a_lease_longer_than_one_heartbeat_ends_one_heartbeat_later() {
     let mut f = fixture();
     let s = &mut f.store;
     s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
-    let legacy = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(86_400_000)).unwrap().unwrap();
+    let legacy = s.claim_run_at("2099-01-01T00:00:00.000Z", lease(86_400_000), &[]).unwrap().unwrap();
     assert_eq!(legacy.run.lease_expires_at.as_deref(), Some("2099-01-02T00:00:00.000Z"));
     s.cancel_run(&Actor::Owner, &legacy.run.id).unwrap();
     assert_eq!(s.get_run(&legacy.run.id).unwrap().status, RunStatus::CancelRequested);
 
     s.enqueue_chat(&Actor::Owner, chat("lead", "turn", "c-lead")).unwrap();
-    let current = s.claim_run_at("2099-01-01T00:01:00.000Z", lease(300_000)).unwrap().unwrap();
+    let current = s.claim_run_at("2099-01-01T00:01:00.000Z", lease(300_000), &[]).unwrap().unwrap();
     assert_eq!(current.run.lease_expires_at.as_deref(), Some("2099-01-01T00:06:00.000Z"), "a current lease is not moved");
     assert_eq!(s.get_run(&legacy.run.id).unwrap().lease_expires_at.as_deref(), Some("2099-01-01T00:06:00.000Z"));
 
     s.renew_run_at("2099-01-01T00:05:00.000Z", &current.run.id, &current.lease_token, 300_000).unwrap();
-    s.claim_run_at("2099-01-01T00:06:01.000Z", lease(300_000)).unwrap();
+    s.claim_run_at("2099-01-01T00:06:01.000Z", lease(300_000), &[]).unwrap();
     let run = s.get_run(&legacy.run.id).unwrap();
     assert_eq!(run.status, RunStatus::Cancelled, "the stop finishes one heartbeat after the clamp, not a day later");
     assert_eq!(s.get_run(&current.run.id).unwrap().status, RunStatus::Running, "a renewing holder keeps its run");
@@ -936,6 +936,30 @@ fn a_lease_longer_than_one_heartbeat_ends_one_heartbeat_later() {
 
 // The holder's renewals keep a run alive past any number of lease terms; a chat run's deadline is
 // the explicit chat budget, never the lease (2026-09-10: a 600 s claim lease killed owner chats).
+#[test]
+fn a_held_run_is_renewed_by_the_gate_before_it_can_expire() {
+    // Regression guard (2026-10-06): a 306 s sleep outlasted the 300 s lease and the gate, running
+    // first at wake, ended live runs. A hold passed to the gate renews inside its transaction.
+    let mut f = fixture();
+    let s = &mut f.store;
+    s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
+    let live = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(300_000));
+    s.post(&buddy("mid"), dm("mid", "ic"), request("and this", "ask2")).unwrap();
+    let dead = claim_executing(s, "2099-01-01T00:00:00.000Z", lease(300_000));
+
+    let hold = RunHold { run_id: live.run.id.clone(), lease_token: live.lease_token.clone() };
+    s.claim_run_at("2099-01-01T00:06:06.000Z", lease(300_000), &[hold]).unwrap();
+    let live_now = s.get_run(&live.run.id).unwrap();
+    assert_eq!(live_now.status, RunStatus::Running, "the held run survives a gap longer than its lease");
+    assert_eq!(live_now.lease_expires_at.as_deref(), Some("2099-01-01T00:11:06.000Z"));
+    assert_eq!(s.get_run(&dead.run.id).unwrap().status, RunStatus::Failed, "an unheld run still expires");
+
+    // A stale hold (run already ended) is skipped, never resurrected.
+    let stale = RunHold { run_id: dead.run.id.clone(), lease_token: dead.lease_token.clone() };
+    s.claim_run_at("2099-01-01T00:06:07.000Z", lease(300_000), &[stale]).unwrap();
+    assert_eq!(s.get_run(&dead.run.id).unwrap().status, RunStatus::Failed);
+}
+
 #[test]
 fn a_renewed_lease_outlives_its_first_term() {
     let mut f = fixture();
@@ -949,7 +973,7 @@ fn a_renewed_lease_outlives_its_first_term() {
     for minute in [4, 8, 12] {
         let at = format!("2099-01-01T00:{minute:02}:00.000Z");
         s.renew_run_at(&at, &chat_run.run.id, &chat_run.lease_token, 300_000).unwrap();
-        s.claim_run_at(&at, lease(300_000)).unwrap();
+        s.claim_run_at(&at, lease(300_000), &[]).unwrap();
     }
     assert_eq!(s.get_run(&chat_run.run.id).unwrap().status, RunStatus::Running, "renewed for 12 minutes");
     assert_eq!(s.get_run(&orphan.run.id).unwrap().status, RunStatus::Failed, "never renewed");
@@ -964,7 +988,7 @@ fn a_renewed_lease_outlives_its_first_term() {
     );
     // An adopting backend after a long gap: the lease ran out, but no gate ran since; it renews.
     s.renew_run_at("2099-01-01T00:30:00.000Z", &chat_run.run.id, &chat_run.lease_token, 300_000).unwrap();
-    s.claim_run_at("2099-01-01T00:30:01.000Z", lease(300_000)).unwrap();
+    s.claim_run_at("2099-01-01T00:30:01.000Z", lease(300_000), &[]).unwrap();
     s.settle_run(&chat_run.run.id, &chat_run.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
     assert_eq!(
         s.settle_run(&chat_run.run.id, &chat_run.lease_token, Outcome::Complete { text: "again".into() })
@@ -1597,7 +1621,7 @@ fn a_follow_returns_the_unread_posts_once_and_subscribes() {
     s.post(&buddy("peer"), channel.clone(), reply("first", "a")).unwrap();
     s.post(&buddy("mid"), channel.clone(), reply("mine", "m")).unwrap();
     s.post(&buddy("peer"), channel, reply("second", "b")).unwrap();
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "a Buddy that never followed a public thread is delivered nothing");
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "a Buddy that never followed a public thread is delivered nothing");
     // "mine" was written without "first" being shown, so it did not read past it (decision K).
     let read = s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
     assert_eq!((bodies(&read.posts), read.unshown), (vec!["first", "second"], 0));
@@ -1613,11 +1637,11 @@ fn a_followed_thread_delivers_anothers_post_to_the_following_conversation() {
     let channel = ChannelRef::Id { id: root.channel_id.clone() };
     s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
     s.post(&buddy("mid"), channel.clone(), reply("on it", "own")).unwrap();
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the follower's own post wakes nobody");
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "the follower's own post wakes nobody");
     let news = s.post(&buddy("peer"), channel.clone(), reply("model is green", "news")).unwrap();
     assert_eq!(s.responding(&root.channel_id).unwrap().iter().map(|r| r.buddy_id.as_str()).collect::<Vec<_>>(), ["mid"], "the delivery is what shows mid replying");
 
-    let claim = s.claim_run(lease(60_000)).unwrap().expect("another's post is delivered now");
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().expect("another's post is delivered now");
     assert_eq!((&claim.run.input, claim.run.conversation_id.as_deref()), (&RunInput::Deliver { post_id: news.id.clone() }, Some("conv-mid")));
     s.post(&buddy("peer"), channel.clone(), reply("one more thing", "late")).unwrap();
     let Delivery::Posts { posts, .. } = s.deliver_posts(&claim.run.id).unwrap() else { panic!() };
@@ -1639,10 +1663,10 @@ fn follow_false_unsubscribes_and_a_read_first_delivery_is_consumed() {
     s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
     let news = s.post(&buddy("peer"), channel.clone(), reply("done", "d")).unwrap();
     s.mark_thread_read(&buddy("mid"), &root.id, &news.id).unwrap();
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "read first: the delivery settled consumed");
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "read first: the delivery settled consumed");
     s.follow_thread(&buddy("mid"), &root.id, None, 20).unwrap();
     s.post(&buddy("peer"), channel, reply("after", "a")).unwrap();
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "unsubscribed: nothing is delivered");
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "unsubscribed: nothing is delivered");
 }
 
 // 2026-09-29 queue stall (888861c): a database created before run_active_buddy existed failed every
@@ -1655,7 +1679,7 @@ fn claim_run_works_on_a_database_missing_run_active_buddy() {
     rusqlite::Connection::open(&path).unwrap().execute_batch("DROP INDEX run_active_buddy;").unwrap();
     let mut s = Store::open(path.to_str().unwrap()).unwrap();
     s.enqueue_chat(&Actor::Owner, chat("peer", "t1", "conv")).unwrap();
-    assert!(s.claim_run(lease(60_000)).unwrap().is_some());
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_some());
 }
 
 // 2026-10-06: the lean rewrite (0fef9d4) dropped `buddy.retry_run` (17 uses); a Buddy whose worker
@@ -1667,12 +1691,12 @@ fn retrying_a_failed_run_makes_attempt_two_and_reopens_the_request() {
     let mut f = fixture();
     let s = &mut f.store;
     let fail = |s: &mut Store, conversation: &str| {
-        let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+        let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
         s.bind_run(&claim.run.id, &claim.lease_token, conversation).unwrap();
         s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap()
     };
     let read_notice = |s: &mut Store| {
-        let notice = s.claim_run(lease(60_000)).unwrap().unwrap();
+        let notice = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
         assert_eq!(notice.run.buddy_id, "mid", "the failure post is delivered to the asker");
         s.settle_run(&notice.run.id, &notice.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
     };
@@ -1699,11 +1723,11 @@ fn retrying_a_failed_run_makes_attempt_two_and_reopens_the_request() {
     let third = s.retry_run(&buddy("mid"), &second.id, None, "k4").unwrap();
     assert_eq!((third.attempt, third.conversation_id.as_deref()), (3, Some("w2")), "same model: same conversation");
 
-    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!(claim.run.id, third.id);
     let done = s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-    let back = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let back = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!((back.run.buddy_id.as_str(), &back.run.input), ("mid", &RunInput::Deliver { post_id: done.id }));
     let complete = s.retry_run(&buddy("mid"), &third.id, None, "k5");
     assert!(matches!(complete, Err(CoreError::Invalid(_))), "a complete run has nothing to retry: {complete:?}");
@@ -1714,7 +1738,7 @@ fn retry_authority_is_the_requester_a_manager_or_the_owner_and_only_managers_pic
     let mut f = fixture();
     let s = &mut f.store;
     let asked = s.post(&buddy("peer"), dm("peer", "ic"), request("please do X", "r1")).unwrap();
-    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     let failed = s
         .settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() })
         .unwrap();
@@ -1727,10 +1751,10 @@ fn retry_authority_is_the_requester_a_manager_or_the_owner_and_only_managers_pic
     assert!(matches!(requester_picks_model, Err(CoreError::Denied(_))), "a requester cannot move a peer's run off its profile");
     assert_eq!(s.retry_run(&buddy("peer"), &failed.id, None, "k2").unwrap().attempt, 2, "the requester may retry as-is");
 
-    let notice = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let notice = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!(notice.run.buddy_id, "peer", "the requester is told by the failure post");
     s.settle_run(&notice.run.id, &notice.lease_token, Outcome::Complete { text: "read".into() }).unwrap();
-    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!(claim.run.attempt, 2);
     let failed2 = s
         .settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() })
@@ -1767,10 +1791,10 @@ fn run_rows_share_one_window_across_scopes() {
     let path = f.path.clone();
     let s = &mut f.store;
     s.enqueue_chat(&Actor::Owner, chat("peer", "old", "old")).unwrap();
-    let old = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let old = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     s.settle_run(&old.run.id, &old.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
     s.enqueue_chat(&Actor::Owner, chat("peer", "new", "new")).unwrap();
-    let new = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let new = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     s.settle_run(&new.run.id, &new.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
     s.enqueue_chat(&Actor::Owner, chat("peer", "live", "live")).unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();
@@ -1796,7 +1820,7 @@ fn a_mention_is_a_delivery_with_no_conversation_until_the_buddy_has_one_in_the_t
     let pick = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
     let mention = |config: Option<RunConfig>| PostInput { mentions: vec![Mention { buddy_id: "peer".into(), config }], ..reply("peer, look", "m1") };
     s.post(&Actor::Owner, channel.clone(), mention(Some(pick.clone()))).unwrap();
-    let claim = s.claim_run(lease(60_000)).unwrap().expect("the mention woke peer");
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().expect("the mention woke peer");
     assert_eq!((claim.run.buddy_id.as_str(), claim.run.conversation_id.as_deref()), ("peer", None));
     assert_eq!(claim.run.config, Some(pick), "the owner's chip pick rides the run");
     let Delivery::Posts { posts, subscribed, .. } = s.deliver_posts(&claim.run.id).unwrap() else { panic!() };
@@ -1805,9 +1829,9 @@ fn a_mention_is_a_delivery_with_no_conversation_until_the_buddy_has_one_in_the_t
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     s.follow_thread(&buddy("peer"), &root.id, Some("conv-peer".into()), 20).unwrap();
     s.post(&Actor::Owner, channel, PostInput { mentions: vec![Mention { buddy_id: "peer".into(), config: None }], ..reply("again", "m2") }).unwrap();
-    let again = s.claim_run(lease(60_000)).unwrap().expect("delivered once");
+    let again = s.claim_run(lease(60_000), &[]).unwrap().expect("delivered once");
     assert_eq!(again.run.conversation_id.as_deref(), Some("conv-peer"));
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the fan-out skipped the mentioned subscriber: no second run");
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "the fan-out skipped the mentioned subscriber: no second run");
 }
 
 // A failed attempt marked its trigger read when it started; its retry must still show it.
@@ -1826,7 +1850,7 @@ fn a_retried_delivery_shows_its_trigger_and_a_second_click_starts_nothing() {
     let retry = s.retry_delivery(&Actor::Owner, &trigger.id, "peer", to("opus")).unwrap();
     assert_eq!(retry.attempt, 2);
     assert_eq!(s.retry_delivery(&Actor::Owner, &trigger.id, "peer", to("sonnet")).unwrap().id, retry.id, "a queued retry is not doubled");
-    let again = s.claim_run(lease(60_000)).unwrap().expect("the retry runs");
+    let again = s.claim_run(lease(60_000), &[]).unwrap().expect("the retry runs");
     let Delivery::Posts { posts, .. } = s.deliver_posts(&again.run.id).unwrap() else { panic!("a retry showing nothing would answer nothing") };
     assert!(posts.iter().any(|p| p.id == trigger.id));
 }
@@ -1841,10 +1865,10 @@ fn deliveries_to_one_buddy_in_one_thread_run_one_at_a_time_until_it_has_a_conver
     let wake = || vec![Mention { buddy_id: "peer".into(), config: None }];
     s.post(&Actor::Owner, channel.clone(), PostInput { mentions: wake(), ..reply("one", "m1") }).unwrap();
     s.post(&Actor::Owner, channel, PostInput { mentions: wake(), ..reply("two", "m2") }).unwrap();
-    let first = s.claim_run(lease(60_000)).unwrap().expect("the first");
-    assert!(s.claim_run(lease(60_000)).unwrap().is_none(), "the second waits for the first's conversation");
+    let first = s.claim_run(lease(60_000), &[]).unwrap().expect("the first");
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "the second waits for the first's conversation");
     s.settle_run(&first.run.id, &first.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-    assert!(s.claim_run(lease(60_000)).unwrap().is_some());
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_some());
 }
 
 // Step 5 removed step 4's seam: posting subscribes in public and task threads too (decision F).
@@ -1856,6 +1880,6 @@ fn a_buddy_posting_from_a_conversation_in_a_public_thread_follows_it() {
     let channel = ChannelRef::Id { id: root.channel_id.clone() };
     s.post(&buddy("peer"), channel.clone(), PostInput { from_conversation_id: Some("conv-peer".into()), ..reply("on it", "p1") }).unwrap();
     s.post(&Actor::Owner, channel, reply("and then?", "o1")).unwrap();
-    let claim = s.claim_run(lease(60_000)).unwrap().expect("peer's conversation follows the thread it posted in");
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().expect("peer's conversation follows the thread it posted in");
     assert_eq!((claim.run.buddy_id.as_str(), claim.run.conversation_id.as_deref()), ("peer", Some("conv-peer")));
 }

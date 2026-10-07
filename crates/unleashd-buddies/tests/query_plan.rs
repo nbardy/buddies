@@ -77,7 +77,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
     s.mark_read(&ic, &channel.id, &top.id).unwrap();
     s.mark_read(&ic, &ask.channel_id, &ask.id).unwrap();
 
-    let claim = s.claim_run(lease(60_000)).unwrap().unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     s.bind_run(&claim.run.id, &claim.lease_token, "c-ic").unwrap();
     s.renew_run(&claim.run.id, &claim.lease_token, 60_000).unwrap();
     s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
@@ -246,7 +246,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
         .unwrap();
     s.responding(&channel.id).unwrap();
     s.mark_thread_read(&mid, &top.id, &woke.id).unwrap();
-    while let Some(claim) = s.claim_run(lease(60_000)).unwrap() {
+    while let Some(claim) = s.claim_run(lease(60_000), &[]).unwrap() {
         if let RunInput::Deliver { .. } = claim.run.input {
             s.deliver_posts(&claim.run.id).unwrap();
         }
@@ -257,11 +257,11 @@ fn workload(s: &mut unleashd_buddies::Store) {
     let codex = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
     s.post(&mid, ChannelRef::Direct { members: vec![mid.clone()] }, PostInput { run_config: Some(codex), from_conversation_id: Some("c-mid".into()), ..input(PostKind::Request, "w", "pw") })
         .unwrap();
-    let worker = s.claim_run_at("2998-01-01T00:00:00.000Z", lease(60_000)).unwrap().unwrap();
+    let worker = s.claim_run_at("2998-01-01T00:00:00.000Z", lease(60_000), &[]).unwrap().unwrap();
     s.record_run_model(&worker.run.id, &worker.lease_token, "gpt").unwrap();
     s.bind_run(&worker.run.id, &worker.lease_token, "c-worker").unwrap();
     s.mark_executing(&worker.run.id, &worker.lease_token).unwrap();
-    s.claim_run_at("2999-01-01T00:00:00.000Z", lease(60_000)).unwrap();
+    s.claim_run_at("2999-01-01T00:00:00.000Z", lease(60_000), &[]).unwrap();
 }
 
 fn input(kind: PostKind, body: &str, key: &str) -> PostInput {
