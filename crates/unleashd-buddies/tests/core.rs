@@ -1832,3 +1832,22 @@ fn posting_in_a_public_thread_does_not_subscribe_and_a_follow_up_goes_to_the_sea
     s.post(&buddy("mid"), channel, PostInput { purpose: Some("reply_failed".into()), ..reply("Couldn't reply", "f1") }).unwrap();
     assert!(s.claim_run(lease(60_000)).unwrap().is_none());
 }
+
+// Owner decision 2026-10-07: a seat opened for an @mention is bound to its run but not subscribed.
+// A subscribed seat would be delivered every later post of the thread without the follow-up gate.
+#[test]
+fn a_seat_bound_in_a_public_thread_is_not_subscribed() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    let mention = vec![Mention { buddy_id: "peer".into(), config: None }];
+    s.post(&Actor::Owner, channel.clone(), PostInput { mentions: mention, ..reply("peer, look", "m1") }).unwrap();
+    let claim = s.claim_run(lease(60_000)).unwrap().expect("the mention woke peer");
+    s.bind_run(&claim.run.id, &claim.lease_token, "seat-peer").unwrap();
+    s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    s.post(&buddy("peer"), channel.clone(), reply("looking", "p1")).unwrap();
+    s.post(&Actor::Owner, channel, reply("thanks, and?", "o2")).unwrap();
+    let next = s.claim_run(lease(60_000)).unwrap().expect("a follow-up for the participant");
+    assert_eq!((next.run.buddy_id.as_str(), next.run.conversation_id.as_deref()), ("peer", None), "gate-bound, not delivered to the seat");
+}
