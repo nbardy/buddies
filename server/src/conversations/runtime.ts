@@ -420,7 +420,7 @@ export class Conversation extends EventEmitter {
     content: string,
     context: BuddyContext,
     claimToken: string,
-    deadline: string,
+    deadline: string | null,
     owner: boolean
   ): Promise<void> {
     if (this._kind.t !== 'buddy') {

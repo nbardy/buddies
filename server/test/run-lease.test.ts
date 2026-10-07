@@ -333,7 +333,12 @@ test(
     // frozen holder's lapsed lease and rightly ends it, which looked like the bug under test.
     await killBackend('C');
     const http = api(7554);
-    await startBackend('D', 7554, { CWV_BUDDY_RUNNER_BACKSTOP_MS: '100' });
+    // This scenario intentionally stays silent for 3 + 6 + 6 seconds. The 15 s idle budget
+    // raced its final assertion; give it headroom while testing the unchanged 3 s lease.
+    await startBackend('D', 7554, {
+      CWV_BUDDY_RUNNER_BACKSTOP_MS: '100',
+      CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '30000',
+    });
     const ws = await workspace(http, 'freeze');
     const frozen = await hire(http, ws, 'frozen');
     await ask(http, frozen, 'frozen');

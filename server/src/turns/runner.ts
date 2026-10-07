@@ -990,7 +990,7 @@ export class TurnRunner {
   }
 
   private startWatchdogs(): void {
-    this.watchdog.start(this.processStartTime);
+    this.watchdog.start(this.processStartTime, this.host.policy.maxRuntimeMs);
     this.stopSwarmWatch?.();
     this.stopSwarmWatch = watchSwarmRuns(
       this.ports.swarmObservers,

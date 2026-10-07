@@ -941,6 +941,7 @@ pub struct RunHold {
 /// `chat_deadline_ms` / `turn_deadline_ms`: the absolute runtime budget of a foreground chat run
 /// and of every other run, written to the run's `deadline` column. All three are required: the
 /// host passes TURN_MAX_RUNTIME_MS for chats explicitly, never a default (AGENTS.md).
+/// A zero turn_deadline_ms disables the background cutoff (deadline is NULL), not the lease.
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunBudgets {

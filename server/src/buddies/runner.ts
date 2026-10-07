@@ -94,8 +94,8 @@ export interface RunnerHost {
     context: BuddyContext;
     prompt: string;
     leaseToken: string;
-    /** The run's absolute deadline (ISO), set at its claim. */
-    deadline: string;
+    /** Absolute deadline (ISO), or null for uncapped background work. */
+    deadline: string | null;
     /** Every post the turn shows is the owner's: it may hold owner authority (design D9). */
     owner: boolean;
   }): Promise<void>;
@@ -645,7 +645,7 @@ export function createRunner(options: {
             context,
             prompt: job.prompt,
             leaseToken: claim.leaseToken,
-            deadline: run.deadline!,
+            deadline: run.deadline ?? null,
             owner: job.owner,
           });
         }

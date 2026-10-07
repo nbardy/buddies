@@ -8,6 +8,7 @@ import type {
 } from '@unleashd/shared';
 import { parseBuddyWorkerToolResult } from '@unleashd/shared';
 import type { BuddyPolicyAdoption } from '../buddies/turn-policy';
+import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from './execution-state';
 import type { TurnInput } from './input';
 import type { InputCarrier } from './intake';
@@ -50,6 +51,7 @@ export interface AdoptedReview {
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
 export interface TurnPolicy {
+  readonly maxRuntimeMs: number | null;
   /** False for a transcript no user input may extend (a Buddy automation run). */
   readonly acceptsUserInput: boolean;
   /** Where this kind's pending owner messages are durable (turns/intake.ts). */
@@ -118,7 +120,7 @@ export interface TurnPolicy {
     content: string,
     context: BuddyContext,
     claimToken: string,
-    deadline: string,
+    deadline: string | null,
     /** The turn answers the owner's own post: it may hold owner authority (delivery design D9). */
     owner: boolean
   ): Promise<void>;
@@ -146,6 +148,7 @@ export function commonToolResultParts(output: unknown): ContentPart[] {
  * lease or coordination. Subclasses add what their kind does differently.
  */
 export abstract class NoRunPolicy {
+  readonly maxRuntimeMs = TURN_MAX_RUNTIME_MS;
   readonly acceptsUserInput = true;
 
   gate(): TurnGate {

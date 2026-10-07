@@ -232,7 +232,7 @@ const RETURN_ORIGIN: { readonly [V in BuddyVisibility]: TurnInput['origin'] } = 
 export interface RunRecord {
   readonly runId: string;
   readonly leaseToken: string;
-  readonly deadline: string;
+  readonly deadline: string | null;
   readonly context: BuddyContext;
 }
 
@@ -275,6 +275,7 @@ export interface BuddyTurnPolicySeed {
 }
 
 export class BuddyTurnPolicy implements TurnPolicy {
+  readonly maxRuntimeMs = null;
   private memory: MemorySnapshot | null;
   // The session audience key the current provider session was built under (persisted with it).
   private providerAudienceKey: string | null;
@@ -503,8 +504,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
   }
 
   /**
-   * Expire the run at its deadline. Until 2026-09-30 a runner-owned run's deadline was a timer in
-   * server.ts `runTurn`, so it could not survive the backend that armed it. An adopted turn arms it
+   * Enforce the stored optional deadline, live or adopted. An adopted turn arms it
    * only when it still runs (execution-state.ts ADOPTIONS): re-arming a deadline that passed while
    * no backend watched sealed a finished replay as max_runtime_timeout (review of P1, 2026-10-01;
    * guard: execution-adoption.test.ts "finished during the gap").
@@ -512,12 +512,11 @@ export class BuddyTurnPolicy implements TurnPolicy {
   armDeadline(): void {
     const execution = this.execution;
     if (!execution) throw new Error('No run to expire: arm it first');
+    if (execution.deadline === null) return;
     const timer = setTimeout(
       () => this.host.maxRuntimeReached(),
       Math.max(0, Date.parse(execution.deadline) - Date.now())
     );
-    // A 24 h deadline must not by itself keep a process alive (the runtime tests' turns that
-    // never answer left it pending, and the test process never exited).
     timer.unref?.();
     execution.deadlineTimer.current = timer;
   }
@@ -676,7 +675,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     content: string,
     context: BuddyContext,
     leaseToken: string,
-    deadline: string,
+    deadline: string | null,
     owner: boolean
   ): Promise<void> {
     if (this.execution) return Promise.reject(new Error('Conversation is busy'));

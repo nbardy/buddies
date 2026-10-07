@@ -1286,6 +1286,69 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
   assert.match(JSON.stringify(settlements[0][2]), /maximum runtime/);
 });
 
+test('background runs without a deadline keep working beyond one day', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'] });
+  const stub = openTurnStub();
+  const completed = deferred<{
+    exitCode: number;
+    signal: null;
+    sessionId: string;
+    reason: 'killed';
+  }>();
+  const queued: UnifiedAgentEvent[] = [];
+  let wake: (() => void) | null = null;
+  const fixture = runtimeFixture({
+    executeTurn: fakeExecuteTurn(() => ({
+      ...stub.turn,
+      completed: completed.promise,
+      events: (async function* () {
+        yield { type: 'turn.started' as const };
+        for (;;) {
+          while (queued.length) {
+            const event = queued.shift()!;
+            yield event;
+            if (event.type === 'turn.complete') return;
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+        }
+      })(),
+    })),
+  });
+  const conversation = new fixture.Conversation({
+    done: false,
+    id: 'background-no-deadline',
+    workingDirectory: '/tmp',
+    configState: fixture.configState,
+    kind: buddyKind({ buddyId: 'buddy-fixture', workspaceId: 'workspace-fixture' }, 'background'),
+  });
+  const execution = conversation.runCoordinationMessage(
+    'Keep working',
+    { buddyId: 'buddy-fixture', workspaceId: 'workspace-fixture', coordinationRunId: 'worker-run' },
+    'worker-token',
+    null,
+    false
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  // Native advancement keeps both idle clocks healthy; neither a NULL run deadline nor
+  // the shared watchdog may impose the former one-hour (or foreground 24-hour) cap.
+  for (let minute = 0; minute < 25 * 60; minute += 1) {
+    t.mock.timers.tick(60_000);
+    queued.push({ type: 'text.delta', text: '.' });
+    (wake as (() => void) | null)?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.equal(conversation.hasActiveProcess(), true);
+  assert.equal(stub.stops(), 0);
+  conversation.stop();
+  assert.equal(stub.stops(), 1, 'explicit Stop still reaches the provider');
+  queued.push({ type: 'turn.complete', reason: 'killed' });
+  (wake as (() => void) | null)?.();
+  completed.resolve({ exitCode: 0, signal: null, sessionId: 'provider-session', reason: 'killed' });
+  await execution;
+});
+
 test('background deadline uses timeout classification and waits for provider drain', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'] });
   const completed = deferred<{

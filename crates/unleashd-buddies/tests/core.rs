@@ -1877,3 +1877,23 @@ fn a_seat_bound_in_a_public_thread_is_not_subscribed() {
     let next = s.claim_run(lease(60_000), &[]).unwrap().expect("a follow-up for the participant");
     assert_eq!((next.run.buddy_id.as_str(), next.run.conversation_id.as_deref()), ("peer", None), "gate-bound, not delivered to the seat");
 }
+
+// A live channel reply reached the old one-hour deadline after 3597 s. No deadline must
+// survive claim, renewal and recovery without lengthening the five-minute heartbeat lease.
+#[test]
+fn a_background_run_can_have_no_deadline_while_its_lease_still_expires() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let budgets = RunBudgets { turn_deadline_ms: 0, ..lease(300_000) };
+    s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "no-cap")).unwrap();
+    let live = claim_executing(s, "2099-01-01T00:00:00.000Z", budgets);
+    assert_eq!(live.run.deadline, None);
+    assert_eq!(live.run.lease_expires_at.as_deref(), Some("2099-01-01T00:05:00.000Z"));
+    let hold = RunHold { run_id: live.run.id.clone(), lease_token: live.lease_token.clone() };
+    s.claim_run_at("2099-01-02T01:00:00.000Z", budgets, &[hold]).unwrap();
+    let held = s.get_run(&live.run.id).unwrap();
+    assert_eq!(held.status, RunStatus::Running);
+    assert_eq!(held.deadline, None);
+    s.claim_run_at("2099-01-02T01:06:00.000Z", budgets, &[]).unwrap();
+    assert_eq!(s.get_run(&live.run.id).unwrap().status, RunStatus::Failed);
+}

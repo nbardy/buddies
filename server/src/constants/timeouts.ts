@@ -69,11 +69,11 @@ export const TURN_TIMEOUT_KILL_GRACE_MS = readPositiveIntEnv(
 export const BUDDY_RUN_LEASE_MS = readPositiveIntEnv('CWV_BUDDY_RUN_LEASE_MS', 5 * 60_000);
 /** A live holder renews at most this often, on bridge events (heartbeats arrive ≤ 30 s apart). */
 export const BUDDY_RUN_LEASE_RENEW_MS = Math.floor(BUDDY_RUN_LEASE_MS / 5);
-/** A background Buddy run's deadline (a request, a return, a schedule), from its claim. */
-export const BUDDY_BACKGROUND_TURN_MS = readPositiveIntEnv(
-  'CWV_BUDDY_BACKGROUND_TURN_MS',
-  60 * 60_000
-);
+// A one-hour cutoff killed Art Lead's active channel reply after 3597 s (2026-10-08).
+// Zero means no absolute cutoff; bridge/provider-idle checks and the lease still apply.
+// Guard: background runs without a deadline keep working beyond one day.
+/** Optional background runtime budget. A positive env override opts into a deadline. */
+export const BUDDY_BACKGROUND_TURN_MS = readPositiveIntEnv('CWV_BUDDY_BACKGROUND_TURN_MS', 0);
 /** The runner's backstop tick: due schedules, runs no write woke (a freed slot), and the claim
  * gate's lease expiry, so a dead holder's run ends within BUDDY_RUN_LEASE_MS plus this. */
 export const BUDDY_RUNNER_BACKSTOP_MS = readPositiveIntEnv('CWV_BUDDY_RUNNER_BACKSTOP_MS', 5_000);

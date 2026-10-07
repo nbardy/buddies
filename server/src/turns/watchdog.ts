@@ -58,7 +58,7 @@ export class TurnWatchdog {
    * original max-runtime budget instead of getting a fresh one per backend. The idle clocks start
    * now, since this backend has seen nothing yet.
    */
-  start(startedAt: number): void {
+  start(startedAt: number, maxRuntimeMs: number | null = this.budgets.maxRuntimeMs): void {
     this.clear();
     const now = Date.now();
     this.startedAt = startedAt;
@@ -67,10 +67,12 @@ export class TurnWatchdog {
     this.providerIdleBudgetMs = this.budgets.providerIdleMs;
     this.armBridge();
     this.armProviderIdle();
-    this.maxTimer = setTimeout(
-      () => this.fire('max'),
-      Math.max(0, this.budgets.maxRuntimeMs - (now - startedAt))
-    );
+    if (maxRuntimeMs !== null) {
+      this.maxTimer = setTimeout(
+        () => this.fire('max'),
+        Math.max(0, maxRuntimeMs - (now - startedAt))
+      );
+    }
   }
 
   /**

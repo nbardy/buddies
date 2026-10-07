@@ -291,7 +291,7 @@ impl Store {
                 "UPDATE run SET status = 'running', lease_token = ?2, lease_expires_at = ?3, started_at = ?4,
                    deadline = ?5
                  WHERE id = ?1 AND status = 'queued'",
-                params![id, token, plus_ms(now, budgets.lease_ms)?, now, plus_ms(now, deadline_ms)?],
+                params![id, token, plus_ms(now, budgets.lease_ms)?, now, if deadline_ms > 0 { Some(plus_ms(now, deadline_ms)?) } else { None }],
             )?;
             match claimed {
                 1 => Ok(Some(Claim { run: get_run(tx, &id)?, lease_token: token })),
