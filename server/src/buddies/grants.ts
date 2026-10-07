@@ -14,9 +14,9 @@ import { OWNER, buddyActor } from './core';
  */
 // Pattern: capability-grants (docs/patterns.md#capability-grants)
 export type Role = 'worker' | 'owner' | 'reviewer' | 'builder';
-// What this turn's posts and follows subscribe: its own conversation, or (a turn the owner typed)
-// the conversation's background branch (Pattern: route-at-send, mcp.ts `subscriber`).
+// What a turn's posts subscribe: itself, or its chat's branch (route-at-send, mcp.ts `subscriber`).
 export type Subscribes = 'self' | 'branch';
+export type OwnerChat = { conversationId: string; buddyId: string; workspaceId: string };
 
 interface GrantBase {
   readonly token: string;

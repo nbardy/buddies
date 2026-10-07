@@ -7,7 +7,10 @@ import { BuddyBuilderResultCard } from '../../components/buddies/BuddyBuilderRes
 import { InlineSwarmRunWidget } from '../../swarm';
 import { ChatActivity } from '../../ui/ChatActivity';
 import type { AssistantResponse, MessageGroup } from '../../utils/chat-message-groups';
-import { messageTranscriptContent } from '../../utils/conversation-transcript';
+import {
+  isLegacyDeliveryInput,
+  messageTranscriptContent,
+} from '../../utils/conversation-transcript';
 import { useMarkdownPipeline } from '../../utils/lazyMarkdownPlugins';
 import {
   type MarkdownRenderer,
@@ -151,6 +154,14 @@ function StandaloneMessage({
   presentation: TranscriptPresentation;
 }) {
   const Actions = ROW_ACTIONS[presentation];
+  if (isLegacyDeliveryInput(msg))
+    return (
+      <div className="message system">
+        <ChatActivity label="Background delivery (ran in this chat before 2026-10-07)">
+          <pre className="ui-muted">{messageTranscriptContent(msg)}</pre>
+        </ChatActivity>
+      </div>
+    );
   return (
     <div className={`message ${msg.role}`}>
       {msg.role !== 'system' && (

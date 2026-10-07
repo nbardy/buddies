@@ -31,6 +31,17 @@ function shownSubAgents(subAgents: SubAgent[]): ShownSubAgents {
   return { active, display: [...active, ...recentlyCompleted], total: subAgents.length };
 }
 
+// A child conversation (utils/subAgents.ts `projectChildConversationToSubAgent`, id
+// `session:<id>`), such as a Buddy chat's background branch, which runs the deliveries for the
+// chat (task_01a1153f). Its row comes from the chat's child rows, so the client holds it.
+function childLink(agent: SubAgent, label: string) {
+  return agent.id.startsWith('session:') ? (
+    <Link to={`/chat/${encodeURIComponent(agent.id.slice('session:'.length))}`}>{label}</Link>
+  ) : (
+    label
+  );
+}
+
 function formatTokens(tokens: number): string {
   return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens.toString();
 }
@@ -65,7 +76,9 @@ function SubAgentCards({ shown }: { shown: ShownSubAgents }) {
               {CARD_BADGE[agent.status].glyph}
             </ContextBadge>
             <div className="context-card__body">
-              <div className="context-card__title ui-truncate">{agent.description || agent.id}</div>
+              <div className="context-card__title ui-truncate">
+                {childLink(agent, agent.description || agent.id)}
+              </div>
               {agent.currentAction ? (
                 <div className="context-card__meta ui-truncate">{agent.currentAction}</div>
               ) : null}
@@ -200,7 +213,7 @@ function SubAgentTree({
                         {truncateDescription(agent.description)}
                       </Link>
                     ) : (
-                      truncateDescription(agent.description)
+                      childLink(agent, truncateDescription(agent.description))
                     )}
                   </span>
                   <span className="subagent-stats ui-row">

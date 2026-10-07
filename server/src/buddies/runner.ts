@@ -12,7 +12,7 @@ import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings } from './briefing';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
 import { type BuddyEvents, announcePost } from './events';
-import type { Grants } from './grants';
+import type { Grants, OwnerChat } from './grants';
 import { mentionedBuddyIds } from './mentions';
 
 /**
@@ -69,7 +69,7 @@ export interface RunnerHost {
     pick: RunConfig | undefined;
   }): Promise<string>;
   /** An owner chat's background branch, opened or reused (as for mcp.ts `subscriber`). */
-  openBranch(chat: { conversationId: string; buddyId: string; workspaceId: string }): Promise<string>;
+  openBranch(chat: OwnerChat): Promise<string>;
   /** `config`: a worker run's own provider/model; absent, the Buddy's profile. */
   openBackground(input: {
     conversationId: string;

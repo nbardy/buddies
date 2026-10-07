@@ -1,4 +1,5 @@
 import type { ConversationDetail, ConversationRow, Message } from '@unleashd/shared';
+import { bodyText } from '@unleashd/shared';
 import { shortenHomePath } from './directories';
 import { formatToolUse } from './tool-presentation';
 
@@ -101,4 +102,15 @@ export function buildForkDraft(conversation: OpenConversation): string {
     '',
     'Continue the original objective from this fork.',
   ].join('\n');
+}
+
+// One-time compatibility (task_01a1153f, owner decision 2026-10-07). From 2026-10-06 (decision A)
+// until then, deliveries (worker answers, run_failed posts, followed-thread posts) ran as turns IN
+// the owner's chat, so its history holds their prompts as user messages, which rendered as "You"
+// with the raw envelope. Deliveries now run in the chat's background branch, so no new message
+// matches. A message carries no provenance, so the envelope's fixed first line (server runner.ts
+// `deliveryPrompt`) is the only evidence left. Never extend this to new inputs.
+const DELIVERY_ENVELOPE = 'New posts in threads you follow, oldest first:';
+export function isLegacyDeliveryInput(message: Message): boolean {
+  return message.role === 'user' && bodyText(message.body).startsWith(DELIVERY_ENVELOPE);
 }

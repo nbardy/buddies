@@ -23,7 +23,7 @@ import {
   taskDetail,
 } from './core';
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
-import type { BuddyGrant, Grants, Role, TurnGrant } from './grants';
+import type { BuddyGrant, Grants, OwnerChat, Role, TurnGrant } from './grants';
 import { attachToRelay } from './mcp-relay';
 import { type MentionResolution, resolveMentions, wakes } from './mentions';
 import {
@@ -53,7 +53,7 @@ export interface ToolDeps {
   /** The one source of message bodies; `runs get {tail}` reads a run's transcript through it. */
   messages: MessageSource;
   /** Open (or reuse) the background branch of an owner chat and return its id (`subscriber`). */
-  openBranch(chat: { conversationId: string; buddyId: string; workspaceId: string }): Promise<string>;
+  openBranch(chat: OwnerChat): Promise<string>;
 }
 
 // Pattern: route-at-send (docs/patterns.md#route-at-send)

@@ -765,3 +765,41 @@ test('mixed user parts retain retry prose and strip the hidden first-turn prefix
   assert.match(draft, /User: Visible request/);
   assert.doesNotMatch(draft, /hidden/);
 });
+
+// Regression (task_01a1153f, #case-studies post_01a1151c-e9d6, 2026-10-07): under decision A a
+// worker's answer ran as a turn in the owner's chat and rendered as a "You" message holding the
+// raw delivery envelope. Deliveries now run in the chat's background branch; history saved before
+// that renders each delivery input as a collapsed event row. Fails if one renders as "You" again.
+test('a delivery input saved in owner-chat history renders as a collapsed event, never as You', () => {
+  const at = new Date('2026-10-07T06:40:00Z');
+  const messages: Message[] = [
+    { role: 'user', body: { t: 'text', text: 'Get Designer to draw the logo' }, timestamp: at },
+    {
+      role: 'user',
+      body: {
+        t: 'text',
+        text: 'New posts in threads you follow, oldest first:\n[2026-10-07T06:41:00Z] buddy_x: Logo drawn (post_1, channel dm_1)',
+      },
+      timestamp: at,
+    },
+  ];
+  const groups = groupChatMessages(messages, null);
+  const markup = renderToStaticMarkup(
+    <MemoryRouter>
+      {groups.map((group, index) => (
+        <TranscriptGroup
+          presentation="hover"
+          key={index}
+          group={group}
+          isLastGroup={index === groups.length - 1}
+          lastMessageRef={{ current: null }}
+          workingDirectory="/tmp"
+        />
+      ))}
+    </MemoryRouter>
+  );
+  assert.equal((markup.match(/>You</g) ?? []).length, 1, 'only the owner message is You');
+  assert.match(markup, /Background delivery/);
+  assert.match(markup, /aria-expanded="false"/, 'collapsed');
+  assert.doesNotMatch(markup, /Logo drawn/, 'the envelope stays inside the collapsed row');
+});

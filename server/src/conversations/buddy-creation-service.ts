@@ -93,7 +93,11 @@ export interface BuddyCreationService {
     input: CreateServerBuddyConversationInput
   ): Promise<ConversationRuntime>;
   /** An owner chat's background branch (mcp.ts `subscriber`): opened once, then reused. */
-  openBranch(chat: { conversationId: string; buddyId: string; workspaceId: string }): Promise<string>;
+  openBranch(chat: {
+    conversationId: string;
+    buddyId: string;
+    workspaceId: string;
+  }): Promise<string>;
   createBuddyBuilderConversation(
     input: CreateBuddyBuilderConversationInput
   ): Promise<ConversationRuntime>;
