@@ -164,4 +164,57 @@ After-numbers are filled in below when phase 2 lands.
 
 ## Results (phase 2)
 
-_Pending._
+Two workers, 2026-10-07. Worker 1 (run_01a115b8, answer post_01a115ea-cb63) landed 82f8279..ed6a23e;
+worker 2 (run_01a115eb) landed the rest below. No V or O item was touched.
+
+**Commits** (origin/main):
+- da9c0d5, 37ea5ac, 1931101, ad689b0 (+b4626ac format), 828848d, 24d1c98: K1/K9 shims, B1+T1+T2
+  dead automation surface and `await-turn.ts`, B3 shared `NoRunPolicy`, B2 one settle path, K5/K6
+  one `write_post` and `Post::root()`. 05fcf02, ed6a23e: test-only re-syncs.
+- e59dd0d: **I1, I2, I3**, each with a test shown failing at ed6a23e (I1: 1 journal left;
+  I2: 3 claims after pause, expected 1; I3: receipt `writes.working` 2, expected 1). All three
+  stayed invisible on re-check: I1's leftover journal only produced a boot log line, a discard
+  and a no-op terminal call (`finishAttempt` ignores terminal attempts); I2's runs start on the
+  next backend instead of the exiting one, an ordering the reload already allowed for any write
+  arriving after the pause; I3's receipts are `event` rows nothing in server or client reads.
+- 4da76ea: T3 `TurnBroadcast`, T6 `kind` setter, T4 `retireInFlightHead`, T7 `OwnerInput`.
+- 52dbbc0: K4 one `cancel_queued` (codes and texts byte for byte), K8 (`Enqueue` trait → two
+  functions, `workspace_row`, `manages` reused by `reject_cycle`, `ListScope::column`), B8
+  `TASK_QUERY`, B11 `profileExecution` (one of the B11 list; see "left").
+- 298eff5: one `ConversationKind`: shared re-exports the ingest crate's generated type
+  (type-only workspace devDependency, as `buddy-api.ts` does for buddies-core); the unparsed zod
+  copy is gone.
+
+**Lines** (gate excludes migrate.rs):
+
+| area | 82f8279 | ed6a23e | final | Δ phase 2 |
+|---|---|---|---|---|
+| crate `src` | 5334 | 5306 | 5305 | −29 |
+| `server/src/buddies` | 6010 | 5947 | 5951 | −59 |
+| **gated** | **11344** | **11253** | **11256** | **−88** (ceiling 11256) |
+| `server/src/turns` | 2873 | 2871 | 2869 | −4 |
+| `server/src/conversations` | 2576 | 2522 | 2519 | −57 |
+| `shared/src` | — | 3465 | 3450 | −15 |
+
+Worker 2's own groups are +3 on the gate: the I fixes and their why-comments cost +8, the
+refactors returned 5. The −320 budget in §5 was not met; reviewer estimates were inflated
+(K4 and B8 remove a second path, not lines).
+
+**Left, in order:**
+1. B9 legacy MCP forms (~75 lines): only after 14:00Z 2026-10-07 and a `runs list` check for
+   live runs started before 2026-10-06 13:30Z. Worker 2 ran at ~11:00Z, so it was not eligible.
+2. Rest of B11: dead archive filters, unreachable `ownerPost` kind check, `Exclude<SeatRequest…>`,
+   `MentionDispatch` alias, 11 exports with no outside caller, `announcePost` re-read. The tasks
+   route nested ternary stays: a table would change the missing-scope error text (visible).
+3. K2/K3 dead napi methods and fields (K2's `list_events` has test callers; keep it or move the
+   tests to another read), K7 `Closed` sum, B5 `Slot`, B6 fallbacks, B7, B10, B12, B13, T5, T8.
+4. Stale Rust doc comments that still name `ConversationKindSchema`
+   (`crates/unleashd-ingest/src/records/types.rs:195`, `markers.rs:213`); editing them rebuilds
+   the ingest addon, so they wait for the next ingest change.
+5. Delivery `route` type move (§3), then the owner's V/O decisions.
+
+**Test notes:** `posts_read_back_in_write_order_within_a_millisecond` (crate tests/core.rs) fails
+its "shared a millisecond" guard whenever the machine is loaded (suite time 39–60 s instead of
+1.5 s); it passes alone on every commit here. Server tests that failed only under load and passed
+3/3 alone: run-lease freeze, buddies-v2 briefing (ENOTEMPTY in scratch cleanup), dependencies
+"first boot installs missing tools once".
