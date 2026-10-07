@@ -301,3 +301,58 @@ The `turns` growth is the I1 follow-up (`discardAt` plus why-comments). T5 remov
 - The delivery `route` type move.
 - The stale Rust doc comments.
 - The owner's V/O decisions.
+
+### Phase 2, worker 4 (run_01a1170a, 2026-10-07/08)
+
+Branch `core-review-w4` off e975553, fast-forwarded to origin/main. Invisible items only; no V, O1,
+V4/V8/V9 item touched. B9 precondition: `runs list` by workspace at 15:45Z showed one running run
+(this one); nothing older than 13:12Z.
+
+**Commits:**
+- bc90d39 B9: `legacySearchToText`, `legacyFollowUntil`, `LEGACY_TOOLS`, the `callTool`/`mcpServerFor`
+  legacy routing and `calledTool` are gone, with the guard tests (LEGACY_FORMS, merged-tool). The
+  additive-only snapshot test stays and now says a NEW reshape needs a shim again. Three
+  buddies-v2 tests that called `channel_admin`/`channel_create` now call `channel`; the legacy
+  search/`{until}`/`channel_create` assertions are deleted. −91 lines.
+- 690500b K2, K3, K7: removed napi `authorize` (its one node.test.mjs assertion; the cargo test
+  covers it), `EnqueueInput.after_run_id`/`.deadline`, `RunWaiting::AfterRun` with its WAITING
+  clause, `RunQuery::Queued` (two core.rs tests now list per Buddy), `Store::enqueue_run` stays.
+  `close_request` takes `Closed::Failed{run,code,error} | Cancelled`. `claim` writes
+  `deadline = ?5`. No schema change: the columns stay, and `Run.after_run_id` still reads NULL.
+  −16 lines.
+- 13fae68 B5, B12 and stale comments: `Pending = Claimed | Admitted | null` replaces `claimed` +
+  `admittedChatRun`, and the lease lives inside `RunExecution` (`execution.lease`), so
+  `disarm` clears both at once. `RESTRICTED_FLAGS` is one table for the reply gate and the memory
+  reviewer. Comments no longer name `Returns`, a schedule post, or `channel-responder.ts`. B5 is
+  +14 on its own; B12 (−5) and the comment cuts pay for it, so this commit holds the ceiling.
+- 64eb0b7 Ingest doc comments name `ConversationKind` (ingest addon rebuilt, 19+4+5+11+8+4+8+1
+  cargo tests, node 3/3).
+
+**Why B5 is not a four-way `Slot`:** `claimed` coexists with `execution`. `gate` waits for the
+previous turn's settle while the NEXT message's run is already claimed (turns/runner.ts
+`settleOutcome` starts the queue head before the settle). A single `Idle|Claimed|Admitted|Executing`
+would drop that claim, which is the lease/queue ordering the owner decision A guard protects.
+So the sum covers the two states that are exclusive (claimed → admitted) and the lease moves into
+the execution; `execution` stays its own field. V1/V6 behavior unchanged (`disarm` still runs
+before the settle lands).
+
+**Skipped, with reasons:**
+- K2 `enqueue_run`, `list_events` napi methods: server tests are their callers (110 post runs in
+  one buddies-v2 case, 4 event reads). Keeping them costs nothing; moving the tests would not
+  remove a line from the gated area.
+- B6: the `?? buddy-run-…` and `trigger.rootId ?? trigger.id` fallbacks are real (a run read before
+  `bindRun`; a root post has no rootId). The `!` assertions are crate guarantees the type does not
+  state; fixing them means a typed `ChatRun`, which is an API change, not a deletion.
+- B7: one `serve()` for the two MCP grant paths measured +2 lines. Dropped (ratchet).
+- Delivery `route` type move (§3): the TS side still has to ask `host.registered(origin)` and
+  `run.config`, which are runtime facts the crate cannot know, so a Rust `route` removes no
+  branch and adds ≈20 lines. Its real motivation is V4/V8/V9: do it with that owner decision.
+- `Run.after_run_id` output field: dropping it changes the run row on the wire; left.
+
+**Lines** (gate = crate src without migrate.rs + server/src/buddies):
+
+| area | e975553 | final |
+|---|---|---|
+| crate `src` | 5305 | 5286 |
+| `server/src/buddies` | 5938 | 5850 |
+| **gated** | **11243** | **11136** (ceiling 11136) |
