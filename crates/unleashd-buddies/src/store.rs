@@ -110,7 +110,7 @@ impl Store {
 
     pub fn list_workspaces(&self) -> Result<Vec<Workspace>> {
         let mut stmt = self.conn.prepare_cached("SELECT id, name, root_path, created_at FROM workspace ORDER BY name")?;
-        collect(stmt.query_map([], |r| Ok(Workspace { id: r.get(0)?, name: r.get(1)?, root_path: r.get(2)?, created_at: r.get(3)? }))?)
+        collect(stmt.query_map([], workspace_row)?)
     }
 
     pub fn get_buddy(&self, id: &str) -> Result<Buddy> {
@@ -201,8 +201,12 @@ fn channel_access(conn: &Connection, actor: &str, channel_id: &str) -> Result<De
     }
 }
 
+pub(crate) fn workspace_row(r: &rusqlite::Row) -> rusqlite::Result<Workspace> {
+    Ok(Workspace { id: r.get(0)?, name: r.get(1)?, root_path: r.get(2)?, created_at: r.get(3)? })
+}
+
 /// Walks the manager chain up from `report` (PK lookups; UNION stops cycles).
-fn manages(conn: &Connection, manager: &str, report: &str) -> Result<bool> {
+pub(crate) fn manages(conn: &Connection, manager: &str, report: &str) -> Result<bool> {
     let sql = "WITH RECURSIVE up(id) AS (
                  SELECT manager_id FROM buddy WHERE id = ?1
                  UNION SELECT b.manager_id FROM buddy b JOIN up ON b.id = up.id)

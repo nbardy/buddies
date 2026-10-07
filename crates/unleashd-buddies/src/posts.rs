@@ -9,7 +9,7 @@
 //! Pattern: one-write-path (docs/patterns.md#one-write-path)
 
 use crate::error::{CoreError, Result};
-use crate::runs::Enqueue;
+use crate::runs::enqueue;
 use crate::store::{Mutation, Store, collect, corrupt, get_buddy, idempotent, idempotent_write, new_id, now_iso, require};
 use crate::tasks::get_task;
 use crate::types::*;
@@ -810,7 +810,7 @@ fn insert_post(
         crate::deliveries::wake(tx, channel, &post, mention)?;
     }
     for recipient in &owed {
-        tx.enqueue(EnqueueInput {
+        enqueue(tx, EnqueueInput {
             buddy_id: recipient.to_string(),
             input: RunInput::Post { post_id: id.clone() },
             conversation_id: None,

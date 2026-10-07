@@ -2,7 +2,8 @@
 //! only (`Op::Admin`); a buddy never edits the team (02 §8.3 `team_admin`).
 
 use crate::error::{CoreError, Result};
-use crate::store::{Mutation, Store, get_buddy, idempotent, new_id, now_iso, require};
+use crate::runs::cancel_queued;
+use crate::store::{Mutation, Store, get_buddy, idempotent, manages, new_id, now_iso, require, workspace_row};
 use crate::types::*;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::json;
@@ -145,7 +146,7 @@ impl Store {
 fn workspace_at(conn: &Connection, root_path: &str) -> Result<Option<Workspace>> {
     Ok(conn
         .prepare_cached("SELECT id, name, root_path, created_at FROM workspace WHERE root_path = ?1")?
-        .query_row([root_path], |r| Ok(Workspace { id: r.get(0)?, name: r.get(1)?, root_path: r.get(2)?, created_at: r.get(3)? }))
+        .query_row([root_path], workspace_row)
         .optional()?)
 }
 
@@ -169,11 +170,8 @@ fn manager_id(manager: &ManagerRef) -> Option<&str> {
 /// A buddy cannot report to itself or to anyone who (transitively) reports to it.
 fn reject_cycle(conn: &Connection, buddy: &str, manager: &str) -> Result<()> {
     get_buddy(conn, manager)?;
-    let sql = "WITH RECURSIVE up(id) AS (
-                 SELECT ?1 UNION SELECT b.manager_id FROM buddy b JOIN up ON b.id = up.id WHERE b.manager_id IS NOT NULL)
-               SELECT EXISTS(SELECT 1 FROM up WHERE id = ?2)";
-    let cycles: bool = conn.prepare_cached(sql)?.query_row(params![manager, buddy], |r| r.get(0))?;
-    match cycles {
+    // A cycle: the manager is the buddy itself, or reports to it up the chain.
+    match manager == buddy || manages(conn, buddy, manager)? {
         true => Err(CoreError::Invalid(format!("{buddy} cannot report to {manager}: that is a reporting cycle"))),
         false => Ok(()),
     }
@@ -184,11 +182,7 @@ fn reject_cycle(conn: &Connection, buddy: &str, manager: &str) -> Result<()> {
 fn archive_side_effects(tx: &Transaction, buddy: &str, status: Option<BuddyStatus>) -> Result<()> {
     match status {
         Some(BuddyStatus::Archived) => {
-            tx.execute(
-                "UPDATE run SET status = 'cancelled', error_code = 'archived', error = 'the buddy was archived', ended_at = ?2
-                 WHERE buddy_id = ?1 AND status = 'queued'",
-                params![buddy, now_iso()],
-            )?;
+            cancel_queued(tx, "archived", Some("the buddy was archived"), "buddy_id = ?2", params![now_iso(), buddy])?;
             Ok(())
         }
         Some(BuddyStatus::Active) | None => Ok(()),

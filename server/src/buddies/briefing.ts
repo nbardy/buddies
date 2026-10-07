@@ -133,16 +133,20 @@ export async function composeBriefing(
     // promptly (identity, soul, memory) and leaves out what changes every turn (tasks).
     memoryGeneration: `memory:${working?.revision ?? 0}:${longTerm?.revision ?? 0}:identity:${identity}`,
     workingDirectory: workspace.rootPath,
-    execution: buddyExecutionPreferences(
-      {
-        provider: buddy.provider ?? null,
-        model: buddy.model ?? null,
-        reasoning_effort: buddy.reasoningEffort ?? null,
-      },
-      installed
-    ),
+    execution: profileExecution(buddy, installed),
   };
 }
+
+/** A crate Buddy's harness/model, through the one shared rule (config-mapping.ts). */
+export const profileExecution = (buddy: Buddy, installed: InstalledAgent): BuddyExecution =>
+  buddyExecutionPreferences(
+    {
+      provider: buddy.provider ?? null,
+      model: buddy.model ?? null,
+      reasoning_effort: buddy.reasoningEffort ?? null,
+    },
+    installed
+  );
 
 const keyOf = (context: BuddyContext) => JSON.stringify([context.buddyId, context.workspaceId]);
 

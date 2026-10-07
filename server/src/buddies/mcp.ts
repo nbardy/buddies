@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { Actor, ChannelRef, DocRef, DocScope, ListScope, Post } from '@unleashd/buddies-core';
+import type { TaskQuery } from '@unleashd/buddies-core';
 import { z } from 'zod';
 import type { MessageSource } from '../conversations/messages';
 import { requireCanonicalPostMedia } from './channel-media';
@@ -355,14 +356,16 @@ const taskRow = (task: Awaited<ReturnType<BuddiesCore['getTask']>>) => ({
   pin: task.pin,
   updatedAt: task.updatedAt,
 });
+// The task query each list scope names; one conversion from the tool's scope (`scopeQuery`).
+const TASK_QUERY: { [K in ListScope['kind']]: (s: Extract<ListScope, { kind: K }>) => TaskQuery } =
+  {
+    buddy: ({ buddyId }) => ({ kind: 'owner', buddyId }),
+    task: ({ taskId }) => ({ kind: 'children', parentId: taskId }),
+    workspace: ({ workspaceId }) => ({ kind: 'workspace', workspaceId }),
+  };
 const readTaskRows = async (deps: ToolDeps, scope: Scope, include: TaskInclude) => {
-  const query =
-    'buddyId' in scope
-      ? ({ kind: 'owner', buddyId: scope.buddyId } as const)
-      : 'taskId' in scope
-        ? ({ kind: 'children', parentId: scope.taskId } as const)
-        : ({ kind: 'workspace', workspaceId: scope.workspace } as const);
-  const tasks = await deps.core.listTasks(query);
+  const list = scopeQuery(scope);
+  const tasks = await deps.core.listTasks(TASK_QUERY[list.kind](list as never));
   return (include === 'all' ? tasks : tasks.filter(isOpenTask)).map(taskRow);
 };
 

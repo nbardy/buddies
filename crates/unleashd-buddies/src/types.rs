@@ -678,6 +678,17 @@ pub enum ListScope {
     Workspace { workspace_id: String },
 }
 
+impl ListScope {
+    /// The run/schedule column this scope filters on, with its id.
+    pub(crate) fn column(self) -> (&'static str, String) {
+        match self {
+            ListScope::Buddy { buddy_id } => ("buddy_id", buddy_id),
+            ListScope::Task { task_id } => ("task_id", task_id),
+            ListScope::Workspace { workspace_id } => ("workspace_id", workspace_id),
+        }
+    }
+}
+
 /// Keyset position: posts strictly older than this ordered id.
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]

@@ -6,12 +6,7 @@ import {
   type ReplyRetryResult,
   isHarnessRetryFailure,
 } from '@unleashd/shared';
-import {
-  NO_AGENT_INSTALLED,
-  WAKE_MESSAGE,
-  buddyExecutionPreferences,
-  configFromProviderPreferences,
-} from '@unleashd/shared';
+import { NO_AGENT_INSTALLED, WAKE_MESSAGE, configFromProviderPreferences } from '@unleashd/shared';
 import type { ConversationRuntime } from '../conversations/runtime';
 import {
   type LiveConversation,
@@ -20,6 +15,7 @@ import {
   scanGenerations,
   stableConversationId,
 } from './buddy-conversation-slots';
+import { profileExecution } from './briefing';
 import type { ReplyGate } from './channel-reply-gate';
 import { type BuddiesCore, OWNER } from './core';
 import type { BuddyEvents } from './events';
@@ -133,14 +129,7 @@ export function createChannels(ports: ChannelsPorts) {
   // A `no-agent` profile throws inside runReply's try, so the thread gets a visible reply_failed
   // notice and nothing is spawned (fresh-install trial 2026-10-05: an empty bubble).
   const profileConfig = (buddy: Buddy): ConversationConfig => {
-    const execution = buddyExecutionPreferences(
-      {
-        provider: buddy.provider ?? null,
-        model: buddy.model ?? null,
-        reasoning_effort: buddy.reasoningEffort ?? null,
-      },
-      ports.installedAgent()
-    );
+    const execution = profileExecution(buddy, ports.installedAgent());
     switch (execution.kind) {
       case 'run':
         return configFromProviderPreferences(execution);

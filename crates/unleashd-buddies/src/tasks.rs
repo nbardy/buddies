@@ -3,6 +3,7 @@
 //! cancels runs queued under the old epoch.
 
 use crate::error::{CoreError, Result};
+use crate::runs::cancel_queued;
 use crate::store::{Mutation, Store, collect, corrupt, get_buddy, idempotent, new_id, now_iso, require};
 use crate::types::*;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
@@ -195,11 +196,7 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
                 next.pin
             ],
         )?;
-        tx.execute(
-            "UPDATE run SET status = 'cancelled', error_code = 'task_epoch_stale', ended_at = ?3
-             WHERE task_id = ?1 AND status = 'queued' AND task_epoch < ?2",
-            params![task.id, epoch, next.updated_at],
-        )?;
+        cancel_queued(tx, "task_epoch_stale", None, "task_id = ?2 AND task_epoch < ?3", params![next.updated_at, task.id, epoch])?;
         Ok(task.id.clone())
     })
 }

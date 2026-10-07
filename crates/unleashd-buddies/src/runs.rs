@@ -11,7 +11,7 @@ use crate::tasks::get_task;
 use crate::types::*;
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::types::Value;
-use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, Row, ToSql, Transaction, params, params_from_iter};
 use serde_json::json;
 use std::str::FromStr;
 
@@ -128,50 +128,45 @@ pub(crate) struct NewRun {
 }
 
 /// Enqueue is idempotent on the input key: the key's latest attempt is returned if it exists.
-pub(crate) trait Enqueue {
-    fn enqueue(&self, input: EnqueueInput) -> Result<Run> {
-        self.insert_run(NewRun { input, body: None })
-    }
-    fn insert_run(&self, run: NewRun) -> Result<Run>;
+pub(crate) fn enqueue(conn: &Connection, input: EnqueueInput) -> Result<Run> {
+    insert_run(conn, NewRun { input, body: None })
 }
 
-impl Enqueue for Connection {
-    fn insert_run(&self, run: NewRun) -> Result<Run> {
-        let NewRun { input, body } = run;
-        let (kind, input_id, key) = input.input.columns(&input.buddy_id)?;
-        let latest = format!("SELECT {RUN_COLS} FROM run WHERE input_key = ?1 AND buddy_id = ?2 ORDER BY attempt DESC LIMIT 1");
-        // Old rows keyed `post:<id>` (before 2026-10-01) never match: a post run is only enqueued
-        // for a post inserted in the same write, so its id is new.
-        if let Some(run) = self.prepare_cached(&latest)?.query_row([&key, &input.buddy_id], run_row).optional()? {
-            return Ok(run);
-        }
-        let buddy = get_buddy(self, &input.buddy_id)?;
-        let task_epoch = input.task_id.as_deref().map(|t| get_task(self, t).map(|t| t.epoch)).transpose()?;
-        let now = now_iso();
-        let id = new_id("run");
-        self.prepare_cached(
-            "INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, task_epoch,
-               after_run_id, status, deadline, ready_at, created_at, config, body)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', ?11, ?12, ?12, ?13, ?14)",
-        )?
-        .execute(params![
-            id,
-            key,
-            kind,
-            input_id,
-            buddy.id,
-            buddy.workspace_id,
-            input.conversation_id,
-            input.task_id,
-            task_epoch,
-            input.after_run_id,
-            input.deadline,
-            now,
-            input.config.as_ref().map(|c| serde_json::to_string(c).expect("run config serializes")),
-            body
-        ])?;
-        get_run(self, &id)
+pub(crate) fn insert_run(conn: &Connection, run: NewRun) -> Result<Run> {
+    let NewRun { input, body } = run;
+    let (kind, input_id, key) = input.input.columns(&input.buddy_id)?;
+    let latest = format!("SELECT {RUN_COLS} FROM run WHERE input_key = ?1 AND buddy_id = ?2 ORDER BY attempt DESC LIMIT 1");
+    // Old rows keyed `post:<id>` (before 2026-10-01) never match: a post run is only enqueued
+    // for a post inserted in the same write, so its id is new.
+    if let Some(run) = conn.prepare_cached(&latest)?.query_row([&key, &input.buddy_id], run_row).optional()? {
+        return Ok(run);
     }
+    let buddy = get_buddy(conn, &input.buddy_id)?;
+    let task_epoch = input.task_id.as_deref().map(|t| get_task(conn, t).map(|t| t.epoch)).transpose()?;
+    let now = now_iso();
+    let id = new_id("run");
+    conn.prepare_cached(
+        "INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, task_epoch,
+           after_run_id, status, deadline, ready_at, created_at, config, body)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', ?11, ?12, ?12, ?13, ?14)",
+    )?
+    .execute(params![
+        id,
+        key,
+        kind,
+        input_id,
+        buddy.id,
+        buddy.workspace_id,
+        input.conversation_id,
+        input.task_id,
+        task_epoch,
+        input.after_run_id,
+        input.deadline,
+        now,
+        input.config.as_ref().map(|c| serde_json::to_string(c).expect("run config serializes")),
+        body
+    ])?;
+    get_run(conn, &id)
 }
 
 impl Store {
@@ -182,7 +177,7 @@ impl Store {
         }
         self.write(|tx| {
             require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: input.buddy_id.clone() })?;
-            tx.enqueue(input)
+            enqueue(tx, input)
         })
     }
 
@@ -194,7 +189,7 @@ impl Store {
     pub fn enqueue_chat(&mut self, actor: &Actor, input: ChatEnqueue) -> Result<Run> {
         self.write(|tx| {
             require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: input.buddy_id.clone() })?;
-            tx.insert_run(NewRun {
+            insert_run(tx, NewRun {
                 input: EnqueueInput {
                     buddy_id: input.buddy_id,
                     input: RunInput::Chat { turn_id: input.turn_id },
@@ -436,10 +431,7 @@ impl Store {
             let run = get_run(tx, run_id)?;
             require(tx, actor, Op::CancelRun, &Subject::Buddy { id: run.buddy_id.clone() })?;
             match run.status {
-                RunStatus::Queued => tx.execute(
-                    "UPDATE run SET status = 'cancelled', error_code = 'user_stop', ended_at = ?2 WHERE id = ?1",
-                    params![run_id, now_iso()],
-                )?,
+                RunStatus::Queued => cancel_queued(tx, "user_stop", None, "id = ?2", params![now_iso(), run_id])?,
                 RunStatus::Running => tx.execute("UPDATE run SET status = 'cancel_requested' WHERE id = ?1", [run_id])?,
                 RunStatus::CancelRequested | RunStatus::Complete | RunStatus::Failed | RunStatus::Cancelled => 0,
             };
@@ -540,18 +532,14 @@ impl Store {
     }
 
     pub fn list_run_rows(&self, reader: &Actor, scope: ListScope, limit: i64) -> Result<Vec<RunRow>> {
-        let (column, scope) = match scope {
-            ListScope::Buddy { buddy_id } => ("r.buddy_id", buddy_id),
-            ListScope::Task { task_id } => ("r.task_id", task_id),
-            ListScope::Workspace { workspace_id } => ("r.workspace_id", workspace_id),
-        };
+        let (column, scope) = scope.column();
         // Live work, plus what ended in the last 12 h: a run whose holder died is `failed`
         // (lease_expired) soon after, and a live-only view made such runs vanish (2026-09-30).
         // Fix-guard: the window applies to EVERY scope. Buddy/task scopes once returned the 20
         // newest runs ever, each with its full error and input (60-95k chars, 2026-10-06);
         // guard: `run_rows_share_one_window_across_scopes` in tests/core.rs.
         let filter = format!(
-            "{column} = ?2 AND (r.status IN ('queued','running','cancel_requested')
+            "r.{column} = ?2 AND (r.status IN ('queued','running','cancel_requested')
                OR r.ended_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '-12 hours'))"
         );
         // Who the run answers to: the owner for a chat; for a request or a delivery, the post's author.
@@ -639,11 +627,7 @@ impl Store {
     }
 
     pub fn list_schedules(&self, query: ListScope) -> Result<Vec<Schedule>> {
-        let (column, id) = match query {
-            ListScope::Buddy { buddy_id } => ("buddy_id", buddy_id),
-            ListScope::Task { task_id } => ("task_id", task_id),
-            ListScope::Workspace { workspace_id } => ("workspace_id", workspace_id),
-        };
+        let (column, id) = query.column();
         let sql = format!("SELECT {SCHEDULE_COLS} FROM schedule WHERE {column} = ?1 ORDER BY name");
         collect(self.conn.prepare_cached(&sql)?.query_map([id], schedule_row)?)
     }
@@ -685,7 +669,7 @@ impl Store {
 /// panel. Guard: `a_schedule_fire_posts_nothing_and_queues_one_silent_run` (tests/core.rs).
 pub(crate) fn fire_slot(tx: &Transaction, s: &Schedule, slot: &str) -> Result<Run> {
     let body = format!("Scheduled run \"{}\" ({}, {}), slot {slot}:\n{}", s.name, s.cron, s.timezone, s.prompt);
-    tx.insert_run(NewRun {
+    insert_run(tx, NewRun {
         input: EnqueueInput {
             buddy_id: s.buddy_id.clone(),
             input: RunInput::Chat { turn_id: format!("schedule:{}:{slot}", s.id) },
@@ -907,4 +891,15 @@ fn close_request(tx: &Transaction, post_id: &str, state: &str, failed: Option<(&
         }
         _ => Ok(()),
     }
+}
+
+/// THE one way a queued run ends without running (K4): owner stop, Buddy archive, stale task
+/// epoch, the read fence. `selector` picks the runs with ?2.. (?1 is the end time); each caller
+/// keeps its own error code and text. Running runs are never touched: their runner settles them.
+pub(crate) fn cancel_queued(tx: &Transaction, code: &str, error: Option<&str>, selector: &str, params: &[&dyn ToSql]) -> Result<usize> {
+    let error = error.map_or("NULL".to_owned(), |text| format!("'{text}'"));
+    let sql = format!(
+        "UPDATE run SET status = 'cancelled', error_code = '{code}', error = {error}, ended_at = ?1 WHERE status = 'queued' AND {selector}"
+    );
+    Ok(tx.prepare_cached(&sql)?.execute(params)?)
 }

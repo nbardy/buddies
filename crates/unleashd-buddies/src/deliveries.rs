@@ -21,7 +21,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::posts::{POST_COLS, post_row};
-use crate::runs::{Enqueue, RUN_COLS, run_row};
+use crate::runs::{RUN_COLS, cancel_queued, enqueue, run_row};
 use crate::store::{Store, collect, now_iso, require};
 use crate::types::*;
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -68,13 +68,11 @@ pub(crate) fn advance(tx: &Transaction, reader: &Actor, root_id: &str, ord: &str
 /// queued until cancelled by hand at 06:56Z. Guards: `a_mark_advance_consumes_every_covered_delivery`
 /// (tests/core.rs), buddies-v2 "an answer the requester already read settles …".
 pub(crate) fn fence(tx: &Transaction, buddy_id: &str, root_id: &str, through: &str) -> Result<()> {
-    tx.prepare_cached(
-        "UPDATE run SET status = 'cancelled', error_code = 'consumed', error = 'the reader already read it', ended_at = ?4
-         WHERE input_kind = 'deliver' AND status = 'queued' AND buddy_id = ?1
-           AND input_id IN (SELECT p.id FROM post p WHERE p.root_id = ?2 AND p.ord <= ?3
-                            UNION ALL SELECT p.id FROM post p WHERE p.id = ?2 AND p.ord <= ?3)",
-    )?
-    .execute(params![buddy_id, root_id, through, now_iso()])?;
+    cancel_queued(tx, "consumed", Some("the reader already read it"), "input_kind = 'deliver' AND buddy_id = ?2
+           AND input_id IN (SELECT p.id FROM post p WHERE p.root_id = ?3 AND p.ord <= ?4
+                            UNION ALL SELECT p.id FROM post p WHERE p.id = ?3 AND p.ord <= ?4)",
+        params![now_iso(), buddy_id, root_id, through],
+    )?;
     Ok(())
 }
 
@@ -193,7 +191,7 @@ pub(crate) fn wake(tx: &Transaction, channel: &Channel, post: &Post, mention: &M
         return Ok(());
     }
     let conversation = subscription(tx, &mention.buddy_id, post.root())?;
-    tx.enqueue(EnqueueInput {
+    enqueue(tx, EnqueueInput {
         buddy_id: mention.buddy_id.clone(),
         input: RunInput::Deliver { post_id: post.id.clone() },
         conversation_id: conversation,
@@ -206,7 +204,7 @@ pub(crate) fn wake(tx: &Transaction, channel: &Channel, post: &Post, mention: &M
 }
 
 pub(crate) fn enqueue_delivery(tx: &Transaction, buddy_id: &str, post: &Post, conversation_id: Option<String>) -> Result<Run> {
-    tx.enqueue(EnqueueInput {
+    enqueue(tx, EnqueueInput {
         buddy_id: buddy_id.to_string(),
         input: RunInput::Deliver { post_id: post.id.clone() },
         conversation_id,
