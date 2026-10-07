@@ -229,7 +229,6 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
     this.revoke();
     return true;
   }
-  ownerStopped(): void {}
   dropWaitingTurn(): boolean {
     return false;
   }
@@ -286,11 +285,10 @@ export function sessionAudienceKey(
  * a request resumed where it ran), by placement. It
  * names which provider-session audience the turn resumes (`sessionAudienceKey`) and whether it
  * can hold owner authority (`startTurn`: only `owner_input`).
- *   foreground: `buddy_post`. The owner chat's own session (audience = this thread) resumes, so
- *     the lead keeps its context instead of forking a fresh session (delivery design D9, 1(d)).
- *     A worker's answer must NEVER run with the owner's grant in the owner's chat: `buddy_post`
- *     is the B1 origin, "Buddy-authored text, conversation audience, no owner authority".
- *   background: `buddy_message`, as before: a worker conversation's audience is its work.
+ *   foreground: `buddy_post` (a thread seat). The seat's own session resumes (delivery design
+ *     D9); `buddy_post` is the B1 origin, "Buddy-authored text, conversation audience, no owner
+ *     authority". An owner chat takes no deliveries since 2026-10-07: they run in its branch.
+ *   background: `buddy_message`: a worker's or a branch's audience is its work.
  */
 const RETURN_ORIGIN: { readonly [V in BuddyVisibility]: TurnInput['origin'] } = {
   foreground: 'buddy_post',
@@ -403,7 +401,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     // Starting an owner message under that old run left it without a run of its own: no lease,
     // no deadline, and invisible to the claim gate, which then saw the conversation free and
     // claimed a queued RETURN beside it (delivery design D3, owner decision A, 2026-10-06). So an
-    // owner message waits for the settle, then gets its own chat run, which `owner_first` sees.
+    // owner message waits for the settle, then gets its own chat run.
     if (this.execution) {
       if (input.inputId === this.execution.runId) return 'send';
       if (!fromQueue) return 'enqueue';
@@ -563,6 +561,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
       context,
       conversationId: this.host.id,
       owner: input.origin === 'owner_input',
+      // A turn the owner typed (a chat run) subscribes the chat's branch (mcp.ts `subscriber`).
+      subscribes: owned ? 'branch' : 'self',
     });
     this.grant = tools.grant;
     return { mcpServers: tools.servers, extraArgs: HARNESS_MEMORY_OFF[config.provider] };
@@ -751,18 +751,6 @@ export class BuddyTurnPolicy implements TurnPolicy {
     return true;
   }
 
-  // Pattern: route-at-send (docs/patterns.md#route-at-send)
-  // Decision C (delivery design D1): Stop means "quiet down now". Cancelling only the running turn
-  // would let the next queued delivery start a moment later, in the chat the owner just silenced.
-  // The posts stay unread, so they come back with the Buddy's next delivery or read. Only the
-  // owner's Stop button gets here: `stop()` also runs for an interrupt-and-send, where the queued
-  // deliveries must survive.
-  ownerStopped(): void {
-    this.buddies.cancelQueuedDeliveries(this.host.id).catch((error) => {
-      console.error(`[${this.host.id}] could not cancel queued deliveries`, error);
-    });
-  }
-
   // --- runner-owned runs --------------------------------------------------------
 
   /**
@@ -804,7 +792,11 @@ export class BuddyTurnPolicy implements TurnPolicy {
         // D9: owner authority only when every post the turn shows is the owner's (the runner
         // decides, from the posts as stored); anything else gets the placement's Buddy origin.
         // Guard: buddies-v2 "B1: a seat turn holds owner authority only when …".
-        origin: owner ? 'owner_input' : RETURN_ORIGIN[this.host.visibility()],
+        // A branch never does (task_01a1153f): it acts for the owner's chat without the owner.
+        origin:
+          owner && !this.kind.context.parentBuddyConversationId
+            ? 'owner_input'
+            : RETURN_ORIGIN[this.host.visibility()],
         inputId: runId,
       });
     } catch (error) {

@@ -445,48 +445,6 @@ fn a_request_from_no_conversation_starts_no_run_for_its_answer_or_failure() {
     assert_eq!(notices.iter().map(|p| p.purpose.as_deref()).collect::<Vec<_>>(), [Some("run_failed")], "the failure is visible in the thread");
 }
 
-// Owner decision A (2026-10-06, delivery design D3): an answer is delivered into the chat that
-// asked, so a human chat's queue holds real work. The owner's queued message still goes first: a
-// delivery waits as `owner_first` while a chat run is queued in its conversation.
-#[test]
-fn a_queued_owner_message_goes_before_a_delivery_in_the_same_conversation() {
-    let mut f = fixture();
-    let s = &mut f.store;
-    let from_chat = PostInput { from_conversation_id: Some("owner-chat".into()), ..request("do X", "r1") };
-    let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat).unwrap();
-    let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
-    s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
-    s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-    let chat = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "owner-chat")).unwrap();
-    let delivery = |s: &Store| {
-        s.list_run_rows(&Actor::Owner, ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap().into_iter().find(|r| matches!(r.input, RunInput::Deliver { .. })).unwrap()
-    };
-    assert_eq!(delivery(s).waiting, Some(RunWaiting::OwnerFirst), "the delivery waits for the owner message");
-    assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.id, chat.id, "the owner message is claimed first");
-    assert_eq!(delivery(s).waiting, Some(RunWaiting::ConversationBusy), "running, the chat holds the conversation");
-}
-
-// Fix-guard (2026-10-06): a chat run orphaned in `queued` by a dead backend has no ticket left to
-// claim it; `owner_first` must stop counting it, or every delivery in that chat waits forever.
-#[test]
-fn an_orphaned_owner_message_stops_holding_returns() {
-    let mut f = fixture();
-    let path = f.path.clone();
-    let s = &mut f.store;
-    let from_chat = PostInput { from_conversation_id: Some("owner-chat".into()), ..request("do X", "r1") };
-    let asked = s.post(&buddy("mid"), dm("mid", "ic"), from_chat).unwrap();
-    let worker = s.claim_run(lease(60_000)).unwrap().unwrap();
-    s.answer(&buddy("ic"), answer_input(&asked.id, "done", "a")).unwrap();
-    s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
-    let chat = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "owner-chat")).unwrap();
-    let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute("UPDATE run SET created_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1", [&chat.id]).unwrap();
-    drop(conn);
-    let rows = s.list_run_rows(&Actor::Owner, ListScope::Buddy { buddy_id: "mid".into() }, 10).unwrap();
-    let delivery = rows.iter().find(|r| matches!(r.input, RunInput::Deliver { .. })).unwrap();
-    assert_eq!(delivery.waiting, None, "an orphaned owner message no longer holds the delivery");
-}
-
 // Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01 (task_01a0f7ff-bbd6): a background
 // requester read its answer in its still-running turn, yet the queued return run stayed to resume
 // that turn with the same answer until cancelled by hand 17 minutes later. The read fence

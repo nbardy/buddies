@@ -52,6 +52,30 @@ export interface ToolDeps {
   uploadsRoot(): string;
   /** The one source of message bodies; `runs get {tail}` reads a run's transcript through it. */
   messages: MessageSource;
+  /** Open (or reuse) the background branch of an owner chat and return its id (`subscriber`). */
+  openBranch(chat: { conversationId: string; buddyId: string; workspaceId: string }): Promise<string>;
+}
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/**
+ * The conversation a turn's post, answer or follow subscribes: where later posts in that thread
+ * are delivered (crate deliveries.rs). Owner decision 2026-10-07 (task_01a1153f): deliveries stay
+ * "out of our chats", shown "as background worker". Under decision A the owner chat subscribed
+ * itself, so a worker's answer ran there and showed its raw envelope as a "You" message. Now a
+ * turn the owner typed subscribes the chat's BRANCH: one background child of the chat (listed as
+ * its worker) that forks the chat's session on its first turn, so it has the lead's context.
+ * Deciding here, not where the delivery runs, keeps a delivery from queueing behind the owner's
+ * turn (`conversation_busy`); that is why decision A needed owner_first and Stop-cancel, now gone.
+ * Cost: the lead's post from the owner chat links to the branch, where its replies run. Rejected
+ * alternatives: agent_notes/2026-10-07_deliveries-off-owner-chats.md.
+ */
+function subscriber(deps: ToolDeps, grant: BuddyGrant): Promise<string> {
+  switch (grant.subscribes) {
+    case 'self':
+      return Promise.resolve(grant.conversationId);
+    case 'branch':
+      return deps.openBranch(grant);
+  }
 }
 
 type Tool<G extends TurnGrant> = {
@@ -191,7 +215,7 @@ function postInThread(events: BuddyEvents, rootId: string, author: Actor, ms: nu
  *     subscription, deliveries.rs), then returns the unread posts at once, or holds the read open
  *     up to `wait` s for a post by someone else, or returns `subscribed` with no posts. From then
  *     on every post by someone else there is delivered to THIS conversation as its next turn (a
- *     durable `deliver` run), a foreground owner chat included (decision A). So the wait only
+ *     durable `deliver` run); an owner chat's follow subscribes its branch (`subscriber`). So the wait only
  *     saves a turn when an answer is seconds away; nothing depends on catching it inline.
  *   - `follow: false` unsubscribes ("notify only" is unsubscribing, decision D2/D).
  * Subscribing BEFORE the wait means a post during it is both returned and queued as a delivery;
@@ -209,7 +233,12 @@ async function followThread(
     const read = await deps.core.followThread(grant.author, root.id, null, limit);
     return { kind: 'unsubscribed' as const, ...read };
   }
-  const read = await deps.core.followThread(grant.author, root.id, grant.conversationId, limit);
+  const read = await deps.core.followThread(
+    grant.author,
+    root.id,
+    await subscriber(deps, grant),
+    limit
+  );
   if (read.posts.length > 0) return { kind: 'unread' as const, ...read };
   await postInThread(deps.events, root.id, grant.author, follow.wait * 1000);
   const late = await deps.core.catchUpThread(grant.author, root.id, limit);
@@ -465,7 +494,7 @@ const BUDDY_TOOLS = {
             requestId: answers,
             body: resolved.body,
             evidence: input.evidence,
-            fromConversationId: grant.conversationId,
+            fromConversationId: await subscriber(deps, grant),
             key: input.key,
           })
         );
@@ -490,7 +519,7 @@ const BUDDY_TOOLS = {
           ...input,
           body,
           // Provenance, and in a DM the conversation later posts there are delivered to.
-          fromConversationId: grant.conversationId,
+          fromConversationId: await subscriber(deps, grant),
           mentions: wakes(channel, grant.author, input.kind, body, NO_PICKS),
           runConfig,
           broadcast: false,

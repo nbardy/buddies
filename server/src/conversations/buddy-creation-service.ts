@@ -9,6 +9,7 @@ import type {
 import { bodyText, buddyExecutionPreferences, buddyKind } from '@unleashd/shared';
 import { NO_AGENT_INSTALLED, configFromProviderPreferences } from '@unleashd/shared';
 import type { ResolvedBuddyConversation } from '../buddies/briefing';
+import { stableConversationId } from '../buddies/buddy-conversation-slots';
 import { type ConfigProvenance, INITIAL_MESSAGE_DISPATCH_LEASE_MS } from './config-records';
 import type { ConversationConfigService } from './config-service';
 import { createConversationService } from './creation-service';
@@ -31,6 +32,8 @@ export interface CreateServerBuddyConversationInput {
   /** Default: decided from the context (defaultBuddyVisibility). */
   visibility?: BuddyVisibility;
   branch?: ConversationBranch;
+  /** Fork this conversation's provider session on the first turn (runtime `chatForkSource`). */
+  resumedFromConversationId?: string;
   ownerInput?: Readonly<{ origin: 'owner_input'; inputId: string }>;
 }
 
@@ -89,6 +92,8 @@ export interface BuddyCreationService {
   createServerBuddyConversation(
     input: CreateServerBuddyConversationInput
   ): Promise<ConversationRuntime>;
+  /** An owner chat's background branch (mcp.ts `subscriber`): opened once, then reused. */
+  openBranch(chat: { conversationId: string; buddyId: string; workspaceId: string }): Promise<string>;
   createBuddyBuilderConversation(
     input: CreateBuddyBuilderConversationInput
   ): Promise<ConversationRuntime>;
@@ -234,6 +239,7 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
       commandId: input.commandId,
       initialMessage: input.initialMessage,
       branch: input.branch,
+      resumedFromConversationId: input.resumedFromConversationId,
       kind: buddyKind(resolved.context, input.visibility),
       buddyBriefing: resolved.briefing,
     });
@@ -244,6 +250,37 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
         input.ownerInput ? { ownerInput: input.ownerInput } : undefined
       );
     return conversation;
+  }
+
+  // Pattern: route-at-send (docs/patterns.md#route-at-send)
+  // One branch per owner chat, at a stable id, so every thread the chat subscribes shares it and
+  // a restart finds it (app-created records are loaded at boot). It is a background child of the
+  // chat (`parentBuddyConversationId`) that forks the chat's provider session on its first turn,
+  // on the chat's config, so a native fork is possible. An existing branch is returned as is: its
+  // creation fingerprint holds the config it was opened on, and the chat's may have moved since.
+  async function openBranch(chat: {
+    conversationId: string;
+    buddyId: string;
+    workspaceId: string;
+  }): Promise<string> {
+    const id = stableConversationId(`branch:${chat.conversationId}`);
+    if (ports.getConversation(id)) return id;
+    const parent = ports.getConversation(chat.conversationId);
+    if (!parent) throw new Error(`Owner chat ${chat.conversationId} is not loaded`);
+    await createServerBuddyConversation({
+      context: {
+        buddyId: chat.buddyId,
+        workspaceId: chat.workspaceId,
+        parentBuddyConversationId: chat.conversationId,
+      },
+      conversationId: id,
+      commandId: id,
+      config: parent.config,
+      deferInitialMessage: true,
+      visibility: 'background',
+      resumedFromConversationId: chat.conversationId,
+    });
+    return id;
   }
 
   async function createBuddyBuilderConversation(
@@ -287,6 +324,7 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
     persistCurrentSession,
     dispatchInitialMessageIfPending,
     createServerBuddyConversation,
+    openBranch,
     createBuddyBuilderConversation,
   };
 }

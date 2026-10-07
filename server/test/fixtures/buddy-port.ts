@@ -50,7 +50,6 @@ export function fakeBuddyPort(
     finishRun: options.finishRun ?? (async () => undefined),
     settle: options.settle ?? (async () => undefined),
     revoke: options.revoke ?? (() => undefined),
-    cancelQueuedDeliveries: async () => undefined,
     afterTurn: options.afterTurn ?? (() => undefined),
   };
 }

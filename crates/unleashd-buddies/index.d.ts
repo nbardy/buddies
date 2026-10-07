@@ -555,7 +555,6 @@ export type RunWaiting =
   | { kind: 'buddy_archived' }
   | { kind: 'after_run'; runId: string }
   | { kind: 'conversation_busy' }
-  | { kind: 'owner_first' }
   | { kind: 'pool_full'; active: number; max: number }
   | { kind: 'task_paused' }
 

@@ -466,8 +466,6 @@ pub enum RunWaiting {
     BuddyArchived,
     AfterRun { run_id: String },
     ConversationBusy,
-    /// A non-chat run (a return) waits while an owner message is queued in its conversation.
-    OwnerFirst,
     PoolFull { active: i64, max: i64 },
     TaskPaused,
 }

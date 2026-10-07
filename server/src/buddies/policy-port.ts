@@ -6,7 +6,7 @@ import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import type { TurnInput } from '../turns/input';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
-import { type GrantRecord, type Grants, type TurnGrant } from './grants';
+import { type GrantRecord, type Grants, type Subscribes, type TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
 import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
 import type { ChatAdmission, LeaseRenewal, Runner } from './runner';
@@ -30,12 +30,14 @@ export interface BuddyPolicyPort {
    * The MCP servers of one turn: one server, one fresh grant. `owner` is true only for an
    * owner-authored input (B1); it is the one thing that makes the principal the Owner. A grant
    * is issued whole, so there is no issue order to keep (T08 had to issue the Buddy grant before
-   * the owner grant because issuing revoked the conversation's earlier grants).
+   * the owner grant because issuing revoked the conversation's earlier grants). `subscribes`:
+   * where the turn's posts subscribe (grants.ts `Subscribes`).
    */
   mcpServers(turn: {
     context: BuddyContext;
     conversationId: string;
     owner: boolean;
+    subscribes: Subscribes;
   }): TurnTools;
   builderMcpServers(conversationId: string): TurnTools;
   /** The turn's holder is alive: push its run's lease forward (Pattern: lease-heartbeat). */
@@ -48,12 +50,6 @@ export interface BuddyPolicyPort {
   /** A runner-owned run's turn ended: its completion step, then its settle, as `settle` resolves. */
   finishRun(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void>;
   revoke(conversationId: string): void;
-  /**
-   * The owner pressed Stop in this conversation: end its queued deliveries (decision C). The posts
-   * stay unread, so they reach the Buddy with its next delivery or read; Stop means "quiet down
-   * now", not "never tell me". Resolves once they are cancelled.
-   */
-  cancelQueuedDeliveries(conversationId: string): Promise<void>;
   /** After a successful turn: memory review. */
   afterTurn(turn: CompletedBuddyTurn): void;
 }
@@ -87,7 +83,7 @@ export function createBuddyPolicyPort(deps: {
     },
     admission: (turnId) => runner.chatAdmission(turnId),
     abandon: (turnId) => runner.abandonChat(turnId),
-    mcpServers({ context, conversationId, owner }) {
+    mcpServers({ context, conversationId, owner, subscribes }) {
       // A new turn's grant replaces whatever this conversation still held.
       grants.revokeConversation(conversationId);
       const grant = grants.issueBuddy({
@@ -96,6 +92,7 @@ export function createBuddyPolicyPort(deps: {
         workspaceId: context.workspaceId,
         conversationId,
         runId: context.coordinationRunId ?? null,
+        subscribes,
       });
       if (owner) grants.promoteToOwner(conversationId);
       return {
@@ -116,7 +113,6 @@ export function createBuddyPolicyPort(deps: {
       runner.finishChat(runId, leaseToken, crateOutcome(outcome)),
     finishRun: (runId, leaseToken, outcome) => runner.finishRun(runId, leaseToken, outcome),
     revoke: (conversationId) => grants.revokeConversation(conversationId),
-    cancelQueuedDeliveries: (conversationId) => runner.cancelQueuedDeliveries(conversationId),
     afterTurn: (turn) => deps.reviewer.enqueue(turn),
   };
 }

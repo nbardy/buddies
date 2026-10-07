@@ -39,23 +39,8 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 // The fix is upstream, not a special case in this gate: the route is fixed when the request is
 // sent (types.rs `Returns`).
 //
-// SUCCESSOR 2026-10-06 (owner decision A, delivery design D0/D3): an answer now DOES run in the
-// chat that asked, owner chats included, so a human chat's queue holds real work. What keeps the
-// owner from waiting behind automation in their own chat is `owner_first`: a non-chat run (a
-// delivery, or a resumed request) waits while a `chat` run (an owner message for that
-// conversation) is queued. The message
-// still typed behind a running turn lives in the runtime's in-memory queue and has no run yet; it
-// gets one the moment the turn ends (turns/runner.ts `settleOutcome` calls processQueue BEFORE
-// the settle lands), so this clause is what the claim gate sees in that window. The owner's
-// messages typed while a turn runs therefore go before the returns that queued behind it.
-// Guard: buddies-v2 "a worker's answer returns to the owner chat that asked …".
-//
-// Fix-guard (2026-10-06): a queued chat run is claimed only through the backend's in-memory chat
-// ticket, so one left queued by a backend that died can never run, and an unbounded clause would
-// hold every return in that conversation behind it forever. Only a chat run queued in the last
-// 15 minutes counts; past that, a live owner message loses only its place ahead of returns. Step 6
-// (owner messages durable at send, task_01a11013-bac6) makes queued chat runs claimable after a
-// restart and can drop this bound. Guard: `an_orphaned_owner_message_stops_holding_returns`.
+// SUCCESSOR 2026-10-07 (task_01a1153f): decision A's `owner_first` clause is gone. Deliveries for
+// an owner chat run in its background branch, so an owner chat's queue holds only owner messages.
 const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
@@ -71,11 +56,6 @@ const WAITING_REASON_SQL: &str = r#"CASE
         WHERE c.buddy_id = r.buddy_id AND c.input_kind = 'deliver' AND c.status IN ('running','cancel_requested')
           AND coalesce(cp.root_id, cp.id) = coalesce(rp.root_id, rp.id)
     ) THEN json_object('kind','conversation_busy')
-    WHEN r.conversation_id IS NOT NULL AND r.input_kind <> 'chat' AND EXISTS (
-        SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
-          AND c.input_kind = 'chat' AND c.status = 'queued'
-          AND c.created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '-15 minutes')
-    ) THEN json_object('kind','owner_first')
     WHEN coalesce(activity.active, 0) >= b.max_active_runs THEN json_object(
         'kind','pool_full',
         'active',coalesce(activity.active, 0),

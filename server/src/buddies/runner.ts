@@ -68,6 +68,8 @@ export interface RunnerHost {
     rootId: string;
     pick: RunConfig | undefined;
   }): Promise<string>;
+  /** An owner chat's background branch, opened or reused (as for mcp.ts `subscriber`). */
+  openBranch(chat: { conversationId: string; buddyId: string; workspaceId: string }): Promise<string>;
   /** `config`: a worker run's own provider/model; absent, the Buddy's profile. */
   openBackground(input: {
     conversationId: string;
@@ -399,8 +401,8 @@ export function createRunner(options: {
    * A post in a thread this Buddy's conversation subscribes to, or that @mentions the Buddy, or
    * the owner's post in its DM (one rule for answers, failure posts, followed threads, mentions
    * and schedule fires; owner decisions A–K). It is a turn in the conversation that follows the
-   * thread, a human chat included (decision A), claimed only once the conversation is idle
-   * (`conversation_busy`) and after any owner message queued there (`owner_first`). With no
+   * thread, claimed only once that conversation is idle (`conversation_busy`); for a chat the
+   * owner talks in, that is its background branch (mcp.ts `subscriber`). With no
    * conversation yet it opens the Buddy's SEAT in the thread (the same ids the deleted pair machine used);
    * a schedule fire, which the Buddy itself wrote, opens a fresh background conversation. Either
    * is subscribed by `bindRun`. Everything it would show was read meanwhile: no turn (the fence).
@@ -418,13 +420,24 @@ export function createRunner(options: {
         // An owner's chip pick (or a retry's model) applies to the thread's SEAT, never to a chat
         // that merely follows the thread: it must not move the owner's own chat onto a model.
         if (origin && host.registered(origin) && !run.config)
-          return existingTurn(origin, prompt, owner);
+          return existingTurn(await outOfOwnerChat(run, origin), prompt, owner);
         const trigger = await core.getPost(OWNER, postId);
         return trigger.author.kind === 'buddy' && trigger.author.id === run.buddyId
           ? freshTurn(run, prompt, owner)
           : seatTurn(run, trigger.rootId ?? trigger.id, prompt, owner);
       }
     }
+  }
+
+  // Pattern: route-at-send (docs/patterns.md#route-at-send)
+  // A subscription from before 2026-10-07 (decision A) can still name an owner chat: one the
+  // owner typed into (a chat run, as in turn-policy.ts `startTurn`). Its delivery runs in the
+  // chat's branch, and `bindRun` moves the subscription there, so this fires once per thread.
+  async function outOfOwnerChat(run: Run, conversationId: string): Promise<string> {
+    const runs = await core.listRuns({ kind: 'conversation', conversationId }, 100);
+    return runs.some((r) => r.input.kind === 'chat')
+      ? host.openBranch({ conversationId, buddyId: run.buddyId, workspaceId: run.workspaceId })
+      : conversationId;
   }
 
   // Delivery design D10: a delivery whose trigger is the owner's @mention, or the owner's post in a
@@ -770,19 +783,6 @@ export function createRunner(options: {
       return tracked(
         core.getRun(runId).then((run) => FINISH[outcome.t](run, leaseToken, outcome as never))
       );
-    },
-
-    /**
-     * The owner's Stop in a conversation: every queued run there that is not an owner message (a
-     * delivery, or a resumed request) ends now (decision C, delivery design D1). The posts stay
-     * unread, so they reach the Buddy with its next delivery or read. Chat runs are the owner's own
-     * messages and keep today's rule: Stop ends the turn, not the queue behind it.
-     */
-    async cancelQueuedDeliveries(conversationId: string): Promise<void> {
-      const runs = await core.listRuns({ kind: 'conversation', conversationId }, 100);
-      const returns = runs.filter((r) => r.status === 'queued' && r.input.kind !== 'chat');
-      await Promise.all(returns.map((r) => core.cancelRun(OWNER, r.id)));
-      if (returns.length > 0) events.emit({ kind: 'changed' });
     },
 
     /** Owner stop: a queued run ends now; a running one is asked to stop and its turn is killed. */

@@ -206,6 +206,9 @@ async function runCase(c: CurationCase, repeat: number, warnings: string[]): Pro
     grants,
     uploadsRoot: () => scratch,
     messages: async () => null,
+    openBranch: async () => {
+      throw new Error('no owner chats in this test');
+    },
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   const rungs: Rung[] = [];

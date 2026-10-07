@@ -220,8 +220,7 @@ CREATE INDEX IF NOT EXISTS event_buddy ON event(buddy_id, seq) WHERE buddy_id IS
 ///   holder died is requeued, never replayed or reported lost (runs.rs `expire_leases`);
 /// - `through_ord`: a delivery's newest shown post, fixed by its first compose, so an adopted turn
 ///   that recomposes never marks read what arrived after (it replaced `thread_follow.delivered_through`);
-/// - NO `lane`/`position` (decision H2): `conversation_id` is the queue key, and owner-first is a
-///   waiting reason (`owner_first`), not a placement;
+/// - NO `lane`/`position` (decision H2): `conversation_id` is the queue key;
 /// - `snapshot` is gone: no code wrote it since the v3 store. An imported value moves into `legacy`.
 /// STRICT CHECKs cannot be ALTERed, hence a rebuild, not ADD COLUMN.
 const RUN_TABLE: &str = r#"

@@ -407,6 +407,7 @@ const buddyRunnerHost: RunnerHost = {
       rootId,
       pick: pick && workerConversationConfig(pick),
     }),
+  openBranch: (chat) => buddyCreationService.openBranch(chat),
   openBackground: async ({ conversationId, context, commandId, config }) => {
     await buddyCreationService.createServerBuddyConversation({
       context,
@@ -830,6 +831,7 @@ void runServerStartup(
         grants: buddyGrants,
         uploadsRoot: () => UPLOADS_DIR,
         messages: async (id, page) => (await listReady).page(id, page),
+        openBranch: (chat) => buddyCreationService.openBranch(chat),
         portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
       });
       // Background, never awaited: bootstrap and the upstream fetch must not

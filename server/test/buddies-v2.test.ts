@@ -19,6 +19,7 @@ import {
   type BuddyContext,
   type ConversationConfig,
   type MessagePage,
+  bodyText,
   createDefaultConversationConfig,
 } from '@unleashd/shared';
 import express from 'express';
@@ -195,6 +196,7 @@ async function world(reopen?: string) {
         messages: all.slice(afterSeq + 1, afterSeq + 1 + limit),
       };
     },
+    openBranch: (chat) => creation.openBranch(chat),
     portFile: join(scratch, 'buddy-mcp.json'),
   });
 
@@ -324,6 +326,7 @@ async function world(reopen?: string) {
           rootId,
           pick: pick && workerConversationConfig(pick),
         }),
+      openBranch: (chat) => creation.openBranch(chat),
       openBackground: async ({ conversationId, context, commandId, config }) => {
         await creation.createServerBuddyConversation({
           context,
@@ -445,7 +448,8 @@ async function world(reopen?: string) {
 }
 
 // Rewritten for owner decision A (2026-10-06, delivery design D0/D9, task_01a11013-9072): the
-// answer used to be an Inbox read with no run; it now returns into the chat that asked (a).
+// answer used to be an Inbox read with no run. Since 2026-10-07 (task_01a1153f) it runs in the
+// asking chat's background branch, never in the chat itself (a).
 test('one full chat turn: an owner chat asks another Buddy, it answers, the return is delivered; grants die with their turns', async () => {
   const w = await world();
   try {
@@ -531,21 +535,25 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     assert.equal(answer.body, 'Logo drawn');
     assert.deepEqual(answer.author, buddyActor(w.designer.id));
 
-    // (a) The request was sent from Lead's owner chat, so that chat is subscribed to its thread and
-    // the answer is delivered THERE: a `deliver` run bound to 'owner-chat', and a third turn that
-    // carries the answer.
+    // (a) The request was sent from Lead's owner chat, so the chat's BRANCH is subscribed to its
+    // thread and the answer is delivered there: a `deliver` run bound to the branch, a child of the
+    // chat (the chat lists it as a background worker), and the owner chat gains no turn.
     const leadRuns = await until(async () => {
       const runs = await w.runs(w.lead.id);
       return runs.length === 2 && runs.every((r) => r.status === 'complete') && runs;
     }, "Lead's chat run and its return");
     const returned = leadRuns.find((r) => r.input.kind === 'deliver')!;
-    assert.equal(returned.conversationId, 'owner-chat');
-    assert.equal(w.turns.length, 3, 'one automated turn, in the owner chat');
+    const branch = w.conversations.get(returned.conversationId!)!;
+    assert.notEqual(branch.id, 'owner-chat', 'the answer never runs in the owner chat');
+    assert.equal(branch.parentConversationId, 'owner-chat');
+    assert.equal(branch.kind.t === 'buddy' && branch.kind.visibility, 'background');
+    assert.equal(chat.messages.filter((m) => m.role === 'user').length, 1, 'no turn in the chat');
+    assert.equal(w.turns.length, 3);
     assert.match(w.turns[2].request.prompt, /New posts in threads you follow/);
     assert.match(w.turns[2].request.prompt, /Logo drawn/);
-    // (d) The return resumes the chat's own provider session (no fork into a worker audience) and
-    // is a Buddy-authored turn: a worker's answer never runs with the owner's grant (B1, D9).
-    assert.equal(w.turns[2].request.resumeSessionId, 'native-1', 'same session as the owner turn');
+    // (d) The branch forks the chat's provider session, so it has the lead's context, and it is a
+    // Buddy-authored turn: a worker's answer never runs with the owner's grant (B1, D9).
+    assert.equal(w.turns[2].request.forkSessionId, 'native-1', "a fork of the chat's session");
     assert.equal(returnTurn.names.includes('team_admin'), false, 'no owner tools');
     assert.equal(returnTurn.write.isError, true);
     assert.match(returnTurn.write.text, /^\[denied\]/, 'no owner document authority');
@@ -566,18 +574,16 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
   }
 });
 
-// Pattern: fix-guards (docs/patterns.md#fix-guards). Rewritten for owner decision A (2026-10-06,
-// delivery design D0/D3). History: 2026-10-01 (agent_notes/2026-10-01_unleashd_case_study_
-// conversation_busy.md) nine answers to an owner chat's requests queued `reply` runs behind it
-// (`conversation_busy`, up to 2h44m) only to settle as no-ops, reading "9 blocked"; the then fix
-// created no run for a human chat. The runs are real work now, so what must hold is their ORDER:
-// (b) the answer waits for the turn it arrived in, and an owner message typed meanwhile goes first.
-test("a worker's answer returns to the owner chat that asked, after its running turn and after an owner message typed meanwhile", async () => {
+// Pattern: fix-guards (docs/patterns.md#fix-guards). Owner decision 2026-10-07 (task_01a1153f,
+// #case-studies post_01a1153e-e5f3): deliveries stay "out of our chats", shown "as background
+// worker". Under decision A the answer ran as a turn IN the owner chat (rendered as a "You"
+// message with the raw envelope) and waited for the owner's turn and messages (owner_first). Now
+// it runs at once in the chat's branch, beside the owner's still-running turn, and the chat's
+// transcript gains nothing. Fails if the owner chat subscribes itself again.
+test("a worker's answer runs in the owner chat's background branch while the owner's turn still runs", async () => {
   const w = await world();
   try {
-    let request!: Post;
-    let whileRunning: Awaited<ReturnType<typeof w.core.listRunRows>> = [];
-    let chat!: ConversationRuntime;
+    let branchTurnDuringOwnerTurn = false;
     w.during.set(1, async (turn) => {
       const posted = await call(turn.mcp, 'post', {
         channel: { direct: [w.designer.id] },
@@ -586,71 +592,14 @@ test("a worker's answer returns to the owner chat that asked, after its running 
         key: 'ask-logo',
       });
       assert.equal(posted.isError, false, posted.text);
-      request = posted.value;
-      // The owner turn is still running while Designer answers; the owner types meanwhile.
       await until(
-        async () => (await w.core.getPost(OWNER, request.id)).request.state === 'answered',
-        'the answer while the owner turn runs'
+        async () =>
+          (await w.runs(w.lead.id)).some(
+            (r) => r.input.kind === 'deliver' && r.status === 'complete'
+          ),
+        'the answer delivered while the owner turn runs'
       );
-      chat.enqueueMessage('Also make it blue', { origin: 'owner_input', inputId: 'owner-2' });
-      whileRunning = await w.core.listRunRows(OWNER, { kind: 'buddy', buddyId: w.lead.id }, 50);
-    });
-    w.answers.set(2, 'Logo drawn');
-    chat = await w.creation.createServerBuddyConversation({
-      context: { buddyId: w.lead.id, workspaceId: w.ws },
-      conversationId: 'owner-chat',
-      commandId: 'owner-chat',
-      deferInitialMessage: true,
-    });
-    chat.sendMessage('Get Designer to draw the logo', {
-      origin: 'owner_input',
-      inputId: 'owner-1',
-    });
-    await until(async () => {
-      const runs = await w.runs(w.lead.id);
-      return runs.length === 3 && runs.every((r) => r.status === 'complete');
-    }, 'the owner turn, the owner message and the return');
-    assert.deepEqual(
-      whileRunning.map((r) => [r.input.kind, r.status]).sort(),
-      [
-        ['chat', 'running'],
-        ['deliver', 'queued'],
-      ],
-      'the answer waits for the running owner turn instead of running beside it'
-    );
-    assert.deepEqual(
-      whileRunning.find((r) => r.input.kind === 'deliver')?.waiting,
-      { kind: 'conversation_busy' },
-      'and says why'
-    );
-    // Turn 2 is Designer's. Then the owner's message runs BEFORE the queued return.
-    assert.match(w.turns[2].request.prompt, /Also make it blue/, 'owner message first');
-    assert.match(w.turns[3].request.prompt, /Logo drawn/, 'the delivery after it');
-    assert.equal(w.turns[3].request.resumeSessionId, 'native-1');
-  } finally {
-    await w.close();
-  }
-});
-
-// (c) Delivery design Task 1: reading the answer yourself settles the return, foreground too.
-test('a foreground requester that reads its answer mid-turn settles the return with no turn', async () => {
-  const w = await world();
-  try {
-    let request!: Post;
-    w.during.set(1, async (turn) => {
-      const posted = await call(turn.mcp, 'post', {
-        channel: { direct: [w.designer.id] },
-        kind: 'request',
-        body: 'Draw the logo',
-        key: 'ask-logo',
-      });
-      request = posted.value;
-      await until(
-        async () => (await w.core.getPost(OWNER, request.id)).request.state === 'answered',
-        'the answer while the owner turn runs'
-      );
-      const read = await call(turn.mcp, 'channel_read', { read: { threadId: request.id } });
-      assert.equal(read.isError, false, read.text);
+      branchTurnDuringOwnerTurn = true;
     });
     w.answers.set(2, 'Logo drawn');
     const chat = await w.creation.createServerBuddyConversation({
@@ -665,19 +614,20 @@ test('a foreground requester that reads its answer mid-turn settles the return w
     });
     const runs = await until(async () => {
       const all = await w.runs(w.lead.id);
-      return (
-        all.length === 2 && all.every((r) => r.status !== 'queued' && r.status !== 'running') && all
-      );
-    }, 'the owner turn and its settled return');
-    assert.equal(runs.find((r) => r.input.kind === 'deliver')?.errorCode, 'consumed');
-    assert.equal(w.turns.length, 2, 'no model turn repeated the answer');
+      return all.length === 2 && all.every((r) => r.status === 'complete') && all;
+    }, 'the owner turn and the delivery');
+    assert.ok(branchTurnDuringOwnerTurn, 'the delivery did not wait for the owner turn');
+    const delivery = runs.find((r) => r.input.kind === 'deliver')!;
+    assert.equal(w.conversations.get(delivery.conversationId!)?.parentConversationId, 'owner-chat');
+    const userText = chat.messages.flatMap((m) => (m.role === 'user' ? [bodyText(m.body)] : []));
+    assert.deepEqual(userText, ['Get Designer to draw the logo'], 'no delivery in the owner chat');
   } finally {
     await w.close();
   }
 });
 
-// (e) A failed worker's notice also arrives in the chat that asked.
-test('a failed worker run reaches the owner chat that asked', async () => {
+// (e) A failed worker's notice also arrives for the chat that asked, in its branch.
+test("a failed worker run reaches the owner chat's branch", async () => {
   const w = await world();
   try {
     w.during.set(1, async (turn) => {
@@ -708,74 +658,17 @@ test('a failed worker run reaches the owner chat that asked', async () => {
       'the failure notice turn'
     );
     // The failure notice is a `run_failed` post by the worker in the request's thread, delivered
-    // to the subscribed owner chat like an answer.
-    assert.equal(notice.conversationId, 'owner-chat');
+    // to the subscribed branch like an answer.
+    assert.equal(w.conversations.get(notice.conversationId!)?.parentConversationId, 'owner-chat');
     assert.match(w.turns[2].request.prompt, /failed \(execution_failed\)/);
-    assert.equal(w.turns[2].request.resumeSessionId, 'native-1');
+    assert.equal(w.turns[2].request.forkSessionId, 'native-1');
   } finally {
     await w.close();
   }
 });
 
-// (f) Delivery design D1: Stop is "quiet down now": the queued return is cancelled, its post stays
-// unread, and no turn starts afterwards.
-test("the owner's Stop cancels the queued return and no turn follows it", async () => {
-  const w = await world();
-  try {
-    let request!: Post;
-    let chat!: ConversationRuntime;
-    w.during.set(1, async (turn) => {
-      const posted = await call(turn.mcp, 'post', {
-        channel: { direct: [w.designer.id] },
-        kind: 'request',
-        body: 'Draw the logo',
-        key: 'ask-logo',
-      });
-      request = posted.value;
-      await until(
-        async () =>
-          (await w.runs(w.lead.id)).some(
-            (r) => r.input.kind === 'deliver' && r.status === 'queued'
-          ),
-        'the return queued behind the running turn'
-      );
-      chat.ownerStop();
-      await until(
-        async () =>
-          (await w.runs(w.lead.id)).some(
-            (r) => r.input.kind === 'deliver' && r.status === 'cancelled'
-          ),
-        'Stop cancelling the return'
-      );
-    });
-    w.answers.set(2, 'Logo drawn');
-    chat = await w.creation.createServerBuddyConversation({
-      context: { buddyId: w.lead.id, workspaceId: w.ws },
-      conversationId: 'owner-chat',
-      commandId: 'owner-chat',
-      deferInitialMessage: true,
-    });
-    chat.sendMessage('Get Designer to draw the logo', {
-      origin: 'owner_input',
-      inputId: 'owner-1',
-    });
-    await until(async () => {
-      const runs = await w.runs(w.lead.id);
-      return (
-        runs.length === 2 && runs.every((r) => r.status !== 'running' && r.status !== 'queued')
-      );
-    }, 'the stopped turn to end');
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    assert.equal(w.turns.length, 2, 'the cancelled return started no turn');
-    const answered = await w.core.getPost(OWNER, request.id);
-    assert.equal(answered.request.state, 'answered', 'the answer itself stands, unread');
-  } finally {
-    await w.close();
-  }
-});
-
-// (g) Follow works from a foreground chat: it registers and wakes that chat, without owner authority.
-test('follow from an owner chat registers and wakes that chat', async () => {
+// (g) Follow from a foreground chat subscribes its branch, which wakes without owner authority.
+test("follow from an owner chat registers and wakes the chat's branch", async () => {
   const w = await world();
   try {
     let rootId = '';
@@ -818,9 +711,10 @@ test('follow from an owner chat registers and wakes that chat', async () => {
       ).isError,
       false
     );
-    const turn = await until(() => w.turns[1], 'the owner chat woken by the follow');
+    const turn = await until(() => w.turns[1], 'the branch woken by the follow');
     assert.match(turn.request.prompt, /Mockups are in \/tmp\/mockups/);
-    assert.equal(turn.request.resumeSessionId, 'native-1', 'it wakes the chat that followed');
+    assert.equal(turn.request.forkSessionId, 'native-1', "the branch forks the chat's session");
+    assert.equal(chat.messages.filter((m) => m.role === 'user').length, 1, 'no turn in the chat');
     await until(() => woken, 'the wake turn');
     assert.equal(woken.names.includes('team_admin'), false, 'a wake never holds the owner grant');
   } finally {
@@ -851,6 +745,7 @@ test('a group DM is refused through MCP; one DM per recipient is the alternative
       workspaceId: w.ws,
       conversationId: 'c',
       runId: null,
+      subscribes: 'self',
     });
     const spec = w.endpoint.spec(grant);
     const group = await call(spec, 'post', {
@@ -886,6 +781,7 @@ test('an MCP write fires the change bus in this process (B2)', async () => {
       workspaceId: w.ws,
       conversationId: 'c',
       runId: null,
+      subscribes: 'self',
     });
     const before = w.events.length;
     const posted = await call(w.endpoint.spec(grant), 'post', {
@@ -949,6 +845,7 @@ test('workspace run rows expose task_paused and clear it when the same run becom
         workspaceId: w.ws,
         conversationId: 'waiting-view',
         runId: null,
+        subscribes: 'self',
       })
     );
     const listed = await call(spec, 'runs', {
@@ -2205,6 +2102,7 @@ test('a worker turn can still create channels, search and follow, spawn and retr
         workspaceId: w.ws,
         conversationId: 'capability-guard',
         runId: null,
+        subscribes: 'self',
       })
     );
     const client = await connect(spec);
@@ -2431,6 +2329,9 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
     grants,
     uploadsRoot: () => scratch,
     messages: async () => null,
+    openBranch: async () => {
+      throw new Error('no owner chats in this test');
+    },
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   const harnesses: string[] = [];
@@ -2558,6 +2459,9 @@ async function reviewOnce(dir: string, env: NodeJS.ProcessEnv) {
     grants,
     uploadsRoot: () => dir,
     messages: async () => null,
+    openBranch: async () => {
+      throw new Error('no owner chats in this test');
+    },
     portFile: join(dir, 'buddy-mcp.json'),
   });
   const launches: Array<{ harness: string; model: string }> = [];
@@ -2732,6 +2636,9 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
     grants,
     uploadsRoot: () => scratch,
     messages: async () => null,
+    openBranch: async () => {
+      throw new Error('no owner chats in this test');
+    },
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   const reviewer = createMemoryReviewer({
@@ -2858,6 +2765,9 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     grants,
     uploadsRoot: () => scratch,
     messages: async () => null,
+    openBranch: async () => {
+      throw new Error('no owner chats in this test');
+    },
     portFile: join(scratch, 'buddy-mcp.json'),
   });
   // An owner chat turn's context: the conversation's, plus its admitted chat run.
@@ -3147,6 +3057,7 @@ test('a retried post (same key) wakes its mentioned Buddy once', async () => {
       workspaceId: w.ws,
       conversationId: 'lead-chat',
       runId: null,
+      subscribes: 'self',
     });
     const mention = {
       channel: { id: w.general.id },
@@ -3506,6 +3417,7 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       workspaceId: w.ws,
       conversationId: 'c',
       runId: null,
+      subscribes: 'self',
     });
     const searched = await call(w.endpoint.spec(grant), 'channel_read', {
       read: { search: { text: 'quarterly' } },
@@ -3588,6 +3500,7 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
         workspaceId: w.ws,
         conversationId: 'c',
         runId: null,
+        subscribes: 'self',
       })
     );
     const ids = (listed: { value: Array<{ id: string }> }) => listed.value.map((t) => t.id).sort();
@@ -3986,6 +3899,7 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
       workspaceId: w.ws,
       conversationId: 'archive-test',
       runId: null,
+      subscribes: 'self',
     });
     const archived = await call(w.endpoint.spec(grant), 'channel_admin', {
       channelId: w.general.id,
@@ -4058,6 +3972,7 @@ test('Buddy MCP renames a public channel without changing its identity or histor
       workspaceId: w.ws,
       conversationId: 'rename-test',
       runId: null,
+      subscribes: 'self',
     });
     const renamed = await call(w.endpoint.spec(grant), 'channel_admin', {
       channelId: w.general.id,
@@ -4096,6 +4011,7 @@ test('Buddy MCP creates a channel, posts in it, and a replayed key returns the s
       workspaceId: w.ws,
       conversationId: 'create-channel-test',
       runId: null,
+      subscribes: 'self',
     });
     const spec = w.endpoint.spec(grant);
     const input = { name: 'launch-prep', purpose: 'Launch checklist', key: 'mk-launch' };
@@ -4185,6 +4101,7 @@ const asBuddy = (w: World, buddyId: string) =>
       workspaceId: w.ws,
       conversationId: `elsewhere-${buddyId}`,
       runId: null,
+      subscribes: 'self',
     })
   );
 
@@ -4526,6 +4443,7 @@ test('slim read surface: tasks get, inbox and runs list stay small and runs say 
         workspaceId: w.ws,
         conversationId: 'slim-view',
         runId: null,
+        subscribes: 'self',
       })
     );
     const size = (value: unknown) => JSON.stringify(value).length;
@@ -4656,6 +4574,7 @@ test('runs get {tail:n} returns the last n assistant entries with tool names and
         workspaceId: w.ws,
         conversationId: 'tail-view',
         runId: null,
+        subscribes: 'self',
       })
     );
     const got = await call(spec, 'runs', { action: { kind: 'get', runId: run.id, tail: 3 } });

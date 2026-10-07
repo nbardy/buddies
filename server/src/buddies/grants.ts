@@ -14,6 +14,9 @@ import { OWNER, buddyActor } from './core';
  */
 // Pattern: capability-grants (docs/patterns.md#capability-grants)
 export type Role = 'worker' | 'owner' | 'reviewer' | 'builder';
+// What this turn's posts and follows subscribe: its own conversation, or (a turn the owner typed)
+// the conversation's background branch (Pattern: route-at-send, mcp.ts `subscriber`).
+export type Subscribes = 'self' | 'branch';
 
 interface GrantBase {
   readonly token: string;
@@ -31,6 +34,7 @@ export interface BuddyGrant extends GrantBase {
   readonly buddyId: string;
   readonly workspaceId: string;
   readonly runId: string | null;
+  readonly subscribes: Subscribes;
 }
 
 /** The owner's Buddy Builder chat: no Buddy of its own; it may only read and edit the team. */
@@ -53,6 +57,7 @@ export type BuddyGrantInput = {
   workspaceId: string;
   conversationId: string;
   runId: string | null;
+  subscribes: Subscribes;
   observe?: (tool: string, input: unknown) => void;
 };
 

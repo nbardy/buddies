@@ -476,6 +476,7 @@ export function createMemoryReviewer(options: {
           workspaceId,
           conversationId: `memory-review:${id}`,
           runId: null,
+          subscribes: 'self',
           observe: (tool, input) => {
             if (++calls > MAX_TOOL_CALLS) throw new Error('Memory review tool-call limit reached');
             const kind = (input as { kind?: string }).kind;

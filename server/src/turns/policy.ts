@@ -96,11 +96,6 @@ export interface TurnPolicy {
   revoke(): void;
   /** An owner stop. Returns false when the policy handled it without stopping the turn. */
   stop(): boolean;
-  /**
-   * The owner's explicit Stop button, as opposed to `stop()`, which an interrupt, an archive and a
-   * delete also call. A Buddy conversation ends its queued returns here and only here.
-   */
-  ownerStopped(): void;
   /** Stop while waiting for a run slot. Returns true when a waiting turn was dropped. */
   dropWaitingTurn(): boolean;
   waitingForRunSlot(): boolean;
@@ -194,7 +189,6 @@ export class ChatTurnPolicy implements TurnPolicy {
   stop(): boolean {
     return true;
   }
-  ownerStopped(): void {}
   dropWaitingTurn(): boolean {
     return false;
   }
