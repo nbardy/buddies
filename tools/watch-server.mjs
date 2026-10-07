@@ -340,7 +340,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const serverRoot = path.join(repositoryRoot, 'server');
   const runner = createBackendRunner({
     command: process.execPath,
-    args: ['--import', 'tsx', 'src/server.ts'],
+    // SIGUSR2 writes a heap snapshot (server/Heap.*.heapsnapshot, gitignored; delete after use). It
+    // costs nothing until sent, and is how a growing backend is measured (2026-10-08 audit).
+    args: ['--import', 'tsx', '--heapsnapshot-signal=SIGUSR2', 'src/server.ts'],
     cwd: serverRoot,
     env: { NODE_ENV: 'development' },
     watchRoot: repositoryRoot,

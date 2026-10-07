@@ -79,3 +79,4 @@ docs/benchmarks/*/*/*/
 
 # Agent worktrees (Claude Code Agent/Workflow isolation); never source.
 .claude/worktrees/
+*.heapsnapshot
