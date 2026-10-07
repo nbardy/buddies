@@ -166,9 +166,9 @@ export interface ConversationInput {
 }
 
 /**
- * `ConversationKindSchema`: what the thread is, fixed at creation. The worker ids and role are
- * `.nullable()` (never absent), so they serialize as `null` — `use_nullable` makes napi do the
- * same (without it `None` crosses as an absent key, which the Zod schema rejects).
+ * `ConversationKind`: what the thread is, fixed at creation. The worker ids and role are
+ * nullable (never absent), so they serialize as `null` — `use_nullable` makes napi do the
+ * same (without it `None` crosses as an absent key).
  */
 export type ConversationKind =
   | { t: 'chat' }

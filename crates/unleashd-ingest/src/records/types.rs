@@ -6,7 +6,7 @@
 //!
 //! Pattern: sum-types (docs/patterns.md#sum-types) — every Zod union is a Rust enum here:
 //! lifecycle status, provenance, model/reasoning selection, knowledge scope, and the stored
-//! conversation kind (`ConversationKindSchema`, record v2 since T09).
+//! conversation kind (`ConversationKind`, record v2 since T09).
 //!
 //! Nullish fields (`z.string().nullish()` in `BuddyContextSchema`) are `Option<Option<T>>`:
 //! outer `None` = key absent, `Some(None)` = explicit `null`. 999 of 1,001 real Buddy contexts
@@ -192,9 +192,9 @@ pub struct ConversationCreation {
     pub resumed_from_conversation_id: Option<String>,
 }
 
-/// `ConversationKindSchema`: what the thread is, fixed at creation. The worker ids and role are
-/// `.nullable()` (never absent), so they serialize as `null` — `use_nullable` makes napi do the
-/// same (without it `None` crosses as an absent key, which the Zod schema rejects).
+/// `ConversationKind`: what the thread is, fixed at creation. The worker ids and role are
+/// nullable (never absent), so they serialize as `null` — `use_nullable` makes napi do the
+/// same (without it `None` crosses as an absent key).
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "t", discriminant_case = "lowercase", use_nullable = true))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "lowercase", rename_all_fields = "camelCase", deny_unknown_fields)]

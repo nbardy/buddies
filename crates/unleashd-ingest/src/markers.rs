@@ -210,7 +210,7 @@ pub enum DurableKind {
     Builder,
 }
 
-/// `ConversationKindSchema.safeParse`.
+/// Reads a stored conversation kind; None when the value is not one.
 pub fn durable_kind_from_value(value: &Value) -> Option<DurableKind> {
     match value.get("kind").and_then(Value::as_str)? {
         "general" => Some(DurableKind::General),
