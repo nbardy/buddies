@@ -390,3 +390,20 @@ message containing the raw delivery envelope (screenshot in #case-studies post_0
 
 **Why the lead's recommendation lost:** the owner does not want automated turns in their own chats, even when they are
 displayed well. This matches their September 13 request.
+
+## Behavior freeze, 2026-10-07 07:26Z
+
+Owner (#case-studies post_01a1153f-c17b): "I'm a little worried in general any other behavior like that we changed, tbh I
+really liked the setup we had and didn't want any big changes."
+
+**Lead response** (post_01a11541-3dae):
+- Listed the 10 user-visible behavior changes since 3838b65.
+- Froze further behavior-changing merges until the owner chooses.
+- Recommended reverting 2 (wake posts a DM message), 3 (schedules fire as posts), 6 (follow-up gate deleted),
+  7 (posting subscribes in every channel) and 8 (replies follow the last writer).
+- Recommended keeping 4 (1:1 DMs), 5 (plain @Name), 9 (restart resume and failure post) and 10 (progress line).
+- Item 1 (decision A) is already being reverted.
+
+**Lesson for the lead.** The review doc presented A–P as architecture choices. Several of them (E, F, I, M-wake) changed
+how the product feels to the owner, and the doc did not label them as user-visible behavior changes. Future decision
+tables mark each row "visible to the owner: yes/no" and default visible changes to opt-in.
