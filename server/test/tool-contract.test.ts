@@ -4,14 +4,15 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import type { Role } from '../src/buddies/grants';
-import { LEGACY_TOOLS, toolsFor } from '../src/buddies/mcp';
+import { toolsFor } from '../src/buddies/mcp';
 
 // Fix-guard: the Buddy MCP tool contract. Agent CLIs cache `tools/list` for a whole turn and an
 // adopted turn outlives the backend that started it, so a turn keeps sending the inputs it was
 // told about. 74d1fd3 reshaped `channel_read.read.search` from a string to {text, ...} and every
 // search from an adopted turn failed validation (CEO feedback, 2026-10-06). Rule: inputs change
-// only additively; a removed or reshaped form needs a legacy canonicalizer in LEGACY_FORMS below,
-// with its own test. Decisions S4 + N: agent_notes/2026-10-06_buddies-target-system-review.md §3
+// only additively. The compatibility shims for the 2026-10-06 reshapes (search string, follow
+// {until}, channel_create/channel_admin) were deleted once the longest adopted turn (24 h) had
+// ended; a NEW reshape needs a shim again, with its own test. Decisions S4 + N: agent_notes/2026-10-06_buddies-target-system-review.md §3
 // rule 6 and §4. Regenerate the snapshot with `UPDATE_TOOL_SNAPSHOT=1`.
 
 const ROLES: readonly Role[] = ['worker', 'owner', 'reviewer', 'builder'];
@@ -47,35 +48,6 @@ function currentSnapshot(): Snapshot {
     ])
   );
 }
-
-/**
- * Legacy input forms a tool still accepts although its advertised schema no longer lists them.
- * `path` is the schema path that was reshaped; `legacy` is what an old turn sends and `canonical`
- * what the handler must see after the real schema parses it.
- */
-const LEGACY_FORMS: ReadonlyArray<{
-  tool: string;
-  path: string;
-  reason: string;
-  legacy: unknown;
-  canonical: unknown;
-}> = [
-  {
-    tool: 'channel_read',
-    path: 'read',
-    reason: '74d1fd3: read.search was a string, now {text, ...filters}',
-    legacy: { read: { search: 'quarterly' } },
-    canonical: { read: { search: { text: 'quarterly' } }, limit: 30 },
-  },
-  {
-    tool: 'channel_read',
-    path: 'read',
-    reason:
-      '2026-10-06 (delivery design Task 3): follow was {until}, a durable wake at a deadline; it is a subscription with a bounded wait now, and {until} reads as the default wait',
-    legacy: { read: { threadId: 'post_1', follow: { until: '2099-01-01T00:00:00Z' } } },
-    canonical: { read: { threadId: 'post_1', follow: { wait: 2 } }, limit: 30 },
-  },
-];
 
 const isObj = (node: Json | undefined): node is Obj =>
   node !== null && typeof node === 'object' && !Array.isArray(node);
@@ -134,21 +106,12 @@ function breakages(old: Json | undefined, next: Json | undefined, path: string):
   return out;
 }
 
-// A tool merged into another (decision L1) vanishes from toolsFor but stays callable by name
-// (LEGACY_TOOLS), so its removal is covered; the test below proves the old input still works.
-const legacyCovers = (tool: string, problem: string) =>
-  problem === `${tool}: removed` && tool in LEGACY_TOOLS
-    ? true
-    : LEGACY_FORMS.some(
-        ({ tool: name, path }) => name === tool && problem.startsWith(`${tool}.${path}`)
-      );
-
 function contractProblems(before: Snapshot, after: Snapshot): string[] {
   return ROLES.flatMap((role) =>
     Object.keys(before[role] ?? {}).flatMap((tool) =>
-      breakages(before[role][tool], after[role]?.[tool], tool)
-        .filter((problem) => !legacyCovers(tool, problem))
-        .map((problem) => `${role}: ${problem}`)
+      breakages(before[role][tool], after[role]?.[tool], tool).map(
+        (problem) => `${role}: ${problem}`
+      )
     )
   );
 }
@@ -168,8 +131,7 @@ test('tool input schemas change only additively; reshaped forms need a legacy ca
     contractProblems(committed, now),
     [],
     'a tool input stopped accepting something it accepted. Adopted turns keep the tool list they ' +
-      'started with. Keep the old form working: add a canonicalizer (see legacySearchToText in ' +
-      'mcp.ts) and register it in LEGACY_FORMS with a legacy input'
+      'started with. Keep the old form working with a canonicalizer and a test of its own'
   );
   // An additive change is allowed, but the snapshot must follow it or a later removal of the new
   // field would be compared against a stale baseline and slip through.
@@ -179,27 +141,6 @@ test('tool input schemas change only additively; reshaped forms need a legacy ca
     'tool inputs changed additively: run `UPDATE_TOOL_SNAPSHOT=1 pnpm exec tsx --test ' +
       'server/test/tool-contract.test.ts` and commit server/test/fixtures/tool-contracts/'
   );
-});
-
-test('every registered legacy input still parses to its canonical form through the real schema', () => {
-  for (const { tool, legacy, canonical, reason } of LEGACY_FORMS) {
-    const parsed = toolsFor('worker')[tool].schema.safeParse(legacy);
-    assert.ok(parsed.success, `${tool} rejects its legacy form (${reason})`);
-    assert.deepEqual(parsed.data, canonical, `${tool} canonicalized differently (${reason})`);
-  }
-});
-
-test('a merged tool is not advertised, and its old input still reaches the canonical tool', () => {
-  const channel = toolsFor('worker').channel;
-  for (const [name, { schema, canonical }] of Object.entries(LEGACY_TOOLS)) {
-    assert.equal(name in toolsFor('worker'), false, `${name} must not be advertised`);
-    const legacy =
-      name === 'channel_create'
-        ? { name: 'Ops', purpose: 'Run it', key: 'k1' }
-        : { channelId: 'c1', change: { kind: 'rename', name: 'Ops2' }, key: 'k2' };
-    const parsed = channel.schema.safeParse(canonical(schema.parse(legacy) as never));
-    assert.ok(parsed.success, `${name} no longer reaches channel: ${JSON.stringify(parsed)}`);
-  }
 });
 
 // Fix-guard: tool descriptions ride in every turn's context (the CEO feedback measured

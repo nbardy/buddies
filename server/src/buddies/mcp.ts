@@ -101,18 +101,6 @@ const teamTool = <S extends z.AnyZodObject>(t: ToolSpec<TurnGrant, S>) =>
 
 const actorOf = (id: string): Actor => (id === 'owner' ? OWNER : buddyActor(id));
 
-// Fix-guard: `read.search` was a bare string until 74d1fd3 made it {text, ...filters}. Agent CLIs
-// cache tools/list for a whole turn and adopted turns outlive backend versions, so a turn that
-// started before the reshape keeps sending `search: "string"` and every call failed validation
-// (2026-10-06, CEO feedback). Canonicalize at the input boundary so the handler sees one shape.
-// z.preprocess leaves the advertised JSON schema as the canonical union. Guard:
-// buddies-v2.test.ts (the `search: "quarterly"` call).
-function legacySearchToText(read: unknown): unknown {
-  if (typeof read !== 'object' || read === null) return read;
-  const { search, ...rest } = read as Record<string, unknown>;
-  return typeof search === 'string' ? { ...rest, search: { text: search } } : read;
-}
-
 const channelRef = z.union([
   z.object({ id: z.string().min(1) }),
   z
@@ -174,18 +162,6 @@ export const FOLLOW_WAIT_DEFAULT_S = 2;
 export const FOLLOW_WAIT_MAX_S = 30;
 /** The default wait in ms (tests time the grace with it). */
 export const FOLLOW_GRACE_MS = FOLLOW_WAIT_DEFAULT_S * 1000;
-
-// Fix-guard (tool contract, decision S4): `follow` was `{until}` (a durable wake at a deadline,
-// follows.rs) until 2026-10-06. Adopted turns keep the tool list they started with and still send
-// it; the deadline is gone (use `schedule`), so `{until}` reads as a follow with the default wait.
-// Guard: tool-contract.test.ts LEGACY_FORMS.
-function legacyFollowUntil(read: unknown): unknown {
-  if (typeof read !== 'object' || read === null) return read;
-  const { follow, ...rest } = read as Record<string, unknown>;
-  if (typeof follow !== 'object' || follow === null || !('until' in follow)) return read;
-  const { until: _until, ...kept } = follow as Record<string, unknown>;
-  return { ...rest, follow: kept };
-}
 
 /** Resolves on the first post in `rootId` by someone other than `author`, or after `ms`. */
 function postInThread(events: BuddyEvents, rootId: string, author: Actor, ms: number) {
@@ -403,48 +379,6 @@ const channelToolSchema = z.object({
   key,
 });
 
-// Fix-guard: `channel_create` and `channel_admin` became one `channel` tool (decision L1). An
-// adopted turn keeps the tool list it started with (agent CLIs cache tools/list for the turn, and
-// the turn outlives the backend that started it, see legacySearchToText), so it keeps calling the
-// old names with the old inputs. Each stays CALLABLE, routed to the `channel` handler through the
-// input rewrite below, but is not ADVERTISED: toolsFor lists only `channel`, so no new turn
-// pays for the old descriptions or schemas (the 3,000-char budget). mcpServerFor registers one
-// only when the request is a call to it. Guard: tool-contract.test.ts (LEGACY_TOOLS).
-export const LEGACY_TOOLS: Readonly<
-  Record<string, { readonly schema: z.AnyZodObject; readonly canonical: (input: never) => unknown }>
-> = {
-  channel_create: {
-    schema: z.object({
-      name: z.string().trim().min(1).max(80),
-      purpose: z.string().trim().min(1).max(500),
-      key,
-    }),
-    canonical: ({ name, purpose, key }: { name: string; purpose: string; key: string }) => ({
-      action: { kind: 'create', name, purpose },
-      key,
-    }),
-  },
-  channel_admin: {
-    schema: z.object({
-      channelId: z.string().min(1),
-      change: z.discriminatedUnion('kind', [
-        z.object({ kind: z.literal('rename'), name: z.string().trim().min(1).max(80) }),
-        z.object({ kind: z.literal('archive') }),
-        z.object({ kind: z.literal('restore') }),
-      ]),
-      key,
-    }),
-    canonical: ({
-      channelId,
-      change,
-      key,
-    }: { channelId: string; change: { kind: string; name?: string }; key: string }) => ({
-      action: { ...change, channelId },
-      key,
-    }),
-  },
-};
-
 /** The author learns whom the post woke; an unresolved `@Token` is data, not a silent no-op. */
 const withMentions = (post: Post, { mentioned, unresolved }: MentionResolution) => ({
   ...post,
@@ -576,40 +510,33 @@ const BUDDY_TOOLS = {
       'Read a channel (newest first), a thread, or search every channel here; returns {posts, next} (page older: `next` as `before`). Search text: words (all match; stems and one typo count), "phrase", -excluded, OR, @Name (posts by that Buddy or @owner). Reading from the newest post marks it read.',
     writes: false,
     schema: z.object({
-      read: z.preprocess(
-        (read) => legacyFollowUntil(legacySearchToText(read)),
-        z.union([
-          z.object({ channelId: z.string().min(1) }),
-          z.object({
-            threadId: z.string().min(1),
-            follow: z
-              .union([
-                z.object({
-                  wait: z.number().min(0).max(FOLLOW_WAIT_MAX_S).default(FOLLOW_WAIT_DEFAULT_S),
-                }),
-                z.literal(false),
-              ])
-              .optional()
-              .describe(
-                "Subscribe: later posts by others here start THIS conversation's next turn. Returns unread posts now or within `wait` s (≤30). false unsubscribes."
-              ),
+      read: z.union([
+        z.object({ channelId: z.string().min(1) }),
+        z.object({
+          threadId: z.string().min(1),
+          follow: z
+            .union([
+              z.object({
+                wait: z.number().min(0).max(FOLLOW_WAIT_MAX_S).default(FOLLOW_WAIT_DEFAULT_S),
+              }),
+              z.literal(false),
+            ])
+            .optional()
+            .describe(
+              "Subscribe: later posts by others here start THIS conversation's next turn. Returns unread posts now or within `wait` s (≤30). false unsubscribes."
+            ),
+        }),
+        z.object({
+          search: z.object({
+            text: z.string().min(1).max(200),
+            channels: z.array(z.string().min(1)).max(20).optional().describe('ids or public names'),
+            from: z.array(z.string().min(1)).max(20).optional().describe("buddy ids or 'owner'"),
+            after: z.string().optional().describe('YYYY-MM-DD or RFC 3339, inclusive'),
+            before: z.string().optional().describe('YYYY-MM-DD or RFC 3339, exclusive'),
+            inThread: z.string().optional().describe('root post id'),
           }),
-          z.object({
-            search: z.object({
-              text: z.string().min(1).max(200),
-              channels: z
-                .array(z.string().min(1))
-                .max(20)
-                .optional()
-                .describe('ids or public names'),
-              from: z.array(z.string().min(1)).max(20).optional().describe("buddy ids or 'owner'"),
-              after: z.string().optional().describe('YYYY-MM-DD or RFC 3339, inclusive'),
-              before: z.string().optional().describe('YYYY-MM-DD or RFC 3339, exclusive'),
-              inThread: z.string().optional().describe('root post id'),
-            }),
-          }),
-        ])
-      ),
+        }),
+      ]),
       before: z.object({ ord: z.string() }).optional(),
       limit: z.number().int().min(1).max(100).default(30),
     }),
@@ -900,21 +827,16 @@ export function toolManifest(role: Role): string {
 // the crate records once per (actor, workspace); a retried call replays the first result.
 export async function callTool(deps: ToolDeps, grant: TurnGrant, name: string, input: unknown) {
   const advertised = toolsFor(grant.role);
-  // A legacy name is its canonical tool called with the rewritten input (LEGACY_TOOLS).
-  const legacy = name in LEGACY_TOOLS && advertised.channel ? LEGACY_TOOLS[name] : undefined;
-  const selected = legacy ? advertised.channel : advertised[name];
+  const selected = advertised[name];
   if (!selected)
     return {
       isError: true,
       content: [{ type: 'text' as const, text: `[denied] ${name} is not available to this turn` }],
     };
   try {
-    const result = await grant.observe(name, input, async () => {
-      const canonical = legacy
-        ? selected.schema.parse(legacy.canonical(legacy.schema.parse(input) as never))
-        : input;
-      return selected.handler(deps, grant, canonical as never);
-    });
+    const result = await grant.observe(name, input, () =>
+      selected.handler(deps, grant, input as never)
+    );
     if (selected.writes) deps.events.emit({ kind: 'changed' });
     return { content: [{ type: 'text' as const, text: JSON.stringify(result ?? null) }] };
   } catch (error) {
@@ -934,7 +856,7 @@ type ToolRegistry = {
   ): unknown;
 };
 
-function mcpServerFor(deps: ToolDeps, grant: TurnGrant, calling: string | null): McpServer {
+function mcpServerFor(deps: ToolDeps, grant: TurnGrant): McpServer {
   const server = new McpServer({ name: MCP_SERVER_NAME, version: '3' });
   const registry = server as unknown as ToolRegistry;
   const run = (name: string) => (input: unknown) => callTool(deps, grant, name, input);
@@ -945,20 +867,7 @@ function mcpServerFor(deps: ToolDeps, grant: TurnGrant, calling: string | null):
       run(name)
     );
   }
-  // A legacy tool exists only for the request that calls it, so tools/list never shows it.
-  if (calling !== null && calling in LEGACY_TOOLS)
-    registry.registerTool(
-      calling,
-      { description: 'Legacy name', inputSchema: LEGACY_TOOLS[calling].schema },
-      run(calling)
-    );
   return server;
-}
-
-/** The tool a JSON-RPC `tools/call` body names; null for every other request. */
-function calledTool(body: unknown): string | null {
-  const { method, params } = (body ?? {}) as { method?: unknown; params?: { name?: unknown } };
-  return method === 'tools/call' && typeof params?.name === 'string' ? params.name : null;
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -997,7 +906,7 @@ export async function startMcpEndpoint(
     if (!grant) return void res.writeHead(401).end('unknown, expired or revoked turn grant');
     if (req.method !== 'POST' || req.url !== '/mcp') return void res.writeHead(405).end();
     const body = await readJson(req);
-    const server = mcpServerFor(deps, grant, calledTool(body));
+    const server = mcpServerFor(deps, grant);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       void transport.close();

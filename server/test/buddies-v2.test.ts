@@ -491,7 +491,7 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
       assert.equal(names.length, 12);
       assert.ok(names.includes('team_admin'));
       assert.ok(names.includes('channel'));
-      // The merged names stay callable for adopted turns but are never advertised (mcp.ts LEGACY_TOOLS).
+      // The merged names are gone (their legacy forms were deleted after the adoption window).
       for (const removed of [
         'answer',
         'channel_archive',
@@ -3680,14 +3680,6 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       read: { search: { text: 'quarterly', from: ['owner'] } },
     });
     assert.deepEqual(byOwner.value.posts, []);
-    // 2026-10-06: a turn that cached the pre-74d1fd3 tool list sends `search: "string"`.
-    const legacy = await call(w.endpoint.spec(grant), 'channel_read', {
-      read: { search: 'quarterly' },
-    });
-    assert.deepEqual(
-      legacy.value.posts.map((post: Post) => post.id),
-      [written.post.id]
-    );
     const malformed = await call(w.endpoint.spec(grant), 'channel_read', {
       read: { search: { text: '"quarterly' } },
     });
@@ -4133,9 +4125,8 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
       runId: null,
       subscribes: 'self',
     });
-    const archived = await call(w.endpoint.spec(grant), 'channel_admin', {
-      channelId: w.general.id,
-      change: { kind: 'archive' },
+    const archived = await call(w.endpoint.spec(grant), 'channel', {
+      action: { kind: 'archive', channelId: w.general.id },
       key: 'archive',
     });
     assert.equal(archived.isError, false, archived.text);
@@ -4161,9 +4152,8 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
       ).status,
       400
     );
-    const restored = await call(w.endpoint.spec(grant), 'channel_admin', {
-      channelId: w.general.id,
-      change: { kind: 'restore' },
+    const restored = await call(w.endpoint.spec(grant), 'channel', {
+      action: { kind: 'restore', channelId: w.general.id },
       key: 'restore',
     });
     assert.equal(restored.isError, false, restored.text);
@@ -4206,9 +4196,8 @@ test('Buddy MCP renames a public channel without changing its identity or histor
       runId: null,
       subscribes: 'self',
     });
-    const renamed = await call(w.endpoint.spec(grant), 'channel_admin', {
-      channelId: w.general.id,
-      change: { kind: 'rename', name: 'features' },
+    const renamed = await call(w.endpoint.spec(grant), 'channel', {
+      action: { kind: 'rename', name: 'features', channelId: w.general.id },
       key: 'rename',
     });
     assert.equal(renamed.isError, false, renamed.text);
@@ -4247,10 +4236,16 @@ test('Buddy MCP creates a channel, posts in it, and a replayed key returns the s
     });
     const spec = w.endpoint.spec(grant);
     const input = { name: 'launch-prep', purpose: 'Launch checklist', key: 'mk-launch' };
-    const created = await call(spec, 'channel_create', input);
+    const created = await call(spec, 'channel', {
+      action: { kind: 'create', name: input.name, purpose: input.purpose },
+      key: input.key,
+    });
     assert.equal(created.isError, false, created.text);
     assert.equal(created.value.kind.name, 'launch-prep');
-    const replay = await call(spec, 'channel_create', input);
+    const replay = await call(spec, 'channel', {
+      action: { kind: 'create', name: input.name, purpose: input.purpose },
+      key: input.key,
+    });
     assert.equal(replay.value.id, created.value.id);
 
     const posted = await call(spec, 'post', {
@@ -4595,13 +4590,10 @@ test('follow (h): follow:false unsubscribes, so later posts are not delivered', 
 
 // The subscription is durable (a `thread_read` row), so a restart loses nothing: the next post is
 // delivered even though the conversation that followed is not loaded in the new process, which
-// takes the fresh-turn fallback (runner.ts `deliverJob`). The follow here is the LEGACY form
-// `{until}` an adopted turn may still send (tool contract, LEGACY_FORMS): it subscribes too.
+// takes the fresh-turn fallback (runner.ts `deliverJob`).
 test('follow (f): a subscription survives a backend restart and still delivers the next post', async () => {
   const before = await world();
-  const { rootId, read } = await leadFollows(before, {
-    until: new Date(Date.now() + 30 * 60_000).toISOString(),
-  });
+  const { rootId, read } = await leadFollows(before, { wait: 0 });
   assert.equal(read.value.kind, 'subscribed', read.text);
   await before.stop();
   const w = await world(before.scratch);
@@ -4744,7 +4736,7 @@ test('slim read surface: tasks get, inbox and runs list stay small and runs say 
     });
     assert.match(tooLong.text, /^\[invalid\] task evidence entry 1 is 501 chars/);
 
-    // The merged channel tool, and the old names an adopted turn still sends.
+    // The merged channel tool.
     const made = await call(spec, 'channel', {
       action: { kind: 'create', name: 'slim-merged', purpose: 'the one channel tool' },
       key: 'merged-create',
@@ -4755,12 +4747,6 @@ test('slim read surface: tasks get, inbox and runs list stay small and runs say 
       key: 'merged-rename',
     });
     assert.equal(renamed.value.kind.name, 'slim-renamed');
-    const legacy = await call(spec, 'channel_create', {
-      name: 'slim-legacy',
-      purpose: 'old name, still callable',
-      key: 'legacy-create',
-    });
-    assert.equal(legacy.isError, false, legacy.text);
   } finally {
     await w.close();
   }
