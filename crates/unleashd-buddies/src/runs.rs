@@ -5,7 +5,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::deliveries;
-use crate::posts::{get_channel, get_post, own_channel, system_post, task_channel};
+use crate::posts::{get_channel, get_post, system_post};
 use crate::store::{Mutation, Store, collect, corrupt, get_buddy, idempotent, new_id, now_iso, require};
 use crate::tasks::get_task;
 use crate::types::*;
@@ -259,11 +259,14 @@ impl Store {
                 .query_row([now], |r| r.get(0))
                 .optional()?;
             let Some(id) = candidate else { return Ok(None) };
-            let deadline_ms = match get_run(tx, &id)?.input {
-                RunInput::Chat { .. } => budgets.chat_deadline_ms,
-                RunInput::Post { .. } | RunInput::Deliver { .. } => budgets.turn_deadline_ms,
+            let queued = get_run(tx, &id)?;
+            let deadline_ms = match (&queued.input, &queued.conversation_id) {
+                (RunInput::Chat { .. }, Some(_)) => budgets.chat_deadline_ms,
+                // A chat run with no conversation is a schedule fire (`fire_slot`): a background
+                // turn, so it gets the background budget, never an owner chat's 24 h.
+                (RunInput::Chat { .. }, None) | (RunInput::Post { .. } | RunInput::Deliver { .. }, _) => budgets.turn_deadline_ms,
                 // The schema CHECK keeps a retired kind out of the queue.
-                RunInput::Retired { input_kind, .. } => return Err(CoreError::Corrupt(format!("queued {input_kind} run {id}"))),
+                (RunInput::Retired { input_kind, .. }, _) => return Err(CoreError::Corrupt(format!("queued {input_kind} run {id}"))),
             };
             let token = uuid::Uuid::new_v4().to_string();
             // No `executing_at` here: the holder stamps it with `mark_executing` just before its
@@ -609,8 +612,7 @@ impl Store {
         collect(self.conn.prepare_cached(&sql)?.query_map([id], schedule_row)?)
     }
 
-    /// The owner's "Run now": the schedule fires at once, a post in its thread delivered to its
-    /// Buddy (decision I); its own slots are unchanged.
+    /// The owner's "Run now": the schedule fires at once; its own slots are unchanged.
     pub fn fire_schedule(&mut self, actor: &Actor, schedule_id: &str) -> Result<Run> {
         self.write(|tx| {
             let schedule = get_schedule(tx, schedule_id)?;
@@ -620,7 +622,7 @@ impl Store {
     }
 
     /// Fires every due schedule (`fire`) and advances it to its next slot after `now`. Missed slots
-    /// collapse into one fire. Returns the deliveries queued.
+    /// collapse into one fire. Returns the runs queued.
     pub fn due_schedules(&mut self, now: &str) -> Result<Vec<Run>> {
         self.write(|tx| {
             let due = collect(
@@ -634,13 +636,6 @@ impl Store {
     }
 }
 
-/// A schedule fire is a POST in the schedule's thread (owner decision I, 2026-10-06), written for
-/// its Buddy and delivered to it: the first fire roots the thread (in its Task's channel, or the
-/// Buddy's own DM), later fires reply there. The thread's subscribed conversation, the one that
-/// handled an earlier fire, takes the next one, so a schedule continues one conversation instead
-/// of opening a fresh one per slot (todo_3c1e58c6), and a slow fire's successor queues behind it
-/// as `conversation_busy` instead of piling up beside it. Before: a `schedule` run kind with its own
-/// job in the runner, always a fresh conversation.
 fn fire(tx: &Transaction, s: Schedule, now: &str) -> Result<Run> {
     let slot = s.next_run_at.clone().ok_or_else(|| CoreError::Corrupt(format!("due schedule {} has no slot", s.id)))?;
     let run = fire_slot(tx, &s, &slot)?;
@@ -648,20 +643,28 @@ fn fire(tx: &Transaction, s: Schedule, now: &str) -> Result<Run> {
     Ok(run)
 }
 
-/// One fire's post and its delivery (`fire`; the rebuild converts a queued `schedule` run with it).
+/// A schedule fire is silent: it posts nothing anywhere. It is one `chat` run carrying the
+/// schedule's prompt as its body and no conversation, which the runner claims and opens as a fresh
+/// background conversation, as every fire did before 2026-10-06. Owner decision, 2026-10-07 ("stay
+/// simple, don't overload DMs") reversed decision I, which posted each fire in a thread (a task's
+/// channel or the Buddy's own DM). The turn id `schedule:<id>:<slot>` keys the fire once per
+/// slot and is how the Schedules panel finds a schedule's runs. A chat run with no conversation is
+/// always a fire; an owner's chat is enqueued with its conversation (`enqueue_chat`).
+/// Guard: `a_schedule_fire_posts_nothing_and_queues_one_silent_run` (tests/core.rs).
 pub(crate) fn fire_slot(tx: &Transaction, s: &Schedule, slot: &str) -> Result<Run> {
-    let root = s.root_id.as_deref().map(|id| get_post(tx, id)).transpose()?;
-    let channel = match (&root, &s.task_id) {
-        (Some(root), _) => get_channel(tx, &root.channel_id)?,
-        (None, Some(task_id)) => task_channel(tx, &Actor::Buddy { id: s.buddy_id.clone() }, task_id)?,
-        (None, None) => own_channel(tx, &s.buddy_id)?,
-    };
     let body = format!("Scheduled run \"{}\" ({}, {}), slot {slot}:\n{}", s.name, s.cron, s.timezone, s.prompt);
-    let post = system_post(tx, &s.buddy_id, &channel, root.as_ref(), "schedule", &body)?;
-    let thread = post.root_id.clone().unwrap_or(post.id.clone());
-    tx.execute("UPDATE schedule SET root_id = coalesce(root_id, ?2) WHERE id = ?1", params![s.id, thread])?;
-    let conversation = deliveries::subscription(tx, &s.buddy_id, &thread)?;
-    deliveries::enqueue_delivery(tx, &s.buddy_id, &post, conversation)
+    tx.insert_run(NewRun {
+        input: EnqueueInput {
+            buddy_id: s.buddy_id.clone(),
+            input: RunInput::Chat { turn_id: format!("schedule:{}:{slot}", s.id) },
+            conversation_id: None,
+            task_id: s.task_id.clone(),
+            after_run_id: None,
+            deadline: None,
+            config: None,
+        },
+        body: Some(body),
+    })
 }
 
 /// The first cron slot strictly after `after`, in the schedule's timezone, as UTC ISO.
@@ -676,7 +679,7 @@ pub fn next_run(cron: &str, timezone: &str, after: &str) -> Result<String> {
 }
 
 const SCHEDULE_COLS: &str =
-    "id, buddy_id, workspace_id, task_id, name, cron, timezone, prompt, enabled, next_run_at, archived_at, created_at, root_id";
+    "id, buddy_id, workspace_id, task_id, name, cron, timezone, prompt, enabled, next_run_at, archived_at, created_at";
 
 fn schedule_row(r: &Row) -> rusqlite::Result<Schedule> {
     Ok(Schedule {
@@ -692,7 +695,6 @@ fn schedule_row(r: &Row) -> rusqlite::Result<Schedule> {
         next_run_at: r.get(9)?,
         archived_at: r.get(10)?,
         created_at: r.get(11)?,
-        root_id: r.get(12)?,
     })
 }
 

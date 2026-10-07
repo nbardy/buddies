@@ -137,11 +137,11 @@ fn the_live_shaped_store_migrates_once_with_every_queued_row_converted() {
         // Nothing lost: every old row is still there, and only deliveries were added.
         assert_eq!(before.values().sum::<i64>(), 13);
         let added: i64 = after.iter().filter(|(k, _)| k.starts_with("deliver:")).map(|(_, n)| n).sum();
-        assert_eq!(after.values().sum::<i64>(), 13 + added);
+        assert_eq!(after.values().sum::<i64>(), 13 + added + 1, "plus the schedule fire");
         assert_eq!(
             after.iter().filter(|(k, _)| k.ends_with(":queued")).map(|(k, n)| (k.as_str(), *n)).collect::<Vec<_>>(),
-            [("deliver:queued", 4)],
-            "only deliveries are queued: the answer, the failure post, the followed news, the schedule fire"
+            [("chat:queued", 1), ("deliver:queued", 3)],
+            "queued: the schedule fire (a silent chat run) and the deliveries: the answer, the failure post, the followed news"
         );
         assert_eq!(after.get("chat:cancelled"), Some(&1), "the queued chat had no stored text");
         assert_eq!((after.get("reply:cancelled"), after.get("follow:cancelled"), after.get("failure_notice:cancelled")), (Some(&1), Some(&3), Some(&1)));
@@ -155,11 +155,11 @@ fn the_live_shaped_store_migrates_once_with_every_queued_row_converted() {
         let deliveries = counts(&conn, "SELECT input_id || ' ' || coalesce(conversation_id, '-'), 1 FROM run WHERE input_kind = 'deliver'");
         let delivered: Vec<&String> = deliveries.keys().collect();
         let notice = one("SELECT id FROM post WHERE purpose = 'run_failed'");
-        let fire = one("SELECT id FROM post WHERE purpose = 'schedule'");
         assert!(delivered.contains(&&"a1 conv-mid".to_string()), "the answer goes to the conversation that asked: {delivered:?}");
         assert!(delivered.contains(&&format!("{notice} conv-mid")), "the failure notice is a post, delivered there: {delivered:?}");
         assert!(delivered.contains(&&"t1-news conv-follow".to_string()), "the followed news: {delivered:?}");
-        assert!(delivered.contains(&&format!("{fire} -")), "the schedule slot fired as a post: {delivered:?}");
+        assert_eq!(one("SELECT count(*) FROM post WHERE purpose = 'schedule'"), "0", "a schedule slot posts nothing");
+        assert_eq!(one("SELECT input_id FROM run WHERE input_kind = 'chat' AND status = 'queued'"), "schedule:s1:2026-10-06T01:00:00.000Z");
         assert_eq!(one("SELECT author_id || ' ' || reply_to_id FROM post WHERE purpose = 'run_failed'"), "ic r2");
         assert!(subscriptions.contains_key("mid r1 conv-mid") && subscriptions.contains_key("mid t1 conv-follow"));
         assert!(subscriptions.contains_key("mid t2 conv-idle"), "a follow waiting only for its timeout still subscribes");
@@ -184,7 +184,7 @@ fn the_live_shaped_store_migrates_once_with_every_queued_row_converted() {
         assert_eq!(backups(dir.path()).len(), 1);
         assert_eq!(run_counts(&conn), after);
 
-        // After the migration the queue works: the four deliveries claim; the legacy running rows,
+        // After the migration the queue works: the three deliveries and the schedule fire claim; the legacy running rows,
         // executed, end at the gate as lease_expired instead of being requeued and replayed.
         let mut claimed = vec![];
         while let Some(claim) = s.claim_run_at("2099-01-02T00:00:00.000Z", lease(300_000)).unwrap() {
@@ -197,7 +197,8 @@ fn the_live_shaped_store_migrates_once_with_every_queued_row_converted() {
         assert_eq!(one("SELECT status || ' ' || error_code FROM run WHERE id = 'live-chat'"), "failed lease_expired");
         assert_eq!(one("SELECT status || ' ' || error_code FROM run WHERE id = 'w3'"), "failed lease_expired");
         assert!(claimed.contains(&RunInput::Post { post_id: "r3".into() }), "the executed request resumed once (decision G): {claimed:?}");
-        assert_eq!(claimed.iter().filter(|i| matches!(i, RunInput::Deliver { .. })).count(), 4);
+        assert_eq!(claimed.iter().filter(|i| matches!(i, RunInput::Deliver { .. })).count(), 3);
+        assert_eq!(claimed.iter().filter(|i| matches!(i, RunInput::Chat { turn_id } if turn_id.starts_with("schedule:"))).count(), 1, "the fire claims as a background run");
     }
 }
 
