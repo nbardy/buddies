@@ -43,7 +43,6 @@ function runtimeFixture(
     revokeBuddyControlCapability?: (conversationId: string) => void;
     queueBuddyChat?: (turnId: string, body: string) => void;
     cancelBuddyChat?: (turnId: string) => void;
-    finishBuddyChatRun?: BuddyPolicyPort['settle'];
     finishBuddyRun?: BuddyPolicyPort['finishRun'];
     reviewCompletedBuddyTurn?: (turn: CompletedBuddyTurn) => void;
     readCurrentBuddyContext?: () => { briefing: string; memoryGeneration: string };
@@ -78,7 +77,6 @@ function runtimeFixture(
         options.queueBuddyChat &&
         ((_context, _conversationId, turnId, body) => options.queueBuddyChat!(turnId, body)),
       cancelChat: options.cancelBuddyChat,
-      settle: options.finishBuddyChatRun,
       finishRun: options.finishBuddyRun,
       revoke: options.revokeBuddyControlCapability,
       afterTurn: options.reviewCompletedBuddyTurn,
@@ -692,11 +690,18 @@ test('a foreground Buddy turn over capacity waits pending, then starts when its 
   const queueBuddyChat = (turnId: string, body: string) => queued.push({ turnId, body });
   const fixture = runtimeFixture({ buddyContext, queueBuddyChat, executeTurn });
   const { conversation } = fixture;
-  const run = { id: 'run-1', claim_token: 'claim', deadline: new Date(Date.now() + 60_000).toISOString() };
+  const run = {
+    id: 'run-1',
+    claim_token: 'claim',
+    deadline: new Date(Date.now() + 60_000).toISOString(),
+  };
 
   conversation.sendMessage('Reply in the thread', { origin: 'owner_input', inputId: 'post-1' });
   assert.equal(providerStarts, 0, 'no claim, no turn');
-  assert.deepEqual(conversation.queue.map((m) => m.status), ['pending']);
+  assert.deepEqual(
+    conversation.queue.map((m) => m.status),
+    ['pending']
+  );
   assert.equal(queued.length, 1, 'the message is a run from the moment it was sent');
   assert.equal(queued[0].turnId, conversation.queue[0].id);
 
@@ -1209,7 +1214,7 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
   const terminals: Parameters<
     NonNullable<ConversationRuntimeDependencies['turnAttempts']>['terminal']
   >[0][] = [];
-  const settlements: Parameters<BuddyPolicyPort['settle']>[] = [];
+  const settlements: Parameters<BuddyPolicyPort['finishRun']>[] = [];
   let release = false;
   let foreground:
     | { admitChatClaim: Parameters<typeof fixtureConversations.set>[1]['admitChatClaim'] }
@@ -1223,7 +1228,7 @@ test('foreground Buddy deadline uses the conversation budget and reports timeout
         claim_token: 'private-fixture-token',
         deadline: new Date(Date.now() + 1000).toISOString(),
       }),
-    finishBuddyChatRun: async (...args) => {
+    finishBuddyRun: async (...args) => {
       settlements.push(args);
     },
     turnAttempts: {

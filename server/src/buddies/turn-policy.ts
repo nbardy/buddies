@@ -230,7 +230,6 @@ const RETURN_ORIGIN: { readonly [V in BuddyVisibility]: TurnInput['origin'] } = 
  * (a separate value: 24 h for a chat) expires it as max_runtime_timeout.
  */
 export interface RunRecord {
-  readonly kind: 'chat' | 'runner';
   readonly runId: string;
   readonly leaseToken: string;
   readonly deadline: string;
@@ -258,23 +257,6 @@ type RunExecution = RunRecord & {
 };
 
 const nothingWaits = () => undefined;
-
-/**
- * Who settles each kind of run, resolving once it landed: a chat run directly, a runner-owned run
- * through the runner's completion step (`finishRun`). One path for a live and an adopted turn:
- * until 2026-10-03 a live runner-owned turn resolved `runCoordination`'s promise and the runner
- * settled it later, out of sight of the turn, so nothing could keep the journal until it landed (2b).
- */
-const SETTLE_RUN: {
-  readonly [K in RunRecord['kind']]: (
-    buddies: BuddyPolicyPort,
-    run: RunRecord,
-    outcome: ExecutionOutcome
-  ) => Promise<void>;
-} = {
-  chat: (buddies, run, outcome) => buddies.settle(run.runId, run.leaseToken, outcome),
-  runner: (buddies, run, outcome) => buddies.finishRun(run.runId, run.leaseToken, outcome),
-};
 
 /** This holder's view of its run's lease: renewed at `renewedAt`, a renewal in flight, or gone. */
 type LeaseHold = { t: 'held'; renewedAt: number } | { t: 'renewing' } | { t: 'lost' };
@@ -384,7 +366,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     if (!owned) return;
     this.admittedChatRun = null;
     this.buddies
-      .settle(owned.id, owned.claim_token, { t: 'cancelled', detail: 'Turn did not start' })
+      .finishRun(owned.id, owned.claim_token, { t: 'cancelled', detail: 'Turn did not start' })
       .catch((error) => console.error('[buddies] unspawned run not settled', owned.id, error));
   }
 
@@ -488,7 +470,6 @@ export class BuddyTurnPolicy implements TurnPolicy {
    */
   private ownChatRun(owned: OwnedChatRun): void {
     this.arm({
-      kind: 'chat',
       runId: owned.id,
       leaseToken: owned.claim_token,
       deadline: owned.deadline,
@@ -533,10 +514,18 @@ export class BuddyTurnPolicy implements TurnPolicy {
     execution.deadlineTimer.current = timer;
   }
 
+  /**
+   * Every run settles through `finishRun`, resolving once it landed: a chat run has no completion
+   * step there, a runner-owned run re-derives its own. One path for a live and an adopted turn:
+   * until 2026-10-03 a live runner-owned turn resolved `runCoordination`'s promise and the runner
+   * settled it later, out of sight of the turn, so nothing could keep the journal until it landed
+   * (2b). Until 2026-10-07 a chat run took a second, equivalent port call (`settle`).
+   */
   settle(outcome: ExecutionOutcome): Promise<void> {
     const execution = this.disarm();
     if (!execution) return Promise.resolve();
-    return SETTLE_RUN[execution.kind](this.buddies, execution, outcome)
+    return this.buddies
+      .finishRun(execution.runId, execution.leaseToken, outcome)
       .then(execution.landed)
       .then(() => this.host.processQueue()); // the owner message `gate` held for this settle
   }
@@ -549,11 +538,11 @@ export class BuddyTurnPolicy implements TurnPolicy {
     const { execution, grant } = this;
     if (!execution || !grant)
       throw new Error('A Buddy turn without its run and grant cannot be adopted');
-    const { kind, runId, leaseToken, deadline, context } = execution;
+    const { runId, leaseToken, deadline, context } = execution;
     return {
       t: 'buddy',
       grant,
-      run: { kind, runId, leaseToken, deadline, context },
+      run: { runId, leaseToken, deadline, context },
       briefedGeneration: this.briefedMemoryGeneration,
       audienceKey: this.providerAudienceKey,
     };
@@ -561,7 +550,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   /**
    * This backend replaced the one that spawned the turn. The run keeps its lease and deadline, and
-   * the turn's settle settles it here exactly as it would have live (SETTLE_RUN). The grant is not
+   * the turn's settle settles it here exactly as it would have live (`settle`). The grant is not
    * touched here: boot restored it only if the turn may hold one (execution-state.ts `holdsGrant`).
    */
   adopt(record: PolicyAdoption, review: AdoptedReview): void {
@@ -696,7 +685,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     const settled = new Promise<void>((resolve) => {
       landed = resolve;
     });
-    this.arm({ kind: 'runner', runId, leaseToken, deadline, context }, landed);
+    this.arm({ runId, leaseToken, deadline, context }, landed);
     this.armDeadline();
     let refusal = 'The turn did not start';
     const heard = (message: string) => {

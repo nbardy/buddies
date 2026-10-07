@@ -10,8 +10,8 @@ import type {
 import type { BuddyContext } from '@unleashd/shared';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings } from './briefing';
-import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
 import type { GateVerdict } from './channel-reply-gate';
+import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
 import { type BuddyEvents, announcePost } from './events';
 import type { Grants, OwnerChat } from './grants';
 import { mentionedBuddyIds } from './mentions';
@@ -44,7 +44,12 @@ export interface RunnerHost {
    * The conversation takes the message from the run's `body` when it was not already queued in
    * memory (a restart), puts it first, and starts it: the durable claim order is the queue order.
    */
-  admitChat(input: { conversationId: string; turnId: string; body: string; run: OwnedChatRun }): void;
+  admitChat(input: {
+    conversationId: string;
+    turnId: string;
+    body: string;
+    run: OwnedChatRun;
+  }): void;
   /** The conversation is loaded here. Never its placement: a delivery goes where it subscribed. */
   registered(conversationId: string): boolean;
   /**
@@ -416,17 +421,26 @@ export function createRunner(options: {
     if (mentionedBuddyIds(trigger.body).includes(run.buddyId)) return null;
     const channel = await core.openChannel(OWNER, { kind: 'id', id: trigger.channelId });
     if (channel.kind.type === 'direct') return null;
-    const page = await core.listPosts(OWNER, { kind: 'thread', rootId: trigger.rootId }, undefined, 12);
+    const page = await core.listPosts(
+      OWNER,
+      { kind: 'thread', rootId: trigger.rootId },
+      undefined,
+      12
+    );
     const talk = page.posts.filter((post) => post.purpose !== 'reply_failed'); // newest first
     if (talk[0]?.id !== trigger.id) return 'a newer post in the thread is gated instead';
     const root = await core.getPost(OWNER, trigger.rootId);
     const buddies = await core.listBuddies(channel.workspaceId);
     const nameOf = (author: Post['author']) =>
-      author.kind === 'owner' ? 'Owner' : (buddies.find((b) => b.id === author.id)?.name ?? author.id);
+      author.kind === 'owner'
+        ? 'Owner'
+        : (buddies.find((b) => b.id === author.id)?.name ?? author.id);
     const line = (post: Post) =>
       `[${post.createdAt}] ${nameOf(post.author)} (${post.id}): ${post.body.slice(0, 4000)}`;
     const me = buddies.find((b) => b.id === run.buddyId);
-    const others = [...new Set(talk.flatMap((p) => (p.author.kind === 'buddy' ? [p.author.id] : [])))]
+    const others = [
+      ...new Set(talk.flatMap((p) => (p.author.kind === 'buddy' ? [p.author.id] : []))),
+    ]
       .filter((id) => id !== run.buddyId)
       .map((id) => buddies.find((b) => b.id === id))
       .flatMap((b) => (b ? [`${b.name} (${b.role})`] : []));
@@ -457,7 +471,9 @@ export function createRunner(options: {
       case 'pass':
         return 'the follow-up gate said no';
       case 'unparseable':
-        logger.warn(`[buddies-runner] ${run.buddyId} gave no <yes>/<no> for ${trigger.id}: ${JSON.stringify(verdict.output)}`);
+        logger.warn(
+          `[buddies-runner] ${run.buddyId} gave no <yes>/<no> for ${trigger.id}: ${JSON.stringify(verdict.output)}`
+        );
         return 'the follow-up gate gave no yes or no';
       case 'failed':
         throw new Error(`could not decide whether to reply (${verdict.reason})`);
@@ -806,14 +822,19 @@ export function createRunner(options: {
         .enqueueChat(OWNER, { buddyId: context.buddyId, conversationId, turnId, body })
         .then(wake, (error) =>
           // Loud (the error journal captures console.error), never thrown into the runtime.
-          console.error(`[buddies-runner] chat turn for ${context.buddyId} could not be queued:`, error)
+          console.error(
+            `[buddies-runner] chat turn for ${context.buddyId} could not be queued:`,
+            error
+          )
         );
     },
 
     promoteChat(turnId: string): void {
-      core.promoteChat(OWNER, turnId).then(wake, (error) =>
-        logger.warn(`[buddies-runner] could not promote chat turn ${turnId}:`, error)
-      );
+      core
+        .promoteChat(OWNER, turnId)
+        .then(wake, (error) =>
+          logger.warn(`[buddies-runner] could not promote chat turn ${turnId}:`, error)
+        );
     },
 
     cancelChat(turnId: string): void {
@@ -823,10 +844,6 @@ export function createRunner(options: {
         .catch((error) =>
           logger.warn(`[buddies-runner] could not cancel chat turn ${turnId}:`, error)
         );
-    },
-
-    finishChat(runId: string, leaseToken: string, outcome: Outcome): Promise<void> {
-      return tracked(core.getRun(runId).then((run) => settle(run, leaseToken, outcome)));
     },
 
     /**

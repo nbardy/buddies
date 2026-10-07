@@ -36,10 +36,14 @@ export function fakeBuddyPort(
   options: {
     briefing?: (context: BuddyContext) => { briefing: string; memoryGeneration: string };
     /** Replaces the instant claim: a test that wants the run to wait does not claim it. */
-    queueChat?: (context: BuddyContext, conversationId: string, turnId: string, body: string) => void;
+    queueChat?: (
+      context: BuddyContext,
+      conversationId: string,
+      turnId: string,
+      body: string
+    ) => void;
     promoteChat?: (turnId: string) => void;
     cancelChat?: (turnId: string) => void;
-    settle?: BuddyPolicyPort['settle'];
     finishRun?: BuddyPolicyPort['finishRun'];
     revoke?: (conversationId: string) => void;
     afterTurn?: (turn: CompletedBuddyTurn) => void;
@@ -68,7 +72,6 @@ export function fakeBuddyPort(
     renewLease: async () => ({ kind: 'renewed' }),
     hold: () => () => undefined,
     finishRun: options.finishRun ?? (async () => undefined),
-    settle: options.settle ?? (async () => undefined),
     revoke: options.revoke ?? (() => undefined),
     afterTurn: options.afterTurn ?? (() => undefined),
   };

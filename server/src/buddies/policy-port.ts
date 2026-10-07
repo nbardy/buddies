@@ -1,5 +1,4 @@
 import type { McpServerSpec } from '@nbardy/agent-cli';
-import type { Outcome } from '@unleashd/buddies-core';
 import type { BuddyContext } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
@@ -44,11 +43,10 @@ export interface BuddyPolicyPort {
   /** This turn executes `runId`: every claim passes it to the gate, which renews it first, until the release. */
   hold(runId: string, leaseToken: string): () => void;
   /**
-   * The turn of a chat run ended: settle it (which also revokes the run's grants). Resolves once
-   * the settle landed or the run had already ended (lease_lost); rejects on a transient failure.
+   * A run's turn ended, an owner chat's or a runner-owned one: its completion step (none for a
+   * chat), then its settle, which also revokes the run's grants. Resolves once the settle landed
+   * or the run had already ended (lease_lost); rejects on a transient failure.
    */
-  settle(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void>;
-  /** A runner-owned run's turn ended: its completion step, then its settle, as `settle` resolves. */
   finishRun(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void>;
   revoke(conversationId: string): void;
   /** After a successful turn: memory review. */
@@ -108,22 +106,8 @@ export function createBuddyPolicyPort(deps: {
     },
     renewLease: (runId, leaseToken) => runner.renew(runId, leaseToken),
     hold: (runId, leaseToken) => runner.hold(runId, leaseToken),
-    settle: (runId, leaseToken, outcome) =>
-      runner.finishChat(runId, leaseToken, crateOutcome(outcome)),
     finishRun: (runId, leaseToken, outcome) => runner.finishRun(runId, leaseToken, outcome),
     revoke: (conversationId) => grants.revokeConversation(conversationId),
     afterTurn: (turn) => deps.reviewer.enqueue(turn),
   };
-}
-
-/** A turn's outcome as the crate records a run's. */
-export function crateOutcome(outcome: ExecutionOutcome): Outcome {
-  switch (outcome.t) {
-    case 'complete':
-      return { kind: 'complete', text: outcome.text };
-    case 'failed':
-      return { kind: 'failed', code: 'execution_failed', error: outcome.detail };
-    case 'cancelled':
-      return { kind: 'cancelled', reason: outcome.detail };
-  }
 }
