@@ -207,3 +207,73 @@ fn records_and_the_ingest_store_share_one_file_without_interfering() {
     assert_eq!(reopened.get("c1").unwrap().unwrap().conversation_id, "c1");
     assert!(unleashd_ingest::store::Reader::open(&db).unwrap().list_sessions(0).unwrap().1.is_empty());
 }
+
+// Step 6 (durable owner messages). A pending owner message is a row from the moment it is sent.
+#[test]
+fn pending_inputs_keep_order_survive_a_reopen_and_settle_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("r.sqlite");
+    let mut r = Records::open(&db).unwrap();
+    r.create(new_record("c1"), T0).unwrap();
+    assert!(r.put_input("c1", "m1", "{}", "2026-10-07T00:00:01.000Z").unwrap());
+    assert!(r.put_input("c1", "m2", "{}", "2026-10-07T00:00:02.000Z").unwrap());
+    assert!(r.put_input("c1", "m3", "{}", "2026-10-07T00:00:03.000Z").unwrap());
+    assert!(!r.put_input("c1", "m3", "{}", "later").unwrap(), "a retried id is not queued twice");
+    assert!(!r.put_input("nope", "mx", "{}", "t").unwrap(), "no conversation, no row");
+    assert!(r.promote_input("m3").unwrap());
+    assert!(r.mark_input_executing("m3", "2026-10-07T00:00:09.000Z").unwrap());
+    assert!(!r.promote_input("m3").unwrap(), "an executing message does not move");
+    drop(r);
+
+    // A new backend: the same rows, same order, executing stamp kept.
+    let mut r = Records::open(&db).unwrap();
+    let rows = r.list_inputs("c1").unwrap();
+    assert_eq!(rows.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["m3", "m1", "m2"]);
+    assert_eq!(rows[0].executing_at.as_deref(), Some("2026-10-07T00:00:09.000Z"));
+    assert_eq!(r.conversations_with_inputs().unwrap(), ["c1"]);
+    assert!(r.settle_input("m1").unwrap());
+    assert!(!r.settle_input("m1").unwrap(), "a row settles exactly once");
+    r.purge("c1").unwrap();
+    assert!(r.list_inputs("c1").unwrap().is_empty(), "deleting the conversation takes its messages");
+}
+
+// Step 6 migration: a live-shaped v2 file (records, no `conversation_input`) is copied at v2, then
+// opened at v3 with every record intact. Without the copy an older build could not come back.
+#[test]
+fn a_v2_file_is_copied_then_migrated_with_its_records_intact() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("conversation-records.sqlite");
+    let mut r = Records::open(&db).unwrap();
+    for i in 0..5 {
+        r.create(new_record(&format!("c{i}")), T0).unwrap();
+    }
+    drop(r);
+    let conn = Connection::open(&db).unwrap();
+    conn.execute_batch("DROP TABLE conversation_input; UPDATE meta SET value = 2 WHERE key = 'records_schema'").unwrap();
+    let count = |c: &Connection, table: &str| c.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, i64>(0)).unwrap();
+    let before = (count(&conn, "conversation_record"), count(&conn, "conversation_session"));
+    drop(conn);
+    assert_eq!(before, (5, 5));
+
+    let r = Records::open(&db).unwrap();
+    let conn = Connection::open(&db).unwrap();
+    let version: i64 = conn.query_row("SELECT value FROM meta WHERE key = 'records_schema'", [], |r| r.get(0)).unwrap();
+    assert_eq!(version, 3);
+    assert_eq!((count(&conn, "conversation_record"), count(&conn, "conversation_session")), before, "no record lost");
+    assert_eq!(count(&conn, "conversation_input"), 0);
+    assert_eq!(r.get("c3").unwrap().unwrap().conversation_id, "c3");
+
+    let backups: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().contains(".before-input-v3.records-v2."))
+        .collect();
+    assert_eq!(backups.len(), 1, "exactly one pre-migration copy");
+    let copy = Connection::open(&backups[0]).unwrap();
+    let old: i64 = copy.query_row("SELECT value FROM meta WHERE key = 'records_schema'", [], |r| r.get(0)).unwrap();
+    assert_eq!((old, count(&copy, "conversation_record")), (2, 5), "the copy is the old schema with every record");
+    drop(r);
+    Records::open(&db).unwrap();
+    let copies = std::fs::read_dir(dir.path()).unwrap().filter(|e| e.as_ref().unwrap().path().to_string_lossy().ends_with(".sqlite") && e.as_ref().unwrap().path() != db).count();
+    assert_eq!(copies, 1, "a current file takes no further copy");
+}

@@ -10,6 +10,7 @@ import { parseBuddyWorkerToolResult } from '@unleashd/shared';
 import type { BuddyPolicyAdoption } from '../buddies/turn-policy';
 import type { ExecutionOutcome } from './execution-state';
 import type { TurnInput } from './input';
+import type { InputCarrier } from './intake';
 
 /**
  * What a conversation's KIND adds to its turns. Chosen ONCE per conversation
@@ -51,7 +52,11 @@ export interface AdoptedReview {
 export interface TurnPolicy {
   /** False for a transcript no user input may extend (a Buddy automation run). */
   readonly acceptsUserInput: boolean;
+  /** Where this kind's pending owner messages are durable (turns/intake.ts). */
+  readonly carrier: InputCarrier;
   gate(input: TurnInput, fromQueue: boolean): TurnGate;
+  /** The runner claimed the chat run of queue entry `entryId`: hold it until the entry starts. */
+  admitClaim(entryId: string, run: { id: string; claim_token: string; deadline: string }): void;
   releaseUnspawned(): void;
   /** Read the current context for this input; true when the session must be re-briefed. */
   prepare(input: TurnInput): boolean;
@@ -94,12 +99,10 @@ export interface TurnPolicy {
   settle(outcome: ExecutionOutcome): Promise<void>;
   /** Revoke per-turn capabilities (tool grants) now. */
   revoke(): void;
+  /** Stop while the head waits for a run slot. Returns true when a waiting message was dropped. */
+  dropWaitingTurn(): boolean;
   /** An owner stop. Returns false when the policy handled it without stopping the turn. */
   stop(): boolean;
-  /** Stop while waiting for a run slot. Returns true when a waiting turn was dropped. */
-  dropWaitingTurn(): boolean;
-  waitingForRunSlot(): boolean;
-  queueEmptied(): void;
   /**
    * The turn's bridge is alive: called on every event that ticks the watchdog's bridge clock,
    * heartbeats included. A Buddy turn renews its run's lease here (Pattern: lease-heartbeat).
@@ -144,10 +147,16 @@ export function commonToolResultParts(output: unknown): ContentPart[] {
 export class ChatTurnPolicy implements TurnPolicy {
   readonly acceptsUserInput = true;
 
-  constructor(private readonly swarmDebugPrefix: () => string | null) {}
+  constructor(
+    private readonly swarmDebugPrefix: () => string | null,
+    readonly carrier: InputCarrier
+  ) {}
 
   gate(): TurnGate {
     return 'send';
+  }
+  admitClaim(): void {
+    throw new Error('A chat has no chat runs');
   }
   releaseUnspawned(): void {}
   prepare(): boolean {
@@ -192,10 +201,6 @@ export class ChatTurnPolicy implements TurnPolicy {
   dropWaitingTurn(): boolean {
     return false;
   }
-  waitingForRunSlot(): boolean {
-    return false;
-  }
-  queueEmptied(): void {}
   bridgeAlive(): void {}
   sessionReset(): void {}
   audienceKey(): string | undefined {

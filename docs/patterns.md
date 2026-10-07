@@ -231,9 +231,20 @@ the stamp is adopted from its journal or ends visibly, never replayed.
 **Here:** crate `runs.rs` (`enqueue_chat`, `mark_executing`, the requeue in `expire_leases`) and
 `schema.rs` `RUN_TABLE` (a queued chat run must carry its `body`). Callers: `buddies/runner.ts`
 (`admitChat`, `runJob`). From durable-pending W0a/W0b (95028f0, 745515f), shipped in the 2026-10-06
-delivery rebuild (`migrate.rs`, ONE live migration with a pre-migration `VACUUM INTO` copy). Step 6
-(task_01a11013-bac6) makes queued chat runs claimable after a restart.
-Guards: crate `a_dead_holder_requeues_an_unexecuted_run_and_fails_an_executed_one`,
+delivery rebuild (`migrate.rs`, ONE live migration with a pre-migration `VACUUM INTO` copy).
+Step 6 (2026-10-07, task_01a11013-bac6): owner messages are rows AT SEND, one carrier per conversation
+kind (`server/src/turns/intake.ts`, `InputCarrier`). A Buddy conversation's are crate `chat` runs
+(`buddies/turn-policy.ts` carrier; the runner's CLAIM hands the run to the conversation, which rebuilds
+the entry from `run.body` after a restart, `runtime.ts admitChatClaim`). Chats and the Builder use the
+records store's `conversation_input` (ingest `records/store.rs`, schema v3, pre-migration copy
+`*.before-input-v3.records-v2.*`); `hydrateInputs` re-queues unstamped rows at boot. `TurnQueue` stays
+the pure machine and wire view, every pending entry backed by a row. The head starts only after its
+stamp (`carrier.stamp`), because a turn spawned before it could be adopted AND requeued. Deleted: the
+chat ticket, the 1 s admission tick, the runner `chats` map, the reload "wait for empty queues" hold
+and the 15-minute `owner_first` bound.
+Guards: `execution-adoption.test.ts` "an owner message queued behind a running turn survives a backend
+SIGKILL", crate `a_queued_owner_message_survives_a_restart_and_still_goes_first`, ingest
+`a_v2_file_is_copied_then_migrated_with_its_records_intact`, crate `a_dead_holder_requeues_an_unexecuted_run_and_fails_an_executed_one`,
 `without_the_executing_backfill_a_legacy_running_turn_would_be_replayed` (tests/migration.rs).
 
 ## store-descriptor-isolation

@@ -1,15 +1,13 @@
-import { randomUUID } from 'node:crypto';
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { Outcome } from '@unleashd/buddies-core';
 import type { BuddyContext } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
-import type { TurnInput } from '../turns/input';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
 import type { GrantRecord, Grants, Subscribes, TurnGrant } from './grants';
 import { MCP_SERVER_NAME } from './mcp';
 import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
-import type { ChatAdmission, LeaseRenewal, Runner } from './runner';
+import type { LeaseRenewal, Runner } from './runner';
 
 /**
  * The narrow interface BuddyTurnPolicy (buddies/turn-policy.ts) calls for one Buddy turn.
@@ -20,12 +18,13 @@ export interface BuddyPolicyPort {
   /** The briefing composed for this context right before its turn (synchronous; see briefing.ts). */
   currentBriefing(context: BuddyContext): ResolvedBuddyConversation;
   /**
-   * Line a chat turn up behind its Buddy's run limit; poll `admission` with the returned id. The
-   * run is written with `input` as its body: a queued chat run without its input is refused.
+   * A queued owner message becomes a `chat` run carrying `body` (its text and provenance), named
+   * by the message id. The runner claims it when the Buddy has a slot and hands it to the
+   * conversation; nothing polls. Idempotent per message id.
    */
-  enqueueChat(context: BuddyContext, conversationId: string, input: TurnInput): string;
-  admission(turnId: string): ChatAdmission;
-  abandon(turnId: string): void;
+  queueChat(context: BuddyContext, conversationId: string, turnId: string, body: string): void;
+  promoteChat(turnId: string): void;
+  cancelChat(turnId: string): void;
   /**
    * The MCP servers of one turn: one server, one fresh grant. `owner` is true only for an
    * owner-authored input (B1); it is the one thing that makes the principal the Owner. A grant
@@ -76,13 +75,10 @@ export function createBuddyPolicyPort(deps: {
     throw new Error(`Buddy chat deadline ${runner.chatDeadlineMs} ms < TURN_MAX_RUNTIME_MS`);
   return {
     currentBriefing: (context) => briefings.current(context),
-    enqueueChat(context, conversationId, input) {
-      const turnId = randomUUID();
-      runner.enqueueChat(context, conversationId, turnId, JSON.stringify(input));
-      return turnId;
-    },
-    admission: (turnId) => runner.chatAdmission(turnId),
-    abandon: (turnId) => runner.abandonChat(turnId),
+    queueChat: (context, conversationId, turnId, body) =>
+      runner.queueChat(context, conversationId, turnId, body),
+    promoteChat: (turnId) => runner.promoteChat(turnId),
+    cancelChat: (turnId) => runner.cancelChat(turnId),
     mcpServers({ context, conversationId, owner, subscribes }) {
       // A new turn's grant replaces whatever this conversation still held.
       grants.revokeConversation(conversationId);

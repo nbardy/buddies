@@ -37,13 +37,14 @@ export type LeaseRenewal =
   | { kind: 'renewed' }
   | { kind: 'lost' }
   | { kind: 'failed'; error: string };
-export type ChatAdmission =
-  | { kind: 'admitted'; run: OwnedChatRun }
-  | { kind: 'waiting'; reason: string }
-  | { kind: 'gone' };
-
 /** What the runner needs from the conversation runtime (implemented by the host). */
 export interface RunnerHost {
+  /**
+   * The runner claimed the chat run of one queued owner message (marked executing, briefing warm).
+   * The conversation takes the message from the run's `body` when it was not already queued in
+   * memory (a restart), puts it first, and starts it: the durable claim order is the queue order.
+   */
+  admitChat(input: { conversationId: string; turnId: string; body: string; run: OwnedChatRun }): void;
   /** The conversation is loaded here. Never its placement: a delivery goes where it subscribed. */
   registered(conversationId: string): boolean;
   /**
@@ -96,11 +97,6 @@ export interface RunnerHost {
   }): Promise<void>;
   stop(conversationId: string): void;
 }
-
-type ChatTicket =
-  | { state: 'queued'; context: BuddyContext; conversationId: string; run: Promise<Run> }
-  | { state: 'admitted'; claim: Claim }
-  | { state: 'failed'; error: string };
 
 /**
  * A background job: a turn, or nothing left to do. `place` opens or reuses the conversation the
@@ -170,7 +166,6 @@ export function createRunner(options: {
 }) {
   const { core, host, grants, events, briefings } = options;
   const logger = options.logger ?? console;
-  const chats = new Map<string, ChatTicket>();
   const budgets: RunBudgets = {
     leaseMs: options.leaseMs,
     chatDeadlineMs: options.chatDeadlineMs,
@@ -271,22 +266,22 @@ export function createRunner(options: {
   // ---- one handler per RunInput --------------------------------------------------------------
 
   async function admitChat(claim: Claim, turnId: string): Promise<void> {
-    const ticket = chats.get(turnId);
-    if (ticket?.state !== 'queued')
-      return settle(claim.run, claim.leaseToken, {
-        kind: 'cancelled',
-        reason: 'no conversation waits for this chat turn',
-      });
+    const run = claim.run;
     try {
       // The runtime reads the briefing synchronously once admitted (briefing.ts).
-      await briefings.warm(ticket.context);
+      await briefings.warm(contextFor(run));
       // Executed from here on: a backend that dies now leaves a run that is adopted or fails,
       // never one requeued and replayed (Pattern: durable-intake).
-      await core.markExecuting(claim.run.id, claim.leaseToken);
-      chats.set(turnId, { state: 'admitted', claim });
+      await core.markExecuting(run.id, claim.leaseToken);
+      host.admitChat({
+        conversationId: run.conversationId!,
+        turnId,
+        // The crate refuses a queued chat run without its body.
+        body: run.body!,
+        run: { id: run.id, claim_token: claim.leaseToken, deadline: run.deadline! },
+      });
     } catch (error) {
-      chats.set(turnId, { state: 'failed', error: String(error) });
-      await settle(claim.run, claim.leaseToken, {
+      await settle(run, claim.leaseToken, {
         kind: 'failed',
         code: 'briefing_failed',
         error: String(error),
@@ -466,8 +461,7 @@ export function createRunner(options: {
    * A post in a thread this Buddy's conversation subscribes to, or that @mentions the Buddy, or
    * the owner's post in its DM (one rule for answers, failure posts, followed threads, mentions
    * and schedule fires; owner decisions A–K). It is a turn in the conversation that follows the
-   * thread, claimed only once that conversation is idle (`conversation_busy`) and after any
-   * owner message queued there (`owner_first`); for a chat the owner talks in, that is its
+   * thread, claimed only once that conversation is idle (`conversation_busy`); for a chat the owner talks in, that is its
    * background branch (mcp.ts `subscriber`). With no conversation yet it opens the Buddy's SEAT
    * in the thread (the same ids the deleted pair machine used); a schedule fire, which the Buddy
    * itself wrote, opens a fresh background conversation. Either is subscribed by `bindRun`.
@@ -785,59 +779,31 @@ export function createRunner(options: {
     },
 
     /**
-     * Line a foreground chat turn up behind its Buddy's run limit. `body` is the message the run
-     * carries: the crate refuses a queued chat run without it (Pattern: durable-intake).
+     * A foreground message becomes a queued `chat` run carrying `body`: the crate refuses one
+     * without it (Pattern: durable-intake). The run, not a ticket here, is the message's place in
+     * line; the runner claims it like any run, and any write or settle wakes the drain.
      */
-    enqueueChat(context: BuddyContext, conversationId: string, turnId: string, body: string): void {
-      const run = core.enqueueChat(OWNER, {
-        buddyId: context.buddyId,
-        conversationId,
-        turnId,
-        body,
-      });
-      chats.set(turnId, { state: 'queued', context, conversationId, run });
-      run.then(wake, (error) => {
-        // Loud (the error journal captures console.error), never thrown into the runtime's
-        // admission tick: an exception there is uncaught and would take the server down.
-        console.error(
-          `[buddies-runner] chat turn for ${context.buddyId} could not be queued:`,
-          error
+    queueChat(context: BuddyContext, conversationId: string, turnId: string, body: string): void {
+      core
+        .enqueueChat(OWNER, { buddyId: context.buddyId, conversationId, turnId, body })
+        .then(wake, (error) =>
+          // Loud (the error journal captures console.error), never thrown into the runtime.
+          console.error(`[buddies-runner] chat turn for ${context.buddyId} could not be queued:`, error)
         );
-        chats.set(turnId, { state: 'failed', error: String(error) });
-      });
     },
 
-    chatAdmission(turnId: string): ChatAdmission {
-      const ticket = chats.get(turnId);
-      if (!ticket) return { kind: 'gone' };
-      switch (ticket.state) {
-        case 'queued':
-          return { kind: 'waiting', reason: 'waiting for a run slot' };
-        // The turn stays pending in its conversation, showing why; the owner can stop it.
-        case 'failed':
-          return { kind: 'waiting', reason: `could not be queued: ${ticket.error}` };
-        case 'admitted':
-          chats.delete(turnId);
-          return {
-            kind: 'admitted',
-            run: {
-              id: ticket.claim.run.id,
-              claim_token: ticket.claim.leaseToken,
-              deadline: ticket.claim.run.deadline!,
-            },
-          };
-      }
+    promoteChat(turnId: string): void {
+      core.promoteChat(OWNER, turnId).then(wake, (error) =>
+        logger.warn(`[buddies-runner] could not promote chat turn ${turnId}:`, error)
+      );
     },
 
-    abandonChat(turnId: string): void {
-      const ticket = chats.get(turnId);
-      chats.delete(turnId);
-      if (ticket?.state !== 'queued') return;
-      void ticket.run
-        .then((run) => core.cancelRun(OWNER, run.id))
+    cancelChat(turnId: string): void {
+      core
+        .cancelChat(OWNER, turnId)
         .then(() => events.emit({ kind: 'changed' }))
         .catch((error) =>
-          logger.warn(`[buddies-runner] could not abandon chat turn ${turnId}:`, error)
+          logger.warn(`[buddies-runner] could not cancel chat turn ${turnId}:`, error)
         );
     },
 

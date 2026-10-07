@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, test } from 'node:test';
+import { after, afterEach, test } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
 import { freePortSync } from './free-port';
@@ -397,7 +397,7 @@ async function assertGroupGoneAgentsJournaling(c: Case, group: DevGroup, work: W
 }
 
 /** After the relaunch: ordered output, a Buddy tool call on the new backend, one completion each. */
-async function assertAdoptedAndCompleted(c: Case, work: Work) {
+async function assertAdoptedAndCompleted(c: Case, work: Work, queuedReply = '') {
   fs.writeFileSync(path.join(c.fakeDir, 'release'), '');
   const exists = (name: string) => fs.existsSync(path.join(c.fakeDir, name));
   await eventually(
@@ -413,22 +413,24 @@ async function assertAdoptedAndCompleted(c: Case, work: Work) {
     'the adopted chat turn to end'
   );
   assert.equal(chat.body.latestAttempt.terminalCause, 'provider_complete');
-  const page = await http(
-    'GET',
-    `/api/conversations/${work.chatId}/messages?afterSeq=-1&limit=200`
+  const assistantText = (messages: Array<{ role: string; body: { t: string; text?: string } }>) =>
+    messages
+      .filter((m) => m.role === 'assistant' && m.body.t === 'text')
+      .map((m) => m.body.text)
+      .join('');
+  const expectedText = `one;two;during;four;${queuedReply}`;
+  // A message queued behind the turn runs after it (once), so its reply lands after the adopted
+  // turn's `succeeded`: wait for the whole text instead of reading it once.
+  const page = await eventually(
+    c,
+    () => http('GET', `/api/conversations/${work.chatId}/messages?afterSeq=-1&limit=200`),
+    (p) => assistantText(p.body.messages) === expectedText,
+    'the chat transcript to read before, during and after Ctrl+C, once each, in order'
   );
   const messages = page.body.messages as Array<{
     role: string;
     body: { t: string; text?: string };
   }>;
-  assert.equal(
-    messages
-      .filter((m) => m.role === 'assistant' && m.body.t === 'text')
-      .map((m) => m.body.text)
-      .join(''),
-    'one;two;during;four;',
-    'before, during and after Ctrl+C, once each, in order'
-  );
   const system = messages.filter((m) => m.role === 'system').map((m) => m.body.text ?? '');
   assert.ok(
     !system.some((t) => /restart|interrupt/i.test(t)),
@@ -484,6 +486,12 @@ async function stopGroup(group: DevGroup) {
   signalGroup(group.pgid, 'SIGKILL');
 }
 
+// A failed or timed-out test must not leave its backend holding the fixed PORT: the next test's
+// launch then dies with "port already in use" and one failure reads as five (2026-10-07).
+afterEach(async () => {
+  for (const group of groups) await stopGroup(group);
+});
+
 after(async () => {
   for (const group of groups) await stopGroup(group);
   for (const c of cases) {
@@ -524,36 +532,30 @@ test(
   }
 );
 
+// Step 6 (2026-10-07): this test used to be "two Ctrl+C", because a message queued behind the
+// running turn was memory-only work that the first press waited 3 s for, and a second press cut the
+// wait short with SIGKILL. A queued message is a durable row now, so nothing holds the reload: the
+// first press exits at once, with the message still queued, and the relaunched backend adopts the
+// turn and keeps the message (execution-adoption.test.ts runs it exactly once).
 test(
-  'two Ctrl+C (supervisor escalates to SIGKILL): agents survive and are adopted',
+  'one Ctrl+C with a message queued behind the turn: no wait, the turn is adopted and the message kept',
   { timeout: 300_000 },
   async () => {
     const c = makeCase('double');
     const first = launch(c, 'A');
     await first.ready;
     const work = await startWork(c, 'worker');
-    // A message queued behind the running turn is in-memory work: the first press waits up to
-    // 3 s for it (lifecycle/shutdown.ts), which is the wait a user cuts short by pressing again.
     await wsCommand({ type: 'queue_message', conversationId: work.chatId, content: 'queued' });
     signalGroup(first.pgid, 'SIGINT');
-    await eventually(
-      c,
-      () => c.log.some((l) => l.includes('SIGINT — shutting down')),
-      Boolean,
-      'backend saw SIGINT'
-    );
-    // A human second press: well outside the supervisor's relay window.
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    signalGroup(first.pgid, 'SIGINT');
     await assertGroupGoneAgentsJournaling(c, first, work);
-    // The supervisor's escalation, not the backend's own SIGINT exit, is what ended the backend.
     assert.ok(
-      c.log.some((l) => l.includes('Backend stopped (signal SIGKILL)')),
-      `second Ctrl+C escalated to SIGKILL:\n${c.log.filter((l) => l.includes('server-watch')).join('\n')}`
+      c.log.some((l) => l.includes('Backend stopped (exit 0)')),
+      `a queued message does not hold the reload:\n${c.log.filter((l) => l.includes('server-watch')).join('\n')}`
     );
     const second = launch(c, 'B');
     await second.ready;
-    await assertAdoptedAndCompleted(c, work);
+    // The fake CLI answers a prompt with no SCENARIO marker with "ok".
+    await assertAdoptedAndCompleted(c, work, 'ok');
     await stopGroup(second);
     c.finished = true;
   }

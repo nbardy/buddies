@@ -318,6 +318,8 @@ async function world(reopen?: string) {
     backstopMs: 200,
     logger: { warn: () => undefined, log: () => undefined },
     host: {
+      admitChat: ({ conversationId, turnId, body, run }) =>
+        conversations.get(conversationId)!.admitChatClaim(turnId, body, run),
       registered: (id) => conversations.has(id),
       defaultModel: providerDefaultModel,
       reconfigure: async (conversationId, config) =>

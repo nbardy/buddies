@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-  type ShutdownConversation,
   type ShutdownOptions,
   type ShutdownPorts,
   createShutdownController,
@@ -28,21 +27,16 @@ const INERT: ShutdownOptions = {
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function createFixture(activeInitially: boolean) {
-  let active = activeInitially;
-  let activeSchedulerRuns = 0;
+  // `activeInitially` = one scheduler run in flight. Queued messages no longer hold a reload
+  // (they are durable rows), so the fixture models only work that is still in memory.
+  let activeSchedulerRuns = activeInitially ? 1 : 0;
   let schedulerPauses = 0;
   let schedulerResumes = 0;
   let schedulerStops = 0;
   let flushes = 0;
   let exits = 0;
   const pendingFlush = deferred();
-  // `active` = memory-only work (a queued send, a chat waiting for a slot). A running provider
-  // turn is never this: the next backend adopts it.
-  const conversation: ShutdownConversation = {
-    holdsUnadoptableWork: () => active,
-  };
   const ports: ShutdownPorts = {
-    conversations: () => [conversation],
     activeSchedulerRuns: () => activeSchedulerRuns,
     pauseScheduler: () => {
       schedulerPauses += 1;
@@ -62,11 +56,10 @@ function createFixture(activeInitially: boolean) {
     },
   };
   return {
-    conversation,
     pendingFlush,
     ports,
     setActive: (value: boolean) => {
-      active = value;
+      activeSchedulerRuns = value ? 1 : 0;
     },
     setActiveSchedulerRuns: (value: number) => {
       activeSchedulerRuns = value;
@@ -211,7 +204,6 @@ test('reload resumes the scheduler when pausing reveals newly active work', asyn
   let resumes = 0;
   let exits = 0;
   const controller = createShutdownController(INERT, {
-    conversations: () => [],
     activeSchedulerRuns: () => schedulerWork,
     pauseScheduler: () => {
       pauses += 1;
@@ -264,9 +256,7 @@ for (const exit of ['reload', 'SIGTERM'] as const) {
     let flushed = 0;
     let exited = 0;
     // A conversation whose only work is that running turn.
-    const conversation: ShutdownConversation = { holdsUnadoptableWork: () => false };
     const controller = createShutdownController(INERT, {
-      conversations: () => [conversation],
       activeSchedulerRuns: () => 0,
       pauseScheduler: () => undefined,
       resumeScheduler: () => undefined,
@@ -321,7 +311,7 @@ test('a backend exits when its dev runner goes away', async (t) => {
       '-e',
       `const { registerShutdownHandlers } = require(${JSON.stringify(shutdownModule)});
        const controller = registerShutdownHandlers({ forceExitGraceMs: 1000, flushGraceMs: 1000 }, {
-         conversations: () => [], activeSchedulerRuns: () => 0, pauseScheduler() {},
+         activeSchedulerRuns: () => 0, pauseScheduler() {},
          resumeScheduler() {}, stopScheduler() {}, flushState() {},
          exit: (code) => process.exit(code),
        });

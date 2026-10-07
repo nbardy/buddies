@@ -47,11 +47,6 @@ export class TurnQueue {
     return this.entries[0];
   }
 
-  /** A message still waiting to be sent: memory-only work a backend exit would drop. */
-  hasPending(): boolean {
-    return this.entries.some((entry) => entry.message.status === 'pending');
-  }
-
   pushBack(entry: QueueEntry): void {
     this.entries.push(entry);
   }
@@ -76,11 +71,25 @@ export class TurnQueue {
     return true;
   }
 
-  /** Drop the sending head once its turn ended. Returns whether one was dropped. */
-  finishHead(): boolean {
-    if (this.entries[0]?.message.status !== 'sending') return false;
-    this.entries.shift();
+  /** Drop the sending head once its turn ended. Returns it, for its durable row to settle. */
+  finishHead(): QueueEntry | null {
+    if (this.entries[0]?.message.status !== 'sending') return null;
+    return this.entries.shift() ?? null;
+  }
+
+  /**
+   * Put a pending entry first WITHOUT retiring anything: the durable claim order says it goes
+   * next (a restart hydrated the queue in another order than a promote left it). Unknown: false.
+   */
+  moveFirst(messageId: string): boolean {
+    const index = this.pendingIndex(messageId);
+    if (index === -1) return false;
+    this.entries.unshift(...this.entries.splice(index, 1));
     return true;
+  }
+
+  has(messageId: string): boolean {
+    return this.entries.some((entry) => entry.message.id === messageId);
   }
 
   /** Drop a pending head (its turn will never start). */

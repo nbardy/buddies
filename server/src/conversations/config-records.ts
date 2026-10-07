@@ -248,6 +248,27 @@ export class ConversationRecordStore {
     );
   }
 
+  // --- pending owner messages (turns/intake.ts InputRows) ---------------------------------------
+
+  async putInput(conversationId: string, id: string, body: string, queuedAt: string) {
+    return (await this.ready).putInput(conversationId, id, body, queuedAt);
+  }
+  async promoteInput(id: string) {
+    return (await this.ready).promoteInput(id);
+  }
+  async markInputExecuting(id: string) {
+    return (await this.ready).markInputExecuting(id, this.now().toISOString());
+  }
+  async settleInput(id: string) {
+    return (await this.ready).settleInput(id);
+  }
+  async listInputs(conversationId: string) {
+    return (await this.ready).listInputs(conversationId);
+  }
+  async conversationsWithInputs() {
+    return (await this.ready).conversationsWithInputs();
+  }
+
   /** Lease delivery of the creation message; undefined = not claimed. */
   async claimInitialMessageDispatch(
     conversationId: string,

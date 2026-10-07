@@ -446,6 +446,18 @@ fn a_request_from_no_conversation_starts_no_run_for_its_answer_or_failure() {
     assert_eq!(notices.iter().map(|p| p.purpose.as_deref()).collect::<Vec<_>>(), [Some("run_failed")], "the failure is visible in the thread");
 }
 
+// Step 6: promoting a queued message makes it the first claim of its conversation, durably.
+#[test]
+fn a_promoted_chat_is_claimed_before_the_chats_queued_ahead_of_it() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let first = s.enqueue_chat(&Actor::Owner, chat("mid", "t1", "c1")).unwrap();
+    let second = s.enqueue_chat(&Actor::Owner, chat("mid", "t2", "c1")).unwrap();
+    s.promote_chat(&Actor::Owner, "t2").unwrap();
+    assert_eq!(s.claim_run(lease(60_000)).unwrap().unwrap().run.id, second.id);
+    assert_ne!(first.id, second.id);
+}
+
 // Pattern: fix-guards (docs/patterns.md#fix-guards). 2026-10-01 (task_01a0f7ff-bbd6): a background
 // requester read its answer in its still-running turn, yet the queued return run stayed to resume
 // that turn with the same answer until cancelled by hand 17 minutes later. The read fence
