@@ -279,17 +279,9 @@ impl Store {
             let id = idempotent(tx, &m, |tx| {
                 // Insert, then flip only an awaiting request. A request that is no longer awaiting fails
                 // the flip, and the error rolls the answer back with the transaction: one answer each.
-                let id = write_post(tx, NewPost {
-                    channel_id: &request.channel_id,
-                    author: actor.buddy_id(),
-                    root_id: Some(request.root()),
-                    reply_to_id: Some(&request.id),
-                    task_id: request.task_id.as_deref(),
-                    body: &input.body,
-                    evidence: &input.evidence,
-                    conversation_id: input.from_conversation_id.as_deref(),
-                    ..NewPost::default()
-                })?;
+                let (body, evidence, conversation_id) = (&input.body, &input.evidence, input.from_conversation_id.as_deref());
+                let id = write_post(tx, NewPost { channel_id: &request.channel_id, author: actor.buddy_id(), root_id: Some(request.root()),
+                    reply_to_id: Some(&request.id), task_id: request.task_id.as_deref(), body, evidence, conversation_id, ..NewPost::default() })?;
                 let flipped = tx.execute(
                     "UPDATE post SET request = 'answered', answer_id = ?2 WHERE id = ?1 AND request = 'awaiting'",
                     params![request.id, id],
@@ -806,19 +798,9 @@ fn insert_post(
     if input.broadcast && root_id.is_none() {
         return Err(CoreError::Invalid("only a reply can also be sent to the channel".into()));
     }
-    let id = write_post(tx, NewPost {
-        channel_id: &channel.id,
-        author: actor.buddy_id(),
-        root_id: root_id.as_deref(),
-        reply_to_id: input.reply_to_id.as_deref(),
-        task_id,
-        purpose: input.purpose.as_deref(),
-        body: &input.body,
-        evidence: &input.evidence,
-        request: ask.column(),
-        conversation_id: input.from_conversation_id.as_deref(),
-        broadcast: input.broadcast,
-    })?;
+    let id = write_post(tx, NewPost { channel_id: &channel.id, author: actor.buddy_id(), root_id: root_id.as_deref(),
+        reply_to_id: input.reply_to_id.as_deref(), task_id, purpose: input.purpose.as_deref(), body: &input.body, evidence: &input.evidence,
+        request: ask.column(), conversation_id: input.from_conversation_id.as_deref(), broadcast: input.broadcast })?;
     let owed: Vec<String> = ask.owed_by().iter().filter_map(Actor::buddy_id).map(str::to_owned).collect();
     let woken: Vec<String> = input.mentions.iter().map(|m| m.buddy_id.clone()).collect();
     let skip: Vec<String> = owed.iter().chain(&woken).cloned().collect();
@@ -889,16 +871,8 @@ pub(crate) fn system_post(tx: &Transaction, author: &str, channel: &Channel, rep
         ChannelKind::Task { task_id } => Some(task_id.as_str()),
         ChannelKind::Public { .. } | ChannelKind::Direct { .. } => reply_to.and_then(|p| p.task_id.as_deref()),
     };
-    let id = write_post(tx, NewPost {
-        channel_id: &channel.id,
-        author: Some(author),
-        root_id: reply_to.map(Post::root),
-        reply_to_id: reply_to.map(|p| p.id.as_str()),
-        task_id,
-        purpose: Some(purpose),
-        body,
-        ..NewPost::default()
-    })?;
+    let id = write_post(tx, NewPost { channel_id: &channel.id, author: Some(author), root_id: reply_to.map(Post::root),
+        reply_to_id: reply_to.map(|p| p.id.as_str()), task_id, purpose: Some(purpose), body, ..NewPost::default() })?;
     let post = get_post(tx, &id)?;
     crate::deliveries::fan_out(tx, &post, &[])?;
     Ok(post)
@@ -931,22 +905,8 @@ fn write_post(tx: &Transaction, p: NewPost) -> Result<String> {
            conversation_id, created_at, ord, broadcast)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
     )?
-    .execute(params![
-        id,
-        p.channel_id,
-        p.author,
-        p.root_id,
-        p.reply_to_id,
-        p.task_id,
-        p.purpose,
-        p.body,
-        evidence_json(p.evidence),
-        p.request,
-        p.conversation_id,
-        now_iso(),
-        ord,
-        p.broadcast
-    ])?;
+    .execute(params![id, p.channel_id, p.author, p.root_id, p.reply_to_id, p.task_id, p.purpose, p.body, evidence_json(p.evidence),
+        p.request, p.conversation_id, now_iso(), ord, p.broadcast])?;
     Ok(id)
 }
 
