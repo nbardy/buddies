@@ -363,3 +363,30 @@ mp4 in /tmp was removed only after confirming identical copies elsewhere (sha b1
 - 56 merged local branches deleted with `git branch -d`.
 - Unmerged dead branches are archive-tagged. Branch deletion with `-D` is blocked by the safety hook, so the branches
   are left in place.
+
+## Decision successor, 2026-10-07 07:23Z: decision A reversed. Deliveries stay out of owner chats
+
+Decision-maker: the owner. Status: ACCEPTED. File before this append: sha256 prefix `b36df33b5278edf6`.
+
+**What happened.** The owner was shown a worker-answer delivery in their DM with the Wave_sim CEO. It rendered as a "You"
+message containing the raw delivery envelope (screenshot in #case-studies post_01a1151c-e9d6, 2026-10-07 06:46Z).
+
+**Options offered** (lead, post_01a1151d-5d6e):
+1. Keep A and render deliveries as a collapsed event row. This was the lead's recommendation.
+2. Keep deliveries out of owner chats and run them in a background branch.
+
+**Owner's choice:** "it should be out of our chats should show up as background worker" (post_01a1153e-e5f3).
+
+**Effect:**
+- **Decision A is superseded.** Deliveries for a conversation the owner talks in run in a background branch of that
+  conversation, which is visible as a background worker. They never run as turns in the owner's chat.
+- **Restored:** CORE_DESIGN's 09-13 "background branch" return and the "Autonomous turns in human chat" row become
+  current again. A successor paragraph is needed there.
+- **Unchanged:** the delivery rule itself (one rule, subscriptions, the fence) stays. Only the subscribed conversation
+  changes: an owner chat's subscriptions point at its background branch. This is the delivery design's own "Revisit if
+  the owner rejects A" path.
+- **Moot for owner chats:** decisions B and C (owner-first ordering, and Stop cancelling queued deliveries), since
+  deliveries no longer queue there.
+
+**Why the lead's recommendation lost:** the owner does not want automated turns in their own chats, even when they are
+displayed well. This matches their September 13 request.
