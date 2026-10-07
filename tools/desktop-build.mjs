@@ -99,7 +99,12 @@ async function main() {
   fs.cpSync(path.join(path.dirname(node), '..', 'lib'), path.join(STAGE, 'node', 'lib'), {
     recursive: true,
   });
-  for (const file of ['desktop-source.mjs', 'desktop-runtime.mjs', 'desktop-selection.mjs']) {
+  for (const file of [
+    'desktop-source.mjs',
+    'desktop-source-git.mjs',
+    'desktop-runtime.mjs',
+    'desktop-selection.mjs',
+  ]) {
     fs.mkdirSync(path.join(STAGE, 'tools'), { recursive: true });
     fs.copyFileSync(path.join(ROOT, 'tools', file), path.join(STAGE, 'tools', file));
   }
