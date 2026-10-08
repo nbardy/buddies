@@ -1,0 +1,58 @@
+.highlight-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  border-radius: 6px;
+}
+.highlight-row:hover,
+.highlight-row:active {
+  background: color-mix(in srgb, var(--text-emphasis) 6%, transparent);
+}
+.highlight-row[data-current] {
+  background: color-mix(in srgb, var(--theme-user) 28%, transparent);
+}
+.highlight-row[data-current] > :first-child {
+  color: var(--text-bright);
+}
+.highlight-row-actions {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+}
+.highlight-row-footer {
+  grid-column: 1 / -1;
+}
+.highlight-row .channel-star {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.highlight-row:hover .channel-star,
+.highlight-row:focus-within .channel-star,
+.highlight-row .channel-star[aria-pressed="true"] {
+  opacity: 1;
+}
+.highlight-row .channel-star:hover,
+.highlight-row .channel-star[aria-pressed="true"] {
+  color: var(--text-bright);
+}
+[data-device="mobile"] .highlight-row .channel-star {
+  opacity: 1;
+  width: 44px;
+  height: 48px;
+}
+@media (hover: none) {
+  .highlight-row .channel-star {
+    opacity: 1;
+  }
+}

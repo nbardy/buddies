@@ -178,13 +178,12 @@
   text-decoration: none;
   cursor: pointer;
 }
-.channel-browser-channels button:hover,
-.channel-browser-buddy-link:hover {
+.channel-browser-channels > li:not(.highlight-row) > button:hover,
+.channel-browser-buddy:not(.highlight-row) .channel-browser-buddy-link:hover {
   background: color-mix(in srgb, var(--text-emphasis) 6%, transparent);
   color: var(--text-emphasis);
 }
-.channel-browser-channels button[aria-current="page"],
-.channel-browser-buddy-link[aria-current="page"] {
+.channel-browser-channels > li:not(.highlight-row) > button[aria-current="page"] {
   background: color-mix(in srgb, var(--theme-user) 28%, transparent);
   color: var(--text-bright);
 }
@@ -570,13 +569,7 @@ a.channel-browser-instance:hover {
 }
 
 /* ── Rail: section header with add, Buddies, new-channel form ──────── */
-/* A Buddy row: the name fills the row and opens the DM; Wake sits over the
-   sigil so the worker link remains reachable on the right. */
-.channel-browser-buddy {
-  position: relative;
-  flex-wrap: wrap;
-  min-width: 0;
-}
+/* Wake, worker count and star share the row's right-side action group. */
 
 .channel-browser-pane-title,
 .channel-browser-buddy-link {
@@ -590,26 +583,21 @@ a.channel-browser-instance:hover {
 
 /* A DM that cannot open (e.g. no agent installed) says why under the row, not only in a tooltip. */
 .channel-browser-buddy-error {
-  flex-basis: 100%;
   padding: 0 var(--sp-6) var(--sp-2) var(--sp-9);
   color: var(--theme-warning);
   font-size: var(--fs-2);
 }
-
 .channel-browser-buddy-actions {
-  position: absolute;
-  top: 50%;
-  left: var(--sp-6);
-  display: flex;
-  gap: var(--sp-1);
-  transform: translateY(-50%);
-  visibility: hidden;
-  z-index: 2;
+  position: relative;
+  width: 26px;
+  height: 26px;
 }
-
-.channel-browser-buddy:hover .channel-browser-buddy-actions,
-.channel-browser-buddy:focus-within .channel-browser-buddy-actions {
-  visibility: visible;
+.channel-browser-buddy-actions > button {
+  opacity: 0;
+}
+.channel-browser-buddy:hover .channel-browser-buddy-actions > button,
+.channel-browser-buddy:focus-within .channel-browser-buddy-actions > button {
+  opacity: 1;
 }
 
 .channel-browser-buddy-actions button {
@@ -620,7 +608,7 @@ a.channel-browser-instance:hover {
   height: 24px;
   border: 0;
   border-radius: 6px;
-  background: var(--bg-sidebar);
+  background: transparent;
   color: var(--text-muted);
   cursor: pointer;
 }
@@ -637,12 +625,14 @@ a.channel-browser-instance:hover {
 
 .channel-browser-buddy-status {
   position: absolute;
-  left: var(--sp-6);
-  z-index: 2;
+  inset: 0;
+  display: grid;
+  place-items: center;
   pointer-events: none;
 }
 
-.channel-browser-buddy:hover .channel-browser-buddy-status {
+.channel-browser-buddy:hover .channel-browser-buddy-status,
+.channel-browser-buddy:focus-within .channel-browser-buddy-status {
   visibility: hidden;
 }
 

@@ -24,6 +24,7 @@ import { ChannelStar } from './ChannelStar';
 import { ChannelWorkers } from './ChannelWorkers';
 import { CopyLinkButton } from './CopyLinkButton';
 import { GroupDmNotice } from './GroupDmNotice';
+import { HighlightRow } from './HighlightRow';
 import { TaskFilter } from './TaskFilter';
 import { TaskPage } from './TaskPage';
 import { ThreadsPane } from './ThreadsPane';
@@ -629,7 +630,10 @@ function RailChannel({
   onSelect(): void;
 }) {
   return (
-    <li className="channel-star-row">
+    <HighlightRow
+      current={current}
+      buttonsRight={<ChannelStar channelId={entry.channel.id} name={heading.name} />}
+    >
       <button
         type="button"
         data-unread={channelUnreadAttr(entry.unread)}
@@ -643,8 +647,7 @@ function RailChannel({
         <span className="channel-browser-channel-name ui-truncate">{heading.name}</span>
         <RequestsBadge count={requests} />
       </button>
-      <ChannelStar channelId={entry.channel.id} name={heading.name} />
-    </li>
+    </HighlightRow>
   );
 }
 

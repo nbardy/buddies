@@ -5,7 +5,7 @@ import {
   toggleBuddyStar,
   toggleChannelStar,
 } from '../../atoms/ui';
-import './ChannelStar.css';
+import './HighlightRow.css';
 
 export function ChannelStar({ channelId, name }: { channelId: string; name: string }) {
   const starred = useAtomValue(starredChannelIdsAtom).includes(channelId);

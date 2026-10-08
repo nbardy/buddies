@@ -3,6 +3,7 @@
 // Uses real data and the screenshot driver's read-only session; requires pnpm dev.
 // node tools/check-workspace-navigation.mjs <workspace-id> [base-url]
 import assert from 'node:assert/strict';
+import { inspectChannelStarLayout } from './lib/channel-star-layout.mjs';
 import { openSession, resolveAuthToken, sleep } from './lib/headless-chrome.mjs';
 
 const [workspaceId, baseUrl = 'http://localhost:7489'] = process.argv.slice(2);
@@ -36,6 +37,8 @@ try {
       500
     );
     await waitFor('!!document.querySelector("[data-worker-row]")');
+    const layout = await session.evaluate(`(${inspectChannelStarLayout.toString()})()`);
+    assert.ok(layout.checked > 0, 'Shared highlight rows must render with their right-side stars');
     const duplicate = await session.evaluate(`
       [...document.querySelectorAll('h2, h3')].some(heading => heading.textContent === 'Direct messages')
     `);

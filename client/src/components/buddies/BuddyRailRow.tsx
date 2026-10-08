@@ -3,6 +3,7 @@ import { BuddyBackgroundLink } from './BuddyBackgroundLink';
 import { BuddySigil } from './BuddySigil';
 import type { OpenDm } from './ChannelAuthor';
 import { BuddyStar } from './ChannelStar';
+import { HighlightRow } from './HighlightRow';
 import { WakeIcon, WakeIndicator } from './WakeIndicator';
 import { useBuddyDirectActions } from './buddy-direct-actions';
 import type { Buddy } from './types';
@@ -26,8 +27,42 @@ export function BuddyRailRow({
   const direct = useBuddyDirectActions(member.id);
   const { action } = direct;
   return (
-    <li
-      className="channel-browser-buddy ui-row channel-star-row"
+    <HighlightRow
+      current={current}
+      buttonsRight={
+        <>
+          <span className="channel-browser-buddy-actions">
+            <button
+              type="button"
+              title={`Wake ${member.name}: catch up on the channels and act`}
+              aria-label={`Wake ${member.name}`}
+              disabled={action.kind === 'pending'}
+              onClick={direct.wake}
+            >
+              <WakeIcon />
+            </button>
+            {direct.woken && (
+              <WakeIndicator
+                key={direct.woken.attempt}
+                conversationId={direct.woken.conversationId}
+                name={member.name}
+                className="channel-browser-buddy-status ui-inline-row ui-muted"
+                doneClassName="channel-browser-buddy-done"
+              />
+            )}
+          </span>
+          <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
+          <BuddyStar buddyId={member.id} name={member.name} />
+        </>
+      }
+      footer={
+        action.kind === 'failed' && (
+          <span className="channel-browser-buddy-error" role="alert">
+            {action.message}
+          </span>
+        )
+      }
+      className="channel-browser-buddy"
       data-worker-row="desktop"
       data-failed={action.kind === 'failed' || undefined}
     >
@@ -43,35 +78,7 @@ export function BuddyRailRow({
         <BuddySigil className="channel-browser-buddy-sigil" name={member.name} />
         <span className="channel-browser-channel-name ui-truncate">{member.name}</span>
       </button>
-      {direct.woken && (
-        <WakeIndicator
-          key={direct.woken.attempt}
-          conversationId={direct.woken.conversationId}
-          name={member.name}
-          className="channel-browser-buddy-status ui-inline-row ui-muted"
-          doneClassName="channel-browser-buddy-done"
-        />
-      )}
-      <span className="channel-browser-buddy-actions">
-        <button
-          type="button"
-          title={`Wake ${member.name}: catch up on the channels and act`}
-          aria-label={`Wake ${member.name}`}
-          disabled={action.kind === 'pending'}
-          onClick={direct.wake}
-        >
-          <WakeIcon />
-        </button>
-      </span>
-      <BuddyStar buddyId={member.id} name={member.name} />
-      <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
-      {/* The fresh-install trial's failures hid in a tooltip; "No agent is installed" must show. */}
-      {action.kind === 'failed' && (
-        <span className="channel-browser-buddy-error" role="alert">
-          {action.message}
-        </span>
-      )}
-    </li>
+    </HighlightRow>
   );
 }
 
@@ -89,7 +96,22 @@ export function CreatingBuddyRailRow({
   current: boolean;
 }) {
   return (
-    <li className="channel-browser-buddy ui-row">
+    <HighlightRow
+      className="channel-browser-buddy"
+      current={current}
+      buttonsRight={
+        <span className="channel-browser-buddy-actions">
+          <button
+            type="button"
+            title="Archive this setup chat"
+            aria-label="Archive Buddy setup"
+            onClick={() => setConversationDone(conversationId, true)}
+          >
+            ×
+          </button>
+        </span>
+      }
+    >
       <button
         type="button"
         className="channel-browser-buddy-link"
@@ -100,16 +122,6 @@ export function CreatingBuddyRailRow({
         <BuddySigil className="channel-browser-buddy-sigil" name={CREATING} />
         <em className="channel-browser-channel-name ui-truncate ui-muted">{CREATING}</em>
       </button>
-      <span className="channel-browser-buddy-actions">
-        <button
-          type="button"
-          title="Archive this setup chat"
-          aria-label="Archive Buddy setup"
-          onClick={() => setConversationDone(conversationId, true)}
-        >
-          ×
-        </button>
-      </span>
-    </li>
+    </HighlightRow>
   );
 }
