@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Express, Request, Response } from 'express';
+import { isChannelPreviewFile } from '../buddies/channel-media';
 import {
   HOME_DIRECTORY,
   displayPathWithHomeAlias,
@@ -101,6 +102,13 @@ export function registerFilesystemRoutes(
     }
     if (!mayServe(resolved)) {
       res.status(403).json({ error: 'Path not under any known project' });
+      return;
+    }
+    // Arbitrary uploads must download: HTML/SVG cannot execute with the app's origin.
+    // Guard: buddies-v2.test.ts (channel files) checks the direct URL as well as the posted link.
+    if (isPathWithin(uploadsDirectory, resolved) && !isChannelPreviewFile(resolved)) {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.download(resolved, (error) => handleSendFileError(error, res, resolved));
       return;
     }
     res.sendFile(resolved, (error) => handleSendFileError(error, res, resolved));

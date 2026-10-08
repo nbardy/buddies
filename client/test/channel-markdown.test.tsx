@@ -220,3 +220,43 @@ test('a copied rendered mention pastes into the composer as its Buddy', () => {
     '[@Reviewer](buddy:b9) please look'
   );
 });
+
+// The composer's framing and the renderer must agree: unsupported previews become file links.
+test('PDFs, ZIPs and arbitrary files render as authenticated file links, including old embeds', async () => {
+  const { mediaMarkdown } = await import('../src/components/buddies/channel-text');
+  for (const name of [
+    'report.pdf',
+    'bundle.zip',
+    'data.blob',
+    'README',
+    'active.svg',
+    'active.html',
+  ]) {
+    const absolutePath = `/tmp/uploads/${name}`;
+    for (const body of [
+      mediaMarkdown({ originalName: name, absolutePath }),
+      `![${name}](${absolutePath})`,
+    ]) {
+      const html = renderChannel(body);
+      assert.match(html, /<a href="\/api\/files\?path=/);
+      assert.ok(html.includes(`>${name}</a>`));
+      assert.doesNotMatch(html, /<img|<video/);
+    }
+  }
+  const video = renderChannel(
+    mediaMarkdown({ originalName: 'clip.mp4', absolutePath: '/tmp/clip.mp4' })
+  );
+  assert.match(video, /<video[^>]+src="\/api\/files\?path=/);
+});
+
+test('root-relative app navigation remains an app link beside attachments', () => {
+  for (const target of [
+    '/',
+    '/chat/c1',
+    '/buddies/workspaces/w1/channels',
+    '/workers/detail',
+    '/api/files?path=x',
+  ]) {
+    assert.ok(renderChannel(`[Open](${target})`).includes(`href="${target}"`));
+  }
+});

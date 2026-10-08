@@ -23,7 +23,13 @@ import { formatToolUse } from '../../utils/tool-presentation';
 import { AskUserQuestionWidget } from '../AskUserQuestion';
 import { BuddyBuilderResultCard } from './BuddyBuilderResultCard';
 import { ChannelTaskOverlay } from './ChannelTaskOverlay';
-import { type ChannelTask, isVideoSource, mediaUrl, parseChannelLink } from './channel-text';
+import {
+  type ChannelTask,
+  isImageSource,
+  isVideoSource,
+  mediaUrl,
+  parseChannelLink,
+} from './channel-text';
 import { REF_ATTRIBUTE } from './composer-draft';
 import { taskStatusView } from './ui-contract';
 import './ChannelContent.css';
@@ -263,7 +269,7 @@ function ChannelLink({ href, children }: { href?: string; children?: ReactNode }
       );
     case 'web':
       return (
-        <a href={link.href} target="_blank" rel="noreferrer">
+        <a href={mediaUrl(link.href)} target="_blank" rel="noreferrer">
           {children}
         </a>
       );
@@ -289,6 +295,12 @@ const CHANNEL_COMPONENTS: Components = {
   img: ({ src, alt }) => {
     const source = typeof src === 'string' ? src : '';
     const url = mediaUrl(source);
+    if (!isImageSource(source) && !isVideoSource(source))
+      return (
+        <ChannelLink href={source}>
+          {alt || source.split('/').at(-1) || 'Download file'}
+        </ChannelLink>
+      );
     return isVideoSource(source) ? (
       // biome-ignore lint/a11y/useMediaCaption: user-posted clips carry no caption track
       <video className="channel-media" src={url} controls preload="metadata" title={alt} />

@@ -213,3 +213,14 @@ export function resolveReferences(body: string, roster: readonly NamedRef[]): Re
     rejected: [...rejected.values()],
   };
 }
+
+// Pattern: one-definition (docs/patterns.md#one-definition)
+// Root-relative app navigation is not a filesystem reference. Keep upload copying and link
+// rendering on the same rule; channel-markdown.test.tsx guards app links beside file links.
+export function isLocalFilePath(source: string): boolean {
+  return (
+    source.startsWith('/') &&
+    source !== '/' &&
+    !/^\/(?:api|chat|chats|buddies|channels|workers|done|search)(?:[/?#]|$)/.test(source)
+  );
+}

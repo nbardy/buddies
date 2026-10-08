@@ -1,3 +1,4 @@
+import { isLocalFilePath } from '@unleashd/shared';
 /**
  * client/src/components/buddies/channel-text.ts
  *
@@ -114,20 +115,30 @@ export function channelDraftId(channelId: string, rootId: string | null): string
 
 // ── Media ──────────────────────────────────────────────────────────────────
 
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov']);
 
 const linkText = (label: string) => label.replace(/[[\]]/g, '');
 
 export function mediaMarkdown(file: { originalName: string; absolutePath: string }): string {
-  const alt = linkText(file.originalName.replace(/\.[^.]+$/, ''));
-  return `![${alt}](${file.absolutePath})`;
+  // Fix-guard: PDF/ZIP uploads used image markdown and rendered broken previews.
+  // channel-markdown.test.tsx exercises upload framing through the real renderer.
+  const preview = isImageSource(file.absolutePath) || isVideoSource(file.absolutePath);
+  const label = linkText(preview ? file.originalName.replace(/\.[^.]+$/, '') : file.originalName);
+  const target = /[\s()<>]/.test(file.absolutePath)
+    ? `<${file.absolutePath.replaceAll('<', '%3C').replaceAll('>', '%3E')}>`
+    : file.absolutePath;
+  return `${preview ? '!' : ''}[${label}](${target})`;
 }
 
 /** Local absolute paths render through the authenticated file route. */
 export function mediaUrl(source: string): string {
-  return source.startsWith('/') && !source.startsWith('/api/')
-    ? `/api/files?path=${encodeURIComponent(source)}`
-    : source;
+  return isLocalFilePath(source) ? `/api/files?path=${encodeURIComponent(source)}` : source;
+}
+
+export function isImageSource(source: string): boolean {
+  const path = source.split(/[?#]/)[0].toLowerCase();
+  return IMAGE_EXTENSIONS.has(path.slice(path.lastIndexOf('.')));
 }
 
 export function isVideoSource(source: string): boolean {

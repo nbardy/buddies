@@ -38,9 +38,7 @@ import type { Express, Request, Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import {
-  CHANNEL_IMAGE_EXTENSIONS,
   CHANNEL_MEDIA_MAX_BYTES,
-  CHANNEL_VIDEO_EXTENSIONS,
   channelMediaDirectory,
   requireCanonicalPostMedia,
 } from './channel-media';
@@ -181,8 +179,6 @@ export async function publishOwnerPost(
   deps.events.emit({ kind: 'posted', post, channel: target });
   return { post };
 }
-
-const MEDIA = new Set<string>([...CHANNEL_IMAGE_EXTENSIONS, ...CHANNEL_VIDEO_EXTENSIONS]);
 
 type Handler = (req: Request) => Promise<unknown>;
 type Method = 'get' | 'post' | 'put' | 'patch' | 'delete';
@@ -543,19 +539,12 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         callback(null, `${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
     }),
     limits: { fileSize: CHANNEL_MEDIA_MAX_BYTES, files: 10 },
-    fileFilter: (_req, file, callback) =>
-      callback(
-        null,
-        MEDIA.has(file.originalname.slice(file.originalname.lastIndexOf('.')).toLowerCase())
-      ),
   });
-  // Lands in the channel's media directory, so the composer's ![name](absolutePath) passes as-is.
+  // Files land in channel storage; the composer embeds previews or inserts ordinary file links.
   app.post('/api/buddies/channels/:channelId/media', upload.array('files', 10), (req, res) => {
     const files = req.files as Express.Multer.File[];
     if (files.length === 0)
-      return void res
-        .status(400)
-        .json({ error: `No supported media: ${[...MEDIA].join(' ')} up to 50 MB` });
+      return void res.status(400).json({ error: 'No files provided (up to 50 MB each)' });
     const saved = files.map((f) => ({
       originalName: f.originalname,
       absolutePath: f.path,

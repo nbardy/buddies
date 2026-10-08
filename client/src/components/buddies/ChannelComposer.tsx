@@ -56,8 +56,8 @@ const NO_SEATS: ThreadSeats = { kind: 'loaded', seats: [] };
 // The owner's composer. Posts as the owner (never a stand-in Buddy). One
 // universal @ menu fuzzy-finds Buddies and Tasks: a Buddy becomes a mention
 // (which starts that Buddy's reply), a Task becomes a live chip. Pasted or
-// dropped images/videos upload into the channel and are inserted as inline
-// markdown at the caret.
+// dropped files upload into the channel and are inserted as preview embeds
+// or ordinary file links at the caret.
 //
 // Every Buddy the text mentions gets a chip on the bar; clicking it opens the
 // chat's harness/model picker for that Buddy's reply. The choice is sent
@@ -433,15 +433,14 @@ export function ChannelComposer({
           type="button"
           className="channel-composer-attach"
           onClick={() => fileInputRef.current?.click()}
-          title="Attach images or video"
-          aria-label="Attach images or video"
+          title="Attach files"
+          aria-label="Attach files"
         >
           +
         </button>
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime"
           multiple
           hidden
           onChange={(event) => {

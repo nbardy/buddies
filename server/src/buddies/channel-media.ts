@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { isLocalFilePath } from '@unleashd/shared';
 import { isPathWithin } from '../http/path-utils';
 
-// Channel posts are markdown, and media is inline markdown: `![alt](path)`.
+// Channel posts are markdown: previews use ![alt](path), other files use [name](path).
 // There is no separate attachments list — the body is the one canonical form.
 //
 // A post may reference a LOCAL file (a Buddy's screenshot in its worktree, a
@@ -20,17 +21,20 @@ import { isPathWithin } from '../http/path-utils';
 
 export const CHANNEL_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'] as const;
 export const CHANNEL_VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mov'] as const;
-// SVG is excluded on purpose: /api/files serves same-origin, and an SVG opened
-// directly in a tab runs its scripts with the app's authority.
+// Only these types have previews; every other uploaded type is served as a download.
 const MEDIA_EXTENSIONS: ReadonlySet<string> = new Set([
   ...CHANNEL_IMAGE_EXTENSIONS,
   ...CHANNEL_VIDEO_EXTENSIONS,
 ]);
+export function isChannelPreviewFile(source: string): boolean {
+  return MEDIA_EXTENSIONS.has(path.extname(source).toLowerCase());
+}
+
 export const CHANNEL_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
 
 export type ChannelMediaProblem = {
   reference: string;
-  reason: 'missing' | 'unsupported_type' | 'too_large' | 'not_a_file';
+  reason: 'missing' | 'too_large' | 'not_a_file';
 };
 
 export type CanonicalizedPostBody = { body: string; problems: ChannelMediaProblem[] };
@@ -41,8 +45,8 @@ export function channelMediaDirectory(uploadsRoot: string, channelId: string): s
   return path.join(uploadsRoot, 'channels', channelId);
 }
 
-// `![alt](target)` or `![alt](<target with spaces>)`, optional "title".
-const IMAGE_REFERENCE = /!\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(\s+"[^"]*")?\s*\)/g;
+// `[name](target)` or `![alt](target)` or `![alt](<target with spaces>)`, optional "title".
+const FILE_REFERENCE = /(!?)\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(\s+"[^"]*")?\s*\)/g;
 
 type LocalReference = { kind: 'local'; absolutePath: string } | { kind: 'remote' };
 
@@ -52,8 +56,7 @@ function classifyTarget(target: string): LocalReference {
   if (target.startsWith('~/'))
     return { kind: 'local', absolutePath: path.join(os.homedir(), target.slice(2)) };
   // /api/files?path=... and /api/serve/... are already-served app URLs.
-  if (target.startsWith('/') && !target.startsWith('/api/'))
-    return { kind: 'local', absolutePath: target };
+  if (isLocalFilePath(target)) return { kind: 'local', absolutePath: target };
   return { kind: 'remote' };
 }
 
@@ -61,8 +64,6 @@ function copyIntoChannel(
   source: string,
   directory: string
 ): { path: string } | { problem: ChannelMediaProblem['reason'] } {
-  const extension = path.extname(source).toLowerCase();
-  if (!MEDIA_EXTENSIONS.has(extension)) return { problem: 'unsupported_type' };
   let stat: fs.Stats;
   try {
     stat = fs.statSync(source);
@@ -73,7 +74,12 @@ function copyIntoChannel(
   if (stat.size > CHANNEL_MEDIA_MAX_BYTES) return { problem: 'too_large' };
   const bytes = fs.readFileSync(source);
   const digest = createHash('sha256').update(bytes).digest('hex').slice(0, 32);
-  const destination = path.join(directory, `${digest}${extension}`);
+  const destination = path.join(
+    directory,
+    isChannelPreviewFile(source)
+      ? `${digest}${path.extname(source).toLowerCase()}`
+      : `${digest}_${path.basename(source).replace(/[^a-zA-Z0-9._-]/g, '_')}`
+  );
   if (!fs.existsSync(destination)) {
     fs.mkdirSync(directory, { recursive: true });
     fs.writeFileSync(destination, bytes);
@@ -82,12 +88,15 @@ function copyIntoChannel(
 }
 
 /**
- * Copy every local media reference into the channel directory and rewrite the
+ * Copy every local file reference into the channel directory and rewrite the
  * body to point at the copies. Remote URLs and already-copied files pass
  * through untouched. Problems are returned, never swallowed: every post path
  * (the MCP `post` tool, the owner routes) rejects them so the author can fix
  * its reference.
  */
+// Pattern: one-write-path (docs/patterns.md#one-write-path)
+// Fix-guard: image-only copying rejected PDF/ZIP shares and left ordinary file links ephemeral.
+// buddies-v2.test.ts (channel files) keeps links durable through the upload/post/download boundaries.
 function canonicalizePostMedia(
   body: string,
   input: { uploadsRoot: string; channelId: string }
@@ -95,8 +104,8 @@ function canonicalizePostMedia(
   const directory = channelMediaDirectory(input.uploadsRoot, input.channelId);
   const problems: ChannelMediaProblem[] = [];
   const rewritten = body.replace(
-    IMAGE_REFERENCE,
-    (whole, alt: string, rawTarget: string, title?: string) => {
+    FILE_REFERENCE,
+    (whole, embed: string, alt: string, rawTarget: string, title?: string) => {
       const target = rawTarget.startsWith('<') ? rawTarget.slice(1, -1) : rawTarget;
       const reference = classifyTarget(target);
       if (reference.kind === 'remote') return whole;
@@ -107,7 +116,7 @@ function canonicalizePostMedia(
         problems.push({ reference: target, reason: copied.problem });
         return whole;
       }
-      return `![${alt}](${copied.path}${title ?? ''})`;
+      return `${embed && isChannelPreviewFile(copied.path) ? '!' : ''}[${alt}](${copied.path}${title ?? ''})`;
     }
   );
   return { body: rewritten, problems };
@@ -123,7 +132,7 @@ export class ChannelMediaError extends Error {
   readonly code = 'post_media_invalid';
   constructor(readonly problems: readonly ChannelMediaProblem[]) {
     super(
-      `Post media could not be attached: ${describeMediaProblems(problems)}. Embed images (${CHANNEL_IMAGE_EXTENSIONS.join(' ')}) or videos (${CHANNEL_VIDEO_EXTENSIONS.join(' ')}) up to 50 MB with ![alt](/absolute/path).`
+      `Post media could not be attached: ${describeMediaProblems(problems)}. Attach files up to 50 MB with [name](/absolute/path); images and videos may use ![alt](/absolute/path).`
     );
   }
 }

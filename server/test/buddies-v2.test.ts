@@ -61,6 +61,7 @@ import {
   createConversationRuntime,
 } from '../src/conversations/runtime';
 import { replaceRuntimeConfig } from '../src/conversations/runtime-config';
+import { registerFilesystemRoutes } from '../src/http/filesystem-routes';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { installedAgent } from '../src/providers/installed-agent';
 import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
@@ -3472,6 +3473,10 @@ async function ownerHttp(w: Awaited<ReturnType<typeof world>>) {
       return { conversationId: 'builder' };
     },
   });
+  registerFilesystemRoutes(app, {
+    uploadsDirectory: join(w.scratch, 'uploads'),
+    isUnderKnownProject: () => false,
+  });
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -5088,6 +5093,84 @@ test('new thread messages steer the live reply once, without a second run or bus
     assert.ok(!page.posts.some((p) => p.purpose === 'reply_failed'));
   } finally {
     release();
+    await w.close();
+  }
+});
+
+// Owner report 2026-10-08: channel upload silently filtered everything except images/videos.
+test('channel files: arbitrary uploads post durable links and download without executing', async () => {
+  const w = await world();
+  const { server, withClient } = await ownerHttp(w);
+  try {
+    await withClient(async () => {
+      const { buddyUpload } = await import('../../client/src/components/buddies/api');
+      const { mediaMarkdown, mediaUrl } = await import(
+        '../../client/src/components/buddies/channel-text'
+      );
+      const form = new FormData();
+      const names = [
+        'report.pdf',
+        'bundle.zip',
+        'unknown.blob',
+        'README',
+        'active.html',
+        'active.svg',
+        'photo.png',
+        'clip.mp4',
+      ];
+      for (const name of names) form.append('files', new Blob([`bytes of ${name}`]), name);
+      const uploaded = await buddyUpload(w.general.id, form);
+      assert.deepEqual(
+        uploaded.files.map((f) => f.originalName),
+        names
+      );
+      const body = `${uploaded.files.map(mediaMarkdown).join('\n')}\n[Open chat](/chat/c1)`;
+      const result = await buddyWrite(
+        'channel.post',
+        { channelId: w.general.id },
+        { body, key: 'files-post' }
+      );
+      assert.equal(result.post.body, body);
+      for (const file of uploaded.files) {
+        const response = await fetch(mediaUrl(file.absolutePath));
+        assert.equal(response.status, 200);
+        assert.equal(await response.text(), `bytes of ${file.originalName}`);
+        if (['photo.png', 'clip.mp4'].includes(file.originalName)) {
+          assert.equal(response.headers.get('content-disposition'), null);
+        } else {
+          assert.match(response.headers.get('content-disposition') ?? '', /^attachment;/);
+          assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+        }
+      }
+      const { writeFileSync, unlinkSync } = await import('node:fs');
+      const source = join(w.scratch, 'local report.pdf');
+      writeFileSync(source, 'survives source removal');
+      const linked = await buddyWrite(
+        'channel.post',
+        { channelId: w.general.id },
+        {
+          body: `[Local report](<${source}>)`,
+          key: 'local-file-post',
+        }
+      );
+      const stored = linked.post.body;
+      assert.ok(!stored.includes(source));
+      unlinkSync(source);
+      const target = /\]\(([^)]+)\)/.exec(stored)![1];
+      const downloaded = await fetch(mediaUrl(target));
+      assert.equal(await downloaded.text(), 'survives source removal');
+      const replay = await buddyWrite(
+        'channel.post',
+        { channelId: w.general.id },
+        {
+          body: stored,
+          key: 'local-file-replay',
+        }
+      );
+      assert.equal(replay.post.body, stored);
+    });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     await w.close();
   }
 });
