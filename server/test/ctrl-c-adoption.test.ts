@@ -167,7 +167,7 @@ function makeCase(name: string): Case {
       NODE_ENV: 'test',
       // Only the no-backend timeout case uses the short hold: reboot still has a full
       // 55 s budget in delivery/adoption cases. Guard: default real-time stress mode.
-      UNLEASHD_TEST_RELAY_HOLD_MS: name === 'longdown' ? String(HOLD_MS) : '',
+      UNLEASHD_TEST_RELAY_HOLD_MS: name === 'longdown' && !REAL_TIME ? String(HOLD_MS) : '',
       ...NO_AUTO_INSTALL,
       // The dev task's first step (tools/ensure-addons.mjs) keys the shared addon cache on rustc's
       // version, so the toolchain and that cache stay the real ones; no agent CLI lives there.
