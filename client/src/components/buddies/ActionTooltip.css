@@ -1,0 +1,13 @@
+.action-tooltip {
+  position: fixed;
+  z-index: 10000;
+  max-width: 280px;
+  padding: var(--sp-3) var(--sp-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--ui-radius);
+  background: var(--bg-panel);
+  color: var(--text-bright);
+  font-size: var(--fs-3);
+  line-height: 1.4;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 30%);
+}

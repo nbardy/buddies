@@ -1,4 +1,5 @@
 import { setConversationDone } from '../../atoms/actions';
+import { ActionTooltip } from './ActionTooltip';
 import { BuddyBackgroundLink } from './BuddyBackgroundLink';
 import { BuddySigil } from './BuddySigil';
 import type { OpenDm } from './ChannelAuthor';
@@ -32,15 +33,16 @@ export function BuddyRailRow({
       buttonsRight={
         <>
           <span className="channel-browser-buddy-actions">
-            <button
-              type="button"
-              title={`Wake up ${member.name}: catch up on the channels and act`}
-              aria-label={`Wake ${member.name}`}
-              disabled={action.kind === 'pending'}
-              onClick={direct.wake}
-            >
-              <WakeIcon />
-            </button>
+            <ActionTooltip text={`Wake up ${member.name}: catch up on the channels and act`}>
+              <button
+                type="button"
+                aria-label={`Wake ${member.name}`}
+                disabled={action.kind === 'pending'}
+                onClick={direct.wake}
+              >
+                <WakeIcon />
+              </button>
+            </ActionTooltip>
             {direct.woken && (
               <WakeIndicator
                 key={direct.woken.attempt}

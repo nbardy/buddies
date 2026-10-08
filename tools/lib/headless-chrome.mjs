@@ -415,6 +415,16 @@ export async function openSession({ baseUrl, token, clockMs, showScrollbars = fa
       }
     };
 
+    const hover = async (selector) => {
+      const point = await evaluate(`(() => {
+        const element = document.querySelector(${JSON.stringify(selector)});
+        if (!element) throw new Error('No element for hover');
+        const rect = element.getBoundingClientRect();
+        return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2};
+      })()`);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point }, sessionId);
+    };
+
     const drag = async (selector, deltaX) => {
       const point = await evaluate(`(() => {
         const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
@@ -463,6 +473,7 @@ export async function openSession({ baseUrl, token, clockMs, showScrollbars = fa
       waitForNetworkIdle,
       capture,
       click,
+      hover,
       drag,
       blockedWrites,
       close,

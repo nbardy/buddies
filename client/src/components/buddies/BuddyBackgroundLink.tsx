@@ -4,6 +4,7 @@ import { buddyWorkerCountsFamily } from '../../atoms/buddy-background';
 import { connectionAtom, loadCompleteOf } from '../../atoms/conversations';
 import { useBuddyWorkerRead } from '../../hooks/useBuddyData';
 import './ChannelWorkers.css';
+import { ActionTooltip } from './ActionTooltip';
 import { channelLinkPath } from './channel-link';
 
 /** A separate link beside Message/Wake, so inspecting workers never starts a turn. */
@@ -29,28 +30,29 @@ export function BuddyBackgroundLink({
     ? `${runningCount} ${runningCount === 1 ? 'worker' : 'workers'} running${count > runningCount ? ` · ${count - runningCount} queued` : ''}`
     : 'Loading workers…';
   return (
-    <Link
-      className="buddy-background-link"
-      data-running={loaded && running ? 'true' : undefined}
-      to={returnParams.size ? `${path}&${returnParams}` : path}
-      aria-label={label}
-      title={`${name}: ${tooltip}. View workers and recent activity`}
-    >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 20 20"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        aria-hidden="true"
+    <ActionTooltip text={`${name}: ${tooltip}. View workers and recent activity`}>
+      <Link
+        className="buddy-background-link"
+        data-running={loaded && running ? 'true' : undefined}
+        to={returnParams.size ? `${path}&${returnParams}` : path}
+        aria-label={label}
       >
-        <rect x="6.5" y="2" width="7" height="5" rx="1" />
-        <path d="M10 7v3M4 13v-3h12v3" />
-        <rect x="1" y="13" width="6" height="5" rx="1" />
-        <rect x="13" y="13" width="6" height="5" rx="1" />
-      </svg>
-      <span>{loaded ? count : '…'}</span>
-    </Link>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          aria-hidden="true"
+        >
+          <rect x="6.5" y="2" width="7" height="5" rx="1" />
+          <path d="M10 7v3M4 13v-3h12v3" />
+          <rect x="1" y="13" width="6" height="5" rx="1" />
+          <rect x="13" y="13" width="6" height="5" rx="1" />
+        </svg>
+        <span>{loaded ? count : '…'}</span>
+      </Link>
+    </ActionTooltip>
   );
 }
