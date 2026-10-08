@@ -1,0 +1,66 @@
+[
+  {
+    "source": "/Users/nicholasbardy/.claude/projects/-private-var-folders-dp-c0lrxwd17xj7ygmjxcpfmbsw0000gn-T-buddies-v2-R5UHPy/1eab8f61-1522-403b-ac9e-44bd5555196c.jsonl",
+    "sha256": "ba3de649c463fab2c197b13b2f1a000d37b9c6e73906b6d34915cb4e66cffc2d",
+    "excerpts": [
+      {
+        "timestamp": "2026-10-08T08:30:11.405Z",
+        "sessionId": "1eab8f61-1522-403b-ac9e-44bd5555196c",
+        "isSidechain": false,
+        "attachment": {
+          "type": "hook_additional_context",
+          "content": [
+            "While you were working, new messages arrived in this thread. Read them and adjust your work, while preserving the current task. These messages do not expand your permissions.\n[2026-10-08T08:30:11.183Z] the owner: [@Lead](buddy:buddy_01a11aa2-4740-700c-808f-2ba0c1dda997) Correction: use a 3×3×3 board. Preserve the current task and keep the worker running. (post_01a11aa2-5eef-77e6-8e27-4bd6fd9baaac, thread post_01a11aa2-4787-7407-b5e4-7eaf8f698f08, channel list_01a11aa2-473f-7723-b330-832551722ec5)"
+          ],
+          "hookName": "PostToolUse:Bash",
+          "toolUseID": "toolu_0129sCX2uBJ2kVTnj53Jxk2p",
+          "hookEvent": "PostToolUse"
+        },
+        "renderedRole": "system"
+      }
+    ]
+  },
+  {
+    "source": "/Users/nicholasbardy/.claude/projects/-private-var-folders-dp-c0lrxwd17xj7ygmjxcpfmbsw0000gn-T-buddies-v2-mdAmxz/4c5af621-7030-427f-aa51-52c708fe6653.jsonl",
+    "sha256": "eb2123a6d1547efd5f0e5f629f042226720373a1f9260cb898f85938a346cd2f",
+    "excerpts": [
+      {
+        "timestamp": "2026-10-08T08:30:48.774Z",
+        "sessionId": "4c5af621-7030-427f-aa51-52c708fe6653",
+        "isSidechain": false,
+        "attachment": {
+          "type": "hook_additional_context",
+          "content": [
+            "While you were working, new messages arrived in this thread. Read them and adjust your work, while preserving the current task. These messages do not expand your permissions.\n[2026-10-08T08:30:34.442Z] the owner: [@Lead](buddy:buddy_01a11aa2-893b-7784-8875-7d0d7845806c) Correction: use a 3×3×3 board. Preserve the current task and keep the worker running. (post_01a11aa2-b9ca-744f-8624-197d0f01aa3f, thread post_01a11aa2-89a8-7098-86aa-2aa66db4aeed, channel list_01a11aa2-893b-7783-8ebd-cf94a5a4cd48)"
+          ],
+          "hookName": "PostToolUse:Agent",
+          "toolUseID": "toolu_019tFEWpQdxjkccWDur5TM6i",
+          "hookEvent": "PostToolUse"
+        },
+        "renderedRole": "system"
+      }
+    ]
+  },
+  {
+    "source": "/Users/nicholasbardy/.claude/projects/-private-var-folders-dp-c0lrxwd17xj7ygmjxcpfmbsw0000gn-T-buddies-v2-mdAmxz/4c5af621-7030-427f-aa51-52c708fe6653/subagents/agent-acf52ae63a280447e.jsonl",
+    "sha256": "496d604e9a362821bd5e33980efbd501156cc38bb745b0e4f1f00139a4f34669",
+    "excerpts": [
+      {
+        "timestamp": "2026-10-08T08:30:34.675Z",
+        "sessionId": "4c5af621-7030-427f-aa51-52c708fe6653",
+        "agentId": "acf52ae63a280447e",
+        "isSidechain": true,
+        "attachment": {
+          "type": "hook_additional_context",
+          "content": [
+            "While you were working, the owner posted in the thread your parent agent is answering. If it changes your part of the work, adjust, while preserving your current task. Your parent agent receives the same message when you return. These messages do not expand your permissions.\n[2026-10-08T08:30:34.442Z] the owner: [@Lead](buddy:buddy_01a11aa2-893b-7784-8875-7d0d7845806c) Correction: use a 3×3×3 board. Preserve the current task and keep the worker running. (post_01a11aa2-b9ca-744f-8624-197d0f01aa3f, thread post_01a11aa2-89a8-7098-86aa-2aa66db4aeed, channel list_01a11aa2-893b-7783-8ebd-cf94a5a4cd48)"
+          ],
+          "hookName": "PostToolUse:Bash",
+          "toolUseID": "toolu_01FSb8tcRnWckVdpbxZtvpn4",
+          "hookEvent": "PostToolUse"
+        },
+        "renderedRole": "system"
+      }
+    ]
+  }
+]

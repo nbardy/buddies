@@ -1,0 +1,22 @@
+{
+  "capturedAt": "2026-10-08T08:33Z",
+  "data": "real temporary native-boundary test core over ownerHttp, no response mocks",
+  "blockedWrites": [
+    "POST /api/buddies/read",
+    "POST /api/diagnostics/errors/client"
+  ],
+  "shots": [
+    {
+      "name": "desktop",
+      "sha256": "b6711b1753b6edc42e7f3a6ee73ef56d0ab9c0ede6dfa8c321f923b92e011e50",
+      "visible": "Lead is replying… · Lead is waiting for the current turn…",
+      "ownerCorrection": "Use a 3×3×3 board, keep the current task."
+    },
+    {
+      "name": "phone",
+      "sha256": "1217f3a312de131788e1bf2152702d3f3b0e17179a9853bdafd7702757dbc67e",
+      "visible": "Lead is replying… · Lead is waiting for the current turn…",
+      "ownerCorrection": "Use a 3×3×3 board, keep the current task."
+    }
+  ]
+}
