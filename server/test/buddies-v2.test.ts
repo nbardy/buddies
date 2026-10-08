@@ -1133,6 +1133,9 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         (p) => p.author.kind === 'buddy' && p.author.id === w.lead.id
       );
     await until(async () => (await leadReplies()).length === 1, "Lead's reply to the owner");
+    // A visible reply can still be the live turn's last tool call (pool8: 30 s timeout).
+    // Guard: the authority follow-up starts after the owner turn actually settles.
+    await settled(() => w.runs(w.lead.id), "Lead's owner turn");
 
     // Designer (a Buddy) posts in the thread; Lead's seat follows it, so the post is delivered
     // there and Lead runs a follow-up turn (the follow-up gate it replaced is gone, step 5).
@@ -3535,6 +3538,9 @@ test('a thread follow-up is gated: <no> runs no turn, <yes> replies in the seat,
       'the follow-up reply'
     );
     assert.equal(w.gate.asked.length, 2);
+    // The reply is a tool call, not the drain: posting here raced steering under pool6
+    // and cost a 30 s timeout. Guard: this case must reach its third gate after settle.
+    await settled(() => w.runs(lead.id), 'the gated reply');
     w.gate.verdicts.push({ kind: 'pass' });
     await say('ok', root.id);
     await until(

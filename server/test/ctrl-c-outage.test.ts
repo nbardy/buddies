@@ -1,3 +1,3 @@
 import { registerCtrlCCases } from './fixtures/ctrl-c-cases';
 
-registerCtrlCCases('restart');
+registerCtrlCCases('outage');

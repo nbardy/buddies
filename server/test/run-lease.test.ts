@@ -3,7 +3,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, test } from 'node:test';
+import { after, afterEach, before, test } from 'node:test';
 import { type ConversationRow, EncodedRowsSchema, WS_PATH, decodeRows } from '@unleashd/shared';
 import { WebSocket } from 'ws';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
@@ -243,7 +243,9 @@ before(() => {
   fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 });
 
-after(async () => {
+// A failed A/B assertion once left B claiming against the next freeze and idle cases,
+// producing two false failures. Guard: every case tears down its holders, even on failure.
+afterEach(async () => {
   for (const name of [...backends.keys()]) await killBackend(name);
   for (const scenario of [
     'held',
@@ -255,8 +257,9 @@ after(async () => {
     'recovered',
   ])
     killGroup(scenario);
-  fs.rmSync(root, { recursive: true, force: true });
 });
+
+after(() => fs.rmSync(root, { recursive: true, force: true }));
 
 test(
   'a holder that dies while the backend stays up is cleared within the lease time',
@@ -267,7 +270,9 @@ test(
     const portB = freePortSync();
     const httpA = api(portA);
     const httpB = api(portB);
-    await startBackend('A', portA, {});
+    // B's cold boot exceeded the unrelated 6 s idle clock at pool8. This case tests
+    // holder leases; only the next case tests provider idleness with IDLE_MS.
+    await startBackend('A', portA, { CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '60000' });
     const ws = await workspace(httpA, 'lease');
     const held = await hire(httpA, ws, 'held');
     const request = await ask(httpA, held, 'held');
@@ -275,7 +280,7 @@ test(
 
     // A second backend on the same Buddy store boots while A still drives the turn. Before the
     // lease was a heartbeat, its startup sweep ended every held run, A's live one included.
-    await startBackend('B', portB, {});
+    await startBackend('B', portB, { CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '60000' });
     await staysRunning(httpB, held, 2 * LEASE_MS, "A's live, renewing run survives B's boot");
 
     // A dies, provider and all, while B stays up: nobody renews A's lease and nobody restarts.
@@ -360,9 +365,8 @@ test(
     // conversation ("Conversation is busy"). SIGSTOP is that sleep for one process: wall time
     // runs, the backend does not. A 100 ms backstop makes the gate's tick the first one due at
     // wake, as the 5 s tick was against the 30 s heartbeat in production.
-    // C (the previous test's backend) shares D's Buddies store: a SECOND live backend's gate sees a
-    // frozen holder's lapsed lease and rightly ends it, which looked like the bug under test.
-    await killBackend('C');
+    // afterEach has closed the previous case's holders: a SECOND live backend on this
+    // shared store would correctly expire D's frozen lease and invalidate this scenario.
     const port = freePortSync();
     const http = api(port);
     // This scenario spans five lease periods. Give the independent idle clock
