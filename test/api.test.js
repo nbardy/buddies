@@ -6,7 +6,7 @@
  */
 
 const WebSocket = require('ws');
-const { WS_PATH } = require('@unleashd/shared');
+const { PROTOCOL_VERSION, WS_PATH } = require('@unleashd/shared');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -272,7 +272,10 @@ async function runTests() {
       const msg = await waitForMessage(ws, 'hello');
       if (!Array.isArray(msg.rows)) throw new Error('Missing rows array');
       if (!msg.defaultCwd) throw new Error('Missing defaultCwd');
-      if (msg.protocol?.version !== 3) throw new Error('Missing protocol v3 capability');
+      // The wire was already v4 at 4f16903; a literal v3 expectation failed this real hello.
+      // Pattern: one-type-source (docs/patterns.md#one-type-source)
+      if (msg.protocol?.version !== PROTOCOL_VERSION)
+        throw new Error(`Missing protocol v${PROTOCOL_VERSION} capability`);
       ws.close();
     });
 
