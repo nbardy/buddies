@@ -94,7 +94,7 @@ export function registerFilesystemRoutes(
   const mayServe = (resolvedPath: string): boolean =>
     isUnderKnownProject(resolvedPath) || isPathWithin(uploadsDirectory, resolvedPath);
 
-  const serve = (res: Response, rawPath: string) => {
+  const serve = (res: Response, rawPath: string, preview = false) => {
     const resolved = path.resolve(rawPath);
     if (resolved !== path.normalize(rawPath)) {
       res.status(400).json({ error: 'Path traversal rejected' });
@@ -106,7 +106,13 @@ export function registerFilesystemRoutes(
     }
     // Arbitrary uploads must download: HTML/SVG cannot execute with the app's origin.
     // Guard: buddies-v2.test.ts (channel files) checks the direct URL as well as the posted link.
-    if (isPathWithin(uploadsDirectory, resolved) && !isChannelPreviewFile(resolved)) {
+    const pdfPreview = preview && path.extname(resolved).toLowerCase() === '.pdf';
+    if (pdfPreview) res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (
+      isPathWithin(uploadsDirectory, resolved) &&
+      !isChannelPreviewFile(resolved) &&
+      !pdfPreview
+    ) {
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.download(resolved, (error) => handleSendFileError(error, res, resolved));
       return;
@@ -120,7 +126,7 @@ export function registerFilesystemRoutes(
       res.status(400).json({ error: 'Absolute path required' });
       return;
     }
-    serve(res, filePath);
+    serve(res, filePath, req.query.preview === '1');
   });
 
   app.get('/api/serve/*', (req: Request, res: Response) => serve(res, `/${req.params[0]}`));

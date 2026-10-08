@@ -260,3 +260,25 @@ test('root-relative app navigation remains an app link beside attachments', () =
     assert.ok(renderChannel(`[Open](${target})`).includes(`href="${target}"`));
   }
 });
+
+test('document file URLs classify for the overlay without treating web pages as documents', async () => {
+  const { channelFilePreview } = await import('../src/components/buddies/channel-text');
+  for (const [path, kind] of [
+    ['/tmp/report.md', 'markdown'],
+    ['/tmp/report.MARKDOWN', 'markdown'],
+    ['/tmp/report.pdf', 'pdf'],
+    ['/tmp/clip.mov', 'video'],
+  ]) {
+    const src = `/api/files?path=${encodeURIComponent(path)}`;
+    assert.deepEqual(channelFilePreview(path), { kind, src });
+    assert.deepEqual(channelFilePreview(src), { kind, src });
+  }
+  for (const target of [
+    'https://example.com/report.md',
+    '/buddies/report.md',
+    '/tmp/archive.zip',
+    '/tmp/active.html',
+  ]) {
+    assert.equal(channelFilePreview(target), null);
+  }
+});

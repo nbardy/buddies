@@ -136,6 +136,33 @@ export function mediaUrl(source: string): string {
   return isLocalFilePath(source) ? `/api/files?path=${encodeURIComponent(source)}` : source;
 }
 
+export type ChannelFileKind = 'image' | 'video' | 'markdown' | 'pdf';
+
+/** Local files and authenticated file URLs use the same preview classification. */
+export function channelFilePreview(source: string): { kind: ChannelFileKind; src: string } | null {
+  let localPath = source;
+  if (source.startsWith('/api/files?'))
+    localPath = new URL(source, 'http://localhost').searchParams.get('path') ?? '';
+  else if (source.startsWith('/api/serve/')) {
+    try {
+      localPath = decodeURIComponent(source.slice('/api/serve'.length));
+    } catch {
+      return null;
+    }
+  } else if (!isLocalFilePath(source)) return null;
+  const extension = localPath.slice(localPath.lastIndexOf('.')).toLowerCase();
+  const kind = isImageSource(localPath)
+    ? 'image'
+    : isVideoSource(localPath)
+      ? 'video'
+      : ['.md', '.markdown'].includes(extension)
+        ? 'markdown'
+        : extension === '.pdf'
+          ? 'pdf'
+          : null;
+  return kind === null ? null : { kind, src: mediaUrl(localPath) };
+}
+
 export function isImageSource(source: string): boolean {
   const path = source.split(/[?#]/)[0].toLowerCase();
   return IMAGE_EXTENSIONS.has(path.slice(path.lastIndexOf('.')));

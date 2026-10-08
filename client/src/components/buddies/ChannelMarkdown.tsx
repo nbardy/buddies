@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom';
 import { type Components, type ExtraProps, defaultUrlTransform } from 'react-markdown';
 import { Link } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
+import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChatActivity } from '../../ui/ChatActivity';
 import { useMarkdownPipeline } from '../../utils/lazyMarkdownPlugins';
 import { defineMarkdownFlavor, renderMarkdownCached } from '../../utils/markdown-pipeline';
@@ -24,7 +25,9 @@ import { AskUserQuestionWidget } from '../AskUserQuestion';
 import { BuddyBuilderResultCard } from './BuddyBuilderResultCard';
 import { ChannelTaskOverlay } from './ChannelTaskOverlay';
 import {
+  type ChannelFileKind,
   type ChannelTask,
+  channelFilePreview,
   isImageSource,
   isVideoSource,
   mediaUrl,
@@ -216,7 +219,7 @@ interface ChannelMarkdownData {
   buddyNames: Readonly<Record<string, string>>;
   tasks: ReadonlyMap<string, ChannelTask>;
   onOpenTask(taskId: string): void;
-  onOpenImage(src: string, alt: string): void;
+  onOpenFile(file: ChannelFile): void;
 }
 
 const ChannelMarkdownDataContext = createContext<ChannelMarkdownData | null>(null);
@@ -230,12 +233,12 @@ function useChannelMarkdownData(): ChannelMarkdownData {
 function ChannelImage({ src, alt }: { src: string; alt: string }) {
   // Fix-guard: target=_blank trapped iOS/PWA users in a full-screen document with no back
   // control; channel-markdown.test.tsx keeps image opens inside the app-owned viewer.
-  const { onOpenImage } = useChannelMarkdownData();
+  const { onOpenFile } = useChannelMarkdownData();
   return (
     <button
       type="button"
       className="channel-media-link"
-      onClick={() => onOpenImage(src, alt)}
+      onClick={() => onOpenFile({ kind: 'image', src, label: alt || 'Image preview' })}
       aria-label={alt ? `Open image: ${alt}` : 'Open image'}
     >
       <img className="channel-media" src={src} alt={alt} loading="lazy" />
@@ -249,7 +252,7 @@ function ChannelTaskBlock({ taskId }: { taskId: string }) {
 }
 
 function ChannelLink({ href, children }: { href?: string; children?: ReactNode }) {
-  const { buddyNames, tasks, onOpenTask } = useChannelMarkdownData();
+  const { buddyNames, tasks, onOpenTask, onOpenFile } = useChannelMarkdownData();
   const link = parseChannelLink(href ?? '');
   switch (link.kind) {
     case 'buddy':
@@ -267,12 +270,37 @@ function ChannelLink({ href, children }: { href?: string; children?: ReactNode }
       return (
         <TaskChip taskId={link.id} label={children} task={tasks.get(link.id)} onOpen={onOpenTask} />
       );
-    case 'web':
+    case 'web': {
+      const preview = channelFilePreview(link.href);
       return (
-        <a href={mediaUrl(link.href)} target="_blank" rel="noreferrer">
+        <a
+          href={mediaUrl(link.href)}
+          target="_blank"
+          rel="noreferrer"
+          onClick={
+            preview
+              ? (event) => {
+                  if (
+                    event.button !== 0 ||
+                    event.metaKey ||
+                    event.ctrlKey ||
+                    event.shiftKey ||
+                    event.altKey
+                  )
+                    return;
+                  event.preventDefault();
+                  onOpenFile({
+                    ...preview,
+                    label: event.currentTarget.textContent || 'File preview',
+                  });
+                }
+              : undefined
+          }
+        >
           {children}
         </a>
       );
+    }
   }
 }
 
@@ -310,20 +338,52 @@ const CHANNEL_COMPONENTS: Components = {
   },
 };
 
-function ChannelImageOverlay({
-  image,
-  onClose,
-}: {
-  image: { src: string; alt: string };
-  onClose(): void;
-}) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
+type ChannelFile = { kind: ChannelFileKind; src: string; label: string };
 
+function MarkdownFile({ src }: { src: string }) {
+  // Pattern: one-store-one-index (docs/patterns.md#one-store-one-index)
+  // The existing text cache also serves hover previews; reopening a file retains its contents.
+  const source = useMemo(
+    () =>
+      resource(`text:${src}`, async (signal) => {
+        const response = await fetch(src, { signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.text();
+      }),
+    [src]
+  );
+  const file = usePolledFetch(source, 0);
+  const pipeline = useMarkdownPipeline(CHANNEL_MARKDOWN);
+  return (
+    <>
+      {(file.kind === 'failed' || file.kind === 'stale') && (
+        <p role="alert">
+          Could not {file.kind === 'stale' ? 'refresh' : 'load'} this document.{' '}
+          <button type="button" onClick={() => void file.refetch()}>
+            Retry
+          </button>
+        </p>
+      )}
+      {file.data === null ? (
+        file.kind !== 'failed' && <output>Loading document…</output>
+      ) : (
+        <div className="channel-markdown">
+          {renderMarkdownCached(pipeline, file.data, CHANNEL_COMPONENTS)}
+        </div>
+      )}
+    </>
+  );
+}
+
+// Pattern: sum-types (docs/patterns.md#sum-types)
+// Fix-guard: Markdown attachments downloaded instead of opening a readable document.
+// channel-markdown.test.tsx and the browser viewer checks cover the shared overlay and file route.
+function ChannelFileOverlay({ file, onClose }: { file: ChannelFile; onClose(): void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (!dialog.open) dialog.showModal();
-    // showModal focuses the first control; keep focus on the dialog so the X shows no ring.
     dialog.focus();
     const onCancel = (event: Event) => {
       event.preventDefault();
@@ -335,27 +395,47 @@ function ChannelImageOverlay({
       if (dialog.open) dialog.close();
     };
   }, [onClose]);
-
   return (
     <dialog
       ref={dialogRef}
-      className="channel-image-overlay"
+      className="channel-file-overlay"
       tabIndex={-1}
-      aria-label={image.alt || 'Image preview'}
+      aria-label={file.label}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <button
         type="button"
-        className="channel-image-close"
+        className="channel-file-close"
         onClick={onClose}
-        aria-label="Close image"
-        title="Close image"
+        aria-label="Close file"
+        title="Close file"
       >
         ✕
       </button>
-      <img className="channel-media" src={image.src} alt={image.alt} />
+      {file.kind === 'image' ? (
+        <img className="channel-media" src={file.src} alt={file.label} />
+      ) : file.kind === 'video' ? (
+        // biome-ignore lint/a11y/useMediaCaption: user attachments carry no caption track
+        <video className="channel-media" src={file.src} controls autoPlay playsInline />
+      ) : (
+        <section className="channel-file-document ui-stack">
+          <header className="channel-file-header ui-row">
+            <span className="ui-truncate">{file.label}</span>
+            <a href={file.src} download>
+              Download
+            </a>
+          </header>
+          {file.kind === 'markdown' ? (
+            <article className="channel-file-scroll">
+              <MarkdownFile src={file.src} />
+            </article>
+          ) : (
+            <iframe className="channel-file-pdf" src={`${file.src}&preview=1`} title={file.label} />
+          )}
+        </section>
+      )}
     </dialog>
   );
 }
@@ -400,15 +480,15 @@ export const ChannelMarkdown = memo(function ChannelMarkdown({
   tasks: ReadonlyMap<string, ChannelTask>;
 }) {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
-  const [openImage, setOpenImage] = useState<{ src: string; alt: string } | null>(null);
+  const [openFile, setOpenFile] = useState<ChannelFile | null>(null);
   const closeTask = useCallback(() => setOpenTaskId(null), []);
-  const closeImage = useCallback(() => setOpenImage(null), []);
+  const closeFile = useCallback(() => setOpenFile(null), []);
   const data = useMemo(
     () => ({
       buddyNames,
       tasks,
       onOpenTask: setOpenTaskId,
-      onOpenImage: (src: string, alt: string) => setOpenImage({ src, alt }),
+      onOpenFile: setOpenFile,
     }),
     [buddyNames, tasks]
   );
@@ -422,7 +502,7 @@ export const ChannelMarkdown = memo(function ChannelMarkdown({
     <ChannelMarkdownDataContext.Provider value={data}>
       <div className="channel-markdown">
         {openTask && <ChannelTaskOverlay task={openTask} names={buddyNames} onClose={closeTask} />}
-        {openImage && <ChannelImageOverlay image={openImage} onClose={closeImage} />}
+        {openFile && <ChannelFileOverlay file={openFile} onClose={closeFile} />}
         {parts.map((part, index) => {
           switch (part.t) {
             case 'text':
