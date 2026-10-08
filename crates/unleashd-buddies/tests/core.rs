@@ -693,6 +693,7 @@ fn a_schedule_fire_posts_nothing_and_queues_one_silent_run() {
     let run = &runs[0];
     assert_eq!(run.input, RunInput::Chat { turn_id: format!("schedule:{}:{slot}", schedule.id) });
     assert!(run.conversation_id.is_none(), "a fire opens its own background conversation");
+    assert_eq!(run.admission, Admission::Capped, "schedule fires remain background work");
     let body = run.body.as_deref().unwrap();
     assert!(body.contains(&slot) && body.ends_with("check"), "{body}");
     assert!(s.due_schedules(later).unwrap().is_empty(), "the schedule advanced past now");
@@ -1984,4 +1985,116 @@ fn a_run_placed_in_a_busy_seat_waits_for_it_instead_of_failing() {
     let again = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!(again.run.id, waiter.run.id);
     s.bind_run(&again.run.id, &again.lease_token, "seat-x").unwrap();
+}
+
+/// Five self-spawned workers hold ic's slots, with three older workers queued.
+fn ic_at_cap_with_queued_workers(s: &mut Store) -> Vec<Run> {
+    s.update_buddy(&Actor::Owner, BuddyUpdate {
+        buddy_id: "ic".into(), changes: BuddyChanges { max_active_runs: Some(5), ..Default::default() }, key: "cap-five".into()
+    }).unwrap();
+    for n in 0..8 {
+        s.post(&buddy("ic"), ChannelRef::Direct { members: vec![buddy("ic")] }, request("work", &format!("worker-{n}"))).unwrap();
+    }
+    for _ in 0..5 {
+        s.claim_run_at("2099-01-02T00:00:00.000Z", lease(300_000), &[]).unwrap().expect("under the cap");
+    }
+    assert!(s.claim_run_at("2099-01-02T00:00:00.000Z", lease(300_000), &[]).unwrap().is_none());
+    let queued: Vec<_> = s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 20).unwrap().into_iter().filter(|r| r.status == RunStatus::Queued).collect();
+    assert_eq!(queued.len(), 3);
+    queued
+}
+
+// 2026-10-08: owner replies waited hours behind the Buddy's own workers. The owner can take a
+// sixth slot, but older queued workers must remain capped. Exercise every owner-post route.
+#[test]
+fn an_owner_post_is_claimed_ahead_of_queued_workers_at_the_run_limit() {
+    for route in ["dm", "mention", "follow"] {
+        let mut f = fixture();
+        let s = &mut f.store;
+        let channel = s.create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "test".into(), key: "general".into() }).unwrap();
+        let root = s.post(&Actor::Owner, ChannelRef::Id { id: channel.id.clone() }, PostInput { kind: PostKind::Inform, ..request("thread", "root") }).unwrap();
+        if route == "follow" {
+            s.follow_thread(&buddy("ic"), &root.id, Some("seat-ic".into()), 20).unwrap();
+        }
+        let workers = ic_at_cap_with_queued_workers(s);
+        let target = if route == "dm" { ChannelRef::Direct { members: vec![Actor::Owner, buddy("ic")] } } else { ChannelRef::Id { id: channel.id } };
+        let owner = s.post(&Actor::Owner, target, PostInput {
+            kind: PostKind::Inform,
+            reply_to_id: (route == "follow").then_some(root.id),
+            // Owner DM intake uses the same typed wake as a public mention (host mentions.ts).
+            mentions: if route != "follow" { vec![Mention { buddy_id: "ic".into(), config: None }] } else { vec![] },
+            ..request("answer me", "owner-q")
+        }).unwrap();
+        let row = s.list_run_rows(&Actor::Owner, ListScope::Buddy { buddy_id: "ic".into() }, 20).unwrap().into_iter().find(|r| r.input == RunInput::Deliver { post_id: owner.id.clone() }).unwrap();
+        assert_eq!(row.waiting, None, "owner admission and its visible waiting reason agree");
+        let claim = s.claim_run_at("2099-01-02T00:00:01.000Z", lease(300_000), &[]).unwrap().expect("owner admitted over cap");
+        assert_eq!(claim.run.input, RunInput::Deliver { post_id: owner.id });
+        assert_eq!(claim.run.admission, Admission::Owner);
+        for worker in workers {
+            assert_eq!(s.get_run(&worker.id).unwrap().status, RunStatus::Queued);
+        }
+        let active = s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 20).unwrap().iter().filter(|r| r.status == RunStatus::Running).count();
+        assert_eq!(active, 6, "the five workers retain their slots while the owner gets an answer ({route})");
+    }
+}
+
+#[test]
+fn a_buddy_post_stays_queued_at_the_run_limit() {
+    for kind in [PostKind::Request, PostKind::Inform] {
+        let mut f = fixture();
+        let s = &mut f.store;
+        ic_at_cap_with_queued_workers(s);
+        let post = s.post(&buddy("peer"), dm("peer", "ic"), PostInput {
+            kind, mentions: vec![Mention { buddy_id: "ic".into(), config: None }], ..request("also work", "peer-q")
+        }).unwrap();
+        assert!(s.claim_run_at("2099-01-02T00:00:01.000Z", lease(300_000), &[]).unwrap().is_none());
+        let run = s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 20).unwrap().into_iter().find(|r| match &r.input {
+            RunInput::Post { post_id } | RunInput::Deliver { post_id } => post_id == &post.id,
+            _ => false,
+        }).unwrap();
+        assert_eq!((run.status, run.admission), (RunStatus::Queued, Admission::Capped));
+        let row = s.list_run_rows(&Actor::Owner, ListScope::Buddy { buddy_id: "ic".into() }, 20).unwrap().into_iter().find(|r| r.id == run.id).unwrap();
+        assert_eq!(row.waiting, Some(RunWaiting::PoolFull { active: 5, max: 5 }));
+    }
+}
+
+#[test]
+fn owner_admission_still_waits_for_its_conversation() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    ic_at_cap_with_queued_workers(s);
+    let first = s.enqueue_chat(&Actor::Owner, chat("ic", "first", "owner-chat")).unwrap();
+    let live = s.claim_run_at("2099-01-02T00:00:01.000Z", lease(300_000), &[]).unwrap().unwrap();
+    assert_eq!(live.run.id, first.id);
+    let next = s.enqueue_chat(&Actor::Owner, chat("ic", "next", "owner-chat")).unwrap();
+    let row = s.list_run_rows(&Actor::Owner, ListScope::Buddy { buddy_id: "ic".into() }, 20).unwrap().into_iter().find(|r| r.id == next.id).unwrap();
+    assert_eq!(row.waiting, Some(RunWaiting::ConversationBusy));
+    assert!(s.claim_run_at("2099-01-02T00:00:02.000Z", lease(300_000), &[]).unwrap().is_none());
+    s.settle_run(&live.run.id, &live.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
+    assert_eq!(s.claim_run_at("2099-01-02T00:00:03.000Z", lease(300_000), &[]).unwrap().unwrap().run.id, next.id);
+}
+
+#[test]
+fn existing_owner_inputs_are_classified_once_on_upgrade_and_retries_keep_the_class() {
+    let mut f = fixture();
+    ic_at_cap_with_queued_workers(&mut f.store);
+    let owner = f.store.post(&Actor::Owner, ChannelRef::Direct { members: vec![Actor::Owner, buddy("ic")] }, request("answer", "upgrade-owner")).unwrap();
+    let owner_chat = f.store.enqueue_chat(&Actor::Owner, chat("ic", "upgrade-chat", "owner-chat")).unwrap();
+    drop(f.store);
+    { // Reproduce a pre-admission schema on a temporary store, never on live data.
+        let conn = rusqlite::Connection::open(&f.path).unwrap();
+        conn.execute_batch("ALTER TABLE run DROP COLUMN admission").unwrap();
+    }
+    let mut s = Store::open(f.path.to_str().unwrap()).unwrap();
+    assert_eq!(s.get_run(&owner_chat.id).unwrap().admission, Admission::Owner);
+    let live = s.claim_run_at("2099-01-02T00:00:01.000Z", lease(300_000), &[]).unwrap().unwrap();
+    assert_eq!((live.run.input, live.run.admission), (RunInput::Post { post_id: owner.id }, Admission::Owner));
+    s.settle_run(&live.run.id, &live.lease_token, Outcome::Failed { code: "provider".into(), error: "failed".into() }).unwrap();
+    let retry = s.retry_run(&Actor::Owner, &live.run.id, None, "retry-owner").unwrap();
+    assert_eq!(retry.admission, Admission::Owner);
+    drop(s);
+    let s = Store::open(f.path.to_str().unwrap()).unwrap();
+    assert_eq!(s.get_run(&retry.id).unwrap().admission, Admission::Owner);
+    let runs = s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 20).unwrap();
+    assert_eq!(runs.iter().filter(|r| r.admission == Admission::Capped).count(), 8, "workers retain their cap after upgrade");
 }

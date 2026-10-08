@@ -32,6 +32,24 @@ export async function publishRuntime({
     encoding: 'utf8',
     stdio: 'pipe',
   }).trim();
+  // An old failed checkout must not be labelled as belonging to a newer bundle.
+  // Guard: old-checkout/new-bundle regression preserves bundle selection on refusal.
+  const metadata = path.join(bundle, 'source.json');
+  const bundleRevision = fs.existsSync(metadata)
+    ? JSON.parse(fs.readFileSync(metadata, 'utf8')).revision
+    : null;
+  if (bundleRevision) {
+    try {
+      run('git', ['merge-base', '--is-ancestor', bundleRevision, revision], {
+        cwd: source,
+        stdio: 'pipe',
+      });
+    } catch {
+      throw new Error(
+        'The source checkout does not include this bundled release. Merge the bundled revision into the preserved source checkout before retrying. The bundled app remains available.'
+      );
+    }
+  }
   const runtimes = path.join(home, 'runtimes');
   fs.mkdirSync(runtimes, { recursive: true });
   const runtime = path.join(runtimes, `${revision}-${randomUUID()}`);
@@ -47,9 +65,7 @@ export async function publishRuntime({
         runtime,
         source,
         revision,
-        bundleRevision: fs.existsSync(path.join(bundle, 'source.json'))
-          ? JSON.parse(fs.readFileSync(path.join(bundle, 'source.json'), 'utf8')).revision
-          : null,
+        bundleRevision,
       }),
       { mode: 0o600 }
     );

@@ -129,3 +129,58 @@ test('persisted source progress exposes preparation, interruption recovery and r
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+// A failed N checkout reused after installing N+1 must not bypass native selection.
+test('publishing refuses an old checkout under a new bundle until a preserving merge', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop bundle floor '));
+  const source = path.join(home, 'source');
+  const bundle = path.join(home, 'bundle');
+  fs.mkdirSync(source);
+  fs.mkdirSync(bundle);
+  const run = (command, args, options = {}) =>
+    execFileSync(command, args, { cwd: source, ...options });
+  const git = (...args) => run('git', args, { encoding: 'utf8', stdio: 'pipe' }).trim();
+  const stage = async (_root, target) => {
+    fs.mkdirSync(path.join(target, 'server/dist'), { recursive: true });
+    fs.copyFileSync(path.join(source, 'version'), path.join(target, 'server/dist/server.js'));
+  };
+  const smoke = async () => {};
+  try {
+    git('init', '-q');
+    git('config', 'user.name', 'Fixture');
+    git('config', 'user.email', 'fixture@example.test');
+    fs.writeFileSync(path.join(source, 'version'), 'A');
+    git('add', 'version');
+    git('commit', '-qm', 'A');
+    const a = git('rev-parse', 'HEAD');
+    fs.writeFileSync(path.join(bundle, 'source.json'), JSON.stringify({ revision: a }));
+    const runtimeA = await publishRuntime({ home, source, bundle, run, stage, smoke });
+    fs.writeFileSync(path.join(source, 'version'), 'B');
+    git('commit', '-qam', 'B');
+    const b = git('rev-parse', 'HEAD');
+    git('checkout', '-q', a);
+    fs.writeFileSync(path.join(bundle, 'source.json'), JSON.stringify({ revision: b }));
+    const before = fs.readFileSync(path.join(home, 'active-runtime.json'), 'utf8');
+    await assert.rejects(
+      publishRuntime({ home, source, bundle, run, stage, smoke }),
+      /does not include this bundled release/
+    );
+    assert.equal(fs.readFileSync(path.join(home, 'active-runtime.json'), 'utf8'), before);
+    assert.equal(git('rev-parse', 'HEAD'), a);
+    assert.deepEqual(selectedRuntime(home, bundle), { runtime: bundle, source });
+    assert.equal(fs.readFileSync(path.join(runtimeA, 'server/dist/server.js'), 'utf8'), 'A');
+    // A failed first setup has no manifest at all; retry still cannot label A as B.
+    fs.unlinkSync(path.join(home, 'active-runtime.json'));
+    await assert.rejects(
+      publishRuntime({ home, source, bundle, run, stage, smoke }),
+      /does not include this bundled release/
+    );
+    assert.ok(!fs.existsSync(path.join(home, 'active-runtime.json')));
+    assert.deepEqual(selectedRuntime(home, bundle), { runtime: bundle, source: null });
+    git('merge', '--ff-only', b);
+    await publishRuntime({ home, source, bundle, run, stage, smoke });
+    assert.equal(selectedRuntime(home, bundle).revision, b);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

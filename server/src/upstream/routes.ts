@@ -46,10 +46,12 @@ function updateBody(input: {
   const mention = `[@${input.releaseManager.name.replace(/[[\]]/g, '')}](buddy:${input.releaseManager.id})`;
   const desktopPublish = input.desktopPublish;
   const quotedPublish = desktopPublish ? `'${desktopPublish.replace(/'/g, "'\"'\"'")}'` : '';
-  const handoff = desktopPublish
-    ? ` Then run node ${quotedPublish} --publish to stage and smoke-check the desktop runtime. Report the verified revision and ask the owner to reopen Buddies to activate it. If publishing fails, report the error; the previous runtime stays selected.`
-    : '';
-  return `${mention} For folder ${input.repoRoot}: fetch upstream ${input.remote}/${UPSTREAM_BRANCH} and merge in our changes. Commit any local edits first, merge (never reset or rebase), resolve conflicts, run pnpm install && pnpm build, then report what changed.${handoff}`;
+  // Desktop helper owns reconciliation, dev dependencies, build and smoke. A preliminary
+  // production install/build can fail before it runs (upstream + source-install guards).
+  const build = desktopPublish
+    ? `run node ${quotedPublish} --publish directly; it reconciles submodules, installs build dependencies, builds, typechecks and smoke-checks the desktop runtime. Report the verified revision and ask the owner to reopen Buddies to activate it. If publishing fails, report the error; the previous runtime stays selected.`
+    : 'run pnpm install && pnpm build, then report what changed.';
+  return `${mention} For folder ${input.repoRoot}: fetch upstream ${input.remote}/${UPSTREAM_BRANCH} and merge in our changes. Commit any local edits first, merge (never reset or rebase), resolve conflicts, then ${build}`;
 }
 
 export function createUpstreamService(dependencies: UpstreamServiceDependencies) {

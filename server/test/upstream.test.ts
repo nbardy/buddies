@@ -348,6 +348,9 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
     )
   );
   assert.ok(posts[0].body.includes('reopen Buddies'));
+  assert.ok(posts[0].body.includes('--publish directly'));
+  assert.ok(!posts[0].body.includes('pnpm install'));
+  assert.ok(!posts[0].body.includes('pnpm build'));
   assert.deepEqual(posts[0].evidence, [`upstream origin/main ${sha}`]);
 
   // The original request may age beyond the newest page before another device answers.
