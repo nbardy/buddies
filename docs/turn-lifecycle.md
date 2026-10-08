@@ -155,3 +155,36 @@ interval contained no old-boot heartbeat or progress; adoption drained a resume 
 115 ms. That interval is unsettled duration, not proven live provider execution. Diagnosis and
 scoped API evidence: `agent_notes/2026-10-08_hung-turn-liveness.md`. Adoption replays with a fresh
 idle observation window; elapsed downtime alone never licenses killing a live turn.
+
+## background-idle
+
+A running turn has one in-memory activity beside its persisted phase (`turns/background-work.ts`
+`TurnActivity`): `working`, or `background`. In `background` the model's turn has ended, and the
+harness process is alive only for background jobs it launched (Workflow, background Agent or
+Bash). It is not a phase: the turn still holds its grant, the provider-progress watchdog above
+still ends a silent one with `provider_idle_timeout`, and nothing persists. A backend exit drops
+the held hook request, claude's hook fails open, and claude waits on its jobs as before, so there is
+nothing to adopt.
+
+Why (task_01a11aa8, 2026-10-08): Game Designer's model ended its turn at 07:09:56 after launching a
+background Workflow. The process then lived 29.5 min with zero tool calls, so tool-boundary
+steering could not fire, and the owner's 07:14 and 07:20 posts queued behind "replying…".
+
+Mechanism, per harness (`buddies/harness-steering.ts` `IdleDelivery`):
+- claude, `stop-hook-hold`: claude runs its Stop hook as soon as the model ends a turn, passing the
+  in-flight `background_tasks`, and blocks while the hook runs. The hook POSTs to the Buddy
+  endpoint's `/hooks/stop`. If no background job is running, it returns at once. Otherwise
+  `holdStoppedTurn` (`buddies/mcp.ts`) enters `background` and holds. On the first owner post in
+  the thread it takes the unread page (marked read, so the queued delivery is fenced `consumed`).
+  It then answers `decision: block` with the "While you were working…" text, and claude continues
+  the SAME process. If the jobs' `task.finished` events arrive first (they stream live during the
+  hold), it releases with no decision, and claude handles the job's notice as it always did.
+- codex, gemini, opencode, cursor, muse, `waits-visibly`: no hold is wired. The post waits as a
+  queued delivery ("waiting for the current turn…") and runs when the process exits.
+
+The status line maps the activity to the channel response state: `background` reads "running
+background work…", never "replying" or "queued at the run limit". Guards:
+`idle-background-delivery.test.ts` (real backend, fake `claude -p`) and the opt-in
+`buddies-v2` "real CLI claude: an owner post reaches a model idle on its background job"
+(`UNLEASHD_REAL_IDLE_BACKGROUND=1`). Probes and evidence:
+`agent_notes/2026-10-08_idle-background-delivery.md`.

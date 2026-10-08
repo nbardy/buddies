@@ -28,6 +28,7 @@ import type {
   TurnTerminalCause,
 } from '../observability';
 import { type SwarmObservers, watchSwarmRuns } from '../swarm';
+import type { BackgroundWork } from './background-work';
 import type { Effect, Execution, ExecutionOutcome, Phase, StopIntent } from './execution-state';
 import type { ExecutionJournals, TurnOwner } from './executions';
 import type { TurnInput } from './input';
@@ -114,6 +115,8 @@ export interface TurnRunnerPorts {
   executions: ExecutionJournals;
   turnAttempts: RuntimeTurnAttemptObserver;
   swarmObservers: SwarmObservers;
+  /** Which background tasks of a turn finished, for a turn whose model is idle (background-work.ts). */
+  backgroundWork: BackgroundWork;
 }
 
 /** The command named by agent-cli's canonical `spawn <cmd> ENOENT` failure, or null. */
@@ -418,6 +421,7 @@ export class TurnRunner {
     this.lastAttemptActivitySource = null;
     this.lastObservedActivity = null;
     this.subAgentFold = subAgentFoldFor(provider);
+    this.ports.backgroundWork.turnStarted(host.id);
   }
 
   /** The one read path: a spawned and an adopted turn are both followed from their journal. */
@@ -459,7 +463,9 @@ export class TurnRunner {
       });
     this.activeDrain = turnDrain;
     void turnDrain.finally(() => {
-      if (this.activeDrain === turnDrain) this.activeDrain = null;
+      if (this.activeDrain !== turnDrain) return;
+      this.activeDrain = null;
+      this.ports.backgroundWork.turnEnded(host.id);
     });
   }
 
@@ -693,6 +699,7 @@ export class TurnRunner {
   }
 
   applyTaskFinished(event: Extract<UnifiedAgentEvent, { type: 'task.finished' }>): void {
+    this.ports.backgroundWork.taskFinished(this.host.id, event.taskId);
     this.subAgentFold.taskFinished(this.subAgentHost, event);
   }
 

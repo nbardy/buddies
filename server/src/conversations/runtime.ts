@@ -42,6 +42,7 @@ import { SWARM_POLL_INTERVAL_MS, SWARM_POLL_THROTTLE_MS } from '../constants/tim
 import type { RuntimeTurnAttemptObserver } from '../observability';
 import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-service';
 import { SwarmObservers } from '../swarm';
+import { BackgroundWork } from '../turns/background-work';
 import type { Effect, Phase } from '../turns/execution-state';
 import type { TurnOwner } from '../turns/executions';
 import {
@@ -85,7 +86,7 @@ function unknownInput(): TurnInput {
 /** The host server's ports: the runner's, the Buddy policies', and the conversation's own. */
 export interface ConversationRuntimeDependencies
   extends BuddyTurnPolicyDependencies,
-    Omit<TurnRunnerPorts, 'executeTurn' | 'turnAttempts' | 'swarmObservers'> {
+    Omit<TurnRunnerPorts, 'executeTurn' | 'turnAttempts' | 'swarmObservers' | 'backgroundWork'> {
   persistCurrentSession(
     conversation: ConversationRuntimeView,
     sessionId: string,
@@ -104,6 +105,8 @@ export interface ConversationRuntimeDependencies
   /** Test seam for the real provider boundary; production uses agent-cli directly. */
   executeTurn?: typeof executeCommand;
   turnAttempts?: RuntimeTurnAttemptObserver;
+  /** Shared with the Buddy hook route (production); absent = no hook can hold a turn. */
+  backgroundWork?: BackgroundWork;
   /** Where chat and Builder owner messages are durable (turns/intake.ts); absent = nowhere. */
   inputs?: InputCarrier;
   /** The ingest list (production); absent = a host with no transcripts (the overlay is all). */
@@ -212,6 +215,7 @@ export function createConversationRuntime(
       ...dependencies,
       executeTurn: dependencies.executeTurn ?? executeCommand,
       turnAttempts: dependencies.turnAttempts ?? NOOP_TURN_ATTEMPT_OBSERVER,
+      backgroundWork: dependencies.backgroundWork ?? new BackgroundWork(),
       // One async swarm poller per working directory, shared by all turns there.
       swarmObservers: new SwarmObservers(dependencies.readLatestOompaRuntime, {
         intervalMs: SWARM_POLL_INTERVAL_MS,

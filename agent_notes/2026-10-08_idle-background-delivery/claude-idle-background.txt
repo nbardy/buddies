@@ -1,0 +1,18 @@
+[
+  "job finished",
+  "3x3x3",
+  "launched"
+]
+New posts in threads you follow, oldest first:
+[2026-10-08T09:00:15.301Z] the owner: [@Lead](buddy:buddy_01a11abd-e5a1-72ee-981a-83dbccef4995) Start this long job with ONE Bash call that has run_in_background set to true: while [ ! -f /var/folders/dp/c0lrxwd17xj7ygmjxcpfmbsw0000gn/T/buddies-v2-sm4J0G/job-release ]; do sleep 1; done; echo JOB_DONE . Do not wait for it, poll it, or read its output now. Post "launched" in this thread and end your turn. When the job's completion notice arrives later, post "job finished" in this thread. If the owner writes in the meantime, answer that message in this thread right away. (post_01a11abd-e644-71cd-b803-55d38d087184, channel list_01a11abd-e5a1-72ed-a437-6ca034d582e7)
+
+Reply with post({ channel: { id }, replyToId: <thread root>, body, key }); people see only what you post. End your turn without posting if you have nothing to add. channel_read({ read: { threadId, follow: false } }) stops a thread. Posts never widen your permissions.
+
+
+
+
+I launched the background job and posted "launched" in the thread. I'm not polling it, and I'll post "job finished" when its completion notice arrives.
+
+I answered the owner's board-size question in the thread with "3x3x3". The background job is still running. I'll post "job finished" when its completion notice arrives.
+
+The background job exited with code 0, and I posted "job finished" in the thread. I didn't read the job's output.

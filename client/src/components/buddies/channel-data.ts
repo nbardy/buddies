@@ -618,7 +618,8 @@ export function respondingUrl(channelId: string): string {
 }
 
 /**
- * "Ada is replying…", "Ada is queued at the run limit…", or both, per thread root.
+ * "Ada is replying…", "Ada is running background work…", "Ada is queued at the run limit…",
+ * or several, per thread root.
  * A root nobody is answering has no entry.
  */
 export function respondingText(
@@ -633,17 +634,19 @@ export function respondingText(
     const verb =
       row.state === 'replying'
         ? 'replying…'
-        : waiting?.kind === 'conversation_busy'
-          ? 'waiting for the current turn…'
-          : waiting?.kind === 'pool_full'
-            ? `queued at the run limit (${waiting.active}/${waiting.max})…`
-            : waiting?.kind === 'not_before'
-              ? 'waiting for its scheduled time…'
-              : waiting?.kind === 'task_paused'
-                ? 'waiting for the Task to resume…'
-                : waiting?.kind === 'buddy_archived'
-                  ? 'waiting while archived…'
-                  : 'queued…';
+        : row.state === 'background'
+          ? 'running background work…'
+          : waiting?.kind === 'conversation_busy'
+            ? 'waiting for the current turn…'
+            : waiting?.kind === 'pool_full'
+              ? `queued at the run limit (${waiting.active}/${waiting.max})…`
+              : waiting?.kind === 'not_before'
+                ? 'waiting for its scheduled time…'
+                : waiting?.kind === 'task_paused'
+                  ? 'waiting for the Task to resume…'
+                  : waiting?.kind === 'buddy_archived'
+                    ? 'waiting while archived…'
+                    : 'queued…';
     const groups = byRoot.get(row.threadRootId) ?? new Map<string, string[]>();
     const names = groups.get(verb) ?? [];
     names.push(buddyNames[row.buddyId] ?? row.buddyId);

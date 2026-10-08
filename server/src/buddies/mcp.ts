@@ -8,6 +8,7 @@ import type { TaskQuery, ThreadUnread } from '@unleashd/buddies-core';
 import type { Resolution } from '@unleashd/shared';
 import { z } from 'zod';
 import type { MessageSource } from '../conversations/messages';
+import type { BackgroundWork } from '../turns/background-work';
 import { requireCanonicalPostMedia } from './channel-media';
 import {
   type BuddiesCore,
@@ -56,6 +57,8 @@ export interface ToolDeps {
   messages: MessageSource;
   /** Open (or reuse) the background branch of an owner chat and return its id (`subscriber`). */
   openBranch(chat: OwnerChat): Promise<string>;
+  /** Turns whose model is idle while their background jobs run (turns/background-work.ts). */
+  backgroundWork: BackgroundWork;
 }
 
 // Pattern: route-at-send (docs/patterns.md#route-at-send)
@@ -897,18 +900,73 @@ export async function steerNativeTool(
 ): Promise<string | null> {
   const thread = await steeredThread(deps, grant);
   if (thread.kind === 'none') return null;
-  const peek = await deps.core.peekThreadUnread(thread.grant.author, thread.root, 20);
   switch (agent.kind) {
     case 'main':
-      if (!peek.posts.some((post) => post.author.kind === 'owner')) return null;
-      return takeSteering(deps, thread);
+      return takeOwnerSteering(deps, thread);
     case 'sub': {
+      const peek = await deps.core.peekThreadUnread(thread.grant.author, thread.root, 20);
       const seen = shownTo(grant, agent.id);
       const fresh = peek.posts.filter((post) => post.author.kind === 'owner' && !seen.has(post.id));
       if (!fresh.length) return null;
       for (const post of fresh) seen.add(post.id);
       return steeringText(STEER_SUBAGENT, thread.root, { posts: fresh, unshown: 0 });
     }
+  }
+}
+
+/** Owner posts trigger a take of the whole unread page; Buddy chatter alone waits (above). */
+async function takeOwnerSteering(deps: ToolDeps, thread: SteeredThreadOf) {
+  const peek = await deps.core.peekThreadUnread(thread.grant.author, thread.root, 20);
+  if (!peek.posts.some((post) => post.author.kind === 'owner')) return null;
+  return takeSteering(deps, thread);
+}
+
+// task_01a11aa8 (owner, 2026-10-08): Game Designer's model ended its turn while a background
+// Workflow ran, and `claude -p` sat 29.5 min with no tool call to steer at; the owner's posts
+// waited for the Workflow. Claude runs its Stop hook the moment the model ends a turn, with the
+// in-flight `background_tasks` in the input, and holds while the hook runs. A `decision: block`
+// continues the model in the SAME process with the reason as its next message; the jobs keep
+// running, and a job that ends during the hold still streams its notice (probed on claude
+// 2.1.294: agent_notes/2026-10-08_idle-background-delivery.md). So this holds the hook while the
+// turn is in the `background` state (turns/background-work.ts) and answers with the first owner
+// post. When the last job finishes first, it releases with no decision, and claude handles the
+// job's notice as it always did. A Stop with no background work returns at once: the turn is
+// settling, and a queued delivery runs as the next turn, unchanged.
+// Guard: idle-background-delivery.test.ts "an owner post reaches a Buddy whose model is idle
+// while its background job runs".
+export async function holdStoppedTurn(
+  deps: ToolDeps,
+  grant: TurnGrant,
+  tasks: readonly string[],
+  closed: AbortSignal
+): Promise<string | null> {
+  if (!tasks.length) return null;
+  const thread = await steeredThread(deps, grant);
+  if (thread.kind === 'none') return null;
+  // A post that arrived during the model's last step is taken at once. After a wake the take runs
+  // again: a Buddy tool call may already have taken the page, and then the hold resumes.
+  for (;;) {
+    const taken = await takeOwnerSteering(deps, thread);
+    if (taken !== null || closed.aborted) return taken;
+    const owner = new AbortController();
+    const off = deps.events.on((event) => {
+      if (event.kind !== 'posted' || event.post.rootId !== thread.root) return;
+      if (event.post.author.kind === 'owner') owner.abort();
+    });
+    const { conversationId, buddyId } = thread.grant;
+    const held = deps.backgroundWork.hold(
+      conversationId,
+      { buddyId, rootId: thread.root },
+      tasks,
+      AbortSignal.any([closed, owner.signal])
+    );
+    deps.events.emit({ kind: 'responding', channelId: thread.channelId });
+    // The background state has ended by now, so the status line never shows it while the model
+    // answers.
+    const drained = await held;
+    off();
+    deps.events.emit({ kind: 'responding', channelId: thread.channelId });
+    if (drained) return null;
   }
 }
 
@@ -986,6 +1044,13 @@ const PostToolHookInput = z.object({
   hook_event_name: z.enum(['PostToolUse', 'PostToolUseFailure']),
   agent_id: z.string().min(1).optional(),
 });
+// κ for claude's Stop hook: `background_tasks` lists its in-flight background work (absent on
+// harness versions before it existed, which is the same as none: nothing to hold for).
+const STOP_HOOK_PATH = '/hooks/stop';
+const StopHookInput = z.object({
+  hook_event_name: z.literal('Stop'),
+  background_tasks: z.array(z.object({ id: z.string().min(1) })).default([]),
+});
 function postToolHookAgent(input: z.infer<typeof PostToolHookInput>): NativeAgent {
   return input.agent_id ? { kind: 'sub', id: input.agent_id } : { kind: 'main' };
 }
@@ -1005,6 +1070,8 @@ export type McpEndpoint = {
   readonly url: string;
   /** Native post-tool hooks POST here (harness-steering.ts), with the turn's MCP bearer. */
   readonly postToolHookUrl: string;
+  /** Claude's Stop hook POSTs here (harness-steering.ts), with the turn's MCP bearer. */
+  readonly stopHookUrl: string;
   close(): Promise<void>;
   spec(grant: TurnGrant): McpServerSpec;
 };
@@ -1037,6 +1104,20 @@ export async function startMcpEndpoint(
       res.writeHead(200, { 'content-type': 'application/json' });
       return void res.end(context === null ? '' : postToolOutput(input.hook_event_name, context));
     }
+    if (req.method === 'POST' && req.url === STOP_HOOK_PATH) {
+      const input = StopHookInput.parse(await readJson(req));
+      // The harness kills its hook with the turn (Stop, timeout, process exit): the hold ends.
+      const closed = new AbortController();
+      res.on('close', () => closed.abort());
+      const reason = await holdStoppedTurn(
+        deps,
+        grant,
+        input.background_tasks.map((task) => task.id),
+        closed.signal
+      );
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return void res.end(reason === null ? '' : JSON.stringify({ decision: 'block', reason }));
+    }
     if (req.method !== 'POST' || req.url !== '/mcp') return void res.writeHead(405).end();
     const body = await readJson(req);
     const server = mcpServerFor(deps, grant);
@@ -1065,6 +1146,9 @@ export async function startMcpEndpoint(
     },
     get postToolHookUrl() {
       return `http://127.0.0.1:${relay.port}${POST_TOOL_HOOK_PATH}`;
+    },
+    get stopHookUrl() {
+      return `http://127.0.0.1:${relay.port}${STOP_HOOK_PATH}`;
     },
     spec: (grant) => ({
       kind: 'http',

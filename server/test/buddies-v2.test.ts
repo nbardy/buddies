@@ -76,6 +76,10 @@ import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
 import { testExecutions } from './fixtures/fake-turn';
 import { recordStore } from './fixtures/records';
 import { tempDir } from './fixtures/temp';
+import { BackgroundWork } from '../src/turns/background-work';
+
+// One per test backend, as in server.ts: the hook route and the channel status read it.
+const backgroundWork = new BackgroundWork();
 
 // The Buddy server end to end through its real boundaries: the crate on a temp DB, the HTTP MCP
 // endpoint, the runner, the channels responder, the creation service and the conversation
@@ -199,6 +203,7 @@ async function world(reopen?: string, realProvider = false) {
   // A transcript per conversation id, read through the same MessageSource shape production uses.
   const transcripts = new Map<string, MessagePage['messages']>();
   const endpoint = await startMcpEndpoint({
+    backgroundWork,
     core,
     events,
     grants,
@@ -384,11 +389,12 @@ async function world(reopen?: string, realProvider = false) {
     briefings,
     reviewer,
     spec: endpoint.spec,
-    steering: () => ({ postToolHookUrl: endpoint.postToolHookUrl }),
+    steering: () => endpoint,
   });
   const Conversation = createConversationRuntime({
     executions: testExecutions(),
     buddies: port,
+    backgroundWork,
     broadcast: () => undefined,
     registerSessionAlias: () => undefined,
     unregisterSessionAlias: () => undefined,
@@ -426,6 +432,7 @@ async function world(reopen?: string, realProvider = false) {
   };
   const picks = new Map<string, ConversationConfig>();
   const channels = createChannels({
+    backgroundWork,
     core,
     events,
     installedAgent: installed,
@@ -1713,6 +1720,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     });
     const events = createBuddyEvents();
     const reloaded = createChannels({
+      backgroundWork,
       core: w.core,
       events,
       installedAgent: () => installedAgent({ PATH: w.agentBin }),
@@ -2611,6 +2619,7 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
   const events = createBuddyEvents();
   const grants = createGrants({ ttlMs: 60_000 });
   const endpoint = await startMcpEndpoint({
+    backgroundWork,
     core,
     events,
     grants,
@@ -2751,6 +2760,7 @@ async function reviewOnce(dir: string, env: NodeJS.ProcessEnv) {
   });
   const grants = createGrants({ ttlMs: 60_000 });
   const endpoint = await startMcpEndpoint({
+    backgroundWork,
     core,
     events: createBuddyEvents(),
     grants,
@@ -2928,6 +2938,7 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
   });
   const grants = createGrants({ ttlMs: 60_000 });
   const endpoint = await startMcpEndpoint({
+    backgroundWork,
     core,
     events: createBuddyEvents(),
     grants,
@@ -3057,6 +3068,7 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
   });
   const grants = createGrants({ ttlMs: 60_000 });
   const reviewEndpoint = await startMcpEndpoint({
+    backgroundWork,
     core,
     events: createBuddyEvents(),
     grants,
@@ -5488,6 +5500,90 @@ test('a queued model pick waits for its own turn at every tool boundary', async 
     await w.close();
   }
 });
+
+// task_01a11aa8: the real-CLI half of idle-background-delivery.test.ts. Opt-in and paid: one
+// Sonnet turn on temp stores through the production executeCommand boundary. The model launches a
+// background shell job and ends its turn; the owner's post must be answered by that same live
+// process while the job still runs, and the job's completion must still reach the model.
+test(
+  'real CLI claude: an owner post reaches a model idle on its background job',
+  { skip: process.env.UNLEASHD_REAL_IDLE_BACKGROUND !== '1', timeout: 300_000 },
+  async () => {
+    const w = await world(undefined, true);
+    const release = join(w.scratch, 'job-release');
+    try {
+      const config = createDefaultConversationConfig('claude');
+      config.model = { mode: 'explicit', modelId: 'claude-sonnet-5-5' };
+      w.picks.set(w.lead.id, config);
+      const say = async (body: string, key: string, replyToId?: string) => {
+        const post = await w.post(
+          OWNER,
+          { kind: 'id', id: w.general.id },
+          { kind: 'inform', body, replyToId, evidence: [], mentions: [], broadcast: false, key }
+        );
+        w.announce(post);
+        return post;
+      };
+      const root = await say(
+        `[@Lead](buddy:${w.lead.id}) Start this long job with ONE Bash call that has run_in_background set to true: while [ ! -f ${release} ]; do sleep 1; done; echo JOB_DONE . Do not wait for it, poll it, or read its output now. Post "launched" in this thread and end your turn. When the job's completion notice arrives later, post "job finished" in this thread. If the owner writes in the meantime, answer that message in this thread right away.`,
+        'real-idle-root'
+      );
+      const buddyPosts = async () =>
+        (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts
+          .filter((post) => post.author.kind === 'buddy')
+          .map((post) => post.body);
+      await until(
+        async () =>
+          (await w.channels.responding(w.general.id)).some((r) => r.state === 'background'),
+        'the model idle on its background job',
+        120_000
+      );
+      const correction = await say(
+        `[@Lead](buddy:${w.lead.id}) While that runs: what board size should we use? Answer "3x3x3".`,
+        'real-idle-correction',
+        root.id
+      );
+      await until(
+        async () => (await buddyPosts()).some((body) => /3\s*[x×]\s*3\s*[x×]\s*3/.test(body)),
+        'the answer while the job runs',
+        120_000
+      );
+      assert.ok(!existsSync(release), 'answered before the job could end');
+      const delivery = (await w.runs(w.lead.id)).find(
+        (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
+      )!;
+      assert.equal(delivery.errorCode, 'consumed');
+      writeFileSync(release, 'done');
+      await until(
+        async () => (await buddyPosts()).some((body) => /job finished/i.test(body)),
+        'the job notice handled',
+        120_000
+      );
+      await until(
+        async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+        'real turn settles',
+        60_000
+      );
+      assert.equal(w.turns.length, 1, 'one process for the whole exchange');
+      assert.equal(w.stopped.size, 0);
+      const seat = [...w.conversations.values()].find((c) => c.id !== 'owner-chat')!;
+      const transcript = seat.messages.map((m) => bodyText(m.body)).join('\n');
+      console.log(
+        `REAL_IDLE_BACKGROUND posts=${JSON.stringify(await buddyPosts())}\n${transcript}`
+      );
+      if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
+        mkdirSync(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, { recursive: true });
+        writeFileSync(
+          join(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, 'claude-idle-background.txt'),
+          `${JSON.stringify(await buddyPosts(), null, 2)}\n${transcript}`
+        );
+      }
+    } finally {
+      writeFileSync(release, 'done');
+      await w.close();
+    }
+  }
+);
 
 // Opt-in paid CLI evidence; all stores and the CLI cwd are temporary. No shell-out to agent
 // binaries: this drives the same executeCommand boundary as a production conversation.

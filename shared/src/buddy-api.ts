@@ -379,6 +379,7 @@ export type ChannelResponse = {
   threadRootId: string;
   buddyId: string;
   startedAt: string;
-  state: 'replying' | 'queued';
+  /** `background`: the model is idle while its own background jobs run (task_01a11aa8). */
+  state: 'replying' | 'background' | 'queued';
   waiting?: RunWaiting;
 };

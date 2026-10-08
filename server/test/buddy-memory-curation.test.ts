@@ -26,6 +26,10 @@ import {
   type CurationCheck,
   type MemoryDoc,
 } from './fixtures/memory-curation/cases';
+import { BackgroundWork } from '../src/turns/background-work';
+
+// One per test backend, as in server.ts: the hook route and the channel status read it.
+const backgroundWork = new BackgroundWork();
 
 // LIVE memory-relevance benchmark: the production reviewer (real executeCommand, real ladder,
 // real MCP endpoint, real BuddiesCore on a temp DB) on each synthetic case. It makes real model
@@ -201,6 +205,7 @@ async function runCase(c: CurationCase, repeat: number, warnings: string[]): Pro
   const before = await snapshot(core, buddy.id);
   const grants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
   const endpoint = await startMcpEndpoint({
+    backgroundWork,
     core,
     events: createBuddyEvents(),
     grants,

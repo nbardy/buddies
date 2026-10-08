@@ -24,6 +24,7 @@ import {
 } from './buddy-conversation-slots';
 import type { ReplyGate } from './channel-reply-gate';
 import { type BuddiesCore, OWNER } from './core';
+import type { BackgroundWork, TurnActivity } from '../turns/background-work';
 import type { BuddyEvents } from './events';
 import { runConfigOfPick } from './worker-config';
 
@@ -62,6 +63,11 @@ export type ThreadSeat = { buddyId: string; config: ConversationConfig };
 type SeatRequest = { kind: 'keep' } | { kind: 'chosen'; config: ConversationConfig };
 export type { ChannelResponse } from '@unleashd/shared';
 
+const RUNNING_STATE = { working: 'replying', background: 'background' } as const satisfies Record<
+  TurnActivity['t'],
+  ChannelResponse['state']
+>;
+
 export const threadConversationId = (rootId: string, buddyId: string, generation: number) =>
   stableConversationId(`channel-thread:${rootId}:${buddyId}:${generation}`);
 export const directConversationId = (workspaceId: string, buddyId: string, generation: number) =>
@@ -70,6 +76,8 @@ export const directConversationId = (workspaceId: string, buddyId: string, gener
 export interface ChannelsPorts {
   core: BuddiesCore;
   events: BuddyEvents;
+  /** Which seats are idle on background work, for the status line (turns/background-work.ts). */
+  backgroundWork: BackgroundWork;
   conversations: StableConversationPorts;
   /** The agent an unpinned Buddy runs (providers/installed-agent.ts), read per resolution. */
   installedAgent(): InstalledAgent;
@@ -289,7 +297,15 @@ export function createChannels(ports: ChannelsPorts) {
         threadRootId: delivery.threadRootId,
         buddyId: delivery.buddyId,
         startedAt: delivery.startedAt,
-        state: delivery.running ? 'replying' : 'queued',
+        // A running seat whose model is idle on background jobs says so, never "replying".
+        state: delivery.running
+          ? RUNNING_STATE[
+              ports.backgroundWork.activityOf({
+                buddyId: delivery.buddyId,
+                rootId: delivery.threadRootId,
+              }).t
+            ]
+          : 'queued',
         waiting: delivery.waiting,
       }));
     },

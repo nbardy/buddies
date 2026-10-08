@@ -84,6 +84,7 @@ import { installedAgent } from './providers/installed-agent';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
+import { BackgroundWork } from './turns/background-work';
 import { type FoundExecution, createExecutionJournals } from './turns/executions';
 import { createUpstreamService } from './upstream/routes';
 
@@ -326,6 +327,8 @@ const buddiesReady = openBuddiesCore(buddiesLocation(buddiesDatabasePath()));
 buddiesReady.catch((error) => console.error('[buddies] Buddies are unavailable:', error.message));
 const buddiesCore = lateBoundCore(buddiesReady);
 const buddyEvents = createBuddyEvents();
+// Turns whose model is idle while background jobs run: the turn folds and the hook route share it.
+const backgroundWork = new BackgroundWork();
 // A grant lives as long as its run's lease at most; settle and turn end revoke it sooner.
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
 const buddyBriefings = createBriefings(buddiesCore, () => installedAgent());
@@ -479,7 +482,7 @@ const buddyPolicyPort = createBuddyPolicyPort({
   spec: buddyMcpSpec,
   steering: () => {
     if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
-    return { postToolHookUrl: buddyMcp.postToolHookUrl };
+    return { postToolHookUrl: buddyMcp.postToolHookUrl, stopHookUrl: buddyMcp.stopHookUrl };
   },
 });
 const Conversation = createConversationRuntime({
@@ -500,6 +503,7 @@ const Conversation = createConversationRuntime({
   },
   getConversation: (id) => conversations.get(id),
   executions: executionJournals,
+  backgroundWork,
   readLatestOompaRuntime: readLatestSwarmRuntime,
   createSessionId: uuidv4,
   turnAttempts: turnAttemptObserver,
@@ -653,6 +657,7 @@ const buddyChannels = createChannels({
   installedAgent: () => installedAgent(),
   core: buddiesCore,
   events: buddyEvents,
+  backgroundWork,
   channelChanged,
   conversations: buddyConversations,
   // Resolved by the same authority as conversations, so the gate runs exactly the
@@ -857,6 +862,7 @@ void runServerStartup(
         uploadsRoot: () => UPLOADS_DIR,
         messages: async (id, page) => (await listReady).page(id, page),
         openBranch: (chat) => buddyCreationService.openBranch(chat),
+        backgroundWork,
         portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
       });
       // Background, never awaited: bootstrap and the upstream fetch must not
