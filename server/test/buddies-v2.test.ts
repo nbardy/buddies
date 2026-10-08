@@ -885,6 +885,9 @@ test('pausing the runner mid-drain stops further claims', async () => {
     assert.equal(claims, 1);
     const queued = [...(await w.runs(w.lead.id)), ...(await w.runs(w.designer.id))];
     assert.equal(queued.filter((run) => run.status === 'queued').length, 1);
+    // Claims start asynchronously: closing the endpoint before placement made the fake post
+    // fail after teardown and retain a 10 s socket wait. Let the one allowed turn start.
+    await until(() => w.turns.length === 1, 'the claimed fake provider starts before teardown');
   } finally {
     await w.close();
   }
