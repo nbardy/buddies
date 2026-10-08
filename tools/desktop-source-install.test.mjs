@@ -10,7 +10,7 @@ import { selectedRuntime } from './desktop-source.mjs';
 
 // Installed app passed NODE_ENV=production: dev tools were skipped. Retry then
 // silently skipped pnpm's non-TTY purge. Real install/build must recover both.
-test('production desktop helper reinstalls dev tools without an interactive purge', () => {
+test('production desktop publish installs changed build dependencies without an interactive purge', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop production install '));
   const source = path.join(home, 'source');
   const bundle = path.join(home, 'bundle');
@@ -56,6 +56,26 @@ test('production desktop helper reinstalls dev tools without an interactive purg
     run('git', ['config', 'user.email', 'fixture@example.test']);
     run('git', ['add', '.']);
     run('git', ['commit', '-qm', 'production-only fixture']);
+    // The merged update introduces a build dependency absent from the installed tree.
+    fs.mkdirSync(path.join(source, 'added-tool'));
+    fs.writeFileSync(
+      path.join(source, 'added-tool/package.json'),
+      JSON.stringify({ name: 'desktop-added-tool', version: '1.0.0', main: 'index.js' })
+    );
+    fs.writeFileSync(path.join(source, 'added-tool/index.js'), "module.exports = 'compiled';");
+    const packageFile = path.join(source, 'package.json');
+    const changed = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
+    changed.devDependencies['desktop-added-tool'] = 'file:./added-tool';
+    fs.writeFileSync(packageFile, JSON.stringify(changed));
+    fs.appendFileSync(
+      path.join(source, 'build.cjs'),
+      "require('node:assert/strict').equal(require('desktop-added-tool'), 'compiled');"
+    );
+    run('pnpm', ['install', '--lockfile-only']);
+    run('git', ['add', '.']);
+    run('git', ['commit', '-qm', 'merged update with changed dependencies']);
+    assert.ok(!fs.existsSync(path.join(source, 'node_modules/desktop-added-tool')));
+
     fs.mkdirSync(path.join(bundle, 'node/bin'), { recursive: true });
     fs.symlinkSync(process.execPath, path.join(bundle, 'node/bin/node'));
     const pnpm = path.join(home, 'toolchain/node_modules/pnpm/bin/pnpm.cjs');
