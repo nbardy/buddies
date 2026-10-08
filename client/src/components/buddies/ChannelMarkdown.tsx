@@ -340,7 +340,7 @@ const CHANNEL_COMPONENTS: Components = {
 
 type ChannelFile = { kind: ChannelFileKind; src: string; label: string };
 
-function MarkdownFile({ src }: { src: string }) {
+function useFileText(src: string) {
   // Pattern: one-store-one-index (docs/patterns.md#one-store-one-index)
   // The existing text cache also serves hover previews; reopening a file retains its contents.
   const source = useMemo(
@@ -352,7 +352,11 @@ function MarkdownFile({ src }: { src: string }) {
       }),
     [src]
   );
-  const file = usePolledFetch(source, 0);
+  return usePolledFetch(source, 0);
+}
+
+function MarkdownFile({ src }: { src: string }) {
+  const file = useFileText(src);
   const pipeline = useMarkdownPipeline(CHANNEL_MARKDOWN);
   return (
     <>
@@ -370,6 +374,36 @@ function MarkdownFile({ src }: { src: string }) {
         <div className="channel-markdown">
           {renderMarkdownCached(pipeline, file.data, CHANNEL_COMPONENTS)}
         </div>
+      )}
+    </>
+  );
+}
+
+// Pattern: sum-types (docs/patterns.md#sum-types)
+// Fix-guard: HTML attachment links downloaded instead of opening the viewer.
+// Render fetched text in an opaque-origin sandbox; never grant allow-same-origin.
+// The browser viewer regression checks scripts work without access to the parent.
+function HtmlFile({ src, label }: { src: string; label: string }) {
+  const file = useFileText(src);
+  return (
+    <>
+      {(file.kind === 'failed' || file.kind === 'stale') && (
+        <p role="alert">
+          Could not {file.kind === 'stale' ? 'refresh' : 'load'} this document.{' '}
+          <button type="button" onClick={() => void file.refetch()}>
+            Retry
+          </button>
+        </p>
+      )}
+      {file.data === null ? (
+        file.kind !== 'failed' && <output>Loading document…</output>
+      ) : (
+        <iframe
+          className="channel-file-pdf"
+          title={label}
+          sandbox="allow-scripts allow-downloads"
+          srcDoc={`<!doctype html><base href="about:srcdoc">${file.data}`}
+        />
       )}
     </>
   );
@@ -431,6 +465,8 @@ function ChannelFileOverlay({ file, onClose }: { file: ChannelFile; onClose(): v
             <article className="channel-file-scroll">
               <MarkdownFile src={file.src} />
             </article>
+          ) : file.kind === 'html' ? (
+            <HtmlFile src={file.src} label={file.label} />
           ) : (
             <iframe className="channel-file-pdf" src={`${file.src}&preview=1`} title={file.label} />
           )}

@@ -122,7 +122,7 @@ export function mediaUrl(source: string): string {
   return isLocalFilePath(source) ? `/api/files?path=${encodeURIComponent(source)}` : source;
 }
 
-export type ChannelFileKind = 'image' | 'video' | 'markdown' | 'pdf';
+export type ChannelFileKind = 'image' | 'video' | 'markdown' | 'pdf' | 'html';
 
 /** Local files and authenticated file URLs use the same preview classification. */
 export function channelFilePreview(source: string): { kind: ChannelFileKind; src: string } | null {
@@ -145,7 +145,9 @@ export function channelFilePreview(source: string): { kind: ChannelFileKind; src
         ? 'markdown'
         : extension === '.pdf'
           ? 'pdf'
-          : null;
+          : ['.html', '.htm'].includes(extension)
+            ? 'html'
+            : null;
   return kind === null ? null : { kind, src: mediaUrl(localPath) };
 }
 

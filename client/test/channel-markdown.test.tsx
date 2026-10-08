@@ -268,6 +268,8 @@ test('document file URLs classify for the overlay without treating web pages as 
     ['/tmp/report.MARKDOWN', 'markdown'],
     ['/tmp/report.pdf', 'pdf'],
     ['/tmp/clip.mov', 'video'],
+    ['/tmp/active.html', 'html'],
+    ['/tmp/active.HTM', 'html'],
   ]) {
     const src = `/api/files?path=${encodeURIComponent(path)}`;
     assert.deepEqual(channelFilePreview(path), { kind, src });
@@ -277,7 +279,7 @@ test('document file URLs classify for the overlay without treating web pages as 
     'https://example.com/report.md',
     '/buddies/report.md',
     '/tmp/archive.zip',
-    '/tmp/active.html',
+    'https://example.com/report.html',
   ]) {
     assert.equal(channelFilePreview(target), null);
   }
