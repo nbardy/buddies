@@ -1,0 +1,43 @@
+{
+  "checks": [
+    {
+      "name": "desktop",
+      "state": {
+        "open": true,
+        "sandbox": "allow-scripts allow-downloads",
+        "html": true,
+        "download": "/api/files?path=%2FUsers%2Fnicholasbardy%2F.agent-viewer%2Fuploads%2Fchannels%2Flist_01a0f255-1f0c-757d-bf35-1c01059a0e37%2F16178154eab3df7c2f56e4e2c9045aad_index.html"
+      },
+      "probe": {
+        "viewerProbe": true,
+        "denied": true,
+        "title": "Great Wave — exploration notebook",
+        "options": 57,
+        "swapped": true,
+        "fragment": "about:srcdoc#compare"
+      }
+    },
+    {
+      "name": "phone",
+      "state": {
+        "open": true,
+        "sandbox": "allow-scripts allow-downloads",
+        "html": true,
+        "download": "/api/files?path=%2FUsers%2Fnicholasbardy%2F.agent-viewer%2Fuploads%2Fchannels%2Flist_01a0f255-1f0c-757d-bf35-1c01059a0e37%2F16178154eab3df7c2f56e4e2c9045aad_index.html"
+      },
+      "probe": {
+        "viewerProbe": true,
+        "denied": true,
+        "title": "Great Wave — exploration notebook",
+        "options": 57,
+        "swapped": true,
+        "fragment": "about:srcdoc#compare"
+      }
+    }
+  ],
+  "blockedWrites": [
+    "POST /api/buddies/read",
+    "POST /api/diagnostics/errors/client",
+    "POST /api/buddies/read"
+  ]
+}

@@ -53,7 +53,7 @@ try {
       window.addEventListener('message', event => {
         if (event.source === frame.contentWindow && event.data?.viewerProbe) window.__htmlViewerProbe = event.data;
       });
-      frame.srcdoc = frame.srcdoc + '<script>let denied=false;try{void parent.document.cookie}catch{denied=true}const left=document.getElementById("left"),swap=document.getElementById("swap");const before=left?.value;swap?.click();parent.postMessage({viewerProbe:true,denied,title:document.title,options:document.querySelectorAll("select option").length,swapped:swap?left.value!==before:null,fragment:document.querySelector(\'a[href^="#"]\')?.href??null},"*")<\/script>';
+      frame.srcdoc = frame.srcdoc + '<script>let denied=false;try{void parent.document.cookie}catch{denied=true}const left=document.getElementById("left"),swap=document.getElementById("swap");const before=left?.value;swap?.click();parent.postMessage({viewerProbe:true,denied,title:document.title,options:document.querySelectorAll("select option").length,swapped:swap?left.value!==before:null,fragment:[...document.links].find(a=>a.hash)?.href??null},"*")<\/script>';
     })()`);
     let probe;
     for (let i = 0; i < 100; i++) {

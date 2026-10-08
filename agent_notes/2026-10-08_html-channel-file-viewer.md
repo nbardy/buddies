@@ -21,3 +21,7 @@ OUTPUT_DIR. It uses the repository's read-only CDP session and closes Chrome in 
 owner-linked page checked at desktop 1440x900 and phone 375x812: open/close, Download href, scripts,
 57 generated select options, Swap button behavior, parent-document denial and fragment base.
 Screenshots posted to the owner thread; transient output removed after posting.
+
+Commit 969e585 was checked directly with git grep for the classifier, overlay and text-hook
+references. Its archived client source passes all nine invariant gates (14587/14587 CSS lines).
+Browser results are retained in agent_notes/2026-10-08_html-channel-file-viewer-checks.json.
