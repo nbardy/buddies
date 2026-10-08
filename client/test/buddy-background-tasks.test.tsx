@@ -200,3 +200,41 @@ test('cold rail badges never fetch idle history, but discover running and queued
     clearResourceCache();
   }
 });
+
+test('worker hover text tracks running counts even when the active total stays unchanged', async () => {
+  const { BuddyBackgroundLink } = await import('../src/components/buddies/BuddyBackgroundLink');
+  const store = createStore();
+  store.set(connectionAtom, {
+    socket: { tag: 'closed' },
+    server: { tag: 'v3', defaultCwd: '/', loadComplete: true },
+  });
+  const render = () =>
+    renderToStaticMarkup(
+      <Provider store={store}>
+        <MemoryRouter>
+          <BuddyBackgroundLink buddyId="lead" workspaceId="wave" name="Lead" />
+        </MemoryRouter>
+      </Provider>
+    );
+  const first = make('tooltip-first', { run: 'running' });
+  const second = make('tooltip-second', { run: 'running' });
+  store.set(
+    rowsAtom,
+    new Map([
+      [first.id, first],
+      [second.id, second],
+    ])
+  );
+  assert.match(render(), /title="Lead: 2 workers running\. View workers and recent activity"/);
+  store.set(
+    rowsAtom,
+    new Map([
+      [first.id, first],
+      [second.id, make(second.id, { run: 'queued' })],
+    ])
+  );
+  assert.match(
+    render(),
+    /title="Lead: 1 worker running · 1 queued\. View workers and recent activity"/
+  );
+});

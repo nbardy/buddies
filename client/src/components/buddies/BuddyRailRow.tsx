@@ -34,7 +34,7 @@ export function BuddyRailRow({
           <span className="channel-browser-buddy-actions">
             <button
               type="button"
-              title={`Wake ${member.name}: catch up on the channels and act`}
+              title={`Wake up ${member.name}: catch up on the channels and act`}
               aria-label={`Wake ${member.name}`}
               disabled={action.kind === 'pending'}
               onClick={direct.wake}

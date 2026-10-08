@@ -230,14 +230,18 @@ export const buddyWorkerCountsFamily = atomFamily(
     stableAtom(
       (get) => {
         const workers = get(buddyBackgroundWorkersAtomFamily(scope));
+        const runningCount = workers.filter((worker) => worker.status === 'running').length;
         return {
+          runningCount,
           active: workers.filter(
             (worker) => worker.status === 'running' || worker.status === 'queued'
           ).length,
-          running: workers.some((worker) => worker.status === 'running'),
+          running: runningCount > 0,
         };
       },
-      (a, b) => a.active === b.active && a.running === b.running
+      // Comparing only the running boolean misses 2 running → 1 running + 1 queued.
+      // Guard: worker hover text tracks running counts with an unchanged active total.
+      (a, b) => a.active === b.active && a.runningCount === b.runningCount
     ),
   sameScope
 );
