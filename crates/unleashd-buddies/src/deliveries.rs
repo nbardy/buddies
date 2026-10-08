@@ -126,6 +126,12 @@ pub(crate) fn catch_up(tx: &Transaction, reader: &Actor, root_id: &str, ord: &st
 /// `skip`: Buddies already woken another way for this post (a request's recipient gets its `post`
 /// run, a mention gets `wake`'s), so nobody is woken twice.
 pub(crate) fn fan_out(tx: &Transaction, post: &Post, skip: &[String]) -> Result<()> {
+    // Fix-guard: a failure notice wakes nobody. Without this, two failing Buddies subscribed to one
+    // thread woke each other with reply_failed notices (~170 failed turns in 4 min, 2026-10-07).
+    // Test: failure_notice_wakes_no_subscriber (tests/core.rs).
+    if post.purpose.as_deref() == Some("reply_failed") {
+        return Ok(());
+    }
     let subscribers = collect(
         tx.prepare_cached(
             "SELECT t.reader, t.conversation_id FROM thread_read t JOIN buddy b ON b.id = t.reader

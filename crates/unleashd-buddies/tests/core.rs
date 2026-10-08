@@ -1859,6 +1859,29 @@ fn posting_in_a_public_thread_does_not_subscribe_and_a_follow_up_goes_to_the_sea
     assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none());
 }
 
+// Incident 2026-10-07 (task_01a119c3): `fan_out` delivered `reply_failed` notices to thread
+// subscribers, so two failing Buddies woke each other ~170 times in 4 minutes. A failure notice wakes
+// nobody, but the same author's normal post in that thread still reaches the subscriber.
+#[test]
+fn failure_notice_wakes_no_subscriber_but_a_normal_post_still_does() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let root = s.post(&buddy("mid"), dm("mid", "ic"), request("thread", "r1")).unwrap(); // subscribes mid
+    let worker = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    let inform = |body: &str, key: &str, purpose: Option<&str>| PostInput {
+        kind: PostKind::Inform,
+        reply_to_id: Some(root.id.clone()),
+        from_conversation_id: Some("conv-ic".into()),
+        purpose: purpose.map(Into::into),
+        ..request(body, key)
+    };
+    s.post(&buddy("ic"), dm("mid", "ic"), inform("failed", "f1", Some("reply_failed"))).unwrap();
+    assert_eq!(queued(s, "mid"), 0, "a failure notice wakes nobody");
+    s.post(&buddy("ic"), dm("mid", "ic"), inform("done", "n1", None)).unwrap();
+    assert_eq!(queued(s, "mid"), 1, "a normal post by the same author still delivers");
+}
+
 // Owner decision 2026-10-07: a seat opened for an @mention is bound to its run but not subscribed.
 // A subscribed seat would be delivered every later post of the thread without the follow-up gate.
 #[test]
