@@ -81,3 +81,36 @@ boundary; Codex idle background delivery has no verified hold; hook transport ca
 paused Tasks and archived Buddies remain owner-controlled. Request messages are at-least-once
 across an ambiguous response-write crash; the child notice cursor deliberately chooses at-most-once
 because it is advisory and must never consume the parent's post.
+
+
+## Verification, 2026-10-08T11:07Z
+
+Code commit: 2180e37e4469dd1fb0a5d8acb422ed1a7c1d3886, based on atomic collector acf0a1a.
+The worktree was clean when checks completed. Required backend group: buddies-v2 81 passed / 6
+opt-in skipped, execution-adoption 6 passed, run-lease 4 passed, idle-background-delivery 2 passed
+(93 passed total, zero failed). Rust: 90 passed; napi: 2 passed. Client: 261 passed, including the
+new rendered reach cases and updated real ChannelBrowser fallback guard. Client invariants: 9
+passed. Typecheck and line gate: passed, 12225/12225. Client production build: passed.
+Logs: /tmp/nw-final-backend.log, /tmp/nw-resume-crate.log, /tmp/nw-final-client2.log,
+/tmp/nw-final-typecheck2.log, /tmp/nw-final-invariants.log. No real provider trial was run after
+resumption: the owner's Claude quota is exhausted. Deterministic proof uses real backend/MCP,
+fake provider, temp stores and backend SIGKILL/adoption.
+
+Visual review: actual temp-backend channel/thread data at 375x812 and 1440x900, read-only CDP,
+dependency/home-screen prompts dismissed locally. Both show “Fan Designer is taking new messages
+at its next step…”; the phone wraps it within the viewport. The initial screenshot-tool attempt
+captured onboarding instead; it was discarded. Final WebP q95 images were inspected and deleted
+at close per AGENTS.md. Screenshot hashes (historical evidence, not retained artifacts):
+
+- status-phone.webp: SHA256 5436a671440ffcb25ea61db69ae3abbad5b600913e99217fcf16fdcad03a95c7
+
+- status-desktop.webp: SHA256 a90c1d45f0f6b8d2c0e6482ac262550cf3ab8e9bc4303bbbb4049447e2a8bfe8
+
+Token audit ran after the context change (/tmp/nw-token-audit.log): 434 sessions, 19k requests,
+~121.7M estimated excess. This is a one-day observational baseline, not a before/after saving
+claim: fake-provider trials produce no billing/token measurement. The concrete fan-out guard
+reduces the incident-shaped five-agent case from five notices to one, including after restart.
+
+Integration: branch-first delivery includes acf0a1a because origin/main remains 4fcc0be at this
+check. The lead must land the atomic steering prerequisite before integrating this branch;
+no live checkout or process was changed by this worker. The Task stays in review for that step.
