@@ -128,7 +128,7 @@ pub(crate) fn catch_up(tx: &Transaction, reader: &Actor, root_id: &str, ord: &st
 pub(crate) fn fan_out(tx: &Transaction, post: &Post, skip: &[String]) -> Result<()> {
     // Fix-guard: a failure notice wakes nobody. Without this, two failing Buddies subscribed to one
     // thread woke each other with reply_failed notices (~170 failed turns in 4 min, 2026-10-07).
-    // Test: failure_notice_wakes_no_subscriber (tests/core.rs).
+    // Test: failure_notice_wakes_no_subscriber_but_a_normal_post_still_does (tests/core.rs).
     if post.purpose.as_deref() == Some("reply_failed") {
         return Ok(());
     }
