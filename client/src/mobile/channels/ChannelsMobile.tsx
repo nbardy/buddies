@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
 import { buddyRailFamily, channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
+import { ActionTooltip } from '../../components/buddies/ActionTooltip';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
 import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
 import { BuddySigil } from '../../components/buddies/BuddySigil';
@@ -453,16 +454,17 @@ function BuddyRow({ member }: { member: Buddy }) {
       buttonsRight={
         <>
           <span className="mobile-channels-wake-slot">
-            <button
-              type="button"
-              className="mobile-channels-wake ui-muted"
-              title={`Wake up ${member.name}: catch up on the channels and act`}
-              aria-label={`Wake ${member.name}: catch up on the channels and act`}
-              disabled={action.kind === 'pending'}
-              onClick={direct.wake}
-            >
-              <WakeIcon />
-            </button>
+            <ActionTooltip text={`Wake up ${member.name}: catch up on the channels and act`}>
+              <button
+                type="button"
+                className="mobile-channels-wake ui-muted"
+                aria-label={`Wake ${member.name}: catch up on the channels and act`}
+                disabled={action.kind === 'pending'}
+                onClick={direct.wake}
+              >
+                <WakeIcon />
+              </button>
+            </ActionTooltip>
             {direct.woken && (
               <WakeIndicator
                 key={direct.woken.attempt}

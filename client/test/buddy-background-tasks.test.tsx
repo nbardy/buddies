@@ -225,7 +225,7 @@ test('worker hover text tracks running counts even when the active total stays u
       [second.id, second],
     ])
   );
-  assert.match(render(), /title="Lead: 2 workers running\. View workers and recent activity"/);
+  assert.match(render(), /data-tooltip="Lead: 2 workers running\. View workers and recent activity"/);
   store.set(
     rowsAtom,
     new Map([
@@ -235,6 +235,6 @@ test('worker hover text tracks running counts even when the active total stays u
   );
   assert.match(
     render(),
-    /title="Lead: 1 worker running · 1 queued\. View workers and recent activity"/
+    /data-tooltip="Lead: 1 worker running · 1 queued\. View workers and recent activity"/
   );
 });
