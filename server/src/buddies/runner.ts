@@ -675,12 +675,12 @@ export function createRunner(options: {
     }
   };
 
-  async function fail(run: Run, leaseToken: string, error: unknown): Promise<void> {
+  async function fail(run: Run, leaseToken: string, error: unknown, code = 'execution_failed') {
     const message = error instanceof Error ? error.message : String(error);
     // An owner's Stop that the turn's death raced: settle records it cancelled, and says nothing.
     if ((await core.getRun(run.id)).status !== 'cancel_requested')
       await failureNotice(run, message);
-    return settle(run, leaseToken, { kind: 'failed', code: 'execution_failed', error: message });
+    return settle(run, leaseToken, { kind: 'failed', code, error: message });
   }
 
   // A running run whose cancel was recorded: kill its turn, and settle records it cancelled. Until
@@ -721,7 +721,9 @@ export function createRunner(options: {
       }
       return finishTurn(run, leaseToken, after, text);
     },
-    failed: (run, leaseToken, { detail }) => fail(run, leaseToken, detail),
+    // Preserve inactivity as a typed run cause, rather than a generic provider failure.
+    failed: (run, leaseToken, { cause, detail }) =>
+      fail(run, leaseToken, detail, cause === 'provider_idle_timeout' ? cause : 'execution_failed'),
     cancelled: (run, leaseToken, { detail }) =>
       settle(run, leaseToken, { kind: 'cancelled', reason: detail }),
   };
@@ -840,10 +842,8 @@ export function createRunner(options: {
     },
 
     /**
-     * A runner-owned turn ended, live or adopted (its `runJob` may have died with the backend that
-     * claimed it). Its completion step is re-derived from the run's input (`jobFor` reads only the
-     * run and the store) and the run settles under the lease it was claimed with. One path, so the
-     * turn can await the settle before its journal goes (execution-state.ts, 2b).
+     * Live and adopted turns re-derive completion from the stored input and settle under their
+     * claim lease. The journal stays until this lands (execution-state.ts, 2b).
      */
     finishRun(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void> {
       return tracked(

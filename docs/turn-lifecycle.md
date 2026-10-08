@@ -127,3 +127,31 @@ queue mutation (catalog changes can move defaults without changing durable
 intent). The policy's preflight is an admission rule, not a process failure:
 checking it before spawn keeps a queued message retryable and prevents a
 synchronous spawn throw from leaving the queue head "sending".
+
+## provider-progress
+
+Three independent clocks stay in `TurnWatchdog`: bridge liveness (2 min), provider progress
+(60 min by default, `CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS`), and an optional absolute budget.
+Child stream/task/subagent events reset provider progress just like parent events. Typed native
+session advancement does too; a timer-only wrapper heartbeat resets only bridge liveness and
+renews the Buddy lease. Background work has no default absolute deadline (dc299ec); foreground
+Buddy deadlines remain explicit and leases never become deadlines.
+
+Successor 2026-10-08: removed `background-wait.ts`, which let an old Claude background launch
+buy 13 hours of silence regardless of whether a child was progressing. Only observed progress
+resets the one idle clock now. A completely silent healthy tool/child exceeding 60 minutes is
+indistinguishable from a hang; retain the established allowance rather than guess a shorter N.
+Revisit with measured healthy silence or a typed child-progress signal.
+
+Expiry persists `stopping(timeout(provider_idle_timeout))` before revoking the grant/signalling.
+The joined process/event drain settles the attempt and run, releases the slot and conversation,
+and removes the journal after settle. Run settlement preserves `provider_idle_timeout` instead
+of flattening it to `execution_failed`; it is distinct from `max_runtime_timeout` and `user_stop`.
+The event-loop stall monitor stays wired. Guard: `run-lease.test.ts` “no-progress ends a silent
+background turn and frees its seat while child streams outlive N”.
+
+A watchdog cannot fire while its backend is absent/frozen. The reported run_01a1185c's 6.5-hour
+interval contained no old-boot heartbeat or progress; adoption drained a resume failure within
+115 ms. That interval is unsettled duration, not proven live provider execution. Diagnosis and
+scoped API evidence: `agent_notes/2026-10-08_hung-turn-liveness.md`. Adoption replays with a fresh
+idle observation window; elapsed downtime alone never licenses killing a live turn.
