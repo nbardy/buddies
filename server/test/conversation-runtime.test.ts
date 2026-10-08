@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { type ChildProcess, spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -1768,7 +1769,8 @@ test('a missing provider binary settles the turn with a visible system message n
       failure = reason;
     });
     fixture.conversation.sendMessage('hi');
-    await eventually(() => assert.notEqual(failure, ''));
+    await fixture.conversation.waitForTurnDrain();
+    assert.notEqual(failure, '');
     const notices = fixture.conversation.messages.filter((m) => m.role === 'system');
     assert.equal(notices.length, 1, 'one notice, not one per error channel');
     const text = messageText(notices[0]);
@@ -1781,5 +1783,58 @@ test('a missing provider binary settles the turn with a visible system message n
     );
   } finally {
     process.env.PATH = saved;
+  }
+});
+
+// Fix guard: a real CLI's exit 127 and stderr mentioning codex + a missing nested command
+// became spawn_failed (and a false install instruction after restart). Exercise the runner,
+// actual shell and attempt sink; provider-authored stderr cannot establish a failed launch.
+test('an installed provider exiting 127 keeps its tool failure visible without a Setup instruction', async () => {
+  const saved = process.env.PATH;
+  const dir = mkdtempSync(join(tmpdir(), 'unleashd-provider-exit-'));
+  try {
+    const shim = join(dir, 'codex');
+    writeFileSync(
+      shim,
+      `#!/bin/sh
+printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"working"}}'
+echo 'codex: nested-tool: not found' >&2
+exit 127
+`
+    );
+    chmodSync(shim, 0o755);
+    process.env.PATH = `${dir}:/usr/bin:/bin`;
+    const terminals: { terminalCause: string }[] = [];
+    const fixture = runtimeFixture({
+      turnAttempts: {
+        queued: () => {},
+        starting: () => {},
+        running: () => {},
+        stopping: () => {},
+        activity: () => {},
+        bindProviderSession: () => {},
+        terminal: (result) => terminals.push(result),
+      },
+    });
+    let failure = '';
+    fixture.conversation.once('buddy-turn-failed', (reason: string) => {
+      failure = reason;
+    });
+    fixture.conversation.sendMessage('hi');
+    await fixture.conversation.waitForTurnDrain();
+    assert.notEqual(failure, '');
+    assert.match(failure, /exit=127.*nested-tool: not found/);
+    assert.doesNotMatch(failure, /Setup|spawn codex ENOENT|command was not found on this server/);
+    assert.ok(
+      fixture.conversation.messages.some((m) => m.role === 'system' && messageText(m) === failure)
+    );
+    assert.deepEqual(
+      terminals.map((t) => t.terminalCause),
+      ['provider_error']
+    );
+  } finally {
+    if (saved === undefined) delete process.env.PATH;
+    else process.env.PATH = saved;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
