@@ -5506,7 +5506,7 @@ for (const provider of ['codex', 'claude'] as const) {
             { kind: 'id', id: w.general.id },
             {
               kind: 'inform',
-              body: `[@Lead](buddy:${w.lead.id}) ${child ? `Delegate these exact steps to one native sub-agent in the foreground, wait for it, and then confirm its result: ${commands}` : commands}`,
+              body: `[@Lead](buddy:${w.lead.id}) ${child ? `Use your native ${provider === 'codex' ? 'spawn_agent' : 'Agent'} tool for these exact steps, wait for that native sub-agent, and then confirm its result: ${commands}` : commands}`,
               evidence: [],
               mentions: [],
               broadcast: false,
@@ -5543,6 +5543,7 @@ for (const provider of ['codex', 'claude'] as const) {
           )!;
           assert.equal(delivery.errorCode, 'consumed');
           const seat = [...w.conversations.values()].find((c) => c.id !== 'owner-chat')!;
+          if (child) assert.ok(seat.subAgents.length > 0, 'the provider started a native child');
           const transcript = seat.messages.map((m) => bodyText(m.body)).join('\n');
           console.log(`REAL_STEERING ${provider} child=${child}: ${transcript}`);
           if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
