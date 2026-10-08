@@ -273,7 +273,7 @@ async function runTests() {
       if (!Array.isArray(msg.rows)) throw new Error('Missing rows array');
       if (!msg.defaultCwd) throw new Error('Missing defaultCwd');
       // The wire was already v4 at 4f16903; a literal v3 expectation failed this real hello.
-      // Pattern: one-type-source (docs/patterns.md#one-type-source)
+      // Pattern: one-definition (docs/patterns.md#one-definition)
       if (msg.protocol?.version !== PROTOCOL_VERSION)
         throw new Error(`Missing protocol v${PROTOCOL_VERSION} capability`);
       ws.close();
