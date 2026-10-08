@@ -13,8 +13,11 @@ import { installedAgent } from '../src/providers/installed-agent';
 // Two budgets, never one. A probe that should SUCCEED gets a load-tolerant budget: the full
 // server suite runs these real /bin/sh fixtures beside other lanes, and at load 35 on 10 cores
 // (f1011d0 rerun, 2026-10-08) a 1.5 s budget timed out rustc (read as missing) and claude's
-// "Yes" (read as failed). Only the hang assertion keeps a short budget, on its own instance,
-// so load can only make that assertion more true. Production keeps its 45 s default.
+// "Yes" (read as failed). Only the hang classification keeps a short budget, on its own
+// instance, so it cannot starve the success-path probes; its fixture sleeps 10 s, well past
+// 1.5 s. No wall-clock bound on the refresh: it also times subprocesses, filesystem work and
+// scheduling, so a correctly killed probe can exceed it under contention (PM review
+// 2026-10-08). Production keeps its 45 s default.
 const READY_BUDGET_MS = 30_000;
 const HANG_BUDGET_MS = 1_500;
 
@@ -56,10 +59,8 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
     await checks.refresh();
     assert.equal(checks.snapshot().checks[2].status, 'ready');
     await executable('claude', '/bin/sleep 10');
-    const hangStarted = Date.now();
     await hanging.refresh();
     assert.match(hanging.snapshot().checks[1].message, /no response within/i);
-    assert.ok(Date.now() - hangStarted < 10_000, 'a hanging probe is cut off, not awaited');
     await executable('claude', 'echo "Weekly limit reached" >&2; exit 1');
     await checks.refresh();
     assert.equal(checks.snapshot().checks[1].failure, 'quota');
