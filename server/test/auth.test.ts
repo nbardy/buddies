@@ -7,10 +7,10 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { WS_PATH } from '@unleashd/shared';
 import { WebSocket } from 'ws';
-import { freePortSync } from './free-port';
-import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 import { decideAuth } from '../src/auth/gate';
 import { digestToken, resolveAuthPolicy } from '../src/auth/policy';
+import { NO_AUTO_INSTALL } from './fixtures/backend-env';
+import { freePortSync } from './free-port';
 
 /**
  * Boots the real server process with a shared secret configured and probes it

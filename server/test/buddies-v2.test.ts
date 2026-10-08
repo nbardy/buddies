@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { channel as diagnosticChannel } from 'node:diagnostics_channel';
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   existsSync,
   mkdirSync,
@@ -11,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
