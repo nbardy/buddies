@@ -10,8 +10,10 @@ import type { Provider } from '@unleashd/shared';
  * Only Claude is known to load cwd-keyed memory; give a harness args here when it grows one.
  * Guard: buddies-v2 "Buddy turns run with harness auto-memory off; an owner chat keeps it".
  */
+export const CLAUDE_MEMORY_OFF = { autoMemoryEnabled: false } as const;
+
 export const HARNESS_MEMORY_OFF: Record<Provider, readonly string[]> = {
-  claude: ['--settings', JSON.stringify({ autoMemoryEnabled: false })],
+  claude: ['--settings', JSON.stringify(CLAUDE_MEMORY_OFF)],
   codex: [],
   opencode: [],
   gemini: [],

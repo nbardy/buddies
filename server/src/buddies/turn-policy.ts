@@ -25,7 +25,7 @@ import {
 } from '../turns/policy';
 import { BUDDY_BUILDER_BRIEFING } from './builder';
 import type { GrantRecord } from './grants';
-import { HARNESS_MEMORY_OFF } from './harness-memory';
+import { HARNESS_TURN } from './harness-steering';
 import type { BuddyPolicyPort } from './policy-port';
 import type { OwnedChatRun } from './runner';
 
@@ -466,7 +466,10 @@ export class BuddyTurnPolicy implements TurnPolicy {
       subscribes: owned ? 'branch' : 'self',
     });
     this.grant = tools.grant;
-    return { mcpServers: tools.servers, extraArgs: HARNESS_MEMORY_OFF[config.provider] };
+    return {
+      mcpServers: tools.servers,
+      extraArgs: HARNESS_TURN[config.provider].args(tools.steering),
+    };
   }
 
   /**

@@ -67,7 +67,11 @@ export function fakeBuddyPort(
     promoteChat: options.promoteChat ?? (() => undefined),
     cancelChat: options.cancelChat ?? (() => undefined),
     // No endpoint in these fixtures: no servers, and a grant that only needs to be data.
-    mcpServers: () => ({ servers: {}, grant: FIXTURE_GRANT }),
+    mcpServers: () => ({
+      servers: {},
+      grant: FIXTURE_GRANT,
+      steering: { postToolHookUrl: 'http://127.0.0.1:9/hooks/claude/post-tool-use' },
+    }),
     builderMcpServers: () => ({ servers: {}, grant: FIXTURE_GRANT }),
     renewLease: async () => ({ kind: 'renewed' }),
     hold: () => () => undefined,

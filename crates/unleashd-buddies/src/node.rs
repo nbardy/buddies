@@ -202,6 +202,12 @@ impl BuddiesCore {
         call(&self.store, move |s| s.catch_up_thread(&actor, &root_id, limit)).await
     }
 
+    /// The thread's unread posts for this Buddy, NOT marked read (a native sub-agent's view).
+    #[napi]
+    pub async fn peek_thread_unread(&self, actor: Actor, root_id: String, limit: i64) -> napi::Result<ThreadUnread> {
+        call(&self.store, move |s| s.peek_thread_unread(&actor, &root_id, limit)).await
+    }
+
     /// What a claimed delivery shows (deliveries.rs `compose`).
     #[napi]
     pub async fn deliver_posts(&self, run_id: String) -> napi::Result<Delivery> {

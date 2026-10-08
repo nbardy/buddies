@@ -21,7 +21,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::posts::{POST_COLS, post_row};
-use crate::runs::{RUN_COLS, cancel_queued, enqueue, run_row};
+use crate::runs::{RUN_WITH_ACTIVITY_SQL, WAITING_REASON_SQL, RUN_COLS, cancel_queued, enqueue, run_row};
 use crate::store::{Store, collect, now_iso, require};
 use crate::types::*;
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -309,6 +309,15 @@ pub(crate) fn delivered(tx: &Transaction, run: &Run, post: &Post) -> Result<()> 
 /// The unread posts of one thread for a Buddy (by others, past its mark), newest `limit`, oldest
 /// first, marked read: returning a post is reading it.
 pub(crate) fn take_unread(tx: &Transaction, buddy_id: &str, root_id: &str, limit: i64) -> Result<ThreadUnread> {
+    let page = unread_page(tx, buddy_id, root_id, limit)?;
+    if let Some(newest) = page.posts.last() {
+        advance(tx, &Actor::Buddy { id: buddy_id.to_string() }, root_id, &newest.ord)?;
+    }
+    Ok(page)
+}
+
+/// The same page as `take_unread`, NOT marked read: no delivery is fenced.
+fn unread_page(tx: &Transaction, buddy_id: &str, root_id: &str, limit: i64) -> Result<ThreadUnread> {
     let unread = "(p.root_id = ?2 OR p.id = ?2) AND p.author_id IS NOT ?1
         AND p.ord > coalesce((SELECT t.last_ord FROM thread_read t WHERE t.reader = ?1 AND t.root_id = ?2), '')";
     let mut posts = collect(
@@ -316,9 +325,6 @@ pub(crate) fn take_unread(tx: &Transaction, buddy_id: &str, root_id: &str, limit
             .query_map(params![buddy_id, root_id, limit], post_row)?,
     )?;
     let total: i64 = tx.prepare_cached(&format!("SELECT count(*) FROM post p WHERE {unread}"))?.query_row(params![buddy_id, root_id], |r| r.get(0))?;
-    if let Some(newest) = posts.first() {
-        advance(tx, &Actor::Buddy { id: buddy_id.to_string() }, root_id, &newest.ord)?;
-    }
     posts.reverse();
     let unshown = total - posts.len() as i64;
     Ok(ThreadUnread { posts, unshown })
@@ -365,6 +371,18 @@ impl Store {
         })
     }
 
+    /// A thread's unread posts for the Buddy, NOT marked read. Only for a reader that is not the
+    /// Buddy's turn itself: a native sub-agent of a running turn sees the owner's message at its
+    /// own tool boundary, while the read mark (and so the fence on the queued delivery) waits for
+    /// the parent turn, which alone takes it (mcp.ts `steerNativeTool`).
+    pub fn peek_thread_unread(&mut self, actor: &Actor, root_id: &str, limit: i64) -> Result<ThreadUnread> {
+        let buddy_id = reader(actor)?.to_string();
+        self.write(|tx| {
+            let root = readable_root(tx, actor, root_id)?;
+            unread_page(tx, &buddy_id, &root.id, limit)
+        })
+    }
+
     /// What the claimed delivery `run_id` shows (`compose`).
     pub fn deliver_posts(&mut self, run_id: &str) -> Result<Delivery> {
         self.write(|tx| {
@@ -382,13 +400,15 @@ impl Store {
         collect(
             self.conn
                 .prepare_cached(
-                    "SELECT r.buddy_id, coalesce(p.root_id, p.id), coalesce(r.started_at, r.created_at), r.status <> 'queued'
-                     FROM run r JOIN post p ON p.id = r.input_id
-                     WHERE r.input_kind = 'deliver' AND r.status IN ('queued','running','cancel_requested') AND p.channel_id = ?1
-                     ORDER BY r.created_at",
+                    &format!("SELECT r.buddy_id, coalesce(p.root_id, p.id), coalesce(r.started_at, r.created_at), r.status <> 'queued',
+                     CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END
+                     {RUN_WITH_ACTIVITY_SQL} JOIN post p ON p.id = r.input_id
+                     WHERE r.input_kind = 'deliver' AND r.status IN ('queued','running','cancel_requested') AND p.channel_id = ?2
+                     ORDER BY r.created_at"),
                 )?
-                .query_map([channel_id], |r| {
-                    Ok(Responding { buddy_id: r.get(0)?, thread_root_id: r.get(1)?, started_at: r.get(2)?, running: r.get(3)? })
+                .query_map(params![now_iso(), channel_id], |r| {
+                    let waiting = r.get::<_, Option<String>>(4)?.map(|json| serde_json::from_str::<RunWaiting>(&json).map_err(|error| crate::store::corrupt(CoreError::Corrupt(format!("run waiting reason {json:?}: {error}"))))).transpose()?;
+                    Ok(Responding { waiting, buddy_id: r.get(0)?, thread_root_id: r.get(1)?, started_at: r.get(2)?, running: r.get(3)? })
                 })?,
         )
     }

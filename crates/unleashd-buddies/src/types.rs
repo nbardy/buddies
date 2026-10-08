@@ -488,6 +488,7 @@ pub struct RunRow {
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Responding {
+    pub waiting: Option<RunWaiting>,
     pub buddy_id: String,
     pub thread_root_id: String,
     pub started_at: String,

@@ -643,18 +643,37 @@ export function respondingText(
   rows: readonly ChannelResponse[],
   buddyNames: Readonly<Record<string, string>>
 ): ReadonlyMap<string, string> {
-  const byRoot = new Map<string, { replying: string[]; queued: string[] }>();
+  const byRoot = new Map<string, Map<string, string[]>>();
   for (const row of rows) {
-    const entry = byRoot.get(row.threadRootId) ?? { replying: [], queued: [] };
-    entry[row.state].push(buddyNames[row.buddyId] ?? row.buddyId);
-    byRoot.set(row.threadRootId, entry);
+    // Game Designer's busy seat was labelled "at the run limit" although it held its own turn.
+    // Show the claim gate's reason. Old backends without it retain the accurate generic queue.
+    const waiting = row.waiting;
+    const verb =
+      row.state === 'replying'
+        ? 'replying…'
+        : waiting?.kind === 'conversation_busy'
+          ? 'waiting for the current turn…'
+          : waiting?.kind === 'pool_full'
+            ? `queued at the run limit (${waiting.active}/${waiting.max})…`
+            : waiting?.kind === 'not_before'
+              ? 'waiting for its scheduled time…'
+              : waiting?.kind === 'task_paused'
+                ? 'waiting for the Task to resume…'
+                : waiting?.kind === 'buddy_archived'
+                  ? 'waiting while archived…'
+                  : 'queued…';
+    const groups = byRoot.get(row.threadRootId) ?? new Map<string, string[]>();
+    const names = groups.get(verb) ?? [];
+    names.push(buddyNames[row.buddyId] ?? row.buddyId);
+    groups.set(verb, names);
+    byRoot.set(row.threadRootId, groups);
   }
-  const phrase = (names: string[], verb: string) =>
-    names.length === 0 ? [] : [`${joinNames(names)} ${names.length === 1 ? 'is' : 'are'} ${verb}`];
   return new Map(
-    [...byRoot].map(([root, { replying, queued }]) => [
+    [...byRoot].map(([root, groups]) => [
       root,
-      [...phrase(replying, 'replying…'), ...phrase(queued, 'queued at the run limit…')].join(' · '),
+      [...groups]
+        .map(([verb, names]) => `${joinNames(names)} ${names.length === 1 ? 'is' : 'are'} ${verb}`)
+        .join(' · '),
     ])
   );
 }

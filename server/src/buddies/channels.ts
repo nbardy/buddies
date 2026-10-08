@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Buddy, Cursor, Post } from '@unleashd/buddies-core';
 import {
   type ConversationConfig,
+  type ChannelResponse,
   type InstalledAgent,
   type ReplyRetryResult,
   isHarnessRetryFailure,
@@ -59,13 +60,7 @@ const talkOf = (thread: Post[]) => thread.filter((post) => post.purpose !== 'rep
 
 export type ThreadSeat = { buddyId: string; config: ConversationConfig };
 type SeatRequest = { kind: 'keep' } | { kind: 'chosen'; config: ConversationConfig };
-export type ChannelResponse = {
-  channelId: string;
-  threadRootId: string;
-  buddyId: string;
-  startedAt: string;
-  state: 'replying' | 'queued';
-};
+export type { ChannelResponse } from '@unleashd/shared';
 
 export const threadConversationId = (rootId: string, buddyId: string, generation: number) =>
   stableConversationId(`channel-thread:${rootId}:${buddyId}:${generation}`);
@@ -295,6 +290,7 @@ export function createChannels(ports: ChannelsPorts) {
         buddyId: delivery.buddyId,
         startedAt: delivery.startedAt,
         state: delivery.running ? 'replying' : 'queued',
+        waiting: delivery.waiting,
       }));
     },
 

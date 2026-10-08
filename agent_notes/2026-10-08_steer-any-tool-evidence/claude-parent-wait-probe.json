@@ -1,0 +1,54 @@
+{
+  "source_sha256": "2eed78e6351a11abd65ca3cffe99961a305c154991b1ef01b19632baf54295f9",
+  "source": "/tmp/steer-probe-claude/sub-log.jsonl",
+  "excerpt": [
+    {
+      "time": "1791444560.312",
+      "event": "PreToolUse",
+      "tool": "Agent",
+      "agent_id": null
+    },
+    {
+      "time": "1791444560.333",
+      "event": "SubagentStart",
+      "tool": null,
+      "agent_id": "a6390e364761f8629"
+    },
+    {
+      "time": "1791444561.435",
+      "event": "PreToolUse",
+      "tool": "Bash",
+      "agent_id": "a6390e364761f8629"
+    },
+    {
+      "time": "1791444565.999",
+      "event": "PostToolUse",
+      "tool": "Bash",
+      "agent_id": "a6390e364761f8629"
+    },
+    {
+      "time": "1791444568.333",
+      "event": "PreToolUse",
+      "tool": "Bash",
+      "agent_id": "a6390e364761f8629"
+    },
+    {
+      "time": "1791444572.631",
+      "event": "PostToolUse",
+      "tool": "Bash",
+      "agent_id": "a6390e364761f8629"
+    },
+    {
+      "time": "1791444573.320",
+      "event": "SubagentStop",
+      "tool": null,
+      "agent_id": "a6390e364761f8629"
+    },
+    {
+      "time": "1791444573.382",
+      "event": "PostToolUse",
+      "tool": "Agent",
+      "agent_id": null
+    }
+  ]
+}

@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { type McpServerSpec, createParser } from '@nbardy/agent-cli';
+import { type McpServerSpec, createParser, executeCommand } from '@nbardy/agent-cli';
 import {
   BuddiesCore,
   type Buddy,
@@ -152,7 +160,7 @@ async function probe(spec: McpServerSpec): Promise<number> {
 }
 
 /** `reopen`: a scratch dir an earlier world used, as a restarted backend finds its stores. */
-async function world(reopen?: string) {
+async function world(reopen?: string, realProvider = false) {
   const scratch = reopen ?? tempDir('buddies-v2-');
   const dbPath = join(scratch, 'buddies-v3.sqlite');
   const core = await BuddiesCore.open(dbPath);
@@ -232,6 +240,10 @@ async function world(reopen?: string) {
     return last ? [last[0], last[3], last[2] ?? last[1]] : null;
   };
   const executeTurn = ((request: ProviderRequest) => {
+    if (realProvider) {
+      turns.push({ n: turns.length + 1, request, mcp: request.mcpServers!.unleashd_buddy });
+      return executeCommand(request);
+    }
     const turn: Turn = { n: turns.length + 1, request, mcp: request.mcpServers!.unleashd_buddy };
     turns.push(turn);
     const sessionId = request.resumeSessionId ?? `native-${turn.n}`;
@@ -355,7 +367,14 @@ async function world(reopen?: string) {
       stop: (id) => conversations.get(id)?.stop(),
     },
   });
-  const port = createBuddyPolicyPort({ runner, grants, briefings, reviewer, spec: endpoint.spec });
+  const port = createBuddyPolicyPort({
+    runner,
+    grants,
+    briefings,
+    reviewer,
+    spec: endpoint.spec,
+    steering: () => ({ postToolHookUrl: endpoint.postToolHookUrl }),
+  });
   const Conversation = createConversationRuntime({
     executions: testExecutions(),
     buddies: port,
@@ -5275,3 +5294,272 @@ test('a follow-up waiting on a busy seat is consumed when the busy turn reads it
     await w.close();
   }
 });
+
+// Native hooks use the same loopback grant and durable read fence as Buddy tool responses.
+for (const child of [false, true]) {
+  test(`an owner post steers a live turn at a native tool boundary${child ? ' while its parent waits' : ''}`, async () => {
+    const w = await world();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let arrived!: () => void;
+    const started = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    try {
+      w.during.set(1, async () => {
+        arrived();
+        await blocked;
+      });
+      const say = async (author: typeof OWNER, body: string, replyToId?: string) => {
+        const post = await w.post(
+          author,
+          { kind: 'id', id: w.general.id },
+          {
+            kind: 'inform',
+            body,
+            replyToId,
+            evidence: [],
+            mentions: [],
+            broadcast: false,
+            key: body,
+          }
+        );
+        w.announce(post);
+        return post;
+      };
+      const root = await say(OWNER, `[@Lead](buddy:${w.lead.id}) build the board`);
+      await started;
+      const turn = w.turns[0];
+      assert.equal(turn.mcp.kind, 'http');
+      if (turn.mcp.kind !== 'http') throw new Error('expected HTTP');
+      const httpSpec = turn.mcp;
+      const hook = async (agent_id?: string) => {
+        const response = await fetch(w.endpoint.postToolHookUrl, {
+          method: 'POST',
+          headers: { ...httpSpec.headers, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            hook_event_name: child ? 'PostToolUse' : 'PostToolUseFailure',
+            ...(agent_id ? { agent_id } : {}),
+          }),
+        });
+        assert.equal(response.status, 200);
+        return response.text();
+      };
+      // Chatter alone never triggers the new native steering surface.
+      const chatter = (
+        await w.core.post(
+          buddyActor(w.designer.id),
+          { kind: 'id', id: w.general.id },
+          {
+            kind: 'inform',
+            body: 'designer chatter',
+            replyToId: root.id,
+            evidence: [],
+            mentions: [],
+            broadcast: false,
+            key: 'chatter',
+          }
+        )
+      ).post;
+      w.announce(chatter);
+      assert.equal(await hook(child ? 'native-child' : undefined), '');
+      const correction = await say(
+        OWNER,
+        `[@Lead](buddy:${w.lead.id}) Use a 3×3×3 board, keep the current task.`,
+        root.id
+      );
+      const shown = JSON.parse(await hook(child ? 'native-child' : undefined));
+      assert.match(shown.hookSpecificOutput.additionalContext, /While you were working/);
+      assert.ok(shown.hookSpecificOutput.additionalContext.includes(correction.body));
+      assert.equal(await hook(child ? 'native-child' : undefined), '');
+      const delivery = async () =>
+        (await w.runs(w.lead.id)).find(
+          (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
+        )!;
+      if (child) {
+        // A child's peek must NOT consume the parent's delivery or claim that the parent read it.
+        assert.equal((await delivery()).status, 'queued');
+        const parent = JSON.parse(await hook());
+        assert.ok(parent.hookSpecificOutput.additionalContext.includes(correction.body));
+      }
+      assert.equal((await delivery()).errorCode, 'consumed');
+      assert.equal(w.turns.length, 1);
+      assert.equal(w.stopped.size, 0);
+      assert.equal(await hook(), '');
+      release();
+      await until(
+        async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+        'settled'
+      );
+      assert.equal(w.turns.length, 1);
+      const denied = await fetch(w.endpoint.postToolHookUrl, {
+        method: 'POST',
+        headers: turn.mcp.headers,
+        body: JSON.stringify({ hook_event_name: 'PostToolUse' }),
+      });
+      assert.equal(denied.status, 401, 'settlement revokes native hooks with the MCP grant');
+    } finally {
+      release();
+      await w.close();
+    }
+  });
+}
+
+test('a queued model pick waits for its own turn at every tool boundary', async () => {
+  const w = await world();
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let arrived!: () => void;
+  const started = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  try {
+    w.during.set(1, async () => {
+      arrived();
+      await blocked;
+    });
+    const say = async (body: string, replyToId?: string) => {
+      const post = await w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          key: body,
+        }
+      );
+      w.announce(post);
+      return post;
+    };
+    const root = await say(`[@Lead](buddy:${w.lead.id}) build the board`);
+    await started;
+    const pick = createDefaultConversationConfig('claude');
+    w.picks.set(w.lead.id, pick);
+    const correction = await say(
+      `[@Lead](buddy:${w.lead.id}) Use a 3×3×3 board on the picked model`,
+      root.id
+    );
+    const mcp = w.turns[0].mcp;
+    assert.equal(mcp.kind, 'http');
+    if (mcp.kind !== 'http') throw new Error('expected HTTP');
+    const hook = await fetch(w.endpoint.postToolHookUrl, {
+      method: 'POST',
+      headers: mcp.headers,
+      body: JSON.stringify({ hook_event_name: 'PostToolUse' }),
+    });
+    assert.equal(await hook.text(), '');
+    const tool = await call(mcp, 'doc_read', { kind: 'working' });
+    assert.equal(tool.content.length, 1);
+    const delivery = (await w.runs(w.lead.id)).find(
+      (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
+    )!;
+    assert.equal(delivery.status, 'queued');
+    const waiting = await w.channels.responding(w.general.id);
+    assert.equal(waiting.find((r) => r.state === 'queued')?.waiting?.kind, 'conversation_busy');
+    release();
+    await until(() => w.turns.length === 2, 'the picked turn');
+    assert.equal(w.turns[1].request.harness, 'claude');
+    assert.ok(w.turns[1].request.prompt.includes(correction.body));
+    await until(
+      async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+      'picked turn settles'
+    );
+  } finally {
+    release();
+    await w.close();
+  }
+});
+
+// Opt-in paid CLI evidence; all stores and the CLI cwd are temporary. No shell-out to agent
+// binaries: this drives the same executeCommand boundary as a production conversation.
+for (const provider of ['codex', 'claude'] as const) {
+  for (const child of [false, true]) {
+    test(
+      `real CLI ${provider}: owner steering ${child ? 'during native child work' : 'after Bash'}`,
+      {
+        skip: process.env.UNLEASHD_REAL_STEERING !== '1',
+        timeout: 180_000,
+      },
+      async () => {
+        const w = await world(undefined, true);
+        const marker = join(w.scratch, 'tool-started');
+        const release = join(w.scratch, 'tool-release');
+        const result = join(w.scratch, 'steered-result');
+        try {
+          const config = createDefaultConversationConfig(provider);
+          config.model = {
+            mode: 'explicit',
+            modelId: provider === 'claude' ? 'claude-sonnet-5-5' : 'gpt-5.6-luna',
+          };
+          w.picks.set(w.lead.id, config);
+          const commands = `First use a shell tool to run: touch ${marker}; while [ ! -f ${release} ]; do sleep 0.2; done; echo ready. Then, in a SECOND shell tool call, write the board dimensions specified by the newest owner message to ${result}. Default dimensions are 2×2×2. Keep working after any owner correction.`;
+          const root = await w.post(
+            OWNER,
+            { kind: 'id', id: w.general.id },
+            {
+              kind: 'inform',
+              body: `[@Lead](buddy:${w.lead.id}) ${child ? `Delegate these exact steps to one native sub-agent in the foreground, wait for it, and then confirm its result: ${commands}` : commands}`,
+              evidence: [],
+              mentions: [],
+              broadcast: false,
+              key: 'real-root',
+            }
+          );
+          w.announce(root);
+          await until(() => existsSync(marker), 'real native shell running');
+          const correction = await w.post(
+            OWNER,
+            { kind: 'id', id: w.general.id },
+            {
+              kind: 'inform',
+              body: `[@Lead](buddy:${w.lead.id}) Correction: use a 3×3×3 board. Preserve the current task and keep the worker running.`,
+              replyToId: root.id,
+              evidence: [],
+              mentions: [],
+              broadcast: false,
+              key: 'real-correction',
+            }
+          );
+          w.announce(correction);
+          writeFileSync(release, 'continue');
+          await until(() => existsSync(result), 'the corrected native tool result');
+          assert.match(readFileSync(result, 'utf8'), /3[×x]3[×x]3/);
+          assert.equal(w.turns.length, 1);
+          assert.equal(w.stopped.size, 0);
+          await until(
+            async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+            'real turn settles'
+          );
+          const delivery = (await w.runs(w.lead.id)).find(
+            (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
+          )!;
+          assert.equal(delivery.errorCode, 'consumed');
+          const seat = [...w.conversations.values()].find((c) => c.id !== 'owner-chat')!;
+          const transcript = seat.messages.map((m) => bodyText(m.body)).join('\n');
+          console.log(`REAL_STEERING ${provider} child=${child}: ${transcript}`);
+          if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
+            mkdirSync(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, { recursive: true });
+            writeFileSync(
+              join(
+                process.env.UNLEASHD_STEERING_EVIDENCE_DIR,
+                `${provider}-${child ? 'child' : 'bash'}.txt`
+              ),
+              transcript
+            );
+          }
+        } finally {
+          writeFileSync(release, 'continue');
+          await w.close();
+        }
+      }
+    );
+  }
+}

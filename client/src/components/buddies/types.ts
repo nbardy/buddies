@@ -101,14 +101,7 @@ export interface ThreadPage {
   seats: ThreadSeat[];
 }
 
-/** GET /api/buddies/channels/:channelId/responding */
-export interface ChannelResponse {
-  channelId: string;
-  threadRootId: string;
-  buddyId: string;
-  startedAt: string;
-  state: 'replying' | 'queued';
-}
+export type { ChannelResponse } from '@unleashd/shared';
 
 /**
  * POST /api/buddies/channels/:channelId/posts (and /direct/posts). A mention's turn starts from

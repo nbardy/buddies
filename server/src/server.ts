@@ -477,6 +477,10 @@ const buddyPolicyPort = createBuddyPolicyPort({
   briefings: buddyBriefings,
   reviewer: memoryReviewer,
   spec: buddyMcpSpec,
+  steering: () => {
+    if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
+    return { postToolHookUrl: buddyMcp.postToolHookUrl };
+  },
 });
 const Conversation = createConversationRuntime({
   // Chat and Builder owner messages are rows of the records store (turns/intake.ts).

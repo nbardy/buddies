@@ -1622,6 +1622,23 @@ fn a_followed_thread_delivers_anothers_post_to_the_following_conversation() {
     assert_eq!(bodies(&s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts), ["during the turn"]);
 }
 
+// task_01a11a68 (2026-10-08): a native sub-agent of a running turn is shown the owner's message
+// without taking it. If its peek advanced the mark, the queued delivery would settle `consumed`
+// and the parent turn, the one answering the thread, would never see the message.
+#[test]
+fn a_peek_shows_unread_posts_without_fencing_their_delivery() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
+    s.post(&buddy("peer"), channel, reply("use a 3x3x3 grid", "fix")).unwrap();
+    assert_eq!(bodies(&s.peek_thread_unread(&buddy("mid"), &root.id, 20).unwrap().posts), ["use a 3x3x3 grid"]);
+    assert_eq!(bodies(&s.peek_thread_unread(&buddy("mid"), &root.id, 20).unwrap().posts), ["use a 3x3x3 grid"], "a peek reads nothing");
+    assert_eq!(bodies(&s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts), ["use a 3x3x3 grid"]);
+    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "the parent's take fenced the delivery");
+}
+
 #[test]
 fn follow_false_unsubscribes_and_a_read_first_delivery_is_consumed() {
     let mut f = fixture();

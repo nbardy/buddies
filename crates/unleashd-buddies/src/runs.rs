@@ -19,7 +19,7 @@ pub(crate) const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id,
     task_epoch, after_run_id, status, deadline, lease_expires_at, outcome, error_code, error, ready_at, \
     created_at, started_at, ended_at, config, body, executing_at, through_ord";
 
-const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
+pub(crate) const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
     JOIN buddy b ON b.id = r.buddy_id
     LEFT JOIN (
         SELECT buddy_id, count(*) AS active
@@ -40,7 +40,7 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 // deliveries for an owner chat run in its background branch, so its queue holds only owner messages.
 // A bound seat and an unbound mention can target the same thread. Serialize both before
 // placement, or bind_run fails conversation_busy. Guard: live thread steering (buddies-v2).
-const WAITING_REASON_SQL: &str = r#"CASE
+pub(crate) const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
     WHEN r.conversation_id IS NOT NULL AND EXISTS (

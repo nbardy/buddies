@@ -43,6 +43,8 @@ export declare class BuddiesCore {
   followThread(actor: Actor, rootId: string, conversationId: string | undefined | null, limit: number): Promise<ThreadUnread>
   /** The thread's unread posts for this Buddy, marked read (the follow wait's re-read). */
   catchUpThread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
+  /** The thread's unread posts for this Buddy, NOT marked read (a native sub-agent's view). */
+  peekThreadUnread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
   /** What a claimed delivery shows (deliveries.rs `compose`). */
   deliverPosts(runId: string): Promise<Delivery>
   /** The Buddies replying in a channel: its queued and running deliveries. */
@@ -429,6 +431,7 @@ export type RequestState =
 
 /** A queued or running delivery: "X is replying…" for a channel (deliveries.rs `responding`). */
 export interface Responding {
+  waiting?: RunWaiting
   buddyId: string
   threadRootId: string
   startedAt: string

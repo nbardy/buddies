@@ -4,6 +4,7 @@ import type {
   Doc,
   Post,
   Run,
+  RunWaiting,
   Schedule,
   Task,
   Workspace,
@@ -370,3 +371,14 @@ export function buddyMutationRoute<K extends BuddyMutation>(operation: K): Buddy
   const { method, status, path } = buddyMutations[operation];
   return `${method} ${status} ${path}` as BuddyMutationRoute<K>;
 }
+
+// Pattern: one-type-source (docs/patterns.md#one-type-source)
+/** A channel delivery with the same waiting reason the claim gate reports. */
+export type ChannelResponse = {
+  channelId: string;
+  threadRootId: string;
+  buddyId: string;
+  startedAt: string;
+  state: 'replying' | 'queued';
+  waiting?: RunWaiting;
+};

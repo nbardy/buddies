@@ -4,6 +4,7 @@ import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
 import type { GrantRecord, Grants, Subscribes, TurnGrant } from './grants';
+import type { SteeringEndpoint } from './harness-steering';
 import { MCP_SERVER_NAME } from './mcp';
 import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
 import type { LeaseRenewal, Runner } from './runner';
@@ -36,7 +37,7 @@ export interface BuddyPolicyPort {
     conversationId: string;
     owner: boolean;
     subscribes: Subscribes;
-  }): TurnTools;
+  }): BuddyTurnTools;
   builderMcpServers(conversationId: string): TurnTools;
   /** The turn's holder is alive: push its run's lease forward (Pattern: lease-heartbeat). */
   renewLease(runId: string, leaseToken: string): Promise<LeaseRenewal>;
@@ -59,12 +60,18 @@ export interface TurnTools {
   grant: GrantRecord;
 }
 
+/** A Buddy worker turn's tools, plus where its harness hook reports native tool uses. */
+export interface BuddyTurnTools extends TurnTools {
+  steering: SteeringEndpoint;
+}
+
 export function createBuddyPolicyPort(deps: {
   runner: Runner;
   grants: Grants;
   briefings: Briefings;
   reviewer: MemoryReviewer;
   spec(grant: TurnGrant): McpServerSpec;
+  steering(): SteeringEndpoint;
 }): BuddyPolicyPort {
   const { runner, grants, briefings } = deps;
   // A chat's deadline is its run's `deadline`, set at claim from this budget. A chat deadline
@@ -94,6 +101,7 @@ export function createBuddyPolicyPort(deps: {
       return {
         servers: { [MCP_SERVER_NAME]: deps.spec(grant) },
         grant: grants.record(grant.token),
+        steering: deps.steering(),
       };
     },
     builderMcpServers(conversationId) {

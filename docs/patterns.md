@@ -215,7 +215,16 @@ At each Buddy MCP tool response, a live delivery/request reads the new posts in 
 (`mcp.ts liveThreadPosts`, the existing `catchUpThread` read fence) and appends a steering envelope:
 adjust to the new message while preserving current work and authority. Consumed deliveries run no
 second turn. Owner chats and memory review are excluded; a queued explicit model pick waits for
-a new turn. A tool-free stretch receives its durable queued delivery when idle. Guards:
+a new turn. The 2026-10-08 native-tool successor reuses this same resolver and fence:
+Claude PostToolUse/Failure and Codex PostToolUse call the loopback endpoint with the turn's own
+bearer. An owner post triggers a parent take; a native child peeks without advancing the parent's
+cursor, then the parent takes at its next boundary. No stop/restart, extra queue or owner DM post.
+The typed harness table documents buddy-tool-only adapters and the limits of a foreground wait.
+Channel waiting text projects this same claim gate's waiting expression, never infers pool_full
+from the mere existence of a queued delivery. Decision/evidence:
+`agent_notes/2026-10-08_steer-any-tool-boundary.md`. A tool-free stretch receives its durable queued
+delivery when idle. Guards: native boundary and model-pick regressions in buddies-v2; rendered
+channel waiting labels; existing
 buddies-v2 "new thread messages steer the live reply once", crate
 `a_subscribed_delivery_waits_for_an_unbound_claim_in_the_same_thread`.
 unread post of the threads its conversation subscribes to (`compose`), so a burst costs one turn. A

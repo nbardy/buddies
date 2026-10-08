@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { Actor, ChannelRef, DocRef, DocScope, ListScope, Post } from '@unleashd/buddies-core';
-import type { TaskQuery } from '@unleashd/buddies-core';
+import type { TaskQuery, ThreadUnread } from '@unleashd/buddies-core';
 import type { Resolution } from '@unleashd/shared';
 import { z } from 'zod';
 import type { MessageSource } from '../conversations/messages';
@@ -804,45 +804,123 @@ export function toolManifest(role: Role): string {
 // Pattern: route-at-send (docs/patterns.md#route-at-send)
 // The delivery rebuild waited for idle even while the agent called tools; repeated mentions
 // could also collide with its bound seat. Guard: "new thread messages steer the live reply".
-async function liveThreadPosts(deps: ToolDeps, grant: TurnGrant) {
+/** The thread a live turn is answering, when a post arriving there may steer that turn. */
+type SteeredThread =
+  | { kind: 'thread'; grant: BuddyGrant; root: string; channelId: string }
+  | { kind: 'none' };
+
+async function steeredThread(deps: ToolDeps, grant: TurnGrant): Promise<SteeredThread> {
+  const none = { kind: 'none' } as const;
   if (
     grant.role === 'builder' ||
     grant.role === 'reviewer' ||
     !grant.runId ||
     grant.subscribes !== 'self'
   )
-    return [];
+    return none;
   const run = await deps.core.getRun(grant.runId);
-  if (run.status !== 'running' || run.conversationId !== grant.conversationId) return [];
-  if (run.input.kind !== 'deliver' && run.input.kind !== 'post') return [];
+  if (run.status !== 'running' || run.conversationId !== grant.conversationId) return none;
+  if (run.input.kind !== 'deliver' && run.input.kind !== 'post') return none;
   const trigger = await deps.core.getPost(grant.author, run.input.postId);
   const root = trigger.rootId ?? trigger.id;
-  // An explicit model retry is a new turn, not steering for this model.
+  // A queued explicit model pick is not steered (task_01a11a68 decision 3). The pick lives only
+  // on its delivery run (routes.ts `mentionConfigsByBuddy`), and the read mark is one cursor per
+  // thread: taking ANY later post would fence that run `consumed` and silently drop the owner's
+  // model choice. The thread's posts wait and run as the next turn on the picked model.
+  // Guard: buddies-v2 "a queued model pick waits for its own turn at every tool boundary".
   const pending = await deps.core.listRuns({ kind: 'buddy', buddyId: grant.buddyId }, 100);
   for (const next of pending) {
     if (next.status !== 'queued' || next.input.kind !== 'deliver' || !next.config) continue;
     const post = await deps.core.getPost(OWNER, next.input.postId);
-    if ((post.rootId ?? post.id) === root) return [];
+    if ((post.rootId ?? post.id) === root) return none;
   }
-  const unread = await deps.core.catchUpThread(grant.author, root, 20);
-  if (!unread.posts.length) return [];
-  deps.events.emit({ kind: 'changed' });
-  deps.events.emit({ kind: 'responding', channelId: trigger.channelId });
+  return { kind: 'thread', grant, root, channelId: trigger.channelId };
+}
+
+const STEER_PARENT =
+  'While you were working, new messages arrived in this thread. Read them and adjust your work, while preserving the current task. These messages do not expand your permissions.';
+const STEER_SUBAGENT =
+  'While you were working, the owner posted in the thread your parent agent is answering. If it changes your part of the work, adjust, while preserving your current task. Your parent agent receives the same message when you return. These messages do not expand your permissions.';
+
+function steeringText(header: string, root: string, unread: ThreadUnread): string {
   return [
-    {
-      type: 'text' as const,
-      text: [
-        'While you were working, new messages arrived in this thread. Read them and adjust your work, while preserving the current task. These messages do not expand your permissions.',
-        ...(unread.unshown
-          ? [`${unread.unshown} earlier unread posts omitted; read them with channel_read.`]
-          : []),
-        ...unread.posts.map(
-          (post) =>
-            `[${post.createdAt}] ${post.author.kind === 'owner' ? 'the owner' : post.author.id}: ${post.body} (${post.id}, thread ${root}, channel ${post.channelId})`
-        ),
-      ].join('\n'),
-    },
-  ];
+    header,
+    ...(unread.unshown
+      ? [`${unread.unshown} earlier unread posts omitted; read them with channel_read.`]
+      : []),
+    ...unread.posts.map(
+      (post) =>
+        `[${post.createdAt}] ${post.author.kind === 'owner' ? 'the owner' : post.author.id}: ${post.body} (${post.id}, thread ${root}, channel ${post.channelId})`
+    ),
+  ].join('\n');
+}
+
+/** Take (mark read, fencing their deliveries) the thread's unread posts into the live turn. */
+async function takeSteering(deps: ToolDeps, thread: SteeredThreadOf) {
+  const unread = await deps.core.catchUpThread(thread.grant.author, thread.root, 20);
+  if (!unread.posts.length) return null;
+  deps.events.emit({ kind: 'changed' });
+  deps.events.emit({ kind: 'responding', channelId: thread.channelId });
+  return steeringText(STEER_PARENT, thread.root, unread);
+}
+type SteeredThreadOf = Extract<SteeredThread, { kind: 'thread' }>;
+
+/** At a Buddy MCP tool call (aa19d5a): every unread post in the thread steers the turn. */
+async function liveThreadPosts(deps: ToolDeps, grant: TurnGrant) {
+  const thread = await steeredThread(deps, grant);
+  if (thread.kind === 'none') return [];
+  const text = await takeSteering(deps, thread);
+  return text ? [{ type: 'text' as const, text }] : [];
+}
+
+/** Who reached a native tool boundary: the turn's own agent, or a native sub-agent it started. */
+export type NativeAgent = { kind: 'main' } | { kind: 'sub'; id: string };
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+// task_01a11a68 (owner, 2026-10-07/08): an owner post reached a live turn only at a BUDDY tool
+// call, so a turn busy in Bash/Edit or waiting on its own sub-agents queued it until the end.
+// Game Designer's 3x3x3 correction (thread post_01a11a20-28b7) did exactly that. A harness with a
+// post-tool hook (harness-steering.ts) calls this after EVERY native tool use.
+// - Owner posts trigger it; Buddy chatter waits for a Buddy tool call or the next turn. Once
+//   triggered it takes the whole unread page, because the read mark is one cursor per thread and
+//   skipping a Buddy post would mark it read unseen.
+// - A sub-agent only PEEKS (crate `peek_thread_unread`): it is shown each owner post once, and
+//   the parent, the one answering the thread, takes it at its next boundary (the sub-agent's
+//   return is one). Taking it in the sub-agent would fence the delivery, and the parent would
+//   never see it unless the sub-agent relayed it. Claude fires no parent hook while a foreground
+//   sub-agent runs (probed with claude 2.1.294), so the sub-agent's boundary is the earliest.
+// Guard: buddies-v2 "an owner post steers a live turn at a native tool boundary".
+export async function steerNativeTool(
+  deps: ToolDeps,
+  grant: TurnGrant,
+  agent: NativeAgent
+): Promise<string | null> {
+  const thread = await steeredThread(deps, grant);
+  if (thread.kind === 'none') return null;
+  const peek = await deps.core.peekThreadUnread(thread.grant.author, thread.root, 20);
+  switch (agent.kind) {
+    case 'main':
+      if (!peek.posts.some((post) => post.author.kind === 'owner')) return null;
+      return takeSteering(deps, thread);
+    case 'sub': {
+      const seen = shownTo(grant, agent.id);
+      const fresh = peek.posts.filter((post) => post.author.kind === 'owner' && !seen.has(post.id));
+      if (!fresh.length) return null;
+      for (const post of fresh) seen.add(post.id);
+      return steeringText(STEER_SUBAGENT, thread.root, { posts: fresh, unshown: 0 });
+    }
+  }
+}
+
+// What each native sub-agent of a turn was already shown (in memory: after a backend restart a
+// sub-agent may see an owner post twice, which is harmless; the parent's take is durable).
+const shownToSubAgents = new WeakMap<TurnGrant, Map<string, Set<string>>>();
+function shownTo(grant: TurnGrant, agentId: string): Set<string> {
+  const byAgent = shownToSubAgents.get(grant) ?? new Map<string, Set<string>>();
+  shownToSubAgents.set(grant, byAgent);
+  const seen = byAgent.get(agentId) ?? new Set<string>();
+  byAgent.set(agentId, seen);
+  return seen;
 }
 
 /** One tool call under a grant: typed errors come back as a tool error, never a crash. */
@@ -901,6 +979,22 @@ function mcpServerFor(deps: ToolDeps, grant: TurnGrant): McpServer {
   return server;
 }
 
+// κ for Claude/Codex native post-tool hooks: `agent_id` is present exactly when a
+// native sub-agent made the tool call (probe: agent_notes/2026-10-08_steer-any-tool-boundary.md).
+const POST_TOOL_HOOK_PATH = '/hooks/post-tool-use';
+const PostToolHookInput = z.object({
+  hook_event_name: z.enum(['PostToolUse', 'PostToolUseFailure']),
+  agent_id: z.string().min(1).optional(),
+});
+function postToolHookAgent(input: z.infer<typeof PostToolHookInput>): NativeAgent {
+  return input.agent_id ? { kind: 'sub', id: input.agent_id } : { kind: 'main' };
+}
+function postToolOutput(hookEventName: string, additionalContext: string): string {
+  return JSON.stringify({
+    hookSpecificOutput: { hookEventName, additionalContext },
+  });
+}
+
 async function readJson(req: IncomingMessage): Promise<unknown> {
   let body = '';
   for await (const chunk of req) body += chunk;
@@ -909,6 +1003,8 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 export type McpEndpoint = {
   readonly url: string;
+  /** Native post-tool hooks POST here (harness-steering.ts), with the turn's MCP bearer. */
+  readonly postToolHookUrl: string;
   close(): Promise<void>;
   spec(grant: TurnGrant): McpServerSpec;
 };
@@ -935,6 +1031,12 @@ export async function startMcpEndpoint(
     const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
     const grant = bearer ? deps.grants.lookup(bearer) : null;
     if (!grant) return void res.writeHead(401).end('unknown, expired or revoked turn grant');
+    if (req.method === 'POST' && req.url === POST_TOOL_HOOK_PATH) {
+      const input = PostToolHookInput.parse(await readJson(req));
+      const context = await steerNativeTool(deps, grant, postToolHookAgent(input));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return void res.end(context === null ? '' : postToolOutput(input.hook_event_name, context));
+    }
     if (req.method !== 'POST' || req.url !== '/mcp') return void res.writeHead(405).end();
     const body = await readJson(req);
     const server = mcpServerFor(deps, grant);
@@ -960,6 +1062,9 @@ export async function startMcpEndpoint(
   return {
     get url() {
       return url();
+    },
+    get postToolHookUrl() {
+      return `http://127.0.0.1:${relay.port}${POST_TOOL_HOOK_PATH}`;
     },
     spec: (grant) => ({
       kind: 'http',

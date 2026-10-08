@@ -5,7 +5,12 @@ import { register } from 'node:module';
 import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
-import type { ChannelUnread, Post, ThreadStat } from '../src/components/buddies/types';
+import type {
+  ChannelResponse,
+  ChannelUnread,
+  Post,
+  ThreadStat,
+} from '../src/components/buddies/types';
 import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { inboxFixture, postFixture, publicChannel } from './fixtures/channel-posts';
 register(
@@ -43,6 +48,7 @@ async function renderChannel(opts: {
   posts: Post[];
   threads?: ThreadStat[];
   url?: string;
+  responding?: ChannelResponse[];
 }) {
   const channelId = `ch_${opts.ws}`;
   await loadResource({
@@ -59,7 +65,7 @@ async function renderChannel(opts: {
   });
   await loadResource({
     key: `/api/buddies/channels/${channelId}/responding`,
-    load: async () => [],
+    load: async () => opts.responding ?? [],
   });
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={[opts.url ?? `/?channel=${channelId}`]}>
@@ -254,4 +260,31 @@ test('the Task filter shows one Task across channels, each post linked into its 
       `href="${channels}\\?channel=ch_main&amp;thread=about-task&amp;post=about-task"[^>]*>View in channel<`
     )
   );
+});
+
+test('channel waiting labels distinguish a busy turn, a full pool and an older backend', async () => {
+  for (const [waiting, expected] of [
+    [{ kind: 'conversation_busy' }, 'waiting for the current turn'],
+    [{ kind: 'pool_full', active: 5, max: 5 }, 'queued at the run limit (5/5)'],
+    [undefined, 'queued…'],
+  ] as const) {
+    const root = post('root', 1);
+    const html = await renderChannel({
+      ws: `ws-waiting-${waiting?.kind ?? 'old'}`,
+      entry: { unread: 0 },
+      posts: [root],
+      responding: [
+        {
+          channelId: 'fixture',
+          threadRootId: root.id,
+          buddyId: lead.id,
+          startedAt: root.createdAt,
+          state: 'queued',
+          waiting,
+        },
+      ],
+    });
+    assert.ok(html.includes(expected), html);
+    if (waiting?.kind !== 'pool_full') assert.ok(!html.includes('run limit'));
+  }
 });
