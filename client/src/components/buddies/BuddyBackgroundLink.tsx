@@ -1,8 +1,8 @@
 import { useAtomValue } from 'jotai';
 import { Link, useSearchParams } from 'react-router-dom';
 import { buddyWorkerCountsFamily } from '../../atoms/buddy-background';
-import { useBuddyWorkerRead } from '../../hooks/useBuddyData';
 import { connectionAtom, loadCompleteOf } from '../../atoms/conversations';
+import { useBuddyWorkerRead } from '../../hooks/useBuddyData';
 import './ChannelWorkers.css';
 import { channelLinkPath } from './channel-link';
 
@@ -13,9 +13,11 @@ export function BuddyBackgroundLink({
   name,
 }: { buddyId: string; workspaceId: string; name: string }) {
   const read = useBuddyWorkerRead(buddyId, workspaceId);
-  const { active: count, running } = useAtomValue(
-    buddyWorkerCountsFamily({ buddyId, workspaceId })
-  );
+  const {
+    active: count,
+    running,
+    runningCount,
+  } = useAtomValue(buddyWorkerCountsFamily({ buddyId, workspaceId }));
   const loaded =
     loadCompleteOf(useAtomValue(connectionAtom).server) && (count > 0 || read.kind !== 'loading');
   const [searchParams] = useSearchParams();
@@ -23,13 +25,16 @@ export function BuddyBackgroundLink({
   returnParams.delete('workers');
   const path = channelLinkPath(workspaceId, { kind: 'workers', buddyId });
   const label = `${name}: ${loaded ? `${count} active background workers` : 'loading background workers'}`;
+  const tooltip = loaded
+    ? `${runningCount} ${runningCount === 1 ? 'worker' : 'workers'} running${count > runningCount ? ` · ${count - runningCount} queued` : ''}`
+    : 'Loading workers…';
   return (
     <Link
       className="buddy-background-link"
       data-running={loaded && running ? 'true' : undefined}
       to={returnParams.size ? `${path}&${returnParams}` : path}
       aria-label={label}
-      title={`${label}. View workers and recent activity`}
+      title={`${name}: ${tooltip}. View workers and recent activity`}
     >
       <svg
         width="14"

@@ -456,6 +456,7 @@ function BuddyRow({ member }: { member: Buddy }) {
             <button
               type="button"
               className="mobile-channels-wake ui-muted"
+              title={`Wake up ${member.name}: catch up on the channels and act`}
               aria-label={`Wake ${member.name}: catch up on the channels and act`}
               disabled={action.kind === 'pending'}
               onClick={direct.wake}
