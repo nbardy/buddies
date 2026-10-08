@@ -7,6 +7,8 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { WS_PATH } from '@unleashd/shared';
 import { WebSocket } from 'ws';
+import { freePortSync } from './free-port';
+import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 import { decideAuth } from '../src/auth/gate';
 import { digestToken, resolveAuthPolicy } from '../src/auth/policy';
 
@@ -18,7 +20,8 @@ import { digestToken, resolveAuthPolicy } from '../src/auth/policy';
  * again.
  */
 
-const PORT = 7527;
+// Fixed 7527 collided across suite runs. Guard: two concurrent full server suites.
+const PORT = freePortSync();
 const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'f4c1a9e2b7d60358f4c1a9e2b7d60358';
 const OWNER = 'owner@example.com';
@@ -75,6 +78,7 @@ function startServer(): Promise<void> {
       env: {
         ...process.env,
         HOME: dataDirectory,
+        ...NO_AUTO_INSTALL,
         PATH: `${shimDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
         PORT: String(PORT),
         // Not development: the UI is served from PORT itself, which is where

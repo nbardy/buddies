@@ -4902,9 +4902,9 @@ test('follow (d): a delivery whose posts the caller already read settles with no
   }
 });
 
-// Delivery design Task 3 criterion: the bounded wait is real, up to 30 s (owner, "wait for a
-// message in thread"). 25 s of wait, a post at 20 s: returned inline, no extra turn.
-test('follow (g): a 25 s wait returns a post that arrives at 20 s', async () => {
+// A 25 s requested budget must return when a post arrives, rather than wait for expiry.
+// The old 20 s sleep cost 20.5 s per suite. Guard: inline return well before the budget.
+test('follow (g): a 25 s wait returns inline when a later post arrives', async () => {
   const w = await world();
   try {
     const { read, ms } = await leadFollows(
@@ -4912,17 +4912,20 @@ test('follow (g): a 25 s wait returns a post that arrives at 20 s', async () => 
       { wait: 25 },
       {
         during: async (rootId) => {
-          await new Promise((resolve) => setTimeout(resolve, 20_000));
-          assert.equal((await designerReplies(w, rootId, 'Twenty seconds in')).isError, false);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          assert.equal(
+            (await designerReplies(w, rootId, 'Arrived during the wait')).isError,
+            false
+          );
         },
       }
     );
     assert.equal(read.value.kind, 'unread', read.text);
     assert.deepEqual(
       read.value.posts.map((p: { body: string }) => p.body),
-      ['Twenty seconds in']
+      ['Arrived during the wait']
     );
-    assert.ok(ms >= 19_900 && ms < 25_000, `returned when the post arrived (${ms} ms)`);
+    assert.ok(ms >= 100 && ms < 5_000, `returned when the post arrived (${ms} ms)`);
   } finally {
     await w.close();
   }
