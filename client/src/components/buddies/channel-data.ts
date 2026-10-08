@@ -50,7 +50,6 @@ import type {
   ThreadPage,
   ThreadStat,
 } from './types';
-import { taskStatusView } from './ui-contract';
 
 /** Legacy generated replies carried markers; owner posts remain literal prose. */
 export function channelPostBody(post: Post): MessageBody {
@@ -541,35 +540,18 @@ function profileExecution(buddy: Buddy, agent: InstalledAgent | null): BuddyMemb
   }
 }
 
-// The universal @ menu: active Buddies and every live top-level Task (todos
-// are child tasks and stay out); the fuzzy ranker orders them together.
+// The @ menu selects active Buddies. Tasks remain in taskById for existing post chips.
 function channelReferences(
   members: readonly Buddy[],
-  tasks: readonly ChannelTask[],
   agent: InstalledAgent | null
 ): ChannelReference[] {
-  return [
-    ...members.map(
-      (member): ChannelReference => ({
-        kind: 'buddy',
-        id: member.id,
-        label: member.name,
-        detail: member.role,
-        execution: profileExecution(member, agent),
-      })
-    ),
-    ...tasks
-      .filter((task) => task.topLevel && task.status !== 'cancelled')
-      .map(
-        (task): ChannelReference => ({
-          kind: 'task',
-          id: task.id,
-          label: task.title,
-          status: task.status,
-          detail: `${taskStatusView(task.status).label} · ${task.ownerName}`,
-        })
-      ),
-  ];
+  return members.map((member) => ({
+    kind: 'buddy',
+    id: member.id,
+    label: member.name,
+    detail: member.role,
+    execution: profileExecution(member, agent),
+  }));
 }
 
 export type WorkspaceDirectory = {
@@ -607,7 +589,7 @@ export function workspaceDirectory(
     taskById: new Map(viewed.map((task) => [task.id, task])),
     tasks,
     rootPath: workspace?.rootPath ?? null,
-    references: channelReferences(activeMembers, viewed, agent),
+    references: channelReferences(activeMembers, agent),
   };
 }
 

@@ -36,6 +36,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WS_PATH } from '@unleashd/shared';
+import { inspectChannelModelPicker } from './lib/channel-model-picker.mjs';
 import { inspectDmLayout } from './lib/dm-layout.mjs';
 import { openSession, resolveAuthToken, sleep } from './lib/headless-chrome.mjs';
 import { compareRuns } from './lib/screenshot-compare.mjs';
@@ -347,6 +348,10 @@ const NO_MATCH = 'zqxj-no-such-text';
 // Type "@" into the channel composer (one component on both trees) so the
 // mention picker opens.
 const OPEN_MENTION_MENU = prep(`
+  document.querySelector('[aria-label="Close dependency checks"]')?.click();
+  await tick(100);
+  document.querySelector('[aria-labelledby="home-screen-guide-title"] button')?.click();
+  await tick(50);
   const input = document.querySelector('.channel-composer textarea');
   if (!input) return 'SKIP';
   input.focus();
@@ -377,6 +382,8 @@ const OPEN_CHANNEL_SEARCH = openChannelSearch('search');
 // keydown), then click its chip on the bar to open the harness/model picker.
 // A chip that is disabled means the backend predates member execution.
 const OPEN_MENTION_MODEL = prep(`
+  document.querySelector('[aria-label="Close dependency checks"]')?.click();
+  [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Got it')?.click();
   const input = document.querySelector('.channel-composer textarea');
   if (!input) return 'SKIP';
   input.focus();
@@ -397,12 +404,16 @@ const OPEN_MENTION_MODEL = prep(`
   if (!chip || chip.disabled) return 'SKIP';
   chip.click();
   await tick(150);
-  return has('.channel-composer-model');`);
+  if (!has('.channel-composer-model')) return false;
+  (${inspectChannelModelPicker.toString()})();
+  return true;`);
 
 // Use the first real seat in this thread. The chip and bottom picker must show its
 // contextual model rather than a profile default, on both composer shells.
 const OPEN_THREAD_SELECTION = (rootId, openPicker = false) =>
   prep(`
+  document.querySelector('[aria-label="Close dependency checks"]')?.click();
+  [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Got it')?.click();
   const thread = await (await fetch('/api/buddies/posts/' + ${JSON.stringify(rootId)} + '/thread')).json();
   const id = thread.seats?.[0]?.buddyId;
   if (!id) return 'SKIP';
@@ -420,6 +431,7 @@ const OPEN_THREAD_SELECTION = (rootId, openPicker = false) =>
   if (!chip || chip.disabled) return 'SKIP';
   ${openPicker ? 'chip.click();' : 'input.blur();'}
   await tick(250);
+  ${openPicker ? `(${inspectChannelModelPicker.toString()})();` : ''}
   return has(${JSON.stringify(openPicker ? '.channel-composer-model' : '.channel-composer-mention')});`);
 
 // Click the first image in a channel post: the viewer must be centred on the page
@@ -657,6 +669,11 @@ export function buildScreens(found, focus) {
       ),
     },
     { name: 'landing', missing: null, views: onBoth(`${channels}?view=home`) },
+    {
+      name: 'landing-mentions',
+      missing: null,
+      views: onBoth(`${channels}?view=home`, OPEN_MENTION_MENU),
+    },
     {
       name: 'landing-menu',
       missing: null,

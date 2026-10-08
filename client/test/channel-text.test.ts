@@ -29,7 +29,7 @@ test('the @ trigger needs a word start and stops at newlines', () => {
 
 test('fuzzy ranking favours word-start matches', () => {
   const references: ChannelReference[] = [
-    { kind: 'task', id: 'x', label: 'Upload deadline', detail: '', status: 'ready' },
+    { kind: 'buddy', id: 'x', label: 'Upload deadline', detail: '', execution: unreported },
     {
       kind: 'buddy',
       id: 'y',
@@ -45,22 +45,19 @@ test('fuzzy ranking favours word-start matches', () => {
   assert.deepEqual(rankReferences('zzz', references), []);
 });
 
-// Live workspaces carry dozens of done Tasks; without the penalty they crowd
-// the eight picker slots ahead of the live work you are trying to mention.
-test('finished Tasks sink below live ones with the same match', () => {
-  const task = (id: string, status: string): ChannelReference => ({
+test('the @ menu never suggests Tasks, even from a mixed or cached reference list', () => {
+  const tasks: ChannelReference[] = ['ready', 'done', 'cancelled'].map((status) => ({
     kind: 'task',
-    id,
-    label: 'Preserve context',
+    id: status,
+    label: 'Lead rollout',
     detail: '',
     status,
-  });
-  assert.deepEqual(
-    rankReferences('pres', [task('done', 'done'), task('live', 'in_progress')]).map(
-      (reference) => reference.id
-    ),
-    ['live', 'done']
-  );
+  }));
+  const references = [...tasks, lead];
+  assert.deepEqual(rankReferences('', references), [lead]);
+  assert.deepEqual(rankReferences('lead', references), [lead]);
+  assert.deepEqual(rankReferences('rollout', references), []);
+  assert.deepEqual(rankReferences('', tasks), []);
 });
 
 // 493c1c7: an un-picked mention in a thread showed the Buddy's PROFILE default even though its
