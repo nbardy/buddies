@@ -48,8 +48,8 @@ export declare class BuddiesCore {
    * there carries an explicit pick (deliveries.rs `take_steering`; one transaction).
    */
   takeSteering(actor: Actor, runId: string, rootId: string, trigger: SteerTrigger, limit: number): Promise<Steering>
-  /** The thread's unread posts for this Buddy, NOT marked read (a native sub-agent's view). */
-  peekThreadUnread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
+  /** The owner posts no native sub-agent of the live turn `run_id` was shown yet, NOT marked read. */
+  noticeSubAgent(actor: Actor, runId: string, rootId: string, limit: number): Promise<ThreadUnread>
   /** Request-addressed messages waiting for this conversation's live turn (messages.rs). */
   pendingMessages(conversationId: string): Promise<Array<AddressedMessage>>
   /** Settles the receipts of messages a live turn was shown (messages.rs `acknowledge`). */
@@ -462,6 +462,16 @@ export interface Responding {
   threadRootId: string
   startedAt: string
   running: boolean
+  /**
+   * The seat the delivery runs (or is bound to run) in; none for an unbound mention. The host
+   * asks its live turn there what can reach it (channels.ts `reachOf`, task_01a11af2).
+   */
+  conversationId?: string
+  /**
+   * It carries the owner's explicit pick (model, effort, provider): it is never steered into a
+   * live turn and runs as its own (deliveries.rs `take_steering`).
+   */
+  picked: boolean
 }
 
 export interface Run {

@@ -24,7 +24,7 @@ import {
   commonToolResultParts,
 } from '../turns/policy';
 import { BUDDY_BUILDER_BRIEFING } from './builder';
-import type { GrantRecord } from './grants';
+import { type GrantRecord, adoptedGrant } from './grants';
 import { HARNESS_TURN } from './harness-steering';
 import type { BuddyPolicyPort } from './policy-port';
 import type { OwnedChatRun } from './runner';
@@ -464,6 +464,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
       owner: input.origin === 'owner_input',
       // A turn the owner typed (a chat run) subscribes the chat's branch (mcp.ts `subscriber`).
       subscribes: owned ? 'branch' : 'self',
+      hooks: HARNESS_TURN[config.provider].hooks,
     });
     this.grant = tools.grant;
     return {
@@ -565,7 +566,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
    */
   adopt(record: PolicyAdoption, review: AdoptedReview): void {
     if (record.t !== 'buddy') throw new Error(`A Buddy thread cannot adopt a ${record.t} turn`);
-    this.grant = record.grant;
+    this.grant = adoptedGrant(record.grant);
     this.briefedMemoryGeneration = record.briefedGeneration;
     this.providerAudienceKey = record.audienceKey;
     this.arm(record.run);

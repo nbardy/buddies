@@ -382,4 +382,27 @@ export type ChannelResponse = {
   /** `background`: the model is idle while its own background jobs run (task_01a11aa8). */
   state: 'replying' | 'background' | 'queued';
   waiting?: RunWaiting;
+  /** For a delivery queued behind its Buddy's live turn (`conversation_busy`): what reaches that
+   * turn. Absent otherwise, and from backends before task_01a11af2. */
+  reach?: LiveReach;
 };
+
+/**
+ * What reaches the live turn a queued owner post waits behind (server channels.ts `reachOf`).
+ * task_01a11af2 (owner, 2026-10-08): "we should never see waiting unless it's at the 5 worker
+ * max." Each case is one cause, said as such, never a generic "waiting":
+ * - `next_step`: the turn takes it at its next tool use, a sub-agent's return, or at once when its
+ *   model is idle on background work.
+ * - `buddy_tool_only`: the harness has no per-turn hook; it lands at a Buddy tool call, or after.
+ * - `spawned_before_live_delivery`: the process predates its hook set being recorded.
+ * - `model_pick`: the owner picked a model; that pick needs its own turn.
+ * - `turn_not_live`: no live turn here (starting, or a dead holder until its lease ends).
+ * Table of every waiting path: agent_notes/2026-10-08_waiting-paths.md.
+ */
+// Pattern: sum-types (docs/patterns.md#sum-types)
+export type LiveReach =
+  | { kind: 'next_step' }
+  | { kind: 'buddy_tool_only'; harness: string }
+  | { kind: 'spawned_before_live_delivery' }
+  | { kind: 'model_pick' }
+  | { kind: 'turn_not_live' };

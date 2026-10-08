@@ -478,15 +478,24 @@ impl Store {
         })
     }
 
-    /// A thread's unread posts for the Buddy, NOT marked read. Only for a reader that is not the
-    /// Buddy's turn itself: a native sub-agent of a running turn sees the owner's message at its
-    /// own tool boundary, while the read mark (and so the fence on the queued delivery) waits for
-    /// the parent turn, which alone takes it (mcp.ts `steerNativeTool`).
-    pub fn peek_thread_unread(&mut self, actor: &Actor, root_id: &str, limit: i64) -> Result<ThreadUnread> {
+    // Per-sub-agent host memory sent one owner's post 35 times and repeated it after restart.
+    // One run cursor notices once without advancing the parent's read mark/delivery fence.
+    // Guard: a_sub_agent_notice_shows_an_owner_post_once_without_fencing_its_delivery.
+    pub fn notice_sub_agent(&mut self, actor: &Actor, run_id: &str, root_id: &str, limit: i64) -> Result<ThreadUnread> {
         let buddy_id = reader(actor)?.to_string();
         self.write(|tx| {
             let root = readable_root(tx, actor, root_id)?;
-            unread_page(tx, &buddy_id, &root.id, limit)
+            let noticed: String = tx
+                .prepare_cached("SELECT coalesce(noticed_ord, '') FROM run WHERE id = ?1 AND buddy_id = ?2")?
+                .query_row(params![run_id, buddy_id], |r| r.get(0))
+                .optional()?
+                .ok_or_else(|| CoreError::not_found("run", run_id))?;
+            let page = unread_page(tx, &buddy_id, &root.id, limit)?;
+            let fresh: Vec<Post> = page.posts.into_iter().filter(|post| post.author == Actor::Owner && post.ord > noticed).collect();
+            if let Some(newest) = fresh.last() {
+                tx.prepare_cached("UPDATE run SET noticed_ord = ?2 WHERE id = ?1")?.execute(params![run_id, newest.ord])?;
+            }
+            Ok(ThreadUnread { posts: fresh, unshown: 0 })
         })
     }
 
@@ -509,14 +518,14 @@ impl Store {
             self.conn
                 .prepare_cached(
                     &format!("SELECT r.buddy_id, coalesce(p.root_id, p.id), coalesce(r.started_at, r.created_at), r.status <> 'queued',
-                     CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END
+                     CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END, r.conversation_id, r.config IS NOT NULL
                      {RUN_WITH_ACTIVITY_SQL} JOIN post p ON p.id = r.input_id
                      WHERE r.input_kind = 'deliver' AND r.delivery_scope = 'thread' AND r.status IN ('queued','running','cancel_requested') AND p.channel_id = ?2
                      ORDER BY r.created_at"),
                 )?
                 .query_map(params![now_iso(), channel_id], |r| {
                     let waiting = r.get::<_, Option<String>>(4)?.map(|json| serde_json::from_str::<RunWaiting>(&json).map_err(|error| crate::store::corrupt(CoreError::Corrupt(format!("run waiting reason {json:?}: {error}"))))).transpose()?;
-                    Ok(Responding { waiting, buddy_id: r.get(0)?, thread_root_id: r.get(1)?, started_at: r.get(2)?, running: r.get(3)? })
+                    Ok(Responding { waiting, buddy_id: r.get(0)?, thread_root_id: r.get(1)?, started_at: r.get(2)?, running: r.get(3)?, conversation_id: r.get(5)?, picked: r.get(6)? })
                 })?,
         )
     }

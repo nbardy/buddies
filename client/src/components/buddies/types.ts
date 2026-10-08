@@ -101,7 +101,7 @@ export interface ThreadPage {
   seats: ThreadSeat[];
 }
 
-export type { ChannelResponse } from '@unleashd/shared';
+export type { ChannelResponse, LiveReach } from '@unleashd/shared';
 
 /**
  * POST /api/buddies/channels/:channelId/posts (and /direct/posts). A mention's turn starts from

@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { Buddy, Cursor, Post } from '@unleashd/buddies-core';
+import type { Buddy, Cursor, Post, Responding } from '@unleashd/buddies-core';
 import {
-  type ConversationConfig,
   type ChannelResponse,
+  type ConversationConfig,
   type InstalledAgent,
+  type LiveReach,
   type ReplyRetryResult,
   isHarnessRetryFailure,
 } from '@unleashd/shared';
@@ -14,6 +15,7 @@ import {
   mentionedIds,
 } from '@unleashd/shared';
 import type { ConversationRuntime } from '../conversations/runtime';
+import type { BackgroundWork, TurnActivity } from '../turns/background-work';
 import { profileExecution } from './briefing';
 import {
   type LiveConversation,
@@ -24,8 +26,8 @@ import {
 } from './buddy-conversation-slots';
 import type { ReplyGate } from './channel-reply-gate';
 import { type BuddiesCore, OWNER } from './core';
-import type { BackgroundWork, TurnActivity } from '../turns/background-work';
 import type { BuddyEvents } from './events';
+import type { HookSet } from './harness-steering';
 import { runConfigOfPick } from './worker-config';
 
 // Thread seats and DM chats: WHICH conversation a Buddy answers a thread in. A post wakes nobody
@@ -68,6 +70,36 @@ const RUNNING_STATE = { working: 'replying', background: 'background' } as const
   ChannelResponse['state']
 >;
 
+const HOOKS_REACH: {
+  readonly [H in HookSet as H['t']]: (hooks: H) => LiveReach;
+} = {
+  stable: () => ({ kind: 'next_step' }),
+  none: ({ harness }) => ({ kind: 'buddy_tool_only', harness }),
+  unrecorded: () => ({ kind: 'spawned_before_live_delivery' }),
+};
+
+// Busy deliveries name the live seat's recorded capability, including a second seat of the same
+// thread. Guard: idle-background-delivery.test.ts; table: agent_notes/2026-10-08_waiting-paths.md.
+function reachOf(
+  queued: Responding,
+  rows: readonly Responding[],
+  liveHooks: (conversationId: string) => HookSet | null
+): LiveReach {
+  if (queued.picked) return { kind: 'model_pick' };
+  const seats = [
+    queued.conversationId,
+    ...rows
+      .filter((row) => row.running && row.buddyId === queued.buddyId)
+      .filter((row) => row.threadRootId === queued.threadRootId)
+      .map((row) => row.conversationId),
+  ];
+  for (const seat of seats) {
+    const hooks = seat ? liveHooks(seat) : null;
+    if (hooks) return HOOKS_REACH[hooks.t](hooks as never);
+  }
+  return { kind: 'turn_not_live' };
+}
+
 export const threadConversationId = (rootId: string, buddyId: string, generation: number) =>
   stableConversationId(`channel-thread:${rootId}:${buddyId}:${generation}`);
 export const directConversationId = (workspaceId: string, buddyId: string, generation: number) =>
@@ -83,6 +115,8 @@ export interface ChannelsPorts {
   installedAgent(): InstalledAgent;
   /** A post landed or who is replying changed: push `channel_changed`. */
   channelChanged(channelId: string): void;
+  /** The hooks of the live Buddy turn in a conversation, null when none is live (grants.ts). */
+  liveHooks(conversationId: string): HookSet | null;
   /** The thread follow-up gate (runner.ts `followUpGate`), resolved like the seat's own turn. */
   gate: ReplyGate;
 }
@@ -292,7 +326,8 @@ export function createChannels(ports: ChannelsPorts) {
 
     /** Buddies replying in this channel, for "X is replying…": its queued and running deliveries. */
     async responding(channelId: string): Promise<ChannelResponse[]> {
-      return (await core.responding(channelId)).map((delivery) => ({
+      const rows = await core.responding(channelId);
+      return rows.map((delivery) => ({
         channelId,
         threadRootId: delivery.threadRootId,
         buddyId: delivery.buddyId,
@@ -307,6 +342,9 @@ export function createChannels(ports: ChannelsPorts) {
             ]
           : 'queued',
         waiting: delivery.waiting,
+        ...(delivery.waiting?.kind === 'conversation_busy'
+          ? { reach: reachOf(delivery, rows, ports.liveHooks) }
+          : {}),
       }));
     },
 

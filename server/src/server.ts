@@ -482,7 +482,7 @@ const buddyPolicyPort = createBuddyPolicyPort({
   spec: buddyMcpSpec,
   steering: () => {
     if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
-    return { postToolHookUrl: buddyMcp.postToolHookUrl, stopHookUrl: buddyMcp.stopHookUrl };
+    return { hookUrl: buddyMcp.hookUrl };
   },
 });
 const Conversation = createConversationRuntime({
@@ -659,6 +659,7 @@ const buddyChannels = createChannels({
   events: buddyEvents,
   backgroundWork,
   channelChanged,
+  liveHooks: (conversationId) => buddyGrants.liveHooks(conversationId),
   conversations: buddyConversations,
   // Resolved by the same authority as conversations, so the gate runs exactly the
   // harness/model the Buddy's reply would.

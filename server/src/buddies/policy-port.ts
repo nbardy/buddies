@@ -4,7 +4,7 @@ import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings, ResolvedBuddyConversation } from './briefing';
 import type { GrantRecord, Grants, Subscribes, TurnGrant } from './grants';
-import type { SteeringEndpoint } from './harness-steering';
+import type { HookSet, SteeringEndpoint } from './harness-steering';
 import { MCP_SERVER_NAME } from './mcp';
 import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
 import type { LeaseRenewal, Runner } from './runner';
@@ -37,6 +37,7 @@ export interface BuddyPolicyPort {
     conversationId: string;
     owner: boolean;
     subscribes: Subscribes;
+    hooks: HookSet;
   }): BuddyTurnTools;
   builderMcpServers(conversationId: string): TurnTools;
   /** The turn's holder is alive: push its run's lease forward (Pattern: lease-heartbeat). */
@@ -86,7 +87,7 @@ export function createBuddyPolicyPort(deps: {
       runner.queueChat(context, conversationId, turnId, body),
     promoteChat: (turnId) => runner.promoteChat(turnId),
     cancelChat: (turnId) => runner.cancelChat(turnId),
-    mcpServers({ context, conversationId, owner, subscribes }) {
+    mcpServers({ context, conversationId, owner, subscribes, hooks }) {
       // A new turn's grant replaces whatever this conversation still held.
       grants.revokeConversation(conversationId);
       const grant = grants.issueBuddy({
@@ -96,6 +97,7 @@ export function createBuddyPolicyPort(deps: {
         conversationId,
         runId: context.coordinationRunId ?? null,
         subscribes,
+        hooks,
       });
       if (owner) grants.promoteToOwner(conversationId);
       return {
