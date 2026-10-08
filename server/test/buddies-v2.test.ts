@@ -856,6 +856,9 @@ test('pausing the runner mid-drain stops further claims', async () => {
   const w = await world();
   try {
     w.runner.pause();
+    // Pause cannot undo a claim already awaited by world()'s startup tick. Begin on an
+    // empty, settled runner, then arrange the mid-drain pause. Guard: concurrent full suites.
+    await w.runner.settled();
     for (const buddy of [w.lead, w.designer])
       await w.post(
         OWNER,
