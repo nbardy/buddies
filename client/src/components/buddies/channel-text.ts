@@ -48,32 +48,18 @@ export function fuzzyScore(query: string, text: string): number | null {
   return score - haystack.length * 0.05;
 }
 
-// Finished Tasks stay findable but sink below live ones with a similar match.
-const SETTLED_TASK_PENALTY = 12;
-
-function referenceScore(query: string, reference: ChannelReference): number | null {
-  const score = fuzzyScore(query, reference.label);
-  if (score === null) return null;
-  switch (reference.kind) {
-    case 'buddy':
-      return score;
-    case 'task':
-      return reference.status === 'done' || reference.status === 'cancelled'
-        ? score - SETTLED_TASK_PENALTY
-        : score;
-  }
-}
-
+// Pattern: one-definition (docs/patterns.md#one-definition)
+// Fix-guard: Task suggestions crowded the eight @ slots; the menu now selects Buddies only.
+// channel-text.test.ts checks empty, matching and task-only queries against mixed references.
 export function rankReferences(
   query: string,
   references: readonly ChannelReference[],
   limit = 8
-): ChannelReference[] {
+): BuddyReference[] {
   return references
-    .map((reference) => ({ reference, score: referenceScore(query, reference) }))
-    .filter(
-      (entry): entry is { reference: ChannelReference; score: number } => entry.score !== null
-    )
+    .filter((reference): reference is BuddyReference => reference.kind === 'buddy')
+    .map((reference) => ({ reference, score: fuzzyScore(query, reference.label) }))
+    .filter((entry): entry is { reference: BuddyReference; score: number } => entry.score !== null)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map((entry) => entry.reference);
@@ -86,7 +72,7 @@ const MAX_QUERY_LENGTH = 40;
 /**
  * The @-query under the caret, if the caret sits in one: an `@` at the start
  * of the text or after whitespace, followed by up to 40 characters with no
- * newline. Spaces are allowed so Task titles can be typed ("@fix login").
+ * newline. Spaces are allowed so full Buddy names can be typed ("@Product Dev").
  */
 export function activeReferenceQuery(
   text: string,
@@ -187,7 +173,7 @@ export function plainChannelText(body: string): string {
 // ── Tasks ──────────────────────────────────────────────────────────────────
 
 /**
- * A Task as a chip and the @ menu show it: from GET /api/buddies/tasks?workspaceId=
+ * A Task as a live post chip shows it: from GET /api/buddies/tasks?workspaceId=
  * (every task of the workspace; todos are its child tasks), with the owner's
  * name and todo progress resolved.
  */
@@ -197,7 +183,7 @@ export type ChannelTask = {
   status: TaskStatus;
   ownerId: string;
   ownerName: string;
-  /** A todo (child task) is false: it never appears in the @ menu. */
+  /** Whether this is a top-level Task rather than a child todo. */
   topLevel: boolean;
   nextAction: string | undefined;
   todosDone: number;

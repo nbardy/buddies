@@ -11,8 +11,8 @@ import { outboxDrop, outboxSending, outboxSent } from '../../atoms/channel-outbo
 import { useConversationDraft } from '../../hooks/useConversationDraft';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { newId } from '../../utils/ids';
-import { ConversationConfigPicker } from '../../views/config/ConversationConfigPicker';
 import { BuddySigil } from './BuddySigil';
+import { ChannelModelPicker } from './ChannelModelPicker';
 import { buddyUpload, buddyWrite, errorText } from './api';
 import { useThreadSeats } from './channel-data';
 import {
@@ -54,8 +54,8 @@ const NO_CHOICES: ReadonlyMap<string, ConversationConfig> = new Map();
 const NO_SEATS: ThreadSeats = { kind: 'loaded', seats: [] };
 
 // The owner's composer. Posts as the owner (never a stand-in Buddy). One
-// universal @ menu fuzzy-finds Buddies and Tasks: a Buddy becomes a mention
-// (which starts that Buddy's reply), a Task becomes a live chip. Pasted or
+// @ menu fuzzy-finds Buddies: a selection becomes a mention
+// (which starts that Buddy's reply). Pasted or
 // dropped files upload into the channel and are inserted as preview embeds
 // or ordinary file links at the caret.
 //
@@ -82,6 +82,7 @@ export function ChannelComposer({
   references,
   autoFocus = false,
   submit,
+  mentionPlacement = 'above',
   onPosted,
 }: {
   channelId: string;
@@ -92,6 +93,7 @@ export function ChannelComposer({
   /** Focus the textarea on mount: the desktop thread pane, opened by a Reply click. */
   autoFocus?: boolean;
   submit: ComposerSubmit;
+  mentionPlacement?: 'above' | 'below';
   onPosted(result: PostResult): void;
 }) {
   // The draft: the post body in its stored Markdown form. `view` is what the textarea shows.
@@ -303,6 +305,7 @@ export function ChannelComposer({
   return (
     <div
       className="channel-composer"
+      data-mention-placement={mentionPlacement}
       data-dragging={dragging || undefined}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return;
@@ -335,7 +338,7 @@ export function ChannelComposer({
         />
       )}
       {showPicker && (
-        <ul className="channel-composer-picker" aria-label="Mention a Buddy or Task">
+        <ul className="channel-composer-picker" aria-label="Mention a Buddy">
           {matches.map((reference, index) => (
             <li key={`${reference.kind}:${reference.id}`}>
               <button
@@ -347,7 +350,7 @@ export function ChannelComposer({
                 }}
                 onMouseEnter={() => setHighlight(index)}
               >
-                <ReferenceIcon reference={reference} />
+                <BuddySigil className="channel-composer-picker-icon" name={reference.label} />
                 <span className="channel-composer-picker-label ui-truncate">{reference.label}</span>
                 <span className="channel-composer-picker-detail ui-truncate ui-muted">
                   {reference.detail}
@@ -582,53 +585,33 @@ function MentionModelPopover({
 }) {
   const value = 'config' in choice ? choice.config : null;
   return (
-    <>
-      <button
-        type="button"
-        className="channel-composer-model-backdrop"
-        aria-label="Close model picker"
-        tabIndex={-1}
-        onClick={onClose}
-      />
-      <dialog
-        open
-        className="channel-composer-model ui-stack"
-        aria-label={`Model for ${buddy.label}`}
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape') return;
-          event.preventDefault();
-          onClose();
-        }}
-      >
+    <ChannelModelPicker
+      label={`Model for ${buddy.label}`}
+      catalog={catalog}
+      value={value}
+      onChange={onChange}
+      onClose={onClose}
+      providerFilter={(providerId) =>
+        catalog?.providers.some(
+          (provider) => provider.id === providerId && provider.supportsRequiredMcp
+        ) ?? false
+      }
+      header={
         <div className="channel-composer-model-head ui-row ui-muted">
           <BuddySigil className="channel-composer-mention-sigil" name={buddy.label} />
-          <div className="channel-composer-model-title">
+          <div className="channel-composer-model-title ui-stack">
             <strong>Reply settings</strong>
             <span>{buddy.label}</span>
           </div>
         </div>
-        {catalog && value ? (
-          <ConversationConfigPicker
-            value={value}
-            catalog={catalog}
-            reasoningControl="slider"
-            // Buddy turns need the Buddy MCP tools.
-            providerFilter={(providerId) =>
-              catalog.providers.some(
-                (provider) => provider.id === providerId && provider.supportsRequiredMcp
-              )
-            }
-            onChange={onChange}
-          />
-        ) : (
-          <p className="channel-composer-model-note ui-muted">Loading harness options…</p>
-        )}
-        <p className="channel-composer-model-note ui-muted">
-          {choice.kind === 'seat'
-            ? 'Updates this thread’s current harness, model, and thinking level.'
-            : 'Applies to future replies in this thread.'}
-        </p>
-        <div className="channel-composer-model-actions">
+      }
+      note={
+        choice.kind === 'seat'
+          ? 'Updates this thread’s current harness, model, and thinking level.'
+          : 'Applies to future replies in this thread.'
+      }
+      actions={
+        <>
           <button
             type="button"
             onClick={onReset}
@@ -640,26 +623,10 @@ function MentionModelPopover({
           <button type="button" className="channel-composer-model-done" onClick={onClose}>
             Done
           </button>
-        </div>
-      </dialog>
-    </>
+        </>
+      }
+    />
   );
-}
-
-function ReferenceIcon({ reference }: { reference: ChannelReference }) {
-  switch (reference.kind) {
-    case 'buddy':
-      return <BuddySigil className="channel-composer-picker-icon" name={reference.label} />;
-    case 'task':
-      return (
-        <span
-          className="channel-composer-picker-icon channel-composer-picker-task ui-muted"
-          aria-hidden="true"
-        >
-          {reference.status === 'done' ? '✓' : '◇'}
-        </span>
-      );
-  }
 }
 
 function SubmitHint({ submit }: { submit: ComposerSubmit }) {
@@ -667,7 +634,7 @@ function SubmitHint({ submit }: { submit: ComposerSubmit }) {
     case 'enter':
       return (
         <>
-          <kbd>@</kbd> mention a Buddy or Task · <kbd>⇧⏎</kbd> new line
+          <kbd>@</kbd> mention a Buddy · <kbd>⇧⏎</kbd> new line
         </>
       );
     case 'button':

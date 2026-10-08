@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
+import { ProviderCatalogSchema, catalogEntryForProvider } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { postFixture } from './fixtures/channel-posts';
@@ -15,11 +16,50 @@ register(
   import.meta.url
 );
 const { ReplyRetry } = await import('../src/components/buddies/HarnessPicker');
+const { ChannelModelPicker } = await import('../src/components/buddies/ChannelModelPicker');
 const { workspaceDirectory } = await import('../src/components/buddies/channel-data');
-const { choiceLabel, mentionChoice } = await import('../src/components/buddies/channel-text');
+const { choiceLabel, mentionChoice, rankReferences } = await import(
+  '../src/components/buddies/channel-text'
+);
 const { loadResource } = await import('../src/atoms/resources');
 const { jotaiStore } = await import('../src/atoms/store');
 const { Provider } = await import('jotai');
+
+test('workspace @ suggestions contain active Buddies while Tasks remain available as post chips', () => {
+  const lead = buddyFixture({ id: 'lead', name: 'Lead' });
+  const task = {
+    id: 'task-ship',
+    workspaceId: 'ws-1',
+    ownerId: 'lead',
+    title: 'Lead rollout',
+    doneCriteria: 'Shipped',
+    status: 'in_progress' as const,
+    paused: false,
+    epoch: 1,
+    evidence: [],
+    position: 0,
+    pin: 0,
+    revision: 1,
+    createdAt: '2026-10-08T00:00:00.000Z',
+    updatedAt: '2026-10-08T00:00:00.000Z',
+  };
+  const directory = workspaceDirectory(
+    [rosterFixture([lead, buddyFixture({ id: 'archived', name: 'Former', status: 'archived' })])],
+    'ws-1',
+    [task],
+    CODEX_INSTALLED
+  );
+  assert.deepEqual(
+    directory.references.map((reference) => reference.id),
+    ['lead']
+  );
+  assert.deepEqual(
+    rankReferences('lead', directory.references).map((reference) => reference.id),
+    ['lead']
+  );
+  assert.deepEqual(rankReferences('rollout', directory.references), []);
+  assert.equal(directory.taskById.get(task.id)?.title, task.title);
+});
 
 // Model-only profiles used to display Codex while server inference launched Claude.
 const LOADED_NONE = { kind: 'loaded', seats: [] } as const;
@@ -128,4 +168,28 @@ test('retry waits for the authoritative thread selection instead of seeding an a
     }),
   });
   assert.doesNotMatch(render(), /disabled=""/);
+});
+
+// The retry used reasoning radios while mention settings used a slider. The confirmation
+// lived inside the scrolling model list, so a short screen hid the action below the fold.
+test('retry and mention model settings share the slider with confirmation outside the options', () => {
+  const catalog = ProviderCatalogSchema.parse({
+    revision: 'picker-guard',
+    providers: [catalogEntryForProvider('codex')],
+  });
+  const html = renderToStaticMarkup(
+    <ChannelModelPicker
+      label="Retry with model"
+      catalog={catalog}
+      value={{ provider: 'codex', model: { mode: 'default' }, reasoning: { mode: 'default' } }}
+      providerFilter={() => true}
+      note="Choose a model"
+      onChange={() => {}}
+      onClose={() => {}}
+      actions={<button type="button">Retry</button>}
+    />
+  );
+  assert.match(html, /type="range"/);
+  assert.match(html, /Choose a model<\/p><\/div><div class="channel-composer-model-actions">/);
+  assert.match(html, /<button type="button">Retry<\/button><\/div><\/dialog>/);
 });

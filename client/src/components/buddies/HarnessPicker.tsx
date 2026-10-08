@@ -2,18 +2,15 @@ import { type ConversationConfig, isHarnessRetryFailure } from '@unleashd/shared
 import { type CSSProperties, useState } from 'react';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
-import { ConversationConfigPicker } from '../../views/config/ConversationConfigPicker';
+import { ChannelModelPicker } from './ChannelModelPicker';
 import { errorText, retryFailedReply } from './api';
 import type { Post, ThreadPage } from './types';
 import './ChannelComposer.css';
 
-// A button that opens the composer's harness/model popover (the mention chip's, same classes) and
-// confirms one choice. Callers (493c1c7): "Retry with a different harness" under a failed reply,
-// an out-of-tokens DM or chat, and "New chat" in a DM. A Buddy turn (`buddy`) needs the Buddy MCP
-// tools, and `excluded` is the harness that just failed, which the server would refuse anyway.
-// `placement` is where the popover opens relative to the button: 'above' near the composer,
-// 'below' in a header. Fix guard: the header's "Refresh context" opened upward off the top of
-// the viewport, unreadable and unpickable (#bugfixes 2026-09-28/29).
+// Retry and new-chat actions reuse the mention chip's model picker. A Buddy turn needs
+// Buddy MCP tools; `excluded` removes the harness that failed. Inline recovery pickers
+// stay centered in the viewport (a bottom sheet on phones), regardless of the row's position.
+// Placement retains the trigger's layout hook for existing header/composer callers.
 export type PickerPlacement = 'above' | 'below';
 
 export function HarnessPicker({
@@ -77,47 +74,28 @@ export function HarnessPicker({
         </p>
       )}
       {open && (
-        <>
-          <button
-            type="button"
-            className="channel-composer-model-backdrop"
-            aria-label="Close harness picker"
-            tabIndex={-1}
-            onClick={close}
-          />
-          <dialog
-            open
-            className="channel-composer-model ui-stack"
-            aria-label={label}
-            onKeyDown={(event) => {
-              if (event.key !== 'Escape') return;
-              event.preventDefault();
-              close();
-            }}
-          >
-            <p className="channel-composer-model-note ui-muted">{note}</p>
-            {catalog && value ? (
-              <ConversationConfigPicker
-                value={value}
-                catalog={catalog}
-                providerFilter={allowed}
-                onChange={setDraft}
-              />
-            ) : (
-              <p className="channel-composer-model-note ui-muted">
-                {catalog ? 'No other harness can run this Buddy.' : 'Loading harness options…'}
-              </p>
-            )}
-            <div className="channel-composer-model-actions">
+        <ChannelModelPicker
+          label={label}
+          note={note}
+          catalog={catalog}
+          value={value}
+          providerFilter={allowed}
+          onChange={setDraft}
+          onClose={close}
+          unavailable={
+            catalog ? 'No other harness can run this Buddy.' : 'Loading harness options…'
+          }
+          actions={
+            <>
               <button type="button" onClick={close}>
                 Cancel
               </button>
               <button
                 type="button"
                 className="channel-composer-model-done"
-                disabled={value === null || value.provider === excluded}
+                disabled={value === null || !allowed(value.provider)}
                 onClick={() => {
-                  if (value === null) return;
+                  if (value === null || !allowed(value.provider)) return;
                   close();
                   setState({ kind: 'busy' });
                   onConfirm(value).then(
@@ -128,9 +106,9 @@ export function HarnessPicker({
               >
                 {confirm}
               </button>
-            </div>
-          </dialog>
-        </>
+            </>
+          }
+        />
       )}
     </div>
   );
