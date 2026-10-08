@@ -202,6 +202,13 @@ impl BuddiesCore {
         call(&self.store, move |s| s.catch_up_thread(&actor, &root_id, limit)).await
     }
 
+    /// One tool boundary of a live thread turn: its unread page, taken unless a queued delivery
+    /// there carries an explicit pick (deliveries.rs `take_steering`; one transaction).
+    #[napi]
+    pub async fn take_steering(&self, actor: Actor, run_id: String, root_id: String, trigger: SteerTrigger, limit: i64) -> napi::Result<Steering> {
+        call(&self.store, move |s| s.take_steering(&actor, &run_id, &root_id, trigger, limit)).await
+    }
+
     /// The thread's unread posts for this Buddy, NOT marked read (a native sub-agent's view).
     #[napi]
     pub async fn peek_thread_unread(&self, actor: Actor, root_id: String, limit: i64) -> napi::Result<ThreadUnread> {

@@ -89,6 +89,16 @@ const backgroundWork = new BackgroundWork();
 type ProviderRequest = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
 type Turn = { n: number; request: ProviderRequest; mcp: McpServerSpec };
 
+// A test whose next post must be its own turn waits for the previous run's actual settle, not
+// for its reply: the reply is the turn's last tool call, and a post written while that call is
+// still open is steered into it (task_01a11a68 6d; these thread-model tests timed out 6/40 on it).
+async function settled(runs: () => Promise<readonly { status: string }[]>, what: string) {
+  await until(
+    async () => (await runs()).every((r) => r.status !== 'running' && r.status !== 'queued'),
+    `${what} settles`
+  );
+}
+
 async function until<T>(
   read: () => T | undefined | false | Promise<T | undefined | false>,
   what: string,
@@ -1417,6 +1427,7 @@ test("an effort pick keeps the seat's session; a provider pick opens a new seat"
       w.picks.set(w.lead.id, config);
       await say(`[@Lead](buddy:${w.lead.id}) ${text}`, root.id);
       await until(async () => (await replies()) === expected, `reply ${expected}`);
+      await settled(() => w.runs(w.lead.id), `turn ${expected}`);
     };
     const root = await say('Plan the barrel solver');
     w.answers.set(1, 'Lead finding one: the flux donor is wrong');
@@ -1538,6 +1549,7 @@ test('latest thread reply model drives the picker and the next delivery; explici
     const thread = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
     await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
+    await settled(() => w.runs(w.lead.id), 'the first turn');
 
     const sol: ConversationConfig = {
       ...createDefaultConversationConfig('codex'),
@@ -1591,6 +1603,7 @@ test('latest thread reply model drives the picker and the next delivery; explici
       async () => (await thread()).filter((p) => p.purpose === 'reply').length === 3,
       'follow-up post'
     );
+    await settled(() => w.runs(w.lead.id), 'the follow-up turn');
     const explicit = createDefaultConversationConfig('claude');
     w.picks.set(w.lead.id, explicit);
     await say(`[@Lead](buddy:${w.lead.id}) switch back`, root.id);
@@ -1598,6 +1611,7 @@ test('latest thread reply model drives the picker and the next delivery; explici
       async () => (await thread()).filter((p) => p.purpose === 'reply').length === 4,
       'explicit reply'
     );
+    await settled(() => w.runs(w.lead.id), 'the explicit turn');
     assert.equal(w.turns[2].request.harness, 'claude', 'a pick on another provider opens a seat');
     w.gate.verdicts.push({ kind: 'respond' });
     await say('Continue without repeating the model', root.id);
@@ -5497,6 +5511,127 @@ test('a queued model pick waits for its own turn at every tool boundary', async 
     );
   } finally {
     release();
+    await w.close();
+  }
+});
+
+// task_01a11a68 6a: the queued-pick guard and the read were two core calls (listRuns, then
+// catchUpThread), so an owner pick written between them was steered into the running turn on the
+// OLD model and its own delivery fenced `consumed`. The release gate saw it as 6/40 thread-model
+// timeouts. This writes the pick at the exact moment the boundary reads the thread (whichever core
+// call does the read), so it fails on any guard that is not the read itself.
+test('an explicit pick posted inside the tool-call window is never steered', async () => {
+  const w = await world();
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let arrived!: () => void;
+  const started = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  const core = w.core as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const reads = ['takeSteering', 'catchUpThread'].filter((name) => name in core);
+  const originals = new Map(reads.map((name) => [name, core[name]]));
+  try {
+    w.during.set(1, async () => {
+      arrived();
+      await blocked;
+    });
+    const say = async (body: string, key: string, replyToId?: string) => {
+      const post = await w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        { kind: 'inform', body, replyToId, evidence: [], mentions: [], broadcast: false, key }
+      );
+      w.announce(post);
+      return post;
+    };
+    const root = await say(`[@Lead](buddy:${w.lead.id}) build the board`, 'window-root');
+    await started;
+    let correction: Post | undefined;
+    for (const name of reads)
+      core[name] = async (...args: unknown[]) => {
+        for (const read of reads) core[read] = originals.get(read)!;
+        w.picks.set(w.lead.id, createDefaultConversationConfig('claude'));
+        correction = await say(
+          `[@Lead](buddy:${w.lead.id}) Use a 3×3×3 board on the picked model`,
+          'window-pick',
+          root.id
+        );
+        return originals.get(name)!.apply(w.core, args);
+      };
+    const mcp = w.turns[0].mcp;
+    if (mcp.kind !== 'http') throw new Error('expected HTTP');
+    const tool = await call(mcp, 'doc_read', { kind: 'working' });
+    assert.ok(correction, 'the pick was written inside the boundary');
+    assert.equal(tool.content.length, 1, 'nothing steered while a pick is queued');
+    const delivery = (await w.runs(w.lead.id)).find(
+      (r) => r.input.kind === 'deliver' && r.input.postId === correction!.id
+    )!;
+    assert.equal(delivery.status, 'queued', 'the pick still owns its own turn');
+    release();
+    await until(() => w.turns.length === 2, 'the picked turn');
+    assert.equal(w.turns[1].request.harness, 'claude');
+    assert.ok(w.turns[1].request.prompt.includes(correction.body));
+    await settled(() => w.runs(w.lead.id), 'the picked turn');
+  } finally {
+    for (const [name, original] of originals) core[name] = original;
+    release();
+    await w.close();
+  }
+});
+
+// task_01a11a68 6c: a post taken at a turn's LAST tool call (the reply's own `post`) is in the
+// model's context, but the model has already answered and ends. Its delivery was fenced
+// `consumed` by the take, so it was never answered and nothing said so. The rule: a turn that
+// wrote nothing in the thread after taking an owner post re-delivers it at settle (crate
+// `redeliver_unanswered`), in the same conversation. The fake model ignores steered text, as a
+// model that ends its turn would.
+test("a post steered into a turn's last tool call is delivered again", async () => {
+  const w = await world();
+  const core = w.core as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const original = core.takeSteering;
+  try {
+    const say = async (body: string, key: string, replyToId?: string) => {
+      const post = await w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        { kind: 'inform', body, replyToId, evidence: [], mentions: [], broadcast: false, key }
+      );
+      w.announce(post);
+      return post;
+    };
+    let late: Post | undefined;
+    const thread: { root?: Post } = {};
+    // The boundary after turn 1's reply `post`: the owner writes as the reply lands.
+    core.takeSteering = async (...args: unknown[]) => {
+      core.takeSteering = original;
+      late = await say(
+        `[@Lead](buddy:${w.lead.id}) and make it 3×3×3`,
+        'last-call',
+        thread.root!.id
+      );
+      return original.apply(w.core, args);
+    };
+    const root = await say(`[@Lead](buddy:${w.lead.id}) build the board`, 'last-root');
+    thread.root = root;
+    await settled(() => w.runs(w.lead.id), 'the steered turn');
+    assert.ok(late, 'the post landed inside the last tool call');
+    await until(() => w.turns.length === 2, 'the re-delivered post');
+    assert.ok(w.turns[1].request.prompt.includes(late.body), 'its own turn shows it');
+    assert.equal(
+      w.turns[1].request.resumeSessionId,
+      'native-1',
+      'in the conversation that was steered'
+    );
+    await settled(() => w.runs(w.lead.id), 'the re-delivery');
+    const replies = (
+      await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)
+    ).posts.filter((post) => post.purpose === 'reply');
+    assert.equal(replies.length, 2, 'both owner posts answered, once each');
+  } finally {
+    core.takeSteering = original;
     await w.close();
   }
 });

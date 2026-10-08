@@ -233,7 +233,7 @@ CREATE TABLE {table} (
   lease_token TEXT, lease_expires_at TEXT, deadline TEXT,
   outcome TEXT, error_code TEXT, error TEXT,
   ready_at TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT, legacy TEXT,
-  config TEXT, body TEXT, executing_at TEXT, through_ord TEXT,
+  config TEXT, body TEXT, executing_at TEXT, through_ord TEXT, steered_at TEXT,
   admission TEXT NOT NULL DEFAULT 'capped' CHECK(admission IN ('owner','capped')),
   CHECK(input_kind IN ('chat','post','deliver') OR status <> 'queued'),
   CHECK(input_kind <> 'chat' OR status <> 'queued' OR body IS NOT NULL),
@@ -347,6 +347,9 @@ pub fn open(path: &str) -> Result<Connection> {
                 tx.commit()?;
             }
             crate::migrate::rebuild_for_delivery(&conn, path)?;
+            // When a live turn last took an owner post at a tool boundary (2026-10-08, task_01a11a68
+            // 6c; deliveries.rs `redeliver_unanswered`). Additive: an older build still opens the file.
+            ensure_column(&conn, "run", "steered_at", "TEXT")?;
             conn.execute_batch(INDEXES)?;
             ensure_post_search(&conn)?;
             Ok(conn)

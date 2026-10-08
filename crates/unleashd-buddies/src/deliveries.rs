@@ -67,8 +67,11 @@ pub(crate) fn advance(tx: &Transaction, reader: &Actor, root_id: &str, ord: &str
 /// post_01a0f62f-c576 was read by its running requester at 06:39:42Z, and its return run stayed
 /// queued until cancelled by hand at 06:56Z. Guards: `a_mark_advance_consumes_every_covered_delivery`
 /// (tests/core.rs), buddies-v2 "an answer the requester already read settles …".
+/// A later attempt (`attempt > 1`: an owner retry, or `redeliver_unanswered`) exists BECAUSE its
+/// post was already read, so a read can never have delivered it again: the fence leaves it be.
+/// Fencing it let any later read in the thread cancel a re-delivery before it ran (task_01a11a68 6c).
 pub(crate) fn fence(tx: &Transaction, buddy_id: &str, root_id: &str, through: &str) -> Result<()> {
-    cancel_queued(tx, "consumed", Some("the reader already read it"), "input_kind = 'deliver' AND buddy_id = ?2
+    cancel_queued(tx, "consumed", Some("the reader already read it"), "input_kind = 'deliver' AND buddy_id = ?2 AND attempt = 1
            AND input_id IN (SELECT p.id FROM post p WHERE p.root_id = ?3 AND p.ord <= ?4
                             UNION ALL SELECT p.id FROM post p WHERE p.id = ?3 AND p.ord <= ?4)",
         params![now_iso(), buddy_id, root_id, through],
@@ -316,6 +319,62 @@ pub(crate) fn take_unread(tx: &Transaction, buddy_id: &str, root_id: &str, limit
     Ok(page)
 }
 
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/// Is a delivery to this Buddy queued in the thread with an explicit pick (model, effort,
+/// provider)? The pick lives only on that run (`wake` stores the owner's mention-chip config), and
+/// the read mark is one cursor per thread: taking ANY page past it fences that run `consumed`.
+fn pick_queued(tx: &Transaction, buddy_id: &str, root_id: &str) -> Result<bool> {
+    Ok(tx
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM run d JOIN post p ON p.id = d.input_id
+               WHERE d.input_kind = 'deliver' AND d.buddy_id = ?1 AND d.status = 'queued' AND d.config IS NOT NULL
+                 AND (p.root_id = ?2 OR p.id = ?2))",
+        )?
+        .query_row(params![buddy_id, root_id], |r| r.get(0))?)
+}
+
+/// Is `run_id` this Buddy's live turn? A take is recorded on the run (`steered_at`) for its
+/// settle to check (`redeliver_unanswered`); a settled run has no settle left, so it takes nothing.
+fn live_turn(tx: &Transaction, buddy_id: &str, run_id: &str) -> Result<bool> {
+    Ok(tx
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM run WHERE id = ?1 AND buddy_id = ?2 AND status IN ('running','cancel_requested'))")?
+        .query_row(params![run_id, buddy_id], |r| r.get(0))?)
+}
+
+/// Decision 6c (task_01a11a68, 2026-10-08): a take at a turn's LAST tool call (often the reply's
+/// own `post`) lands after the reply was written, and the model ends without answering it; its
+/// delivery was fenced by the take, so it was lost silently. At settle, if the Buddy wrote nothing
+/// in the thread after its last take of an owner post, the newest owner post it took runs again:
+/// the next attempt of its delivery, in the same conversation (which holds every steered post).
+/// Owner posts only (re-delivering Buddy chatter could ping-pong); an owner Stop re-delivers nothing.
+/// Guard: buddies-v2 "a post steered into a turn's last tool call is delivered again".
+pub(crate) fn redeliver_unanswered(tx: &Transaction, run: &Run, post_id: &str) -> Result<()> {
+    let steered_at: Option<String> =
+        tx.prepare_cached("SELECT steered_at FROM run WHERE id = ?1")?.query_row([&run.id], |r| r.get(0))?;
+    let Some(steered_at) = steered_at else { return Ok(()) };
+    let root = crate::posts::get_post(tx, post_id)?.root().to_string();
+    // Strictly after: a reply written in the same tool call as the take (the race this closes)
+    // precedes it, and a later model step cannot share its millisecond.
+    let latest = tx
+        .prepare_cached(
+            "SELECT d.id FROM run d JOIN post p ON p.id = d.input_id
+              WHERE d.input_kind = 'deliver' AND d.buddy_id = ?2 AND (p.root_id = ?1 OR p.id = ?1)
+                AND p.author_id IS NULL AND p.created_at <= ?3 AND p.ord > coalesce(?4, '')
+                AND p.ord <= coalesce((SELECT t.last_ord FROM thread_read t WHERE t.reader = ?2 AND t.root_id = ?1), '')
+                AND NOT EXISTS (SELECT 1 FROM post r WHERE (r.root_id = ?1 OR r.id = ?1) AND r.author_id = ?2
+                                  AND r.created_at > ?3 AND r.purpose IS NOT 'reply_failed')
+                AND d.executing_at IS NULL
+                AND d.attempt = (SELECT max(attempt) FROM run k WHERE k.input_key = d.input_key)
+              ORDER BY p.ord DESC LIMIT 1",
+        )?
+        .query_row(params![root, run.buddy_id, steered_at, run.through_ord], |r| r.get::<_, String>(0))
+        .optional()?;
+    if let Some(delivery) = latest {
+        crate::runs::next_attempt(tx, &crate::runs::get_run(tx, &delivery)?, run.conversation_id.clone(), None)?;
+    }
+    Ok(())
+}
+
 /// The same page as `take_unread`, NOT marked read: no delivery is fenced.
 fn unread_page(tx: &Transaction, buddy_id: &str, root_id: &str, limit: i64) -> Result<ThreadUnread> {
     let unread = "(p.root_id = ?2 OR p.id = ?2) AND p.author_id IS NOT ?1
@@ -368,6 +427,40 @@ impl Store {
         self.write(|tx| {
             let root = readable_root(tx, actor, root_id)?;
             take_unread(tx, &buddy_id, &root.id, limit)
+        })
+    }
+
+    // Pattern: route-at-send (docs/patterns.md#route-at-send)
+    /// One tool boundary of the live turn `run_id`: take the thread's unread page into it (marked
+    /// read, fencing its deliveries) unless a delivery there carries an explicit pick. ONE
+    /// transaction on purpose (task_01a11a68 6a): the host checked the pick (listRuns) and read
+    /// (catch_up_thread) in two calls, so a pick posted between them was steered into the turn on
+    /// the OLD model and its delivery fenced `consumed`, lost with no notice (6/40 release-gate
+    /// timeouts). A post and its delivery are one transaction (`wake`), and SQLite serializes
+    /// writers: here a post is visible with its pick, or not at all.
+    /// Guard: buddies-v2 "an explicit pick posted inside the tool-call window is never steered".
+    pub fn take_steering(&mut self, actor: &Actor, run_id: &str, root_id: &str, trigger: SteerTrigger, limit: i64) -> Result<Steering> {
+        let buddy_id = reader(actor)?.to_string();
+        self.write(|tx| {
+            let root = readable_root(tx, actor, root_id)?;
+            if !live_turn(tx, &buddy_id, run_id)? {
+                return Ok(Steering::Quiet);
+            }
+            if pick_queued(tx, &buddy_id, &root.id)? {
+                return Ok(Steering::PickQueued);
+            }
+            let page = unread_page(tx, &buddy_id, &root.id, limit)?;
+            let owner = page.posts.iter().any(|post| post.author == Actor::Owner);
+            let takes = match trigger {
+                SteerTrigger::AnyPost => !page.posts.is_empty(),
+                SteerTrigger::OwnerPost => owner,
+            };
+            let Some(newest) = page.posts.last().filter(|_| takes) else { return Ok(Steering::Quiet) };
+            advance(tx, &Actor::Buddy { id: buddy_id.clone() }, &root.id, &newest.ord)?;
+            if owner {
+                tx.prepare_cached("UPDATE run SET steered_at = ?2 WHERE id = ?1")?.execute(params![run_id, now_iso()])?;
+            }
+            Ok(Steering::Taken { posts: page.posts, unshown: page.unshown })
         })
     }
 

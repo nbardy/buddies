@@ -871,8 +871,10 @@ fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
         }
         (RunInput::Post { post_id }, Outcome::Failed { code, error }) => close_request(tx, post_id, Closed::Failed { run, code, error }),
         (RunInput::Post { post_id }, Outcome::Cancelled { .. }) => close_request(tx, post_id, Closed::Cancelled),
-        (RunInput::Post { .. }, Outcome::Complete { .. })
-        | (RunInput::Chat { .. } | RunInput::Deliver { .. } | RunInput::Retired { .. }, _) => Ok(()),
+        // A live thread turn's steered owner posts that it never answered run again (decision 6c).
+        (RunInput::Post { post_id } | RunInput::Deliver { post_id }, Outcome::Complete { .. })
+        | (RunInput::Deliver { post_id }, Outcome::Failed { .. }) => crate::deliveries::redeliver_unanswered(tx, run, post_id),
+        (RunInput::Deliver { .. }, Outcome::Cancelled { .. }) | (RunInput::Chat { .. } | RunInput::Retired { .. }, _) => Ok(()),
     }
 }
 

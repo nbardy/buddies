@@ -216,7 +216,7 @@ self-spawned worker writes in its spawner's thread without taking the subscripti
 when only one is bound: the subscription can change while a claimed run opens its seat. Before
 2026-10-08 a bound delivery could overtake an unbound claim and fail `conversation_busy` at bind.
 At each Buddy MCP tool response, a live delivery/request reads the new posts in its own thread
-(`mcp.ts liveThreadPosts`, the existing `catchUpThread` read fence) and appends a steering envelope:
+(`mcp.ts liveThreadPosts`, the crate `take_steering` read fence) and appends a steering envelope:
 adjust to the new message while preserving current work and authority. Consumed deliveries run no
 second turn. Owner chats and memory review are excluded; a queued explicit model pick waits for
 a new turn. The 2026-10-08 native-tool successor reuses this same resolver and fence:
@@ -226,7 +226,12 @@ cursor, then the parent takes at its next boundary. No stop/restart, extra queue
 The typed harness table documents buddy-tool-only adapters and the limits of a foreground wait.
 Channel waiting text projects this same claim gate's waiting expression, never infers pool_full
 from the mere existence of a queued delivery. Decision/evidence:
-`agent_notes/2026-10-08_steer-any-tool-boundary.md`. A tool-free stretch receives its durable queued
+`agent_notes/2026-10-08_steer-any-tool-boundary.md`. Every steering take (Buddy tool, native hook,
+Stop hold) is ONE crate call, `take_steering`: the queued-pick guard and the read share a
+transaction, because as two calls a pick posted between them was steered and lost (6/40 release-gate
+timeouts). A take of an owner post stamps the run (`steered_at`); if the turn writes nothing in the
+thread after it, its settle re-delivers the newest such post (`redeliver_unanswered`, the fence
+exempts later attempts). A tool-free stretch receives its durable queued
 delivery when idle. Guards: native boundary and model-pick regressions in buddies-v2; rendered
 channel waiting labels; existing
 buddies-v2 "new thread messages steer the live reply once", crate
