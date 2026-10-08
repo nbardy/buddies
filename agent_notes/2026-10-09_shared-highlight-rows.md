@@ -11,7 +11,7 @@ The star is last and flush with the row's right edge; worker links reserve
 48px and use tabular digits. Existing actions, navigation and local favorites
 remain their original implementations. Removed ChannelStar.css and superseded
 row positioning rules; styles now share HighlightRow.css. CSS total decreased
-from 14596 to 14594; no ceiling increase.
+from 14596 to 14593; no ceiling increase.
 
 Evidence on isolated branch ui/highlight-rows-20261009, base ddca73e:
 - pnpm typecheck passed (full repo including client/server test projects).
@@ -40,3 +40,6 @@ Evidence on isolated branch ui/highlight-rows-20261009, base ddca73e:
   tools/check-workspace-navigation.mjs regression check.
 - Transient images and isolated Vite/worktree are removed at closeout.
 No backend restart or push.
+
+Keyboard follow-through: kept the prior behavior of showing Wake completion while
+tabbing through the row; only mouse hover swaps the completion indicator for Wake.
