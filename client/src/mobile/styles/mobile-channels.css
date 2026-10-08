@@ -34,7 +34,7 @@
   text-align: left;
   text-decoration: none;
 }
-.mobile-channels-row:active {
+.mobile-channels-list > li:not(.highlight-row) .mobile-channels-row:active {
   background: color-mix(in srgb, var(--text-emphasis) 8%, transparent);
 }
 .mobile-channels-row[aria-current="page"] {
@@ -97,13 +97,6 @@
   color: #fff;
   font: 700 12px / 1 var(--font-mono);
   text-align: center;
-}
-.mobile-channels-buddy {
-  gap: var(--sp-2);
-}
-.mobile-channels-buddy > .mobile-channels-row {
-  flex: 1;
-  min-width: 0;
 }
 .mobile-channels-buddy[data-failed] .mobile-channels-row__detail {
   color: var(--theme-warning);

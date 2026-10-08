@@ -31,6 +31,10 @@
   /* Inherited type + padding made 30px Buddy rows 38px tall and overflow the rail.
      Guard: tools/check-workspace-navigation.mjs checks row height and overflow. */
   display: inline-flex;
+  width: 48px;
+  height: 26px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
   align-items: center;
   gap: var(--sp-2);
   font-size: var(--fs-3);
@@ -52,4 +56,8 @@
 .buddy-background-link:focus-visible {
   outline: 1px solid var(--accent-primary);
   opacity: 1;
+}
+
+[data-device="mobile"] .buddy-background-link {
+  height: 44px;
 }

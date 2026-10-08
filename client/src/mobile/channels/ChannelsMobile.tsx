@@ -15,6 +15,7 @@ import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { BuddyStar, ChannelStar } from '../../components/buddies/ChannelStar';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
+import { HighlightRow } from '../../components/buddies/HighlightRow';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
 import { TaskPage } from '../../components/buddies/TaskPage';
 import { WakeIcon, WakeIndicator } from '../../components/buddies/WakeIndicator';
@@ -246,7 +247,10 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
     const heading = channelHeading(entry.channel.kind, directory.buddyNames);
     const requests = channelRequestCount(inbox, entry.channel.id);
     return (
-      <li key={entry.channel.id} className="channel-star-row">
+      <HighlightRow
+        key={entry.channel.id}
+        buttonsRight={<ChannelStar channelId={entry.channel.id} name={heading.name} />}
+      >
         <Link
           className="mobile-channels-row ui-row"
           data-unread={channelUnreadAttr(entry.unread)}
@@ -265,8 +269,7 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
             </span>
           )}
         </Link>
-        <ChannelStar channelId={entry.channel.id} name={heading.name} />
-      </li>
+      </HighlightRow>
     );
   };
   return (
@@ -446,8 +449,39 @@ function BuddyRow({ member }: { member: Buddy }) {
   const direct = useBuddyDirectActions(member.id);
   const { action } = direct;
   return (
-    <li
-      className="mobile-channels-buddy ui-row channel-star-row"
+    <HighlightRow
+      buttonsRight={
+        <>
+          <span className="mobile-channels-wake-slot">
+            <button
+              type="button"
+              className="mobile-channels-wake ui-muted"
+              aria-label={`Wake ${member.name}: catch up on the channels and act`}
+              disabled={action.kind === 'pending'}
+              onClick={direct.wake}
+            >
+              <WakeIcon />
+            </button>
+            {direct.woken && (
+              <WakeIndicator
+                key={direct.woken.attempt}
+                conversationId={direct.woken.conversationId}
+                name={member.name}
+                className="mobile-channels-wake-status ui-muted"
+                doneClassName="mobile-channels-wake-done"
+                linkState={mobileConversationRouteState(location)}
+              />
+            )}
+          </span>
+          <BuddyBackgroundLink
+            buddyId={member.id}
+            workspaceId={member.workspaceId}
+            name={member.name}
+          />
+          <BuddyStar buddyId={member.id} name={member.name} />
+        </>
+      }
+      className="mobile-channels-buddy"
       data-worker-row="mobile"
       data-failed={action.kind === 'failed' || undefined}
     >
@@ -465,34 +499,7 @@ function BuddyRow({ member }: { member: Buddy }) {
           </span>
         </span>
       </button>
-      <BuddyStar buddyId={member.id} name={member.name} />
-      <BuddyBackgroundLink
-        buddyId={member.id}
-        workspaceId={member.workspaceId}
-        name={member.name}
-      />
-      <span className="mobile-channels-wake-slot">
-        <button
-          type="button"
-          className="mobile-channels-wake ui-muted"
-          aria-label={`Wake ${member.name}: catch up on the channels and act`}
-          disabled={action.kind === 'pending'}
-          onClick={direct.wake}
-        >
-          <WakeIcon />
-        </button>
-        {direct.woken && (
-          <WakeIndicator
-            key={direct.woken.attempt}
-            conversationId={direct.woken.conversationId}
-            name={member.name}
-            className="mobile-channels-wake-status ui-muted"
-            doneClassName="mobile-channels-wake-done"
-            linkState={mobileConversationRouteState(location)}
-          />
-        )}
-      </span>
-    </li>
+    </HighlightRow>
   );
 }
 
