@@ -73,6 +73,7 @@ export function ChannelLanding({
               rootId={null}
               references={directory.references}
               submit={frame === 'desktop' ? 'enter' : 'button'}
+              mentionPlacement="below"
               onPosted={({ post }) =>
                 navigate(
                   channelLinkPath(workspaceId, {

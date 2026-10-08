@@ -162,7 +162,7 @@
 }
 
 /* Home clipped upward suggestions; check-mention-placement.mjs guards below vs channel above. */
-.landing-composer .channel-composer-picker {
+.channel-composer[data-mention-placement="below"] .channel-composer-picker {
   inset: calc(100% + 6px) 0 auto;
 }
 

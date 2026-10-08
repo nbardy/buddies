@@ -82,6 +82,7 @@ export function ChannelComposer({
   references,
   autoFocus = false,
   submit,
+  mentionPlacement = 'above',
   onPosted,
 }: {
   channelId: string;
@@ -92,6 +93,7 @@ export function ChannelComposer({
   /** Focus the textarea on mount: the desktop thread pane, opened by a Reply click. */
   autoFocus?: boolean;
   submit: ComposerSubmit;
+  mentionPlacement?: 'above' | 'below';
   onPosted(result: PostResult): void;
 }) {
   // The draft: the post body in its stored Markdown form. `view` is what the textarea shows.
@@ -303,6 +305,7 @@ export function ChannelComposer({
   return (
     <div
       className="channel-composer"
+      data-mention-placement={mentionPlacement}
       data-dragging={dragging || undefined}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return;
