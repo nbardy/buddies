@@ -87,6 +87,8 @@ export type Actor =
   | { kind: 'owner' }
   | { kind: 'buddy'; id: string }
 
+export type Admission = 'owner' | 'capped'
+
 export interface AnswerInput {
   requestId: string
   body: string
@@ -470,6 +472,8 @@ export interface Run {
   executingAt?: string
   /** A delivery's newest shown post, fixed by its first compose (deliveries.rs). */
   throughOrd?: string
+  /** Decided at enqueue; see `Admission`. */
+  admission: Admission
 }
 
 /**

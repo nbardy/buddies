@@ -31,6 +31,9 @@ str_enum!(BuddyStatus { Active = "active", Archived = "archived" });
 str_enum!(TaskStatus { Open = "open", InProgress = "in_progress", Blocked = "blocked", Review = "review", Done = "done", Cancelled = "cancelled" });
 str_enum!(RunStatus { Queued = "queued", Running = "running", CancelRequested = "cancel_requested", Complete = "complete", Failed = "failed", Cancelled = "cancelled" });
 str_enum!(DocKind { Soul = "soul", Working = "working", LongTerm = "long_term", Shared = "shared" });
+// Pattern: sum-types (docs/patterns.md#sum-types)
+// Stored at enqueue: owner messages bypass max_active_runs, background work stays capped.
+str_enum!(Admission { Owner = "owner", Capped = "capped" });
 str_enum!(PostKind { Inform = "inform", Request = "request" });
 str_enum!(Op { ReadDoc = "read_doc", WriteDoc = "write_doc", Post = "post", ReadChannel = "read_channel", SearchPosts = "search_posts", CreateChannel = "create_channel", ArchiveChannel = "archive_channel", RenameChannel = "rename_channel", WriteTask = "write_task", EnqueueRun = "enqueue_run", CancelRun = "cancel_run", RetryRun = "retry_run", WriteSchedule = "write_schedule", Admin = "admin" });
 
@@ -446,6 +449,8 @@ pub struct Run {
     pub executing_at: Option<String>,
     /// A delivery's newest shown post, fixed by its first compose (deliveries.rs).
     pub through_ord: Option<String>,
+    /// Decided at enqueue; see `Admission`.
+    pub admission: Admission,
 }
 
 /// Why a queued run cannot be claimed yet. This is derived from the claim predicate on every

@@ -132,6 +132,10 @@ Only an edit changes identity: typing inside a token dissolves it to plain text,
 Guards: buddies-v2 "an explicit id that is not on the roster is refused", composer-draft "never trusts a foreign id".
 The Buddy run queue's `WAITING_REASON_SQL` in `crates/unleashd-buddies/src/runs.rs` is both the
 list reason and the claim predicate (`reason IS NULL`), so an observation cannot drift from admission.
+Owner-triggered runs bypass only the Buddy pool cap (2026-10-08, task_01a11a6d). A stored typed
+`Admission` is classified once at enqueue from the owner chat or triggering post's author; retry
+copies it. Existing rows are classified once on upgrade. Conversation serialization and the other
+gates still apply. Guard: `an_owner_post_is_claimed_ahead_of_queued_workers_at_the_run_limit`.
 
 ## deep-modules
 **Smell:** wrappers, relays and adapters that only forward calls.
