@@ -56,6 +56,7 @@ function scheduleRun(id: string, conversationId: string): Run {
     inputKey: `deliver:${id}:lead`,
     attempt: 1,
     input: { kind: 'deliver', postId: `post-${id}` },
+    admission: 'capped',
     buddyId: 'lead',
     workspaceId: 'ws-1',
     conversationId,

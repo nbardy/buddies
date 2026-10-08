@@ -17,7 +17,7 @@ use std::str::FromStr;
 
 pub(crate) const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, \
     task_epoch, after_run_id, status, deadline, lease_expires_at, outcome, error_code, error, ready_at, \
-    created_at, started_at, ended_at, config, body, executing_at, through_ord";
+    created_at, started_at, ended_at, config, body, executing_at, through_ord, admission";
 
 const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
     JOIN buddy b ON b.id = r.buddy_id
@@ -40,6 +40,9 @@ const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
 // deliveries for an owner chat run in its background branch, so its queue holds only owner messages.
 // A bound seat and an unbound mention can target the same thread. Serialize both before
 // placement, or bind_run fails conversation_busy. Guard: live thread steering (buddies-v2).
+// 2026-10-08 (task_01a11a6d): workers held all slots for hours after the background deadline
+// was removed. Owner posts skip the cap; answering the owner can briefly exceed max_active_runs.
+// Guard: an_owner_post_is_claimed_ahead_of_queued_workers_at_the_run_limit (tests/core.rs).
 const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
@@ -52,7 +55,7 @@ const WAITING_REASON_SQL: &str = r#"CASE
         WHERE c.buddy_id = r.buddy_id AND c.input_kind = 'deliver' AND c.status IN ('running','cancel_requested')
           AND coalesce(cp.root_id, cp.id) = coalesce(rp.root_id, rp.id)
     ) THEN json_object('kind','conversation_busy')
-    WHEN coalesce(activity.active, 0) >= b.max_active_runs THEN json_object(
+    WHEN r.admission = 'capped' AND coalesce(activity.active, 0) >= b.max_active_runs THEN json_object(
         'kind','pool_full',
         'active',coalesce(activity.active, 0),
         'max',b.max_active_runs
@@ -90,6 +93,7 @@ pub(crate) fn run_row(r: &Row) -> rusqlite::Result<Run> {
         body: r.get("body")?,
         executing_at: r.get("executing_at")?,
         through_ord: r.get("through_ord")?,
+        admission: r.get("admission")?,
     })
 }
 
@@ -141,10 +145,11 @@ pub(crate) fn insert_run(conn: &Connection, run: NewRun) -> Result<Run> {
     let task_epoch = input.task_id.as_deref().map(|t| get_task(conn, t).map(|t| t.epoch)).transpose()?;
     let now = now_iso();
     let id = new_id("run");
+    let admission = admission_of(conn, &input)?;
     conn.prepare_cached(
         "INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, task_epoch,
-           status, ready_at, created_at, config, body)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'queued', ?10, ?10, ?11, ?12)",
+           status, ready_at, created_at, config, body, admission)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'queued', ?10, ?10, ?11, ?12, ?13)",
     )?
     .execute(params![
         id,
@@ -158,9 +163,23 @@ pub(crate) fn insert_run(conn: &Connection, run: NewRun) -> Result<Run> {
         task_epoch,
         now,
         input.config.as_ref().map(|c| serde_json::to_string(c).expect("run config serializes")),
-        body
+        body,
+        admission.as_str()
     ])?;
     get_run(conn, &id)
+}
+
+/// Classify once at enqueue: owner chats/posts bypass the cap; schedules and Buddy posts do not.
+fn admission_of(conn: &Connection, input: &EnqueueInput) -> Result<Admission> {
+    match (&input.input, &input.conversation_id) {
+        (RunInput::Chat { .. }, Some(_)) => Ok(Admission::Owner),
+        (RunInput::Chat { .. }, None) => Ok(Admission::Capped),
+        (RunInput::Post { post_id } | RunInput::Deliver { post_id }, _) => match conn.query_row("SELECT EXISTS(SELECT 1 FROM post WHERE id = ?1 AND author_id IS NULL)", [post_id], |r| r.get::<_, bool>(0))? {
+            true => Ok(Admission::Owner),
+            false => Ok(Admission::Capped),
+        },
+        (RunInput::Retired { input_kind, .. }, _) => Err(CoreError::Invalid(format!("a {input_kind} run is history; it cannot be enqueued"))),
+    }
 }
 
 impl Store {
@@ -263,7 +282,7 @@ impl Store {
                     .execute(params![hold.run_id, hold.lease_token, until])?;
             }
             expire_leases(tx, now, budgets.lease_ms)?;
-            // Ready, predecessor finished, conversation free, buddy under its limit, task not paused.
+            // Ready, conversation free, capped work under its Buddy limit, task not paused.
             // Background work is always claimable: the old per-Buddy hold was removed 2026-09-29
             // (owner) after it silently parked requests as "delivered but held".
             let candidate: Option<String> = tx
@@ -770,8 +789,8 @@ pub(crate) fn next_attempt(tx: &Transaction, run: &Run, conversation_id: Option<
     let attempt: i64 = tx.query_row("SELECT max(attempt) + 1 FROM run WHERE input_key = ?1", [&run.input_key], |r| r.get(0))?;
     tx.execute(
         "INSERT INTO run (id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id,
-           task_epoch, status, ready_at, created_at, config, body)
-         SELECT ?1, input_key, ?2, input_kind, input_id, buddy_id, workspace_id, ?3, task_id, ?4, 'queued', ?5, ?5, ?6, body
+           task_epoch, status, ready_at, created_at, config, body, admission)
+         SELECT ?1, input_key, ?2, input_kind, input_id, buddy_id, workspace_id, ?3, task_id, ?4, 'queued', ?5, ?5, ?6, body, admission
          FROM run WHERE id = ?7",
         params![
             id,

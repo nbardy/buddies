@@ -234,6 +234,7 @@ CREATE TABLE {table} (
   outcome TEXT, error_code TEXT, error TEXT,
   ready_at TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT, legacy TEXT,
   config TEXT, body TEXT, executing_at TEXT, through_ord TEXT,
+  admission TEXT NOT NULL DEFAULT 'capped' CHECK(admission IN ('owner','capped')),
   CHECK(input_kind IN ('chat','post','deliver') OR status <> 'queued'),
   CHECK(input_kind <> 'chat' OR status <> 'queued' OR body IS NOT NULL),
   UNIQUE(input_key, attempt)) STRICT;
@@ -336,6 +337,15 @@ pub fn open(path: &str) -> Result<Connection> {
             drop_column(&conn, "buddy", "background_enabled")?;
             ensure_column(&conn, "run", "config", "TEXT")?;
             ensure_threads(&conn)?;
+            let classify_admission = !has_column(&conn, "run", "admission")?;
+            // Classify existing inputs once too, so a queued owner reply gains admission on upgrade.
+            if classify_admission {
+                let tx = conn.unchecked_transaction()?;
+                ensure_column(&tx, "run", "admission", "TEXT NOT NULL DEFAULT 'capped' CHECK(admission IN ('owner','capped'))")?;
+                tx.execute_batch("UPDATE run SET admission = 'owner' WHERE (input_kind = 'chat' AND conversation_id IS NOT NULL)
+                    OR (input_kind IN ('post','deliver') AND input_id IN (SELECT id FROM post WHERE author_id IS NULL));")?;
+                tx.commit()?;
+            }
             crate::migrate::rebuild_for_delivery(&conn, path)?;
             conn.execute_batch(INDEXES)?;
             ensure_post_search(&conn)?;
