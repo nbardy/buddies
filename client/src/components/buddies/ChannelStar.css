@@ -1,4 +1,5 @@
 .channel-star-row {
+  position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
@@ -6,6 +7,14 @@
 .channel-star-row > :first-child {
   flex: 1;
   min-width: 0;
+}
+/* A separate flex star clipped the selected channel bar; keep its opener full width (inspectChannelStarLayout). */
+.channel-star-row:not([data-worker-row]) > :first-child {
+  padding-right: var(--sp-10);
+}
+.channel-star-row:not([data-worker-row]) .channel-star {
+  position: absolute;
+  right: 0;
 }
 .channel-star-row .channel-star {
   display: grid;

@@ -2,7 +2,7 @@ import { mentionsABuddy } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { channelRailFamily } from '../../atoms/channel-rail';
+import { buddyRailFamily, channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { openSetupAt, setThreadWidth, threadWidthAtom } from '../../atoms/ui';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
@@ -698,6 +698,7 @@ export function ChannelBrowser({
   const inbox = useWorkspaceInbox(workspaceId);
   const archived = useArchivedChannels(workspaceId);
   const rail = useAtomValue(channelRailFamily(workspaceId));
+  const buddyRail = useAtomValue(buddyRailFamily(directory.activeMembers));
   useWarmChannelPosts(rail.channels);
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
@@ -863,7 +864,7 @@ export function ChannelBrowser({
                   current={dm === creatingBuddy.id}
                 />
               )}
-              {directory.activeMembers.map((member) => (
+              {buddyRail.map((member) => (
                 <BuddyRailRow
                   key={member.id}
                   member={member}

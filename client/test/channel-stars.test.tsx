@@ -3,6 +3,7 @@ import { register } from 'node:module';
 import test from 'node:test';
 import { Provider } from 'jotai';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { buddyFixture } from './fixtures/buddy-roster';
 import { inboxFixture, publicChannel } from './fixtures/channel-posts';
 
 register(
@@ -14,11 +15,12 @@ register(
   `)}`,
   import.meta.url
 );
-const { channelRailFamily } = await import('../src/atoms/channel-rail');
+const { buddyRailFamily, channelRailFamily } = await import('../src/atoms/channel-rail');
 const { loadResource } = await import('../src/atoms/resources');
 const { jotaiStore } = await import('../src/atoms/store');
-const { starredChannelIdsAtom, toggleChannelStar } = await import('../src/atoms/ui');
-const { ChannelStar } = await import('../src/components/buddies/ChannelStar');
+const { starredBuddyIdsAtom, toggleBuddyStar, starredChannelIdsAtom, toggleChannelStar } =
+  await import('../src/atoms/ui');
+const { BuddyStar, ChannelStar } = await import('../src/components/buddies/ChannelStar');
 
 test('channel stars partition the cached rail without losing unread counts or changing other workspaces', async () => {
   const original = jotaiStore.get(starredChannelIdsAtom);
@@ -66,5 +68,40 @@ test('channel stars partition the cached rail without losing unread counts or ch
     assert.deepEqual(rail(), rows);
   } finally {
     jotaiStore.set(starredChannelIdsAtom, original);
+  }
+});
+
+test('Buddy stars move only directory members first and expose pressed state', async () => {
+  const original = jotaiStore.get(starredBuddyIdsAtom);
+  const members = ['alpha', 'beta', 'gamma'].map((name) =>
+    buddyFixture({ id: name, name, workspaceId: 'buddy-stars-ws' })
+  );
+  const other = [buddyFixture({ id: 'other', name: 'Other' })];
+  const rail = () => jotaiStore.get(buddyRailFamily(members));
+  const renderStar = () =>
+    renderToStaticMarkup(
+      <Provider store={jotaiStore}>
+        <BuddyStar buddyId="gamma" name="gamma" />
+      </Provider>
+    );
+  try {
+    jotaiStore.set(starredBuddyIdsAtom, []);
+    assert.match(renderStar(), /aria-label="Star gamma"[^>]*aria-pressed="false"/);
+    toggleBuddyStar('gamma');
+    toggleBuddyStar('absent');
+    assert.deepEqual(
+      rail().map((buddy) => buddy.id),
+      ['gamma', 'alpha', 'beta']
+    );
+    assert.equal(rail()[0], members[2]);
+    assert.match(renderStar(), /aria-label="Unstar gamma"[^>]*aria-pressed="true"/);
+    assert.deepEqual(
+      jotaiStore.get(buddyRailFamily(other)).map((buddy) => buddy.id),
+      ['other']
+    );
+    toggleBuddyStar('gamma');
+    assert.deepEqual(rail(), members);
+  } finally {
+    jotaiStore.set(starredBuddyIdsAtom, original);
   }
 });

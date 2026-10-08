@@ -1,10 +1,30 @@
 import { useAtomValue } from 'jotai';
-import { starredChannelIdsAtom, toggleChannelStar } from '../../atoms/ui';
+import {
+  starredBuddyIdsAtom,
+  starredChannelIdsAtom,
+  toggleBuddyStar,
+  toggleChannelStar,
+} from '../../atoms/ui';
 import './ChannelStar.css';
 
 export function ChannelStar({ channelId, name }: { channelId: string; name: string }) {
   const starred = useAtomValue(starredChannelIdsAtom).includes(channelId);
-  const label = `${starred ? 'Unstar' : 'Star'} #${name}`;
+  return (
+    <StarButton starred={starred} name={`#${name}`} onClick={() => toggleChannelStar(channelId)} />
+  );
+}
+
+export function BuddyStar({ buddyId, name }: { buddyId: string; name: string }) {
+  const starred = useAtomValue(starredBuddyIdsAtom).includes(buddyId);
+  return <StarButton starred={starred} name={name} onClick={() => toggleBuddyStar(buddyId)} />;
+}
+
+function StarButton({
+  starred,
+  name,
+  onClick,
+}: { starred: boolean; name: string; onClick(): void }) {
+  const label = `${starred ? 'Unstar' : 'Star'} ${name}`;
   return (
     <button
       type="button"
@@ -12,7 +32,7 @@ export function ChannelStar({ channelId, name }: { channelId: string; name: stri
       aria-label={label}
       title={label}
       aria-pressed={starred}
-      onClick={() => toggleChannelStar(channelId)}
+      onClick={onClick}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
         <path
