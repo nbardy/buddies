@@ -37,6 +37,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WS_PATH } from '@unleashd/shared';
 import { inspectChannelModelPicker } from './lib/channel-model-picker.mjs';
+import { inspectChannelStarLayout } from './lib/channel-star-layout.mjs';
 import { inspectDmLayout } from './lib/dm-layout.mjs';
 import { openSession, resolveAuthToken, sleep } from './lib/headless-chrome.mjs';
 import { compareRuns } from './lib/screenshot-compare.mjs';
@@ -622,7 +623,16 @@ export function buildScreens(found, focus) {
       views: onBoth(`/buddies/workspaces/${enc(found.workspaceId)}`),
     },
     // ── Channels ──
-    { name: 'channels', missing: null, views: onBoth(channels) },
+    {
+      name: 'channels',
+      missing: null,
+      views: Object.fromEntries(
+        Object.entries(onBoth(channels)).map(([tree, view]) => [
+          tree,
+          { ...view, verify: `(${inspectChannelStarLayout.toString()})()` },
+        ])
+      ),
+    },
     {
       name: 'dm',
       missing: dm ? null : 'no Buddy DM',

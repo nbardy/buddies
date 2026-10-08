@@ -316,6 +316,21 @@ export function toggleChannelStar(channelId: string): void {
 }
 
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
+/** Buddy favorites share channel stars' device-local lifetime. */
+export const starredBuddyIdsAtom = atomWithStorage<string[]>(
+  'unleashd-starred-buddies',
+  [],
+  validatedStorage<string[]>((raw) =>
+    Array.isArray(raw) && raw.every((id) => typeof id === 'string') ? raw : null
+  ),
+  { getOnInit: true }
+);
+
+export function toggleBuddyStar(buddyId: string): void {
+  jotaiStore.set(starredBuddyIdsAtom, toggleInList(jotaiStore.get(starredBuddyIdsAtom), buddyId));
+}
+
+// Pattern: one-write-path (docs/patterns.md#one-write-path)
 /** Desktop thread width belongs to this device, across workspaces and reloads. */
 export const threadWidthAtom = atomWithStorage<number>(
   'unleashd-thread-width',

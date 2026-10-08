@@ -2,7 +2,7 @@ import { useAtomValue } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
-import { channelRailFamily } from '../../atoms/channel-rail';
+import { buddyRailFamily, channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
 import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
@@ -12,7 +12,7 @@ import { ChannelDm } from '../../components/buddies/ChannelDm';
 import { ChannelLanding } from '../../components/buddies/ChannelLanding';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
-import { ChannelStar } from '../../components/buddies/ChannelStar';
+import { BuddyStar, ChannelStar } from '../../components/buddies/ChannelStar';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
@@ -380,6 +380,7 @@ function BuddySection({
   workspaceId: string;
 }) {
   const openDm = useChannelsDm();
+  const buddyRail = useAtomValue(buddyRailFamily(members));
   const newBuddy = useNewBuddy(openDm, workspaceId);
   const [teamCreator, setTeamCreator] = useState(false);
   const creating = useAtomValue(listField('builders')).find((entry) => !entry.done);
@@ -428,7 +429,7 @@ function BuddySection({
           </button>
         </li>
       )}
-      {members.map((member) => (
+      {buddyRail.map((member) => (
         <BuddyRow key={member.id} member={member} />
       ))}
     </ul>
@@ -446,7 +447,7 @@ function BuddyRow({ member }: { member: Buddy }) {
   const { action } = direct;
   return (
     <li
-      className="mobile-channels-buddy ui-row"
+      className="mobile-channels-buddy ui-row channel-star-row"
       data-worker-row="mobile"
       data-failed={action.kind === 'failed' || undefined}
     >
@@ -464,6 +465,7 @@ function BuddyRow({ member }: { member: Buddy }) {
           </span>
         </span>
       </button>
+      <BuddyStar buddyId={member.id} name={member.name} />
       <BuddyBackgroundLink
         buddyId={member.id}
         workspaceId={member.workspaceId}
