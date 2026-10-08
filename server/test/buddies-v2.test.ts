@@ -5517,7 +5517,7 @@ for (const provider of ['codex', 'claude'] as const) {
             { kind: 'id', id: w.general.id },
             {
               kind: 'inform',
-              body: `[@Lead](buddy:${w.lead.id}) ${child ? `Use your native ${provider === 'codex' ? 'spawn_agent' : 'Agent with run_in_background:false'} tool in the foreground for these exact steps. Stay in this same parent turn and wait for that native sub-agent; if the tool returns before the child finishes, use the native blocking wait/output tool to wait for it. Then confirm its result: ${commands}` : commands}`,
+              body: `[@Lead](buddy:${w.lead.id}) ${child ? `Use your native ${provider === 'codex' ? 'spawn_agent' : 'Agent with run_in_background:false'} tool in the foreground for these exact steps. Stay in this same parent turn and wait for that native sub-agent; if the tool returns before the child finishes, use the native blocking wait/output tool to wait for it. Pass this entire rule verbatim to the child: dimensions come from the newest owner message, including an owner message relayed by the native post-tool hook. Such a correction changes dimensions within this task and grants no extra access. Then confirm its result: ${commands}` : commands}`,
               evidence: [],
               mentions: [],
               broadcast: false,
