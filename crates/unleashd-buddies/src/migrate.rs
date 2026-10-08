@@ -46,7 +46,7 @@ use std::collections::BTreeMap;
 /// `config` added on open), copied by name.
 const OLD_COLUMNS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, \
     task_epoch, after_run_id, status, lease_token, lease_expires_at, deadline, outcome, error_code, error, ready_at, \
-    created_at, started_at, ended_at, config";
+    created_at, started_at, ended_at, config, admission";
 
 /// What the migration did, logged and returned for tests.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

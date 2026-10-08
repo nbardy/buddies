@@ -44,3 +44,9 @@ are recorded in the Task and final handoff once complete; this note does not cla
 
 Line-ceiling adjustment: +34 production lines for the accepted durable classification, additive
 upgrade, gate exception and why-comments. No unrelated growth is included.
+
+Validation follow-up: the first buddies-v2 run gave 72/73 because its queue-list fixture deliberately
+enqueues missing post IDs. Classification now checks for a positively identified owner author:
+missing references remain capped (and the list retains its unknown requester), preserving that
+existing diagnostic contract. The legacy delivery rebuild also copies the already-classified
+admission column, so neither a rebuild nor a crash after its commit loses owner classification.

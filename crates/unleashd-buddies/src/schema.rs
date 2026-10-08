@@ -338,7 +338,6 @@ pub fn open(path: &str) -> Result<Connection> {
             ensure_column(&conn, "run", "config", "TEXT")?;
             ensure_threads(&conn)?;
             let classify_admission = !has_column(&conn, "run", "admission")?;
-            crate::migrate::rebuild_for_delivery(&conn, path)?;
             // Classify existing inputs once too, so a queued owner reply gains admission on upgrade.
             if classify_admission {
                 let tx = conn.unchecked_transaction()?;
@@ -347,6 +346,7 @@ pub fn open(path: &str) -> Result<Connection> {
                     OR (input_kind IN ('post','deliver') AND input_id IN (SELECT id FROM post WHERE author_id IS NULL));")?;
                 tx.commit()?;
             }
+            crate::migrate::rebuild_for_delivery(&conn, path)?;
             conn.execute_batch(INDEXES)?;
             ensure_post_search(&conn)?;
             Ok(conn)

@@ -174,9 +174,9 @@ fn admission_of(conn: &Connection, input: &EnqueueInput) -> Result<Admission> {
     match (&input.input, &input.conversation_id) {
         (RunInput::Chat { .. }, Some(_)) => Ok(Admission::Owner),
         (RunInput::Chat { .. }, None) => Ok(Admission::Capped),
-        (RunInput::Post { post_id } | RunInput::Deliver { post_id }, _) => match get_post(conn, post_id)?.author {
-            Actor::Owner => Ok(Admission::Owner),
-            Actor::Buddy { .. } => Ok(Admission::Capped),
+        (RunInput::Post { post_id } | RunInput::Deliver { post_id }, _) => match conn.query_row("SELECT EXISTS(SELECT 1 FROM post WHERE id = ?1 AND author_id IS NULL)", [post_id], |r| r.get::<_, bool>(0))? {
+            true => Ok(Admission::Owner),
+            false => Ok(Admission::Capped),
         },
         (RunInput::Retired { input_kind, .. }, _) => Err(CoreError::Invalid(format!("a {input_kind} run is history; it cannot be enqueued"))),
     }
