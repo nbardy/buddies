@@ -10,11 +10,23 @@ import express from 'express';
 import { createDependencyChecks, registerDependencyRoutes } from '../src/providers/dependencies';
 import { installedAgent } from '../src/providers/installed-agent';
 
+// Two budgets, never one. A probe that should SUCCEED gets a load-tolerant budget: the full
+// server suite runs these real /bin/sh fixtures beside other lanes, and at load 35 on 10 cores
+// (f1011d0 rerun, 2026-10-08) a 1.5 s budget timed out rustc (read as missing) and claude's
+// "Yes" (read as failed). Only the hang classification keeps a short budget, on its own
+// instance, so it cannot starve the success-path probes; its fixture sleeps 10 s, well past
+// 1.5 s. No wall-clock bound on the refresh: it also times subprocesses, filesystem work and
+// scheduling, so a correctly killed probe can exceed it under contention (PM review
+// 2026-10-08). Production keeps its 45 s default.
+const READY_BUDGET_MS = 30_000;
+const HANG_BUDGET_MS = 1_500;
+
 test('readiness requires a successful Yes, missing and hanging agents remain actionable', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'deps-test-'));
   const executable = async (name: string, body: string) =>
     fs.writeFile(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
-  const checks = createDependencyChecks({ PATH: dir, HOME: dir, CLAUDECODE: '1' }, 1500);
+  const checks = createDependencyChecks({ PATH: dir, HOME: dir, CLAUDECODE: '1' }, READY_BUDGET_MS);
+  const hanging = createDependencyChecks({ PATH: dir, HOME: dir }, HANG_BUDGET_MS);
   const app = express();
   registerDependencyRoutes(app, checks);
   const server = app.listen(0, '127.0.0.1');
@@ -26,7 +38,7 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
     await executable('cargo', 'echo cargo');
     await executable('claude', '[ -z "$CLAUDECODE" ] || exit 1; echo Yes');
     await checks.refresh();
-    let snapshot: Pick<Dependencies, 'checks'> = DependenciesSchema.parse(
+    const snapshot: Pick<Dependencies, 'checks'> = DependenciesSchema.parse(
       await (await fetch(`${url}/api/dependencies`)).json()
     );
     assert.deepEqual(
@@ -45,11 +57,10 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
     await executable('codex', 'echo Yes');
     assert.equal((await fetch(`${url}/api/dependencies/check`, { method: 'POST' })).status, 202);
     await checks.refresh();
+    assert.equal(checks.snapshot().checks[2].status, 'ready');
     await executable('claude', '/bin/sleep 10');
-    await checks.refresh();
-    snapshot = checks.snapshot();
-    assert.equal(snapshot.checks[2].status, 'ready');
-    assert.match(snapshot.checks[1].message, /no response within/i);
+    await hanging.refresh();
+    assert.match(hanging.snapshot().checks[1].message, /no response within/i);
     await executable('claude', 'echo "Weekly limit reached" >&2; exit 1');
     await checks.refresh();
     assert.equal(checks.snapshot().checks[1].failure, 'quota');
@@ -59,6 +70,7 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
     assert.equal(checks.snapshot().checks[1].status, 'failed', 'substring yes is not a response');
   } finally {
     checks.close();
+    hanging.close();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve()))
     );
@@ -99,8 +111,8 @@ SCRIPT
     `echo npm >> "$HOME/attempts"\n/bin/mkdir -p "$HOME/.local/bin"\n/bin/cat > "$HOME/.local/bin/codex" <<'SCRIPT'\n#!/bin/sh\nif [ "$1" = '--version' ]; then echo codex; exit; fi\necho probe >> "$HOME/probes"\necho Yes\nSCRIPT\n/bin/chmod +x "$HOME/.local/bin/codex"`
   );
   const env = { PATH: bin, HOME: dir };
-  const first = createDependencyChecks(env, 1500, setup, 1500);
-  const restarted = createDependencyChecks(env, 1500, setup, 1500);
+  const first = createDependencyChecks(env, READY_BUDGET_MS, setup, READY_BUDGET_MS);
+  const restarted = createDependencyChecks(env, READY_BUDGET_MS, setup, READY_BUDGET_MS);
   try {
     await first.refresh();
     assert.deepEqual(
@@ -146,7 +158,12 @@ test('auto-install off: missing tools are reported, no installer runs', async ()
       }
     );
   const env = { PATH: bin, HOME: dir, UNLEASHD_AUTO_INSTALL: '0' };
-  const checks = createDependencyChecks(env, 1500, path.join(dir, 'setup'), 1500);
+  const checks = createDependencyChecks(
+    env,
+    READY_BUDGET_MS,
+    path.join(dir, 'setup'),
+    READY_BUDGET_MS
+  );
   try {
     await checks.refresh();
     assert.deepEqual(
@@ -168,7 +185,7 @@ test('the installed agent follows PATH on every read: none, then claude, then co
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'installed-agent-'));
   const env = { PATH: `${path.join(dir, 'absent')}${path.delimiter}${dir}`, HOME: dir };
   const app = express();
-  const checks = createDependencyChecks({ ...env }, 1500);
+  const checks = createDependencyChecks({ ...env }, READY_BUDGET_MS);
   registerDependencyRoutes(app, checks, () => installedAgent(env));
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
