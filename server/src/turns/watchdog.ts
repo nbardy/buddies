@@ -18,9 +18,8 @@ import { noteActivity } from '../observability/event-loop-stall';
  *   `max_runtime_timeout`, never `user_stop` (guard: `foreground Buddy
  *   deadline uses the conversation budget and reports timeout after joined
  *   drain`).
- * A turn that launched a background task (turns/background-wait.ts) widens only the
- * provider-idle budget, by its harness's declared wait, until its last background task
- * finishes; the max clock never moves.
+ * Child events reset the same provider clock; a background launch alone never extends it.
+ * No absolute budget is required for background work.
  */
 
 export type TurnTimeoutKind = 'bridge' | 'provider' | 'max';
@@ -42,8 +41,6 @@ export class TurnWatchdog {
   private startedAt = 0;
   private lastBridgeEventAt = 0;
   private lastProviderProgressAt = 0;
-  // The provider-idle budget of this turn: budgets.providerIdleMs until a background launch.
-  private providerIdleBudgetMs = 0;
   private bridgeTimer: NodeJS.Timeout | null = null;
   private providerIdleTimer: NodeJS.Timeout | null = null;
   private maxTimer: NodeJS.Timeout | null = null;
@@ -64,7 +61,6 @@ export class TurnWatchdog {
     this.startedAt = startedAt;
     this.lastBridgeEventAt = now;
     this.lastProviderProgressAt = now;
-    this.providerIdleBudgetMs = this.budgets.providerIdleMs;
     this.armBridge();
     this.armProviderIdle();
     if (maxRuntimeMs !== null) {
@@ -88,26 +84,6 @@ export class TurnWatchdog {
       this.lastProviderProgressAt = now;
       this.armProviderIdle();
     }
-  }
-
-  /**
-   * The turn launched a background task its harness waits for after the parent goes idle, up
-   * to `waitMs`. Silence within that wait is not a stall, so for the rest of the turn the
-   * provider-idle budget is the wait plus the normal idle budget (a harness that still hangs
-   * after its own ceiling dies as before). `endBackgroundWait` narrows it back.
-   */
-  allowBackgroundWait(waitMs: number): void {
-    this.providerIdleBudgetMs = Math.max(
-      this.providerIdleBudgetMs,
-      this.budgets.providerIdleMs + waitMs
-    );
-    this.armProviderIdle();
-  }
-
-  /** Every background task of the turn has finished: silence is a stall again. */
-  endBackgroundWait(): void {
-    this.providerIdleBudgetMs = this.budgets.providerIdleMs;
-    this.armProviderIdle();
   }
 
   clear(): void {
@@ -135,7 +111,9 @@ export class TurnWatchdog {
 
   private armProviderIdle(): void {
     if (this.providerIdleTimer) clearTimeout(this.providerIdleTimer);
-    const remaining = this.providerIdleBudgetMs - (Date.now() - this.lastProviderProgressAt);
+    // A Claude launch once bought 13h of silence, hiding hung parents/children. Only observed
+    // progress extends this clock (run-lease: no-progress ends a silent background turn).
+    const remaining = this.budgets.providerIdleMs - (Date.now() - this.lastProviderProgressAt);
     this.providerIdleTimer = setTimeout(() => this.fire('provider'), remaining);
   }
 

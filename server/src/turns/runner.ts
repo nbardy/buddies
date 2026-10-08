@@ -28,7 +28,6 @@ import type {
   TurnTerminalCause,
 } from '../observability';
 import { type SwarmObservers, watchSwarmRuns } from '../swarm';
-import { type BackgroundWait, backgroundWaitFor } from './background-wait';
 import type { Effect, Execution, ExecutionOutcome, Phase, StopIntent } from './execution-state';
 import type { ExecutionJournals, TurnOwner } from './executions';
 import type { TurnInput } from './input';
@@ -151,8 +150,6 @@ export class TurnRunner {
   private nextAttempt: string | null = null;
   // Chosen once per turn from the harness capability table (turns/subagents.ts).
   private subAgentFold: SubAgentFold = subAgentFoldFor('claude');
-  // Chosen with it: how long the harness may wait silently on background tasks it launched.
-  private backgroundWait: BackgroundWait = backgroundWaitFor('claude');
   // This turn's subscription to its folder's swarm observer (swarm/observer.ts).
   private stopSwarmWatch: (() => void) | null = null;
   // The max budget is passed explicitly: foreground Buddy turns never inherit a shorter
@@ -421,7 +418,6 @@ export class TurnRunner {
     this.lastAttemptActivitySource = null;
     this.lastObservedActivity = null;
     this.subAgentFold = subAgentFoldFor(provider);
-    this.backgroundWait = backgroundWaitFor(provider);
   }
 
   /** The one read path: a spawned and an adopted turn are both followed from their journal. */
@@ -672,7 +668,6 @@ export class TurnRunner {
 
   applyToolUse(event: ToolUseEvent): void {
     this.ensureAssistantMessage();
-    this.backgroundWait.toolUse(event, this.watchdog);
     if (this.subAgentFold.toolUse(this.subAgentHost, event) === 'hide') return;
     // Codex shell completion-only events would duplicate the tool line.
     if (isCompletionOnlyToolUse(event.name, event.input, event.displayText)) return;
@@ -694,12 +689,10 @@ export class TurnRunner {
   }
 
   applyTaskStarted(event: Extract<UnifiedAgentEvent, { type: 'task.started' }>): void {
-    this.backgroundWait.taskStarted(event);
     this.subAgentFold.taskStarted(this.subAgentHost, event);
   }
 
   applyTaskFinished(event: Extract<UnifiedAgentEvent, { type: 'task.finished' }>): void {
-    this.backgroundWait.taskFinished(event, this.watchdog);
     this.subAgentFold.taskFinished(this.subAgentHost, event);
   }
 

@@ -323,7 +323,10 @@ adopted turns before its first claim. The deadline is the run's `deadline` colum
 chat (passed explicitly) and `BUDDY_BACKGROUND_TURN_MS` otherwise. Since 2026-10-08 (owner request), background runs default
 to no absolute cutoff: a zero budget stores a NULL deadline; a positive env override opts in.
 Their shared watchdog checks bridge/provider idleness only, while the policy enforces any stored
-deadline. Foreground claims still receive their explicit chat budget.
+deadline. Since 2026-10-08, a Claude background launch no longer widens provider silence to 13 h:
+all child events reset the same 60-minute provider-progress clock, and its `provider_idle_timeout`
+reaches the run unchanged (see `turn-lifecycle.md#provider-progress`). A lease proves the holder
+is observing, not that the provider is progressing; wrapper-only heartbeats cannot defer this timer. Foreground claims still receive their explicit chat budget.
 What the gate does to a dead holder's run depends on `executing_at` (Pattern: durable-intake): unexecuted
 → back to the queue; executed → `lease_expired`, and an executed REQUEST then continues once in its own
 conversation (decision G, `runs.rs` `resume`; a second death sends the failure post, a stop is never

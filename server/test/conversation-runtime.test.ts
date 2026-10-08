@@ -1026,51 +1026,18 @@ function recordedBackgroundAgentTurn(): UnifiedAgentEvent[] {
     .flatMap((line) => parse(JSON.parse(line)));
 }
 
-// agent_notes/2026-09-26_claude-p-background-agents-ceiling.md: agent-cli lets `claude -p` wait
-// 12 h for its background agents, but the parent is silent meanwhile, so the 60-minute
-// provider-idle watchdog killed every such wait. A launch now widens only that clock, by the
-// harness's declared wait, and the turn still ends if Claude hangs past it.
-test('a Claude turn waiting on a background agent outlives the provider-idle limit', async (t) => {
+// A launch alone used to widen silence to 13h. Child events, not an old launch, prove life.
+test('a background launch cannot exempt a silent Claude turn from the idle clock', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
-  const run = (launch: UnifiedAgentEvent, minutes: number) =>
-    silentClaudeTurn(t, [{ type: 'turn.started' }, launch], minutes);
-  const agent = (runInBackground: boolean): UnifiedAgentEvent => ({
+  const launch: UnifiedAgentEvent = {
     type: 'tool.use',
     name: 'Agent',
-    input: { description: 'worker', prompt: 'build it', run_in_background: runInBackground },
+    input: { description: 'worker', run_in_background: true },
+  };
+  assert.deepEqual(await silentClaudeTurn(t, [{ type: 'turn.started' }, launch], 61), {
+    running: false,
+    stops: 1,
   });
-  const idleMinutes = 60;
-  const waitMinutes = 12 * 60; // agent-cli's CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS default
-
-  const foreground = await run(agent(false), idleMinutes + 1);
-  assert.deepEqual(foreground, { running: false, stops: 1 }, 'a plain silent turn still stalls');
-
-  const waiting = await run(agent(true), idleMinutes + 1);
-  assert.deepEqual(waiting, { running: true, stops: 0 }, 'the background wait is not a stall');
-
-  const hung = await run(agent(true), waitMinutes + idleMinutes + 1);
-  assert.deepEqual(hung, { running: false, stops: 1 }, 'past the declared wait it stalls again');
-});
-
-// The widened budget used to last the whole turn: agent-cli's Claude parser dropped the
-// task_* lines, so nothing said the agents were done and a turn hung after they finished lived
-// 13 h. The finish of the last background task now restores the normal idle limit.
-test('a recorded background agent finishing restores the idle limit', async (t) => {
-  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
-  // Claude flushes every `result` only at exit, so the live stream ends at the last task line.
-  const live = recordedBackgroundAgentTurn().filter((event) => event.type !== 'turn.complete');
-  const agentFinish = live.findIndex(
-    (event) =>
-      event.type === 'task.finished' &&
-      live.some((e) => e.type === 'task.started' && e.background && e.taskId === event.taskId)
-  );
-  assert.ok(agentFinish > 0, 'the fixture carries the background agent finishing');
-
-  const stillWorking = await silentClaudeTurn(t, live.slice(0, agentFinish), 61);
-  assert.deepEqual(stillWorking, { running: true, stops: 0 }, 'agent still running: waiting');
-
-  const finished = await silentClaudeTurn(t, live, 61);
-  assert.deepEqual(finished, { running: false, stops: 1 }, 'agent done: silence is a stall');
 });
 
 test('a recorded Claude 2.1 Agent launch becomes a sub-agent', async () => {

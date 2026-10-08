@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { type ConversationRow, EncodedRowsSchema, WS_PATH, decodeRows } from '@unleashd/shared';
+import { WebSocket } from 'ws';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
+import { freePortSync } from './free-port';
 
 /**
  * A run's lease is its holder's heartbeat, separate from its deadline (decision:
@@ -45,6 +48,17 @@ async function main() {
   mark(scenario + '.pgid', execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
   text('one;');
   mark(scenario + '.midturn', process.pid);
+  if (scenario === 'backgroundhung' || scenario === 'backgroundslow') {
+    say({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'Agent' } } });
+    say({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'input_json_delta', partial_json: JSON.stringify({ description: 'child', run_in_background: true }) } } });
+    say({ type: 'stream_event', event: { type: 'content_block_stop' } });
+    if (scenario === 'backgroundhung') return setInterval(() => {}, 1000);
+    const stream = setInterval(() => say({ type: 'stream_event', parent_tool_use_id: 'child-launch', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'child working;' } } }), 500);
+    await until(scenario + '.go');
+    clearInterval(stream);
+    say({ type: 'result', subtype: 'success' });
+    return;
+  }
   if (scenario === 'held' || scenario === 'stuck' || scenario === 'frozen') return setInterval(() => {}, 1000);
   await until(scenario + '.go');
   text('done;');
@@ -227,7 +241,16 @@ before(() => {
 
 after(async () => {
   for (const name of [...backends.keys()]) await killBackend(name);
-  for (const scenario of ['held', 'silent', 'stuck', 'frozen']) killGroup(scenario);
+  for (const scenario of [
+    'held',
+    'silent',
+    'stuck',
+    'frozen',
+    'backgroundhung',
+    'backgroundslow',
+    'recovered',
+  ])
+    killGroup(scenario);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -313,7 +336,7 @@ test(
     );
     assert.ok(Date.now() - startedAt >= IDLE_MS - 1_000, 'not before the idle budget');
     assert.equal(killed?.status, 'failed', JSON.stringify(killed));
-    assert.equal(killed?.errorCode, 'execution_failed', JSON.stringify(killed));
+    assert.equal(killed?.errorCode, 'provider_idle_timeout', JSON.stringify(killed));
     assert.match(String(killed?.error), /no provider event/, JSON.stringify(killed));
   }
 );
@@ -355,5 +378,86 @@ test(
     assert.equal(await runOf(http, frozen, 2), undefined, 'no resume of a run that never died');
     killGroup('frozen');
     await killBackend('D');
+  }
+);
+
+// A background launch is not perpetual proof of progress: the old 13h exemption masked a
+// silent provider. Child stream events must keep the same clock alive, with no absolute cap.
+test(
+  'no-progress ends a silent background turn and frees its seat while child streams outlive N',
+  { timeout: 120_000 },
+  async () => {
+    const port = freePortSync();
+    const http = api(port);
+    const idleMs = 4_000;
+    await startBackend('liveness', port, {
+      CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: String(idleMs),
+      CWV_TURN_TIMEOUT_KILL_GRACE_MS: '200',
+      CWV_BUDDY_RUNNER_BACKSTOP_MS: '100',
+    });
+    const ws = await workspace(http, 'liveness');
+    const hung = await hire(http, ws, 'backgroundhung');
+    const slow = await hire(http, ws, 'backgroundslow');
+    await ask(http, hung, 'backgroundhung');
+    await ask(http, slow, 'backgroundslow');
+    await eventually(
+      () => exists('backgroundhung.midturn') && exists('backgroundslow.midturn'),
+      Boolean,
+      'both background turns started'
+    );
+    const ended = await eventually(
+      () => runOf(http, hung),
+      (r) => r?.status === 'failed',
+      'silent background run failed',
+      idleMs + 8_000
+    );
+    assert.equal(ended?.errorCode, 'provider_idle_timeout', JSON.stringify(ended));
+    assert.ok(ended?.conversationId);
+    const rows = await new Promise<ConversationRow[]>((resolve, reject) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}${WS_PATH}`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      const timer = setTimeout(() => {
+        socket.terminate();
+        reject(new Error('no hello'));
+      }, 5_000);
+      socket.on('error', (error) => {
+        clearTimeout(timer);
+        socket.terminate();
+        reject(error);
+      });
+      socket.on('message', (raw) => {
+        const message = JSON.parse(raw.toString());
+        if (message.type !== 'hello') return;
+        clearTimeout(timer);
+        socket.close();
+        resolve(decodeRows(EncodedRowsSchema.parse(message)));
+      });
+    });
+    assert.equal(rows.find((row) => row.id === ended.conversationId)?.run, 'idle');
+    const diagnostics = await http('GET', `/api/conversations/${ended.conversationId}/diagnostics`);
+    assert.equal(diagnostics.body.latestAttempt.terminalCause, 'provider_idle_timeout');
+    // A second request to the same Buddy demonstrates the slot and conversation were released.
+    fs.writeFileSync(path.join(fakeDir, 'recovered.go'), '');
+    const next = await ask(http, hung, 'recovered');
+    await eventually(
+      async () => {
+        const runs = await http('GET', `/api/buddies/runs?buddyId=${hung}`);
+        return (runs.body.runs ?? runs.body).find(
+          (r: { input: { postId?: string } }) => r.input.postId === next.id
+        );
+      },
+      (r) => r?.status === 'complete',
+      'next request uses freed run slot and seat'
+    );
+    await staysRunning(http, slow, 2 * idleMs, 'child stream progresses beyond N');
+    fs.writeFileSync(path.join(fakeDir, 'backgroundslow.go'), '');
+    const done = await eventually(
+      () => runOf(http, slow),
+      (r) => r?.status === 'complete',
+      'slow run completes'
+    );
+    assert.equal(done?.errorCode ?? null, null);
+    await killBackend('liveness');
   }
 );

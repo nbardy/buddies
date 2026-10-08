@@ -1,0 +1,161 @@
+{
+  "attempt": {
+    "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+    "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+    "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+    "originServerBootId": "9d553565-a7ea-4f00-a60f-bf9acc15af41",
+    "stateTimestamps": {
+      "queued": "2026-10-07T21:54:32.408Z",
+      "starting": "2026-10-07T21:54:32.422Z",
+      "running": "2026-10-07T21:54:32.426Z",
+      "failed": "2026-10-08T04:25:23.379Z"
+    },
+    "createdAt": "2026-10-07T21:54:32.408Z",
+    "updatedAt": "2026-10-08T04:25:23.379Z",
+    "lastActivityAt": "2026-10-08T04:25:23.271Z",
+    "lastActivity": {
+      "source": "provider_event",
+      "providerEventType": "session.started"
+    },
+    "lastBridgeActivityAt": "2026-10-08T04:25:23.271Z",
+    "lastProviderProgressAt": "2026-10-08T04:25:23.271Z",
+    "startedAt": "2026-10-07T21:54:32.426Z",
+    "terminalAt": "2026-10-08T04:25:23.379Z",
+    "state": "failed",
+    "terminalCause": "provider_error"
+  },
+  "events": [
+    {
+      "kind": "attempt_created",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "state": "queued",
+      "schemaVersion": 1,
+      "eventId": "451dce96-8d52-4c2c-abed-1ec5fe884d2e",
+      "serverBootId": "9d553565-a7ea-4f00-a60f-bf9acc15af41",
+      "timestamp": "2026-10-07T21:54:32.408Z"
+    },
+    {
+      "kind": "attempt_state_changed",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "previousState": "queued",
+      "state": "starting",
+      "schemaVersion": 1,
+      "eventId": "68eedac9-0b3b-47fb-8c05-485a8134562d",
+      "serverBootId": "9d553565-a7ea-4f00-a60f-bf9acc15af41",
+      "timestamp": "2026-10-07T21:54:32.422Z"
+    },
+    {
+      "kind": "attempt_activity",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "state": "starting",
+      "activity": {
+        "source": "runtime",
+        "providerEventType": "execution.resume",
+        "providerEventSource": "unleashd.runtime"
+      },
+      "schemaVersion": 1,
+      "eventId": "c3d687d1-bbed-492d-9f03-ceac56749ceb",
+      "serverBootId": "9d553565-a7ea-4f00-a60f-bf9acc15af41",
+      "timestamp": "2026-10-07T21:54:32.426Z"
+    },
+    {
+      "kind": "attempt_state_changed",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "previousState": "starting",
+      "state": "running",
+      "schemaVersion": 1,
+      "eventId": "aeb67320-5029-409f-a740-f3190f1d668e",
+      "serverBootId": "9d553565-a7ea-4f00-a60f-bf9acc15af41",
+      "timestamp": "2026-10-07T21:54:32.426Z"
+    },
+    {
+      "kind": "attempt_activity",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "state": "running",
+      "activity": {
+        "source": "provider_event",
+        "providerEventType": "session.started"
+      },
+      "schemaVersion": 1,
+      "eventId": "dab67a4f-4cc4-4aa6-b45e-2a81bc2ffb04",
+      "serverBootId": "9d553565-a7ea-4f00-a60f-bf9acc15af41",
+      "timestamp": "2026-10-07T21:54:32.426Z"
+    },
+    {
+      "kind": "attempt_provider_session_bound",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "state": "running",
+      "schemaVersion": 1,
+      "eventId": "ef523530-3777-4918-b067-49ebef2e20dc",
+      "serverBootId": "9d553565-a7ea-4f00-a60f-bf9acc15af41",
+      "timestamp": "2026-10-07T21:54:32.426Z"
+    },
+    {
+      "kind": "attempt_activity",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "state": "running",
+      "activity": {
+        "source": "runtime",
+        "providerEventType": "execution.adopted",
+        "providerEventSource": "unleashd.runtime"
+      },
+      "schemaVersion": 1,
+      "eventId": "5f6ed67f-b2a9-4500-a04b-08307ff6d397",
+      "serverBootId": "a8c87063-8ca5-4093-ac53-1187ebf299cd",
+      "timestamp": "2026-10-08T04:25:23.264Z"
+    },
+    {
+      "kind": "attempt_activity",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "state": "running",
+      "activity": {
+        "source": "provider_event",
+        "providerEventType": "session.started"
+      },
+      "schemaVersion": 1,
+      "eventId": "165e665d-d4dc-4948-9e38-320a7eb5cce9",
+      "serverBootId": "a8c87063-8ca5-4093-ac53-1187ebf299cd",
+      "timestamp": "2026-10-08T04:25:23.271Z"
+    },
+    {
+      "kind": "attempt_provider_session_bound",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "state": "running",
+      "schemaVersion": 1,
+      "eventId": "4c86319a-3d00-44ef-a46e-d8bcd822a9bd",
+      "serverBootId": "a8c87063-8ca5-4093-ac53-1187ebf299cd",
+      "timestamp": "2026-10-08T04:25:23.376Z"
+    },
+    {
+      "kind": "attempt_terminal",
+      "attemptId": "84ee4f79-de6c-47a9-9582-5ba74c50aaf4",
+      "conversationId": "38b91d03-923e-5820-8b28-3cff6ecc9893",
+      "providerSessionId": "01a117b7-5488-7301-897a-401e6f51b2a6",
+      "previousState": "running",
+      "state": "failed",
+      "terminalCause": "provider_error",
+      "schemaVersion": 1,
+      "eventId": "7abf692d-b8a5-4426-a56f-de84819bf457",
+      "serverBootId": "a8c87063-8ca5-4093-ac53-1187ebf299cd",
+      "timestamp": "2026-10-08T04:25:23.379Z"
+    }
+  ]
+}
