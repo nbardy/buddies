@@ -11,8 +11,8 @@ process.once('exit', () => {
 });
 
 /** A fresh temp directory, removed at process exit. */
-export function tempDir(prefix: string): string {
-  const dir = mkdtempSync(path.join(tmpdir(), prefix));
+export function tempDir(prefix: string, root = tmpdir()): string {
+  const dir = mkdtempSync(path.join(root, prefix));
   owned.add(dir);
   return dir;
 }

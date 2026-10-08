@@ -162,7 +162,9 @@ async function probe(spec: McpServerSpec): Promise<number> {
 
 /** `reopen`: a scratch dir an earlier world used, as a restarted backend finds its stores. */
 async function world(reopen?: string, realProvider = false) {
-  const scratch = reopen ?? tempDir('buddies-v2-');
+  // Native CLI safety hooks allow scratch writes under /tmp, not macOS's /var/folders.
+  const scratch =
+    reopen ?? (realProvider ? tempDir('buddies-v2-', '/tmp') : tempDir('buddies-v2-'));
   const dbPath = join(scratch, 'buddies-v3.sqlite');
   const core = await BuddiesCore.open(dbPath);
   const ws = (await core.createWorkspace(OWNER, { name: 'Team', rootPath: scratch })).id;
@@ -243,7 +245,14 @@ async function world(reopen?: string, realProvider = false) {
   const executeTurn = ((request: ProviderRequest) => {
     if (realProvider) {
       turns.push({ n: turns.length + 1, request, mcp: request.mcpServers!.unleashd_buddy });
-      return executeCommand(request);
+      const handle = executeCommand(request);
+      return {
+        ...handle,
+        stop: (...args: Parameters<typeof handle.stop>) => {
+          stopped.add(turns.length);
+          return handle.stop(...args);
+        },
+      };
     }
     const turn: Turn = { n: turns.length + 1, request, mcp: request.mcpServers!.unleashd_buddy };
     turns.push(turn);
@@ -328,7 +337,8 @@ async function world(reopen?: string, realProvider = false) {
     briefings,
     leaseMs: BUDDY_RUN_LEASE_MS,
     chatDeadlineMs: TURN_MAX_RUNTIME_MS,
-    backgroundTurnMs: 60_000,
+    // Paid native-child startup can exceed the fake provider's one-minute test budget.
+    backgroundTurnMs: realProvider ? 300_000 : 60_000,
     backstopMs: 200,
     logger: { warn: () => undefined, log: () => undefined },
     host: {
@@ -5507,7 +5517,7 @@ for (const provider of ['codex', 'claude'] as const) {
             { kind: 'id', id: w.general.id },
             {
               kind: 'inform',
-              body: `[@Lead](buddy:${w.lead.id}) ${child ? `Use your native ${provider === 'codex' ? 'spawn_agent' : 'Agent'} tool for these exact steps, wait for that native sub-agent, and then confirm its result: ${commands}` : commands}`,
+              body: `[@Lead](buddy:${w.lead.id}) ${child ? `Use your native ${provider === 'codex' ? 'spawn_agent' : 'Agent with run_in_background:false'} tool in the foreground for these exact steps. Stay in this same parent turn and wait for that native sub-agent; if the tool returns before the child finishes, use the native blocking wait/output tool to wait for it. Then confirm its result: ${commands}` : commands}`,
               evidence: [],
               mentions: [],
               broadcast: false,
@@ -5540,7 +5550,13 @@ for (const provider of ['codex', 'claude'] as const) {
             'real turn settles',
             90_000
           );
-          const delivery = (await w.runs(w.lead.id)).find(
+          const runs = await w.runs(w.lead.id);
+          assert.equal(
+            runs.find((r) => r.input.kind === 'deliver' && r.input.postId === root.id)?.status,
+            'complete'
+          );
+          assert.equal(w.stopped.size, 0, 'the real provider was never stopped');
+          const delivery = runs.find(
             (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
           )!;
           assert.equal(delivery.errorCode, 'consumed');
