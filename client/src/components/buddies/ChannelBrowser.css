@@ -631,8 +631,7 @@ a.channel-browser-instance:hover {
   pointer-events: none;
 }
 
-.channel-browser-buddy:hover .channel-browser-buddy-status,
-.channel-browser-buddy:focus-within .channel-browser-buddy-status {
+.channel-browser-buddy:hover .channel-browser-buddy-status {
   visibility: hidden;
 }
 
