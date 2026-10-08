@@ -489,7 +489,19 @@ function killProcessesUnder(root: string) {
 
 async function stopGroup(group: DevGroup) {
   signalGroup(group.pgid, 'SIGINT');
-  await Promise.race([group.exited, new Promise((resolve) => setTimeout(resolve, 20_000))]);
+  // A winning exit left the losing 20 s timer alive once per launch.
+  // Guard: full suite wall time includes cleanup, not just test durations.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      group.exited,
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, 20_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
   signalGroup(group.pgid, 'SIGKILL');
 }
 

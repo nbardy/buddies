@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { channel as diagnosticChannel } from 'node:diagnostics_channel';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   existsSync,
   mkdirSync,
@@ -277,13 +279,13 @@ async function world(reopen?: string, realProvider = false) {
       exitCode: number;
       signal: null;
       sessionId: string;
-      reason: 'success';
+      reason: 'success' | 'error';
     }) => void;
     const completed = new Promise<{
       exitCode: number;
       signal: null;
       sessionId: string;
-      reason: 'success';
+      reason: 'success' | 'error';
     }>((resolve) => {
       finish = resolve;
     });
@@ -292,37 +294,43 @@ async function world(reopen?: string, realProvider = false) {
       pid: 0,
       journalDir: request.journalDir,
       events: (async function* () {
-        yield { type: 'session.started' as const, sessionId };
-        yield { type: 'turn.started' as const };
-        await during.get(turn.n)?.(turn);
-        const error = providerErrors.get(turn.n);
-        if (error) {
-          yield { type: 'error' as const, message: error };
-          yield { type: 'turn.complete' as const, reason: 'error' as const };
+        try {
+          yield { type: 'session.started' as const, sessionId };
+          yield { type: 'turn.started' as const };
+          await during.get(turn.n)?.(turn);
+          const error = providerErrors.get(turn.n);
+          if (error) {
+            yield { type: 'error' as const, message: error };
+            yield { type: 'turn.complete' as const, reason: 'error' as const };
+            finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
+            return;
+          }
+          if (outOfTokens.has(turn.n)) {
+            yield { type: 'out_of_tokens' as const, message: 'You have hit your usage limit' };
+            yield { type: 'turn.complete' as const, reason: 'out_of_tokens' as const };
+            finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
+            return;
+          }
+          const answer = answers.get(turn.n) ?? `Answer ${turn.n}`;
+          const seat = answersLastPost(request.prompt) ? deliveredPost(request.prompt) : null;
+          if (seat && !silent.has(turn.n)) {
+            const posted = await call(turn.mcp, 'post', {
+              channel: { id: seat[1] },
+              replyToId: seat[2],
+              purpose: 'reply',
+              body: answer,
+              key: `seat-reply-${turn.n}`,
+            });
+            assert.equal(posted.isError, false, posted.text);
+          }
+          yield { type: 'text.delta' as const, text: answer };
+          yield { type: 'turn.complete' as const, reason: 'success' as const };
           finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
-          return;
+        } finally {
+          // An async tool/assertion error used to leave completion pending and retain the
+          // 60 s watchdog. Preserve the thrown event error, but always join process exit.
+          finish({ exitCode: 1, signal: null, sessionId, reason: 'error' });
         }
-        if (outOfTokens.has(turn.n)) {
-          yield { type: 'out_of_tokens' as const, message: 'You have hit your usage limit' };
-          yield { type: 'turn.complete' as const, reason: 'out_of_tokens' as const };
-          finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
-          return;
-        }
-        const answer = answers.get(turn.n) ?? `Answer ${turn.n}`;
-        const seat = answersLastPost(request.prompt) ? deliveredPost(request.prompt) : null;
-        if (seat && !silent.has(turn.n)) {
-          const posted = await call(turn.mcp, 'post', {
-            channel: { id: seat[1] },
-            replyToId: seat[2],
-            purpose: 'reply',
-            body: answer,
-            key: `seat-reply-${turn.n}`,
-          });
-          assert.equal(posted.isError, false, posted.text);
-        }
-        yield { type: 'text.delta' as const, text: answer };
-        yield { type: 'turn.complete' as const, reason: 'success' as const };
-        finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
       })(),
       completed,
       stop: () => {
@@ -512,11 +520,55 @@ async function world(reopen?: string, realProvider = false) {
     },
     async close() {
       runner.stop();
+      // Do not close a fake model's MCP transport while its last post is still draining.
+      // Guard: full/concurrent suites have no late fetch errors or retained watchdogs.
+      await Promise.all(
+        [...conversations.values()].map((conversation) => conversation.waitForTurnDrain())
+      );
       await endpoint.close();
       rmSync(scratch, { recursive: true, force: true });
     },
   };
 }
+
+// A throwing fake event stream must still report provider exit and drain the watchdog.
+// Otherwise one failed tool call kept the test process alive until its 60 s deadline.
+test('a fake async event error joins completion and keeps its original failure', async () => {
+  const w = await world();
+  try {
+    w.during.set(1, async () => {
+      throw new Error('scripted tool failure');
+    });
+    const started = Date.now();
+    const post = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) start`,
+        key: 'event-error',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+      }
+    );
+    w.announce(post);
+    const run = await until(
+      async () => (await w.runs(w.lead.id)).find((r) => r.status === 'failed'),
+      'fake error drain'
+    );
+    assert.equal(run.errorCode, 'execution_failed');
+    const conversation = w.conversations.get(run.conversationId!);
+    assert.ok(conversation);
+    assert.match(
+      conversation.messages.map((m) => bodyText(m.body)).join('\n'),
+      /scripted tool failure/
+    );
+    assert.ok(Date.now() - started < 5_000, 'joined exit without waiting for the 60 s watchdog');
+  } finally {
+    await w.close();
+  }
+});
 
 // Rewritten for owner decision A (2026-10-06, delivery design D0/D9, task_01a11013-9072): the
 // answer used to be an Inbox read with no run. Since 2026-10-07 (task_01a1153f) it runs in the
@@ -6246,25 +6298,59 @@ test('request messages: siblings, shared reads, hook/MCP race, a dropped hook, d
     // next boundary shows it (at least once, never lost).
     assert.equal((await send(live.parent, a, 'worker', 'survives a dropped hook')).isError, false);
     if (workerA.mcp.kind !== 'http') throw new Error('expected HTTP');
+    const workerHeaders = workerA.mcp.headers;
     const url = new URL(w.endpoint.hookUrl);
-    await new Promise<void>((resolve) => {
-      const dropped = httpRequest(
-        {
-          host: url.hostname,
-          port: url.port,
-          path: url.pathname,
-          method: 'POST',
-          headers: workerA.mcp.kind === 'http' ? workerA.mcp.headers : {},
-        },
-        () => resolve()
-      );
-      dropped.on('error', () => resolve());
-      dropped.end(JSON.stringify({ hook_event_name: 'PostToolUse' }), () => {
-        dropped.destroy();
-        resolve();
+    // Observe the backend socket, not the client's end callback: the latter can race
+    // the relay forwarding a response. Guard: disconnect before response is written.
+    const serverClosed = held();
+    let droppedResponse: ServerResponse | undefined;
+    const requests = diagnosticChannel('http.server.request.start');
+    const observe = (message: unknown) => {
+      const { request, response } = message as {
+        request: IncomingMessage;
+        response: ServerResponse;
+      };
+      if (
+        request.url === url.pathname &&
+        request.headers.authorization === workerHeaders?.Authorization
+      ) {
+        droppedResponse = response;
+        response.once('close', serverClosed.release);
+      }
+    };
+    requests.subscribe(observe);
+    const reading = held();
+    const resume = held();
+    const pending = w.core.pendingMessages.bind(w.core);
+    w.core.pendingMessages = async (...args) => {
+      reading.release();
+      await resume.wait;
+      return pending(...args);
+    };
+    try {
+      const dropped = httpRequest({
+        host: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        method: 'POST',
+        headers: workerHeaders,
       });
-    });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+      dropped.on('error', () => undefined);
+      const closed = new Promise<void>((resolve) => dropped.on('close', resolve));
+      dropped.end(JSON.stringify({ hook_event_name: 'PostToolUse' }));
+      await reading.wait;
+      dropped.destroy();
+      await closed;
+      await serverClosed.wait;
+    } finally {
+      requests.unsubscribe(observe);
+      resume.release();
+      w.core.pendingMessages = pending;
+    }
+    await until(
+      () => droppedResponse?.writableEnded,
+      'the disconnected handler finishes without writing'
+    );
     assert.ok((await nativeHook(w, workerA)()).includes('survives a dropped hook'));
 
     // Denied senders: another Buddy of the workspace, and a Buddy of another workspace.

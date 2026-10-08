@@ -1,16 +1,13 @@
 // Pattern: fix-guards (docs/patterns.md#fix-guards)
-// Unbounded file fan-out made full feedback take 401 s on d094cf3. Start the real-process
-// critical path first, with a bounded pool; --fast is an explicitly smaller development gate.
+// The full suite took 401 s on d094cf3 with unbounded file fan-out. Use a bounded pool;
+// --fast is an explicitly smaller development gate, never the complete release proof.
 import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const critical = ['ctrl-c-adoption', 'execution-adoption', 'run-lease', 'buddies-v2'];
 const fast = [
   'wire-v3',
   'execution-crash-checker',
-  'turn-machine',
-  'turn-queue',
   'config-service',
   'tool-contract',
   'buddy-conversation-contract',
@@ -25,13 +22,7 @@ if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) {
 const files = readdirSync(new URL('../server/test/', import.meta.url))
   .filter((name) => name.endsWith('.test.ts'))
   .filter((name) => mode === 'full' || fast.includes(name.replace('.test.ts', '')))
-  .sort((a, b) => {
-    const rank = (name) => {
-      const n = critical.indexOf(name.replace('.test.ts', ''));
-      return n < 0 ? 4 : n;
-    };
-    return rank(a) - rank(b) || a.localeCompare(b);
-  })
+  .sort()
   .map((name) => `server/test/${name}`);
 console.log(`[server tests] ${mode}: ${files.length} files, concurrency ${concurrency}`);
 const started = performance.now();
