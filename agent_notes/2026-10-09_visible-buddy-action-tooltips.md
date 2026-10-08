@@ -12,3 +12,7 @@ Verification on the isolated current-source Cambium worktree:
 - wake.webp and workers.webp visually inspected and attached to the owner thread before transient cleanup.
 
 Browser used an isolated Vite frontend on 7493 proxying the existing backend on 7499. No backend restart, production permission change, live DB access or push. The client source change becomes available through the existing Vite server after local integration; installed builds require their normal update path. Browser interaction evidence is desktop; mobile reuses this component and its render tests passed, but a phone hover interaction was not claimed.
+
+## Integration evidence
+
+Implementation commit 638224b on local main (isolated source commit 7add35e). The same real-browser check passed after integration against the existing frontend at http://localhost:7489; screenshots from this run were visually inspected and attached to the owner thread. An initial attempt against backend port 7499 could not import the Vite-only setup preference module; 7489 is the frontend used for the successful live verification. No backend restart or push.
