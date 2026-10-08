@@ -10,11 +10,20 @@ import express from 'express';
 import { createDependencyChecks, registerDependencyRoutes } from '../src/providers/dependencies';
 import { installedAgent } from '../src/providers/installed-agent';
 
+// Two budgets: a probe that answers must never time out; only the hang case waits for one
+// (twice: --version, then the Yes probe). One shared 1.5 s budget read real /bin/sh stubs as
+// missing/failed at load 35 (f1011d0 full-suite rerun, 2026-10-08: ['missing','failed','missing']
+// in 3,052 ms). Evidence: agent_notes/2026-10-08_deps-readiness-budget.md.
+const READY_BUDGET_MS = 30_000;
+const HANG_BUDGET_MS = 3_000;
+
 test('readiness requires a successful Yes, missing and hanging agents remain actionable', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'deps-test-'));
   const executable = async (name: string, body: string) =>
     fs.writeFile(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
-  const checks = createDependencyChecks({ PATH: dir, HOME: dir, CLAUDECODE: '1' }, 1500);
+  const env = { PATH: dir, HOME: dir, CLAUDECODE: '1' };
+  const checks = createDependencyChecks({ ...env }, READY_BUDGET_MS);
+  const hanging = createDependencyChecks({ ...env }, HANG_BUDGET_MS);
   const app = express();
   registerDependencyRoutes(app, checks);
   const server = app.listen(0, '127.0.0.1');
@@ -45,11 +54,11 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
     await executable('codex', 'echo Yes');
     assert.equal((await fetch(`${url}/api/dependencies/check`, { method: 'POST' })).status, 202);
     await checks.refresh();
-    await executable('claude', '/bin/sleep 10');
-    await checks.refresh();
-    snapshot = checks.snapshot();
-    assert.equal(snapshot.checks[2].status, 'ready');
-    assert.match(snapshot.checks[1].message, /no response within/i);
+    await executable('claude', '/bin/sleep 60');
+    await hanging.refresh();
+    snapshot = hanging.snapshot();
+    assert.equal(snapshot.checks[2].status, 'ready', 'a hanging agent does not fail its sibling');
+    assert.match(snapshot.checks[1].message, /no response within 3 seconds/i);
     await executable('claude', 'echo "Weekly limit reached" >&2; exit 1');
     await checks.refresh();
     assert.equal(checks.snapshot().checks[1].failure, 'quota');
@@ -59,6 +68,7 @@ test('readiness requires a successful Yes, missing and hanging agents remain act
     assert.equal(checks.snapshot().checks[1].status, 'failed', 'substring yes is not a response');
   } finally {
     checks.close();
+    hanging.close();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve()))
     );
@@ -99,8 +109,8 @@ SCRIPT
     `echo npm >> "$HOME/attempts"\n/bin/mkdir -p "$HOME/.local/bin"\n/bin/cat > "$HOME/.local/bin/codex" <<'SCRIPT'\n#!/bin/sh\nif [ "$1" = '--version' ]; then echo codex; exit; fi\necho probe >> "$HOME/probes"\necho Yes\nSCRIPT\n/bin/chmod +x "$HOME/.local/bin/codex"`
   );
   const env = { PATH: bin, HOME: dir };
-  const first = createDependencyChecks(env, 1500, setup, 1500);
-  const restarted = createDependencyChecks(env, 1500, setup, 1500);
+  const first = createDependencyChecks(env, READY_BUDGET_MS, setup, READY_BUDGET_MS);
+  const restarted = createDependencyChecks(env, READY_BUDGET_MS, setup, READY_BUDGET_MS);
   try {
     await first.refresh();
     assert.deepEqual(
@@ -146,7 +156,12 @@ test('auto-install off: missing tools are reported, no installer runs', async ()
       }
     );
   const env = { PATH: bin, HOME: dir, UNLEASHD_AUTO_INSTALL: '0' };
-  const checks = createDependencyChecks(env, 1500, path.join(dir, 'setup'), 1500);
+  const checks = createDependencyChecks(
+    env,
+    READY_BUDGET_MS,
+    path.join(dir, 'setup'),
+    READY_BUDGET_MS
+  );
   try {
     await checks.refresh();
     assert.deepEqual(
@@ -168,7 +183,7 @@ test('the installed agent follows PATH on every read: none, then claude, then co
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'installed-agent-'));
   const env = { PATH: `${path.join(dir, 'absent')}${path.delimiter}${dir}`, HOME: dir };
   const app = express();
-  const checks = createDependencyChecks({ ...env }, 1500);
+  const checks = createDependencyChecks({ ...env }, READY_BUDGET_MS);
   registerDependencyRoutes(app, checks, () => installedAgent(env));
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
