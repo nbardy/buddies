@@ -45,6 +45,7 @@ import {
   shownOffset,
   spliceDraft,
 } from './composer-draft';
+import { type EmojiChoice, activeEmojiQuery, rankEmoji } from './emoji-completion';
 import type { PostResult } from './types';
 import './ChannelComposer.css';
 
@@ -132,6 +133,14 @@ export function ChannelComposer({
 
   const { seats, retry: retrySeats } = useThreadSeats(rootId);
   const trigger = activeTrigger(view, caret);
+  const emojiTrigger = trigger ? null : activeEmojiQuery(text, caret);
+  const activeStart = trigger?.start ?? emojiTrigger?.start;
+  const emojiQuery = emojiTrigger && emojiTrigger.start !== dismissedAt ? emojiTrigger.query : null;
+  const emojiMatches = useMemo(
+    () => (emojiQuery === null ? [] : rankEmoji(emojiQuery)),
+    [emojiQuery]
+  );
+  const selectedEmoji = emojiMatches[Math.min(highlight, emojiMatches.length - 1)];
   const open = trigger !== null && trigger.start !== dismissedAt;
   const query = open && trigger ? trigger.query : null;
   const matches = useMemo(
@@ -157,7 +166,10 @@ export function ChannelComposer({
     setChoosingFor(buddyId === choosingFor ? null : buddyId);
   };
   // The model picker and the @ menu share the space above the composer.
-  const showPicker = open && matches.length > 0 && !choosing;
+  const showMentionPicker = open && matches.length > 0 && !choosing;
+  const showEmojiPicker = emojiMatches.length > 0 && !choosing;
+  const showPicker = showMentionPicker || showEmojiPicker;
+  const optionCount = showEmojiPicker ? emojiMatches.length : matches.length;
 
   // Re-measure placeholders and width changes too: a long reply target can wrap.
   // biome-ignore lint/correctness/useExhaustiveDependencies: text and placeholder trigger re-measurement
@@ -217,6 +229,12 @@ export function ChannelComposer({
   const pick = (reference: ChannelReference) => {
     if (!trigger) return;
     apply(pickReference(view, trigger, reference));
+    textareaRef.current?.focus();
+  };
+
+  const pickEmoji = (choice: EmojiChoice) => {
+    if (!emojiTrigger) return;
+    apply(spliceDraft(view, emojiTrigger.start, caret, `${choice.emoji} `));
     textareaRef.current?.focus();
   };
 
@@ -337,7 +355,7 @@ export function ChannelComposer({
           }}
         />
       )}
-      {showPicker && (
+      {showMentionPicker && (
         <ul className="channel-composer-picker" aria-label="Mention a Buddy">
           {matches.map((reference, index) => (
             <li key={`${reference.kind}:${reference.id}`}>
@@ -355,6 +373,26 @@ export function ChannelComposer({
                 <span className="channel-composer-picker-detail ui-truncate ui-muted">
                   {reference.detail}
                 </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {showEmojiPicker && (
+        <ul className="channel-composer-picker" aria-label="Choose an emoji">
+          {emojiMatches.map((choice, index) => (
+            <li key={choice.name}>
+              <button
+                type="button"
+                data-selected={choice === selectedEmoji || undefined}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => pickEmoji(choice)}
+                onMouseEnter={() => setHighlight(index)}
+              >
+                <span className="channel-composer-picker-icon" aria-hidden="true">
+                  {choice.emoji}
+                </span>
+                <span className="channel-composer-picker-label ui-truncate">:{choice.name}:</span>
               </button>
             </li>
           ))}
@@ -401,21 +439,23 @@ export function ChannelComposer({
             apply(spliceDraft(view, selectionStart, selectionEnd, body));
           }}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
             if (showPicker) {
               if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                 event.preventDefault();
                 const step = event.key === 'ArrowDown' ? 1 : -1;
-                setHighlight((index) => (index + step + matches.length) % matches.length);
+                setHighlight((index) => (index + step + optionCount) % optionCount);
                 return;
               }
-              if ((event.key === 'Enter' || event.key === 'Tab') && selected) {
+              if ((event.key === 'Enter' || event.key === 'Tab') && (selectedEmoji || selected)) {
                 event.preventDefault();
-                pick(selected);
+                if (showEmojiPicker && selectedEmoji) pickEmoji(selectedEmoji);
+                else if (selected) pick(selected);
                 return;
               }
-              if (event.key === 'Escape' && trigger) {
+              if (event.key === 'Escape' && activeStart !== undefined) {
                 event.preventDefault();
-                setDismissedAt(trigger.start);
+                setDismissedAt(activeStart);
                 return;
               }
             }
