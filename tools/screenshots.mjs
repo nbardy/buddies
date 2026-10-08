@@ -403,6 +403,10 @@ const OPEN_MENTION_MODEL = prep(`
   const chip = document.querySelector('.channel-composer-mention');
   if (!chip || chip.disabled) return 'SKIP';
   chip.click();
+  // A late dependency response can mount onboarding after the picker opens.
+  await tick(1000);
+  document.querySelector('[aria-label="Close dependency checks"]')?.click();
+  [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Got it')?.click();
   await tick(150);
   if (!has('.channel-composer-model')) return false;
   (${inspectChannelModelPicker.toString()})();
@@ -430,7 +434,10 @@ const OPEN_THREAD_SELECTION = (rootId, openPicker = false) =>
   const chip = [...document.querySelectorAll('.channel-composer-mention')].at(-1);
   if (!chip || chip.disabled) return 'SKIP';
   ${openPicker ? 'chip.click();' : 'input.blur();'}
-  await tick(250);
+  await tick(1000);
+  document.querySelector('[aria-label="Close dependency checks"]')?.click();
+  [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Got it')?.click();
+  await tick(150);
   ${openPicker ? `(${inspectChannelModelPicker.toString()})();` : ''}
   return has(${JSON.stringify(openPicker ? '.channel-composer-model' : '.channel-composer-mention')});`);
 
