@@ -41,6 +41,7 @@ import type {
   ChannelKind,
   ChannelPage,
   ChannelResponse,
+  LiveReach,
   ChannelUnread,
   Cursor,
   Inbox,
@@ -617,6 +618,21 @@ export function respondingUrl(channelId: string): string {
   return `/api/buddies/channels/${encodeURIComponent(channelId)}/responding`;
 }
 
+// task_01a11af2 (owner, 2026-10-08): "we should never see waiting unless it's at the 5 worker max."
+// A post queued behind its Buddy's live turn says what reaches that turn (server `reachOf`); only
+// a backend from before that field keeps the generic text.
+// Pattern: table-driven (docs/patterns.md#table-driven)
+const REACH_VERB: { readonly [R in LiveReach as R['kind']]: (reach: R) => string } = {
+  next_step: () => 'taking new messages at its next step…',
+  buddy_tool_only: ({ harness }) =>
+    `on ${harness}, which can't take messages mid-turn: it answers after this turn…`,
+  spawned_before_live_delivery: () => 'in a turn started before live delivery: it answers after it…',
+  model_pick: () => 'answering on your picked model after this turn…',
+  turn_not_live: () => 'answering after its current turn ends…',
+};
+const busyVerb = (reach: LiveReach | undefined) =>
+  reach ? REACH_VERB[reach.kind](reach as never) : 'waiting for the current turn…';
+
 /**
  * "Ada is replying…", "Ada is running background work…", "Ada is queued at the run limit…",
  * or several, per thread root.
@@ -637,7 +653,7 @@ export function respondingText(
         : row.state === 'background'
           ? 'running background work…'
           : waiting?.kind === 'conversation_busy'
-            ? 'waiting for the current turn…'
+            ? busyVerb(row.reach)
             : waiting?.kind === 'pool_full'
               ? `queued at the run limit (${waiting.active}/${waiting.max})…`
               : waiting?.kind === 'not_before'

@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Actor } from '@unleashd/buddies-core';
 import { OWNER, buddyActor } from './core';
+import type { HookSet } from './harness-steering';
 
 /**
  * What one turn may do through the MCP endpoint. The token is readable by the agent's own
@@ -35,6 +36,8 @@ export interface BuddyGrant extends GrantBase {
   readonly workspaceId: string;
   readonly runId: string | null;
   readonly subscribes: Subscribes;
+  /** The hooks its process was spawned with: what can reach it mid-turn (harness-steering.ts). */
+  readonly hooks: HookSet;
 }
 
 /** The owner's Buddy Builder chat: no Buddy of its own; it may only read and edit the team. */
@@ -51,6 +54,15 @@ export type TurnGrant = BuddyGrant | BuilderGrant;
  */
 export type GrantRecord = Omit<BuddyGrant, 'observe'> | Omit<BuilderGrant, 'observe'>;
 
+/**
+ * κ for a grant read back from an execution journal. A journal written before task_01a11af2 has
+ * no `hooks`: its process holds whatever hooks its backend had, which is `unrecorded`, said as such.
+ */
+export function adoptedGrant(record: GrantRecord): GrantRecord {
+  if (record.role === 'builder' || 'hooks' in record) return record;
+  return { ...(record as Omit<BuddyGrant, 'observe' | 'hooks'>), hooks: { t: 'unrecorded' } };
+}
+
 export type Observe = <T>(tool: string, input: unknown, call: () => Promise<T>) => Promise<T>;
 
 export type BuddyGrantInput = {
@@ -60,6 +72,7 @@ export type BuddyGrantInput = {
   conversationId: string;
   runId: string | null;
   subscribes: Subscribes;
+  hooks: HookSet;
   observe?: Observe;
 };
 
@@ -121,7 +134,7 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
 
     /** Re-register an adopted turn's grant exactly as it was issued (same token and expiry). */
     adopt(record: GrantRecord): void {
-      byToken.set(record.token, { ...record, observe: ignore } as TurnGrant);
+      byToken.set(record.token, { ...adoptedGrant(record), observe: ignore } as TurnGrant);
     },
 
     lookup(bearer: string): TurnGrant | null {
@@ -129,6 +142,13 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
       if (!grant) return null;
       if (grant.expiresAt > now()) return grant;
       byToken.delete(bearer);
+      return null;
+    },
+
+    /** The hooks of the Buddy turn live in `conversationId` here; null: no live turn holds one. */
+    liveHooks(conversationId: string): HookSet | null {
+      for (const grant of byToken.values())
+        if (grant.role !== 'builder' && grant.conversationId === conversationId) return grant.hooks;
       return null;
     },
 

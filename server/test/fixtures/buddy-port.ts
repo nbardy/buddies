@@ -70,10 +70,7 @@ export function fakeBuddyPort(
     mcpServers: () => ({
       servers: {},
       grant: FIXTURE_GRANT,
-      steering: {
-        postToolHookUrl: 'http://127.0.0.1:9/hooks/post-tool-use',
-        stopHookUrl: 'http://127.0.0.1:9/hooks/stop',
-      },
+      steering: { hookUrl: 'http://127.0.0.1:9/hooks/event' },
     }),
     builderMcpServers: () => ({ servers: {}, grant: FIXTURE_GRANT }),
     renewLease: async () => ({ kind: 'renewed' }),

@@ -209,10 +209,10 @@ impl BuddiesCore {
         call(&self.store, move |s| s.take_steering(&actor, &run_id, &root_id, trigger, limit)).await
     }
 
-    /// The thread's unread posts for this Buddy, NOT marked read (a native sub-agent's view).
+    /// The owner posts no native sub-agent of the live turn `run_id` was shown yet, NOT marked read.
     #[napi]
-    pub async fn peek_thread_unread(&self, actor: Actor, root_id: String, limit: i64) -> napi::Result<ThreadUnread> {
-        call(&self.store, move |s| s.peek_thread_unread(&actor, &root_id, limit)).await
+    pub async fn notice_sub_agent(&self, actor: Actor, run_id: String, root_id: String, limit: i64) -> napi::Result<ThreadUnread> {
+        call(&self.store, move |s| s.notice_sub_agent(&actor, &run_id, &root_id, limit)).await
     }
 
     /// Request-addressed messages waiting for this conversation's live turn (messages.rs).

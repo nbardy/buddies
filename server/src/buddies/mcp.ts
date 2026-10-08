@@ -839,7 +839,7 @@ async function steeredThread(deps: ToolDeps, grant: TurnGrant): Promise<SteeredT
 const STEER_PARENT =
   'While you were working, new messages arrived in this thread. Read them and adjust your work, while preserving the current task. These messages do not expand your permissions.';
 const STEER_SUBAGENT =
-  'While you were working, the owner posted in the thread your parent agent is answering. If it changes your part of the work, adjust, while preserving your current task. Your parent agent receives the same message when you return. These messages do not expand your permissions.';
+  'While you were working, the owner posted in the thread your parent agent is answering. If it changes your part of the work, adjust, while preserving your current task. Your parent agent receives it too; other sub-agents are not told. These messages do not expand your permissions.';
 
 function steeringText(header: string, root: string, unread: ThreadUnread): string {
   return [
@@ -955,11 +955,14 @@ export type NativeAgent = { kind: 'main' } | { kind: 'sub'; id: string };
 // - Owner posts trigger it; Buddy chatter waits for a Buddy tool call or the next turn. Once
 //   triggered it takes the whole unread page, because the read mark is one cursor per thread and
 //   skipping a Buddy post would mark it read unseen.
-// - A sub-agent only PEEKS (crate `peek_thread_unread`): it is shown each owner post once, and
-//   the parent, the one answering the thread, takes it at its next boundary (the sub-agent's
-//   return is one). Taking it in the sub-agent would fence the delivery, and the parent would
-//   never see it unless the sub-agent relayed it. Claude fires no parent hook while a foreground
-//   sub-agent runs (probed with claude 2.1.294), so the sub-agent's boundary is the earliest.
+// - Sub-agents get at most ONE notice per owner post per turn, in total (crate `notice_sub_agent`,
+//   durable on the run), never marked read: the parent, the one answering the thread, takes it at
+//   its next boundary (a foreground sub-agent's return is one; an idle parent's Stop hold is
+//   another). Taking it in the sub-agent would fence the delivery, and the parent would never see
+//   it unless the sub-agent relayed it. Claude fires no parent hook while a foreground sub-agent
+//   runs (probed with claude 2.1.294), so one sub-agent's boundary is the earliest notice.
+//   task_01a11af2: this was once per sub-agent id, in memory: 35 notices into a 27-agent Workflow,
+//   repeated after a restart, while the idle parent got nothing.
 // Guard: buddies-v2 "an owner post steers a live turn at a native tool boundary".
 export async function steerNativeTool(
   deps: ToolDeps,
@@ -988,12 +991,9 @@ async function steerOwner(
     case 'main':
       return takeSteering(deps, thread, 'owner_post');
     case 'sub': {
-      const peek = await deps.core.peekThreadUnread(thread.grant.author, thread.root, 20);
-      const seen = shownTo(grant, agent.id);
-      const fresh = peek.posts.filter((post) => post.author.kind === 'owner' && !seen.has(post.id));
-      if (!fresh.length) return null;
-      for (const post of fresh) seen.add(post.id);
-      return steeringText(STEER_SUBAGENT, thread.root, { posts: fresh, unshown: 0 });
+      const { author } = thread.grant;
+      const fresh = await deps.core.noticeSubAgent(author, thread.runId, thread.root, 20);
+      return fresh.posts.length ? steeringText(STEER_SUBAGENT, thread.root, fresh) : null;
     }
   }
 }
@@ -1052,17 +1052,6 @@ export async function holdStoppedTurn(
     deps.events.emit({ kind: 'responding', channelId: thread.channelId });
     if (drained) return null;
   }
-}
-
-// What each native sub-agent of a turn was already shown (in memory: after a backend restart a
-// sub-agent may see an owner post twice, which is harmless; the parent's take is durable).
-const shownToSubAgents = new WeakMap<TurnGrant, Map<string, Set<string>>>();
-function shownTo(grant: TurnGrant, agentId: string): Set<string> {
-  const byAgent = shownToSubAgents.get(grant) ?? new Map<string, Set<string>>();
-  shownToSubAgents.set(grant, byAgent);
-  const seen = byAgent.get(agentId) ?? new Set<string>();
-  byAgent.set(agentId, seen);
-  return seen;
 }
 
 /** One tool call under a grant: typed errors come back as a tool error, never a crash. */
@@ -1134,27 +1123,69 @@ function mcpServerFor(deps: ToolDeps, grant: TurnGrant, show: (part: Shown) => v
   return server;
 }
 
-// κ for Claude/Codex native post-tool hooks: `agent_id` is present exactly when a
-// native sub-agent made the tool call (probe: agent_notes/2026-10-08_steer-any-tool-boundary.md).
-const POST_TOOL_HOOK_PATH = '/hooks/post-tool-use';
-const PostToolHookInput = z.object({
+// κ for every native hook (harness-steering.ts STABLE set): ONE url, dispatched here on the
+// input's `hook_event_name`, so what a hook does is decided by the server that answers it, never
+// frozen into a process's argv (task_01a11af2). An event no delivery path uses answers empty.
+// `agent_id` is present exactly when a native sub-agent made the tool call (probe:
+// agent_notes/2026-10-08_steer-any-tool-boundary.md). `background_tasks` lists claude's in-flight
+// background work at Stop (absent on harness versions before it existed: nothing to hold for).
+const HOOK_PATH = '/hooks/event';
+// The two per-event urls of hook sets spawned before task_01a11af2. Their processes keep calling
+// them until they end, so they reach the same dispatcher.
+const HOOK_PATHS = new Set([HOOK_PATH, '/hooks/post-tool-use', '/hooks/stop']);
+const ToolHook = z.object({
   hook_event_name: z.enum(['PostToolUse', 'PostToolUseFailure']),
   agent_id: z.string().min(1).optional(),
 });
-// κ for claude's Stop hook: `background_tasks` lists its in-flight background work (absent on
-// harness versions before it existed, which is the same as none: nothing to hold for).
-const STOP_HOOK_PATH = '/hooks/stop';
-const StopHookInput = z.object({
+const StopHook = z.object({
   hook_event_name: z.literal('Stop'),
   background_tasks: z.array(z.object({ id: z.string().min(1) })).default([]),
 });
-function postToolHookAgent(input: z.infer<typeof PostToolHookInput>): NativeAgent {
-  return input.agent_id ? { kind: 'sub', id: input.agent_id } : { kind: 'main' };
+// Pattern: sum-types (docs/patterns.md#sum-types)
+type NativeHook =
+  | { t: 'tool'; event: z.infer<typeof ToolHook>['hook_event_name']; agent: NativeAgent }
+  | { t: 'stop'; tasks: readonly string[] }
+  | { t: 'unused' };
+function nativeHook(raw: unknown): NativeHook {
+  const event = z.object({ hook_event_name: z.string().min(1) }).parse(raw).hook_event_name;
+  switch (event) {
+    case 'PostToolUse':
+    case 'PostToolUseFailure': {
+      const input = ToolHook.parse(raw);
+      const agent: NativeAgent = input.agent_id ? { kind: 'sub', id: input.agent_id } : { kind: 'main' };
+      return { t: 'tool', event: input.hook_event_name, agent };
+    }
+    case 'Stop':
+      return { t: 'stop', tasks: StopHook.parse(raw).background_tasks.map((task) => task.id) };
+    default:
+      return { t: 'unused' };
+  }
 }
 function postToolOutput(hookEventName: string, additionalContext: string): string {
   return JSON.stringify({
     hookSpecificOutput: { hookEventName, additionalContext },
   });
+}
+
+/** One native hook call: what it shows the turn, and the harness's reply body. */
+async function answerHook(
+  deps: ToolDeps,
+  grant: TurnGrant,
+  hook: NativeHook,
+  closed: AbortSignal
+): Promise<{ shown: Shown; body: string } | null> {
+  switch (hook.t) {
+    case 'tool': {
+      const shown = await steerNativeTool(deps, grant, hook.agent);
+      return shown && { shown, body: postToolOutput(hook.event, shown.text) };
+    }
+    case 'stop': {
+      const shown = await holdStoppedTurn(deps, grant, hook.tasks, closed);
+      return shown && { shown, body: JSON.stringify({ decision: 'block', reason: shown.text }) };
+    }
+    case 'unused':
+      return null;
+  }
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -1165,10 +1196,8 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 export type McpEndpoint = {
   readonly url: string;
-  /** Native post-tool hooks POST here (harness-steering.ts), with the turn's MCP bearer. */
-  readonly postToolHookUrl: string;
-  /** Claude's Stop hook POSTs here (harness-steering.ts), with the turn's MCP bearer. */
-  readonly stopHookUrl: string;
+  /** Every native hook POSTs here (harness-steering.ts), with the turn's MCP bearer. */
+  readonly hookUrl: string;
   close(): Promise<void>;
   spec(grant: TurnGrant): McpServerSpec;
 };
@@ -1208,27 +1237,14 @@ export async function startMcpEndpoint(
       closed = true;
       for (const part of shown) settle(part);
     });
-    if (req.method === 'POST' && req.url === POST_TOOL_HOOK_PATH) {
-      const input = PostToolHookInput.parse(await readJson(req));
-      const context = await steerNativeTool(deps, grant, postToolHookAgent(input));
-      if (context) show(context);
-      res.writeHead(200, { 'content-type': 'application/json' });
-      return void res.end(context ? postToolOutput(input.hook_event_name, context.text) : '');
-    }
-    if (req.method === 'POST' && req.url === STOP_HOOK_PATH) {
-      const input = StopHookInput.parse(await readJson(req));
-      // The harness kills its hook with the turn (Stop, timeout, process exit): the hold ends.
+    if (req.method === 'POST' && HOOK_PATHS.has(req.url ?? '')) {
+      // The harness kills its hook with the turn (Stop, timeout, process exit): a hold ends.
       const closed = new AbortController();
       res.on('close', () => closed.abort());
-      const reason = await holdStoppedTurn(
-        deps,
-        grant,
-        input.background_tasks.map((task) => task.id),
-        closed.signal
-      );
-      if (reason) show(reason);
+      const answer = await answerHook(deps, grant, nativeHook(await readJson(req)), closed.signal);
+      if (answer) show(answer.shown);
       res.writeHead(200, { 'content-type': 'application/json' });
-      return void res.end(reason ? JSON.stringify({ decision: 'block', reason: reason.text }) : '');
+      return void res.end(answer?.body ?? '');
     }
     if (req.method !== 'POST' || req.url !== '/mcp') return void res.writeHead(405).end();
     const body = await readJson(req);
@@ -1256,11 +1272,8 @@ export async function startMcpEndpoint(
     get url() {
       return url();
     },
-    get postToolHookUrl() {
-      return `http://127.0.0.1:${relay.port}${POST_TOOL_HOOK_PATH}`;
-    },
-    get stopHookUrl() {
-      return `http://127.0.0.1:${relay.port}${STOP_HOOK_PATH}`;
+    get hookUrl() {
+      return `http://127.0.0.1:${relay.port}${HOOK_PATH}`;
     },
     spec: (grant) => ({
       kind: 'http',

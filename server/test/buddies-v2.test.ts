@@ -449,6 +449,7 @@ async function world(reopen?: string, realProvider = false) {
     installedAgent: installed,
     conversations: stable,
     channelChanged: () => undefined,
+    liveHooks: (conversationId) => grants.liveHooks(conversationId),
     gate: async ({ prompt }) => {
       gate.asked.push(prompt);
       return gate.verdicts.shift() ?? { kind: 'pass' };
@@ -1741,6 +1742,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
       installedAgent: () => installedAgent({ PATH: w.agentBin }),
       conversations: { ...w.stable, slot: async (id) => slotOf(await reopened.getRecord(id)) },
       channelChanged: () => undefined,
+      liveHooks: () => null,
       gate: async () => ({ kind: 'pass' }),
     });
     assert.deepEqual(
@@ -5374,7 +5376,7 @@ for (const child of [false, true]) {
       if (turn.mcp.kind !== 'http') throw new Error('expected HTTP');
       const httpSpec = turn.mcp;
       const hook = async (agent_id?: string) => {
-        const response = await fetch(w.endpoint.postToolHookUrl, {
+        const response = await fetch(w.endpoint.hookUrl, {
           method: 'POST',
           headers: { ...httpSpec.headers, 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -5432,7 +5434,7 @@ for (const child of [false, true]) {
         'settled'
       );
       assert.equal(w.turns.length, 1);
-      const denied = await fetch(w.endpoint.postToolHookUrl, {
+      const denied = await fetch(w.endpoint.hookUrl, {
         method: 'POST',
         headers: turn.mcp.headers,
         body: JSON.stringify({ hook_event_name: 'PostToolUse' }),
@@ -5488,7 +5490,7 @@ test('a queued model pick waits for its own turn at every tool boundary', async 
     const mcp = w.turns[0].mcp;
     assert.equal(mcp.kind, 'http');
     if (mcp.kind !== 'http') throw new Error('expected HTTP');
-    const hook = await fetch(w.endpoint.postToolHookUrl, {
+    const hook = await fetch(w.endpoint.hookUrl, {
       method: 'POST',
       headers: mcp.headers,
       body: JSON.stringify({ hook_event_name: 'PostToolUse' }),
@@ -5833,7 +5835,7 @@ function held(): Held {
 function nativeHook(w: World, turn: Turn) {
   return async (agent_id?: string): Promise<string> => {
     if (turn.mcp.kind !== 'http') throw new Error('expected HTTP');
-    const response = await fetch(w.endpoint.postToolHookUrl, {
+    const response = await fetch(w.endpoint.hookUrl, {
       method: 'POST',
       headers: { ...turn.mcp.headers, 'content-type': 'application/json' },
       body: JSON.stringify({ hook_event_name: 'PostToolUse', ...(agent_id ? { agent_id } : {}) }),
@@ -6070,7 +6072,7 @@ test('request messages: siblings, shared reads, hook/MCP race, a dropped hook, d
     // next boundary shows it (at least once, never lost).
     assert.equal((await send(live.parent, a, 'worker', 'survives a dropped hook')).isError, false);
     if (workerA.mcp.kind !== 'http') throw new Error('expected HTTP');
-    const url = new URL(w.endpoint.postToolHookUrl);
+    const url = new URL(w.endpoint.hookUrl);
     await new Promise<void>((resolve) => {
       const dropped = httpRequest(
         {
@@ -6231,7 +6233,7 @@ test("a worker's question reaches a parent idle on its own background work", asy
   try {
     const [requestId] = live.requests;
     if (live.parent.mcp.kind !== 'http') throw new Error('expected HTTP');
-    const hold = fetch(w.endpoint.stopHookUrl, {
+    const hold = fetch(w.endpoint.hookUrl, {
       method: 'POST',
       headers: { ...live.parent.mcp.headers, 'content-type': 'application/json' },
       body: JSON.stringify({ hook_event_name: 'Stop', background_tasks: [{ id: 'bg-1' }] }),

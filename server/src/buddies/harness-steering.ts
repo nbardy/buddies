@@ -28,13 +28,36 @@ export type IdleDelivery = 'stop-hook-hold' | 'waits-visibly';
 
 /** Where the loopback Buddy endpoint serves native hooks (mcp.ts `McpEndpoint`). */
 export interface SteeringEndpoint {
-  readonly postToolHookUrl: string;
-  readonly stopHookUrl: string;
+  /** ONE url for every hook event: the server dispatches on the input's `hook_event_name`. */
+  readonly hookUrl: string;
 }
+
+/**
+ * The hooks a turn's process was spawned with, recorded on its grant (grants.ts) so an adopting
+ * backend knows what can reach it (channels.ts `reachOf`).
+ * - `stable`: the harness's STABLE hook set below. Every hook event the delivery logic uses (and
+ *   the ones it may use, on the hold ceiling) calls one URL, and the server decides what each
+ *   does, so a server upgrade reaches processes that are already running.
+ * - `none`: the harness has no verified per-turn hook; posts land at a Buddy MCP tool call.
+ * - `unrecorded`: spawned before hook sets were recorded (before task_01a11af2), so its argv
+ *   holds whichever hooks its backend had: none of them may include Stop (83fd4e1).
+ *
+ * task_01a11af2 (owner, 2026-10-08): hooks live in the process argv, so a turn keeps the hook set it
+ * was spawned with across every adoption. Execution 29c47118, spawned at 09:20:33 by a backend
+ * built before 83fd4e1, carried only PostToolUse; its model went idle on a background Workflow,
+ * nothing ever called back for the parent, and the owner's 09:30 post waited 25+ minutes. A server
+ * fix could not reach it. One-time gap: processes spawned before this change keep their old argv
+ * (`unrecorded`) until they end. Evidence: agent_notes/2026-10-08_waiting-paths.md.
+ */
+export type HookSet =
+  | { readonly t: 'stable'; readonly version: 1 }
+  | { readonly t: 'none'; readonly harness: Provider }
+  | { readonly t: 'unrecorded' };
 
 interface HarnessTurn {
   readonly steering: Steering;
   readonly idle: IdleDelivery;
+  readonly hooks: HookSet;
   /** The extra argv of a Buddy worker turn on this harness. */
   args(endpoint: SteeringEndpoint): readonly string[];
 }
@@ -47,13 +70,14 @@ function hookCommand(url: string, maxSeconds: number): string {
   return `curl -sS --fail --max-time ${maxSeconds} -X POST -H "Authorization: $${bearer}" -H 'Content-Type: application/json' --data-binary @- '${url}'`;
 }
 
-// A post-tool hook answers at once. The Stop hold lasts as long as the background jobs, and it
-// need not outlast claude's own wait on them (12 h, agent-cli harnesses/claude.ts
-// CLAUDE_PRINT_BG_WAIT_CEILING_MS, which the package does not export):
-// past that claude stops the jobs anyway. A hold the hook timeout cuts fails open: claude ends
-// the turn as before, and the post runs as the next turn.
+// Ceilings, not behaviour: the server decides when each hook returns. A tool hook answers at once
+// and must never stall a turn on a hung backend. An agent-end hook (Stop, SubagentStop) may hold
+// as long as background jobs, and need not outlast claude's own wait on them (12 h, agent-cli
+// harnesses/claude.ts CLAUDE_PRINT_BG_WAIT_CEILING_MS, which the package does not export): past
+// that claude stops the jobs anyway. A hold the hook timeout cuts fails open: claude ends the turn
+// as before, and the post runs as the next turn.
 const TOOL_HOOK_S = 20;
-const STOP_HOLD_S = 12 * 60 * 60;
+const HOLD_HOOK_S = 12 * 60 * 60;
 const hook = (url: string, seconds: number) => ({
   type: 'command',
   command: hookCommand(url, seconds),
@@ -63,6 +87,7 @@ const hook = (url: string, seconds: number) => ({
 const buddyToolOnly = (provider: Provider): HarnessTurn => ({
   steering: 'buddy-tool-only',
   idle: 'waits-visibly',
+  hooks: { t: 'none', harness: provider },
   args: () => HARNESS_MEMORY_OFF[provider],
 });
 
@@ -73,19 +98,22 @@ export const HARNESS_TURN: Record<Provider, HarnessTurn> = {
   // PostToolUse `additionalContext` reaches the model as a system reminder after that tool result
   // (claude 2.1.294). It fires for a native sub-agent's tools too, with `agent_id` set; no hook
   // fires for the parent while a foreground sub-agent runs.
+  // The STABLE set: every event any delivery path uses, or may (SubagentStop: a sub-agent ending,
+  // which the server answers at once today). An event the server does not use answers empty.
+  // Never drop an event from this set: running processes keep the set they were spawned with.
   claude: {
     steering: 'any-tool',
     idle: 'stop-hook-hold',
-    args: (endpoint) => [
+    hooks: { t: 'stable', version: 1 },
+    args: ({ hookUrl }) => [
       '--settings',
       JSON.stringify({
         ...CLAUDE_MEMORY_OFF,
         hooks: {
-          PostToolUse: [{ matcher: '.*', hooks: [hook(endpoint.postToolHookUrl, TOOL_HOOK_S)] }],
-          PostToolUseFailure: [
-            { matcher: '.*', hooks: [hook(endpoint.postToolHookUrl, TOOL_HOOK_S)] },
-          ],
-          Stop: [{ hooks: [hook(endpoint.stopHookUrl, STOP_HOLD_S)] }],
+          PostToolUse: [{ matcher: '.*', hooks: [hook(hookUrl, TOOL_HOOK_S)] }],
+          PostToolUseFailure: [{ matcher: '.*', hooks: [hook(hookUrl, TOOL_HOOK_S)] }],
+          Stop: [{ hooks: [hook(hookUrl, HOLD_HOOK_S)] }],
+          SubagentStop: [{ hooks: [hook(hookUrl, HOLD_HOOK_S)] }],
         },
       }),
     ],
@@ -95,12 +123,13 @@ export const HARNESS_TURN: Record<Provider, HarnessTurn> = {
   codex: {
     steering: 'any-tool',
     idle: 'waits-visibly',
-    args: (endpoint) => [
+    hooks: { t: 'stable', version: 1 },
+    args: ({ hookUrl }) => [
       '-c',
       'features.hooks=true',
       '--dangerously-bypass-hook-trust',
       '-c',
-      `hooks.PostToolUse=[{matcher=".*",hooks=[{type="command",command=${JSON.stringify(hookCommand(endpoint.postToolHookUrl, TOOL_HOOK_S))},timeout=30,additionalContextLimit=0}]}]`,
+      `hooks.PostToolUse=[{matcher=".*",hooks=[{type="command",command=${JSON.stringify(hookCommand(hookUrl, TOOL_HOOK_S))},timeout=30,additionalContextLimit=0}]}]`,
     ],
   },
   opencode: buddyToolOnly('opencode'),

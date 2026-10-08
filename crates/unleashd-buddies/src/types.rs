@@ -529,6 +529,12 @@ pub struct Responding {
     pub thread_root_id: String,
     pub started_at: String,
     pub running: bool,
+    /// The seat the delivery runs (or is bound to run) in; none for an unbound mention. The host
+    /// asks its live turn there what can reach it (channels.ts `reachOf`, task_01a11af2).
+    pub conversation_id: Option<String>,
+    /// It carries the owner's explicit pick (model, effort, provider): it is never steered into a
+    /// live turn and runs as its own (deliveries.rs `take_steering`).
+    pub picked: bool,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(object))]

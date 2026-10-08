@@ -1624,20 +1624,30 @@ fn a_followed_thread_delivers_anothers_post_to_the_following_conversation() {
 }
 
 // task_01a11a68 (2026-10-08): a native sub-agent of a running turn is shown the owner's message
-// without taking it. If its peek advanced the mark, the queued delivery would settle `consumed`
-// and the parent turn, the one answering the thread, would never see the message.
+// without taking it. If its notice advanced the read mark, the queued delivery would settle
+// `consumed` and the parent turn, the one answering the thread, would never see the message.
+// task_01a11af2 (2026-10-08): the "once" is per TURN and durable. A per-sub-agent set in host memory
+// showed one owner post 35 times to a 27-agent Workflow, and again after a backend restart.
 #[test]
-fn a_peek_shows_unread_posts_without_fencing_their_delivery() {
+fn a_sub_agent_notice_shows_an_owner_post_once_without_fencing_its_delivery() {
     let mut f = fixture();
     let s = &mut f.store;
     let (root, reply) = follow_fixture(s);
     let channel = ChannelRef::Id { id: root.channel_id.clone() };
     s.follow_thread(&buddy("mid"), &root.id, Some("conv-mid".into()), 20).unwrap();
-    s.post(&buddy("peer"), channel, reply("use a 3x3x3 grid", "fix")).unwrap();
-    assert_eq!(bodies(&s.peek_thread_unread(&buddy("mid"), &root.id, 20).unwrap().posts), ["use a 3x3x3 grid"]);
-    assert_eq!(bodies(&s.peek_thread_unread(&buddy("mid"), &root.id, 20).unwrap().posts), ["use a 3x3x3 grid"], "a peek reads nothing");
-    assert_eq!(bodies(&s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts), ["use a 3x3x3 grid"]);
-    assert!(s.claim_run(lease(60_000), &[]).unwrap().is_none(), "the parent's take fenced the delivery");
+    s.post(&buddy("peer"), channel.clone(), reply("start the sweep", "start")).unwrap();
+    let turn = s.claim_run(lease(60_000), &[]).unwrap().expect("the follower's turn");
+    s.deliver_posts(&turn.run.id).unwrap();
+    s.mark_executing(&turn.run.id, &turn.lease_token).unwrap();
+    s.post(&buddy("peer"), channel.clone(), reply("chatter", "chat")).unwrap();
+    s.post(&Actor::Owner, channel, reply("use a 3x3x3 grid", "fix")).unwrap();
+    let notice = |s: &mut Store| bodies(&s.notice_sub_agent(&buddy("mid"), &turn.run.id, &root.id, 20).unwrap().posts).into_iter().map(str::to_string).collect::<Vec<_>>();
+    assert_eq!(notice(s), ["use a 3x3x3 grid"], "owner posts only");
+    assert!(notice(s).is_empty(), "every later sub-agent of the turn: nothing");
+    assert_eq!(bodies(&s.catch_up_thread(&buddy("mid"), &root.id, 20).unwrap().posts), ["chatter", "use a 3x3x3 grid"], "a notice reads nothing");
+    s.settle_run(&turn.run.id, &turn.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    let mid_queued = |s: &Store| s.list_runs(RunQuery::Buddy { buddy_id: "mid".into() }, 20).unwrap().into_iter().filter(|r| r.status == RunStatus::Queued).count();
+    assert_eq!(mid_queued(s), 0, "the parent's take fenced mid's deliveries");
 }
 
 #[test]
