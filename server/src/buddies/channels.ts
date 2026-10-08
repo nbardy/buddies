@@ -7,12 +7,10 @@ import {
   type InstalledAgent,
   type LiveReach,
   type ReplyRetryResult,
-  isHarnessRetryFailure,
-} from '@unleashd/shared';
-import {
   NO_AGENT_INSTALLED,
   WAKE_MESSAGE,
   configFromProviderPreferences,
+  isHarnessRetryFailure,
   mentionedIds,
 } from '@unleashd/shared';
 import type { ConversationRuntime } from '../conversations/runtime';
