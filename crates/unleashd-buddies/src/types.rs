@@ -961,6 +961,24 @@ pub struct AddressedMessage {
     pub post: Post,
 }
 
+// Which posts make a live turn's tool boundary take the thread's unread page (deliveries.rs
+// `take_steering`): any unread post at a Buddy MCP tool call; only an owner post at a native
+// tool hook or a held Stop (Buddy chatter there waits for a Buddy tool call or the next turn).
+str_enum!(SteerTrigger { AnyPost = "any_post", OwnerPost = "owner_post" });
+
+/// What one tool boundary of a live thread turn got (deliveries.rs `take_steering`).
+#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
+#[derive(Debug, Clone)]
+pub enum Steering {
+    /// The page was taken into the turn: marked read, fencing its queued deliveries.
+    Taken { posts: Vec<Post>, unshown: i64 },
+    /// A queued delivery in the thread carries an explicit pick (model, effort, provider): nothing
+    /// is read, so that delivery runs as its own turn on the picked config.
+    PickQueued,
+    /// Nothing the trigger takes: no unread post, or (OwnerPost) none by the owner.
+    Quiet,
+}
+
 /// What a claimed delivery shows (deliveries.rs `compose`).
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
 #[derive(Debug, Clone)]

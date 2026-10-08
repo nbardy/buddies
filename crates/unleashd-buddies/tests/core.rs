@@ -2197,3 +2197,36 @@ fn a_request_message_reaches_only_its_other_endpoint_and_never_revives_closed_wo
     let rest: Vec<Run> = std::iter::from_fn(|| s.claim_run(lease(60_000), &[]).unwrap().map(|c| c.run)).collect();
     assert!(rest.iter().all(|r| !matches!(r.input, RunInput::Message { .. })), "no other message runs: {rest:?}");
 }
+
+// task_01a11a68 6a successor (2026-10-08, rebase of the atomic steering take onto 4fcc0be): the
+// request-message collector is pending → show → acknowledge, three calls like the old split
+// steering guard. It cannot lose a message there, for two reasons this pins: acknowledge settles
+// the exact run ids it showed (a message sent inside the window is not among them), and the
+// thread take of `take_steering` never fences an addressed message even when it moves the shared
+// read mark past it. A cursor-style acknowledge, or a fence without `delivery_scope = 'thread'`,
+// silently consumes the second message. Messages carry no pick (`require_plain` refuses `worker`),
+// so there is no pick to lose either. Decision: agent_notes/2026-10-08_steer-any-tool-boundary.md.
+#[test]
+fn a_request_message_sent_inside_a_boundary_window_is_never_lost() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let sol = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
+    let a = s.post(&buddy("mid"), me_only(), PostInput { run_config: Some(sol), ..request("sweep A", "wa") }).unwrap();
+    let ca = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    s.bind_run(&ca.run.id, &ca.lease_token, "worker-a").unwrap();
+    let to_worker = || ChannelRef::Request { request_id: a.id.clone(), to: RequestEndpoint::Worker };
+    let msg = |body: &str, key: &str| PostInput { kind: PostKind::Inform, from_conversation_id: Some("conv-sender".into()), ..request(body, key) };
+
+    s.write_post(&buddy("mid"), to_worker(), msg("first", "m1")).unwrap();
+    let shown: Vec<String> = s.pending_messages("worker-a").unwrap().into_iter().map(|m| m.run_id).collect();
+    // Inside the window: a second message, then an owner post the worker's turn takes, which
+    // advances the shared mark past both messages.
+    s.write_post(&buddy("mid"), to_worker(), msg("second", "m2")).unwrap();
+    s.post(&Actor::Owner, me_only(), PostInput { kind: PostKind::Inform, reply_to_id: Some(a.id.clone()), ..request("owner aside", "o1") }).unwrap();
+    let took = s.take_steering(&buddy("mid"), &ca.run.id, &a.id, SteerTrigger::AnyPost, 20).unwrap();
+    assert!(matches!(&took, Steering::Taken { posts, .. } if bodies(posts) == ["owner aside"]), "{took:?}");
+    assert_eq!(s.acknowledge_messages("worker-a", &shown).unwrap(), 1);
+    let left: Vec<String> = s.pending_messages("worker-a").unwrap().into_iter().map(|m| m.post.body).collect();
+    assert_eq!(left, ["second"], "the message sent inside the window is still queued for the next boundary");
+}

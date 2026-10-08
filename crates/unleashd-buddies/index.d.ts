@@ -43,6 +43,11 @@ export declare class BuddiesCore {
   followThread(actor: Actor, rootId: string, conversationId: string | undefined | null, limit: number): Promise<ThreadUnread>
   /** The thread's unread posts for this Buddy, marked read (the follow wait's re-read). */
   catchUpThread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
+  /**
+   * One tool boundary of a live thread turn: its unread page, taken unless a queued delivery
+   * there carries an explicit pick (deliveries.rs `take_steering`; one transaction).
+   */
+  takeSteering(actor: Actor, runId: string, rootId: string, trigger: SteerTrigger, limit: number): Promise<Steering>
   /** The thread's unread posts for this Buddy, NOT marked read (a native sub-agent's view). */
   peekThreadUnread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
   /** Request-addressed messages waiting for this conversation's live turn (messages.rs). */
@@ -645,6 +650,14 @@ export interface SearchQuery {
 export type Setting =
   | { kind: 'set'; value: string }
   | { kind: 'default' }
+
+/** What one tool boundary of a live thread turn got (deliveries.rs `take_steering`). */
+export type Steering =
+  | { kind: 'taken'; posts: Array<Post>; unshown: number }
+  | { kind: 'pick_queued' }
+  | { kind: 'quiet' }
+
+export type SteerTrigger = 'any_post' | 'owner_post'
 
 /** Whose resource an operation touches (the `target` of `authorize`). */
 export type Subject =

@@ -82,3 +82,44 @@ All required checks are green on the committed implementation and its merged dep
 Core commit definitions were checked directly at HEAD (`steeredThread`, `steerNativeTool`, `peekThreadUnread`, and submodule `mcpHeaderEnvName` export), not inferred from the shared dirty main tree. The upcoming fast-forward preserves unrelated main edits; the submodule export commit 6d45ede is already pushed. The native answer to request post_01a11a68-7f62-7267-9915-23a8b206a9e5 will record the exact main push hash.
 
 Deployment limitation: launch-time hooks apply to new CLI processes; an already-running CLI does not acquire them in place. The owner backend is not forcibly restarted and no live turn is stopped. Parent-in-an-unfinished-wait, hosted Codex tools, explicit queued model picks, and the declared Buddy-tool-only harnesses retain the limits above. Native receipt is independently proved; a model can still mishandle a correction if its delegation freezes conflicting dimensions. This change does not invent authority from an incoming post.
+
+## Successor — 2026-10-08 ~09:40Z: atomic pick guard, and the last-tool-call rule (criterion 6)
+
+Decision-maker: assistant (implementation choices below), under the lead's reopened criterion 6 of task_01a11a68 (request post_01a11acf-3d0d-70d1-8968-8de84966f967). Status: proposed, on branch `fix/steer-atomic-guard`, pending PM review. Earlier sections above still hold; this amends "Explicit model picks" (its guard was not atomic) and adds the last-call rule.
+
+**What changed.** RE reproduced 6/40 timeouts of the thread-model pair at f1011d0 and showed the cause (agent_notes/2026-10-08_f1011d0-full-suite-rerun.md, "1–2: reproduced"): `steeredThread` checked queued picks with `listRuns` and the read happened later in `catchUpThread`, two core calls. A pick posted between them was steered into the running turn on the old model and its own delivery was fenced `consumed`. At 83fd4e1 the Stop-hook hold (`holdStoppedTurn`) used the same split, so all three take sites had it.
+
+**6a choice: one crate authority.** New crate call `take_steering(actor, runId, root, trigger, limit)` checks, in ONE write transaction: the run is still live; no queued delivery for this Buddy in the thread carries a config (pick); then takes the unread page (`any_post` at a Buddy tool call, `owner_post` at a native hook / Stop hold). It returns a typed `taken | pick_queued | quiet`. The pick guard was removed from `steeredThread`; `takeOwnerSteering` and the `catchUpThread` steering call are gone. Why atomic holds: a post and its delivery run (with the pick config) are written in one transaction (`wake`), and SQLite serializes writers, so the take sees the post with its pick or not at all. Alternative considered: "never steer while the Buddy has any queued delivery in the thread". Rejected: that disables steering for every ordinary owner post, because each one queues a delivery. Rejected too: wrapping the old calls in a host lock. The poster is a different code path, so a lock would not cover it.
+
+**6c choice: re-delivered as its own run (not "answered in-turn").** Reason: the backend cannot make a model answer. A tool result is always followed by a model step, but at the LAST tool call (often the reply's own `post`) the reply is already written, and the model typically ends. "Answered in-turn" would be a claim we cannot enforce. Rule: a take that includes an owner post stamps the run `steered_at`. At settle (complete, or failed for a delivery; not on an owner Stop), if the Buddy wrote no post in that thread with `created_at > steered_at` (ignoring `reply_failed` notices), the newest owner post it took gets the next attempt of its delivery, in the steered run's conversation, which holds all the steered text. A later attempt shows its trigger even though it is read (existing `compose` rule), and skips the follow-up gate. The fence now exempts `attempt > 1`: that attempt exists because its post was read, and without the exemption any later read in the thread cancelled it before it ran. That same exemption also stops a later read from cancelling an owner's queued retry (`retry_delivery`), which was the same latent hole. Owner posts only: re-delivering steered Buddy chatter could ping-pong between Buddies. The comparison is strict: a reply written in the same tool call as the take predates it. A later model step cannot fall in the same millisecond.
+
+Cost: when a steered owner post is left unanswered, the owner gets one extra turn. When the turn did reply after the take, there is no extra turn. Schema: additive `run.steered_at TEXT` (`ensure_column`, so an older build still opens the file).
+
+**6d.** The two thread-model tests now wait for the previous run's actual settle (`settled()`: no lead run `running`/`queued`) before the next owner post, with no sleeps. They no longer depend on the post landing after the reply's tool call has closed.
+
+**Residual, not changed:** an explicit `channel_read {follow}` read (`follow_thread`/`catch_up_thread`) still advances the cursor without a pick guard. That is the model reading on purpose, not steering. Revisit if a pick is ever lost that way.
+
+Revisit when: a harness gains a way to confirm the model handled injected text (then "answered in-turn" could be enforced), or the owner asks for picks to steer inline. That second case needs the pick to be stored outside the consumed run.
+
+Evidence: mutation proof /tmp/steer-atomic/mutation-proof.log (copied to agent_notes/2026-10-08_steer-atomic-guard-evidence/). Loop and gate logs are listed in the same directory.
+
+## Successor — 2026-10-08 ~10:30Z: rebased onto 4fcc0be; request-addressed messages keep their own take path
+
+Decision-maker: assistant (implementation choice), on the lead's request post_01a11ae5-f852-7564-aa8f-1cb8855fb085. Status: proposed, on branch `fix/steer-atomic-guard` (rebased onto origin/main 4fcc0be, force-pushed branch only). The ~09:40Z section still holds unchanged; this records how it composes with 4fcc0be ("Message a live request's worker or parent", agent_notes/2026-10-08_request-addressed-messages.md).
+
+**Question.** 4fcc0be's request messages also reach a live turn at its next tool boundary, through a three-step collector in mcp.ts: `pendingMessages` → show → `acknowledgeMessages` on the response's close. That is check-then-act like the old split steering guard. Should it be folded into `take_steering`?
+
+**Choice: no fold; it cannot lose a pick or a delivery, and a crate test pins why.**
+- No pick to lose: a message is refused if it carries `worker` (run config), mentions, a task, or kind request (`messages.rs require_plain`), and the owner cannot send one (`parent` refuses an owner request). Its receipt run is enqueued with `config: None`.
+- No delivery to lose: `acknowledge` settles the exact run ids that were shown (and only still-`queued` ones of that conversation). It is not a cursor, so a message sent inside the window is not among them and stays queued for the next boundary or the idle turn. The steering race existed because the thread mark IS a cursor: one take covered posts the check never saw.
+- The two paths do not fence each other: `take_steering`'s page and the thread fence skip addressed posts and runs (`not_addressed!`, `delivery_scope = 'thread'`), even when the take moves the shared mark past them. The conflict resolution keeps both conditions on the fence (`delivery_scope = 'thread' AND attempt = 1`), and adds `delivery_scope = 'thread'` to `pick_queued` and `redeliver_unanswered` for the same reason (no behaviour change today: addressed runs carry no config and no owner author).
+- The worst case is a repeat, not a loss: two concurrent boundaries are deduplicated by the in-memory `offered` set, and a restart between show and acknowledge repeats a message once. That is 4fcc0be's stated at-least-once contract.
+- Folding would couple two independent authorities (a per-thread cursor and per-conversation receipts) in one call for no lost case; rejected.
+
+Message turns (an idle destination running a `Message` run) get no thread steering (`steeredThread` only steers `deliver`/`post` runs), so they never stamp `steered_at` and settle with no re-delivery; `after_settle` lists `Message` with the no-op arms.
+
+**Migration order.** One order, the order the columns shipped: `delivery_scope` (4fcc0be), then `steered_at`. `RUN_TABLE` lists them in that order and `open` runs `ensure_column` in that order, so a fresh file and a migrated one agree. Both are additive; no rebuild.
+
+Guard: crate test `a_request_message_sent_inside_a_boundary_window_is_never_lost` (tests/core.rs), mutation-proved: dropping `delivery_scope = 'thread'` from the fence, or making `acknowledge` settle every queued message, each fails it.
+
+Evidence: agent_notes/2026-10-08_steer-atomic-guard-evidence/rebase/ (copied from /tmp/steer-atomic-rebase/).

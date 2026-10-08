@@ -239,6 +239,7 @@ CREATE TABLE {table} (
   config TEXT, body TEXT, executing_at TEXT, through_ord TEXT,
   admission TEXT NOT NULL DEFAULT 'capped' CHECK(admission IN ('owner','capped')),
   delivery_scope TEXT NOT NULL DEFAULT 'thread' CHECK(delivery_scope IN ('thread','to_worker','to_parent')),
+  steered_at TEXT,
   CHECK(input_kind IN ('chat','post','deliver') OR status <> 'queued'),
   CHECK(input_kind <> 'chat' OR status <> 'queued' OR body IS NOT NULL),
   UNIQUE(input_key, attempt)) STRICT;
@@ -351,7 +352,12 @@ pub fn open(path: &str) -> Result<Connection> {
                 tx.commit()?;
             }
             crate::migrate::rebuild_for_delivery(&conn, path)?;
+            // Additive columns, in the order they shipped (the same order RUN_TABLE lists them, so a
+            // migrated file and a fresh one agree): delivery_scope (4fcc0be), then steered_at.
             ensure_column(&conn, "run", "delivery_scope", "TEXT NOT NULL DEFAULT 'thread' CHECK(delivery_scope IN ('thread','to_worker','to_parent'))")?;
+            // When a live turn last took an owner post at a tool boundary (2026-10-08, task_01a11a68
+            // 6c; deliveries.rs `redeliver_unanswered`). Additive: an older build still opens the file.
+            ensure_column(&conn, "run", "steered_at", "TEXT")?;
             conn.execute_batch(INDEXES)?;
             ensure_post_search(&conn)?;
             Ok(conn)
