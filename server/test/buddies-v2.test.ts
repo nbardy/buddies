@@ -87,9 +87,10 @@ type Turn = { n: number; request: ProviderRequest; mcp: McpServerSpec };
 
 async function until<T>(
   read: () => T | undefined | false | Promise<T | undefined | false>,
-  what: string
+  what: string,
+  timeoutMs = 30_000
 ): Promise<T> {
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await read();
     if (value) return value;
@@ -5486,7 +5487,7 @@ for (const provider of ['codex', 'claude'] as const) {
       `real CLI ${provider}: owner steering ${child ? 'during native child work' : 'after Bash'}`,
       {
         skip: process.env.UNLEASHD_REAL_STEERING !== '1',
-        timeout: 180_000,
+        timeout: 300_000,
       },
       async () => {
         const w = await world(undefined, true);
@@ -5514,7 +5515,7 @@ for (const provider of ['codex', 'claude'] as const) {
             }
           );
           w.announce(root);
-          await until(() => existsSync(marker), 'real native shell running');
+          await until(() => existsSync(marker), 'real native shell running', 90_000);
           const correction = await w.post(
             OWNER,
             { kind: 'id', id: w.general.id },
@@ -5530,13 +5531,14 @@ for (const provider of ['codex', 'claude'] as const) {
           );
           w.announce(correction);
           writeFileSync(release, 'continue');
-          await until(() => existsSync(result), 'the corrected native tool result');
+          await until(() => existsSync(result), 'the corrected native tool result', 90_000);
           assert.match(readFileSync(result, 'utf8'), /3[×x]3[×x]3/);
           assert.equal(w.turns.length, 1);
           assert.equal(w.stopped.size, 0);
           await until(
             async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
-            'real turn settles'
+            'real turn settles',
+            90_000
           );
           const delivery = (await w.runs(w.lead.id)).find(
             (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
