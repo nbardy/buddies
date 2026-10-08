@@ -264,7 +264,7 @@ test('the Task filter shows one Task across channels, each post linked into its 
 
 test('channel waiting labels distinguish a busy turn, a full pool and an older backend', async () => {
   for (const [waiting, expected] of [
-    [{ kind: 'conversation_busy' }, 'waiting for the current turn'],
+    [{ kind: 'conversation_busy' }, 'answering after its current turn ends'],
     [{ kind: 'pool_full', active: 5, max: 5 }, 'queued at the run limit (5/5)'],
     [undefined, 'queued…'],
   ] as const) {
