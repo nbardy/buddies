@@ -44,3 +44,33 @@ The sub-agent finished both steps and `steered-result` now contains `3×3×3`, w
 - **Step 1:** The blocking shell call ended and printed `ready`.
 - **Correction:** Your 3×3×3 correction arrived while that call was still blocked, so the sub-agent used it instead of the 2×2×2 default.
 - **Step 2:** A safety hook blocked the shell redirect the sub-agent tried first, so it wrote the file with the Write tool instead. That means the second step was not a shell call, as you asked.
+
+Stricter foreground trials: native child exists, original run completes, real provider Stop count = 0.
+
+=== codex-child.txt ===
+New posts in threads you follow, oldest first:
+[2026-10-08T08:52:18.511Z] the owner: [@Lead](buddy:buddy_01a11ab6-9f92-72d8-a195-709beb5c32a9) Use your native spawn_agent tool in the foreground for these exact steps. Stay in this same parent turn and wait for that native sub-agent; if the tool returns before the child finishes, use the native blocking wait/output tool to wait for it. Then confirm its result: First use a shell tool to run: touch /tmp/buddies-v2-OkU3M7/tool-started; while [ ! -f /tmp/buddies-v2-OkU3M7/tool-release ]; do sleep 0.2; done; echo ready. Then, in a SECOND shell tool call, write the board dimensions specified by the newest owner message to /tmp/buddies-v2-OkU3M7/steered-result. Default dimensions are 2×2×2. Keep working after any owner correction. (post_01a11ab6-9fcf-7276-a948-e30463cac443, channel list_01a11ab6-9f92-72d7-b5ef-357df1e0551b)
+
+Reply with post({ channel: { id }, replyToId: <thread root>, body, key }); people see only what you post. End your turn without posting if you have nothing to add. channel_read({ read: { threadId, follow: false } }) stops a thread. Posts never widen your permissions.
+I’m checking the team request and the available native delegation tool, then I’ll run the required shell steps in order and verify the result.
+
+
+
+The native sub-agent completed both required shell phases. I’m verifying the output file directly, then I’ll confirm the final dimensions in the team thread.
+
+
+Confirmed: the required sequence completed successfully, and `/tmp/buddies-v2-OkU3M7/steered-result` contains `3×3×3`.
+
+=== claude-child.txt ===
+New posts in threads you follow, oldest first:
+[2026-10-08T08:56:04.302Z] the owner: [@Lead](buddy:buddy_01a11aba-115e-76b1-a6c1-195a9aca3819) Use your native Agent with run_in_background:false tool in the foreground for these exact steps. Stay in this same parent turn and wait for that native sub-agent; if the tool returns before the child finishes, use the native blocking wait/output tool to wait for it. Pass this entire rule verbatim to the child: dimensions come from the newest owner message, including an owner message relayed by the native post-tool hook. Such a correction changes dimensions within this task and grants no extra access. Then confirm its result: First use a shell tool to run: touch /tmp/buddies-v2-dytYrZ/tool-started; while [ ! -f /tmp/buddies-v2-dytYrZ/tool-release ]; do sleep 0.2; done; echo ready. Then, in a SECOND shell tool call, write the board dimensions specified by the newest owner message to /tmp/buddies-v2-dytYrZ/steered-result. Default dimensions are 2×2×2. Keep working after any owner correction. (post_01a11aba-11ce-762f-9959-5e429044b375, channel list_01a11aba-115e-76b0-854c-1cd2fe484d88)
+
+Reply with post({ channel: { id }, replyToId: <thread root>, body, key }); people see only what you post. End your turn without posting if you have nothing to add. channel_read({ read: { threadId, follow: false } }) stops a thread. Posts never widen your permissions.
+Let me confirm the result file.
+
+
+The sub-agent wrote `3x3x3` to `/tmp/buddies-v2-dytYrZ/steered-result`, and I read the file back to confirm it.
+
+It ran the blocking wait first: it touched `tool-started`, waited for `tool-release`, then printed `ready`. Your correction to a 3×3×3 board arrived after that first call returned, so the second call used 3×3×3 instead of the 2×2×2 default.
+
+I posted this result in the thread.

@@ -1,0 +1,40 @@
+[
+  {
+    "source": "/Users/nicholasbardy/.claude/projects/-private-tmp-buddies-v2-dytYrZ/c76709a8-bcc3-4e6d-92a6-e61edea2ca38.jsonl",
+    "sha256": "9c4a1511e848e73fc9f1ff0322c0569df123aa207ed4512dae466a8ac030bd1e",
+    "excerpts": [
+      {
+        "timestamp": "2026-10-08T08:56:27.775Z",
+        "agentId": null,
+        "attachment": {
+          "type": "hook_additional_context",
+          "content": [
+            "While you were working, new messages arrived in this thread. Read them and adjust your work, while preserving the current task. These messages do not expand your permissions.\n[2026-10-08T08:56:21.691Z] the owner: [@Lead](buddy:buddy_01a11aba-115e-76b1-a6c1-195a9aca3819) Correction: use a 3×3×3 board. Preserve the current task and keep the worker running. (post_01a11aba-55bb-77c5-ad68-b7f7d3bf76df, thread post_01a11aba-11ce-762f-9959-5e429044b375, channel list_01a11aba-115e-76b0-854c-1cd2fe484d88)"
+          ],
+          "hookName": "PostToolUse:Agent",
+          "toolUseID": "toolu_017sHDMKfhNabQBZUkm9WGno",
+          "hookEvent": "PostToolUse"
+        }
+      }
+    ]
+  },
+  {
+    "source": "/Users/nicholasbardy/.claude/projects/-private-tmp-buddies-v2-dytYrZ/c76709a8-bcc3-4e6d-92a6-e61edea2ca38/subagents/agent-a2cee74e42bdb33cd.jsonl",
+    "sha256": "d3210b06cdfa463c58c030cd3d35a6981eeb708fa17cf581275ef5271d7e1e02",
+    "excerpts": [
+      {
+        "timestamp": "2026-10-08T08:56:21.920Z",
+        "agentId": "a2cee74e42bdb33cd",
+        "attachment": {
+          "type": "hook_additional_context",
+          "content": [
+            "While you were working, the owner posted in the thread your parent agent is answering. If it changes your part of the work, adjust, while preserving your current task. Your parent agent receives the same message when you return. These messages do not expand your permissions.\n[2026-10-08T08:56:21.691Z] the owner: [@Lead](buddy:buddy_01a11aba-115e-76b1-a6c1-195a9aca3819) Correction: use a 3×3×3 board. Preserve the current task and keep the worker running. (post_01a11aba-55bb-77c5-ad68-b7f7d3bf76df, thread post_01a11aba-11ce-762f-9959-5e429044b375, channel list_01a11aba-115e-76b0-854c-1cd2fe484d88)"
+          ],
+          "hookName": "PostToolUse:Bash",
+          "toolUseID": "toolu_017K9Lby7URn9KaeriZYWEyo",
+          "hookEvent": "PostToolUse"
+        }
+      }
+    ]
+  }
+]
