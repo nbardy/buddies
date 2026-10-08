@@ -270,9 +270,7 @@ test(
     const portB = freePortSync();
     const httpA = api(portA);
     const httpB = api(portB);
-    // B's cold boot exceeded the unrelated 6 s idle clock at pool8. This case tests
-    // holder leases; only the next case tests provider idleness with IDLE_MS.
-    await startBackend('A', portA, { CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '60000' });
+    await startBackend('A', portA, {});
     const ws = await workspace(httpA, 'lease');
     const held = await hire(httpA, ws, 'held');
     const request = await ask(httpA, held, 'held');
@@ -280,7 +278,7 @@ test(
 
     // A second backend on the same Buddy store boots while A still drives the turn. Before the
     // lease was a heartbeat, its startup sweep ended every held run, A's live one included.
-    await startBackend('B', portB, { CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '60000' });
+    await startBackend('B', portB, {});
     await staysRunning(httpB, held, 2 * LEASE_MS, "A's live, renewing run survives B's boot");
 
     // A dies, provider and all, while B stays up: nobody renews A's lease and nobody restarts.
