@@ -25,6 +25,7 @@ const RUN_KIND: Record<RunInput['kind'], string> = {
   chat: 'chat',
   post: 'post',
   deliver: 'delivery',
+  message: 'message',
   retired: 'earlier',
 };
 

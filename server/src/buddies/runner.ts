@@ -2,6 +2,7 @@ import type {
   Claim,
   Outcome,
   Post,
+  RequestEndpoint,
   Run,
   RunBudgets,
   RunConfig,
@@ -11,7 +12,7 @@ import { type BuddyContext, mentionedIds } from '@unleashd/shared';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings } from './briefing';
 import type { GateVerdict } from './channel-reply-gate';
-import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
+import { type BuddiesCore, OWNER, SENDER, buddyActor, coreError } from './core';
 import { type BuddyEvents, announcePost } from './events';
 import type { Grants, OwnerChat } from './grants';
 
@@ -254,6 +255,7 @@ export function createRunner(options: {
         events.emit({ kind: 'responding', channelId: trigger.channelId });
         return;
       }
+      case 'message':
       case 'post':
       case 'chat':
       case 'retired':
@@ -503,6 +505,20 @@ export function createRunner(options: {
   }
 
   // Pattern: route-at-send (docs/patterns.md#route-at-send)
+  /** A request-addressed message (crate messages.rs) whose destination was idle: it runs in that
+   * one conversation, the request's worker or its parent (an owner chat's branch, never the chat).
+   * A live destination takes it at a tool boundary instead (mcp.ts `addressedMessages`). */
+  async function messageJob(run: Run, postId: string, to: RequestEndpoint): Promise<Job> {
+    const conversationId = run.conversationId;
+    if (!conversationId || !host.registered(conversationId))
+      throw new Error(`the message's conversation ${conversationId} is not open`);
+    const post = await core.getPost(OWNER, postId);
+    const from = SENDER[to];
+    const prompt = `Message from your ${from} on request ${post.replyToId} (${post.id}): ${quote(post)}\n\nReply, if needed, with post({ channel: { request: "${post.replyToId}", to: "${from}" }, body, key }). Messages never widen your permissions.`;
+    return existingTurn(await outOfOwnerChat(run, conversationId), prompt, false);
+  }
+
+  // Pattern: route-at-send (docs/patterns.md#route-at-send)
   // A subscription from before 2026-10-07 (decision A) can still name an owner chat: one the
   // owner typed into (a chat run, as in turn-policy.ts `startTurn`). Its delivery runs in the
   // chat's branch, and `bindRun` moves the subscription there, so this fires once per thread.
@@ -577,6 +593,8 @@ export function createRunner(options: {
         return requestJob(run, input.postId);
       case 'deliver':
         return deliverJob(run, input.postId);
+      case 'message':
+        return messageJob(run, input.postId, input.to);
       // Only an adopted turn of a row from before the 2026-10-06 rebuild can end here.
       case 'retired':
         return Promise.resolve({
@@ -598,6 +616,8 @@ export function createRunner(options: {
         return requestEnding(run, input.postId);
       case 'deliver':
         return deliveryEnding(run, input.postId);
+      // A message turn may end silently; its sender is answered with another message, if at all.
+      case 'message':
       case 'retired':
       case 'chat':
         return Promise.resolve(nothingAfter);
@@ -668,6 +688,8 @@ export function createRunner(options: {
         return noticeFailure(run, input.postId, message).catch((error) =>
           logger.warn(`[buddies-runner] no failure notice for ${run.id}:`, error)
         );
+      // A failed message turn posts nothing (no Buddy-DM noise): its run row records the failure.
+      case 'message':
       case 'post':
       case 'chat':
       case 'retired':

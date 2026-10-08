@@ -183,7 +183,7 @@ fn run_retry_decision(conn: &Connection, actor: &str, run_id: &str) -> Result<De
     let run = crate::runs::get_run(conn, run_id)?;
     let requester = match &run.input {
         RunInput::Post { post_id } => Some(crate::posts::get_post(conn, post_id)?.author),
-        RunInput::Chat { .. } | RunInput::Deliver { .. } | RunInput::Retired { .. } => None,
+        RunInput::Chat { .. } | RunInput::Deliver { .. } | RunInput::Message { .. } | RunInput::Retired { .. } => None,
     };
     match requester == Some(Actor::Buddy { id: actor.to_string() }) {
         true => Ok(Decision::Allowed),

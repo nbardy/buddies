@@ -35,6 +35,14 @@ str_enum!(DocKind { Soul = "soul", Working = "working", LongTerm = "long_term", 
 // Stored at enqueue: owner messages bypass max_active_runs, background work stays capped.
 str_enum!(Admission { Owner = "owner", Capped = "capped" });
 str_enum!(PostKind { Inform = "inform", Request = "request" });
+// Pattern: sum-types (docs/patterns.md#sum-types)
+// The two live ends of one request (task_01a11a97): the conversation that sent it and the worker
+// conversation bound to its run. A request-addressed message goes from one to the other (messages.rs).
+str_enum!(RequestEndpoint { Worker = "worker", Parent = "parent" });
+// `run.delivery_scope`: how a `deliver` row is received. `thread` = through the Buddy's thread read
+// mark (the fence, `compose`); `to_worker`/`to_parent` = one request-addressed message, received
+// only by its own run (messages.rs). Stored on the row, surfaced as `RunInput::Message`.
+str_enum!(DeliveryScope { Thread = "thread", ToWorker = "to_worker", ToParent = "to_parent" });
 str_enum!(Op { ReadDoc = "read_doc", WriteDoc = "write_doc", Post = "post", ReadChannel = "read_channel", SearchPosts = "search_posts", CreateChannel = "create_channel", ArchiveChannel = "archive_channel", RenameChannel = "rename_channel", WriteTask = "write_task", EnqueueRun = "enqueue_run", CancelRun = "cancel_run", RetryRun = "retry_run", WriteSchedule = "write_schedule", Admin = "admin" });
 
 /// Who acts. Stored as NULL (post author / channel creator) or the key `'owner'` (events, read
@@ -127,6 +135,9 @@ pub enum ChannelRef {
     Id { id: String },
     Direct { members: Vec<Actor> },
     Task { task_id: String },
+    /// A request's other live endpoint (messages.rs): the post lands in the request's thread and is
+    /// delivered to that one conversation only, never through the thread's read mark.
+    Request { request_id: String, to: RequestEndpoint },
 }
 
 /// A post's request lifecycle. Column `request` NULL is `None`; `Answered` names the answer post.
@@ -161,6 +172,12 @@ pub enum RunInput {
     Deliver {
         post_id: String,
     },
+    /// A request-addressed message (messages.rs) for exactly this run's conversation: the request's
+    /// worker or its parent. Stored as `deliver` + `delivery_scope`; shows only its own post.
+    Message {
+        post_id: String,
+        to: RequestEndpoint,
+    },
     /// A row of a kind folded away by the rebuild. Read-only: never enqueued, claimed or retried.
     Retired {
         input_kind: String,
@@ -177,21 +194,35 @@ impl RunInput {
     /// matched the first recipient's run and got no run of its own.
     /// Guard: `a_group_request_starts_one_run_per_recipient` (tests/core.rs).
     /// A delivery is one run per (post, recipient), so a retried post write wakes nobody twice.
-    pub fn columns(&self, buddy_id: &str) -> Result<(&str, &str, String)> {
+    /// A message is a `deliver` row (the schema's input_kind CHECK cannot be ALTERed) told apart by
+    /// `delivery_scope`, with its own key: one message run per (post, recipient).
+    pub fn columns(&self, buddy_id: &str) -> Result<(&str, &str, String, DeliveryScope)> {
         match self {
-            RunInput::Chat { turn_id } => Ok(("chat", turn_id, format!("chat:{turn_id}"))),
-            RunInput::Post { post_id } => Ok(("post", post_id, format!("post:{post_id}:{buddy_id}"))),
-            RunInput::Deliver { post_id } => Ok(("deliver", post_id, format!("deliver:{post_id}:{buddy_id}"))),
+            RunInput::Chat { turn_id } => Ok(("chat", turn_id, format!("chat:{turn_id}"), DeliveryScope::Thread)),
+            RunInput::Post { post_id } => Ok(("post", post_id, format!("post:{post_id}:{buddy_id}"), DeliveryScope::Thread)),
+            RunInput::Deliver { post_id } => Ok(("deliver", post_id, format!("deliver:{post_id}:{buddy_id}"), DeliveryScope::Thread)),
+            RunInput::Message { post_id, to } => Ok(("deliver", post_id, format!("message:{post_id}:{buddy_id}"), to.scope())),
             RunInput::Retired { input_kind, .. } => Err(CoreError::Invalid(format!("a {input_kind} run is history; it cannot be enqueued"))),
         }
     }
-    pub fn from_columns(kind: &str, id: String) -> Result<RunInput> {
-        match kind {
-            "chat" => Ok(RunInput::Chat { turn_id: id }),
-            "post" => Ok(RunInput::Post { post_id: id }),
-            "deliver" => Ok(RunInput::Deliver { post_id: id }),
-            retired if RETIRED_KINDS.contains(&retired) => Ok(RunInput::Retired { input_kind: retired.to_string(), input_id: id }),
-            other => Err(CoreError::Corrupt(format!("run input_kind {other:?}"))),
+    pub fn from_columns(kind: &str, id: String, scope: DeliveryScope) -> Result<RunInput> {
+        match (kind, scope) {
+            ("chat", DeliveryScope::Thread) => Ok(RunInput::Chat { turn_id: id }),
+            ("post", DeliveryScope::Thread) => Ok(RunInput::Post { post_id: id }),
+            ("deliver", DeliveryScope::Thread) => Ok(RunInput::Deliver { post_id: id }),
+            ("deliver", DeliveryScope::ToWorker) => Ok(RunInput::Message { post_id: id, to: RequestEndpoint::Worker }),
+            ("deliver", DeliveryScope::ToParent) => Ok(RunInput::Message { post_id: id, to: RequestEndpoint::Parent }),
+            (retired, DeliveryScope::Thread) if RETIRED_KINDS.contains(&retired) => Ok(RunInput::Retired { input_kind: retired.to_string(), input_id: id }),
+            (other, scope) => Err(CoreError::Corrupt(format!("run input_kind {other:?} with delivery_scope {scope:?}"))),
+        }
+    }
+}
+
+impl RequestEndpoint {
+    pub fn scope(self) -> DeliveryScope {
+        match self {
+            RequestEndpoint::Worker => DeliveryScope::ToWorker,
+            RequestEndpoint::Parent => DeliveryScope::ToParent,
         }
     }
 }
@@ -918,6 +949,16 @@ pub struct WorkspaceInput {
 pub struct ThreadUnread {
     pub posts: Vec<Post>,
     pub unshown: i64,
+}
+
+/// A request-addressed message still waiting for its conversation (messages.rs `pending`): the
+/// live turn's tool boundary shows it, then settles `run_id` (`acknowledge`).
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct AddressedMessage {
+    pub run_id: String,
+    pub to: RequestEndpoint,
+    pub post: Post,
 }
 
 /// What a claimed delivery shows (deliveries.rs `compose`).

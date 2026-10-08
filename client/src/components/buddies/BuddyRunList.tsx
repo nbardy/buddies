@@ -12,6 +12,7 @@ const RUN_INPUT_LABEL: { [K in RunInput['kind']]: string } = {
   chat: 'Chat turn',
   post: 'Answering a post',
   deliver: 'New posts in a thread',
+  message: 'A message on a request',
   retired: 'Earlier run',
 };
 

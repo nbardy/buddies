@@ -37,11 +37,23 @@ const COVERED: &str = "covered(root, mark) AS (
     UNION
     SELECT ?3, coalesce((SELECT t.last_ord FROM thread_read t WHERE t.reader = ?1 AND t.root_id = ?3), ''))";
 
+/// `p` is not a request-addressed message. Neither a thread delivery nor a thread read (steering
+/// catch-up, channel_read's unread page) shows one: it reaches its destination through its own
+/// run, and a shared thread mark must neither show it to the wrong conversation nor settle it.
+macro_rules! not_addressed {
+    () => {
+        "NOT EXISTS (SELECT 1 FROM run m WHERE m.input_kind = 'deliver' AND m.input_id = p.id AND m.delivery_scope <> 'thread')"
+    };
+}
+
 /// What a delivery shows from a covered thread: past the mark, and either by someone else or a
 /// post still being delivered to this Buddy (a note to self, which the Buddy itself authored).
-const SHOWABLE: &str = "p.ord > h.mark AND (p.author_id IS NOT ?1 OR EXISTS (
+/// A request-addressed message (messages.rs) is never shown by a thread delivery: it reaches only
+/// its destination conversation, through its own run (`not_addressed!`).
+const SHOWABLE: &str = concat!("p.ord > h.mark AND ", not_addressed!(), "
+    AND (p.author_id IS NOT ?1 OR EXISTS (
     SELECT 1 FROM run d WHERE d.input_kind = 'deliver' AND d.input_id = p.id AND d.buddy_id = ?1
-      AND d.status IN ('queued','running','cancel_requested')))";
+      AND d.delivery_scope = 'thread' AND d.status IN ('queued','running','cancel_requested')))");
 
 /// Moves `reader`'s mark in a thread forward to `ord` (never back), creating the row, then fences
 /// a Buddy's deliveries. The subscription column is left as it is.
@@ -68,7 +80,9 @@ pub(crate) fn advance(tx: &Transaction, reader: &Actor, root_id: &str, ord: &str
 /// queued until cancelled by hand at 06:56Z. Guards: `a_mark_advance_consumes_every_covered_delivery`
 /// (tests/core.rs), buddies-v2 "an answer the requester already read settles …".
 pub(crate) fn fence(tx: &Transaction, buddy_id: &str, root_id: &str, through: &str) -> Result<()> {
-    cancel_queued(tx, "consumed", Some("the reader already read it"), "input_kind = 'deliver' AND buddy_id = ?2
+    // `thread` only: a request-addressed message is received by its own conversation, never by a
+    // thread read (the parent and its self-worker share this one mark; messages.rs).
+    cancel_queued(tx, "consumed", Some("the reader already read it"), "input_kind = 'deliver' AND delivery_scope = 'thread' AND buddy_id = ?2
            AND input_id IN (SELECT p.id FROM post p WHERE p.root_id = ?3 AND p.ord <= ?4
                             UNION ALL SELECT p.id FROM post p WHERE p.id = ?3 AND p.ord <= ?4)",
         params![now_iso(), buddy_id, root_id, through],
@@ -318,8 +332,8 @@ pub(crate) fn take_unread(tx: &Transaction, buddy_id: &str, root_id: &str, limit
 
 /// The same page as `take_unread`, NOT marked read: no delivery is fenced.
 fn unread_page(tx: &Transaction, buddy_id: &str, root_id: &str, limit: i64) -> Result<ThreadUnread> {
-    let unread = "(p.root_id = ?2 OR p.id = ?2) AND p.author_id IS NOT ?1
-        AND p.ord > coalesce((SELECT t.last_ord FROM thread_read t WHERE t.reader = ?1 AND t.root_id = ?2), '')";
+    let unread = concat!("(p.root_id = ?2 OR p.id = ?2) AND p.author_id IS NOT ?1 AND ", not_addressed!(), "
+        AND p.ord > coalesce((SELECT t.last_ord FROM thread_read t WHERE t.reader = ?1 AND t.root_id = ?2), '')");
     let mut posts = collect(
         tx.prepare_cached(&format!("SELECT {POST_COLS} FROM post p WHERE {unread} ORDER BY p.ord DESC LIMIT ?3"))?
             .query_map(params![buddy_id, root_id, limit], post_row)?,
@@ -389,6 +403,7 @@ impl Store {
             let run = crate::runs::get_run(tx, run_id)?;
             match &run.input {
                 RunInput::Deliver { post_id } => compose(tx, &run, &crate::posts::get_post(tx, post_id)?),
+                RunInput::Message { post_id, .. } => crate::messages::compose(tx, post_id),
                 other => Err(CoreError::Invalid(format!("run {run_id} is not a delivery: {other:?}"))),
             }
         })
@@ -403,7 +418,7 @@ impl Store {
                     &format!("SELECT r.buddy_id, coalesce(p.root_id, p.id), coalesce(r.started_at, r.created_at), r.status <> 'queued',
                      CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END
                      {RUN_WITH_ACTIVITY_SQL} JOIN post p ON p.id = r.input_id
-                     WHERE r.input_kind = 'deliver' AND r.status IN ('queued','running','cancel_requested') AND p.channel_id = ?2
+                     WHERE r.input_kind = 'deliver' AND r.delivery_scope = 'thread' AND r.status IN ('queued','running','cancel_requested') AND p.channel_id = ?2
                      ORDER BY r.created_at"),
                 )?
                 .query_map(params![now_iso(), channel_id], |r| {
@@ -424,7 +439,7 @@ impl Store {
             let post = crate::posts::get_post(tx, post_id)?;
             let latest = |tx: &Transaction| -> Result<Option<Run>> {
                 Ok(tx
-                    .prepare_cached(&format!("SELECT {RUN_COLS} FROM run WHERE input_kind = 'deliver' AND input_id = ?1 AND buddy_id = ?2 ORDER BY attempt DESC LIMIT 1"))?
+                    .prepare_cached(&format!("SELECT {RUN_COLS} FROM run WHERE input_kind = 'deliver' AND delivery_scope = 'thread' AND input_id = ?1 AND buddy_id = ?2 ORDER BY attempt DESC LIMIT 1"))?
                     .query_row(params![post_id, buddy_id], run_row)
                     .optional()?)
             };

@@ -236,6 +236,20 @@ request's failure is a `run_failed` post (`runs.rs` `close_request`), delivered 
 self-spawned worker writes in its spawner's thread without taking the subscription
 (`from_own_worker`). Public and task threads subscribe only by `follow` until step 5 moves mentions
 and seats onto delivery.
+**Request-addressed messages (2026-10-08, task_01a11a97):** a self-worker shares its spawner's Buddy
+id and thread mark, so a plain inform in the request thread reached neither live conversation.
+`post {channel:{request, to:'worker'|'parent'}}` writes one post in the request's thread plus ONE
+`deliver` run with `delivery_scope` `to_worker | to_parent` for exactly that endpoint's conversation
+(crate `messages.rs`, surfaced as `RunInput::Message`). Endpoints are derived at every send: worker =
+the latest attempt of the request's `post` run; parent = the author's subscription (the route
+`answers` takes). The sender must write from the OTHER endpoint's conversation, and the request must
+be awaiting; closing it fences queued `to_worker` messages. The thread fence, thread composes and
+unread pages never see these (`not_addressed!`). A live destination is shown them at the same
+boundaries as owner steering (`mcp.ts addressedMessages`), settled `consumed` only after the response
+carrying them was written (the relay passes a caller's disconnect upstream); an idle one runs them as a
+turn (`runner messageJob`). Decision/evidence: `agent_notes/2026-10-08_request-addressed-messages.md`.
+Guards: crate `a_request_message_reaches_only_its_other_endpoint_and_never_revives_closed_work`;
+buddies-v2 "owner correction → parent → live worker …", "request messages: siblings, …".
 **Read fence:** whatever moves a Buddy's mark in a thread (a thread read, a follow, a delivery at
 `mark_executing`, its own post) settles every queued delivery it covers `consumed`, with no turn
 (`deliveries.rs` `fence`). Posting never moves the author's mark past a post it was not shown

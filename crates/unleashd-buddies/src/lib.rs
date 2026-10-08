@@ -5,6 +5,7 @@ pub mod docs;
 pub mod deliveries;
 pub mod error;
 pub mod ids;
+pub mod messages;
 pub mod migrate;
 #[cfg(feature = "node")]
 pub mod node;

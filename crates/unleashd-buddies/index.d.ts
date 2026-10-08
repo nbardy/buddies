@@ -45,6 +45,10 @@ export declare class BuddiesCore {
   catchUpThread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
   /** The thread's unread posts for this Buddy, NOT marked read (a native sub-agent's view). */
   peekThreadUnread(actor: Actor, rootId: string, limit: number): Promise<ThreadUnread>
+  /** Request-addressed messages waiting for this conversation's live turn (messages.rs). */
+  pendingMessages(conversationId: string): Promise<Array<AddressedMessage>>
+  /** Settles the receipts of messages a live turn was shown (messages.rs `acknowledge`). */
+  acknowledgeMessages(conversationId: string, runIds: Array<string>): Promise<number>
   /** What a claimed delivery shows (deliveries.rs `compose`). */
   deliverPosts(runId: string): Promise<Delivery>
   /** The Buddies replying in a channel: its queued and running deliveries. */
@@ -88,6 +92,16 @@ export declare class BuddiesCore {
 export type Actor =
   | { kind: 'owner' }
   | { kind: 'buddy'; id: string }
+
+/**
+ * A request-addressed message still waiting for its conversation (messages.rs `pending`): the
+ * live turn's tool boundary shows it, then settles `run_id` (`acknowledge`).
+ */
+export interface AddressedMessage {
+  runId: string
+  to: RequestEndpoint
+  post: Post
+}
 
 export type Admission = 'owner' | 'capped'
 
@@ -175,6 +189,7 @@ export type ChannelRef =
   | { kind: 'id'; id: string }
   | { kind: 'direct'; members: Array<Actor> }
   | { kind: 'task'; taskId: string }
+  | { kind: 'request'; requestId: string; to: RequestEndpoint }
 
 export interface ChannelUnread {
   channel: Channel
@@ -226,6 +241,8 @@ export type Decision =
 export type Delivery =
   | { kind: 'posts'; posts: Array<Post>; unshown: number; subscribed?: string }
   | { kind: 'consumed' }
+
+export type DeliveryScope = 'thread' | 'to_worker' | 'to_parent'
 
 export interface Doc {
   id: string
@@ -423,6 +440,8 @@ export interface PostWrite {
   created: boolean
 }
 
+export type RequestEndpoint = 'worker' | 'parent'
+
 /** A post's request lifecycle. Column `request` NULL is `None`; `Answered` names the answer post. */
 export type RequestState =
   | { state: 'none' }
@@ -530,6 +549,7 @@ export type RunInput =
   | { kind: 'chat'; turnId: string }
   | { kind: 'post'; postId: string }
   | { kind: 'deliver'; postId: string }
+  | { kind: 'message'; postId: string; to: RequestEndpoint }
   | { kind: 'retired'; inputKind: string; inputId: string }
 
 export type RunQuery =

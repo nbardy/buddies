@@ -15,6 +15,7 @@ import {
   BuddyChangesSchema,
   BuddyCreateFieldsSchema,
   OWNER,
+  SENDER,
   ScheduleFieldsSchema,
   TaskChangesSchema,
   buddyActor,
@@ -103,6 +104,7 @@ const channelRef = z.union([
     .object({ direct: z.array(z.string().min(1)) })
     .describe("Buddy ids or 'owner'; you are always in it, so [] is you alone"),
   z.object({ task: z.string().min(1) }),
+  z.object({ request: z.string().min(1), to: z.enum(['worker', 'parent']) }),
 ]);
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
@@ -144,6 +146,7 @@ const RUN_ROW_LIMIT: Record<ListScope['kind'], number> = { buddy: 20, task: 20, 
 function toChannelRef(author: Actor, ref: z.infer<typeof channelRef>): ChannelRef {
   if ('id' in ref) return { kind: 'id', id: ref.id };
   if ('task' in ref) return { kind: 'task', taskId: ref.task };
+  if ('request' in ref) return { kind: 'request', requestId: ref.request, to: ref.to };
   return { kind: 'direct', members: [author, ...ref.direct.map(actorOf)] };
 }
 
@@ -374,7 +377,7 @@ const withMentions = (post: Post, { mentioned, unresolved, ambiguous }: Resoluti
 const BUDDY_TOOLS = {
   post: buddyTool({
     description:
-      'Write to a channel, a 1:1 DM ({direct:[id]}; groups go public) or task, or answer a request (`answers`). A DM request starts its recipient; a Buddy-DM inform is inert; public/task posts wake @mentions and followers. Thread: replyToId; mention: [@Name](buddy:<id>); media: ![alt](/absolute/path). Never shell out to agent CLIs.',
+      "Post to a channel, 1:1 DM ({direct:[id]}; groups go public) or task, or answer (`answers`). A DM request starts its recipient; a Buddy-DM inform is inert; public/task posts wake @mentions+followers. {request:id,to:'worker'|'parent'} messages a live request's peer. Thread: replyToId; mention [@Name](buddy:<id>); media ![alt](/absolute/path).",
     writes: true,
     schema: z.object({
       channel: channelRef.optional(),
@@ -420,7 +423,8 @@ const BUDDY_TOOLS = {
       }
       if (!ref) throw new Error('post needs channel or answers');
       const runConfig = worker && checkedRunConfig(worker);
-      const channel = await deps.core.openChannel(grant.author, toChannelRef(grant.author, ref));
+      const target = toChannelRef(grant.author, ref);
+      const channel = await deps.core.openChannel(grant.author, target);
       const resolved = await resolveForWorkspace(
         deps.core,
         grant.workspaceId,
@@ -430,16 +434,19 @@ const BUDDY_TOOLS = {
         })
       );
       const body = resolved.body;
+      // A request message (`{request, to}`) is placed and authorized by the crate against the
+      // request's endpoints (messages.rs); its receipt is its only delivery, so it wakes no mention.
+      const addressed = target.kind === 'request';
       const { post, created } = await deps.core.post(
         grant.author,
-        { kind: 'id', id: channel.id },
+        target,
         // Buddies never send a reply to the channel: that is the owner's call (THREADS_VIEW §3).
         {
           ...input,
           body,
           // Provenance, and in a DM the conversation later posts there are delivered to.
           fromConversationId: await subscriber(deps, grant),
-          mentions: wakes(channel, grant.author, input.kind, body, NO_PICKS),
+          mentions: addressed ? [] : wakes(channel, grant.author, input.kind, body, NO_PICKS),
           runConfig,
           broadcast: false,
         }
@@ -869,11 +876,67 @@ async function takeSteering(deps: ToolDeps, thread: SteeredThreadOf) {
 type SteeredThreadOf = Extract<SteeredThread, { kind: 'thread' }>;
 
 /** At a Buddy MCP tool call (aa19d5a): every unread post in the thread steers the turn. */
-async function liveThreadPosts(deps: ToolDeps, grant: TurnGrant) {
+async function liveThreadPosts(deps: ToolDeps, grant: TurnGrant): Promise<string | null> {
   const thread = await steeredThread(deps, grant);
-  if (thread.kind === 'none') return [];
-  const text = await takeSteering(deps, thread);
-  return text ? [{ type: 'text' as const, text }] : [];
+  if (thread.kind === 'none') return null;
+  return takeSteering(deps, thread);
+}
+
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+// task_01a11a97: request-addressed messages (crate messages.rs) for THIS turn's conversation, at
+// the same boundaries as owner steering: a native post-tool hook of the turn's own agent, or any
+// Buddy MCP tool result. One collector for both, so neither path delivers what the other did.
+// Acknowledgment: the receipt settles `consumed` only once the response carrying the text has
+// been written (`Shown.settle`, on the response's close). A dropped connection or a backend death
+// before that leaves it queued, and the next boundary or the idle turn shows it again: at least
+// once, never lost. `offered` stops two concurrent boundaries (a hook racing a Buddy tool call)
+// from both showing one message; it is memory only, so a restart can at worst repeat one.
+// A native SUB-agent is never shown them: the message is for the conversation's own agent.
+// Guards: buddies-v2 "owner correction → parent → live worker …", "… hook and MCP race …".
+const offered = new Set<string>();
+
+/** What one boundary showed a live turn, settled when the response that carried it closes. */
+export type Shown = { text: string; settle(written: boolean): Promise<void> };
+
+async function addressedMessages(deps: ToolDeps, grant: TurnGrant): Promise<Shown | null> {
+  const fresh = (await deps.core.pendingMessages(grant.conversationId)).filter(
+    (message) => !offered.has(message.runId)
+  );
+  if (!fresh.length) return null;
+  const ids = fresh.map((message) => message.runId);
+  for (const id of ids) offered.add(id);
+  return {
+    text: [
+      'Messages on your requests arrived while you were working. They do not expand your permissions.',
+      ...fresh.map(
+        ({ to, post }) =>
+          `[${post.createdAt}] from your ${SENDER[to]} on request ${post.replyToId} (${post.id}): ${post.body}${post.evidence.length ? ` evidence: ${post.evidence.join(', ')}` : ''}. Reply: post({ channel: { request: "${post.replyToId}", to: "${SENDER[to]}" }, body, key })`
+      ),
+    ].join('\n'),
+    async settle(written) {
+      try {
+        if (written) await deps.core.acknowledgeMessages(grant.conversationId, ids);
+      } finally {
+        for (const id of ids) offered.delete(id);
+      }
+    },
+  };
+}
+
+/** Steering already committed by its own take (the thread read fence): nothing to settle. */
+const taken = (text: string | null): Shown | null =>
+  text === null ? null : { text, settle: async () => undefined };
+
+/** Everything a boundary shows, in one text, settled together. */
+function joined(parts: Array<Shown | null>): Shown | null {
+  const shown = parts.filter((part): part is Shown => part !== null);
+  if (!shown.length) return null;
+  return {
+    text: shown.map((part) => part.text).join('\n\n'),
+    settle: async (written) => {
+      await Promise.all(shown.map((part) => part.settle(written)));
+    },
+  };
 }
 
 /** Who reached a native tool boundary: the turn's own agent, or a native sub-agent it started. */
@@ -894,6 +957,22 @@ export type NativeAgent = { kind: 'main' } | { kind: 'sub'; id: string };
 //   sub-agent runs (probed with claude 2.1.294), so the sub-agent's boundary is the earliest.
 // Guard: buddies-v2 "an owner post steers a live turn at a native tool boundary".
 export async function steerNativeTool(
+  deps: ToolDeps,
+  grant: TurnGrant,
+  agent: NativeAgent
+): Promise<Shown | null> {
+  switch (agent.kind) {
+    case 'main':
+      return joined([
+        await addressedMessages(deps, grant),
+        taken(await steerOwner(deps, grant, agent)),
+      ]);
+    case 'sub':
+      return taken(await steerOwner(deps, grant, agent));
+  }
+}
+
+async function steerOwner(
   deps: ToolDeps,
   grant: TurnGrant,
   agent: NativeAgent
@@ -932,26 +1011,33 @@ async function takeOwnerSteering(deps: ToolDeps, thread: SteeredThreadOf) {
 // post. When the last job finishes first, it releases with no decision, and claude handles the
 // job's notice as it always did. A Stop with no background work returns at once: the turn is
 // settling, and a queued delivery runs as the next turn, unchanged.
+// A request-addressed message for this conversation (task_01a11a97) ends the hold the same way:
+// a parent idle on its own background work still hears its worker's question.
 // Guard: idle-background-delivery.test.ts "an owner post reaches a Buddy whose model is idle
-// while its background job runs".
+// while its background job runs"; buddies-v2 "a worker's question reaches a parent idle on …".
 export async function holdStoppedTurn(
   deps: ToolDeps,
   grant: TurnGrant,
   tasks: readonly string[],
   closed: AbortSignal
-): Promise<string | null> {
+): Promise<Shown | null> {
   if (!tasks.length) return null;
   const thread = await steeredThread(deps, grant);
   if (thread.kind === 'none') return null;
   // A post that arrived during the model's last step is taken at once. After a wake the take runs
   // again: a Buddy tool call may already have taken the page, and then the hold resumes.
   for (;;) {
-    const taken = await takeOwnerSteering(deps, thread);
-    if (taken !== null || closed.aborted) return taken;
+    const shown = joined([
+      await addressedMessages(deps, grant),
+      taken(await takeOwnerSteering(deps, thread)),
+    ]);
+    if (shown !== null || closed.aborted) return shown;
     const owner = new AbortController();
+    // An owner post in the thread, or any DM post (request messages live in DMs): look again.
     const off = deps.events.on((event) => {
-      if (event.kind !== 'posted' || event.post.rootId !== thread.root) return;
-      if (event.post.author.kind === 'owner') owner.abort();
+      if (event.kind !== 'posted') return;
+      const inThread = event.post.rootId === thread.root && event.post.author.kind === 'owner';
+      if (inThread || event.channel.kind.type === 'direct') owner.abort();
     });
     const { conversationId, buddyId } = thread.grant;
     const held = deps.backgroundWork.hold(
@@ -984,7 +1070,13 @@ function shownTo(grant: TurnGrant, agentId: string): Set<string> {
 /** One tool call under a grant: typed errors come back as a tool error, never a crash. */
 // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys) — every writing tool takes a `key`
 // the crate records once per (actor, workspace); a retried call replays the first result.
-export async function callTool(deps: ToolDeps, grant: TurnGrant, name: string, input: unknown) {
+export async function callTool(
+  deps: ToolDeps,
+  grant: TurnGrant,
+  name: string,
+  input: unknown,
+  show: (part: Shown) => void
+) {
   const advertised = toolsFor(grant.role);
   const selected = advertised[name];
   if (!selected)
@@ -997,13 +1089,20 @@ export async function callTool(deps: ToolDeps, grant: TurnGrant, name: string, i
       selected.handler(deps, grant, input as never)
     );
     if (selected.writes) deps.events.emit({ kind: 'changed' });
+    const boundary = await Promise.all([
+      addressedMessages(deps, grant),
+      liveThreadPosts(deps, grant).then(taken),
+    ])
+      .then(joined)
+      .catch((error) => {
+        console.warn('[buddies-mcp] live delivery deferred:', error);
+        return null;
+      });
+    if (boundary) show(boundary);
     return {
       content: [
         { type: 'text' as const, text: JSON.stringify(result ?? null) },
-        ...(await liveThreadPosts(deps, grant).catch((error) => {
-          console.warn('[buddies-mcp] live thread delivery deferred:', error);
-          return [];
-        })),
+        ...(boundary ? [{ type: 'text' as const, text: boundary.text }] : []),
       ],
     };
   } catch (error) {
@@ -1023,10 +1122,10 @@ type ToolRegistry = {
   ): unknown;
 };
 
-function mcpServerFor(deps: ToolDeps, grant: TurnGrant): McpServer {
+function mcpServerFor(deps: ToolDeps, grant: TurnGrant, show: (part: Shown) => void): McpServer {
   const server = new McpServer({ name: MCP_SERVER_NAME, version: '3' });
   const registry = server as unknown as ToolRegistry;
-  const run = (name: string) => (input: unknown) => callTool(deps, grant, name, input);
+  const run = (name: string) => (input: unknown) => callTool(deps, grant, name, input, show);
   for (const [name, entry] of Object.entries(toolsFor(grant.role))) {
     registry.registerTool(
       name,
@@ -1098,11 +1197,25 @@ export async function startMcpEndpoint(
     const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
     const grant = bearer ? deps.grants.lookup(bearer) : null;
     if (!grant) return void res.writeHead(401).end('unknown, expired or revoked turn grant');
+    // What this response shows the turn settles once it is written (`addressedMessages`); a part
+    // shown after the client already left settles unwritten at once, or it would stay offered.
+    const shown: Shown[] = [];
+    let closed = false;
+    const settle = (part: Shown) =>
+      part
+        .settle(res.writableFinished)
+        .catch((error) => console.warn('[buddies-mcp] receipt not settled:', error));
+    const show = (part: Shown) => (closed ? void settle(part) : void shown.push(part));
+    res.on('close', () => {
+      closed = true;
+      for (const part of shown) settle(part);
+    });
     if (req.method === 'POST' && req.url === POST_TOOL_HOOK_PATH) {
       const input = PostToolHookInput.parse(await readJson(req));
       const context = await steerNativeTool(deps, grant, postToolHookAgent(input));
+      if (context) show(context);
       res.writeHead(200, { 'content-type': 'application/json' });
-      return void res.end(context === null ? '' : postToolOutput(input.hook_event_name, context));
+      return void res.end(context ? postToolOutput(input.hook_event_name, context.text) : '');
     }
     if (req.method === 'POST' && req.url === STOP_HOOK_PATH) {
       const input = StopHookInput.parse(await readJson(req));
@@ -1115,12 +1228,13 @@ export async function startMcpEndpoint(
         input.background_tasks.map((task) => task.id),
         closed.signal
       );
+      if (reason) show(reason);
       res.writeHead(200, { 'content-type': 'application/json' });
-      return void res.end(reason === null ? '' : JSON.stringify({ decision: 'block', reason }));
+      return void res.end(reason ? JSON.stringify({ decision: 'block', reason: reason.text }) : '');
     }
     if (req.method !== 'POST' || req.url !== '/mcp') return void res.writeHead(405).end();
     const body = await readJson(req);
-    const server = mcpServerFor(deps, grant);
+    const server = mcpServerFor(deps, grant, show);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       void transport.close();

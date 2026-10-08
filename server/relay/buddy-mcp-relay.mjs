@@ -103,6 +103,12 @@ function forward(port, req, body, res) {
       }
     );
     upstream.on('error', () => resolve('failed'));
+    // A caller that leaves before its response is written takes the backend's request down with
+    // it, so the backend sees its reply undelivered: a request-addressed message it was about to
+    // show stays queued instead of being acknowledged to nobody (mcp.ts `Shown`, task_01a11a97).
+    res.on('close', () => {
+      if (!res.writableFinished) upstream.destroy();
+    });
     upstream.end(body);
   });
 }

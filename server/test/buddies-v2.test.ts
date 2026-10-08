@@ -9,6 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -5678,3 +5679,445 @@ for (const provider of ['codex', 'claude'] as const) {
     );
   }
 }
+
+// ---- Request-addressed messages (task_01a11a97, owner 2026-10-08 07:40Z/08:37Z) -----------------
+// A self-spawned worker shares its parent's Buddy id and thread read mark, so a plain DM inform
+// could address neither live conversation (agent_notes/2026-10-08_live-delivery-review/README.md,
+// reproduction 2). `post {channel:{request, to}}` addresses the request's other ENDPOINT instead.
+
+type Held = { wait: Promise<void>; release(): void };
+function held(): Held {
+  let release!: () => void;
+  const wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { wait, release };
+}
+
+/** A native post-tool hook call from `turn` (agent_id set: a native sub-agent made the call). */
+function nativeHook(w: World, turn: Turn) {
+  return async (agent_id?: string): Promise<string> => {
+    if (turn.mcp.kind !== 'http') throw new Error('expected HTTP');
+    const response = await fetch(w.endpoint.postToolHookUrl, {
+      method: 'POST',
+      headers: { ...turn.mcp.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ hook_event_name: 'PostToolUse', ...(agent_id ? { agent_id } : {}) }),
+    });
+    assert.equal(response.status, 200);
+    const text = await response.text();
+    return text && JSON.parse(text).hookSpecificOutput.additionalContext;
+  };
+}
+
+/** A Lead seat turn (turn 1) answering the owner, which spawns one self-worker (turn 2); both held. */
+async function parentAndWorker(w: World, workers = 1) {
+  const parentHeld = held();
+  const workerHeld = held();
+  const requests: string[] = [];
+  w.during.set(1, async (turn) => {
+    for (let i = 0; i < workers; i++) {
+      const ask = await call(turn.mcp, 'post', {
+        channel: { direct: [] },
+        kind: 'request',
+        body: `Worker ${i}: build the board files; keep running`,
+        worker: { provider: 'codex' },
+        key: `spawn-${i}`,
+      });
+      assert.equal(ask.isError, false, ask.text);
+      requests.push(ask.value.id);
+    }
+    await parentHeld.wait;
+  });
+  // A worker holds until released, or until its process is told to stop (`runs cancel`).
+  const stopOrRelease = (n: number) =>
+    new Promise<void>((resolve) => {
+      const poll = setInterval(() => w.stopped.has(n) && done(), 20);
+      const done = () => {
+        clearInterval(poll);
+        resolve();
+      };
+      void workerHeld.wait.then(done);
+    });
+  for (let n = 2; n <= workers + 1; n++) w.during.set(n, (turn) => stopOrRelease(turn.n));
+  const root = await w.post(
+    OWNER,
+    { kind: 'id', id: w.general.id },
+    {
+      kind: 'inform',
+      body: `[@Lead](buddy:${w.lead.id}) build the board, 2×2×2`,
+      evidence: [],
+      mentions: [],
+      broadcast: false,
+      key: 'parent-root',
+    }
+  );
+  w.announce(root);
+  await until(
+    () => requests.length === workers && w.turns.length === workers + 1,
+    'parent and workers running'
+  );
+  const runOf = async (requestId: string) =>
+    (await w.runs(w.lead.id)).find((r) => r.input.kind === 'post' && r.input.postId === requestId)!;
+  const workerTurn = (requestId: string) =>
+    w.turns.find((t) => t.request.prompt.includes(`Request ${requestId}`))!;
+  return {
+    root,
+    requests,
+    parent: w.turns[0],
+    workerTurn,
+    runOf,
+    async release() {
+      workerHeld.release();
+      parentHeld.release();
+      await until(
+        async () =>
+          (await w.runs(w.lead.id)).every((r) => r.status !== 'running' && r.status !== 'queued'),
+        'all fake turns drained'
+      );
+    },
+    releaseNow() {
+      workerHeld.release();
+      parentHeld.release();
+    },
+  };
+}
+
+const messageRuns = async (w: World, postId: string) =>
+  (await w.runs(w.lead.id)).filter((r) => r.input.kind === 'message' && r.input.postId === postId);
+
+test('owner correction → parent → live worker → question → parent → answer → final answers', async () => {
+  const w = await world();
+  const live = await parentAndWorker(w);
+  try {
+    const [requestId] = live.requests;
+    const worker = live.workerTurn(requestId);
+    const parentHook = nativeHook(w, live.parent);
+    const workerHook = nativeHook(w, worker);
+    const parentConversation = (await w.runs(w.lead.id)).find(
+      (r) => r.input.kind === 'deliver' && r.input.postId === live.root.id
+    )!.conversationId;
+    const workerConversation = (await live.runOf(requestId)).conversationId;
+    assert.ok(workerConversation && workerConversation !== parentConversation);
+
+    // 1. The owner corrects the parent; it lands at the parent's next native tool boundary.
+    const correction = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) Correction: 3×3×3, keep the worker running`,
+        replyToId: live.root.id,
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        key: 'correction',
+      }
+    );
+    w.announce(correction);
+    assert.ok((await parentHook()).includes(correction.body));
+
+    // 2. The parent directs its still-running worker.
+    const direction = await call(live.parent.mcp, 'post', {
+      channel: { request: requestId, to: 'worker' },
+      body: 'Revised direction: 3×3×3; continue the useful work',
+      key: 'direction',
+    });
+    assert.equal(direction.isError, false, direction.text);
+    assert.equal(await parentHook(), '', 'the sender is not delivered its own message');
+    // A native sub-agent of the worker is not the Buddy worker: it is never shown the message.
+    assert.equal(await workerHook('native-child'), '');
+    const seen = await workerHook();
+    assert.ok(seen.includes('Revised direction: 3×3×3'), seen);
+    assert.ok(seen.includes(requestId), 'the message names its request');
+    assert.equal(await workerHook(), '', 'shown once');
+
+    // 3. The worker asks the parent, and keeps working.
+    const question = await call(worker.mcp, 'post', {
+      channel: { request: requestId, to: 'parent' },
+      body: 'Question: should the three versions share one rubric?',
+      key: 'question',
+    });
+    assert.equal(question.isError, false, question.text);
+    assert.equal(await workerHook(), '');
+    assert.ok((await parentHook()).includes('share one rubric'));
+
+    // 4. The parent answers; the worker sees it at a Buddy MCP tool boundary (the fallback).
+    const reply = await call(live.parent.mcp, 'post', {
+      channel: { request: requestId, to: 'worker' },
+      body: 'Yes: one rubric for all three',
+      key: 'reply',
+    });
+    assert.equal(reply.isError, false, reply.text);
+    const tool = await call(worker.mcp, 'doc_read', { kind: 'working' });
+    assert.equal(tool.isError, false, tool.text);
+    assert.ok(tool.content.some((c) => c.text?.includes('one rubric for all three')));
+    assert.equal(
+      await workerHook(),
+      '',
+      'the MCP boundary consumed it; the hook does not repeat it'
+    );
+
+    // One durable receipt per message, in its destination conversation, consumed by the turn.
+    for (const [post, conversation] of [
+      [direction.value, workerConversation],
+      [question.value, parentConversation],
+      [reply.value, workerConversation],
+    ] as const) {
+      const runs = await messageRuns(w, post.id);
+      assert.equal(runs.length, 1, `one receipt for ${post.body}`);
+      assert.deepEqual(
+        [runs[0].conversationId, runs[0].status, runs[0].errorCode],
+        [conversation, 'cancelled', 'consumed']
+      );
+    }
+    assert.equal(w.turns.length, 2, 'no extra live writer');
+    assert.equal(w.stopped.size, 0, 'nobody was stopped');
+    assert.equal((await w.core.getPost(OWNER, requestId)).request.state, 'awaiting');
+
+    // 5. The final answer still closes the request and returns to the spawner.
+    const final = await call(worker.mcp, 'post', {
+      answers: requestId,
+      body: 'Done: 3×3×3 with one rubric',
+      key: 'final',
+    });
+    assert.equal(final.isError, false, final.text);
+    assert.equal((await w.core.getPost(OWNER, requestId)).request.state, 'answered');
+    const late = await call(live.parent.mcp, 'post', {
+      channel: { request: requestId, to: 'worker' },
+      body: 'one more thing',
+      key: 'late',
+    });
+    assert.equal(late.isError, true, 'an answered request has no live worker to address');
+    assert.match(late.text, /not awaiting/);
+    await live.release();
+  } finally {
+    live.releaseNow();
+    await w.close();
+  }
+});
+
+test('request messages: siblings, shared reads, hook/MCP race, a dropped hook, denied senders, cancel', async () => {
+  const w = await world();
+  const live = await parentAndWorker(w, 2);
+  try {
+    const [a, b] = live.requests;
+    const [workerA, workerB] = [live.workerTurn(a), live.workerTurn(b)];
+    const send = (turn: Turn, request: string, to: 'worker' | 'parent', body: string) =>
+      call(turn.mcp, 'post', { channel: { request, to }, body, key: `${request}-${to}-${body}` });
+
+    // Same Buddy, two workers: a message reaches only its request's worker, and a sibling cannot
+    // speak for another request.
+    assert.equal((await send(live.parent, a, 'worker', 'for A only')).isError, false);
+    assert.equal(await nativeHook(w, workerB)(), '', 'the sibling sees nothing');
+    const posing = await send(workerB, a, 'parent', 'I am A');
+    assert.equal(posing.isError, true, posing.text);
+    assert.match(posing.text, /only the worker conversation/);
+
+    // The parent reading the shared thread does not consume the worker's message.
+    const read = await call(live.parent.mcp, 'channel_read', { read: { threadId: a } });
+    assert.equal(read.isError, false, read.text);
+    // Hook and Buddy-tool boundaries race: exactly one shows it.
+    const [hooked, tool] = await Promise.all([
+      nativeHook(w, workerA)(),
+      call(workerA.mcp, 'doc_read', { kind: 'working' }),
+    ]);
+    const shownBy = [
+      hooked.includes('for A only'),
+      tool.content.some((c) => c.text.includes('for A only')),
+    ];
+    assert.equal(shownBy.filter(Boolean).length, 1, `shown once: ${JSON.stringify(shownBy)}`);
+    await until(async () => {
+      const [run] = (await w.runs(w.lead.id)).filter((r) => r.input.kind === 'message');
+      return run?.errorCode === 'consumed';
+    }, 'the receipt settles');
+
+    // A hook whose client is gone before the response is written leaves the message queued; the
+    // next boundary shows it (at least once, never lost).
+    assert.equal((await send(live.parent, a, 'worker', 'survives a dropped hook')).isError, false);
+    if (workerA.mcp.kind !== 'http') throw new Error('expected HTTP');
+    const url = new URL(w.endpoint.postToolHookUrl);
+    await new Promise<void>((resolve) => {
+      const dropped = httpRequest(
+        {
+          host: url.hostname,
+          port: url.port,
+          path: url.pathname,
+          method: 'POST',
+          headers: workerA.mcp.kind === 'http' ? workerA.mcp.headers : {},
+        },
+        () => resolve()
+      );
+      dropped.on('error', () => resolve());
+      dropped.end(JSON.stringify({ hook_event_name: 'PostToolUse' }), () => {
+        dropped.destroy();
+        resolve();
+      });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.ok((await nativeHook(w, workerA)()).includes('survives a dropped hook'));
+
+    // Denied senders: another Buddy of the workspace, and a Buddy of another workspace.
+    const parentConversation = (await w.runs(w.lead.id)).find(
+      (r) => r.input.kind === 'deliver' && r.input.postId === live.root.id
+    )!.conversationId!;
+    const elsewhere = await w.core.createWorkspace(OWNER, { name: 'Other', rootPath: w.scratch });
+    const stranger = await w.core.createBuddy(OWNER, {
+      workspaceId: elsewhere.id,
+      slug: 'stranger',
+      name: 'Stranger',
+      role: 'r',
+      manager: { kind: 'nobody' },
+      provider: 'codex',
+      key: 'stranger',
+    });
+    for (const outsider of [w.designer.id, stranger.id]) {
+      await assert.rejects(
+        w.core.post(
+          buddyActor(outsider),
+          { kind: 'request', requestId: a, to: 'worker' },
+          {
+            kind: 'inform',
+            body: 'not yours',
+            evidence: [],
+            mentions: [],
+            broadcast: false,
+            fromConversationId: parentConversation,
+            key: `outsider-${outsider}`,
+          }
+        ),
+        /denied|not a member|outside/i
+      );
+    }
+
+    // Cancelling a worker fences its queued messages; nothing revives it.
+    const forB = await send(live.parent, b, 'worker', 'queued for B');
+    assert.equal(forB.isError, false, forB.text);
+    const runB = await live.runOf(b);
+    const cancelled = await call(live.parent.mcp, 'runs', {
+      action: { kind: 'cancel', runId: runB.id },
+    });
+    assert.equal(cancelled.isError, false, cancelled.text);
+    await until(async () => (await live.runOf(b)).status === 'cancelled', 'worker B cancelled');
+    const [receipt] = await messageRuns(w, forB.value.id);
+    assert.deepEqual([receipt.status, receipt.errorCode], ['cancelled', 'request_closed']);
+    assert.equal((await send(live.parent, b, 'worker', 'too late')).isError, true);
+    assert.equal(
+      w.turns.filter((t) => t.request.prompt.includes('queued for B')).length,
+      0,
+      'no turn was started for the cancelled worker'
+    );
+    await live.release();
+  } finally {
+    live.releaseNow();
+    await w.close();
+  }
+});
+
+// Opt-in paid CLI evidence (task_01a11a97 criterion 3): a REAL Buddy worker, busy in a native
+// shell tool, receives its parent's request-addressed message at the next completed tool call.
+// The parent here is the crate-level endpoint (its own conversation id); the worker is the real
+// CLI turn. Temp stores and cwd only.
+test(
+  'real CLI codex: a parent message reaches a busy Buddy worker after its native shell tool',
+  { skip: process.env.UNLEASHD_REAL_STEERING !== '1', timeout: 240_000 },
+  async () => {
+    const w = await world(undefined, true);
+    const marker = join(w.scratch, 'tool-started');
+    const release = join(w.scratch, 'tool-release');
+    const result = join(w.scratch, 'worker-result');
+    try {
+      const spawn = await w.core.post(
+        buddyActor(w.lead.id),
+        { kind: 'direct', members: [buddyActor(w.lead.id)] },
+        {
+          kind: 'request',
+          body: `First use a shell tool to run: touch ${marker}; while [ ! -f ${release} ]; do sleep 0.2; done; echo ready. Then, in a SECOND shell tool call, write the board dimensions from the newest message your parent sent you to ${result}. Default dimensions are 2×2×2. Then answer the request.`,
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          fromConversationId: 'real-parent',
+          runConfig: { provider: 'codex', model: 'gpt-5.6-luna' },
+          key: 'real-spawn',
+        }
+      );
+      w.emit({ kind: 'changed' });
+      await until(() => existsSync(marker), 'the real worker is inside its native shell tool');
+      const message = await w.core.post(
+        buddyActor(w.lead.id),
+        { kind: 'request', requestId: spawn.post.id, to: 'worker' },
+        {
+          kind: 'inform',
+          body: 'Correction from your parent: use a 3×3×3 board. Keep the current task.',
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          fromConversationId: 'real-parent',
+          key: 'real-message',
+        }
+      );
+      writeFileSync(release, 'continue');
+      await until(() => existsSync(result), 'the worker wrote its result');
+      assert.match(readFileSync(result, 'utf8'), /3[×x]3[×x]3/);
+      await until(
+        async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+        'the worker settles'
+      );
+      const [receipt] = await messageRuns(w, message.post.id);
+      const worker = [...w.conversations.values()].find((c) => c.id === receipt.conversationId)!;
+      const transcript = worker.messages.map((m) => bodyText(m.body)).join('\n');
+      console.log(`REAL_REQUEST_MESSAGE codex: ${transcript}`);
+      if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
+        mkdirSync(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, { recursive: true });
+        writeFileSync(
+          join(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, 'codex-request-message.txt'),
+          transcript
+        );
+      }
+      assert.deepEqual([receipt.status, receipt.errorCode], ['cancelled', 'consumed']);
+      // The only other turn is the answer's return to the parent endpoint, never a message turn.
+      assert.equal(
+        w.turns.filter((t) => t.request.prompt.includes('Message from your parent')).length,
+        0,
+        'the message reached the running turn, not a second one'
+      );
+      assert.equal(w.stopped.size, 0);
+    } finally {
+      writeFileSync(release, 'continue');
+      await w.close();
+    }
+  }
+);
+
+// task_01a11a97 on task_01a11aa8's Stop hold: a parent whose model is idle while its own
+// background job runs still hears its worker. Without this the question waited for the job.
+test("a worker's question reaches a parent idle on its own background work", async () => {
+  const w = await world();
+  const live = await parentAndWorker(w);
+  try {
+    const [requestId] = live.requests;
+    if (live.parent.mcp.kind !== 'http') throw new Error('expected HTTP');
+    const hold = fetch(w.endpoint.stopHookUrl, {
+      method: 'POST',
+      headers: { ...live.parent.mcp.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ hook_event_name: 'Stop', background_tasks: [{ id: 'bg-1' }] }),
+    }).then((response) => response.text());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const question = await call(live.workerTurn(requestId).mcp, 'post', {
+      channel: { request: requestId, to: 'parent' },
+      body: 'Question while you wait: one rubric?',
+      key: 'idle-question',
+    });
+    assert.equal(question.isError, false, question.text);
+    const answer = JSON.parse(await hold);
+    assert.equal(answer.decision, 'block');
+    assert.ok(answer.reason.includes('one rubric?'), answer.reason);
+    await until(
+      async () => (await messageRuns(w, question.value.id))[0]?.errorCode === 'consumed',
+      'the receipt settles once the hook response is written'
+    );
+    await live.release();
+  } finally {
+    live.releaseNow();
+    await w.close();
+  }
+});

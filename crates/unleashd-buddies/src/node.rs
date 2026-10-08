@@ -208,6 +208,18 @@ impl BuddiesCore {
         call(&self.store, move |s| s.peek_thread_unread(&actor, &root_id, limit)).await
     }
 
+    /// Request-addressed messages waiting for this conversation's live turn (messages.rs).
+    #[napi]
+    pub async fn pending_messages(&self, conversation_id: String) -> napi::Result<Vec<AddressedMessage>> {
+        call(&self.store, move |s| s.pending_messages(&conversation_id)).await
+    }
+
+    /// Settles the receipts of messages a live turn was shown (messages.rs `acknowledge`).
+    #[napi]
+    pub async fn acknowledge_messages(&self, conversation_id: String, run_ids: Vec<String>) -> napi::Result<u32> {
+        call(&self.store, move |s| s.acknowledge_messages(&conversation_id, &run_ids).map(|n| n as u32)).await
+    }
+
     /// What a claimed delivery shows (deliveries.rs `compose`).
     #[napi]
     pub async fn deliver_posts(&self, run_id: String) -> napi::Result<Delivery> {

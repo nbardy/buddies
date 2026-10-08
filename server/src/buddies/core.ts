@@ -6,6 +6,7 @@ import {
   BuddiesCore,
   type BuddyChanges,
   type ManagerRef,
+  type RequestEndpoint,
   type Setting,
 } from '@unleashd/buddies-core';
 import type { BuddyChangesSchema } from '@unleashd/shared';
@@ -15,6 +16,11 @@ export type { BuddiesCore } from '@unleashd/buddies-core';
 
 export const OWNER: Actor = { kind: 'owner' };
 export const buddyActor = (id: string): Actor => ({ kind: 'buddy', id });
+/** Who sent a request message addressed `to` an endpoint: the other end (crate messages.rs). */
+export const SENDER: Record<RequestEndpoint, RequestEndpoint> = {
+  worker: 'parent',
+  parent: 'worker',
+};
 
 /**
  * κ for a profile field on the wire: absent = unchanged, `null` = back to the default, a string =

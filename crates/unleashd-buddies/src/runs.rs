@@ -17,7 +17,7 @@ use std::str::FromStr;
 
 pub(crate) const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, \
     task_epoch, after_run_id, status, deadline, lease_expires_at, outcome, error_code, error, ready_at, \
-    created_at, started_at, ended_at, config, body, executing_at, through_ord, admission";
+    created_at, started_at, ended_at, config, body, executing_at, through_ord, admission, delivery_scope";
 
 pub(crate) const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
     JOIN buddy b ON b.id = r.buddy_id
@@ -50,9 +50,9 @@ pub(crate) const WAITING_REASON_SQL: &str = r#"CASE
         SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
           AND c.status IN ('running','cancel_requested')
     ) THEN json_object('kind','conversation_busy')
-    WHEN r.input_kind = 'deliver' AND EXISTS (
+    WHEN r.input_kind = 'deliver' AND r.delivery_scope = 'thread' AND EXISTS (
         SELECT 1 FROM run c JOIN post cp ON cp.id = c.input_id JOIN post rp ON rp.id = r.input_id
-        WHERE c.buddy_id = r.buddy_id AND c.input_kind = 'deliver' AND c.status IN ('running','cancel_requested')
+        WHERE c.buddy_id = r.buddy_id AND c.input_kind = 'deliver' AND c.delivery_scope = 'thread' AND c.status IN ('running','cancel_requested')
           AND coalesce(cp.root_id, cp.id) = coalesce(rp.root_id, rp.id)
     ) THEN json_object('kind','conversation_busy')
     WHEN r.admission = 'capped' AND coalesce(activity.active, 0) >= b.max_active_runs THEN json_object(
@@ -71,7 +71,7 @@ pub(crate) fn run_row(r: &Row) -> rusqlite::Result<Run> {
         id: r.get(0)?,
         input_key: r.get(1)?,
         attempt: r.get(2)?,
-        input: RunInput::from_columns(&r.get::<_, String>(3)?, r.get(4)?).map_err(corrupt)?,
+        input: RunInput::from_columns(&r.get::<_, String>(3)?, r.get(4)?, r.get("delivery_scope")?).map_err(corrupt)?,
         buddy_id: r.get(5)?,
         workspace_id: r.get(6)?,
         conversation_id: r.get(7)?,
@@ -134,7 +134,7 @@ pub(crate) fn enqueue(conn: &Connection, input: EnqueueInput) -> Result<Run> {
 
 pub(crate) fn insert_run(conn: &Connection, run: NewRun) -> Result<Run> {
     let NewRun { input, body } = run;
-    let (kind, input_id, key) = input.input.columns(&input.buddy_id)?;
+    let (kind, input_id, key, scope) = input.input.columns(&input.buddy_id)?;
     let latest = format!("SELECT {RUN_COLS} FROM run WHERE input_key = ?1 AND buddy_id = ?2 ORDER BY attempt DESC LIMIT 1");
     // Old rows keyed `post:<id>` (before 2026-10-01) never match: a post run is only enqueued
     // for a post inserted in the same write, so its id is new.
@@ -148,8 +148,8 @@ pub(crate) fn insert_run(conn: &Connection, run: NewRun) -> Result<Run> {
     let admission = admission_of(conn, &input)?;
     conn.prepare_cached(
         "INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, task_epoch,
-           status, ready_at, created_at, config, body, admission)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'queued', ?10, ?10, ?11, ?12, ?13)",
+           status, ready_at, created_at, config, body, admission, delivery_scope)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'queued', ?10, ?10, ?11, ?12, ?13, ?14)",
     )?
     .execute(params![
         id,
@@ -164,7 +164,8 @@ pub(crate) fn insert_run(conn: &Connection, run: NewRun) -> Result<Run> {
         now,
         input.config.as_ref().map(|c| serde_json::to_string(c).expect("run config serializes")),
         body,
-        admission.as_str()
+        admission.as_str(),
+        scope
     ])?;
     get_run(conn, &id)
 }
@@ -174,7 +175,7 @@ fn admission_of(conn: &Connection, input: &EnqueueInput) -> Result<Admission> {
     match (&input.input, &input.conversation_id) {
         (RunInput::Chat { .. }, Some(_)) => Ok(Admission::Owner),
         (RunInput::Chat { .. }, None) => Ok(Admission::Capped),
-        (RunInput::Post { post_id } | RunInput::Deliver { post_id }, _) => match conn.query_row("SELECT EXISTS(SELECT 1 FROM post WHERE id = ?1 AND author_id IS NULL)", [post_id], |r| r.get::<_, bool>(0))? {
+        (RunInput::Post { post_id } | RunInput::Deliver { post_id } | RunInput::Message { post_id, .. }, _) => match conn.query_row("SELECT EXISTS(SELECT 1 FROM post WHERE id = ?1 AND author_id IS NULL)", [post_id], |r| r.get::<_, bool>(0))? {
             true => Ok(Admission::Owner),
             false => Ok(Admission::Capped),
         },
@@ -299,7 +300,7 @@ impl Store {
                 (RunInput::Chat { .. }, Some(_)) => budgets.chat_deadline_ms,
                 // A chat run with no conversation is a schedule fire (`fire_slot`): a background
                 // turn, so it gets the background budget, never an owner chat's 24 h.
-                (RunInput::Chat { .. }, None) | (RunInput::Post { .. } | RunInput::Deliver { .. }, _) => budgets.turn_deadline_ms,
+                (RunInput::Chat { .. }, None) | (RunInput::Post { .. } | RunInput::Deliver { .. } | RunInput::Message { .. }, _) => budgets.turn_deadline_ms,
                 // The schema CHECK keeps a retired kind out of the queue.
                 (RunInput::Retired { input_kind, .. }, _) => return Err(CoreError::Corrupt(format!("queued {input_kind} run {id}"))),
             };
@@ -349,7 +350,8 @@ impl Store {
             tx.execute("UPDATE run SET executing_at = coalesce(executing_at, ?2) WHERE id = ?1", params![run_id, now_iso()])?;
             match (&run.input, &run.executing_at) {
                 (RunInput::Deliver { post_id }, None) => deliveries::delivered(tx, &run, &get_post(tx, post_id)?)?,
-                (RunInput::Deliver { .. }, Some(_)) | (RunInput::Chat { .. } | RunInput::Post { .. } | RunInput::Retired { .. }, _) => {}
+                // A message shows only its own post: no thread is marked read (messages.rs).
+                (RunInput::Deliver { .. }, Some(_)) | (RunInput::Chat { .. } | RunInput::Post { .. } | RunInput::Message { .. } | RunInput::Retired { .. }, _) => {}
             }
             get_run(tx, run_id)
         })
@@ -429,7 +431,8 @@ impl Store {
                         deliveries::subscribe(tx, &run.buddy_id, post.root(), Some(conversation_id))?;
                     }
                 }
-                RunInput::Deliver { .. } | RunInput::Chat { .. } | RunInput::Retired { .. } => {}
+                // A message is enqueued with its destination conversation and subscribes nothing.
+                RunInput::Deliver { .. } | RunInput::Message { .. } | RunInput::Chat { .. } | RunInput::Retired { .. } => {}
             }
             get_run(tx, run_id)
         })
@@ -530,6 +533,10 @@ impl Store {
                     (RunInput::Retired { input_kind, .. }, ..) => {
                         return Err(CoreError::Invalid(format!("a {input_kind} run is history; its posts are delivered as `deliver` runs now")));
                     }
+                    // Never revived: its request may have closed, and its conversation is fixed.
+                    (RunInput::Message { .. }, ..) => {
+                        return Err(CoreError::Invalid("a request message is not retried; send a new one to the request".into()));
+                    }
                     (RunInput::Chat { .. }, ..) => run.conversation_id.clone(),
                     (RunInput::Post { .. } | RunInput::Deliver { .. }, None, _) => run.conversation_id.clone(),
                     (RunInput::Post { .. } | RunInput::Deliver { .. }, Some(new), Some(old)) if new.provider == old.provider => run.conversation_id.clone(),
@@ -594,7 +601,7 @@ impl Store {
                     {requester}, r.started_at, r.ended_at,
                     CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END,
                     r.conversation_id, r.error_code, r.error,
-                    {purpose}, (SELECT t.title FROM task t WHERE t.id = r.task_id)
+                    {purpose}, (SELECT t.title FROM task t WHERE t.id = r.task_id), r.delivery_scope
              {RUN_WITH_ACTIVITY_SQL}
              WHERE {filter}
              ORDER BY r.status IN ('queued','running','cancel_requested') DESC, r.created_at DESC, r.id DESC LIMIT ?3"
@@ -610,7 +617,7 @@ impl Store {
             Ok(RunRow {
                 id: r.get(0)?,
                 status: r.get(1)?,
-                input: RunInput::from_columns(&r.get::<_, String>(2)?, r.get(3)?).map_err(corrupt)?,
+                input: RunInput::from_columns(&r.get::<_, String>(2)?, r.get(3)?, r.get(15)?).map_err(corrupt)?,
                 task_id: r.get(5)?,
                 requester: r.get::<_, Option<String>>(6)?.map(|key| Actor::from_key(&key)),
                 started_at: r.get(7)?,
@@ -789,8 +796,8 @@ pub(crate) fn next_attempt(tx: &Transaction, run: &Run, conversation_id: Option<
     let attempt: i64 = tx.query_row("SELECT max(attempt) + 1 FROM run WHERE input_key = ?1", [&run.input_key], |r| r.get(0))?;
     tx.execute(
         "INSERT INTO run (id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id,
-           task_epoch, status, ready_at, created_at, config, body, admission)
-         SELECT ?1, input_key, ?2, input_kind, input_id, buddy_id, workspace_id, ?3, task_id, ?4, 'queued', ?5, ?5, ?6, body, admission
+           task_epoch, status, ready_at, created_at, config, body, admission, delivery_scope)
+         SELECT ?1, input_key, ?2, input_kind, input_id, buddy_id, workspace_id, ?3, task_id, ?4, 'queued', ?5, ?5, ?6, body, admission, delivery_scope
          FROM run WHERE id = ?7",
         params![
             id,
@@ -872,7 +879,7 @@ fn after_settle(tx: &Transaction, run: &Run, outcome: &Outcome) -> Result<()> {
         (RunInput::Post { post_id }, Outcome::Failed { code, error }) => close_request(tx, post_id, Closed::Failed { run, code, error }),
         (RunInput::Post { post_id }, Outcome::Cancelled { .. }) => close_request(tx, post_id, Closed::Cancelled),
         (RunInput::Post { .. }, Outcome::Complete { .. })
-        | (RunInput::Chat { .. } | RunInput::Deliver { .. } | RunInput::Retired { .. }, _) => Ok(()),
+        | (RunInput::Chat { .. } | RunInput::Deliver { .. } | RunInput::Message { .. } | RunInput::Retired { .. }, _) => Ok(()),
     }
 }
 
@@ -915,6 +922,7 @@ fn close_request(tx: &Transaction, post_id: &str, how: Closed) -> Result<()> {
         Closed::Cancelled => "cancelled",
     };
     let closed = tx.execute("UPDATE post SET request = ?2 WHERE id = ?1 AND request = 'awaiting'", params![post_id, state])?;
+    crate::messages::close(tx, post_id)?;
     match (closed, how) {
         (1, Closed::Failed { run, code, error }) => {
             let request = get_post(tx, post_id)?;

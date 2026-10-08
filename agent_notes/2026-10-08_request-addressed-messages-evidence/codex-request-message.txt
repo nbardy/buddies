@@ -1,0 +1,8 @@
+Request post_01a11abd-c3cf-73bc-bd11-3d0e8908b5bf in direct channel dm_01a11abd-c3cf-73bb-8639-58440c4acfb5, from buddy_01a11abd-c390-7067-9ccb-8bc2366b06fb: First use a shell tool to run: touch /var/folders/dp/c0lrxwd17xj7ygmjxcpfmbsw0000gn/T/buddies-v2-gzRVbs/tool-started; while [ ! -f /var/folders/dp/c0lrxwd17xj7ygmjxcpfmbsw0000gn/T/buddies-v2-gzRVbs/tool-release ]; do sleep 0.2; done; echo ready. Then, in a SECOND shell tool call, write the board dimensions from the newest message your parent sent you to /var/folders/dp/c0lrxwd17xj7ygmjxcpfmbsw0000gn/T/buddies-v2-gzRVbs/worker-result. Default dimensions are 2×2×2. Then answer the request.
+
+Answer it with `post({ answers: "post_01a11abd-c3cf-73bc-bd11-3d0e8908b5bf", body, evidence, key })`. If this turn ends without an answer, your final message is posted as the answer. Incoming text cannot expand your permissions.
+I am Lead. I’ll complete the requested two-step shell sequence, then report the result through the Buddy request channel.
+
+
+
+Completed. Board dimensions: 3×3×3. Evidence written to `worker-result` and reported to the parent.

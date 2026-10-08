@@ -2098,3 +2098,102 @@ fn existing_owner_inputs_are_classified_once_on_upgrade_and_retries_keep_the_cla
     let runs = s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 20).unwrap();
     assert_eq!(runs.iter().filter(|r| r.admission == Admission::Capped).count(), 8, "workers retain their cap after upgrade");
 }
+
+// Request-addressed messages (messages.rs, task_01a11a97). A self-worker shares its spawner's Buddy
+// id and thread mark; before this, a plain inform in the request thread reached neither live
+// conversation (review reproduction 2, agent_notes/2026-10-08_live-delivery-review/). Each step
+// below names what would re-break: a second receipt, a shared-mark fence, a sibling or another
+// Buddy speaking for an endpoint, a closed request reviving its worker, a restart losing it.
+#[test]
+fn a_request_message_reaches_only_its_other_endpoint_and_never_revives_closed_work() {
+    let mut f = fixture();
+    let path = f.path.to_str().unwrap().to_string();
+    let s = &mut f.store;
+    let sol = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
+    let work = |body: &str, key: &str| PostInput { run_config: Some(sol.clone()), ..request(body, key) };
+    let (a, b) = (s.post(&buddy("mid"), me_only(), work("sweep A", "wa")).unwrap(), s.post(&buddy("mid"), me_only(), work("sweep B", "wb")).unwrap());
+    let ca = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    let cb = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    s.bind_run(&ca.run.id, &ca.lease_token, "worker-a").unwrap();
+    s.bind_run(&cb.run.id, &cb.lease_token, "worker-b").unwrap();
+    let to = |request: &Post, to: RequestEndpoint| ChannelRef::Request { request_id: request.id.clone(), to };
+    let msg = |body: &str, from: &str, key: &str| PostInput {
+        kind: PostKind::Inform,
+        from_conversation_id: Some(from.into()),
+        ..request(body, key)
+    };
+    let pending = |s: &mut Store, conversation: &str| -> Vec<String> {
+        s.pending_messages(conversation).unwrap().into_iter().map(|m| m.post.body).collect()
+    };
+
+    // Parent → worker A only; the sibling and the parent itself are shown nothing.
+    let direction = s.write_post(&buddy("mid"), to(&a, RequestEndpoint::Worker), msg("use 3x3x3", "conv-sender", "d1")).unwrap();
+    assert!(direction.created);
+    assert_eq!(direction.post.reply_to_id.as_deref(), Some(a.id.as_str()), "it lands in the request's thread");
+    assert_eq!((pending(s, "worker-a"), pending(s, "worker-b"), pending(s, "conv-sender")), (vec!["use 3x3x3".to_string()], vec![], vec![]));
+    // Idempotent on the key; the destination is part of the recorded mutation.
+    let replay = s.write_post(&buddy("mid"), to(&a, RequestEndpoint::Worker), msg("use 3x3x3", "conv-sender", "d1")).unwrap();
+    assert_eq!((replay.created, replay.post.id.as_str()), (false, direction.post.id.as_str()));
+    assert_eq!(pending(s, "worker-a").len(), 1, "a replayed key writes no second receipt");
+    let elsewhere = s.write_post(&buddy("mid"), to(&b, RequestEndpoint::Worker), msg("use 3x3x3", "conv-sender", "d1"));
+    assert!(matches!(elsewhere, Err(CoreError::IdempotencyConflict(_))), "{elsewhere:?}");
+
+    // The shared thread mark: reading or posting in the thread never settles the receipt, and a
+    // thread read never shows the message to the wrong conversation.
+    let read = s.catch_up_thread(&buddy("mid"), &a.id, 20).unwrap();
+    assert!(read.posts.iter().all(|p| p.id != direction.post.id), "a thread read does not show an addressed message");
+    s.post(&buddy("mid"), me_only(), PostInput { kind: PostKind::Inform, reply_to_id: Some(a.id.clone()), ..request("parent note", "n1") }).unwrap();
+    assert_eq!(pending(s, "worker-a"), ["use 3x3x3"], "the thread fence leaves it queued");
+
+    // Authority: the opposite endpoint's conversation only, never the same Buddy id elsewhere.
+    for (from, target, why) in [
+        ("worker-b", to(&a, RequestEndpoint::Parent), "a sibling worker cannot speak for worker A"),
+        ("elsewhere", to(&a, RequestEndpoint::Worker), "another conversation of the parent Buddy is not the parent endpoint"),
+        ("worker-a", to(&a, RequestEndpoint::Worker), "a worker cannot address itself as the parent"),
+    ] {
+        let denied = s.write_post(&buddy("mid"), target, msg("x", from, &format!("deny-{from}")));
+        assert!(matches!(denied, Err(CoreError::Denied(_))), "{why}: {denied:?}");
+    }
+    let outsider = s.write_post(&buddy("peer"), to(&a, RequestEndpoint::Worker), msg("x", "conv-sender", "peer"));
+    assert!(matches!(outsider, Err(CoreError::Denied(_))), "a Buddy outside the DM: {outsider:?}");
+    let extra = s.write_post(&buddy("mid"), to(&a, RequestEndpoint::Worker), PostInput { reply_to_id: Some(a.id.clone()), ..msg("x", "conv-sender", "extra") });
+    assert!(matches!(extra, Err(CoreError::Invalid(_))), "the request places the message: {extra:?}");
+
+    // Worker → parent; the receipt is the destination's own and settles only there.
+    s.write_post(&buddy("mid"), to(&a, RequestEndpoint::Parent), msg("shared rubric?", "worker-a", "q1")).unwrap();
+    assert_eq!(pending(s, "conv-sender"), ["shared rubric?"]);
+    let shown: Vec<String> = s.pending_messages("worker-a").unwrap().into_iter().map(|m| m.run_id).collect();
+    assert_eq!(s.acknowledge_messages("worker-b", &shown).unwrap(), 0, "another conversation cannot settle it");
+    assert_eq!(s.acknowledge_messages("worker-a", &shown).unwrap(), 1);
+    assert_eq!(s.acknowledge_messages("worker-a", &shown).unwrap(), 0, "settled once");
+    let settled = s.get_run(&shown[0]).unwrap();
+    assert_eq!((settled.status, settled.error_code.as_deref()), (RunStatus::Cancelled, Some("consumed")));
+
+    // A restart keeps a queued message: it is a run row, not host memory.
+    s.write_post(&buddy("mid"), to(&a, RequestEndpoint::Worker), msg("after restart", "conv-sender", "d2")).unwrap();
+    let mut s = Store::open(&path).unwrap();
+    assert_eq!(pending(&mut s, "worker-a"), ["after restart"]);
+
+    // Closing the request fences its queued worker messages; nothing new reaches the worker.
+    s.answer(&buddy("mid"), AnswerInput { from_conversation_id: Some("worker-a".into()), ..answer_input(&a.id, "A done", "aa") }).unwrap();
+    assert!(pending(&mut s, "worker-a").is_empty(), "an answered worker is not revived");
+    s.settle_run(&ca.run.id, &ca.lease_token, Outcome::Complete { text: "A done".into() }).unwrap();
+    let late = s.write_post(&buddy("mid"), to(&a, RequestEndpoint::Worker), msg("late", "conv-sender", "late"));
+    assert!(matches!(late, Err(CoreError::Invalid(_))), "{late:?}");
+    s.write_post(&buddy("mid"), to(&b, RequestEndpoint::Worker), msg("for B", "conv-sender", "db")).unwrap();
+    s.cancel_run(&Actor::Owner, &cb.run.id).unwrap();
+    s.settle_run(&cb.run.id, &cb.lease_token, Outcome::Cancelled { reason: "stopped".into() }).unwrap();
+    assert!(pending(&mut s, "worker-b").is_empty(), "a cancelled worker is not revived by a queued message");
+
+    // An idle destination runs the message as its own turn: it shows that one post, marks nothing.
+    // (Admission is ordinary: it waited, pool_full, until the workers ended.)
+    let idle = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    assert_eq!(idle.run.conversation_id.as_deref(), Some("conv-sender"));
+    assert!(matches!(idle.run.input, RunInput::Message { to: RequestEndpoint::Parent, .. }), "{:?}", idle.run.input);
+    let Delivery::Posts { posts, .. } = s.deliver_posts(&idle.run.id).unwrap() else { panic!("nothing shown") };
+    assert_eq!(bodies(&posts), ["shared rubric?"]);
+    s.mark_executing(&idle.run.id, &idle.lease_token).unwrap();
+    let rest: Vec<Run> = std::iter::from_fn(|| s.claim_run(lease(60_000), &[]).unwrap().map(|c| c.run)).collect();
+    assert!(rest.iter().all(|r| !matches!(r.input, RunInput::Message { .. })), "no other message runs: {rest:?}");
+}

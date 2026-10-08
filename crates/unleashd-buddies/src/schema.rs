@@ -221,7 +221,10 @@ CREATE INDEX IF NOT EXISTS event_buddy ON event(buddy_id, seq) WHERE buddy_id IS
 /// - `through_ord`: a delivery's newest shown post, fixed by its first compose, so an adopted turn
 ///   that recomposes never marks read what arrived after (it replaced `thread_follow.delivered_through`);
 /// - NO `lane`/`position` (decision H2): `conversation_id` is the queue key;
-/// - `snapshot` is gone: no code wrote it since the v3 store. An imported value moves into `legacy`.
+/// - `snapshot` is gone: no code wrote it since the v3 store. An imported value moves into `legacy`;
+/// - `delivery_scope` (2026-10-08, task_01a11a97): `thread` for every existing row; `to_worker` /
+///   `to_parent` mark a request-addressed message (messages.rs), which the thread read fence never
+///   settles. Added to older files by `ensure_column` (open) after the rebuild.
 /// STRICT CHECKs cannot be ALTERed, hence a rebuild, not ADD COLUMN.
 const RUN_TABLE: &str = r#"
 CREATE TABLE {table} (
@@ -235,6 +238,7 @@ CREATE TABLE {table} (
   ready_at TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT, legacy TEXT,
   config TEXT, body TEXT, executing_at TEXT, through_ord TEXT,
   admission TEXT NOT NULL DEFAULT 'capped' CHECK(admission IN ('owner','capped')),
+  delivery_scope TEXT NOT NULL DEFAULT 'thread' CHECK(delivery_scope IN ('thread','to_worker','to_parent')),
   CHECK(input_kind IN ('chat','post','deliver') OR status <> 'queued'),
   CHECK(input_kind <> 'chat' OR status <> 'queued' OR body IS NOT NULL),
   UNIQUE(input_key, attempt)) STRICT;
@@ -347,6 +351,7 @@ pub fn open(path: &str) -> Result<Connection> {
                 tx.commit()?;
             }
             crate::migrate::rebuild_for_delivery(&conn, path)?;
+            ensure_column(&conn, "run", "delivery_scope", "TEXT NOT NULL DEFAULT 'thread' CHECK(delivery_scope IN ('thread','to_worker','to_parent'))")?;
             conn.execute_batch(INDEXES)?;
             ensure_post_search(&conn)?;
             Ok(conn)

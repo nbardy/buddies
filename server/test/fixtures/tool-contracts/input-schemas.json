@@ -366,6 +366,27 @@
                 "task"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "request": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "enum": [
+                    "worker",
+                    "parent"
+                  ]
+                }
+              },
+              "required": [
+                "request",
+                "to"
+              ],
+              "additionalProperties": false
             }
           ]
         },
@@ -1378,6 +1399,27 @@
               },
               "required": [
                 "task"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "request": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "enum": [
+                    "worker",
+                    "parent"
+                  ]
+                }
+              },
+              "required": [
+                "request",
+                "to"
               ],
               "additionalProperties": false
             }

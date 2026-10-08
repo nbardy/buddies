@@ -122,6 +122,7 @@ fn open_channel(tx: &Connection, actor: &Actor, channel: &ChannelRef) -> Result<
         ChannelRef::Id { id } => get_channel(tx, id),
         ChannelRef::Direct { members } => direct_channel(tx, actor, members),
         ChannelRef::Task { task_id } => task_channel(tx, actor, task_id),
+        ChannelRef::Request { request_id, .. } => get_channel(tx, &get_post(tx, request_id)?.channel_id),
     }
 }
 
@@ -238,12 +239,15 @@ impl Store {
     /// `post`, saying whether it wrote the post or replayed its key. The host announces only a
     /// created post: a replayed key used to re-run its @mentions and follow-up gates (2026-09-28
     /// review R2, agent_notes/2026-09-28_channels-state-machine-review.md).
-    pub fn write_post(&mut self, actor: &Actor, channel: ChannelRef, input: PostInput) -> Result<PostWrite> {
+    pub fn write_post(&mut self, actor: &Actor, channel_ref: ChannelRef, input: PostInput) -> Result<PostWrite> {
         self.write(|tx| {
-            let channel = open_channel(tx, actor, &channel)?;
+            let channel = open_channel(tx, actor, &channel_ref)?;
             require(tx, actor, Op::Post, &Subject::Channel { id: channel.id.clone() })?;
             require_one_to_one(&channel)?;
-            let task_id = task_id_for_channel(&channel, input.task_id.as_deref())?;
+            let task_id = match &channel_ref {
+                ChannelRef::Request { request_id, .. } => get_post(tx, request_id)?.task_id,
+                ChannelRef::Id { .. } | ChannelRef::Direct { .. } | ChannelRef::Task { .. } => task_id_for_channel(&channel, input.task_id.as_deref())?,
+            };
             let m = Mutation {
                 actor,
                 workspace_id: &channel.workspace_id,
@@ -252,10 +256,15 @@ impl Store {
                 op: "post",
                 payload: json!({"channel": channel.id, "kind": input.kind.as_str(), "body": input.body, "purpose": input.purpose,
                     "evidence": input.evidence, "reply_to": input.reply_to_id, "task": task_id,
-                    "run_config": input.run_config}),
+                    "run_config": input.run_config, "addressed": addressed(&channel_ref)}),
                 key: Some(&input.key),
             };
-            let (id, created) = idempotent_write(tx, &m, |tx| insert_post(tx, actor, &channel, &input, task_id.as_deref()))?;
+            // The destination is part of the recorded mutation: a replayed key that names another
+            // endpoint is an idempotency conflict, never a second message.
+            let (id, created) = idempotent_write(tx, &m, |tx| match &channel_ref {
+                ChannelRef::Request { request_id, to } => crate::messages::write(tx, actor, request_id, *to, &input),
+                ChannelRef::Id { .. } | ChannelRef::Direct { .. } | ChannelRef::Task { .. } => insert_post(tx, actor, &channel, &input, task_id.as_deref()),
+            })?;
             Ok(PostWrite { post: get_post(tx, &id)?, created })
         })
     }
@@ -289,6 +298,7 @@ impl Store {
                 if flipped != 1 {
                     return Err(CoreError::Invalid(format!("post {} is not awaiting an answer: {:?}", request.id, request.request)));
                 }
+                crate::messages::close(tx, &request.id)?;
                 // A request lives in a direct channel, so answering subscribes like any DM post.
                 let channel = get_channel(tx, &request.channel_id)?;
                 let answer = get_post(tx, &id)?;
@@ -881,21 +891,21 @@ pub(crate) fn system_post(tx: &Transaction, author: &str, channel: &Channel, rep
 /// `conversation_id` is provenance: the conversation the post was written from. A thread seat reads
 /// it to skip its own posts; in a DM it is also where later posts by others are delivered.
 #[derive(Default)]
-struct NewPost<'a> {
-    channel_id: &'a str,
-    author: Option<&'a str>,
-    root_id: Option<&'a str>,
-    reply_to_id: Option<&'a str>,
-    task_id: Option<&'a str>,
-    purpose: Option<&'a str>,
-    body: &'a str,
-    evidence: &'a [String],
-    request: Option<&'static str>,
-    conversation_id: Option<&'a str>,
-    broadcast: bool,
+pub(crate) struct NewPost<'a> {
+    pub(crate) channel_id: &'a str,
+    pub(crate) author: Option<&'a str>,
+    pub(crate) root_id: Option<&'a str>,
+    pub(crate) reply_to_id: Option<&'a str>,
+    pub(crate) task_id: Option<&'a str>,
+    pub(crate) purpose: Option<&'a str>,
+    pub(crate) body: &'a str,
+    pub(crate) evidence: &'a [String],
+    pub(crate) request: Option<&'static str>,
+    pub(crate) conversation_id: Option<&'a str>,
+    pub(crate) broadcast: bool,
 }
 
-fn write_post(tx: &Transaction, p: NewPost) -> Result<String> {
+pub(crate) fn write_post(tx: &Transaction, p: NewPost) -> Result<String> {
     let ord = crate::ids::next().to_string();
     let id = format!("post_{ord}");
     tx.prepare_cached(
@@ -906,6 +916,14 @@ fn write_post(tx: &Transaction, p: NewPost) -> Result<String> {
     .execute(params![id, p.channel_id, p.author, p.root_id, p.reply_to_id, p.task_id, p.purpose, p.body, evidence_json(p.evidence),
         p.request, p.conversation_id, now_iso(), ord, p.broadcast])?;
     Ok(id)
+}
+
+/// The endpoint a `{request, to}` post addresses, for its recorded mutation (None: any other ref).
+fn addressed(channel: &ChannelRef) -> Option<serde_json::Value> {
+    match channel {
+        ChannelRef::Request { request_id, to } => Some(json!({"request": request_id, "to": to.as_str()})),
+        ChannelRef::Id { .. } | ChannelRef::Direct { .. } | ChannelRef::Task { .. } => None,
+    }
 }
 
 /// A reply joins its parent's thread, which must be in the same channel.
