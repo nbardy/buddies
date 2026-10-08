@@ -110,6 +110,24 @@ export const PostBodySchema = z
     key,
   })
   .strict();
+export const PostEditSchema = z
+  .object({
+    body: z.string().trim().min(1).max(32_000),
+    baseRevision: z.number().int().positive(),
+    key,
+  })
+  .strict();
+export const PostReactionSchema = z
+  .object({
+    emoji: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|[0-9#*]\uFE0F?\u20E3)/u),
+    active: z.boolean(),
+    key,
+  })
+  .strict();
 export const DocWriteSchema = z
   .object({
     scope: z.enum(['buddy', 'workspace']).default('buddy'),
@@ -289,6 +307,18 @@ export const buddyMutations = {
     status: 201,
     body: PostBodySchema,
   },
+  'post.edit': {
+    method: 'PATCH',
+    path: '/api/buddies/posts/:postId',
+    status: 200,
+    body: PostEditSchema,
+  },
+  'post.react': {
+    method: 'PUT',
+    path: '/api/buddies/posts/:postId/reaction',
+    status: 200,
+    body: PostReactionSchema,
+  },
   'reply.retry': {
     method: 'POST',
     path: '/api/buddies/posts/:postId/retry',
@@ -361,6 +391,8 @@ export interface BuddyMutationResults {
   'channel.rename': Channel;
   'channel.create': Channel;
   'channel.post': { post: Post };
+  'post.edit': Post;
+  'post.react': Post;
   'reply.retry': ReplyRetryResult;
   read: { ok: boolean };
   'upstream.update': UpstreamUpdateResult;

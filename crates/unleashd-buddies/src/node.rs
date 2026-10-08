@@ -47,6 +47,16 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn edit_post(&self, actor: Actor, id: String, body: String, base_revision: i64, key: String) -> napi::Result<Post> {
+        call(&self.store, move |s| s.edit_post(&actor, &id, &body, base_revision, &key)).await
+    }
+
+    #[napi]
+    pub async fn react_post(&self, actor: Actor, id: String, emoji: String, active: bool, key: String) -> napi::Result<Post> {
+        call(&self.store, move |s| s.react_post(&actor, &id, &emoji, active, &key)).await
+    }
+
+    #[napi]
     pub async fn answer(&self, actor: Actor, input: AnswerInput) -> napi::Result<Post> {
         call(&self.store, move |s| s.answer(&actor, input)).await
     }

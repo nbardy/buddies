@@ -73,12 +73,16 @@ CREATE TABLE post (
   author_id TEXT REFERENCES buddy(id),
   root_id TEXT REFERENCES post(id), reply_to_id TEXT REFERENCES post(id),
   task_id TEXT REFERENCES task(id),
-  purpose TEXT, body TEXT NOT NULL, evidence TEXT NOT NULL DEFAULT '[]',
+  purpose TEXT, body TEXT NOT NULL, edit_revision INTEGER NOT NULL DEFAULT 1, edited_at TEXT, evidence TEXT NOT NULL DEFAULT '[]',
   request TEXT CHECK(request IN ('awaiting','answered','cancelled','failed')),
   answer_id TEXT REFERENCES post(id),
   conversation_id TEXT, created_at TEXT NOT NULL, legacy TEXT,
   ord TEXT NOT NULL UNIQUE, broadcast INTEGER NOT NULL DEFAULT 0 CHECK(broadcast IN (0,1)),
   CHECK((request IS 'answered') = (answer_id IS NOT NULL))) STRICT;
+
+CREATE TABLE post_reaction (
+  post_id TEXT NOT NULL REFERENCES post(id), actor TEXT NOT NULL, emoji TEXT NOT NULL,
+  PRIMARY KEY(post_id, actor, emoji)) STRICT, WITHOUT ROWID;
 
 CREATE TABLE post_read (
   reader TEXT NOT NULL, channel_id TEXT NOT NULL REFERENCES channel(id),
@@ -330,6 +334,12 @@ pub fn open(path: &str) -> Result<Connection> {
     match (app_id == APPLICATION_ID, tables) {
         (true, _) => {
             require_ordered_ids(&conn, path)?;
+            ensure_column(&conn, "post", "edit_revision", "INTEGER NOT NULL DEFAULT 1")?;
+            ensure_column(&conn, "post", "edited_at", "TEXT")?;
+            conn.execute_batch("CREATE TABLE IF NOT EXISTS post_reaction (
+                post_id TEXT NOT NULL REFERENCES post(id), actor TEXT NOT NULL, emoji TEXT NOT NULL,
+                PRIMARY KEY(post_id, actor, emoji)) STRICT, WITHOUT ROWID;")?;
+
             ensure_column(&conn, "channel", "archived_at", "TEXT")?;
             // Workspace-home pins (2026-09-30): additive, so an older build still opens the file.
             ensure_column(&conn, "task", "pin", "INTEGER NOT NULL DEFAULT 0 CHECK(pin >= 0)")?;

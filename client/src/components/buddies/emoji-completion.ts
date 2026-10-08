@@ -33,10 +33,20 @@ export function activeEmojiQuery(
   return { start: caret - match[1].length - 1, query: match[1] };
 }
 
-export function rankEmoji(query: string): EmojiChoice[] {
+export function rankEmoji(
+  query: string,
+  usage: Readonly<Record<string, number>> = {}
+): EmojiChoice[] {
   const needle = query.toLowerCase();
-  if (!needle)
-    return favorites.flatMap((name) => catalog.filter((entry) => entry.aliases.includes(name)));
+  if (!needle) {
+    const used = catalog
+      .filter((entry) => usage[entry.emoji] > 0)
+      .sort((a, b) => usage[b.emoji] - usage[a.emoji]);
+    const defaults = favorites.flatMap((name) =>
+      catalog.filter((entry) => entry.aliases.includes(name))
+    );
+    return [...new Set([...used, ...defaults])].slice(0, 8);
+  }
   const score = (entry: EmojiChoice) =>
     entry.aliases.includes(needle)
       ? 0

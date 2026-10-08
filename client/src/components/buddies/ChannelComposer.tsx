@@ -1,4 +1,5 @@
 import type { ConversationConfig, OwnerPostMentionConfig, ProviderCatalog } from '@unleashd/shared';
+import { useAtomValue } from 'jotai';
 import {
   type ClipboardEvent,
   type ReactNode,
@@ -8,6 +9,7 @@ import {
   useState,
 } from 'react';
 import { outboxDrop, outboxSending, outboxSent } from '../../atoms/channel-outbox';
+import { emojiUsageAtom, recordEmojiUse } from '../../atoms/emoji-usage';
 import { useConversationDraft } from '../../hooks/useConversationDraft';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { newId } from '../../utils/ids';
@@ -46,7 +48,7 @@ import {
   spliceDraft,
 } from './composer-draft';
 import { type EmojiChoice, activeEmojiQuery, rankEmoji } from './emoji-completion';
-import type { PostResult } from './types';
+import type { Post, PostResult } from './types';
 import './ChannelComposer.css';
 
 const MAX_TEXTAREA_HEIGHT = 240;
@@ -85,6 +87,8 @@ export function ChannelComposer({
   submit,
   mentionPlacement = 'above',
   onPosted,
+  editPost,
+  onCancel,
 }: {
   channelId: string;
   placeholder: string;
@@ -96,9 +100,13 @@ export function ChannelComposer({
   submit: ComposerSubmit;
   mentionPlacement?: 'above' | 'below';
   onPosted(result: PostResult): void;
+  editPost?: Post;
+  onCancel?(): void;
 }) {
   // The draft: the post body in its stored Markdown form. `view` is what the textarea shows.
-  const [raw, setRaw] = useState('');
+  const [raw, setRaw] = useState(editPost?.body ?? '');
+  const [saving, setSaving] = useState(false);
+  const usage = useAtomValue(emojiUsageAtom);
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
@@ -118,13 +126,14 @@ export function ChannelComposer({
   const viewRef = useRef(view);
   viewRef.current = view;
   const draft = useConversationDraft({
-    conversationId: channelDraftId(channelId, rootId),
+    conversationId: editPost ? `edit-post:${editPost.id}` : channelDraftId(channelId, rootId),
     textareaRef,
     controlled: true,
     autoFocus,
     maxHeight: MAX_TEXTAREA_HEIGHT,
     onDraftLoaded: (stored) => {
-      const restored = decodeChannelDraft(stored);
+      const restored =
+        stored === '' && editPost ? { text: editPost.body } : decodeChannelDraft(stored);
       setRaw(restored.text);
       setChoices(new Map(restored.mentionConfigs?.map(({ buddyId, config }) => [buddyId, config])));
       setCaret(draftView(restored.text, roster).display.length);
@@ -137,8 +146,8 @@ export function ChannelComposer({
   const activeStart = trigger?.start ?? emojiTrigger?.start;
   const emojiQuery = emojiTrigger && emojiTrigger.start !== dismissedAt ? emojiTrigger.query : null;
   const emojiMatches = useMemo(
-    () => (emojiQuery === null ? [] : rankEmoji(emojiQuery)),
-    [emojiQuery]
+    () => (emojiQuery === null ? [] : rankEmoji(emojiQuery, usage)),
+    [emojiQuery, usage]
   );
   const selectedEmoji = emojiMatches[Math.min(highlight, emojiMatches.length - 1)];
   const open = trigger !== null && trigger.start !== dismissedAt;
@@ -235,6 +244,7 @@ export function ChannelComposer({
   const pickEmoji = (choice: EmojiChoice) => {
     if (!emojiTrigger) return;
     apply(spliceDraft(view, emojiTrigger.start, caret, `${choice.emoji} `));
+    recordEmojiUse(choice.emoji);
     textareaRef.current?.focus();
   };
 
@@ -281,6 +291,23 @@ export function ChannelComposer({
       selections.some(({ choice }) => choice.kind === 'loading')
     )
       return;
+    if (saving) return;
+    if (editPost) {
+      setSaving(true);
+      setProblem(null);
+      void buddyWrite(
+        'post.edit',
+        { postId: editPost.id },
+        { body, baseRevision: editPost.editRevision ?? 1 }
+      )
+        .then((post) => {
+          draft.clear();
+          onPosted({ post });
+        })
+        .catch((cause: unknown) => setProblem(errorText(cause)))
+        .finally(() => setSaving(false));
+      return;
+    }
     const mentionConfigs = selections.flatMap(({ buddy, choice }): OwnerPostMentionConfig[] =>
       choice.kind === 'chosen' ? [{ buddyId: buddy.id, config: choice.config }] : []
     );
@@ -491,7 +518,7 @@ export function ChannelComposer({
             event.target.value = '';
           }}
         />
-        {mentions.length > 0 && (
+        {!editPost && mentions.length > 0 && (
           <div className="channel-composer-mentions">
             {selections.map(({ buddy, choice }) => (
               <MentionChip
@@ -520,18 +547,31 @@ export function ChannelComposer({
             <SubmitHint submit={submit} />
           )}
         </span>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={() => {
+              draft.clear();
+              onCancel();
+            }}
+            disabled={saving}
+          >
+            Cancel
+          </button>
+        )}
         <button
           type="button"
           className="channel-composer-send"
           onClick={send}
           disabled={
+            saving ||
             uploading > 0 ||
             foreign.length > 0 ||
             text.trim().length === 0 ||
             selections.some(({ choice }) => choice.kind === 'loading')
           }
         >
-          Send
+          {editPost ? (saving ? 'Saving…' : 'Save') : 'Send'}
         </button>
       </div>
     </div>

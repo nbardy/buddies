@@ -6429,3 +6429,73 @@ test("a worker's question reaches a parent idle on its own background work", asy
     await w.close();
   }
 });
+
+test('owner post editing and reactions use real HTTP without starting another reply', async () => {
+  const w = await world();
+  const { server, http, withClient } = await ownerHttp(w);
+  try {
+    await withClient(async () => {
+      const { post } = await buddyWrite(
+        'channel.post',
+        { channelId: w.general.id },
+        { body: 'original' }
+      );
+      const saved = await buddyWrite(
+        'post.edit',
+        { postId: post.id },
+        { body: 'updated 🚀', baseRevision: 1, key: 'edit-root' }
+      );
+      assert.equal(saved.id, post.id);
+      assert.equal(saved.ord, post.ord);
+      assert.equal(saved.editRevision, 2);
+      assert.ok(saved.editedAt);
+      const replay = await buddyWrite(
+        'post.edit',
+        { postId: post.id },
+        { body: 'updated 🚀', baseRevision: 1, key: 'edit-root' }
+      );
+      assert.equal(replay.editRevision, 2);
+      assert.equal(
+        (
+          await http('PATCH', `/api/buddies/posts/${post.id}`, {
+            body: 'stale',
+            baseRevision: 1,
+            key: 'stale',
+          })
+        ).status,
+        409
+      );
+      const reacted = await buddyWrite(
+        'post.react',
+        { postId: post.id },
+        { emoji: '🚀', active: true, key: 'react-root' }
+      );
+      assert.deepEqual(reacted.reactions, [{ emoji: '🚀', actorKey: 'owner' }]);
+      assert.equal(
+        (
+          await buddyWrite(
+            'post.react',
+            { postId: post.id },
+            { emoji: '🚀', active: true, key: 'react-root' }
+          )
+        ).reactions?.length,
+        1
+      );
+      assert.equal(
+        (await buddyWrite('post.react', { postId: post.id }, { emoji: '🚀', active: false }))
+          .reactions?.length,
+        0
+      );
+      await buddyWrite('post.react', { postId: post.id }, { emoji: '1️⃣', active: true });
+      const found = await w.core.searchPosts(OWNER, w.ws, { text: 'updated', channels: [], from: [] }, null, 20);
+      assert.ok(
+        found.posts.some((row) => row.id === post.id),
+        'search reflects the edited body'
+      );
+      assert.equal(w.turns.length, 0, 'editing/reactions are never posted events');
+    });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await w.close();
+  }
+});

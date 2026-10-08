@@ -378,6 +378,9 @@ pub struct PostWrite {
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Post {
+    pub edit_revision: Option<i64>,
+    pub edited_at: Option<String>,
+    pub reactions: Option<Vec<PostReaction>>,
     pub id: String,
     pub channel_id: String,
     pub author: Actor,
@@ -394,6 +397,14 @@ pub struct Post {
     pub ord: String,
     /// A reply also shown in its channel's feed ("Also send to #channel"). Always false at top level.
     pub broadcast: bool,
+}
+
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostReaction {
+    pub emoji: String,
+    pub actor_key: String,
 }
 
 impl Post {

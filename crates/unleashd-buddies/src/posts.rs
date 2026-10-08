@@ -18,7 +18,8 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_f
 use serde_json::json;
 
 pub(crate) const POST_COLS: &str = "p.id, p.channel_id, p.author_id, p.root_id, p.reply_to_id, p.task_id, p.purpose, p.body, p.evidence, \
-    p.request, p.answer_id, p.conversation_id, p.created_at, p.ord, p.broadcast";
+    p.request, p.answer_id, p.conversation_id, p.created_at, p.ord, p.broadcast, p.edit_revision, p.edited_at, \
+    (SELECT json_group_array(json_object('emoji', r.emoji, 'actorKey', r.actor)) FROM post_reaction r WHERE r.post_id = p.id)";
 
 /// The channels `actor_param` (an actor key) may read: the owner every one, a buddy the public and
 /// task channels and the direct channels it is a member of. `c` is the channel.
@@ -81,6 +82,9 @@ pub(crate) fn post_row(r: &Row) -> rusqlite::Result<Post> {
         created_at: r.get(12)?,
         ord: r.get(13)?,
         broadcast: r.get(14)?,
+        edit_revision: Some(r.get(15)?),
+        edited_at: r.get(16)?,
+        reactions: Some(serde_json::from_str(&r.get::<_, String>(17)?).map_err(|e| corrupt(CoreError::Json(e)))?),
     })
 }
 
@@ -232,6 +236,52 @@ impl Ask {
 }
 
 impl Store {
+    // Pattern: one-write-path (docs/patterns.md#one-write-path)
+    // Edit the existing owner post; never insert or dispatch it again. The revision prevents lost edits.
+    // Guard: post_interactions (identity, stale edits, authorization, search and no new deliveries).
+    pub fn edit_post(&mut self, actor: &Actor, id: &str, body: &str, base_revision: i64, key: &str) -> Result<Post> {
+        self.write(|tx| {
+            let post = get_post(tx, id)?;
+            if *actor != Actor::Owner || post.author != Actor::Owner {
+                return Err(CoreError::Denied("only the owner can edit their own messages".into()));
+            }
+            if body.trim().is_empty() || body.len() > 128_000 { return Err(CoreError::Invalid("empty or oversized post".into())); }
+            let channel = get_channel(tx, &post.channel_id)?;
+            let m = Mutation { actor, workspace_id: &channel.workspace_id, buddy_id: None,
+                task_id: post.task_id.as_deref(), op: "post.edit",
+                payload: json!({"post": id, "body": body, "baseRevision": base_revision}), key: Some(key) };
+            idempotent(tx, &m, |tx| {
+                let revision = post.edit_revision.unwrap_or(1);
+                if revision != base_revision { return Err(CoreError::RevisionConflict { expected: base_revision, current: revision }); }
+                tx.execute("UPDATE post SET body = ?2, edit_revision = edit_revision + 1, edited_at = ?3 WHERE id = ?1", params![id, body, now_iso()])?;
+                Ok(id.into())
+            })?;
+            get_post(tx, id)
+        })
+    }
+
+    // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys)
+    // Desired state, not a toggle: retrying an add/remove cannot reverse a reaction.
+    pub fn react_post(&mut self, actor: &Actor, id: &str, emoji: &str, active: bool, key: &str) -> Result<Post> {
+        self.write(|tx| {
+            let post = get_post(tx, id)?;
+            require(tx, actor, Op::Post, &Subject::Channel { id: post.channel_id.clone() })?;
+            if emoji.is_empty() || emoji.chars().count() > 32 || emoji.chars().any(|c| c.is_ascii_alphabetic() || c.is_whitespace()) {
+                return Err(CoreError::Invalid("reaction must be an emoji".into()));
+            }
+            let channel = get_channel(tx, &post.channel_id)?;
+            let m = Mutation { actor, workspace_id: &channel.workspace_id, buddy_id: actor.buddy_id(),
+                task_id: post.task_id.as_deref(), op: "post.react",
+                payload: json!({"post": id, "emoji": emoji, "active": active}), key: Some(key) };
+            idempotent(tx, &m, |tx| {
+                if active { tx.execute("INSERT OR IGNORE INTO post_reaction (post_id, actor, emoji) VALUES (?1, ?2, ?3)", params![id, actor.key(), emoji])?; }
+                else { tx.execute("DELETE FROM post_reaction WHERE post_id = ?1 AND actor = ?2 AND emoji = ?3", params![id, actor.key(), emoji])?; }
+                Ok(id.into())
+            })?;
+            get_post(tx, id)
+        })
+    }
+
     pub fn post(&mut self, actor: &Actor, channel: ChannelRef, input: PostInput) -> Result<Post> {
         self.write_post(actor, channel, input).map(|written| written.post)
     }

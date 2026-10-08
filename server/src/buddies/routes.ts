@@ -25,6 +25,8 @@ import {
   NewDirectSchema,
   type OwnerPostMentionConfig,
   PostBodySchema,
+  PostEditSchema,
+  PostReactionSchema,
   ReadSchema,
   RetrySchema,
   ScheduleSchema,
@@ -448,6 +450,25 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         ...(await feedPage(req, { kind: 'thread', rootId: root.id })),
         seats: await channels.threadSeats(root.id),
       };
+    },
+    // An edit/reaction changes the existing post, without the posted event that starts Buddy replies.
+    [buddyMutationRoute('post.edit')]: async (req) => {
+      const input = PostEditSchema.parse(req.body);
+      const original = await core.getPost(OWNER, p(req, 'postId'));
+      const channel = await core.openChannel(OWNER, { kind: 'id', id: original.channelId });
+      const resolved = await resolveForWorkspace(
+        core,
+        channel.workspaceId,
+        requireCanonicalPostMedia(input.body, {
+          uploadsRoot: deps.uploadsRoot(),
+          channelId: channel.id,
+        })
+      );
+      return write(core.editPost(OWNER, original.id, resolved.body, input.baseRevision, input.key));
+    },
+    [buddyMutationRoute('post.react')]: async (req) => {
+      const input = PostReactionSchema.parse(req.body);
+      return write(core.reactPost(OWNER, p(req, 'postId'), input.emoji, input.active, input.key));
     },
     [buddyMutationRoute('channel.post')]: (req) => ownerPost(req.body, p(req, 'channelId')),
     // A failed reply's retry on another harness (493c1c7); the new attempt is a later reply.

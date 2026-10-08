@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { BuddySigil } from './BuddySigil';
 import { ChannelAuthor, type OpenDm } from './ChannelAuthor';
-import { ChannelMarkdown, TypingDots } from './ChannelMarkdown';
+import { TypingDots } from './ChannelMarkdown';
+import { ChannelPostContent } from './ChannelPostContent';
 import { ConversationEye } from './ConversationEye';
 import { CopyLinkButton } from './CopyLinkButton';
 import { ReplyRetry } from './HarnessPicker';
@@ -10,7 +11,6 @@ import {
   type ChannelRow,
   type WorkspaceDirectory,
   authorName,
-  channelPostBody,
   clockTime,
   postPurposeLabel,
   postPurposeTag,
@@ -247,13 +247,7 @@ function MessageActions({ post, context }: { post: Post; context: RowContext }) 
 }
 
 function PostBody({ post, context }: { post: Post; context: RowContext }) {
-  return (
-    <ChannelMarkdown
-      body={channelPostBody(post)}
-      buddyNames={context.directory.buddyNames}
-      tasks={context.directory.taskById}
-    />
-  );
+  return <ChannelPostContent post={post} directory={context.directory} />;
 }
 
 function rowUnread(post: Post, context: RowContext): 'true' | undefined {

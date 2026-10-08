@@ -5,6 +5,8 @@ export declare class BuddiesCore {
   /** Opens (or creates) the database. Refuses a file that is not a buddies-core database. */
   static open(path: string): Promise<BuddiesCore>
   post(actor: Actor, channel: ChannelRef, input: PostInput): Promise<PostWrite>
+  editPost(actor: Actor, id: string, body: string, baseRevision: number, key: string): Promise<Post>
+  reactPost(actor: Actor, id: string, emoji: string, active: boolean, key: string): Promise<Post>
   answer(actor: Actor, input: AnswerInput): Promise<Post>
   getPost(actor: Actor, id: string): Promise<Post>
   openChannel(actor: Actor, channel: ChannelRef): Promise<Channel>
@@ -381,6 +383,9 @@ export type Outcome =
   | { kind: 'cancelled'; reason: string }
 
 export interface Post {
+  editRevision?: number
+  editedAt?: string
+  reactions?: Array<PostReaction>
   id: string
   channelId: string
   author: Actor
@@ -438,6 +443,11 @@ export interface PostPage {
 export type PostQuery =
   | { kind: 'channel'; channelId: string }
   | { kind: 'thread'; rootId: string }
+
+export interface PostReaction {
+  emoji: string
+  actorKey: string
+}
 
 /** A post write: the post, and whether this call created it (false: its key replayed). */
 export interface PostWrite {

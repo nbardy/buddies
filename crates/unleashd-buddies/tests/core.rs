@@ -2240,3 +2240,37 @@ fn a_request_message_sent_inside_a_boundary_window_is_never_lost() {
     let left: Vec<String> = s.pending_messages("worker-a").unwrap().into_iter().map(|m| m.post.body).collect();
     assert_eq!(left, ["second"], "the message sent inside the window is still queued for the next boundary");
 }
+
+#[test]
+fn post_interactions_preserve_threads_and_deliveries_and_survive_reopen() {
+    let f = fixture();
+    let mut s = f.store;
+    let channel = s.create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: "emoji".into(), purpose: "reactions".into(), key: "channel".into() }).unwrap();
+    let mut input = request("original", "post");
+    input.kind = PostKind::Inform;
+    input.from_conversation_id = None;
+    let root = s.post(&Actor::Owner, ChannelRef::Id { id: channel.id.clone() }, input.clone()).unwrap();
+    input.body = "reply".into(); input.key = "reply".into(); input.reply_to_id = Some(root.id.clone());
+    let reply = s.post(&buddy("ic"), ChannelRef::Id { id: channel.id.clone() }, input).unwrap();
+    let before = s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 100).unwrap().len();
+    let edited = s.edit_post(&Actor::Owner, &root.id, "updated 🚀", 1, "edit").unwrap();
+    assert_eq!((&edited.id, &edited.ord, &edited.created_at), (&root.id, &root.ord, &root.created_at));
+    assert_eq!(edited.edit_revision, Some(2));
+    assert!(edited.edited_at.is_some());
+    assert_eq!(s.edit_post(&Actor::Owner, &root.id, "updated 🚀", 1, "edit").unwrap().edit_revision, Some(2));
+    assert!(matches!(s.edit_post(&Actor::Owner, &root.id, "stale", 1, "stale"), Err(CoreError::RevisionConflict { .. })));
+    assert!(matches!(s.edit_post(&Actor::Owner, &reply.id, "overwrite buddy", 1, "bad"), Err(CoreError::Denied(_))));
+    assert!(matches!(s.edit_post(&buddy("ic"), &root.id, "overwrite owner", 2, "bad-actor"), Err(CoreError::Denied(_))));
+    let reacted = s.react_post(&Actor::Owner, &root.id, "🚀", true, "react").unwrap();
+    assert_eq!(reacted.reactions.unwrap().len(), 1);
+    s.react_post(&Actor::Owner, &root.id, "🚀", true, "react").unwrap();
+    assert_eq!(s.get_post(&Actor::Owner, &root.id).unwrap().reactions.unwrap().len(), 1);
+    assert_eq!(s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 100).unwrap().len(), before);
+    drop(s);
+    let mut reopened = Store::open(f.path.to_str().unwrap()).unwrap();
+    assert_eq!(reopened.get_post(&Actor::Owner, &reply.id).unwrap().root_id, Some(root.id.clone()));
+    let kept = reopened.get_post(&Actor::Owner, &root.id).unwrap();
+    assert_eq!(kept.body, "updated 🚀");
+    assert_eq!(kept.reactions.unwrap()[0].actor_key, "owner");
+    assert_eq!(reopened.react_post(&Actor::Owner, &root.id, "🚀", false, "remove").unwrap().reactions.unwrap().len(), 0);
+}

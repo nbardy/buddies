@@ -3,7 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BuddySigil } from '../../components/buddies/BuddySigil';
 import { ChannelHeaderControls } from '../../components/buddies/ChannelArchive';
 import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
-import { ChannelMarkdown, TypingDots } from '../../components/buddies/ChannelMarkdown';
+import { TypingDots } from '../../components/buddies/ChannelMarkdown';
+import { ChannelPostContent } from '../../components/buddies/ChannelPostContent';
 import { ConversationEye } from '../../components/buddies/ConversationEye';
 import { CopyLinkButton } from '../../components/buddies/CopyLinkButton';
 import { ReplyRetry } from '../../components/buddies/HarnessPicker';
@@ -11,7 +12,6 @@ import {
   type ChannelRow,
   type WorkspaceDirectory,
   authorName,
-  channelPostBody,
   clockTime,
   postPurposeLabel,
   postPurposeTag,
@@ -157,11 +157,7 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
                 linkState={linkState}
               />
             </div>
-            <ChannelMarkdown
-              body={channelPostBody(row.post)}
-              buddyNames={context.directory.buddyNames}
-              tasks={context.directory.taskById}
-            />
+            <ChannelPostContent post={row.post} directory={context.directory} />
             <ReplyRetry post={row.post} />
             <PostFooter post={row.post} context={context} />
           </div>
@@ -183,11 +179,7 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
               className="mobile-channel-post__reply ui-inline-row ui-muted"
               linkState={linkState}
             />
-            <ChannelMarkdown
-              body={channelPostBody(row.post)}
-              buddyNames={context.directory.buddyNames}
-              tasks={context.directory.taskById}
-            />
+            <ChannelPostContent post={row.post} directory={context.directory} />
             <ReplyRetry post={row.post} />
             <PostFooter post={row.post} context={context} />
           </div>
