@@ -56,16 +56,13 @@ export interface RunnerHost {
    * equal to the conversation's is a no-op.
    */
   reconfigure(conversationId: string, config: RunConfig): Promise<void>;
-  /**
-   * The Buddy's seat in a thread it follows no conversation in (a mention, the owner's DM post):
-   * opened, on the owner's pick when the run carries one, and its id returned (channels.ts
-   * `openSeat`).
-   */
+  /** Resolve the thread's choice, retaining a matching subscribed context (channels.ts). */
   openSeat(input: {
     buddyId: string;
     workspaceId: string;
     rootId: string;
     pick: RunConfig | undefined;
+    subscribedConversationId?: string;
   }): Promise<string>;
   /** The thread follow-up gate for one Buddy: one yes/no model call (channels.ts `askGate`). */
   askGate(input: { buddyId: string; rootId: string; prompt: string }): Promise<GateVerdict>;
@@ -335,7 +332,13 @@ export function createRunner(options: {
       return conversationId;
     },
   });
-  const seatTurn = (run: Run, rootId: string, prompt: string, owner: boolean): Job => ({
+  const seatTurn = (
+    run: Run,
+    rootId: string,
+    prompt: string,
+    owner: boolean,
+    subscribedConversationId?: string
+  ): Job => ({
     kind: 'turn',
     prompt,
     owner,
@@ -347,6 +350,7 @@ export function createRunner(options: {
         workspaceId: run.workspaceId,
         rootId,
         pick: run.config,
+        subscribedConversationId,
       }),
   });
 
@@ -495,8 +499,16 @@ export function createRunner(options: {
         }
         // An owner's chip pick (or a retry's model) applies to the thread's SEAT, never to a chat
         // that merely follows the thread: it must not move the owner's own chat onto a model.
-        if (origin && host.registered(origin) && !run.config)
-          return existingTurn(await outOfOwnerChat(run, origin), prompt, owner);
+        if (origin && host.registered(origin) && !run.config) {
+          const subscribedConversationId = await outOfOwnerChat(run, origin);
+          return seatTurn(
+            run,
+            trigger.rootId ?? trigger.id,
+            prompt,
+            owner,
+            subscribedConversationId
+          );
+        }
         return trigger.author.kind === 'buddy' && trigger.author.id === run.buddyId
           ? freshTurn(run, prompt, owner)
           : seatTurn(run, trigger.rootId ?? trigger.id, prompt, owner);

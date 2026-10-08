@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { Buddy, Cursor, Post } from '@unleashd/buddies-core';
 import {
-  type ConversationConfig,
   type ChannelResponse,
+  type ConversationConfig,
   type InstalledAgent,
   type ReplyRetryResult,
   isHarnessRetryFailure,
@@ -14,6 +15,7 @@ import {
   mentionedIds,
 } from '@unleashd/shared';
 import type { ConversationRuntime } from '../conversations/runtime';
+import type { BackgroundWork, TurnActivity } from '../turns/background-work';
 import { profileExecution } from './briefing';
 import {
   type LiveConversation,
@@ -24,30 +26,17 @@ import {
 } from './buddy-conversation-slots';
 import type { ReplyGate } from './channel-reply-gate';
 import { type BuddiesCore, OWNER } from './core';
-import type { BackgroundWork, TurnActivity } from '../turns/background-work';
 import type { BuddyEvents } from './events';
 import { runConfigOfPick } from './worker-config';
 
-// Thread seats and DM chats: WHICH conversation a Buddy answers a thread in. A post wakes nobody
-// here. Since step 5 (2026-10-06) a mention, a task-comment mention, the owner's DM post and a
-// retry are all `deliver` runs (crate deliveries.rs `wake`, runner.ts `deliverJob`); the runner
-// asks `openSeat` for the conversation of one that follows no thread yet. Step 5 deleted the pair
-// machine (channel-pair.ts), which stays deleted. It also deleted the follow-up gate
-// (channel-reply-gate.ts); the owner restored it on 2026-10-07 ("stay simple, don't overload
-// DMs"): in a public or task thread a participant that did not subscribe is asked one yes/no
-// question per new post before it gets a turn, now as a step of its `deliver` run (runner.ts
-// `followUpGate`) instead of host memory. `askGate` below resolves the model it runs on.
-// NO HOP BOUND (owner decision 2026-10-03, #bugfixes): Buddies may mention each other without
-// pause and stop when they decide to. The brakes are the delivery's coalescing, `follow:false`,
-// the run limits and the owner's Stop.
-// SEATS: ONE resumed conversation per (thread, Buddy) (buddy-conversation-slots.ts). The owner's
-// mention-chip pick is applied to the seat, which keeps its provider session; only a pick on
-// another PROVIDER opens a new seat generation (a started session cannot change provider). Until
-// 2026-09-29 any differing pick, an effort change included, opened a new seat and dropped hours of
-// resumed context (wave_sim thread, 2026-09-28). The Buddy posts its own reply with the `post`
-// tool; its text output is a private scratchpad and never reaches the channel (493c1c7). A turn
-// the owner is waiting on that posts nothing, or fails, leaves a visible reply_failed notice
-// (runner.ts, delivery design D10).
+// Thread seats and DM chats choose WHERE a delivery replies; the crate owns waking/admission.
+// Public/task follow-ups use runner.ts followUpGate (owner restored 2026-10-07); mentions,
+// subscriptions, DMs and retries are not gated. A seat is one resumed conversation per thread
+// and Buddy; only changing PROVIDER opens a new generation, preserving same-provider context
+// (2026-09-29 fix). The Buddy posts its reply with `post`; private output stays private. An
+// owner-facing silent/error turn leaves reply_failed (runner.ts, design D10).
+// NO HOP BOUND (owner 2026-10-03): conversations continue until the Buddies decide to stop,
+// subject to existing run limits, read coalescing, follow:false and owner Stop.
 
 const THREAD_PAGE = 200;
 
@@ -191,12 +180,9 @@ export function createChannels(ports: ChannelsPorts) {
   }
 
   async function seatConfig(
-    rootId: string,
     buddyId: string,
-    request: SeatRequest,
-    thread?: Post[]
+    choice: Awaited<ReturnType<typeof threadChoice>>
   ): Promise<LiveConversation> {
-    const choice = await threadChoice(rootId, buddyId, request, thread);
     const { current, next } = choice.seats;
     const config = choice.config ?? profileConfig(await core.getBuddy(buddyId));
     return {
@@ -231,23 +217,38 @@ export function createChannels(ports: ChannelsPorts) {
   }
 
   return {
-    /**
-     * The Buddy's seat in a thread, opened and running on the config this thread decided: the
-     * owner's pick (a delivery's run config), an explicit override, the model its latest reply ran,
-     * or its profile. A `no-agent` profile throws here, so the run fails and the thread gets a
-     * visible reply_failed notice, with nothing spawned (fresh-install trial 2026-10-05).
-     */
+    /** Resolve a delivery on the thread choice; retain a matching subscribed context.
+     * No-agent resolution fails visibly before anything spawns (fresh-install guard). */
     async openSeat(input: {
       buddyId: string;
       workspaceId: string;
       rootId: string;
       pick: ConversationConfig | undefined;
+      subscribedConversationId?: string;
     }): Promise<string> {
-      const seat = await seatConfig(
+      // Request returns keep their requester model (guard: tracked workers return to parent model).
+      if (!input.pick && input.subscribedConversationId) {
+        const root = await core.getPost(OWNER, input.rootId);
+        if (root.request.state !== 'none') return input.subscribedConversationId;
+      }
+      const choice = await threadChoice(
         input.rootId,
         input.buddyId,
         input.pick ? { kind: 'chosen', config: input.pick } : { kind: 'keep' }
       );
+      // Pattern: one-definition (docs/patterns.md#one-definition)
+      // A stale subscribed Claude worker bypassed a saved Sol pick after quota failure (10-08).
+      // Keep a matching follower's context; a different choice uses the thread's canonical seat.
+      // Guard: a stale subscribed conversation cannot resurrect Claude after a Codex pick fails.
+      if (!input.pick && input.subscribedConversationId) {
+        const slot = await ports.conversations.slot(input.subscribedConversationId);
+        if (
+          slot.kind === 'live' &&
+          (!choice.config || isDeepStrictEqual(slot.config, choice.config))
+        )
+          return input.subscribedConversationId;
+      }
+      const seat = await seatConfig(input.buddyId, choice);
       const conversation = await openConversation(ports.conversations, {
         context: { buddyId: input.buddyId, workspaceId: input.workspaceId },
         conversationId: seat.conversationId,
@@ -259,20 +260,16 @@ export function createChannels(ports: ChannelsPorts) {
       return conversation.id;
     },
 
-    /**
-     * The thread follow-up gate for one Buddy: asked on the config its seat would run (the thread's
-     * decided model, else its profile), so a Buddy the owner moved to another harness is asked
-     * there, not on a profile harness that may be down.
-     */
+    /** Gate on the same thread choice as its reply, even when the profile harness is down. */
     async askGate(input: { buddyId: string; rootId: string; prompt: string }) {
-      const seat = await seatConfig(input.rootId, input.buddyId, { kind: 'keep' });
+      const seat = await seatConfig(
+        input.buddyId,
+        await threadChoice(input.rootId, input.buddyId, { kind: 'keep' })
+      );
       return ports.gate({ config: seat.config, prompt: input.prompt });
     },
 
-    /**
-     * Each thread Buddy's latest seat (harness, model, reasoning): the one its next reply runs
-     * on. The composer and retry share explicit intent, then thread history, then profile.
-     */
+    /** Picker/retry projection of the same choice that drives execution. */
     async threadSeats(rootId: string): Promise<ThreadSeat[]> {
       const root = await core.getPost(OWNER, rootId);
       if (root.rootId) return [];
@@ -310,12 +307,8 @@ export function createChannels(ports: ChannelsPorts) {
       }));
     },
 
-    /**
-     * Rerun a reply whose HARNESS failed (out of tokens, a provider error) on the harness the owner
-     * picks; the failure notice stays and the new attempt is a later reply. A model change resumes
-     * the seat, while a provider change opens a new one. A second click while the rerun is queued
-     * or running starts nothing (crate `retry_delivery`).
-     */
+    /** Retry a harness failure on the owner's pick; keep the notice. Same-provider retries
+     * resume; provider changes open a seat. Duplicate clicks coalesce in retry_delivery. */
     async retryReply(failed: Post, config: ConversationConfig): Promise<ReplyRetryResult> {
       if (failed.purpose !== 'reply_failed' || failed.author.kind !== 'buddy' || !failed.replyToId)
         throw new Error('Only a failed Buddy reply can be retried');
@@ -338,11 +331,8 @@ export function createChannels(ports: ChannelsPorts) {
       return { buddyId, generations: live };
     },
 
-    /**
-     * "New chat" in a DM: the next generation, with no handoff. Earlier ones stay live, so the DM
-     * shows them above a divider. `config` defaults to the current chat's; with `message` it is the
-     * out-of-tokens retry, which must move to another harness and resends the owner's message.
-     */
+    /** New DM generation without handoff; earlier chats stay visible. A message retries on a
+     * different harness; otherwise config defaults to the current chat's. */
     async newDirect(
       buddyId: string,
       input: { config?: ConversationConfig; message?: string }

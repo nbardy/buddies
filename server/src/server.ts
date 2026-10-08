@@ -1,8 +1,8 @@
 import http from 'node:http';
-import { recordsCarrier } from './turns/intake';
 import os from 'node:os';
 import path from 'node:path';
 import { ProviderSchema, encodeRows } from '@unleashd/shared';
+import { recordsCarrier } from './turns/intake';
 
 import { attachExecution, executeCommand } from '@nbardy/agent-cli';
 import compression from 'compression';
@@ -412,12 +412,13 @@ const buddyRunnerHost: RunnerHost = {
     );
   },
   askGate: (input) => buddyChannels.askGate(input),
-  openSeat: async ({ buddyId, workspaceId, rootId, pick }) =>
+  openSeat: async ({ buddyId, workspaceId, rootId, pick, subscribedConversationId }) =>
     buddyChannels.openSeat({
       buddyId,
       workspaceId,
       rootId,
       pick: pick && workerConversationConfig(pick),
+      subscribedConversationId,
     }),
   openBranch: (chat) => buddyCreationService.openBranch(chat),
   openBackground: async ({ conversationId, context, commandId, config }) => {

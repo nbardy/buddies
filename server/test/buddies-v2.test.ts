@@ -73,11 +73,11 @@ import { replaceRuntimeConfig } from '../src/conversations/runtime-config';
 import { registerFilesystemRoutes } from '../src/http/filesystem-routes';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { installedAgent } from '../src/providers/installed-agent';
+import { BackgroundWork } from '../src/turns/background-work';
 import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
 import { testExecutions } from './fixtures/fake-turn';
 import { recordStore } from './fixtures/records';
 import { tempDir } from './fixtures/temp';
-import { BackgroundWork } from '../src/turns/background-work';
 
 // One per test backend, as in server.ts: the hook route and the channel status read it.
 const backgroundWork = new BackgroundWork();
@@ -335,7 +335,11 @@ async function world(reopen?: string, realProvider = false) {
     resolver: { resolve: async (config) => resolveConfigAgainstProviderCatalog(config) },
   });
   // The thread follow-up gate, scripted: each call takes the next verdict (default `<no>`).
-  const gate = { asked: [] as string[], verdicts: [] as GateVerdict[] };
+  const gate = {
+    asked: [] as string[],
+    configs: [] as ConversationConfig[],
+    verdicts: [] as GateVerdict[],
+  };
   const runner = createRunner({
     core,
     grants,
@@ -359,12 +363,13 @@ async function world(reopen?: string, realProvider = false) {
           workerConversationConfig(config)
         ),
       askGate: (input) => channels.askGate(input),
-      openSeat: ({ buddyId, workspaceId, rootId, pick }) =>
+      openSeat: ({ buddyId, workspaceId, rootId, pick, subscribedConversationId }) =>
         channels.openSeat({
           buddyId,
           workspaceId,
           rootId,
           pick: pick && workerConversationConfig(pick),
+          subscribedConversationId,
         }),
       openBranch: (chat) => creation.openBranch(chat),
       openBackground: async ({ conversationId, context, commandId, config }) => {
@@ -439,8 +444,9 @@ async function world(reopen?: string, realProvider = false) {
     installedAgent: installed,
     conversations: stable,
     channelChanged: () => undefined,
-    gate: async ({ prompt }) => {
+    gate: async ({ config, prompt }) => {
       gate.asked.push(prompt);
+      gate.configs.push(config);
       return gate.verdicts.shift() ?? { kind: 'pass' };
     },
   });
@@ -1539,6 +1545,13 @@ test('latest thread reply model drives the picker and the next delivery; explici
     const thread = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
     await until(async () => (await thread()).some((p) => p.purpose === 'reply'), 'first reply');
+    await until(
+      async () => (await w.channels.responding(w.general.id)).length === 0,
+      'first seat idle'
+    );
+    const oldSeat = (await w.runs(w.lead.id)).find((r) => r.input.kind === 'deliver')!
+      .conversationId!;
+    await w.core.followThread(buddyActor(w.lead.id), root.id, oldSeat, 20);
 
     const sol: ConversationConfig = {
       ...createDefaultConversationConfig('codex'),
@@ -1592,12 +1605,20 @@ test('latest thread reply model drives the picker and the next delivery; explici
       async () => (await thread()).filter((p) => p.purpose === 'reply').length === 3,
       'follow-up post'
     );
+    await until(
+      async () => (await w.channels.responding(w.general.id)).length === 0,
+      'follow-up idle'
+    );
     const explicit = createDefaultConversationConfig('claude');
     w.picks.set(w.lead.id, explicit);
     await say(`[@Lead](buddy:${w.lead.id}) switch back`, root.id);
     await until(
       async () => (await thread()).filter((p) => p.purpose === 'reply').length === 4,
       'explicit reply'
+    );
+    await until(
+      async () => (await w.channels.responding(w.general.id)).length === 0,
+      'explicit idle'
     );
     assert.equal(w.turns[2].request.harness, 'claude', 'a pick on another provider opens a seat');
     w.gate.verdicts.push({ kind: 'respond' });
@@ -1767,6 +1788,150 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
       async () => (await w.channels.responding(w.general.id)).length === 0,
       'weekly retry idle'
     );
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
+// A subscribed old worker can coexist with a new explicit seat; following is a delivery route,
+// not permission to replace the thread's saved model choice.
+test('a stale subscribed conversation cannot resurrect Claude after a Codex pick fails', async () => {
+  let w = await world();
+  let { server, http } = await ownerHttp(w);
+  try {
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.lead.id,
+      changes: { provider: { kind: 'set', value: 'claude' } },
+      key: 'subscribed-claude-profile',
+    });
+    const root = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) start`,
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        key: 'subscribed-root',
+      }
+    );
+    const settled = () =>
+      until(
+        async () =>
+          (await w.runs(w.lead.id)).every((r) => r.status !== 'running' && r.status !== 'queued'),
+        'all deliveries settled'
+      );
+    await until(() => w.turns.length === 1, 'Claude starts');
+    await settled();
+    const oldId = (await w.runs(w.lead.id)).find((r) => r.input.kind === 'deliver')!
+      .conversationId!;
+    await w.core.followThread(buddyActor(w.lead.id), root.id, oldId, 20);
+    w.providerErrors.set(2, "You've hit your weekly limit · resets Oct 11 at 7pm (Asia/Makassar)");
+    await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body: `[@Lead](buddy:${w.lead.id}) old exhausted attempt`,
+      replyToId: root.id,
+      key: 'claude-quota',
+    });
+    await until(() => w.turns.length === 2, 'Claude quota attempt');
+    await settled();
+    assert.equal(w.turns[1].request.harness, 'claude');
+    const selected: ConversationConfig = {
+      provider: 'codex',
+      model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
+      reasoning: { mode: 'explicit', effort: 'medium' },
+    };
+    w.outOfTokens.add(3);
+    const picked = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body: `[@Lead](buddy:${w.lead.id}) switch`,
+      replyToId: root.id,
+      mentionConfigs: [{ buddyId: w.lead.id, config: selected }],
+      key: 'subscribed-pick',
+    });
+    assert.equal(picked.status, 201);
+    await until(() => w.turns.length === 3, 'selected attempt starts');
+    await settled();
+    assert.equal(w.turns[2].request.harness, 'codex');
+    assert.equal(
+      w.turns[2].request.resumeSessionId,
+      undefined,
+      'no Claude session resumed as Codex'
+    );
+    assert.deepEqual((await w.channels.threadSeats(root.id))[0].config, selected);
+    const chosenId = (await w.runs(w.lead.id)).find((r) => r.config?.provider === 'codex')!
+      .conversationId!;
+    const restore = await Promise.all(
+      [oldId, chosenId].map(async (id) => ({ id, slot: await w.stable.slot(id) }))
+    );
+    await w.stop();
+    server.close();
+    w = await world(w.scratch); // fresh crate, config service, runner, grants and runtimes
+    ({ server, http } = await ownerHttp(w));
+    for (const { id, slot } of restore) {
+      assert.equal(slot.kind, 'live');
+      if (slot.kind !== 'live') throw new Error('missing saved seat');
+      await w.stable.createConversation({
+        context: { buddyId: w.lead.id, workspaceId: w.ws },
+        conversationId: id,
+        commandId: `channel-thread-${id}`,
+        config: slot.config,
+        provenance: slot.provenance,
+        deferInitialMessage: true,
+      });
+    }
+    assert.deepEqual((await w.channels.threadSeats(root.id))[0].config, selected);
+
+    const next = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body: `[@Lead](buddy:${w.lead.id}) continue without another pick`,
+      replyToId: root.id,
+      key: 'subscribed-follow-up',
+    });
+    assert.equal(next.status, 201);
+    await until(() => w.turns.length === 1, 'unconfigured follow-up starts');
+    await settled();
+    assert.equal(
+      w.turns[0].request.harness,
+      'codex',
+      'subscription must not override chosen harness'
+    );
+    assert.equal(w.turns[0].request.model, 'gpt-6.1-sol');
+    assert.equal(w.turns[0].request.reasoningEffort, 'medium');
+    assert.equal(
+      w.turns[0].request.resumeSessionId,
+      'native-3',
+      'resumes only the chosen Codex seat'
+    );
+    for (let n = 0; n < 2; n++) {
+      await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+        body: `[@Lead](buddy:${w.lead.id}) continue ${n}`,
+        replyToId: root.id,
+        key: `continued-${n}`,
+      });
+      await until(() => w.turns.length === n + 2, 'continued owner follow-up');
+      await settled();
+      const invoked = w.turns[n + 1].request;
+      assert.deepEqual(
+        [invoked.harness, invoked.model, invoked.reasoningEffort],
+        ['codex', 'gpt-6.1-sol', 'medium']
+      );
+      assert.equal(invoked.resumeSessionId, 'native-3');
+    }
+    await w.core.followThread(buddyActor(w.lead.id), root.id, null, 20);
+    w.gate.verdicts.push({ kind: 'respond' });
+    await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body: 'A plain follow-up after unsubscribing',
+      replyToId: root.id,
+      key: 'chosen-gate',
+    });
+    await until(() => w.turns.length === 4, 'gate and reply');
+    await settled();
+    assert.deepEqual(w.gate.configs.at(-1), selected);
+    assert.deepEqual(
+      [w.turns[3].request.harness, w.turns[3].request.model, w.turns[3].request.reasoningEffort],
+      ['codex', 'gpt-6.1-sol', 'medium']
+    );
+    for (const turn of w.turns) assert.equal(await probe(turn.mcp), 401, 'settled grants revoked');
   } finally {
     server.close();
     await w.close();
@@ -2374,6 +2539,11 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
     const lead = w.turns[0].request as { model?: string };
     assert.notEqual(lead.model, 'gpt-6-luna', 'the spawner itself stays on its profile');
     const returned = w.turns.find((t) => delivered(t, a().id))!;
+    assert.equal(
+      returned.request.model,
+      w.turns[0].request.model,
+      'worker model never replaces requester model'
+    );
     assert.equal(
       returned.request.resumeSessionId,
       'native-1',
