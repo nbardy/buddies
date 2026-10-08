@@ -955,14 +955,9 @@ export type NativeAgent = { kind: 'main' } | { kind: 'sub'; id: string };
 // - Owner posts trigger it; Buddy chatter waits for a Buddy tool call or the next turn. Once
 //   triggered it takes the whole unread page, because the read mark is one cursor per thread and
 //   skipping a Buddy post would mark it read unseen.
-// - Sub-agents get at most ONE notice per owner post per turn, in total (crate `notice_sub_agent`,
-//   durable on the run), never marked read: the parent, the one answering the thread, takes it at
-//   its next boundary (a foreground sub-agent's return is one; an idle parent's Stop hold is
-//   another). Taking it in the sub-agent would fence the delivery, and the parent would never see
-//   it unless the sub-agent relayed it. Claude fires no parent hook while a foreground sub-agent
-//   runs (probed with claude 2.1.294), so one sub-agent's boundary is the earliest notice.
-//   task_01a11af2: this was once per sub-agent id, in memory: 35 notices into a 27-agent Workflow,
-//   repeated after a restart, while the idle parent got nothing.
+// - One durable notice per turn, never a read mark: per-sub-agent memory sent 35 copies into
+//   one Workflow and repeated them after restart. Only the parent takes/fences the post.
+//   Guard: idle-background-delivery.test.ts frozen-hook/restart case.
 // Guard: buddies-v2 "an owner post steers a live turn at a native tool boundary".
 export async function steerNativeTool(
   deps: ToolDeps,
@@ -1123,12 +1118,8 @@ function mcpServerFor(deps: ToolDeps, grant: TurnGrant, show: (part: Shown) => v
   return server;
 }
 
-// κ for every native hook (harness-steering.ts STABLE set): ONE url, dispatched here on the
-// input's `hook_event_name`, so what a hook does is decided by the server that answers it, never
-// frozen into a process's argv (task_01a11af2). An event no delivery path uses answers empty.
-// `agent_id` is present exactly when a native sub-agent made the tool call (probe:
-// agent_notes/2026-10-08_steer-any-tool-boundary.md). `background_tasks` lists claude's in-flight
-// background work at Stop (absent on harness versions before it existed: nothing to hold for).
+// One stable URL dispatches server-side; old event URLs remain aliases for adopted processes.
+// Native tool input's agent_id distinguishes sub-agents; Stop's background_tasks licenses a hold.
 const HOOK_PATH = '/hooks/event';
 // The two per-event urls of hook sets spawned before task_01a11af2. Their processes keep calling
 // them until they end, so they reach the same dispatcher.
@@ -1152,7 +1143,9 @@ function nativeHook(raw: unknown): NativeHook {
     case 'PostToolUse':
     case 'PostToolUseFailure': {
       const input = ToolHook.parse(raw);
-      const agent: NativeAgent = input.agent_id ? { kind: 'sub', id: input.agent_id } : { kind: 'main' };
+      const agent: NativeAgent = input.agent_id
+        ? { kind: 'sub', id: input.agent_id }
+        : { kind: 'main' };
       return { t: 'tool', event: input.hook_event_name, agent };
     }
     case 'Stop':

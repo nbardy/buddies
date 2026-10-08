@@ -73,11 +73,11 @@ import { replaceRuntimeConfig } from '../src/conversations/runtime-config';
 import { registerFilesystemRoutes } from '../src/http/filesystem-routes';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { installedAgent } from '../src/providers/installed-agent';
+import { BackgroundWork } from '../src/turns/background-work';
 import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
 import { testExecutions } from './fixtures/fake-turn';
 import { recordStore } from './fixtures/records';
 import { tempDir } from './fixtures/temp';
-import { BackgroundWork } from '../src/turns/background-work';
 
 // One per test backend, as in server.ts: the hook route and the channel status read it.
 const backgroundWork = new BackgroundWork();
@@ -848,6 +848,7 @@ test('a group DM is refused through MCP; one DM per recipient is the alternative
       conversationId: 'c',
       runId: null,
       subscribes: 'self',
+      hooks: { t: 'stable', version: 1 },
     });
     const spec = w.endpoint.spec(grant);
     const group = await call(spec, 'post', {
@@ -884,6 +885,7 @@ test('an MCP write fires the change bus in this process (B2)', async () => {
       conversationId: 'c',
       runId: null,
       subscribes: 'self',
+      hooks: { t: 'stable', version: 1 },
     });
     const before = w.events.length;
     const posted = await call(w.endpoint.spec(grant), 'post', {
@@ -948,6 +950,7 @@ test('workspace run rows expose task_paused and clear it when the same run becom
         conversationId: 'waiting-view',
         runId: null,
         subscribes: 'self',
+        hooks: { t: 'stable', version: 1 },
       })
     );
     const listed = await call(spec, 'runs', {
@@ -2415,6 +2418,7 @@ test('a worker turn can still create channels, search and follow, spawn and retr
         conversationId: 'capability-guard',
         runId: null,
         subscribes: 'self',
+        hooks: { t: 'stable', version: 1 },
       })
     );
     const client = await connect(spec);
@@ -3488,6 +3492,7 @@ test('a retried post (same key) wakes its mentioned Buddy once', async () => {
       conversationId: 'lead-chat',
       runId: null,
       subscribes: 'self',
+      hooks: { t: 'stable', version: 1 },
     });
     const mention = {
       channel: { id: w.general.id },
@@ -3852,6 +3857,7 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       conversationId: 'c',
       runId: null,
       subscribes: 'self',
+      hooks: { t: 'stable', version: 1 },
     });
     const searched = await call(w.endpoint.spec(grant), 'channel_read', {
       read: { search: { text: 'quarterly' } },
@@ -3927,6 +3933,7 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
         conversationId: 'c',
         runId: null,
         subscribes: 'self',
+        hooks: { t: 'stable', version: 1 },
       })
     );
     const ids = (listed: { value: Array<{ id: string }> }) => listed.value.map((t) => t.id).sort();
@@ -4326,6 +4333,7 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
       conversationId: 'archive-test',
       runId: null,
       subscribes: 'self',
+      hooks: { t: 'stable', version: 1 },
     });
     const archived = await call(w.endpoint.spec(grant), 'channel', {
       action: { kind: 'archive', channelId: w.general.id },
@@ -4397,6 +4405,7 @@ test('Buddy MCP renames a public channel without changing its identity or histor
       conversationId: 'rename-test',
       runId: null,
       subscribes: 'self',
+      hooks: { t: 'stable', version: 1 },
     });
     const renamed = await call(w.endpoint.spec(grant), 'channel', {
       action: { kind: 'rename', name: 'features', channelId: w.general.id },
@@ -4435,6 +4444,7 @@ test('Buddy MCP creates a channel, posts in it, and a replayed key returns the s
       conversationId: 'create-channel-test',
       runId: null,
       subscribes: 'self',
+      hooks: { t: 'stable', version: 1 },
     });
     const spec = w.endpoint.spec(grant);
     const input = { name: 'launch-prep', purpose: 'Launch checklist', key: 'mk-launch' };
@@ -4531,6 +4541,7 @@ const asBuddy = (w: World, buddyId: string) =>
       conversationId: `elsewhere-${buddyId}`,
       runId: null,
       subscribes: 'self',
+      hooks: { t: 'stable', version: 1 },
     })
   );
 
@@ -4875,6 +4886,7 @@ test('slim read surface: tasks get, inbox and runs list stay small and runs say 
         conversationId: 'slim-view',
         runId: null,
         subscribes: 'self',
+        hooks: { t: 'stable', version: 1 },
       })
     );
     const size = (value: unknown) => JSON.stringify(value).length;
@@ -5000,6 +5012,7 @@ test('runs get {tail:n} returns the last n assistant entries with tool names and
         conversationId: 'tail-view',
         runId: null,
         subscribes: 'self',
+        hooks: { t: 'stable', version: 1 },
       })
     );
     const got = await call(spec, 'runs', { action: { kind: 'get', runId: run.id, tail: 3 } });

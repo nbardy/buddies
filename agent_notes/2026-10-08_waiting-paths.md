@@ -54,3 +54,30 @@ notice per owner post per turn, in total, durable, so a foreground sub-agent doi
 hears a correction (task_01a11a68 requirement "incl. while it waits on its own sub-agents").
 Rejected: one notice per sub-agent (35x fan-out, today); no notice at all (regresses the foreground
 sub-agent case, where claude fires no parent hook until the sub-agent returns).
+
+
+## Successor: retry after quota exhaustion, 2026-10-08T11:0xZ
+
+Decision-maker: implementation recommendation by the resumed worker, not an owner decision.
+Source: Task comment post_01a11b29-5a73 at 10:57Z records owner post_01a11b27-81d4: use Codex
+and finish; evaluate kill/restart, do not implement blanket termination or kill Game Designer.
+Earlier evidence above was preserved by the first worker; the journal is absent at resume, so
+this worker cannot independently re-read it. Baseline implementation is acf0a1a; preserved WIP
+2f0de84. The first worker's logs /tmp/nw-fan-baseline.log and /tmp/nw-fan-m1.log report baseline
+fan-out failure and memory-only mutation failure; final checks below are rerun independently.
+
+Recommendation: do not automatically kill/restart to deliver a correction. Backend restart adopts
+the same process and argv, so it cannot add the missing hook. Killing only a foreground tool is
+provider-specific and can leave partial writes or descendants alive; it has no verified generic
+boundary here. Killing parent plus children loses useful background work and can repeat external
+side effects on resume. Use the existing explicit Stop (persist stop intent, revoke grant, drain
+process group), then an owner-authorized new turn/resume with the durable message and resolved
+model/config. Never auto-revive Stop. This is a disruptive manual fallback, not message delivery.
+Revisit only with a verified provider interrupt that preserves process/session and descendants,
+and a real-boundary proof that queued intake/config survives without replaying side effects.
+
+Known limits: pre-change processes cannot be retrofitted; a single blocking tool has no parent
+boundary; Codex idle background delivery has no verified hold; hook transport can time out;
+paused Tasks and archived Buddies remain owner-controlled. Request messages are at-least-once
+across an ambiguous response-write crash; the child notice cursor deliberately chooses at-most-once
+because it is advisory and must never consume the parent's post.

@@ -173,14 +173,14 @@ steering could not fire, and the owner's 07:14 and 07:20 posts queued behind "re
 Mechanism, per harness (`buddies/harness-steering.ts` `IdleDelivery`):
 - claude, `stop-hook-hold`: claude runs its Stop hook as soon as the model ends a turn, passing the
   in-flight `background_tasks`, and blocks while the hook runs. The hook POSTs to the Buddy
-  endpoint's `/hooks/stop`. If no background job is running, it returns at once. Otherwise
+  endpoint's `/hooks/event` (the old `/hooks/stop` URL remains an alias). If no background job is running, it returns at once. Otherwise
   `holdStoppedTurn` (`buddies/mcp.ts`) enters `background` and holds. On the first owner post in
   the thread it takes the unread page (marked read, so the queued delivery is fenced `consumed`).
   It then answers `decision: block` with the "While you were working…" text, and claude continues
   the SAME process. If the jobs' `task.finished` events arrive first (they stream live during the
   hold), it releases with no decision, and claude handles the job's notice as it always did.
 - codex, gemini, opencode, cursor, muse, `waits-visibly`: no hold is wired. The post waits as a
-  queued delivery ("waiting for the current turn…") and runs when the process exits.
+  queued delivery; its status names the next tool boundary or the harness limitation.
 
 The status line maps the activity to the channel response state: `background` reads "running
 background work…", never "replying" or "queued at the run limit". Guards:
@@ -188,3 +188,34 @@ background work…", never "replying" or "queued at the run limit". Guards:
 `buddies-v2` "real CLI claude: an owner post reaches a model idle on its background job"
 (`UNLEASHD_REAL_IDLE_BACKGROUND=1`). Probes and evidence:
 `agent_notes/2026-10-08_idle-background-delivery.md`.
+
+
+## live-delivery
+
+Successor 2026-10-08, task_01a11af2: execution 29c47118 was born before the Stop hook existed.
+Backend adoption preserves argv, so upgrading the backend could not reach its idle parent. Its
+27 native sub-agents received the owner post 35 times from a per-agent in-memory set, repeated
+on restart. New Claude turns register PostToolUse, PostToolUseFailure, Stop and SubagentStop at
+one stable `/hooks/event` endpoint; unused events return empty. Codex registers its supported
+PostToolUse event. Behaviour is dispatched by the current server, with old URLs retained as aliases.
+The exact hook set is recorded on the grant and survives adoption. Journals without it are typed
+`unrecorded`: their processes retain their original hooks until they end. No backend update can
+retrofit a missing Stop hook into an already-running process.
+
+The parent's existing collector takes the post at its tool boundary or Claude idle hold. Native
+sub-agents share one durable `run.noticed_ord`, so at most one receives each owner's post per run,
+without advancing the parent read cursor or consuming its delivery. This notice is at-most-once:
+a failed hook response can lose the advisory notice; the parent still receives the durable post.
+Request-addressed messages keep their existing response/consumed fence and at-least-once outage
+semantics. No second delivery transport or child-to-parent relay is introduced.
+
+Queued thread responses include the live seat's reach: next step, Buddy-tool-only harness,
+unrecorded hooks, picked model requiring a new turn, or no live seat here. Only actual capped
+admission says “at the run limit (n/max)”. Older backend responses without reach use a neutral
+“answers after its current turn” fallback. Explicit picks are never steered into the old model.
+Full waiting-path table and restart recommendation: `agent_notes/2026-10-08_waiting-paths.md`.
+Guards: `idle-background-delivery.test.ts` (real temp backend, idle hold plus fan-out/adoption),
+crate `a_sub_agent_notice_shows_an_owner_post_once_without_fencing_its_delivery`, and rendered
+`channel-response-status.test.tsx`. Line ceiling grows 97 lines after removing the superseded
+WeakMap and merging hook handlers; the growth records durable capability/cursor state and honest
+status projection, with no new controller.

@@ -67,6 +67,7 @@ async function main() {
   // Every Buddy turn carries a prompt; the backend's CLI probes send none.
   if (prompt.trim()) mark('turns', process.pid + '\n');
   say({ type: 'system', subtype: 'init', session_id: 'fake-' + process.pid });
+  if (/SCENARIO:fanout/.test(prompt)) return fanout();
   if (!/SCENARIO:bgidle/.test(prompt)) { text('ok'); say({ type: 'result', subtype: 'success' }); return; }
   mark('pgid', process.pid);
   say({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'Bash' } } });
@@ -101,6 +102,34 @@ async function main() {
   mark('notice-handled');
   say({ type: 'result', subtype: 'success', result: 'bg finished' });
 }
+// Execution 29c47118 as it ran: the model idle on a background Workflow, its sub-agents calling the
+// PostToolUse hook (with agent_id) over and over, and NO Stop hook: spawned before 83fd4e1, so the
+// parent is never called back until the Workflow ends and the model takes a new turn.
+async function fanout() {
+  mark('pgid', process.pid);
+  say({ type: 'system', subtype: 'task_started', task_id: 'wf1', tool_use_id: 'toolu_wf1', description: 'workflow', is_backgrounded: true, task_type: 'local_workflow' });
+  text('launched;');
+  say({ type: 'result', subtype: 'success', result: 'launched' });
+  mark('idle');
+  const tool = settings().hooks.PostToolUse[0].hooks[0].command;
+  const context = async (input) => {
+    const out = (await runHook(tool, input)).out.trim();
+    return out ? JSON.parse(out).hookSpecificOutput.additionalContext : '';
+  };
+  while (!fs.existsSync(file('go'))) {
+    for (const agent_id of ['a1', 'a2', 'a3', 'a4', 'a5']) {
+      const shown = await context({ hook_event_name: 'PostToolUse', agent_id, tool_name: 'Bash' });
+      if (shown) mark('notices', JSON.stringify({ agent_id, shown }) + '\n');
+    }
+    mark('rounds', '.');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  say({ type: 'system', subtype: 'task_notification', task_id: 'wf1', tool_use_id: 'toolu_wf1', status: 'completed', summary: 'workflow completed' });
+  // The Workflow's notice is a new model turn in this process; its first tool use is the parent's.
+  mark('parent', await context({ hook_event_name: 'PostToolUse', tool_name: 'Read' }));
+  await post('Switching to a 3x3x3 board.', 'answer');
+  say({ type: 'result', subtype: 'success', result: 'done' });
+}
 `;
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'unleashd-idle-bg-'));
@@ -110,6 +139,13 @@ const bin = path.join(root, 'bin');
 const workspaceDir = path.join(root, 'workspace');
 const log: string[] = [];
 let backend: ChildProcess | null = null;
+
+async function stopBackend(): Promise<void> {
+  if (!backend || backend.exitCode !== null) return;
+  const exited = new Promise((resolve) => backend?.once('exit', resolve));
+  backend.kill('SIGKILL');
+  await exited;
+}
 
 function startBackend(port: number): Promise<void> {
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
@@ -186,11 +222,7 @@ before(() => {
 });
 
 after(async () => {
-  if (backend && backend.exitCode === null) {
-    const exited = new Promise((resolve) => backend?.once('exit', resolve));
-    backend.kill('SIGKILL');
-    await exited;
-  }
+  await stopBackend();
   if (readFake('pgid'))
     try {
       process.kill(-Number(readFake('pgid')), 'SIGKILL');
@@ -291,5 +323,122 @@ test(
     assert.equal(readFake('turns').trim().split('\n').length, 1, 'still one process');
     assert.equal(readFake('posts'), '200 false\n200 false\n', 'both replies posted');
     assert.deepEqual((await http('GET', `/api/buddies/channels/${channelId}/responding`)).body, []);
+  }
+);
+
+/**
+ * task_01a11af2 (owner, 2026-10-08): execution 29c47118 carried only the PostToolUse hook it was
+ * spawned with. Its model sat idle on a 27-agent background Workflow, the owner's 09:30 post went
+ * into the SUB-agents 35 times (once per agent id, from host memory, again after the 09:40
+ * restart), never to the parent, and the thread said "waiting for the current turn" for 25+ min.
+ * Here: one notice in total across every sub-agent and a backend restart; a status that says what
+ * reaches the turn (and, for a process from before hook sets were recorded, that it cannot); and
+ * the parent takes the post at its own first tool use. Table: agent_notes/2026-10-08_waiting-paths.md.
+ */
+test(
+  'sub-agents of a frozen-hook turn get one notice across a restart, and the parent takes the post',
+  { timeout: 180_000 },
+  async () => {
+    await stopBackend();
+    for (const name of ['idle', 'go', 'notices', 'rounds', 'parent', 'turns', 'posts', 'pgid'])
+      fs.rmSync(fake(name), { force: true });
+    const port = freePortSync();
+    const http = api(port);
+    await startBackend(port);
+    const ws = await http('POST', '/api/buddies/workspaces', {
+      name: 'fan',
+      rootPath: workspaceDir,
+    });
+    const buddy = await http('POST', '/api/buddies', {
+      workspaceId: ws.body.id,
+      slug: 'fan-designer',
+      name: 'Fan Designer',
+      role: 'test worker',
+      provider: 'claude',
+      key: 'hire-fan-designer',
+    });
+    const buddyId = buddy.body.id as string;
+    const channel = await http('POST', `/api/buddies/workspaces/${ws.body.id}/channels`, {
+      name: 'fan',
+      purpose: 'the 29c47118 thread',
+      key: 'fan-channel',
+    });
+    const channelId = channel.body.id as string;
+    const asked = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+      kind: 'inform',
+      body: `[@Fan Designer](buddy:${buddyId}) Run the sweep. SCENARIO:fanout`,
+      key: 'fan-ask',
+    });
+    const rootId = (asked.body.post ?? asked.body).id as string;
+    fs.writeFileSync(fake('thread.json'), JSON.stringify({ channelId, rootId }));
+    await eventually(
+      () => readFake('rounds').length,
+      (n) => n > 0,
+      'the sub-agents to run'
+    );
+
+    const correction = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+      kind: 'inform',
+      body: `[@Fan Designer](buddy:${buddyId}) While that runs: use a 3x3x3 board.`,
+      replyToId: rootId,
+      key: 'fan-correction',
+    });
+    const correctionId = (correction.body.post ?? correction.body).id as string;
+    const rounds = async (more: number) => {
+      const from = readFake('rounds').length;
+      await eventually(
+        () => readFake('rounds').length,
+        (n) => n >= from + more,
+        'sub-agent rounds'
+      );
+    };
+    const notices = () => readFake('notices').trim().split('\n').filter(Boolean);
+    const responding = async () =>
+      (await http('GET', `/api/buddies/channels/${channelId}/responding`)).body as Array<{
+        state: string;
+        waiting?: { kind: string };
+        reach?: { kind: string };
+      }>;
+    await rounds(3);
+    assert.equal(notices().length, 1, `one notice for five sub-agents: ${notices().join('\n')}`);
+    assert.ok(notices()[0].includes('use a 3x3x3 board'), notices()[0]);
+    const queued = (await responding()).find((row) => row.state === 'queued');
+    assert.equal(queued?.waiting?.kind, 'conversation_busy', JSON.stringify(queued));
+    assert.equal(queued?.reach?.kind, 'next_step', 'a turn spawned with the stable hook set');
+
+    // A backend restart adopts the turn. Its journal is rewritten as a backend from before hook
+    // sets were recorded wrote it: no `hooks` on the grant.
+    await stopBackend();
+    const executions = path.join(root, 'data', 'executions');
+    const journal = fs
+      .readdirSync(executions)
+      .map((name) => path.join(executions, name, 'owner.json'))
+      .find(
+        (file) => fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('SCENARIO:fanout')
+      );
+    assert.ok(journal, 'the turn journal');
+    const owner = JSON.parse(fs.readFileSync(journal, 'utf8'));
+    owner.policy.grant.hooks = undefined;
+    fs.writeFileSync(journal, JSON.stringify(owner));
+    await startBackend(port);
+    await rounds(3);
+    assert.equal(notices().length, 1, `no notice again after the restart: ${notices().join('\n')}`);
+    const adopted = (await responding()).find((row) => row.state === 'queued');
+    assert.equal(adopted?.reach?.kind, 'spawned_before_live_delivery', JSON.stringify(adopted));
+
+    // The Workflow ends; the model's new turn in the same process takes the post at its first tool.
+    fs.writeFileSync(fake('go'), '');
+    await eventually(
+      () => readFake('parent'),
+      (text) => text.includes('use a 3x3x3 board'),
+      'the parent to take it'
+    );
+    assert.match(readFake('parent'), /While you were working/);
+    const runs = (await http('GET', `/api/buddies/runs?buddyId=${buddyId}`)).body;
+    const delivery = (runs.runs ?? runs).find(
+      (r: { input: { postId?: string } }) => r.input.postId === correctionId
+    );
+    assert.equal(delivery?.errorCode, 'consumed', JSON.stringify(delivery));
+    assert.equal(readFake('turns').trim().split('\n').length, 1, 'one process throughout');
   }
 );

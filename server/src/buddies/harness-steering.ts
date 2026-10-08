@@ -21,7 +21,7 @@ export type Steering = 'any-tool' | 'buddy-tool-only';
  *   in-flight background tasks in the input, and continues the same process on `decision: block`
  *   (mcp.ts `holdStoppedTurn`; proven on claude 2.1.294 with a real CLI run).
  * - `waits-visibly`: no such hook is wired (none probed yet, codex included), so the post waits
- *   as a queued delivery ("waiting for the current turn…") and runs when the process exits.
+ *   until its next tool boundary or process exit; the UI names this capability.
  * Evidence and probe commands: agent_notes/2026-10-08_idle-background-delivery.md.
  */
 export type IdleDelivery = 'stop-hook-hold' | 'waits-visibly';
@@ -32,23 +32,9 @@ export interface SteeringEndpoint {
   readonly hookUrl: string;
 }
 
-/**
- * The hooks a turn's process was spawned with, recorded on its grant (grants.ts) so an adopting
- * backend knows what can reach it (channels.ts `reachOf`).
- * - `stable`: the harness's STABLE hook set below. Every hook event the delivery logic uses (and
- *   the ones it may use, on the hold ceiling) calls one URL, and the server decides what each
- *   does, so a server upgrade reaches processes that are already running.
- * - `none`: the harness has no verified per-turn hook; posts land at a Buddy MCP tool call.
- * - `unrecorded`: spawned before hook sets were recorded (before task_01a11af2), so its argv
- *   holds whichever hooks its backend had: none of them may include Stop (83fd4e1).
- *
- * task_01a11af2 (owner, 2026-10-08): hooks live in the process argv, so a turn keeps the hook set it
- * was spawned with across every adoption. Execution 29c47118, spawned at 09:20:33 by a backend
- * built before 83fd4e1, carried only PostToolUse; its model went idle on a background Workflow,
- * nothing ever called back for the parent, and the owner's 09:30 post waited 25+ minutes. A server
- * fix could not reach it. One-time gap: processes spawned before this change keep their old argv
- * (`unrecorded`) until they end. Evidence: agent_notes/2026-10-08_waiting-paths.md.
- */
+// Hooks stay frozen in argv across adoption: 29c47118 had no Stop hook, so an idle parent
+// missed the owner's post for 25+ minutes. Record the stable set; old journals are unrecorded.
+// Guard: idle-background-delivery.test.ts frozen-hook/restart case. See docs/turn-lifecycle.md#live-delivery.
 export type HookSet =
   | { readonly t: 'stable'; readonly version: 1 }
   | { readonly t: 'none'; readonly harness: Provider }
@@ -70,12 +56,8 @@ function hookCommand(url: string, maxSeconds: number): string {
   return `curl -sS --fail --max-time ${maxSeconds} -X POST -H "Authorization: $${bearer}" -H 'Content-Type: application/json' --data-binary @- '${url}'`;
 }
 
-// Ceilings, not behaviour: the server decides when each hook returns. A tool hook answers at once
-// and must never stall a turn on a hung backend. An agent-end hook (Stop, SubagentStop) may hold
-// as long as background jobs, and need not outlast claude's own wait on them (12 h, agent-cli
-// harnesses/claude.ts CLAUDE_PRINT_BG_WAIT_CEILING_MS, which the package does not export): past
-// that claude stops the jobs anyway. A hold the hook timeout cuts fails open: claude ends the turn
-// as before, and the post runs as the next turn.
+// Hook timeouts fail open; the 12 h hold ceiling matches Claude's own background-job ceiling.
+// The server decides when to return, so upgrades reach processes carrying this stable set.
 const TOOL_HOOK_S = 20;
 const HOLD_HOOK_S = 12 * 60 * 60;
 const hook = (url: string, seconds: number) => ({

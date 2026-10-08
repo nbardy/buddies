@@ -478,14 +478,9 @@ impl Store {
         })
     }
 
-    /// The owner posts a native SUB-agent of the live turn `run_id` is shown: unread ones that no
-    /// sub-agent of this turn was shown yet, NOT marked read. Only the parent's take marks a post
-    /// read (and so fences its queued delivery): the parent answers the thread (mcp.ts
-    /// `steerNativeTool`). The cursor is the run's `noticed_ord`, so each owner post reaches the
-    /// sub-agents of one turn at most ONCE in total, across backend restarts.
-    /// task_01a11af2 (2026-10-08): this was a per-sub-agent set in host memory. A 27-agent Workflow
-    /// got the owner's 09:30 post 35 times, again after the 09:40 restart, and never its parent.
-    /// Guard: `a_sub_agent_notice_shows_an_owner_post_once_without_fencing_its_delivery`.
+    // Per-sub-agent host memory sent one owner's post 35 times and repeated it after restart.
+    // One run cursor notices once without advancing the parent's read mark/delivery fence.
+    // Guard: a_sub_agent_notice_shows_an_owner_post_once_without_fencing_its_delivery.
     pub fn notice_sub_agent(&mut self, actor: &Actor, run_id: &str, root_id: &str, limit: i64) -> Result<ThreadUnread> {
         let buddy_id = reader(actor)?.to_string();
         self.write(|tx| {

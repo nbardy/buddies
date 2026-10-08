@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Buddy, Cursor, Post, Responding } from '@unleashd/buddies-core';
 import {
-  type ConversationConfig,
   type ChannelResponse,
+  type ConversationConfig,
   type InstalledAgent,
   type LiveReach,
   type ReplyRetryResult,
@@ -15,6 +15,7 @@ import {
   mentionedIds,
 } from '@unleashd/shared';
 import type { ConversationRuntime } from '../conversations/runtime';
+import type { BackgroundWork, TurnActivity } from '../turns/background-work';
 import { profileExecution } from './briefing';
 import {
   type LiveConversation,
@@ -24,10 +25,9 @@ import {
   stableConversationId,
 } from './buddy-conversation-slots';
 import type { ReplyGate } from './channel-reply-gate';
-import type { HookSet } from './harness-steering';
 import { type BuddiesCore, OWNER } from './core';
-import type { BackgroundWork, TurnActivity } from '../turns/background-work';
 import type { BuddyEvents } from './events';
+import type { HookSet } from './harness-steering';
 import { runConfigOfPick } from './worker-config';
 
 // Thread seats and DM chats: WHICH conversation a Buddy answers a thread in. A post wakes nobody
@@ -78,13 +78,8 @@ const HOOKS_REACH: {
   unrecorded: () => ({ kind: 'spawned_before_live_delivery' }),
 };
 
-/**
- * What reaches the live turn a `conversation_busy` delivery waits behind (task_01a11af2). The busy
- * turn is the delivery's own seat, or the running delivery of the same Buddy in the same thread
- * (a bound seat and an unbound mention: the running seat's take advances the Buddy's per-thread
- * read mark, which fences this one too). Its hooks were recorded on its grant at spawn.
- * Table of every waiting path: agent_notes/2026-10-08_waiting-paths.md.
- */
+// Busy deliveries name the live seat's recorded capability, including a second seat of the same
+// thread. Guard: idle-background-delivery.test.ts; table: agent_notes/2026-10-08_waiting-paths.md.
 function reachOf(
   queued: Responding,
   rows: readonly Responding[],
