@@ -476,12 +476,12 @@ function BuddyRow({ member }: { member: Buddy }) {
               />
             )}
           </span>
+          <BuddyStar buddyId={member.id} name={member.name} />
           <BuddyBackgroundLink
             buddyId={member.id}
             workspaceId={member.workspaceId}
             name={member.name}
           />
-          <BuddyStar buddyId={member.id} name={member.name} />
         </>
       }
       className="mobile-channels-buddy"

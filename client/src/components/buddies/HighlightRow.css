@@ -16,22 +16,17 @@
   color: var(--text-bright);
 }
 .highlight-row-actions {
-  display: flex;
-  align-items: center;
+  display: flex; align-items: center;
   justify-self: end;
 }
-.highlight-row-footer {
-  grid-column: 1 / -1;
-}
+.highlight-row-footer { grid-column: 1 / -1; }
 .highlight-row .channel-star {
-  display: grid;
-  place-items: center;
+  display: grid; place-items: center;
   flex: none;
   width: 26px;
   height: 26px;
   padding: 0;
-  border: 0;
-  border-radius: var(--ui-radius);
+  border: 0; border-radius: var(--ui-radius);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -55,4 +50,9 @@
   .highlight-row .channel-star {
     opacity: 1;
   }
+}
+/* Separate favorites only at the boundary; inspectChannelStarLayout guards both lists. */
+.highlight-row:has(.channel-star[aria-pressed="true"])
+  + .highlight-row:has(.channel-star[aria-pressed="false"]) {
+  margin-block-start: var(--sp-4);
 }

@@ -8,9 +8,13 @@ export function inspectChannelStarLayout() {
     const star = actions?.querySelector('.channel-star');
     if (!opener || !star) continue;
     const r = row.getBoundingClientRect();
-    const s = star.getBoundingClientRect();
-    if (Math.abs(r.right - s.right) > 1 || actions.lastElementChild !== star) {
-      throw new Error('Row star must be the last action at the far right');
+    const worker = actions.querySelector('.buddy-background-link');
+    const last = worker ?? star;
+    if (Math.abs(r.right - last.getBoundingClientRect().right) > 1 || actions.lastElementChild !== last) {
+      throw new Error('Worker status (or channel star) must be the last action at the far right');
+    }
+    if (worker && star.getBoundingClientRect().right > worker.getBoundingClientRect().left + 1) {
+      throw new Error('Buddy star must precede the worker status');
     }
     const current = row.getAttribute('data-current');
     try {
@@ -31,13 +35,33 @@ export function inspectChannelStarLayout() {
           count.textContent = value;
           if (
             Math.abs(opener.getBoundingClientRect().width - width) > 1 ||
-            Math.abs(star.getBoundingClientRect().right - r.right) > 1
+            Math.abs(last.getBoundingClientRect().right - r.right) > 1
           ) {
-            throw new Error('Worker count moved the star or shortened the Buddy opener');
+            throw new Error('Worker count moved the rightmost action or shortened the Buddy opener');
           }
         }
       } finally {
         count.textContent = original;
+      }
+    }
+    const next = row.nextElementSibling;
+    const nextStar = next?.querySelector('.channel-star');
+    if (next?.classList.contains('highlight-row') && nextStar) {
+      const original = star.getAttribute('aria-pressed');
+      const nextOriginal = nextStar.getAttribute('aria-pressed');
+      try {
+        star.setAttribute('aria-pressed', 'true');
+        nextStar.setAttribute('aria-pressed', 'false');
+        if (Math.abs(parseFloat(getComputedStyle(next).marginBlockStart) - 8) > 0.1) {
+          throw new Error('Starred and unstarred rows need an 8px gap');
+        }
+        nextStar.setAttribute('aria-pressed', 'true');
+        if (parseFloat(getComputedStyle(next).marginBlockStart) !== 0) {
+          throw new Error('Rows within the starred group must stay compact');
+        }
+      } finally {
+        star.setAttribute('aria-pressed', original);
+        nextStar.setAttribute('aria-pressed', nextOriginal);
       }
     }
     checked += 1;

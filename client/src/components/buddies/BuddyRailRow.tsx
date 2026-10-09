@@ -53,8 +53,8 @@ export function BuddyRailRow({
               />
             )}
           </span>
-          <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
           <BuddyStar buddyId={member.id} name={member.name} />
+          <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
         </>
       }
       footer={
