@@ -1,7 +1,6 @@
 /* The channel composer and its universal @ picker. Shared by the desktop
    channel browser and the mobile channel screens; each places it (margins)
    in its own layout CSS. */
-
 .channel-composer {
   position: relative;
   flex: none;
@@ -9,20 +8,16 @@
   border-radius: 10px;
   background: var(--bg-base);
 }
-
 .channel-composer:focus-within {
   border-color: var(--border-emphasis);
 }
-
 .channel-composer[data-dragging] {
   border-style: dashed;
   border-color: var(--theme-user);
 }
-
 .channel-composer-field {
   position: relative;
 }
-
 .channel-composer-highlight,
 .channel-composer textarea {
   display: block;
@@ -41,12 +36,10 @@
      narrower than the mirror, stranding the caret (2026-09-27). Same gutter on both. */
   scrollbar-gutter: stable;
 }
-
 .channel-composer textarea {
   position: relative;
   resize: none;
 }
-
 /* Picked @names are painted on the mirror. The textarea keeps the caret and
    the real text; its glyphs stay invisible so the highlight shows through
    without shifting the caret (no extra padding or weight on the mark). */

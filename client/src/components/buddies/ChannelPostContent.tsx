@@ -7,6 +7,7 @@ import { EmojiPicker } from './EmojiPicker';
 import { buddyWrite, errorText } from './api';
 import { type WorkspaceDirectory, channelPostBody } from './channel-data';
 import type { Post } from './types';
+import './ChannelPostContent.css';
 
 const actionStyle: CSSProperties = {
   display: 'inline-flex',
@@ -51,7 +52,12 @@ export function ChannelPostContent({
       .finally(() => setBusy(false));
   };
   return (
-    <>
+    <div
+      className="channel-post-content"
+      aria-label="Message content and actions"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: Focus reveals message actions for keyboard and touch users.
+      tabIndex={0}
+    >
       {editing ? (
         <ChannelComposer
           channelId={post.channelId}
@@ -80,7 +86,10 @@ export function ChannelPostContent({
           style={{
             gap: 'var(--sp-2)',
             flexWrap: 'wrap',
-            marginTop: 'var(--sp-2)',
+            marginTop:
+              reactions.size > 0 || post.author.kind === 'owner' || post.editedAt
+                ? 'var(--sp-2)'
+                : 0,
             fontSize: 'var(--fs-3)',
           }}
         >
@@ -101,9 +110,20 @@ export function ChannelPostContent({
               {emoji} {value.count}
             </button>
           ))}
+          {post.author.kind === 'owner' && (
+            <button
+              type="button"
+              style={{ ...actionStyle, border: 0 }}
+              aria-label="Edit message"
+              onClick={() => setEditing(post)}
+            >
+              Edit
+            </button>
+          )}
           <button
             type="button"
-            style={actionStyle}
+            className="channel-post-add-reaction"
+            style={{ ...actionStyle, display: undefined }}
             aria-label="Add emoji reaction"
             title="Add emoji reaction"
             disabled={busy}
@@ -124,16 +144,6 @@ export function ChannelPostContent({
             </svg>{' '}
             +
           </button>
-          {post.author.kind === 'owner' && (
-            <button
-              type="button"
-              style={{ ...actionStyle, border: 0 }}
-              aria-label="Edit message"
-              onClick={() => setEditing(post)}
-            >
-              Edit
-            </button>
-          )}
           {post.editedAt && (
             <span className="ui-muted" title={new Date(post.editedAt).toLocaleString()}>
               edited
@@ -145,6 +155,6 @@ export function ChannelPostContent({
       {picking && (
         <EmojiPicker onPick={(emoji) => react(emoji, true)} onClose={() => setPicking(false)} />
       )}
-    </>
+    </div>
   );
 }

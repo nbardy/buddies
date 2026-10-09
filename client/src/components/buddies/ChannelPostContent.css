@@ -1,0 +1,7 @@
+.channel-post-add-reaction {
+  display: none;
+}
+.channel-post-content:hover .channel-post-add-reaction,
+.channel-post-content:focus-within .channel-post-add-reaction {
+  display: inline-flex;
+}

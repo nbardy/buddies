@@ -175,6 +175,34 @@ try {
     await session.evaluate(
       `document.querySelector('[aria-label="Add emoji reaction"]').scrollIntoView({block:'center'})`
     );
+    // Empty reaction controls must not decorate every message; hover/focus makes them available.
+    await session.evaluate('document.activeElement?.blur()');
+    await session.hover('header');
+    assert.equal(
+      await session.evaluate(
+        `getComputedStyle(document.querySelector('[aria-label="Add emoji reaction"]')).display`
+      ),
+      'none'
+    );
+    await capture(`react-rest-${width}`);
+    await session.evaluate(
+      `document.querySelector('[aria-label="Add emoji reaction"]').closest('.channel-post-content').focus()`
+    );
+    assert.notEqual(
+      await session.evaluate(
+        `getComputedStyle(document.querySelector('[aria-label="Add emoji reaction"]')).display`
+      ),
+      'none'
+    );
+    await session.evaluate('document.activeElement?.blur()');
+    await session.hover('.channel-post-content:has([aria-label="Add emoji reaction"])');
+    assert.notEqual(
+      await session.evaluate(
+        `getComputedStyle(document.querySelector('[aria-label="Add emoji reaction"]')).display`
+      ),
+      'none'
+    );
+    await capture(`react-hover-${width}`);
     await session.click('[aria-label="Add emoji reaction"]');
     await waitFor(`!!document.querySelector('[aria-label="Emoji reactions"]')`);
     await capture(`react-${width}`);
