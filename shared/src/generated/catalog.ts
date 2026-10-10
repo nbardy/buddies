@@ -1,5 +1,5 @@
 // DO NOT EDIT - generated from catalog.jsonc
-// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-30.sol-6.1-medium-effort)
+// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-10-08.haiku-5.5)
 // Generator: shared/scripts/gen-catalog.ts
 // Run: pnpm --filter @unleashd/shared gen:catalog
 
@@ -42,6 +42,20 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
       {
         "id": "claude-sonnet-5-5",
         "displayName": "Sonnet 5.5",
+        "reasoning": {
+          "levels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "claude-haiku-5-5",
+        "displayName": "Haiku 5.5",
         "reasoning": {
           "levels": [
             "low",
