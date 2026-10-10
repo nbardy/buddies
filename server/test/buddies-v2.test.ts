@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { channel as diagnosticChannel } from 'node:diagnostics_channel';
 import {
   existsSync,
   mkdirSync,
@@ -9,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -277,13 +279,13 @@ async function world(reopen?: string, realProvider = false) {
       exitCode: number;
       signal: null;
       sessionId: string;
-      reason: 'success';
+      reason: 'success' | 'error';
     }) => void;
     const completed = new Promise<{
       exitCode: number;
       signal: null;
       sessionId: string;
-      reason: 'success';
+      reason: 'success' | 'error';
     }>((resolve) => {
       finish = resolve;
     });
@@ -292,37 +294,43 @@ async function world(reopen?: string, realProvider = false) {
       pid: 0,
       journalDir: request.journalDir,
       events: (async function* () {
-        yield { type: 'session.started' as const, sessionId };
-        yield { type: 'turn.started' as const };
-        await during.get(turn.n)?.(turn);
-        const error = providerErrors.get(turn.n);
-        if (error) {
-          yield { type: 'error' as const, message: error };
-          yield { type: 'turn.complete' as const, reason: 'error' as const };
+        try {
+          yield { type: 'session.started' as const, sessionId };
+          yield { type: 'turn.started' as const };
+          await during.get(turn.n)?.(turn);
+          const error = providerErrors.get(turn.n);
+          if (error) {
+            yield { type: 'error' as const, message: error };
+            yield { type: 'turn.complete' as const, reason: 'error' as const };
+            finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
+            return;
+          }
+          if (outOfTokens.has(turn.n)) {
+            yield { type: 'out_of_tokens' as const, message: 'You have hit your usage limit' };
+            yield { type: 'turn.complete' as const, reason: 'out_of_tokens' as const };
+            finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
+            return;
+          }
+          const answer = answers.get(turn.n) ?? `Answer ${turn.n}`;
+          const seat = answersLastPost(request.prompt) ? deliveredPost(request.prompt) : null;
+          if (seat && !silent.has(turn.n)) {
+            const posted = await call(turn.mcp, 'post', {
+              channel: { id: seat[1] },
+              replyToId: seat[2],
+              purpose: 'reply',
+              body: answer,
+              key: `seat-reply-${turn.n}`,
+            });
+            assert.equal(posted.isError, false, posted.text);
+          }
+          yield { type: 'text.delta' as const, text: answer };
+          yield { type: 'turn.complete' as const, reason: 'success' as const };
           finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
-          return;
+        } finally {
+          // An async tool/assertion error used to leave completion pending and retain the
+          // 60 s watchdog. Preserve the thrown event error, but always join process exit.
+          finish({ exitCode: 1, signal: null, sessionId, reason: 'error' });
         }
-        if (outOfTokens.has(turn.n)) {
-          yield { type: 'out_of_tokens' as const, message: 'You have hit your usage limit' };
-          yield { type: 'turn.complete' as const, reason: 'out_of_tokens' as const };
-          finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
-          return;
-        }
-        const answer = answers.get(turn.n) ?? `Answer ${turn.n}`;
-        const seat = answersLastPost(request.prompt) ? deliveredPost(request.prompt) : null;
-        if (seat && !silent.has(turn.n)) {
-          const posted = await call(turn.mcp, 'post', {
-            channel: { id: seat[1] },
-            replyToId: seat[2],
-            purpose: 'reply',
-            body: answer,
-            key: `seat-reply-${turn.n}`,
-          });
-          assert.equal(posted.isError, false, posted.text);
-        }
-        yield { type: 'text.delta' as const, text: answer };
-        yield { type: 'turn.complete' as const, reason: 'success' as const };
-        finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
       })(),
       completed,
       stop: () => {
@@ -512,11 +520,55 @@ async function world(reopen?: string, realProvider = false) {
     },
     async close() {
       runner.stop();
+      // Do not close a fake model's MCP transport while its last post is still draining.
+      // Guard: full/concurrent suites have no late fetch errors or retained watchdogs.
+      await Promise.all(
+        [...conversations.values()].map((conversation) => conversation.waitForTurnDrain())
+      );
       await endpoint.close();
       rmSync(scratch, { recursive: true, force: true });
     },
   };
 }
+
+// A throwing fake event stream must still report provider exit and drain the watchdog.
+// Otherwise one failed tool call kept the test process alive until its 60 s deadline.
+test('a fake async event error joins completion and keeps its original failure', async () => {
+  const w = await world();
+  try {
+    w.during.set(1, async () => {
+      throw new Error('scripted tool failure');
+    });
+    const started = Date.now();
+    const post = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) start`,
+        key: 'event-error',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+      }
+    );
+    w.announce(post);
+    const run = await until(
+      async () => (await w.runs(w.lead.id)).find((r) => r.status === 'failed'),
+      'fake error drain'
+    );
+    assert.equal(run.errorCode, 'execution_failed');
+    const conversation = w.conversations.get(run.conversationId!);
+    assert.ok(conversation);
+    assert.match(
+      conversation.messages.map((m) => bodyText(m.body)).join('\n'),
+      /scripted tool failure/
+    );
+    assert.ok(Date.now() - started < 5_000, 'joined exit without waiting for the 60 s watchdog');
+  } finally {
+    await w.close();
+  }
+});
 
 // Rewritten for owner decision A (2026-10-06, delivery design D0/D9, task_01a11013-9072): the
 // answer used to be an Inbox read with no run. Since 2026-10-07 (task_01a1153f) it runs in the
@@ -804,6 +856,9 @@ test('pausing the runner mid-drain stops further claims', async () => {
   const w = await world();
   try {
     w.runner.pause();
+    // Pause cannot undo a claim already awaited by world()'s startup tick. Begin on an
+    // empty, settled runner, then arrange the mid-drain pause. Guard: concurrent full suites.
+    await w.runner.settled();
     for (const buddy of [w.lead, w.designer])
       await w.post(
         OWNER,
@@ -830,6 +885,9 @@ test('pausing the runner mid-drain stops further claims', async () => {
     assert.equal(claims, 1);
     const queued = [...(await w.runs(w.lead.id)), ...(await w.runs(w.designer.id))];
     assert.equal(queued.filter((run) => run.status === 'queued').length, 1);
+    // Claims start asynchronously: closing the endpoint before placement made the fake post
+    // fail after teardown and retain a 10 s socket wait. Let the one allowed turn start.
+    await until(() => w.turns.length === 1, 'the claimed fake provider starts before teardown');
   } finally {
     await w.close();
   }
@@ -1075,6 +1133,9 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         (p) => p.author.kind === 'buddy' && p.author.id === w.lead.id
       );
     await until(async () => (await leadReplies()).length === 1, "Lead's reply to the owner");
+    // A visible reply can still be the live turn's last tool call (pool8: 30 s timeout).
+    // Guard: the authority follow-up starts after the owner turn actually settles.
+    await settled(() => w.runs(w.lead.id), "Lead's owner turn");
 
     // Designer (a Buddy) posts in the thread; Lead's seat follows it, so the post is delivered
     // there and Lead runs a follow-up turn (the follow-up gate it replaced is gone, step 5).
@@ -3477,6 +3538,9 @@ test('a thread follow-up is gated: <no> runs no turn, <yes> replies in the seat,
       'the follow-up reply'
     );
     assert.equal(w.gate.asked.length, 2);
+    // The reply is a tool call, not the drain: posting here raced steering under pool6
+    // and cost a 30 s timeout. Guard: this case must reach its third gate after settle.
+    await settled(() => w.runs(lead.id), 'the gated reply');
     w.gate.verdicts.push({ kind: 'pass' });
     await say('ok', root.id);
     await until(
@@ -4902,9 +4966,9 @@ test('follow (d): a delivery whose posts the caller already read settles with no
   }
 });
 
-// Delivery design Task 3 criterion: the bounded wait is real, up to 30 s (owner, "wait for a
-// message in thread"). 25 s of wait, a post at 20 s: returned inline, no extra turn.
-test('follow (g): a 25 s wait returns a post that arrives at 20 s', async () => {
+// A 25 s requested budget must return when a post arrives, rather than wait for expiry.
+// The old 20 s sleep cost 20.5 s per suite. Guard: inline return well before the budget.
+test('follow (g): a 25 s wait returns inline when a later post arrives', async () => {
   const w = await world();
   try {
     const { read, ms } = await leadFollows(
@@ -4912,17 +4976,20 @@ test('follow (g): a 25 s wait returns a post that arrives at 20 s', async () => 
       { wait: 25 },
       {
         during: async (rootId) => {
-          await new Promise((resolve) => setTimeout(resolve, 20_000));
-          assert.equal((await designerReplies(w, rootId, 'Twenty seconds in')).isError, false);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          assert.equal(
+            (await designerReplies(w, rootId, 'Arrived during the wait')).isError,
+            false
+          );
         },
       }
     );
     assert.equal(read.value.kind, 'unread', read.text);
     assert.deepEqual(
       read.value.posts.map((p: { body: string }) => p.body),
-      ['Twenty seconds in']
+      ['Arrived during the wait']
     );
-    assert.ok(ms >= 19_900 && ms < 25_000, `returned when the post arrived (${ms} ms)`);
+    assert.ok(ms >= 100 && ms < 5_000, `returned when the post arrived (${ms} ms)`);
   } finally {
     await w.close();
   }
@@ -6243,25 +6310,59 @@ test('request messages: siblings, shared reads, hook/MCP race, a dropped hook, d
     // next boundary shows it (at least once, never lost).
     assert.equal((await send(live.parent, a, 'worker', 'survives a dropped hook')).isError, false);
     if (workerA.mcp.kind !== 'http') throw new Error('expected HTTP');
+    const workerHeaders = workerA.mcp.headers;
     const url = new URL(w.endpoint.hookUrl);
-    await new Promise<void>((resolve) => {
-      const dropped = httpRequest(
-        {
-          host: url.hostname,
-          port: url.port,
-          path: url.pathname,
-          method: 'POST',
-          headers: workerA.mcp.kind === 'http' ? workerA.mcp.headers : {},
-        },
-        () => resolve()
-      );
-      dropped.on('error', () => resolve());
-      dropped.end(JSON.stringify({ hook_event_name: 'PostToolUse' }), () => {
-        dropped.destroy();
-        resolve();
+    // Observe the backend socket, not the client's end callback: the latter can race
+    // the relay forwarding a response. Guard: disconnect before response is written.
+    const serverClosed = held();
+    let droppedResponse: ServerResponse | undefined;
+    const requests = diagnosticChannel('http.server.request.start');
+    const observe = (message: unknown) => {
+      const { request, response } = message as {
+        request: IncomingMessage;
+        response: ServerResponse;
+      };
+      if (
+        request.url === url.pathname &&
+        request.headers.authorization === workerHeaders?.Authorization
+      ) {
+        droppedResponse = response;
+        response.once('close', serverClosed.release);
+      }
+    };
+    requests.subscribe(observe);
+    const reading = held();
+    const resume = held();
+    const pending = w.core.pendingMessages.bind(w.core);
+    w.core.pendingMessages = async (...args) => {
+      reading.release();
+      await resume.wait;
+      return pending(...args);
+    };
+    try {
+      const dropped = httpRequest({
+        host: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        method: 'POST',
+        headers: workerHeaders,
       });
-    });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+      dropped.on('error', () => undefined);
+      const closed = new Promise<void>((resolve) => dropped.on('close', resolve));
+      dropped.end(JSON.stringify({ hook_event_name: 'PostToolUse' }));
+      await reading.wait;
+      dropped.destroy();
+      await closed;
+      await serverClosed.wait;
+    } finally {
+      requests.unsubscribe(observe);
+      resume.release();
+      w.core.pendingMessages = pending;
+    }
+    await until(
+      () => droppedResponse?.writableEnded,
+      'the disconnected handler finishes without writing'
+    );
     assert.ok((await nativeHook(w, workerA)()).includes('survives a dropped hook'));
 
     // Denied senders: another Buddy of the workspace, and a Buddy of another workspace.

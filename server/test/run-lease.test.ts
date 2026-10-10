@@ -3,7 +3,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, test } from 'node:test';
+import { after, afterEach, before, test } from 'node:test';
 import { type ConversationRow, EncodedRowsSchema, WS_PATH, decodeRows } from '@unleashd/shared';
 import { WebSocket } from 'ws';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
@@ -24,8 +24,10 @@ import { freePortSync } from './free-port';
  */
 
 const TOKEN = 'b8e4d1fa03c25769b8e4d1fa03c25769';
-const LEASE_MS = 3_000;
-const IDLE_MS = 15_000;
+// Keep multiple real lease periods, without the old 16 s freeze wait.
+// Guard: SIGSTOP longer than the lease, then no failed/resumed run.
+const LEASE_MS = 1_000;
+const IDLE_MS = 6_000;
 
 // Marker in the prompt picks the behaviour. Nothing on stdout after "one;": the only events the
 // backend sees are agent-cli heartbeats, exactly a model thinking silently.
@@ -92,10 +94,12 @@ function startBackend(name: string, port: number, env: Record<string, string>): 
       FAKE_DIR: fakeDir,
       NODE_ENV: 'test',
       CWV_BUDDY_RUN_LEASE_MS: String(LEASE_MS),
+      CWV_BUDDY_RUNNER_BACKSTOP_MS: '100',
+      CWV_TURN_TIMEOUT_KILL_GRACE_MS: '200',
       CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: String(IDLE_MS),
-      // A heartbeat every 250 ms once the provider is silent for 500 ms (production: 30 s / 25 s).
-      AGENT_CLI_HEARTBEAT_CHECK_INTERVAL_MS: '250',
-      AGENT_CLI_HEARTBEAT_SILENCE_THRESHOLD_MS: '500',
+      // A heartbeat every 100 ms once the provider is silent for 200 ms (production: 30 s / 25 s).
+      AGENT_CLI_HEARTBEAT_CHECK_INTERVAL_MS: '100',
+      AGENT_CLI_HEARTBEAT_SILENCE_THRESHOLD_MS: '200',
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -239,7 +243,9 @@ before(() => {
   fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 });
 
-after(async () => {
+// A failed A/B assertion once left B claiming against the next freeze and idle cases,
+// producing two false failures. Guard: every case tears down its holders, even on failure.
+afterEach(async () => {
   for (const name of [...backends.keys()]) await killBackend(name);
   for (const scenario of [
     'held',
@@ -251,16 +257,20 @@ after(async () => {
     'recovered',
   ])
     killGroup(scenario);
-  fs.rmSync(root, { recursive: true, force: true });
 });
+
+after(() => fs.rmSync(root, { recursive: true, force: true }));
 
 test(
   'a holder that dies while the backend stays up is cleared within the lease time',
   { timeout: 180_000 },
   async () => {
-    const httpA = api(7551);
-    const httpB = api(7552);
-    await startBackend('A', 7551, {});
+    // Fixed 7551–7554 made two suites share sockets. Guard: concurrent full suites.
+    const portA = freePortSync();
+    const portB = freePortSync();
+    const httpA = api(portA);
+    const httpB = api(portB);
+    await startBackend('A', portA, {});
     const ws = await workspace(httpA, 'lease');
     const held = await hire(httpA, ws, 'held');
     const request = await ask(httpA, held, 'held');
@@ -268,7 +278,7 @@ test(
 
     // A second backend on the same Buddy store boots while A still drives the turn. Before the
     // lease was a heartbeat, its startup sweep ended every held run, A's live one included.
-    await startBackend('B', 7552, {});
+    await startBackend('B', portB, {});
     await staysRunning(httpB, held, 2 * LEASE_MS, "A's live, renewing run survives B's boot");
 
     // A dies, provider and all, while B stays up: nobody renews A's lease and nobody restarts.
@@ -301,8 +311,9 @@ test(
   'a heartbeating silent turn outlives its lease; a turn with no provider progress still dies of the idle timer',
   { timeout: 180_000 },
   async () => {
-    const http = api(7553);
-    await startBackend('C', 7553, {});
+    const port = freePortSync();
+    const http = api(port);
+    await startBackend('C', port, {});
     const ws = await workspace(http, 'clocks');
     const silent = await hire(http, ws, 'silent');
     const stuck = await hire(http, ws, 'stuck');
@@ -352,15 +363,15 @@ test(
     // conversation ("Conversation is busy"). SIGSTOP is that sleep for one process: wall time
     // runs, the backend does not. A 100 ms backstop makes the gate's tick the first one due at
     // wake, as the 5 s tick was against the 30 s heartbeat in production.
-    // C (the previous test's backend) shares D's Buddies store: a SECOND live backend's gate sees a
-    // frozen holder's lapsed lease and rightly ends it, which looked like the bug under test.
-    await killBackend('C');
-    const http = api(7554);
-    // This scenario intentionally stays silent for 3 + 6 + 6 seconds. The 15 s idle budget
-    // raced its final assertion; give it headroom while testing the unchanged 3 s lease.
-    await startBackend('D', 7554, {
+    // afterEach has closed the previous case's holders: a SECOND live backend on this
+    // shared store would correctly expire D's frozen lease and invalidate this scenario.
+    const port = freePortSync();
+    const http = api(port);
+    // This scenario spans five lease periods. Give the independent idle clock
+    // headroom so it cannot race the freeze assertion.
+    await startBackend('D', port, {
       CWV_BUDDY_RUNNER_BACKSTOP_MS: '100',
-      CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '30000',
+      CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '15000',
     });
     const ws = await workspace(http, 'freeze');
     const frozen = await hire(http, ws, 'frozen');
