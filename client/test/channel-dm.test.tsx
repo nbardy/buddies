@@ -420,3 +420,19 @@ test('a long DM draws only its newest rows, opening on a lead, with older ones p
   const drawn = html.split('Line ').length - 1;
   assert.ok(drawn >= 40 && drawn < 60, `a window of rows, not all 150 (drew ${drawn})`);
 });
+
+test('a replying DM offers Interrupt and Queue with their desktop shortcuts', async () => {
+  await seed();
+  const idle = desktop(NEW);
+  assert.doesNotMatch(idle, />Interrupt/);
+  assert.doesNotMatch(idle, /Queue · Shift\+Enter/);
+  const current = jotaiStore.get(rowsAtom).get(NEW)!;
+  jotaiStore.set(
+    rowsAtom,
+    new Map([...jotaiStore.get(rowsAtom), [NEW, { ...current, run: 'running' }]])
+  );
+  const active = desktop(NEW);
+  assert.match(active, />Interrupt · Enter</);
+  assert.match(active, />Queue · Shift\+Enter</);
+  assert.match(active, /title="Send after the current reply finishes"/);
+});

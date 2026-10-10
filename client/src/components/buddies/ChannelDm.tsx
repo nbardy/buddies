@@ -9,7 +9,12 @@ import {
   useState,
 } from 'react';
 import { Link } from 'react-router-dom';
-import { queueMessage, readConversation, setConversationDone } from '../../atoms/actions';
+import {
+  interruptAndSend,
+  queueMessage,
+  readConversation,
+  setConversationDone,
+} from '../../atoms/actions';
 import { setConversationConfig } from '../../atoms/commands';
 import {
   commandFor,
@@ -406,6 +411,7 @@ export function ChannelDm({
           placeholder={`Message ${buddyName}`}
           submit={frame === 'desktop' ? 'enter' : 'button'}
           ready={row !== null}
+          running={running}
           onSent={follow.pin}
         />
       )}
@@ -572,12 +578,14 @@ function DmComposer({
   placeholder,
   submit,
   ready,
+  running,
   onSent,
 }: {
   conversationId: string;
   placeholder: string;
   submit: ComposerSubmit;
   ready: boolean;
+  running: boolean;
   onSent(): void;
 }) {
   const [text, setText] = useState('');
@@ -616,14 +624,15 @@ function DmComposer({
       .catch((cause: unknown) => setProblem(errorText(cause)))
       .finally(() => setUploading((count) => count - 1));
   };
-  const send = () => {
+  const send = (mode: 'queue' | 'interrupt' = 'queue') => {
     const body = text.trim();
     if (!body || uploading > 0 || !ready) return;
     draft.clear();
     setText('');
     setProblem(null);
     onSent();
-    queueMessage(conversationId, body).catch((cause: unknown) => {
+    const action = mode === 'interrupt' ? interruptAndSend : queueMessage;
+    action(conversationId, body).catch((cause: unknown) => {
       setProblem(errorText(cause));
       change(body);
     });
@@ -645,10 +654,14 @@ function DmComposer({
             upload(files);
           }}
           onKeyDown={(event) => {
-            if (submit !== 'enter' || event.key !== 'Enter' || event.shiftKey) return;
-            if (event.nativeEvent.isComposing) return;
+            if (submit !== 'enter' || event.key !== 'Enter') return;
+            if (event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey)
+              return;
+            if (event.shiftKey && !running) return;
             event.preventDefault();
-            send();
+            // DM Enter used to queue silently while the chat composer interrupted.
+            // Keep both choices explicit; channel-dm.test.tsx guards the busy controls.
+            send(running && !event.shiftKey ? 'interrupt' : 'queue');
           }}
         />
       </div>
@@ -682,13 +695,25 @@ function DmComposer({
             'Uploading…'
           ) : null}
         </span>
+        {running && (
+          <button
+            type="button"
+            className="channel-inline-action"
+            onClick={() => send('queue')}
+            disabled={!ready || uploading > 0 || text.trim().length === 0}
+            title="Send after the current reply finishes"
+          >
+            {submit === 'enter' ? 'Queue · Shift+Enter' : 'Queue'}
+          </button>
+        )}
         <button
           type="button"
           className="channel-composer-send"
-          onClick={send}
+          onClick={() => send(running ? 'interrupt' : 'queue')}
+          title={running ? 'Interrupt the current reply and send this message' : 'Send message'}
           disabled={!ready || uploading > 0 || text.trim().length === 0}
         >
-          Send
+          {running ? (submit === 'enter' ? 'Interrupt · Enter' : 'Interrupt') : 'Send'}
         </button>
       </div>
     </div>
