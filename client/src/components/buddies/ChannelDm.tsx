@@ -654,14 +654,19 @@ function DmComposer({
             upload(files);
           }}
           onKeyDown={(event) => {
-            if (submit !== 'enter' || event.key !== 'Enter') return;
+            if (submit !== 'enter') return;
             if (event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey)
               return;
-            if (event.shiftKey && !running) return;
-            event.preventDefault();
-            // DM Enter used to queue silently while the chat composer interrupted.
-            // Keep both choices explicit; channel-dm.test.tsx guards the busy controls.
-            send(running && !event.shiftKey ? 'interrupt' : 'queue');
+            // Preserve Shift+Enter for multiline drafts; queueing must not consume it.
+            // Guard: channel-dm.test.tsx and the read-only DM keyboard browser check.
+            if (event.key === 'Tab' && event.shiftKey) {
+              if (!text.trim() || !ready || uploading > 0) return;
+              event.preventDefault();
+              send('queue');
+            } else if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              send(running ? 'interrupt' : 'queue');
+            }
           }}
         />
       </div>
@@ -703,7 +708,7 @@ function DmComposer({
             disabled={!ready || uploading > 0 || text.trim().length === 0}
             title="Send after the current reply finishes"
           >
-            {submit === 'enter' ? 'Queue · Shift+Enter' : 'Queue'}
+            {submit === 'enter' ? 'Queue · Shift+Tab' : 'Queue'}
           </button>
         )}
         <button

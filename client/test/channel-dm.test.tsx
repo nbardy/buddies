@@ -425,7 +425,7 @@ test('a replying DM offers Interrupt and Queue with their desktop shortcuts', as
   await seed();
   const idle = desktop(NEW);
   assert.doesNotMatch(idle, />Interrupt/);
-  assert.doesNotMatch(idle, /Queue · Shift\+Enter/);
+  assert.doesNotMatch(idle, /Queue · Shift\+Tab/);
   const current = jotaiStore.get(rowsAtom).get(NEW)!;
   jotaiStore.set(
     rowsAtom,
@@ -433,6 +433,6 @@ test('a replying DM offers Interrupt and Queue with their desktop shortcuts', as
   );
   const active = desktop(NEW);
   assert.match(active, />Interrupt · Enter</);
-  assert.match(active, />Queue · Shift\+Enter</);
+  assert.match(active, />Queue · Shift\+Tab</);
   assert.match(active, /title="Send after the current reply finishes"/);
 });
