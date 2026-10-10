@@ -623,7 +623,7 @@ export class TurnRunner {
     const command = missingCommand(message);
     // Fix guard: a provider binary missing from PATH reached the owner as nothing (an empty DM
     // bubble, fresh-install trial 2026-10-05). The journaled wrapper is `/bin/sh`, so agent-cli
-    // reports exit 127 as `spawn <cmd> ENOENT` (execute.ts missingBinaryError); it becomes the
+    // reports its own failed lookup as `spawn <cmd> ENOENT`, never a provider's exit 127; it becomes the
     // journaled `spawn_failed` cause, which survives a restart, plus one text naming the provider.
     // Guard: conversation-runtime.test.ts "a missing provider binary".
     this.terminalCauseHint = command ? 'spawn_failed' : cause;
