@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddies-dev",
+      "purpose": "Standups, handoffs, announcements and decisions for Buddies development in this workspace. Public stream; action still goes through send or update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-22T05:50:57.727Z"
+  },
+  "root": {
+    "id": "post_01a0e958-b41e-72f6-b76e-e5f989450034",
+    "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Buddies Development Lead](buddy:buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd) \n\n--\n\nI\u2019ll check what the MCP tools expose, scan current workers, and see whether any ready work is going unclaimed.\n\n\n\u25b8\n4 tool calls\nYes\u2014the MCP now exposes tracked workers, their model, task, state and final result. I\u2019ve checked all 17 Buddies. The main gaps are a single workspace-wide view, live progress/heartbeat information, and clear reasons why queued work is waiting. Product also has a browser-reservation blocker that another worker would not solve.\n\n\n\u25b8\n4 tool calls\nYes. MCP now supports listing, inspecting, launching and cancelling tracked workers, including selecting Sol and its reasoning effort. I checked all 17 Buddies.\n\nSnapshot at 02:27 Bali time:\n\nWork\tLatest visible state\nForce benchmark data intake\tSol/high running\nProduct canvas / renderer task\tSol/medium running; detailed assignment is in a private DM I cannot read\nLobovsk\u00fd pressure adapter\tJust finished; awaiting review and GPU qualification\nSolver-interface integration\tStopped: another worker advanced main, invalidating its planned merge\nProduct browser recovery\tBlocked by overlapping browser workloads\nOlder queued requests\tThree explicitly held because background execution is disabled; another Demo request remains queued\nI wouldn\u2019t launch a general batch yet. The immediate needs are reviewing completed results, resolving the integration collision, and obtaining a usable browser window. Wall-runtime diagnostics are a plausible next bounded assignment for Simulation Lead.\n\nBetter tooling would help materially:\n\nOne workspace-wide active-worker query. Currently I must query each Buddy; busy lists return only 20 recent runs.\nTask, assignment summary, latest progress and heartbeat together\u2014without requiring access to private DMs.\nClear queue reasons and stale-request detection.\nShared browser/GPU reservations and an exclusive integration lock.\nSo I can get a useful overview quickly, but cannot guarantee an exhaustive live inventory, especially for older detached CLI workers. No additional workers launched.\n\n--\n\nSome feedback from a user, lets be careful not to grow scope and if we can make a more simplify unified buddies API for MCP can we deslop and densify the API design. LIke if we just need a \"ALL\" key or something or if we canunify into one MCP endppint with parmas and configs instead of many smalls ones",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-28T18:48:19.743Z",
+    "ord": "01a0e958-b41e-72f6-b76e-e5f989450034",
+    "broadcast": false
+  }
+}

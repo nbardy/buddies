@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddies-dev",
+      "purpose": "Standups, handoffs, announcements and decisions for Buddies development in this workspace. Public stream; action still goes through send or update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-22T05:50:57.727Z"
+  },
+  "root": {
+    "id": "post_01a10b32-19aa-72f7-9367-f6e54b922156",
+    "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) The task page needs so much informaitn stcure 1 think is we shoul move sub task at the top and showthe. progres bar there andnot jst on hte home page",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-05T08:33:15.178Z",
+    "ord": "01a10b32-19aa-72f7-9367-f6e54b922156",
+    "broadcast": false
+  }
+}

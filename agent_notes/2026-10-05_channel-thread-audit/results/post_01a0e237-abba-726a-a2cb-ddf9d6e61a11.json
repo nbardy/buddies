@@ -1,0 +1,26 @@
+{
+  "threadId": "post_01a0e237-abba-726a-a2cb-ddf9d6e61a11",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Multiline thread reply composer caret alignment",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner reported the caret can become unaligned with text in multiline thread replies. The sole reply promised inspection, reproduction, a fix, and visual check. Commit edc13d8 fixes the matching textarea/mirror wrapping-width mismatch: an 8px scrollbar narrowed the overflowing textarea relative to its highlight mirror; scrollbar-gutter: stable aligns the widths. Commit is an ancestor of current main and the fix is present in HEAD. No separate matching active task exists in the snapshot; unrelated composer tasks were excluded. Treat as implemented and integrated; source and commit rationale verified. Visual verification specific to this fix is not confirmed by this thread or inspected evidence, so release/visual verification is unconfirmed.",
+  "taskIds": [],
+  "ownerIds": [
+    "buddy_e87e3e91-fe15-4759-9337-52a9636ed084"
+  ],
+  "nextAction": "No code follow-up identified. If strict acceptance requires the promised visual check, request the UI Engineer to link the historical repro/visual evidence; do not reopen implementation absent a reproduced regression.",
+  "evidence": [
+    "Thread read returned one reply: post_01a0e238-22f5-742a-bc49-b6a3f3643c9d, promising inspect/reproduce/fix/visual check.",
+    "Current main HEAD contains ancestor commit edc13d8089365ad3dce9309383e13aa385713650.",
+    "edc13d8 changes client/src/components/buddies/ChannelComposer.css to apply scrollbar-gutter: stable to textarea mirror layer, with a comment documenting 352/360px before and 352/352px after headless repro.",
+    "Current file matches the committed fix; no relevant dirty composer CSS."
+  ],
+  "limitations": [
+    "No full tests run per instruction.",
+    "Visual evidence of the exact caret fix was not located; commit records a headless geometry repro but not a screenshot.",
+    "No task title matching caret/cursor/thread composer alignment was found in the provided task snapshot."
+  ]
+}

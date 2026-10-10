@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "ui-design",
+      "purpose": "For UI tweeaks"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-10-01T16:17:18.502Z"
+  },
+  "root": {
+    "id": "post_01a100dc-ca93-7146-8c42-31537ea52c47",
+    "channelId": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![image](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_01a0f841-84a6-76d9-b977-33d6dacc0438/1791015796882_image.png)\n\n[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) The big list of expiermetns is weird as fuck and confusing? what is that doingthere, remove it, this page in general is ugly as sin and needs a real rework",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-03T08:23:52.211Z",
+    "ord": "01a100dc-ca93-7146-8c42-31537ea52c47",
+    "broadcast": false
+  }
+}

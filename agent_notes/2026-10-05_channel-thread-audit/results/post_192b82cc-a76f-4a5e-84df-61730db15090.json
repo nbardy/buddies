@@ -1,0 +1,32 @@
+{
+  "threadId": "post_192b82cc-a76f-4a5e-84df-61730db15090",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Untagged thread follow-up did not trigger a reply; reply appeared only after mention",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The untagged owner follow-up was processed by the reply gate; the gate's Claude session-limit result was surfaced to the CLI as a successful empty answer and treated as unparseable/silent. A later explicit mention started a real turn but yielded '(no reply text)'. The gate/parser fix is implemented and committed in 92e8692 on current main, with the submodule pinned at 85ba151. The gate-specific task is done and its focused tests are recorded as passing. Runtime behavior is not fully closed out: the related channel-replies project remains in review, with next action to confirm after backend reload that a mention posts its answer and an empty turn posts a failure notice. Separate out-of-tokens retry project remains in review; its next action is owner pressing Retry in the failure notice.",
+  "taskIds": [
+    "buddy_project_7c2a5a53-2e57-48cc-91e5-07d7f70345ad",
+    "buddy_project_d612b353-b0c5-48bb-9142-fe4f15c6e96f",
+    "buddy_project_7bf1c0e1-82ce-4db9-89e4-f56bb6971b3a"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead (buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) to coordinate the safe backend reload, then verify a tagged reply posts its answer and an empty/no-answer run posts the visible failure notice; update buddy_project_d612b353-b0c5-48bb-9142-fe4f15c6e96f with runtime evidence. The owner may separately press Retry in the out-of-tokens notice to close the remaining acceptance step on buddy_project_7bf1c0e1-82ce-4db9-89e4-f56bb6971b3a.",
+  "evidence": [
+    "Specified thread read returned all 7 replies with no next-page cursor. Owner root text asks why an untagged follow-up did not trigger a thread participant and says it responded only after explicit tagging.",
+    "Thread reply post_89343020-c213-4b0e-913f-ff135bba6e1a diagnoses the gate result: Claude session-limit error surfaced as successful empty output; unparseable gate answer stayed silent. The direct mention later produced '(no reply text)' in post_17f26046-c213-4b0e-913f-ff135bba6e1a.",
+    "Commit 92e8692 is at current main ancestry and includes channel-reply-gate.ts, its regression tests, docs, and the vendor submodule pointer; current parent tree pins vendor/agent-cli-tool at 85ba151f665d217a5fda4a3234299d53842e3630.",
+    "Current task buddy_project_7c2a5a53-2e57-48cc-91e5-07d7f70345ad is done. Its evidence records 2/2 focused reply-gate tests and the parser test passing, and criteria for treating empty gate answers and out_of_tokens results as failures.",
+    "Current task buddy_project_d612b353-b0c5-48bb-9142-fe4f15c6e96f remains review; nextAction explicitly requires post-reload live mention and failure-notice verification.",
+    "Current task buddy_project_7bf1c0e1-82ce-4db9-89e4-f56bb6971b3a remains review; evidence says the picker was opened on the live failure but retry was not pressed."
+  ],
+  "limitations": [
+    "No tests were rerun, as requested.",
+    "No running-server reload or live runtime verification was performed; the repository/task evidence does not prove the fix is active in the server process.",
+    "No task, code, memory, or thread changes were made beyond writing this requested audit JSON."
+  ]
+}

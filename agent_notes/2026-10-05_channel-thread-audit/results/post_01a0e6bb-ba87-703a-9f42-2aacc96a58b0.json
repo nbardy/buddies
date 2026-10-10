@@ -1,0 +1,28 @@
+{
+  "threadId": "post_01a0e6bb-ba87-703a-9f42-2aacc96a58b0",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "iOS PWA keyboard half-stuck layout and broader keyboard/full-screen behavior review",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The reported half-stuck iOS/PWA keyboard layout has an implementation and focused browser evidence: shell stays at 732px through closed/focused/blurred states, editor expands/collapses, tab bar returns and overflow restores. Commit 993fc54 is an ancestor of current main, so the fix is integrated. A later related app-switch refresh fix is also included in that commit; its note reports the dev-server cause and focused keep-on-resume regression test, though the thread contains no current real-phone verification. The owner's broader request to review the full-screen keyboard behavior/quirks has no explicit completion evidence. No matching canonical active task was found in the supplied task snapshot.",
+  "taskIds": [],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead should decide whether the broader keyboard/full-screen behavior review is still required; if yes, open or identify one canonical task with concrete scope, and have Release Engineer verify app-switch resume on a real phone if that remains part of the acceptance criteria.",
+  "evidence": [
+    "commit:993fc54 (ancestor of current HEAD main)",
+    "agent_notes/20260928_ios-keyboard-shell-stability.md: mobile viewport closed/focused/blurred evidence; invariants/typecheck/Biome/diff reported passing",
+    "client/test/keep-on-resume.test.ts (focused regression test cited in thread)",
+    "agent_notes/20260928_ios-pwa-resume-reload.md (Vite reload root cause and resume implementation)",
+    "thread reply post_01a0e8b5-b709-71e0-8a67-c9b4c0d983d7: commit reported local/not pushed at time of post; later commit ancestry confirms integration"
+  ],
+  "limitations": [
+    "No matching canonical task appears in tasks-snapshot.json; tasks list contained no relevant keyboard/PWA task.",
+    "No real iPhone or installed-PWA verification inspected in this read-only review.",
+    "Working tree contains unrelated dirty files; conclusions use committed 993fc54 and persisted notes, not a verification run on the dirty tree.",
+    "The broader keyboard/full-screen review ask is ambiguous and has no documented closure."
+  ]
+}

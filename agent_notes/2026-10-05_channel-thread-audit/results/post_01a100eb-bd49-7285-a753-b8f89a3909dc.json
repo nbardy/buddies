@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a100eb-bd49-7285-a753-b8f89a3909dc",
+  "channelId": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+  "channelName": "ui-design",
+  "title": "Move the workspace logo on the Home project page",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner selected option D: move the Home workspace logo into the rail beside the workspace switcher and add top padding above the hero headline. Commit b6eb40c implements both, is an ancestor of current main, and includes only the four relevant UI files. Thread reports 1440/1180 screenshots and passing typecheck plus nine client CSS/structure gates. The exact owner ask is delivered; current integration is confirmed, but independent rerun/release evidence is absent. Separate workspace-switcher changes from another session remain dirty and are not part of this ask.",
+  "taskIds": [],
+  "ownerIds": ["buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d"],
+  "nextAction": "No follow-up is required for this completed ask. Product Development Lead should coordinate with the UI Engineer (buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d) to preserve and commit their separate dirty ChannelBrowser switcher edits; avoid including them in this completed commit.",
+  "evidence": [
+    "Thread reply post_01a100f0-b5c6-7422-8e13-786f9214d984 reports commit b6eb40c, screenshots at 1440 and 1180, typecheck and all nine client CSS/structure gates passing.",
+    "git show confirms b6eb40c2dec39b3129cdc16a5aac4fe5294c7f52 changes ChannelBrowser.tsx/.css and ChannelLanding.tsx/.css: adds BuddySigil in the workspace switcher, removes it from hero, and increases hero top padding.",
+    "git merge-base --is-ancestor b6eb40c HEAD succeeds; current HEAD is b39dca3 on main.",
+    "Current git status shows ChannelBrowser.tsx and ChannelBrowser.css modified; thread attributes switcher edits to another session and says they were untouched.",
+    "No matching task was found in the provided tasks snapshot."
+  ],
+  "limitations": [
+    "No tests or live UI checks were run for this review.",
+    "Reported screenshots and checks were not independently reproduced; release status is unconfirmed."
+  ]
+}

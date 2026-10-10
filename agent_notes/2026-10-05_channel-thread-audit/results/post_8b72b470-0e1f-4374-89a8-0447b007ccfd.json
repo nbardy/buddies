@@ -1,0 +1,31 @@
+{
+  "threadId": "post_8b72b470-0e1f-4374-89a8-0447b007ccfd",
+  "channelId": "list_772940ff-ef8f-4a93-8151-6011b9674256",
+  "channelName": "buddy-repairs",
+  "title": "Correct inform delivery to background-disabled recipients",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "The root post reports triage complete and a pending fix. The current Task and its completed child records show the preview-only correction was delivered: plain inform preview now agrees with the existing send path, while requests, work, deferred messages, and reply informs retain their structured blockers. Task completion cites the clean-tree verification at unleashd 87d58e9 and Buddies package commit 49dfe08; the vendored provenance in 87d58e9 records sourceCommit 49dfe08, sourceDirty=false, and releaseReady=true. The requested behavior and regression/verification criteria are recorded as satisfied. Current workspace is dirty and at f3d6cf1, so this review relies on the recorded clean-tree evidence and inspected commit, not current-tree checks.",
+  "taskIds": [
+    "buddy_project_40cf0d8d-5f4e-4453-8eef-8845ee0dd2d7",
+    "buddy_project_a2fa592f-d57c-4848-b271-5e93aa0d80fe",
+    "todo_2983ae5b-20d3-4b9e-af97-32d106733afa",
+    "todo_8e8149e4-bb4b-4d4f-a02f-589cdace46ee"
+  ],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+  ],
+  "nextAction": "None for this thread. Reopen only if plain informs begin creating recipient runs or send-capability semantics change, as recorded in the Task.",
+  "evidence": [
+    "Current Task buddy_project_40cf0d8d-5f4e-4453-8eef-8845ee0dd2d7 is done; child implementation/verification Task buddy_project_a2fa592f-d57c-4848-b271-5e93aa0d80fe is done.",
+    "Task evidence: Buddies 49dfe08; unleashd 87d58e9; clean-tree pnpm typecheck exit 0 and pnpm test:server 455 tests / 449 pass / 0 fail / 6 skipped.",
+    "Inspected commit 87d58e9: commit message identifies vendor package source 49dfe08; vendor provenance sourceCommit matches, sourceDirty=false, releaseReady=true.",
+    "Thread API returned no replies on two reads; root input JSON is the available thread post evidence."
+  ],
+  "limitations": [
+    "Buddies source commit 49dfe08 is not present in this checkout, so its source diff was not inspected.",
+    "No tests were run, per instruction. Current shared workspace has unrelated dirty files; no conclusion relies on them."
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "capturedAt": "2026-10-08T08:07Z",
+  "base": "f1011d0b4a954a8bee82292ea212768565baa4b3",
+  "sources": [
+    {
+      "path": "product/buddies/CORE_DESIGN.md",
+      "sha256": "ec8f932c8eb614bce9eb76dd01d2741b6965b39398a42857f3fb5f862c7a488d",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "agent_notes/2026-10-08_conversation-busy-thread-inject.md",
+      "sha256": "f9069a3477b822310458e69f42587c2bfbbb51041fef7a240d234e83ad6cab18",
+      "matchesBase": false,
+      "commit": null,
+      "preservedText": "# Thread replies to a mid-turn seat fail with conversation_busy; inject instead (2026-10-08)\n\nStatus: owner direction (accepted), lead diagnosis (proposed until the regression test confirms it).\nTask: task_01a117e5-1391-7690-955f-fae9527cc872. Owner thread: post_01a117e1-1b0e-72e6-bef4-52b764bac275\n(channel list_4bd52262-8f0b-465d-99e5-60cc33eb8565), 2026-10-07T19:39Z.\n\n## Symptom\n\"Couldn't reply: [conversation_busy] conversation 38b91d03-\u2026 already has a live run\". Posted three times\nby Product Development Lead in the launch thread post_01a117a1 (runs run_01a117da-bfcd, run_01a117df-04a4,\nrun_01a117e0-2a04, all `execution_failed`) while run_01a117d6 (a delivery from task thread\ntask_01a117b8) held its seat 38b91d03.\n\n## Diagnosis (lead, from source at 961ec3f + `runs` rows)\n- 5d75897 (2026-10-07, part of the owner-approved thread-noise revert / follow-up gate restore):\n  `bind_run` binds a subscription only for DMs or the Buddy's own post. A public/task seat stays\n  unsubscribed so later posts go through the follow-up gate.\n- Consequence: thread follow-ups enqueue with conversation_id NULL. `WAITING_REASON_SQL` blocks a\n  NULL-conversation deliver only on a running deliver in the same root.\n- The seat was busy with another root's delivery. The run was claimed, `seatTurn` chose the seat,\n  `bind_run` hit the one-live-run constraint, and `noticeFailure` posted reply_failed.\n- The runs.rs comment already warns against this: \"Do not admit a run here whose job is decided\n  after the claim\".\n\n## Owner direction\nA message arriving while the Buddy works in that conversation is injected into the live turn after the\nnext tool call, framed \"While you were working a new message arrived\u2026 adjust, but don't forget the\ncurrent work\". It must never fail.\n\n## Lead decisions (assistant, not owner)\n- Keep 5d75897's unsubscribed public seat (an owner decision); fix the gate/bind, don't re-subscribe.\n- Two typed paths per harness capability: inject (mid-turn input supported) | wait (conversation_busy,\n  runs after). No silent fallback. Mid-turn input support is unproven for every harness as of\n  961ec3f (no such path in vendor/agent-cli-tool); the worker establishes it with evidence.\n- The worker is Opus (the injection design is open), per the 2026-10-01 worker-model policy.\n\nRevisit if: per-harness injection proves unavailable everywhere (then wait-only, and tell the owner), or\ninjection mid-tool-chain causes turns to drop their current work.\n\n## Successor, 2026-10-07T19:47Z: Product Development Lead's steering is the inject path (lead decision)\n- PDL had implemented this before my worker started (posts post_01a117e7-0223, post_01a117e7-5fc6):\n  - new unread current-thread posts are appended to the result of any Buddy MCP tool call\n    (server/src/buddies/mcp.ts, existing catchUpThread fence);\n  - a same-thread claim race repair in runs.rs;\n  - tests in buddies-v2.test.ts and core.rs.\n- No commit hash was given yet.\n- Verified live: PDL's post reached my turn inside my `post` tool result.\n- Supersedes my per-harness inject plan above. It works the same on every agent CLI and needs no CLI\n  transport. Cost: injection happens only at Buddy tool calls, not after Bash or Edit (accepted for\n  now; the owner was told and can ask for any-tool injection).\n- My Opus worker run_01a117e5-83ed-722c-b698-deb1205ac53c was cancelled to avoid duplicating the work.\n  It may have left a worktree.\n- Still open, now concrete enough for Sonnet:\n  - the cross-thread seat case (the actual live failure: the busy run came from another root);\n  - the case where a turn ends without a Buddy tool call.\n  PDL agrees the same-thread repair doesn't cover the first one.\n\n## Successor, 2026-10-07T20:11Z: cross-thread fix f509912 reviewed (lead); merge awaits owner\n- Sonnet worker: f509912 on fix/thread-busy-gate (base aa19d5a), worktree ../unleashd-wt-thread-busy-gate.\n- Mechanism: when `bind_run` says conversation_busy, the run goes back to the queue naming the seat\n  (crate `defer_run`), so the existing gate rule makes it wait.\n- Chosen over teaching the gate the seat id. The seat id derives from host state, and a crate copy\n  would be a second definition.\n- Lead diff review found:\n  - only a not-yet-executed run is deferred;\n  - the runner's `holds` are set only after bind, so a deferred run is never renewed;\n  - the re-claim goes to the seat's existing turn without subscribing it. 5d75897 is preserved.\n- Tests: worker-reported (buddies-v2 72/72, crate pass); not rerun by the lead. Rest of the server suite\n  not run. Line ceiling 11136 -> 11172.\n- Asked the owner (post_01a117fe-10f6) to approve a local fast-forward plus an addon rebuild and\n  restart. Recommended no push yet: main is 12 ahead of origin, including the updater commits that are\n  pending the owner's A/B release decision.\n\n## Successor, 2026-10-08T05:26Z: landed on local main as 4663353 (lead)\n- The owner asked \"I thought we fixed this?\" (post_01a119f5-8a1c) with a screenshot.\n  - The screenshot showed the 19:38Z/19:43Z failures, from before the fix.\n  - A search found no conversation_busy failure after 19:43Z.\n  - f509912 had never been merged: the merge question in post_01a117fe-10f6 went unanswered, and the\n    lead left it waiting. Read the owner's message as the go-ahead to land it.\n- Cherry-picked f509912 onto main 650a915, giving 4663353.\n  - The one conflict was buddies-v2.test.ts, where both sides appended tests.\n  - A union merge dropped the shared tail of the attachments test; it was restored by hand.\n  - The diff against the parent shows additions only.\n- Lead-run checks on the committed tree (for these paths, the tree equals HEAD):\n  - pnpm addons rebuilt unleashd-buddies;\n  - pnpm typecheck passes;\n  - cargo test --no-default-features: all pass;\n  - buddies-v2 73/73;\n  - line gate 11170/11172.\n- Not pushed. Live only after the dev backend reloads (deferred while turns run); post-reload\n  behaviour not yet observed.\n\n## Successor, 2026-10-08T05:30Z: pushed 51a5a10 on the owner's instruction\n- Owner (post_01a119fa-dc4e): \"commit and merge all branches and push\".\n- Backend pid 19173 started 13:23:07 +0800, before 4663353 (13:26:06). So the owner's restart ran code\n  without the fix.\n- Merged origin/main b8a1e3d (docs/index.html only) into main, then pushed: origin/main = main = 51a5a10.\n  - This includes a concurrent session's df361d5 (Markdown/PDF preview), which I did not review.\n  - Checks at 51a5a10: typecheck 0, client 257/257, line gate 11170/11172.\n  - The only tracked dirty file that could affect typecheck is commands.ts, and its change is\n    formatting only.\n  - test:server was not run at 51a5a10; buddies-v2 73/73 ran at 4663353.\n- \"Going live\" relies on tools/watch-server.mjs design: a source or addon change drains the backend,\n  which reloads once its turns finish. I did not observe the reload.\n- Branch triage was delegated to an Opus worker (post_01a119fd-1384, Task task_01a10beb). Rule: land\n  only finished, non-superseded work; WIP, rescue snapshots and unapproved behavior changes go to the\n  owner; no branch deletions.\n\n## Successor, 2026-10-08T07:27Z: owner wants interruption at ANY tool use; \"run limit\" label is wrong\n- Owner reports (07:24Z, 07:25Z, 07:27Z):\n  - Game Designer's thread was stuck with \"X is replying\u2026 \u00b7 X and X are queued at the run limit\".\n  - Owner direction, restated: owner replies made while an agent is replying should interrupt it\n    (first given 2026-10-07T19:39Z).\n- Lead's first answer (post_01a11a67-d4f3) blamed the per-Buddy pool plus dc299ec's removed 60-min\n  cutoff, and proposed \"owner first\" past the pool. RETRACTED (post_01a11a68-ad19):\n  - Product Development Lead showed the busy turn was Game Designer's own reply in the same thread;\n  - the lead then found that the label \"queued at the run limit\" is applied to EVERY queued delivery\n    (server/src/buddies/channels.ts:297 -> client channel-data.ts:657), whatever the waiting reason.\n  The pool hypothesis had no evidence.\n- Real gap: aa19d5a steers only at a completed Buddy MCP tool call. A turn running Bash/Edit or\n  waiting on native sub-agents never receives the owner's message, which then waits for the turn.\n- Accepted owner requirement (twice stated, so no new approval needed): inject at the next tool use of\n  any kind.\n  - Task task_01a11a68-4873-7712-8ca8-64b9b102f8a7; Opus worker post_01a11a68-7f62.\n  - Per-harness mechanism with evidence (e.g. a Claude PostToolUse hook with additionalContext).\n  - Also covers the queued-model-pick suppression found by Product Development Lead.\n  - Also fixes the mislabel: carry the real waiting reason.\n- Facts: max_active_runs is per Buddy, default 5 (schema.rs:43). Running runs are counted per\n  buddy_id; queued runs are claimed oldest-first (runs.rs:273). The 60-min background cutoff was\n  removed by owner request (dc299ec); not to be reopened without the owner.\n- Lesson: the lead reasoned from a UI label without checking what the label maps to. Check the\n  label's source before diagnosing from a screenshot.\n"
+    },
+    {
+      "path": "agent_notes/2026-10-08_owner-reply-root-causes-decision.md",
+      "sha256": "de781db1c55a5667cb6c3c87178c5c81a1537742fb1f5a683896e5802e098c04",
+      "matchesBase": false,
+      "commit": null,
+      "preservedText": "# 2026-10-08 \u2014 Owner replies stuck \"queued at the run limit\": three root causes, three fixes\n\nStatus: ACCEPTED by owner, 2026-10-08T07:31:22Z. The owner said \"fix the root issues, refactor\nsystems/software as needed, fix and commit all and push\" (post_01a11a6c-8660, #bugfixes thread\npost_01a117e1-1b0e-72e6-bef4-52b764bac275). The lead (Buddies Development Lead) proposed the\nbreakdown below, and reads the owner's message as approving all three, including the push.\n\n## Evidence\n- Live symptoms: Game Designer (3\u00d73\u00d73 correction) and Art Lead replies queued for an hour or more. The owner\n  reproduced it in the #bugfixes thread itself, when lead replies showed \"queued at the run limit\"\n  (screenshot in post_01a11a68-ebcd).\n- The label is generic: server/src/buddies/channels.ts:297 maps not-running \u2192 'queued', and\n  client channel-data.ts:657 renders every queued row as \"at the run limit\" (lead read, 07:27Z).\n- Steering (aa19d5a) fires only when a Buddy MCP tool call completes (Product Development Lead's statement, post_01a11a67-c24f).\n- Run cap is per Buddy (default 5), shared by owner replies and workers, oldest first\n  (claim_run_at ORDER BY ready_at). dc299ec (2026-10-08 01:52) removed the 60-min background\n  limit, at the owner's request.\n- run_01a1185c (codex) hung 6.5 h, 2026-10-07 21:54Z \u2192 2026-10-08 04:25Z.\n\n## Decisions\n1. Owner messages steer a running turn after ANY tool use, and the label names the real reason.\n   Task task_01a11a68 (Opus).\n2. Owner-first admission: a run triggered by an owner post bypasses the per-Buddy cap, and waits\n   only for its conversation. Task task_01a11a6d (Sonnet).\n   - Alternatives: reserve a slot for the owner, or bring back a worker-only time limit.\n     The owner was offered both in post_01a11a67-d4f3 and did not pick either.\n   - Cost: a Buddy can briefly exceed its cap while it answers the owner.\n   - Product Development Lead's caveat (post_01a11a68-8eb2): this does not steer a busy\n     conversation. That is decision 1's job; the two decisions complement each other.\n3. Hung-turn liveness: no harness progress for N minutes ends the turn with its own error code.\n   No wall-clock cap comes back (the dc299ec decision stands). Task task_01a119c4 (Opus).\n   This replaces that Task's earlier \"no behavior change without approval\" clause.\n\n## Revisit if\n- Owner-first admission lets a Buddy flood the host. If so, cap it at cap+1.\n- No reliable progress signal exists for some harness (e.g. a silent sub-agent wait). If so,\n  that harness needs a typed exemption, decided by the owner.\n"
+    },
+    {
+      "path": "agent_notes/2026-10-06_buddies-target-system-review.md",
+      "sha256": "4d90c94201595170033587d65aad4945e8f438d9759ff8f983c38f786e9f65f1",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "agent_notes/2026-10-07_deliveries-off-owner-chats.md",
+      "sha256": "1a49200c213cd663e6acc2dd93f330870f8ffcf68cb67caa9d0c08cb400cacce",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "server/src/buddies/mcp.ts",
+      "sha256": "75323c77cc11066b058c0539d73ea1047f6f60ccc52b94c6ea34cbfea2262d8d",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "server/src/buddies/runner.ts",
+      "sha256": "ea4ad4d6f977dd2fefbf17cc6fc6676a2e90c70a7716a25f767cf36c716d1121",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "crates/unleashd-buddies/src/deliveries.rs",
+      "sha256": "07fa36d5265f6b53fead1a0eb14858e34b5f89fabccb08b75b9aa178313e261d",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "crates/unleashd-buddies/src/runs.rs",
+      "sha256": "60feef8191bdc61309e9630fab4e2232c9e4386201e2f5835de3b688ce75e3a8",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "server/src/turns/watchdog.ts",
+      "sha256": "7dcbb7b3f88b9616d96c94786d4c3392addcb12c79c674737283b03761db4eba",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "server/src/turns/background-wait.ts",
+      "sha256": "0d3be57097e1958cd05e01c2ac7d22037310583f8ae8296edfcfe1f4a73b321f",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "client/src/components/buddies/channel-data.ts",
+      "sha256": "2bbd915f974ea871f4e3144b6180451b1a274a892445e0c59be7e3ee6b5c3a83",
+      "matchesBase": true,
+      "commit": "f1011d0b4a954a8bee82292ea212768565baa4b3"
+    },
+    {
+      "path": "vendor/agent-cli-tool/src/harnesses/codex.ts",
+      "sha256": "c51ca3411f1dc17371e683b097ba28db351e6c7ff6eae866bfbfa53f240cefc1",
+      "commit": "7a41287033e3fade6bda202117f09ef3dca03bb2"
+    },
+    {
+      "path": "vendor/agent-cli-tool/src/harnesses/claude.ts",
+      "sha256": "5155340f62bd768799fa8853274bbb2b7f13bc3d403a2a10c05016a419761631",
+      "commit": "7a41287033e3fade6bda202117f09ef3dca03bb2"
+    },
+    {
+      "path": "vendor/agent-cli-tool/src/harnesses/gemini.ts",
+      "sha256": "d4fe87b2cd4aaba6e615f76553e8f54b91bd83e6ac85ea95d827ade9ef166243",
+      "commit": "7a41287033e3fade6bda202117f09ef3dca03bb2"
+    },
+    {
+      "path": "vendor/agent-cli-tool/src/harnesses/cursor.ts",
+      "sha256": "3799c4a45028c5c68f119ef37bf90abac63c21caec147c1e70ff3c37b49072bd",
+      "commit": "7a41287033e3fade6bda202117f09ef3dca03bb2"
+    },
+    {
+      "path": "vendor/agent-cli-tool/src/harnesses/muse.ts",
+      "sha256": "b3f5825b26de53b6ab3e9238934a27ae23f724fb7b0323ba074a5dd1bc9b46eb",
+      "commit": "7a41287033e3fade6bda202117f09ef3dca03bb2"
+    },
+    {
+      "path": "vendor/agent-cli-tool/src/execute.ts",
+      "sha256": "1a7a3286affb6620baad8b3a64784e8e68cafa9dcf9dece0af7af590a797716a",
+      "commit": "7a41287033e3fade6bda202117f09ef3dca03bb2"
+    }
+  ]
+}

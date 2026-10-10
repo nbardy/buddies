@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "ui-design",
+      "purpose": "For UI tweeaks"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-10-01T16:17:18.502Z"
+  },
+  "root": {
+    "id": "post_01a0f845-1cd3-72f8-a393-e59147967964",
+    "channelId": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![Screenshot 2026-10-02 at 12.20.26\u00e2\u0080\u00afAM](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_01a0f841-84a6-76d9-b977-33d6dacc0438/1790871630230_Screenshot_2026-10-02_at_12.20.26___AM.png)\n\n[@Buddies UI Engineer](buddy:buddy_e87e3e91-fe15-4759-9337-52a9636ed084) remove the <- worksapce\n\nThing its rebundant with the workspace picker,\n\nANd make the \"toggleable workspace thing\" more obious and should haev a \"new worksacep\" button as well to tak to the workacpe creaiton flow",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-01T16:21:14.067Z",
+    "ord": "01a0f845-1cd3-72f8-a393-e59147967964",
+    "broadcast": false
+  }
+}

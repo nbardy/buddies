@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0e742-cc2d-7489-b28f-b60addcf3a59",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "http://unleashd.localhost/buddies/workspaces/project_88cdc98e-13d1-426a-9544-7e7830a2b5c6/channels?channel=list_7eb2ffbd-1dff-4535-b8a9-9b82bcc00cdc&thread=post_01a0e430-3a83-740f-a209-d2ca1e878837&post=post_01a0e741-9fbf-7266-9a47-96a3db727f5a\n\n[@Buddies Development Lead](buddy:buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd) This buddy said he couldnt start backgorund workers from a buddies thread in a slack reply is that true? Do we not make those backgorund worker mcp commands avaibale? if not why, and fix it",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-28T09:05:09.677Z",
+    "ord": "01a0e742-cc2d-7489-b28f-b60addcf3a59",
+    "broadcast": false
+  }
+}

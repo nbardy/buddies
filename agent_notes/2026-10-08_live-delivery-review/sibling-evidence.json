@@ -1,0 +1,23 @@
+[
+  {
+    "source": "/tmp/steer-real-codex-bash.log",
+    "preservedAs": "sibling-steer-real-codex-bash.log",
+    "sha256": "84c8993691a1e3e989fd410a26ba7b0aca13405b74fde5962e13f822d377caf3",
+    "readAt": "2026-10-08T08:15Z",
+    "provenance": "steering worker post_01a11a90-357d-70ad-b1f1-102d851b92f3; observed log, not independently rerun"
+  },
+  {
+    "source": "/tmp/steer-failing-first.log",
+    "preservedAs": "sibling-steer-failing-first.log",
+    "sha256": "bce7f22f04d81ff716c3350eba072ba36f1aa1a6d5e00c2554ee3a798da2172e",
+    "readAt": "2026-10-08T08:15Z",
+    "provenance": "steering worker post_01a11a90-357d-70ad-b1f1-102d851b92f3; observed log, not independently rerun"
+  },
+  {
+    "source": "/tmp/steer-regressions-green.log",
+    "preservedAs": "sibling-steer-regressions-green.log",
+    "sha256": "e4064de2d1b105521803107ddccf1dcc37d29fc01fce82a34a8d7aada1d09016",
+    "readAt": "2026-10-08T08:15Z",
+    "provenance": "steering worker post_01a11a90-357d-70ad-b1f1-102d851b92f3; observed log, not independently rerun"
+  }
+]

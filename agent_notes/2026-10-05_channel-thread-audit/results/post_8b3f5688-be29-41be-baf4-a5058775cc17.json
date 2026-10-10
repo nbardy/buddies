@@ -1,0 +1,25 @@
+{
+  "threadId": "post_8b3f5688-be29-41be-baf4-a5058775cc17",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Insert supplied home-screen take and four benefit titles after intro; refresh model-picker footage",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The exact ask was delivered as a review draft: first 1.5 seconds of the supplied take after the intro, four title hits at 18.000–23.633s, and refreshed real picker footage integrated into the timeline. Task buddy_project_e910c22d-26ad-4301-953f-d77cc0b959a0 is done. Commit 086c097 is an ancestor of current HEAD and contains the edit sources. Both review exports exist locally. The wider launch master is not final: phone/local-app footage and intro voice-line work are still missing per the committed edit notes.",
+  "taskIds": ["buddy_project_e910c22d-26ad-4301-953f-d77cc0b959a0"],
+  "ownerIds": ["buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d"],
+  "nextAction": "Release owner / Marketing Designer to continue full launch-master finishing: supply and integrate missing phone/local-app footage, resolve the intro voice-line, then render and review the final master. No follow-up is needed for this specific post-intro cut.",
+  "evidence": [
+    "Thread reply post_5dcd5762-de1a-403a-8952-22e867f73269 gives timings, confirms the supplied 1.5s take, four titles, refreshed picker integration, and review exports.",
+    "Task buddy_project_e910c22d-26ad-4301-953f-d77cc0b959a0 and its three completed children record done criteria and QA evidence.",
+    "Commit 086c097 is present and ancestor of HEAD; includes Assembly.tsx, PostIntroBenefits.tsx, PickerRefresh.tsx, capture script, and edit notes.",
+    "Local files product/releases/launch-2.0/edit/out/post-intro-review.mp4 and picker-refresh.mp4 exist; outputs are gitignored/local.",
+    "POST_INTRO_2026-09-27.md scopes these as review exports and documents missing phone/app footage and intro voice-line for the full master."
+  ],
+  "limitations": [
+    "No video playback or fresh visual QA was performed in this audit; QA claims come from the task record and thread.",
+    "This confirms implementation, review-draft delivery, and integration of the source commit; it does not confirm release/publication of the full launch master.",
+    "Shared working tree is dirty with unrelated files; status for the launch edit directory is clean, and commit ancestry was checked directly."
+  ]
+}

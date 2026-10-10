@@ -1,0 +1,36 @@
+{
+  "threadId": "post_2d3ec42e-d08c-46b2-9dea-17441b84f419",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Why do we only have one channel?",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Root ask answered: channels were opt-in, and buddies-dev was the only channel at the time. After the owner's follow-up complaint asking to fix the lack of channels/projects/general, the Lead created #general, #buddy-repairs, #channels-feature and #releases, posted task links, and cancelled two stale superseded tracking tasks. Current task evidence shows #general default provisioning implemented in fix/workspace-general @ b99a894 and in review, with owner merge timing/backfill decision outstanding. The channel count question/action is closed; broader workspace setup is not all released. No dropped work found; proposal to rename mailing lists fully/archive/unify send was explicitly parked/cancelled under the existing rename task.",
+  "taskIds": [
+    "buddy_project_d157d274-80b7-472e-9ee2-ad5b61effccf",
+    "buddy_project_37f2780f-f766-452b-991c-eb4ca4192a9b",
+    "buddy_project_9864f34e-b435-43b1-80b1-07cc51645fbe",
+    "buddy_project_4b01b303-c38b-422c-860f-07923c76ea2d",
+    "task_01a10acc-88dd-712c-92b4-7f8a967cabc3"
+  ],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd",
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4",
+    "owner"
+  ],
+  "nextAction": "Owner to approve merge timing for #general provisioning and choose how existing workspaces without #general are handled (current task recommends a Home affordance; no backfill is implemented). The Lead should ensure #general task reaches integrated/released status after approval. No follow-up needed for the original channel-count question.",
+  "evidence": [
+    "Root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_2d3ec42e-d08c-46b2-9dea-17441b84f419.json",
+    "Thread replies: post_ebe22367-1894-4494-a0b4-16b06e849729 (why only one), post_397c3ea4-47ab-45e5-9da7-942472a0ae28 (created four channels and task-linked posts)",
+    "Current channel read shows #buddies-dev exists; #general existence inferred from owner-accepted implementation plan and task evidence, not directly enumerated through channel list API in this review.",
+    "Task buddy_project_d157d274-80b7-472b-991c-eb4ca4192a9b is done: display-only Channels rename shipped; full rename, archive and unified send explicitly cancelled/no demonstrated need.",
+    "Tasks buddy_project_37f2780f-f766-452b-991c-eb4ca4192a9b and buddy_project_9864f34e-b435-43b1-80b1-07cc51645fbe are cancelled as superseded; evidence preserved and successors identified. Mention-trace task buddy_project_4b01b303-c38b-422c-860f-07923c76ea2d is cancelled per owner decision to use existing tool-call UI.",
+    "Task task_01a10acc-88dd-712c-92b4-7f8a967cabc3: #general provisioning branch fix/workspace-general @ b99a894dec88f5dac4a1dae654ba2880325a10e6; worker-reported crate/server/typecheck and screenshot evidence; not merged/pushed/restarted; status review."
+  ],
+  "limitations": [
+    "The #general task includes owner approval needed for merge timing because merging reloads the live backend; this review did not alter tasks or request approval.",
+    "The broader question of existing workspaces lacking #general remains undecided; implementation deliberately has no backfill.",
+    "No direct current channel enumeration tool was available; #general current state is evidenced by its task/branch report, not a live channel list."
+  ]
+}

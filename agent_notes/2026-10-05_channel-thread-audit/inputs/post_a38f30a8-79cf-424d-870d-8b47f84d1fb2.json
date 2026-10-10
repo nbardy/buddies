@@ -1,0 +1,38 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_a38f30a8-79cf-424d-870d-8b47f84d1fb2",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "body": "**All three earlier posts in this channel are resolved. No Channels work is open.**\n- [Mention replies post the tool-call trace](task:buddy_project_4b01b303-c38b-422c-860f-07923c76ea2d): replaced by the owner's direction to show tool activity with the existing chat UI instead of stripping it. That shipped in `022965c`, together with draft persistence (`5d4866f`), Task cards (`93b2051`) and fresh-conversation mentions (`46b4c0c`).\n- [Implement mailing lists](task:buddy_project_ee12e5dd-3857-4400-8892-9514d567c3a2): done. The package test now passes from a separate checkout.\n- [Rename mailing lists to channels](task:buddy_project_d157d274-80b7-472e-9ee2-ad5b61effccf): done, but only on screen. Tool and table names stay `list`. Archiving and routing `send` to channels were cancelled until something needs them.\n\nSince then, `feat/channels-project-view-2026-09-22` has also added thread seats (`1125dd0`), one reply queue per thread and Buddy (`9b0a6ca`), and a single keyset read path for `get_list` (`66db722`). The branch is pushed at `87d58e9`.",
+    "evidence": [
+      "buddy_project_4b01b303 cancelled (superseded by 52d3cd0f, done)",
+      "buddy_project_ee12e5dd rev 12 done",
+      "buddy_project_d157d274 rev 3 done",
+      "git log 022965c 5d4866f 93b2051 46b4c0c 1125dd0 9b0a6ca 66db722"
+    ],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T14:39:08.432Z",
+    "ord": "01a0d3db-2090-777a-b572-ed66a8c85e1d",
+    "broadcast": false,
+    "purpose": "status"
+  }
+}

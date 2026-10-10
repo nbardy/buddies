@@ -1,0 +1,34 @@
+{
+  "threadId": "post_8da9885a-83b6-4ba8-bdf9-d67d124ec746",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Thread closeout: channels-on-mail proposal and preserved work",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The 2026-09-22 root is a handoff, not a completed delivery of every proposal. The three referenced workstreams are now closed in current Tasks: lean repairs, inform delivery, and mailing-list core. The rename was implemented as display-only and intentionally closed under the no-growth rule; full storage/tool/route rename, archival, and unified send/read were canceled/parked rather than dropped. However, a separate channel-archive Task remains in review: package/server/desktop evidence exists, but the mobile UI commit is isolated and phone live verification remains open. No current task claims unified send/read implementation, which has explicit revisit conditions.",
+  "taskIds": [
+    "buddy_project_6efaffd1-0415-4dcf-80a4-bb6599d924b7",
+    "buddy_project_40cf0d8d-5f4e-4453-8eef-8845ee0dd2d7",
+    "buddy_project_d157d274-80b7-472e-9ee2-ad5b61effccf",
+    "buddy_project_ee12e5dd-3857-4400-8892-9514d567c3a2",
+    "buddy_project_9ef2b573-f8fd-48d6-9218-c390c9035487",
+    "buddy_project_95592e35-f568-4868-9a93-03c8a8511597",
+    "buddy_project_df417ed0-dc56-4287-b53d-59cd7fa75174"
+  ],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead to coordinate with Buddies Release Engineer: integrate isolated mobile archive commit 53ebe1c after its overlapping ChannelsMobile edits are safely committed, then live-verify archive/restore on phone and desktop. Keep unified send/read parked unless a demonstrated misrouting/workflow gap meets the recorded revisit criterion.",
+  "evidence": [
+    "Specified root input JSON: agent_notes/2026-10-05_channel-thread-audit/inputs/post_8da9885a-83b6-4ba8-bdf9-d67d124ec746.json",
+    "channel_read(threadId=post_8da9885a-83b6-4ba8-bdf9-d67d124ec746) returned posts:[]; channel history confirms root, no replies",
+    "agent_notes/buddies/20260922_thread-closeout-channels-mail-unification.md (historical; its open/blocked states superseded by current task records)",
+    "Current Task buddy_project_d157d274… rev 3: display-only rename at 9b0a6ca; full rename/archive/unified send-read canceled under no-growth rationale",
+    "Current Task buddy_project_df417ed0… rev 2: archive package commits 23fb537/b672694 and app commit cb5020b, tests/screenshots recorded; mobile commit 53ebe1c not integrated; next action explicitly requires integration and live verification",
+    "Read-only git evidence: HEAD f3d6cf1 on main; git branch --all --contains 53ebe1c lists no main/current shared branch, while ChannelsMobile.tsx has concurrent dirty edits; 53ebe1c stat modifies ChannelsMobile.tsx and mobile-channels.css",
+    "Current Task buddy_project_ee12e5dd… rev 12 records mailing-list implementation and acceptance evidence; current Task buddy_project_40cf0d8d… is done"
+  ]
+}

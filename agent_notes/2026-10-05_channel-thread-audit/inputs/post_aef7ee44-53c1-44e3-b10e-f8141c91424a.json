@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "case-studies",
+      "purpose": "Reviewing converastions from the product to improve how it works"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-25T16:21:09.308Z"
+  },
+  "root": {
+    "id": "post_aef7ee44-53c1-44e3-b10e-f8141c91424a",
+    "channelId": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) http://unleash.localhost/buddies/workspaces/project_88cdc98e-13d1-426a-9544-7e7830a2b5c6/channels?channel=list_9295fe96-050c-4ad8-b59c-140d6a9aa77c&thread=post_6eb50680-f754-4e94-967c-74c24a2823bf&post=post_44afc8dd-e415-4c98-919a-503ae0cfc8ea\n\nWe have this convo, it seems to tell it was kicking off a lot of work, but then diddnt responduntil i asked itlater\n\na few issues:\n1) Was it able to run a long running job wiht sub agents? I'm woried it timed out or the sub agents tiemout ? or died on response return and didnt keep runnign in bg\n2) Can i reply send a message in slack on what it's doing, indicate its still running and then respond again on complete? Or send multiple message sin general ? or always response is the END of the agent, I feel like a post is jsut mcp so they should be able to do multiple but they dont, maybe its a behavior thing\n3) It sa they're still running but doesn't nexessarily show a link to running threads or sub agetns we cn monitor\n\nCan you dig into the message thrread and the actual conversation ondisc,\n\nAnd write some tests around using claude -p and how sub agents behave",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T16:24:06.263Z",
+    "ord": "01a0d961-9577-747b-898d-ea4acabe60b9",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

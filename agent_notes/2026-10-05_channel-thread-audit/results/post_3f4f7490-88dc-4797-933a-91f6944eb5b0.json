@@ -1,0 +1,20 @@
+{
+  "threadId": "post_3f4f7490-88dc-4797-933a-91f6944eb5b0",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Owner request: fix four top-level channel issues from the preceding thread",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Umbrella task is done. All four issues have implementation/verification evidence; their commits and the revised thread-seat behavior are integrated into current main HEAD. Thread-seat design intentionally superseded fresh-conversation-per-mention. No unresolved asks surfaced in this thread.",
+  "taskIds": ["buddy_project_52d3cd0f-e342-43a3-a221-7d24c19930cf", "todo_fe582030-f0c8-4583-ae30-7983395026ba", "todo_3148315b-be0e-4638-9d5f-a160f4dd6de1", "todo_30d7e75e-9fd2-42a6-ade1-b61d3d18397f", "todo_0f741f0a-da76-47ba-9525-fd416ed4945b"],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084", "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"],
+  "nextAction": "None. Existing task closed with lead acceptance; fresh-conversation criterion was superseded by thread seats and same-thread cross-harness live acceptance.",
+  "evidence": [
+    "Root post asks the Buddies Development Lead to address four issues described in the preceding thread.",
+    "Current task detail: umbrella status done; todos 1-4 done; clean-commit typecheck/client test/invariant evidence and phone/desktop screenshot references recorded.",
+    "Commits 022965c (collapsed tool activity), 5d4866f (persistent drafts), 93b2051 (Task chips/cards), 46b4c0c (initial mention fix), 1125dd0 and 9b0a6ca (superseding thread-seat behavior) all exist and are ancestors of HEAD f3d6cf1 on main.",
+    "Later integrated channel behavior is evidenced by 70f87b3, f3f2d23 and a38bdc2, all ancestors of HEAD. Task records live acceptance in thread post_68e186a9 with alternate Claude harness succeeding in the same thread."
+  ],
+  "limitations": "No tests rerun per request. Worktree is dirty with unrelated changes; integration assessed from commit ancestry only. Historical task evidence records clean-tree checks at the relevant implementation commits, but this audit did not independently inspect archived screenshots or replay live behavior."
+}

@@ -1,0 +1,28 @@
+{
+  "threadId": "post_66802944-6f82-4d8f-8f37-aab14dadaa17",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Buddy DMs in Channels use the thread response and composer",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Implementation and desktop/phone visual verification are reported, but the linked Task remains in review. Thread evidence says Send enabled after typing and explicitly says no message was sent; current acceptance criteria require confirming a sent message reaches the Buddy and preserving Builder conversation UI. This is active owned work, not dropped.",
+  "taskIds": [
+    "buddy_project_a978f8e4-6566-434d-aa9d-2667269da30e"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead: verify an actual Buddy DM send reaches the Buddy, confirm the Buddy Builder still uses conversation UI, add evidence and update the existing Task status.",
+  "evidence": [
+    "Thread post post_c4b562e9-e429-4d22-aea1-02fc4c870165 reports desktop and phone screenshot checks; no message sent.",
+    "Current Task buddy_project_a978f8e4-6566-434d-aa9d-2667269da30e is status review, owner buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4, revision 2.",
+    "Task acceptance criteria explicitly require sending a message reaches the Buddy and Buddy Builder continues using conversation view.",
+    "Task evidence reports focused tests, typecheck and invariant gates passed; live visual evidence for desktop and phone is listed.",
+    "Relevant client implementation and tests are present in working checkout; repository has 54 dirty paths, so this review does not assert commit integration/release."
+  ],
+  "limitations": [
+    "No tests run, no message sent, no Builder runtime check performed.",
+    "The shared working tree is dirty; did not attribute current client files to a verified integration commit."
+  ]
+}

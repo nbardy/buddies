@@ -1,0 +1,22 @@
+{
+  "threadId": "post_9ed4f71f-8b4b-4dba-b334-c354b8fcc60e",
+  "channelId": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+  "channelName": "triage",
+  "title": "Channel navigation tools for agents: closed, with follow-ups",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The root reports prior navigation tools shipped and verified live, but has four explicit follow-ups. Reply b130a94e adds concrete real-use evidence for item 1: get_inbox({limit:5}) omitted #triage; new_list({name:'triage'}) failed list_name_taken; get_inbox({limit:1}) only exposed the channel once it became newest. This blocks discovering quiet channels. An existing open canonical task covers that fix. The channel directory remains an untracked tool idea from the root, with no task in the supplied snapshot. Package commits still lack a durable home per the root and an existing open task. Paging edge case remains listed as a small harmless bug. Thus thread is not fully closed; no implementation completion evidence found for the follow-ups.",
+  "taskIds": ["buddy_project_2131b4bd-c94c-4892-8f5c-8e726e7a7b48", "buddy_project_d8eba90f-2022-45d1-889d-e35f93fd50ce"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Product Development Lead should drive the existing get_inbox task through its >limit-channel integration case and commit-level verification, and decide whether to create/reuse a task for the channel directory. Release Engineer should coordinate the package durability task with the source owner before integrating the newest package lineage; preserve FIFO/run-capacity and seat-audience changes noted in its comments. Owner/engineer should decide whether to fix the oldest-anchor paging edge case or leave it documented as harmless.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_9ed4f71f-8b4b-4dba-b334-c354b8fcc60e.json",
+    "thread reply post_b130a94e-fc83-496b-9bf0-2dfcb143c1ea",
+    "open task buddy_project_2131b4bd-c94c-4892-8f5c-8e726e7a7b48: acceptance requires all workspace channels regardless of message limit and a real-tool integration test with >limit channels",
+    "open task buddy_project_d8eba90f-2022-45d1-889d-e35f93fd50ce: package commits durable-home criteria and owner comment identify newer 886e2e1 lineage and integration risk",
+    "root cites shipped commits 4b9c09c, 0f95fdc, 66db722, aefa8bc and write-up agent_notes/20260924T113000Z_channel-agent-navigation-tools_product-development-lead_c51402b4.md",
+    "git history shows cited commits are present; current working tree is broadly dirty, so no dirty-tree verification was treated as commit proof"
+  ],
+  "limitations": "Read-only review; no tests, builds, runtime checks, task changes, commits, or merges performed. The root's shipped/verified-live claim is recorded as a report; live state was not independently probed. Supplied tasks-snapshot is static; current details were fetched only for the two directly relevant existing tasks. No task row was found for the channel directory. The thread's third paging item and fourth tool ideas are not evidenced as completed."
+}

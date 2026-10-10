@@ -1,0 +1,33 @@
+{
+  "channel": {
+    "id": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "triage",
+      "purpose": "Follow-ups, loose ends and small bugs left open when a thread closes. Pick one up by turning it into a Task with new_project/update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+    },
+    "createdAt": "2026-09-24T14:40:21.506Z"
+  },
+  "root": {
+    "id": "post_86583c4f-cf9a-4e05-a8a4-b1895067bdb5",
+    "channelId": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+    },
+    "body": "Handoff \u2014 closing out this thread, all pending work listed:\n\nIn progress:\n- [Eliminate agent-thread interruption across restarts](task:buddy_project_33bb3d10-9da0-4db3-84fe-7f9143ff5592) \u2014 3 open + 1 in_progress todos, re-scope vs session binding remaining\n- [Fix foreground Buddy admission after restart](task:buddy_project_d1064ee8-e064-4ef9-b942-a1c87ffd2a40) \u2014 1 in_progress, verify conv 89d40447 after drain\n- [Replace the context estimator with provider-reported truth](task:buddy_project_3d52671d-120d-4f64-9438-fed36c97a151) \u2014 4 open, live-run verification only\n- [Pick the harness per @mention](task:buddy_project_d5790892-4ca9-472d-9e61-e178c266f127) \u2014 5 open\n\nBlocked:\n- [Capture and autonomously triage server errors](task:buddy_project_0918702c-a8e2-4c51-884d-cf9f33c5cee0) \u2014 needs owner `schedule.manage` grant + background execution enable (backgroundEnabled:false) before `set_automation enable automation_2c140768`. Note: my last message called this a \"work grant\" \u2014 same thing as the background-execution / incoming-work toggle, not a removed concept. Owner approval to enable already given 2026-09-20; only mechanical grants remain. Watch stale next_run_at 2026-09-16 on enable.\n\nReview (code done, verify):\n- [Archive and hide Buddies from Settings](task:buddy_project_4c7c0e4e-545a-4068-b669-621545c7ac5a)\n- [Remove injected Codex plugin recommendations](task:buddy_project_9cfaf9ac-233f-40eb-9a41-9d8cdc05822c)\n- [Simplify individual Buddy pages](task:buddy_project_b3562e28-71c5-4b82-91d6-13463bcd5e2e)\n- [Unify UI appearance and simplify mobile](task:buddy_project_8b8ebb68-4cc2-418a-a456-ca5dcb939c3d)\n\nReady / backlog (channel seats wave):\n- [Reconcile channel thread seats](task:buddy_project_a17450ec-596b-4caf-b0ec-61360d1923ff)\n- [Mention chip shows seat model](task:buddy_project_4ed48794-f423-4673-bcd6-55d547e27de5)\n- [Live-verify thread follow-ups and seats](task:buddy_project_d6b661c3-8250-4d45-a9d6-4b527a50af3c)\n- [Resumed seat gets only posts since last reply](task:buddy_project_26eab07c-cd6f-47f2-8d4f-bd9980e2ea0a) (backlog)\n\nThis thread is done \u2014 pick up from Tasks, not here.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T15:22:30.810Z",
+    "ord": "01a0d402-d61a-75cb-a32c-780534a4e7b1",
+    "broadcast": false,
+    "purpose": "handoff"
+  }
+}

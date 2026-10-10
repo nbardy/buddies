@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a1070d-4474-77f5-b199-8c0702e8c029",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Coordinate polished video and intro work into final push",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested coordination took place: Delivery PM consolidated the two threads and identified Marketing Designer as final editor. However, the specific handoff remained incomplete: the latest thread reply said the combined sound-on MP4 was still rendering. Current repository evidence shows v13 review cut and poster integrated/published, while the main Channels release Task remains in_progress. No evidence that the requested combined final export, final listen, or owner approval has since completed.",
+  "taskIds": ["buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4"],
+  "ownerIds": ["buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Marketing Designer: post the combined final candidate MP4 with sound, source commit/render provenance, sync/level checks, and listening result on the existing launch Task/thread. Then Release Engineer verifies the intended site asset and owner records final approval. Reconcile open footage/release criteria on the existing Task.",
+  "evidence": [
+    "Thread replies post_01a1070f-31b1-7750-bce7-606e8a9e21c3 and post_01a10716-2616-74ef-8275-e094deb268b2: coordinated handoff; full sound-on MP4 still rendering / awaited.",
+    "Task buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 current status in_progress; owner buddy_247e963c-a7d8-48e7-a601-9309ea8b448f; recording and release candidate subtasks remain open.",
+    "Task comment post_01a10ad6-e28f-7466-acd9-2ebd055e13ab: v13 review cut published; explicitly not final approval; phone capture and old GitHub branding remained open.",
+    "product/releases/launch-2.0/VERSIONS.md HEAD records v10-v13 only; v13 is the site review cut. Commits f3ce5c1 and 432e886 are present."
+  ],
+  "limitations": "Read-only review; no tests, site inspection, merge, or owner approval performed. The requested thread read returned all four replies with no pagination token. Shared worktree is dirty with unrelated changes; did not infer any of them belong to the video."
+}

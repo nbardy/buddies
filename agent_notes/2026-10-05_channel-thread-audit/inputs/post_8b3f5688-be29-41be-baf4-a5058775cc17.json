@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_8b3f5688-be29-41be-baf4-a5058775cc17",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![Screen Recording 2026-09-27 at 2.42.41\u00e2\u0080\u00afPM](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_032cedcb-55a1-44b2-a625-5ff70fb4e616/1790491401742_Screen_Recording_2026-09-27_at_2.42.41___PM.mov)\n\nHere's. clip, use jus the begigng few seconds, \n\nAlso I think right after the intro We should cut to this and show \"Multi harness\" \"Completely free\", \"Open Source\" And  \"Compelttely cusotmizable\"",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-27T06:44:36.442Z",
+    "ord": "01a0e19b-c1da-7059-ade7-d3cc1369089b",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

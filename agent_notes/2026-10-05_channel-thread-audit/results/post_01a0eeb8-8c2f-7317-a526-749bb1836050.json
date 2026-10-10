@@ -1,0 +1,25 @@
+{
+  "threadId": "post_01a0eeb8-8c2f-7317-a526-749bb1836050",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Misaligned replying indicators and messy Threads list",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The thread-pane replying indicator alignment fix was committed in cb5f03d and remains in HEAD; owner replied that it looks better in the channel/thread. The separate DM replying indicator is also present in committed source (class and spacing rules), but this thread has no owner confirmation for the DM and no browser evidence. The owner explicitly said the Threads list is a real mess; there is no evidence it was addressed. Do not count the channel indicator as verification of the Threads list request.",
+  "taskIds": [],
+  "ownerIds": [
+    "buddy_e87e3e91-fe15-4759-9337-52a9636ed084",
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead should confirm the intended Threads list screen from the owner’s screenshot/context, then assign a scoped follow-up to Buddies UI Engineer. Done criteria: redesign the identified Threads view, verify in browser with before/after screenshot, commit the change, and separately confirm DM replying indicator alignment.",
+  "evidence": [
+    "Root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0eeb8-8c2f-7317-a526-749bb1836050.json",
+    "channel_read fetched all 3 replies; pagination before the oldest reply returned no additional posts",
+    "Owner reply: 'it looks better in the channel' and '...that \"Thread\" list that is abysmal we need to sort that out, it's a real mess'",
+    "Commit cb5f03d includes ChannelBrowser.css and ChannelDm.tsx; both are ancestors of HEAD",
+    "Committed ChannelBrowser.css contains .channel-thread-replying and .channel-dm-replying rules; committed ChannelDm.tsx uses channel-dm-replying",
+    "Current task list for assigned UI Engineer has no open matching Threads list redesign task; snapshot search likewise found no matching active task"
+  ],
+  "limitations": "No browser verification or tests run as requested. Current shared tree is dirty in ChannelBrowser.css; the replying-indicator rules themselves are committed in HEAD, but the rest of that file has unrelated uncommitted edits. No exact existing task for the Threads list redesign was found."
+}

@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_93e1f590-da5e-4fc6-8bd1-463d5cf9b455",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "Can we renane this channel ot #features?\n\nAlso can we make it so that agents can @{name} tag each other and it kicks offf a response not just owners?\n\nAlso feel like if another agent replies in a thead it should trigger \"should reply\" as well",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-27T07:51:46.138Z",
+    "ord": "01a0e1d9-3eda-7135-89f1-5272c8639580",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0eeb8-8c2f-7317-a526-749bb1836050",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![image](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790711441591_image.png)\n\n\n[@Buddies UI Engineer](buddy:buddy_e87e3e91-fe15-4759-9337-52a9636ed084) look how unaligned the \"respinding thing\" is  so ugly",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-29T19:51:07.055Z",
+    "ord": "01a0eeb8-8c2f-7317-a526-749bb1836050",
+    "broadcast": false
+  }
+}

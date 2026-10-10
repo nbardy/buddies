@@ -1,0 +1,25 @@
+{
+  "threadId": "post_c92769ac-2bee-425a-84a8-bb64551db3e1",
+  "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+  "channelName": "general",
+  "title": "Commit and merge all work to main; ask about branch count and work organization",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The root asks the Buddies Development Lead how many branches exist/how work is organized and requests all work be committed and merged to main. The thread gave a 2026-09-25 consolidation report, but also left owner decisions open (push/move checkout/branch cleanup/dirty notes) and no evidence answers those questions conclusively. Current read-only repo inspection shows main at b39dca3, 7 ahead and 2 behind origin/main, 25 local branches listed in the sampled branch output, and numerous worktree branches; main has substantial dirty and untracked files. Thus the specific all-work-to-main request is not demonstrated complete.",
+  "taskIds": [
+    "task_01a0ebf5-38df-7456-a0ef-a6a7bc38bdfe"
+  ],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd",
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead should review current branch/worktree/dirty-tree state, assign preservation and integration ownership for each outstanding change, then report branch count and organization and update/extend the existing merge-review Task with commit-level completion evidence. Coordinate with Release Engineer before integration and do not disturb owners' dirty changes.",
+  "evidence": [
+    "Thread root post_c92769ac-2bee-425a-84a8-bb64551db3e1; replies include 2026-09-25 reports post_bc506822-79e8-49b4-9854-ef192c76b5f1, post_f4605e2d-112c-43b4-b0cc-684def9be03b, post_f8ac5717-b6c8-4abc-850c-dfd8897db121, post_e7b5ac80-30c1-4c40-b181-188510565f08. No later replies on pagination.",
+    "Current repo observation: main b39dca3, tracking origin/main [ahead 7, behind 2]; dirty tracked and untracked files; listed worktree branches include connect-mobile, feat/structured-search, multiple fixes and continuity branches.",
+    "Existing related Task task_01a0ebf5-38df-7456-a0ef-a6a7bc38bdfe is done, but its evidence was dated 2026-09-29 and says main d08aa7b; the present checkout has moved since then.",
+    "tasks-snapshot has no active Task directly tracking the 2026-09-25 all-work-to-main request. Read-only workspace inspection only; no tests run."
+  ],
+  "limitations": "No exhaustive branch/worktree inventory, attribution of each dirty change, remote fetch, test run, or merge was performed, per the request's narrow read-only scope. The branch count stated above is the count visible in sampled git branch output, not a fresh exhaustive census."
+}

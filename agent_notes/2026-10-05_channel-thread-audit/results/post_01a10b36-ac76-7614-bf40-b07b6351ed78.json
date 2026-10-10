@@ -1,0 +1,52 @@
+{
+  "threadId": "post_01a10b36-ac76-7614-bf40-b07b6351ed78",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Channel search fuzziness, @author search, and readable/highlighted results",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The owner reported that “market” returns nothing despite marketing content, @name cannot find Buddy messages, and results expose raw markdown without highlighting or breathing room; they also asked what search engine/matching exists and how hard embeddings would be. The Development Lead explained SQLite FTS5 currently uses exact whole-token body matching, proposed prefix+Porter stemming and one-edit typo matching, author/channel results, and markdown/highlighted roomier excerpts. Embeddings were deferred pending real missed-query evidence. The exact follow-up task is open and no implementation completion evidence is present. Existing structured-search code is unmerged and does not satisfy this ask by itself.",
+  "taskIds": [
+    "task_01a10b37-e7d8-7689-b16f-98254db2f8d5",
+    "task_01a10757-8bbf-7189-938f-7b66704a70a1"
+  ],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+  ],
+  "nextAction": "Buddies Development Lead: complete the open search task from feat/structured-search, reproduce the owner's “go to market” miss on a temporary store, implement prefix/stem/typo matching and the requested @author/channel and rendered/highlighted excerpt UX, then attach commit-level test and desktop/phone screenshot evidence. Keep branch-only until authorized integration; revisit embeddings only after measuring misses.",
+  "evidence": [
+    {
+      "source": "root post input",
+      "path": "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a10b36-ac76-7614-bf40-b07b6351ed78.json",
+      "finding": "Owner's exact request and channel identity."
+    },
+    {
+      "source": "thread replies",
+      "finding": "Development Lead states SQLite FTS5 exact-token matching, body-only index, 180-character plain excerpt; proposes task and defers embeddings. Replies include explanation and worker plan, no completion report."
+    },
+    {
+      "source": "task record",
+      "taskId": "task_01a10b37-e7d8-7689-b16f-98254db2f8d5",
+      "finding": "Current status open, owner Development Lead, done criteria require matching behavior, @author, channel result, readable UI and tests/screenshots."
+    },
+    {
+      "source": "decision note",
+      "path": "agent_notes/2026-10-05_search-fuzziness-decision.md",
+      "finding": "Status PROPOSED; embeds deferred; main baseline evidence and scope."
+    },
+    {
+      "source": "git",
+      "commit": "74d1fd3",
+      "branch": "feat/structured-search",
+      "finding": "Existing structured filters only; commit is not on main."
+    },
+    {
+      "source": "git",
+      "commit": "6147983",
+      "branch": "feat/channel-search-fuzzy",
+      "finding": "Duplicate branch contains same structured-search commit; no later search completion commit found in git log."
+    }
+  ],
+  "limitations": "Read-only, targeted review. No tests run. No unmerged working-tree diff inspected for search implementation because the relevant source paths are not among the observed dirty files; lack of task/commit evidence means implementation remains unverified. The separately listed structured-search task remains open and is not treated as dropped."
+}

@@ -1,0 +1,22 @@
+{
+  "threadId": "post_01a0e33c-d8b2-71e8-a9f2-dccddd7bdab5",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Remove the Claude prefix from Haiku, Opus and Sonnet picker names",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "The owner asked to remove the redundant Claude prefix from Haiku, Opus and Sonnet model names in the picker. Product Development Lead reported this done. Commit c296f84 updates generated catalog display names to Opus 5.5, Sonnet and Haiku and updates the label comment; it also changes the agent-cli submodule pointer. Local main contains c296f84. Reported checks: catalog check, config-picker tests (5/5), and full typecheck. No matching open task was found in the workspace task list; no follow-up needed for this exact ask.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "None for this request. Release/remote integration was not verified.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0e33c-d8b2-71e8-a9f2-dccddd7bdab5.json",
+    "thread reply post_01a0e341-90a1-7331-a63d-ba0c55cdc751",
+    "local git show c296f84: shared/src/generated/catalog.ts changes Claude Opus 5.5/Claude Sonnet/Claude Haiku to Opus 5.5/Sonnet/Haiku",
+    "local git show c296f84: client/src/components/buddies/channel-text.ts label comment updated",
+    "thread report says catalog check, config-picker tests (5/5), and full typecheck passed",
+    "git status --short --branch: main...origin/main [ahead 7, behind 2], with unrelated dirty files"
+  ],
+  "limitations": "Review was read-only apart from writing this requested JSON. Checks were not rerun. The shared tree is dirty, and remote integration or released runtime behavior was not verified. Thread wording and commit diff satisfy the exact requested label change."
+}

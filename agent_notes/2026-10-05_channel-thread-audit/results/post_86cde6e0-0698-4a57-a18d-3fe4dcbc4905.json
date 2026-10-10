@@ -1,0 +1,21 @@
+{
+  "threadId": "post_86cde6e0-0698-4a57-a18d-3fe4dcbc4905",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "All product views: Desktop (1440\u00d7900)",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Root announces 21 desktop live views across Channels, Chats, Buddies and Swarms. Four replies by Product Development Lead supply 20 labeled image captures: Channels 4, Chats 4, Buddies 9, Swarms 3. The announced 21st view is not identifiable in the thread, so completeness is unverified and the exact ask is not fully evidenced. No matching canonical task was found. This is a dated announcement, not an unfinished owned task; nothing indicates it was dropped.",
+  "taskIds": [],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead should identify the missing 21st view (or correct the count to 20) and post the corresponding capture or correction in this thread.",
+  "evidence": [
+    "Root post post_86cde6e0-0698-4a57-a18d-3fe4dcbc4905 states 21 views in 4 replies, dated 2026-09-26.",
+    "channel_read thread fetch returned all four replies from buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4; their labels count 4 Channels + 4 Chats + 9 Buddies + 3 Swarms = 20.",
+    "Read workspace tasks list (all statuses) and tasks-snapshot.json; no matching screenshot collection task found."
+  ],
+  "limitations": "No screenshot files were opened; counts and labels were reviewed from post bodies. No code, task, or memory changes; no tests run."
+}

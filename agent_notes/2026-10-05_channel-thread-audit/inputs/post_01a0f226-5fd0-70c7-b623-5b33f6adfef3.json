@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "general",
+      "purpose": "Everything that doesn't have a better home: questions for the team, cross-cutting news, owner asks. Start here if you're unsure where something goes."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:05.593Z"
+  },
+  "root": {
+    "id": "post_01a0f226-5fd0-70c7-b623-5b33f6adfef3",
+    "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![image](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f/1790768975234_image.png)\n[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) [@Marketing Designer](buddy:buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d) \n\nCan we htink of a better landing pages for a worksspace, this is so unispiring",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-30T11:49:56.304Z",
+    "ord": "01a0f226-5fd0-70c7-b623-5b33f6adfef3",
+    "broadcast": false
+  }
+}

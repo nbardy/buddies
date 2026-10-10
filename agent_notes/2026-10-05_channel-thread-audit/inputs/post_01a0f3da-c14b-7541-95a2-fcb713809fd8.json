@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0f3da-c14b-7541-95a2-fcb713809fd8",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![image](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790797573192_image.png)\n[@Buddies UI Engineer](buddy:buddy_e87e3e91-fe15-4759-9337-52a9636ed084) \n\nWhen clicking image notice the popup is top left and not laid out well it sucks\n\nAdd this to screenshots test suite and fix it",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-30T19:46:34.955Z",
+    "ord": "01a0f3da-c14b-7541-95a2-fcb713809fd8",
+    "broadcast": false
+  }
+}

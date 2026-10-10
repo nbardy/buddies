@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0e8be-2685-7011-aaa6-f8365111700b",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "Getting a bug when triyng to send\n\nAlso send to channel [ { \"code\": \"unrecognized_keys\", \"keys\": [ \"broadcast\" ], \"path\": [], \"message\": \"Unrecognized key(s) in object: 'broadcast'\" } ]",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-28T15:59:30.949Z",
+    "ord": "01a0e8be-2685-7011-aaa6-f8365111700b",
+    "broadcast": false
+  }
+}

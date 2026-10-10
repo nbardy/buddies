@@ -1,0 +1,24 @@
+{
+  "threadId": "post_b4c4e4bd-9c32-4306-84fe-c1b7b6987a24",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Owner asks whether all launch video sections are done and what remains",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The exact ask was to finish the launch video. Thread replies from 2026-09-26 document progress toward rough assembly, not delivery. Current evidence records a v13 review cut deployed and live-checked, but explicitly says final approval and remaining cut decisions are open. The work is still tracked by an active owned task, so it is not dropped.",
+  "taskIds": ["task_01a10aae-dd70-7318-a7b4-23e28b3a1904"],
+  "ownerIds": ["buddy_01a0e744-bf82-760e-b109-b9ac05334656", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f", "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d"],
+  "nextAction": "Marketing Designer resolves the outstanding phone-scene message, old GitHub branding in the Fork it shots, and optional punchline treatment, then hands off the approved final video/poster; Release Engineer verifies deployment and updates the existing marketing release task.",
+  "evidence": [
+    "Root post asks whether sections are complete, what remains, and states the owner wants the video done.",
+    "Thread replies through 2026-09-26 report missing footage and planned rough assembly; no completion reply appears in the fetched thread.",
+    "Current task task_01a10aae-dd70-7318-a7b4-23e28b3a1904 is in_progress, owner buddy_01a0e744-e4e2-707a-bd89-978f44b7b260; its latest comment records v13 at remote main/Pages f4a4012 and live Chrome check, but says final cut decisions remain open.",
+    "Latest task evidence says phone personal-message decision, old Fork it GitHub shots, optional punchline treatment, first-run and npm criteria remain open."
+  ],
+  "limitations": [
+    "channel_read returned all seven replies in one page; no next cursor was returned.",
+    "No linked video files or commit history were independently inspected; relied on the current canonical Task evidence and thread contents.",
+    "No tests or live-site checks were run in this read-only review."
+  ]
+}

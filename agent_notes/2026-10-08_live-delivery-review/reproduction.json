@@ -1,0 +1,19 @@
+{
+  "base": "f1011d0b4a954a8bee82292ea212768565baa4b3",
+  "fixtureSha256": "b888a368fd5b37d3fbc4d11dfb58ff72194b6a04a2e4affb3580a6772bf22d38",
+  "before": {
+    "server/src/buddies/mcp.ts": "75323c77cc11066b058c0539d73ea1047f6f60ccc52b94c6ea34cbfea2262d8d",
+    "crates/unleashd-buddies/src/deliveries.rs": "07fa36d5265f6b53fead1a0eb14858e34b5f89fabccb08b75b9aa178313e261d",
+    "crates/unleashd-buddies/src/posts.rs": "c55c0dc67711c4c1d40cd355100472f2fd5e9506c3f7b691f6a25ed487137f4e",
+    "crates/unleashd-buddies/src/runs.rs": "60feef8191bdc61309e9630fab4e2232c9e4386201e2f5835de3b688ce75e3a8"
+  },
+  "after": {
+    "server/src/buddies/mcp.ts": "75323c77cc11066b058c0539d73ea1047f6f60ccc52b94c6ea34cbfea2262d8d",
+    "crates/unleashd-buddies/src/deliveries.rs": "07fa36d5265f6b53fead1a0eb14858e34b5f89fabccb08b75b9aa178313e261d",
+    "crates/unleashd-buddies/src/posts.rs": "c55c0dc67711c4c1d40cd355100472f2fd5e9506c3f7b691f6a25ed487137f4e",
+    "crates/unleashd-buddies/src/runs.rs": "60feef8191bdc61309e9630fab4e2232c9e4386201e2f5835de3b688ce75e3a8"
+  },
+  "exitCode": 0,
+  "clock": "2026-10-08T08:05:12.505Z",
+  "scope": "temporary stores; real crate/MCP/runtime; fake provider; no live CLI inference"
+}

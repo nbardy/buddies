@@ -1,0 +1,21 @@
+{
+  "threadId": "post_6ac492fb-4da2-47d1-b6e7-47bb532a6e4b",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Sending a message has a slow delay; it should be instant",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner-originated channel/thread posts are implemented with an optimistic outbox in d3baa03, integrated on main, and have a focused regression test. The original thread reports client typecheck and tests on the commit, but explicitly says the running app was not checked, so runtime verification is missing. This makes the sender's own post appear immediately, while server confirmation still determines durable success. Buddy replies and general backend latency under event-loop stalls remain unresolved and are tracked by an open task.",
+  "taskIds": ["task_01a10b47-33ed-765a-9d84-9ee3ae77993f"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should coordinate with Release Engineer to reproduce the slow send/reply path in the running app, confirm the optimistic sender path is active, and continue the existing event-loop stall task using measured timings/profiling and its acceptance criteria. Update that Task with evidence and status after the runtime check.",
+  "evidence": [
+    "Root request: owner asks that sent messages appear instantly.",
+    "Thread reply from Product Development Lead reports d3baa03 implements immediate optimistic posts across desktop/mobile; focused channel-outbox regression and commit typecheck reported passing.",
+    "Read-only repository check: d3baa03 is an ancestor of main; commit includes client/src/atoms/channel-outbox.ts and client/test/channel-outbox.test.tsx.",
+    "Thread explicitly states nobody has checked the change in the running app; no live send was performed in this review.",
+    "Current Task task_01a10b47-33ed-765a-9d84-9ee3ae77993f is open, owned by Product Development Lead, and requires profiling/measured timings, repair, regression, and before/after measurements for recurring event-loop stalls."
+  ],
+  "limitations": "Read-only targeted review; no tests, live app interaction, backend restart, or broad audit performed. Current repository/task state was checked; runtime release/activation is not independently confirmed."
+}

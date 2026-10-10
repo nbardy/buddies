@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a0e39a-ec7a-770f-b1e3-18acf3ca1231",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Thread reply composer caret and spelling alignment",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The owner asked why long thread replies misaligned the caret/spellcheck and directed the UI Engineer to fix it. A committed CSS fix was reported and the commit contains scrollbar-gutter: stable on the mirrored composer layer plus a 3-line CSS budget update. A local geometry reproduction and client invariant script pass were reported. The reporter explicitly had not reproduced the fix in the running app. The owner’s original visible behavior therefore lacks end-to-end confirmation; implemented and committed, but runtime verified/integrated/released status is unconfirmed.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084", "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Buddies UI Engineer should reproduce a >10-line thread reply in the running app and capture confirmation that caret and spellcheck stay aligned; Product Development Lead should confirm whether the commit is integrated/released and record that evidence. No directly matching current Task was found in the task inventory; the open composer-related review task is a different Buddy DM delivery task.",
+  "evidence": [
+    "Input root: agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0e39a-ec7a-770f-b1e3-18acf3ca1231.json",
+    "Thread replies: post_01a0e3a6-c174-722f-b1b1-0d9d2d1e1574 (owner: Fix it); post_01a0e3a7-5b8f-7163-b04b-688d1c64b1d9 (cause and work underway); post_01a0e3a8-fa21-709f-b5b9-ad3f888e6b3f (commit and checks report). channel_read pagination returned no additional replies.",
+    "Read-only git evidence: commit edc13d8089365ad3dce9309383e13aa385713650 changes client/src/components/buddies/ChannelComposer.css and tools/check-client-invariants.sh; commit message records 352/360px before and 352/352px after headless geometry repro.",
+    "Current git status is dirty across unrelated client files; do not infer dirty-tree integration or use working-tree state as proof. The commit object exists locally."
+  ],
+  "limitations": [
+    "No matching Task was found by title in the current workspace task listing; taskIds is empty.",
+    "No tests or live app reproduction were run in this review, per request scope.",
+    "The thread’s original screenshots were not opened; root text and commit evidence were reviewed."
+  ]
+}

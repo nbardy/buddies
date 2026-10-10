@@ -1,0 +1,29 @@
+{
+  "threadId": "post_19d45fa4-e232-4897-b320-f552b2cb3f81",
+  "channelId": "list_772940ff-ef8f-4a93-8151-6011b9674256",
+  "channelName": "buddy-repairs",
+  "title": "Blocked owner decisions: inactive saved-grant revocation and blocked-work recovery delivery",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Both blockers are now resolved as tasks, though the original thread has no replies. Saved-grant discovery/revocation and permission-draft preservation are marked done with commits 1e68159 and 4e4d878 plus browser observations; these are implemented and verified, but evidence says they were on a feature branch and not main at the time recorded. Buddy blocked-work recovery implementation/verification is done at 14465ac and that commit is an ancestor of current HEAD. Its prepared Wave_sim CEO response was deliberately not delivered due to no authorized route; task says delivery was dropped under explicit owner delegation, not that work was abandoned. The original thread's outdated blocked summary needs no new implementation task, but release/integration of the saved-grant commits still needs confirmation.",
+  "taskIds": [
+    "buddy_project_95592e35-f568-4868-9a93-03c8a8511597",
+    "buddy_project_9ef2b573-f8fd-48d6-9218-c390c9035487"
+  ],
+  "ownerIds": [
+    "buddy_e87e3e91-fe15-4759-9337-52a9636ed084",
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+  ],
+  "nextAction": "Release Engineer: verify commits 1e68159 and 4e4d878 are integrated into the release/main target and deployed; if not, coordinate preservation and integration. Development Lead: leave the prepared CEO reply for owner forwarding unless an authorized route is supplied.",
+  "evidence": [
+    "Live task buddy_project_95592e35-f568-4868-9a93-03c8a8511597: done; evidence lists commits 1e68159, 4e4d878 and output/inactive-access-2026-09-24/.",
+    "Live task buddy_project_9ef2b573-f8fd-48d6-9218-c390c9035487: done; evidence lists 14465ac, 25 focused tests, typecheck, and undelivered ceo-response.md.",
+    "git show: 1e68159cf3bae549f29d4936d8238aa900d208c9 and 4e4d8786a84193b99936d66b982a0adcb602815c exist.",
+    "git merge-base --is-ancestor 14465ac HEAD succeeded.",
+    "Channel read requested for thread post_19d45fa4-e232-4897-b320-f552b2cb3f81 returned posts: [].",
+    "Working tree is dirty with unrelated concurrent edits; no whole-tree clean or commit verification claimed."
+  ],
+  "limitations": "No tests were run, per instruction. No branch integration or deployment was verified for the saved-grant commits. The endpoint of current HEAD is not assumed to be production. The thread itself returned no replies; current task records supplied status and evidence."
+}

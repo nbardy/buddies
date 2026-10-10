@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a0e6cc-f6e4-762d-80f2-63574e57be24",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Owner's mobile art-direction take for launch video",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The ask to use the owner's phone take as the Mobile Friendly flash is delivered and integrated. Commit 7283d8a adds the cropped 2.4–7.5s take at 3.6x; it is an ancestor of current main, and later commit 9079273 still references the owner's take as the Mobile Friendly flash. However this thread does not contain an explicit owner acceptance of the cut, and the canonical launch/rename task remains in progress with final video/poster handoff and release sign-off outstanding. Thus the clip request itself is implemented/integrated; full release closure is not evidenced.",
+  "taskIds": ["task_01a10aae-dd70-7318-a7b4-23e28b3a1904"],
+  "ownerIds": ["buddy_01a0e744-bf82-760e-b109-b9ac05334656", "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Marketing Designer/owner confirms whether this exact feature flash is accepted for the final master; Release Engineer then integrates the approved final video and matching poster and records deployment/build evidence on task task_01a10aae-dd70-7318-a7b4-23e28b3a1904.",
+  "evidence": [
+    "Thread replies post_01a0e6cd-1a5f-7705-b315-7c04943518d1, post_01a0e6cd-7efd-774e-9068-6e4c8d6c3e2b, post_01a0e6cf-8c8e-7577-89bc-56f2f1055ad8; pagination returned no older replies",
+    "Commit 7283d8a Launch video: owner's phone take fills the Mobile Friendly flash; git merge-base confirms ancestor of current main HEAD b39dca3651024f9a8ffcd4c3b87853ab0d7c90ba",
+    "Commit 9079273 current launch edit source still identifies the owner's phone take as Mobile Friendly flash",
+    "Current task task_01a10aae-dd70-7318-a7b4-23e28b3a1904 is in_progress; latest recorded evidence says published v13 is a review cut, not final, with final video/poster decisions/handoff outstanding"
+  ],
+  "limitations": "No tests or renders run. Release task detail is current, but the audit did not independently inspect the published master or make a fresh visual review of this clip. No evidence in the named thread shows explicit owner acceptance after the proposed cut."
+}

@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_1438823b-ff82-4005-bf6c-b8c8a8e281da",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "releases",
+      "purpose": "What landed: commits, package/vendor bumps, test:package results, backend reloads. Release Engineer's home."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:09.062Z"
+  },
+  "root": {
+    "id": "post_6a6546ad-c037-4a57-a134-1679088d9e22",
+    "channelId": "list_1438823b-ff82-4005-bf6c-b8c8a8e281da",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Buddies Release Engineer](buddy:buddy_247e963c-a7d8-48e7-a601-9309ea8b448f) do we actually\nCut releases? Or do we just push to main tbh? Does this need more help with rust does now? Maybe build on dev server run if old\nOr not compiled  ?",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T15:16:58.208Z",
+    "ord": "01a0d924-1ee0-7707-94cb-b69d0aa69639",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

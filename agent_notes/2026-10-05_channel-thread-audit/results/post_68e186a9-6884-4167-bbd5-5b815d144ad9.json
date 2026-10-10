@@ -1,0 +1,34 @@
+{
+  "threadId": "post_68e186a9-6884-4167-bbd5-5b815d144ad9",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Close all open Buddy work, implement fully, commit and push",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The lead answered the owner’s request with an inventory and then completed the authorized/selected work. Five initially open items were closed: mailing lists, inform preview/package verification, inactive-access UI (successor to the stale-grant task), and the lean Buddy repairs parent, plus follow-on verification. Other proposed backlog items were explicitly cancelled after owner delegated choices. The live Buddies package commit 49dfe08 remains local-only because ~/git/buddies had no remote; the app already vendors the fix. Feature branch work was pushed; current main contains the two cited app commits as ancestors. No active owned tasks from this thread appear dropped. A remote decision remains necessary only if package-owned history itself must be pushed.",
+  "taskIds": [
+    "buddy_project_b53d3177-1f9b-458e-b0da-5a6feae137b7",
+    "buddy_project_95592e35-f568-4868-9a93-03c8a8511597",
+    "buddy_project_6efaffd1-0415-4dcf-80a4-bb6599d924b7",
+    "buddy_project_a2fa592f-d57c-4848-b271-5e93aa0d80fe",
+    "buddy_project_ee12e5dd-3857-4400-8892-9514d567c3a2"
+  ],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd",
+    "buddy_e87e3e91-fe15-4759-9337-52a9636ed084",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+  ],
+  "nextAction": "If the owner requires the package repository history to be pushed, have the Buddies Development Lead request an explicit destination remote from the owner; the app-side feature commits are already integrated in current main. Otherwise no follow-up is needed for this thread.",
+  "evidence": [
+    "Thread replies post_15a1d1f7-a478-43bb-9630-fe690c7d02cc (provider failed), post_1822f3ac-2f1a-4591-b369-64c83a505301 (work inventory/status and delegated decisions), post_abe5afc3-6071-4023-aad1-5dbf43432a58 (owner asks lead to choose), post_6f93c984-f5b4-4977-9815-7ffeca1325d8 (decision/closure report), post_e8af1f54-027b-4835-b77a-f0f77a002d62 (final status and blocked package push).",
+    "Current task details: b53d3177 and 95592e35 done with commits 1e68159 and 4e4d878, boundary test, desktop/phone screenshots and HEAD/feature-branch checks; a2fa592f done with 87d58e9 and separate package test; ee12e5dd done with package and app evidence; 6efaffd1 done. Snapshot also records selected deferred work as cancelled.",
+    "Read-only git check: 4e4d878 and 87d58e9 are ancestors of current main HEAD f3d6cf1. Working tree has unrelated dirty/untracked changes, so no checks were run against it and no clean-tree claim is made. The September 24 task evidence says commits were pushed to feat/channels-project-view-2026-09-22; current local branch list lacks that feature branch, and remote state was not freshly fetched/verified.",
+    "Unresolved package-only publication: thread reports commit 49dfe08 on codex/channel-agent-tools-20260924 could not be pushed because ~/git/buddies has no remote and github.com/nbardy/buddies did not exist. The fix was vendored into the app as 87d58e9."
+  ],
+  "limitations": [
+    "No tests or UI checks run for this audit; relied on dated task evidence and verified commit ancestry only.",
+    "The remote feature branch and package remote were not freshly queried; evidence about their state is from the dated thread/task records.",
+    "Current checkout is dirty with unrelated changes, so integrated means present in current main history, not that the checkout is a clean release artifact."
+  ]
+}

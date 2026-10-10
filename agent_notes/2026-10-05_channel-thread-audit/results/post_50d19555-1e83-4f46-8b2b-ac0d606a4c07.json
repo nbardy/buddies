@@ -1,0 +1,25 @@
+{
+  "threadId": "post_50d19555-1e83-4f46-8b2b-ac0d606a4c07",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Investigate running-response limits and allow five shared Buddy executions",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The thread establishes that foreground replies in separate channel threads were not globally capped at the time of initial investigation; per-thread turns serialize, while background work had separate per-Buddy and workspace caps. The follow-up task implements one FIFO pool of five per Buddy shared across foreground/channel and background execution, adds queued UI state and an integration test, and reports updating 61 live memberships from 2 to 5 with owner approval. The Unleashd integration commits e99e59c, 4ae9385 and 24d60c7 are ancestors of current main. The task remains in review because its documented live runtime check was not done: the backend had not reloaded and no live sixth-reply queued-and-landed behavior was confirmed. Thus implementation, tests and integration are evidenced; release/runtime activation is not fully verified.",
+  "taskIds": ["buddy_project_1356a643-15d4-4c13-9135-af8650f93271"],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Buddies Development Lead should coordinate with Release Engineer to confirm the production/dev backend is running the integrated code, then verify that a sixth concurrent reply for one Buddy is visibly queued and eventually lands; attach evidence and close/update the existing task. Resolve or explicitly record the task's workspace-wide cap question if still applicable.",
+  "evidence": [
+    "Thread reply from Buddies Development Lead (2026-09-25) reports implementation commits 4ae9385 and 24d60c7 plus merge e99e59c; current task evidence describes the six-thread/shared-background integration test and queued UI checks.",
+    "Read-only git ancestry check: e99e59c, 4ae9385 and 24d60c7 are ancestors of current HEAD b39dca3 (main).",
+    "Current task detail: buddy_project_1356a643-15d4-4c13-9135-af8650f93271, status review; nextAction still requests a live sixth-reply check after backend reload.",
+    "Task evidence reports all 61 live buddy_projects rows raised to max_active_runs=5 through the package settings API, with owner approval; backup noted at ~/.buddies/backups/buddies-before-max-active-runs-5-20260925T115956.sqlite. This was not independently rechecked."
+  ],
+  "limitations": [
+    "No runtime restart or live UI verification was performed in this review.",
+    "The live database row update is supported by the task's evidence but was not independently verified; live stores were not opened.",
+    "The Buddies package commit beceb77 is not present as a Git object in this repository, so its upstream/package provenance is taken from the task record.",
+    "The repository working tree is dirty with unrelated concurrent changes; conclusions rely on commit ancestry and task/thread evidence, not dirty-tree checks."
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0f1a8-0ae4-725b-8bb9-e7a42b0e7fd4",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![image](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790760687501_image.png)\n\n[@Buddies UI Engineer](buddy:buddy_e87e3e91-fe15-4759-9337-52a9636ed084)  replying here in the threads does not have balanced or aligned UI, we need to fix that",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-30T09:31:57.028Z",
+    "ord": "01a0f1a8-0ae4-725b-8bb9-e7a42b0e7fd4",
+    "broadcast": false
+  }
+}

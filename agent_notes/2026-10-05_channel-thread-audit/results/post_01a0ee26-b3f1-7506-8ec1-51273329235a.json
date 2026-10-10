@@ -1,0 +1,29 @@
+{
+  "threadId": "post_01a0ee26-b3f1-7506-8ec1-51273329235a",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Launch video clip inventory and publication readiness",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Marketing Designer answered the clip inventory request in-thread and iterated through v2–v13. The v13 review cut is built and deployed to the marketing site, but it is not owner-approved as final. The latest review says there is no finished video with sound: v9 was picture-only and the new music was shorter; re-render/mux and listening remain. Remaining asks include fresh Buddies-branded GitHub/Run captures after the repo rename, resolving readable personal/task/workspace content, owner choices on phone-message treatment and punchline style, and producing an approved final export/poster. The owner's newest request to rename the GitHub repo and redo the README around tasks/channels/buddies has no completion evidence. Active launch and rename/release Tasks remain open, so work is not dropped.",
+  "taskIds": [
+    "buddy_project_0bcad28f-2855-4007-bf01-d438e4e0376b4",
+    "task_01a10aae-dd70-7318-a7b4-23e28b3a1904"
+  ],
+  "ownerIds": [
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d",
+    "buddy_01a0e744-bf82-760e-b109-b9ac05334656"
+  ],
+  "nextAction": "Marketing Designer owns the video: wait for the intro final-hit edit, render/mux picture and score to matching duration, listen end to end, finish the privacy and branding pass, and post a final candidate with artifact/hash/provenance for owner review. Owner must decide phone-message privacy and punchline styling. Release Engineer owns site/release integration; reconcile stale recording subtasks against actual clips and update the existing launch Task. Route the owner's GitHub rename/README request through its responsible owner and verify completion before recapturing the shots.",
+  "evidence": [
+    "Thread root post_01a0ee26-b3f1-7506-8ec1-51273329235a and all 26 returned replies; latest status in post_01a1070a-1b79-773c-aa21-62296f607e9c.",
+    "Current Task buddy_project_0bcad28f-2855-4007-bf01-d438e4e0376b4: in_progress; done criteria explicitly require recording/edit handoff and a named software release candidate; children remain open.",
+    "Current Task task_01a10aae-dd70-7318-a7b4-23e28b3a1904: in_progress; latest nextAction requires Designer's approved final video/poster and other first-run/release evidence.",
+    "product/releases/launch-2.0/VERSIONS.md records v10-v13 provenance; v13 is 96.267s with corrected nbardy/buddies end card and shimmer Vim card.",
+    "product/releases/launch-2.0/LAUNCH_CUT_PLAN.md documents remaining owner review, GitHub recapture, UI freshness/privacy review and approved export; publication requires separate owner approval.",
+    "Task comment post_01a10ad6-e28f-7466-acd9-2ebd055e13ab reports v13 deployed at f4a4012 and live playback/poster verified, explicitly as a review cut rather than final approval."
+  ],
+  "limitations": "Read-only audit; no tests or playback performed. The thread itself has no next-page token and returned 26 posts. Current project Task predates latest thread updates and contains stale recording subtasks; there is no evidence here of their reconciliation. Claims of live playback and deployment are from the existing Task comment, not independently rechecked during this audit."
+}

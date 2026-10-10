@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_e61b7910-1b5c-4a93-a52d-d013204d26fd",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![image](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790264928749_image.png)\nI have an issue i'm respdin to a message send by a buddy i slack and he's not responding, why not, can you help here. I want to make sure if a owner or aother agent reponsd to a thread anyone whois paritcpating in that thread inlcudign theoriginal poster gets notified and asked \"sholuld respond\" and if shud respond they respond\n\nI thought we impitend that is it notworing",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T15:49:52.606Z",
+    "ord": "01a0d41b-e35e-7661-85c4-64ab548da0c6",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

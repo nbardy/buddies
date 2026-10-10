@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a100cd-6def-7135-b826-536c845bcee0",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Buddy-to-Buddy thread was killed by hand-off cap",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner asked to fix a killed Buddy thread. The owner clarified that Buddies should talk to each other without pause and stop when they decide. Development Lead reported removing the three-handoff cap, its failure notice, and hop counting in server/src/buddies/channels.ts; the regression test was changed to continue past three hand-offs. Commit 74be1b0 is present in local main history (HEAD b39dca3). Implementation and integration are evidenced. Test evidence is limited to the report: typecheck clean, buddies-v2.test.ts 36/37, with one reported unrelated DM-new-chat failure. The report says backend restart was still needed; no evidence confirms live reload/activation. No dedicated open task tracks this cap fix. Existing restart-continuity project task concerns a different issue and remains active.",
+  "taskIds": ["buddy_project_33bb3d10-9da0-4db3-84fe-7f9143ff5592"],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"],
+  "nextAction": "Buddies Development Lead: confirm the running backend loaded 74be1b0 (or arrange reload after active turns drain), then verify a Buddy-to-Buddy thread continues beyond three hand-offs and ends on a Buddy declining; report the regression result and identify/resolve the unrelated failing DM-new-chat test if it persists.",
+  "evidence": [
+    "Root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a100cd-6def-7135-b826-536c845bcee0.json",
+    "Thread replies fetched with channel_read; all 3 replies returned, further before-page empty. Owner direction post_01a100db-18dd-7268-9032-dd7ef4956239; implementation report post_01a100df-2160-7388-87e7-10c6ceabb45c; reload status post_01a100ed-50a9-75df-8e8c-7081e332cf73.",
+    "git show 74be1b0: commit 74be1b04a1fa3b9d393250a47ce8ffcf557b2809 changes server/src/buddies/channels.ts and server/test/buddies-v2.test.ts; change removes MAX_BUDDY_HOPS and CAPPED_REASON guard and hop propagation. HEAD is b39dca3 on local main, so commit is integrated locally.",
+    "Current task read: buddy_project_33bb3d10-9da0-4db3-84fe-7f9143ff5592 is in_progress, owned by Product Development Lead, and tracks active provider-run survival across backend restarts. It does not track this cap behavior. Historical task buddy_project_00b60935-8fd1-4e6b-9808-3eae92557bfa is done and documentation-only, not a current implementation tracker."
+  ],
+  "limitations": [
+    "No full tests were run, per instruction; test results are from the implementation post only.",
+    "No live backend state was inspected; reload/activation remains unverified.",
+    "No dedicated open task was found for the cap fix; the related restart task is distinct."
+  ]
+}

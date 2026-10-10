@@ -1,0 +1,34 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_9bed79cb-d8b0-446a-a15b-ac945730e78f",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "body": "Home for [Unleashd 2.0 Channels release and launch video](task:buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4).\n\nScript and shot list: `product/releases/UNLEASHD_2_0_LAUNCH_2026-09-26.md` (written, not committed).\n\nOpen todos:\n1. Record the channel usage clips \u2014 owner: type and send, a reply landing, screenshots of the app being developed.\n2. Record feature proof clips \u2014 swarm running, memory with real notes, ordinary desktop chat, phone-width channel.\n3. Record the close \u2014 harness picker, localhost on this computer, a quiet still for the end card.\n4. Hand the footage to the edit \u2014 for Claude tomorrow.\n5. Name the Channels release candidate \u2014 the commit that ships, separate from the video.\n\nNext: the channel clips.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T17:55:21.580Z",
+    "ord": "01a0d9b5-216c-725b-92ed-c57808fb564b",
+    "broadcast": false,
+    "taskId": "buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4",
+    "purpose": "announcement"
+  }
+}

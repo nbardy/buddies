@@ -1,0 +1,36 @@
+{
+  "threadId": "post_01a0ee7c-8f4e-7377-86ec-7e3c31cc574a",
+  "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+  "channelName": "general",
+  "title": "Handoff: recovered Buddy run queue stall, fix and integration follow-ups",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner supplied an incident handoff and asked Product Development Lead to take it forward. One reply reports the live stall recovery (index added, 25 duplicate schedule runs coalesced, server restarted, broken cross-worktree vendor links repaired) and says commit 337da24 has regression coverage and passed 37/37 Rust tests. This review verified that 337da24 and handoff commit 2fe67e6 exist on branch fix/run-active-buddy-index-20260930 in the current checkout; 337da24 is not contained in any other branch shown here. Four Release Engineer follow-up Tasks remain open: integrate/rebuild 337da24, surface claim/drain failures, prevent cross-worktree node_modules links, and unify index definitions. A separate active restart durability project and task cover queued chat turns surviving restart. The handoff is actionable but not delivered through integration, and its claimed live recovery and test run were not independently reproduced in this read-only review.",
+  "taskIds": [
+    "task_01a0ee7e-0f95-7642-8a41-9deae7ca974d",
+    "task_01a0ee7e-0f8c-73b6-94a8-a70b07bffbdb",
+    "task_01a0ee7e-0fa1-74e1-90dd-1e1cbebb4a3b",
+    "task_01a0ee7e-0f7b-7109-a8ae-d767350baa10",
+    "task_01a10ae8-38d8-7377-a315-c61fa920eaaf",
+    "buddy_project_33bb3d10-9da0-4db3-84fe-7f9143ff5592"
+  ],
+  "ownerIds": [
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd",
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Buddies Release Engineer: integrate 337da24 into the intended main integration line, rebuild through ensure-addons, run the specified Rust and relevant server checks, and record whether any safe live reload/restart occurred; coordinate with Product Development Lead on the existing restart-durability task. Complete the three open safeguards under their existing Tasks. Do not push without owner approval.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0ee7c-8f4e-7377-86ec-7e3c31cc574a.json",
+    "thread reply post_01a0ee7e-631a-7380-9ba0-1a06ca27c99c",
+    "agent_notes/2026-10-05_channel-thread-audit/tasks-snapshot.json",
+    "live Task get: task_01a0ee7e-0f95-7642-8a41-9deae7ca974d (open, Release Engineer)",
+    "live Task get: task_01a0ee7e-0f8c-73b6-94a8-a70b07bffbdb (open, Release Engineer)",
+    "live Task get: task_01a0ee7e-0fa1-74e1-90dd-1e1cbebb4a3b (open, Release Engineer)",
+    "live Task get: task_01a0ee7e-0f7b-7109-a8ae-d767350baa10 (open, Release Engineer)",
+    "git show confirms 337da24 and 2fe67e6; git branch --all --contains 337da24 shows fix/run-active-buddy-index-20260930",
+    "/Users/nicholasbardy/git/unleashd-wt-runindex/agent_notes/2026-09-30_buddies_queue_stall_handoff.md (exists; read-only handoff record)"
+  ],
+  "limitations": "Only the specified #general thread was read. No tests, runtime checks, merges, pushes, task changes, or live-system checks were performed. The main checkout has unrelated dirty files; review stayed read-only apart from writing this requested result JSON. The originating handoff reports the live recovery and 37/37 test result, but those claims were not independently verified."
+}

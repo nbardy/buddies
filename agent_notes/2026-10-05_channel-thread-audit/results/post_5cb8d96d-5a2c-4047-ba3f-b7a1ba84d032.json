@@ -1,0 +1,25 @@
+{
+  "threadId": "post_5cb8d96d-5a2c-4047-ba3f-b7a1ba84d032",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Show each Buddy’s background workers from the DM list",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "The owner asked for a worker icon/count on Buddy DM rows that opens an activity view, then clarified that running workers must show green without hover and that the destination must stay in the Buddies/DM shell. Both asks are implemented, verified, integrated and present in commit 675b134 at HEAD; the canonical task is done.",
+  "taskIds": [
+    "buddy_project_b55cc6f1-1399-4c80-9320-074955dd2eff"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "None for this thread.",
+  "evidence": [
+    "Canonical task status=done; acceptance criteria and evidence enumerate commits 5c1c947, 1356784 and 675b134, focused regressions, typecheck, client invariants and live desktop/phone/tablet checks.",
+    "Read-only commit inspection: 675b134f453efad6afb8828e31aa35513e0ae1ce is HEAD and contains ChannelWorkers view and mobile worker route; desktop worker view and DM links are included in that commit.",
+    "Thread reply post_b1ae4af5-69e1-4241-b204-94ac54be5af4 confirms corrected destination, reload/Back, screenshots, 11 focused tests; task has detailed verification record."
+  ],
+  "limitations": [
+    "Did not rerun tests or inspect the live UI; relied on task evidence and thread reports. Shared working tree is dirty with unrelated changes; commit inspection used git show."
+  ]
+}

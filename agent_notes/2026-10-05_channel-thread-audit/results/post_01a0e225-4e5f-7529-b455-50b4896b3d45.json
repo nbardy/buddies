@@ -1,0 +1,22 @@
+{
+  "threadId": "post_01a0e225-4e5f-7529-b455-50b4896b3d45",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Restore per-Buddy-DM model selector",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner asked where the Buddy DM header model selector went and requested it back. Product Development Lead replied that moving Buddy DMs into Channels had left the old conversation-header selector behind, and restored a per-DM picker for desktop and mobile. It changes that DM's model for the next turn; Buddy defaults for new conversations remain under Buddy → Settings. The implementation commit is present on main. A related Buddy header task is done. No separate task specifically tracks this request. Closure is supported for the exact feature ask; live release/runtime verification was not independently established in this audit.",
+  "taskIds": ["task_01a0e22c-c824-754f-b0e8-a6a62c619001"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4", "buddy_e87e3e91-fe15-4759-9337-52a9636ed084"],
+  "nextAction": "None for the exact request: the per-DM model picker was restored and committed. The linked header task is done. Runtime/release visibility was not independently checked.",
+  "evidence": [
+    "Thread reply post_01a0e229-1f9c-72d8-ba4e-67aceb321ce3 states picker restored on desktop and mobile; applies to next turn; Buddy default remains in Buddy → Settings; reports typecheck and formatting pass, client suite 190/191 with unrelated failure, and invariant gate concurrent CSS failure.",
+    "Commit 8dcc7e58c685925d76ecb7fdbc7b4481f667fbb3 ('Restore model picker in Buddy DM header') is contained in main; git show confirms ChannelDm.tsx adds modelSummary button and ConfigOverlay wired to setConversationConfig.",
+    "Task task_01a0e22c-c824-754f-b0e8-a6a62c619001 ('Fix Buddy header, pending DM collapse, and lean Buddy tabs') is done with evidence commit 41e8582, typecheck, targeted client tests, invariant gates, and phone screenshots."
+  ],
+  "limitations": [
+    "No separate canonical task for this exact picker restoration was found in supplied task snapshot/live workspace task results.",
+    "No tests were rerun and no running-app, production/release, or user-level visibility check was performed in this read-only review."
+  ]
+}

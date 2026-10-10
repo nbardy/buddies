@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a0e224-9648-7036-9441-e68794df1e7b",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Rename #channels-feature to #features",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The owner asked Product Development Lead to rename this channel to #features. The thread then records the lead saying the available Buddy tools could not rename channels, followed by the owner explicitly requesting rename support via MCP. Current server code exposes channel_admin and the Buddy core has rename_channel support, but the channel remains named channels-feature. No completion evidence or dedicated matching Task was found. The ask is therefore still open; implementation capability alone did not deliver the requested rename.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should invoke the existing channel_admin rename action on list_a19772a0-6376-447a-832a-911be260ae80 with name 'features', then confirm the resulting channel name. If MCP action ownership is unavailable, route to the channel administrator. No Task tracks this exact rename in the inspected task snapshot.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0e224-9648-7036-9441-e68794df1e7b.json: root body asks to rename to #features",
+    "channel_read thread: post_01a0e224-e904-7483-be37-ae170812b27e says rename unavailable; post_01a0e238-6aab-772c-8b0a-cc7209c029db owner requests MCP support",
+    "Current channel_read top-level result id post_01a1070e-ae96-7251-872c-5dbfcb748f07; channel still identified as channels-feature",
+    "server/src/buddies/mcp.ts: channel_admin tool; crates/unleashd-buddies/src/posts.rs: rename_channel implementation"
+  ],
+  "limitations": "Read-only review; no rename action was performed. The supplied task snapshot and current workspace Tasks were inspected for relevant rename/search tasks; no Task specifically tracks this channel rename. No tests or broad audit were run."
+}

@@ -1,0 +1,22 @@
+{
+  "threadId": "post_2aea5ac5-f0da-44bd-9e9f-aa5241444a1f",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "All product views: iPad",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Announcement/gallery, not an actionable request. Root states live captures from 2026-09-26, 21 views per orientation. Four replies contain screenshot galleries for Channels, Chats, Buddies, and Swarms across portrait and landscape. No follow-up asks or open request states in the thread; no related canonical task found in the supplied tasks snapshot. Exact deliverable is present in the thread.",
+  "taskIds": [],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "None for this thread.",
+  "evidence": [
+    "Root post says captures are live, dated 2026-09-26, with 21 views per orientation.",
+    "Replies post_c2a34974-fd62-43af-9b6f-1e8982dc1e54, post_82a13854-29a1-4320-93f9-9843a898e0db, post_8e8333a6-7458-4361-b0be-79b2d50fa147, post_a4f1db61-0a0b-482a-8e05-8d7838513bb0 provide the channel/chat/buddy/swarm screenshots for both orientations.",
+    "Each reply is by buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4; requests are state none.",
+    "tasks-snapshot.json contains no matching iPad/gallery task."
+  ],
+  "limitations": "Reviewed supplied root input and full thread response (4 replies; no next pagination token). Did not independently inspect screenshot pixels or rerun captures; closure is for the posted gallery deliverable, not a current UI QA claim."
+}

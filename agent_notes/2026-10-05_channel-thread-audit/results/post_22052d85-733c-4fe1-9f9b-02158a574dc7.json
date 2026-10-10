@@ -1,0 +1,24 @@
+{
+  "threadId": "post_22052d85-733c-4fe1-9f9b-02158a574dc7",
+  "channelId": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+  "channelName": "case-studies",
+  "title": "Slack/channel reply text: understand and redesign the reply path; prevent lost or noisy answers",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested design and code changes are implemented and present in HEAD. Task criteria and focused regressions are reported complete, but the canonical task remains in review because post-reload runtime verification is outstanding. The related background-worker continuity task remains in progress; it addresses a distinct long-running-reply gap and is not dropped.",
+  "taskIds": [
+    "buddy_project_d612b353-b0c5-48bb-9142-fe4f15c6e96f",
+    "buddy_project_95e0dcdb-515f-479a-b80b-750b121f791a"
+  ],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Task owner (Product Development Lead) should coordinate a safe backend reload with Release Engineer, then verify a real @mention posts only authored channel posts and a no-post turn shows the failure notice. Keep the background-worker continuity task active and verify its separate acceptance criteria there.",
+  "evidence": [
+    "Thread posts document the owner’s four questions, requested redesign, implementation, and remaining reload verification.",
+    "Canonical task buddy_project_d612b353-b0c5-48bb-9142-fe4f15c6e96f is in review; all five child criteria are done; nextAction explicitly requires a post-reload mention and no-post check.",
+    "HEAD commit 02b75b3356a6ddb5721d01bd9735d4668781d357 contains the relevant channel changes; git grep HEAD confirms the private-scratchpad brief and failure notice in server/src/buddies/channels.ts.",
+    "Task reports focused tests passed (41 tests, 0 failures); this audit did not rerun tests.",
+    "Related task buddy_project_95e0dcdb-515f-479a-b80b-750b121f791a is in_progress with open seat-reply, task-event, UI-link, and watchdog work; its owner is also buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4."
+  ],
+  "limitations": "Working tree is dirty with unrelated changes, so verification is based on HEAD inspection and git grep. Runtime activation/reload and real-thread behavior were not checked. The task snapshot supplied by the thread-audit instruction was searched but no relevant match was returned; current task details were fetched directly. No tests were run."
+}

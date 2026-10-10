@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_acc22201-4c7b-400c-81b7-06e75fb6154b",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) When I click a name of a budie in slak it goes ot the converasiton in the convo view\n\nWe shuld justmake it open the DM thread in a slack view",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T18:54:36.486Z",
+    "ord": "01a0d4c5-03c6-7207-8d2b-0e88a07ee2e1",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

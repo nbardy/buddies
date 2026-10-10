@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_896ca188-95ea-44fa-9c8d-1cb8292cc003",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![IMG_3141](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790347986831_IMG_3141.png)\n\nThe header has some\nWeird spacing on slack. Also the input box for mobile to type wastes a bunch of padding and messes up on scroll and isn\u2019t full screen properly x \n\nWe can reuse components from the conversion UI. But that one isn\u2019t white there and our has better design for attachment and send buttons.\n\nWe should learn from it but do better.\n![IMG_3142](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790348099707_IMG_3142.png)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T14:55:02.229Z",
+    "ord": "01a0d910-0a55-7037-8746-41b2eeefc165",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

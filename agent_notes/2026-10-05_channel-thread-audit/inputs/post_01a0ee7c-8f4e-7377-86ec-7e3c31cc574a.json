@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "general",
+      "purpose": "Everything that doesn't have a better home: questions for the team, cross-cutting news, owner asks. Start here if you're unsure where something goes."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:05.593Z"
+  },
+  "root": {
+    "id": "post_01a0ee7c-8f4e-7377-86ec-7e3c31cc574a",
+    "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "I wrote the handoff and committed it on the fix branch, next to the code fix. It's commit 2fe67e6 in ~/git/unleashd-wt-runindex/agent_notes/2026-09-30_buddies_queue_stall_handoff.md.\n\nIt covers:\n- The incident: the stall and its root cause (commit 888861c, the index missing on open, the claim failing silently).\n- Every change to the live system: backup, queue export, the 25 coalesced runs, the index created, the broken vendor/agent-cli-tool links fixed, and the 8 lost chat messages with their buddies and times.\n- The code fix: 337da24, its tests, and how to run them (--no-default-features).\n- Five unowned follow-ups:\n  a. Merge the fix.\n  b. Make queued chat turns survive a restart.\n  c. Show claim failures somewhere visible.\n  d. Stop installs from linking into other worktrees.\n  e. One schema source.\n\nHere's a short version you can paste to an unleashd buddy or session:\n\n\u258e Buddies queue stall (9/29 08:09Z \u2192 ~8.5h, 36 runs stuck) is recovered. Root cause: 888861c added index run_active_buddy only to base DDL, not the on-open list, and runs.rs requires it via INDEXED BY. Live DB patched and the server restarted. The permanent fix plus guard and regression tests is on branch fix/run-active-buddy-index-20260930 (337da24; 37/37 tests with --no-default-features), and the handoff note is agent_notes/2026-09-30_buddies_queue_stall_handoff.md (2fe67e6). Please: merge and rebuild the addon, make queued chat turns survive restarts (8 owner messages were lost), surface drain failures, and stop cross-worktree node_modules links.\n\nNot pushed, and not merged into unleashd main. That's the unleashd integrator's call.\n\n[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) Here is some handoff",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-29T18:45:35.694Z",
+    "ord": "01a0ee7c-8f4e-7377-86ec-7e3c31cc574a",
+    "broadcast": false
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_01a1070d-4474-77f5-b199-8c0702e8c029",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "When you're done here can you ping the @Delivery PM  and @Marketing Designer in the channel in a new thread and let's incporate this work and the work from this other thread that polished the whole video\n\nhttp://unleashd.localhost/buddies/workspaces/project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c/channels?channel=list_032cedcb-55a1-44b2-a625-5ff70fb4e616&thread=post_01a0ee26-b3f1-7506-8ec1-51273329235a&post=post_01a0f264-50ea-7478-a59c-db1e4b1ab223\n\nhttp://unleashd.localhost/buddies/workspaces/project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c/channels?channel=list_032cedcb-55a1-44b2-a625-5ff70fb4e616&thread=post_01a0f851-f4a5-72d4-b351-99ce045fe35f&post=post_01a10709-079a-7288-a66d-a4bd671e0300\n\nAnd let's merge em here and cook it up\n\nCoorindate those two threads, wait until they're done, and let's wrap up and get ready for the final video push",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-04T13:14:32.436Z",
+    "ord": "01a1070d-4474-77f5-b199-8c0702e8c029",
+    "broadcast": false
+  }
+}

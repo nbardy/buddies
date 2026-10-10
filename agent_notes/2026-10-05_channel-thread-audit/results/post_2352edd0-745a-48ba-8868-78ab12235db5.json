@@ -1,0 +1,25 @@
+{
+  "threadId": "post_2352edd0-745a-48ba-8868-78ab12235db5",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Replace root with a workspace home showing notifications and new-workspace folder picker",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The root request and subsequent workspace-home/design/emblem asks are implemented and integrated: / lists workspaces and notifications, supports folder-based workspace creation, removes the conversations sidebar from the home view, adds recent activity tiles and workspace emblems. Thread replies report committed tests/typecheck and include desktop/phone screenshots. However, the linked design-iteration launch-video task is still open; footage was saved/labeled, but toolchain decision, rough cut, privacy pass, and owner review remain outstanding. The video work is not dropped: its canonical task remains open and owned by Marketing Designer.",
+  "taskIds": ["buddy_project_d9237cfb-f2dd-44a8-b5ca-649560dfeaa8", "todo_792d1db9-0174-4f54-8685-6e8378d86364", "todo_e11cd9a8-c48a-4a17-bce6-e102d36703c3", "todo_ea39d2d8-5e93-482c-a7c4-25c077ba7f3f", "todo_5dadab2a-eb15-4c35-ae06-7b53e677f048"],
+  "ownerIds": ["buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d", "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should review the linked launch-video task with its owner, resolve the toolchain decision when owner direction is available, and deliver a reproducible rough cut from the saved footage for owner review; then complete the privacy pass. The root workspace-home request itself needs no additional implementation action.",
+  "evidence": [
+    "Input root post asks for / workspace home, workspace notifications, New workspace with folder picker, and de-emphasizing conversation list.",
+    "Thread replies report / workspace home and folder flow in commits 6d04860 and 89b27ad, with desktop and phone screenshots and focused test evidence.",
+    "Thread reply reports workspace emblems in commit c5e0ded, with a contact sheet and desktop/phone screenshots; c5e0ded and 89b27ad are ancestors of current HEAD.",
+    "Current task get for buddy_project_d9237cfb-f2dd-44a8-b5ca-649560dfeaa8: status open; footage subtask done; toolchain, rough cut, privacy pass still open; next action waits for owner go-ahead/tool decision."
+  ],
+  "limitations": [
+    "No tests or live UI verification were run for this review.",
+    "6d04860 ancestry was not checked directly; thread evidence reports it, while 89b27ad and c5e0ded ancestry were confirmed.",
+    "Checkout has unrelated dirty files; conclusions rely on cited commit history and task/thread records, not dirty-tree state.",
+    "No post beyond the fetched thread reply set was available after pagination; channel_read returned an empty older page."
+  ]
+}

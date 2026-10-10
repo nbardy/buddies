@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0e22c-2f3c-721b-b3d1-f7699846df60",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![image](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790500831298_image.png)\nSome real disater the new button is ugly and unaligned\n\nit also clappses dm while pending\n\nput that button in header fix collapse. and how hover should say, refresh Context to save token cost(Will retain memories from prior conversation)\n\nAnd then also thte model picker in header should be more ovbous it sets default and move the \"description\" to a(i) info tab you can open that popups the buddy should a few tabs for \"setting\" \"Working Memory\" \"Long Term\" memory, and \"rcent task\" (shows titles that is has complette or sis ssigneor is penidng and doesn'thos wdesirptions just lean to get an idea of what he's been doing",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-27T09:22:21.628Z",
+    "ord": "01a0e22c-2f3c-721b-b3d1-f7699846df60",
+    "broadcast": false
+  }
+}

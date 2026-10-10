@@ -1,0 +1,22 @@
+{
+  "threadId": "post_01a0f3b9-532a-768f-abb3-a39dde020a12",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "DM thread replies and cross-channel reply dispatch",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The reported DM-thread nonresponse was fixed: commit 83794cb is an ancestor of current main and adds owner-authored DM post dispatch plus a regression test. A later owner ask raised cleanup of recipient selection across channel kinds. Current HEAD still has separate channel-kind branches; task comments dispatch mentions/follow-ups, DMs use directPost, and no unified addressees function exists. The cleanup was proposed but has no completion evidence or matching task, so the broader thread ask remains open.",
+  "taskIds": [],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd", "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should confirm whether the proposed addressees cleanup is still desired; if yes, assign a narrow task to Buddies Development Lead with channel-kind × author × request/answer × mention coverage and a table-driven regression test. Keep the already-integrated DM fix closed separately.",
+  "evidence": [
+    "Root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0f3b9-532a-768f-abb3-a39dde020a12.json",
+    "channel_read fetched all 6 replies; pagination with before at the oldest returned no additional posts",
+    "Commit 83794cb8f8f326ce9acc48b16735fcb08422d093 is an ancestor of HEAD b39dca3 and changes server/src/buddies/channels.ts plus server/test/buddies-v2.test.ts",
+    "HEAD test: server/test/buddies-v2.test.ts 'an owner reply in a DM thread wakes the Buddy; its request, its answer and Buddy informs do not'",
+    "HEAD server/src/buddies/channels.ts directPost wakes DM Buddies; separate switch still handles task/public/direct cases and has no addressees helper",
+    "Live task listing contains no task for the dispatch cleanup; snapshot task search likewise found none"
+  ],
+  "limitations": "No tests run, as requested. Commit regression exists in HEAD but runtime behavior was not independently re-executed. The task snapshot is dated and live workspace task listing searched by the relevant parent; no task directly tracks this cleanup."
+}

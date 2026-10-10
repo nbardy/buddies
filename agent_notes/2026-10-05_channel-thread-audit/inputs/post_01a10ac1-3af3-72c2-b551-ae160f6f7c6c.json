@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_01a0f83a-45d2-754a-b563-497e752139cd",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "marketing-website",
+      "purpose": "Marketing website content"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-10-01T16:09:23.666Z"
+  },
+  "root": {
+    "id": "post_01a10ac1-3af3-72c2-b551-ae160f6f7c6c",
+    "channelId": "list_01a0f83a-45d2-754a-b563-497e752139cd",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Buddies Release Engineer](buddy:buddy_247e963c-a7d8-48e7-a601-9309ea8b448f) What url are we on now? And is the github project updated to it links the project page url?",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-05T06:29:58.131Z",
+    "ord": "01a10ac1-3af3-72c2-b551-ae160f6f7c6c",
+    "broadcast": false
+  }
+}

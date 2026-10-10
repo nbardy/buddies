@@ -1,0 +1,22 @@
+{
+  "threadId": "post_190f0724-1f81-44cc-b34c-5db4a5103107",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Task chips open an overlay; eye opens Buddy reply conversation",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Both asks are implemented, verified, and integrated in main. Task chips open a full Task overlay while staying on Channels; Buddy reply eye opens its conversation/tool-call transcript. Historical thread reports live desktop and phone checks. The linked Task remains in review pending owner try, so administrative task closure is outstanding, but no product follow-up is needed based on available evidence.",
+  "taskIds": ["buddy_project_df45d050-86e6-43df-a57e-b458c9fd93d4"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Owner review/close the existing Task after accepting the recorded live desktop and phone checks.",
+  "evidence": [
+    "Root request: post_190f0724-1f81-44cc-b34c-5db4a5103107; thread implementation reply: post_8d2cbd82-2b8a-4a19-b203-0cb2e54ed49c.",
+    "Task current record: status review; owner buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4; child todo done with live desktop and phone evidence for Task overlay and eye transcript.",
+    "Commit e7fed0609bb448f0c01930c3450cff049a41620d (Task overlay) and e8adfae0c5b6edcbac8e90ea14f3f8365bb013b9 (mobile eye) are ancestors of main HEAD b39dca3.",
+    "Commit descriptions document channel-markdown/channel-browser and mobile-channels regression tests. No tests rerun."
+  ],
+  "limitations": [
+    "The working tree has unrelated dirty files including adjacent channel UI; implementation files themselves are not dirty. Main contains both commits, but this review did not rerun tests or live UI checks."
+  ]
+}

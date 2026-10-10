@@ -1,0 +1,27 @@
+{
+  "threadId": "post_e04d0017-8cfb-43f8-a7e4-f08973593e79",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Four channel issues: raw tool traces, lost drafts, ugly task links, and provider lock errors",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "All four owner-reported issues have a completed parent task and child evidence. Three UI asks were implemented and validated. The provider error was resolved through thread seats, with a harness switch opening a new seat generation; implementation is integrated at HEAD. This superseded the literal request for every @mention to start a brand-new conversation, and later code also makes the mention chip open on the existing Buddy seat. No separate owner approval for that UX change is recorded here; however, the original error was demonstrably resolved, so the bug report is closed. Stored tool traces remain in post bodies but collapse through the existing Chat activity UI at render time, an accepted deviation recorded by task review.",
+  "taskIds": [
+    "buddy_project_52d3cd0f-e342-43a3-a221-7d24c19930cf",
+    "todo_fe582030-f0c8-4583-ae30-7983395026ba",
+    "todo_3148315b-be0e-4638-9d5f-a160f4dd6de1",
+    "todo_30d7e75e-9fd2-42a6-ade1-b61d3d18397f",
+    "todo_0f741f0a-da76-47ba-9525-fd416ed4945b"
+  ],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084"],
+  "nextAction": "None for the reported defects. If the owner still requires a fresh conversation for each @mention as a product behavior, reopen/replace the completed provider UX criterion through the task owner; no such live requirement is evidenced in the thread.",
+  "evidence": [
+    "Parent task is done; its criteria and evidence cover four child tasks and validation/screenshots.",
+    "Commits 022965c, 5d4866f, 93b2051 (plus 1504330 for structured markers) are ancestors of current main HEAD f3d6cf1; associated task evidence records typecheck, client tests, invariants and visual artifacts.",
+    "Thread-seat implementation commits 1125dd0 and 9b0a6ca are ancestors of HEAD; integrated current code includes server/src/buddies/channels.ts and buddy-conversation-slots.ts. Commit 70f87b3 (also ancestor of HEAD) ports thread seats to composer mention selection; its commit description and tests cover seat/profile/chosen priority.",
+    "Live harness-switch repro is documented in task evidence at #buddies-dev post_68e186a9; Codex failed due to account usage limit, then Claude Opus 5.5 replied in same thread without provider-lock failure.",
+    "Current worktree is dirty (54 paths), so current-tree checks are not proof; integration assessed by git ancestry and committed source at HEAD. No tests were run per request."
+  ],
+  "limitations": "Did not rerun tests or screenshots. Reviewed existing task evidence, relevant commit ancestry, committed source references, and thread history only. The completed Task's parent notes historical verification on its feature branch; this review did not reproduce it on current main. The thread-seat/product behavior diverges from the literal initial fresh-conversation criterion, with no explicit owner decision visible in this thread."
+}

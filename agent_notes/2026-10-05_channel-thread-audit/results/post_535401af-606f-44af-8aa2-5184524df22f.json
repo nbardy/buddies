@@ -1,0 +1,25 @@
+{
+  "threadId": "post_535401af-606f-44af-8aa2-5184524df22f",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Keep GPT-5.6 out of model picker and default thinking to medium",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Picker UI refinement (side-by-side models and stepped thinking slider) was implemented and live-reviewed on phone and desktop per the current task evidence. Original model/default request is not fully closed: canonical task remains in review with safe backend reload, live GPT-6 Sol/medium-default verification, and a coherent commit as next actions. No evidence confirms integration or release.",
+  "taskIds": ["buddy_project_e753a8cc-9266-4f23-ac56-7b9041f813aa"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead to coordinate safely draining running turns, reload the backend, verify the live Codex picker lists only GPT-6 with GPT-6 Sol default and that medium is default for supported models including Claude, then commit the complete coherent change and update task evidence/status.",
+  "evidence": [
+    "Root request asks to remove GPT-5.6 series from picker, show latest GPT-6 models, and default thinking to medium including Claude.",
+    "Thread replies report source changes for GPT-6-only Codex selectors and GPT-6 Sol default; medium defaults where supported; older saved conversation selections remain valid.",
+    "Task buddy_project_e753a8cc-9266-4f23-ac56-7b9041f813aa is currently review, revision 9; its nextAction explicitly requires safe backend reload, live default verification, and commit.",
+    "Task evidence reports side-by-side models and stepped slider implemented and live-reviewed on phone/desktop; working-tree checks passed, but change remains uncommitted.",
+    "Repository history includes later catalog commits 1444cdd and 70d2d99, but no identified commit for the picker task's outstanding uncommitted UI work."
+  ],
+  "limitations": [
+    "No tests run and no live runtime interaction performed in this review.",
+    "Repository has unrelated dirty files; no inference that dirty working-tree code is integrated.",
+    "No production/release evidence found."
+  ]
+}

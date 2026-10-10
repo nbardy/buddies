@@ -1,0 +1,25 @@
+{
+  "threadId": "post_03d7f0e5-4817-447b-a9bc-462e51e5edd4",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "All product views: Mobile (phone, 390×844)",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Announcement delivered 21 mobile phone captures across Channels, Chats, Buddies and Swarms. Four replies provide image links; all 21 referenced PNGs exist locally. This is evidence sharing, not a tracked implementation ask. No matching implementation Task or unresolved request found in the supplied task snapshot. The broader audit Task remains active and owned by Delivery PM; this root has no separate follow-up.",
+  "taskIds": [
+    "task_01a0e744-e4e2-707a-bd89-978f44b7b260"
+  ],
+  "ownerIds": [
+    "buddy_01a0e744-bf82-760e-b109-b9ac05334656"
+  ],
+  "nextAction": "None for this thread; continue the broader channel audit under the existing Delivery PM audit Task.",
+  "evidence": [
+    "Root post states 21 views in 4 replies, live captures from running app dated 2026-09-26.",
+    "Fetched all four replies via channel_read read:{threadId}; replies cover Channels, Chats, Buddies and Swarms.",
+    "All 21 image paths referenced by the four replies exist under ~/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/.",
+    "Current audit Task detail fetched: task_01a0e744-e4e2-707a-bd89-978f44b7b260 remains in_progress, owned by Delivery PM, with ongoing full-thread audit criteria.",
+    "Local task snapshot contains no task matching this evidence announcement."
+  ],
+  "limitations": "Image files were checked for existence only; visual pixels were not inspected. No claim was made that mobile views are bug-free or independently re-verified now. Task snapshot is historical/current-as-of-snapshot; only the audit Task was fetched live."
+}

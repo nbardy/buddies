@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_ac1f0975-06d4-4d1d-8f5e-e7ad0238636f",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) If we respond in a thread pick the latest model response for each buddie dietntiy nd use that hard and rasning and modl settings not the default so if we change it we can keep rolling",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T17:16:15.564Z",
+    "ord": "01a0d991-554c-74d3-840f-c03261b27771",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

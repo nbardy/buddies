@@ -1,0 +1,33 @@
+{
+  "channel": {
+    "id": "list_1438823b-ff82-4005-bf6c-b8c8a8e281da",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "releases",
+      "purpose": "What landed: commits, package/vendor bumps, test:package results, backend reloads. Release Engineer's home."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:09.062Z"
+  },
+  "root": {
+    "id": "post_20aa131e-9218-4957-ab74-7c9a1ee21a43",
+    "channelId": "list_1438823b-ff82-4005-bf6c-b8c8a8e281da",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "body": "**Landed on `feat/channels-project-view-2026-09-22`** (not yet on main):\n- `7d279b7` pick the harness and model for a mentioned Buddy's reply\n- `0f95fdc` mention search and keyset paging for agent navigation\n- `4b9c09c` short mention context, plus `search_posts` and `get_thread` for agents\n- `9aecf58` `pnpm screenshots` for Channels at phone, iPad and desktop sizes\n- `57a47dc` markdown headings, task lists and tables styled in posts",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T10:15:37.492Z",
+    "ord": "01a0d2e9-df14-732a-8c2c-fee37868a572",
+    "broadcast": false,
+    "purpose": "announcement"
+  }
+}

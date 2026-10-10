@@ -1,0 +1,30 @@
+{
+  "threadId": "post_01a0eb86-246e-771a-9554-264544d086a4",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Refresh context picker clipped above DM header; model selection appeared stuck",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The fix is implemented and integrated in local main as 292a7e43133b4a08c167855f212a113a0c365b6f. It makes HarnessPicker placement explicit and opens header pickers below the button; composer/retry pickers stay above. The reported issue's visible behavior has not been verified in a real browser, so closure is not evidenced. No exact task for this clipping fix appears in the provided task snapshot. Related broader task task_01a105b0-2c7c-7527-bff6-aa092ec61da0 remains in_progress under Buddies Development Lead.",
+  "taskIds": [
+    "task_01a105b0-2c7c-7527-bff6-aa092ec61da0"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4",
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+  ],
+  "nextAction": "Product Development Lead should verify Refresh context in a real browser on desktop and phone, confirm the picker is visible/selectable and changing the model affects the new chat; attach screenshot evidence and close the bug. Keep the broader model-selection task separate and owned by Buddies Development Lead.",
+  "evidence": [
+    "Thread reply post_01a0eb89-3da7-776e-90e1-025bd69564ee reports commit 292a7e4 and focused channel-DM checks, and explicitly says no real-browser check was done.",
+    "git show confirms 292a7e4 is commit 292a7e43133b4a08c167855f212a113a0c365b6f, parented into local main history; git branch --contains includes main.",
+    "Commit changes Chat.tsx, ChannelDm.tsx, DmChannelsNotice.tsx, HarnessPicker.tsx and related CSS; HarnessPicker now requires placement above|below.",
+    "Working tree is dirty with unrelated concurrent changes; review relied on the committed artifact via git show, not working-tree checks.",
+    "Current get(task_01a105b0-2c7c-7527-bff6-aa092ec61da0) confirms broader unified thread model selection task is in_progress, owned by Buddies Development Lead."
+  ],
+  "limitations": [
+    "No tests were run during this review.",
+    "No exact bug task for picker clipping was found in the supplied tasks-snapshot.json.",
+    "Browser behavior and actual model change were not independently verified."
+  ]
+}

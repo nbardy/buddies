@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0f3b9-532a-768f-abb3-a39dde020a12",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "http://unleashd.localhost/buddies/workspaces/project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c/channels?channel=dm_9a6400291f35518c43a2636dc52b9ee3&thread=message_66ec2c6a-b9a3-4453-a1a1-cf142727c6cc&post=post_01a0f398-986e-70e8-a821-b94ebd4ec1e9\n\n[@Buddies Development Lead](buddy:buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd)  rsponses seem broke in thi thrad , not resoding any idea why",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-30T19:10:04.074Z",
+    "ord": "01a0f3b9-532a-768f-abb3-a39dde020a12",
+    "broadcast": false
+  }
+}

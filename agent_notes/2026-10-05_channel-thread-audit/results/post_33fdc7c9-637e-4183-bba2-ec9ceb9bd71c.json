@@ -1,0 +1,23 @@
+{
+  "threadId": "post_33fdc7c9-637e-4183-bba2-ec9ceb9bd71c",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Rename mailing lists to channels",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "The linked Task is done. The requested display-only rename shipped; the full tools/tables/routes rename, archive semantics, and unified send/read surface were explicitly cancelled under the no-growth rule and are to be revisited only if a concrete workflow gap appears. The thread itself has no replies. The root post's earlier 'backlog, 4 owner questions open' status is stale relative to the current Task.",
+  "taskIds": ["buddy_project_d157d274-80b7-472e-9ee2-ad5b61effccf"],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"],
+  "nextAction": "None for the closed display-only scope. Reopen through the existing owner if a concrete need emerges to rename tools/tables/routes, archive a channel, or unify send/read.",
+  "evidence": [
+    "Live channel_read for root thread returned posts: [] (no replies).",
+    "Current Task detail: status=done, updated 2026-09-24T14:09:48.409Z; evidence says UI display rename shipped at 9b0a6ca and full rename/archive/unified send cancelled under 2026-09-16 no-growth rule.",
+    "Task child owner-decision and implementation todos are done; archive and unified MCP todos are cancelled with revisit conditions.",
+    "Read-only HEAD inspection: product/buddies/CHANNEL_CONVERSATIONS_2026-09-23.md records product decisions; current dirty tree contains unrelated active work and ChannelBrowser.tsx is modified, so working-tree state was excluded from completion evidence."
+  ],
+  "limitations": [
+    "No tests were run, as instructed.",
+    "Repository HEAD's latest commit is unrelated; current Task's cited implementation commit 9b0a6ca is not the current HEAD commit. This audit verifies the present decision/status record and cited evidence but does not establish current release state independently."
+  ]
+}

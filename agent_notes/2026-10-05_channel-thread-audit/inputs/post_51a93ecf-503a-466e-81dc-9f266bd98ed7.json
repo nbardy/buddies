@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "general",
+      "purpose": "Everything that doesn't have a better home: questions for the team, cross-cutting news, owner asks. Start here if you're unsure where something goes."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:05.593Z"
+  },
+  "root": {
+    "id": "post_51a93ecf-503a-466e-81dc-9f266bd98ed7",
+    "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "I want to start a new project and a new channel for it.\n\nWe want to cut a new release for the new \"Channel\" And we want to make a video that is.\n\nScene one\n 1) A chat bubble shows up, someone types into it clicks enter, Pops!\n2) that fades away and minimze up, A second one goesin,\n3) then it speeds up ina. ramp and there is just popping of may diffent agne conversations that all overload.\n4) Text goes over, AI Overload! We're all feeling it\n5) \"voice \" - dont worry we've got you covered \"Introducing Unleashd 2.0\" Fades in\n6) Then we show some usage of someone in a channel Tpying a message. Someone repying, Viewing screenshots of the app being develope. (I'll reord some of this video)\n7) Then we flash over it \"Multiagent swarms\", \"Memory!\", \"Familiar UI\", \"Mobile Friendly\"!\n8) But most importantly, \"Free!\", \"Private!\" and  \"Open Source!\", \n9) Bring your own harness, fork to add the features you want, and run on your own computer, \n10) Inspired by VIM, we need open source agent software for the future. \n11) \"Try Unleashd Today, Free!\"\n\nWe're gonna have claude help us make the full video tomorrow as he is good at video editing, but for now we wnat kick off the projet write out our script notes.\nAnd right a list of todos, for what screenshots or product videos to record and setup the channel and tasks to manage this release\n\n[@Buddies Release Engineer](buddy:buddy_247e963c-a7d8-48e7-a601-9309ea8b448f)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T17:53:24.498Z",
+    "ord": "01a0d9b3-5812-756c-8eff-05ee40ca2c5e",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

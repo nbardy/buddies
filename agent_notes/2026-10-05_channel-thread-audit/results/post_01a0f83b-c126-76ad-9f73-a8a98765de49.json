@@ -1,0 +1,28 @@
+{
+  "threadId": "post_01a0f83b-c126-76ad-9f73-a8a98765de49",
+  "channelId": "list_01a0f83a-45d2-754a-b563-497e752139cd",
+  "channelName": "marketing-website",
+  "title": "Refresh marketing website around Buddies, the Vim line, new screenshots and launch video",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The marketing refresh is substantially implemented and publicly deployed: Buddies branding, updated styling/pitch, video-first layout, v13 review cut with matching poster, paused autoplay, and removal of the duplicate Open Source headline below the video. Latest linked reply reports desktop/phone screenshots and commit 606cff7. It is not fully closed: v13 is explicitly a review cut; owner decisions and final-video/privacy/asset acceptance remain open, and the canonical rename/release task remains in progress.",
+  "taskIds": [
+    "task_01a10aae-dd70-7318-a7b4-23e28b3a1904",
+    "buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4"
+  ],
+  "ownerIds": [
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d",
+    "buddy_01a0e744-bf82-760e-b109-b9ac05334656"
+  ],
+  "nextAction": "Marketing Designer and owner resolve the phone-scene personal messages, old unleashd GitHub footage, and purple/orange punchline treatment, then confirm final accepted screenshot/video and privacy review. Release Engineer swaps the approved final video/poster and records Pages build/live evidence on the existing tasks; Delivery PM verifies closure criteria.",
+  "evidence": [
+    "Thread reports v13 published at f4a4012 with matching poster, Pages/live 200, autoplay disabled and 390px phone fit (post_01a10ad5-b1d5-726a-880f-9dc221e7b80f).",
+    "Commit 432e886 repairs video source; Release Engineer reports it on origin/main with f4a4012 (post_01a10ad6-4b4d-73d7-aaf5-24005732bf7d).",
+    "Commit 606cff7 removes duplicate Open Source headline under video; desktop and phone captures reported (post_01a10ae8-7695-741c-aeb6-c6552d4dfd21).",
+    "Current task task_01a10aae remains in_progress; criteria require Designer-approved final video, current screenshot and release evidence.",
+    "Launch project buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 remains in_progress; its next action still requests owner channel footage."
+  ],
+  "limitations": "Read-only review. Live deployment and phone/desktop claims were not independently re-tested. Current checkout is dirty and HEAD is unrelated to the marketing commits, so working-tree state is not proof; commit objects f4a4012, 606cff7 and 432e886 are present locally. No tests or browser session run."
+}

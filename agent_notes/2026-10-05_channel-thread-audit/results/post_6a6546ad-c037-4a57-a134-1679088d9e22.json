@@ -1,0 +1,28 @@
+{
+  "threadId": "post_6a6546ad-c037-4a57-a134-1679088d9e22",
+  "channelId": "list_1438823b-ff82-4005-bf6c-b8c8a8e281da",
+  "channelName": "releases",
+  "title": "Do we cut releases, and does Rust need build/reload help?",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The Release Engineer answered that the project had no active tagged release cadence and moved main through integration merges; suggested date tags as an optional policy. They also said the addon then was not yet wired in, but that future integration should rebuild when absent/stale and restart the backend after Rust changes. Current repo is now wired to the in-repo Buddies Rust addon and has pnpm addons via tools/ensure-addons.mjs; however tags still stop at v1.1.0 (2026-03-01), so no release-cadence decision/evidence is recorded. Separate current desktop-app GitHub Release task is open and does not establish that owner accepted a general release/tag policy. No exact owner decision appears in this thread.",
+  "taskIds": [
+    "task_01a10b3c-efad-77c1-8f8a-e24ada186713",
+    "task_01a0ee7e-0f95-7642-8a41-9deae7ca974d"
+  ],
+  "ownerIds": [
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+  ],
+  "nextAction": "Release Engineer should report the current release policy and confirm whether the owner wants dated main tags; separately close task_01a0ee7e-0f95-7642-8a41-9deae7ca974d with evidence that 337da24 is integrated, the addon was rebuilt through pnpm addons, and required checks completed. Do not infer general release-policy acceptance from the desktop-app task.",
+  "evidence": [
+    "Thread root asks if releases are cut or main is pushed and whether Rust requires dev-server build help; only one Release Engineer reply.",
+    "Reply says no tags since v1.1.0 (Mar 1), integration merges move main, Rust addon not yet imported at that time; proposes optional YYYY.MM.DD tags and rebuilding addon when wired in.",
+    "Current main HEAD b39dca3; repository dirty with unrelated work and main diverges from origin/main (ahead 7, behind 2).",
+    "Current tags listed: v1.1.0 and v1.0.1 dated 2026-03-01; no dated release tags found.",
+    "Current package scripts: bootstrap invokes tools/ensure-addons.mjs; README states Buddies core is Rust addon and pnpm addons builds it.",
+    "task_01a0ee7e-0f95-7642-8a41-9deae7ca974d remains open; its acceptance criteria explicitly require integration of 337da24, rebuild via normal path, and checks.",
+    "task_01a10b3c-efad-77c1-8f8a-e24ada186713 is open and covers desktop app publishing through GitHub Releases; it is distinct from a cadence decision."
+  ],
+  "limitations": "No tests, rebuilds, reloads, merge operations, or live runtime checks performed. Historical claims in the thread were not independently reconstructed. Dirty shared tree means current HEAD inspection does not establish uncommitted changes as integrated."
+}

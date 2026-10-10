@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddies-dev",
+      "purpose": "Standups, handoffs, announcements and decisions for Buddies development in this workspace. Public stream; action still goes through send or update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-22T05:50:57.727Z"
+  },
+  "root": {
+    "id": "post_e04d0017-8cfb-43f8-a7e4-f08973593e79",
+    "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![Screenshot 2026-09-24 at 6.21.58\u00e2\u0080\u00afPM](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_4bd52262-8f0b-465d-99e5-60cc33eb8565/1790245319720_Screenshot_2026-09-24_at_6.21.58___PM.png)\nWe have some work to do\n![Screenshot 2026-09-24 at 6.22.05\u00e2\u0080\u00afPM](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_4bd52262-8f0b-465d-99e5-60cc33eb8565/1790245326931_Screenshot_2026-09-24_at_6.22.05___PM.png)\n_-\n\n ToolSearch select:mcp__unleashd_buddy__new_list,mcp__unleashd_buddy__post,mcp__unleashd_buddy__get_current_w...\n\ud83d\udd27 mcp__unleashd_buddy__get_current_work\n\ud83d\udd27 mcp__unleashd_buddy__new_list\n\ud83d\udd27 mcp__unleashd_buddy__new_list\n\ud83d\udd27 mcp__unleashd_buddy__new_list\n\ud83d\udd27 mcp__unleashd_buddy__new_list\nFour channels are up. Next I'm posting each open Task into its channel and closing out stale Tasks.\n\ud83d\udd27 ToolSearch select:mcp__unleashd_buddy__update_project\n\u26a1 Bash cd /Users/nicholasbardy/git/unleashd; git log --oneline -8 main..HEAD | cat; git log -1 --format=...\n\ud83d\udd27 mcp__unleashd_buddy__update_project\n\ud83d\udd27 mcp__unleashd_buddy__update_project\n\ud83d\udd27 mcp__unleashd_buddy__post\n\ud83d\udd27 mcp__unleashd_buddy__post\n\ud83d\udd27 mcp__unleashd_buddy__post\n\ud83d\udd27 mcp__unleashd_buddy__post\n\ud83d\udd27 mcp__unleashd_buddy__post\n\ud83d\udd27 mcp__unleashd_buddy__post\n\ud83d\udd27 mcp__unleashd_buddy__post\n\ud83d\udd27 mcp__unleashd_buddy__post\n\ud83d\udd27 mcp__unleashd_buddy__new_project\n\ud83d\udd27 mcp__unleashd_buddy__post\n\n\n1) Why is ther a huge list of tools i just copied in that respond,its ugly, why dont we use the same ui formating from before I dont want to recode that\n\n2) The chat messages in flight dont get cahced in local torage and we loose the draft when navigating or refreshing the page\n\n3) The tasks are really ugly they shouldbe nice elegant formmated cards, \n![Screenshot 2026-09-24 at 6.23.11\u00e2\u0080\u00afPM](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_4bd52262-8f0b-465d-99e5-60cc33eb8565/1790245392632_Screenshot_2026-09-24_at_6.23.11___PM.png)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T10:23:51.734Z",
+    "ord": "01a0d2f1-69b6-7680-9778-05fb4225532d",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

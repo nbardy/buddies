@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_1048b24f-e581-4fc5-a29d-70707769b3f0",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) We need noticaitons for me as the many user, so I can see what I haven't repsonded to rihg no it show sht total message count in chanels lets make it show unread and use the same slack UI patterns for that",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T19:11:58.831Z",
+    "ord": "01a0d4d4-eb6f-767f-9c51-29c5edd201d8",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

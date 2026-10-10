@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a0f3da-c14b-7541-95a2-fcb713809fd8",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Fix channel image popup layout and add screenshot coverage",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner asked to fix the poorly positioned image popup and add it to the screenshot suite. The image viewer was progressively centered, changed to a full-screen overlay with a naturally sized/capped image and close behavior, and refined with a smaller translucent close control and spacing. The image-viewer screenshot screen was added. These commits are ancestors of current HEAD, so the work is integrated; the thread reports a fast-forward push that included the commits. Final visual/typecheck evidence is incomplete.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084"],
+  "nextAction": "Buddies UI Engineer: run the image-viewer screenshot against the final UI (including the close-button and border changes) on desktop and phone, and confirm pnpm typecheck; attach the resulting evidence to the originating thread or a newly linked task if tracking is needed.",
+  "evidence": [
+    "Thread replies post_01a0f3e0-dfae-754e-9e17-b84d84c40eeb, post_01a0f640-ae2b-727c-be50-45d76437c9ef, and post_01a0f650-57b3-70fc-adaa-e17101db38ea report implementation details and desktop/phone screenshots; the final reply explicitly says its screenshot predates the border fix and typecheck was not run.",
+    "Commits e36447d, 7e9d75b, and b6455ea are ancestors of HEAD; HEAD includes ChannelContent.css, ChannelMarkdown.tsx, and tools/screenshots.mjs changes.",
+    "Current HEAD tools/screenshots.mjs has the image-viewer screen and checks for an open channel-image-overlay dialog.",
+    "The supplied tasks-snapshot.json contains no matching image-viewer/channel-image task."
+  ],
+  "limitations": [
+    "No tests or screenshot run were performed for this review, per instruction.",
+    "A reply reports the commits were included in a fast-forward push from 09d8b0e to 8290148; the required commits are integrated in current HEAD, but this review did not independently inspect remote state.",
+    "The working tree is dirty with unrelated work, so conclusions are based on committed HEAD evidence only."
+  ]
+}

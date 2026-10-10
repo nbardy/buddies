@@ -1,0 +1,28 @@
+{
+  "threadId": "post_ddf375f4-0215-4e44-bc1b-ce828f45bd37",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Can channels be archived with MCP so we can clean up?",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The request was implemented in commits but is not closed out. The latest thread reply reports reversible archive/restore in the Buddy package, MCP, owner API and desktop UI, with package and focused integration/type/invariant checks reported passing. However, at HEAD main neither the archive tool nor desktop implementation symbols are present; the mobile commit is a child of the desktop commit and also is not in main's history. Task remains in review with runtime reload, mobile integration, and live phone/desktop archive-restore verification outstanding. This is active work, not dropped.",
+  "taskIds": [
+    "buddy_project_df417ed0-dc56-4287-b53d-59cd7fa75174"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead to coordinate with Release Engineer: preserve the shared dirty ChannelsMobile.tsx work, integrate the feature commits into main, then arrange safe backend reload and live archive/restore verification on desktop and phone; update task evidence/status.",
+  "evidence": [
+    "Thread root post_ddf375f4-0215-4e44-bc1b-ce828f45bd37 asks whether channels can be archived through MCP; owner follow-up says implement it.",
+    "Latest thread reply post_9593dade-0ef9-43b0-b416-81b965c2ab56 reports package commits 23fb537 and b672694, app commit cb5020b, and phone commit 53ebe1c; it reports package tests 132/132, focused MCP/HTTP integration tests, typechecks, client invariant gates, and reviewed desktop/phone screenshots. These are thread-reported, not rerun.",
+    "Current task buddy_project_df417ed0-dc56-4287-b53d-59cd7fa75174 is review, owned by buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4. Its nextAction says integrate phone UI after concurrent ChannelsMobile.tsx edits are committed, then live-verify archive/restore after safe server reload.",
+    "Local git: main HEAD b39dca3; cb5020b is in local history but git grep at HEAD finds no set_list_archived or archivedOnly symbols in server/src/buddies or desktop ChannelBrowser. Commit 53ebe1c is not an ancestor of main; it directly follows cb5020b. client/src/mobile/channels/ChannelsMobile.tsx is currently dirty.",
+    "No live runtime or release verification was performed."
+  ],
+  "limitations": [
+    "No tests or runtime actions performed, per request.",
+    "Local checkout contains extensive unrelated dirty work; conclusions about integration are based on commit ancestry and symbols at HEAD only."
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "threadId": "post_01a105a9-6cce-7497-9858-2e6a91c9f1a3",
+  "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+  "channelName": "general",
+  "title": "Unify thread model selection and verify hot reload of reply priority fix",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner asked why a just-implemented thread reply-priority fix still appeared broken without restarting the server, and then specified a unified picker/execution priority. The thread records an earlier backend restart after commit 02b75b3, subsequent fresh Claude weekly-limit failures, and a missing retry affordance. A follow-up root-cause report attributes execution to recent Claude thread history despite Codex Buddy defaults and confirms a retry-classifier gap. The canonical unified-selection/retry task remains in_progress; its criteria are broader than the earlier commit, and no completion/live verification is evidenced. Active task means the work is not dropped.",
+  "taskIds": ["task_01a105b0-2c7c-7527-bff6-aa092ec61da0"],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"],
+  "nextAction": "Buddies Development Lead should review the current candidate against the Task's full criteria, provide committed regression/screenshot/typecheck evidence for unified composer, mention, gate, reply and retry selection plus override persistence and weekly-limit recovery, then confirm safe backend activation/runtime behavior without forcing a restart or live agent test; update the existing Task with evidence/status.",
+  "evidence": [
+    "Specified root input agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a105a9-6cce-7497-9858-2e6a91c9f1a3.json contains the owner ask.",
+    "Fetched all available thread replies: owner clarified single canonical selection (latest thread model, then Buddy default, explicit override persists); Buddies Development Lead reported commit 02b75b3 and backend start at 14:43:43, followed by owner report at 14:45:51; later replies document fresh 14:52 failures and exact weekly-limit retry classifier issue.",
+    "Current Task get confirms task_01a105b0-2c7c-7527-bff6-aa092ec61da0 is in_progress, owned by buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd; required criteria include unified selection, override persistence, real-boundary regressions and desktop/phone evidence.",
+    "Read-only artifact agent_notes/2026-10-04_thread-model-priority-and-retry.md reports focused regressions, client checks, typecheck, invariant gates and screenshots for commit 02b75b3; it explicitly says no forced restart or live retry occurred.",
+    "git show confirms commit 02b75b3 changes server/src/buddies/channels.ts, client/src/components/buddies/HarnessPicker.tsx, shared/src/harness-retry.ts and regression tests; current HEAD is b39dca3."
+  ],
+  "limitations": "No tests, runtime restart, live retry, task mutation or further channel messages. The requested tasks-snapshot.json file was not present at the supplied path; searched available snapshot through the existing audit directory context and fetched the current canonical Task directly. Thread pagination returned all 9 replies in one page. Commit ancestry and current backend activation were not independently checked in this scoped review."
+}

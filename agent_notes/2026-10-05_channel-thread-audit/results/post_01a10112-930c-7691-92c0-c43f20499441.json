@@ -1,0 +1,37 @@
+{
+  "threadId": "post_01a10112-930c-7691-92c0-c43f20499441",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Fresh no-workspaces onboarding before launch video",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Several Setup/dependency improvements were committed and checked (including 11a721d, e97acf0/e88a093, f47ceaa, 84d9881, 86cfa45). The owner acknowledged the refined Setup look. However, the exact fresh-install onboarding ask is not closed: no complete first-run pass proves a new user can reach an unobstructed Home, send from its composer, and receive a first agent reply on the intended committed release. Owner-requested launch-video readiness also remains unverified for onboarding.",
+  "taskIds": [
+    "buddy_project_d5d94e0e-4990-4277-bafc-73a7c6bb2a6d",
+    "todo_4784a23d-715a-4959-8dba-17ba07b15f78",
+    "todo_b4d7809f-e0b4-4a7b-8c32-8343f96cc12b",
+    "task_01a10acc-88dd-712c-92b4-7f8a967cabc3"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+  ],
+  "nextAction": "Product Development Lead owns the existing first-run Home task and should coordinate with Release Engineer to rerun the existing fresh-install trial after relevant fixes: temp state, one installed CLI, unobstructed phone/desktop Home, send a Home composer message into #general, and observe the first agent reply. Use the exact candidate commit; record screenshots/logs and update existing task evidence. Do not duplicate tasks.",
+  "evidence": [
+    "Thread root asks for a good pass on fresh no-workspaces clone/open before launch-video publication.",
+    "Release Engineer thread posts report committed improvements: 11a721d; e97acf0 + e88a093; f47ceaa; 84d9881; 86cfa45. Multiple posts report committed-source checks and phone/desktop browser previews; owner replied 'much bette,r thanks'.",
+    "Live task buddy_project_d5d94e0e-4990-4277-bafc-73a7c6bb2a6d is in_progress and defines scripted fresh-install acceptance; it records first agent reply as unverified.",
+    "Live task todo_4784a23d-715a-4959-8dba-17ba07b15f78 is in_progress; next action awaits exact branch commit plus regression/temp-state evidence, then Release Engineer trial.",
+    "Live task todo_b4d7809f-e0b4-4a7b-8c32-8343f96cc12b remains open; its latest comments say script is not built and rerun after relevant fixes, with composer send/first reply required.",
+    "Task task_01a10acc-88dd-712c-92b4-7f8a967cabc3 for #general at workspace creation is in review; evidence cites branch fix/workspace-general @ b99a894..., with merge timing/backfill decision open.",
+    "Read-only git evidence: commits 86cfa45, 84d9881 and f47ceaa exist and are reachable from main; shared tree is dirty, so this inspection does not certify HEAD or the complete release commit."
+  ],
+  "limitations": [
+    "Did not run tests or start/restart an app, per request.",
+    "The supplied thread snapshot was supplemented with one channel_read thread fetch (returned 30 replies in one page); response had no next cursor.",
+    "Task snapshot was supplemented by current gets for install project, first-run task and fresh-install trial task.",
+    "Could not independently verify the actual current UI/runtime or a clean consolidated release commit; the working tree is dirty."
+  ]
+}

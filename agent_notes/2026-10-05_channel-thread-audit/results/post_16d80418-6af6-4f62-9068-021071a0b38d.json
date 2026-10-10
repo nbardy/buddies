@@ -1,0 +1,25 @@
+{
+  "threadId": "post_16d80418-6af6-4f62-9068-021071a0b38d",
+  "channelId": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+  "channelName": "triage",
+  "title": "Follow-up: the ongoing Buddy DM grows without limit",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner explicitly parked this proposal on 2026-09-25: one ongoing DM per (workspace, Buddy) is acceptable for now; no work is scheduled, and the proposal was not accepted. Thread read returned no replies. Separate restart/session-history continuity work was completed, but does not implement or accept DM auto-rotation. Closed as parked, not implemented.",
+  "taskIds": [
+    "todo_b15a463a-b8df-40e6-b498-a7e4517dcaf8"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "None while parked. Reopen only if DM resumes become a top pnpm token-audit excess entry or a DM reaches the context window; confirm current display-history behavior before proposing rotation.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_16d80418-6af6-4f62-9068-021071a0b38d.json",
+    "agent_notes/2026-09-12-audit-history-cause.md",
+    "agent_notes/buddies/2026-09-15-restart-continuity-closeout.md",
+    "Historical closeout reports focused integration coverage for server/test/session-history-rotation.test.ts; not rerun.",
+    "Relevant current task todo_b15a463a-b8df-40e6-b498-a7e4517dcaf8 is done but covers separate session-history continuity."
+  ],
+  "limitations": "No tests run. Referenced session-history test file is absent from this checkout; historical closeout and task evidence were read. Dirty shared working tree observed, unrelated files not inspected."
+}

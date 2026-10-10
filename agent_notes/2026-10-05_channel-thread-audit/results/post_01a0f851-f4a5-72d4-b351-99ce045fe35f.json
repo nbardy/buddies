@@ -1,0 +1,30 @@
+{
+  "threadId": "post_01a0f851-f4a5-72d4-b351-99ce045fe35f",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Rebrand Unleashd as Buddies; develop brand and launch video",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The original request for a rebrand opinion was answered with a recommendation to move to Buddies; the owner leaned into Buddies and approved branded concepts and video iterations. Assets and review cuts were delivered, and a v13 review cut is deployed, but the thread is not fully closed: v13 is not final owner-approved work, and remaining content/branding decisions plus final listening/approval are unresolved. Work is tracked by active launch and rename review tasks, so it is not dropped.",
+  "taskIds": [
+    "task_01a10aae-dd70-7318-a7b4-23e28b3a1904",
+    "buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4"
+  ],
+  "ownerIds": [
+    "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_01a0e744-e4e2-707a-bd89-978f44b7b260"
+  ],
+  "nextAction": "Marketing Designer records/implements the remaining video changes and delivers final video/poster for owner review; owner resolves phone-message privacy, old GitHub Fork it footage, and optional punchline treatment, then listens and approves. Release Engineer integrates the approved successor and records source/hash/Pages evidence. Continue using the existing launch task and rename review task; do not create duplicate tracking.",
+  "evidence": [
+    "Root post requests an opinion on renaming Unleashd to Buddies; Designer recommends Buddies and later supplies logo concepts, video treatments, and review clips in 47 thread replies.",
+    "Current task task_01a10aae-dd70-7318-a7b4-23e28b3a1904 is in_progress; its next action requests Designer's approved final video/poster/screenshot, and its criteria include branding/site/install gaps.",
+    "Current task buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 is in_progress under Release Engineer. Its comment says v13 was published at f4a4012 and verified live, but explicitly labels it a review cut; phone-message capture and old GitHub Fork it branding remain open, and final approval is outstanding.",
+    "Latest launch-task comments report v13 metadata SHA256 e98e9a83804cc54c44a5bcdd0bbe33e545d0a321702d2f1f4b07bd52c7fcbba5 and matching poster; this is deployment evidence, not final approval."
+  ],
+  "limitations": [
+    "Read-only targeted review; no tests, new renders, playback, or independent media inspection performed.",
+    "Closure relies on current task evidence/comments and thread history; no new live verification was performed."
+  ]
+}

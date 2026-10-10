@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a0e8be-2685-7011-aaa6-f8365111700b",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Sending a channel reply fails with unrecognized broadcast key",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "The owner reported that sending a channel reply failed because the request included an unrecognized 'broadcast' key. A later committed fix removes the owner-facing broadcast option and rejects broadcast:true explicitly, so this specific client/server mismatch is resolved. The named root was the only post available in the saved input; channel_read(threadId) returned no replies. No matching active Task was found; the related channel broadcast change was an owner direction recorded in the commit and thread-view spec.",
+  "taskIds": [],
+  "ownerIds": [],
+  "nextAction": "None for the reported error. If it recurs, capture the current client/server version and request payload; the repository has a regression test for rejecting broadcast:true and accepting normal thread replies.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0e8be-2685-7011-aaa6-f8365111700b.json records the exact owner error and root post.",
+    "Commit ef328383f5260812951b95b490d48c5409455f62 (Remove channel broadcast option from owner replies) is an ancestor of current HEAD b39dca3651024f9a8ffcd4c3b87853ab0d7c90ba.",
+    "At HEAD, server/src/buddies/routes.ts schema uses broadcast: z.literal(false).default(false), and server/test/buddies-v2.test.ts contains 'owner channel replies stay in threads and reject old broadcast requests' (asserts broadcast:true returns 400, normal reply returns 201).",
+    "Commit ef32838 also removes the composer checkbox and omits broadcast from new reply requests."
+  ],
+  "limitations": [
+    "Live send was not exercised; no tests were run per instruction.",
+    "Working tree is dirty with unrelated files, so verification is against committed HEAD source plus ancestor history, not a clean tree.",
+    "Buddy channel_read returned an empty post list for the requested thread; replies could not be independently fetched or paginated."
+  ]
+}

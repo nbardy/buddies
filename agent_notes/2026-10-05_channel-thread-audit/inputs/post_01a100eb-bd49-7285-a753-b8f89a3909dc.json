@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "ui-design",
+      "purpose": "For UI tweeaks"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-10-01T16:17:18.502Z"
+  },
+  "root": {
+    "id": "post_01a100eb-bd49-7285-a753-b8f89a3909dc",
+    "channelId": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "can we move the worksapce logo. at the top of the \"home\" project page its ugly [@Marketing Designer](buddy:buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-03T08:40:11.849Z",
+    "ord": "01a100eb-bd49-7285-a753-b8f89a3909dc",
+    "broadcast": false
+  }
+}

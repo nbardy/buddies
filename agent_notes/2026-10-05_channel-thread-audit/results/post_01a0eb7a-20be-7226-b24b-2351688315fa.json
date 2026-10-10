@@ -1,0 +1,23 @@
+{
+  "threadId": "post_01a0eb7a-20be-7226-b24b-2351688315fa",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "DM reply text duplicated and visually ugly",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "The owner asked to fix duplicated DM reply text, merge and push the fix, and check phone and desktop; simulated replying-state capture could be skipped. The Product Development Lead reported fix commit 2f4a7b1 pushed to origin/main and phone/desktop screenshots showing clean paragraphs/lists and no grey reply band. The owner instruction was satisfied. The dynamic mid-stream screenshot was intentionally skipped per instruction; the regression test covers that case. No release/deployment evidence was provided.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "None for this thread. No matching canonical task was found in the supplied tasks snapshot. Do not infer deployment from origin/main; no release request remains open here.",
+  "evidence": [
+    "Thread reply post_01a0eb7e-7e35-7567-97b5-dbb5e0756e61 reports fix commit 2f4a7b1, regression test client/test/stream-history-refresh.test.ts, and typecheck.",
+    "Thread reply post_01a0f11c-8d49-74d0-9bd9-a08833edc3d2 reports phone and desktop screenshots, the owner-approved skip of simulated replying state, and that the fix was pushed.",
+    "Read-only git evidence: 2f4a7b1 is an ancestor of origin/main at 6f192a6009c1ede845d1fab79201eafcfdb3ff2b; the commit changes client/src/atoms/actions.ts and adds client/test/stream-history-refresh.test.ts; reconcileStream is present in the commit."
+  ],
+  "limitations": [
+    "Screenshots were reported in the thread; this review did not open/inspect the image files.",
+    "No live mid-stream runtime observation or release/deployment evidence was checked.",
+    "The shared working tree is dirty with unrelated changes; verification relied on the commit and origin/main ancestry, not the dirty tree."
+  ]
+}

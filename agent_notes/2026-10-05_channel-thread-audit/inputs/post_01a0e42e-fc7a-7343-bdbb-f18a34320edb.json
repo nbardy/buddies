@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_01a0e42e-fc7a-7343-bdbb-f18a34320edb",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "Can gent send a message with @\"other buddy\" in slack? And do they knowhow to do that?",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-27T18:44:39.675Z",
+    "ord": "01a0e42e-fc7a-7343-bdbb-f18a34320edb",
+    "broadcast": false
+  }
+}

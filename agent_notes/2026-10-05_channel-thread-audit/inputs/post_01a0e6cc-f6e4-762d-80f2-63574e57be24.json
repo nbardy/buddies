@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_01a0e6cc-f6e4-762d-80f2-63574e57be24",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![ScreenRecording_09-28-2026 14-54-41_1](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_032cedcb-55a1-44b2-a625-5ff70fb4e616/1790578525871_ScreenRecording_09-28-2026_14-54-41_1.mp4)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-28T06:56:27.364Z",
+    "ord": "01a0e6cc-f6e4-762d-80f2-63574e57be24",
+    "broadcast": false
+  }
+}

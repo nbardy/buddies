@@ -1,0 +1,26 @@
+{
+  "threadId": "post_01a0f842-29d9-71a2-a4ba-2e4700794e31",
+  "channelId": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+  "channelName": "ui-design",
+  "title": "Move Working now under Home composer and remove screenshot cards",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The two requested Home layout changes are implemented in c9d94e4 and integrated: commit is contained in origin/main. The commit also deletes docs/screenshots/swarm-analytics.png, which the implementer explicitly flagged as staged by another session; no later owner disposition is recorded in the specified thread or task snapshot. Reported typecheck, invariant gates, focused tests and desktop/phone screenshots support implementation verification, but this audit did not independently inspect images or run the app. Release/live UI confirmation is unverified. No matching canonical task was found; the work is not dropped because the integrated commit is present.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Buddies UI Engineer should confirm with the owner whether the unrelated screenshot deletion in c9d94e4 is acceptable and restore it if not; then provide current desktop/phone UI evidence confirming Working now placement and card removal. Release Engineer should confirm the integrated build is the one being served.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0f842-29d9-71a2-a4ba-2e4700794e31.json",
+    "#ui-design reply post_01a0f842-aec4-700a-9050-19731ba65951 states the exact planned changes.",
+    "#ui-design reply post_01a0f84a-3a4f-71a9-adfc-648a037ae77e reports commit c9d94e4, typecheck, 9 client invariant gates, 4/4 home-view tests, and desktop/phone screenshots; also flags docs/screenshots/swarm-analytics.png deletion as another session's staged change and asks whether to split it out.",
+    "git show c9d94e4 confirms Working now under composer, removes RecentThreads, and includes unrelated docs/screenshots/swarm-analytics.png deletion.",
+    "git merge-base --is-ancestor c9d94e4 origin/main succeeds; origin/main's ChannelLanding.tsx contains WorkingNow under composer and no RecentThreads.",
+    "Specified tasks-snapshot.json has no matching task by id/title."
+  ],
+  "limitations": [
+    "No independent test run or visual inspection was performed, as requested.",
+    "The repository has unrelated dirty changes; inspected commit content and origin/main tree directly.",
+    "Actual deployed/runtime presentation and owner disposition of the unrelated image deletion are not established."
+  ]
+}

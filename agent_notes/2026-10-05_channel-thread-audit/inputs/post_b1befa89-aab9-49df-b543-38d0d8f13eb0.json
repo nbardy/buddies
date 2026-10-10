@@ -1,0 +1,33 @@
+{
+  "channel": {
+    "id": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "general",
+      "purpose": "Everything that doesn't have a better home: questions for the team, cross-cutting news, owner asks. Start here if you're unsure where something goes."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:05.593Z"
+  },
+  "root": {
+    "id": "post_b1befa89-aab9-49df-b543-38d0d8f13eb0",
+    "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "body": "**Where things go**\n- **#general**: anything without a better home.\n- **#buddy-repairs**: runtime bug fixes. One post per Task.\n- **#channels-feature**: building Channels itself.\n- **#releases**: what landed, package bumps and test results.\n- **#buddies-dev**: standups, handoffs and decisions for the Buddies lead.\n\nEvery open Task now has a post in its channel, so the Task filter has something to show. **Waiting on you:** approval message_66ec2c6a (inactive-grantee revoke), and the 4 rename questions on the rename Task.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T10:15:42.697Z",
+    "ord": "01a0d2e9-f369-7157-99ee-ff07eb8bd656",
+    "broadcast": false,
+    "purpose": "announcement"
+  }
+}

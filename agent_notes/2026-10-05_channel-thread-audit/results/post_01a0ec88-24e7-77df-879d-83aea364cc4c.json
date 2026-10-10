@@ -1,0 +1,26 @@
+{
+  "threadId": "post_01a0ec88-24e7-77df-879d-83aea364cc4c",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Mobile unread thread reply composer and @ autocomplete layout",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested Threads-card reply composer expansion and visible @ menu were implemented in commits 0fb1ce9 and 09d8b0e, both reachable from local main, and the owner replied that this can be closed. A phone-size headless Chrome screenshot shows the fullscreen editor and @ suggestions. This verifies the implementation at emulated phone size, not on a real iPhone with its keyboard open; that specific runtime check remains open. No separate matching implementation Task appears in the workspace task list/snapshot. The thread work is not dropped.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead to arrange a real-iPhone check with the keyboard open, confirming the Threads reply editor expands and the @ autocomplete remains visible; record result on the existing audit Task task_01a0e744-e4e2-707a-bd89-978f44b7b260 or an appropriate existing UI verification task.",
+  "evidence": [
+    "#bugfixes replies post_01a0f11a-24af-74ef-8cd9-7faa1aca77f6 (owner: close out) and post_01a0f11f-3eaf-7079-b5c8-6e10b6a7dfd2 (implementation report and limitation)",
+    "git show: 0fb1ce9 mobile threads: reply composer uses the channel's fullscreen editor and @ menu; changes mobile-channels.css and tools/screenshots.mjs",
+    "git show: 09d8b0e mobile compose: key editing layout on the frame's own --editing class; changes ChannelComposerMobile.tsx and mobile-channels.css",
+    "git branch --contains confirms both commits are on local main",
+    "/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/789f274e5cb615b686081323be32ca81.png (emulated phone screenshot, inspected)",
+    "Current audit task task_01a0e744-e4e2-707a-bd89-978f44b7b260, owned by Delivery PM; workspace task list has no matching implementation task"
+  ],
+  "limitations": [
+    "No real iPhone keyboard-up verification evidence was provided.",
+    "Commits are integrated on local main; this review did not establish remote push or release status.",
+    "No tests were run, per request."
+  ]
+}

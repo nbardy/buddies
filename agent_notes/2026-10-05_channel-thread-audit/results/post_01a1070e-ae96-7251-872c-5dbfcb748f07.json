@@ -1,0 +1,30 @@
+{
+  "threadId": "post_01a1070e-ae96-7251-872c-5dbfcb748f07",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Wait for new thread responses; add searchable channel queries",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner asked whether a worker can wait for new replies on a channel thread, then expanded the request to searchable text with pagination, complex queries, channel and author filters. The Development Lead proposed channel_read follow:{until} and structured search; owner approved thread follow, and later specified a 2-second grace poll before registering the follow. Follow has no delivered implementation evidence: its Task remains open and branch feat/thread-follow is still at unrelated commit e830baa. Structured search is implemented in commit 74d1fd3 on feat/structured-search, but that commit is not an ancestor of current HEAD; its Task remains open and branch-only criteria require test/clean-commit report. Later fuzzy matching, @author, channel rows and rendered/highlighted excerpts are implemented in commit b61c1a9 on main's history context but not current HEAD; canonical Task task_01a10b37-e7d8-7689-b16f-98254db2f8d5 remains open. No run of tests or live MCP verification was performed in this review. Nothing is marked dropped: both canonical tasks are active/open.",
+  "taskIds": [
+    "task_01a10757-769e-7486-9f8d-55b9b8cc2ad0",
+    "task_01a10757-8bbf-7189-938f-7b66704a70a1",
+    "task_01a10b37-e7d8-7689-b16f-98254db2f8d5"
+  ],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"],
+  "nextAction": "Buddies Development Lead: resume the thread-follow worker on its branch and complete revision-2 criteria, including 2-second grace, unread immediate return, post-grace wake, already-read no-turn, timeout, restart survival, required integration tests, and clean-commit verification; separately coordinate branch integration/review of structured-search commit 74d1fd3 and fuzzy-search commit b61c1a9, reconcile with the open search Task's required criteria, then verify tests and runtime behavior before closing Tasks.",
+  "evidence": [
+    "Input root: agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a1070e-ae96-7251-872c-5dbfcb748f07.json",
+    "Thread replies fetched: post_01a10710-5ad3-772e-83cd-4e07f37d65cc, post_01a10757-55f3-76e4-8bf0-6766bc416de9, post_01a10757-e3f7-7250-9062-e6f773c2113e, post_01a10769-2cbf-764e-b1d5-f17aed3763bb, post_01a1076a-399d-75d8-a1b6-b0e76213bf3a",
+    "Follow Task remains open at revision 2; criteria explicitly include grace, wake routing, no-turn when already read, timeout, restart and integration tests.",
+    "Structured-search Task remains open; commit 74d1fd31fb04b685a6105e0975f5177d42bd06e1 exists on feat/structured-search and is not an ancestor of current HEAD.",
+    "Search enhancement commit b61c1a9788be0dc00aa4074d4f505a9c702720bc exists in repository history; its current canonical task task_01a10b37-e7d8-7689-b16f-98254db2f8d5 remains open.",
+    "Thread-follow branch feat/thread-follow points at e830baa2e4244ebcd6f352241db7af752ae4a688 (unrelated launch-video sound-plan commit); no follow implementation commit is evidenced there.",
+    "Repository contains unrelated dirty changes; review was read-only and does not treat working-tree state as commit verification."
+  ],
+  "limitations": [
+    "No tests or live MCP/runtime verification were run, as requested.",
+    "Repository has unrelated dirty files and main is not aligned with origin/main; integration/release state is not established by this review."
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "threadId": "post_01a0e6e1-fb6c-73fa-99a7-97f1768a0647",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Fresh context UI/header overflow is unreadable on mobile",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner reported the fresh-context UI appeared above screen and was unreadable. Product Development Lead replied that mobile DM header overflow was fixed by constraining the refresh/model action row, stacking below 340px, and applying border-box sizing. The reply reports a rendered regression test (6/6), client tsc -b, Biome, diff checks, and clean 375px phone screenshot; a 250px final live repaint was still outstanding due to an unrelated missing BuddyMemory.css import. Current checkout contains commit 292a7e4, an ancestor of HEAD, implementing a below-placement for header pickers and fixed bottom-sheet placement on mobile. The exact ask appears addressed; no matching current task is recorded.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "None for this one-off bug report. The reply's 250px live repaint was not evidenced as rerun; reopen if that specific viewport still fails.",
+  "evidence": [
+    "Thread reply post_01a0e6e9-dfdb-74b8-b067-c79300179114 (2026-09-28): implementation details, reported 6/6 channel-dm.test.tsx, client tsc -b, Biome, diff checks, 375px screenshot; notes 250px live repaint remains to rerun after restoring unrelated BuddyMemory.css import.",
+    "Commit 292a7e4 is ancestor of HEAD; HarnessPicker requires placement above|below and ChannelComposer.css places below header picker, with mobile fixed bottom-sheet rules.",
+    "Root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0e6e1-fb6c-73fa-99a7-97f1768a0647.json"
+  ],
+  "limitations": [
+    "Screenshot files under /tmp were cited in the reply but were not inspected in this read-only audit.",
+    "No tests or live UI check were run. Current working tree is dirty; commit ancestry and committed source were checked directly.",
+    "The final 250px live repaint mentioned in the reply remains unconfirmed."
+  ]
+}

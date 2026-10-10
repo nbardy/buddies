@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a0e33e-692d-70d7-9a23-b4448a2cf49b",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Global channel message search with Ctrl/Cmd+F",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner asked for a clickable Ctrl/Cmd+F and top search across workspace messages. Replies and committed implementation report a compact centered header control, centered overlay, inline results, keyboard handling, and click-through. The canonical task remains in review and explicitly awaits a live click/search/result check. Thus implemented with reported focused verification; runtime UX sign-off, integration/release confirmation, and final closure are unconfirmed.",
+  "taskIds": ["task_01a0e340-1a73-70d9-91e9-574831032777"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Task owner (Product Development Lead) should perform the recorded running-app path: click Search messages or press Cmd/Ctrl+F, enter a term, click a result, and confirm the originating channel/thread opens; then update task evidence/status and confirm integration/release.",
+  "evidence": [
+    "Thread replies post_01a0e34e-bdf3-7789-92e2-a1aecd05e951 and post_01a0e354-400b-70f8-b072-c9abc3ac09f8 report initial/refined behavior and checks.",
+    "Canonical task task_01a0e340-1a73-70d9-91e9-574831032777 is status review; nextAction explicitly requests owner live click/search/result verification.",
+    "Commit e4884ac ('Expand channel Search in place from the header pill') includes ChannelSearch.tsx, ChannelBrowser.tsx, styles and screenshot tooling; task evidence records ChannelBrowser 7/7 and all 9 client invariant gates passed.",
+    "Recorded screenshots: output/screenshots/2026-09-27T14-37-32/channels@desktop.png and output/screenshots/2026-09-27T14-44-18/channels@desktop.png."
+  ],
+  "limitations": "No tests run per instruction. Working tree is dirty, including ChannelBrowser.tsx/.css, so commit ancestry and task evidence are not proof of current tree or release state. No live app interaction or deployment verification performed."
+}

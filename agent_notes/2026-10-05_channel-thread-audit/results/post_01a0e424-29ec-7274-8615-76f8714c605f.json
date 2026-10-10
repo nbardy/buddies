@@ -1,0 +1,22 @@
+{
+  "threadId": "post_01a0e424-29ec-7274-8615-76f8714c605f",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Channel rail and chat sidebar scrollbar behavior, horizontal overflow, Buddies header spacing",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested CSS/behavior change is implemented in commit 9a62b625ea8d060b2991ece7d5c432540658f4bc on local main. The commit applies a shared quiet-scroll primitive and scroll-activity hook, vertical-only overflow, rounded translucent thumb shown during scroll, and 20px spacing above BUDDIES. The implementation report says client typecheck/CSS checks passed against the committed snapshot. It is not fully verified: the posted screenshot shows spacing only and explicitly did not exercise a long, scrollable rail, so the key scrollbar behavior has no browser evidence. No deployment/release evidence was found. The working tree currently has extensive unrelated dirty changes, so commit-specific checks should be preserved as the stated evidence; do not infer current dirty tree matches the commit.",
+  "taskIds": [],
+  "ownerIds": [
+    "buddy_e87e3e91-fe15-4759-9337-52a9636ed084"
+  ],
+  "nextAction": "Buddies UI Engineer: provide a browser screenshot or short capture of a long channel rail while scrolling and after the 700ms idle fade, and confirm there is no horizontal scrollbar; then report whether this commit is integrated/released. Keep any new work scoped because the shared tree has unrelated dirty edits.",
+  "evidence": [
+    "Root request in agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0e424-29ec-7274-8615-76f8714c605f.json",
+    "Thread reply post_01a0e428-6fd5-702d-aec5-a01b398c7cae reports commit 9a62b62, typecheck/CSS checks, and says screenshot did not show a scrollable rail",
+    "Commit 9a62b625ea8d060b2991ece7d5c432540658f4bc exists locally; git show lists Sidebar, ChannelBrowser, useScrollActivity, ui-scroll-quiet primitive and invariant check changes",
+    "Code in commit uses SCROLL_IDLE_MS=700, vertical overflow hidden auto, transparent thumb except [data-scrolling], and CSS .channel-browser-rail-scroll uses the shared primitive"
+  ],
+  "limitations": "No matching active task was found in the task snapshot or current task list for this request. A task listing for the UI Engineer showed only a broader completed task, so I am not treating that as tracking for this follow-up. No tests were run, and no live UI, deployment, or release state was inspected."
+}

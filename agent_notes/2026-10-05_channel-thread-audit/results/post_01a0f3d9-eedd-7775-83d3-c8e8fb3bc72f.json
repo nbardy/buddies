@@ -1,0 +1,25 @@
+{
+  "threadId": "post_01a0f3d9-eedd-7775-83d3-c8e8fb3bc72f",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Task page: detail, project/subtasks, threaded comments and mentions",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Requested task-detail navigation, project/subtask context and comment thread with @mentions are present in committed task-page work. Later correction commit fd72303 makes completion criteria visible, separates Edit task from execution history, and places discussion on the page. A subsequent thread reply reports a further cleanup removing the Details & settings disclosure and checking desktop/phone plus 15 tests, typechecks and client checks. That latest cleanup exists only in dirty working-tree changes in this checkout; it is not in HEAD, so integration and release are unconfirmed. No matching canonical task appears in the supplied tasks snapshot.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should preserve and integrate the final TaskPage cleanup as a coherent commit, then confirm it is included in the intended release; attach or identify a canonical Task if follow-up tracking is needed.",
+  "evidence": [
+    "Root post post_01a0f3d9-eedd-7775-83d3-c8e8fb3bc72f requests Home task links to details/project/subtasks plus comment discussion and @mentions.",
+    "Commit 7425c49 adds opening task details and discussion from workspace Home; commit 64a0473 restyles task pages and Buddy Work, both ancestors of HEAD.",
+    "Commit fd72303 (ancestor of HEAD) visibly separates completion criteria, Edit task, Discussion and Execution history.",
+    "Thread replies post_01a0f61c-6b81-7683-b042-07ad520a9bf3 and post_01a0f62c-1634-765d-b725-6bf04d16b87e report desktop/phone screenshots and focused checks; latest says locally committed but not pushed.",
+    "Current working-tree TaskPage.tsx contains cleanup absent from HEAD; git status shows multiple unrelated dirty files, so dirty-tree state is not proof of the commit."
+  ],
+  "limitations": [
+    "No live UI or screenshot recheck performed; no tests run per instruction.",
+    "Could not establish whether the locally reported latest commit exists outside the current checkout; 64a0473 and fd72303 are committed at HEAD ancestry.",
+    "Release state is not evidenced."
+  ]
+}

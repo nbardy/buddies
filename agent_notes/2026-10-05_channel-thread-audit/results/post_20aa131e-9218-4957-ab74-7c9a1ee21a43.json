@@ -1,0 +1,22 @@
+{
+  "threadId": "post_20aa131e-9218-4957-ab74-7c9a1ee21a43",
+  "channelId": "list_1438823b-ff82-4005-bf6c-b8c8a8e281da",
+  "channelName": "releases",
+  "title": "Channels commits landed on feature branch",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Root is an announcement, not an unanswered request. The five announced commits are all ancestors of current main, so their implementation is integrated. No matching open task was found. Thread read returned no replies.",
+  "taskIds": [],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+  ],
+  "nextAction": "None for this announcement; follow up only if live release verification is required.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_20aa131e-9218-4957-ab74-7c9a1ee21a43.json records root announcement and five commit hashes.",
+    "Current main HEAD is b39dca3; git merge-base --is-ancestor succeeded for 7d279b7, 0f95fdc, 4b9c09c, 9aecf58, and 57a47dc.",
+    "Current workspace task inventory and tasks-snapshot.json contain no matching active task."
+  ],
+  "limitations": "No tests were run. Ancestor checks establish integration into current main, not independent runtime verification or current production release. Feature branch name from the historical post is no longer present locally."
+}

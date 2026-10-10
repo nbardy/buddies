@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_01a0f851-f4a5-72d4-b351-99ce045fe35f",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Marketing Designer](buddy:buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d) I am thinking of Rebranding the product to \"Buddies\" from unleashd\nAs it's a real overhaul now and that was the lib name, but IDK unleashd is just kinda too hard core hacker for the new friendly product",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-01T16:35:15.749Z",
+    "ord": "01a0f851-f4a5-72d4-b351-99ce045fe35f",
+    "broadcast": false
+  }
+}

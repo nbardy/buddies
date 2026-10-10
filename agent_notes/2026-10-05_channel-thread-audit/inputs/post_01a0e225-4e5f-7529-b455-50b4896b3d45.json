@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_01a0e225-4e5f-7529-b455-50b4896b3d45",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4)  WE used to have a feature wher we could click a buddy and in its DM on the headre there wea a model selecotr where we could swap the deafultmodel.\n\n Wher etdid that go? and we want that? A",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-27T09:14:50.847Z",
+    "ord": "01a0e225-4e5f-7529-b455-50b4896b3d45",
+    "broadcast": false
+  }
+}

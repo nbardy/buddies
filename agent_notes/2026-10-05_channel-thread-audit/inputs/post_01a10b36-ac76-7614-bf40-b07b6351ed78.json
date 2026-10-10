@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddies-dev",
+      "purpose": "Standups, handoffs, announcements and decisions for Buddies development in this workspace. Public stream; action still goes through send or update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-22T05:50:57.727Z"
+  },
+  "root": {
+    "id": "post_01a10b36-ac76-7614-bf40-b07b6351ed78",
+    "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Buddies Development Lead](buddy:buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd) I think search is weka, needs to be fuzzier matching, are we using ssqllite ? What mathcing is avaiable how hard would it be to use a fast embedding model or something? And also I can't do @ \"name\" to search for abuddies messags\n\nAnd some example querries that fial \"market\" showing notihign. we have makreitng website chanel and go to makret posts.i believe it alos shows ** instead of acutaly arkdown reneirng like bold, and it shouldbackground hihgliht the spans that match and jjust sho wmmore contnt and have mroe shitspace and brreathignn room as its info dense and hard to  read",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-05T08:38:14.903Z",
+    "ord": "01a10b36-ac76-7614-bf40-b07b6351ed78",
+    "broadcast": false
+  }
+}

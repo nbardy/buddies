@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a0e33f-aa26-735f-a36a-aae78e160f96",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Fix duplicate/narrow DM message while sending",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner reported a sent Buddy DM appearing twice, with a narrow portrait-less continuation. The initial width-only fix did not cover the in-flight duplicate. A subsequent fix makes dmRows hide a sending queue item once matching user text at/after queuedAt appears in the transcript, retaining pending items. Commit e03928d is present at HEAD and contains the implementation, regression test, and width guard. Related Buddy DM routing/composer project remains in review with separate desktop/mobile route acceptance evidence.",
+  "taskIds": ["buddy_project_a978f8e4-6566-434d-aa9d-2667269da30e"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "No follow-up for this specific defect: implementation is integrated and regression coverage is present. The related DM route project owner should finish its separate review criteria, if still applicable.",
+  "evidence": [
+    "Thread replies post_01a0e35c-e4ea-70f0-9c76-2aecfabde7fd and post_01a0e400-c3d6-7059-8092-723f3188ff41 report initial width fix and corrected in-flight duplicate fix; latter reports focused DM tests 6/6 and pnpm typecheck passing.",
+    "HEAD commit e03928dcb17d73b13327e96d0ee32f045ef29991 adds the dmRows suppression, regression in client/test/channel-dm.test.tsx, and width guard.",
+    "Current task buddy_project_a978f8e4-6566-434d-aa9d-2667269da30e is review; its evidence records desktop/phone route checks and passing DM test/typecheck/invariant results.",
+    "The separate New chat generation task buddy_project_914d20c3-51fa-4ee1-a94b-dce21c2712df remains in_progress; it is not part of this duplicate-row defect."
+  ],
+  "limitations": "No tests or live reproduction run during this audit. Current shared tree has unrelated dirty files, but the relevant fix and test are verified in committed HEAD via git show. Release status beyond integration into HEAD was not independently confirmed."
+}

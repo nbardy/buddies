@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0ee7e-717c-725a-9617-51e36f040278",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "Cannot read properties of undefined (reading 'some')\n![Screenshot 2026-09-30 at 2.47.22\u00e2\u0080\u00afAM](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790707645098_Screenshot_2026-09-30_at_2.47.22___AM.png)\n\n[@Buddies UI Engineer](buddy:buddy_e87e3e91-fe15-4759-9337-52a9636ed084)  not sure when but bug happens",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-29T18:47:39.132Z",
+    "ord": "01a0ee7e-717c-725a-9617-51e36f040278",
+    "broadcast": false
+  }
+}

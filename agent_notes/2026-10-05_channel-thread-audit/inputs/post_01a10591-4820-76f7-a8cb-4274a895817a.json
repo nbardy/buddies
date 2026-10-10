@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a10591-4820-76f7-a8cb-4274a895817a",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![image](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1791094365147_image.png)\n\nSo we have this here, I am seeing the \"should reply\" thing getting bricked.\n\nSo if we look at this here, We have the models target at Gpt-6.1 sol is their defualt model nand we have sol as an available model, but also it seems like the \"should reply\" is first hitting the claude model that is out\n\n1) the should reply should use models in this order: \"the one chosen in the model picker if we @ that model so the user can always override.\n2) The most recent used model in the thread from the most recent message working backward and deafutl to the most recent @ so if we keep respoindig we only have ot se the model once\n3) \"I thought we made a feature where if a model fails we can click a button in that message \"retry with model X\"\n4) The\"should reply\" should use the same model priority and hve the same retry button\n\n\n[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-04T06:19:29.696Z",
+    "ord": "01a10591-4820-76f7-a8cb-4274a895817a",
+    "broadcast": false
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a0eece-40e8-7292-abbb-b1fbb9f7d5a7",
+  "channelId": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+  "channelName": "case-studies",
+  "title": "Handoff: why Buddy workers ran on gpt-6-sol instead of gpt-6.1-sol",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The Delivery/Product Development Lead explained the cause: model IDs were copied from Buddy prose and workers accept explicit IDs without resolving a latest family. Owner approved medium as the reasoning-model default, family-keyed latest-version behavior, and the initial commit/push. Step 0 is implemented and verified by task evidence: agent-cli 1b82d82 is pushed; unleashd 70d2d99 contains the catalog pointer, generated catalog, rule test and docs. That outer commit is local/unpushed per task evidence; live backend/API activation was not checked. The larger family-selection task remains in progress. Steps 1–7 (family registry, shared/Rust selection resolution, profile/worker family input and resolved run records, regression coverage, picker/settings UI and screenshots, wire-skew guard, docs/pattern tags) have no completion evidence. Other proposed catalog listing, superseded-ID warning, soul sweep and runs transcript access are explicitly out of scope or separate approvals, not silently treated as delivered.",
+  "taskIds": ["task_01a0eed8-6c72-7018-a2c3-d2a2acbf6efd"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Task owner (Product Development Lead) should confirm the owner's intended meaning of overlays (the task still records pin as an assumption), then proceed with steps 1–7 in an isolated worktree and local commits. Coordinate any outer push with the release owner because task evidence says main is three commits ahead, including two unrelated commits. After implementation, verify the commits and regression/UI evidence; coordinate backend reload and live API verification before marking the medium default active. Revisit the out-of-scope run transcript/catalog/soul items only through separate decisions.",
+  "evidence": [
+    "Input root: agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0eece-40e8-7292-abbb-b1fbb9f7d5a7.json",
+    "All thread replies fetched via channel_read, including owner approval and lead's implementation proposal/status.",
+    "Current task detail: task_01a0eed8-6c72-7018-a2c3-d2a2acbf6efd, status in_progress, steps 1–7 open, step 0 evidence lists agent-cli 1b82d82 and unleashd 70d2d99.",
+    "Read-only git check: 70d2d99 exists and is contained in main; current HEAD is b39dca3. Shared working tree has numerous unrelated modifications, so no dirty-tree check was treated as commit verification."
+  ],
+  "limitations": [
+    "No tests, live server/API checks, runtime restart, or UI screenshots were run in this audit.",
+    "Integrated/pushed state for outer commit 70d2d99 is unconfirmed; task evidence explicitly says it was local/unpushed. Git shows commit reachable from main, but no remote comparison was done.",
+    "Task evidence confirms checks at the commit for step 0 only; it does not establish completion of family behavior."
+  ]
+}

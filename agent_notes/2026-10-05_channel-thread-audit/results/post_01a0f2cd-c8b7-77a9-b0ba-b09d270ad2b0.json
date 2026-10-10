@@ -1,0 +1,21 @@
+{
+  "threadId": "post_01a0f2cd-c8b7-77a9-b0ba-b09d270ad2b0",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Temporary restriction: no direct SQLite clients on live stores until lock-loss fix is verified",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "No thread replies were returned. The linked P0 task is done: root cause was uploads GC opening/closing SQLite files in a backend worker thread, releasing process POSIX locks; the fix moves GC scanning to a child process and adds an integration regression test. Commits b79b2c1 and fdbe6f1 are ancestors of current local main. The task explicitly says activation requires the live backend to restart onto b79b2c1; the evidence note says that restart remained the owner's call. Therefore the repository fix is implemented, guarded, and integrated locally, but live activation/recovery is unverified and the original live-store restriction should not be considered lifted based on this audit.",
+  "taskIds": ["task_01a0f2cb-29d1-777b-a62a-508abae5baf3", "task_01a0f2cb-48ba-722b-b0f6-07e4942fdb5c"],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd", "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Buddis Development Lead / Product Development Lead: confirm the live backend has restarted on a build containing b79b2c1 and that normal API operation is healthy before lifting the direct-SQLite restriction; retain the separate in-progress detach-and-adopt task as active work.",
+  "evidence": [
+    "Buddy task task_01a0f2cb-29d1-777b-a62a-508abae5baf3: status done; cause/fix/guard acceptance; evidence records activation only after restart.",
+    "agent_notes/2026-09-30_worker-continuity-double-audit.md §6 confirms reproduction and fix b79b2c1, guard server/test/sqlite-locks.test.ts, and says activation requires next boot; cites successor note fdbe6f1.",
+    "agent_notes/2026-09-30_sqlite-locks-sigbus-root-cause.md documents temp-store lock probes, outside-opener reproduction, child-process fix, and guard; explicitly says live activation was pending restart at note time.",
+    "git merge-base confirms b79b2c1 and fdbe6f1 are ancestors of current local main; committed test at b79b2c1 asserts store WAL/-shm survive outside opens after real backend GC pass.",
+    "Current local main is ahead 6 and behind 2 versus origin/main; working tree is dirty with unrelated changes, so this verifies local commit ancestry only, not remote release or live runtime state."
+  ],
+  "limitations": "No live backend state was inspected and no tests were run, per request. Local main contains unrelated dirty files. Cannot confirm restart/activation or that origin/main/production contains the fix."
+}

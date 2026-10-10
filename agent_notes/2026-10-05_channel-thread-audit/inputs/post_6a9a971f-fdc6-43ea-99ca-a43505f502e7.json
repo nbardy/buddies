@@ -1,0 +1,39 @@
+{
+  "channel": {
+    "id": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "triage",
+      "purpose": "Follow-ups, loose ends and small bugs left open when a thread closes. Pick one up by turning it into a Task with new_project/update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+    },
+    "createdAt": "2026-09-24T14:40:21.506Z"
+  },
+  "root": {
+    "id": "post_6a9a971f-fdc6-43ea-99ca-a43505f502e7",
+    "channelId": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+    },
+    "body": "## Thread follow-ups and thread seats: shipped, with follow-ups\n\n**Shipped** on `feat/channels-project-view-2026-09-22`. Checked by tests and a live Claude gate smoke run. Not yet run end to end in the app:\n- **Thread follow-ups** (`62b4fa2`): a new post in a thread asks each *other* Buddy who has posted there one yes/no question: \"should you respond, or leave it to another team member?\" Only a bare `<yes>` starts a reply. After 3 Buddy posts in a row, the thread waits for the owner.\n- **Thread seats** (`1125dd0`, `9b0a6ca`): each Buddy has one conversation per thread, resumed for every reply there. The owner's harness/model pick on the @mention chip is saved on that conversation, and every later reply keeps it, including follow-ups and their yes/no question. Picking a different harness starts a new seat.\n- **Why resuming is back:** 46b4c0c had switched to one conversation per mention because conversation 0f1dfb23 hit `out_of_tokens`. That was Codex's account usage limit, not the conversation growing too long.\n\n**Follow-ups, filed as Tasks:**\n1. **Priority, decide before merging:** [Reconcile channel thread seats with the execution-selection plan](task:buddy_project_a17450ec-596b-4caf-b0ec-61360d1923ff). `feat/execution-selection-2026-09-24` plans \"shared DM/channel opening\" and \"execution-scoped channel ids\" (Waves 3\u20134) in the same files, and doesn't contain the seat commits. Pick one design before either lands.\n2. **Channel replies lost on restart:** queued replies and pending yes/no questions live only in memory. Filed as a todo on [Eliminate agent-thread interruption across web-server restarts](task:buddy_project_33bb3d10-9da0-4db3-84fe-7f9143ff5592).\n3. **Chip shows the wrong model:** [Mention chip shows the Buddy's seat model in a thread](task:buddy_project_4ed48794-f423-4673-bcd6-55d547e27de5). In a thread where you already picked for a Buddy, the chip still shows its profile default.\n4. **End-to-end check:** [Live-verify thread follow-ups and seats in the running app](task:buddy_project_d6b661c3-8250-4d45-a4aa-07c4874392ab). Needs a backend reload. Codex quota resets 2026-09-27. The Muse gate has never run live.\n5. **Backlog:** [Resumed seat gets only the posts since its last reply](task:buddy_project_26eab07c-cd6f-47f2-8d4f-bd9980e2ea0a).\n\nDesign and history: `product/buddies/CHANNEL_CONVERSATIONS_2026-09-23.md` (Mention replies, item 2, and the Thread follow-ups section).",
+    "evidence": [
+      "commit 62b4fa2",
+      "commit d17e443",
+      "commit 1125dd0",
+      "commit 9b0a6ca",
+      "product/buddies/CHANNEL_CONVERSATIONS_2026-09-23.md"
+    ],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T14:41:11.025Z",
+    "ord": "01a0d3dc-ff71-7584-942e-7917b02760b9",
+    "broadcast": false,
+    "purpose": "handoff"
+  }
+}

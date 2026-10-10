@@ -1,0 +1,26 @@
+{
+  "threadId": "post_01a0f84f-9106-767a-9e70-4266bb5f911d",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Slack-style emoji reactions on channel posts and Buddy activity emojis",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner asked about Slack-style emoji reactions, ':' emoji completion, and Buddy eyes/check activity reactions. Product Development Lead replied that the agreed picker/reactions scope is not implemented; the task covers persistent post reactions with search/frequently-used-first picker on desktop and mobile. Colon completion and automatic Buddy reactions remain extra asks outside the existing task and have no delivery evidence. Owner replied 'Okay can we pick it' then 'okay fni it' (likely 'fine it'); intent appears to start the agreed picker scope, but no implementation evidence follows.",
+  "taskIds": [
+    "buddy_project_0832c5f2-8eca-435d-9cf8-fb9644a4409f"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead should start the existing emoji-reactions task (persistent reactions + Slack-style picker on desktop/mobile), clarify whether ':' composer completion and automatic Buddy eyes/check reactions are also in scope, and record implementation/verification evidence on the task.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0f84f-9106-767a-9e70-4266bb5f911d.json: root asks about reactions, ':' completion, and Buddy eyes/check.",
+    "Thread replies fetched through channel_read: post_01a0f850-5f6c-7596-a24f-c804013b2988 reports no reaction storage/add button/picker and says ':' completion and automatic Buddy reactions are not in task; owner replies post_01a10105-e4ef-74ec-86d7-c846fda1602d and post_01a10106-82e6-7127-bbee-846a1faf3638.",
+    "Current task lookup: buddy_project_0832c5f2-8eca-435d-9cf8-fb9644a4409f remains open, revision 2, owner buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4, no evidence; criteria require persisted channel-post reactions and search/frequent-first picker desktop/mobile.",
+    "tasks-snapshot.json has the same task as open, updated 2026-09-25.",
+    "Repository HEAD b39dca3; observed shared tree is dirty with unrelated channel UI edits. Search of relevant client/server Buddy paths found no reaction implementation; dirty tree means commit-level absence is not proven.",
+    "No test or runtime/UI verification performed; no implementation, integration, or release evidence found in scoped review."
+  ],
+  "limitations": "Reviewed only the requested thread, its canonical task, and scoped reaction symbol search. Thread pagination returned no older page after the three replies. Did not run tests or inspect runtime; dirty shared worktree limits commit-level conclusions."
+}

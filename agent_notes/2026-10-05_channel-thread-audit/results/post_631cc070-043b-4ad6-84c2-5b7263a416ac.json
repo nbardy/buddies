@@ -1,0 +1,20 @@
+{
+  "threadId": "post_631cc070-043b-4ad6-84c2-5b7263a416ac",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Embedded channel videos restart after about four seconds",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "The owner asked why embedded and expanded channel videos restarted after about four seconds and requested a fix. Product Development Lead reported the cause and fix in commit 69eb4cf: custom post-body pieces were recreated when member/Task polling refreshed, causing the video player to remount; those pieces are now stable and receive changing names/Tasks without rebuilding the post. They reported running-app verification by playing all four videos for 40 seconds: before the fix, four players were destroyed on each refresh; after, none were destroyed and all four played to completion. Thus the specific ask is answered and delivered. The separate Unleashd 2.0 Channels release project remains in progress for launch footage and release-candidate criteria; it is not a dropped video-bug task.",
+  "taskIds": ["buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "No bug-specific follow-up. Release Engineer continues the existing Channels release project: reconcile remaining clip/release-candidate subtasks against evidence; the video restart fix itself needs no further action.",
+  "evidence": [
+    "Root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_631cc070-043b-4ad6-84c2-5b7263a416ac.json",
+    "Thread reply post_334a4c42-568a-47ce-b60d-1a51396064f0 reports fix commit 69eb4cf, cause, 40-second running-app playback of all four videos, no post-fix player destructions, and reported typecheck/lint plus channel-test results (23/24; remaining failure described as pre-existing).",
+    "Read-only git evidence: git show confirms commit 69eb4cf is present and changes client/src/components/buddies/ChannelMarkdown.tsx; current HEAD is b39dca3, so the fix is integrated into the local main history.",
+    "Current task buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 is in_progress, owned by Release Engineer, with launch-footage and named release-candidate criteria; it does not track this bug specifically."
+  ],
+  "limitations": "The reported runtime playback, typecheck, lint, and test outcomes are thread evidence and were not rerun in this audit. The current worktree is dirty across unrelated client/channel files, so no checks of the working tree were treated as commit verification. The target commit is present in local main history; remote deployment/release of the code fix is not independently established here."
+}

@@ -1,0 +1,21 @@
+{
+  "threadId": "post_01a10710-5294-750a-adc5-571437035dfc",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Final video handoff — combining both edit threads",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The v13 review cut and source chain are preserved, and the source repair is integrated; the cut is published as a review asset, not accepted as final. Closure is still blocked on palette placement/content decisions, final-frame privacy/branding decisions and edits, full end-to-end listening, and completion of the broader launch task's footage/release criteria. The palette trim is committed but not integrated into the full cut.",
+  "taskIds": ["buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4", "todo_5dadab2a-eb15-4c35-ae06-7b53e677f048"],
+  "ownerIds": ["buddy_247e963c-a7d8-48e7-a601-9309ea8b448f", "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d"],
+  "nextAction": "Release Engineer: keep the launch task open and coordinate with Marketing Designer, who remains sole editor, to deliver a successor review cut incorporating the approved palette placement/content and current branding; record exact source/render provenance, then obtain owner decisions for visible phone messages/private names and complete an end-to-end listen. Marketing Designer: update the existing Privacy pass task with redaction or owner-approved scope and evidence from the final export. Release Engineer: reconcile remaining launch footage and Channels release acceptance criteria in the existing parent task.",
+  "evidence": [
+    "Thread latest replies: post_01a10b35-5ddb-768b-9788-1d774328e72f and post_01a10b35-ada3-76c8-999c-7c25efb869b7 report v13 96.3s / 5776 frames, hash matching ledger, 13 preserved chain files, source clean; palette remains separate and no fresh full frame-by-frame viewing was done.",
+    "Existing task buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 is in_progress, owner buddy_247e963c-a7d8-48e7-a601-9309ea8b448f; its done criteria include script, footage todos, edit handoff, and Channels release commit/tests. Child footage todos remain open.",
+    "Existing task todo_5dadab2a-eb15-4c35-ae06-7b53e677f048 is open, owner buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d, with criterion: no readable private names outside thread pane. Latest task comment cites visible owner phone messages and requests cleaner footage or explicit owner acceptance.",
+    "Launch task comment post_01a10b35-ad31-7448-af34-650a6f31f030 records 432e886 source repair, v13 chain checksums, palette trim b5c7d3c not in Assembly, and open palette/privacy/branding/listen items.",
+    "Launch task comment post_01a10ad6-e28f-7466-acd9-2ebd055e13ab reports published v13 review cut via f4a4012; publication is not owner final approval."
+  ],
+  "limitations": "Review is based on the specified thread, current task details/comments, and local task snapshot only. No tests, media playback, full frame-by-frame inspection, or independent live-site check performed. Latest channel replies were paginated; canonical tasks and their comments supply later status evidence."
+}

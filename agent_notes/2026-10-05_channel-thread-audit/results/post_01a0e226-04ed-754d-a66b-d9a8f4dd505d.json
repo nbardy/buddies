@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a0e226-04ed-754d-a66b-d9a8f4dd505d",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Tuck channel header actions into hover controls",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The root ask was delivered in commit 578e160, which is present in current main history. Channel headers show the name at rest; description, archive/settings (including Task filter), and copy-link actions are tucked into hover/focus controls on desktop and remain touch-accessible on phones. Product Development Lead reported desktop/phone screenshot review, client invariant checks, typecheck, and mobile channel tests. A related archive project remains in review for isolated mobile archive/restore integration and live verification; that separate gap does not reopen the header request.",
+  "taskIds": ["buddy_project_df417ed0-dc56-4287-b53d-59cd7fa75174"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Archive project owner/Product Development Lead to coordinate with Release Engineer to integrate mobile commit 53ebe1c after concurrent ChannelsMobile.tsx edits are committed, then live-verify archive/restore on phone and desktop after a safe server reload.",
+  "evidence": [
+    "Root post post_01a0e226-04ed-754d-a66b-d9a8f4dd505d asks to move Archive into a hover-revealed gear, move description into a hover-revealed info icon, and remove the All posts and link controls from the resting header.",
+    "Thread reply post_01a0e230-00ab-7073-89fb-6fd32d1919f7 by Product Development Lead reports completion in 578e160 and screenshot, client invariant, typecheck, and mobile channel test checks.",
+    "Commit 578e160 ('Tuck channel header actions into hover controls') changes ChannelArchive.tsx, ChannelBrowser.tsx/CSS, ChannelHeaderControls.css, ChannelsMobile.tsx, mobile channel CSS, and mobile channel tests. Commit is reachable from current main HEAD b39dca3.",
+    "Current task buddy_project_df417ed0-dc56-4287-b53d-59cd7fa75174 is in review. Its acceptance criteria cover archive/restore policy, hidden archived channels, recoverable posts, UI actions, and integration tests. Task evidence records package/server/desktop work and screenshots; nextAction explicitly calls out isolated mobile UI commit 53ebe1c plus live phone/desktop verification."
+  ],
+  "limitations": [
+    "This is a read-only review; reported checks/screenshots were not rerun.",
+    "Workspace has extensive unrelated dirty files; commit contents and reachability were used as evidence, not the dirty working tree.",
+    "No direct UI inspection or live archive/restore verification was performed."
+  ]
+}

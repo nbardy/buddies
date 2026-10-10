@@ -1,0 +1,32 @@
+{
+  "threadId": "post_649c1cdf-b134-4860-bf34-50db10045f86",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Share the latest launch video and remaining demo screen recordings",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Marketing Designer replied with a 50-second rough assembly and six recording requests. Owner then asked whether to use affordable TTS and suggested a FAL API; the only reply was an automated Claude weekly-limit failure, so that question was not answered in this thread. Later launch evidence in the existing project task reports v13 published to the site as a review cut (not final), with unresolved owner review/polish and recording evidence. Current project task remains in_progress; recording, handoff and release-candidate child tasks remain open. The request is not dropped because the canonical project is active.",
+  "taskIds": [
+    "buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4",
+    "todo_4cef8077-98ab-42f1-8daf-1aa011dee254",
+    "todo_78934f45-089e-4303-9d7e-bdb07dbe3fbc",
+    "todo_570a74ca-bf6f-4152-ad83-519612227fd7",
+    "todo_8c2baa49-0f42-4157-9c41-377c9113093d",
+    "todo_3760f262-ebff-43f0-8f04-9b9753df0a36"
+  ],
+  "ownerIds": [
+    "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+  ],
+  "nextAction": "Marketing Designer should answer the outstanding TTS question with a costed choice or confirm no voice line, and refresh the recording checklist against footage already captured; Release Engineer should ensure the current v13 review cut and accurate remaining asks are directly shared with the owner. Keep the existing launch project open until owner acceptance and the task's recording, edit-handoff, and Channels release criteria are evidenced.",
+  "evidence": [
+    "Input root agent_notes/2026-10-05_channel-thread-audit/inputs/post_649c1cdf-b134-4860-bf34-50db10045f86.json: owner requests latest video and remaining demo screen recordings.",
+    "Thread reply post_7c89efa7-c538-442e-836d-ed04f9a76dea: rough assembly 1 (50 s), six screen recordings requested, voice line/TTS and music decision requested.",
+    "Thread posts post_726d33c2-a6f5-4ab1-8b00-c365ddf1e827 and post_5bac2bfe-051c-4e75-b029-3912b2ac5a4e: owner suggests affordable TTS/FAL; response failed due weekly limit.",
+    "Current task buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 is in_progress; it defines recording, edit handoff, and release-candidate criteria. Its children for channel clips, feature proof clips, close clips, footage handoff, and release candidate remain open.",
+    "Current task comment post_01a10ad6-e28f-7466-acd9-2ebd055e13ab reports v13 published to marketing site in f4a4012 as a review cut; comments post_01a10ad4-0d93-74e0-99c3-2e8a0d4ea109 and post_01a10b35-ad31-7448-af34-650a6f31f030 describe unresolved capture/review items.",
+    "Repository product/releases/launch-2.0/VERSIONS.md documents v13 artifact provenance; product/releases/launch-2.0/LAUNCH_CUT_PLAN.md records remaining owner review, capture/privacy, and export decisions."
+  ],
+  "limitations": "No full tests or live-site recheck performed. Thread pagination returned no older page. Task recording rows appear stale relative to later footage/project comments; exact still-missing recording list needs owner/Designer reconciliation. Published v13 is reported as a review cut and does not close final acceptance."
+}

@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_86cde6e0-0698-4a57-a18d-3fe4dcbc4905",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+    },
+    "body": "\ud83d\udda5\ufe0f **All product views: Desktop (1440\u00d7900)**. These are live captures from the running app, taken 2026-09-26. The thread has 21 views in 4 replies: Channels, Chats, Buddies and Swarms.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-26T08:22:56.120Z",
+    "ord": "01a0dccf-6b78-73d2-b9ee-dbe5951adc73",
+    "broadcast": false,
+    "purpose": "announcement"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "threadId": "post_01a0e6bf-d434-762c-a295-49cc1dc1c174",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Mobile channel image viewer has no back/close affordance",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner reported that tapping an image in an installed mobile app opened a full-screen image with no way back to the thread, and suggested an in-app window with an X. Product Development Lead reported implementing an app-owned image modal with explicit X, backdrop close, and Escape/back cancellation for mobile and desktop renderers, with a regression test and mobile screenshot. Current HEAD main (b39dca3) includes the viewer implementation via integrated commit c62c5b6 and subsequent committed viewer refinements e36447d, 7e9d75b, b6455ea. The mobile screenshot artifact exists. Closed as implemented and integrated; release/runtime presence was not independently checked.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "None for this request; viewer implementation is in main. Existing thread reply reports focused tests, typecheck, invariant gates, and screenshot; no further verification requested.",
+  "evidence": [
+    "Thread root post_01a0e6bf-d434-762c-a295-49cc1dc1c174 and replies post_01a0e6c0-1d21-77b5-96f8-753c778651cf, post_01a0e6c8-55d5-754a-a9c7-dc328c84c0b7",
+    "main HEAD b39dca3651024f9a8ffcd4c3b87853ab0d7c90ba; commit c62c5b6 adds mobile channel image overlay and channel-markdown regression test; viewer refinements e36447d, 7e9d75b, b6455ea",
+    "HEAD client/src/components/buddies/ChannelMarkdown.tsx has ChannelImage onOpenImage handler and app-owned ChannelImageOverlay; image-specific Escape/backdrop close handling",
+    "HEAD client/test/channel-markdown.test.tsx",
+    "Reported test evidence in reply: focused markdown tests 6/6, pnpm typecheck, git diff --check, 9 client invariant gates; screenshot output/screenshots/2026-09-28T06-49-53/thread@phone.png exists"
+  ],
+  "limitations": "No tests were run per request. Screenshot existence was checked but its pixels were not opened. The repo has unrelated dirty files, so HEAD/commit evidence was inspected directly. No channel task tracks this request; task lookup by thread id returned not_found and snapshot search found no matching issue task. Production release/runtime activation was not verified."
+}

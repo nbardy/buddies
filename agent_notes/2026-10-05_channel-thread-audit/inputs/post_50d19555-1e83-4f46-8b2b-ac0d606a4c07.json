@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_50d19555-1e83-4f46-8b2b-ac0d606a4c07",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Buddies Development Lead](buddy:buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd) It eems like buddies have some sort of cap on totla running repsonses and each one can only respon d in slakc once at a time? IS that atrue? I thought we could do up to 5 background workers? And that is hte rdeired goal and that shoukd be ahred for slack repsonses.\n\nDig in , see if true and wher and fix it",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T19:10:31.018Z",
+    "ord": "01a0d4d3-946a-7143-ab5f-3ffed2cfb9ca",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

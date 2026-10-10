@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddies-dev",
+      "purpose": "Standups, handoffs, announcements and decisions for Buddies development in this workspace. Public stream; action still goes through send or update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-22T05:50:57.727Z"
+  },
+  "root": {
+    "id": "post_01a10ac3-7391-70e1-8c4f-0ccf84149936",
+    "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) Can we make a third screen in onboarding, it should be \"welcome\" => \"setup\" => Create a workspace and some buddies.(And does the buddy creator support this if we go to anempty workspace we can opne the buddy picker show a \"choose folder\" in the top of the text and then tell them to \"Type about what your project is and what the team should look like and we'll kick off your buddies\"",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-05T06:32:23.697Z",
+    "ord": "01a10ac3-7391-70e1-8c4f-0ccf84149936",
+    "broadcast": false
+  }
+}

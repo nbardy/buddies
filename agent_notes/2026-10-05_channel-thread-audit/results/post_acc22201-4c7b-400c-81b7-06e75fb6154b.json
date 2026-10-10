@@ -1,0 +1,23 @@
+{
+  "threadId": "post_acc22201-4c7b-400c-81b7-06e75fb6154b",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Open a Buddy DM inside the Channels view",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner's ask was to open a Buddy DM in the Slack-style Channels view rather than navigate to the conversation view. The implementation landed and is integrated; no unresolved part of that ask remains. Separate channel-DM composer work is tracked in review and should not be conflated with this request.",
+  "taskIds": [
+    "buddy_project_e9c63dc5-54aa-43f6-ba72-9ee33a7f16d8",
+    "buddy_project_a978f8e4-6566-434d-aa9d-2667269da30e"
+  ],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "No follow-up needed for the original ask. Keep the distinct thread-style DM composer/send task in review with its owner.",
+  "evidence": [
+    "Thread reply reports working desktop/phone DM-in-Channels behavior, URL persistence, Back behavior, click-through verification, typecheck and 157 client tests on commit c5e4f91.",
+    "Read-only git check: c5e4f91 is an ancestor of current HEAD; commit contains ChannelBrowser, Chat, ChannelsMobile and channel-buddy-dm test changes.",
+    "Current task buddy_project_e9c63dc5-54aa-43f6-ba72-9ee33a7f16d8 is done; its evidence records live POST timings 2.3ms/1.0ms/1.0ms versus prior 27.7s, and owner test that clicking a Buddy opened the DM fast. Root ask did not require latency profiling.",
+    "Separate task buddy_project_a978f8e4-6566-434d-aa9d-2667269da30e remains review; evidence reports desktop and 390px phone channel-DM presentation and client checks. Its richer composer/send acceptance is separate from the root ask."
+  ],
+  "limitations": "No tests or runtime interaction were performed in this review. Commit ancestry and source were checked read-only; current live release state was not independently verified."
+}

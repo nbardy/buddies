@@ -1,0 +1,23 @@
+{
+  "threadId": "post_01a0eebc-d85e-73d4-8543-76b5da886114",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Focus the reply input when opening a thread",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The exact root ask is implemented and integrated: clicking Reply opens the desktop thread pane with ChannelComposer autoFocus enabled. Commit acd7410 is an ancestor of origin/main. Broader issues raised in follow-ups were only partly delivered: mobile Threads rows/header (5c9381e) and fullscreen thread composer/@ menu (0fb1ce9) are also ancestors of origin/main; the mobile composer change lacked phone verification in the replies. The later owner request to fix and merge all was not fully closed out. Unread-thread reply width and @ menu, replying-indicator alignment, and the undefined .some crash lack completion evidence; crash needs server log/repro. No relevant active UI task was found; related project task buddy_project_a978f8e4-6566-434d-aa9d-2667269da30e is in review but its acceptance criteria concern Buddy DMs in Channels, not thread focus. These asks remain untracked or need owner/Product Development Lead to route into existing ownership.",
+  "taskIds": ["buddy_project_a978f8e4-6566-434d-aa9d-2667269da30e"],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084", "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should route the remaining UI checks to Buddies UI Engineer; verify the mobile thread composer/@ menu and unread-thread width on phone, confirm replying-indicator alignment, and obtain the server log or exact Wave_sim CEO repro for the .some crash before assigning a fix. Update/reuse an appropriate task for the unresolved items.",
+  "evidence": [
+    "Root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0eebc-d85e-73d4-8543-76b5da886114.json",
+    "Thread replies through newest: post_01a0f1a9-f68f-77e5-a503-3cc7ed7e8bfb, post_01a0f1a8-5158-74f2-a086-ec53255b455d, post_01a0f121-7bfc-74c0-aab3-26f9431e530d and earlier root replies",
+    "git show acd7410: ChannelBrowser passes autoFocus to thread ChannelComposer; ChannelComposer forwards it to draft hook",
+    "git merge-base --is-ancestor checks: acd7410, 5c9381e, 0fb1ce9 each ancestor of origin/main",
+    "git show 5c9381e: flat mobile Threads rows and one-line header styles",
+    "git show 0fb1ce9: fullscreen mobile Threads composer and @ menu layout rules; screenshot screen added but no phone verification is evidenced in the thread",
+    "Current task record buddy_project_a978f8e4-6566-434d-aa9d-2667269da30e is review status and unrelated to focus; no matching active task found"
+  ],
+  "limitations": "No full tests or browser/phone verification run, per request. The working tree is dirty with unrelated shared-session changes; claims rely on commit history and origin/main ancestry, not dirty-tree state. .some crash root cause remains unconfirmed."
+}

@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_7b17ee8d-46f6-4c21-8308-48d8f6c0578a",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Marketing Designer](buddy:buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d) Here is another clip, Screen Recording 2026-09-26 at 4.16.28\u202fPM(in Desktop)\n\nThis one shows us asking it to post screenshots fo the app.\n\nIt's a \"Design REview\" example",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-26T08:25:10.107Z",
+    "ord": "01a0dcd1-76db-732d-8601-16e35b6d383e",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

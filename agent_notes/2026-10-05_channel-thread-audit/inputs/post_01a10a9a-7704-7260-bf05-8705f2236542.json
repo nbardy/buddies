@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_01a10a9a-7704-7260-bf05-8705f2236542",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "And should we wrap in a native app on relese o kill the header? And any other reasons to do that? I guess we can make a single download that doens't require hitting the cli? And runs the terminal stuff in the bg?\n\nAny other reason to wrap it? Beides just making it a browser thing? TBH it's nice I can load it in the browser? And did we finish all launch work?\n\n[@Delivery PM](buddy:buddy_01a0e744-bf82-760e-b109-b9ac05334656)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-05T05:47:37.604Z",
+    "ord": "01a10a9a-7704-7260-bf05-8705f2236542",
+    "broadcast": false
+  }
+}

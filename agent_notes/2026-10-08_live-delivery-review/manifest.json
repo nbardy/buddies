@@ -1,0 +1,18 @@
+{
+  "createdAt": "2026-10-08T08:16Z",
+  "status": "proposed design; no production implementation; sibling logs attributed",
+  "files": {
+    "reproduce.mjs": "296222e30cf9b3bf6eb2723c1750f9cdb4c4e6120d68edb0183553a860d778a1",
+    "reproduction.json": "7092e9c90586cbd9807a3036b95755d90f15f6ed7402b9ce2d3f524de4018336",
+    "sibling-steer-failing-first.log": "bce7f22f04d81ff716c3350eba072ba36f1aa1a6d5e00c2554ee3a798da2172e",
+    "native-evidence.json": "f8fd8b7547bd190ca8fab41091c09042650716cd744b969067dcffcb78b2f918",
+    "cases.tsfrag": "d3fdb80f26c0b4e97378165421b7f4263af398a9d5916ded618720bc3b39661d",
+    "README.md": "3cdd629ba9bc9954f6679449fed1d2c6277b53fccf1b25c08a66607f6eda9d14",
+    "reproduction.log": "59659fd23e512920097874b325c38fdd5a9194dfbf1803c895259af3e5a2082e",
+    "source-evidence.json": "d647e93d069ba88a47ed0bef651e1c67870d2bda94bc289d49b5f21a8f2f9b8e",
+    "sibling-steer-real-codex-bash.log": "84c8993691a1e3e989fd410a26ba7b0aca13405b74fde5962e13f822d377caf3",
+    "sibling-steer-regressions-green.log": "e4064de2d1b105521803107ddccf1dcc37d29fc01fce82a34a8d7aada1d09016",
+    "sibling-evidence.json": "a24c6344f10b4ee87c614860722019446aff2f7f2721929f40187af2f299a60a",
+    "reproduction-first-cleanup-failed.log": "6b168a675cdb7cc5e2858741671e1ef25c94b1c0b6fe2c71d70e4de0bb0f3d11"
+  }
+}

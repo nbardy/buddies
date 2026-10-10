@@ -1,0 +1,21 @@
+{
+  "threadId": "post_01a0f63e-36dd-70c9-8a86-4331551155ac",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Fix DM continuation message collapsing into the avatar column",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The Product Development Lead reports a local fix: explicitly place DM message content in grid column 2 and add a screenshot guard that checks lead/continuation alignment. Their thread reply reports phone, both iPad widths, and desktop coverage, eight DM tests, five tools tests, and a guard that fails when the regression is restored. This is implemented and locally verified by report, but remains uncommitted/unintegrated, so the exact ask is not closed out. No matching active task was found; the related older task task_01a0e22c-c824-754f-b0e8-a6a62c619001 is done and covers earlier pending-DM collapse, not this recurrence.",
+  "taskIds": ["task_01a0e22c-c824-754f-b0e8-a6a62c619001"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead to preserve the scoped CSS and screenshot-guard edits in a coherent commit (without unrelated dirty tools/screenshots.mjs changes), then arrange release-owner integration and verify the committed change/regression coverage. Track the recurrence under a new narrowly scoped task if it remains open after the commit handoff.",
+  "evidence": [
+    "Thread root post_01a0f63e-36dd-70c9-8a86-4331551155ac and both replies, including post_01a0f644-be66-738d-a4c8-2dc9088414da",
+    "agent_notes/2026-10-01_dm-continuation-layout.md",
+    "client/src/components/buddies/ChannelBrowser.css: .channel-browser-message-content grid-column: 2 is present in the dirty working tree",
+    "tools/lib/dm-layout.mjs: continuation alignment guard is present and untracked",
+    "tools/screenshots.mjs: guard wired into DM screenshot verification; file has unrelated concurrent edits"
+  ],
+  "limitations": "No tests rerun per request. Validation is reported in the thread/note, not independently reproduced. The artifact has no commit containing this fix; working tree is dirty with concurrent edits. Related prior task is done but does not substantiate integration of this recurrence fix."
+}

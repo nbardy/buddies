@@ -1,0 +1,32 @@
+{
+  "threadId": "post_01a0eecc-a22e-7335-ab48-1b831e922c38",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Unify the DM header",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested DM-header behavior is implemented in c3065ab and the Product Development Lead reported it pushed to origin/main in history through 09d8b0e. The commit includes one enabled model picker, New convo confirmation plus context-clearing/memory-preservation guidance on harness change, a new-chat divider, and profile-default update for future @mention threads. Thread report says focused tests/typecheck passed but browser review was not done. Related broader model-family/default work remains in progress; this exact thread has no dedicated matching task.",
+  "taskIds": [
+    "task_01a0eed8-6c72-7018-a2c3-d2a2acbf6efd",
+    "task_01a105b0-2c7c-7527-bff6-aa092ec61da0"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4",
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+  ],
+  "nextAction": "Product Development Lead should review the DM header in the running app, including same-harness immediate changes, different-harness New convo flow, context/memory notice, divider, and future @mention default; then record visual evidence and close this request. Continue the broader family-resolution task separately under Buddies Development Lead.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0eecc-a22e-7335-ab48-1b831e922c38.json: exact owner request",
+    "channel thread replies: post_01a0eed3-9f9e-7062-a410-0c0f0c583d2e reports commit c3065ab and tests/typecheck, explicitly says no browser review",
+    "channel thread reply post_01a0f1a9-1e92-7388-9458-1c426c8dbe54 reports push to origin/main through 09d8b0e with c3065ab included",
+    "git show --stat c3065ab: changes ChannelDm.tsx, ConfigOverlay.tsx, and client/test/channel-dm.test.tsx; later git history contains c3065ab and 09d8b0e",
+    "current task task_01a0eed8-6c72-7018-a2c3-d2a2acbf6efd: model-family/default work in_progress, owner Product Development Lead; specifies live API unchecked"
+  ],
+  "limitations": [
+    "No full tests rerun, per instruction.",
+    "No browser/app visual verification evidence.",
+    "Current working tree is dirty with unrelated files, so tree-wide verification is not claimed.",
+    "Push/release status is based on the thread owner's report; no live deployment verification."
+  ]
+}

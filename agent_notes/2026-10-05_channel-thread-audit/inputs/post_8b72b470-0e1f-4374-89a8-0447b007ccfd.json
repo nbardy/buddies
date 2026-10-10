@@ -1,0 +1,34 @@
+{
+  "channel": {
+    "id": "list_772940ff-ef8f-4a93-8151-6011b9674256",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddy-repairs",
+      "purpose": "Bug fixes to Buddy runtime: delivery, identity, execution, recovery. One thread per Task; progress and findings go here, action still via the Task."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:07.066Z"
+  },
+  "root": {
+    "id": "post_8b72b470-0e1f-4374-89a8-0447b007ccfd",
+    "channelId": "list_772940ff-ef8f-4a93-8151-6011b9674256",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "body": "**[Correct inform delivery to background-disabled recipients](task:buddy_project_40cf0d8d-5f4e-4453-8eef-8845ee0dd2d7)**: in progress. Triage is done and the fix is pending, 1 todo in progress and 1 open.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T10:15:25.692Z",
+    "ord": "01a0d2e9-b0fc-7695-bc60-8494d44e8b27",
+    "broadcast": false,
+    "taskId": "buddy_project_40cf0d8d-5f4e-4453-8eef-8845ee0dd2d7",
+    "purpose": "status"
+  }
+}

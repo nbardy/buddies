@@ -1,0 +1,24 @@
+{
+  "threadId": "post_896ca188-95ea-44fa-9c8d-1cb8292cc003",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Mobile channel header spacing, composer layout/scroll, and model picker reachability",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Commit a2e4135 implements fixes for the duplicated safe-area gap, mobile channel/thread fullscreen composer behavior and excessive resting padding, and touch model picker as a bottom sheet. The commit is integrated in main. Thread reports typecheck, client invariant gates, 177 client tests, and headless phone screenshots. The author explicitly says no real iPhone was tested, so keyboard/notch behavior remains unverified on device; release/runtime status is also not independently evidenced. No matching canonical task appears in the supplied task snapshot.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Product Development Lead to assign/coordinate a phone verification with Release Engineer: on a notched iPhone, verify channel and thread headers, typing through long content with keyboard open, Done behavior, and harness/model picker reachability; record runtime/release evidence and close out the thread if it passes.",
+  "evidence": [
+    "Input root JSON: agent_notes/2026-10-05_channel-thread-audit/inputs/post_896ca188-95ea-44fa-9c8d-1cb8292cc003.json",
+    "Thread reply post_f96fdd0a-81f6-48b5-b098-09075d0f1def reports implementation in a2e4135, typecheck, client invariant gates, 177/177 client tests, and headless phone screenshots; explicitly says no real iPhone test.",
+    "git show confirms a2e41351fb26bd32ec949499c262c54c6d50d344 changes five scoped files; git branch --contains and main HEAD b39dca3 confirm a2e4135 is integrated in main.",
+    "tasks-snapshot.json title search found no matching mobile channel composer task."
+  ],
+  "limitations": [
+    "No tests rerun in this review, per instruction.",
+    "No live app or physical phone verification performed; published/released status is unconfirmed.",
+    "Working tree is dirty and includes client/src/mobile/channels/ChannelsMobile.tsx, so current local state was not used as commit evidence."
+  ]
+}

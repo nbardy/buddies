@@ -1,0 +1,23 @@
+{
+  "threadId": "post_ac1f0975-06d4-4d1d-8f5e-e7ad0238636f",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Thread replies use each Buddy's latest model, harness, and reasoning settings",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The main request is implemented and has task-level verification evidence: thread seats persist their latest harness/model/reasoning, the thread read returns the seat, and the mention chip seeds from it instead of profile defaults. The linked task is done. A later reply also identified a separate should-respond gate parsing gap: output like <yes><yes> is unparseable and silently leaves the Buddy quiet. The existing empty-gate failure task does not cover this case. Current gate parser still accepts only exact <yes> or <no>, confirming the gap remains; no matching active task or completion evidence was found.",
+  "taskIds": [
+    "buddy_project_4ed48794-f423-4673-bcd6-55d547e27de5",
+    "todo_cab0f3f9-6f6e-48e6-a84e-807e7a6a0d77"
+  ],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should decide whether repeated/duplicated affirmative gate tokens such as <yes><yes> should count as yes; if so, create or attach a narrowly scoped follow-up task and add regression coverage for the exact malformed affirmative output.",
+  "evidence": [
+    "Thread reply post_1bc05437-10f2-447d-9754-426af86e0e90 links the completed task and states the seat behavior; it includes a screenshot of the composer chip.",
+    "Current task buddy_project_4ed48794-f423-4673-bcd6-55d547e27de5 is done; criteria/evidence cover seat data, chip seeding, client labeling, thread test, config replay test, and screenshot review.",
+    "Current task todo_cab0f3f9-6f6e-48e6-a84e-807e7a6a0d77 is done for empty gate answers and out-of-tokens failures, but its criteria do not cover duplicated affirmative tokens.",
+    "Current server/src/buddies/channel-reply-gate.ts parseGateVerdict matches only exact '<yes>' and '<no>'; all other nonempty output becomes unparseable. No tests were run for this review."
+  ],
+  "limitations": "Read-only review of the supplied root, all returned thread replies, snapshot/current relevant tasks, and current parser source. Thread pagination returned no next cursor. No full tests, runtime verification, task changes, or code changes were performed."
+}

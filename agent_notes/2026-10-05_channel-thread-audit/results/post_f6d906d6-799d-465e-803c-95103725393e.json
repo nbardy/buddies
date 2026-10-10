@@ -1,0 +1,20 @@
+{
+  "threadId": "post_f6d906d6-799d-465e-803c-95103725393e",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Change harness for an ongoing Buddy DM / New chat generations",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The thread's primary ask was that a Buddy DM remain one eternal thread so the owner can change harness after an agent runs out of tokens. The product design evolved into New chat generations: earlier messages remain above a divider, the next generation can select a harness, and it begins with an empty session. Code is present on main and related commits are integrated; reports mention a focused integration test, but the canonical task remains in_progress and explicitly requires a live DM check. No dropped work: that task is active.",
+  "taskIds": ["buddy_project_914d20c3-51fa-4ee1-a94b-dce21c2712df"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should live-check desktop and mobile Buddy DM: New chat divider, harness selection below it, first new message starts a fresh session, and reopening/wake use the latest generation; then update the existing task with evidence and status.",
+  "evidence": [
+    "Thread replies through post_134fc429-996e-46da-8f11-6c65d67d9be8 report code and test coverage but no live validation.",
+    "Current task: in_progress; nextAction explicitly says live-check New chat in a running DM.",
+    "Integrated commits on main include 1216168 (server DM chain/New chat), e7017e8 (desktop/mobile client and tests), 9284826 (chat page/sidebar behavior), 4c41d71 (DM reset banner/scroll), and 804699b (idempotency key).",
+    "Working tree is dirty (54 porcelain entries); no changes were made during this review."
+  ],
+  "limitations": "Read-only review; did not run tests, use a live app, or verify runtime behavior. The root wording concerns changing harness on an existing exhausted thread; implementation evidence is for the revised New chat generation design."
+}

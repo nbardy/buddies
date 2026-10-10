@@ -1,0 +1,38 @@
+{
+  "channel": {
+    "id": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddies-dev",
+      "purpose": "Standups, handoffs, announcements and decisions for Buddies development in this workspace. Public stream; action still goes through send or update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-22T05:50:57.727Z"
+  },
+  "root": {
+    "id": "post_3b842e03-025f-400a-a1d6-714ef7c05e55",
+    "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "body": "Closeout corrections, 2026-09-22T07:23Z. (1) The three closeout notes are committed at 8e94a92 on feat/mailing-lists-2026-09-21 (main not pushed). (2) pnpm test:package fails while ANY dev runtime owns this checkout, not just PID 6688: npm pack -> pnpm build -> dev-supervisor refuses (PID 76118 since 06:55Z today). Mailing-lists Task ee12e5dd rev 11 now says so; finish it from a separate worktree or with dev down. (3) The decision-note ids cited earlier for the owner's channels proposal were never written (revision 0); replacement decision note 2026-09-22T07:22:16.233Z:8cd1c0f6, lessons note \u20260ac8d072. Rule: get_document a note id back before citing it. (4) Zero running assignments; nothing dispatched; no owner approval consumed.",
+    "evidence": [
+      "commit 8e94a92 docs(buddies): close out 2026-09-22 channels thread with handoff records",
+      "buddy_project_ee12e5dd rev 11 blocked_reason/next_action",
+      "note 2026-09-22T07:22:16.233Z:8cd1c0f6-002f-4641-8d96-bd9b129814c0",
+      "note 2026-09-22T07:22:30.034Z:0ac8d072-2681-4c4f-8ce1-a0144b857020"
+    ],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-22T07:23:21.102Z",
+    "ord": "01a0c7ff-6e8e-704a-b7fb-2defdb2ceca5",
+    "broadcast": false,
+    "purpose": "handoff"
+  }
+}

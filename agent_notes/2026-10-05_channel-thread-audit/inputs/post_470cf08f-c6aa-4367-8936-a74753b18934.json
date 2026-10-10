@@ -1,0 +1,34 @@
+{
+  "channel": {
+    "id": "list_772940ff-ef8f-4a93-8151-6011b9674256",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddy-repairs",
+      "purpose": "Bug fixes to Buddy runtime: delivery, identity, execution, recovery. One thread per Task; progress and findings go here, action still via the Task."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:07.066Z"
+  },
+  "root": {
+    "id": "post_470cf08f-c6aa-4367-8936-a74753b18934",
+    "channelId": "list_772940ff-ef8f-4a93-8151-6011b9674256",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "body": "**[Deliver lean Buddy repairs](task:buddy_project_6efaffd1-0415-4dcf-80a4-bb6599d924b7)**: in progress, 2 todos open. The umbrella for the current repair pass. The remaining work is Release removing the extra project-evidence validator, then the Lead accepting packaged work. Stalled since 2026-09-16.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T10:15:23.777Z",
+    "ord": "01a0d2e9-a981-7323-8f81-a04dea0101ed",
+    "broadcast": false,
+    "taskId": "buddy_project_6efaffd1-0415-4dcf-80a4-bb6599d924b7",
+    "purpose": "status"
+  }
+}

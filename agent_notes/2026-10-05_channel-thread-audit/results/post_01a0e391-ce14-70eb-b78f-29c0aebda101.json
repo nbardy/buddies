@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a0e391-ce14-70eb-b78f-29c0aebda101",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "New Buddy from a workspace should use the current workspace",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested behavior is implemented and integrated in commit 3c1d8d6 (HEAD's ancestor): workspace-originated Builder creation now passes workspaceId, uses that workspace root, and directs the first hire there; Sidebar New Buddy retains the install checkout. The commit includes focused server regression tests. The sole reply explicitly says the backend must reload before the behavior takes effect. No reload or live click/hire verification is evidenced, so the request is not fully closed out. The supplied task snapshot contains no task specifically tracking this request; the nearest Builder harness task is a separate scope and should not be repurposed.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Product Development Lead should coordinate with Release Engineer to confirm the integrated backend has safely reloaded, then exercise New Buddy from a non-unleashd workspace (for example Paint Live) and verify Builder working directory and resulting hire workspace; record runtime evidence and close the request.",
+  "evidence": [
+    "Thread root post_01a0e391-ce14-70eb-b78f-29c0aebda101 reports Buddy creation always using ~/git/unleashd even when spawned from Slack.",
+    "Only reply post_01a0e39a-b7e0-763e-bde0-17903654a709 describes the fix and says backend reload is required before the next workspace + click uses it.",
+    "Commit 3c1d8d61a0587e644c6954659bc87fb593c6e992 is present in main history and includes client workspaceId propagation, Builder route/runtime workspace root handling, and tests buddies-v2.test.ts / conversation-runtime.test.ts.",
+    "Working tree has unrelated dirty files, including ChannelBrowser.tsx and ChannelsMobile.tsx; commit membership was checked directly, so those edits are not treated as evidence for this change."
+  ],
+  "limitations": "Read-only review; no tests, server restart/reload, live UI action, or hire was performed. The commit is integrated but runtime activation and live behavior remain unverified."
+}

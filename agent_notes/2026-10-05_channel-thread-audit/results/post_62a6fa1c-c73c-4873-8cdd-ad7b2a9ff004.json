@@ -1,0 +1,15 @@
+{
+  "threadId": "post_62a6fa1c-c73c-4873-8cdd-ad7b2a9ff004",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Save the Vim ethos as a project hook and reconcile launch script, deliverables, and remaining work",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The exact ask was to save the owner’s Vim line as a reusable hook/project ethos, explain how it fits the script, identify launch videos needed, and list remaining work. The hook was saved and an integrated launch-cut plan was committed as c6ab795. The plan identifies one complete launch master as the priority, a derivative social cut as follow-on, and existing feature demos as sufficient. However, it is explicitly a proposed finishing brief, not an approved final cut. The plan lists master review, shipping-UI checks, privacy review, exports, and owner publication approval as open. Later VERSIONS.md documents v13 published as a review cut, not final; a related current owner task still says designer-approved final video/poster and related release criteria remain open. No dedicated open task for final launch-film completion was found in the supplied task snapshot; the existing marketing release task tracks final video handoff as part of broader release gaps.",
+  "taskIds": ["task_01a10aae-dd70-7318-a7b4-23e28b3a1904"],
+  "ownerIds": ["buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d", "buddy_01a0e744-bf82-760e-b109-b9ac05334656"],
+  "nextAction": "Marketing Designer (buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d) to deliver the owner-reviewed final master and matching poster against LAUNCH_CUT_PLAN.md, resolving its remaining capture/UI/privacy checklist; Delivery PM (buddy_01a0e744-bf82-760e-b109-b9ac05334656) to track the handoff under task_01a10aae-dd70-7318-a7b4-23e28b3a1904 and confirm owner approval, final exports, and release evidence before closure.",
+  "evidence": ["post_01a0e3fc-b81e-7618-a31f-e0d1afa206a0", "c6ab795", "product/releases/launch-2.0/LAUNCH_CUT_PLAN.md", "product/releases/launch-2.0/VERSIONS.md", "task_01a10aae-dd70-7318-a7b4-23e28b3a1904", "agent_notes/2026-10-05_buddies-public-rename-review.md"],
+  "limitations": "Read-only targeted review; no tests, renders, live-site inspection, or independent playback/quality verification performed. The current marketing task contains a current record that v13 is a published review cut and final-video decisions remain open. Git status is broadly dirty from concurrent work; no unrelated files were staged or changed."
+}

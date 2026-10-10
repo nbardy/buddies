@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a0e33d-0cac-74c1-90fe-68b27a13408b",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Move Buddy wake controls left so background workers remain clickable",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "The exact owner ask is implemented and integrated: Wake/status controls sit over the left Buddy sigil and the background-worker link remains clickable at right. Commit c729e5f is an ancestor of current main and includes the implementation and focused regression assertion. The thread reply reports focused test, Biome, all 9 client invariant gates, typecheck, and read-only desktop screenshot passing. No matching task exists in the supplied task snapshot; the change is not dropped. Release is not independently confirmed.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "None for the requested UI fix. Release Engineer may confirm runtime/release state if needed; no follow-up is required to close the ask based on available evidence.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0e33d-0cac-74c1-90fe-68b27a13408b.json: exact owner request",
+    "thread reply post_01a0e346-de69-7249-96b3-2f06d6118150: reports verification and screenshot",
+    "commit c729e5fb35b46a3d0dab77e4145a1ac73641c6b3: BuddyRailRow.tsx, ChannelBrowser.css, channel-buddy-dm.test.tsx",
+    "git merge-base --is-ancestor c729e5f HEAD: passed; current branch main at b39dca3"
+  ],
+  "limitations": "Read-only review; no checks rerun and no independent live release verification. Shared working tree is dirty in overlapping ChannelBrowser.css and other unrelated files; this review did not modify them. The specific changed files BuddyRailRow.tsx and channel-buddy-dm.test.tsx are clean in the working tree."
+}

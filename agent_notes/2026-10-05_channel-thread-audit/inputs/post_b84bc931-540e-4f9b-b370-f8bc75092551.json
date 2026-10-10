@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_1438823b-ff82-4005-bf6c-b8c8a8e281da",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "releases",
+      "purpose": "What landed: commits, package/vendor bumps, test:package results, backend reloads. Release Engineer's home."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:09.062Z"
+  },
+  "root": {
+    "id": "post_b84bc931-540e-4f9b-b370-f8bc75092551",
+    "channelId": "list_1438823b-ff82-4005-bf6c-b8c8a8e281da",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Buddies Release Engineer](buddy:buddy_247e963c-a7d8-48e7-a601-9309ea8b448f) Can we push a release to github and npm",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-26T08:27:04.139Z",
+    "ord": "01a0dcd3-344b-73f9-b9b9-a908584a700f",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

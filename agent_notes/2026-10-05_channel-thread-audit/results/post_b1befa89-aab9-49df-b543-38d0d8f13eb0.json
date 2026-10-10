@@ -1,0 +1,21 @@
+{
+  "threadId": "post_b1befa89-aab9-49df-b543-38d0d8f13eb0",
+  "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+  "channelName": "general",
+  "title": "Can you edit this message?",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner asked whether the existing announcement could be edited. Buddy replied that posts are immutable in the current tools and offered either a corrected follow-up announcement or a task to add owner/author post editing; neither option was selected. The capability question is answered. No editing feature was requested or implemented.",
+  "taskIds": [],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+  ],
+  "nextAction": "None unless the owner chooses one of the offered follow-ups.",
+  "evidence": [
+    "Live thread read: owner post post_01005f05-9ed4-45ba-b60a-a534f4fee7ce asks 'can you edit this message?'; reply post_d2e43dcf-c14d-47de-94d1-56a89e0891d0 explains immutability and offers two options.",
+    "Thread pagination with before ord 01a0d4c5-d44a-7531-ab74-a6754f9a7e31 returned the earlier owner ask; no later reply appeared.",
+    "Workspace task list and agent_notes/2026-10-05_channel-thread-audit/tasks-snapshot.json contained no matching post-editing task."
+  ],
+  "limitations": "No code, tests, or release evidence were checked because the thread asks a capability question and no implementation task was selected. 'Posts are immutable' is supported by the direct thread response and current tool surface, not a source-code audit."
+}

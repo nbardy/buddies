@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a0e73a-981c-7289-9f24-0537ec13c4fd",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Channel thread seat resume behavior and dispatch cleanup",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested seat model/effort behavior, fresh-seat context, and dispatch cleanup are implemented in cc1637b and integrated into main. The successor review note documents a second pass implementing the initially deferred replay, hop-bound, and pure state-machine items. However, the original thread's live-after-backend-reload condition is unverified, and current related Tasks remain open/in progress; therefore the thread is not fully closed out. Remaining noted limits include restart losing readThrough (one full-context prompt cost) and hop counting restarting for DM/background-run posts. These are documented as intentional limits, not dropped work.",
+  "taskIds": [
+    "buddy_project_78fc1d42-f6f5-486b-8277-6136ea76fe29",
+    "buddy_project_a17450ec-596b-4caf-b0ec-61360d1923ff",
+    "buddy_project_26eab07c-cd6f-47f2-8d4f-bd9980e2ea0a"
+  ],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should reconcile the open seat/session Tasks against cc1637b and the current implementation, determine whether their distinct acceptance criteria still apply, and record remaining verified gaps. Coordinate a safe backend reload with Release Engineer and verify a live follow-up resumes the same-provider seat and a provider change starts a fresh seat with prior replies included; then update/close the canonical Tasks with commit and runtime evidence.",
+  "evidence": [
+    "Read all 9 replies returned for the thread; no continuation page was returned.",
+    "cc1637b is an ancestor of current main; git show confirms changes in channels.ts, runtime-config.ts, buddy-conversation-slots.ts, server.ts, and buddies-v2 tests.",
+    "agent_notes/2026-09-28_channels-state-machine-review.md successor sections document implementation and the limits/deferred restart readThrough persistence.",
+    "Current Tasks: buddy_project_78fc1d42-f6f5-486b-8277-6136ea76fe29 is in_progress; buddy_project_a17450ec-596b-4caf-b0ec-61360d1923ff is open; buddy_project_26eab07c-cd6f-47f2-8d4f-bd9980e2ea0a is open. All are owned by Product Development Lead."
+  ],
+  "limitations": "No tests were run per instruction. Runtime reload/live seat behavior was not exercised. The shared worktree is dirty in unrelated client files; the commit ancestry and committed artifact were checked directly. No canonical Task specifically representing this exact September 29 thread completion was found in the provided task snapshot/API results; related existing seat Tasks are listed above."
+}

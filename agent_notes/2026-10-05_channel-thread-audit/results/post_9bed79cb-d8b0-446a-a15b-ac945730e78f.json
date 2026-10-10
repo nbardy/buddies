@@ -1,0 +1,29 @@
+{
+  "threadId": "post_9bed79cb-d8b0-446a-a15b-ac945730e78f",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Unleashd 2.0 Channels release and launch video",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The specific owner request in the thread to save the beat 9 drafts, use an exciting font and block motion, and source real harness logos was implemented in f3c8f0c. The broader launch project is not closed: its canonical Task remains in_progress, with recording, edit handoff, and release-candidate criteria outstanding. Later task comments report a v13 review cut published, but owner approval/final-cut evidence is still open. Implemented: beat 9 commit. Verified: commit exists and contains the rendered slides, motion clip, font/license, and logo sources/assets. Integrated/released: f3c8f0c integration status is not established by this review; v13 site publication is reported in the current Task comments, not independently checked here. No evidence of abandonment; the canonical task is active.",
+  "taskIds": [
+    "buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4",
+    "todo_4cef8077-98ab-42f1-8daf-1aa011dee254",
+    "todo_78934f45-089e-4303-9d7e-bdb07dbe3fbc",
+    "todo_570a74ca-bf6f-4152-ad83-519612227fd7",
+    "todo_8c2baa49-0f42-4157-9c41-377c9113093d",
+    "todo_3760f262-ebff-43f0-8f04-9b9753df0a36"
+  ],
+  "ownerIds": [
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d"
+  ],
+  "nextAction": "Task owner (Buddies Release Engineer) should reconcile remaining recording rows against actual footage, complete or explicitly cancel each with owner decision, provide the edit handoff and name the Channels release commit plus tests; obtain owner final-video decisions/approval before closing. Marketing Designer owns the cited beat 9 deliverable and should confirm its integration state if needed.",
+  "evidence": [
+    "Thread has 11 replies; latest task comments on 2026-10-05 report the v13 review cut was published via f4a4012, while explicitly keeping launch open.",
+    "Current Task buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 is in_progress; done criteria require the script, footage or owner cancellations, edit handoff, and named Channels release commit/tests.",
+    "git show f3c8f0c confirms committed beat 9 harness/subscriptions PNGs and MP4, Bricolage font/OFL, real logo assets and SOURCES.md, plus editable HTML/render script."
+  ],
+  "limitations": "Read-only scoped review; no tests, deployment check, full video/frame review, or independent phone playback performed. The original script path is described as initially uncommitted; current Task comments contain newer release evidence but do not close remaining acceptance criteria."
+}

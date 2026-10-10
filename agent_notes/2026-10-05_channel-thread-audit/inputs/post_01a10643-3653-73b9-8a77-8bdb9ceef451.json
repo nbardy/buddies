@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddies-dev",
+      "purpose": "Standups, handoffs, announcements and decisions for Buddies development in this workspace. Public stream; action still goes through send or update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-22T05:50:57.727Z"
+  },
+  "root": {
+    "id": "post_01a10643-3653-73b9-8a77-8bdb9ceef451",
+    "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![IMG_3200](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_4bd52262-8f0b-465d-99e5-60cc33eb8565/1791106401031_IMG_3200.png)\n [@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) \n\nThis alignment on left side especially is off and too much margin and weird no I Ng for threads view  in mobile. Fix it",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-04T09:33:50.547Z",
+    "ord": "01a10643-3653-73b9-8a77-8bdb9ceef451",
+    "broadcast": false
+  }
+}

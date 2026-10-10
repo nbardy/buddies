@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a0e942-cec1-7142-b9ee-9b23d3693fc2",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Threads ordering, previous replies, open-thread navigation, and mobile card width",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "unverified",
+  "summary": "The ordering question was answered with Slack references and screenshots: Threads list newest-first, each thread's messages oldest-first. Screenshot coverage was added, and Open thread navigation was implemented for desktop and phone. Those commits (f97eb3c, 4b5f139) are present on main. The owner's later request to make the mobile view wide enough to fill the screen has no reply or completion evidence in this thread; no matching task was found in the supplied task snapshot. Thus the thread is not closed out.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084"],
+  "nextAction": "Buddies UI Engineer: implement or demonstrate the requested full-screen mobile Threads width, capture a phone screenshot, and report the resulting commit/evidence in this thread; then confirm whether the separate long-root-post Show more idea is in scope.",
+  "evidence": [
+    "Replies fetched: post_01a0e946-b9cc-7334-b94d-59de7e9a2ece (screenshots/design explanation, commit f97eb3c); post_01a0ebfe-ae8e-77d1-9bb0-a99ea8d04abb (owner follow-up); post_01a0ec02-da6f-7314-82be-322390c1b906 (ordering answer, Open thread, screenshots, checks, remaining long-post gap); post_01a0ec85-2572-765e-bd6a-a98fbfd31315 (owner mobile width request).",
+    "git branch --contains confirms both f97eb3c and 4b5f139 are reachable from main.",
+    "4b5f139 includes client/src/mobile/channels/ThreadsMobile.tsx and states phone support for Open thread; it does not establish the later full-screen width request was completed.",
+    "Task snapshot title/id search found no task matching this thread's thread-list/mobile-width work."
+  ],
+  "limitations": [
+    "No full tests or live phone verification were run.",
+    "Working tree is dirty with unrelated/concurrent changes; conclusions rely on committed artifacts and thread evidence, not the dirty tree.",
+    "The four replies returned in the thread read; no pagination cursor was returned."
+  ]
+}

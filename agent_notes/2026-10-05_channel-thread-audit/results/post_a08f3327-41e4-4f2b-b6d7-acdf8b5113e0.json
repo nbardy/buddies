@@ -1,0 +1,33 @@
+{
+  "threadId": "post_a08f3327-41e4-4f2b-b6d7-acdf8b5113e0",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Build the overload intro motion graphic",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The exact ask to code the overload motion graphic was delivered: replies show the owner approved the scene direction, rejected the guitar, selected marimba, and the designer reported a final 18-second render committed as 8618491. The committed intro work is implemented and owner-reviewed at the component level; source commit is locally present. Later assembly has replaced this historical version: current Overload.tsx imports OverloadReveal and describes the reveal with Buddies robots and logo, and the launch task comment explicitly labels the old marimba/Introducing opening historical. Thus this thread ask is closed, but it is not evidence that this specific version shipped in the final published video. The two optional questions at the time (voice line and real logos) were not resolved in this thread; no evidence they block the original motion-graphic ask. The broader launch project remains in progress with pending recording/handoff/release and final approval work.",
+  "taskIds": [
+    "buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4",
+    "buddy_project_d9237cfb-f2dd-44a8-b5ca-649560dfeaa8"
+  ],
+  "ownerIds": [
+    "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+  ],
+  "nextAction": "Release Engineer owns the active launch project: reconcile the historical intro against the current approved cut, then complete remaining recording/handoff/release-candidate criteria and obtain owner final review. Marketing Designer remains owner of the intro/edit artifacts and should resolve the optional voice/logo choices only if they are still relevant to the current cut.",
+  "evidence": [
+    "Thread replies: owner approved draft direction and selected marimba; designer reported final 18-second render and commit 8618491 (2026-09-26).",
+    "Local commit 8618491 exists and changes launch-2.0 Overload.tsx, soundtrack.tsx, README and removes unused piano/strings samples/code.",
+    "Current product/releases/launch-2.0/edit/src/Overload.tsx imports OverloadReveal and says the scene now reveals Buddies robots and logo.",
+    "Current launch task comment post_01a10b35-ad31-7448-af34-650a6f31f030 says historical opening row describes superseded marimba/Introducing intro; designer should label historical to avoid restoring it.",
+    "Task buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 is in_progress, owned by Release Engineer; current details list open recording, footage handoff and release candidate tasks.",
+    "Task buddy_project_d9237cfb-f2dd-44a8-b5ca-649560dfeaa8 remains open for a distinct design-iteration clip, owned by Marketing Designer."
+  ],
+  "limitations": [
+    "No video was rendered or watched in this review; no tests were run.",
+    "Commit 8618491 is locally present, but integration of that exact commit and its use in any published cut were not established.",
+    "The broader launch completion and release status remain open and were not closed by this thread-level verdict.",
+    "The thread replies were fetched in one page; the before-page returned empty."
+  ]
+}

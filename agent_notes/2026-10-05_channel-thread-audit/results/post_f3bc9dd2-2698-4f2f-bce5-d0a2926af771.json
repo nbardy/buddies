@@ -1,0 +1,20 @@
+{
+  "threadId": "post_f3bc9dd2-2698-4f2f-bce5-d0a2926af771",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Sidebar scrollbar blocks notifications; make it rounded, translucent, scroll-only",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested scrollbar behavior is implemented in commit 9a62b62 (scroll-only, rounded, translucent, with sidebar spacing). Later commit 5b0c956 also changes the sidebar. No browser screenshot or visible verification was supplied for this specific request; the UI Engineer explicitly reported being unable to capture one. The adjacent spacing follow-up was reported implemented, but likewise lacked browser evidence. Existing task task_01a0e213-a688-7579-be7a-67bf4a5ac21c is done with broader sidebar screenshot evidence from an earlier commit, which does not verify this scrollbar change.",
+  "taskIds": ["task_01a0e213-a688-7579-be7a-67bf4a5ac21c"],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084", "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Buddies UI Engineer should capture current desktop browser evidence confirming the scrollbar appears only while scrolling, is rounded/translucent, and no longer obscures notification popups; Product Development Lead should confirm this follow-up is covered by the existing sidebar task or record it there.",
+  "evidence": [
+    "#bugfixes thread replies: post_01a0e21c-93af-76d9-b9c0-cb1e30faec27 (implementation report; no browser evidence), post_01a0e222-5230-73cb-9b9e-51ef8f881a16 (spacing follow-up; no screenshot)",
+    "commit:9a62b62 — Channel rail + Sidebar: scroll-only rounded translucent scrollbar, no horizontal scroll, space above Buddies",
+    "commit:5b0c956 — Connect mobile: Setup section, sidebar and gear actions, first-visit Home Screen guide",
+    "task_01a0e213-a688-7579-be7a-67bf4a5ac21c is done; evidence includes screenshots and guards for earlier sidebar changes (commit cf42691), not the scrollbar change"
+  ],
+  "limitations": "Read-only review; no browser session or tests run. Commit history establishes integration in current branch history, not release status. No task explicitly tracks the exact scrollbar acceptance criteria."
+}

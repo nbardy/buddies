@@ -1,0 +1,23 @@
+{
+  "threadId": "post_01a0e8be-4ad4-77f7-9f89-0ac1dcb5610d",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Why did posting a channel reply with broadcast fail, and why did hot reload not fix it?",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The owner's direct question was answered: pnpm start executes compiled server/dist/server.js without a watcher, so it keeps its loaded schema until rebuilt and restarted. The reported schema/package fix is in the current tree and its regression test rejects broadcast:true. The associated broader update-flow work remains open, with no evidence this live process was restarted or that the install/update flow now restarts safely.",
+  "taskIds": [
+    "buddy_project_d5d94e0e-4990-4277-bafc-73a7c6bb2a6d",
+    "todo_7bb1fee9-cea0-4eb1-979d-18c5a6f05213"
+  ],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead owns the install experience and its open restart-mechanism subtask; complete and verify safe restart behavior in the update flow, then verify the running app loads the rebuilt code. Do not restart the live process as part of this review.",
+  "evidence": [
+    "Thread replies post_01a0e8c3-ccf8-7560-a436-81961db2ab07 and post_01a0e8c5-79c0-777b-b190-943e5fd475ab explain stale compiled server/dist under pnpm start and recommend rebuild + restart.",
+    "HEAD ef32838 removes channel broadcast option; server/src/buddies/routes.ts and server/dist/buddies/routes.js both use z.literal(false).default(false).",
+    "server/test/buddies-v2.test.ts test 'owner channel replies stay in threads and reject old broadcast requests' covers rejection and normal thread-only reply behavior.",
+    "Current task buddy_project_d5d94e0e-4990-4277-bafc-73a7c6bb2a6d remains in_progress; child todo_7bb1fee9-cea0-4eb1-979d-18c5a6f05213 ('Complete the update flow... Needs a restart mechanism') remains open."
+  ],
+  "limitations": "Read-only review; no tests or runtime restart performed. Shared worktree is dirty, so current working-tree source/test observations are not treated as a verified clean commit; commit ef32838's route source and regression test are integrated at HEAD, but dist is generated/dirty-tree evidence and live runtime state was not checked."
+}

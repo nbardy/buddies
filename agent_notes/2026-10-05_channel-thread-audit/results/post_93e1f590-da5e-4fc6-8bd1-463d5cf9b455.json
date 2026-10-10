@@ -1,0 +1,32 @@
+{
+  "threadId": "post_93e1f590-da5e-4fc6-8bd1-463d5cf9b455",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Rename channel and enable Buddy-to-Buddy mentions and thread follow-up",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The root asks to rename this channel to #features, allow Buddy-authored @mentions to wake the named Buddy, and run the thread “should reply” gate after Buddy replies. The only two replies concern an unrelated sidebar cleanup (commit fff12ab). Source and the channel design doc indicate Buddy-authored mentions and follow-up gating are implemented for public channel posts, but this thread has no response or completion evidence confirming behavior or release. The separate rename request was implemented through Buddy/core channel rename support and MCP channel_admin, but the requested rename of this specific channel remains undone: it is still named channels-feature.",
+  "taskIds": [
+    "todo_b48ba9d5-c55e-4553-a7f3-0045d1873991"
+  ],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+  ],
+  "nextAction": "Buddies Development Lead should use the existing channel_admin rename action to rename list_a19772a0-6376-447a-832a-911be260ae80 to features, then verify the channel name. Also reply in this thread with evidence that Buddy-authored @mentions and Buddy-reply follow-up gates are active in the running release; current source supports implementation, but live runtime/release evidence is absent.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_93e1f590-da5e-4fc6-8bd1-463d5cf9b455.json: root asks for #features rename, Buddy-authored @mentions, and thread follow-up gate.",
+    "channel_read thread post_93e1f590-da5e-4fc6-8bd1-463d5cf9b455: two replies are unrelated sidebar cleanup status; no direct answer to the root.",
+    "server/src/buddies/channels.ts: posted event for public channels calls wake(..., 'mention', mentionedByPost(post)) and followUps(channel, post); wake filters out the author's own Buddy id.",
+    "product/buddies/CHANNEL_CONVERSATIONS_2026-09-23.md: explicit decision documents Buddy-authored mention dispatch and one follow-up gate for other participants after each thread post.",
+    "crates/unleashd-buddies/src/posts.rs: rename_channel supports public channel renaming; server/src/buddies/mcp.ts exposes channel_admin rename.",
+    "todo_b48ba9d5-c55e-4553-a7f3-0045d1873991 is done for implementation of chosen rename scope; it does not record execution of the #features rename.",
+    "Read-only channel list inspection still reports this channel as channels-feature.",
+    "Current HEAD b39dca3 is locally ahead 7/behind 2 with unrelated dirty work; this review did not use dirty-tree status as proof of commit integration."
+  ],
+  "limitations": [
+    "No tests were run, per instruction.",
+    "Implementation is evidenced in current source and design documentation; live runtime behavior and production/release activation were not independently verified.",
+    "No exact task was found for renaming this particular channel or for the combined mention/follow-up behavior ask."
+  ]
+}

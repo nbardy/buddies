@@ -1,0 +1,19 @@
+{
+  "threadId": "post_01a0f3d8-1eef-772a-af8f-bc5b44febdbd",
+  "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+  "channelName": "general",
+  "title": "HI",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Root post body is only “HI”; the live thread read returned no replies. No request or deliverable is present to assess, and no matching task was found in the supplied task snapshot.",
+  "taskIds": [],
+  "ownerIds": [],
+  "nextAction": "None; no actionable ask exists in this thread.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0f3d8-1eef-772a-af8f-bc5b44febdbd.json",
+    "channel_read(threadId=post_01a0f3d8-1eef-772a-af8f-bc5b44febdbd) returned posts: []",
+    "agent_notes/2026-10-05_channel-thread-audit/tasks-snapshot.json (no exact root ID match)"
+  ],
+  "limitations": "Task lookup used the provided snapshot; no live task fetch or artifact review was needed because there is no actionable ask."
+}

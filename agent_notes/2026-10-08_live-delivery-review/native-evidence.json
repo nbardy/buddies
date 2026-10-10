@@ -1,0 +1,246 @@
+{
+  "capturedAt": "2026-10-08T08:06:00Z",
+  "scope": "Native Buddy tools: this Buddy/workspace only; no foreign workspace reads",
+  "ownerPosts": [
+    {
+      "id": "post_01a11a84-e146-77b3-a99f-044146818e09",
+      "createdAt": "2026-10-08T07:57:58.470Z",
+      "body": "so looks like we're out of claude credits"
+    },
+    {
+      "id": "post_01a11a74-7a14-729b-b624-c9f0d37d1707",
+      "createdAt": "2026-10-08T07:40:03.477Z",
+      "body": "OKay fix the reply waiting it should injet andth buddy workers shuk d stllbe runing and the buddy should have a way to interact with those suba agent workers, perhaps we add a \"message worker' mcp\" and mesage \"parent\" Mcp for both to comunicate as tooling sync that will get injecfted on next copleted tool call,\n\nAnd anyhting else lets do a rela fresh breth look at diangotics seems likeour last rework relaly screwed this up as we're still playing whack a whole from before, and the beahvior used to be relal ygreat"
+    },
+    {
+      "id": "post_01a11a6c-8660-7387-96c5-a410c36e369c",
+      "createdAt": "2026-10-08T07:31:22.336Z",
+      "body": "OKay so can we fix the root isues recacot rsystems software needed and fix and commit all and push fix up so this isnt happening"
+    }
+  ],
+  "runs": [
+    {
+      "id": "run_01a11a86-1dbe-7091-981d-2241d656d015",
+      "status": "running",
+      "input": {
+        "kind": "post",
+        "postId": "post_01a11a86-1d25-736f-917c-70c7d494604f"
+      },
+      "taskId": "task_01a11a85-d085-7440-8f2b-8bedb004412d",
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+      },
+      "startedAt": "2026-10-08T07:59:19.486Z",
+      "conversationId": "buddy-run-run_01a11a86-1dbe-7091-981d-2241d656d015",
+      "purpose": "Fresh delivery architecture diagnosis and lean live-worker messaging design",
+      "taskTitle": "Fresh review: responsive owner steering and live parent↔worker communication through one delivery path"
+    },
+    {
+      "id": "run_01a11a86-1cad-74f9-b945-4138fef82565",
+      "status": "running",
+      "input": {
+        "kind": "post",
+        "postId": "post_01a11a6d-a213-73fa-af6c-d06cc32e6026"
+      },
+      "taskId": "task_01a119c4-0545-71da-9ac5-79f9d3553b0b",
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+      },
+      "startedAt": "2026-10-08T07:59:19.218Z",
+      "conversationId": "buddy-run-run_01a11a86-1cad-74f9-b945-4138fef82565",
+      "purpose": "Hung turns end on no-progress, not wall clock",
+      "taskTitle": "A hung turn ends on its own: no progress for N minutes ends the run, but long healthy work is never cut (run_01a1185c hung 6.5 h)"
+    },
+    {
+      "id": "run_01a11a86-1ca1-7720-a089-9578e6711ef0",
+      "status": "running",
+      "input": {
+        "kind": "post",
+        "postId": "post_01a11a6d-8bc5-77f9-bfcb-9d41a2cb38db"
+      },
+      "taskId": "task_01a11a6d-4075-754e-be99-dfcc1caa2e5a",
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+      },
+      "startedAt": "2026-10-08T07:59:19.202Z",
+      "conversationId": "buddy-run-run_01a11a86-1ca1-7720-a089-9578e6711ef0",
+      "purpose": "Owner replies bypass the Buddy run limit",
+      "taskTitle": "An owner message never waits behind a Buddy's own workers at its run limit"
+    },
+    {
+      "id": "run_01a11a86-1c87-77a5-b17e-4cd3601514e1",
+      "status": "running",
+      "input": {
+        "kind": "post",
+        "postId": "post_01a11a68-7f62-7267-9915-23a8b206a9e5"
+      },
+      "taskId": "task_01a11a68-4873-7712-8ca8-64b9b102f8a7",
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+      },
+      "startedAt": "2026-10-08T07:59:19.176Z",
+      "conversationId": "buddy-run-run_01a11a86-1c87-77a5-b17e-4cd3601514e1",
+      "purpose": "Owner messages steer a running turn at any tool boundary",
+      "taskTitle": "Owner messages reach a running Buddy turn at ANY tool boundary (incl. while it waits on its own sub-agents), not only at a Buddy tool call"
+    },
+    {
+      "id": "run_01a11a76-9ae7-742a-8eac-f9256acf0a0e",
+      "status": "failed",
+      "input": {
+        "kind": "deliver",
+        "postId": "post_01a11a76-9ad1-7504-8366-feb9cb8bdc72"
+      },
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+      },
+      "startedAt": "2026-10-08T07:42:22.992Z",
+      "endedAt": "2026-10-08T07:42:26.489Z",
+      "errorCode": "execution_failed",
+      "error": "could not decide whether to reply (gate run ended: out_of_tokens (Out of tokens: You've hit your session limit · resets 4:30pm (Asia/Makassar)))",
+      "purpose": null,
+      "taskTitle": null
+    },
+    {
+      "id": "run_01a11a76-3588-73ee-9b0a-549d7d5c0344",
+      "status": "failed",
+      "input": {
+        "kind": "deliver",
+        "postId": "post_01a11a76-356f-729c-8307-1c4820158e83"
+      },
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+      },
+      "startedAt": "2026-10-08T07:41:57.009Z",
+      "endedAt": "2026-10-08T07:42:00.568Z",
+      "errorCode": "execution_failed",
+      "error": "could not decide whether to reply (gate run ended: out_of_tokens (Out of tokens: You've hit your session limit · resets 4:30pm (Asia/Makassar)))",
+      "purpose": null,
+      "taskTitle": null
+    },
+    {
+      "id": "run_01a11a74-7a18-7004-bf33-73073336d0ba",
+      "status": "failed",
+      "input": {
+        "kind": "deliver",
+        "postId": "post_01a11a74-7a14-729b-b624-c9f0d37d1707"
+      },
+      "requester": {
+        "kind": "owner"
+      },
+      "startedAt": "2026-10-08T07:40:03.483Z",
+      "endedAt": "2026-10-08T07:40:06.356Z",
+      "conversationId": "e671d06f-843d-52db-beb4-bcdcae55ff1d",
+      "errorCode": "execution_failed",
+      "error": "Out of tokens: You've hit your session limit · resets 4:30pm (Asia/Makassar)",
+      "purpose": null,
+      "taskTitle": null
+    },
+    {
+      "id": "run_01a11a72-71c7-7371-a1a7-cb53474919aa",
+      "status": "failed",
+      "input": {
+        "kind": "deliver",
+        "postId": "post_01a11a72-71c6-7078-8a86-f8151fb59742"
+      },
+      "taskId": "task_01a11a68-4873-7712-8ca8-64b9b102f8a7",
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+      },
+      "startedAt": "2026-10-08T07:37:50.281Z",
+      "endedAt": "2026-10-08T07:37:53.636Z",
+      "conversationId": "5229d8c6-6da7-5d33-8457-1309f2ca95ff",
+      "errorCode": "execution_failed",
+      "error": "Out of tokens: You've hit your session limit · resets 4:30pm (Asia/Makassar)",
+      "purpose": "run_failed",
+      "taskTitle": "Owner messages reach a running Buddy turn at ANY tool boundary (incl. while it waits on its own sub-agents), not only at a Buddy tool call"
+    },
+    {
+      "id": "run_01a11a72-53e2-73b9-baaa-9dd56a3673ed",
+      "status": "failed",
+      "input": {
+        "kind": "deliver",
+        "postId": "post_01a11a72-53e0-7789-b5ab-46c1600502ea"
+      },
+      "taskId": "task_01a119c4-0545-71da-9ac5-79f9d3553b0b",
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+      },
+      "startedAt": "2026-10-08T07:37:42.629Z",
+      "endedAt": "2026-10-08T07:37:45.899Z",
+      "conversationId": "e671d06f-843d-52db-beb4-bcdcae55ff1d",
+      "errorCode": "execution_failed",
+      "error": "Out of tokens: You've hit your session limit · resets 4:30pm (Asia/Makassar)",
+      "purpose": "run_failed",
+      "taskTitle": "A hung turn ends on its own: no progress for N minutes ends the run, but long healthy work is never cut (run_01a1185c hung 6.5 h)"
+    },
+    {
+      "id": "run_01a11a72-2c9d-7320-b368-d6549b4b11b5",
+      "status": "failed",
+      "input": {
+        "kind": "deliver",
+        "postId": "post_01a11a72-2c98-75cb-8421-adff381e2cd4"
+      },
+      "taskId": "task_01a11a6d-4075-754e-be99-dfcc1caa2e5a",
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+      },
+      "startedAt": "2026-10-08T07:37:32.578Z",
+      "endedAt": "2026-10-08T07:37:36.471Z",
+      "conversationId": "e671d06f-843d-52db-beb4-bcdcae55ff1d",
+      "errorCode": "execution_failed",
+      "error": "Out of tokens: You've hit your session limit · resets 4:30pm (Asia/Makassar)",
+      "purpose": "run_failed",
+      "taskTitle": "An owner message never waits behind a Buddy's own workers at its run limit"
+    },
+    {
+      "id": "run_01a11a6d-a242-766c-a391-6b9026b8ca55",
+      "status": "failed",
+      "input": {
+        "kind": "post",
+        "postId": "post_01a11a6d-a213-73fa-af6c-d06cc32e6026"
+      },
+      "taskId": "task_01a119c4-0545-71da-9ac5-79f9d3553b0b",
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+      },
+      "startedAt": "2026-10-08T07:32:35.012Z",
+      "endedAt": "2026-10-08T07:37:42.623Z",
+      "conversationId": "buddy-run-run_01a11a6d-a242-766c-a391-6b9026b8ca55",
+      "errorCode": "execution_failed",
+      "error": "Out of tokens: You've hit your session limit · resets 4:30pm (Asia/Makassar)",
+      "purpose": "Hung turns end on no-progress, not wall clock",
+      "taskTitle": "A hung turn ends on its own: no progress for N minutes ends the run, but long healthy work is never cut (run_01a1185c hung 6.5 h)"
+    },
+    {
+      "id": "run_01a11a6d-8e1d-7084-8774-bb8d1aad64af",
+      "status": "failed",
+      "input": {
+        "kind": "post",
+        "postId": "post_01a11a6d-8bc5-77f9-bfcb-9d41a2cb38db"
+      },
+      "taskId": "task_01a11a6d-4075-754e-be99-dfcc1caa2e5a",
+      "requester": {
+        "kind": "buddy",
+        "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+      },
+      "startedAt": "2026-10-08T07:32:29.858Z",
+      "endedAt": "2026-10-08T07:37:32.565Z",
+      "conversationId": "buddy-run-run_01a11a6d-8e1d-7084-8774-bb8d1aad64af",
+      "errorCode": "execution_failed",
+      "error": "Out of tokens: You've hit your session limit · resets 4:30pm (Asia/Makassar)",
+      "purpose": "Owner replies bypass the Buddy run limit",
+      "taskTitle": "An owner message never waits behind a Buddy's own workers at its run limit"
+    }
+  ],
+  "truncated": true
+}

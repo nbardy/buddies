@@ -1,0 +1,21 @@
+{
+  "threadId": "post_01a0ee7d-f14c-745b-9106-21e6d566f799",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "DM default model mismatch, new-chat error, and per-response model hover",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The new-chat idempotency-key rejection is implemented and integrated at HEAD in 804699b, but no regression test or runtime/release verification is evidenced. The DM/profile/thread model paths were diagnosed but not unified; proposed behavior and two policy decisions remain unresolved. The owner also asked for each conv tag hover to show the model used per response; this is not implemented. Active unified-thread-model task covers part of the model-selection work and remains in progress. No relevant task specifically covers the per-post model stamp/hover or the new-chat issue.",
+  "taskIds": ["task_01a105b0-2c7c-7527-bff6-aa092ec61da0"],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"],
+  "nextAction": "Buddies Development Lead: finish task_01a105b0 against its accepted criteria and report commit/evidence; separately scope the missing per-post provider/model/effort stamp and conv-tag hover, including back-compat behavior for older posts, with an integration test that changes model mid-thread. Confirm whether profile changes affect existing conversations or only new ones, and whether explicit per-thread picks persist. Release Engineer should coordinate safe backend activation and report runtime/release evidence for 804699b.",
+  "evidence": [
+    "Root plus all three replies read through channel_read; product lead identified NewDirectSchema strict-key rejection, and owner explicitly requested model-per-response hover.",
+    "HEAD contains NewDirectSchema key acceptance; git show 804699b shows the change is committed and branch --contains includes main. No test is described in the commit.",
+    "HEAD ChannelRows.tsx InstanceTag title contains only the conversation id; no per-post model stamp/hover found in inspected crate code.",
+    "Current Task task_01a105b0 is in_progress, owned by buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd; done criteria unify thread selection and retry behavior, not per-post hover.",
+    "git status --porcelain is non-empty with unrelated shared-tree changes; verification is limited to committed HEAD and read-only source inspection."
+  ],
+  "limitations": "No tests, backend restart, live UI check, release check, or write to the current task were performed. The thread's model policy questions remain unanswered in its replies."
+}

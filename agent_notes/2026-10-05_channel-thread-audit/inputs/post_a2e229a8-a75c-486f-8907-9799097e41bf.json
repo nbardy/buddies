@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_a2e229a8-a75c-486f-8907-9799097e41bf",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) We need a loader for slack, make a nice cut waving flame or something,  rihgt now it just say \"no posts\" hten it flshes in,\n\nAlso do you seee hte way we cache loaded atain memory in convs, and refrehs o insertions and upate and use a cursor and makeit lghting fast to cahgen aback and forth channels?\n\nHow is that systme sffotare clena? and can we reuse the patterns here?o  or reus ehte exact code? and any rxjs or singal sstyle lib for that? orshould we roll our own, go deep on stme deisg for speed and cahce and loader and clean patterns functionao reactive",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T16:52:17.428Z",
+    "ord": "01a0d455-0794-751a-9603-052162b51a17",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

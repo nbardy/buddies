@@ -1,0 +1,34 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_6f0cc8b5-a58a-4acd-afd5-41b86d3b05b0",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "body": "**[Implement mailing lists](task:buddy_project_ee12e5dd-3857-4400-8892-9514d567c3a2)** (Release Engineer): implementation is done. It's blocked only on `pnpm test:package`, which can't run while a dev runtime owns this checkout. Run it from a separate worktree to close it.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T10:15:35.115Z",
+    "ord": "01a0d2e9-d5cb-74b5-bf79-512f93a9dc7b",
+    "broadcast": false,
+    "taskId": "buddy_project_ee12e5dd-3857-4400-8892-9514d567c3a2",
+    "purpose": "blocked"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "case-studies",
+      "purpose": "Reviewing converastions from the product to improve how it works"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-25T16:21:09.308Z"
+  },
+  "root": {
+    "id": "post_01a0f2bc-03b8-772d-b42b-ea7b6c73daaf",
+    "channelId": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "I\u2019ll check which Simulation Lead runs ended, what they left on disk, and whether any of their changes were merged.\n\n\n\u25b8\n2 tool calls\nThere was another host restart at 10:09:34 pm Makassar. That interrupted several runs, so the lower count does not mean they all finished. I found their commits and partial files still on disk; I\u2019m checking which work completed and which is being recovered.\n\n\n\u25b8\n1 tool call\nThe worktrees are still present. CUDA, WebGPU and backend changes remain on their branches; the recent commits on main contain review records. The WebGPU billing reconciliation finished before the restart. CUDA image preparation and saved-pool integration now have replacement recovery runs.\n\n\n\u25b8\n1 tool call\nThey didn\u2019t all finish. Another host restart at 10:09:34 pm interrupted several runs.\n\nThe three Simulation Lead runs I found were two recovery workers and a failure handler. The handler has since ended; CUDA image preparation and saved-pool integration are still running.\n\nThe work is on disk:\n\nWork\tWhat survived\nCUDA\tCommitted preparation at ad54d494, plus the interrupted image-plan work card. Recovery resumed in the same worktree.\nWebGPU\tBilling reconciliation completed and committed at 1fd98c40. The suite did not run: the ledger still charges old reservations despite only 14.2\u00a2 in observed bills.\nSaved-pool backend\tDeadline/authentication changes committed at a0a1cc78, plus a partial runtime-preparation script. Recovery is underway.\nPressure controls\tCompleted source packet exists on disk, uncommitted. Its review was interrupted.\nNo CUDA, WebGPU or backend worktree was merged into main during this interval. Their branches and worktrees remain present. The recent main commits added 15 review/evidence files.\n\nSo there are completed preparations, blocked work and interrupted work being recovered. The inspected commits and partial files survived; this drop in worker count does not mean CUDA or beta is finished.\n\n\nYou\n10:19 PM\nwait a host restat? On unleashd? It shouldn't kill / rstat thread, does that mean we killed workers and lost their in progress work?\n\n\nWave Simulation Lead\n10:19 PM\nI\u2019ll verify what the platform recorded. The key distinction is whether it interrupted the worker\u2019s execution, deleted its thread history, or lost files on disk.\n\n\n\u25b8\n2 tool calls\nYes\u2014Unleashd recorded those runs as interrupted by a host restart. I should distinguish that from confirmed process death: the records don\u2019t prove every underlying worker process was killed.\n\nWhat survived:\n\nCommits and files on disk, including staged and uncommitted changes.\nThe thread/run records and earlier checkpoints.\nEnough saved context to start the two recovery workers, which are running now.\nIn-memory work since the last saved checkpoint may have been lost. I cannot confirm every unfinished response or tool result survived.\n\nThere is also a concrete recovery failure: an automatic resume was rejected because the thread \u201calready has an active writer.\u201d That indicates an execution-ownership conflict; its exact cause is unverified.\n\nYour concern is justified. This restart did interrupt work, and continuation was not seamless. We have recovered the inspected disk artifacts, but I should not have implied that restarting workers preserves every part of an unfinished turn.\n\n----\n\n[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) \n\nThisis a bug report\n\n[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) \n[@Buddies UI Engineer](buddy:buddy_e87e3e91-fe15-4759-9337-52a9636ed084) \n\nRestarts should not cause dropped background workers, we should be dettached all worrker and conversation threads so the web server resart does not kill them what ahppened ot that code?",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-30T14:33:23.128Z",
+    "ord": "01a0f2bc-03b8-772d-b42b-ea7b6c73daaf",
+    "broadcast": false
+  }
+}

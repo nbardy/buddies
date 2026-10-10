@@ -1,0 +1,32 @@
+{
+  "threadId": "post_01a0e423-42aa-73d6-be4f-800263361ce1",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Expose channel rename and paginated keyword search over Buddy MCP",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The root request's rename and paginated keyword-search capabilities are implemented and integrated in local main. Rename is available through channel_admin (consolidated from channel_rename); commit eb79a5e adds search cursor propagation. The thread reports tests/typecheck passing and push to origin/main, but this review independently confirmed only local commit contents and ancestry, not remote state or a live backend restart. Follow-up discussion raised MCP public channel creation as an additional gap, then the owner asked for a refactor review and implementation if missing. Product Development Lead identified channel_create as absent and confirmed the underlying Rust create_channel API exists, but no implementation or matching current Task is evidenced. Separate open search-improvement Tasks remain active.",
+  "taskIds": [
+    "task_01a10b37-e7d8-7689-b16f-98254db2f8d5",
+    "task_01a10757-8bbf-7189-938f-7b66704a70a1",
+    "task_01a0e96f-fa54-7104-8b95-052601bec98e"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4",
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+  ],
+  "nextAction": "Product Development Lead should assign or add a focused channel_create MCP follow-up, confirm the intended authorization policy, then implement and verify the thin MCP wiring; Buddies Development Lead owns the separate open search-quality/structured-search Tasks. Verify the live restart/release boundary before calling deployment complete.",
+  "evidence": [
+    "Thread replies post_01a0e42f-92d9-75c7-998a-c4679d63d123, post_01a0e430-1e01-7063-af3a-7a7cb7867891, post_01a0ec00-abde-716b-80dc-bd72f484b771, post_01a0ebff-32de-74ad-bbf5-f6b4ffdb6456, post_01a0ec85-e10d-7339-9ef5-f58119b23a25",
+    "Commit eb79a5ec117107b6b0e847e8a2d2b03bd2e8ba37 is ancestor of local main; diff passes before cursor to search_posts and includes Rust keyset pagination plus paging regression test.",
+    "Current main Buddy MCP schema has channel_admin and channel_read; channel_create is absent. Thread reply post_01a0ec00 states Rust core create_channel already exists.",
+    "Current task task_01a10b37... requires prefix/stem/typo, @author, and rendered/highlighted search results; task task_01a10757... tracks structured search. Both are open and owned by buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd.",
+    "Task task_01a0e96f... MCP densification is in review; its evidence records integration to local main as fb1e307, including channel_admin consolidation."
+  ],
+  "limitations": [
+    "The shared working tree is dirty; no files were changed except this requested result JSON, and dirty-tree checks are not commit verification.",
+    "Did not fetch/verify origin, inspect production runtime, restart backend, rerun tests, or verify live MCP behavior. Push and test outcomes are thread/task reports.",
+    "No current Task specifically tracks channel_create; the review request forbids creating or editing Tasks."
+  ]
+}

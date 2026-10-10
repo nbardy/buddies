@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0e6bb-ba87-703a-9f42-2aacc96a58b0",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![IMG_3152](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790577383026_IMG_3152.png)\n![IMG_3151](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790577383611_IMG_3151.png)\n\nSomething seems to happen sometimes where if I open the text box and type and then leave it. It\u2019s like the View gets half stuck open the whole app. It\u2019s weird because the keyboard should never actually shrink the size of the app or just shrink the size of the escaped kind of separate container that we use for Text input that bug shouldn\u2019t even be possible to be emergent, but anyway, I need to get fixed if I go back and open the keyboard and then close it again sometimes I\u2019ll fix it but I want the battery never happened so let\u2019s take a look at all that kind of keyboard opening and overflow on iOS app mode and let\u2019s tile it in and get it right also go ahead and recent article cause I think this whole like keyboard input behavior full screen stuff is somewhat well. Discussed has a bunch of quirks. [@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-28T06:37:37.800Z",
+    "ord": "01a0e6bb-ba87-703a-9f42-2aacc96a58b0",
+    "broadcast": false
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "threadId": "post_88e81e2c-073e-4a49-a22e-ae939acdc691",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Highlight selected @name in the composer before sending",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "The reported issue is addressed: a selected @name is highlighted in the composer before send. The fix is committed as c0ae4ed and that commit is an ancestor of current main. Thread reports client tests/typecheck/rule checks and desktop/phone screenshots; these were not rerun during this review. Earlier status questions were answered, including that the branch was pushed. No matching canonical active task was found in the supplied task snapshot.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "None for this specific composer highlight request.",
+  "evidence": [
+    "Thread replies post_07442c6a-9703-4c97-8168-6cdee9eb3b2a and post_2f45953f-e1a4-44c7-b07c-303c92bfc441 report commit c0ae4ed, push to feat/channels-project-view-2026-09-22, client verification, and desktop/phone screenshot evidence.",
+    "git show c0ae4ed lists the five implementation/test files, including ChannelComposer.tsx, ChannelComposer.css, channel-text.ts, mobile-channels.css, and channel-text.test.ts.",
+    "git branch --contains c0ae4ed includes main; current HEAD is b39dca3651024f9a8ffcd4c3b87853ab0d7c90ba.",
+    "The supplied tasks-snapshot.json contains no task specifically tracking this composer highlight request."
+  ],
+  "limitations": [
+    "No tests or live UI checks were rerun; verification and screenshot claims are from the thread replies.",
+    "Release beyond integration into main was not independently confirmed."
+  ]
+}

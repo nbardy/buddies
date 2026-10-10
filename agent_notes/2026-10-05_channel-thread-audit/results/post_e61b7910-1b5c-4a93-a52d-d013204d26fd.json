@@ -1,0 +1,33 @@
+{
+  "threadId": "post_e61b7910-1b5c-4a93-a52d-d013204d26fd",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Thread participants should be notified/gated to respond after another participant posts",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested follow-up gate is implemented in source: after a new thread post, other Buddy participants with prior participation are asked whether they should respond; a <yes> queues a reply and <no> passes. Tests cover the gate and model selection. However, the exact live owner-reply scenario has no completion evidence: the canonical verification task remains open, and the root thread has no replies. Thus implementation is evidenced, but runtime verification and closure are not.",
+  "taskIds": [
+    "buddy_project_d6b661c3-8250-4d45-a4aa-07c4874392ab",
+    "todo_ca8fdb98-20ff-4364-a7b6-cd35cd7b3c8f",
+    "buddy_project_06478480-876d-4230-b31e-bf6a5f015065"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4",
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+  ],
+  "nextAction": "Product Development Lead (buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) should complete the existing open live check in buddy_project_d6b661c3-8250-4d45-a4aa-07c4874392ab / todo_ca8fdb98-20ff-4364-a7b6-cd35cd7b3c8f: on a safely reloaded backend, post an owner reply in a real thread with other Buddy participants, verify each other participant gets the should-respond gate and a <yes> posts from that Buddy seat; attach evidence and update task status.",
+  "evidence": [
+    "Root snapshot: agent_notes/2026-10-05_channel-thread-audit/inputs/post_e61b7910-1b5c-4a93-a52d-d013204d26fd.json (owner asks that all thread participants, including original poster, be prompted after another participant replies).",
+    "channel_read(threadId=post_e61b7910-1b5c-4a93-a52d-d013204d26fd) returned posts: [] (no thread replies/evidence).",
+    "Current task detail buddy_project_d6b661c3-8250-4d45-a4aa-07c4874392ab is open; its done criteria specify live owner-reply <yes>/<no> gate, picked harness, chain cap and error-journal checks. Child todo_ca8fdb98-20ff-4364-a7b6-cd35cd7b3c8f is open and specifies follow-ups fire for other posters.",
+    "Read-only source inspection: server/src/buddies/channels.ts followUps gathers Buddy participants from thread posts and queued seats, excludes the triggering Buddy/mentioned Buddies, gates each eligible participant, and queues a reply on gate_yes. server/src/buddies/channel-reply-gate.ts defines exact <yes>/<no> verdicts.",
+    "Regression coverage exists in server/test/buddies-v2.test.ts, including \"latest thread reply model drives the picker, should-reply gate and answer; explicit picks win\" and gate failure/retry coverage. No tests were run in this review.",
+    "Repository has unrelated dirty work; no claim is made about commit-level integration or release from this inspection."
+  ],
+  "limitations": [
+    "No live runtime verification performed; task states that reload and real owner-reply scenario remain to be checked.",
+    "No tests rerun.",
+    "The generic Buddy inbox notification task is done but does not close this exact thread follow-up gate scenario."
+  ]
+}

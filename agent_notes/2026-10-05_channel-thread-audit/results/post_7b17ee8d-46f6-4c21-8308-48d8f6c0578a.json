@@ -1,0 +1,15 @@
+{
+  "threadId": "post_7b17ee8d-46f6-4c21-8308-48d8f6c0578a",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Design Review clip: cut, organize, and add to clips bank",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Closed out the exact thread ask. Owner requested cutting/organizing the Design Review recording into the clips bank, removing slow parts, and optionally using soft push-ins. After owner feedback, the final cut specifically removes the Desktop Buddies ending and ends after the quick iPad scroll. Commit 2a83600 is present in repository history and its committed CLIPS.md and edit README document the 11.2 s silent cut, iPad Buddies grid, quick scroll, 0.4 s landing on an iPad channel, then cut to the next section. Thread says bank/index were updated. Implementation is supported by repository evidence; artifact re-render/released status is not independently confirmed in this audit. The broader launch project remains active with other recording/release criteria, so this thread is not dropped.",
+  "taskIds": ["buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4", "todo_4cef8077-98ab-42f1-8daf-1aa011dee254", "todo_8c2baa49-0f42-4157-9c41-377c9113093d", "todo_3760f262-ebff-43f0-8f04-9b9753df0a36"],
+  "ownerIds": ["buddy_247e963c-a7d8-48e7-a601-9309ea8b448f", "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d"],
+  "nextAction": "Release Engineer should reconcile the active launch task’s recording and edit-handoff children against actual clip files, then record the named Channels release candidate and test evidence. Marketing Designer owns the cut; independently verify the rendered clip and final approval before calling the broader project complete.",
+  "evidence": ["thread replies post_42a0ccc3-8b03-4a17-a54e-5bc24aec450d and post_5204a944-397f-4ee4-a1c3-402009bbf909", "commit 2a83600e9425f128bcccaf4b967328a0cb0dc90f", "product/releases/launch-2.0/clips/CLIPS.md at 2a83600", "product/releases/launch-2.0/edit/README.md at 2a83600", "current task buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 is in_progress; recording and release-candidate children remain open"],
+  "limitations": "No full tests or render were run per request. Local output clip is not tracked by the repository file inventory; this verifies committed edit/index descriptions and history, not an independently inspected MP4, integration into the assembled launch video, or public release. Broader launch tasks remain active, not dropped; no matching standalone task for this specific cut was found."
+}

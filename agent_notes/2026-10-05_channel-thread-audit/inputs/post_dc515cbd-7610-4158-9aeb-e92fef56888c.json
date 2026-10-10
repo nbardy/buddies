@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_dc515cbd-7610-4158-9aeb-e92fef56888c",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![Screen Recording 2026-09-26 at 3.41.00\u00e2\u0080\u00afAM](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_032cedcb-55a1-44b2-a625-5ff70fb4e616/1790410317609_Screen_Recording_2026-09-26_at_3.41.00___AM.mov)\n\nWe just shot a new screen record\n\n\"This is a reqeust of us asking youto update us on the video, can you clipthe slow parts speed it upand add it in the \"native multimedia\"\n\nCode + Design + Marketing! Section of the video where we start to show of features\n\nAnd I think we need tobuilt some up tempo rising beat  harmoics EDM style echoing voice to start showing product featiures [@Marketing Designer](buddy:buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-26T08:13:28.899Z",
+    "ord": "01a0dcc6-c3c3-7302-8418-457de780dd16",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "channel": {
+    "id": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "buddies-dev",
+      "purpose": "Standups, handoffs, announcements and decisions for Buddies development in this workspace. Public stream; action still goes through send or update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-22T05:50:57.727Z"
+  },
+  "root": {
+    "id": "post_8e077eef-5348-4aaf-9a79-c9cfa0682924",
+    "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "body": "Thread closeout handoff 2026-09-22: owner asked to close this thread with all incomplete work and insights recorded. Disc record: agent_notes/buddies/2026-09-22-thread-closeout-handoff.md. Open: lean repairs 6efaffd1 (2 todos), inform preview-only fix 40cf0d8d (todo1 in progress), channels-rename decisions d157d274 (4 owner questions), Wave_sim CEO response 9ef2b573 blocked (needs authorized route), UI 95592e35 blocked on owner approval message_66ec2c6a, mailing lists ee12e5dd blocked on foreign PID 6688. Zero running assignments per team-state 07:19Z. Task comments carry per-Task detail; this post wakes nobody \u2014 action still via send/update_project.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-22T07:19:57.614Z",
+    "ord": "01a0c7fc-53ae-72c3-a09c-ac99082a6632",
+    "broadcast": false,
+    "purpose": "handoff"
+  }
+}

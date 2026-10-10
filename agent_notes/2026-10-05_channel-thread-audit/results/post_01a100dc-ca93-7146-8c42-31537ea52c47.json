@@ -1,0 +1,27 @@
+{
+  "threadId": "post_01a100dc-ca93-7146-8c42-31537ea52c47",
+  "channelId": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+  "channelName": "ui-design",
+  "title": "Remove confusing task evidence dump and rework task page readability",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Raw task evidence dump was removed from the reading UI and TaskPage was iteratively restyled with shared components and clearer title/action/blocker/criteria/discussion hierarchy. Local notes report desktop/phone review and focused tests/typecheck/UI gates passing. The relevant TaskPage changes are still dirty and uncommitted; therefore implemented and locally verified, but not integrated or released. No exact matching canonical Task exists. The broad UI appearance task is unrelated (mobile composer/model picker) and remains in review.",
+  "taskIds": [
+    "buddy_project_8b8ebb68-4cc2-418a-a456-ca5dcb939c3d"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead should preserve and complete the TaskPage changes in a coherent commit, verify the commit contains TaskPage.tsx, TaskPage.css and its regression fixture (without sweeping unrelated dirty work), then record integration/release evidence and ask the owner to review the final page.",
+  "evidence": [
+    "agent_notes/2026-10-03_task-page-reading-rework.md",
+    "output/screenshots/task-hierarchy/desktop.png",
+    "output/screenshots/task-hierarchy/phone.png",
+    "output/screenshots/task-shared-style/desktop.png",
+    "output/screenshots/task-shared-style/phone.png",
+    "git status confirms TaskPage.tsx and client/test/task-page.test.tsx modified, TaskPage.css untracked; no commit evidence for this work",
+    "Current task buddy_project_8b8ebb68-4cc2-418a-a456-ca5dcb939c3d is the broader mobile composer/model picker effort and does not cover this page rework"
+  ],
+  "limitations": "Read-only audit; no tests rerun. Test and screenshot results are reported in the implementation note and were not independently rerun or re-captured. Integration and release were not demonstrated."
+}

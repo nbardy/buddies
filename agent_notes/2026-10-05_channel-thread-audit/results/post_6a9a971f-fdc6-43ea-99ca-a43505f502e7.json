@@ -1,0 +1,26 @@
+{
+  "threadId": "post_6a9a971f-fdc6-43ea-99ca-a43505f502e7",
+  "channelId": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+  "channelName": "triage",
+  "title": "Thread follow-ups and thread seats: shipped, with follow-ups",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Core follow-up/seat implementation and seat-model chip fix are integrated in current HEAD, with code/test evidence in commit history and current task evidence. Full live follow-up/seat flow remains unverified. Restart durability remains active work. Execution-selection reconciliation task is still open although the selection merge is present in HEAD; explicit written decision and overlap resolution are not evidenced. Backlog context-window task remains open. No thread replies were returned by live channel_read, so no newer thread-level closeout evidence was available.",
+  "taskIds": [
+    "buddy_project_a17450ec-596b-4caf-b0ec-61360d1923ff",
+    "buddy_project_33bb3d10-9da0-4db3-84fe-7f9143ff5592",
+    "buddy_project_4ed48794-f423-4673-bcd6-55d547e27de5",
+    "buddy_project_d6b661c3-8250-4d45-a4aa-07c4874392ab",
+    "buddy_project_26eab07c-cd6f-47f2-8d4f-bd9980e2ea0a"
+  ],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4", "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"],
+  "nextAction": "Product Development Lead: verify the written seat-vs-execution-selection decision and overlapping merge resolution for buddy_project_a17450ec; coordinate an idle backend reload and complete the real-thread follow-up/seat gate under buddy_project_d6b661c3; Buddies Development Lead continues restart durability under buddy_project_33bb3d10, including active child todo_cc739f9c. Keep buddy_project_26eab07c as explicit backlog until its bounded-context regression is implemented and evidenced. The chip-model task buddy_project_4ed48794 is closed with client/server test and live thread evidence.",
+  "evidence": [
+    "Input snapshot: agent_notes/2026-10-05_channel-thread-audit/inputs/post_6a9a971f-fdc6-43ea-99ca-a43505f502e7.json; live channel_read for root returned posts: [].",
+    "Current task reads: buddy_project_4ed48794 status done with live thread evidence and server/client test evidence; buddy_project_d6b661c3 open with original thread gate todo open and no evidence; buddy_project_33bb3d10 in_progress with P1 adoption and pending-delivery child tasks still active; buddy_project_26eab07c open; buddy_project_a17450ec open with written design decision still requested.",
+    "Read-only git ancestry checks: 62b4fa2, 1125dd0, and 70f87b3 are ancestors of HEAD; merge commits 364003a (channel feature) and 7f7537a (execution-selection) are ancestors of HEAD.",
+    "Working tree is shared and dirty (54 porcelain entries); ancestry establishes committed integration only, not clean-tree verification, runtime activation, or release. No tests, restarts, task edits, merges, or other messages were performed."
+  ],
+  "limitations": "Review limited to the specified root/thread and its five linked tasks. Thread fetch returned no replies. No full tests or runtime verification performed. Current working tree has unrelated dirty changes; commit ancestry was used to assess integration."
+}

@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_192b82cc-a76f-4a5e-84df-61730db15090",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) http://unleash.localhost/buddies/workspaces/project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c/channels?channel=list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a&thread=post_f6d906d6-799d-465e-803c-95103725393e&post=post_fc9feb23-a3f0-4e66-95fd-e888582d98d7\n\nThis messsge didnt get a rsponse from the other agent in the threa i thougth we trigger \"should _Reply \" on all thread particpants, what hapepened her? did it just maybe say \" didnt need repy\" Or what? \n\nCna wefix it it repsondedonly after I tagged it",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T16:44:31.029Z",
+    "ord": "01a0d974-45b5-75be-b201-1dd29049f7b3",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

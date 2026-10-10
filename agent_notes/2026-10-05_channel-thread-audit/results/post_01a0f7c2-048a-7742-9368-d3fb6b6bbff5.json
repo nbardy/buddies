@@ -1,0 +1,30 @@
+{
+  "threadId": "post_01a0f7c2-048a-7742-9368-d3fb6b6bbff5",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Copy Wave Sim case study; fix conversation-busy return runs and clarify liveness",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The literal copy request was delivered: replies say the source was copied verbatim into agent_notes/2026-10-01_unleashd_case_study_conversation_busy.md, and the file header confirms its Wave Sim source and copy date. The root cause/design discussion developed into active Tasks. The return-route implementation is in commit 316ef1f and is an ancestor of current main; task remains open and backend activation/release is unconfirmed. Lease-heartbeat commit 1ad0781 has focused test/typecheck evidence but is not in current main, remains in review, and is gated behind P1. P1 rework evidence exists on a separate rebased branch but is not integrated; current main has unrelated dirty files, so no dirty-tree checks count as commit verification. Additional child tasks for already-read answers and stale worker badges remain open. No full tests run in this review.",
+  "taskIds": [
+    "task_01a0f7c2-c655-73ba-944d-227c35c5e620",
+    "task_01a0f7ff-bbd6-7632-86ef-844b05b0cd4e",
+    "task_01a0f7f0-cf18-730a-8c72-2dd480be982c",
+    "task_01a0f2cb-48ba-722b-b0f6-07e4942fdb5c",
+    "task_01a0f7ff-d00c-7169-be38-ef25e23ecb3e"
+  ],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"],
+  "nextAction": "Buddies Development Lead: update existing Tasks with current evidence; verify whether commit 316ef1f is activated/released and close its Task only after criteria are evidenced; review and coordinate integration order for P1 rework before lease 1ad0781; assign/continue the two open child Tasks. Do not claim P1/lease integration from the current dirty main tree.",
+  "evidence": [
+    "Thread replies post_01a0f7c2-e7fd-7000-a2d1-87ccdafc60d9, post_01a0f804-25e8-746a-ad64-c3713341fdc9, post_01a0f804-a3ba-7459-86c2-2f5d539fa857",
+    "Copied artifact agent_notes/2026-10-01_unleashd_case_study_conversation_busy.md; header identifies source path and says verbatim copy",
+    "Current Task get: return-route Task open; evidence records 316ef1f, commit tests and fast-forward to local main; next activation/release not evidenced",
+    "git merge-base confirms 316ef1f is ancestor of HEAD; current worktree has unrelated dirty changes",
+    "Current Task get: lease Task in review with evidence for 1ad0781 and tests; next action explicitly requires lead/owner review and merge only after P1",
+    "git merge-base confirms 1ad0781 and b6438a8 are not ancestors of HEAD",
+    "P1 Task remains in_progress; latest task comment says verified branch continuity/p1-state-rebased @ 5d9347e, but not merged because activation restart awaits owner",
+    "Already-read-answer child and stale-worker-badge Tasks remain open"
+  ],
+  "limitations": "Read-only targeted review; did not run tests, inspect live backend or release state, verify current P1 branch files beyond task evidence, or confirm copy at the Wave Sim source."
+}

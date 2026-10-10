@@ -1,0 +1,26 @@
+{
+  "threadId": "post_81d72a3e-bec6-4696-862a-9d90521ab493",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Can automations be set from a Slack message?",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "A Buddy can create and enable its own automation from any conversation, including channel/Slack threads, without schedule.manage when within guardrails; scheduling another Buddy still requires that grant. Implementation is integrated on current main. The separate requested FIFO cap for Buddy responses is also integrated. The canonical self-scheduling Task remains in review pending owner live-runtime verification, so release/runtime activation is unconfirmed; no unrelated or parked ask was found.",
+  "taskIds": ["buddy_project_77f5bc70-341d-4f69-8900-b1a25760e748"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead/owner: after confirming the running backend has reloaded, ask a Buddy in a channel thread to create an hourly self-automation and verify it is enabled in its Automations page; then update/close the existing Task. Confirm FIFO behavior live only if its separate acceptance remains in scope.",
+  "evidence": [
+    "Read root post_81d72a3e-bec6-4696-862a-9d90521ab493 and all replies via channel_read.",
+    "Current Task buddy_project_77f5bc70-341d-4f69-8900-b1a25760e748 is in review, owned by buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4; its nextAction asks for a post-reload channel-thread runtime check.",
+    "Current main HEAD b39dca3 contains d265ce9 and 4ae9385 (both confirmed ancestors).",
+    "Commit d265ce9 implements self-scheduling guardrails and ownerControlUrl; Task evidence records integration tests, server typecheck, and suite results (460 pass, one unrelated shutdown failure).",
+    "Commit 4ae9385 implements per-Buddy FIFO admission at five active runs.",
+    "Scoped status showed no changes in the self-scheduling implementation/test/docs paths."
+  ],
+  "limitations": [
+    "No tests run in this review.",
+    "No live server/runtime activation or Slack UI check performed; main ancestry confirms integration, not release.",
+    "Historical branch/server claims in thread replies are superseded by current commit ancestry for integration status."
+  ]
+}

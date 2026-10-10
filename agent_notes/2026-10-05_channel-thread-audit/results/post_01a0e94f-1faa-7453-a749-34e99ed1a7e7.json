@@ -1,0 +1,26 @@
+{
+  "threadId": "post_01a0e94f-1faa-7453-a749-34e99ed1a7e7",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Add Sonnet 5.5; model picker cleanup and backend reload follow-up",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The owner’s request to add Sonnet 5.5 was implemented in catalog.jsonc (ID claude-sonnet-5-5, display Sonnet 5.5, medium default). Thread replies report commits eefe240, dd69b92, 1bbb554 and later registry cleanup commits, but these commits are not available in the current checkout’s history and the dirty working tree prevents commit-level confirmation here. Current catalog contains the model and alias. Later asks to show only Fable 5.1, Opus 5.5, Sonnet 5.5 in one wider row and remove latest duplicates are reported completed in pushed commits, but not verifiable from current HEAD. A separate backend reload starvation fix was proposed but explicitly awaited owner go; it was not started. The newer task for model family selection is active and owned by Product Development Lead; a pre-existing live-reload verification task remains open.",
+  "taskIds": [
+    "task_01a0eed8-6c72-7018-a2c3-d2a2acbf6efd",
+    "buddy_project_d6b661c3-8250-4d45-a4aa-07c4874392ab"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Product Development Lead: verify the model-family task’s current branch/commit against its acceptance criteria and complete the picker/live verification; separately obtain owner approval for the queued-reload admission fix, then implement and verify it under an existing or explicitly scoped task.",
+  "evidence": [
+    "Thread root and all 13 replies read from channel_read; root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0e94f-1faa-7453-a749-34e99ed1a7e7.json",
+    "vendor/agent-cli-tool/catalog.jsonc currently maps sonnet to claude-sonnet-5-5 and lists Sonnet 5.5 (medium default)",
+    "Task task_01a0eed8... is in_progress; its current detail says only step 0 done, later steps await owner go; evidence reports local commits not pushed and no live API check",
+    "Task buddy_project_d6b661c3... is open with empty evidence",
+    "Thread note agent_notes/2026-09-29_dev-backend-reload-starvation.md records the reload starvation fix as proposed, not started"
+  ],
+  "limitations": "Current checkout has many unrelated dirty files and HEAD f3d6cf1; reported model commits are absent from local git history, so cannot confirm their contents or integration. No tests or broad audit run, per request."
+}

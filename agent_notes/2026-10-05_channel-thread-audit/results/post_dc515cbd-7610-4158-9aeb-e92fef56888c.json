@@ -1,0 +1,20 @@
+{
+  "threadId": "post_dc515cbd-7610-4158-9aeb-e92fef56888c",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Add the Native multimedia segment and rising EDM cue to the features section",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested segment was implemented as a rough cut: the follow-up cut moves the Native multimedia title to the first beat and smooths the drop transition. Commit 9ab652f is present on main and the clips catalog places it at beats 6–7. However, the posted v13 release is documented as stitched from v12 and does not include the segment; the current posted cut therefore does not satisfy the full-assembly ask. No dedicated active task for this thread was found in the supplied task snapshot; a separate completed post-intro project covers other benefits/picker edits, not this segment.",
+  "taskIds": [],
+  "ownerIds": ["buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Marketing Designer to integrate the NativeMultimedia composition and EDM cue into the current launch assembly, render a review cut, and post it; Release Engineer to verify the assembled segment is in the published video and record the release evidence.",
+  "evidence": [
+    "Thread replies post_10507b49-1754-4fb1-9806-b43b46fd210f and post_6a547c93-d113-46e8-9f2f-8ec8c030d5bf report rough cuts 1 and 2; second reports title at opening and smoother transition.",
+    "Commit 9ab652f is present in main history; changes NativeMultimedia source, EDM sound/stems and clips catalog.",
+    "product/releases/launch-2.0/clips/CLIPS.md describes 04_native-multimedia as segment beats 6–7.",
+    "product/releases/launch-2.0/VERSIONS.md records v13 as cut from v12 and says the exact cut is launch-v12.mp4 plus Vim/end-card changes; no NativeMultimedia integration is recorded."
+  ],
+  "limitations": "Read-only review; no tests or renders run. Verified source commit ancestry and release-version documentation, not the actual video pixels/audio. No matching active task appeared in the supplied task snapshot; absence is limited to that snapshot."
+}

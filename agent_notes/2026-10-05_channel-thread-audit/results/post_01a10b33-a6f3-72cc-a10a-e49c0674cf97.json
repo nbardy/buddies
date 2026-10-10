@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a10b33-a6f3-72cc-a10a-e49c0674cf97",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Star and pin channels from the sidebar",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The exact UI ask (star channels on hover and pin them to the top) is implemented in the working tree, with reported desktop/mobile interaction checks, persistence, focused tests, and typecheck. It is not integrated: the report says changes are local and uncommitted. The device-local persistence and ordering behavior are documented in the implementation note. No existing task matches this feature; the nearest starred-channel task is emoji reactions and is unrelated. Treat request as implemented and locally verified per supplied evidence, but not committed, integrated, or released.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should coordinate with the concurrent owners of ChannelBrowser.tsx and tools/check-client-invariants.sh, then isolate/stage only the star feature, commit it, and verify the commit contains all required files. Add or link a narrowly scoped task only if the existing owner chooses to track the handoff; no matching task currently exists.",
+  "evidence": [
+    "Thread reply post_01a10b3a-010d-75dc-8f3e-2ac35365308a reports implementation, checks, and uncommitted state.",
+    "agent_notes/2026-10-05_channel-stars.md describes hover/focus and touch controls, top ordering, device-local persistence, 18 focused tests, typecheck, and desktop/phone CDP checks; it explicitly labels validation as working-tree-only.",
+    "Working-tree status shows star-related files modified/untracked alongside concurrent onboarding changes in ChannelBrowser.tsx and multiple other files; clean integration cannot be inferred.",
+    "Current task lookup for buddy_project_0832c5f2-8eca-435d-9cf8-fb9644a4409f confirms it is emoji reactions, unrelated to channel stars."
+  ],
+  "limitations": "No tests rerun per instruction. Evidence comes from the thread report and its note; no commit or release evidence exists. The thread replies were fetched in one page (no next cursor)."
+}

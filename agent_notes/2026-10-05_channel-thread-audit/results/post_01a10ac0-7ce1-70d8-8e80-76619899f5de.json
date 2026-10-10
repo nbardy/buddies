@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a10ac0-7ce1-70d8-8e80-76619899f5de",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Color scheme AI Generate button: own line, ‘Let the AI Cook’, cooking animation",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The three explicit asks were implemented: the button moved to its own line, was renamed ‘Let the AI Cook’, and expands into a cooking robot animation. A later owner request for bubbling pot hover hints and improved text styling was also implemented. Commits 960754c, 292a9cd, and fd352c4 are ancestors of local main. The first two are contained in origin/main; fd352c4 is not, so the latest text refinement is integrated locally but not shown as released. No matching task was found in the supplied task snapshot. Follow up only on the implementer's unanswered question about whether the separate ‘✦ AI Generate’ sidebar entry should also be renamed.",
+  "taskIds": [],
+  "ownerIds": ["owner", "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Owner to decide whether to rename the ‘✦ AI Generate’ entry; if yes, assign the small UI follow-up to Product Development Lead. Confirm/publish fd352c4 if release of the final text styling is expected.",
+  "evidence": [
+    "Thread reply post_01a10ac8-7acd-7745-a139-7a57df9b6d53 reports 960754c, screenshots/GIF, measured textarea width, and client checks/typecheck.",
+    "Thread reply post_01a10ace-db77-736e-ac19-83cad68e07d6 reports 292a9cd, hover animation evidence, reduced-motion behavior, and checks.",
+    "Thread reply post_01a10aee-1781-71b2-9196-ccdc3b1af3bb reports fd352c4, before/after screenshots, and checks.",
+    "Read-only git checks: all three commits are ancestors of local main; origin/main contains 960754c and 292a9cd, but not fd352c4."
+  ],
+  "limitations": "Repository working tree is broadly dirty with unrelated files; verification was limited to commit ancestry/stat evidence, not a clean-tree build or full tests. Release status for fd352c4 is inferred from origin/main reachability; no deployment/live-site check was performed."
+}

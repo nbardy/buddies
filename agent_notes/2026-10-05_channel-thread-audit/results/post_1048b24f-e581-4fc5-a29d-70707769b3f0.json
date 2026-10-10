@@ -1,0 +1,20 @@
+{
+  "threadId": "post_1048b24f-e581-4fc5-a29d-70707769b3f0",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Owner unread notifications and Slack-style channel indicators",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Implementation committed as 63edbe5 with server/client changes and a real-route separation/durability integration test. Thread reports say focused server/client tests, typecheck, invariant checks and desktop/phone screenshots passed. However, the screenshots did not use the live endpoint: at the time /api/buddies/channels/unread returned 404 because the backend had not reloaded. The canonical feature task remains in review; its next action is live cross-device verification after reload. The broader reload task remains open. Explicit limits: owner @mentions are unavailable to count, read marks are channel-level, and posts before initialization are not counted.",
+  "taskIds": ["buddy_project_cbd6043b-848b-4741-ae0f-d4a54f03688c", "buddy_project_d6b661c3-8250-4d45-a4aa-07c4874392ab"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead: after a safe backend reload, verify GET /api/buddies/channels/unread returns real counts; run pnpm screenshots --only home,channel,thread against real API data; open a channel on desktop and confirm it clears on phone; confirm a Buddy's get_list unread count is unchanged. Then update the feature task evidence/status and resolve its stated scope limits with the owner if needed.",
+  "evidence": [
+    "Thread report: commit 63edbe5; 20/20 server channel tests, 168/168 client tests, typecheck and invariant gates passed; screenshots used computed counts injected into the page because the live endpoint returned 404.",
+    "Current task buddy_project_cbd6043b-848b-4741-ae0f-d4a54f03688c is in review, owned by buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4; next action is cross-device clearing and Buddy unread invariance after backend reload.",
+    "Current task buddy_project_d6b661c3-8250-4d45-a4aa-07c4874392ab is open; its comment adds the unread endpoint, real-data screenshots, cross-device clear and Buddy unread checks to reload verification.",
+    "Read-only repository inspection: commit 63edbe5 contains server routes, owner read store, desktop/mobile UI and integration test; current HEAD is b39dca3, so it is an ancestor. Working tree is dirty in overlapping ChannelBrowser.tsx, ChannelsMobile.tsx and related files; no conclusion is drawn from those later changes."
+  ],
+  "limitations": "No tests were run and no backend restart/live endpoint call was performed for this audit. The working tree is broadly dirty, including overlapping feature files, so commit 63edbe5 was reviewed directly. Tasks snapshot search was inconclusive; current Tasks were fetched directly."
+}

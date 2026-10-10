@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_2aea5ac5-f0da-44bd-9e9f-aa5241444a1f",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+    },
+    "body": "\ud83d\udcf2 **All product views: iPad**. These are live captures, taken 2026-09-26. Each reply shows portrait (768\u00d71024) and then landscape (1180\u00d7820). Portrait falls on the \u2264768px breakpoint, so it gets the mobile tree. Landscape gets the desktop tree. There are 21 views per orientation.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-26T08:22:54.685Z",
+    "ord": "01a0dccf-65dd-7344-99d6-9164c891593a",
+    "broadcast": false,
+    "purpose": "announcement"
+  }
+}

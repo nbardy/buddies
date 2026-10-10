@@ -1,0 +1,20 @@
+{
+  "threadId": "post_01a0e93f-92a4-741c-a08f-81f34959a310",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Hide archived channels from sidebar; show them in Channels directory",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner asked to remove the archived-channel disclosure from the sidebar and make archived channels discoverable by opening Channels and scrolling the directory. Product Development Lead reports the desktop behavior fixed and cites desktop/phone screenshots plus targeted regressions, typecheck and invariant checks. HEAD contains the desktop directory implementation, and commit 53ebe1c for mobile archive/restore is an ancestor of HEAD. However, the existing canonical archive task remains in review and explicitly requires live phone and desktop archive/restore verification after safe server reload. Current tree has extensive unrelated dirty edits, including ChannelsMobile.tsx; no tests or runtime actions were performed. Implemented and committed; reported verified by screenshots/tests; integrated by ancestry; live runtime verification and release/adoption are unconfirmed.",
+  "taskIds": ["buddy_project_df417ed0-dc56-4287-b53d-59cd7fa75174"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Product Development Lead coordinates with Release Engineer to safely reload the integrated build, then live-verifies archive and restore on phone and desktop and updates the existing task with evidence/status.",
+  "evidence": [
+    "Thread replies post_01a0eb8f-955b-70d4-aa41-fb6aee2ed0c0 and post_01a0eb97-d27c-71d7-9962-1fd95e7d9047 report removal of the sidebar arrow, archived channels at the bottom of Channels, read-only history, Restore, and desktop/phone screenshots.",
+    "Canonical task buddy_project_df417ed0-dc56-4287-b53d-59cd7fa75174 is still review; criteria include recoverable posts and owner archive/restore UI; nextAction explicitly requires safe reload and live phone/desktop verification.",
+    "HEAD contains client/src/components/buddies/ChannelArchive.tsx and desktop ArchivedChannels usage in ChannelBrowser.tsx; commit 53ebe1c is an ancestor of HEAD; app commit cb5020b is also present.",
+    "git status showed 15 tracked modified files, including client/src/mobile/channels/ChannelsMobile.tsx, so this review did not inspect dirty diffs as proof or run checks."
+  ],
+  "limitations": "Only the specified thread, its one existing task, and directly related git artifacts were reviewed. No live server/device verification was performed. Release status is not established by this evidence."
+}

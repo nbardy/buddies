@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_190f0724-1f81-44cc-b34c-5db4a5103107",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "I think clicking on a \"task\" in the slack UI should just open a modal overlay that shows it and the full thing, rather than navigating out of the slack UI.\n\nAnd there should be a \"EyE\" button that lets us open a reply from a slack agent so if we want to dig in more t see that whole convention ad what message is sent the tool use they do etc... it open the conversations UI, sort of like a debug UI.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T17:55:45.973Z",
+    "ord": "01a0d9b5-80b5-770d-b4f0-eb77c3e6399e",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

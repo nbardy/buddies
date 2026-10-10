@@ -1,0 +1,33 @@
+{
+  "threadId": "post_4e306ec0-d04c-4454-98f1-a8340480e7ab",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Install experience: first-run workspace and upstream update flow",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The exact ask was to make a single-command install register the user's checkout as an editable workspace, check for upstream changes on start, and offer an Update action that opens a readable #upstream merge thread. Bootstrap and fetch/update code are implemented in 0914a8b and that commit is an ancestor of current HEAD. The HTTPS submodule fix is also integrated: current HEAD has the HTTPS URL and ff0702f is an ancestor. However neither parent Task's full done criteria is met: both remain in_progress, the install trial and update/restart flow are outstanding, and current follow-up records still leave the runtime popup unverified and bootstrap rename/Home work pending. Therefore implementation is partial, integration is confirmed for these commits, but verification and release are incomplete.",
+  "taskIds": [
+    "buddy_project_85f41c44-df38-45c6-9171-ffe7f6e3c2ba",
+    "buddy_project_d5d94e0e-4990-4277-bafc-73a7c6bb2a6d",
+    "todo_b4d7809f-e0b4-4a7b-8c32-8343f96cc12b",
+    "todo_4cd56ea4-4c3c-4ef3-8402-8e3c21f80b24",
+    "todo_4784a23d-715a-4959-8dba-17ba07b15f78",
+    "todo_eb819e02-f333-488c-bd61-81cf249bb00c"
+  ],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4",
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+  ],
+  "nextAction": "Product Development Lead to coordinate existing bootstrap rename and Home follow-ups with Development Lead; Release Engineer to complete todo_b4d7809f's exact-commit temporary-state fresh-install/update trial after implementation is ready. Do not close either parent Task until the acceptance criteria and runtime/screenshot evidence are met.",
+  "evidence": [
+    "Root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_4e306ec0-d04c-4454-98f1-a8340480e7ab.json; owner asks for editable install workspace, startup upstream check and popup launching a #upstream merge thread.",
+    "Thread replies retrieved in full with channel_read; owner approved Product Dev + Upstream Release Manager bootstrap; follow-up identifies SSH-only submodule failure and requested install project.",
+    "Current Task buddy_project_85f41c44-... remains in_progress; popup child todo_4cd56ea4 remains in_progress with 'not yet seen rendered'; integration/evidence child todo_96da3105 remains in_progress pending live check and screenshot. Bootstrap task todo_eb819e02 is marked done based on commit 0914a8b.",
+    "Current Task buddy_project_d5d94e0e-... remains in_progress. HTTPS fix child records 3278d76; anonymous clone succeeded but recorded as not pushed at the time. Current HEAD contains HTTPS .gitmodules and ff0702f is an ancestor. Fresh-install trial todo_b4d7809f remains open; provider, docs, Node/preflight, update/restart criteria remain unresolved in its children.",
+    "Repository commit evidence: 0914a8b is an ancestor of HEAD; ff0702f is an ancestor of HEAD; HEAD:.gitmodules points to https://github.com/nbardy/agent-cli.git.",
+    "Repository has many unrelated dirty files, so conclusions rely on committed HEAD and Buddy task records, not dirty-tree checks."
+  ],
+  "limitations": "Read-only targeted review; no tests, live install, popup screenshot, runtime activation, or release/push performed. Task snapshots and commit history establish implementation/integration evidence, not user-visible operation or a successful complete install trial."
+}

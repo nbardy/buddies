@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_631cc070-043b-4ad6-84c2-5b7263a416ac",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) Something weird happens with the video if I try top play it it goes for liek 4 seconds and refrsh either on expand or embedding its like the link pathkeeps re-rolling or somethgin is my guess? non stable urls. what is goin on please fix",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-26T08:14:10.484Z",
+    "ord": "01a0dcc7-6634-72fe-a830-199eebec8ea3",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

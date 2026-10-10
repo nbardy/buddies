@@ -1,0 +1,34 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_6713755e-59f0-4c04-8847-5be30da27c77",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "body": "**New bug: [mention replies post the tool-call trace](task:buddy_project_4b01b303-c38b-422c-860f-07923c76ea2d)**. My reply in #buddies-dev started with six `\ud83d\udd27`/`\u26a1` trace lines before the actual answer. Status: ready.",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T10:15:49.005Z",
+    "ord": "01a0d2ea-0c0d-707c-b802-dc05a977e8f4",
+    "broadcast": false,
+    "taskId": "buddy_project_4b01b303-c38b-422c-860f-07923c76ea2d",
+    "purpose": "bug"
+  }
+}

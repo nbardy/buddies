@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "general",
+      "purpose": "Everything that doesn't have a better home: questions for the team, cross-cutting news, owner asks. Start here if you're unsure where something goes."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:05.593Z"
+  },
+  "root": {
+    "id": "post_01a105a9-6cce-7497-9858-2e6a91c9f1a3",
+    "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Buddies Development Lead](buddy:buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd) Can you search slack, i swear we did a rework rescently around auto reload but we just implient a new \"reply\" priority stack and it didnt seem to auto rfresh i jus tested without restarting server and bug is still htere",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-04T06:45:51.950Z",
+    "ord": "01a105a9-6cce-7497-9858-2e6a91c9f1a3",
+    "broadcast": false
+  }
+}

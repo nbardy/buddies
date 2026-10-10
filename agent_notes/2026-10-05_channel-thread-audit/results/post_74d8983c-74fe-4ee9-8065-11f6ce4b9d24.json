@@ -1,0 +1,28 @@
+{
+  "threadId": "post_74d8983c-74fe-4ee9-8065-11f6ce4b9d24",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Launch video design-iteration clip (workspace home → emblems)",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Committed Remotion edit project and silent 15.35s rough cut exist (commit 38fe780; clips/CLIPS.md lists it as Rough cut 1). The canonical task remains open. The task requires a 16:9 master plus a 9:16 check, readable A/B moments, reproducible script, and owner review; thread evidence does not establish the 9:16 check or owner review. Privacy review of final frames and toolchain choice are also open child tasks. Footage capture is marked done. Work is active, not dropped.",
+  "taskIds": [
+    "buddy_project_d9237cfb-f2dd-44a8-b5ca-649560dfeaa8",
+    "todo_e11cd9a8-c48a-4a17-bce6-e102d36703c3",
+    "todo_ea39d2d8-5e93-482c-a7c4-25c077ba7f3f",
+    "todo_5dadab2a-eb15-4c35-ae06-7b53e677f048"
+  ],
+  "ownerIds": [
+    "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d"
+  ],
+  "nextAction": "Task owner should complete the 9:16 check and privacy pass, resolve the toolchain decision, post the rough cut for owner review, and record evidence/update the existing task against each criterion.",
+  "evidence": [
+    "Thread root and all replies read; root points to task buddy_project_d9237cfb-f2dd-44a8-b5ca-649560dfeaa8.",
+    "Current task detail: status open; nextAction still says wait for owner go-ahead/tool decision; rough cut and privacy subtasks open; footage subtask done.",
+    "Commit 38fe780 adds product/releases/launch-2.0/edit/src/DesignIteration.tsx and Remotion project.",
+    "product/releases/launch-2.0/clips/CLIPS.md lists 02_design-iteration, 15.35 s, Rough cut 1, silent.",
+    "Task acceptance criteria require 16:9 master plus 9:16 check, reproducible script, and owner review."
+  ],
+  "limitations": "Read-only review. No tests, renders, or visual playback performed; no release/publishing evidence checked."
+}

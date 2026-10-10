@@ -1,0 +1,24 @@
+{
+  "threadId": "post_01a10591-4820-76f7-a8cb-4274a895817a",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Unify thread model selection and retry behavior for should-reply failures",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested priority and retry behavior is implemented in commit 02b75b3 and that commit is integrated in main. Evidence documents focused server regressions, client retry checks, typecheck and invariant gates, plus desktop/phone retry screenshots. However the canonical task remains in_progress and requires a review; no observed backend idle reload or live retry confirms activation. The broader Buddy test run had an ENOTEMPTY cleanup failure and a rerun that did not exit, so the broader suite is not clean. Work is active rather than dropped.",
+  "taskIds": ["task_01a105b0-2c7c-7527-bff6-aa092ec61da0"],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"],
+  "nextAction": "Task owner Buddies Development Lead should review commit 02b75b3 against the task's full acceptance criteria, update its status/evidence, and confirm the existing backend has reloaded at a safe idle boundary (or record an equivalent runtime verification). Do not force a restart or live agent test; task explicitly disallows those.",
+  "evidence": [
+    "Thread reports commit 02b75b3; git show confirms commit 02b75b3356a6ddb5721d01bd9735d4668781d357 is an ancestor of main.",
+    "agent_notes/2026-10-04_thread-model-priority-and-retry.md: implementation details; focused 6/6 regression execution, 17 client checks, typecheck, 9 invariants and screenshots; broader suite limitation; no push/restart/live retry.",
+    "Current task get: task_01a105b0-2c7c-7527-bff6-aa092ec61da0 is in_progress, owner buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd; task acceptance criteria require review and full criteria evidence.",
+    "Current working tree has unrelated changes in channel UI/error journal paths; no relevant files from commit 02b75b3 are dirty."
+  ],
+  "limitations": [
+    "No tests were run during this review, per instruction.",
+    "No live restart, backend reload observation, or live retry was performed.",
+    "The report note is implementation evidence; this audit did not independently reproduce its checks."
+  ]
+}

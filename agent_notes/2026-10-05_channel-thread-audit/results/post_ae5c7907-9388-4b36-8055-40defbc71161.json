@@ -1,0 +1,23 @@
+{
+  "threadId": "post_ae5c7907-9388-4b36-8055-40defbc71161",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Post all product view screenshots in mobile, iPad and desktop threads",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Closed out: Product Development Lead posted three screenshot threads in #bugfixes (phone 390×844, iPad portrait 768×1024 and landscape 1180×820, desktop 1440×900). Each contains four category replies—Channels, Chats, Buddies and Swarms—with screenshot links. Replies claim 21 views per target size/orientation. No matching canonical task was found; active task lookup only surfaced unrelated error-triage work.",
+  "taskIds": [],
+  "ownerIds": [
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "None for this request.",
+  "evidence": [
+    "Root request post_ae5c7907-9388-4b36-8055-40defbc71161",
+    "Mobile thread post_03d7f0e5-4817-447b-a9bc-462e51e5edd4; replies post_4fa87c5d-6045-4ac5-955e-6f05968f6244, post_7958e5f7-5f4b-4081-b886-7f90ae0c8656, post_f6eaa7ed-458f-44df-a67b-edbe7e510cbb, post_077f4911-de6e-44e0-b8a1-ee1eb372295c",
+    "iPad thread post_2aea5ac5-f0da-44bd-9e9f-aa5241444a1f; replies post_c2a34974-fd62-43af-9b6f-1e8982dc1e54, post_82a13854-29a1-4320-93f9-9843a898e0db, post_8e8333a6-7458-4361-b0be-79b2d50fa147, post_a4f1db61-0a0b-482a-8e05-8d7838513bb0",
+    "Desktop thread post_86cde6e0-0698-4a57-a18d-3fe4dcbc4905; replies post_09d31918-be2e-410f-be79-079cab82449d, post_90a1c395-d3fb-4a10-b0f9-68b411a56feb, post_3bedeaaa-d265-4bd6-ada7-b3feb91fe279, post_76125985-86a8-4add-8c27-892b51a9a005",
+    "Output script output/shoot-all-views.mjs"
+  ],
+  "limitations": "Confirmed channel delivery from image links and thread bodies; did not open or visually inspect every uploaded image or independently recount each 21-view claim."
+}

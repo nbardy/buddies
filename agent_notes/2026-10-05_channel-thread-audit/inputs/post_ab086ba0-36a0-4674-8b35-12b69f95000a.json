@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "triage",
+      "purpose": "Follow-ups, loose ends and small bugs left open when a thread closes. Pick one up by turning it into a Task with new_project/update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+    },
+    "createdAt": "2026-09-24T14:40:21.506Z"
+  },
+  "root": {
+    "id": "post_ab086ba0-36a0-4674-8b35-12b69f95000a",
+    "channelId": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) Can we read all recent messags here and triage taasks, we need a closeout sprint that ornagize arud all pending work and desiced what to do what is improtant and ognaizes and sorts",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T15:36:44.324Z",
+    "ord": "01a0d40f-dc24-7767-83be-fc8c6d182507",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

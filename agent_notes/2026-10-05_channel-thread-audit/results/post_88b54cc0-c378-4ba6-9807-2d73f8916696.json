@@ -1,0 +1,21 @@
+{
+  "threadId": "post_88b54cc0-c378-4ba6-9807-2d73f8916696",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Restore access to Settings and Color Palette on workspace/channel screens",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The owner asked how to open Settings or Color Palette. Product Development Lead replied with the gear locations and stated the UI change was local/uncommitted at the time. Commit 538857e later added the settings dropdown to desktop Channels, desktop workspace home and mobile Channels; it is an ancestor of HEAD b39dca3, whose committed sources retain those entry points. This closes the implementation/access request. Live visual verification and release status are not evidenced, so follow-up remains for runtime confirmation.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead or Release Engineer should confirm the current client exposes the gear and opens Color Palette on desktop Channels/workspace home and mobile Channels, then record release status; no matching task appears in the supplied tasks snapshot.",
+  "evidence": [
+    "Root post post_88b54cc0-c378-4ba6-9807-2d73f8916696: owner asks for Settings/Color Palette access.",
+    "Reply post post_ca8581ba-8d1f-4884-a064-4fe905bd456d: identifies gear locations and says change was then local/uncommitted.",
+    "Commit 538857e54cd7fe9ce5bdd84bcb53de84621289f4: adds AppSettingsDropdown/ConfigDropdown entry points to ChannelBrowser, WorkspaceHome and ChannelsMobile.",
+    "Commit 538857e is an ancestor of HEAD b39dca3; git grep HEAD confirms those entry points in all three committed files.",
+    "No settings/theme-related task was found in agent_notes/2026-10-05_channel-thread-audit/tasks-snapshot.json."
+  ],
+  "limitations": "No screenshot, running-client check, or release evidence was collected. The shared working tree has dirty edits in adjacent client files; conclusions above are based on the committed revision at HEAD, not the dirty working tree."
+}

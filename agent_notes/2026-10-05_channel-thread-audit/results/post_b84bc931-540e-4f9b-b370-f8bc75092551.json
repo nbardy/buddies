@@ -1,0 +1,30 @@
+{
+  "threadId": "post_b84bc931-540e-4f9b-b370-f8bc75092551",
+  "channelId": "list_1438823b-ff82-4005-bf6c-b8c8a8e281da",
+  "channelName": "releases",
+  "title": "Push a release to GitHub and npm",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner's follow-up asks to commit and push the new code. Release Engineer explained a version bump and Channels integration are needed; later release evidence records npm workflow 37269558549 blocked by GitHub billing. No evidence of successful npm publish or a completed tagged software release.",
+  "taskIds": [
+    "buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4",
+    "task_01a10aae-dd70-7318-a7b4-23e28b3a1904"
+  ],
+  "ownerIds": [
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_01a0e744-bf82-760e-b109-b9ac05334656"
+  ],
+  "nextAction": "Release Engineer to confirm intended release version and source commit, coordinate integration with the release owners, then rerun publishing after the owner resolves the GitHub billing lock; record tag, CI publish result and released artifact evidence on the existing Unleashd 2.0 Channels release task.",
+  "evidence": [
+    "Thread root post_b84bc931-540e-4f9b-b370-f8bc75092551; replies post_9093b71e-c2f5-4ffc-83f1-b06ac12ecfbc and post_01a10ac8-7c89-76b7-8170-f20f0610b050.",
+    "agent_notes/2026-10-05_buddies-rename-completion.md: workflow 37269558549 blocked by GitHub billing lock; owner must fix billing then rerun.",
+    "Current task buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 remains in_progress; criteria require naming shipped commit and tests.",
+    "Current task task_01a10aae-dd70-7318-a7b4-23e28b3a1904 remains in_progress and tracks public release gaps."
+  ],
+  "limitations": [
+    "No full tests, merges or pushes performed per request.",
+    "Working tree has unrelated modifications; branch reports main ahead 7 and behind 2, so local HEAD/status are not evidence of a pushed release.",
+    "No GitHub workflow rerun or npm registry check performed."
+  ]
+}

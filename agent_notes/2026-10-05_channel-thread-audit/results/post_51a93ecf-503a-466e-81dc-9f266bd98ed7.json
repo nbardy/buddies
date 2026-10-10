@@ -1,0 +1,21 @@
+{
+  "threadId": "post_51a93ecf-503a-466e-81dc-9f266bd98ed7",
+  "channelId": "list_1cbdabf5-a5be-4fad-9203-66bd14ea7b7f",
+  "channelName": "general",
+  "title": "Kick off Unleashd 2.0 Channels release and launch video",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The owner’s kickoff ask was partially delivered: #unleashd-2 and the tracked release task were created, and the 11-beat script/shot list exists and is committed (latest touching commit 6b91370). The existing task remains in_progress and its current criteria are unmet. Current task detail has recording clips, feature proof, close shots, footage handoff, and naming the Channels release commit/test result open. Recent task comments show v13 is deployed as a review cut (f4a4012); it is not final owner approval, and phone-message/branding/content decisions plus final acceptance remain open. Thus kickoff/script setup is implemented; video review-cut is integrated/released; overall launch task and Channels release evidence are not closed.",
+  "taskIds": ["buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4", "todo_4cef8077-98ab-42f1-8daf-1aa011dee254", "todo_78934f45-089e-4303-9d7e-bdb07dbe3fbc", "todo_570a74ca-bf6f-4152-ad83-519612227fd7", "todo_8c2baa49-0f42-4157-9c41-377c9113093d", "todo_3760f262-ebff-43f0-8f04-9b9753df0a36"],
+  "ownerIds": ["buddy_247e963c-a7d8-48e7-a601-9309ea8b448f", "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d", "owner"],
+  "nextAction": "Release Engineer (buddy_247e963c-a7d8-48e7-a601-9309ea8b448f) should reconcile the existing task’s stale recording/handoff rows against current v13 evidence, resolve remaining owner decisions (phone content/privacy and outdated branding/captures), and ensure the Channels release commit plus passed tests are recorded; retain the task open until its done criteria are evidenced.",
+  "evidence": [
+    "Root input: agent_notes/2026-10-05_channel-thread-audit/inputs/post_51a93ecf-503a-466e-81dc-9f266bd98ed7.json",
+    "Live thread replies: post_05a6f65e-d829-4b01-8dfe-df06e9be90e9 and post_edec6864-0094-4455-9ab6-4ad0272958b2 establish channel/task/script; post_69159f5a-8a9a-4a14-bade-0619987951c8 adds editor notes and owner inputs needed.",
+    "Current task read: buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 is in_progress; script child done; recording, feature clips, close, footage handoff, and release-candidate children open.",
+    "Current task comments post_01a10ad6-e28f-7466-acd9-2ebd055e13ab and post_01a10ad4-0d93-74e0-99c3-2e8a0d4ea109 report v13 review-cut publication at f4a4012, source repair 432e886 and poster f3ce5c1 integrated, but outstanding phone-message capture, old GitHub Fork branding, and final owner approval/listening.",
+    "Script file product/releases/UNLEASHD_2_0_LAUNCH_2026-09-26.md exists; latest touching commit 6b91370."
+  ],
+  "limitations": "Thread read returned all available replies in one page (no next cursor). No full tests, video listen, visual inspection, or independent publication probe performed; release/video details rely on current task comments. Review was limited to the specified root and its linked task/artifacts."
+}

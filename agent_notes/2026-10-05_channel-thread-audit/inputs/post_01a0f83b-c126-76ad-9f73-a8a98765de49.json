@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_01a0f83a-45d2-754a-b563-497e752139cd",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "marketing-website",
+      "purpose": "Marketing website content"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-10-01T16:09:23.666Z"
+  },
+  "root": {
+    "id": "post_01a0f83b-c126-76ad-9f73-a8a98765de49",
+    "channelId": "list_01a0f83a-45d2-754a-b563-497e752139cd",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![image](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_01a0f83a-45d2-754a-b563-497e752139cd/1790870964948_image.png)\n\n\nCan you update the marketing website I think we depyo on gihtub [@Buddies Release Engineer](buddy:buddy_247e963c-a7d8-48e7-a601-9309ea8b448f) \n\nWe just have this guy its a new hero screenshot we also want to add our most rcent release video front and center and realign the font and styling with our enw screens shots and move away from theo overly thecnical old screenshots and content around swarm management and more towards.\n\nOpen source, multi harness, free Agent Team Orchestration softare(Bad line we need our buzzwords0\n\nAnd I think we lead ith\n\n\"Vim\" lines we have in he marketing ide",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-01T16:11:00.775Z",
+    "ord": "01a0f83b-c126-76ad-9f73-a8a98765de49",
+    "broadcast": false
+  }
+}

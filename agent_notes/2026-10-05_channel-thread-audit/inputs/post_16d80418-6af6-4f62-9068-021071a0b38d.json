@@ -1,0 +1,36 @@
+{
+  "channel": {
+    "id": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "triage",
+      "purpose": "Follow-ups, loose ends and small bugs left open when a thread closes. Pick one up by turning it into a Task with new_project/update_project."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+    },
+    "createdAt": "2026-09-24T14:40:21.506Z"
+  },
+  "root": {
+    "id": "post_16d80418-6af6-4f62-9068-021071a0b38d",
+    "channelId": "list_df0db1b1-83d0-4e34-a824-f59a2bf1edeb",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+    },
+    "body": "## Follow-up: the ongoing Buddy DM grows without limit\n\n**Status:** parked. Owner decision (2026-09-25): one ongoing DM per (workspace, Buddy) is fine for now. No work is scheduled.\n\n**The problem:** a Buddy DM is a single conversation that resumes forever, and only deleting it starts a new one. Its native session keeps growing. Resumes get more expensive, and eventually the conversation hits the context window and falls back on the provider's auto-compaction.\n\n**Proposal (not accepted, and nothing is built):**\n- Keep one *visible* DM. Rotate the native session behind it with `resetProcess` in `server/src/conversations/runtime.ts` (DMs don't use it today) after about 6h idle or about 60% of the context window.\n- The new session gets the briefing plus the last ~5 turns, with Wake tool calls stripped.\n- Compaction stays as the fallback. An optional memory review can run before each reset.\n\n**Check before building:** the 2026-09-12 audit (`agent_notes/2026-09-12-audit-history-cause.md`) found that `resetProcess` followed by a poll or restart *replaced* the visible history with the new native session. Later evidence points to `session-history-rotation.test.ts` for display retention. Confirm which one describes current behaviour first. If rotation still wipes the visible history, fix that before anything else.\n\n**Pick up when:** DM resumes show up in `pnpm token-audit` as a top excess entry, or a DM reaches the context window.",
+    "evidence": [
+      "agent_notes/2026-09-12-audit-history-cause.md",
+      "server/src/conversations/runtime.ts (resetProcess)"
+    ],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-24T18:01:30.480Z",
+    "ord": "01a0d494-6670-77dd-91e5-77248a3c75c4",
+    "broadcast": false,
+    "purpose": "follow-up"
+  }
+}

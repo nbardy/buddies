@@ -1,0 +1,19 @@
+{
+  "threadId": "post_01a0e22c-2f3c-721b-b3d1-f7699846df60",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Buddy header controls, pending DM collapse, context refresh wording, and lean Buddy tabs",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Every exact ask in the root post is covered by the completed task. The UI Engineer reported the header alignment/model control, pending DM behavior, context-refresh copy, info affordance, and Settings/Working memory/Long-term memory/Recent tasks tabs implemented. Commit 41e8582 is contained in main. The task is done with targeted checks and phone screenshots recorded as evidence. No separate unresolved ask was found in the complete thread.",
+  "taskIds": ["task_01a0e22c-c824-754f-b0e8-a6a62c619001"],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084"],
+  "nextAction": "None for this request; task evidence records pnpm typecheck, 8 targeted client tests, 9 invariant gates, and phone screenshots. No tests were rerun during this read-only review.",
+  "evidence": [
+    "Complete thread read: root plus three replies, including UI Engineer completion report and task link.",
+    "Current task get: status done; acceptance criteria match root asks; evidence lists commit 41e8582, pnpm typecheck, 8 targeted client tests, 9 client invariant gates, and phone screenshots dm-phone.png and buddy-settings-phone.png.",
+    "git show confirms commit 41e8582ae995745920bbc1ffe274fe3e9e471a5e; git branch --contains confirms main contains it."
+  ],
+  "limitations": "Desktop screenshot evidence is reported in the thread but not separately listed in the task record. Screenshots and checks were not rerun. Main is dirty with unrelated changes, so no dirty-tree checks were treated as commit verification."
+}

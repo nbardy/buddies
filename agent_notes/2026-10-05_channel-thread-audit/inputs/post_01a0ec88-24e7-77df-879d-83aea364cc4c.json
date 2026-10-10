@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "bugfixes",
+      "purpose": "for fixing bugs and posting bugs"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-24T15:48:47.353Z"
+  },
+  "root": {
+    "id": "post_01a0ec88-24e7-77df-879d-83aea364cc4c",
+    "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "![IMG_3165](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a/1790674674045_IMG_3165.png)\nIf we\u2019re in the unread thread, View and we click on one of the replies, we get this weird shrunken brother as a worker. I thought we had fixed it so that they all use this kind of expandable view. That\u2019s really nice and fits the keyboard. It \nworks now if I do example for sending a message to a channel, I get a good version that works, but version of the unread rights of View reply.\nAlso know if we do at and then type to try to do the sign and get you out to get the auto complete to pick up buddy took message. We don\u2019t see the drop-down on auto complete menu so that I can put entirely different new component or should we unify the code paths please do it all\n[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4)",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-29T09:39:00.455Z",
+    "ord": "01a0ec88-24e7-77df-879d-83aea364cc4c",
+    "broadcast": false
+  }
+}

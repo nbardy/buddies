@@ -1,0 +1,38 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_74d8983c-74fe-4ee9-8065-11f6ce4b9d24",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "buddy",
+      "id": "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d"
+    },
+    "body": "Moved here from #channels-feature. **Footage for the design-iteration clip** is saved and labelled. I haven't started the edit.\n\nTask: [Launch video: design-iteration clip (workspace home \u2192 emblems)](task:buddy_project_d9237cfb-f2dd-44a8-b5ca-649560dfeaa8). It's for beat 6 of the launch script, \"screenshots of the app being developed\". I couldn't attach it under the release Task because that Task is outside my scope, so it's a separate Task that names the release Task.\n\n**Files** are in `product/releases/launch-2.0/footage/`. Timecodes are in `FOOTAGE.md`.\n- **A** `\u2026design-iteration_A_scroll-request-to-redesign.mov` (12 s). You scroll from \"icons for most recent / design pass\" through the redesign screenshots to the emblem request. **To be clipped.**\n- **B** `\u2026design-iteration_B_emblem-response-great-work.mov` (19 s). The emblem post lands, the contact sheet opens full-frame at about 9 s, and you type \"Great work!\" at 14\u201317 s. **This is the response and the final design.**\n\nAll the movement happens in the thread pane, the right 28% of the frame. So the plan you described works well: blur everything outside that pane and ease the zoom into it. The sidebar shows real channel and Buddy names, and the blur covers them too.\n\n![A \u2014 scroll request \u2192 redesign](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_032cedcb-55a1-44b2-a625-5ff70fb4e616/868136609b31cce160f2810f1f1bf7d6.mov)\n\n![B \u2014 emblem response \u2192 Great work!](/Users/nicholasbardy/.agent-viewer/uploads/channels/list_032cedcb-55a1-44b2-a625-5ff70fb4e616/1eb1442791036e947b0e29d9c64211bc.mov)\n\n---\n\n**Editing tools: my recommendation is Remotion for the timeline and ffmpeg for everything else.**\n\n- **ffmpeg alone** is fine for trimming, concatenating, cropping and encoding. It breaks down on exactly what this clip needs. Its `zoompan` filter is built for stills, so it jitters on moving video. A blur that eases in during scrolls means hand-writing timing expressions inside a filtergraph. And there's no preview, so every adjustment costs a full render.\n- **Remotion** (React/TypeScript, renders in headless Chrome and then ffmpeg) turns the timeline into code:\n  - clipping: `<Sequence>` plus video trim points\n  - zoom: `interpolate()` with easing on a transform\n  - blur: a blurred copy of the frame under a sharp, masked copy of the thread pane\n  - cards and type: the same HTML/CSS as the beat 9 slides\n\n  It fits our stack (pnpm, TypeScript), it can be re-rendered when the UI changes, and Remotion Studio gives you a scrubbable preview in the browser for reviewing drafts. Beat 9 already renders HTML frame-by-frame through our own headless-Chrome script. Remotion is that same idea, plus proper video-layer decoding, which we'd otherwise have to build ourselves.\n- **Driving desktop software** (Final Cut, Resolve, Premiere through computer use) is slow and fragile, and it leaves nothing we can re-run. The useful middle ground: if you want to do fine timing by hand, I can export the cut as FCPXML and you open it in Final Cut. The code stays the source.\n- **Also possible, not recommended:** Motion Canvas is great for animated explainers but weak with real footage. MLT/`melt` (Shotcut's engine) works, but its timelines are hand-written XML.\n\n**One decision for you:** Remotion is free for individuals and companies of up to 3 people. Bigger teams need a paid company licence. If Unleashd is just you, it's free. I won't install anything until you say go.\n\nNext, once you say go: add Remotion under `launch-2.0/edit/`, storyboard this clip, and post a rough cut here.",
+    "evidence": [
+      "product/releases/launch-2.0/footage/FOOTAGE.md",
+      "product/releases/launch-2.0/footage/A_thread-pane_1fps.png",
+      "product/releases/launch-2.0/footage/B_thread-pane_1fps.png"
+    ],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T19:45:52.367Z",
+    "ord": "01a0da1a-4eef-73b0-aaf2-a78ffcfdd183",
+    "broadcast": false,
+    "taskId": "buddy_project_d9237cfb-f2dd-44a8-b5ca-649560dfeaa8",
+    "purpose": "handoff"
+  }
+}

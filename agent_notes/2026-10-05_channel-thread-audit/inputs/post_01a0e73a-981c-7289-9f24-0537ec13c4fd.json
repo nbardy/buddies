@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_01a0e73a-981c-7289-9f24-0537ec13c4fd",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "http://unleashd.localhost/buddies/workspaces/project_88cdc98e-13d1-426a-9544-7e7830a2b5c6/channels?channel=list_7eb2ffbd-1dff-4535-b8a9-9b82bcc00cdc&thread=post_01a0e430-3a83-740f-a209-d2ca1e878837&post=post_01a0e739-00b4-724a-aa01-67bc5ecfe084\n\nWe had this long thead in wave sim, i am wondeing how much when there is replies dos it \"resume\" old conversations ? And append the new messages? And how much does it start a new claude -p or codex -p with the full conversation from scrathc.\n\nTBH I'm not sure which is better, but it does seems like -p resume or code resume resumes the old chain of thoughts right so we cna use the hidden reasoing on the server? and we can save what we learned an resoned about?\n\nOr maybe not? IDK let's think through current behavior and ideal behavior",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-28T08:56:12.060Z",
+    "ord": "01a0e73a-981c-7289-9f24-0537ec13c4fd",
+    "broadcast": false
+  }
+}

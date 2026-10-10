@@ -1,0 +1,30 @@
+{
+  "threadId": "post_01a10a9a-7704-7260-bf05-8705f2236542",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Native app vs browser launch choice, reasons to wrap, and launch readiness",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The owner chose browser-first and requested Setup → Connect from mobile, a sidebar entry, Tailscale guidance, a copyable URL, and first-visit Add to Home Screen guidance. Implementation is substantially present and locally committed, but the canonical task remains in review: the running backend still returned 404 for /api/mobile-access, and live ready-state plus owner iPhone sign-in/install/relaunch evidence are outstanding. The wider launch-readiness question was answered with open release/install tasks, so launch work cannot be called complete based on this thread.",
+  "taskIds": [
+    "task_01a10ab1-5dc7-7464-acb5-37ae756251ad",
+    "buddy_project_d5d94e0e-4990-4277-bafc-73a7c6bb2a6d",
+    "todo_3760f262-ebff-43f0-8f04-9b9753df0a36",
+    "buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4",
+    "todo_5dadab2a-eb15-4c35-ae06-7b53e677f048"
+  ],
+  "ownerIds": [
+    "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f",
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Release Engineer: coordinate safe backend activation for the committed mobile-access endpoint, capture live desktop Ready/copy/auth state, and push through release ownership. Owner: complete the real iPhone copied-URL sign-in, Add to Home Screen, and relaunch pass and record evidence. Product Development Lead and Release Engineer: close remaining install/release/video criteria in their existing tasks before declaring launch complete.",
+  "evidence": [
+    "Thread replies post_01a10ab1-dae5-7254-8bfb-db18daf51e98 and post_01a10af8-2744-7618-9ef5-15ec0eca361d record browser-first decision and requested mobile flow.",
+    "Current task task_01a10ab1-5dc7-7464-acb5-37ae756251ad is review, owned by buddy_247e963c-a7d8-48e7-a601-9309ea8b448f; task evidence records local main commit 2276d28, implementation ancestry through 5b0c956, tests/screenshots, real tailnet URL probe, and live endpoint 404.",
+    "Task comments include setup/sidebar/gear/phone screenshots and report endpoint activation and real phone flow as unverified.",
+    "Thread reply post_01a10a9d-3356-73aa-a9b8-61faf4a41e15 identifies open launch video, privacy, install experience, and release-candidate tasks.",
+    "Working tree is dirty with unrelated concurrent changes; branch main is ahead 7 and behind 2, so commit/integration/release status cannot be inferred from the working tree."
+  ],
+  "limitations": "Read only the specified thread, its exact Connect mobile task, the supplied task snapshot, and repository status. Did not run tests, change tasks, inspect other threads, or verify current live runtime/device state."
+}

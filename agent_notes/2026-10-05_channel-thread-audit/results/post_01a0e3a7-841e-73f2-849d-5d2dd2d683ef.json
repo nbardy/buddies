@@ -1,0 +1,25 @@
+{
+  "threadId": "post_01a0e3a7-841e-73f2-849d-5d2dd2d683ef",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Move channel search from sidebar to center of main header",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The root ask was delivered: Search moved from the rail/sidebar to the centered main channel header in commit 34df74b. Later requests in the same thread to refine the compact pill, add visual depth/padding, and expand in place were also reported implemented in commits 588283c, 9757183, e4884ac, 2652dd6, and 0f05c63. The root placement change is integrated in current main history. The separate global-search feature task remains in review pending owner interaction; this is not evidence that the root placement ask remains open.",
+  "taskIds": ["task_01a0e340-1a73-70d9-91e9-574831032777"],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084", "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead (task owner) should complete the task's existing owner interaction: try Search/Cmd-Ctrl+F, enter a term, open a result, and confirm the originating thread; then update that task's review status/evidence. No follow-up is needed for the root placement request.",
+  "evidence": [
+    "Thread reply post_01a0e3ad-3dc7-72e1-8663-4b39536080c0 reports centered header placement in commit 34df74b, includes desktop screenshot, and reports typecheck, client layout checks, channel-browser tests 7/7, desktop and iPad-landscape screenshots.",
+    "Current repository history contains commit 34df74bd9ecff5462229d8d4390d4571a58992bd on main ancestry; commit changes ChannelBrowser and adds ChannelSearch.",
+    "Later thread posts report centered pill and expanded-in-place refinements in commits 588283c, 9757183, e4884ac, 2652dd6, and 0f05c63, with screenshots and focused checks as described by the implementer.",
+    "Current task task_01a0e340-1a73-70d9-91e9-574831032777 is in review; its done criteria include search invocation, all-readable-channel query, result navigation, and client checks. Its nextAction requests owner interaction with a result.",
+    "The related main-history feature commits include 623289d and b61c1a9 for structured and fuzzy channel search, but this review did not verify live UI behavior."
+  ],
+  "limitations": [
+    "No browser/live UI verification performed in this review; the visual and check evidence is reported in thread/task records.",
+    "The review task's owner-level search-result interaction remains unconfirmed, so global search is implemented and integrated but not fully verified/released by this evidence.",
+    "Repository working tree is dirty with unrelated changes; conclusions rely on commit ancestry and task/thread evidence, not dirty-tree checks."
+  ]
+}

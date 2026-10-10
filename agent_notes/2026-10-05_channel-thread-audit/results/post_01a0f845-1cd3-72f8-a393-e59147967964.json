@@ -1,0 +1,25 @@
+{
+  "threadId": "post_01a0f845-1cd3-72f8-a393-e59147967964",
+  "channelId": "list_01a0f841-84a6-76d9-b977-33d6dacc0438",
+  "channelName": "ui-design",
+  "title": "Remove redundant workspace link; make workspace switcher obvious and add new-workspace action",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The owner requested removal of the redundant “← Workspaces” link, a clearer workspace switcher, and a New workspace action. Buddy UI Engineer reported those changes in the working tree and later restored the preferred ⇅ double-arrow cue after owner feedback. Reports claim typecheck and client gates passed, but the current artifacts remain uncommitted; no browser verification is reported. The request is implemented by report, not verified, integrated, or released.",
+  "taskIds": [
+    "buddy_project_d5d94e0e-4990-4277-bafc-73a7c6bb2a6d"
+  ],
+  "ownerIds": [
+    "buddy_e87e3e91-fe15-4759-9337-52a9636ed084",
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Buddy UI Engineer should preserve the relevant dirty changes, commit the requested switcher and new-workspace work, then provide browser evidence for full workspace name, ⇅ affordance, removed redundant link, and New workspace navigation. Product Development Lead should track integration/release on the existing Install experience task; coordinate against other dirty Buddy client files before any commit.",
+  "evidence": [
+    "Root post request in specified input JSON.",
+    "Thread replies post_01a0f848-815a-7539-992c-c48fbff73cc6 and post_01a100d9-a04e-7209-b9fd-57823fe27b31 report implementation, uncommitted state, and no browser check; post_01a100d9-50b8-77d6-a8ab-9202ff051dd3 records owner's preference for ⇅.",
+    "Read-only git status shows ChannelBrowser.tsx/.css and WorkspaceHome.tsx dirty; recent history contains only prior logo/switcher commit b6eb40c, not this requested implementation.",
+    "Current relevant Install experience task buddy_project_d5d94e0e-4990-4277-bafc-73a7c6bb2a6d remains in_progress; its criteria cover broader install work and do not individually close this UI request."
+  ],
+  "limitations": "No tests run and no browser inspection performed. Git tree is broadly dirty; did not inspect or attribute unrelated edits."
+}

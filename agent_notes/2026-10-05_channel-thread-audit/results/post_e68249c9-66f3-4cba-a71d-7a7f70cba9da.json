@@ -1,0 +1,21 @@
+{
+  "threadId": "post_e68249c9-66f3-4cba-a71d-7a7f70cba9da",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "GPT-6 sol requests failing during shared/MCP rebuilds",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The thread reports GPT-6 Sol Buddy requests failing. Investigation identified the MCP helper becoming unavailable while shared/dist was deleted/rebuilt, followed by a retry attempting to resume a Codex session that had not started. Fixes are committed and on main: 7b484c6 preserves a last-good MCP bundle and avoids phantom resumes; c93852f stages shared ESM/CJS output and atomically publishes completed files. Focused regressions, shared build, typecheck, and dev-supervisor tests are reported passing. This is implemented and integrated, but not fully verified in the live runtime: the canonical Task remains blocked pending an authorized review of the owner's cross-workspace example and a safe live retry after backend reload.",
+  "taskIds": ["buddy_project_fdc1f9ea-2a84-4dbf-924f-04bda5b19d4b"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead to obtain the linked example/error from the owner or authorized workspace access, then verify a live GPT-6 Sol retry after the safe backend reload and update/close the existing blocked Task with evidence.",
+  "evidence": [
+    "Thread replies 2026-09-27 identify the shared/dist rebuild gap and the failed first-startup/no-rollout retry path.",
+    "Current Task buddy_project_fdc1f9ea-2a84-4dbf-924f-04bda5b19d4b is blocked, owned by buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4; nextAction records pending access or pasted example plus safe live retry.",
+    "Task evidence records 32 conversation-runtime tests, 1 real MCP bundle handshake test, server typecheck and targeted biome check passing for 7b484c6; shared build, root typecheck, 11 dev-supervisor tests and targeted formatting checks passing for c93852f.",
+    "git show confirms 7b484c6 and c93852f; git branch --contains confirms both commits are contained in main.",
+    "Current tasks-snapshot lists the same canonical Task as blocked; git working tree is dirty with unrelated concurrent edits, so commit evidence was checked directly."
+  ],
+  "limitations": "No full tests or runtime restart were run. The owner's linked example is outside this Buddy's workspace access; earlier native inspection was denied and this review did not use another route. Live GPT-6 Sol retry and release/runtime behavior therefore remain unconfirmed."
+}

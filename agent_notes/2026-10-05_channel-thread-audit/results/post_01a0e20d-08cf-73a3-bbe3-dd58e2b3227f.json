@@ -1,0 +1,15 @@
+{
+  "threadId": "post_01a0e20d-08cf-73a3-bbe3-dd58e2b3227f",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Restore a single Buddies sidebar list and tighten spacing",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner asked to remove the separate Direct messages list, restore the single Buddies list, and reduce spacing between Buddy/channel rows and between # and channel names. The exact ask is closed out with committed implementation and verification evidence. The thread additionally surfaced workspace list bullets and Buddy row height; those were fixed and verified in the same follow-up. A broad concern that recent merges may have rolled back other design changes was acknowledged but not audited beyond this concrete sidebar ask.",
+  "taskIds": ["task_01a0e213-a688-7579-be7a-67bf4a5ac21c"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "None for this ask. Task records owner visual review as next action; no evidence here confirms whether that review occurred. The wider merge-regression concern would need a separate scoped request.",
+  "evidence": ["task task_01a0e213-a688-7579-be7a-67bf4a5ac21c is done; criteria cover duplicate list removal, compact rows, # spacing, workspace bullets, screenshots and focused checks", "commits fff12ab, 13e1037, cf42691 present; cf42691 is contained in main", "task evidence records screenshots at output/screenshots/2026-09-27-workspace-navigation/final/index.html, browser guard at 375px and 1440px, 19 focused tests, typecheck, Biome and nine invariant checks on exact commit cf42691", "thread reply includes two screenshot attachments and reports desktop/phone verification; it states changes were committed locally and not pushed at the time"],
+  "limitations": ["Shared working tree is dirty with unrelated and overlapping sidebar/channel edits; no checks were run. Task records validation against exact commit, avoiding reliance on current dirty tree.", "Current remote release/deployment state was not checked; implemented and verified are supported, integrated into main is supported by branch containment, released is unconfirmed.", "No full audit of the broad concern about other merge regressions was requested or performed."]
+}

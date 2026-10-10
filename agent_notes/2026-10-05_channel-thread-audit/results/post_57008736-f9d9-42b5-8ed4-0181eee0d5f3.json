@@ -1,0 +1,21 @@
+{
+  "threadId": "post_57008736-f9d9-42b5-8ed4-0181eee0d5f3",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Retry an out-of-tokens reply on a different harness",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Owner asked for a way to retry an out-of-tokens failure with a different harness. Both channel and chat flows are implemented; listed focused regression tests and live picker evidence; both implementation commits are ancestors of HEAD. Task remains in review because the real Retry action has not been submitted. The feature request is active, not dropped.",
+  "taskIds": ["buddy_project_7bf1c0e1-82ce-4db9-89e4-f56bb6971b3a"],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Product Development Lead should ask the owner to press Retry with a different harness on the existing live #bugfixes out-of-tokens notice, confirm the retry succeeds or yields a clear failure, then attach evidence and close the task if its criteria pass.",
+  "evidence": [
+    "Thread replies post_853cbb42-b7ac-40ca-b15b-fcabe64c79cb and post_68ce35fc-4d2d-737a-86c8-0e4f0d43c57c state picker opened; Retry intentionally not pressed.",
+    "Current task buddy_project_7bf1c0e1-82ce-4db9-89e4-f56bb6971b3a is in review; child tasks for channel retry and chat new-chat are done; criteria require channel integration/client render tests and successful route behavior.",
+    "Task evidence lists server/test/channel-conversations.test.ts and client/test/harness-retry.test.tsx, plus a live picker showing Claude, Codex, Cursor, and Muse and route validation.",
+    "Commits e7017e8 (client) and 1216168 (server) are ancestors of HEAD b39dca3, confirming implementation is integrated.",
+    "Thread pagination from the oldest returned ordinal yielded no earlier replies."
+  ],
+  "limitations": "No tests were run per request. Release status and a successful live retry were not independently verified. Working tree has unrelated dirty changes; commit ancestry was checked directly."
+}

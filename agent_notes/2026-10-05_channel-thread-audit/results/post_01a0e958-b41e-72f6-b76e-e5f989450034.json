@@ -1,0 +1,31 @@
+{
+  "threadId": "post_01a0e958-b41e-72f6-b76e-e5f989450034",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Densify the Buddy MCP API: scoped slim runs, waiting reasons, 14→12 tools, dead-code removal",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The accepted MCP densification was implemented, verified and integrated into local main at fb1e307ffa42934a37f12b59188e26028f753eda, which is an ancestor of this checkout's HEAD. The requested owner asked for finish and local merge; task comments and commit evidence record the implementation, tests, size measurements, and review. However, the canonical implementation task remains status=review, owned by Buddies Development Lead, so the exact tracked work is not formally closed. Separate release/push evidence is absent; the integration report explicitly says no push. A later lead review reported two issues (workspace-scope audience enforcement and silent cap of 20 on workspace run rows) and sent blockers to Product Development Lead; no evidence in the reviewed task/thread shows these blockers resolved. The related broader review task is marked done, but its recorded done criteria concern an earlier snapshot and do not establish resolution of the two later review blockers.",
+  "taskIds": [
+    "task_01a0e96f-fa54-7104-8b95-052601bec98e",
+    "task_01a0ebf5-38df-7456-a0ef-a6a7bc38bdfe"
+  ],
+  "ownerIds": [
+    "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd",
+    "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"
+  ],
+  "nextAction": "Buddies Development Lead should reconcile the two recorded review blockers against current main, attach commit-level fix or rationale evidence, then close task_01a0e96f-fa54-7104-8b95-052601bec98e if accepted. Owner authorization is separately required before any push/release.",
+  "evidence": [
+    "Task task_01a0e96f-fa54-7104-8b95-052601bec98e current status=review; owner buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd.",
+    "Task comment post_01a0ebf5-74ac-7238-bea5-66f3659bd41d records merge and verification at fb1e307: typecheck pass; Rust 35/35; focused MCP 30/30; server 226 pass, 1 skip; client 209/209; payload/size measurements; no push.",
+    "Read-only git check: fb1e307ffa42934a37f12b59188e26028f753eda is an ancestor of current HEAD; commit defines WAITING_REASON_SQL once for claim/list and has channel_admin; standalone answer/channel_archive/channel_rename definitions absent in checked MCP surface.",
+    "agent_notes/2026-09-29_mcp-densify-lead-review.md records unresolved blockers: constrain Buddy workspace scope to grant workspace; avoid silently capping workspace runs at 20 and report truncation.",
+    "Related review task task_01a0ebf5-38df-7456-a0ef-a6a7bc38bdfe is done, but its final recorded next action says owner may separately authorize push; no push evidence."
+  ],
+  "limitations": [
+    "No tests rerun, per request; verification relies on task comments and the commit-level report.",
+    "No external release check performed; local-main integration is confirmed, deployment/release is not.",
+    "Task snapshot may lag current live status; current task detail was fetched for both relevant task IDs."
+  ]
+}

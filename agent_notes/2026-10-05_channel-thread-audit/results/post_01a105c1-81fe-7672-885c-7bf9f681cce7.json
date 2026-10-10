@@ -1,0 +1,25 @@
+{
+  "threadId": "post_01a105c1-81fe-7672-885c-7bf9f681cce7",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Fix ugly, misaligned and unclear onboarding style",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The original visual-design ask has implementation and review evidence: later redesign commits report a centered compact Setup dialog with consistent alignment, explicit status, and visible controls, and the linked browser regression checks phone/desktop layout and Copy. The owner then asked whether there were more commits; the response enumerated five commits. Current main contains the visual commits and newer onboarding work. The larger onboarding release is not complete: Connect mobile is still awaiting backend reload/live ready-state and owner iPhone verification, and the branch is unpushed. These are continuing tasks, not dropped work.",
+  "taskIds": ["task_01a10ab1-5dc7-7464-acb5-37ae756251ad"],
+  "ownerIds": ["buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Release Engineer: complete existing Connect mobile task by getting the live backend to load mobile-access, capturing the ready state, and coordinating the owner iPhone pass; then hand off for release-owner push. Original styling commits are local on main but exact inclusion in an upstream release is not established here.",
+  "evidence": [
+    "Thread reply post_01a106d3-9dff-7286-9ca1-73ffe3ef1b16 reports commits 41b5443, b6ebeb2, 97593da, e97acf0 and e88a093 and includes desktop/phone screenshots; commit summaries are locally inspectable.",
+    "agent_notes/2026-10-04_onboarding-dependency-checks.md records compact redesign screenshots, browser layout regression, and verification; phone install controls remain above the fold.",
+    "Local HEAD f3d6cf1 includes the follow-up chain; git status is dirty (56 entries), so this audit does not treat the working tree as commit verification.",
+    "Current task task_01a10ab1-5dc7-7464-acb5-37ae756251ad is review, owned by Release Engineer; evidence documents local integration, live API 404 pending backend reload, owner iPhone pass outstanding, and unpushed commits."
+  ],
+  "limitations": [
+    "Thread pagination returned all 3 replies; an additional before-page returned no posts.",
+    "No tests were run and no screenshots were re-opened in this bounded audit.",
+    "The owner follow-up asks if other commits exist; reply enumerates five, but evidence does not establish that this is an exhaustive repository-wide commit inventory.",
+    "No evidence establishes upstream push/release of the redesign commits."
+  ]
+}

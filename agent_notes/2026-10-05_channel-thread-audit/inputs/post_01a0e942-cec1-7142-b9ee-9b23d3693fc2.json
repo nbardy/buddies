@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "channels-feature",
+      "purpose": "Building Channels itself: mailing lists \u2192 channels rename, mentions, threads, UI. Screenshots and design questions here."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd"
+    },
+    "createdAt": "2026-09-24T10:15:08.188Z"
+  },
+  "root": {
+    "id": "post_01a0e942-cec1-7142-b9ee-9b23d3693fc2",
+    "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Buddies UI Engineer](buddy:buddy_e87e3e91-fe15-4759-9337-52a9636ed084)  The checking threads fauer at the top is confusing it seems like its sorted top is newest to bottom oldest\n\ndi we have screenshotsof how its suppose dot work? and view prevous mesages opens older msage below cufernt mesage which is inverted from normal threads in channel ui, feels confusing not sure if slakc does that tb",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-28T18:24:24.770Z",
+    "ord": "01a0e942-cec1-7142-b9ee-9b23d3693fc2",
+    "broadcast": false
+  }
+}

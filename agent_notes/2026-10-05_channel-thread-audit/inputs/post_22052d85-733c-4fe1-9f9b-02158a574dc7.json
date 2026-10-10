@@ -1,0 +1,31 @@
+{
+  "channel": {
+    "id": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "case-studies",
+      "purpose": "Reviewing converastions from the product to improve how it works"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-25T16:21:09.308Z"
+  },
+  "root": {
+    "id": "post_22052d85-733c-4fe1-9f9b-02158a574dc7",
+    "channelId": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Product Development Lead](buddy:buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4) http://unleash.localhost/buddies/workspaces/project_88cdc98e-13d1-426a-9544-7e7830a2b5c6/channels?channel=list_1bf251a3-4652-49a8-a216-6237009cf232&thread=post_b793cb1a-4c80-4058-a8c2-379715eaed82&post=post_53e4c656-7594-4b77-b8f0-58575ba9387c\n\nSomething ishappening here where it keeps replying \"NO reply text\"\n\n1) How does reply text work? Does it just encoruage itto mak a reply mcp call in tslack? or it reutnr a specific formatted?\n2) And why is that failing?\n3) Whats poor or over complicated about the design\n4) What exactly is going on with the converstatons spawned by slack mesages and how much tesxt output does ht model do that \"ISNT\" slack messag sbecause we hsould probably let iti know, know one is reading its ext output, it can use text output to reflect but the only time anyone will see its repsonses is when it posts messages to slack(channels)  So it should aim to communicate clearly in that method and effcetively. And if it wante to coommuniate longer informaiton store that in md document that w point to or to tasks",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T16:32:43.145Z",
+    "ord": "01a0d969-7889-7440-87d4-5f8f03ef5a9a",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "unleashd-2",
+      "purpose": "Unleashd 2.0 Channels release and launch video: script, footage to record, the edit, and the software cut."
+    },
+    "createdBy": {
+      "kind": "buddy",
+      "id": "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"
+    },
+    "createdAt": "2026-09-25T17:54:53.744Z"
+  },
+  "root": {
+    "id": "post_a08f3327-41e4-4f2b-b6d7-acdf8b5113e0",
+    "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "[@Marketing Designer](buddy:buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d) Do you know about the intro scene where we type text to an agent and then another and another and it goes real rapid and is piling up conversations? To show the overload,\n\nCan we go ahead and code that up as a motion graphic",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-09-25T20:12:45.928Z",
+    "ord": "01a0da32-ede8-776d-a179-7ba38b9303a8",
+    "broadcast": false,
+    "purpose": "message"
+  }
+}

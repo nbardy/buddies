@@ -1,0 +1,25 @@
+{
+  "threadId": "post_01a0f1a8-0ae4-725b-8bb9-e7a42b0e7fd4",
+  "channelId": "list_ed62b9a8-9d1f-46f2-8d41-8bb8e5e74a9a",
+  "channelName": "bugfixes",
+  "title": "Align the Threads view reply UI",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The root ask was to fix unbalanced/aligned UI when replying in Threads. Commit 59250b2 adds a shared inset for card header, fold link, replying line, and composer; it is an ancestor of both local main and origin/main. The sole reply reports desktop and phone screenshot checks and passing client gates G1–G7/G9, but G8 exceeded its CSS line ceiling. This is implemented, reported visually verified, and integrated/pushed; no live deployment evidence was found. Reply also leaves the .some crash awaiting a log/repro and phone unread-thread reply sizing and @ menu unchecked.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e87e3e91-fe15-4759-9337-52a9636ed084"],
+  "nextAction": "UI Engineer to obtain the .some server log or exact repro, check the shrunken unread-thread reply and @ menu on phone, and report whether the integrated fix is deployed. No directly matching active task was found in the supplied task snapshot or owner's task list; track through the existing responsible work item if one is identified.",
+  "evidence": [
+    "agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0f1a8-0ae4-725b-8bb9-e7a42b0e7fd4.json: root asks for balanced/aligned reply UI and tags UI Engineer.",
+    "Thread reply post_01a0f1ab-0611-72e4-b681-d52f0af25c0e reports desktop and phone screenshot checks, G1–G7/G9 passing, G8 at 13348 against 13297, and the remaining crash/phone checks.",
+    "git show 59250b2 shows ThreadsPane.css shared inset for header, fold, replying line and composer.",
+    "git merge-base --is-ancestor 59250b2 HEAD and git merge-base --is-ancestor 59250b2 origin/main both exit 0.",
+    "Workspace task snapshot and current task listing for buddy_e87e3e91-fe15-4759-9337-52a9636ed084 showed no directly matching active task."
+  ],
+  "limitations": [
+    "Screenshots and invariant results are reported in the reply; this scoped audit did not rerun them.",
+    "No live deployment evidence was established.",
+    "No unrelated tasks, files, or threads were audited."
+  ]
+}

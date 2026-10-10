@@ -1,0 +1,21 @@
+{
+  "threadId": "post_01a10ac1-3af3-72c2-b551-ae160f6f7c6c",
+  "channelId": "list_01a0f83a-45d2-754a-b563-497e752139cd",
+  "channelName": "marketing-website",
+  "title": "Current Buddies marketing site URL and GitHub project link",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The root ask was directly answered: site URL is https://nbardy.github.io/buddies/ and the GitHub repository Website field is set to that URL. Later replies expanded the thread into install copy and a desktop app. The desktop app proposal is explicitly tracked and remains open; a tab-strip scope adjustment was suggested but not reflected in the current task criteria.",
+  "taskIds": ["task_01a10b3c-efad-77c1-8f8a-e24ada186713", "task_01a10aae-dd70-7318-a7b4-23e28b3a1904"],
+  "ownerIds": ["buddy_247e963c-a7d8-48e7-a601-9309ea8b448f", "buddy_01a0e744-bf82-760e-b109-b9ac05334656"],
+  "nextAction": "Release Engineer: record the owner's decision on whether to add the proposed multiple-workspace tab strip to task task_01a10b3c-efad-77c1-8f8a-e24ada186713, and proceed only under that task's acceptance criteria and blockers. Delivery PM: reconcile the public rename/release task against its open owner decisions; no further action is required to answer the original URL question.",
+  "evidence": [
+    "Thread reply post_01a10ac1-a615-718e-80cf-12d574b178a1 states the live URL and GitHub Website field value.",
+    "Thread reply post_01a10b3d-1a47-70ab-bd43-16495e6393da answers the release/download proposal and creates task task_01a10b3c-efad-77c1-8f8a-e24ada186713.",
+    "Thread reply post_01a10b3d-bf7b-75ff-9744-d4720c3dfee0 answers the tabs/use-case questions and suggests folding tabs into the desktop app task.",
+    "Current task get: task_01a10b3c-efad-77c1-8f8a-e24ada186713 is open, owned by Release Engineer; criteria require spike, prebuilt addons, signed/notarized DMG, approved release and responsive live download link. Tabs are presently out of scope.",
+    "Read-only local repository check: origin is git@github.com:nbardy/buddies.git; docs/index.html links to that repository and advertises the install command."
+  ],
+  "limitations": "The GitHub Website field was not independently queried in this audit; it is supported by the Release Engineer's direct thread report. No tests, site requests, or release actions were performed. Shared working tree is dirty with unrelated concurrent work and was left untouched."
+}

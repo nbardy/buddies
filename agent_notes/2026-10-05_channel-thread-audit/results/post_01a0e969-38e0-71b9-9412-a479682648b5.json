@@ -1,0 +1,21 @@
+{
+  "threadId": "post_01a0e969-38e0-71b9-9412-a479682648b5",
+  "channelId": "list_4bd52262-8f0b-465d-99e5-60cc33eb8565",
+  "channelName": "buddies-dev",
+  "title": "Remove background_enabled as a configurable flag; make background work always available",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The requested code change is implemented in c977f68 and integrated on current local main. Source removes the configurable flag and claim gate; schema migration drops the legacy DB column. Thread reports commit pushed, but also explicitly says the running backend had not yet restarted with rebuilt addon. Live release/adoption is therefore unverified. No matching current implementation Task exists; work is pending runtime adoption, not abandoned.",
+  "taskIds": [],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd", "buddy_247e963c-a7d8-48e7-a601-9309ea8b448f"],
+  "nextAction": "Buddies Release Engineer to confirm the addon is rebuilt and backend restarted, then verify background work is claimable in the live runtime; report evidence to the owner.",
+  "evidence": [
+    "Thread root post_01a0e969-38e0-71b9-9412-a479682648b5 requests removal.",
+    "Reply post_01a0e96f-ead8-7082-bb69-476b8e3bf12d reports implementation in c977f68 and test results; explicitly says backend restart with new addon is pending.",
+    "Reply post_01a0e973-6ce1-752a-96d2-e6136b3f8aa3 reports c977f68 pushed to origin and repeats that backend restart is pending.",
+    "Local HEAD f3d6cf1 includes c977f68 in history; git show c977f68 shows source/schema/test changes; git grep at c977f68 finds no executable background_enabled references, only migration/test comments and historical documentation.",
+    "Current Tasks workspace listing has no matching background_enabled implementation or runtime-adoption task."
+  ],
+  "limitations": "No tests rerun and no live addon rebuild/backend restart or runtime behavior observed. Repository has unrelated dirty paths; commit inspection was against c977f68, not the working tree."
+}

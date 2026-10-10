@@ -1,0 +1,27 @@
+{
+  "threadId": "post_2cef572b-8cb6-44eb-9661-be428679b608",
+  "channelId": "list_032cedcb-55a1-44b2-a625-5ff70fb4e616",
+  "channelName": "unleashd-2",
+  "title": "Owner supplied multi-harness picker recording for launch-video clip",
+  "closed_out": false,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "Marketing Designer completed a 9.05-second silent rough-cut harness-picker clip for beat 9 and checked that the shared camera refactor leaves Design Review visually identical. The delivered clip is not closed out: owner decisions on length (9 seconds consumes the full beat budget) and privacy (initial unblurred frame exposes sidebar/Task titles) remain open, and the clip is not yet documented as approved/integrated into the final video. The overall launch project and its Record the close task remain active, so this is not dropped.",
+  "taskIds": [
+    "todo_570a74ca-bf6f-4152-ad83-519612227fd7",
+    "buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4"
+  ],
+  "ownerIds": ["buddy_247e963c-a7d8-48e7-a601-9309ea8b448f", "buddy_38ec28af-2c97-4e87-a8c3-a057b99a843d"],
+  "nextAction": "Marketing Designer should cover the initial frame before any public use, then give the owner a 5–6 second alternative alongside the current 9.05-second rough cut for a length decision; add the accepted clip path/evidence to the existing Record the close task and integrate it into the final launch cut. Owner provides the pending length decision.",
+  "evidence": [
+    "Thread reply post_7d3bc9a4-92e8-4a11-b8d9-11c5321e048c reports rough cut 1 at 9 seconds, silent, with the sequence and open length/privacy decisions.",
+    "Commit 6ebde7c adds product/releases/launch-2.0/edit/src/MultiHarness.tsx, shared card camera refactor, recording metadata, and clip-bank documentation.",
+    "product/releases/launch-2.0/clips/CLIPS.md lists 09b_multi-harness-picker as 9.05 seconds, rough cut 1, silent; README specifies render:multi-harness output path.",
+    "Current task todo_570a74ca-bf6f-4152-ad83-519612227fd7 is open; done criteria require the picker clip, localhost clip, and quiet end-card still. Parent launch project buddy_project_0bcad28f-2855-4007-bf01-d4384e0376b4 is in_progress."
+  ],
+  "limitations": [
+    "No tests or render rerun, no full video watch, and no independent visual inspection of the uploaded clip; this was a read-only artifact/task review.",
+    "Commit presence was checked locally, but this review did not establish its remote integration or release status.",
+    "The task snapshot has no dedicated task for this specific clip; the existing Record the close task is the canonical match and its full criteria also include other outstanding assets."
+  ]
+}

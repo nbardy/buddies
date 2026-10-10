@@ -1,0 +1,30 @@
+{
+  "channel": {
+    "id": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+    "workspaceId": "project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c",
+    "kind": {
+      "type": "public",
+      "name": "case-studies",
+      "purpose": "Reviewing converastions from the product to improve how it works"
+    },
+    "createdBy": {
+      "kind": "owner"
+    },
+    "createdAt": "2026-09-25T16:21:09.308Z"
+  },
+  "root": {
+    "id": "post_01a0f659-342a-7691-92b8-31a8b3791401",
+    "channelId": "list_ed5e4655-3019-4646-97f2-2b0e37f2ee75",
+    "author": {
+      "kind": "owner"
+    },
+    "body": "Users/nicholasbardy/git/unleashd/agent_notes/2026-10-01_product_lead_dispatch_fanout_handoff.md\n\n--\n\n[@Buddies Development Lead](buddy:buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd) Whats in this handoff from a user",
+    "evidence": [],
+    "request": {
+      "state": "none"
+    },
+    "createdAt": "2026-10-01T07:23:56.330Z",
+    "ord": "01a0f659-342a-7691-92b8-31a8b3791401",
+    "broadcast": false
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "threadId": "post_01a0e8c5-39f3-716a-b4a8-55feac4a7b7e",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Remove the unwanted ‘Also send to channel’ thread-reply option",
+  "closed_out": true,
+  "follow_up_needed": false,
+  "dropped": "no",
+  "summary": "Owner asked when the ‘Also send to channel’ option was added and requested removal. Product Development Lead said it was added Sep 28 by commit 7427b00, then removed it in ef32838. The commit removes the checkbox and broadcast client state, rejects old-client broadcast=true requests, and adds a regression test asserting normal replies stay out of the channel feed. A subsequent owner reply said the UI still appeared in a stale tab; Product Development Lead refreshed the tab/thread and reported the checkbox absent with the unsent draft preserved. This satisfies the exact ask. Implementation and commit integration on local main are evidenced; test/screenshot passes are reported in-thread, not rerun here. Release/push status is not independently established.",
+  "taskIds": [],
+  "ownerIds": ["buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "None for this request; the thread reports the stale UI was resolved after refresh. No matching task exists in the task snapshot.",
+  "evidence": [
+    "Root request post_01a0e8c5-39f3-716a-b4a8-55feac4a7b7e in agent_notes/2026-10-05_channel-thread-audit/inputs/post_01a0e8c5-39f3-716a-b4a8-55feac4a7b7e.json",
+    "Thread reply post_01a0e908: says added Sep 28 in 7427b00; removed in ef32838; focused tests, typecheck, invariants and desktop/phone screenshots reported passed; local, not pushed",
+    "Thread reply post_01a0e93f: owner still saw option in old UI and requested removal",
+    "Thread reply post_01a0e942: Product Development Lead refreshed tab and exact thread; option absent and unsent draft preserved",
+    "Commit ef328383f5260812951b95b490d48c5409455f62 is on local main and remotes/origin/main; includes client removal, server rejection and server regression coverage"
+  ],
+  "limitations": [
+    "No matching task was found in tasks-snapshot.json; task get for the root ID returned not_found.",
+    "No tests were rerun per instruction. The test and screenshot passes are reported in the thread.",
+    "The thread's statement that the commit was not pushed is from Sep 29; current branch containment shows local main and remotes/origin/main contain it, but no deployment/release check was performed."
+  ]
+}

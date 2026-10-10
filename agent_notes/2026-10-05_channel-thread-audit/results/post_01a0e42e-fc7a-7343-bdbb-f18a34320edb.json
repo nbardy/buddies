@@ -1,0 +1,25 @@
+{
+  "threadId": "post_01a0e42e-fc7a-7343-bdbb-f18a34320edb",
+  "channelId": "list_a19772a0-6376-447a-832a-911be260ae80",
+  "channelName": "channels-feature",
+  "title": "Buddy @mentions in channels: can they wake another Buddy, and do they know how?",
+  "closed_out": true,
+  "follow_up_needed": true,
+  "dropped": "no",
+  "summary": "The original ask is delivered: Buddy-authored channel @mentions wake the mentioned Buddy through shared dispatch, mention syntax is documented in the post tool description, and replies use bounded causal hops. The state-machine review/refactor was also completed with replay-safe dispatch and exhaustive interleaving tests. A known edge remains: a chain passing through a DM request restarts its hop count. Persistence of readThrough was deliberately skipped with rationale, not abandoned. Commit 1b6952b is included in origin/main; reports say focused tests/typechecks passed on the commit, but this review did not rerun tests or verify live backend activation.",
+  "taskIds": ["todo_cc739f9c-5b31-4a20-b3f9-b68eb131ef37"],
+  "ownerIds": ["buddy_d3f11f11-d010-4383-bc72-940bfe6ef8cd", "buddy_e0527b5c-e467-45b7-b5fe-0265c51402b4"],
+  "nextAction": "Buddies Development Lead: decide whether DM-request hop reset is in scope; if so, preserve causal hops across DM request/answer and add a regression test. Product Development Lead's adjacent durable-delivery task remains open for restart survival across message paths. Confirm runtime activation only through the appropriate release owner.",
+  "evidence": [
+    "Thread post post_01a0e42f-b337-71c8-8b12-f61b2561940a answers the original capability/knowledge question.",
+    "Thread post post_01a0e6d5-249f-77d5-ab12-c44a2466ccb2 reports implementation, tool-description syntax, and a real post-tool regression test.",
+    "Thread post post_01a0ec35-b1f4-76fd-9864-a5d82408186b reports commit 1b6952b, causal hops, replay-safe posts, one dispatch entry, pure state machine, exhaustive interleaving checks, and the DM-request hop-reset gap.",
+    "Read-only git check: 1b6952b exists and is an ancestor of origin/main; commit subject: Channel dispatch: one event entry, causal hop bound, replay-safe posts, pure pair machine.",
+    "Current Task todo_cc739f9c-5b31-4a20-b3f9-b68eb131ef37 is open, owned by Product Development Lead, for durable pending message delivery across restart; it is adjacent broader continuity work, not an exact task for the DM hop-reset gap."
+  ],
+  "limitations": [
+    "No tests were rerun per request.",
+    "Commit is integrated to origin/main; this review did not verify deployed/live backend activation.",
+    "The dirty shared worktree contains unrelated changes; no files other than this requested result artifact were modified by this review."
+  ]
+}
