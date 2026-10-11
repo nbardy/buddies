@@ -126,7 +126,7 @@ export function ChannelPostContent({
           <button
             type="button"
             className="channel-post-add-reaction"
-            style={{ ...actionStyle, display: undefined }}
+            style={actionStyle}
             aria-label="Add emoji reaction"
             title="Add emoji reaction"
             disabled={busy}
