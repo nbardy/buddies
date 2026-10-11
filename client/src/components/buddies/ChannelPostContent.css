@@ -1,7 +1,8 @@
 .channel-post-add-reaction {
-  display: none;
-}
-.channel-post-content:hover .channel-post-add-reaction,
-.channel-post-content:focus-within .channel-post-add-reaction {
   display: inline-flex;
+  opacity: 0;
+}
+.channel-post-content:is(:hover, :focus-within) .channel-post-add-reaction,
+[data-device="mobile"] .channel-post-add-reaction {
+  opacity: 1;
 }

@@ -9,6 +9,9 @@ import { type WorkspaceDirectory, channelPostBody } from './channel-data';
 import type { Post } from './types';
 import './ChannelPostContent.css';
 
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
+// Keep the emoji action in layout: display:none resized posts on hover.
+// Guard: tools/check-reaction-layout.mjs checks hover/focus dimensions and touch access.
 const actionStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
