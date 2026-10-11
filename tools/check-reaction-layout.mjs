@@ -22,6 +22,9 @@ try {
     await session.evaluate(
       `document.querySelector('[aria-label="Close dependency checks"]')?.click()`
     );
+    await session.evaluate(
+      `document.querySelector('[aria-labelledby="home-screen-guide-title"] button')?.click()`
+    );
     const selector = '[data-reaction-layout-probe]';
     await session.evaluate(`(() => {
       const posts = [...document.querySelectorAll('.channel-post-content')];
@@ -54,6 +57,15 @@ try {
     await capture('before');
     if (mobile) {
       assert.equal(before.opacity, '1', 'Touch must expose the emoji action');
+      assert.equal(
+        await session.evaluate(`(() => {
+        const button = document.querySelector('${selector} .channel-post-add-reaction');
+        const r = button.getBoundingClientRect();
+        return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('button') === button;
+      })()`),
+        true,
+        'Touch action must be reachable'
+      );
     } else {
       await session.hover(selector);
       const hovered = await measure();
