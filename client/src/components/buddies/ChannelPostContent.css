@@ -1,5 +1,4 @@
 .channel-post-add-reaction {
-  display: inline-flex;
   opacity: 0;
 }
 .channel-post-content:is(:hover, :focus-within) .channel-post-add-reaction,
