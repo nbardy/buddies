@@ -1,0 +1,417 @@
+[
+  {
+    "name": "p1-state",
+    "path": "/Users/nicholasbardy/git/unleashd-p1state",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "p1guard811",
+    "path": "/Users/nicholasbardy/git/unleashd-p1guard811",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "structured-search",
+    "path": "/Users/nicholasbardy/git/unleashd-structured-search",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "thread-follow",
+    "path": "/Users/nicholasbardy/git/unleashd-thread-follow",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "thread-follow-main",
+    "path": "/Users/nicholasbardy/git/unleashd-thread-follow-main",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "rename-buddies",
+    "path": "/Users/nicholasbardy/git/_wt/rename-buddies",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "unleashd-connect-mobile",
+    "path": "/Users/nicholasbardy/git/wt/unleashd-connect-mobile",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "buddies-bootstrap-rename",
+    "path": "/Users/nicholasbardy/git/unleashd-wt-buddies-bootstrap-rename",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "ws-general",
+    "path": "/Users/nicholasbardy/git/_wt/ws-general",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "missing-cli",
+    "path": "/Users/nicholasbardy/git/_wt/missing-cli",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "installed-provider",
+    "path": "/Users/nicholasbardy/git/_wt/installed-provider",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "ip-base",
+    "path": "/Users/nicholasbardy/git/_wt/ip-base",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "builder-reviewer",
+    "path": "/Users/nicholasbardy/git/_wt/builder-reviewer",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "search-fuzzy",
+    "path": "/Users/nicholasbardy/git/_wt/search-fuzzy",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "search-before",
+    "path": "/Users/nicholasbardy/git/_wt/search-before",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "desktop-spike",
+    "path": "/private/tmp/unleashd-desktop-spike",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "desktop-agent-detect",
+    "path": "/Users/nicholasbardy/git/_wt/desktop-agent-detect",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "auth-local-trust",
+    "path": "/Users/nicholasbardy/git/unleashd-wt-auth-local-trust",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "copied-store",
+    "path": "/Users/nicholasbardy/git/_wt/copied-store",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "outage-delivery",
+    "path": "/Users/nicholasbardy/git/_wt/outage-delivery",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "copied-store-base",
+    "path": "/Users/nicholasbardy/git/_wt/copied-store-base",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "durable-pending",
+    "path": "/Users/nicholasbardy/git/_wt/durable-pending",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "rc-trial-1005",
+    "path": "/Users/nicholasbardy/git/_wt/rc-trial-1005",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "outage-base",
+    "path": "/Users/nicholasbardy/git/_wt/outage-base",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "launch-1005",
+    "path": "/Users/nicholasbardy/git/_wt/launch-1005",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "launch-base",
+    "path": "/Users/nicholasbardy/git/_wt/launch-base",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "rc-base-1005",
+    "path": "/Users/nicholasbardy/git/_wt/rc-base-1005",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "launch-wave2",
+    "path": "/Users/nicholasbardy/git/_wt/launch-wave2",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "durable-pending-base",
+    "path": "/Users/nicholasbardy/git/_wt/durable-pending-base",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "dm-open-fast",
+    "path": "/Users/nicholasbardy/git/unleashd-wt-dm-open-fast",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "buddy-channel-create",
+    "path": "/Users/nicholasbardy/git/_wt/buddy-channel-create",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "ui-rework-verify",
+    "path": "/Users/nicholasbardy/git/_wt/ui-rework-verify",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "merge-verify",
+    "path": "/Users/nicholasbardy/git/_wt/merge-verify",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "missing-cli-127",
+    "path": "/Users/nicholasbardy/git/_wt/missing-cli-127",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "base-verify",
+    "path": "/Users/nicholasbardy/git/_wt/base-verify",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "thread-follow-v2",
+    "path": "/Users/nicholasbardy/git/_wt/thread-follow-v2",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "launch-final",
+    "path": "/Users/nicholasbardy/git/_wt/launch-final",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "launch-final-2",
+    "path": "/Users/nicholasbardy/git/wt-launch-final-2",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "final-1006",
+    "path": "/Users/nicholasbardy/git/_wt/final-1006",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "tests-gc",
+    "path": "/Users/nicholasbardy/git/_wt_tests_gc",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "lease-clamp",
+    "path": "/Users/nicholasbardy/git/_wt/lease-clamp",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "runs-retry",
+    "path": "/Users/nicholasbardy/git/_wt/runs-retry",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "consumed-fence",
+    "path": "/Users/nicholasbardy/git/_wt/consumed-fence",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "main-1006",
+    "path": "/Users/nicholasbardy/git/_wt/main-1006",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "buddy-read-surface",
+    "path": "/Users/nicholasbardy/git/_wt/buddy-read-surface",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "buddy-run-semantics",
+    "path": "/Users/nicholasbardy/git/_wt/buddy-run-semantics",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "buddy-tool-repairs",
+    "path": "/Users/nicholasbardy/git/_wt/buddy-tool-repairs",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "main-1006b",
+    "path": "/Users/nicholasbardy/git/_wt/main-1006b",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "dm-one-to-one",
+    "path": "/Users/nicholasbardy/git/_wt/dm-one-to-one",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "tool-contract-guards",
+    "path": "/Users/nicholasbardy/git/_wt/tool-contract-guards",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "deliver-to-asker",
+    "path": "/Users/nicholasbardy/git/_wt/deliver-to-asker",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "read-surface",
+    "path": "/Users/nicholasbardy/git/_wt/read-surface",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "target-rebuild",
+    "path": "/Users/nicholasbardy/git/_wt/target-rebuild",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "line-ratchet",
+    "path": "/Users/nicholasbardy/git/_wt/line-ratchet",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "worker-progress",
+    "path": "/Users/nicholasbardy/git/_wt/worker-progress",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "deliver-seats",
+    "path": "/Users/nicholasbardy/git/_wt/deliver-seats",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "durable-owner",
+    "path": "/Users/nicholasbardy/git/_wt/durable-owner",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "tail-inbox",
+    "path": "/Users/nicholasbardy/git/_wt/tail-inbox",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "live-lease",
+    "path": "/Users/nicholasbardy/git/_wt/live-lease",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "owner-branch",
+    "path": "/Users/nicholasbardy/git/_wt/owner-branch",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "silent-wake",
+    "path": "/Users/nicholasbardy/git/_wt/silent-wake",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "thread-revert",
+    "path": "/Users/nicholasbardy/git/_wt/thread-revert",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "wrapup",
+    "path": "/Users/nicholasbardy/git/_wt/wrapup",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "bisect",
+    "path": "/Users/nicholasbardy/git/_wt/bisect",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "core-review",
+    "path": "/Users/nicholasbardy/git/_wt/core-review",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "keep-awake",
+    "path": "/Users/nicholasbardy/git/_wt/keep-awake",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "core-review-base",
+    "path": "/Users/nicholasbardy/git/_wt/core-review-base",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "core-verify",
+    "path": "/Users/nicholasbardy/git/_wt/core-verify",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "lost-liveness",
+    "path": "/Users/nicholasbardy/git/_wt/lost-liveness",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "core-w4",
+    "path": "/Users/nicholasbardy/git/_wt/core-w4",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "rv-a453e61",
+    "path": "/Users/nicholasbardy/git/_wt/rv-a453e61",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "thread-inject",
+    "path": "/Users/nicholasbardy/git/unleashd-wt-thread-inject",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "thread-busy-gate",
+    "path": "/Users/nicholasbardy/git/unleashd-wt-thread-busy-gate",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "reply-failed-fanout",
+    "path": "/Users/nicholasbardy/git/wt/reply-failed-fanout",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "branch-sweep-1008",
+    "path": "/Users/nicholasbardy/git/wt/branch-sweep-1008",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "rel-4f16903",
+    "path": "/Users/nicholasbardy/git/_wt/rel-4f16903",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "rel-f1011d0",
+    "path": "/Users/nicholasbardy/git/_wt/rel-f1011d0",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "idle-bg",
+    "path": "/Users/nicholasbardy/git/unleashd-wt-idle-bg",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "req-msg",
+    "path": "/Users/nicholasbardy/git/unleashd-wt-req-msg",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "deps-readiness-budget",
+    "path": "/Users/nicholasbardy/git/_wt/deps-readiness-budget",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "rel-deps-budget",
+    "path": "/Users/nicholasbardy/git/_wt/rel-deps-budget",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "steer-atomic",
+    "path": "/Users/nicholasbardy/git/_wt/steer-atomic",
+    "reason": "Cambium refused: path is not a Git working tree"
+  },
+  {
+    "name": "steer-atomic-rebase",
+    "path": "/Users/nicholasbardy/git/wt-steer-atomic-rebase",
+    "reason": "Cambium refused: path is not a Git working tree"
+  }
+]
