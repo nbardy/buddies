@@ -124,6 +124,13 @@
   background: transparent;
 }
 
+.channel-code-copy-btn {
+  top: var(--sp-3);
+  right: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+
 .channel-markdown a {
   color: var(--theme-user);
 }
