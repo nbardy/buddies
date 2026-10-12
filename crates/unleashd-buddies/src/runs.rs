@@ -430,6 +430,8 @@ impl Store {
                     if direct || post.author.buddy_id() == Some(run.buddy_id.as_str()) {
                         deliveries::subscribe(tx, &run.buddy_id, post.root(), Some(conversation_id))?;
                     }
+                    // An existing follow moves to where its delivery runs (it never starts one).
+                    deliveries::follow_placement(tx, &run, &post, conversation_id)?;
                 }
                 // A message is enqueued with its destination conversation and subscribes nothing.
                 RunInput::Deliver { .. } | RunInput::Message { .. } | RunInput::Chat { .. } | RunInput::Retired { .. } => {}
@@ -445,13 +447,17 @@ impl Store {
     /// (5d75897), so the run has no conversation until the host computes the seat after the claim,
     /// and the same-root rule cannot see a seat busy on another root's delivery (2026-10-07: three
     /// launch-thread replies failed "Couldn't reply: conversation_busy"). Never failed, never
-    /// retried in a loop. Only a run that has not executed may go back. Does not subscribe.
+    /// retried in a loop. Only a run that has not executed may go back. Does not subscribe; an
+    /// existing follow moves here, as its later bind sees nothing to move (`follow_placement`).
     /// Guard: `a_run_placed_in_a_busy_seat_waits_for_it_instead_of_failing`.
     pub fn defer_run(&mut self, run_id: &str, lease_token: &str, conversation_id: &str) -> Result<Run> {
         self.write(|tx| {
             let run = leased(tx, run_id, lease_token)?;
             if run.executing_at.is_some() {
                 return Err(CoreError::Invalid(format!("run {run_id} already executed; it cannot wait for a seat")));
+            }
+            if let RunInput::Deliver { post_id } = &run.input {
+                deliveries::follow_placement(tx, &run, &get_post(tx, post_id)?, conversation_id)?;
             }
             tx.execute(
                 "UPDATE run SET status = 'queued', lease_token = NULL, lease_expires_at = NULL, started_at = NULL,

@@ -191,7 +191,11 @@ wins, decision F). A conversation subscribes when it posts in a DIRECT thread (a
 it is opened for a request or a DM delivery (`bind_run`), or by `channel_read {follow}`. Posting in a
 public or task thread subscribes nothing, and a seat opened there is bound but not subscribed (owner
 decision 2026-10-07, reverting step 5's "every channel"), so a thread's deliveries go to the Buddy's
-thread seat, never to whichever conversation wrote last. Every post by someone
+thread seat, never to whichever conversation wrote last. A follow moves with its deliveries: when the
+host places a subscribed, unpicked delivery in another conversation (`openSeat` found the followed one
+stale, or `outOfOwnerChat` branched), `bind_run`/`defer_run` re-point the subscription there
+(`follow_placement`; 2026-10-12, a follow left on a conversation dead since 10-08 filed 50 deliveries
+under it). Every post by someone
 else in the thread becomes a durable `deliver` run for that conversation, in the post's own transaction
 (crate `deliveries.rs` `fan_out`, called from `posts.rs` `after_write`). An @mention, a task-comment
 mention and the owner's plain post in a DM are deliveries too (`PostInput.mentions`, crate `wake`, host
@@ -229,9 +233,12 @@ from the mere existence of a queued delivery. Decision/evidence:
 `agent_notes/2026-10-08_steer-any-tool-boundary.md`. Every steering take (Buddy tool, native hook,
 Stop hold) is ONE crate call, `take_steering`: the queued-pick guard and the read share a
 transaction, because as two calls a pick posted between them was steered and lost (6/40 release-gate
-timeouts). A take of an owner post stamps the run (`steered_at`); if the turn writes nothing in the
-thread after it, its settle re-delivers the newest such post (`redeliver_unanswered`, the fence
-exempts later attempts). A tool-free stretch receives its durable queued
+timeouts). A take of an owner post stamps the run (`steered_at`, and its `SteerBoundary`); if the turn
+writes nothing in the thread after it, its settle re-delivers the newest such post
+(`redeliver_unanswered`, the fence exempts later attempts). A tool-call take can land after the
+model's last step, so any owner post runs again. A held Stop's take is the model's next message, so
+only a post owing a reply (an @mention or a DM, D10) runs again: since 2026-10-12, a Buddy that
+reads "stop posting" and stays silent is not asked again. A tool-free stretch receives its durable queued
 delivery when idle. Guards: native boundary and model-pick regressions in buddies-v2; rendered
 channel waiting labels; existing
 buddies-v2 "new thread messages steer the live reply once", crate

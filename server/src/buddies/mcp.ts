@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { Actor, ChannelRef, DocRef, DocScope, ListScope, Post } from '@unleashd/buddies-core';
-import type { SteerTrigger, TaskQuery, ThreadUnread } from '@unleashd/buddies-core';
+import type { SteerBoundary, TaskQuery, ThreadUnread } from '@unleashd/buddies-core';
 import type { Resolution } from '@unleashd/shared';
 import { z } from 'zod';
 import type { MessageSource } from '../conversations/messages';
@@ -858,14 +858,15 @@ function steeringText(header: string, root: string, unread: ThreadUnread): strin
 // Take the thread's unread posts into the live turn (marked read, fencing their deliveries) with
 // the queued-pick guard in ONE crate call (`take_steering`, which says why). Never split it into a
 // pick check here and a read there: a pick written between them was steered into the turn on the
-// OLD model and lost (task_01a11a68 6a). An unanswered take is re-delivered at settle (6c).
+// OLD model and lost (task_01a11a68 6a). An unanswered take is re-delivered at settle (6c); a
+// held Stop's take only when the post owes a reply (crate `redeliver_unanswered`, 2026-10-13).
 // Guard: buddies-v2 "an explicit pick posted inside the tool-call window is never steered".
-async function takeSteering(deps: ToolDeps, thread: SteeredThreadOf, trigger: SteerTrigger) {
+async function takeSteering(deps: ToolDeps, thread: SteeredThreadOf, boundary: SteerBoundary) {
   const steering = await deps.core.takeSteering(
     thread.grant.author,
     thread.runId,
     thread.root,
-    trigger,
+    boundary,
     20
   );
   switch (steering.kind) {
@@ -884,7 +885,7 @@ type SteeredThreadOf = Extract<SteeredThread, { kind: 'thread' }>;
 async function liveThreadPosts(deps: ToolDeps, grant: TurnGrant): Promise<string | null> {
   const thread = await steeredThread(deps, grant);
   if (thread.kind === 'none') return null;
-  return takeSteering(deps, thread, 'any_post');
+  return takeSteering(deps, thread, 'buddy_tool');
 }
 
 // Pattern: route-at-send (docs/patterns.md#route-at-send)
@@ -984,7 +985,7 @@ async function steerOwner(
   if (thread.kind === 'none') return null;
   switch (agent.kind) {
     case 'main':
-      return takeSteering(deps, thread, 'owner_post');
+      return takeSteering(deps, thread, 'native_tool');
     case 'sub': {
       const { author } = thread.grant;
       const fresh = await deps.core.noticeSubAgent(author, thread.runId, thread.root, 20);
@@ -1022,7 +1023,7 @@ export async function holdStoppedTurn(
   for (;;) {
     const shown = joined([
       await addressedMessages(deps, grant),
-      taken(await takeSteering(deps, thread, 'owner_post')),
+      taken(await takeSteering(deps, thread, 'held_stop')),
     ]);
     if (shown !== null || closed.aborted) return shown;
     const owner = new AbortController();

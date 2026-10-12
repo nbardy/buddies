@@ -255,6 +255,19 @@ pub(crate) fn deliver_to_spawner(tx: &Transaction, buddy_id: &str, post: &Post) 
     enqueue_delivery(tx, buddy_id, post, conversation).map(|_| ())
 }
 
+// Pattern: route-at-send (docs/patterns.md#route-at-send)
+/// The host placed a delivery routed to the Buddy's follow elsewhere (runner.ts `openSeat`,
+/// `outOfOwnerChat`): the follow moves with it (unpicked runs only; a pick must not pull a chat).
+/// It never moved before: 2026-10-12, 50 Game Designer deliveries were filed under a Claude
+/// conversation dead since 10-08. Guard: `a_subscribed_delivery_placed_elsewhere_moves_the_follow`.
+pub(crate) fn follow_placement(tx: &Transaction, run: &Run, post: &Post, placed: &str) -> Result<()> {
+    let Some(followed) = run.conversation_id.as_deref().filter(|c| *c != placed && run.config.is_none()) else { return Ok(()) };
+    if subscription(tx, &run.buddy_id, post.root())?.as_deref() == Some(followed) {
+        subscribe(tx, &run.buddy_id, post.root(), Some(placed))?;
+    }
+    Ok(())
+}
+
 /// The Buddy's subscribed conversation in a thread, if any.
 pub(crate) fn subscription(tx: &Transaction, buddy_id: &str, root_id: &str) -> Result<Option<String>> {
     Ok(tx
@@ -362,10 +375,16 @@ fn live_turn(tx: &Transaction, buddy_id: &str, run_id: &str) -> Result<bool> {
 /// the next attempt of its delivery, in the same conversation (which holds every steered post).
 /// Owner posts only (re-delivering Buddy chatter could ping-pong); an owner Stop re-delivers nothing.
 /// Guard: buddies-v2 "a post steered into a turn's last tool call is delivered again".
+/// A held Stop's take is the model's next message, not that race: only a post owing a reply (an
+/// @mention or a DM, D10) runs again. Every one used to: 2026-10-12, a silent-as-asked Game Designer
+/// re-ran the owner's "stop posting" for an "already handled" turn. NULL boundary = a tool call.
+/// Guard: `a_held_stop_take_redelivers_only_a_post_that_owes_a_reply` (tests/core.rs).
 pub(crate) fn redeliver_unanswered(tx: &Transaction, run: &Run, post_id: &str) -> Result<()> {
-    let steered_at: Option<String> =
-        tx.prepare_cached("SELECT steered_at FROM run WHERE id = ?1")?.query_row([&run.id], |r| r.get(0))?;
+    let (steered_at, boundary): (Option<String>, Option<SteerBoundary>) = tx
+        .prepare_cached("SELECT steered_at, steered_boundary FROM run WHERE id = ?1")?
+        .query_row([&run.id], |r| Ok((r.get(0)?, r.get(1)?)))?;
     let Some(steered_at) = steered_at else { return Ok(()) };
+    let owed_only = boundary == Some(SteerBoundary::HeldStop);
     let root = crate::posts::get_post(tx, post_id)?.root().to_string();
     // Strictly after: a reply written in the same tool call as the take (the race this closes)
     // precedes it, and a later model step cannot share its millisecond.
@@ -379,9 +398,11 @@ pub(crate) fn redeliver_unanswered(tx: &Transaction, run: &Run, post_id: &str) -
                                   AND r.created_at > ?3 AND r.purpose IS NOT 'reply_failed')
                 AND d.executing_at IS NULL
                 AND d.attempt = (SELECT max(attempt) FROM run k WHERE k.input_key = d.input_key)
+                AND (NOT ?5 OR (SELECT c.kind FROM channel c WHERE c.id = p.channel_id) = 'direct'
+                     OR instr(p.body, '(buddy:' || ?2 || ')') > 0)
               ORDER BY p.ord DESC LIMIT 1",
         )?
-        .query_row(params![root, run.buddy_id, steered_at, run.through_ord], |r| r.get::<_, String>(0))
+        .query_row(params![root, run.buddy_id, steered_at, run.through_ord, owed_only], |r| r.get::<_, String>(0))
         .optional()?;
     if let Some(delivery) = latest {
         crate::runs::next_attempt(tx, &crate::runs::get_run(tx, &delivery)?, run.conversation_id.clone(), None)?;
@@ -453,7 +474,7 @@ impl Store {
     /// timeouts). A post and its delivery are one transaction (`wake`), and SQLite serializes
     /// writers: here a post is visible with its pick, or not at all.
     /// Guard: buddies-v2 "an explicit pick posted inside the tool-call window is never steered".
-    pub fn take_steering(&mut self, actor: &Actor, run_id: &str, root_id: &str, trigger: SteerTrigger, limit: i64) -> Result<Steering> {
+    pub fn take_steering(&mut self, actor: &Actor, run_id: &str, root_id: &str, boundary: SteerBoundary, limit: i64) -> Result<Steering> {
         let buddy_id = reader(actor)?.to_string();
         self.write(|tx| {
             let root = readable_root(tx, actor, root_id)?;
@@ -465,14 +486,15 @@ impl Store {
             }
             let page = unread_page(tx, &buddy_id, &root.id, limit)?;
             let owner = page.posts.iter().any(|post| post.author == Actor::Owner);
-            let takes = match trigger {
-                SteerTrigger::AnyPost => !page.posts.is_empty(),
-                SteerTrigger::OwnerPost => owner,
+            let takes = match boundary {
+                SteerBoundary::BuddyTool => !page.posts.is_empty(),
+                SteerBoundary::NativeTool | SteerBoundary::HeldStop => owner,
             };
             let Some(newest) = page.posts.last().filter(|_| takes) else { return Ok(Steering::Quiet) };
             advance(tx, &Actor::Buddy { id: buddy_id.clone() }, &root.id, &newest.ord)?;
             if owner {
-                tx.prepare_cached("UPDATE run SET steered_at = ?2 WHERE id = ?1")?.execute(params![run_id, now_iso()])?;
+                tx.prepare_cached("UPDATE run SET steered_at = ?2, steered_boundary = ?3 WHERE id = ?1")?
+                    .execute(params![run_id, now_iso(), boundary])?;
             }
             Ok(Steering::Taken { posts: page.posts, unshown: page.unshown })
         })

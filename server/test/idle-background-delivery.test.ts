@@ -42,16 +42,19 @@ const settings = () => {
   return at < 0 ? {} : JSON.parse(process.argv[at + 1]);
 };
 // The turn's Buddy tools, as execution-adoption.test.ts calls them: a reply is a post.
-async function post(body, key) {
+const thread = () => JSON.parse(fs.readFileSync(file('thread.json'), 'utf8'));
+function tool(name, args) {
   const i = process.argv.indexOf('--mcp-config');
   const server = Object.values(JSON.parse(process.argv[i + 1]).mcpServers)[0];
   const auth = server.headers.Authorization.replace(/\$\{(\w+)\}/g, (_, v) => process.env[v] ?? '');
-  const thread = JSON.parse(fs.readFileSync(file('thread.json'), 'utf8'));
-  const response = await fetch(server.url, {
+  return fetch(server.url, {
     method: 'POST',
     headers: { authorization: auth, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'post', arguments: { channel: { id: thread.channelId }, replyToId: thread.rootId, body, key } } }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
   });
+}
+async function post(body, key) {
+  const response = await tool('post', { channel: { id: thread().channelId }, replyToId: thread().rootId, body, key });
   mark('posts', response.status + ' ' + (await response.text()).includes('"isError":true') + '\n');
 }
 function runHook(command, input) {
@@ -68,7 +71,15 @@ async function main() {
   if (prompt.trim()) mark('turns', process.pid + '\n');
   say({ type: 'system', subtype: 'init', session_id: 'fake-' + process.pid });
   if (/SCENARIO:fanout/.test(prompt)) return fanout();
-  if (!/SCENARIO:bgidle/.test(prompt)) { text('ok'); say({ type: 'result', subtype: 'success' }); return; }
+  if (!/SCENARIO:bg(idle|silent)/.test(prompt)) { text('ok'); say({ type: 'result', subtype: 'success' }); return; }
+  // bgsilent: a follower (as Game Designer was) that acts on what it is shown and never posts.
+  const silent = /SCENARIO:bgsilent/.test(prompt);
+  if (silent) {
+    while (!fs.existsSync(file('thread.json'))) await new Promise((r) => setTimeout(r, 25));
+    await tool('channel_read', { read: { threadId: thread().rootId, follow: { wait: 0 } } });
+    // The ask is an owner @mention, which must end with a post (D10); this one precedes any take.
+    await post('Running the long job.', 'started');
+  }
   mark('pgid', process.pid);
   say({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'Bash' } } });
   say({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'input_json_delta', partial_json: JSON.stringify({ command: 'sleep 600', run_in_background: true }) } } });
@@ -94,11 +105,11 @@ async function main() {
     const decision = result.out.trim() ? JSON.parse(result.out) : {};
     if (decision.decision !== 'block') break;
     mark('steered', JSON.stringify({ at: Date.now(), jobDone, reason: decision.reason }) + '\n');
-    await post('Switching to a 3x3x3 board; the long job keeps running.', 'answer');
+    if (!silent) await post('Switching to a 3x3x3 board; the long job keeps running.', 'answer');
   }
   say({ type: 'result', subtype: 'success', result: 'launched' });
   await job;
-  await post('The long job finished.', 'finished');
+  if (!silent) await post('The long job finished.', 'finished');
   mark('notice-handled');
   say({ type: 'result', subtype: 'success', result: 'bg finished' });
 }
@@ -440,5 +451,94 @@ test(
     );
     assert.equal(delivery?.errorCode, 'consumed', JSON.stringify(delivery));
     assert.equal(readFake('turns').trim().split('\n').length, 1, 'one process throughout');
+  }
+);
+
+// Incident 2026-10-12 (room-runners #game-design): Game Designer followed the thread and sat idle
+// on background work. The owner's "everyone stop posting" (no @mention) reached it at the held
+// Stop. It acted on that and stayed silent as asked, yet the settle re-delivered the post for a
+// second turn ("already handled"). A held Stop's take re-runs only a post that owes a reply. Fails
+// if mcp.ts passes a tool-call boundary at the hold, or the crate re-delivers any held-Stop take.
+test(
+  'a post taken at a held Stop that owes no reply is not delivered again',
+  { timeout: 120_000 },
+  async () => {
+    await stopBackend();
+    for (const name of [
+      'idle',
+      'go',
+      'steered',
+      'turns',
+      'posts',
+      'pgid',
+      'notice-handled',
+      'thread.json',
+    ])
+      fs.rmSync(fake(name), { force: true });
+    const port = freePortSync();
+    const http = api(port);
+    await startBackend(port);
+    const ws = await http('POST', '/api/buddies/workspaces', {
+      name: 'quiet',
+      rootPath: workspaceDir,
+    });
+    const buddy = await http('POST', '/api/buddies', {
+      workspaceId: ws.body.id,
+      slug: 'quiet-designer',
+      name: 'Quiet Designer',
+      role: 'test worker',
+      provider: 'claude',
+      key: 'hire-quiet-designer',
+    });
+    const buddyId = buddy.body.id as string;
+    const channel = await http('POST', `/api/buddies/workspaces/${ws.body.id}/channels`, {
+      name: 'quiet',
+      purpose: 'the stop-posting thread',
+      key: 'quiet-channel',
+    });
+    const channelId = channel.body.id as string;
+    const asked = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+      kind: 'inform',
+      body: `[@Quiet Designer](buddy:${buddyId}) Run the long job. SCENARIO:bgsilent`,
+      key: 'quiet-ask',
+    });
+    const rootId = (asked.body.post ?? asked.body).id as string;
+    fs.writeFileSync(fake('thread.json'), JSON.stringify({ channelId, rootId }));
+    await eventually(() => fs.existsSync(fake('idle')), Boolean, 'the model turn to end');
+    const stop = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+      kind: 'inform',
+      body: 'Everyone, stop posting in this thread.',
+      replyToId: rootId,
+      key: 'quiet-stop',
+    });
+    const stopId = (stop.body.post ?? stop.body).id as string;
+    await eventually(
+      () => readFake('steered'),
+      (text) => text.includes('stop posting'),
+      'the hold to take it'
+    );
+    fs.writeFileSync(fake('go'), '');
+    const runs = async () => {
+      const r = await http('GET', `/api/buddies/runs?buddyId=${buddyId}`);
+      return (r.body.runs ?? r.body) as Array<{
+        status: string;
+        attempt: number;
+        input: { postId?: string };
+      }>;
+    };
+    await eventually(
+      async () => (await runs()).find((r) => r.input.postId === rootId),
+      (r) => r?.status === 'complete',
+      'the turn to settle'
+    );
+    // The re-delivery is written in the settle's own transaction: none now means none at all.
+    const attempts = (await runs()).filter((r) => r.input.postId === stopId).map((r) => r.attempt);
+    assert.deepEqual(attempts, [1], 'the post the model read and acted on is not run again');
+    assert.equal(
+      readFake('posts'),
+      '200 false\n',
+      'only the reply to the ask; silent as asked after'
+    );
+    assert.equal(readFake('turns').trim().split('\n').length, 1, 'one turn');
   }
 );

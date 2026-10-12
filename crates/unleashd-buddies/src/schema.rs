@@ -244,6 +244,7 @@ CREATE TABLE {table} (
   admission TEXT NOT NULL DEFAULT 'capped' CHECK(admission IN ('owner','capped')),
   delivery_scope TEXT NOT NULL DEFAULT 'thread' CHECK(delivery_scope IN ('thread','to_worker','to_parent')),
   steered_at TEXT, noticed_ord TEXT,
+  steered_boundary TEXT CHECK(steered_boundary IN ('buddy_tool','native_tool','held_stop')),
   CHECK(input_kind IN ('chat','post','deliver') OR status <> 'queued'),
   CHECK(input_kind <> 'chat' OR status <> 'queued' OR body IS NOT NULL),
   UNIQUE(input_key, attempt)) STRICT;
@@ -363,7 +364,8 @@ pub fn open(path: &str) -> Result<Connection> {
             }
             crate::migrate::rebuild_for_delivery(&conn, path)?;
             // Additive columns, in the order they shipped (the same order RUN_TABLE lists them, so a
-            // migrated file and a fresh one agree): delivery_scope (4fcc0be), steered_at, noticed_ord.
+            // migrated file and a fresh one agree): delivery_scope (4fcc0be), steered_at, noticed_ord,
+            // steered_boundary.
             ensure_column(&conn, "run", "delivery_scope", "TEXT NOT NULL DEFAULT 'thread' CHECK(delivery_scope IN ('thread','to_worker','to_parent'))")?;
             // When a live turn last took an owner post at a tool boundary (2026-10-08, task_01a11a68
             // 6c; deliveries.rs `redeliver_unanswered`). Additive: an older build still opens the file.
@@ -371,6 +373,8 @@ pub fn open(path: &str) -> Result<Connection> {
             // The newest owner post a live turn's native sub-agents were shown (2026-10-08,
             // task_01a11af2; deliveries.rs `notice_sub_agent`). Additive: an older build still opens the file.
             ensure_column(&conn, "run", "noticed_ord", "TEXT")?;
+            // Which boundary set `steered_at` (2026-10-13; `redeliver_unanswered`). Additive.
+            ensure_column(&conn, "run", "steered_boundary", "TEXT CHECK(steered_boundary IN ('buddy_tool','native_tool','held_stop'))")?;
             conn.execute_batch(INDEXES)?;
             ensure_post_search(&conn)?;
             Ok(conn)
