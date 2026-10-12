@@ -49,11 +49,24 @@ try {
   );
   await new Promise((resolve) => setTimeout(resolve, 300));
   await capture('channel-before-top');
-  await session.click('.mobile-channel-header__top');
-  await new Promise((resolve) => setTimeout(resolve, 2500));
   assert.equal(
-    await session.evaluate(`document.querySelector('.mobile-channel__scroll').scrollTop`),
+    await session.evaluate(`(() => {
+    const button = document.querySelector('.mobile-channel-header__top');
+    const r = button.getBoundingClientRect();
+    if (!button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)))
+      throw new Error('Channel title is covered');
+    button.click();
+    return document.querySelector('.mobile-channel__scroll').scrollTop;
+  })()`),
     0
+  );
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert(
+    await session.evaluate(`(() => {
+    const node = document.querySelector('.mobile-channel__scroll');
+    return node.scrollTop < node.scrollHeight - node.clientHeight - 48;
+  })()`),
+    'Paging older history must not repin the reader to the bottom'
   );
   const opened = await session.evaluate(`(async () => {
     const tick = ms => new Promise(r => setTimeout(r, ms));
