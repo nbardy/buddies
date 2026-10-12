@@ -268,12 +268,15 @@ async function discover(api, args, token) {
   const conversation = await discoverConversation(args.url, token);
   const buddy = firstBuddy(overview, channel.workspaceId);
   // Task screenshots need a real checklist, rather than the first task mentioned in a post.
-  const tasks = await api(`/api/buddies/tasks?workspaceId=${encodeURIComponent(channel.workspaceId)}`);
+  const tasks = await api(
+    `/api/buddies/tasks?workspaceId=${encodeURIComponent(channel.workspaceId)}`
+  );
   const childCounts = new Map();
   for (const task of tasks) {
     if (task.parentId) childCounts.set(task.parentId, (childCounts.get(task.parentId) ?? 0) + 1);
   }
-  const checklist = tasks.filter((task) => childCounts.has(task.id))
+  const checklist = tasks
+    .filter((task) => childCounts.has(task.id))
     .sort((a, b) => childCounts.get(b.id) - childCounts.get(a.id))[0];
   const direct = buddy.buddyId
     ? await api(`/api/buddies/${encodeURIComponent(buddy.buddyId)}/direct/chain`)
@@ -737,14 +740,17 @@ export function buildScreens(found, focus) {
     {
       name: 'task-filter',
       missing: noChannel ?? (found.taskId ? null : 'no post about a Task in this channel'),
-      views: onBoth(`${channels}?${channel}&task=${enc(found.taskId)}`, prep(`
+      views: onBoth(
+        `${channels}?${channel}&task=${enc(found.taskId)}`,
+        prep(`
         // Fresh screenshot storage opens onboarding; dismiss it to inspect the task itself.
         document.querySelector('[aria-label="Close dependency checks"]')?.click();
         await tick();
         document.querySelector('[aria-labelledby="home-screen-guide-title"] button')?.click();
         await tick();
         return 'OK';
-      `)),
+      `)
+      ),
     },
     {
       name: 'task-discussion',
@@ -938,12 +944,19 @@ async function capture(args) {
           await session.goto(`${args.url}${view.path}`, screen.settleMs ?? 1000);
           // Requests still open at capture time (empty when the page went quiet).
           let pending = await session.waitForNetworkIdle(QUIET_MS, IDLE_TIMEOUT_MS, prefetch);
-          // Continue is a device-local dismissal, unlike "Check again", which invokes CLIs.
+          // Close (✕) is a device-local dismissal, unlike "Check again", which invokes CLIs.
           // Temporary servers deliberately have no agent CLIs; their prompt hid every screen.
+          // Fix guard: this clicked a button whose text was exactly 'Continue'; the wizard's
+          // restyle (098c83b) made it 'Continue →' and a step forward, so every shot was covered.
           await session.evaluate(
             prep(`
             const prompt = document.querySelector('dialog[aria-labelledby="dependencies-title"]');
-            [...(prompt?.querySelectorAll('button') ?? [])].find(button => button.textContent === 'Continue')?.click();
+            prompt?.querySelector('button[aria-label="Close dependency checks"]')?.click();
+            await tick(100);
+            // The phone's Add-to-Home-Screen sheet is device-local too; it mounts once Setup
+            // closes and covered the lower half of every phone shot.
+            const guide = document.querySelector('dialog[aria-labelledby="home-screen-guide-title"]');
+            [...(guide?.querySelectorAll('button') ?? [])].find(b => b.textContent === 'Got it')?.click();
             await tick(100);`)
           );
           if (view.prepare) {
