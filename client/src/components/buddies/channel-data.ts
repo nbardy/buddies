@@ -643,7 +643,8 @@ export function respondingText(
   rows: readonly ChannelResponse[],
   buddyNames: Readonly<Record<string, string>>
 ): ReadonlyMap<string, string> {
-  const byRoot = new Map<string, Map<string, string[]>>();
+  // verb → Buddy name → how many of its rows say that verb.
+  const byRoot = new Map<string, Map<string, Map<string, number>>>();
   for (const row of rows) {
     // Game Designer's busy seat was labelled "at the run limit" although it held its own turn.
     // Show the claim gate's reason. Old backends without it retain the accurate generic queue.
@@ -664,17 +665,26 @@ export function respondingText(
                   : waiting?.kind === 'buddy_archived'
                     ? 'waiting while archived…'
                     : 'queued…';
-    const groups = byRoot.get(row.threadRootId) ?? new Map<string, string[]>();
-    const names = groups.get(verb) ?? [];
-    names.push(buddyNames[row.buddyId] ?? row.buddyId);
-    groups.set(verb, names);
+    const groups = byRoot.get(row.threadRootId) ?? new Map<string, Map<string, number>>();
+    const counts = groups.get(verb) ?? new Map<string, number>();
+    const name = buddyNames[row.buddyId] ?? row.buddyId;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    groups.set(verb, counts);
     byRoot.set(row.threadRootId, groups);
   }
+  // Fix guard (owner, 2026-10-12): one row per queued post named a Buddy once per post, so 15
+  // posts waiting on Game Designer's busy turn read "Game Designer, Game Designer, …" 15 times.
+  // A Buddy is named once per verb, with its post count. Guard: channel-response-status test.
+  const named = ([name, posts]: [string, number]) =>
+    posts === 1 ? name : `${name} (${posts} posts)`;
   return new Map(
     [...byRoot].map(([root, groups]) => [
       root,
       [...groups]
-        .map(([verb, names]) => `${joinNames(names)} ${names.length === 1 ? 'is' : 'are'} ${verb}`)
+        .map(
+          ([verb, counts]) =>
+            `${joinNames([...counts].map(named))} ${counts.size === 1 ? 'is' : 'are'} ${verb}`
+        )
         .join(' · '),
     ])
   );
