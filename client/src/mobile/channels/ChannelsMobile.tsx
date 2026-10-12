@@ -599,6 +599,7 @@ function ChannelScreen({ channelId, context }: { channelId: string; context: Scr
       <ScreenHeader
         backTo={channelsHref(workspaceId, { kind: 'home' })}
         title={title}
+        onTop={follow.top}
         channel={entry?.channel}
         subtitle={heading.about}
         settings={
@@ -718,6 +719,7 @@ function ThreadScreen({
       <ScreenHeader
         backTo={channelsHref(workspaceId, { kind: 'channel', channelId })}
         title="Thread"
+        onTop={follow.top}
         subtitle={`${heading.mark} ${heading.name}`}
         link={{
           path: channelLinkPath(workspaceId, { kind: 'thread', channelId, rootId }),

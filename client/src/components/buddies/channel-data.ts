@@ -761,11 +761,17 @@ export function useFollowBottom(rowCount: number, version: unknown, linkedPostId
   const pin = () => {
     followRef.current = true;
   };
+  // A tap-to-top is reading history: stop following before the next feed refresh.
+  // Guard: check-mobile-keyboard-scroll.mjs clicks the real channel title.
+  const top = () => {
+    followRef.current = false;
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+  };
   const hold = () => {
     const node = scrollRef.current;
     if (node) heldRef.current = node.scrollHeight - node.scrollTop;
   };
-  return { scrollRef, contentRef, onScroll, pin, hold };
+  return { scrollRef, contentRef, onScroll, pin, hold, top };
 }
 
 // ── Owner unread ────────────────────────────────────────────────────────────

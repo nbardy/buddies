@@ -1,6 +1,7 @@
 import type { ConversationConfig } from '@unleashd/shared';
 import { type ReactNode, useEffect, useRef } from 'react';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
+import { useVisibleViewport } from '../../hooks/useVisibleViewport';
 import {
   type ConfigEditOrigin,
   ConversationConfigPicker,
@@ -147,6 +148,7 @@ function Popover({ children, onClose }: { children: ReactNode; onClose: () => vo
 
 function Sheet({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
+  useVisibleViewport(ref);
   useEffect(() => {
     const dialog = ref.current;
     if (dialog && !dialog.open) dialog.showModal();

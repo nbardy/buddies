@@ -452,9 +452,6 @@
   font-weight: 600;
 }
 
-[data-device="mobile"] .channel-composer-model {
-  width: 100%;
-}
 [data-device="mobile"] .channel-composer-model .ui-choice.ui-choice {
   min-height: 44px;
 }
@@ -488,10 +485,13 @@
   width: min(420px, calc(100vw - 2 * var(--sp-6)));
   max-height: calc(100dvh - 2 * var(--sp-6));
 }
+[data-device="mobile"] .channel-composer-model,
 [data-device="mobile"] .channel-harness-picker > .channel-composer-model {
-  inset: auto var(--sp-4) var(--sp-4);
+  position: fixed;
+  inset: auto var(--sp-4) calc(var(--picker-bottom, 0px) + var(--sp-4));
   transform: none;
   width: auto;
+  max-height: calc(var(--picker-visible-height, 100dvh) - 2 * var(--sp-4));
 }
 
 .dm-channels-notice {

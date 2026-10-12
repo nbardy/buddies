@@ -5,6 +5,9 @@ export function inspectChannelModelPicker() {
   const actions = dialog?.querySelector('.channel-composer-model-actions');
   if (!dialog || !options || !actions) throw new Error('Model picker did not load');
   const before = actions.getBoundingClientRect();
+  const viewport = window.visualViewport;
+  const viewportTop = viewport?.offsetTop ?? 0;
+  const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
   const confirm = actions.querySelector('.channel-composer-model-done');
   const button = confirm?.getBoundingClientRect();
   const hit =
@@ -19,8 +22,8 @@ export function inspectChannelModelPicker() {
   options.scrollTop = originalScroll;
   if (
     getComputedStyle(dialog).overflowY !== 'hidden' ||
-    before.top < 0 ||
-    before.bottom > window.innerHeight ||
+    before.top < viewportTop ||
+    before.bottom > viewportBottom ||
     before.left < 0 ||
     before.right > window.innerWidth ||
     Math.abs(before.top - after.top) > 1

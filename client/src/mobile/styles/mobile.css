@@ -1,11 +1,3 @@
-/* =============================================================================
-   mobile.css — Mobile shell tokens + dvh/safe-area layout
-   Imported only by the mobile tree (ShellMobile). Never imported by desktop.
-   Desktop layout lives in App.css (100vh + overflow:hidden) — this file is
-   the Phase 0 layout hardening for PWA on iPhone (§9): 100dvh + env(safe-*)
-   so ChatMobile renders correctly with notches / home indicator / URL bar.
-   ============================================================================= */
-
 /* ---- Tokens (mobile-specific; app color tokens stay in index.css) ---- */
 :root {
   --mobile-tab-bar-height: 56px;
@@ -13,7 +5,6 @@
 }
 
 /* ---- Shell: 100dvh + safe-area insets, not 100vh+overflow:hidden ---- */
-/* ShellMobile renders <div class="mobile-shell"><div class="mobile-content">… */
 .mobile-shell {
   /* Mobile type is smaller, so use the more legible structural tones here. */
   --text-muted: var(--theme-text-body);
@@ -22,8 +13,6 @@
   max-width: 100%;
   min-width: 0;
 
-  /* dvh = dynamic viewport height (tracks URL bar collapse on iOS). */
-  /* svh fallback for older WebKit via @supports below. */
   /* The shell remains the layout viewport. FullscreenComposer owns the
      visual-viewport frame while editing, so keyboard resize events cannot
      leave the whole app stuck at the keyboard's height. */
@@ -35,13 +24,10 @@
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 
-  /* Body scroll owns the page on mobile; inner panes handle own scroll. */
   background: var(--bg-page);
   color: var(--text-primary);
 }
 
-/* Fallback for browsers without dvh (older Safari). Prefer svh over vh
-   because svh is at least stable; last resort is 100vh. */
 @supports not (height: 100dvh) {
   .mobile-shell {
     height: 100svh;
@@ -54,11 +40,7 @@
 }
 
 /* ---- Scrollable content area (between header and tab bar) ---- */
-/* Flex column so a full-height pane (the conversation view) can stretch to
-   exactly this box. Before this, ConversationView sized itself with
-   `height: 100dvh` — 56px taller than this scrollport — and its composer sat
-   underneath the tab bar, unreachable because the inner message list consumed
-   the scroll gesture. Panes must fill the PARENT, never the viewport. */
+/* Panes fill their parent so the composer stays above the tab bar. */
 .mobile-content {
   display: flex;
   flex-direction: column;
@@ -72,11 +54,32 @@
   overscroll-behavior-y: contain;
 }
 
-/* Pane mode (conversation route): the content area does not scroll — the pane
-   inside it does. `flex: 1 1 0` gives the inner a DEFINITE height equal to the
-   content area, which is what lets the composer pin to its bottom edge. */
 .mobile-content--pane {
   overflow-y: hidden;
+}
+
+/* Fix-guard: a locked body and nested list scroller swallowed iOS status-bar
+   tap-to-top. List pages use the document; guard: mobile page scroll probe. */
+html:has(.mobile-shell[data-scroll="page"]),
+body:has(.mobile-shell[data-scroll="page"]) {
+  height: auto;
+  overflow: visible;
+}
+body:has(.mobile-shell[data-scroll="page"]) #root {
+  height: auto;
+}
+.mobile-shell[data-scroll="page"] {
+  height: auto;
+  min-height: 100dvh;
+  padding-bottom: calc(var(--mobile-tab-bar-height) + env(safe-area-inset-bottom));
+}
+.mobile-shell[data-scroll="page"] .mobile-content {
+  overflow: visible;
+}
+.mobile-shell[data-scroll="page"] .mobile-tab-bar {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 100;
 }
 
 .mobile-content--pane .mobile-content__inner {
@@ -85,8 +88,6 @@
 }
 
 /* Constrain reading width on tablet-sized "mobile" viewports */
-/* `flex: 1 0 auto` = at least the container's height, but grows with taller
-   content so list pages keep scrolling the outer container as before. */
 .mobile-content__inner {
   display: flex;
   flex-direction: column;
@@ -103,21 +104,10 @@
   justify-content: space-around;
   height: var(--mobile-tab-bar-height);
   padding-bottom: env(safe-area-inset-bottom);
-  /* Expand tap target into home-indicator area without overlapping it */
   box-sizing: content-box;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-raised-2);
 }
-
-/* When the tab bar uses content-box + padding-bottom: safe area, its
-   visual height is tab-bar-height + safe inset. Keep it above the indicator. */
-@supports (padding-bottom: env(safe-area-inset-bottom)) {
-  .mobile-tab-bar {
-    /* No extra hack needed — padding already separates content from indicator */
-  }
-}
-
-/* ---- Header (optional top bar inside mobile shell) ---- */
 
 /* ---- Tab items (NavLink) ---- */
 .mobile-tab {

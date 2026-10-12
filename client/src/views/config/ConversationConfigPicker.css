@@ -188,6 +188,12 @@
 
 /* ---- sheet: the frame is .ui-sheet (ui/primitives.css); only the options differ. ---- */
 
+[data-device="mobile"] .config-overlay--sheet {
+  position: fixed;
+  inset: auto 0 var(--picker-bottom, 0px);
+  max-height: calc(var(--picker-visible-height, 100dvh) - var(--sp-5));
+}
+
 .config-overlay--sheet .config-picker__group {
   flex-wrap: wrap;
   gap: var(--sp-3);

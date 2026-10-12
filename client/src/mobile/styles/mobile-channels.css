@@ -222,6 +222,18 @@ a.mobile-channels-wake-done {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.mobile-channel-header__top {
+  min-height: 44px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mobile-channel-header__dm-actions {
   flex: 0 1 100%;
   min-width: 0;
@@ -458,15 +470,6 @@ a.mobile-channels-wake-done {
 }
 .mobile-channel-compose--editing .channel-composer-bar {
   order: 2;
-}
-/* The harness/model picker is a bottom sheet on touch; opening it dismisses
-   the keyboard, which pushed the popover off-screen (#bugfixes 2026-09-25). */
-.mobile-channel-compose .channel-composer-model {
-  position: fixed;
-  inset: auto 0 0;
-  max-height: 85dvh;
-  padding-bottom: calc(var(--sp-7) + env(safe-area-inset-bottom));
-  border-radius: 12px 12px 0 0;
 }
 .mobile-channel-header__link {
   display: grid;

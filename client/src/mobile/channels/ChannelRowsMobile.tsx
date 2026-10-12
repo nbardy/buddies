@@ -195,6 +195,7 @@ export function ScreenHeader({
   link,
   channel,
   settings,
+  onTop,
 }: {
   backTo: string;
   title: string;
@@ -202,6 +203,7 @@ export function ScreenHeader({
   link: { path: string; label: string };
   channel?: Channel;
   settings?: ReactNode;
+  onTop?: () => void;
 }) {
   return (
     <header className="mobile-channel-header ui-row" data-channel-header>
@@ -209,7 +211,20 @@ export function ScreenHeader({
         ‹
       </Link>
       <div className="mobile-channel-header__heading">
-        <h1>{title}</h1>
+        <h1>
+          {onTop ? (
+            <button
+              type="button"
+              className="mobile-channel-header__top"
+              aria-label={`Scroll ${title} to top`}
+              onClick={onTop}
+            >
+              {title}
+            </button>
+          ) : (
+            title
+          )}
+        </h1>
       </div>
       {channel && (
         <ChannelHeaderControls channel={channel} description={subtitle}>

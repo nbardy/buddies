@@ -78,7 +78,11 @@ export function ShellMobile() {
   return (
     // data-device scopes the colocated device tweaks in view CSS
     // ([data-device="mobile"] .x), the only device switch views may style on (G9).
-    <div data-device="mobile" className="mobile-shell ui-stack">
+    <div
+      data-device="mobile"
+      data-scroll={isPaneRoute ? 'pane' : 'page'}
+      className="mobile-shell ui-stack"
+    >
       <div className={isPaneRoute ? 'mobile-content mobile-content--pane' : 'mobile-content'}>
         <div className="mobile-content__inner">
           <Outlet />

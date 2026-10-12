@@ -171,7 +171,7 @@ export function ChannelComposer({
   const openModel = (buddyId: string, choice: MentionChoice) => {
     // A failed seat read has no model to pick from: the chip is its retry.
     if (choice.kind === 'failed') return retrySeats();
-    if (submit === 'button') textareaRef.current?.blur();
+    // Keep the mobile keyboard and draft open while choosing reply settings.
     setChoosingFor(buddyId === choosingFor ? null : buddyId);
   };
   // The model picker and the @ menu share the space above the composer.
@@ -636,7 +636,7 @@ function MentionChip({
                 ? `No agent is installed, so ${buddy.label} cannot reply. Install Claude Code or Codex from Setup.`
                 : `Choose the harness and model for ${buddy.label}’s reply`
       }
-      onMouseDown={(event) => event.preventDefault()}
+      onPointerDown={(event) => event.preventDefault()}
       onClick={onOpen}
     >
       <BuddySigil className="channel-composer-mention-sigil" name={buddy.label} />

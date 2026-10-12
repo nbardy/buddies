@@ -1,5 +1,6 @@
 import type { ConversationConfig, ProviderCatalog } from '@unleashd/shared';
-import type { ReactNode } from 'react';
+import { type ReactNode, useRef } from 'react';
+import { useVisibleViewport } from '../../hooks/useVisibleViewport';
 import {
   ConversationConfigPicker,
   type ConversationConfigPickerProps,
@@ -31,6 +32,8 @@ export function ChannelModelPicker({
   actions: ReactNode;
   unavailable?: string;
 }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useVisibleViewport(ref);
   return (
     <>
       <button
@@ -41,6 +44,7 @@ export function ChannelModelPicker({
         onClick={onClose}
       />
       <dialog
+        ref={ref}
         open
         className="channel-composer-model ui-stack"
         aria-label={label}
