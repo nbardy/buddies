@@ -5,7 +5,8 @@ function classes(...values: Array<string | false | null | undefined>) {
 }
 
 type MobilePageProps = PropsWithChildren<{
-  title: string;
+  /** The h1's content: usually text; the channels sidebar puts its workspace switcher here. */
+  title: ReactNode;
   subtitle?: ReactNode;
   className?: string;
   headerAside?: ReactNode;

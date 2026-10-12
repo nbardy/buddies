@@ -3,8 +3,39 @@
    look come from components/buddies/ChannelContent.css + ChannelComposer.css;
    this file owns only mobile layout and the Home rows. */
 /* ── Home: channel and Buddy rows ─────────────────────────────────────── */
-.mobile-channels-header-aside {
+/* Header: the workspace name is the switcher (desktop rail's ⇅). One left edge: emblem, row
+   glyphs and section labels start at the rows' inset (owner, 2026-10-12: labels sat 16px left). */
+.mobile-channels-home .mobile-ui-page__header {
+  align-items: center;
+  margin-bottom: var(--sp-7);
+}
+.mobile-channels-switcher {
   gap: var(--sp-4);
+  max-width: 100%;
+  padding: var(--sp-2);
+  border: 0;
+  border-radius: var(--ui-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-8);
+}
+.mobile-channels-switcher[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text-emphasis) 8%, transparent);
+}
+.mobile-channels-switcher__caret {
+  color: var(--text-muted);
+  font-size: var(--fs-5);
+}
+.mobile-channels-home .ui-section__header {
+  margin-inline: var(--sp-2);
+}
+.mobile-channels-home .channel-browser-buddy-link {
+  padding-inline: var(--sp-2);
+}
+/* Channels, Archived (not a MobileSection) and Buddies: one gap. */
+.mobile-channels-home > * + section {
+  margin-top: var(--sp-9);
 }
 .mobile-channels-list {
   display: grid;
@@ -54,6 +85,9 @@
   color: var(--text-muted);
   font-size: var(--fs-7);
 }
+.mobile-channels-row__hash {
+  place-items: center start;
+}
 .mobile-channels-row__mark {
   border-radius: var(--ui-radius);
   background: color-mix(in srgb, var(--text-emphasis) 10%, transparent);
@@ -61,11 +95,13 @@
   font-size: var(--fs-4);
   font-weight: 700;
 }
-.mobile-channels-row__sigil {
+.mobile-channels-row__sigil,
+.mobile-channels-switcher__emblem {
   display: block;
   flex: none;
-  width: 32px;
-  height: 32px;
+  /* The glyph column's width, so Buddy names line up with channel names. */
+  width: 28px;
+  height: 28px;
   border-radius: 8px;
 }
 .mobile-channels-row__stack {
