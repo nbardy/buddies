@@ -34,6 +34,7 @@ fn muse_walk(dir: &Path, out: &mut Vec<PathBuf>) {
 pub fn discover(root: &Root) -> Vec<PathBuf> {
     let base = Path::new(&root.path);
     match root.format {
+        Format::Pi => subdirs(base).iter().flat_map(|d| files(d, ".jsonl")).collect(),
         Format::Claude => subdirs(base).iter().flat_map(|d| files(d, ".jsonl")).collect(),
         Format::Codex => {
             subdirs(base).iter().flat_map(|y| subdirs(y)).flat_map(|m| subdirs(&m)).flat_map(|d| files(&d, ".jsonl")).collect()
@@ -73,6 +74,7 @@ pub fn classify(root: &Root, path: &Path) -> Touched {
     let name = parts.last().copied().unwrap_or("");
     let visible = |i: usize| parts.get(i).is_some_and(|p| !p.starts_with('.'));
     let is_source = match root.format {
+        Format::Pi => parts.len() == 2 && visible(0) && name.ends_with(".jsonl"),
         Format::Claude => parts.len() == 2 && visible(0) && name.ends_with(".jsonl"),
         Format::Codex => parts.len() == 4 && visible(0) && visible(1) && visible(2) && name.ends_with(".jsonl"),
         Format::Cursor => parts.len() == 4 && visible(0) && parts[1] == "agent-transcripts" && visible(2) && name.ends_with(".jsonl"),

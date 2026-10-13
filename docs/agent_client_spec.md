@@ -166,6 +166,18 @@ Set `CLAUDE_MAX_PERMISSIONS=false` or `CODEX_MAX_PERMISSIONS=false` to disable.
 
 ## Adding a New Provider
 
+### Pi / SoL-Pi
+
+The `pi` harness uses the pinned `sol-pi` launcher (Pi 1.1.0 plus SoL-Pi
+PR #105). Launch, native MCP/codemode configuration, JSON event normalization
+and native session create/resume/fork live in `agent-cli-tool`. The Rust ingest
+crate reads Pi's session tree under `~/.pi/agent/sessions`; ordinary appends
+fold only new bytes, while a branch change rebuilds its visible path. Usage
+includes abandoned branches. Completion follows `agent_settled`, preserving
+SoL-Pi's compaction continuations. Required Buddy MCP waits for actual native
+tool registration before the agent starts, rather than relying on a concurrent
+reachability probe. Setup/model access: `vendor/agent-cli-tool/docs/sol-pi.md`.
+
 1. **Implement harness + parser in `agent-cli-tool`**
    - Add harness config in `agent-cli-tool/src/harnesses/{name}.ts`
    - Add parser/normalizer in `agent-cli-tool/src/run.ts`

@@ -44,6 +44,7 @@ pub enum FoldState {
     Codex(parsers::codex::CodexFold),
     Cursor(parsers::cursor::CursorFold),
     Muse(parsers::muse::MuseFold),
+    Pi(parsers::pi::PiFold),
 }
 
 /// Everything needed to resume a JSONL source where the last read stopped. Stored per source.
@@ -243,6 +244,10 @@ impl From<parsers::muse::MuseFold> for FoldState {
     }
 }
 
+impl From<parsers::pi::PiFold> for FoldState {
+    fn from(f: parsers::pi::PiFold) -> Self { Self::Pi(f) }
+}
+
 fn finish<F: Fold + Into<FoldState>>(
     pass: Pass<F>,
     path: &Path,
@@ -409,6 +414,10 @@ pub fn read_source(
         }),
         Format::Cursor => read_jsonl(path, &ctx, stamp, prior, |f| match f {
             FoldState::Cursor(f) => Some(f),
+            _ => None,
+        }),
+        Format::Pi => read_jsonl(path, &ctx, stamp, prior, |f| match f {
+            FoldState::Pi(f) => Some(f),
             _ => None,
         }),
         Format::Muse => read_jsonl(path, &ctx, stamp, prior, |f| match f {

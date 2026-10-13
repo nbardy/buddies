@@ -41,6 +41,7 @@ const DEFAULTS: Record<Provider, string> = {
   gemini: 'gemini-3.1-pro-preview',
   cursor: 'composer-2.5',
   muse: 'muse-spark-1.3',
+  pi: 'openai-codex/gpt-6.1-sol',
 };
 
 const resolver: ConversationConfigResolver = {

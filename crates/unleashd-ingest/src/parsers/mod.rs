@@ -18,6 +18,7 @@ pub mod codex;
 pub mod cursor;
 pub mod gemini;
 pub mod muse;
+pub mod pi;
 pub mod opencode;
 
 use crate::markers::{Hints, Rebuild, Visible};
