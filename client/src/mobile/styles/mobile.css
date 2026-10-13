@@ -6,9 +6,9 @@
 
 /* ---- Shell: 100dvh + safe-area insets, not 100vh+overflow:hidden ---- */
 .mobile-shell {
-  /* Mobile type is smaller, so use the more legible structural tones here. */
   --text-muted: var(--theme-text-body);
   --text-secondary: var(--theme-text-bright);
+  --channel-picker-layer: 1200;
   width: 100%;
   max-width: 100%;
   min-width: 0;

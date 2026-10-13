@@ -38,6 +38,43 @@ try {
   );
   await new Promise((resolve) => setTimeout(resolve, 500));
   await capture('threads');
+  const navigationPicker = await session.evaluate(`(async () => {
+    const tick = ms => new Promise(r => setTimeout(r, ms));
+    [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Got it')?.click();
+    const input = document.querySelector('.threads-card .channel-composer textarea');
+    if (!input) throw new Error('Threads page needs a real reply composer');
+    input.focus();
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '@');
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    input.setSelectionRange(1, 1);
+    await tick(300);
+    input.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
+    await tick(300);
+    const chip = input.closest('.channel-composer').querySelector('.channel-composer-mention');
+    if (!chip || chip.disabled) throw new Error('No available Buddy reply model');
+    input.blur();
+    await tick(200);
+    chip.click();
+    await tick(300);
+    return !!document.querySelector('.channel-composer-model') &&
+      !document.querySelector('.fullscreen-composer--expanded') &&
+      !document.querySelector('.mobile-tab-bar').hidden;
+  })()`);
+  assert(
+    navigationPicker,
+    'Threads picker must be checked with navigation visible and editor collapsed'
+  );
+  await capture('threads-picker-navigation');
+  assert((await session.evaluate(`(${inspectChannelModelPicker.toString()})()`)).visible);
+  const navBackdrop = await session.evaluate(`(() => {
+    const nav = document.querySelector('.mobile-tab-bar').getBoundingClientRect();
+    return document.elementFromPoint(nav.left + 5, nav.bottom - 5)?.className;
+  })()`);
+  assert.equal(
+    navBackdrop,
+    'channel-composer-model-backdrop',
+    'Backdrop must block navigation while picker is open'
+  );
   await session.goto(`http://localhost:7489${path}?channel=${channel}`, 1500);
   await session.waitForNetworkIdle(500, 15000, /sigil.worker/);
   await session.evaluate(
