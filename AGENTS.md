@@ -75,7 +75,17 @@ client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen in
 - Provider-bespoke values (effort levels etc.) pass through verbatim as
   `z.string()`; no shared enums, no value translation, server-side defaults.
 - Submodule commits: commit + push INSIDE `vendor/agent-cli-tool` first, then
-  bump the outer pointer. Never push main unless the user asks.
+  bump the outer pointer.
+- Keep local `main` and `origin/main` current and merge constantly (owner,
+  2026-10-13). Start work from a freshly fetched `origin/main`. Land finished,
+  verified work on main right away; do not leave it on a local branch waiting
+  for a push. Rebase onto the latest `origin/main`, re-run the checks on the
+  rebased commit, then push it fast-forward (`git push origin HEAD:main`). Then
+  move local `main` up too (`git fetch origin main:main` when no worktree has it
+  checked out). Never force-push main: a rejected push means fetch, rebase,
+  re-verify, push. Why: finished fixes sat unpushed for days while the live
+  checkout ran older code (Task pins 2026-09-30, delivery fixes 2026-10-12),
+  and local `main` lagged `origin/main`.
 - Verify the COMMIT, not the working tree. `git` cannot stage part of a file
   non-interactively, this repo forbids stashing, and the tree routinely carries
   150+ dirty files from concurrent sessions — so a multi-file change can land
