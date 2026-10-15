@@ -484,6 +484,30 @@ impl Store {
         Ok(keyset_page(collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?, limit))
     }
 
+    // Pattern: fix-guards (docs/patterns.md#fix-guards)
+    // Badges fetched 18 full inboxes (293 KB even after scoping). One counts-only read replaces
+    // that fan-out; EXISTS stops at the first unread post. Guard: owner_unread_matches_inboxes.
+    pub fn owner_unread(&self) -> Result<Vec<OwnerUnread>> {
+        collect(self.conn.prepare_cached(&format!(
+            "SELECT workspace.id,
+              (SELECT count(*) FROM channel c JOIN channel_member m ON m.channel_id = c.id AND m.member = 'owner'
+               JOIN post p ON p.channel_id = c.id AND p.request = 'awaiting'
+               WHERE c.workspace_id = workspace.id AND c.archived_at IS NULL AND (p.author_id IS NOT NULL OR c.member_key = 'owner')),
+              (SELECT count(*) FROM channel c LEFT JOIN post_read r ON r.reader = 'owner' AND r.channel_id = c.id
+               WHERE c.workspace_id = workspace.id AND c.archived_at IS NULL AND c.kind != 'task'
+                 AND (c.kind = 'public' OR r.reader IS NOT NULL OR EXISTS
+                   (SELECT 1 FROM channel_member m WHERE m.member = 'owner' AND m.channel_id = c.id))
+                 AND EXISTS (SELECT 1 FROM post p WHERE p.channel_id = c.id AND p.author_id IS NOT NULL
+                   AND {IN_CHANNEL_FEED} AND p.ord > coalesce(r.last_ord, ''))),
+              (SELECT count(*) FROM thread_read t JOIN post root ON root.id = t.root_id JOIN channel c ON c.id = root.channel_id
+               WHERE t.reader = 'owner' AND c.workspace_id = workspace.id AND EXISTS
+                 (SELECT 1 FROM post p WHERE p.root_id = t.root_id AND p.ord > t.last_ord AND p.author_id IS NOT NULL))
+             FROM workspace ORDER BY workspace.id"
+        ))?.query_map([], |r| Ok(OwnerUnread {
+            workspace_id: r.get(0)?, requests: r.get(1)?, unread_channels: r.get(2)?, unread_threads: r.get(3)?,
+        }))?)
+    }
+
     pub fn inbox(&self, actor: &Actor, workspace_id: &str) -> Result<Inbox> {
         let (me, my_buddy) = (actor.key(), actor.buddy_id());
         // Pattern: fix-guards (docs/patterns.md#fix-guards)

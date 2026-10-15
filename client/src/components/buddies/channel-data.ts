@@ -1,3 +1,4 @@
+import type { OwnerUnread } from '@unleashd/buddies-core';
 /**
  * client/src/components/buddies/channel-data.ts
  *
@@ -775,49 +776,11 @@ export function useFollowBottom(rowCount: number, version: unknown, linkedPostId
 }
 
 // ── Owner unread ────────────────────────────────────────────────────────────
-// The owner's read cursor per channel (post_read, reader 'owner'). The inbox
-// counts posts by others after it — replies included — per channel, and lists
-// the requests awaiting the owner in that workspace's DMs.
-
-/**
- * Every workspace's inbox, one keyed resource: the tab title, the sidebar and
- * the mobile tab read it. The key names the workspaces, so a new workspace in
- * the overview is a new entry rather than a stale one; `channel_changed`
- * refreshes it (atoms/resources.ts invalidateChannelResources).
- */
-export const OWNER_INBOXES_KEY = 'buddy-owner-inboxes:';
-
-export function ownerInboxesResource(workspaceIds: readonly string[]) {
-  return resource(`${OWNER_INBOXES_KEY}${workspaceIds.join(',')}`, async (signal) => {
-    // Pattern: fix-guards (docs/patterns.md#fix-guards)
-    // 18 background inbox reads filled the browser's HTTP/1 connection queue on refresh,
-    // leaving route modules and the visible thread waiting. Guard: owner-inboxes.test.ts.
-    const entries: Array<readonly [string, Inbox]> = [];
-    const pending = workspaceIds[Symbol.iterator]();
-    const read = async () => {
-      for (const id of pending) {
-        signal.throwIfAborted();
-        entries.push([id, await buddyApi<Inbox>(inboxUrl(id), { signal })]);
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(2, workspaceIds.length) }, read));
-    return Object.fromEntries(entries);
-  });
-}
-
-export type OwnerInboxes = Readonly<Record<string, Inbox>>;
-
-export function useOwnerInboxes() {
-  const overview = useBuddyOverview(CHANNEL_BACKSTOP_MS);
-  const ids = overview.data?.map((workspace) => workspace.id).join(',') ?? null;
-  const source = useMemo(
-    () => (ids === null ? null : ownerInboxesResource(ids === '' ? [] : ids.split(','))),
-    [ids]
-  );
-  return usePolledFetch<OwnerInboxes>(source, CHANNEL_BACKSTOP_MS);
-}
-
-const isListed = (entry: ChannelUnread) => entry.channel.kind.type !== 'task';
+// Pattern: patches-not-snapshots (docs/patterns.md#patches-not-snapshots)
+// Navigation loads counts in one request; full inboxes load only in views that display them.
+export const OWNER_UNREAD_URL = '/api/buddies/unread';
+export const useOwnerUnread = () =>
+  usePolledFetch<readonly OwnerUnread[]>(OWNER_UNREAD_URL, CHANNEL_BACKSTOP_MS);
 
 /** Requests awaiting the owner that sit in one of `inbox`'s channels. */
 export function inboxRequests(inbox: Inbox): Post[] {
@@ -825,25 +788,20 @@ export function inboxRequests(inbox: Inbox): Post[] {
   return inbox.requests.filter((post) => channels.has(post.channelId));
 }
 
-// What a nav item shows: the badge counts requests waiting on the owner, the
-// dot says some rail channel has anything new. `workspaceId` null sums all.
-// Count each request once, including when talking to an older backend with global requests.
-export type OwnerUnreadTotal = { requests: number; unreadChannels: number; unreadThreads: number };
-
+/** The workspace badge, or the total across every workspace when `workspaceId` is null. */
+export type OwnerUnreadTotal = Omit<OwnerUnread, 'workspaceId'>;
 export function ownerUnreadTotal(
-  inboxes: OwnerInboxes | null,
+  rows: readonly OwnerUnread[] | null,
   workspaceId: string | null
 ): OwnerUnreadTotal {
-  const requests = new Set<string>();
-  let unreadChannels = 0;
-  let unreadThreads = 0;
-  for (const [id, inbox] of Object.entries(inboxes ?? {})) {
-    if (workspaceId !== null && id !== workspaceId) continue;
-    for (const post of inboxRequests(inbox)) requests.add(post.id);
-    unreadChannels += inbox.channels.filter((entry) => isListed(entry) && entry.unread > 0).length;
-    unreadThreads += inbox.unreadThreads;
+  const total: OwnerUnreadTotal = { requests: 0, unreadChannels: 0, unreadThreads: 0 };
+  for (const row of rows ?? []) {
+    if (workspaceId !== null && row.workspaceId !== workspaceId) continue;
+    total.requests += row.requests;
+    total.unreadChannels += row.unreadChannels;
+    total.unreadThreads += row.unreadThreads;
   }
-  return { requests: requests.size, unreadChannels, unreadThreads };
+  return total;
 }
 
 /** New posts in a channel or new replies in a followed thread: the one "something is new" dot. */
@@ -1033,7 +991,7 @@ export function useThreadView(
  * Mounted once, in AppInner, so it holds on every route.
  */
 export function useOwnerUnreadTitle(): void {
-  const inboxes = useOwnerInboxes();
+  const inboxes = useOwnerUnread();
   const total = ownerUnreadTotal(inboxes.data, null);
   const baseTitle = useRef(document.title);
   useEffect(() => {

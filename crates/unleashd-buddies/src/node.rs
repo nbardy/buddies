@@ -97,6 +97,11 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn owner_unread(&self) -> napi::Result<Vec<OwnerUnread>> {
+        call(&self.store, |s| s.owner_unread()).await
+    }
+
+    #[napi]
     pub async fn inbox(&self, actor: Actor, workspace_id: String) -> napi::Result<Inbox> {
         call(&self.store, move |s| s.inbox(&actor, &workspace_id)).await
     }

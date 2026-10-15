@@ -19,7 +19,7 @@ fn record(sql: &str) {
 }
 
 /// Reads whose job is to return every row of a small table.
-const WHOLE_TABLE_BY_DESIGN: &[&str] = &["SCAN workspace"];
+const WHOLE_TABLE_BY_DESIGN: &[&str] = &["SCAN workspace", "SCAN workspace USING COVERING INDEX sqlite_autoindex_workspace_1"];
 /// Whole walks of a PARTIAL index whose every row is a candidate: the run queue and live leases.
 /// Any other `SCAN t USING INDEX` walks the whole table in index order (T22: the Task filter's
 /// `post.task_id` lookup walked `post` by ord before `post_task` existed, and passed).
@@ -67,6 +67,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
     assert_eq!(s.thread_stats(&ic, &channel.id, &[top.id.clone(), ask.id.clone()]).unwrap().len(), 1);
     s.inbox(&ic, WS).unwrap();
     s.inbox(&owner, WS).unwrap();
+    s.owner_unread().unwrap();
     assert_eq!(s.followed_threads(&owner, WS, 5).unwrap().threads.len(), 1);
     s.followed_threads(&ic, WS, 5).unwrap();
     s.mark_thread_read(&owner, &top.id, &top_reply.id).unwrap();

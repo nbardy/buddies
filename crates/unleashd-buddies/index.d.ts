@@ -15,6 +15,7 @@ export declare class BuddiesCore {
   threadStats(actor: Actor, channelId: string, rootIds: Array<string>): Promise<Array<ThreadStat>>
   taskPosts(actor: Actor, taskId: string, before: Cursor | undefined | null, limit: number): Promise<PostPage>
   searchPosts(actor: Actor, workspaceId: string, query: SearchQuery, before: Cursor | undefined | null, limit: number): Promise<PostPage>
+  ownerUnread(): Promise<Array<OwnerUnread>>
   inbox(actor: Actor, workspaceId: string): Promise<Inbox>
   markRead(actor: Actor, channelId: string, postId: string): Promise<void>
   followedThreads(actor: Actor, workspaceId: string, limit: number): Promise<FollowedThreads>
@@ -381,6 +382,14 @@ export type Outcome =
   | { kind: 'complete'; text: string }
   | { kind: 'failed'; code: string; error: string }
   | { kind: 'cancelled'; reason: string }
+
+/** The owner's navigation badges: counts only, never post bodies or channel detail. */
+export interface OwnerUnread {
+  workspaceId: string
+  requests: number
+  unreadChannels: number
+  unreadThreads: number
+}
 
 export interface Post {
   editRevision?: number

@@ -297,7 +297,7 @@ test('a channel change refreshes that channel, threads and inboxes, not other ch
     '/api/buddies/channels/ch_a/responding',
     '/api/buddies/posts/root/thread?limit=50',
     '/api/buddies/workspaces/w/inbox',
-    'buddy-owner-inboxes:w,v',
+    '/api/buddies/unread',
     '/api/buddies/tasks/t1',
     '/api/buddies/tasks/t1/posts?limit=50',
     '/api/buddies/channels/ch_b/posts?limit=50',

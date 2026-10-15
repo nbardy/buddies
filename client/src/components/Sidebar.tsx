@@ -25,7 +25,7 @@ import {
 import { DmIcon, WakeIcon, WakeIndicator } from './buddies/WakeIndicator';
 import { useBuddyDirectActions } from './buddies/buddy-direct-actions';
 import { buddyTabPath } from './buddies/buddy-tabs';
-import { anyUnread, ownerUnreadTotal, useOwnerInboxes } from './buddies/channel-data';
+import { anyUnread, ownerUnreadTotal, useOwnerUnread } from './buddies/channel-data';
 import { createBuddyViaBuilder } from './buddies/create-buddy-builder';
 import './Sidebar.css';
 import { SearchView } from '../views/search/SearchView';
@@ -100,7 +100,7 @@ export function Sidebar() {
     buddyCount,
     channels: channelsWorkspaces,
   } = useAtomValue(buddySidebarAtom);
-  const ownerUnread = useOwnerInboxes().data;
+  const ownerUnread = useOwnerUnread().data;
   const runningCountByFolder = useAtomValue(listField('runningByFolder'));
   const [expandedBuddies, setExpandedBuddies] = useState<Set<string>>(() => new Set());
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(() => new Set());

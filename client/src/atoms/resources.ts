@@ -296,7 +296,7 @@ export const invalidateChannelResources = (channelId: string): void => {
       /^\/api\/buddies\/posts\/[^/]+\/thread/.test(key) ||
       /^\/api\/buddies\/workspaces\/[^/]+\/inbox$/.test(key) ||
       /^\/api\/buddies\/workspaces\/[^/]+\/threads\?/.test(key) ||
-      key.startsWith('buddy-owner-inboxes:') ||
+      key === '/api/buddies/unread' ||
       /^\/api\/buddies\/tasks\/[^/?]+(\/posts\?.*)?$/.test(key)
   );
 };

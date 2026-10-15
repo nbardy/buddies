@@ -8,7 +8,7 @@ import { formatTimeAgo } from '../../utils/time';
 import { ConfigDropdown } from '../ConfigDropdown';
 import { BuddySigil, WorkspaceEmblem } from './BuddySigil';
 import { WorkspaceTeamForm } from './WorkspaceTeamForm';
-import { CHANNEL_BACKSTOP_MS, anyUnread, ownerUnreadTotal, useOwnerInboxes } from './channel-data';
+import { CHANNEL_BACKSTOP_MS, anyUnread, ownerUnreadTotal, useOwnerUnread } from './channel-data';
 import {
   type WorkspaceActivity,
   type WorkspaceHomeRow,
@@ -34,7 +34,7 @@ const channelsPath = (workspaceId: string) =>
 
 export function WorkspaceHome() {
   const overview = useBuddyOverview(CHANNEL_BACKSTOP_MS);
-  const inboxes = useOwnerInboxes();
+  const inboxes = useOwnerUnread();
   const entries = useAtomValue(listField('buddyEntries'));
   // The URL owns "creating": arriving at `/?new=1` while already on `/` must open it too.
   const [params, setParams] = useSearchParams();

@@ -150,8 +150,8 @@ The push names only the channel, so keys that are not addressed by it
 refresh whenever they are mounted — in practice the one of each on screen:
   - threads (`/api/buddies/posts/<rootId>/thread`), keyed by their root;
   - the owner's inboxes (`/api/buddies/workspaces/<ws>/inbox`, and the
-    all-workspace fan-out `buddy-owner-inboxes:<ids>` the title, sidebar and
-    mobile tab read): unread counts, requests and DMs span every channel,
+    counts-only `/api/buddies/unread` used by the title, sidebar and
+    mobile tab): unread counts, requests and DMs span every channel,
     and the server pushes `channel_changed` when the owner marks one read,
     which is what clears it on other devices;
   - task details (`/api/buddies/tasks/<id>`), whose comments are the task

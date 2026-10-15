@@ -4342,6 +4342,52 @@ test('owner routes restore what the T11 client migration dropped: reply stats, t
   }
 });
 
+test('owner unread HTTP read returns only counts in one request across workspaces', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const empty = await w.core.createWorkspace(OWNER, {
+      name: 'Empty',
+      rootPath: join(w.scratch, 'empty'),
+    });
+    await w.core.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'Long content '.repeat(5000),
+        key: 'unread-post',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+      }
+    );
+    const response = await http('GET', '/api/buddies/unread');
+    assert.equal(response.status, 200);
+    const rows = response.body as unknown as Awaited<ReturnType<BuddiesCore['ownerUnread']>>;
+    assert.equal(rows.find((row) => row.workspaceId === w.ws)?.unreadChannels, 1);
+    assert.deepEqual(
+      rows.find((row) => row.workspaceId === empty.id),
+      {
+        workspaceId: empty.id,
+        requests: 0,
+        unreadChannels: 0,
+        unreadThreads: 0,
+      }
+    );
+    assert.ok(JSON.stringify(rows).length < 400, 'response size is independent of message bodies');
+    assert.ok(
+      rows.every(
+        (row) =>
+          Object.keys(row).sort().join(',') === 'requests,unreadChannels,unreadThreads,workspaceId'
+      )
+    );
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
 test('owner channel replies stay in threads and reject old broadcast requests', async () => {
   const w = await world();
   const { server, http } = await ownerHttp(w);

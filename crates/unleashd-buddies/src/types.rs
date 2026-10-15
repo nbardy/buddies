@@ -794,6 +794,16 @@ pub struct ChannelUnread {
     pub last_read_ord: Option<String>,
 }
 
+/// The owner's navigation badges: counts only, never post bodies or channel detail.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerUnread {
+    pub workspace_id: String,
+    pub requests: i64,
+    pub unread_channels: i64,
+    pub unread_threads: i64,
+}
+
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Inbox {

@@ -1,11 +1,7 @@
 import { useAtomValue } from 'jotai';
 import { NavLink, Outlet, matchPath, useLocation } from 'react-router-dom';
 import { rowFamily } from '../../atoms/conversations';
-import {
-  anyUnread,
-  ownerUnreadTotal,
-  useOwnerInboxes,
-} from '../../components/buddies/channel-data';
+import { anyUnread, ownerUnreadTotal, useOwnerUnread } from '../../components/buddies/channel-data';
 import {
   type MobilePrimarySection,
   mobilePrimarySectionForPath,
@@ -73,7 +69,7 @@ export function ShellMobile() {
   const activeSection = isPaneRoute
     ? resolveMobileConversationDestination(location.state, conversation).section
     : mobilePrimarySectionForPath(pathname);
-  const channelsUnread = anyUnread(ownerUnreadTotal(useOwnerInboxes().data, null));
+  const channelsUnread = anyUnread(ownerUnreadTotal(useOwnerUnread().data, null));
 
   return (
     // data-device scopes the colocated device tweaks in view CSS

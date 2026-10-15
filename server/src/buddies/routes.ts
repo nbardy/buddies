@@ -281,6 +281,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
 
   const routes = {
     // ---- team -----------------------------------------------------------------------------------
+    'GET 200 /api/buddies/unread': () => core.ownerUnread(),
     'GET 200 /api/buddies/overview': async () =>
       Promise.all(
         (await core.listWorkspaces()).map(async (w) => ({
