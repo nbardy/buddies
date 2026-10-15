@@ -10,7 +10,6 @@ import {
 } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { handleMessage } from './atoms/actions';
-import { startConversationPrefetch } from './atoms/prefetch';
 import { jotaiStore } from './atoms/store';
 import { UpdateBanner } from './components/UpdateBanner';
 import { UpstreamUpdatePrompt } from './components/buddies/UpstreamUpdatePrompt';
@@ -48,12 +47,6 @@ function wsUrlForLocation(loc: Location): string {
 function useWebSocketBridge() {
   const wsUrl = wsUrlForLocation(window.location);
   useWebSocket(wsUrl, handleMessage);
-
-  // Warm recent chat history once the server reports its load complete, so
-  // navigating between conversations reads the local store instead of waiting
-  // on a round trip. Lives beside the socket because that is where "the
-  // snapshot has landed" is known; the work itself is idle-scheduled.
-  useEffect(() => startConversationPrefetch(), []);
 }
 
 // `/` is the workspace home (port of 6d04860). It used to restore the last
@@ -70,14 +63,12 @@ function useWebSocketBridge() {
 // biome-ignore lint/suspicious/noExplicitAny: React's own bound for lazy() components.
 type AnyComponent = ComponentType<any>;
 
-/** A named export loaded on first render; `preload` fetches it without rendering. */
-function lazyNamed<C extends AnyComponent>(
-  load: () => Promise<C>
-): LazyExoticComponent<C> & { preload: () => Promise<C> } {
-  return Object.assign(
-    lazy(async () => ({ default: await load() })),
-    { preload: load }
-  );
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
+// Warming every route at startup loaded 15 unused swarm modules/styles on /buddies.
+// Load routes on use; guard: tools/check-route-loading.mjs.
+/** A named export loaded on first render. */
+function lazyNamed<C extends AnyComponent>(load: () => Promise<C>): LazyExoticComponent<C> {
+  return lazy(async () => ({ default: await load() }));
 }
 
 // Desktop tree
@@ -129,51 +120,6 @@ const SearchMobile = lazyNamed(() =>
 const ChannelsMobile = lazyNamed(() =>
   import('./mobile/channels/ChannelsMobile').then((m) => m.ChannelsMobile)
 );
-
-/** Each device's chunks, fetched when the browser is idle after first render,
- *  so a later navigation does not wait on the network. */
-const DEVICE_CHUNKS: Record<DeviceKind, ReadonlyArray<{ preload: () => Promise<unknown> }>> = {
-  desktop: [
-    Gallery,
-    ChatRoute,
-    BuddiesDashboard,
-    SwarmDashboard,
-    SwarmDetail,
-    SwarmAnalytics,
-    WorkspaceSlack,
-    BuddyWorkspaceActivity,
-    ChannelsIndex,
-    WorkspaceHome,
-  ],
-  mobile: [
-    ConversationListMobile,
-    ChatMobile,
-    BuddiesMobile,
-    BuddyDetailMobile,
-    SwarmDashboard,
-    SwarmDetail,
-    SwarmAnalytics,
-    SearchMobile,
-    ChannelsMobile,
-    BuddyWorkspaceActivity,
-    ChannelsIndex,
-    WorkspaceHome,
-  ],
-};
-
-function usePreloadDeviceChunks(device: DeviceKind): void {
-  useEffect(() => {
-    const preload = () => {
-      for (const chunk of DEVICE_CHUNKS[device]) void chunk.preload().catch(() => {});
-    };
-    if (typeof window.requestIdleCallback === 'function') {
-      const handle = window.requestIdleCallback(preload, { timeout: 3_000 });
-      return () => window.cancelIdleCallback(handle);
-    }
-    const handle = window.setTimeout(preload, 1_000);
-    return () => window.clearTimeout(handle);
-  }, [device]);
-}
 
 // =============================================================================
 // RouteTable — element FACTORIES, not ComponentType (§3).
@@ -281,9 +227,8 @@ const SHELLS: Record<DeviceKind, ComponentType> = {
   mobile: ShellMobile,
 };
 
-// Nothing to show while a chunk loads (a local server answers in milliseconds,
-// and idle preloading usually has the chunk already). The route-level boundary
-// sits inside the shell, so navigating never blanks the sidebar or tab bar.
+// The route-level boundary sits inside the shell, so loading a destination never
+// blanks the sidebar or tab bar.
 function AppRoutes({ device }: { device: DeviceKind }) {
   const Shell = SHELLS[device]; // δ #1 — shell
   const pick = (r: RouteDef) => (device === 'mobile' ? r.mobile() : r.desktop()); // δ #2 — leaf
@@ -317,7 +262,6 @@ function AppInner() {
   const device = useDeviceKind();
   useWebSocketBridge();
   useOwnerUnreadTitle();
-  usePreloadDeviceChunks(device);
 
   useEffect(() => {
     initSettings().catch(console.error);

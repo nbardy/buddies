@@ -594,24 +594,22 @@ A failed POST removes the entry and the composer gets its text back.
 =============================================================================
 
 <a id="prefetch"></a>
-## Prefetch of conversation details
+## Bounded resource warming; transcripts and routes load on use
 
-From `client/src/atoms/prefetch.ts`.
+From `client/src/atoms/prefetch.ts` and `client/src/App.tsx`.
 
-=============================================================================
-Prefetch — warm what the user is about to open, before they open it.
+The 2026-10-15 directory audit found 41 transcript pages (17.9 MB decoded) fetched
+for 12 unopened chats, plus 15 unused swarm modules/styles. `requestIdleCallback`
+ran while the visible route was waiting on network reads: JS idle did not mean
+the page had finished loading. Global history warming and all-route preloading
+were removed. Guard: `node tools/check-route-loading.mjs` opens the real directory
+and rejects unopened transcript reads and swarm-page downloads.
 
-`init` ships conversation SUMMARIES, so the first visit to each chat costs a
-round trip for its history. That is fine on desktop over loopback and very
-much not fine on a phone over the LAN, where it is the whole "why is opening
-a conversation slow" complaint. The data is small and already on the machine;
-the only reason to wait for it is that nobody asked early.
-
-Two rules keep this from making things worse:
-  - Idle only. Prefetch must never compete with the view actually on screen.
-  - Bounded concurrency. A burst of parallel GETs from a phone is slower
-    than a lazy load, not faster.
-=============================================================================
+Conversation bodies load through `useConversationBodies` on open and remain in
+the keyed transcript cache for revisits. Route code loads on first navigation
+and stays in the browser's module cache. A view can still warm its own likely
+next resources through `warmResources`, at idle with three workers; this does
+not hydrate unrelated chat histories or load every route.
 
 <a id="folder-group-key"></a>
 ## folderGroupKey vs normalizeFolderDirectory

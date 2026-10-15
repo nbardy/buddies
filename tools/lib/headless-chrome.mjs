@@ -298,21 +298,30 @@ export async function openBlankTab() {
  *
  * `clockMs` is the instant the page's Date is frozen at (see stabilisingScript).
  *
- * Returns { goto, evaluate, setViewport, waitForNetworkIdle, capture,
+ * Returns { goto, evaluate, setViewport, waitForNetworkIdle, requestedPaths, capture,
  * click, blockedWrites, close }.
  * `await close()` must run (use try/finally) or a Chrome process outlives the
  * script.
  */
-export async function openSession({ baseUrl, token, clockMs, showScrollbars = false }) {
+export async function openSession({
+  baseUrl,
+  token,
+  clockMs,
+  showScrollbars = false,
+  initialPath = '/',
+  viewport,
+}) {
   const { cdp, sessionId, evaluate, close } = await openTab(showScrollbars);
   try {
     // In-flight HTTP requests, for waitForNetworkIdle. WebSocket and
     // EventSource streams never finish, so they are not counted.
     const inFlight = new Map();
+    const requestedPaths = new Set();
     let lastNetworkChange = Date.now();
     cdp.listeners.add((msg) => {
       if (msg.sessionId !== sessionId) return;
       if (msg.method === 'Network.requestWillBeSent') {
+        requestedPaths.add(new URL(msg.params.request.url).pathname);
         if (msg.params.type === 'WebSocket' || msg.params.type === 'EventSource') return;
         inFlight.set(msg.params.requestId, msg.params.request.url);
       } else if (
@@ -455,7 +464,10 @@ export async function openSession({ baseUrl, token, clockMs, showScrollbars = fa
 
     const blockedWrites = async () => [...blocked, ...(await pageBlocked())];
 
-    await goto(token ? `${baseUrl}/?token=${encodeURIComponent(token)}` : `${baseUrl}/`, 500);
+    if (viewport) await setViewport(viewport);
+    const initialUrl = new URL(initialPath, baseUrl);
+    if (token) initialUrl.searchParams.set('token', token);
+    await goto(initialUrl.href, 500);
     const gated = await evaluate(`document.title.toLowerCase().includes('sign in') ||
       !!document.querySelector('form input[type=password]')`);
     if (gated) {
@@ -476,6 +488,7 @@ export async function openSession({ baseUrl, token, clockMs, showScrollbars = fa
       hover,
       drag,
       blockedWrites,
+      requestedPaths: () => [...requestedPaths],
       close,
     };
   } catch (error) {
