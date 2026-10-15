@@ -484,22 +484,23 @@ impl Store {
         Ok(keyset_page(collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?, limit))
     }
 
-    /// Requests the actor owes (across workspaces), its own open requests in `workspace_id`, and its channels in
-    /// `workspace_id` with unread counts.
     pub fn inbox(&self, actor: &Actor, workspace_id: &str) -> Result<Inbox> {
         let (me, my_buddy) = (actor.key(), actor.buddy_id());
+        // Pattern: fix-guards (docs/patterns.md#fix-guards)
+        // 18 owner reads repeated global bodies (3.88 MB, 5.3 s). Scope before decoding.
+        // Guard: owner_inbox_requests_are_workspace_local_but_buddy_requests_are_global.
+        let request_workspace = matches!(actor, Actor::Owner).then_some(workspace_id);
         let requests = collect(
             self.conn
                 .prepare_cached(&format!(
                     "SELECT {POST_COLS} FROM channel_member m JOIN channel c ON c.id = m.channel_id
                        JOIN post p ON p.channel_id = m.channel_id AND p.request = 'awaiting'
-                     WHERE m.member = ?1 AND (p.author_id IS NOT ?2 OR c.member_key = ?1) ORDER BY p.ord"
+                     WHERE m.member = ?1 AND (p.author_id IS NOT ?2 OR c.member_key = ?1)
+                       AND (?3 IS NULL OR c.workspace_id = ?3) ORDER BY p.ord"
                 ))?
-                .query_map(params![me, my_buddy], post_row)?,
+                .query_map(params![me, my_buddy, request_workspace], post_row)?,
         )?;
-        // Fix-guard: scoped to the turn's workspace like `channels` and `unread_threads`; it was
-        // buddy-wide, so another workspace's open requests leaked into this inbox (2026-10-06).
-        // Guard: `inbox_waiting_on_is_scoped_to_the_workspace`.
+        // Workspace scope guard: inbox_waiting_on_is_scoped_to_the_workspace (2026-10-06).
         let waiting_on = collect(
             self.conn
                 .prepare_cached(&format!(
@@ -532,8 +533,7 @@ impl Store {
         Ok(Inbox { requests, waiting_on, channels, unread_threads })
     }
 
-    /// Posts in `workspace_id` matching the structured `query` (grammar: `search.rs`), newest
-    /// first, from the channels the actor may read: public and task channels, and the direct
+    /// Newest matching posts in `workspace_id` (grammar: `search.rs`) from readable public, task and direct
     /// channels it is a member of (the owner reads every one). Every filter is a WHERE clause next
     /// to the readability rule, so filters narrow BEFORE the keyset page and never widen access.
     /// Pages older with `before` (keyset on `ord`, like `task_posts`); until 2026-09-27 search took

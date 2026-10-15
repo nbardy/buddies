@@ -777,7 +777,7 @@ export function useFollowBottom(rowCount: number, version: unknown, linkedPostId
 // ── Owner unread ────────────────────────────────────────────────────────────
 // The owner's read cursor per channel (post_read, reader 'owner'). The inbox
 // counts posts by others after it — replies included — per channel, and lists
-// the requests awaiting the owner (DM requests; across workspaces).
+// the requests awaiting the owner in that workspace's DMs.
 
 /**
  * Every workspace's inbox, one keyed resource: the tab title, the sidebar and
@@ -787,16 +787,22 @@ export function useFollowBottom(rowCount: number, version: unknown, linkedPostId
  */
 export const OWNER_INBOXES_KEY = 'buddy-owner-inboxes:';
 
-function ownerInboxesResource(workspaceIds: readonly string[]) {
-  return resource(`${OWNER_INBOXES_KEY}${workspaceIds.join(',')}`, async (signal) =>
-    Object.fromEntries(
-      await Promise.all(
-        workspaceIds.map(
-          async (id) => [id, await buddyApi<Inbox>(inboxUrl(id), { signal })] as const
-        )
-      )
-    )
-  );
+export function ownerInboxesResource(workspaceIds: readonly string[]) {
+  return resource(`${OWNER_INBOXES_KEY}${workspaceIds.join(',')}`, async (signal) => {
+    // Pattern: fix-guards (docs/patterns.md#fix-guards)
+    // 18 background inbox reads filled the browser's HTTP/1 connection queue on refresh,
+    // leaving route modules and the visible thread waiting. Guard: owner-inboxes.test.ts.
+    const entries: Array<readonly [string, Inbox]> = [];
+    const pending = workspaceIds[Symbol.iterator]();
+    const read = async () => {
+      for (const id of pending) {
+        signal.throwIfAborted();
+        entries.push([id, await buddyApi<Inbox>(inboxUrl(id), { signal })]);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, workspaceIds.length) }, read));
+    return Object.fromEntries(entries);
+  });
 }
 
 export type OwnerInboxes = Readonly<Record<string, Inbox>>;
@@ -821,7 +827,7 @@ export function inboxRequests(inbox: Inbox): Post[] {
 
 // What a nav item shows: the badge counts requests waiting on the owner, the
 // dot says some rail channel has anything new. `workspaceId` null sums all.
-// `requests` is global in every inbox, so it is counted by post id, once.
+// Count each request once, including when talking to an older backend with global requests.
 export type OwnerUnreadTotal = { requests: number; unreadChannels: number; unreadThreads: number };
 
 export function ownerUnreadTotal(
