@@ -50,6 +50,37 @@ impl Store {
         })
     }
 
+    /// Re-roots a workspace whose folder moved. A workspace already registered at the new root
+    /// (startup registers the checkout it runs from) is folded in: its rows move over and it is
+    /// deleted. Refused while both hold one buddy slug or public channel name (unique per
+    /// workspace, archived rows included), so nothing is silently renamed. Events stay where they
+    /// were recorded: history, and moving them could collide idempotency keys.
+    /// Why: `root_path` is the turn cwd. Renaming ~/git/unleashd to ~/git/buddies (2026-10-14)
+    /// left every turn spawning into a missing folder, beside a second workspace at the new root.
+    pub fn move_workspace(&mut self, actor: &Actor, input: WorkspaceMove) -> Result<Workspace> {
+        self.write(|tx| {
+            require(tx, actor, Op::Admin, &Subject::Owner)?;
+            let to = get_workspace(tx, &input.workspace_id)?.id;
+            let m = Mutation {
+                actor,
+                workspace_id: &to,
+                buddy_id: None,
+                task_id: None,
+                op: "workspace.move",
+                payload: json!({"name": input.name, "root_path": input.root_path}),
+                key: Some(&input.key),
+            };
+            idempotent(tx, &m, |tx| {
+                if let Some(from) = workspace_at(tx, &input.root_path)?.map(|w| w.id).filter(|id| *id != to) {
+                    fold_workspace(tx, &from, &to)?;
+                }
+                tx.execute("UPDATE workspace SET name = ?2, root_path = ?3 WHERE id = ?1", params![to, input.name, input.root_path])?;
+                Ok(to.clone())
+            })?;
+            get_workspace(tx, &to)
+        })
+    }
+
     pub fn create_buddy(&mut self, actor: &Actor, input: BuddyCreate) -> Result<Buddy> {
         self.write(|tx| {
             require(tx, actor, Op::Admin, &Subject::Owner)?;
@@ -141,6 +172,32 @@ impl Store {
             get_buddy(tx, &id)
         })
     }
+}
+
+fn get_workspace(conn: &Connection, id: &str) -> Result<Workspace> {
+    conn.prepare_cached("SELECT id, name, root_path, created_at FROM workspace WHERE id = ?1")?
+        .query_row([id], workspace_row)
+        .optional()?
+        .ok_or_else(|| CoreError::not_found("workspace", id))
+}
+
+/// Moves every row of `from` into `to`, then deletes `from`.
+fn fold_workspace(tx: &Transaction, from: &str, to: &str) -> Result<()> {
+    let clash_sql = "SELECT 'buddy slug ' || a.slug FROM buddy a JOIN buddy b ON b.slug = a.slug
+                       WHERE a.workspace_id = ?1 AND b.workspace_id = ?2
+                     UNION ALL
+                     SELECT 'channel #' || a.name FROM channel a JOIN channel b ON b.name = a.name COLLATE NOCASE
+                       WHERE a.workspace_id = ?1 AND b.workspace_id = ?2 AND a.name IS NOT NULL";
+    let clashes = tx.prepare(clash_sql)?.query_map(params![from, to], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    if !clashes.is_empty() {
+        return Err(CoreError::Invalid(format!("workspace {from} is at that root and shares {} with {to}; resolve that first", clashes.join(", "))));
+    }
+    for table in ["buddy", "task", "channel", "schedule", "conversation", "run", "doc"] {
+        tx.execute(&format!("UPDATE {table} SET workspace_id = ?2 WHERE workspace_id = ?1"), params![from, to])?;
+    }
+    tx.execute("UPDATE doc SET scope_id = ?2 WHERE scope_kind = 'workspace' AND scope_id = ?1", params![from, to])?;
+    tx.execute("DELETE FROM workspace WHERE id = ?1", [from])?;
+    Ok(())
 }
 
 fn workspace_at(conn: &Connection, root_path: &str) -> Result<Option<Workspace>> {

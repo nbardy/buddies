@@ -11,10 +11,10 @@ import { type BuddiesCore, OWNER, managerRef } from '../buddies/core';
 //   workspace — createWorkspace is idempotent by root path (real path here).
 //   channel   — a public channel named "upstream" is reused, else created
 //               under a fixed command key (the crate replays a repeated key).
-//   Buddies   — a seat is filled by our own hire (found by its slug, in any
-//               status: an archived hire stays archived, the owner retired
-//               it), else by a matching active Buddy (e.g. the existing
-//               "Product Development Lead"), else hired under a fixed key.
+//   Buddies   — a seat is filled by our own active hire (found by its slug),
+//               else by a matching active Buddy (e.g. the existing "Product
+//               Development Lead"), else by our own archived hire (it stays
+//               archived: the owner retired it), else hired under a fixed key.
 
 export const BOOTSTRAP_KEY = 'unleashd-bootstrap';
 export const UPSTREAM_CHANNEL_NAME = 'upstream';
@@ -91,9 +91,14 @@ async function ensureUpstreamChannel(core: BuddiesCore, workspaceId: string): Pr
 async function ensureSeat(core: BuddiesCore, workspaceId: string, seat: Seat): Promise<string> {
   const buddies = await core.listBuddies(workspaceId);
   const ours = buddies.find((buddy) => buddy.slug === seat.slug);
-  if (ours) return ours.id;
+  // An active Buddy holding the seat beats our own RETIRED hire: merging a duplicate workspace
+  // (2026-10-14 checkout rename) brings in a retired `product-dev`, and returning it made an
+  // archived Buddy the seat. A retired hire with no active holder still stays retired.
+  // Guard: "an active seat holder beats a retired own hire" in server/test/upstream.test.ts.
+  if (ours?.status === 'active') return ours.id;
   const filled = buddies.find((buddy) => buddy.status === 'active' && seat.fills(buddy));
   if (filled) return filled.id;
+  if (ours) return ours.id;
   const key = `${BOOTSTRAP_KEY}:buddy:${seat.slug}`;
   const hired = await core.createBuddy(OWNER, {
     workspaceId,

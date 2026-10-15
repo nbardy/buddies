@@ -308,6 +308,11 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn move_workspace(&self, actor: Actor, input: WorkspaceMove) -> napi::Result<Workspace> {
+        call(&self.store, move |s| s.move_workspace(&actor, input)).await
+    }
+
+    #[napi]
     pub async fn create_buddy(&self, actor: Actor, input: BuddyCreate) -> napi::Result<Buddy> {
         call(&self.store, move |s| s.create_buddy(&actor, input)).await
     }

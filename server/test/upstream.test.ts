@@ -172,6 +172,49 @@ test('bootstrap reuses an existing "Product Development Lead" as Product Dev', a
   assert.equal((await core.listBuddies(workspace.id)).length, 2);
 });
 
+// 2026-10-14: the checkout was renamed (~/git/unleashd -> ~/git/buddies). Startup registered the
+// new root as a second workspace and hired a duplicate Product Dev + Release Manager there, while
+// every turn in the original workspace spawned into the missing old root. The repair: retire the
+// duplicates, re-root the original (folding in the new-root workspace). Startup must then
+// resolve to the original's seat holders, not the retired duplicates that came with the merge.
+test('an active seat holder beats a retired own hire after a checkout rename merge', async (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'unleashd-home-rename-')));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const [oldRoot, newRoot] = [join(root, 'unleashd'), join(root, 'buddies')];
+  mkdirSync(oldRoot);
+  mkdirSync(newRoot);
+  const core = await openCore(root);
+  // The original's seats are held by Buddies the owner hired (other slugs), as on the live store.
+  const ws = await core.createWorkspace(OWNER, { name: 'unleashd', rootPath: oldRoot });
+  for (const [i, name] of ['Product Development Lead', 'Upstream Release Manager'].entries())
+    await core.createBuddy(OWNER, {
+      workspaceId: ws.id,
+      slug: `builder-${i}`,
+      name,
+      role: 'r',
+      manager: managerRef(null),
+      key: name,
+    });
+  const original = await bootstrapUnleashdHome(core, oldRoot);
+  const duplicate = await bootstrapUnleashdHome(core, newRoot);
+  for (const [i, buddyId] of [duplicate.productDevId, duplicate.releaseManagerId].entries())
+    await core.updateBuddy(OWNER, { buddyId, changes: { status: 'archived' }, key: `retire-${i}` });
+  for (const { channel } of (await core.inbox(OWNER, duplicate.workspaceId)).channels)
+    if (channel.kind.type === 'public')
+      await core.renameChannel(OWNER, channel.id, `${channel.kind.name}-old`, `rn-${channel.id}`);
+
+  await core.moveWorkspace(OWNER, {
+    workspaceId: original.workspaceId,
+    name: 'Buddies',
+    rootPath: newRoot,
+    key: 'move',
+  });
+  const home = await bootstrapUnleashdHome(core, newRoot);
+
+  assert.deepEqual(home, { ...original, repoRoot: newRoot });
+  assert.equal((await core.listWorkspaces()).length, 1);
+});
+
 const soulOf = async (core: BuddiesCore, buddyId: string) =>
   (await core.readDoc(OWNER, { buddyId, scope: { kind: 'buddy' }, kind: 'soul', name: '' }))
     ?.content;

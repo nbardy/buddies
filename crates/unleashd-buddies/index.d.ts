@@ -74,6 +74,7 @@ export declare class BuddiesCore {
   cancelRun(actor: Actor, runId: string): Promise<Run>
   retryRun(actor: Actor, runId: string, config: RunConfig | undefined | null, key: string): Promise<Run>
   createWorkspace(actor: Actor, input: WorkspaceInput): Promise<Workspace>
+  moveWorkspace(actor: Actor, input: WorkspaceMove): Promise<Workspace>
   createBuddy(actor: Actor, input: BuddyCreate): Promise<Buddy>
   updateBuddy(actor: Actor, input: BuddyUpdate): Promise<Buddy>
   getRun(id: string): Promise<Run>
@@ -777,4 +778,12 @@ export interface Workspace {
 export interface WorkspaceInput {
   name: string
   rootPath: string
+}
+
+/** Re-root a workspace (`Store::move_workspace`); `root_path` is resolved by the caller. */
+export interface WorkspaceMove {
+  workspaceId: string
+  name: string
+  rootPath: string
+  key: string
 }

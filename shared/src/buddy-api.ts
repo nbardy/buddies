@@ -146,6 +146,9 @@ export const WorkspaceSchema = z
     rootPath: z.string().trim().min(1),
   })
   .strict();
+// A renamed checkout (2026-10-14: ~/git/unleashd -> ~/git/buddies) re-roots its workspace; the
+// one startup registered at the new root folds into it (crate `move_workspace`).
+export const WorkspaceMoveSchema = WorkspaceSchema.extend({ key }).strict();
 // Slack "New Buddy" names the workspace on screen. Until 2026-09-27 the route
 // ignored the body and the Builder always opened in the unleashd checkout, so
 // a hire from Paint Live still landed in ~/git/unleashd. Guard: buddies-v2
@@ -203,6 +206,12 @@ export const buddyMutations = {
     path: '/api/buddies/workspaces',
     status: 201,
     body: WorkspaceSchema,
+  },
+  'workspace.move': {
+    method: 'PATCH',
+    path: '/api/buddies/workspaces/:workspaceId',
+    status: 200,
+    body: WorkspaceMoveSchema,
   },
   'builder.open': {
     method: 'POST',
@@ -371,6 +380,7 @@ type ConversationOpened = { conversationId: string };
 // Generated crate types are the domain source; only HTTP envelopes belong here.
 export interface BuddyMutationResults {
   'workspace.create': Workspace;
+  'workspace.move': Workspace;
   'builder.open': ConversationOpened;
   'buddy.create': Buddy;
   'buddy.update': Buddy;

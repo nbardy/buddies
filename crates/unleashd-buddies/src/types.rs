@@ -959,6 +959,16 @@ pub struct WorkspaceInput {
     pub root_path: String,
 }
 
+/// Re-root a workspace (`Store::move_workspace`); `root_path` is resolved by the caller.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct WorkspaceMove {
+    pub workspace_id: String,
+    pub name: String,
+    pub root_path: String,
+    pub key: String,
+}
+
 /// A thread's unread posts for one Buddy, oldest first: the newest `limit`, and how many older
 /// unread ones were left out.
 #[cfg_attr(feature = "node", napi_derive::napi(object))]

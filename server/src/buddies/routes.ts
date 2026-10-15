@@ -32,6 +32,7 @@ import {
   ScheduleSchema,
   TaskCreateSchema,
   TaskUpdateSchema,
+  WorkspaceMoveSchema,
   WorkspaceSchema,
   buddyMutationRoute,
   BuddyDocKindSchema as docKind,
@@ -292,6 +293,13 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       ),
     [buddyMutationRoute('workspace.create')]: async (req) =>
       write(core.createWorkspace(OWNER, workspaceInput(req.body))),
+    [buddyMutationRoute('workspace.move')]: async (req) => {
+      const { key: moveKey, ...input } = WorkspaceMoveSchema.parse(req.body);
+      const { name, rootPath } = workspaceInput(input);
+      return write(
+        core.moveWorkspace(OWNER, { workspaceId: p(req, 'workspaceId'), name, rootPath, key: moveKey })
+      );
+    },
     [buddyMutationRoute('builder.open')]: async (req) => {
       const { workspaceId } = BuilderOpenSchema.parse(req.body ?? {});
       if (workspaceId === undefined) return deps.createBuilderConversation();
