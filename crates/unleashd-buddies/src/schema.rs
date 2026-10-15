@@ -32,6 +32,7 @@ pub const APPLICATION_ID: i64 = 0x4255_4444;
 pub const DDL: &str = r#"
 CREATE TABLE workspace (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,
+  folders TEXT NOT NULL DEFAULT '[]', repository_identity TEXT,
   legacy TEXT) STRICT;
 
 CREATE TABLE buddy (
@@ -174,6 +175,8 @@ DROP TABLE IF EXISTS post_search;";
 pub const INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS buddy_manager ON buddy(manager_id) WHERE manager_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS task_owner ON task(owner_id, updated_at);
+CREATE INDEX IF NOT EXISTS workspace_repository ON workspace(repository_identity);
+CREATE INDEX IF NOT EXISTS workspace_folder_owner ON workspace_folder(workspace_id);
 CREATE INDEX IF NOT EXISTS task_workspace ON task(workspace_id, updated_at);
 CREATE INDEX IF NOT EXISTS task_parent ON task(parent_id, position) WHERE parent_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS task_live ON task(workspace_id, owner_id, status)
@@ -264,6 +267,22 @@ pub(crate) fn has_column(conn: &Connection, table: &str, column: &str) -> Result
     Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)", [table, column], |r| r.get(0))?)
 }
 
+// Pattern: one-store-one-index (docs/patterns.md#one-store-one-index)
+// Folder history is canonical JSON; this derived lookup prevents a scan on registration.
+const WORKSPACE_FOLDERS: &str = r#"
+CREATE TABLE IF NOT EXISTS workspace_folder (
+  path TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspace(id)) STRICT, WITHOUT ROWID;
+CREATE TRIGGER IF NOT EXISTS workspace_folders_insert AFTER INSERT ON workspace BEGIN
+  INSERT INTO workspace_folder SELECT value, NEW.id FROM json_each(
+    CASE WHEN NEW.folders = '[]' THEN json_array(NEW.root_path) ELSE NEW.folders END);
+END;
+CREATE TRIGGER IF NOT EXISTS workspace_folders_update AFTER UPDATE OF folders ON workspace BEGIN
+  DELETE FROM workspace_folder WHERE workspace_id = NEW.id;
+  INSERT INTO workspace_folder SELECT value, NEW.id FROM json_each(NEW.folders);
+END;
+INSERT OR IGNORE INTO workspace_folder SELECT j.value, w.id FROM workspace w, json_each(w.folders) j;
+"#;
+
 /// Additive compatibility: add `table.column` (declared by `decl`) to a database created before it.
 fn ensure_column(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
     if !has_column(conn, table, column)? {
@@ -335,6 +354,10 @@ pub fn open(path: &str) -> Result<Connection> {
     match (app_id == APPLICATION_ID, tables) {
         (true, _) => {
             require_ordered_ids(&conn, path)?;
+            ensure_column(&conn, "workspace", "folders", "TEXT NOT NULL DEFAULT '[]'")?;
+            ensure_column(&conn, "workspace", "repository_identity", "TEXT")?;
+            conn.execute_batch("UPDATE workspace SET folders = json_array(root_path) WHERE folders = '[]';")?;
+            conn.execute_batch(WORKSPACE_FOLDERS)?;
             ensure_column(&conn, "post", "edit_revision", "INTEGER NOT NULL DEFAULT 1")?;
             ensure_column(&conn, "post", "edited_at", "TEXT")?;
             conn.execute_batch("CREATE TABLE IF NOT EXISTS post_reaction (
@@ -381,7 +404,7 @@ pub fn open(path: &str) -> Result<Connection> {
         }
         (false, 0) => {
             let run = RUN_TABLE.replace("{table}", "run");
-            conn.execute_batch(&format!("BEGIN; {DDL} {run} {INDEXES} PRAGMA application_id = {APPLICATION_ID}; COMMIT;"))?;
+            conn.execute_batch(&format!("BEGIN; {DDL} {run} {WORKSPACE_FOLDERS} {INDEXES} PRAGMA application_id = {APPLICATION_ID}; COMMIT;"))?;
             ensure_post_search(&conn)?;
             Ok(conn)
         }

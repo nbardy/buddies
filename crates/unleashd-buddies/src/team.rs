@@ -9,13 +9,44 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::json;
 
 impl Store {
-    /// Registers a folder as a workspace. The root path is the natural key: registering the same
-    /// folder again returns the existing workspace.
+    /// Registers a folder, preserving workspace identity when its checkout moves.
+    // Pattern: one-write-path (docs/patterns.md#one-write-path)
+    // Fix-guard: the 2026-10-14 rename duplicated the workspace and stranded Buddy turns.
+    // Reuse only one missing checkout with matching history; never merge active clones.
+    // Guard: bootstrap follows a renamed checkout without duplicating its team.
     pub fn create_workspace(&mut self, actor: &Actor, input: WorkspaceInput) -> Result<Workspace> {
         self.write(|tx| {
             require(tx, actor, Op::Admin, &Subject::Owner)?;
-            if let Some(found) = workspace_at(tx, &input.root_path)? {
-                return Ok(found);
+            let exact = workspace_at(tx, &input.root_path)?;
+            let found = match exact {
+                Some(found) => Some(found),
+                None => {
+                    let mut candidates = Vec::new();
+                    if let Some(identity) = &input.repository_identity {
+                        let mut stmt = tx.prepare_cached("SELECT id, name, root_path, created_at, folders, repository_identity FROM workspace WHERE repository_identity = ?1")?;
+                        for candidate in stmt.query_map([identity], workspace_row)? {
+                            let candidate = candidate?;
+                            let mut missing = true;
+                            for folder in candidate.folders.as_ref().unwrap() {
+                                // Permission or I/O errors are not evidence that a checkout moved.
+                                if std::path::Path::new(folder).try_exists()? { missing = false; }
+                            }
+                            if missing { candidates.push(candidate); }
+                        }
+                    }
+                    if candidates.len() > 1 {
+                        return Err(CoreError::Invalid("multiple missing workspaces share this repository history; registration is ambiguous".into()));
+                    }
+                    candidates.pop()
+                }
+            };
+            if let Some(found) = found {
+                let mut folders = found.folders.unwrap();
+                folders.retain(|folder| folder != &input.root_path);
+                folders.push(input.root_path.clone());
+                tx.execute("UPDATE workspace SET root_path = ?2, folders = ?3, repository_identity = coalesce(?4, repository_identity) WHERE id = ?1",
+                    params![found.id, input.root_path, serde_json::to_string(&folders)?, input.repository_identity])?;
+                return get_workspace(tx, &found.id);
             }
             let id = new_id("project");
             let m = Mutation {
@@ -29,8 +60,8 @@ impl Store {
             };
             idempotent(tx, &m, |tx| {
                 tx.execute(
-                    "INSERT INTO workspace (id, name, root_path, created_at) VALUES (?1, ?2, ?3, ?4)",
-                    params![id, input.name, input.root_path, now_iso()],
+                    "INSERT INTO workspace (id, name, root_path, created_at, folders, repository_identity) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![id, input.name, input.root_path, now_iso(), serde_json::to_string(&vec![&input.root_path])?, input.repository_identity],
                 )?;
                 // Fix-guard: a fresh install's Home posts to #general, and the crate gave new
                 // workspaces no channel, so Home rendered no composer (fresh-install trial
@@ -47,37 +78,6 @@ impl Store {
                 Ok(id.clone())
             })?;
             workspace_at(tx, &input.root_path)?.ok_or_else(|| CoreError::not_found("workspace", &id))
-        })
-    }
-
-    /// Re-roots a workspace whose folder moved. A workspace already registered at the new root
-    /// (startup registers the checkout it runs from) is folded in: its rows move over and it is
-    /// deleted. Refused while both hold one buddy slug or public channel name (unique per
-    /// workspace, archived rows included), so nothing is silently renamed. Events stay where they
-    /// were recorded: history, and moving them could collide idempotency keys.
-    /// Why: `root_path` is the turn cwd. Renaming ~/git/unleashd to ~/git/buddies (2026-10-14)
-    /// left every turn spawning into a missing folder, beside a second workspace at the new root.
-    pub fn move_workspace(&mut self, actor: &Actor, input: WorkspaceMove) -> Result<Workspace> {
-        self.write(|tx| {
-            require(tx, actor, Op::Admin, &Subject::Owner)?;
-            let to = get_workspace(tx, &input.workspace_id)?.id;
-            let m = Mutation {
-                actor,
-                workspace_id: &to,
-                buddy_id: None,
-                task_id: None,
-                op: "workspace.move",
-                payload: json!({"name": input.name, "root_path": input.root_path}),
-                key: Some(&input.key),
-            };
-            idempotent(tx, &m, |tx| {
-                if let Some(from) = workspace_at(tx, &input.root_path)?.map(|w| w.id).filter(|id| *id != to) {
-                    fold_workspace(tx, &from, &to)?;
-                }
-                tx.execute("UPDATE workspace SET name = ?2, root_path = ?3 WHERE id = ?1", params![to, input.name, input.root_path])?;
-                Ok(to.clone())
-            })?;
-            get_workspace(tx, &to)
         })
     }
 
@@ -175,34 +175,15 @@ impl Store {
 }
 
 fn get_workspace(conn: &Connection, id: &str) -> Result<Workspace> {
-    conn.prepare_cached("SELECT id, name, root_path, created_at FROM workspace WHERE id = ?1")?
+    conn.prepare_cached("SELECT id, name, root_path, created_at, folders, repository_identity FROM workspace WHERE id = ?1")?
         .query_row([id], workspace_row)
         .optional()?
         .ok_or_else(|| CoreError::not_found("workspace", id))
 }
 
-/// Moves every row of `from` into `to`, then deletes `from`.
-fn fold_workspace(tx: &Transaction, from: &str, to: &str) -> Result<()> {
-    let clash_sql = "SELECT 'buddy slug ' || a.slug FROM buddy a JOIN buddy b ON b.slug = a.slug
-                       WHERE a.workspace_id = ?1 AND b.workspace_id = ?2
-                     UNION ALL
-                     SELECT 'channel #' || a.name FROM channel a JOIN channel b ON b.name = a.name COLLATE NOCASE
-                       WHERE a.workspace_id = ?1 AND b.workspace_id = ?2 AND a.name IS NOT NULL";
-    let clashes = tx.prepare(clash_sql)?.query_map(params![from, to], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    if !clashes.is_empty() {
-        return Err(CoreError::Invalid(format!("workspace {from} is at that root and shares {} with {to}; resolve that first", clashes.join(", "))));
-    }
-    for table in ["buddy", "task", "channel", "schedule", "conversation", "run", "doc"] {
-        tx.execute(&format!("UPDATE {table} SET workspace_id = ?2 WHERE workspace_id = ?1"), params![from, to])?;
-    }
-    tx.execute("UPDATE doc SET scope_id = ?2 WHERE scope_kind = 'workspace' AND scope_id = ?1", params![from, to])?;
-    tx.execute("DELETE FROM workspace WHERE id = ?1", [from])?;
-    Ok(())
-}
-
 fn workspace_at(conn: &Connection, root_path: &str) -> Result<Option<Workspace>> {
     Ok(conn
-        .prepare_cached("SELECT id, name, root_path, created_at FROM workspace WHERE root_path = ?1")?
+        .prepare_cached("SELECT id, name, root_path, created_at, folders, repository_identity FROM workspace WHERE id = (SELECT workspace_id FROM workspace_folder WHERE path = ?1)")?
         .query_row([root_path], workspace_row)
         .optional()?)
 }

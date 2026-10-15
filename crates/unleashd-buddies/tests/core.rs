@@ -738,7 +738,7 @@ fn team_admin_is_owner_only_and_refuses_a_reporting_cycle() {
         reasoning_effort: None,
         key: key.into(),
     };
-    let folder = WorkspaceInput { name: "Docs".into(), root_path: "/tmp/docs".into() };
+    let folder = WorkspaceInput { repository_identity: None, name: "Docs".into(), root_path: "/tmp/docs".into() };
     assert!(matches!(s.create_workspace(&buddy("lead"), folder.clone()), Err(CoreError::Denied(_))));
     let docs = s.create_workspace(&Actor::Owner, folder.clone()).unwrap();
     assert_eq!(s.create_workspace(&Actor::Owner, folder).unwrap().id, docs.id, "one workspace per folder");
@@ -1444,7 +1444,7 @@ fn a_dm_is_one_to_one_and_a_legacy_group_dm_is_read_only() {
 fn new_workspace_has_general_once() {
     let mut f = fixture();
     let s = &mut f.store;
-    let folder = WorkspaceInput { name: "Fresh".into(), root_path: "/tmp/fresh".into() };
+    let folder = WorkspaceInput { repository_identity: None, name: "Fresh".into(), root_path: "/tmp/fresh".into() };
     let ws = s.create_workspace(&Actor::Owner, folder.clone()).unwrap();
     s.create_workspace(&Actor::Owner, folder).unwrap();
     let general = |s: &Store| -> Vec<Channel> {
@@ -1454,7 +1454,7 @@ fn new_workspace_has_general_once() {
     assert_eq!(found.len(), 1, "one #general after create + re-register");
 
     s.set_channel_archived(&Actor::Owner, &found[0].id, true, "arch").unwrap();
-    s.create_workspace(&Actor::Owner, WorkspaceInput { name: "Fresh".into(), root_path: "/tmp/fresh".into() }).unwrap();
+    s.create_workspace(&Actor::Owner, WorkspaceInput { repository_identity: None, name: "Fresh".into(), root_path: "/tmp/fresh".into() }).unwrap();
     assert!(general(s).is_empty(), "archived #general stays archived; no replacement appears");
     assert_eq!(s.archived_channels(&Actor::Owner, &ws.id).unwrap().len(), 1);
 }
@@ -2347,52 +2347,4 @@ fn a_subscribed_delivery_placed_elsewhere_moves_the_follow() {
     s.defer_run(&waiter.run.id, &waiter.lease_token, "live-seat").unwrap();
     let q2 = s.post(&Actor::Owner, channel, in_other("fourth", "q2")).unwrap().id;
     assert_eq!(routed(s, &q2).as_deref(), Some("live-seat"), "defer moved the follow too");
-}
-
-#[test]
-fn renamed_checkout_merges_into_one_workspace_at_the_new_root() {
-    // 2026-10-14: ~/git/unleashd was renamed to ~/git/buddies. Its workspace kept the old root
-    // (every turn spawned into a missing cwd) while startup registered a second workspace at the
-    // new root, and there was no way to re-point it. Guards the re-root and the fold-in together.
-    let mut f = fixture();
-    let s = &mut f.store;
-    let new_root = WorkspaceInput { name: "Buddies".into(), root_path: "/tmp/renamed".into() };
-    let other = s.create_workspace(&Actor::Owner, new_root.clone()).unwrap();
-    s.create_buddy(
-        &Actor::Owner,
-        BuddyCreate {
-            workspace_id: other.id.clone(),
-            slug: "growth".into(),
-            name: "Growth".into(),
-            role: "r".into(),
-            manager: ManagerRef::Nobody,
-            provider: None,
-            model: None,
-            reasoning_effort: None,
-            key: "hire".into(),
-        },
-    )
-    .unwrap();
-    let theirs = s.inbox(&Actor::Owner, &other.id).unwrap().channels[0].channel.id.clone();
-    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, from_conversation_id: None, ..request(body, key) };
-    s.post(&Actor::Owner, ChannelRef::Id { id: theirs.clone() }, say("launch checklist drafted", "p")).unwrap();
-    s.create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: "General".into(), purpose: "p".into(), key: "g".into() })
-        .unwrap();
-    let mv = |key: &str| WorkspaceMove { workspace_id: WS.into(), name: "Buddies".into(), root_path: "/tmp/renamed".into(), key: key.into() };
-
-    let clash = s.move_workspace(&Actor::Owner, mv("m1")).unwrap_err().to_string();
-    assert!(clash.contains("channel #general") && clash.contains(&other.id), "{clash}");
-    assert_eq!(s.list_workspaces().unwrap().len(), 2, "a refused move changes nothing");
-
-    s.rename_channel(&Actor::Owner, &theirs, "general-old", "r").unwrap();
-    s.move_workspace(&Actor::Owner, mv("m2")).unwrap();
-    s.move_workspace(&Actor::Owner, mv("m2")).unwrap(); // replay: same key, no error
-
-    let all = s.list_workspaces().unwrap();
-    assert_eq!(all.iter().map(|w| (w.id.as_str(), w.root_path.as_str())).collect::<Vec<_>>(), [(WS, "/tmp/renamed")]);
-    assert!(s.list_buddies(WS).unwrap().iter().any(|b| b.slug == "growth"));
-    let hits = s.search_posts(&Actor::Owner, WS, &SearchQuery::text("checklist"), None, 10).unwrap().posts;
-    assert_eq!(hits.len(), 1, "the absorbed channel's posts are searchable in the survivor");
-    // Startup re-registering the new root now finds the survivor instead of a third workspace.
-    assert_eq!(s.create_workspace(&Actor::Owner, new_root).unwrap().id, WS);
 }

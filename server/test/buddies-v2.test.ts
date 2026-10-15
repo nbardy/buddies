@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { channel as diagnosticChannel } from 'node:diagnostics_channel';
 import {
@@ -6,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -4507,7 +4509,7 @@ test('New workspace from a folder: the name defaults to the folder, any spelling
   const w = await world();
   const { server, http } = await ownerHttp(w);
   try {
-    const folder = join(w.scratch, 'Atlas');
+    const folder = join(realpathSync(w.scratch), 'Atlas');
     mkdirSync(folder);
     symlinkSync(folder, join(w.scratch, 'atlas-link'));
     writeFileSync(join(w.scratch, 'notes.txt'), 'x');
@@ -4520,6 +4522,31 @@ test('New workspace from a folder: the name defaults to the folder, any spelling
       name: 'Other name',
     });
     assert.equal((again.body as unknown as { id: string }).id, workspace.id);
+    // Enrich an existing workspace, then register its renamed checkout through the owner API.
+    execFileSync('git', ['init', '--quiet', folder]);
+    execFileSync('git', [
+      '-C',
+      folder,
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.com',
+      'commit',
+      '--quiet',
+      '--allow-empty',
+      '-m',
+      'first',
+    ]);
+    await http('POST', '/api/buddies/workspaces', { rootPath: folder });
+    const moved = join(realpathSync(w.scratch), 'Atlas-renamed');
+    renameSync(folder, moved);
+    const registered = await http('POST', '/api/buddies/workspaces', { rootPath: moved });
+    assert.equal(registered.status, 201, JSON.stringify(registered.body));
+    assert.equal((registered.body as unknown as { id: string }).id, workspace.id);
+    assert.deepEqual((registered.body as unknown as { folders: string[] }).folders, [
+      folder,
+      moved,
+    ]);
     for (const rootPath of [join(w.scratch, 'notes.txt'), join(w.scratch, 'missing'), '/', 'rel'])
       assert.equal(
         (await http('POST', '/api/buddies/workspaces', { rootPath })).status,

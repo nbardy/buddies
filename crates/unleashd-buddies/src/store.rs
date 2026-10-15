@@ -109,7 +109,9 @@ impl Store {
     }
 
     pub fn list_workspaces(&self) -> Result<Vec<Workspace>> {
-        let mut stmt = self.conn.prepare_cached("SELECT id, name, root_path, created_at FROM workspace ORDER BY name")?;
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT id, name, root_path, created_at, folders, repository_identity FROM workspace ORDER BY name")?;
         collect(stmt.query_map([], workspace_row)?)
     }
 
@@ -202,7 +204,22 @@ fn channel_access(conn: &Connection, actor: &str, channel_id: &str) -> Result<De
 }
 
 pub(crate) fn workspace_row(r: &rusqlite::Row) -> rusqlite::Result<Workspace> {
-    Ok(Workspace { id: r.get(0)?, name: r.get(1)?, root_path: r.get(2)?, created_at: r.get(3)? })
+    let stored: String = r.get(2)?;
+    let folders_json: String = r.get(4)?;
+    let mut folders: Vec<String> = serde_json::from_str(&folders_json)
+        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(error)))?;
+    if folders.is_empty() {
+        folders.push(stored.clone());
+    }
+    let root_path = folders.iter().rev().find(|folder| std::path::Path::new(folder).is_dir()).cloned().unwrap_or(stored);
+    Ok(Workspace {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        root_path,
+        created_at: r.get(3)?,
+        folders: Some(folders),
+        repository_identity: r.get(5)?,
+    })
 }
 
 /// Walks the manager chain up from `report` (PK lookups; UNION stops cycles).

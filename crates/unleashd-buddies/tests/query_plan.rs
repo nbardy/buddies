@@ -153,7 +153,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
     ] {
         s.list_run_rows(&Actor::Owner, q, 10).unwrap();
     }
-    s.create_workspace(&owner, WorkspaceInput { name: "w2".into(), root_path: "/tmp/w2".into() }).unwrap();
+    s.create_workspace(&owner, WorkspaceInput { repository_identity: Some("repo".into()), name: "w2".into(), root_path: "/tmp/w2".into() }).unwrap();
     let hired = s
         .create_buddy(
             &owner,

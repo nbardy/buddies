@@ -356,15 +356,13 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   port. Never mount it on the gated Express app: a turn's bearer is not the owner
   secret, and the owner secret must never reach a turn. Each turn's grant is
   revoked at settle (the token is readable by the agent's shell).
-- Moving or renaming a checkout strands its Buddy workspace: `root_path` is the turn cwd, so
-  every turn spawns into a missing folder, and startup registers the new path as a SECOND
-  workspace with its own Product Dev + Release Manager. Re-root it with
-  `PATCH /api/buddies/workspaces/:id {name, rootPath, key}` (crate `move_workspace`), which folds
-  any workspace already at the new root into it; retire duplicate seats and rename clashing
-  channels first (it refuses a shared slug or channel name). 2026-10-14: `~/git/unleashd` became
-  `~/git/buddies`. Node reported the missing cwd as `spawn /bin/sh ENOENT`, and an unhandled
-  spawn `'error'` crashed the whole backend on every attempt (fixed in
-  `vendor/agent-cli-tool/src/journal.ts`; guard `journal.test.ts` "failed spawn").
+- Workspace registration keeps folder history and Git-root history plus repo-relative folder
+  identity. Startup and New workspace share `workspaceRegistration`; the crate reuses exactly one
+  matching workspace only when all its folders are absent, preserving active clones separately.
+  Ambiguous missing matches fail instead of merging teams. Existing workspaces acquire history on
+  their next registration; folders already missing before that cannot be inferred. Turns use the
+  newest registered folder that exists. There is no workspace move/fold route or MCP tool.
+  Guards: `server/test/workspace-registration.test.ts`; failed-spawn handling stays in agent-cli.
 - When source is broken, `server/dist/*.js` (and `shared/dist/`) is the oracle
   for the author's prior intent — check it before git archaeology.
 - The formatter is **biome** (`pnpm format`, `pnpm lint:fix`; config in

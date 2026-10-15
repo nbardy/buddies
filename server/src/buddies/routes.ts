@@ -32,7 +32,6 @@ import {
   ScheduleSchema,
   TaskCreateSchema,
   TaskUpdateSchema,
-  WorkspaceMoveSchema,
   WorkspaceSchema,
   buddyMutationRoute,
   BuddyDocKindSchema as docKind,
@@ -63,6 +62,7 @@ import { resolveForWorkspace, wakes } from './mentions';
 import type { Runner } from './runner';
 import { channelsNamed } from './search-channels';
 import { checkedEvidence } from './tool-views';
+import { workspaceRegistration } from './workspace-registration';
 
 /**
  * The owner's Buddy API over the crate, mounted behind the auth gate (server.ts registers it after
@@ -86,7 +86,7 @@ export interface BuddyRouteDeps {
 
 /**
  * κ for "New workspace" on the home screen (port of 6d04860): the folder is resolved to its real
- * path, because the crate's reuse key is the stored root_path string — `~/x`, `/x/` and a symlink
+ * path, so `~/x`, `/x/` and a symlink
  * to `/x` must all find the one workspace. A missing name is the folder's name.
  */
 function workspaceInput(raw: unknown): { name: string; rootPath: string } {
@@ -292,14 +292,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         }))
       ),
     [buddyMutationRoute('workspace.create')]: async (req) =>
-      write(core.createWorkspace(OWNER, workspaceInput(req.body))),
-    [buddyMutationRoute('workspace.move')]: async (req) => {
-      const { key: moveKey, ...input } = WorkspaceMoveSchema.parse(req.body);
-      const { name, rootPath } = workspaceInput(input);
-      return write(
-        core.moveWorkspace(OWNER, { workspaceId: p(req, 'workspaceId'), name, rootPath, key: moveKey })
-      );
-    },
+      write(core.createWorkspace(OWNER, await workspaceRegistration(workspaceInput(req.body)))),
     [buddyMutationRoute('builder.open')]: async (req) => {
       const { workspaceId } = BuilderOpenSchema.parse(req.body ?? {});
       if (workspaceId === undefined) return deps.createBuilderConversation();
