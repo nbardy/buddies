@@ -311,7 +311,7 @@ export class TurnRunner {
         harness: turn.config.provider,
         mode: 'conversation',
         prompt: turn.content,
-        cwd: host.workingDirectory,
+        cwd: host.policy.turnDirectory(host.workingDirectory),
         model: turn.config.modelId,
         resumeSessionId: turn.resume ? host.sessionId : undefined,
         forkSessionId: forking ? turn.forkSourceSessionId : undefined,
@@ -587,7 +587,7 @@ export class TurnRunner {
     // The same signal renews a Buddy run's lease: a live bridge means a live holder (lease ≠
     // deadline; see BuddyTurnPolicy.bridgeAlive).
     this.host.policy.bridgeAlive();
-    this.ports.swarmObservers.poke(this.host.workingDirectory);
+    this.ports.swarmObservers.poke(this.host.policy.turnDirectory(this.host.workingDirectory));
   }
 
   sawOutput(): void {
@@ -994,7 +994,7 @@ export class TurnRunner {
     this.stopSwarmWatch?.();
     this.stopSwarmWatch = watchSwarmRuns(
       this.ports.swarmObservers,
-      this.host.workingDirectory,
+      this.host.policy.turnDirectory(this.host.workingDirectory),
       this.subAgentHost
     );
   }
