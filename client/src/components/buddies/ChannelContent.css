@@ -368,8 +368,9 @@ video.channel-media {
   font-size: var(--fs-4);
 }
 
-.channel-file-header a {
+.channel-file-actions {
   flex: none;
+  gap: var(--sp-5);
 }
 
 .channel-file-scroll {

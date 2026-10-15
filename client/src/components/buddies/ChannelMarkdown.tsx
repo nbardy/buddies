@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom';
 import { type Components, type ExtraProps, defaultUrlTransform } from 'react-markdown';
 import { Link } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
+import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChatActivity } from '../../ui/ChatActivity';
 import { useMarkdownPipeline } from '../../utils/lazyMarkdownPlugins';
@@ -355,6 +356,16 @@ function useFileText(src: string) {
   return usePolledFetch(source, 0);
 }
 
+function MarkdownFileCopy({ src }: { src: string }) {
+  const file = useFileText(src);
+  const { state, copy } = useCopyAction(file.data ?? '');
+  return (
+    <button type="button" onClick={copy} disabled={file.data === null} aria-live="polite">
+      {COPY_LABEL[state]}
+    </button>
+  );
+}
+
 function MarkdownFile({ src }: { src: string }) {
   const file = useFileText(src);
   const pipeline = useMarkdownPipeline(CHANNEL_MARKDOWN);
@@ -457,9 +468,12 @@ function ChannelFileOverlay({ file, onClose }: { file: ChannelFile; onClose(): v
         <section className="channel-file-document ui-stack">
           <header className="channel-file-header ui-row">
             <span className="ui-truncate">{file.label}</span>
-            <a href={file.src} download>
-              Download
-            </a>
+            <span className="channel-file-actions ui-row">
+              <a href={file.src} download>
+                Download
+              </a>
+              {file.kind === 'markdown' && <MarkdownFileCopy key={file.src} src={file.src} />}
+            </span>
           </header>
           {file.kind === 'markdown' ? (
             <article className="channel-file-scroll">
