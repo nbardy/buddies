@@ -138,16 +138,18 @@ console.log(JSON.stringify({schema:'oompa.task-validation/v1',task_id:process.en
   const executable = path.join(scratch, 'oompa-stub');
   fs.writeFileSync(executable, '#!/bin/sh\necho $$\nsleep 90 &\necho $!\nwait\n', { mode: 0o755 });
   let grants = createGrants({ ttlMs: 60_000 });
-  const owner = () => {
-    const grant = grants.issueBuddy({
+  const worker = (buddyId = buddy.id, workspaceId = ws.id) =>
+    grants.issueBuddy({
       role: 'worker',
-      buddyId: buddy.id,
-      workspaceId: ws.id,
-      conversationId: `owner-${Math.random()}`,
+      buddyId,
+      workspaceId,
+      conversationId: `turn-${Math.random()}`,
       runId: null,
       subscribes: 'self',
       hooks: { t: 'unrecorded' },
     });
+  const owner = () => {
+    const grant = worker();
     grants.promoteToOwner(grant.conversationId);
     return grant;
   };
@@ -208,9 +210,11 @@ console.log(JSON.stringify({schema:'oompa.task-validation/v1',task_id:process.en
     task,
     foreign,
     counter,
+    configPath,
     launch,
     stop,
     owner,
+    worker,
     get grants() {
       return grants;
     },
@@ -314,6 +318,58 @@ test('run-owned MCP outlives parent settle and backend reload; scope, stop and e
     const expired = await w.launch(1);
     await until(async () => (await probe(expired.spec)) === 401);
     assert.equal(w.grants.lookup(expired.grant.token), null);
+  } finally {
+    await w.close();
+  }
+});
+
+test('ordinary launch Buddy can monitor and stop, while peers, foreign scope and worker launch are denied', async () => {
+  const w = await fixture();
+  try {
+    const child = await w.launch();
+    w.grants.revokeConversation(child.parent.conversationId);
+    const manager = w.worker();
+    const call = (grant: BuddyGrant, kind: 'status' | 'stop') =>
+      rpc(w.endpoint.spec(grant), 'oompa', {
+        action: { kind, runId: child.run.runId },
+        key: `${kind}-${Math.random()}`,
+      });
+    const status = await call(manager, 'status');
+    assert.equal(status.error, false, status.text);
+    assert.equal(status.value.runId, child.run.runId);
+    assert.equal(status.value.expiresAt, child.grant.expiresAt);
+    const peer = await w.core.createBuddy(OWNER, {
+      workspaceId: w.ws.id,
+      slug: 'peer',
+      name: 'Peer',
+      role: 'peer',
+      manager: { kind: 'nobody' },
+      key: 'peer',
+    });
+    for (const other of [w.worker(peer.id), w.worker(w.buddy.id, 'foreign-workspace')]) {
+      assert.equal((await call(other, 'status')).error, true);
+      assert.equal((await call(other, 'stop')).error, true);
+    }
+    const deniedLaunch = await rpc(w.endpoint.spec(manager), 'oompa', {
+      action: {
+        kind: 'launch',
+        workspaceId: w.ws.id,
+        buddyId: w.buddy.id,
+        workspacePath: w.repo,
+        configPath: w.configPath,
+        maxSeconds: 60,
+      },
+      key: 'worker-launch-denied',
+    });
+    assert.equal(deniedLaunch.error, true);
+    assert.match(deniedLaunch.text, /owner-authored/);
+    assert.equal(
+      (await call(child.grant, 'stop')).error,
+      true,
+      'run-owned child cannot stop its supervisor'
+    );
+    assert.equal((await call(manager, 'stop')).error, false);
+    assert.equal(await probe(child.spec), 401);
   } finally {
     await w.close();
   }

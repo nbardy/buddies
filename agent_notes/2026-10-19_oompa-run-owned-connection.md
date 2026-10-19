@@ -54,3 +54,12 @@ grants; running turns do not block reload or get killed. The backend PID changed
 during implementation while current turns continued. A schedule-origin Buddy
 turn does not gain owner launch authority; the current adopted owner turn must
 perform the launch.
+
+Follow-up blocker: the scheduled launch Buddy had no MCP status/stop operation
+after the owner launch turn settled. Ordinary Buddy workers now see `oompa`,
+but the host admits only status/stop for the exact launch Buddy and workspace.
+Peers, foreign workspace grants and run-owned children are denied; launch still
+requires an owner-authored principal. Cheapest check is a real MCP call under a
+fresh ordinary worker grant after parent revoke, plus peer/foreign/launch denials.
+The live run retains its original journaled token and deadline across the source
+reload; this change does not mint or promote a grant for it.

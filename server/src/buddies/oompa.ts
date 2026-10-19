@@ -270,19 +270,24 @@ export function createOompaHost(options: {
     guard: forGrant,
     close: () => clearInterval(poll),
     async action(grant: TurnGrant, action: z.infer<typeof OompaAction>, key: string) {
-      if (grant.role !== 'owner' && grant.role !== 'builder')
-        throw new Error('Oompa launch/control requires an owner-authored turn');
-      if (grant.principal.kind !== 'owner')
-        throw new Error('Oompa launch requires the owner launch principal');
+      const ownerInput =
+        (grant.role === 'owner' || grant.role === 'builder') && grant.principal.kind === 'owner';
       if (gate.t !== 'enabled') throw new Error(`Oompa execution disabled: ${gate.reason}`);
       if (action.kind !== 'launch') {
+        // The scheduled launch Buddy can monitor/stop its own execution after the owner turn
+        // settles. A peer or task-scoped child cannot inherit that control. Guard: oompa-mcp.
+        if (!ownerInput && (grant.role !== 'worker' || grant.oompa))
+          throw new Error('Oompa control requires the launch Buddy or an owner-authored turn');
         const run = runs.get(action.runId);
         if (!run) throw new Error('unknown Oompa run');
         if (grant.role !== 'builder' && run.owner.grant.workspaceId !== grant.workspaceId)
           throw new Error('Oompa run is outside this workspace');
+        if (!ownerInput && grant.role !== 'builder' && run.owner.grant.buddyId !== grant.buddyId)
+          throw new Error('Oompa run belongs to another Buddy');
         if (action.kind === 'stop') stop(run);
         return view(run);
       }
+      if (!ownerInput) throw new Error('Oompa launch requires an owner-authored turn');
       if (grant.role !== 'builder' && grant.workspaceId !== action.workspaceId)
         throw new Error('Oompa launch is outside this workspace');
       const workspace = (await options.core.listWorkspaces()).find(

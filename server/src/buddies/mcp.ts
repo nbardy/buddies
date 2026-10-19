@@ -892,7 +892,7 @@ const OOMPA_TOOLS = {
 };
 const OOMPA_CONTROL = teamTool({
   description:
-    'Owner-only host launch, status and stop for bounded Oompa work on explicitly selected tasks. No credentials are returned.',
+    'Owner-only host launch for bounded Oompa work on selected tasks. The launch Buddy may read status or stop its own run. No credentials are returned.',
   writes: true,
   schema: z.object({ action: OompaAction, key }).strict(),
   handler: (deps, grant, { action, key }) => {
@@ -907,7 +907,7 @@ export function toolsFor(role: Role): Record<string, Tool<TurnGrant>> {
   const buddy = BUDDY_TOOLS as Record<string, Tool<TurnGrant>>;
   switch (role) {
     case 'worker':
-      return { ...buddy, team };
+      return { ...buddy, team, oompa: OOMPA_CONTROL };
     case 'owner':
       return { ...buddy, team, team_admin, oompa: OOMPA_CONTROL };
     case 'reviewer':
