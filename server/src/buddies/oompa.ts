@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -63,6 +63,20 @@ export const OompaAction = z.discriminatedUnion('kind', [
       maxSeconds: z.number().int().positive().max(43_200),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('continue'),
+      runId: z.string().min(1),
+      swarmId: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+      taskId: z.string().min(1),
+      baseRevision: z.number().int().positive(),
+      workspacePath: z.string().min(1),
+      sourceCommit: z.string().regex(/^[a-f0-9]{40}$/),
+      command: Validator.shape.command,
+      sourceFiles: Validator.shape.source_files,
+      maxSeconds: z.number().int().positive().max(600),
+    })
+    .strict(),
   z.object({ kind: z.literal('status'), runId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal('stop'), runId: z.string().min(1) }).strict(),
 ]);
@@ -76,6 +90,15 @@ export const OompaAccept = z
   })
   .strict();
 type Accept = z.infer<typeof OompaAccept>;
+type Continue = Extract<z.infer<typeof OompaAction>, { kind: 'continue' }>;
+type Continuation = {
+  request: Continue;
+  key: string;
+  requestHash: string;
+  deadline: number;
+  phase: 'requesting' | 'started' | 'failed';
+  reason?: string;
+};
 type Run = { owner: OompaOwner; execution: Execution };
 type Validation = {
   request: Accept;
@@ -88,7 +111,10 @@ type Validation = {
 function cleanEnv(): NodeJS.ProcessEnv {
   return Object.fromEntries(
     Object.entries(process.env).filter(
-      ([name]) => !/^(UNLEASHD_AUTH_|OOMPA_BUDDY_MCP_|AGENT_CLI_MCP_|BUDDIES_.*TOKEN)/.test(name)
+      ([name]) =>
+        !/^(UNLEASHD_AUTH_|OOMPA_BUDDY_MCP_|AGENT_CLI_MCP_|OOMPA_CONTINUATION_|BUDDIES_.*TOKEN)/.test(
+          name
+        )
     )
   );
 }
@@ -111,8 +137,7 @@ async function registered(base: string, candidate: string): Promise<string> {
   return real;
 }
 async function cleanCommit(cwd: string): Promise<string> {
-  if (await git(cwd, 'status', '--porcelain'))
-    throw new Error('workspace must be clean for acceptance');
+  if (await git(cwd, 'status', '--porcelain')) throw new Error('workspace must be clean');
   return git(cwd, 'rev-parse', 'HEAD');
 }
 async function pins(cwd: string, validator: z.infer<typeof Validator>): Promise<void> {
@@ -146,6 +171,7 @@ export function createOompaHost(options: {
   const journals = createExecutionJournals(root);
   const runs = new Map<string, Run>();
   const accepts = new Map<string, Promise<unknown>>();
+  const registering = new Set<string>();
   const now = options.now ?? Date.now;
   const wrapper = options.wrapper ?? path.resolve(__dirname, '../../relay/oompa-run-host.mjs');
   const executable =
@@ -156,6 +182,60 @@ export function createOompaHost(options: {
   function signal(dir: string) {
     const process = executionProcess(dir);
     if (process.t === 'live') killExecution(process.pid, dir);
+  }
+  function continuations(run: Run) {
+    const root = path.join(run.execution.dir, 'continuations');
+    return fs.existsSync(root)
+      ? fs
+          .readdirSync(root)
+          .filter((name) => /^[a-f0-9]{64}$/.test(name))
+          .map((name) => {
+            const dir = path.join(root, name);
+            return { dir, record: read<Continuation>(path.join(dir, 'continuation.json')) };
+          })
+      : [];
+  }
+  function releaseRequest(run: Run, id: string) {
+    const file = path.join(run.execution.dir, 'continuation-request.json');
+    if (fs.existsSync(file) && read<{ id: string }>(file).id === id) fs.unlinkSync(file);
+  }
+  function childActive(dir: string) {
+    if (executionProcess(dir).t !== 'ended') return true;
+    // exit.json precedes the wrapper's final group kill. Do not resume the
+    // task loop in that gap; wait until its exact wrapper is gone.
+    try {
+      const pid = fs.readFileSync(path.join(dir, 'pid'), 'utf8').trim();
+      return execFileSync('ps', ['-p', pid, '-o', 'command='], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).includes(dir);
+    } catch {
+      return false;
+    }
+  }
+  function refreshContinuations(run: Run) {
+    for (const { dir, record } of continuations(run)) {
+      if (
+        !registering.has(run.owner.id) &&
+        (!childActive(dir) ||
+          (record.phase === 'requesting' && executionProcess(dir).t === 'unstarted'))
+      ) {
+        if (record.phase === 'requesting')
+          atomic(path.join(dir, 'continuation.json'), {
+            ...record,
+            phase: 'failed',
+            reason: 'host restarted before diagnostic spawn',
+          });
+        releaseRequest(run, path.basename(dir));
+      }
+    }
+  }
+  function stopChildren(run: Run) {
+    for (const kind of ['validations', 'continuations']) {
+      const root = path.join(run.execution.dir, kind);
+      if (fs.existsSync(root))
+        for (const name of fs.readdirSync(root)) signal(path.join(root, name));
+    }
   }
   function stop(run: Run, timeout = false) {
     if (run.execution.phase.t === 'running') {
@@ -172,11 +252,10 @@ export function createOompaHost(options: {
     }
     options.grants.revokeRun(run.owner.id);
     signal(run.execution.dir);
-    const validationRoot = path.join(run.execution.dir, 'validations');
-    if (fs.existsSync(validationRoot))
-      for (const name of fs.readdirSync(validationRoot)) signal(path.join(validationRoot, name));
+    stopChildren(run);
   }
   function refresh(run: Run) {
+    refreshContinuations(run);
     if (run.execution.phase.t === 'stopping' && executionProcess(run.execution.dir).t !== 'live') {
       journals.step(run.execution, {
         t: 'drained',
@@ -184,7 +263,10 @@ export function createOompaHost(options: {
       });
       return;
     }
-    if (run.execution.phase.t !== 'running') return;
+    if (run.execution.phase.t !== 'running') {
+      stopChildren(run);
+      return;
+    }
     if (run.owner.grant.expiresAt <= now()) return stop(run, true);
     if (executionProcess(run.execution.dir).t !== 'live') {
       journals.step(run.execution, {
@@ -192,6 +274,7 @@ export function createOompaHost(options: {
         observed: { t: 'complete', text: 'Oompa process exited' },
       });
       options.grants.revokeRun(run.owner.id);
+      stopChildren(run);
     }
   }
   function view(run: Run) {
@@ -203,6 +286,17 @@ export function createOompaHost(options: {
       workspacePath: run.owner.workspacePath,
       taskIds: run.owner.grant.oompa!.taskIds,
       logDirectory: run.execution.dir,
+      continuations: continuations(run).map(({ dir, record }) => ({
+        ...record,
+        status: record.phase === 'failed' ? 'failed' : executionProcess(dir).t,
+        logDirectory: dir,
+        stdoutPath: path.join(dir, 'stdout'),
+        stderrPath: path.join(dir, 'stderr'),
+        exitPath: path.join(dir, 'exit.json'),
+        exit: fs.existsSync(path.join(dir, 'exit.json'))
+          ? read<{ status: number }>(path.join(dir, 'exit.json'))
+          : null,
+      })),
     };
   }
   function spawnOwned(
@@ -232,6 +326,189 @@ export function createOompaHost(options: {
     } finally {
       fs.closeSync(out);
       fs.closeSync(err);
+    }
+  }
+
+  // Idle snapshots alone raced the task loop. Every original worker must acknowledge
+  // the persisted request before argv starts; guard: oompa-mcp bounded continuation.
+  async function idle(run: Run, swarmId: string, acknowledgement?: string) {
+    const dir = path.join(run.owner.workspacePath, 'runs', swarmId);
+    const started = read<{
+      'swarm-id': string;
+      'config-file': string;
+      'continuation-control-dir'?: string;
+      pid: number;
+      workers: { id: string }[];
+    }>(path.join(dir, 'started.json'));
+    const log = fs.readFileSync(path.join(run.execution.dir, 'stdout'), 'utf8');
+    const parent = executionProcess(run.execution.dir);
+    if (
+      parent.t !== 'live' ||
+      started['swarm-id'] !== swarmId ||
+      started['config-file'] !== path.join(run.execution.dir, 'config.json') ||
+      !log.includes(`Started event written to runs/${swarmId}/started.json`) ||
+      !Number.isInteger(started.pid) ||
+      started.pid <= 0 ||
+      fs.existsSync(path.join(dir, 'stopped.json'))
+    )
+      throw new Error('cannot prove the exact active Oompa swarm identity');
+    if (started['continuation-control-dir'] !== run.execution.dir)
+      throw new Error('Oompa host needs restart with continuation handshake support');
+    const group = (await exec('ps', ['-p', String(started.pid), '-o', 'pgid='])).stdout.trim();
+    if (Number(group) !== parent.pid) throw new Error('Oompa swarm process is outside its host');
+    if (!started.workers?.length) throw new Error('unknown Oompa worker state');
+    for (const worker of started.workers) {
+      if (!/^[a-zA-Z0-9_-]+$/.test(worker.id)) throw new Error('invalid Oompa worker identity');
+      const state = read<{
+        status: string;
+        reason: string;
+        'worker-id': string;
+        'updated-at': string;
+        execution: { task_id?: string; phase?: string; host_continuation_id?: string };
+      }>(path.join(dir, 'workers', `${worker.id}.json`));
+      const age = now() - Date.parse(state['updated-at']);
+      if (
+        state['worker-id'] !== worker.id ||
+        state.status !== 'waiting' ||
+        !Number.isFinite(age) ||
+        age < -1000 ||
+        age > 5000 ||
+        !state.execution ||
+        state.execution.task_id ||
+        state.execution.phase ||
+        (acknowledgement &&
+          (state.reason !== 'host-continuation' ||
+            state.execution.host_continuation_id !== acknowledgement))
+      )
+        throw new Error('Oompa worker is active, stale or has not acknowledged the diagnostic');
+    }
+  }
+  function activeChild(run: Run) {
+    for (const kind of ['validations', 'continuations']) {
+      const root = path.join(run.execution.dir, kind);
+      if (fs.existsSync(root))
+        for (const name of fs.readdirSync(root)) {
+          if (kind === 'continuations' && !/^[a-f0-9]{64}$/.test(name)) continue;
+          const dir = path.join(root, name);
+          if (
+            kind === 'continuations' &&
+            read<Continuation>(path.join(dir, 'continuation.json')).phase === 'failed' &&
+            executionProcess(dir).t === 'unstarted'
+          )
+            continue;
+          if (childActive(dir)) return true;
+        }
+    }
+    return false;
+  }
+  // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys)
+  async function continueRun(run: Run, request: Continue, key: string) {
+    const id = sha(key);
+    const dir = path.join(run.execution.dir, 'continuations', id);
+    const recordPath = path.join(dir, 'continuation.json');
+    const requestHash = sha(JSON.stringify(request));
+    if (fs.existsSync(recordPath)) {
+      if (read<Continuation>(recordPath).requestHash !== requestHash)
+        throw new Error('Oompa continuation key was already used for different input');
+      return view(run);
+    }
+    if (registering.has(run.owner.id) || activeChild(run))
+      throw new Error('Oompa implementation, validator or continuation is active');
+    registering.add(run.owner.id);
+    try {
+      refresh(run);
+      if (run.execution.phase.t !== 'running')
+        throw new Error('Oompa execution is no longer running');
+      if (!fs.existsSync(path.join(run.execution.dir, 'continuation-control.json')))
+        throw new Error('Oompa host needs restart with continuation handshake support');
+      if (!run.owner.grant.oompa!.taskIds.includes(request.taskId))
+        throw new Error('task is outside this Oompa execution');
+      const config = Config.parse(read<unknown>(path.join(run.execution.dir, 'config.json')));
+      const task = await options.core.getTask(request.taskId);
+      if (
+        task.workspaceId !== run.owner.grant.workspaceId ||
+        task.ownerId !==
+          (config.task_backend.owner_by_task?.[task.id] ?? config.task_backend.buddy_id)
+      )
+        throw new Error('task owner or workspace changed');
+      if (
+        task.revision !== request.baseRevision ||
+        task.paused ||
+        ['done', 'cancelled'].includes(task.status)
+      )
+        throw new Error('task revision or status changed');
+      const workspacePath = await registered(run.owner.workspacePath, request.workspacePath);
+      if ((await cleanCommit(workspacePath)) !== request.sourceCommit)
+        throw new Error('diagnostic source commit does not match request');
+      await pins(workspacePath, {
+        command: request.command,
+        timeout_seconds: request.maxSeconds,
+        source_files: request.sourceFiles,
+      });
+      await idle(run, request.swarmId);
+      const deadline = now() + request.maxSeconds * 1000;
+      if (deadline > run.owner.grant.expiresAt)
+        throw new Error('diagnostic exceeds original Oompa deadline');
+      const childJournals = createExecutionJournals(path.dirname(dir));
+      const preparing = childJournals.ephemeral(`Oompa diagnostic ${request.taskId}`);
+      const record: Continuation = { request, key, requestHash, deadline, phase: 'requesting' };
+      atomic(path.join(preparing, 'continuation.json'), record);
+      fs.renameSync(preparing, dir);
+      atomic(path.join(run.execution.dir, 'continuation-request.json'), {
+        id,
+        deadline_ms: deadline,
+      });
+      const end = Math.min(deadline, now() + 5000);
+      let acknowledged = false;
+      while (now() < end) {
+        refresh(run);
+        if (run.execution.phase.t !== 'running')
+          throw new Error('Oompa stopped during diagnostic handshake');
+        try {
+          await idle(run, request.swarmId, id);
+          acknowledged = true;
+          break;
+        } catch {}
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
+      if (!acknowledged)
+        throw new Error(
+          'Oompa worker did not acknowledge diagnostic; host needs handshake support'
+        );
+      const current = await options.core.getTask(request.taskId);
+      if (current.revision !== request.baseRevision)
+        throw new Error('task changed during diagnostic handshake');
+      if ((await cleanCommit(workspacePath)) !== request.sourceCommit)
+        throw new Error('diagnostic source changed during handshake');
+      await pins(workspacePath, {
+        command: request.command,
+        timeout_seconds: request.maxSeconds,
+        source_files: request.sourceFiles,
+      });
+      refresh(run);
+      if (run.execution.phase.t !== 'running' || deadline <= now())
+        throw new Error('Oompa diagnostic deadline expired');
+      atomic(recordPath, { ...record, phase: 'started' });
+      spawnOwned(dir, deadline, request.command, workspacePath, {
+        ...cleanEnv(),
+        OOMPA_TASK_ID: request.taskId,
+        OOMPA_SOURCE_COMMIT: request.sourceCommit,
+        OOMPA_CONTINUATION_CONTROL_DIR: run.execution.dir,
+        OOMPA_CONTINUATION_ID: id,
+      });
+      return view(run);
+    } catch (error) {
+      if (fs.existsSync(recordPath))
+        atomic(recordPath, {
+          ...read<Continuation>(recordPath),
+          phase: 'failed',
+          reason: String(error),
+        });
+      if (executionProcess(dir).t === 'live') signal(dir);
+      else releaseRequest(run, id);
+      throw error;
+    } finally {
+      registering.delete(run.owner.id);
     }
   }
 
@@ -284,6 +561,10 @@ export function createOompaHost(options: {
           throw new Error('Oompa run is outside this workspace');
         if (!ownerInput && grant.role !== 'builder' && run.owner.grant.buddyId !== grant.buddyId)
           throw new Error('Oompa run belongs to another Buddy');
+        if (action.kind === 'continue') {
+          if (!ownerInput) throw new Error('Oompa continuation requires an owner-authored turn');
+          return continueRun(run, action, key);
+        }
         if (action.kind === 'stop') stop(run);
         return view(run);
       }
@@ -349,6 +630,7 @@ export function createOompaHost(options: {
         // Pin configuration at owner launch; later model edits cannot change the oracle or scope.
         const pinnedConfig = path.join(execution.dir, 'config.json');
         fs.writeFileSync(pinnedConfig, raw, { mode: 0o600 });
+        atomic(path.join(execution.dir, 'continuation-control.json'), { version: 1 });
         spawnOwned(
           execution.dir,
           record.expiresAt,
@@ -356,6 +638,7 @@ export function createOompaHost(options: {
           workspacePath,
           {
             ...cleanEnv(),
+            OOMPA_CONTINUATION_CONTROL_DIR: execution.dir,
             OOMPA_BUDDY_MCP_URL: options.url(),
             OOMPA_BUDDY_MCP_TOKEN: record.token,
             AGENT_CLI_MCP_UNLEASHD_BUDDY__AUTHORIZATION: `Bearer ${record.token}`,
@@ -375,8 +658,18 @@ export function createOompaHost(options: {
       const lockKey = `${grant.oompa?.executionId}:${sha(JSON.stringify(request))}`;
       const previous = accepts.get(lockKey);
       if (previous) return previous;
+      const run = forGrant(grant);
+      if (
+        registering.has(run.owner.id) ||
+        continuations(run).some(
+          ({ dir, record }) =>
+            (record.phase !== 'failed' || executionProcess(dir).t !== 'unstarted') &&
+            childActive(dir)
+        )
+      )
+        throw new Error('Oompa continuation is active');
       const perform = async () => {
-        const run = forGrant(grant);
+        registering.add(run.owner.id);
         if (!grant.oompa!.taskIds.includes(request.taskId))
           throw new Error('task is outside this Oompa execution');
         const validator = run.owner.validators[request.taskId];
@@ -519,6 +812,7 @@ export function createOompaHost(options: {
         return await pending;
       } finally {
         accepts.delete(lockKey);
+        registering.delete(run.owner.id);
       }
     },
   };

@@ -79,7 +79,19 @@ fs.appendFileSync(${JSON.stringify(counter)}, 'x');
 await new Promise(resolve => setTimeout(resolve, 500));
 console.log(JSON.stringify({schema:'oompa.task-validation/v1',task_id:process.env.OOMPA_TASK_ID,source_commit:process.env.OOMPA_SOURCE_COMMIT,accepted:true}));\n`;
   fs.writeFileSync(path.join(repo, 'oracle.mjs'), oracle);
-  git('add', 'oracle.mjs');
+  const diagnosticCounter = path.join(scratch, 'diagnostic-count');
+  const diagnostic = `import fs from 'node:fs';
+import { spawn } from 'node:child_process';
+fs.appendFileSync(${JSON.stringify(diagnosticCounter)}, 'x');
+const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)']);
+console.log(JSON.stringify({pid:child.pid, credential:!!process.env.UNLEASHD_AUTH_TEST}));
+await new Promise(resolve => setTimeout(resolve, Number(process.argv[2] || 200)));
+if(process.argv[3] === 'dirty') fs.writeFileSync('result.txt', 'changed');
+child.kill();
+`;
+  fs.writeFileSync(path.join(repo, 'diagnostic.mjs'), diagnostic);
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'runs/\n');
+  git('add', 'oracle.mjs', 'diagnostic.mjs', '.gitignore');
   git('commit', '-qm', 'initial');
   const base = git('rev-parse', 'HEAD');
   const candidate = path.join(scratch, 'candidate');
@@ -136,7 +148,26 @@ console.log(JSON.stringify({schema:'oompa.task-validation/v1',task_id:process.en
     })
   );
   const executable = path.join(scratch, 'oompa-stub');
-  fs.writeFileSync(executable, '#!/bin/sh\necho $$\nsleep 90 &\necho $!\nwait\n', { mode: 0o755 });
+  const stubMode = path.join(scratch, 'stub-mode');
+  fs.writeFileSync(
+    executable,
+    `#!/usr/bin/env node
+const fs = require('node:fs'), path = require('node:path'), {spawn} = require('node:child_process');
+const sleeper = spawn('sleep', ['90']);
+console.log(process.pid); console.log(sleeper.pid);
+const root=path.join(process.cwd(), 'runs', 'test-swarm');
+fs.mkdirSync(path.join(root,'workers'),{recursive:true});
+fs.writeFileSync(path.join(root,'started.json'),JSON.stringify({'swarm-id':'test-swarm','config-file':process.argv[4],pid:process.pid,workers:[{id:'w0'}],'continuation-control-dir':process.env.OOMPA_CONTINUATION_CONTROL_DIR}));
+console.log('Started event written to runs/test-swarm/started.json');
+const update=()=>{
+let request; try{request=JSON.parse(fs.readFileSync(path.join(process.env.OOMPA_CONTINUATION_CONTROL_DIR,'continuation-request.json'),'utf8'));}catch{}
+let mode='';try{mode=fs.readFileSync(${JSON.stringify(stubMode)},'utf8')}catch{}
+const state={'worker-id':'w0',status:mode==='active'?'running':'waiting',reason:request&&mode!=='noack'?'host-continuation':'awaiting-buddy-acceptance','updated-at':new Date().toISOString(),execution:mode==='active'?{task_id:'active'}:request&&mode!=='noack'?{host_continuation_id:request.id}:{}};
+const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON.stringify(state));fs.renameSync(file+'.tmp',file);
+};update();setInterval(update,30);
+`,
+    { mode: 0o755 }
+  );
   let grants = createGrants({ ttlMs: 60_000 });
   const worker = (buddyId = buddy.id, workspaceId = ws.id) =>
     grants.issueBuddy({
@@ -210,6 +241,9 @@ console.log(JSON.stringify({schema:'oompa.task-validation/v1',task_id:process.en
     task,
     foreign,
     counter,
+    diagnosticCounter,
+    diagnosticHash: createHash('sha256').update(diagnostic).digest('hex'),
+    stubMode,
     configPath,
     launch,
     stop,
@@ -248,7 +282,8 @@ test('run-owned MCP outlives parent settle and backend reload; scope, stop and e
         .readFileSync(path.join(child.run.logDirectory, 'stdout'), 'utf8')
         .trim()
         .split('\n');
-      return lines.length === 2 ? lines.map(Number) : false;
+      const pids = lines.filter((line) => /^\d+$/.test(line)).map(Number);
+      return pids.length === 2 ? pids : false;
     });
     w.grants.revokeConversation(child.parent.conversationId);
     assert.equal(await probe(w.endpoint.spec(child.parent)), 401);
@@ -440,6 +475,222 @@ test('only the pinned host oracle can accept, integrates the exact candidate, an
     assert.equal(repeated.value.kind, 'accepted', repeated.text);
     assert.equal(repeated.value.task.revision, accepted.task.revision);
     assert.equal(fs.readFileSync(w.counter, 'utf8'), 'x');
+  } finally {
+    await w.close();
+  }
+});
+
+test('bounded continuation requires owner, exact scope/revision/source and idle ack; replay/reload runs exactly once', async () => {
+  const w = await fixture();
+  try {
+    const child = await w.launch();
+    await until(async () => fs.existsSync(path.join(w.repo, 'runs/test-swarm/workers/w0.json')));
+    const action = {
+      kind: 'continue',
+      runId: child.run.runId,
+      swarmId: 'test-swarm',
+      taskId: w.task.id,
+      baseRevision: w.task.revision,
+      workspacePath: w.candidate,
+      sourceCommit: w.commit,
+      command: [process.execPath, 'diagnostic.mjs', '1000'],
+      sourceFiles: { 'diagnostic.mjs': w.diagnosticHash },
+      maxSeconds: 10,
+    };
+    const call = (patch = {}, key = 'diagnostic', grant = w.owner()) =>
+      rpc(w.endpoint.spec(grant), 'oompa', { action: { ...action, ...patch }, key });
+    for (const patch of [
+      { taskId: w.foreign.id },
+      { baseRevision: 99 },
+      { sourceCommit: w.base },
+      { sourceFiles: { 'diagnostic.mjs': '0'.repeat(64) } },
+      { sourceFiles: {} },
+      { maxSeconds: 601 },
+      { swarmId: 'unknown' },
+    ])
+      assert.equal((await call(patch)).error, true, JSON.stringify(patch));
+    assert.equal((await call({}, 'worker-denied', w.worker())).error, true);
+    assert.equal((await call({}, 'child-denied', child.grant)).error, true);
+    fs.writeFileSync(path.join(w.candidate, 'dirty.txt'), 'dirty');
+    assert.equal((await call()).error, true);
+    fs.unlinkSync(path.join(w.candidate, 'dirty.txt'));
+    fs.writeFileSync(w.stubMode, 'active');
+    await sleep(100);
+    const active = await call();
+    assert.equal(active.error, true);
+    assert.match(active.text, /active/);
+    fs.unlinkSync(w.stubMode);
+    await sleep(100);
+    process.env.UNLEASHD_AUTH_TEST = 'must-not-inherit';
+    const started = await call();
+    Reflect.deleteProperty(process.env, 'UNLEASHD_AUTH_TEST');
+    assert.equal(started.error, false, started.text);
+    assert.equal(started.value.continuations.length, 1);
+    const dir = started.value.continuations[0].logDirectory;
+    await until(async () => fs.existsSync(w.diagnosticCounter));
+    assert.equal((await call({}, 'overlap')).error, true);
+    assert.equal(
+      (await call({ command: [process.execPath, 'diagnostic.mjs', '500'] }, 'diagnostic')).error,
+      true
+    );
+    const accept = await rpc(child.spec, 'oompa', {
+      action: {
+        kind: 'accept',
+        taskId: w.task.id,
+        baseRevision: w.task.revision,
+        sourceCommit: w.commit,
+        workspacePath: w.candidate,
+      },
+    });
+    assert.equal(accept.error, true, accept.text);
+    await w.restart();
+    const repeated = await call();
+    assert.equal(repeated.error, false, repeated.text);
+    await until(async () => fs.existsSync(path.join(dir, 'exit.json')));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'exit.json'), 'utf8')).status, 0);
+    assert.equal(fs.readFileSync(w.diagnosticCounter, 'utf8'), 'x');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'stdout'), 'utf8')).credential, false);
+    await until(
+      async () => !fs.existsSync(path.join(child.run.logDirectory, 'continuation-request.json'))
+    );
+    assert.equal(
+      (await w.core.getTask(w.task.id)).status,
+      w.task.status,
+      'diagnostic never accepts the task'
+    );
+    assert.equal((await call()).error, false);
+    assert.equal(fs.readFileSync(w.diagnosticCounter, 'utf8'), 'x');
+    const interruptedId = createHash('sha256').update('interrupted').digest('hex');
+    const interruptedDir = path.join(child.run.logDirectory, 'continuations', interruptedId);
+    fs.mkdirSync(interruptedDir);
+    fs.writeFileSync(
+      path.join(interruptedDir, 'continuation.json'),
+      JSON.stringify({
+        ...JSON.parse(fs.readFileSync(path.join(dir, 'continuation.json'), 'utf8')),
+        key: 'interrupted',
+        phase: 'requesting',
+      })
+    );
+    fs.writeFileSync(
+      path.join(child.run.logDirectory, 'continuation-request.json'),
+      JSON.stringify({ id: interruptedId, deadline_ms: Date.now() + 10000 })
+    );
+    await w.restart();
+    const interrupted = await call({}, 'interrupted');
+    assert.equal(interrupted.error, false, interrupted.text);
+    assert.equal(
+      interrupted.value.continuations.find((x: { key: string }) => x.key === 'interrupted').phase,
+      'failed'
+    );
+    assert.equal(
+      fs.readFileSync(w.diagnosticCounter, 'utf8'),
+      'x',
+      'pre-spawn crash never re-executes on replay'
+    );
+    assert.equal(
+      fs.existsSync(path.join(child.run.logDirectory, 'continuation-request.json')),
+      false
+    );
+  } finally {
+    Reflect.deleteProperty(process.env, 'UNLEASHD_AUTH_TEST');
+    await w.close();
+  }
+});
+
+test('continuation refuses missing handshake and deadline extension; parent stop and outage deadline cancel its childtree', async () => {
+  const w = await fixture();
+  try {
+    const child = await w.launch(40);
+    await until(async () => fs.existsSync(path.join(w.repo, 'runs/test-swarm/workers/w0.json')));
+    const action = {
+      kind: 'continue',
+      runId: child.run.runId,
+      swarmId: 'test-swarm',
+      taskId: w.task.id,
+      baseRevision: w.task.revision,
+      workspacePath: w.candidate,
+      sourceCommit: w.commit,
+      command: [process.execPath, 'diagnostic.mjs', '60000'],
+      sourceFiles: { 'diagnostic.mjs': w.diagnosticHash },
+      maxSeconds: 4,
+    };
+    const call = (patch = {}, key = 'deadline') =>
+      rpc(w.endpoint.spec(w.owner()), 'oompa', { action: { ...action, ...patch }, key });
+    assert.equal((await call({ maxSeconds: 50 })).error, true);
+    const started = await call();
+    assert.equal(started.error, false, started.text);
+    const dir = started.value.continuations[0].logDirectory;
+    await until(async () => fs.statSync(path.join(dir, 'stdout')).size > 0);
+    const pid = JSON.parse(fs.readFileSync(path.join(dir, 'stdout'), 'utf8')).pid;
+    await w.restart();
+    await until(async () => fs.existsSync(path.join(dir, 'exit.json')));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'exit.json'), 'utf8')).status, 124);
+    await until(async () => {
+      try {
+        return execFileSync('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8' })
+          .trim()
+          .startsWith('Z');
+      } catch {
+        return true;
+      }
+    });
+    const stopped = await call({ maxSeconds: 10 }, 'stop-child');
+    assert.equal(stopped.error, false, stopped.text);
+    const second = stopped.value.continuations.find((x: { key: string }) => x.key === 'stop-child');
+    await until(async () => fs.statSync(second.stdoutPath).size > 0);
+    await w.stop(child.run.runId);
+    await w.restart();
+    await until(async () => fs.existsSync(second.exitPath));
+    assert.notEqual(JSON.parse(fs.readFileSync(second.exitPath, 'utf8')).status, 0);
+  } finally {
+    await w.close();
+  }
+});
+
+test('continuation fails closed on unsupported handshake and source changes after execution', async () => {
+  const w = await fixture();
+  try {
+    const child = await w.launch();
+    await until(async () => fs.existsSync(path.join(w.repo, 'runs/test-swarm/workers/w0.json')));
+    const action = {
+      kind: 'continue',
+      runId: child.run.runId,
+      swarmId: 'test-swarm',
+      taskId: w.task.id,
+      baseRevision: w.task.revision,
+      workspacePath: w.candidate,
+      sourceCommit: w.commit,
+      command: [process.execPath, 'diagnostic.mjs', '100', 'dirty'],
+      sourceFiles: { 'diagnostic.mjs': w.diagnosticHash },
+      maxSeconds: 10,
+    };
+    const call = (key: string) => rpc(w.endpoint.spec(w.owner()), 'oompa', { action, key });
+    const marker = path.join(child.run.logDirectory, 'continuation-control.json');
+    fs.unlinkSync(marker);
+    const unsupported = await call('unsupported');
+    assert.equal(unsupported.error, true);
+    assert.match(unsupported.text, /needs restart/);
+    fs.writeFileSync(marker, JSON.stringify({ version: 1 }));
+    fs.writeFileSync(w.stubMode, 'noack');
+    await sleep(100);
+    const noack = await call('noack');
+    assert.equal(noack.error, true);
+    assert.match(noack.text, /did not acknowledge/);
+    assert.equal(fs.existsSync(w.diagnosticCounter), false);
+    assert.equal(
+      fs.existsSync(path.join(child.run.logDirectory, 'continuation-request.json')),
+      false
+    );
+    fs.unlinkSync(w.stubMode);
+    await sleep(100);
+    const started = await call('dirty-after');
+    assert.equal(started.error, false, started.text);
+    const job = started.value.continuations.find((x: { key: string }) => x.key === 'dirty-after');
+    await until(async () => fs.existsSync(job.exitPath));
+    const exit = JSON.parse(fs.readFileSync(job.exitPath, 'utf8'));
+    assert.equal(exit.status, 126);
+    assert.match(exit.sourceError, /source changed/);
+    assert.equal((await w.core.getTask(w.task.id)).status, w.task.status);
   } finally {
     await w.close();
   }

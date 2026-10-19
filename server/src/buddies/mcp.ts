@@ -892,7 +892,7 @@ const OOMPA_TOOLS = {
 };
 const OOMPA_CONTROL = teamTool({
   description:
-    'Owner-only host launch for bounded Oompa work on selected tasks. The launch Buddy may read status or stop its own run. No credentials are returned.',
+    'Owner-only host launch or pinned diagnostic continuation for bounded Oompa work on selected tasks. The launch Buddy may read status or stop its own run. No credentials are returned.',
   writes: true,
   schema: z.object({ action: OompaAction, key }).strict(),
   handler: (deps, grant, { action, key }) => {
