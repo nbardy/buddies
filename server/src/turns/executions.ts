@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { type ExecutionProcess, executionProcess, killExecution } from '@nbardy/agent-cli';
 import type { Provider } from '@unleashd/shared';
+import type { BuddyGrant } from '../buddies/grants';
 import {
   type Execution,
   type ExecutionEvent,
@@ -44,10 +45,29 @@ export interface EphemeralOwner {
 }
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
-export type ExecutionOwner = TurnOwner | EphemeralOwner;
+export interface OompaOwner {
+  readonly version: 1;
+  readonly kind: 'oompa';
+  readonly id: string;
+  readonly key: string;
+  readonly launchHash: string;
+  readonly workspacePath: string;
+  readonly configPath: string;
+  readonly grant: Omit<BuddyGrant, 'observe'>;
+  readonly validators: Record<
+    string,
+    {
+      command: string[];
+      timeout_seconds: number;
+      source_files: Record<string, string>;
+    }
+  >;
+}
+export type ExecutionOwner = TurnOwner | EphemeralOwner | OompaOwner;
 
 /** One journal found at boot, classified once (the κ of this boundary). */
 export type FoundExecution =
+  | { t: 'oompa'; dir: string; owner: OompaOwner; phase: Phase; process: ExecutionProcess }
   | {
       t: 'turn';
       dir: string;
@@ -109,6 +129,8 @@ export function createExecutionJournals(root: string) {
           : { t: 'turn', dir, owner, phase, process };
       case 'ephemeral':
         return { t: 'ephemeral', dir, process };
+      case 'oompa':
+        return { t: 'oompa', dir, owner, phase, process };
     }
   }
 
@@ -137,6 +159,14 @@ export function createExecutionJournals(root: string) {
     /** A journal the next backend kills rather than adopts. */
     ephemeral(label: string): string {
       return create(`ephemeral-${crypto.randomUUID()}`, { version: 1, kind: 'ephemeral', label });
+    },
+
+    /** A bounded host execution: its task-scoped grant is restored only while running. */
+    forOompa(owner: Omit<OompaOwner, 'version' | 'kind'>): Execution {
+      return {
+        dir: create(owner.id, { version: 1, kind: 'oompa', ...owner }),
+        phase: { t: 'running' },
+      };
     },
 
     /** Every journal under the root, classified. Missing root = none. */

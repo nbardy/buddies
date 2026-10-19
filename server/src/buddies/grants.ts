@@ -4,9 +4,11 @@ import { OWNER, buddyActor } from './core';
 import type { HookSet } from './harness-steering';
 
 /**
- * What one turn may do through the MCP endpoint. The token is readable by the agent's own
+ * What one turn or bounded host-owned Oompa execution may do through the MCP endpoint.
+ * The token is readable by the agent's own
  * shell (T07: it sits in the CLI's env, or a 0600 file for muse), so a grant lives exactly as
- * long as its turn: revoked at settle, cancel or expiry, never reused.
+ * long as its turn: revoked at settle, cancel or expiry, never reused. A detached Oompa launch
+ * receives a fresh task-scoped grant, journaled and revoked by its own execution, never its parent.
  *
  * `author` is who posts and answers are written as. `principal` is whose authority task, doc,
  * run, schedule and team writes use. Only an owner-authored input makes the principal the
@@ -38,6 +40,8 @@ export interface BuddyGrant extends GrantBase {
   readonly subscribes: Subscribes;
   /** The hooks its process was spawned with: what can reach it mid-turn (harness-steering.ts). */
   readonly hooks: HookSet;
+  /** Owner-delegated capability of one host-owned Oompa execution, never a turn token. */
+  readonly oompa?: { readonly executionId: string; readonly taskIds: readonly string[] };
 }
 
 /** The owner's Buddy Builder chat: no Buddy of its own; it may only read and edit the team. */
@@ -85,13 +89,14 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
   const byToken = new Map<string, TurnGrant>();
 
   function issue<G extends TurnGrant>(
-    grant: Omit<G, 'token' | 'expiresAt' | 'observe'> & { observe?: GrantBase['observe'] }
+    grant: Omit<G, 'token' | 'expiresAt' | 'observe'> & { observe?: GrantBase['observe'] },
+    ttlMs = options.ttlMs
   ): G {
     const issued = {
       ...grant,
       observe: grant.observe ?? ignore,
       token: randomBytes(32).toString('base64url'),
-      expiresAt: now() + options.ttlMs,
+      expiresAt: now() + ttlMs,
     } as unknown as G;
     byToken.set(issued.token, issued);
     return issued;
@@ -113,13 +118,44 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
         principal: OWNER,
       }),
 
+    // Pattern: capability-grants (docs/patterns.md#capability-grants)
+    // Detached work used to borrow its parent's bearer, revoked at parent settle. This fresh
+    // grant is fenced by the host execution, never promoted or renewed. Guard: oompa-mcp.test.
+    issueOompa(input: {
+      executionId: string;
+      buddyId: string;
+      workspaceId: string;
+      taskIds: readonly string[];
+      principal: Actor;
+      ttlMs: number;
+    }): BuddyGrant {
+      if (!(input.ttlMs > 0 && input.ttlMs <= 43_200_000))
+        throw new Error('Oompa grant must have a positive deadline of at most 12 hours');
+      return issue<BuddyGrant>(
+        {
+          role: 'worker',
+          buddyId: input.buddyId,
+          workspaceId: input.workspaceId,
+          conversationId: `oompa:${input.executionId}`,
+          runId: input.executionId,
+          subscribes: 'self',
+          hooks: { t: 'unrecorded' },
+          author: buddyActor(input.buddyId),
+          principal: input.principal,
+          oompa: { executionId: input.executionId, taskIds: [...input.taskIds] },
+        },
+        input.ttlMs
+      );
+    },
+
     /**
      * The owner wrote this turn's input: the conversation's worker grant becomes an owner grant.
      * Only the runtime calls this, and only for origin 'owner_input' (runtime.ts B1 rule).
      */
     promoteToOwner(conversationId: string): void {
       for (const grant of byToken.values()) {
-        if (grant.conversationId !== conversationId || grant.role !== 'worker') continue;
+        if (grant.conversationId !== conversationId || grant.role !== 'worker' || grant.oompa)
+          continue;
         byToken.set(grant.token, { ...grant, role: 'owner', principal: OWNER });
       }
     },
