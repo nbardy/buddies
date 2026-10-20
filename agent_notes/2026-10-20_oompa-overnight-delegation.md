@@ -78,3 +78,46 @@ its successful runtime pass; the corrected invocation exposed the mismatch above
 A stricter test initially caught a one-millisecond horizon drift from relative
 TTL conversion; issuance now preserves the exact absolute owner deadline.
 No test artifacts or verification source archives were retained.
+
+
+## Scoped missing-reviewer recovery successor
+
+Source commit `256d50396cac56a6b2d6df1a7e7e0de83bf6689c` adds
+`oompa {action:{kind:'requeue',runId,taskId,baseRevision,reason},key}`.
+The fixed delegation permits the same launch Buddy to repair the canonical
+queue transition for the exact proven internal missing-reviewer prompt hold.
+Its ordinary principal still cannot use general `task_write` on another Buddy's
+tasks. The host exercises only the original journaled owner delegation, bounded
+by the approved task/owner, latest drained host, exact held claim/current revision,
+original task deadline, known framework error and unchanged validator source pins.
+Only status and explanatory nextAction change. Receipts are action records in
+the existing execution journal; no alternate task ledger was introduced.
+
+Proof is deliberately limited to persisted `execution-blocked` holds whose error
+is exactly `Framework prompt not found: config/prompts/_framework/reviewer.md`,
+with retained positive attempt/history, native session and registered source.
+Model-blocked Force attempts, other solver/validator errors, canonical blocked,
+review, done or paused tasks, foreign scope/owners, stale revisions and children
+are refused. The host never rewrites saved worker state or resets task/session/
+source history. A new host must still use the same original config and explicit
+priorRunId; normal Oompa selection reclaims the new canonical revision.
+
+Committed-source receipt: **4/4** combined overnight, drain and requeue tests
+passed in ~45 seconds using temporary archives of Buddies `256d503` and Oompa
+`f841340fa5226f25d36c84cc9f1ac55834f71a23`:
+
+`tsx --test --test-name-pattern='overnight|checkpoint drain|delegated requeue' server/test/oompa-mcp.test.ts`
+
+The consumer check was explicitly enabled with `OOMPA_TEST_SOURCE_ROOT` pointing
+to the temporary committed Oompa archive. It executed the real private
+`selected-next-task!` and real Buddy task adapter against the isolated fixture's
+HTTP MCP endpoint and run-owned grant, with no provider/model launched. The
+scheduled lead first failed ordinary other-owner task_write, succeeded through
+scoped requeue, survived a simulated crash after CAS without another revision,
+renewed the host, then the real selector reclaimed the reopened task. Saved
+attempt/session/workspace/history bytes were identical before and after.
+
+Working-tree server/test typecheck, owned-file Biome and diff checks passed.
+The previous installed-dependency static-check limitation remains unchanged;
+foreign provider/catalog work was not staged. The integrator owns any live
+requeue/renewal. This worker made no live task or host calls.
