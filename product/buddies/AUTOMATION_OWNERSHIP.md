@@ -102,3 +102,12 @@ Explicit `stop` on any host in the chain durably revokes its root authorization
 before signaling the processes; backend reload cannot restore it. Run-owned
 subagent tools retain their task-limited acceptance surface and cannot control
 the host. Boundary guard: `server/test/oompa-mcp.test.ts`.
+
+`drain` with `runId` is a separate, asynchronous controller operation. It saves
+its intent in the same execution journal and reuses the worker continuation
+handshake to wait for all current task/validator work to reach acknowledged idle
+checkpoints. Only then does the host cancel and revoke its own execution grant;
+the automation remains valid for `priorRunId` renewal with updated harness code.
+Reload recovers both the pending request and its control projection. An explicit
+Stop still revokes the whole delegation, and the fixed horizon still ends work
+at expiry. Drain never signals an active implementation or validator.

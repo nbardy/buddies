@@ -891,3 +891,69 @@ test('overnight horizon expiry and original owner-free stop remain fail closed',
     await w.close();
   }
 });
+
+test('checkpoint drain waits through active work and reload, then revokes only host grant and permits delegated renewal', async () => {
+  const w = await fixture();
+  try {
+    fs.writeFileSync(w.stubMode, 'active');
+    const child = await w.launch(1, 60);
+    await until(async () => fs.existsSync(path.join(w.repo, 'runs/test-swarm/workers/w0.json')));
+    const call = (grant = w.worker(), key = 'checkpoint-drain') =>
+      rpc(w.endpoint.spec(grant), 'oompa', {
+        action: { kind: 'drain', runId: child.run.runId },
+        key,
+      });
+    for (const grant of [w.worker('sibling'), w.worker(w.buddy.id, 'foreign'), child.grant])
+      assert.equal((await call(grant)).error, true);
+    const requested = await call();
+    assert.equal(requested.error, false, requested.text);
+    assert.equal(requested.value.status, 'running');
+    assert.equal(requested.value.drain.phase, 'requested');
+    assert.equal(requested.value.automation.revoked, false);
+    await sleep(200);
+    assert.equal(await probe(child.spec), 200, 'active model retains its host capability');
+    assert.equal(
+      fs.existsSync(path.join(child.run.logDirectory, 'exit.json')),
+      false,
+      'active worker was not signaled'
+    );
+    // The intent is authoritative even if its derived control write was lost in a crash.
+    fs.unlinkSync(path.join(child.run.logDirectory, 'continuation-request.json'));
+    await w.restart();
+    await until(async () =>
+      fs.existsSync(path.join(child.run.logDirectory, 'continuation-request.json'))
+    );
+    assert.equal(await probe(child.spec), 200, 'reload adopts active model while drain waits');
+    const pending = await call();
+    assert.equal(pending.value.drain.id, requested.value.drain.id);
+    assert.equal(pending.value.status, 'running');
+    fs.unlinkSync(w.stubMode);
+    await until(async () => fs.existsSync(path.join(child.run.logDirectory, 'exit.json')));
+    assert.equal(await probe(child.spec), 401, 'host grant revoked at idle checkpoint');
+    const status = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: { kind: 'status', runId: child.run.runId },
+      key: 'drained-status',
+    });
+    assert.equal(status.value.status, 'ended');
+    assert.equal(status.value.drain.phase, 'signaling');
+    assert.equal(status.value.automation.revoked, false);
+    await w.restart();
+    const renewed = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: {
+        kind: 'launch',
+        priorRunId: child.run.runId,
+        workspaceId: w.ws.id,
+        buddyId: w.buddy.id,
+        workspacePath: w.repo,
+        configPath: w.configPath,
+        maxSeconds: 10,
+      },
+      key: 'renew-after-drain',
+    });
+    assert.equal(renewed.error, false, renewed.text);
+    assert.equal(renewed.value.expiresAt, child.run.expiresAt);
+    assert.equal(renewed.value.automation.revoked, false);
+  } finally {
+    await w.close();
+  }
+});

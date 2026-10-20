@@ -81,6 +81,7 @@ export const OompaAction = z.discriminatedUnion('kind', [
     .strict(),
   z.object({ kind: z.literal('status'), runId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal('stop'), runId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal('drain'), runId: z.string().min(1) }).strict(),
 ]);
 export const OompaAccept = z
   .object({
@@ -102,6 +103,7 @@ type Continuation = {
   reason?: string;
 };
 type Run = { owner: OompaOwner; execution: Execution };
+type Drain = { id: string; key: string; swarmId: string; phase: 'requested' | 'signaling' };
 type Validation = {
   request: Accept;
   evidence: string[];
@@ -174,6 +176,7 @@ export function createOompaHost(options: {
   const runs = new Map<string, Run>();
   const accepts = new Map<string, Promise<unknown>>();
   const registering = new Set<string>();
+  const draining = new Set<string>();
   const now = options.now ?? Date.now;
   const wrapper = options.wrapper ?? path.resolve(__dirname, '../../relay/oompa-run-host.mjs');
   const executable =
@@ -276,8 +279,8 @@ export function createOompaHost(options: {
       if (sibling !== run && sibling.owner.automation?.rootRunId === root.owner.id)
         stop(sibling, true);
   }
-  function stop(run: Run, timeout = false) {
-    if (!timeout) revokeAutomation(run);
+  function stop(run: Run, timeout = false, preserveAutomation = false) {
+    if (!timeout && !preserveAutomation) revokeAutomation(run);
     if (run.execution.phase.t === 'running') {
       journals.step(run.execution, {
         t: 'stop',
@@ -315,7 +318,7 @@ export function createOompaHost(options: {
       });
       options.grants.revokeRun(run.owner.id);
       stopChildren(run);
-    }
+    } else void advanceDrain(run);
   }
   function view(run: Run) {
     refresh(run);
@@ -334,6 +337,9 @@ export function createOompaHost(options: {
       workspacePath: run.owner.workspacePath,
       taskIds: run.owner.grant.oompa!.taskIds,
       logDirectory: run.execution.dir,
+      drain: fs.existsSync(path.join(run.execution.dir, 'drain.json'))
+        ? read<Drain>(path.join(run.execution.dir, 'drain.json'))
+        : undefined,
       continuations: continuations(run).map(({ dir, record }) => ({
         ...record,
         status: record.phase === 'failed' ? 'failed' : executionProcess(dir).t,
@@ -448,6 +454,62 @@ export function createOompaHost(options: {
       throw new Error('prior Oompa swarm does not match its pinned host configuration');
     return id;
   }
+  // Pattern: persisted-state-machine (docs/patterns.md#persisted-state-machine)
+  // Reloading a harness must wait for the current task checkpoint, not kill a live model or
+  // revoke overnight renewal. Reuse the worker idle acknowledgement; guard: oompa-mcp drain.
+  async function advanceDrain(run: Run) {
+    const file = path.join(run.execution.dir, 'drain.json');
+    if (draining.has(run.owner.id) || !fs.existsSync(file) || run.execution.phase.t !== 'running')
+      return;
+    draining.add(run.owner.id);
+    try {
+      const record = read<Drain>(file);
+      const control = path.join(run.execution.dir, 'continuation-request.json');
+      // Recover a crash between the durable drain intent and its worker control projection.
+      if (!fs.existsSync(control))
+        atomic(control, { id: record.id, deadline_ms: run.owner.grant.expiresAt });
+      if (registering.has(run.owner.id) || activeChild(run)) return;
+      await idle(run, record.swarmId, record.id);
+      if (run.execution.phase.t !== 'running' || registering.has(run.owner.id) || activeChild(run))
+        return;
+      const request = read<{ id: string }>(
+        path.join(run.execution.dir, 'continuation-request.json')
+      );
+      if (request.id !== record.id) return;
+      atomic(file, { ...record, phase: 'signaling' });
+      // This is the authorized controller's checkpoint cancellation, not an explicit owner Stop.
+      // Persist stopping before signaling, retain the original automation for priorRunId renewal.
+      stop(run, false, true);
+    } catch {
+      // Active workers and validators are expected while a drain waits for their checkpoint.
+    } finally {
+      draining.delete(run.owner.id);
+    }
+  }
+  function requestDrain(run: Run, key: string) {
+    const file = path.join(run.execution.dir, 'drain.json');
+    if (fs.existsSync(file)) return view(run);
+    refresh(run);
+    if (run.execution.phase.t !== 'running')
+      throw new Error('Oompa execution is no longer running');
+    if (
+      registering.has(run.owner.id) ||
+      fs.existsSync(path.join(run.execution.dir, 'continuation-request.json'))
+    )
+      throw new Error('Oompa diagnostic handshake is active');
+    const record: Drain = {
+      id: sha(`drain:${key}`),
+      key,
+      swarmId: resumeSwarm(run),
+      phase: 'requested',
+    };
+    atomic(file, record);
+    atomic(path.join(run.execution.dir, 'continuation-request.json'), {
+      id: record.id,
+      deadline_ms: run.owner.grant.expiresAt,
+    });
+    return view(run);
+  }
   function activeChild(run: Run) {
     for (const kind of ['validations', 'continuations']) {
       const root = path.join(run.execution.dir, kind);
@@ -477,6 +539,8 @@ export function createOompaHost(options: {
         throw new Error('Oompa continuation key was already used for different input');
       return view(run);
     }
+    if (fs.existsSync(path.join(run.execution.dir, 'drain.json')))
+      throw new Error('Oompa drain is waiting for its checkpoint');
     if (registering.has(run.owner.id) || activeChild(run))
       throw new Error('Oompa implementation, validator or continuation is active');
     registering.add(run.owner.id);
@@ -629,6 +693,10 @@ export function createOompaHost(options: {
           throw new Error('Oompa run is outside this workspace');
         if (!ownerInput && grant.role !== 'builder' && run.owner.grant.buddyId !== grant.buddyId)
           throw new Error('Oompa run belongs to another Buddy');
+        if (action.kind === 'drain') {
+          if (!ownerInput) delegated(grant, run);
+          return requestDrain(run, key);
+        }
         if (action.kind === 'continue') {
           if (!ownerInput) delegated(grant, run);
           return continueRun(run, action, key);
