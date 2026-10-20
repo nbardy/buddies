@@ -243,8 +243,12 @@ export function createOompaHost(options: {
     return run.owner.automation && runs.get(run.owner.automation.rootRunId);
   }
   function revoked(run: Run) {
-    const root = automationRoot(run);
-    return !!root && fs.existsSync(path.join(root.execution.dir, 'automation-revoked.json'));
+    const authorization = run.owner.automation;
+    // Boot scan order must not briefly re-adopt a successor before its revoked root is loaded.
+    return (
+      !!authorization &&
+      fs.existsSync(path.join(root, authorization.rootRunId, 'automation-revoked.json'))
+    );
   }
   // Pattern: capability-grants (docs/patterns.md#capability-grants)
   // Scheduled turns previously needed a fresh owner every chunk. Only the original launch Buddy
@@ -585,7 +589,8 @@ export function createOompaHost(options: {
       runs.set(found.owner.id, run);
       if (
         holdsGrant(found.phase, found.process.t === 'live' ? 'live' : 'ended') &&
-        found.owner.grant.expiresAt > now()
+        found.owner.grant.expiresAt > now() &&
+        !revoked(run)
       )
         options.grants.adopt(found.owner.grant);
       else if (found.phase.t === 'stopping' || found.owner.grant.expiresAt <= now())

@@ -825,8 +825,23 @@ test('overnight delegation lets scheduled same-Buddy turns continue and renew ex
     );
     assert.equal((await renew({}, w.worker(), 'scheduled-renewal')).value.runId, next.value.runId);
     assert.equal((await renew()).error, true, 'one successor per prior host');
+    const nextOwner = JSON.parse(
+      fs.readFileSync(path.join(next.value.logDirectory, 'owner.json'), 'utf8')
+    );
+    const nextSpec = w.endpoint.spec(w.grants.lookup(nextOwner.grant.token)!);
     await w.stop(child.run.runId);
+    // Crash after root revocation, before the descendant's phase write: the root marker alone
+    // must prevent adoption, independent of execution scan order.
+    fs.writeFileSync(
+      path.join(next.value.logDirectory, 'phase.json'),
+      JSON.stringify({ t: 'running' })
+    );
     await w.restart();
+    assert.equal(
+      await probe(nextSpec),
+      401,
+      'revoked delegation cannot briefly restore a child bearer'
+    );
     const denied = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
       action: { ...renewal, priorRunId: next.value.runId },
       key: 'revoked-renewal',
