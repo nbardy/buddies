@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -953,6 +953,236 @@ test('checkpoint drain waits through active work and reload, then revokes only h
     assert.equal(renewed.error, false, renewed.text);
     assert.equal(renewed.value.expiresAt, child.run.expiresAt);
     assert.equal(renewed.value.automation.revoked, false);
+  } finally {
+    await w.close();
+  }
+});
+
+test('delegated requeue reopens only the latest proven missing-reviewer hold with CAS and preserves execution history', async () => {
+  const w = await fixture();
+  try {
+    const product = await w.core.createBuddy(OWNER, {
+      workspaceId: w.ws.id,
+      slug: 'product',
+      name: 'Product',
+      role: 'test',
+      manager: { kind: 'nobody' },
+      key: 'product',
+    });
+    let task = await w.core.upsertTask(OWNER, {
+      kind: 'update',
+      taskId: w.task.id,
+      baseRevision: w.task.revision,
+      changes: { ownerId: product.id, status: 'in_progress' },
+      key: 'product-claim',
+    });
+    const config = JSON.parse(fs.readFileSync(w.configPath, 'utf8'));
+    config.task_backend.owner_by_task = { [task.id]: product.id };
+    fs.writeFileSync(w.configPath, JSON.stringify(config));
+    const child = await w.launch(1, 120);
+    await until(async () => fs.existsSync(path.join(w.repo, 'runs/test-swarm/workers/w0.json')));
+    const manager = w.worker();
+    assert.equal(manager.principal.kind, 'buddy');
+    const normal = await rpc(w.endpoint.spec(manager), 'task_write', {
+      write: {
+        kind: 'update',
+        taskId: task.id,
+        baseRevision: task.revision,
+        changes: { status: 'open' },
+      },
+      key: 'ordinary-other-owner-denied',
+    });
+    assert.equal(normal.error, true, 'scheduled lead has no ordinary authority over Product tasks');
+    const request = (patch = {}) => ({
+      kind: 'requeue',
+      runId: child.run.runId,
+      taskId: task.id,
+      baseRevision: task.revision,
+      reason: 'Committed framework prompt lookup fix; retain exact source/session',
+      ...patch,
+    });
+    const call = (patch = {}, grant = w.worker(), key = `requeue-${Math.random()}`) =>
+      rpc(w.endpoint.spec(grant), 'oompa', { action: request(patch), key });
+    assert.equal((await call()).error, true, 'active host cannot requeue');
+    assert.equal(
+      (await call({}, child.grant)).error,
+      true,
+      'run-owned child has no controller action'
+    );
+    await rpc(w.endpoint.spec(manager), 'oompa', {
+      action: { kind: 'drain', runId: child.run.runId },
+      key: 'drain-for-requeue',
+    });
+    await until(async () => fs.existsSync(path.join(child.run.logDirectory, 'exit.json')));
+    const statePath = path.join(w.repo, 'runs/test-swarm/workers/w0.json');
+    const proof = () => ({
+      task_id: task.id,
+      claim_revision: task.revision,
+      held_reason: 'execution-blocked',
+      feedback: {
+        error: 'Framework prompt not found: config/prompts/_framework/reviewer.md',
+        reason: null,
+      },
+      attempt: 2,
+      session_id: 'retained-native-session',
+      workspace: { path: w.candidate },
+      attempt_history: [
+        { attempt: 1, session_id: 'retained-native-session', exit: 0 },
+        { attempt: 2, session_id: 'retained-native-session', exit: 0 },
+      ],
+      deadline_ms: Date.now() + 60_000,
+    });
+    const writeProof = (value: Record<string, unknown>) =>
+      fs.writeFileSync(
+        statePath,
+        JSON.stringify({
+          'worker-id': 'w0',
+          status: 'stopped',
+          reason: 'interrupted',
+          execution: { cycle: 2, attempt: 0, held_executions: { [task.id]: value } },
+        })
+      );
+    writeProof(proof());
+    for (const grant of [w.worker('sibling'), w.worker(w.buddy.id, 'foreign')])
+      assert.equal((await call({}, grant)).error, true);
+    for (const patch of [{ taskId: w.foreign.id }, { baseRevision: task.revision + 1 }])
+      assert.equal((await call(patch)).error, true);
+    for (const patch of [
+      {
+        held_reason: 'model-blocked',
+        attempt: 9,
+        blocked_result: { status: 'blocked', reason: 'Force physics evidence missing' },
+      },
+      { held_reason: 'attempt-budget-exhausted' },
+      { feedback: { error: 'Unknown solver failure' } },
+      { feedback: { error: 'Framework prompt not found: config/prompts/_framework/other.md' } },
+      { blocked_result: { status: 'blocked', reason: 'Physics evidence' } },
+      { session_id: null },
+      { deadline_ms: 1 },
+      { claim_revision: task.revision + 1 },
+    ]) {
+      writeProof({ ...proof(), ...patch });
+      assert.equal((await call()).error, true, JSON.stringify(patch));
+    }
+    for (const changes of [
+      { status: 'blocked' as const, blockedReason: 'Force attempt 9 awaits independent evidence' },
+      { status: 'review' as const },
+      { status: 'done' as const },
+      { paused: true },
+      { ownerId: w.buddy.id },
+    ]) {
+      task = await w.core.upsertTask(OWNER, {
+        kind: 'update',
+        taskId: task.id,
+        baseRevision: task.revision,
+        changes,
+        key: `refusal-${Math.random()}`,
+      });
+      writeProof(proof());
+      assert.equal((await call()).error, true, JSON.stringify(changes));
+      task = await w.core.upsertTask(OWNER, {
+        kind: 'update',
+        taskId: task.id,
+        baseRevision: task.revision,
+        changes: { status: 'in_progress', paused: false, ownerId: product.id },
+        key: `restore-${Math.random()}`,
+      });
+    }
+    writeProof(proof());
+    const saved = fs.readFileSync(statePath, 'utf8');
+    const before = await w.core.getTask(task.id);
+    const result = await call({}, w.worker(), 'known-framework-requeue');
+    assert.equal(result.error, false, result.text);
+    assert.equal(result.value.kind, 'requeued');
+    assert.equal(result.value.task.status, 'open');
+    assert.equal(result.value.task.revision, before.revision + 1);
+    assert.equal(result.value.task.ownerId, product.id);
+    assert.equal(result.value.task.doneCriteria, before.doneCriteria);
+    assert.deepEqual(result.value.task.evidence, before.evidence);
+    assert.match(result.value.task.nextAction, /missing reviewer framework prompt/);
+    assert.equal(
+      fs.readFileSync(statePath, 'utf8'),
+      saved,
+      'no attempt/session/workspace/history edits'
+    );
+    assert.equal(
+      (await call({ reason: 'different input' }, w.worker(), 'known-framework-requeue')).error,
+      true
+    );
+    assert.equal((await call()).error, true, 'fresh key cannot reopen an already open task');
+    // Crash after CAS, before journal completion: core idempotency prevents another revision.
+    const receipt = JSON.parse(fs.readFileSync(result.value.logPath, 'utf8'));
+    fs.writeFileSync(
+      result.value.logPath,
+      JSON.stringify({ ...receipt, phase: 'requesting', task: undefined })
+    );
+    await w.restart();
+    const replay = await call({}, w.worker(), 'known-framework-requeue');
+    assert.equal(replay.error, false, replay.text);
+    assert.equal(replay.value.task.revision, result.value.task.revision);
+    const renewed = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: {
+        kind: 'launch',
+        priorRunId: child.run.runId,
+        workspaceId: w.ws.id,
+        buddyId: w.buddy.id,
+        workspacePath: w.repo,
+        configPath: w.configPath,
+        maxSeconds: 10,
+      },
+      key: 'renew-after-requeue',
+    });
+    assert.equal(renewed.error, false, renewed.text);
+    assert.equal((await call()).error, true, 'old host cannot mutate after its successor exists');
+    assert.equal(fs.readFileSync(statePath, 'utf8'), saved);
+    const oompaSource = process.env.OOMPA_TEST_SOURCE_ROOT;
+    if (oompaSource) {
+      const nextOwner = JSON.parse(
+        fs.readFileSync(path.join(renewed.value.logDirectory, 'owner.json'), 'utf8')
+      );
+      const nextSpec = w.endpoint.spec(w.grants.lookup(nextOwner.grant.token)!);
+      assert.equal(nextSpec.kind, 'http');
+      if (nextSpec.kind !== 'http') throw new Error('HTTP only');
+      const selected = await new Promise<string>((resolve, reject) =>
+        execFile(
+          'bb',
+          [
+            '-e',
+            `
+(require '[agentnet.tasks :as tasks] '[agentnet.worker :as worker] '[cheshire.core :as json])
+(let [[config-path state-path task-id] *command-line-args*
+      config (json/parse-string (slurp config-path) true)
+      state (json/parse-string (slurp state-path) true)
+      held (get-in state [:execution :held_executions (keyword task-id)])]
+  (tasks/configure! (:task_backend config))
+  (let [selected (#'worker/selected-next-task! {:id "w0"} (:task_execution config) {task-id held})]
+    (println (json/generate-string selected))))`,
+            path.join(renewed.value.logDirectory, 'config.json'),
+            statePath,
+            task.id,
+          ],
+          {
+            cwd: oompaSource,
+            timeout: 10_000,
+            env: {
+              ...process.env,
+              OOMPA_BUDDY_MCP_URL: nextSpec.url,
+              OOMPA_BUDDY_MCP_TOKEN: nextOwner.grant.token,
+            },
+          },
+          (error, stdout) => (error ? reject(error) : resolve(stdout))
+        )
+      );
+      const claimed = JSON.parse(selected.trim().split('\n').at(-1)!);
+      assert.equal(claimed.id, task.id, 'real Oompa selector reclaims the requeued task via MCP');
+      assert.equal(claimed.status, 'in_progress');
+      assert.equal(claimed.revision, result.value.task.revision + 1);
+      assert.equal(
+        fs.readFileSync(statePath, 'utf8'),
+        saved,
+        'selection preserves the retained source history'
+      );
+    }
   } finally {
     await w.close();
   }

@@ -82,6 +82,15 @@ export const OompaAction = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('status'), runId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal('stop'), runId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal('drain'), runId: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal('requeue'),
+      runId: z.string().min(1),
+      taskId: z.string().min(1),
+      baseRevision: z.number().int().positive(),
+      reason: z.string().trim().min(1).max(2000),
+    })
+    .strict(),
 ]);
 export const OompaAccept = z
   .object({
@@ -94,6 +103,34 @@ export const OompaAccept = z
   .strict();
 type Accept = z.infer<typeof OompaAccept>;
 type Continue = Extract<z.infer<typeof OompaAction>, { kind: 'continue' }>;
+type Requeue = Extract<z.infer<typeof OompaAction>, { kind: 'requeue' }>;
+type RequeueRecord = {
+  request: Requeue;
+  requestHash: string;
+  heldSha256: string;
+  deadline: number;
+  nextAction: string;
+  phase: 'requesting' | 'applied';
+  task?: Awaited<ReturnType<BuddiesCore['getTask']>>;
+};
+const MissingReviewerHold = z
+  .object({
+    task_id: z.string(),
+    claim_revision: z.number().int().positive(),
+    held_reason: z.literal('execution-blocked'),
+    feedback: z
+      .object({
+        error: z.literal('Framework prompt not found: config/prompts/_framework/reviewer.md'),
+      })
+      .passthrough(),
+    attempt: z.number().int().positive(),
+    attempt_history: z.array(z.unknown()).min(1),
+    session_id: z.string().min(1),
+    workspace: z.object({ path: z.string().min(1) }).passthrough(),
+    deadline_ms: z.number().positive(),
+    blocked_result: z.never().optional(),
+  })
+  .passthrough();
 type Continuation = {
   request: Continue;
   key: string;
@@ -256,10 +293,10 @@ export function createOompaHost(options: {
   // Pattern: capability-grants (docs/patterns.md#capability-grants)
   // Scheduled turns previously needed a fresh owner every chunk. Only the original launch Buddy
   // may exercise this immutable journaled scope; guard: oompa-mcp overnight delegation.
-  function delegated(grant: TurnGrant, run: Run) {
+  function delegated(grant: TurnGrant, run: Run, allowOwner = false) {
     const authorization = run.owner.automation;
     if (
-      grant.role !== 'worker' ||
+      (grant.role !== 'worker' && !(allowOwner && grant.role === 'owner')) ||
       grant.oompa ||
       !authorization ||
       !automationRoot(run) ||
@@ -643,6 +680,110 @@ export function createOompaHost(options: {
     }
   }
 
+  function latestDrained(run: Run) {
+    refresh(run);
+    if (
+      run.execution.phase.t !== 'ended' ||
+      childActive(run.execution.dir) ||
+      activeChild(run) ||
+      [...runs.values()].some((other) => other.owner.priorRunId === run.owner.id)
+    )
+      throw new Error('requeue requires the latest fully drained Oompa host');
+  }
+  // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys)
+  // Internal missing-reviewer errors left canonical tasks in_progress forever. The owner-delegated
+  // controller may reopen only this proven infrastructure hold; guard: oompa-mcp requeue.
+  async function requeue(grant: TurnGrant, run: Run, request: Requeue, key: string) {
+    const authorization = delegated(grant, run, true);
+    if (
+      !run.owner.grant.oompa!.taskIds.includes(request.taskId) ||
+      !Object.hasOwn(authorization.taskOwners, request.taskId)
+    )
+      throw new Error('requeue task is outside the owner delegation');
+    const id = sha(key);
+    const file = path.join(run.execution.dir, 'requeues', `${id}.json`);
+    const requestHash = sha(JSON.stringify(request));
+    let record = fs.existsSync(file) ? read<RequeueRecord>(file) : undefined;
+    if (record && record.requestHash !== requestHash)
+      throw new Error('Oompa requeue key was already used for different input');
+    if (record?.phase === 'applied') return { kind: 'requeued', task: record.task, logPath: file };
+    if (registering.has(run.owner.id)) throw new Error('Oompa host operation is active');
+    registering.add(run.owner.id);
+    try {
+      latestDrained(run);
+      if (!record) {
+        const swarmId = resumeSwarm(run);
+        const swarmDir = path.join(run.owner.workspacePath, 'runs', swarmId);
+        const started = z
+          .object({
+            workers: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]+$/) })).min(1),
+          })
+          .parse(read<unknown>(path.join(swarmDir, 'started.json')));
+        const held: unknown[] = [];
+        for (const worker of started.workers) {
+          const state = z
+            .object({
+              'worker-id': z.literal(worker.id),
+              execution: z
+                .object({
+                  held_executions: z.record(z.unknown()).optional(),
+                })
+                .passthrough(),
+            })
+            .passthrough()
+            .parse(read<unknown>(path.join(swarmDir, 'workers', `${worker.id}.json`)));
+          const candidate = state.execution.held_executions?.[request.taskId];
+          if (candidate) held.push(candidate);
+        }
+        if (held.length !== 1)
+          throw new Error('requeue requires one exact persisted internal hold');
+        const proof = MissingReviewerHold.parse(held[0]);
+        if (
+          proof.task_id !== request.taskId ||
+          proof.claim_revision !== request.baseRevision ||
+          proof.deadline_ms <= now()
+        )
+          throw new Error('held task claim revision or original deadline changed');
+        const candidate = await registered(run.owner.workspacePath, proof.workspace.path);
+        const validator = run.owner.validators[request.taskId];
+        if (validator) await pins(candidate, validator);
+        const task = await options.core.getTask(request.taskId);
+        if (
+          task.workspaceId !== authorization.workspaceId ||
+          task.ownerId !== authorization.taskOwners[task.id] ||
+          task.status !== 'in_progress' ||
+          task.paused ||
+          task.revision !== request.baseRevision
+        )
+          throw new Error('requeue requires the exact unpaused in_progress task claim and owner');
+        record = {
+          request,
+          requestHash,
+          heldSha256: sha(JSON.stringify(held[0])),
+          deadline: proof.deadline_ms,
+          nextAction: `Retry known missing reviewer framework prompt after repair: ${request.reason} [${run.owner.id}/${id}]`,
+          phase: 'requesting',
+        };
+        fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+        atomic(file, record);
+      }
+      delegated(grant, run, true);
+      latestDrained(run);
+      if (record.deadline <= now()) throw new Error('original held task deadline expired');
+      const task = await options.core.upsertTask(run.owner.grant.principal, {
+        kind: 'update',
+        taskId: request.taskId,
+        baseRevision: request.baseRevision,
+        changes: { status: 'open', nextAction: record.nextAction },
+        key: `oompa-requeue-${run.owner.id}-${id}`,
+      });
+      atomic(file, { ...record, phase: 'applied', task });
+      return { kind: 'requeued', task, logPath: file };
+    } finally {
+      registering.delete(run.owner.id);
+    }
+  }
+
   // Restore only the original capability of a live running execution, with its original deadline.
   // A Stop is persisted before signaling; an outage can never restore its authority.
   const gate = decideExecutionGate();
@@ -693,6 +834,7 @@ export function createOompaHost(options: {
           throw new Error('Oompa run is outside this workspace');
         if (!ownerInput && grant.role !== 'builder' && run.owner.grant.buddyId !== grant.buddyId)
           throw new Error('Oompa run belongs to another Buddy');
+        if (action.kind === 'requeue') return requeue(grant, run, action, key);
         if (action.kind === 'drain') {
           if (!ownerInput) delegated(grant, run);
           return requestDrain(run, key);
@@ -766,6 +908,7 @@ export function createOompaHost(options: {
         refresh(previous);
         if (
           previous.execution.phase.t !== 'ended' ||
+          registering.has(previous.owner.id) ||
           childActive(previous.execution.dir) ||
           activeChild(previous)
         )

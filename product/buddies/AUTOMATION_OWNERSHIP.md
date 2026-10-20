@@ -111,3 +111,18 @@ the automation remains valid for `priorRunId` renewal with updated harness code.
 Reload recovers both the pending request and its control projection. An explicit
 Stop still revokes the whole delegation, and the fixed horizon still ends work
 at expiry. Drain never signals an active implementation or validator.
+
+`requeue` (`runId`, `taskId`, exact `baseRevision`, bounded `reason`, idempotency
+`key`) is a narrow controller recovery action for one known harness failure:
+`Framework prompt not found: config/prompts/_framework/reviewer.md`. It requires
+the latest fully drained host, active same-launch-Buddy delegation, one exact
+persisted `execution-blocked` hold, retained attempt/session/source history,
+original unexpired task deadline and an unpaused canonical `in_progress` task
+at the held claim revision with its approved owner. Its owner-delegated CAS
+changes only `status=open` and explanatory `nextAction`; the execution journal
+records the proof hash and result. A crash after CAS replays the same core key.
+It never edits held state, criteria, owner, session, attempts or workspace. Model
+blocks (including held Force physics), canonical blocked/review/done tasks,
+changed owners/revisions/pins, unknown errors and run-owned children are refused.
+After renewal the existing Oompa selector reclaims the higher task revision and
+reuses its held execution history. This is not a general unblock permission.
