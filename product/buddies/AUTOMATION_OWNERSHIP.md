@@ -71,3 +71,34 @@ Relevant boundary tests cover cancellation during creation, stale tokens,
 concurrent claims, delayed event drain, archival history, and MCP callbacks through
 the authenticated scoped control path. The long accepted design remains evidence;
 this file is the living entry point.
+
+## Owner-delegated overnight Oompa control — October 20, 2026
+
+An owner-authored `oompa` launch may include `automationSeconds` (positive,
+at most 43,200). This explicitly grants the configured launch Buddy a fixed
+controller horizon for the same workspace, registered source worktree, approved
+tasks/owners and exact configuration, including validator pins. The immutable
+authorization lives in the existing Oompa execution's `owner.json`; there is no
+new task ledger or owner authority on the scheduled Buddy turn. `expiresAt` is
+the parent host's controller horizon. `originalExpiresAt` records the original
+`maxSeconds` deadline separately. Task configuration and existing task deadlines
+are unchanged; configure a new desired task horizon on a new owner launch.
+
+Within that authorization, ordinary scheduled turns of the same Buddy may use
+`continue` for a task/revision/clean-commit/source-pinned diagnostic of at most
+600 seconds, or `launch` with `priorRunId` naming the latest drained host and the
+same launch coordinates/configuration. Renewal derives `resume_swarm_id` from
+the exact prior host receipt and resumes Oompa's existing execution state. It
+retains attempts, native sessions, held workspaces and original task deadlines;
+it does not grant a new task budget. Each prior host has at most one successor,
+and every parent host remains bounded by the original controller horizon.
+The existing Oompa loop selects the next eligible implementation task from the
+approved configuration; this host delegation never changes the task allowlist.
+
+Only a fresh owner launch may grant a new policy/horizon. Sibling Buddies,
+foreign workspaces, run-owned task children, changed task ownership, altered
+configuration or validator pins and expired authorizations are rejected.
+Explicit `stop` on any host in the chain durably revokes its root authorization
+before signaling the processes; backend reload cannot restore it. Run-owned
+subagent tools retain their task-limited acceptance surface and cannot control
+the host. Boundary guard: `server/test/oompa-mcp.test.ts`.

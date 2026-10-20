@@ -53,6 +53,19 @@ export interface OompaOwner {
   readonly launchHash: string;
   readonly workspacePath: string;
   readonly configPath: string;
+  /** Original owner-requested chunk deadline; automation never changes task configuration. */
+  readonly originalExpiresAt?: number;
+  readonly priorRunId?: string;
+  /** Immutable owner delegation; renewal copies this scope and its fixed horizon verbatim. */
+  readonly automation?: {
+    readonly rootRunId: string;
+    readonly buddyId: string;
+    readonly workspaceId: string;
+    readonly workspacePath: string;
+    readonly configSha256: string;
+    readonly taskOwners: Readonly<Record<string, string>>;
+    readonly expiresAt: number;
+  };
   readonly grant: Omit<BuddyGrant, 'observe'>;
   readonly validators: Record<
     string,

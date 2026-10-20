@@ -155,13 +155,16 @@ child.kill();
 const fs = require('node:fs'), path = require('node:path'), {spawn} = require('node:child_process');
 const sleeper = spawn('sleep', ['90']);
 console.log(process.pid); console.log(sleeper.pid);
-const root=path.join(process.cwd(), 'runs', 'test-swarm');
+const config=JSON.parse(fs.readFileSync(process.argv[4],'utf8'));
+const swarmId=config.resume_swarm_id?'renewed-swarm':'test-swarm';
+const root=path.join(process.cwd(), 'runs', swarmId);
 fs.mkdirSync(path.join(root,'workers'),{recursive:true});
-fs.writeFileSync(path.join(root,'started.json'),JSON.stringify({'swarm-id':'test-swarm','config-file':process.argv[4],pid:process.pid,workers:[{id:'w0'}],'continuation-control-dir':process.env.OOMPA_CONTINUATION_CONTROL_DIR}));
-console.log('Started event written to runs/test-swarm/started.json');
+fs.writeFileSync(path.join(root,'started.json'),JSON.stringify({'swarm-id':swarmId,'config-file':process.argv[4],pid:process.pid,workers:[{id:'w0'}],'continuation-control-dir':process.env.OOMPA_CONTINUATION_CONTROL_DIR}));
+console.log('Started event written to runs/'+swarmId+'/started.json');
 const update=()=>{
 let request; try{request=JSON.parse(fs.readFileSync(path.join(process.env.OOMPA_CONTINUATION_CONTROL_DIR,'continuation-request.json'),'utf8'));}catch{}
 let mode='';try{mode=fs.readFileSync(${JSON.stringify(stubMode)},'utf8')}catch{}
+if(mode==='exit') process.exit(0);
 const state={'worker-id':'w0',status:mode==='active'?'running':'waiting',reason:request&&mode!=='noack'?'host-continuation':'awaiting-buddy-acceptance','updated-at':new Date().toISOString(),execution:mode==='active'?{task_id:'active'}:request&&mode!=='noack'?{host_continuation_id:request.id}:{}};
 const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON.stringify(state));fs.renameSync(file+'.tmp',file);
 };update();setInterval(update,30);
@@ -197,7 +200,7 @@ const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON
       oompaOptions: { executable },
     });
   let endpoint = await start();
-  const launch = async (seconds = 60) => {
+  const launch = async (seconds = 60, automationSeconds?: number) => {
     const parent = owner();
     const started = await rpc(endpoint.spec(parent), 'oompa', {
       action: {
@@ -207,6 +210,7 @@ const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON
         workspacePath: repo,
         configPath,
         maxSeconds: seconds,
+        ...(automationSeconds === undefined ? {} : { automationSeconds }),
       },
       key: `launch-${Math.random()}`,
     });
@@ -691,6 +695,183 @@ test('continuation fails closed on unsupported handshake and source changes afte
     assert.equal(exit.status, 126);
     assert.match(exit.sourceError, /source changed/);
     assert.equal((await w.core.getTask(w.task.id)).status, w.task.status);
+  } finally {
+    await w.close();
+  }
+});
+
+test('overnight delegation lets scheduled same-Buddy turns continue and renew exact saved execution without owner authority', async () => {
+  const w = await fixture();
+  try {
+    const child = await w.launch(1, 60);
+    const authorization = child.run.automation;
+    assert.equal(authorization.buddyId, w.buddy.id);
+    assert.equal(authorization.workspaceId, w.ws.id);
+    assert.equal(child.run.expiresAt - child.run.originalExpiresAt, 59_000);
+    await until(async () => fs.existsSync(path.join(w.repo, 'runs/test-swarm/workers/w0.json')));
+    w.grants.revokeConversation(child.parent.conversationId);
+    await sleep(1100);
+    const manager = w.worker();
+    assert.equal(manager.principal.kind, 'buddy');
+    const action = {
+      kind: 'continue',
+      runId: child.run.runId,
+      swarmId: 'test-swarm',
+      taskId: w.task.id,
+      baseRevision: w.task.revision,
+      workspacePath: w.candidate,
+      sourceCommit: w.commit,
+      command: [process.execPath, 'diagnostic.mjs'],
+      sourceFiles: { 'diagnostic.mjs': w.diagnosticHash },
+      maxSeconds: 5,
+    };
+    const call = (patch = {}, grant = manager, key = `next-${Math.random()}`) =>
+      rpc(w.endpoint.spec(grant), 'oompa', { action: { ...action, ...patch }, key });
+    for (const grant of [w.worker('sibling'), w.worker(w.buddy.id, 'foreign'), child.grant])
+      assert.equal((await call({}, grant)).error, true);
+    for (const patch of [{ taskId: w.foreign.id }, { baseRevision: 99 }, { maxSeconds: 601 }])
+      assert.equal((await call(patch)).error, true);
+    const first = await call({}, manager, 'scheduled-first');
+    assert.equal(first.error, false, first.text);
+    await until(async () => fs.existsSync(first.value.continuations[0].exitPath));
+    await until(
+      async () => !fs.existsSync(path.join(child.run.logDirectory, 'continuation-request.json'))
+    );
+    const second = await call({}, w.worker(), 'scheduled-second');
+    assert.equal(second.error, false, second.text);
+    await until(async () => fs.readFileSync(w.diagnosticCounter, 'utf8') === 'xx');
+    await until(async () => fs.existsSync(second.value.continuations[1].exitPath));
+    await until(
+      async () => !fs.existsSync(path.join(child.run.logDirectory, 'continuation-request.json'))
+    );
+    fs.appendFileSync(path.join(w.candidate, 'oracle.mjs'), '\n// changed validator pin\n');
+    execFileSync('git', ['-C', w.candidate, 'add', 'oracle.mjs']);
+    execFileSync('git', ['-C', w.candidate, 'commit', '-qm', 'changed validator pin']);
+    const changedCommit = execFileSync('git', ['-C', w.candidate, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
+    const changedPin = await call({ sourceCommit: changedCommit });
+    assert.equal(changedPin.error, true);
+    assert.match(changedPin.text, /validator source pin changed/);
+    assert.equal(fs.readFileSync(w.diagnosticCounter, 'utf8'), 'xx');
+    await w.restart();
+    const afterReload = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: { kind: 'status', runId: child.run.runId },
+      key: 'after-reload',
+    });
+    assert.deepEqual(afterReload.value.automation, { ...authorization, revoked: false });
+    fs.writeFileSync(w.stubMode, 'exit');
+    await until(async () => fs.existsSync(path.join(child.run.logDirectory, 'exit.json')));
+    fs.unlinkSync(w.stubMode);
+    const savedPath = path.join(w.repo, 'runs/test-swarm/workers/w0.json');
+    const saved = fs.readFileSync(savedPath, 'utf8');
+    const configRaw = fs.readFileSync(w.configPath, 'utf8');
+    const renewal = {
+      kind: 'launch',
+      priorRunId: child.run.runId,
+      workspaceId: w.ws.id,
+      buddyId: w.buddy.id,
+      workspacePath: w.repo,
+      configPath: w.configPath,
+      maxSeconds: 20,
+    };
+    const renew = (patch = {}, grant = w.worker(), key = `renew-${Math.random()}`) =>
+      rpc(w.endpoint.spec(grant), 'oompa', { action: { ...renewal, ...patch }, key });
+    for (const grant of [w.worker('sibling'), w.worker(w.buddy.id, 'foreign')])
+      assert.equal((await renew({}, grant)).error, true);
+    for (const patch of [
+      { priorRunId: undefined },
+      { automationSeconds: 60 },
+      { buddyId: 'sibling' },
+      { workspaceId: 'foreign' },
+      { workspacePath: w.candidate },
+      { maxSeconds: 600 },
+    ])
+      assert.equal((await renew(patch)).error, true, JSON.stringify(patch));
+    type LaunchConfig = {
+      task_backend: { task_ids: string[] };
+      task_execution: { validators: Record<string, { source_files: Record<string, string> }> };
+    };
+    for (const alter of [
+      (config: LaunchConfig) => config.task_backend.task_ids.push(w.foreign.id),
+      (config: LaunchConfig) => {
+        config.task_execution.validators[w.task.id].source_files['oracle.mjs'] = '0'.repeat(64);
+      },
+      (config: LaunchConfig) => {
+        config.task_execution.validators = {};
+      },
+    ]) {
+      const config = JSON.parse(configRaw);
+      alter(config);
+      fs.writeFileSync(w.configPath, JSON.stringify(config));
+      const denied = await renew();
+      assert.equal(denied.error, true, denied.text);
+      assert.match(denied.text, /configuration changed/);
+    }
+    fs.writeFileSync(w.configPath, configRaw);
+    const next = await renew({}, w.worker(), 'scheduled-renewal');
+    assert.equal(next.error, false, next.text);
+    assert.equal(next.value.priorRunId, child.run.runId);
+    assert.deepEqual(next.value.automation, { ...authorization, revoked: false });
+    assert.equal(next.value.expiresAt, authorization.expiresAt);
+    const resumed = JSON.parse(
+      fs.readFileSync(path.join(next.value.logDirectory, 'config.json'), 'utf8')
+    );
+    assert.deepEqual(resumed, { ...JSON.parse(configRaw), resume_swarm_id: 'test-swarm' });
+    assert.equal(
+      fs.readFileSync(savedPath, 'utf8'),
+      saved,
+      'renewal never rewrites prior attempts/session/history'
+    );
+    assert.equal((await renew({}, w.worker(), 'scheduled-renewal')).value.runId, next.value.runId);
+    assert.equal((await renew()).error, true, 'one successor per prior host');
+    await w.stop(child.run.runId);
+    await w.restart();
+    const denied = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: { ...renewal, priorRunId: next.value.runId },
+      key: 'revoked-renewal',
+    });
+    assert.equal(denied.error, true);
+    assert.match(denied.text, /delegation/);
+    const stopped = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: { kind: 'status', runId: next.value.runId },
+      key: 'revoked-status',
+    });
+    assert.notEqual(stopped.value.status, 'running');
+    assert.equal(stopped.value.automation.revoked, true);
+  } finally {
+    await w.close();
+  }
+});
+
+test('overnight horizon expiry and original owner-free stop remain fail closed', async () => {
+  const w = await fixture();
+  try {
+    const child = await w.launch(60, 1);
+    assert.ok(child.run.expiresAt < child.run.originalExpiresAt);
+    await until(async () => (await probe(child.spec)) === 401);
+    await w.restart();
+    const renewal = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: {
+        kind: 'launch',
+        priorRunId: child.run.runId,
+        workspaceId: w.ws.id,
+        buddyId: w.buddy.id,
+        workspacePath: w.repo,
+        configPath: w.configPath,
+        maxSeconds: 1,
+      },
+      key: 'expired-renewal',
+    });
+    assert.equal(renewal.error, true);
+    assert.match(renewal.text, /delegation/);
+    const plain = await w.launch();
+    const stopped = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: { kind: 'stop', runId: plain.run.runId },
+      key: 'ordinary-stop',
+    });
+    assert.equal(stopped.error, false, stopped.text);
+    assert.equal(await probe(plain.spec), 401);
   } finally {
     await w.close();
   }

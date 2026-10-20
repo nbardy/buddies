@@ -892,7 +892,7 @@ const OOMPA_TOOLS = {
 };
 const OOMPA_CONTROL = teamTool({
   description:
-    'Owner-only host launch or pinned diagnostic continuation for bounded Oompa work on selected tasks. The launch Buddy may read status or stop its own run. No credentials are returned.',
+    'Owner launch may grant automationSeconds (at most 43200) for this launch Buddy to continue pinned diagnostics and renew a drained host with launch.priorRunId within the immutable scope/horizon. Renewal preserves task attempts, sessions and original deadlines; only a new owner launch grants new policy. The launch Buddy may read status or stop its run; Stop revokes its delegation. No credentials are returned.',
   writes: true,
   schema: z.object({ action: OompaAction, key }).strict(),
   handler: (deps, grant, { action, key }) => {

@@ -90,13 +90,14 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
 
   function issue<G extends TurnGrant>(
     grant: Omit<G, 'token' | 'expiresAt' | 'observe'> & { observe?: GrantBase['observe'] },
-    ttlMs = options.ttlMs
+    ttlMs = options.ttlMs,
+    deadline?: number
   ): G {
     const issued = {
       ...grant,
       observe: grant.observe ?? ignore,
       token: randomBytes(32).toString('base64url'),
-      expiresAt: now() + ttlMs,
+      expiresAt: deadline ?? now() + ttlMs,
     } as unknown as G;
     byToken.set(issued.token, issued);
     return issued;
@@ -120,16 +121,18 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
 
     // Pattern: capability-grants (docs/patterns.md#capability-grants)
     // Detached work used to borrow its parent's bearer, revoked at parent settle. This fresh
-    // grant is fenced by the host execution, never promoted or renewed. Guard: oompa-mcp.test.
+    // grant is fenced by the host execution, never promoted or renewed. Its absolute deadline
+    // preserves the owner horizon without relative-clock drift. Guard: oompa-mcp.test.
     issueOompa(input: {
       executionId: string;
       buddyId: string;
       workspaceId: string;
       taskIds: readonly string[];
       principal: Actor;
-      ttlMs: number;
+      expiresAt: number;
     }): BuddyGrant {
-      if (!(input.ttlMs > 0 && input.ttlMs <= 43_200_000))
+      const ttlMs = input.expiresAt - now();
+      if (!(ttlMs > 0 && ttlMs <= 43_200_000))
         throw new Error('Oompa grant must have a positive deadline of at most 12 hours');
       return issue<BuddyGrant>(
         {
@@ -144,7 +147,8 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
           principal: input.principal,
           oompa: { executionId: input.executionId, taskIds: [...input.taskIds] },
         },
-        input.ttlMs
+        ttlMs,
+        input.expiresAt
       );
     },
 

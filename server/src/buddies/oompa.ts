@@ -61,6 +61,8 @@ export const OompaAction = z.discriminatedUnion('kind', [
       workspacePath: z.string().min(1),
       configPath: z.string().min(1),
       maxSeconds: z.number().int().positive().max(43_200),
+      automationSeconds: z.number().int().positive().max(43_200).optional(),
+      priorRunId: z.string().min(1).optional(),
     })
     .strict(),
   z
@@ -237,7 +239,41 @@ export function createOompaHost(options: {
         for (const name of fs.readdirSync(root)) signal(path.join(root, name));
     }
   }
+  function automationRoot(run: Run) {
+    return run.owner.automation && runs.get(run.owner.automation.rootRunId);
+  }
+  function revoked(run: Run) {
+    const root = automationRoot(run);
+    return !!root && fs.existsSync(path.join(root.execution.dir, 'automation-revoked.json'));
+  }
+  // Pattern: capability-grants (docs/patterns.md#capability-grants)
+  // Scheduled turns previously needed a fresh owner every chunk. Only the original launch Buddy
+  // may exercise this immutable journaled scope; guard: oompa-mcp overnight delegation.
+  function delegated(grant: TurnGrant, run: Run) {
+    const authorization = run.owner.automation;
+    if (
+      grant.role !== 'worker' ||
+      grant.oompa ||
+      !authorization ||
+      !automationRoot(run) ||
+      grant.buddyId !== authorization.buddyId ||
+      grant.workspaceId !== authorization.workspaceId ||
+      authorization.expiresAt <= now() ||
+      revoked(run)
+    )
+      throw new Error('Oompa operation requires active owner delegation for this launch Buddy');
+    return authorization;
+  }
+  function revokeAutomation(run: Run) {
+    const root = automationRoot(run);
+    if (!root) return;
+    atomic(path.join(root.execution.dir, 'automation-revoked.json'), { revokedAt: now() });
+    for (const sibling of runs.values())
+      if (sibling !== run && sibling.owner.automation?.rootRunId === root.owner.id)
+        stop(sibling, true);
+  }
   function stop(run: Run, timeout = false) {
+    if (!timeout) revokeAutomation(run);
     if (run.execution.phase.t === 'running') {
       journals.step(run.execution, {
         t: 'stop',
@@ -267,7 +303,7 @@ export function createOompaHost(options: {
       stopChildren(run);
       return;
     }
-    if (run.owner.grant.expiresAt <= now()) return stop(run, true);
+    if (run.owner.grant.expiresAt <= now() || revoked(run)) return stop(run, true);
     if (executionProcess(run.execution.dir).t !== 'live') {
       journals.step(run.execution, {
         t: 'drained',
@@ -283,6 +319,14 @@ export function createOompaHost(options: {
       runId: run.owner.id,
       status: run.execution.phase.t,
       expiresAt: run.owner.grant.expiresAt,
+      originalExpiresAt: run.owner.originalExpiresAt ?? run.owner.grant.expiresAt,
+      priorRunId: run.owner.priorRunId,
+      automation: run.owner.automation
+        ? {
+            ...run.owner.automation,
+            revoked: revoked(run),
+          }
+        : undefined,
       workspacePath: run.owner.workspacePath,
       taskIds: run.owner.grant.oompa!.taskIds,
       logDirectory: run.execution.dir,
@@ -383,6 +427,23 @@ export function createOompaHost(options: {
         throw new Error('Oompa worker is active, stale or has not acknowledged the diagnostic');
     }
   }
+  function resumeSwarm(run: Run) {
+    const log = fs.readFileSync(path.join(run.execution.dir, 'stdout'), 'utf8');
+    const ids = [
+      ...log.matchAll(/Started event written to runs\/([a-zA-Z0-9_-]+)\/started\.json/g),
+    ];
+    if (ids.length !== 1) throw new Error('cannot prove the prior Oompa swarm identity');
+    const id = ids[0][1];
+    const started = read<{ 'swarm-id': string; 'config-file': string }>(
+      path.join(run.owner.workspacePath, 'runs', id, 'started.json')
+    );
+    if (
+      started['swarm-id'] !== id ||
+      started['config-file'] !== path.join(run.execution.dir, 'config.json')
+    )
+      throw new Error('prior Oompa swarm does not match its pinned host configuration');
+    return id;
+  }
   function activeChild(run: Run) {
     for (const kind of ['validations', 'continuations']) {
       const root = path.join(run.execution.dir, kind);
@@ -440,6 +501,8 @@ export function createOompaHost(options: {
       const workspacePath = await registered(run.owner.workspacePath, request.workspacePath);
       if ((await cleanCommit(workspacePath)) !== request.sourceCommit)
         throw new Error('diagnostic source commit does not match request');
+      for (const validator of Object.values(run.owner.validators))
+        await pins(workspacePath, validator);
       await pins(workspacePath, {
         command: request.command,
         timeout_seconds: request.maxSeconds,
@@ -562,13 +625,28 @@ export function createOompaHost(options: {
         if (!ownerInput && grant.role !== 'builder' && run.owner.grant.buddyId !== grant.buddyId)
           throw new Error('Oompa run belongs to another Buddy');
         if (action.kind === 'continue') {
-          if (!ownerInput) throw new Error('Oompa continuation requires an owner-authored turn');
+          if (!ownerInput) delegated(grant, run);
           return continueRun(run, action, key);
         }
         if (action.kind === 'stop') stop(run);
         return view(run);
       }
-      if (!ownerInput) throw new Error('Oompa launch requires an owner-authored turn');
+      const previous = action.priorRunId ? runs.get(action.priorRunId) : undefined;
+      if (action.priorRunId && !previous) throw new Error('unknown prior Oompa run');
+      if (!ownerInput && !previous) throw new Error('Oompa launch requires an owner-authored turn');
+      if (previous && action.automationSeconds !== undefined)
+        throw new Error('new automation policy requires a new owner launch');
+      const authorization =
+        previous && (ownerInput ? previous.owner.automation : delegated(grant, previous));
+      if (previous && (!authorization || authorization.expiresAt <= now() || revoked(previous)))
+        throw new Error('prior Oompa run has no active owner delegation');
+      if (
+        authorization &&
+        (action.buddyId !== authorization.buddyId ||
+          action.workspaceId !== authorization.workspaceId ||
+          fs.realpathSync(action.workspacePath) !== authorization.workspacePath)
+      )
+        throw new Error('Oompa renewal is outside the owner delegation');
       if (grant.role !== 'builder' && grant.workspaceId !== action.workspaceId)
         throw new Error('Oompa launch is outside this workspace');
       const workspace = (await options.core.listWorkspaces()).find(
@@ -582,16 +660,22 @@ export function createOompaHost(options: {
       const configPath = fs.realpathSync(action.configPath);
       const raw = fs.readFileSync(configPath, 'utf8');
       const config = Config.parse(JSON.parse(raw));
+      if (authorization && sha(raw) !== authorization.configSha256)
+        throw new Error('Oompa renewal configuration changed from owner-pinned scope');
       const backend = config.task_backend;
       if (backend.workspace_id !== workspace.id || backend.buddy_id !== buddy.id)
         throw new Error('Oompa config workspace/Buddy does not match launch');
       const taskIds = [...new Set(backend.task_ids)];
+      const taskOwners: Record<string, string> = {};
       for (const id of taskIds) {
         const task = await options.core.getTask(id);
         if (task.workspaceId !== workspace.id)
           throw new Error('Oompa task is outside the launch workspace');
         if (task.ownerId !== (backend.owner_by_task?.[id] ?? backend.buddy_id))
           throw new Error('Oompa task owner does not match the explicit configuration');
+        taskOwners[id] = task.ownerId!;
+        if (authorization && authorization.taskOwners[id] !== task.ownerId)
+          throw new Error('Oompa task owner changed from owner delegation');
       }
       const launchHash = sha(JSON.stringify({ ...action, raw }));
       const prior = [...runs.values()].find(
@@ -602,14 +686,54 @@ export function createOompaHost(options: {
           throw new Error('Oompa launch key was already used for different input');
         return view(prior);
       }
+      let resumeSwarmId: string | undefined;
+      if (previous) {
+        if (revoked(previous) || authorization!.expiresAt <= now())
+          throw new Error('owner automation delegation expired or was revoked');
+        refresh(previous);
+        if (
+          previous.execution.phase.t !== 'ended' ||
+          childActive(previous.execution.dir) ||
+          activeChild(previous)
+        )
+          throw new Error('prior Oompa execution has not drained');
+        if ([...runs.values()].some((run) => run.owner.priorRunId === previous.owner.id))
+          throw new Error('prior Oompa run already renewed; reference its successor');
+        if (
+          [...runs.values()].some(
+            (run) =>
+              run.owner.automation?.rootRunId === authorization!.rootRunId &&
+              (run.execution.phase.t === 'running' || run.execution.phase.t === 'stopping')
+          )
+        )
+          throw new Error('an Oompa execution under this delegation is active');
+        if (now() + action.maxSeconds * 1000 > authorization!.expiresAt)
+          throw new Error('Oompa renewal exceeds owner automation horizon');
+        resumeSwarmId = resumeSwarm(previous);
+      }
       const id = `oompa-${randomUUID()}`;
+      const startedAt = now();
+      const automation =
+        authorization ??
+        (action.automationSeconds
+          ? {
+              rootRunId: id,
+              buddyId: buddy.id,
+              workspaceId: workspace.id,
+              workspacePath,
+              configSha256: sha(raw),
+              taskOwners,
+              expiresAt: startedAt + action.automationSeconds * 1000,
+            }
+          : undefined);
+      const expiresAt = automation?.expiresAt ?? startedAt + action.maxSeconds * 1000;
       const issued = options.grants.issueOompa({
         executionId: id,
         buddyId: buddy.id,
         workspaceId: workspace.id,
         taskIds,
-        principal: grant.principal,
-        ttlMs: action.maxSeconds * 1000,
+        principal: previous?.owner.grant.principal ?? grant.principal,
+        expiresAt,
       });
       const { observe: _, ...record } = issued;
       const owner: OompaOwner = {
@@ -620,6 +744,9 @@ export function createOompaHost(options: {
         launchHash,
         workspacePath,
         configPath,
+        originalExpiresAt: startedAt + action.maxSeconds * 1000,
+        priorRunId: previous?.owner.id,
+        automation,
         grant: record,
         validators: config.task_execution?.validators ?? {},
       };
@@ -629,7 +756,12 @@ export function createOompaHost(options: {
       try {
         // Pin configuration at owner launch; later model edits cannot change the oracle or scope.
         const pinnedConfig = path.join(execution.dir, 'config.json');
-        fs.writeFileSync(pinnedConfig, raw, { mode: 0o600 });
+        // Resume the existing Oompa execution state, including attempts/session/task deadlines.
+        // A plain run here silently reset those budgets. Guard: overnight delegation renewal.
+        const pinnedRaw = resumeSwarmId
+          ? JSON.stringify({ ...config, resume_swarm_id: resumeSwarmId })
+          : raw;
+        fs.writeFileSync(pinnedConfig, pinnedRaw, { mode: 0o600 });
         atomic(path.join(execution.dir, 'continuation-control.json'), { version: 1 });
         spawnOwned(
           execution.dir,
