@@ -1196,7 +1196,7 @@ test('delegated requeue reopens only the latest proven missing-reviewer hold wit
   }
 });
 
-test('portfolio MCP admits reviewed canonical prerequisite after three done children and resumes preserved history', async () => {
+async function portfolioBoundary(ownerScale: boolean) {
   const w = await fixture();
   try {
     const reviewer = await w.core.createBuddy(OWNER, {
@@ -1236,6 +1236,23 @@ test('portfolio MCP admits reviewed canonical prerequisite after three done chil
     }
     const original = JSON.parse(fs.readFileSync(w.configPath, 'utf8'));
     original.task_backend.task_ids = [root.id, ...done.map((task) => task.id)];
+    original.task_backend.dependencies = { [root.id]: [done[0].id] };
+    if (ownerScale) {
+      original.workers = [
+        {
+          model: 'codex:gpt-6.1-sol:xhigh',
+          prompt: ['worker.md'],
+          count: 1,
+          can_claim_gpu: true,
+          max_cycle: 100,
+          max_resumes: 100,
+          needs_review: true,
+          can_plan: false,
+          max_wait_for_tasks: 600,
+        },
+      ];
+      original.reviewers = [{ model: 'claude:claude-opus-5-5:high', prompt: ['reviewer.md'] }];
+    }
     original.task_execution.wall_time_seconds = 120;
     original.task_execution.attempt_timeout_seconds = 10;
     for (const task of done)
@@ -1293,7 +1310,10 @@ test('portfolio MCP admits reviewed canonical prerequisite after three done chil
       JSON.stringify({ 'worker-id': 'w0', status: 'stopped', execution: oldState })
     );
     const call = (action: Record<string, unknown>, key = 'portfolio', grant = w.worker()) =>
-      rpc(w.endpoint.spec(grant), 'oompa', { action: { runId: child.run.runId, ...action }, key });
+      rpc(w.endpoint.spec(grant), 'oompa', {
+        action: { runId: child.run.runId, ...action },
+        key,
+      });
     const renewAction = {
       kind: 'launch',
       priorRunId: child.run.runId,
@@ -1362,6 +1382,19 @@ test('portfolio MCP admits reviewed canonical prerequisite after three done chil
       next_action: 'Execute reviewed consumer',
       role: 'consumer',
     };
+    if (ownerScale) {
+      proposed.workers = [
+        { ...original.workers[0], model: 'claude:claude-opus-5-5:high', task_ids: [] },
+        {
+          ...original.workers[0],
+          model: 'codex:gpt-6.1-sol:medium',
+          count: 5,
+          can_claim_gpu: false,
+          task_ids: [created.value.id],
+        },
+      ];
+      proposed.reviewers[0].prompt = ['reviewed-reviewer.md'];
+    }
     const proposedPath = path.join(w.scratch, 'amended.json');
     fs.writeFileSync(proposedPath, JSON.stringify(proposed));
     const configSha256 = createHash('sha256').update(fs.readFileSync(proposedPath)).digest('hex');
@@ -1415,6 +1448,7 @@ test('portfolio MCP admits reviewed canonical prerequisite after three done chil
     );
     const amendment = {
       kind: 'amend',
+      ...(ownerScale ? { ownerScale: true } : {}),
       baseConfigSha256,
       configPath: proposedPath,
       configSha256,
@@ -1428,13 +1462,97 @@ test('portfolio MCP admits reviewed canonical prerequisite after three done chil
     assert.equal((await call({ ...amendment, sourceCommit: w.base }, 'stale-source')).error, true);
     assert.equal((await call(amendment, 'foreign-amend', w.worker('peer'))).error, true);
     const saved = fs.readFileSync(statePath, 'utf8');
-    const admitted = await call(amendment, 'reviewed-amendment');
+    const admittingGrant = ownerScale ? w.owner() : w.worker();
+    if (ownerScale) {
+      const denied = await call(amendment, 'scheduled-scale');
+      assert.equal(denied.error, true);
+      assert.match(denied.text, /owner-authored/);
+      const { ownerScale: _ownerScale, ...ordinary } = amendment;
+      assert.match((await call(ordinary, 'scheduled-unflagged-scale')).text, /frozen/);
+      for (const field of ['max_cycle', 'max_resumes', 'max_wait_for_tasks']) {
+        const bad = structuredClone(proposed);
+        bad.workers[1][field]++;
+        const badPath = path.join(w.scratch, `scale-${field}.json`);
+        fs.writeFileSync(badPath, JSON.stringify(bad));
+        const result = await call(
+          {
+            ...amendment,
+            configPath: badPath,
+            configSha256: createHash('sha256').update(fs.readFileSync(badPath)).digest('hex'),
+          },
+          `scale-${field}`,
+          admittingGrant
+        );
+        assert.equal(result.error, true, field);
+        assert.match(result.text, /controls/);
+      }
+      for (const [label, mutate, reason] of [
+        [
+          'dependency',
+          (bad: typeof proposed) => {
+            bad.task_backend.dependencies[root.id] = [];
+          },
+          /acceptance dependencies/,
+        ],
+        [
+          'budget',
+          (bad: typeof proposed) => {
+            bad.task_execution.wall_time_seconds++;
+          },
+          /frozen/,
+        ],
+        [
+          'gpu',
+          (bad: typeof proposed) => {
+            bad.workers[1].can_claim_gpu = true;
+          },
+          /one GPU/,
+        ],
+        [
+          'count',
+          (bad: typeof proposed) => {
+            bad.workers[1].count = 6;
+          },
+          /six workers/,
+        ],
+        [
+          'foreign-task',
+          (bad: typeof proposed) => {
+            bad.workers[1].task_ids = [w.foreign.id];
+          },
+          /outside admitted graph/,
+        ],
+      ] as const) {
+        const bad = structuredClone(proposed);
+        mutate(bad);
+        const badPath = path.join(w.scratch, `scale-${label}.json`);
+        fs.writeFileSync(badPath, JSON.stringify(bad));
+        const result = await call(
+          {
+            ...amendment,
+            configPath: badPath,
+            configSha256: createHash('sha256').update(fs.readFileSync(badPath)).digest('hex'),
+          },
+          `scale-${label}`,
+          admittingGrant
+        );
+        assert.equal(result.error, true, label);
+        assert.match(result.text, reason);
+      }
+    }
+    const admitted = await call(amendment, 'reviewed-amendment', admittingGrant);
     assert.equal(admitted.error, false, admitted.text);
     assert.equal(fs.readFileSync(statePath, 'utf8'), saved);
     assert.equal(
-      (await call(amendment, 'reviewed-amendment')).value.amendmentId,
+      (await call(amendment, 'reviewed-amendment', admittingGrant)).value.amendmentId,
       admitted.value.amendmentId
     );
+    if (ownerScale)
+      assert.match(
+        (await call(amendment, 'reviewed-amendment')).text,
+        /owner-authored/,
+        'scheduled replay of an owner receipt does not gain scale authority'
+      );
     const executedPinChange = structuredClone(proposed);
     executedPinChange.task_execution.validators[root.id] =
       executedPinChange.task_execution.validators[created.value.id];
@@ -1448,7 +1566,8 @@ test('portfolio MCP admits reviewed canonical prerequisite after three done chil
             configPath: badPath,
             configSha256: createHash('sha256').update(fs.readFileSync(badPath)).digest('hex'),
           },
-          'held-repin'
+          'held-repin',
+          admittingGrant
         )
       ).error,
       true
@@ -1560,7 +1679,11 @@ test('portfolio MCP admits reviewed canonical prerequisite after three done chil
   } finally {
     await w.close();
   }
-});
+}
+
+for (const ownerScale of [false, true])
+  test(`portfolio MCP admits reviewed canonical prerequisite and preserves history (ownerScale=${ownerScale})`, () =>
+    portfolioBoundary(ownerScale));
 
 test('only a new owner launch grants an explicit resumed window after expiry without renewing old authority', async () => {
   const w = await fixture();

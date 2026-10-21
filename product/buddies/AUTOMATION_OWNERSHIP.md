@@ -189,3 +189,26 @@ model/gate attempt. It cannot be removed or set false by delegated amendment.
 It is an execution checkpoint policy, excluded from oracle identity; tightening
 it does not silently change historical source pins. Cheap validators retain the
 existing default loop.
+
+### Owner-only scale amendment — October 22, 2026
+
+The existing `amend` action accepts optional `ownerScale:true` only from a live
+owner-authored turn for the launch Buddy. A scheduled Buddy, worker or replay of
+an owner receipt cannot authorize scale. The default amendment remains frozen.
+The owner names the same exact reviewed config/source/revisions as ordinary
+`amend`; independent review, canonical dependencies, held/executed validator
+pins, Stop and expiry still apply. This source capability does not itself grant
+permission to spend or activate a reviewed configuration.
+
+This bounded exception admits up to six workers, at most one GPU worker, and
+one reviewer. Worker allocation fields are only `model`, `prompt`, `count`,
+`can_claim_gpu` and `task_ids` (within the admitted graph); reviewer allocation
+fields are only `model` and `prompt`. Every remaining worker control must match
+the original common worker controls exactly; heterogeneous original controls
+require a separate owner decision. Remaining reviewer controls, global budget
+and task-execution controls remain frozen. Model values pass through verbatim.
+
+After owner admission, the launch Buddy may use normal `launch` with
+`priorRunId,amendmentId` and the returned absolute `configPath`. That renewal
+retains the original automation horizon and task history; it grants no new
+window. Activation requires the applicable owner authorization separately.

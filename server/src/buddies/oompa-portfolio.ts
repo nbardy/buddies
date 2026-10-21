@@ -23,6 +23,7 @@ export const Prerequisite = z
 export const Amendment = z
   .object({
     kind: z.literal('amend'),
+    ownerScale: z.literal(true).optional(),
     runId: z.string().min(1),
     baseConfigSha256: z.string().regex(/^[a-f0-9]{64}$/),
     configPath: z.string().min(1),
@@ -84,14 +85,61 @@ export type PortfolioConfig = {
   [key: string]: unknown;
 };
 
+// Pattern: pure-core (docs/patterns.md#pure-core)
+// Owner scale changes only allocation fields; budget and policy fields still compare exactly.
+// Guard: oompa-mcp owner-only scale amendment, including scheduled receipt replay denial.
+function scaleDelta(base: PortfolioConfig, next: PortfolioConfig) {
+  const worker = z
+    .object({
+      model: z.string().min(1),
+      prompt: z.array(z.string().min(1)).min(1),
+      count: z.number().int().positive().max(6),
+      can_claim_gpu: z.boolean(),
+      task_ids: z.array(z.string().min(1)).optional(),
+    })
+    .passthrough();
+  const before = z.array(worker).min(1).parse(base.workers);
+  const after = z.array(worker).min(1).max(6).parse(next.workers);
+  const allocation = ['model', 'prompt', 'count', 'can_claim_gpu', 'task_ids'];
+  const controls = stable(without(before[0], allocation));
+  if ([...before, ...after].some((item) => stable(without(item, allocation)) !== controls))
+    throw new Error('owner scale cannot change worker task, runtime or spend controls');
+  if (
+    after.reduce((sum, item) => sum + item.count, 0) > 6 ||
+    after.filter((item) => item.can_claim_gpu).reduce((sum, item) => sum + item.count, 0) > 1
+  )
+    throw new Error('owner scale permits at most six workers and one GPU worker');
+  const ids = new Set(next.task_backend.task_ids);
+  for (const item of after)
+    if (item.task_ids?.some((id) => !ids.has(id)))
+      throw new Error('owner scale worker task outside admitted graph');
+  const reviewer = z
+    .object({ model: z.string().min(1), prompt: z.array(z.string().min(1)).min(1) })
+    .passthrough();
+  const oldReview = z.array(reviewer).length(1).parse(base.reviewers);
+  const newReview = z.array(reviewer).length(1).parse(next.reviewers);
+  if (
+    stable(without(oldReview[0], ['model', 'prompt'])) !==
+    stable(without(newReview[0], ['model', 'prompt']))
+  )
+    throw new Error('owner scale cannot change reviewer controls');
+}
+
 export function amendmentDelta(
   base: PortfolioConfig,
   next: PortfolioConfig,
-  executed: Set<string>
+  executed: Set<string>,
+  ownerScale = false
 ) {
+  if (ownerScale) scaleDelta(base, next);
+  const mutable = [
+    'task_backend',
+    'task_execution',
+    'resume_swarm_id',
+    ...(ownerScale ? ['workers', 'reviewers'] : []),
+  ];
   if (
-    stable(without(base, ['task_backend', 'task_execution', 'resume_swarm_id'])) !==
-      stable(without(next, ['task_backend', 'task_execution', 'resume_swarm_id'])) ||
+    stable(without(base, mutable)) !== stable(without(next, mutable)) ||
     stable(without(base.task_backend, ['task_ids', 'owner_by_task', 'dependencies'])) !==
       stable(without(next.task_backend, ['task_ids', 'owner_by_task', 'dependencies'])) ||
     stable(

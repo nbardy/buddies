@@ -736,6 +736,8 @@ export function createOompaHost(options: {
     return config;
   }
   async function amend(grant: TurnGrant, run: Run, action: z.infer<typeof Amendment>, key: string) {
+    if (action.ownerScale && (grant.role !== 'owner' || grant.principal.kind !== 'owner'))
+      throw new Error('scale amendment requires an owner-authored turn');
     const auth = delegated(grant, run, true);
     if (!auth.portfolio) throw new Error('owner launch has no portfolio delegation');
     latestDrained(run);
@@ -778,7 +780,12 @@ export function createOompaHost(options: {
     const original = baseConfig(run);
     if (stable(original) === stable(config))
       throw new Error('unchanged semantic configuration; suppress duplicate reconciliation');
-    const { changed, readiness } = amendmentDelta(original, config, executed);
+    const { changed, readiness } = amendmentDelta(
+      original,
+      config,
+      executed,
+      action.ownerScale === true
+    );
     for (const [taskId, item] of Object.entries(readiness))
       if (!taskOwners[taskId] || item.required_owner !== taskOwners[taskId])
         throw new Error('readiness ownership mismatch');

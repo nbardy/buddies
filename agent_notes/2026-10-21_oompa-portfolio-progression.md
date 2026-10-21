@@ -64,3 +64,35 @@ Working-tree server/test typecheck, owned-file Biome and diff checks passed.
 Archived runtime checks reused installed package/native dependencies. A clean
 whole-repository rebuild was not claimed; foreign provider/catalog changes were
 left unstaged, with the previously recorded static baseline limitation unchanged.
+
+## October 22 source-only owner scale repair
+
+Blocker: reviewed beta scale configuration is refused by the intentional frozen
+harness guard, including from owner turns. Target: an explicit owner-only scale
+exception in existing amendment admission; scheduled callers retain the freeze.
+Expected improvement: admit reviewed allocation changes without creating a new
+automation window. Cheapest check: real temporary-store portfolio MCP boundary.
+Pass: owner admission and same-horizon renewal; scheduled and budget/graph/pin
+weakening refused. Stop: broad authorization redesign or activation needed.
+Claim boundary: source software controls only, no beta or physics acceptance.
+
+`amend.ownerScale:true` requires current owner role and owner principal before
+idempotent receipt lookup. Allocation is bounded to six workers, one GPU worker,
+one reviewer; models/prompts pass through and task assignments stay within the
+admitted graph. Remaining worker/reviewer controls, global/task budgets,
+independent review, history and acceptance dependencies retain their owners.
+Normal scheduled renewal may consume the owner-admitted immutable receipt under
+the original horizon. No live run, DB, provider, deployment or server activation
+was performed. Required owner action after supported source activation: invoke
+ordinary reviewed `amend` with `ownerScale:true` from the launch Buddy's live
+owner-authored turn, then use its returned amendment ID/config for normal renewal.
+
+Verification: `pnpm exec tsx --test --test-name-pattern='portfolio MCP'
+server/test/oompa-mcp.test.ts` passed 2/2 (ordinary and owner-scale variants,
+30.4 s), through real MCP HTTP/core with temporary stores and fixture host.
+Covered scheduled flag/unflagged/replayed receipt denial, owner admission,
+original expiry/history preservation, worker/global budget refusal, GPU/count
+caps, foreign task refusal, retained acceptance dependencies and held repin
+refusal. `pnpm --filter @unleashd/server typecheck`, owned-file Biome and
+`git diff --check` passed. No optional real Babashka portfolio driver was enabled;
+this verifies software admission controls, not provider execution or beta outcomes.
