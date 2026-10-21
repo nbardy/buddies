@@ -56,6 +56,9 @@ export interface OompaOwner {
   /** Original owner-requested chunk deadline; automation never changes task configuration. */
   readonly originalExpiresAt?: number;
   readonly priorRunId?: string;
+  readonly resumeRunId?: string;
+  readonly configSha256?: string;
+  readonly taskOwners?: Readonly<Record<string, string>>;
   /** Immutable owner delegation; renewal copies this scope and its fixed horizon verbatim. */
   readonly automation?: {
     readonly rootRunId: string;
@@ -63,6 +66,11 @@ export interface OompaOwner {
     readonly workspaceId: string;
     readonly workspacePath: string;
     readonly configSha256: string;
+    readonly portfolio?: {
+      readonly rootTaskIds: string[];
+      readonly ownerIds: string[];
+      readonly reviewerIds: string[];
+    };
     readonly taskOwners: Readonly<Record<string, string>>;
     readonly expiresAt: number;
   };
@@ -72,6 +80,7 @@ export interface OompaOwner {
     {
       command: string[];
       timeout_seconds: number;
+      reconcile_on_rejection?: boolean;
       source_files: Record<string, string>;
     }
   >;

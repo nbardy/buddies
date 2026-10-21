@@ -12,6 +12,14 @@ import { type OompaOwner, createExecutionJournals } from '../turns/executions';
 import type { BuddiesCore } from './core';
 import { decideExecutionGate } from './execution-gate';
 import type { BuddyGrant, Grants, TurnGrant } from './grants';
+import {
+  Amendment,
+  Portfolio,
+  Prerequisite,
+  amendmentDelta,
+  portfolioTask,
+  stable,
+} from './oompa-portfolio';
 
 const exec = promisify(execFile);
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -24,6 +32,7 @@ const Validator = z
   .object({
     command: z.array(z.string().min(1)).min(1),
     timeout_seconds: z.number().int().positive().max(43_200),
+    reconcile_on_rejection: z.boolean().optional(),
     source_files: z
       .record(z.string().regex(/^[a-f0-9]{64}$/))
       .refine((x) => Object.keys(x).length > 0),
@@ -53,6 +62,8 @@ const Config = z
   .passthrough();
 
 export const OompaAction = z.discriminatedUnion('kind', [
+  Amendment,
+  Prerequisite,
   z
     .object({
       kind: z.literal('launch'),
@@ -63,6 +74,12 @@ export const OompaAction = z.discriminatedUnion('kind', [
       maxSeconds: z.number().int().positive().max(43_200),
       automationSeconds: z.number().int().positive().max(43_200).optional(),
       priorRunId: z.string().min(1).optional(),
+      resumeRunId: z.string().min(1).optional(),
+      amendmentId: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .optional(),
+      portfolio: Portfolio.optional(),
     })
     .strict(),
   z
@@ -153,7 +170,7 @@ function cleanEnv(): NodeJS.ProcessEnv {
   return Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) =>
-        !/^(UNLEASHD_AUTH_|OOMPA_BUDDY_MCP_|AGENT_CLI_MCP_|OOMPA_CONTINUATION_|BUDDIES_.*TOKEN)/.test(
+        !/^(UNLEASHD_AUTH_|OOMPA_BUDDY_MCP_|AGENT_CLI_MCP_|OOMPA_CONTINUATION_|OOMPA_OWNER_WINDOW_|BUDDIES_.*TOKEN)/.test(
           name
         )
     )
@@ -365,6 +382,7 @@ export function createOompaHost(options: {
       expiresAt: run.owner.grant.expiresAt,
       originalExpiresAt: run.owner.originalExpiresAt ?? run.owner.grant.expiresAt,
       priorRunId: run.owner.priorRunId,
+      resumeRunId: run.owner.resumeRunId,
       automation: run.owner.automation
         ? {
             ...run.owner.automation,
@@ -373,6 +391,8 @@ export function createOompaHost(options: {
         : undefined,
       workspacePath: run.owner.workspacePath,
       taskIds: run.owner.grant.oompa!.taskIds,
+      configSha256: run.owner.configSha256 ?? run.owner.automation?.configSha256,
+      queueAudit: graphAudit(run),
       logDirectory: run.execution.dir,
       drain: fs.existsSync(path.join(run.execution.dir, 'drain.json'))
         ? read<Drain>(path.join(run.execution.dir, 'drain.json'))
@@ -606,8 +626,8 @@ export function createOompaHost(options: {
       const workspacePath = await registered(run.owner.workspacePath, request.workspacePath);
       if ((await cleanCommit(workspacePath)) !== request.sourceCommit)
         throw new Error('diagnostic source commit does not match request');
-      for (const validator of Object.values(run.owner.validators))
-        await pins(workspacePath, validator);
+      const validator = run.owner.validators[request.taskId];
+      if (validator) await pins(workspacePath, validator);
       await pins(workspacePath, {
         command: request.command,
         timeout_seconds: request.maxSeconds,
@@ -680,6 +700,171 @@ export function createOompaHost(options: {
     }
   }
 
+  function workerStates(run: Run) {
+    const id = resumeSwarm(run);
+    const dir = path.join(run.owner.workspacePath, 'runs', id);
+    const started = read<{ workers: { id: string }[] }>(path.join(dir, 'started.json'));
+    return started.workers.map(({ id }) => {
+      if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('invalid worker identity');
+      return read<{
+        execution: {
+          task_id?: string;
+          deadline_ms?: number;
+          held_executions?: Record<
+            string,
+            { attempt?: number; session_id?: string; attempt_history?: unknown[] }
+          >;
+          queue_audit?: { state: string; fingerprint: string };
+        };
+      }>(path.join(dir, 'workers', `${id}.json`));
+    });
+  }
+  function graphAudit(run: Run) {
+    try {
+      const audits = workerStates(run)
+        .map((state) => state.execution.queue_audit)
+        .filter(Boolean);
+      return audits.length ? { fingerprint: sha(stable(audits)), workers: audits } : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  function baseConfig(run: Run) {
+    const config = Config.parse(read<unknown>(path.join(run.execution.dir, 'config.json')));
+    config.resume_swarm_id = undefined;
+    if (config.task_execution) config.task_execution.owner_window = undefined;
+    return config;
+  }
+  async function amend(grant: TurnGrant, run: Run, action: z.infer<typeof Amendment>, key: string) {
+    const auth = delegated(grant, run, true);
+    if (!auth.portfolio) throw new Error('owner launch has no portfolio delegation');
+    latestDrained(run);
+    const id = sha(key);
+    const dir = path.join(run.execution.dir, 'config-revisions', id);
+    const requestHash = sha(stable(action));
+    if (fs.existsSync(path.join(dir, 'revision.json'))) {
+      const receipt = read<{ requestHash: string }>(path.join(dir, 'revision.json'));
+      if (receipt.requestHash !== requestHash)
+        throw new Error('amendment key reused with different input');
+      return read<unknown>(path.join(dir, 'revision.json'));
+    }
+    const baseSha = run.owner.configSha256 ?? auth.configSha256;
+    if (action.baseConfigSha256 !== baseSha) throw new Error('stale base configuration revision');
+    const raw = fs.readFileSync(action.configPath, 'utf8');
+    if (raw.length > 1_000_000 || sha(raw) !== action.configSha256)
+      throw new Error('amendment configuration digest mismatch');
+    if (action.configSha256 === baseSha)
+      throw new Error('unchanged configuration; no new reconciliation work');
+    const source = await registered(run.owner.workspacePath, action.workspacePath);
+    if ((await cleanCommit(source)) !== action.sourceCommit)
+      throw new Error('amendment source is not the reviewed clean commit');
+    const config = Config.parse(JSON.parse(raw));
+    const executed = new Set<string>();
+    for (const state of workerStates(run)) {
+      if (state.execution.task_id) executed.add(state.execution.task_id);
+      for (const [taskId, held] of Object.entries(state.execution.held_executions ?? {}))
+        if (held.attempt || held.session_id || held.attempt_history?.length) executed.add(taskId);
+    }
+    const taskOwners: Record<string, string> = {};
+    for (const taskId of config.task_backend.task_ids) {
+      const task = await portfolioTask(options.core, auth.portfolio, auth.workspaceId, taskId);
+      if (task.status === 'done') executed.add(taskId);
+      if (task.revision !== action.taskRevisions[taskId])
+        throw new Error('amended canonical task revision changed');
+      const owner = config.task_backend.owner_by_task?.[taskId] ?? config.task_backend.buddy_id;
+      if (owner !== task.ownerId) throw new Error('amended canonical task owner mismatch');
+      taskOwners[taskId] = owner;
+    }
+    const original = baseConfig(run);
+    if (stable(original) === stable(config))
+      throw new Error('unchanged semantic configuration; suppress duplicate reconciliation');
+    const { changed, readiness } = amendmentDelta(original, config, executed);
+    for (const [taskId, item] of Object.entries(readiness))
+      if (!taskOwners[taskId] || item.required_owner !== taskOwners[taskId])
+        throw new Error('readiness ownership mismatch');
+    const review = await portfolioTask(
+      options.core,
+      auth.portfolio,
+      auth.workspaceId,
+      action.reviewTaskId
+    );
+    const reviewBinding = `oompa.config-review/v1 ${action.baseConfigSha256} ${action.configSha256} ${action.sourceCommit}`;
+    if (
+      review.status !== 'done' ||
+      review.paused ||
+      review.revision !== action.reviewRevision ||
+      !auth.portfolio.reviewerIds.includes(review.ownerId) ||
+      review.ownerId === auth.buddyId ||
+      !review.evidence.includes(reviewBinding)
+    )
+      throw new Error('missing canonical independent delta review binding');
+    for (const taskId of changed) await pins(source, config.task_execution!.validators[taskId]);
+    delegated(grant, run, true);
+    latestDrained(run);
+    if ((await cleanCommit(source)) !== action.sourceCommit)
+      throw new Error('reviewed source changed during amendment');
+    for (const [taskId, revision] of Object.entries(action.taskRevisions))
+      if ((await options.core.getTask(taskId)).revision !== revision)
+        throw new Error('reviewed graph changed during amendment');
+    if ((await options.core.getTask(action.reviewTaskId)).revision !== action.reviewRevision)
+      throw new Error('review changed during amendment');
+    delegated(grant, run, true);
+    latestDrained(run);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(dir, 'config.json'), raw, { mode: 0o600 });
+    const receipt = {
+      amendmentId: id,
+      requestHash,
+      action,
+      taskOwners,
+      configSha256: sha(raw),
+      configPath: path.join(dir, 'config.json'),
+      queueFingerprint: graphAudit(run)?.fingerprint,
+    };
+    atomic(path.join(dir, 'revision.json'), receipt);
+    return receipt;
+  }
+  async function prerequisite(
+    grant: TurnGrant,
+    run: Run,
+    action: z.infer<typeof Prerequisite>,
+    key: string
+  ) {
+    const auth = delegated(grant, run, true);
+    if (!auth.portfolio) throw new Error('owner launch has no portfolio delegation');
+    latestDrained(run);
+    const receiptPath = path.join(run.execution.dir, 'prerequisites', `${sha(key)}.json`);
+    const requestHash = sha(stable(action));
+    if (fs.existsSync(receiptPath)) {
+      const receipt = read<{ requestHash: string; task: unknown }>(receiptPath);
+      if (receipt.requestHash !== requestHash)
+        throw new Error('prerequisite key reused with different input');
+      return receipt.task;
+    }
+    await portfolioTask(options.core, auth.portfolio, auth.workspaceId, action.parentTaskId);
+    if (
+      !(action.role === 'review' ? auth.portfolio.reviewerIds : auth.portfolio.ownerIds).includes(
+        action.ownerId
+      )
+    )
+      throw new Error('prerequisite owner outside approved portfolio');
+    const buddy = await options.core.getBuddy(action.ownerId);
+    if (buddy.workspaceId !== auth.workspaceId || buddy.status === 'archived')
+      throw new Error('foreign prerequisite owner');
+    delegated(grant, run, true);
+    latestDrained(run);
+    const task = await options.core.upsertTask(run.owner.grant.principal, {
+      kind: 'create',
+      parentId: action.parentTaskId,
+      ownerId: action.ownerId,
+      title: action.title,
+      doneCriteria: action.doneCriteria,
+      key: `oompa-prerequisite-${auth.rootRunId}-${sha(stable({ ...action, runId: undefined }))}`,
+    });
+    fs.mkdirSync(path.dirname(receiptPath), { recursive: true, mode: 0o700 });
+    atomic(receiptPath, { requestHash, task });
+    return task;
+  }
   function latestDrained(run: Run) {
     refresh(run);
     if (
@@ -697,7 +882,7 @@ export function createOompaHost(options: {
     const authorization = delegated(grant, run, true);
     if (
       !run.owner.grant.oompa!.taskIds.includes(request.taskId) ||
-      !Object.hasOwn(authorization.taskOwners, request.taskId)
+      !Object.hasOwn(run.owner.taskOwners ?? authorization.taskOwners, request.taskId)
     )
       throw new Error('requeue task is outside the owner delegation');
     const id = sha(key);
@@ -750,7 +935,7 @@ export function createOompaHost(options: {
         const task = await options.core.getTask(request.taskId);
         if (
           task.workspaceId !== authorization.workspaceId ||
-          task.ownerId !== authorization.taskOwners[task.id] ||
+          task.ownerId !== (run.owner.taskOwners ?? authorization.taskOwners)[task.id] ||
           task.status !== 'in_progress' ||
           task.paused ||
           task.revision !== request.baseRevision
@@ -834,6 +1019,17 @@ export function createOompaHost(options: {
           throw new Error('Oompa run is outside this workspace');
         if (!ownerInput && grant.role !== 'builder' && run.owner.grant.buddyId !== grant.buddyId)
           throw new Error('Oompa run belongs to another Buddy');
+        if (action.kind === 'amend' || action.kind === 'prerequisite') {
+          if (registering.has(run.owner.id)) throw new Error('portfolio reconciliation is active');
+          registering.add(run.owner.id);
+          try {
+            return await (action.kind === 'amend'
+              ? amend(grant, run, action, key)
+              : prerequisite(grant, run, action, key));
+          } finally {
+            registering.delete(run.owner.id);
+          }
+        }
         if (action.kind === 'requeue') return requeue(grant, run, action, key);
         if (action.kind === 'drain') {
           if (!ownerInput) delegated(grant, run);
@@ -846,6 +1042,10 @@ export function createOompaHost(options: {
         if (action.kind === 'stop') stop(run);
         return view(run);
       }
+      if ((action.resumeRunId || action.portfolio) && (!ownerInput || action.priorRunId))
+        throw new Error('new portfolio/window policy requires a new owner-authored launch');
+      if (action.amendmentId && !action.priorRunId)
+        throw new Error('amendment requires explicit prior host');
       const previous = action.priorRunId ? runs.get(action.priorRunId) : undefined;
       if (action.priorRunId && !previous) throw new Error('unknown prior Oompa run');
       if (!ownerInput && !previous) throw new Error('Oompa launch requires an owner-authored turn');
@@ -875,7 +1075,24 @@ export function createOompaHost(options: {
       const configPath = fs.realpathSync(action.configPath);
       const raw = fs.readFileSync(configPath, 'utf8');
       const config = Config.parse(JSON.parse(raw));
-      if (authorization && sha(raw) !== authorization.configSha256)
+      const revision =
+        previous && action.amendmentId
+          ? read<{
+              configSha256: string;
+              taskOwners: Record<string, string>;
+              action: z.infer<typeof Amendment>;
+            }>(
+              path.join(
+                previous.execution.dir,
+                'config-revisions',
+                action.amendmentId,
+                'revision.json'
+              )
+            )
+          : undefined;
+      const expectedSha =
+        revision?.configSha256 ?? previous?.owner.configSha256 ?? authorization?.configSha256;
+      if (authorization && sha(raw) !== expectedSha)
         throw new Error('Oompa renewal configuration changed from owner-pinned scope');
       const backend = config.task_backend;
       if (backend.workspace_id !== workspace.id || backend.buddy_id !== buddy.id)
@@ -889,7 +1106,13 @@ export function createOompaHost(options: {
         if (task.ownerId !== (backend.owner_by_task?.[id] ?? backend.buddy_id))
           throw new Error('Oompa task owner does not match the explicit configuration');
         taskOwners[id] = task.ownerId!;
-        if (authorization && authorization.taskOwners[id] !== task.ownerId)
+        if (revision && task.revision !== revision.action.taskRevisions[id])
+          throw new Error('reviewed amended task revision changed before renewal');
+        if (
+          authorization &&
+          (revision?.taskOwners ?? previous?.owner.taskOwners ?? authorization.taskOwners)[id] !==
+            task.ownerId
+        )
           throw new Error('Oompa task owner changed from owner delegation');
       }
       const launchHash = sha(JSON.stringify({ ...action, raw }));
@@ -902,6 +1125,47 @@ export function createOompaHost(options: {
         return view(prior);
       }
       let resumeSwarmId: string | undefined;
+      let priorDeadline: number | undefined;
+      if (action.resumeRunId) {
+        const resumed = runs.get(action.resumeRunId);
+        if (
+          !resumed ||
+          resumed.owner.workspacePath !== workspacePath ||
+          resumed.owner.grant.buddyId !== buddy.id ||
+          resumed.owner.grant.workspaceId !== workspace.id
+        )
+          throw new Error('foreign owner resume source');
+        if (registering.has(resumed.owner.id))
+          throw new Error('portfolio reconciliation is active');
+        latestDrained(resumed);
+        resumeSwarmId = resumeSwarm(resumed);
+        priorDeadline = Math.min(
+          ...workerStates(resumed).map(
+            (state) => state.execution.deadline_ms ?? Number.POSITIVE_INFINITY
+          )
+        );
+        if (!Number.isFinite(priorDeadline)) throw new Error('cannot prove prior task window');
+      }
+      if (action.portfolio) {
+        if (
+          !action.automationSeconds ||
+          action.portfolio.reviewerIds.some((id) => !action.portfolio!.ownerIds.includes(id))
+        )
+          throw new Error('portfolio needs a fixed owner horizon and approved reviewer ownership');
+        for (const taskId of action.portfolio.rootTaskIds) {
+          const task = await options.core.getTask(taskId);
+          if (task.workspaceId !== workspace.id) throw new Error('foreign portfolio root');
+        }
+        if (action.portfolio.reviewerIds.includes(buddy.id))
+          throw new Error('portfolio reviewer must be independent of launch Buddy');
+        for (const ownerId of [...action.portfolio.ownerIds, ...action.portfolio.reviewerIds]) {
+          const owner = await options.core.getBuddy(ownerId);
+          if (owner.workspaceId !== workspace.id || owner.status === 'archived')
+            throw new Error('foreign portfolio owner');
+        }
+        for (const taskId of taskIds)
+          await portfolioTask(options.core, action.portfolio, workspace.id, taskId);
+      }
       if (previous) {
         if (revoked(previous) || authorization!.expiresAt <= now())
           throw new Error('owner automation delegation expired or was revoked');
@@ -925,6 +1189,32 @@ export function createOompaHost(options: {
           throw new Error('an Oompa execution under this delegation is active');
         if (now() + action.maxSeconds * 1000 > authorization!.expiresAt)
           throw new Error('Oompa renewal exceeds owner automation horizon');
+        const audit = graphAudit(previous);
+        if (
+          !revision &&
+          !ownerInput &&
+          audit &&
+          audit.workers.every((item) => item && !['ready', 'running'].includes(item.state))
+        ) {
+          const items = audit.workers.flatMap(
+            (item) =>
+              (item as unknown as { items?: { task_id: string; revision: number }[] }).items ?? []
+          );
+          if (
+            items.length &&
+            (
+              await Promise.all(
+                items.map(
+                  async (item) =>
+                    (await options.core.getTask(item.task_id)).revision === item.revision
+                )
+              )
+            ).every(Boolean)
+          )
+            throw new Error(
+              'unchanged queue fingerprint requires reconciliation, not another scheduled launch'
+            );
+        }
         resumeSwarmId = resumeSwarm(previous);
       }
       const id = `oompa-${randomUUID()}`;
@@ -938,6 +1228,7 @@ export function createOompaHost(options: {
               workspaceId: workspace.id,
               workspacePath,
               configSha256: sha(raw),
+              portfolio: action.portfolio,
               taskOwners,
               expiresAt: startedAt + action.automationSeconds * 1000,
             }
@@ -962,6 +1253,9 @@ export function createOompaHost(options: {
         configPath,
         originalExpiresAt: startedAt + action.maxSeconds * 1000,
         priorRunId: previous?.owner.id,
+        resumeRunId: action.resumeRunId,
+        configSha256: sha(raw),
+        taskOwners,
         automation,
         grant: record,
         validators: config.task_execution?.validators ?? {},
@@ -974,6 +1268,15 @@ export function createOompaHost(options: {
         const pinnedConfig = path.join(execution.dir, 'config.json');
         // Resume the existing Oompa execution state, including attempts/session/task deadlines.
         // A plain run here silently reset those budgets. Guard: overnight delegation renewal.
+        if (action.resumeRunId) {
+          if (!config.task_execution)
+            throw new Error('owner resumed window requires selected task execution');
+          config.task_execution.owner_window = {
+            authorization_id: id,
+            expires_at_ms: expiresAt,
+            prior_deadline_ms: priorDeadline,
+          };
+        }
         const pinnedRaw = resumeSwarmId
           ? JSON.stringify({ ...config, resume_swarm_id: resumeSwarmId })
           : raw;
@@ -986,6 +1289,12 @@ export function createOompaHost(options: {
           workspacePath,
           {
             ...cleanEnv(),
+            ...(action.resumeRunId
+              ? {
+                  OOMPA_OWNER_WINDOW_AUTHORIZATION_ID: id,
+                  OOMPA_OWNER_WINDOW_EXPIRES_AT_MS: String(expiresAt),
+                }
+              : {}),
             OOMPA_CONTINUATION_CONTROL_DIR: execution.dir,
             OOMPA_BUDDY_MCP_URL: options.url(),
             OOMPA_BUDDY_MCP_TOKEN: record.token,

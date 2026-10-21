@@ -161,6 +161,7 @@ const root=path.join(process.cwd(), 'runs', swarmId);
 fs.mkdirSync(path.join(root,'workers'),{recursive:true});
 fs.writeFileSync(path.join(root,'started.json'),JSON.stringify({'swarm-id':swarmId,'config-file':process.argv[4],pid:process.pid,workers:[{id:'w0'}],'continuation-control-dir':process.env.OOMPA_CONTINUATION_CONTROL_DIR}));
 console.log('Started event written to runs/'+swarmId+'/started.json');
+fs.writeFileSync(path.join(root,'owner-window.json'),JSON.stringify({window:config.task_execution?.owner_window,id:process.env.OOMPA_OWNER_WINDOW_AUTHORIZATION_ID,expires:process.env.OOMPA_OWNER_WINDOW_EXPIRES_AT_MS}));
 const update=()=>{
 let request; try{request=JSON.parse(fs.readFileSync(path.join(process.env.OOMPA_CONTINUATION_CONTROL_DIR,'continuation-request.json'),'utf8'));}catch{}
 let mode='';try{mode=fs.readFileSync(${JSON.stringify(stubMode)},'utf8')}catch{}
@@ -200,7 +201,11 @@ const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON
       oompaOptions: { executable },
     });
   let endpoint = await start();
-  const launch = async (seconds = 60, automationSeconds?: number) => {
+  const launch = async (
+    seconds = 60,
+    automationSeconds?: number,
+    policy: Record<string, unknown> = {}
+  ) => {
     const parent = owner();
     const started = await rpc(endpoint.spec(parent), 'oompa', {
       action: {
@@ -211,6 +216,7 @@ const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON
         configPath,
         maxSeconds: seconds,
         ...(automationSeconds === undefined ? {} : { automationSeconds }),
+        ...policy,
       },
       key: `launch-${Math.random()}`,
     });
@@ -1147,6 +1153,8 @@ test('delegated requeue reopens only the latest proven missing-reviewer hold wit
         execFile(
           'bb',
           [
+            '-cp',
+            path.join(oompaSource, 'agentnet/src'),
             '-e',
             `
 (require '[agentnet.tasks :as tasks] '[agentnet.worker :as worker] '[cheshire.core :as json])
@@ -1162,7 +1170,7 @@ test('delegated requeue reopens only the latest proven missing-reviewer hold wit
             task.id,
           ],
           {
-            cwd: oompaSource,
+            cwd: w.candidate,
             timeout: 10_000,
             env: {
               ...process.env,
@@ -1183,6 +1191,446 @@ test('delegated requeue reopens only the latest proven missing-reviewer hold wit
         'selection preserves the retained source history'
       );
     }
+  } finally {
+    await w.close();
+  }
+});
+
+test('portfolio MCP admits reviewed canonical prerequisite after three done children and resumes preserved history', async () => {
+  const w = await fixture();
+  try {
+    const reviewer = await w.core.createBuddy(OWNER, {
+      workspaceId: w.ws.id,
+      slug: 'reviewer',
+      name: 'Review owner',
+      role: 'test',
+      manager: { kind: 'nobody' },
+      key: 'reviewer',
+    });
+    const root = await w.core.upsertTask(OWNER, {
+      kind: 'update',
+      taskId: w.task.id,
+      baseRevision: w.task.revision,
+      changes: { status: 'blocked', blockedReason: 'Internal source closure needs review' },
+      key: 'root-held',
+    });
+    const done = [];
+    for (let i = 0; i < 3; i++) {
+      const created = await w.core.upsertTask(OWNER, {
+        kind: 'create',
+        ownerId: w.buddy.id,
+        parentId: root.id,
+        title: `Prior child ${i}`,
+        doneCriteria: 'Historical receipt',
+        key: `done-${i}`,
+      });
+      done.push(
+        await w.core.upsertTask(OWNER, {
+          kind: 'update',
+          taskId: created.id,
+          baseRevision: created.revision,
+          changes: { status: 'done', evidence: ['Historical accepted source receipt'] },
+          key: `accept-${i}`,
+        })
+      );
+    }
+    const original = JSON.parse(fs.readFileSync(w.configPath, 'utf8'));
+    original.task_backend.task_ids = [root.id, ...done.map((task) => task.id)];
+    original.task_execution.wall_time_seconds = 120;
+    original.task_execution.attempt_timeout_seconds = 10;
+    for (const task of done)
+      original.task_execution.validators[task.id] = original.task_execution.validators[root.id];
+    original.task_execution.task_readiness = {
+      [root.id]: {
+        blocker_class: 'internal',
+        reason_code: 'source-closure',
+        required_owner: w.buddy.id,
+        next_action: 'Review source prerequisite',
+      },
+    };
+    fs.writeFileSync(w.configPath, JSON.stringify(original));
+    const portfolio = {
+      rootTaskIds: [root.id],
+      ownerIds: [w.buddy.id, reviewer.id],
+      reviewerIds: [reviewer.id],
+    };
+    const child = await w.launch(1, 120, { portfolio });
+    await until(async () => fs.existsSync(path.join(w.repo, 'runs/test-swarm/workers/w0.json')));
+    await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: { kind: 'drain', runId: child.run.runId },
+      key: 'portfolio-drain',
+    });
+    await until(async () => fs.existsSync(path.join(child.run.logDirectory, 'exit.json')));
+    const statePath = path.join(w.repo, 'runs/test-swarm/workers/w0.json');
+    const oldState = {
+      cycle: 4,
+      attempt: 0,
+      accepted_count: 3,
+      deadline_ms: child.run.expiresAt,
+      held_executions: {
+        [root.id]: {
+          task_id: root.id,
+          claim_revision: root.revision,
+          held_task_revision: root.revision,
+          held_reason: 'model-blocked',
+          attempt: 9,
+          session_id: 'retained-science-session',
+          workspace: { path: w.candidate },
+          attempt_history: [{ attempt: 9, exit: 0 }],
+          deadline_ms: child.run.expiresAt,
+        },
+      },
+      queue_audit: {
+        schema: 'oompa.task-graph/v1',
+        state: 'needs-reconciliation',
+        fingerprint: '1'.repeat(64),
+        items: [root, ...done].map((task) => ({ task_id: task.id, revision: task.revision })),
+        actions: [{ task_id: root.id, code: 'source-closure', class: 'internal' }],
+      },
+    };
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({ 'worker-id': 'w0', status: 'stopped', execution: oldState })
+    );
+    const call = (action: Record<string, unknown>, key = 'portfolio', grant = w.worker()) =>
+      rpc(w.endpoint.spec(grant), 'oompa', { action: { runId: child.run.runId, ...action }, key });
+    const renewAction = {
+      kind: 'launch',
+      priorRunId: child.run.runId,
+      workspaceId: w.ws.id,
+      buddyId: w.buddy.id,
+      workspacePath: w.repo,
+      configPath: w.configPath,
+      maxSeconds: 10,
+    };
+    const unchanged = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: renewAction,
+      key: 'unchanged-graph',
+    });
+    assert.equal(unchanged.error, true);
+    assert.match(unchanged.text, /unchanged queue fingerprint/);
+    const definition = {
+      kind: 'prerequisite',
+      parentTaskId: root.id,
+      ownerId: reviewer.id,
+      role: 'consumer',
+      title: 'Review and repair missing source closure',
+      doneCriteria: 'Independent source-pinned consumer passes',
+    };
+    const created = await call(definition, 'create-prerequisite');
+    assert.equal(created.error, false, created.text);
+    assert.equal(
+      (await call(definition, 'different-key-same-graph')).value.id,
+      created.value.id,
+      'duplicate unchanged prerequisite is not created twice'
+    );
+    assert.equal(
+      (await call({ ...definition, parentTaskId: w.foreign.id }, 'foreign-parent')).error,
+      true
+    );
+    assert.equal((await call({ ...definition, ownerId: 'foreign' }, 'foreign-owner')).error, true);
+    assert.equal((await call(definition, 'peer', w.worker('peer'))).error, true);
+    const review = await call(
+      {
+        ...definition,
+        role: 'review',
+        title: 'Independent delta/source review',
+        doneCriteria: 'Bind exact proposed source and config delta',
+      },
+      'review-task'
+    );
+    assert.equal(review.error, false, review.text);
+    fs.appendFileSync(path.join(w.repo, 'oracle.mjs'), '\n// reviewed current prompt revision\n');
+    w.git('add', 'oracle.mjs');
+    w.git('commit', '-qm', 'reviewed source repair');
+    const sourceCommit = w.git('rev-parse', 'HEAD');
+    const currentPin = createHash('sha256')
+      .update(fs.readFileSync(path.join(w.repo, 'oracle.mjs')))
+      .digest('hex');
+    const proposed = structuredClone(original);
+    proposed.task_backend.task_ids.push(created.value.id);
+    proposed.task_backend.owner_by_task = { [created.value.id]: reviewer.id };
+    proposed.task_execution.validators[created.value.id] = {
+      command: [process.execPath, 'oracle.mjs'],
+      timeout_seconds: 10,
+      source_files: { 'oracle.mjs': currentPin },
+    };
+    proposed.task_execution.task_readiness[created.value.id] = {
+      blocker_class: 'internal',
+      reason_code: 'reviewed-source-repair',
+      required_owner: reviewer.id,
+      next_action: 'Execute reviewed consumer',
+      role: 'consumer',
+    };
+    const proposedPath = path.join(w.scratch, 'amended.json');
+    fs.writeFileSync(proposedPath, JSON.stringify(proposed));
+    const configSha256 = createHash('sha256').update(fs.readFileSync(proposedPath)).digest('hex');
+    const baseConfigSha256 = child.run.configSha256;
+    w.grants.revokeConversation(child.parent.conversationId);
+    const request = await rpc(w.endpoint.spec(w.worker()), 'post', {
+      channel: { direct: [reviewer.id] },
+      kind: 'request',
+      taskId: review.value.id,
+      purpose: 'Independent scoped configuration/source review',
+      body: `Review only this proposed delta and source, then record your own canonical task evidence: ${baseConfigSha256} ${configSha256} ${sourceCommit}`,
+      evidence: [],
+      key: 'request-independent-review',
+    });
+    assert.equal(request.error, false, request.text);
+    const deniedReview = await rpc(w.endpoint.spec(w.worker()), 'task_write', {
+      write: {
+        kind: 'update',
+        taskId: review.value.id,
+        baseRevision: review.value.revision,
+        changes: { status: 'done', evidence: ['self approval'] },
+      },
+      key: 'self-review-denied',
+    });
+    assert.equal(deniedReview.error, true);
+    const reviewGrant = w.worker(reviewer.id);
+    assert.equal(reviewGrant.principal.kind, 'buddy');
+    const reviewResult = await rpc(w.endpoint.spec(reviewGrant), 'task_write', {
+      write: {
+        kind: 'update',
+        taskId: review.value.id,
+        baseRevision: review.value.revision,
+        changes: {
+          status: 'done',
+          evidence: [`oompa.config-review/v1 ${baseConfigSha256} ${configSha256} ${sourceCommit}`],
+        },
+      },
+      key: 'reviewed-delta',
+    });
+    assert.equal(reviewResult.error, false, reviewResult.text);
+    const reviewed = reviewResult.value;
+    const answer = await rpc(w.endpoint.spec(reviewGrant), 'post', {
+      answers: request.value.id,
+      body: 'Independent delta/source review complete; canonical evidence recorded',
+      evidence: [sourceCommit],
+      key: 'review-reply',
+    });
+    assert.equal(answer.error, false, answer.text);
+    const taskRevisions = Object.fromEntries(
+      [root, ...done, created.value].map((task) => [task.id, task.revision])
+    );
+    const amendment = {
+      kind: 'amend',
+      baseConfigSha256,
+      configPath: proposedPath,
+      configSha256,
+      workspacePath: w.repo,
+      sourceCommit,
+      reviewTaskId: reviewed.id,
+      reviewRevision: reviewed.revision,
+      taskRevisions,
+    };
+    assert.equal((await call({ ...amendment, reviewRevision: 1 }, 'stale-review')).error, true);
+    assert.equal((await call({ ...amendment, sourceCommit: w.base }, 'stale-source')).error, true);
+    assert.equal((await call(amendment, 'foreign-amend', w.worker('peer'))).error, true);
+    const saved = fs.readFileSync(statePath, 'utf8');
+    const admitted = await call(amendment, 'reviewed-amendment');
+    assert.equal(admitted.error, false, admitted.text);
+    assert.equal(fs.readFileSync(statePath, 'utf8'), saved);
+    assert.equal(
+      (await call(amendment, 'reviewed-amendment')).value.amendmentId,
+      admitted.value.amendmentId
+    );
+    const executedPinChange = structuredClone(proposed);
+    executedPinChange.task_execution.validators[root.id] =
+      executedPinChange.task_execution.validators[created.value.id];
+    const badPath = path.join(w.scratch, 'bad-amendment.json');
+    fs.writeFileSync(badPath, JSON.stringify(executedPinChange));
+    assert.equal(
+      (
+        await call(
+          {
+            ...amendment,
+            configPath: badPath,
+            configSha256: createHash('sha256').update(fs.readFileSync(badPath)).digest('hex'),
+          },
+          'held-repin'
+        )
+      ).error,
+      true
+    );
+    const resumed = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: {
+        ...renewAction,
+        configPath: admitted.value.configPath,
+        amendmentId: admitted.value.amendmentId,
+      },
+      key: 'resume-reviewed-graph',
+    });
+    assert.equal(resumed.error, false, resumed.text);
+    assert.equal(resumed.value.expiresAt, child.run.expiresAt);
+    assert.ok(resumed.value.taskIds.includes(created.value.id));
+    assert.equal(fs.readFileSync(statePath, 'utf8'), saved, 'all original held history retained');
+    const runtimeConfig = JSON.parse(
+      fs.readFileSync(path.join(resumed.value.logDirectory, 'config.json'), 'utf8')
+    );
+    assert.equal(runtimeConfig.resume_swarm_id, 'test-swarm');
+    for (const task of done)
+      assert.deepEqual(
+        runtimeConfig.task_execution.validators[task.id],
+        original.task_execution.validators[task.id],
+        'DONE historical pins remain receipts'
+      );
+    if (process.env.OOMPA_TEST_SOURCE_ROOT && process.env.OOMPA_TEST_PORTFOLIO_DRIVER) {
+      const owner = JSON.parse(
+        fs.readFileSync(path.join(resumed.value.logDirectory, 'owner.json'), 'utf8')
+      );
+      const spec = w.endpoint.spec(w.grants.lookup(owner.grant.token)!);
+      if (spec.kind !== 'http') throw new Error('HTTP only');
+      const candidate = path.join(w.scratch, 'new-prerequisite-source');
+      w.git('worktree', 'add', '-qb', 'new-prerequisite', candidate);
+      const validatorPath = path.join(w.scratch, 'held-validator.json');
+      fs.writeFileSync(validatorPath, JSON.stringify(original.task_execution.validators[root.id]));
+      const digest = execFileSync(
+        'bb',
+        [
+          '-cp',
+          path.join(process.env.OOMPA_TEST_SOURCE_ROOT!, 'agentnet/src'),
+          '-e',
+          `(require '[agentnet.task-execution :as execution] '[cheshire.core :as json]) (print (execution/validator-digest (json/parse-string (slurp (first *command-line-args*)) true)))`,
+          validatorPath,
+        ],
+        { encoding: 'utf8' }
+      ).trim();
+      const driverState = JSON.parse(saved);
+      driverState.execution.held_executions[root.id].validator_digest = digest;
+      driverState.execution.held_executions[root.id].workspace = {
+        path: w.candidate,
+        name: 'candidate',
+        dir: w.candidate,
+        branch: 'candidate',
+      };
+      fs.writeFileSync(statePath, JSON.stringify(driverState));
+      const optionsPath = path.join(w.scratch, 'consumer-options.json');
+      fs.writeFileSync(
+        optionsPath,
+        JSON.stringify({
+          configPath: path.join(resumed.value.logDirectory, 'config.json'),
+          resumeSwarmId: 'test-swarm',
+          workerId: 'w0',
+          outputSwarmId: 'consumer-proof',
+          newTaskWorkspace: {
+            path: candidate,
+            name: 'new-prerequisite',
+            dir: candidate,
+            branch: 'new-prerequisite',
+            source_commit: w.git('rev-parse', 'HEAD'),
+          },
+          registeredWorkspaces: [driverState.execution.held_executions[root.id].workspace],
+          rootTaskId: root.id,
+          statePath,
+        })
+      );
+      const output = await new Promise<string>((resolve, reject) =>
+        execFile(
+          'bb',
+          [process.env.OOMPA_TEST_PORTFOLIO_DRIVER!, optionsPath],
+          {
+            cwd: w.repo,
+            timeout: 30_000,
+            env: {
+              ...process.env,
+              BABASHKA_CLASSPATH: path.join(process.env.OOMPA_TEST_SOURCE_ROOT!, 'agentnet/src'),
+              OOMPA_BUDDY_MCP_URL: spec.url,
+              OOMPA_BUDDY_MCP_TOKEN: owner.grant.token,
+            },
+          },
+          (error, stdout, stderr) =>
+            error ? reject(new Error(`${error.message}\n${stderr}`)) : resolve(stdout)
+        )
+      );
+      const result = JSON.parse(output.trim().split('\n').at(-1)!);
+      assert.equal((await w.core.getTask(created.value.id)).status, 'done', output);
+      assert.equal(fs.readFileSync(w.counter, 'utf8'), 'x', 'new real consumer executed once');
+      assert.equal(result.execution.held_executions[root.id].attempt, 9);
+      assert.equal(
+        result.execution.held_executions[root.id].session_id,
+        'retained-science-session'
+      );
+      assert.deepEqual(
+        result.execution.held_executions[root.id].attempt_history,
+        oldState.held_executions[root.id].attempt_history
+      );
+      assert.equal(result.execution.accepted_count, 4);
+    }
+  } finally {
+    await w.close();
+  }
+});
+
+test('only a new owner launch grants an explicit resumed window after expiry without renewing old authority', async () => {
+  const w = await fixture();
+  try {
+    const expired = await w.launch(1, 1);
+    await until(async () => fs.existsSync(path.join(expired.run.logDirectory, 'exit.json')));
+    const statePath = path.join(w.repo, 'runs/test-swarm/workers/w0.json');
+    const oldState = {
+      'worker-id': 'w0',
+      status: 'stopped',
+      execution: {
+        deadline_ms: 1,
+        attempt: 9,
+        session_id: 'old-session',
+        attempt_history: [{ attempt: 9 }],
+        held_executions: {},
+      },
+    };
+    fs.writeFileSync(statePath, JSON.stringify(oldState));
+    const saved = fs.readFileSync(statePath, 'utf8');
+    const action = {
+      kind: 'launch',
+      workspaceId: w.ws.id,
+      buddyId: w.buddy.id,
+      workspacePath: w.repo,
+      configPath: w.configPath,
+      maxSeconds: 60,
+      automationSeconds: 60,
+      resumeRunId: expired.run.runId,
+    };
+    const denied = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action,
+      key: 'worker-new-window-denied',
+    });
+    assert.equal(denied.error, true);
+    const fresh = await rpc(w.endpoint.spec(w.owner()), 'oompa', {
+      action,
+      key: 'new-owner-window',
+    });
+    assert.equal(fresh.error, false, fresh.text);
+    assert.notEqual(fresh.value.automation.rootRunId, expired.run.automation.rootRunId);
+    assert.equal(fresh.value.resumeRunId, expired.run.runId);
+    assert.ok(fresh.value.expiresAt > expired.run.expiresAt);
+    await until(async () =>
+      fs.existsSync(path.join(w.repo, 'runs/renewed-swarm/owner-window.json'))
+    );
+    const window = JSON.parse(
+      fs.readFileSync(path.join(w.repo, 'runs/renewed-swarm/owner-window.json'), 'utf8')
+    );
+    assert.equal(window.window.authorization_id, fresh.value.runId);
+    assert.equal(window.window.prior_deadline_ms, 1);
+    assert.equal(window.window.expires_at_ms, fresh.value.expiresAt);
+    assert.equal(window.id, fresh.value.runId);
+    assert.equal(Number(window.expires), fresh.value.expiresAt);
+    assert.equal(
+      fs.readFileSync(statePath, 'utf8'),
+      saved,
+      'host never rewrites original execution history'
+    );
+    const oldRenewal = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: {
+        ...action,
+        resumeRunId: undefined,
+        priorRunId: expired.run.runId,
+        automationSeconds: undefined,
+      },
+      key: 'old-expired-not-renewed',
+    });
+    assert.equal(oldRenewal.error, true);
+    assert.equal(await probe(expired.spec), 401);
   } finally {
     await w.close();
   }

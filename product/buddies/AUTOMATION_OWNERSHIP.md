@@ -126,3 +126,66 @@ blocks (including held Force physics), canonical blocked/review/done tasks,
 changed owners/revisions/pins, unknown errors and run-owned children are refused.
 After renewal the existing Oompa selector reclaims the higher task revision and
 reuses its held execution history. This is not a general unblock permission.
+
+## Reviewed portfolio progression — October 21, 2026
+
+The October 20 raw-config freeze is superseded only for an explicit owner launch
+with `portfolio:{rootTaskIds,ownerIds,reviewerIds}`. Roots and owners are canonical
+workspace identities; reviewers must be included among approved owners and must
+exclude the launch Buddy. The fixed automation horizon and Stop revocation still
+apply. Give the initial campaign enough `max_cycle` allowance; amendments retain
+all original task/runtime/model/spend controls and accepted counts.
+
+After a host ends, the scheduled launch Buddy can use:
+
+1. `prerequisite` with `runId,parentTaskId,ownerId,role:'consumer'|'review',title,
+   doneCriteria` and an outer key. The parent must descend from an approved root;
+   the owner must be approved. This creates a canonical task through the existing
+   owner delegation, without admitting executable configuration. Duplicate task
+   definitions return the same canonical task even on repeated unchanged wakes.
+2. An ordinary `post` DM request to an approved reviewer, naming its review task,
+   exact proposed config delta and committed source. The reviewer uses its **own**
+   normal `task_write` authority to record a real independent review and answer
+   the request. It records evidence exactly as
+   `oompa.config-review/v1 BASE_CONFIG_SHA CONFIG_SHA SOURCE_COMMIT` and completes
+   its review task. Neither the Lead nor a run-owned child receives general
+   authority to mark another owner's review complete. A review artifact may be
+   honestly recorded by its canonical owner; assignment is not a claim that a
+   particular Buddy personally authored an external review.
+3. `amend` with `runId,baseConfigSha256,configPath,configSha256,workspacePath,
+   sourceCommit,reviewTaskId,reviewRevision,taskRevisions` and an outer key.
+   This validates canonical ancestry/ownership/revisions, a clean registered
+   reviewed source, exact review evidence and the configuration delta. New
+   prerequisites require typed internal readiness. Existing tasks, acceptance
+   dependencies, external/human gates and harness/model/spend budgets cannot be
+   discarded or loosened. Oracle changes are allowed only for never-executed
+   tasks; executed or held sources require a distinct reviewed canonical consumer,
+   never a silent repin. New validators have a 600-second limit unless the original
+   owner configuration already approved a larger timeout for that task.
+4. `launch` with `priorRunId`, the returned `amendmentId` and `configPath`, and
+   original launch coordinates. Canonical revisions are rechecked at launch.
+   The host issues a fresh scope for the admitted graph while retaining the same
+   original owner horizon and Oompa execution history. Completed children retain
+   historical source pins; they are not revalidated against current prompt files.
+
+`status` exposes `configSha256` and `queueAudit` with worker queue-audit receipts
+and a stable aggregate fingerprint. Unchanged exhausted, externally blocked or
+accepted graph fingerprints do not authorize another automatic launch. Changed
+canonical task revisions or a reviewed amendment permit meaningful progression;
+unchanged semantic configuration is refused. This does not invent a new scheduler.
+
+Only an **owner-authored new launch** may supply `resumeRunId` to preserve the
+latest drained execution after the former window expired and grant a fresh
+window. It records the old run identity and injects `task_execution.owner_window`
+with `{authorization_id,expires_at_ms,prior_deadline_ms}` plus matching host-only
+environment values. Oompa appends deadline history and preserves attempts,
+sessions, held sources and accepted counts. Ordinary `priorRunId` renewal never
+extends an expired window or forges this authorization. No new user confirmation
+is needed when that new owner launch is already explicitly authorized.
+
+Optional validator `reconcile_on_rejection:true` holds a real rejected consumer
+receipt for reviewed reconciliation rather than immediately spending another
+model/gate attempt. It cannot be removed or set false by delegated amendment.
+It is an execution checkpoint policy, excluded from oracle identity; tightening
+it does not silently change historical source pins. Cheap validators retain the
+existing default loop.
