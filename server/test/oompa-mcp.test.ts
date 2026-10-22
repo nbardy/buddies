@@ -159,7 +159,8 @@ const config=JSON.parse(fs.readFileSync(process.argv[4],'utf8'));
 const swarmId=config.resume_swarm_id?'renewed-swarm':'test-swarm';
 const root=path.join(process.cwd(), 'runs', swarmId);
 fs.mkdirSync(path.join(root,'workers'),{recursive:true});
-fs.writeFileSync(path.join(root,'started.json'),JSON.stringify({'swarm-id':swarmId,'config-file':process.argv[4],pid:process.pid,workers:[{id:'w0'}],'continuation-control-dir':process.env.OOMPA_CONTINUATION_CONTROL_DIR}));
+let initialMode='';try{initialMode=fs.readFileSync(${JSON.stringify(stubMode)},'utf8')}catch{}
+fs.writeFileSync(path.join(root,'started.json'),JSON.stringify({'swarm-id':swarmId,'config-file':process.argv[4],pid:process.pid,workers:initialMode.startsWith('terminal')?[{id:'w0'},{id:'w1'}]:[{id:'w0'}],'continuation-control-dir':process.env.OOMPA_CONTINUATION_CONTROL_DIR}));
 console.log('Started event written to runs/'+swarmId+'/started.json');
 fs.writeFileSync(path.join(root,'owner-window.json'),JSON.stringify({window:config.task_execution?.owner_window,id:process.env.OOMPA_OWNER_WINDOW_AUTHORIZATION_ID,expires:process.env.OOMPA_OWNER_WINDOW_EXPIRES_AT_MS}));
 const update=()=>{
@@ -167,6 +168,15 @@ let request; try{request=JSON.parse(fs.readFileSync(path.join(process.env.OOMPA_
 let mode='';try{mode=fs.readFileSync(${JSON.stringify(stubMode)},'utf8')}catch{}
 if(mode==='exit') process.exit(0);
 const state={'worker-id':'w0',status:mode==='active'?'running':'waiting',reason:request&&mode!=='noack'?'host-continuation':'awaiting-buddy-acceptance','updated-at':new Date().toISOString(),execution:mode==='active'?{task_id:'active'}:request&&mode!=='noack'?{host_continuation_id:request.id}:{}};
+if(mode.startsWith('terminal')) {
+  state.status=mode==='terminal-waiting-stale'?'waiting':'stopped';
+  state.reason='needs-reconciliation';
+  state['updated-at']=mode==='terminal-bad-date'?'invalid':'2020-01-01T00:00:00Z';
+  state.execution={queue_audit:{state:mode==='terminal-bad-audit'?'accepted':'needs-reconciliation'}};
+  if(mode==='terminal-active') state.execution.task_id='active';
+  const peer={'worker-id':'w1',status:'waiting',reason:mode==='terminal-peer-noack'?'awaiting-buddy-acceptance':'host-continuation','updated-at':new Date().toISOString(),execution:mode==='terminal-peer-noack'?{}:{host_continuation_id:request?.id}};
+  const peerFile=path.join(root,'workers','w1.json');fs.writeFileSync(peerFile+'.tmp',JSON.stringify(peer));fs.renameSync(peerFile+'.tmp',peerFile);
+}
 const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON.stringify(state));fs.renameSync(file+'.tmp',file);
 };update();setInterval(update,30);
 `,
@@ -959,6 +969,53 @@ test('checkpoint drain waits through active work and reload, then revokes only h
     assert.equal(renewed.error, false, renewed.text);
     assert.equal(renewed.value.expiresAt, child.run.expiresAt);
     assert.equal(renewed.value.automation.revoked, false);
+  } finally {
+    await w.close();
+  }
+});
+
+test('checkpoint drain accepts a terminal reconciliation receipt only when peers acknowledge', async () => {
+  const w = await fixture();
+  try {
+    fs.writeFileSync(w.stubMode, 'terminal-active');
+    const child = await w.launch(1, 60);
+    const workerFile = path.join(w.repo, 'runs/test-swarm/workers/w0.json');
+    await until(async () => fs.existsSync(workerFile));
+    const requested = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: { kind: 'drain', runId: child.run.runId },
+      key: 'terminal-worker-drain',
+    });
+    assert.equal(requested.error, false, requested.text);
+    for (const mode of [
+      'terminal-active',
+      'terminal-bad-audit',
+      'terminal-bad-date',
+      'terminal-waiting-stale',
+      'terminal-peer-noack',
+    ]) {
+      fs.writeFileSync(w.stubMode, mode);
+      await until(
+        async () =>
+          JSON.parse(fs.readFileSync(workerFile, 'utf8')).status ===
+          (mode === 'terminal-waiting-stale' ? 'waiting' : 'stopped')
+      );
+      await sleep(150);
+      const status = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+        action: { kind: 'status', runId: child.run.runId },
+        key: `terminal-${mode}`,
+      });
+      assert.equal(status.value.status, 'running', mode);
+      assert.equal(status.value.drain.phase, 'requested', mode);
+    }
+    fs.writeFileSync(w.stubMode, 'terminal');
+    await until(async () => fs.existsSync(path.join(child.run.logDirectory, 'exit.json')));
+    const status = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+      action: { kind: 'status', runId: child.run.runId },
+      key: 'terminal-drained-status',
+    });
+    assert.equal(status.value.status, 'ended');
+    assert.equal(status.value.drain.phase, 'signaling');
+    assert.equal(status.value.automation.revoked, false);
   } finally {
     await w.close();
   }

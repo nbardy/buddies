@@ -475,19 +475,32 @@ export function createOompaHost(options: {
         reason: string;
         'worker-id': string;
         'updated-at': string;
-        execution: { task_id?: string; phase?: string; host_continuation_id?: string };
+        execution: {
+          task_id?: string;
+          phase?: string;
+          host_continuation_id?: string;
+          queue_audit?: { state?: string };
+        };
       }>(path.join(dir, 'workers', `${worker.id}.json`));
       const age = now() - Date.parse(state['updated-at']);
+      // A worker that durably stopped for queue reconciliation cannot write a fresh
+      // handshake. Its matching audit and empty execution prove it holds no task.
+      // Guard: oompa-mcp terminal-worker drain.
+      const terminal =
+        state.status === 'stopped' &&
+        state.reason === 'needs-reconciliation' &&
+        state.execution?.queue_audit?.state === 'needs-reconciliation';
       if (
         state['worker-id'] !== worker.id ||
-        state.status !== 'waiting' ||
+        (!terminal && state.status !== 'waiting') ||
         !Number.isFinite(age) ||
         age < -1000 ||
-        age > 5000 ||
+        (!terminal && age > 5000) ||
         !state.execution ||
         state.execution.task_id ||
         state.execution.phase ||
         (acknowledgement &&
+          !terminal &&
           (state.reason !== 'host-continuation' ||
             state.execution.host_continuation_id !== acknowledgement))
       )
