@@ -4,6 +4,7 @@ import path from 'node:path';
 import { type ExecutionProcess, executionProcess, killExecution } from '@nbardy/agent-cli';
 import type { Provider } from '@unleashd/shared';
 import type { BuddyGrant } from '../buddies/grants';
+import type { ScaleEnvelopePolicy } from '../buddies/oompa-portfolio';
 import {
   type Execution,
   type ExecutionEvent,
@@ -71,6 +72,7 @@ export interface OompaOwner {
       readonly ownerIds: string[];
       readonly reviewerIds: string[];
     };
+    readonly scaleEnvelope?: ScaleEnvelopePolicy;
     readonly taskOwners: Readonly<Record<string, string>>;
     readonly expiresAt: number;
   };

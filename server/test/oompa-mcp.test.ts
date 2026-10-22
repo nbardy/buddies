@@ -1253,7 +1253,7 @@ test('delegated requeue reopens only the latest proven missing-reviewer hold wit
   }
 });
 
-async function portfolioBoundary(ownerScale: boolean) {
+async function portfolioBoundary(ownerScale: boolean, delegatedScale = false) {
   const w = await fixture();
   try {
     const reviewer = await w.core.createBuddy(OWNER, {
@@ -1294,7 +1294,7 @@ async function portfolioBoundary(ownerScale: boolean) {
     const original = JSON.parse(fs.readFileSync(w.configPath, 'utf8'));
     original.task_backend.task_ids = [root.id, ...done.map((task) => task.id)];
     original.task_backend.dependencies = { [root.id]: [done[0].id] };
-    if (ownerScale) {
+    if (ownerScale || delegatedScale) {
       original.workers = [
         {
           model: 'codex:gpt-6.1-sol:xhigh',
@@ -1328,7 +1328,53 @@ async function portfolioBoundary(ownerScale: boolean) {
       ownerIds: [w.buddy.id, reviewer.id],
       reviewerIds: [reviewer.id],
     };
-    const child = await w.launch(1, 120, { portfolio });
+    const scaleEnvelope = {
+      maxWorkers: 6,
+      models: ['codex:gpt-6.1-sol:medium', 'codex:gpt-6.1-sol:high', 'claude:claude-opus-5-5:high'],
+      maxGpuWorkers: 1,
+    };
+    if (delegatedScale) {
+      const denied = await rpc(w.endpoint.spec(w.owner()), 'oompa', {
+        action: {
+          kind: 'launch',
+          workspaceId: w.ws.id,
+          buddyId: w.buddy.id,
+          workspacePath: w.repo,
+          configPath: w.configPath,
+          maxSeconds: 1,
+          portfolio,
+          scaleEnvelope,
+        },
+        key: 'envelope-without-automation',
+      });
+      assert.match(denied.text, /requires owner launch automationSeconds and portfolio/);
+      const malformed = await rpc(w.endpoint.spec(w.owner()), 'oompa', {
+        action: {
+          kind: 'launch',
+          workspaceId: w.ws.id,
+          buddyId: w.buddy.id,
+          workspacePath: w.repo,
+          configPath: w.configPath,
+          maxSeconds: 1,
+          automationSeconds: 120,
+          portfolio,
+          scaleEnvelope: { maxWorkers: 6, models: scaleEnvelope.models },
+        },
+        key: 'envelope-requires-explicit-gpu-cap',
+      });
+      assert.equal(malformed.error, true);
+      assert.match(malformed.text, /maxGpuWorkers/);
+    }
+    const child = await w.launch(1, 120, {
+      portfolio,
+      ...(delegatedScale ? { scaleEnvelope } : {}),
+    });
+    if (delegatedScale) {
+      const ownerRecord = JSON.parse(
+        fs.readFileSync(path.join(child.run.logDirectory, 'owner.json'), 'utf8')
+      );
+      assert.deepEqual(ownerRecord.automation.scaleEnvelope, scaleEnvelope);
+    }
     await until(async () => fs.existsSync(path.join(w.repo, 'runs/test-swarm/workers/w0.json')));
     await rpc(w.endpoint.spec(w.worker()), 'oompa', {
       action: { kind: 'drain', runId: child.run.runId },
@@ -1366,6 +1412,7 @@ async function portfolioBoundary(ownerScale: boolean) {
       statePath,
       JSON.stringify({ 'worker-id': 'w0', status: 'stopped', execution: oldState })
     );
+    if (delegatedScale) await w.restart();
     const call = (action: Record<string, unknown>, key = 'portfolio', grant = w.worker()) =>
       rpc(w.endpoint.spec(grant), 'oompa', {
         action: { runId: child.run.runId, ...action },
@@ -1439,7 +1486,7 @@ async function portfolioBoundary(ownerScale: boolean) {
       next_action: 'Execute reviewed consumer',
       role: 'consumer',
     };
-    if (ownerScale) {
+    if (ownerScale || delegatedScale) {
       proposed.workers = [
         { ...original.workers[0], model: 'claude:claude-opus-5-5:high', task_ids: [] },
         {
@@ -1450,7 +1497,8 @@ async function portfolioBoundary(ownerScale: boolean) {
           task_ids: [created.value.id],
         },
       ];
-      proposed.reviewers[0].prompt = ['reviewed-reviewer.md'];
+      if (ownerScale) proposed.reviewers[0].prompt = ['reviewed-reviewer.md'];
+      if (delegatedScale) proposed.reviewers[0].model = 'codex:gpt-6.1-sol:high';
     }
     const proposedPath = path.join(w.scratch, 'amended.json');
     fs.writeFileSync(proposedPath, JSON.stringify(proposed));
@@ -1597,6 +1645,142 @@ async function portfolioBoundary(ownerScale: boolean) {
         assert.match(result.text, reason);
       }
     }
+    if (delegatedScale) {
+      const rejectedScale = async (
+        label: string,
+        mutate: (config: typeof proposed) => void,
+        reason: RegExp
+      ) => {
+        const bad = structuredClone(proposed);
+        mutate(bad);
+        const badPath = path.join(w.scratch, `envelope-${label}.json`);
+        fs.writeFileSync(badPath, JSON.stringify(bad));
+        const result = await call(
+          {
+            ...amendment,
+            configPath: badPath,
+            configSha256: createHash('sha256').update(fs.readFileSync(badPath)).digest('hex'),
+          },
+          `envelope-${label}`
+        );
+        assert.equal(result.error, true, label);
+        assert.match(result.text, reason, label);
+      };
+      await rejectedScale(
+        'count',
+        (bad) => {
+          bad.workers[1].count = 6;
+        },
+        /maxWorkers exceeded/
+      );
+      await rejectedScale(
+        'gpu',
+        (bad) => {
+          bad.workers[1].can_claim_gpu = true;
+        },
+        /maxGpuWorkers exceeded/
+      );
+      await rejectedScale(
+        'model',
+        (bad) => {
+          bad.workers[1].model = 'codex:unlisted:medium';
+        },
+        /model not listed/
+      );
+      await rejectedScale(
+        'reviewer-model',
+        (bad) => {
+          bad.reviewers[0].model = 'codex:unlisted:medium';
+        },
+        /reviewer model not listed/
+      );
+      await rejectedScale(
+        'worker-prompt',
+        (bad) => {
+          bad.workers[1].prompt = ['changed.md'];
+        },
+        /controls/
+      );
+      for (const field of ['max_cycle', 'max_resumes'] as const)
+        await rejectedScale(
+          field,
+          (bad) => {
+            bad.workers[1][field]++;
+          },
+          /controls/
+        );
+      await rejectedScale(
+        'reviewer-prompt',
+        (bad) => {
+          bad.reviewers[0].prompt = ['changed.md'];
+        },
+        /reviewer controls/
+      );
+      await rejectedScale(
+        'budget',
+        (bad) => {
+          bad.task_execution.wall_time_seconds++;
+        },
+        /frozen/
+      );
+      await rejectedScale(
+        'attempt-timeout',
+        (bad) => {
+          bad.task_execution.attempt_timeout_seconds++;
+        },
+        /frozen/
+      );
+      await rejectedScale(
+        'dependency',
+        (bad) => {
+          bad.task_backend.dependencies[root.id] = [];
+        },
+        /acceptance dependencies/
+      );
+      const attemptedWiden = await call(
+        { ...amendment, scaleEnvelope: { ...scaleEnvelope, maxWorkers: 7 } },
+        'envelope-amend-widen'
+      );
+      assert.equal(attemptedWiden.error, true);
+    }
+    if (!ownerScale && !delegatedScale) {
+      const bad = structuredClone(proposed);
+      bad.workers = [
+        {
+          model: 'codex:gpt-6.1-sol:medium',
+          prompt: ['worker.md'],
+          count: 2,
+          can_claim_gpu: false,
+        },
+      ];
+      const badPath = path.join(w.scratch, 'scale-without-envelope.json');
+      fs.writeFileSync(badPath, JSON.stringify(bad));
+      const denied = await call(
+        {
+          ...amendment,
+          configPath: badPath,
+          configSha256: createHash('sha256').update(fs.readFileSync(badPath)).digest('hex'),
+        },
+        'scale-without-envelope'
+      );
+      assert.match(denied.text, /frozen/);
+      assert.equal(
+        (
+          await call(
+            {
+              ...amendment,
+              scaleEnvelope: {
+                maxWorkers: 6,
+                models: ['codex:gpt-6.1-sol:medium'],
+                maxGpuWorkers: 1,
+              },
+            },
+            'add-envelope-by-amend'
+          )
+        ).error,
+        true
+      );
+    }
     const admitted = await call(amendment, 'reviewed-amendment', admittingGrant);
     assert.equal(admitted.error, false, admitted.text);
     assert.equal(fs.readFileSync(statePath, 'utf8'), saved);
@@ -1629,6 +1813,43 @@ async function portfolioBoundary(ownerScale: boolean) {
       ).error,
       true
     );
+    if (!ownerScale && !delegatedScale) {
+      const denied = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+        action: {
+          ...renewAction,
+          configPath: admitted.value.configPath,
+          amendmentId: admitted.value.amendmentId,
+          scaleEnvelope: { maxWorkers: 6, models: ['codex:gpt-6.1-sol:medium'], maxGpuWorkers: 1 },
+        },
+        key: 'renewal-cannot-add-envelope',
+      });
+      assert.equal(denied.error, true);
+    }
+    if (delegatedScale) {
+      const deniedRenewal = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+        action: {
+          ...renewAction,
+          configPath: admitted.value.configPath,
+          amendmentId: admitted.value.amendmentId,
+          scaleEnvelope: { ...scaleEnvelope, maxWorkers: 7 },
+        },
+        key: 'renewal-cannot-widen-envelope',
+      });
+      assert.match(
+        deniedRenewal.text,
+        /new portfolio\/window policy requires a new owner-authored launch/
+      );
+      const deniedSame = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
+        action: {
+          ...renewAction,
+          configPath: admitted.value.configPath,
+          amendmentId: admitted.value.amendmentId,
+          scaleEnvelope,
+        },
+        key: 'renewal-cannot-repeat-envelope',
+      });
+      assert.equal(deniedSame.error, true);
+    }
     const resumed = await rpc(w.endpoint.spec(w.worker()), 'oompa', {
       action: {
         ...renewAction,
@@ -1639,12 +1860,42 @@ async function portfolioBoundary(ownerScale: boolean) {
     });
     assert.equal(resumed.error, false, resumed.text);
     assert.equal(resumed.value.expiresAt, child.run.expiresAt);
+    if (delegatedScale) {
+      const successorRecord = JSON.parse(
+        fs.readFileSync(path.join(resumed.value.logDirectory, 'owner.json'), 'utf8')
+      );
+      assert.deepEqual(successorRecord.automation.scaleEnvelope, scaleEnvelope);
+    }
     assert.ok(resumed.value.taskIds.includes(created.value.id));
     assert.equal(fs.readFileSync(statePath, 'utf8'), saved, 'all original held history retained');
     const runtimeConfig = JSON.parse(
       fs.readFileSync(path.join(resumed.value.logDirectory, 'config.json'), 'utf8')
     );
     assert.equal(runtimeConfig.resume_swarm_id, 'test-swarm');
+    if (delegatedScale) {
+      assert.equal(
+        runtimeConfig.task_execution.wall_time_seconds,
+        original.task_execution.wall_time_seconds
+      );
+      assert.equal(
+        runtimeConfig.task_execution.attempt_timeout_seconds,
+        original.task_execution.attempt_timeout_seconds
+      );
+      assert.deepEqual(
+        runtimeConfig.task_backend.dependencies[root.id],
+        original.task_backend.dependencies[root.id]
+      );
+      for (const task of [root, ...done])
+        assert.equal(
+          runtimeConfig.task_backend.owner_by_task?.[task.id] ??
+            runtimeConfig.task_backend.buddy_id,
+          original.task_backend.owner_by_task?.[task.id] ?? original.task_backend.buddy_id
+        );
+      for (const worker of runtimeConfig.workers) {
+        assert.equal(worker.max_cycle, original.workers[0].max_cycle);
+        assert.equal(worker.max_resumes, original.workers[0].max_resumes);
+      }
+    }
     for (const task of done)
       assert.deepEqual(
         runtimeConfig.task_execution.validators[task.id],
@@ -1741,6 +1992,8 @@ async function portfolioBoundary(ownerScale: boolean) {
 for (const ownerScale of [false, true])
   test(`portfolio MCP admits reviewed canonical prerequisite and preserves history (ownerScale=${ownerScale})`, () =>
     portfolioBoundary(ownerScale));
+test('portfolio MCP permits reviewed delegated scale only within the owner launch envelope', () =>
+  portfolioBoundary(false, true));
 
 test('only a new owner launch grants an explicit resumed window after expiry without renewing old authority', async () => {
   const w = await fixture();

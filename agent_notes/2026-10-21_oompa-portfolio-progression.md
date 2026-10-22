@@ -96,3 +96,53 @@ caps, foreign task refusal, retained acceptance dependencies and held repin
 refusal. `pnpm --filter @unleashd/server typecheck`, owned-file Biome and
 `git diff --check` passed. No optional real Babashka portfolio driver was enabled;
 this verifies software admission controls, not provider execution or beta outcomes.
+
+## October 22 delegated scale envelope implementation brief
+
+Blocker: a scheduled controller cannot admit a reviewed allocation change, so an
+owner-requested six-worker beta run waited for another live owner turn. Target:
+optional, strict owner-launch `scaleEnvelope` persisted with the automation grant;
+delegated amendments can change only worker count/model/task assignment/GPU flag
+and reviewer model within it. Expected improvement: reviewed bounded scaling
+continues within the existing horizon. Cheapest check: real MCP temporary-store
+portfolio boundary, including renewal and rejection cases. Pass: in-envelope
+admission, specific cap/model/GPU refusals, unchanged frozen controls and review
+binding; absent or renewal-supplied envelope refuses. Stop: any need to change
+the existing amendment design or broaden authority. Claim boundary: source-only
+authorization repair; no live beta execution or delivery acceptance.
+
+Implemented on the existing Oompa owner journal and portfolio amendment path.
+The strict launch field is
+`scaleEnvelope:{maxWorkers:number,models:string[],maxGpuWorkers:number}`;
+an owner must also give `automationSeconds` and `portfolio`. Renewal inherits the
+exact envelope from `owner.json` and cannot submit one. With no envelope,
+scheduled allocation changes still fail. With an envelope, the scheduled Buddy
+can submit independently reviewed worker count/model/task_ids/GPU and reviewer
+model changes within its limits. Full model strings include effort. Worker and
+reviewer prompts, task/runtime/spend controls, budgets, dependencies, owners,
+validator pins and original horizon retain their existing freezes. Existing
+owner-only `amend.ownerScale` remains a separate explicit path.
+
+Owner clarification: the envelope bounds agent count and subscription load,
+including an explicit `maxWorkers:12`; model tokens are subscription-paid.
+It does not authorize paid GPU/Modal dispatch. The worker-count refusal names
+agent count/subscription load rather than treating it as a monetary limit.
+
+Verification: `pnpm exec tsx --test server/test/oompa-mcp.test.ts` passed **15/15**
+(173.5 s); after adding accepted-path frozen-field assertions, the changed
+`portfolio MCP permits reviewed delegated scale only within the owner launch
+envelope` case passed **1/1** (18.2 s). Both include real MCP HTTP boundaries,
+temporary core stores, independent review evidence and fixture host; the new
+case reloads the server before amendment and checks persisted/renewed envelope.
+`pnpm --filter @unleashd/server typecheck`, both client TypeScript checks,
+vendor agent-cli typecheck, owned-file Biome and `git diff --check` passed.
+Repository `pnpm typecheck` stops before compilers at the already-dirty shared
+tree line ceiling: 14,474 > 12,487 after the policy wording update (baseline
+14,431 > 12,487); the ceiling file was untouched. Optional
+real Babashka portfolio driver was not enabled. No server restart, live Oompa
+run, deployment or external publication was performed.
+
+After the subscription-load wording update, the delegated-scale MCP case passed
+again **1/1** (25.6 s), owned-file Biome and `git diff --check` passed. The existing
+checkout is `preserve/owner-20261010/live-source-base` (contains `ee1da2d`, divergent
+from `main`); only the seven scoped files are included, with no branch switch.

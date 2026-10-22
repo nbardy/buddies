@@ -16,6 +16,7 @@ import {
   Amendment,
   Portfolio,
   Prerequisite,
+  ScaleEnvelope,
   amendmentDelta,
   portfolioTask,
   stable,
@@ -80,6 +81,7 @@ export const OompaAction = z.discriminatedUnion('kind', [
         .regex(/^[a-f0-9]{64}$/)
         .optional(),
       portfolio: Portfolio.optional(),
+      scaleEnvelope: ScaleEnvelope.optional(),
     })
     .strict(),
   z
@@ -797,7 +799,8 @@ export function createOompaHost(options: {
       original,
       config,
       executed,
-      action.ownerScale === true
+      action.ownerScale === true,
+      auth.scaleEnvelope
     );
     for (const [taskId, item] of Object.entries(readiness))
       if (!taskOwners[taskId] || item.required_owner !== taskOwners[taskId])
@@ -1062,8 +1065,13 @@ export function createOompaHost(options: {
         if (action.kind === 'stop') stop(run);
         return view(run);
       }
-      if ((action.resumeRunId || action.portfolio) && (!ownerInput || action.priorRunId))
+      if (
+        (action.resumeRunId || action.portfolio || action.scaleEnvelope) &&
+        (!ownerInput || action.priorRunId)
+      )
         throw new Error('new portfolio/window policy requires a new owner-authored launch');
+      if (action.scaleEnvelope && (!action.automationSeconds || !action.portfolio))
+        throw new Error('scale envelope requires owner launch automationSeconds and portfolio');
       if (action.amendmentId && !action.priorRunId)
         throw new Error('amendment requires explicit prior host');
       const previous = action.priorRunId ? runs.get(action.priorRunId) : undefined;
@@ -1249,6 +1257,7 @@ export function createOompaHost(options: {
               workspacePath,
               configSha256: sha(raw),
               portfolio: action.portfolio,
+              scaleEnvelope: action.scaleEnvelope,
               taskOwners,
               expiresAt: startedAt + action.automationSeconds * 1000,
             }

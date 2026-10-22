@@ -192,6 +192,16 @@ existing default loop.
 
 ### Owner-only scale amendment — October 22, 2026
 
+An owner-authored new `launch` with `automationSeconds` and `portfolio` may also
+grant `scaleEnvelope:{maxWorkers,models,maxGpuWorkers}`. The immutable automation
+grant carries it through renewals. After the same independent config review, the
+launch Buddy may amend worker `model,count,task_ids,can_claim_gpu` and reviewer
+`model` only within those explicit limits; prompts and all other controls stay
+frozen. A launch without the envelope keeps the ordinary freeze, and delegated
+amendment or renewal cannot add or widen it. The envelope bounds agent count and
+subscription load (for example, explicit `maxWorkers:12`); it grants no paid
+GPU/Modal dispatch authority, which remains separately authorized.
+
 The existing `amend` action accepts optional `ownerScale:true` only from a live
 owner-authored turn for the launch Buddy. A scheduled Buddy, worker or replay of
 an owner receipt cannot authorize scale. The default amendment remains frozen.

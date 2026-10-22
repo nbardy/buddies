@@ -9,6 +9,16 @@ export const Portfolio = z
   })
   .strict();
 export type PortfolioPolicy = z.infer<typeof Portfolio>;
+// Pattern: capability-grants (docs/patterns.md#capability-grants)
+// An owner fixes the complete scaling authority at launch; absence grants none.
+export const ScaleEnvelope = z
+  .object({
+    maxWorkers: z.number().int().positive(),
+    models: z.array(z.string().min(1)).min(1),
+    maxGpuWorkers: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ScaleEnvelopePolicy = z.infer<typeof ScaleEnvelope>;
 export const Prerequisite = z
   .object({
     kind: z.literal('prerequisite'),
@@ -88,26 +98,41 @@ export type PortfolioConfig = {
 // Pattern: pure-core (docs/patterns.md#pure-core)
 // Owner scale changes only allocation fields; budget and policy fields still compare exactly.
 // Guard: oompa-mcp owner-only scale amendment, including scheduled receipt replay denial.
-function scaleDelta(base: PortfolioConfig, next: PortfolioConfig) {
+function scaleDelta(base: PortfolioConfig, next: PortfolioConfig, envelope?: ScaleEnvelopePolicy) {
   const worker = z
     .object({
       model: z.string().min(1),
       prompt: z.array(z.string().min(1)).min(1),
-      count: z.number().int().positive().max(6),
+      count: z.number().int().positive(),
       can_claim_gpu: z.boolean(),
       task_ids: z.array(z.string().min(1)).optional(),
     })
     .passthrough();
   const before = z.array(worker).min(1).parse(base.workers);
-  const after = z.array(worker).min(1).max(6).parse(next.workers);
-  const allocation = ['model', 'prompt', 'count', 'can_claim_gpu', 'task_ids'];
+  const after = z.array(worker).min(1).parse(next.workers);
+  const allocation = envelope
+    ? ['model', 'count', 'can_claim_gpu', 'task_ids']
+    : ['model', 'prompt', 'count', 'can_claim_gpu', 'task_ids'];
   const controls = stable(without(before[0], allocation));
   if ([...before, ...after].some((item) => stable(without(item, allocation)) !== controls))
     throw new Error('owner scale cannot change worker task, runtime or spend controls');
-  if (
-    after.reduce((sum, item) => sum + item.count, 0) > 6 ||
-    after.filter((item) => item.can_claim_gpu).reduce((sum, item) => sum + item.count, 0) > 1
-  )
+  const count = after.reduce((sum, item) => sum + item.count, 0);
+  const gpuCount = after
+    .filter((item) => item.can_claim_gpu)
+    .reduce((sum, item) => sum + item.count, 0);
+  if (envelope) {
+    if (count > envelope.maxWorkers)
+      throw new Error(
+        `scale envelope maxWorkers exceeded (agent count/subscription load): ${count} > ${envelope.maxWorkers}`
+      );
+    if (gpuCount > envelope.maxGpuWorkers)
+      throw new Error(
+        `scale envelope maxGpuWorkers exceeded: ${gpuCount} > ${envelope.maxGpuWorkers}`
+      );
+    for (const item of after)
+      if (!envelope.models.includes(item.model))
+        throw new Error(`scale envelope model not listed: ${item.model}`);
+  } else if (count > 6 || gpuCount > 1)
     throw new Error('owner scale permits at most six workers and one GPU worker');
   const ids = new Set(next.task_backend.task_ids);
   for (const item of after)
@@ -118,25 +143,34 @@ function scaleDelta(base: PortfolioConfig, next: PortfolioConfig) {
     .passthrough();
   const oldReview = z.array(reviewer).length(1).parse(base.reviewers);
   const newReview = z.array(reviewer).length(1).parse(next.reviewers);
+  const reviewerAllocation = envelope ? ['model'] : ['model', 'prompt'];
   if (
-    stable(without(oldReview[0], ['model', 'prompt'])) !==
-    stable(without(newReview[0], ['model', 'prompt']))
+    stable(without(oldReview[0], reviewerAllocation)) !==
+    stable(without(newReview[0], reviewerAllocation))
   )
     throw new Error('owner scale cannot change reviewer controls');
+  if (envelope && !envelope.models.includes(newReview[0].model))
+    throw new Error(`scale envelope reviewer model not listed: ${newReview[0].model}`);
 }
 
 export function amendmentDelta(
   base: PortfolioConfig,
   next: PortfolioConfig,
   executed: Set<string>,
-  ownerScale = false
+  ownerScale = false,
+  scaleEnvelope?: ScaleEnvelopePolicy
 ) {
-  if (ownerScale) scaleDelta(base, next);
+  if (
+    (ownerScale || scaleEnvelope) &&
+    (stable(base.workers) !== stable(next.workers) ||
+      stable(base.reviewers) !== stable(next.reviewers))
+  )
+    scaleDelta(base, next, ownerScale ? undefined : scaleEnvelope);
   const mutable = [
     'task_backend',
     'task_execution',
     'resume_swarm_id',
-    ...(ownerScale ? ['workers', 'reviewers'] : []),
+    ...(ownerScale || scaleEnvelope ? ['workers', 'reviewers'] : []),
   ];
   if (
     stable(without(base, mutable)) !== stable(without(next, mutable)) ||
