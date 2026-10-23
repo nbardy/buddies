@@ -307,10 +307,16 @@ test('run-owned MCP outlives parent settle and backend reload; scope, stop and e
     });
     w.grants.revokeConversation(child.parent.conversationId);
     assert.equal(await probe(w.endpoint.spec(child.parent)), 401);
-    assert.equal(
-      (await rpc(child.spec, 'tasks', { action: { kind: 'get', taskId: w.task.id } })).error,
-      false
-    );
+    const got = await rpc(child.spec, 'tasks', { action: { kind: 'get', taskId: w.task.id } });
+    assert.equal(got.error, false);
+    // One list is the whole scan: rows carry the CAS revision and criteria a worker claims with.
+    // Summary rows forced a per-task `get` storm that dropped connections (swarm 00733e4f).
+    const listed = await rpc(child.spec, 'tasks', {
+      action: { kind: 'list', scope: { workspace: w.ws.id }, include: 'all' },
+    });
+    const row = listed.value.find((task: { id: string }) => task.id === w.task.id);
+    assert.equal(row.revision, got.value.task.revision);
+    assert.equal(row.doneCriteria, got.value.task.doneCriteria);
     for (const [name, args] of [
       ['tasks', { action: { kind: 'get', taskId: w.foreign.id } }],
       ['tasks', { action: { kind: 'list', scope: { workspace: 'foreign' } } }],

@@ -75,9 +75,15 @@ type TaskDetail = {
   comments: Post[];
 };
 
+/** One task record with evidence clipped: what `tasks get` and Oompa scans return. */
+export const taskRecordView = (task: Task) => ({
+  ...task,
+  evidence: task.evidence.map((entry) => clip(entry, EVIDENCE_MAX_CHARS)),
+});
+
 /** `tasks get` for a Buddy: the task, its children as list rows, comments as previews. */
 export const taskDetailView = ({ task, channel, children, comments }: TaskDetail) => ({
-  task: { ...task, evidence: task.evidence.map((entry) => clip(entry, EVIDENCE_MAX_CHARS)) },
+  task: taskRecordView(task),
   channel,
   children: children.map(({ id, ownerId, title, status, paused, updatedAt }) => ({
     id,

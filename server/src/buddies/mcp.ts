@@ -39,6 +39,7 @@ import {
   runRowsView,
   runTail,
   taskDetailView,
+  taskRecordView,
 } from './tool-views';
 import { WorkerSchema, checkedRunConfig } from './worker-config';
 
@@ -820,11 +821,15 @@ const OOMPA_TOOLS = {
       if ('buddyId' in action.scope && action.scope.buddyId !== grant.buddyId)
         throw new Error('Buddy is outside this Oompa execution');
       if ('taskId' in action.scope) await oompaTask(deps, grant, action.scope.taskId);
+      // Full records (revision, criteria, nextAction), not summary rows: an Oompa worker scans its
+      // whole selection every loop, and summary rows forced one `get` per task — each also opening
+      // the task channel and reading 20 comments. Ten workers x forty tasks dropped connections
+      // (swarm 00733e4f, 2026-10-23). The selection is owner-bounded, so one list is one scan.
       const tasks = await Promise.all(grant.oompa!.taskIds.map((id) => oompaTask(deps, grant, id)));
       return tasks
         .filter((task) => action.include === 'all' || isOpenTask(task))
         .filter((task) => !('taskId' in action.scope) || task.parentId === action.scope.taskId)
-        .map(taskRow);
+        .map(taskRecordView);
     },
   }),
   task_write: buddyTool({
