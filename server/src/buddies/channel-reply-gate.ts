@@ -2,15 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ExecuteCommandRequest } from '@nbardy/agent-cli';
-import { executeCommand } from '@nbardy/agent-cli';
+import { executeCommand, PI_RESTRICTED_FLAGS } from '@nbardy/agent-cli';
 import type { ConversationConfig, Provider, ResolvedExecutionConfig } from '@unleashd/shared';
 import { runDetached } from './detached-cli';
 
 // The thread follow-up gate: "should you respond, or leave it to another team
 // member?" asked of one Buddy about one new thread post. It is a bare CLI run
 // on the Buddy's seat model — no Buddy MCP, no tools, no session files,
-// a scratch cwd so no repository instructions load — and it may answer only
-// `<yes>` or `<no>`. Anything else is `unparseable`, never read as a guess:
+// a scratch cwd, and only `<yes>` or `<no>`; anything else is `unparseable`:
 // a Buddy that rambles past GATE_MAX_CHARS is stopped and stays silent.
 
 export type GateVerdict =
@@ -77,6 +76,7 @@ const GATE_HARNESSES: Record<Provider, { args: string[]; effort: boolean } | nul
   // same harness answers a mention and then fails this gate. Its transcript is deleted after
   // exit (runDetached), and effort lives in the model id.
   cursor: { args: [...RESTRICTED_FLAGS.cursor, '--trust'], effort: false },
+  pi: { args: [...PI_RESTRICTED_FLAGS], effort: true },
   opencode: null,
   gemini: null,
 };

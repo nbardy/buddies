@@ -318,6 +318,7 @@ pub fn default_roots(home: String) -> Vec<Root> {
         at(Format::Cursor, ".cursor/projects"),
         at(Format::Gemini, ".gemini/tmp"),
         at(Format::Opencode, ".local/share/opencode/storage"),
+        at(Format::Pi, ".pi/agent/sessions"),
         at(Format::Muse, ".local/share/muse/sessions"),
     ];
     if let Ok(sandboxes) = std::fs::read_dir(home.join(".gemini-sandbox")) {

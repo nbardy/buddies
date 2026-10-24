@@ -75,8 +75,7 @@ const buddyToolOnly = (provider: Provider): HarnessTurn => ({
 
 // Pattern: table-driven (docs/patterns.md#table-driven)
 export const HARNESS_TURN: Record<Provider, HarnessTurn> = {
-  // ONE `--settings` document: it also carries harness-memory.ts's auto-memory switch, and a
-  // second `--settings` flag is not documented to merge with the first.
+  // ONE `--settings` document also carries auto-memory off; two flags do not merge.
   // PostToolUse `additionalContext` reaches the model as a system reminder after that tool result
   // (claude 2.1.294). It fires for a native sub-agent's tools too, with `agent_id` set; no hook
   // fires for the parent while a foreground sub-agent runs.
@@ -118,4 +117,5 @@ export const HARNESS_TURN: Record<Provider, HarnessTurn> = {
   gemini: buddyToolOnly('gemini'),
   cursor: buddyToolOnly('cursor'),
   muse: buddyToolOnly('muse'),
+  pi: buddyToolOnly('pi'),
 };

@@ -1,11 +1,69 @@
 // DO NOT EDIT - generated from catalog.jsonc
-// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-10-12.muse-wonder-1.0)
+// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-10-24.muse-wonder-1.0+sol-pi-1.1)
 // Generator: shared/scripts/gen-catalog.ts
 // Run: pnpm --filter @unleashd/shared gen:catalog
 
 import type { CatalogProvider } from '../provider-catalog.js';
 
 export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
+  {
+    "id": "pi",
+    "displayName": "SoL-Pi",
+    "shortName": "Pi",
+    "models": [
+      {
+        "id": "anthropic/claude-opus-5-5",
+        "displayName": "Opus 5.5",
+        "reasoning": {
+          "levels": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "openai-codex/gpt-6.1-sol",
+        "displayName": "GPT-6.1 Sol",
+        "reasoning": {
+          "levels": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "meta/muse-wonder-1.0",
+        "displayName": "Muse Wonder 1.0",
+        "reasoning": {
+          "levels": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      }
+    ],
+    "defaultModelId": "openai-codex/gpt-6.1-sol",
+    "supportsDynamicModels": true,
+    "aliases": {}
+  },
   {
     "id": "claude",
     "displayName": "Claude",

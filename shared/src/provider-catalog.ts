@@ -4,7 +4,15 @@ import { z } from 'zod';
  * Stable provider identity. Provider-native model and effort values deliberately
  * remain opaque strings and are validated against a ProviderCatalog.
  */
-export const ProviderSchema = z.enum(['claude', 'codex', 'opencode', 'gemini', 'cursor', 'muse']);
+export const ProviderSchema = z.enum([
+  'claude',
+  'codex',
+  'opencode',
+  'gemini',
+  'cursor',
+  'muse',
+  'pi',
+]);
 export type Provider = z.infer<typeof ProviderSchema>;
 
 export const ModelDefinitionSchema = z.object({

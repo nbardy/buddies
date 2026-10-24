@@ -957,6 +957,7 @@ test('every harness receives its resolved effort in one request shape', () => {
     gemini: undefined,
     opencode: undefined,
     cursor: undefined,
+    pi: 'medium',
   };
   for (const provider of Object.keys(expected) as Provider[]) {
     const requests: Request[] = [];

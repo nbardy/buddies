@@ -70,6 +70,7 @@ const RATES: Record<ProviderName, Rates> = {
   gemini: OPENAI_LIKE,
   cursor: OPENAI_LIKE,
   muse: OPENAI_LIKE,
+  pi: OPENAI_LIKE,
 };
 
 /** A provider-recorded cost (OpenCode) wins over the estimate; `reportedCostUsd` is 0 when none. */
