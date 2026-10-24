@@ -183,6 +183,38 @@ fn merged_count_counts_an_inherited_prefix_once() {
     assert_eq!(reader.merged_count(&[of("missing", 4)]).unwrap(), 0, "an unknown session contributes nothing");
 }
 
+// Fix-guard (2026-10-24): a page of a long conversation was merged in JS over the whole history.
+// `merged_page` must agree with `merged_count` on the total, return only the requested rows, and
+// order forks as the JS merge did (each session's order kept, earliest ready row first).
+#[test]
+fn merged_page_slices_the_merge_and_agrees_with_its_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let line = |text: &str, second: u32| {
+        format!(
+            "{}\n",
+            json!({ "type": "user", "timestamp": format!("2026-09-22T00:00:{second:02}.000Z"), "cwd": "/w", "message": { "content": text } })
+        )
+    };
+    let prefix = format!("{}{}", line("Plan", 0), line("Again", 1));
+    write(&dir.path().join("claude/-w/a.jsonl"), &format!("{prefix}{}", line("a late", 30)));
+    write(&dir.path().join("claude/-w/b.jsonl"), &format!("{prefix}{}{}", line("b early", 10), line("b later", 11)));
+    let db = dir.path().join("ingest.sqlite");
+    Engine::open(roots(dir.path()), &db).unwrap().scan(&mut |_| {});
+    let reader = Reader::open(&db).unwrap();
+    let of = |id: &str| MergePrefix { session_id: id.to_string(), created_at: 0.0, count: 10 };
+    let texts = |page: &unleashd_ingest::store::MergedPage| page.messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>();
+    let both = [of("a"), of("b")];
+    let all = reader.merged_page(&both, -1, 100).unwrap();
+    assert_eq!(all.total, reader.merged_count(&both).unwrap());
+    assert_eq!(texts(&all), ["Plan", "Again", "b early", "b later", "a late"]);
+    let middle = reader.merged_page(&both, 1, 2).unwrap();
+    assert_eq!((middle.total, texts(&middle)), (5, vec!["b early".to_string(), "b later".to_string()]));
+    assert!(reader.merged_page(&both, 5, 2).unwrap().messages.is_empty(), "past the end");
+    let single = reader.merged_page(&[of("b")], 1, 5).unwrap();
+    assert_eq!((single.total, texts(&single)), (4, vec!["b early".to_string(), "b later".to_string()]));
+    assert!(single.messages.iter().all(|m| m.at.is_some()), "every row carries its resolved time");
+}
+
 // Fix-guard (2026-10-23): `known()` read the `source` table, whose rows carry the fold checkpoint
 // inline, so a cold start spent 1.6 s on it (11k sources). It must stay on the covering index.
 #[test]

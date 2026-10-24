@@ -92,6 +92,15 @@ pub struct MergeSession {
     pub count: u32,
 }
 
+/// One page of a conversation's merged history, as `mergedPage` returns it.
+#[napi(object)]
+pub struct MergedMessagePage {
+    /// Rows in the whole merged history (the page is a slice of them).
+    pub total: u32,
+    /// The rows at merged positions `afterSeq + 1 ..`, each with its resolved `at`.
+    pub messages: Vec<Message>,
+}
+
 fn to_js(e: impl std::fmt::Display) -> Error {
     Error::from_reason(e.to_string())
 }
@@ -235,6 +244,22 @@ impl Ingest {
                 }
             }
             Ok(out)
+        })
+        .await
+    }
+
+    /// One page of the merged settled history of a conversation's bound sessions (no live
+    /// overlay): the merge and the paging run in Rust over the stored rows, so only the requested
+    /// rows cross napi. Same rule as `mergedCounts` (`total` equals its count). Runs on a
+    /// connection of its own like `search`: a long history never holds the shared reader.
+    #[napi]
+    pub async fn merged_page(&self, sessions: Vec<MergeSession>, options: MessagesOptions) -> Result<MergedMessagePage> {
+        let db = self.db.clone();
+        blocking(move || {
+            let prefixes: Vec<MergePrefix> =
+                sessions.into_iter().map(|s| MergePrefix { session_id: s.session_id, created_at: s.created_at, count: s.count }).collect();
+            let page = Reader::open(&db).map_err(to_js)?.merged_page(&prefixes, options.after_seq, options.limit).map_err(to_js)?;
+            Ok(MergedMessagePage { total: page.total, messages: page.messages })
         })
         .await
     }

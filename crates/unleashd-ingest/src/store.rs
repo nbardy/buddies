@@ -25,7 +25,8 @@ use crate::model::{
 };
 use crate::read::{Apply, Checkpoint, Outcome, RowData, Stamp};
 use rusqlite::{Connection, OptionalExtension, params};
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 
@@ -448,6 +449,44 @@ pub struct MergePrefix {
     pub count: u32,
 }
 
+/// One page of a conversation's merged settled history (`Reader::merged_page`).
+#[derive(Debug, Clone)]
+pub struct MergedPage {
+    pub total: u32,
+    pub messages: Vec<Message>,
+}
+
+const MESSAGE_SELECT: &str = "SELECT seq, role, at, completed_at, content, tool_name, tool_input FROM message";
+
+fn decode_message(r: &rusqlite::Row) -> rusqlite::Result<Result<Message>> {
+    let role: String = r.get(1)?;
+    let tool_name: Option<String> = r.get(5)?;
+    let tool_input: Option<String> = r.get(6)?;
+    let (seq, at, completed_at, content) = (r.get(0)?, r.get(2)?, r.get(3)?, r.get(4)?);
+    Ok(Role::parse(&role).ok_or_else(|| StoreError::Corrupt(format!("role {role}"))).map(|role| Message {
+        seq,
+        role,
+        at,
+        completed_at,
+        content,
+        parts_json: (tool_name.as_deref() == Some(PARTS_RECORD)).then(|| tool_input.clone()).flatten(),
+        tool_call: tool_name.filter(|name| name != PARTS_RECORD).map(|name| ToolCall { name, input: tool_input }),
+    }))
+}
+
+/// A row's resolved start time (a missing one inherits `previous_at`; whole ms, like the JS `Date`
+/// the merge compared) and its merge identity: a hash of that time and the raw stored
+/// role/content/tool columns, read from a `SELECT at, role, content, tool_name, tool_input`.
+fn row_key(r: &rusqlite::Row, previous_at: f64) -> Result<(f64, u64)> {
+    let at = r.get::<_, Option<f64>>(0)?.map_or(previous_at, f64::trunc);
+    let mut hasher = DefaultHasher::new();
+    (at + 0.0).to_bits().hash(&mut hasher);
+    for column in 1..5 {
+        r.get_ref(column)?.as_str_or_null().map_err(rusqlite::Error::from)?.hash(&mut hasher);
+    }
+    Ok((at, hasher.finish()))
+}
+
 pub struct Reader {
     conn: Connection,
 }
@@ -492,27 +531,9 @@ impl Reader {
 
     pub fn messages(&self, session_id: &str, after_seq: i64, limit: u32) -> Result<Vec<Message>> {
         let Some(source) = self.source_of(session_id)? else { return Ok(Vec::new()) };
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT seq, role, at, completed_at, content, tool_name, tool_input FROM message WHERE source_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
-        )?;
-        let rows = stmt.query_map(params![source, after_seq, limit], |r| {
-            let role: String = r.get(1)?;
-            let tool_name: Option<String> = r.get(5)?;
-            Ok((r.get::<_, u32>(0)?, role, r.get(2)?, r.get(3)?, r.get::<_, String>(4)?, tool_name, r.get::<_, Option<String>>(6)?))
-        })?;
-        rows.map(|row| {
-            let (seq, role, at, completed_at, content, tool_name, tool_input) = row?;
-            Ok(Message {
-                seq,
-                role: Role::parse(&role).ok_or_else(|| StoreError::Corrupt(format!("role {role}")))?,
-                at,
-                completed_at,
-                content,
-                parts_json: (tool_name.as_deref() == Some(PARTS_RECORD)).then(|| tool_input.clone()).flatten(),
-                tool_call: tool_name.filter(|name| name != PARTS_RECORD).map(|name| ToolCall { name, input: tool_input }),
-            })
-        })
-        .collect()
+        let mut stmt = self.conn.prepare_cached(&format!("{MESSAGE_SELECT} WHERE source_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"))?;
+        let rows = stmt.query_map(params![source, after_seq, limit], decode_message)?;
+        rows.map(|row| row?).collect()
     }
 
     /// The number of rows `mergeSessionMessages(prefixes, [])` keeps across forked sessions (the
@@ -537,14 +558,9 @@ impl Reader {
             let mut seen: HashMap<u64, u32> = HashMap::new();
             let mut previous_at = prefix.created_at;
             while let Some(r) = rows.next()? {
-                let at = r.get::<_, Option<f64>>(0)?.unwrap_or(previous_at);
+                let (at, key) = row_key(r, previous_at)?;
                 previous_at = at;
-                let mut hasher = DefaultHasher::new();
-                at.to_bits().hash(&mut hasher);
-                for column in 1..5 {
-                    r.get_ref(column)?.as_str_or_null().map_err(rusqlite::Error::from)?.hash(&mut hasher);
-                }
-                *seen.entry(hasher.finish()).or_insert(0) += 1;
+                *seen.entry(key).or_insert(0) += 1;
             }
             for (key, n) in seen {
                 let best = most.entry(key).or_insert(0);
@@ -552,6 +568,133 @@ impl Reader {
             }
         }
         Ok(most.values().sum())
+    }
+
+    /// One page of `mergeSessionMessages(prefixes, [])` (the conversation's settled history, no
+    /// live overlay): `total` merged rows and the raw rows at merged positions
+    /// `after_seq + 1 ..+ limit`, each with its resolved `at`. The caller converts only those.
+    ///
+    /// Pattern: one-store-one-index (docs/patterns.md) — the merge runs over the stored rows here,
+    /// so JS never materializes a history to serve a 500-message page.
+    /// Fix-guard (2026-10-24): opening a long conversation paged EVERY message of every bound
+    /// session through napi, converted it (`toMessage`/`nativeBody`) and merged it in JS to slice
+    /// 500 rows (~310 ms of main thread for 42k rows in a synthetic fork, up to 1.8 s on real long
+    /// histories). Guards: `merged_page_*` in tests/engine.rs and server/test/ingest-history.test.ts.
+    ///
+    /// One prefix is its own order (the JS merge returned it as is, repeated rows included), so it
+    /// is a range read. Several are merged by the same rule as `merged_count` (row identity = a
+    /// hash of the raw stored fields, the maximum occurrence count over sessions) and ordered by
+    /// the JS rule: each session's own order is kept, and chronology only picks between rows that
+    /// are not ordered by any session (smallest timestamp in whole ms, then first seen).
+    pub fn merged_page(&self, prefixes: &[MergePrefix], after_seq: i64, limit: u32) -> Result<MergedPage> {
+        let start = (after_seq + 1).max(0) as usize;
+        let end = start.saturating_add(limit as usize);
+        match prefixes {
+            [only] => self.single_page(only, start, end),
+            _ => self.merge_page(prefixes, start, end),
+        }
+    }
+
+    fn single_page(&self, prefix: &MergePrefix, start: usize, end: usize) -> Result<MergedPage> {
+        let Some(source) = self.source_of(&prefix.session_id)? else { return Ok(MergedPage { total: 0, messages: Vec::new() }) };
+        let total: u32 = self
+            .conn
+            .prepare_cached("SELECT COUNT(*) FROM (SELECT 1 FROM message WHERE source_id = ?1 ORDER BY seq LIMIT ?2)")?
+            .query_row(params![source, prefix.count], |r| r.get(0))?;
+        let end = end.min(total as usize);
+        if start >= end {
+            return Ok(MergedPage { total, messages: Vec::new() });
+        }
+        // A message without a time starts when the one before it did: seed from the last timed row.
+        let mut at = self
+            .conn
+            .prepare_cached("SELECT at FROM message WHERE source_id = ?1 AND seq < ?2 AND at IS NOT NULL ORDER BY seq DESC LIMIT 1")?
+            .query_row(params![source, start as i64], |r| r.get::<_, f64>(0))
+            .optional()?
+            .unwrap_or(prefix.created_at);
+        let mut stmt = self.conn.prepare_cached(&format!("{MESSAGE_SELECT} WHERE source_id = ?1 AND seq >= ?2 AND seq < ?3 ORDER BY seq"))?;
+        let rows = stmt.query_map(params![source, start as i64, end as i64], decode_message)?;
+        let mut messages = Vec::with_capacity(end - start);
+        for row in rows {
+            let mut message = row??;
+            at = message.at.unwrap_or(at);
+            message.at = Some(at);
+            messages.push(message);
+        }
+        Ok(MergedPage { total, messages })
+    }
+
+    fn merge_page(&self, prefixes: &[MergePrefix], start: usize, end: usize) -> Result<MergedPage> {
+        struct Node {
+            source: i64,
+            seq: i64,
+            at: f64,
+            following: HashSet<usize>,
+            predecessors: u32,
+        }
+        let mut nodes: Vec<Node> = Vec::new();
+        let mut identities: HashMap<u64, Vec<usize>> = HashMap::new();
+        for prefix in prefixes {
+            let Some(source) = self.source_of(&prefix.session_id)? else { continue };
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT at, role, content, tool_name, tool_input, seq FROM message WHERE source_id = ?1 ORDER BY seq LIMIT ?2",
+            )?;
+            let mut rows = stmt.query(params![source, prefix.count])?;
+            let mut occurrences: HashMap<u64, usize> = HashMap::new();
+            let mut previous_at = prefix.created_at;
+            let mut previous: Option<usize> = None;
+            while let Some(r) = rows.next()? {
+                let (at, key) = row_key(r, previous_at)?;
+                previous_at = at;
+                let occurrence = occurrences.entry(key).or_insert(0);
+                let matches = identities.entry(key).or_default();
+                let index = match matches.get(*occurrence) {
+                    Some(&index) => index,
+                    None => {
+                        nodes.push(Node { source, seq: r.get(5)?, at, following: HashSet::new(), predecessors: 0 });
+                        matches.push(nodes.len() - 1);
+                        nodes.len() - 1
+                    }
+                };
+                *occurrence += 1;
+                if let Some(before) = previous {
+                    if nodes[before].following.insert(index) {
+                        nodes[index].predecessors += 1;
+                    }
+                }
+                previous = Some(index);
+            }
+        }
+        // Kahn's order with chronology choosing among ready rows; rows left in a contradictory
+        // cycle keep their first-seen order at the end (none is dropped).
+        let mut ready: BinaryHeap<Reverse<(i64, usize)>> =
+            (0..nodes.len()).filter(|&i| nodes[i].predecessors == 0).map(|i| Reverse((nodes[i].at as i64, i))).collect();
+        let mut emitted = vec![false; nodes.len()];
+        let mut order = Vec::with_capacity(nodes.len());
+        while let Some(Reverse((_, index))) = ready.pop() {
+            emitted[index] = true;
+            order.push(index);
+            let following: Vec<usize> = nodes[index].following.iter().copied().collect();
+            for next in following {
+                nodes[next].predecessors -= 1;
+                if nodes[next].predecessors == 0 {
+                    ready.push(Reverse((nodes[next].at as i64, next)));
+                }
+            }
+        }
+        order.extend((0..nodes.len()).filter(|&i| !emitted[i]));
+        let total = order.len() as u32;
+        let mut stmt = self.conn.prepare_cached(&format!("{MESSAGE_SELECT} WHERE source_id = ?1 AND seq = ?2"))?;
+        let messages = order[start.min(order.len())..end.min(order.len())]
+            .iter()
+            .map(|&i| {
+                let node = &nodes[i];
+                let mut message = stmt.query_row(params![node.source, node.seq], decode_message)??;
+                message.at = Some(node.at);
+                Ok(message)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(MergedPage { total, messages })
     }
 
     /// The source a native session id reads from: the most recently active listed file of it.

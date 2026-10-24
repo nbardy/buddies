@@ -56,6 +56,13 @@ export declare class Ingest {
    */
   mergedCounts(groups: Array<Array<MergeSession>>): Promise<Array<number>>
   /**
+   * One page of the merged settled history of a conversation's bound sessions (no live
+   * overlay): the merge and the paging run in Rust over the stored rows, so only the requested
+   * rows cross napi. Same rule as `mergedCounts` (`total` equals its count). Runs on a
+   * connection of its own like `search`: a long history never holds the shared reader.
+   */
+  mergedPage(sessions: Array<MergeSession>, options: MessagesOptions): Promise<MergedMessagePage>
+  /**
    * Provider-counted token usage of the turns in `[since, until)`, grouped by session, UTC day
    * or model, plus the latest Codex rate limits. Replaces `/api/usage`'s transcript parsers.
    */
@@ -250,6 +257,14 @@ export type KnowledgeScope =
 export interface ListOptions {
   /** Revision already seen; 0 lists everything. */
   since: number
+}
+
+/** One page of a conversation's merged history, as `mergedPage` returns it. */
+export interface MergedMessagePage {
+  /** Rows in the whole merged history (the page is a slice of them). */
+  total: number
+  /** The rows at merged positions `afterSeq + 1 ..`, each with its resolved `at`. */
+  messages: Array<Message>
 }
 
 /** One bound session's settled prefix, as `mergedCounts` takes it. */

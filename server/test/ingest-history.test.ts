@@ -148,6 +148,8 @@ async function serve(
     sent,
     registry,
     list: booted.list,
+    ingest: booted.ingest,
+    base,
     builder,
     /** Every message, paged the way the client pages (500 at a time). */
     async history(id: string) {
@@ -454,6 +456,76 @@ test('mergedCount equals the length of the real merge across forked sessions', a
   } finally {
     list.stop();
     await ingest.stop();
+    fixture.cleanup();
+  }
+});
+
+// Fix-guard (2026-10-24): opening a long conversation read, converted and merged the whole history
+// in JS to slice one page (~310 ms of main thread for 42k rows; the crate now merges and pages).
+// The crate's `merged_page` must serve exactly the pages the JS merge (`mergeSessionMessages`,
+// still the overlay path) would slice: across page boundaries, from a middle `afterSeq`, past the
+// end, with an inherited prefix counted once and two forks' diverging tails interleaved by time.
+test('the route pages a forked record exactly as the JS merge slices it', async () => {
+  const fixture = ingestHome('unleashd-merged-page-');
+  const [a, b] = [sessionId(1), sessionId(2)];
+  const { project } = fixture;
+  const prefix = [0, 1, 2, 3, 4, 5].map((n) =>
+    claudeLine(a, n % 2 ? 'assistant' : 'user', `shared ${n}`, T0 + n * 1_000, project)
+  );
+  fs.writeFileSync(
+    fixture.transcript(a),
+    prefix.join('') +
+      claudeLine(a, 'user', 'a late', T0 + 20_000, project) +
+      claudeLine(a, 'assistant', 'a later', T0 + 21_000, project)
+  );
+  fs.writeFileSync(
+    fixture.transcript(b),
+    prefix.join('').replaceAll(a, b) +
+      claudeLine(b, 'user', 'b early', T0 + 10_000, project) +
+      claudeLine(b, 'assistant', 'b earlier', T0 + 11_000, project) +
+      claudeLine(b, 'user', 'b last', T0 + 30_000, project)
+  );
+  const records = recordStore(fixture.appData);
+  await records.create({
+    conversationId: a,
+    kind: { t: 'chat' },
+    sessionBindings: [
+      { provider: 'claude', sessionId: a },
+      { provider: 'claude', sessionId: b },
+    ],
+    currentSession: { provider: 'claude', sessionId: b },
+    config: createDefaultConversationConfig('claude'),
+    provenance: 'external_discovered',
+  });
+  const server = await serve(fixture);
+  try {
+    const { rows } = await server.ingest.listSessions({ since: 0 });
+    const bound = rows.filter((row) => [a, b].includes(row.sessionId));
+    const expected = mergeSessionMessages(
+      await Promise.all(bound.map((row) => sessionMessages(server.ingest, row, row.messageCount)))
+    );
+    assert.equal(expected.length, 11, 'prefix of 6 once, 2 + 3 diverging rows');
+    const view = (m: Message) => [m.role, textOf(m), new Date(m.timestamp).getTime()];
+    for (const [afterSeq, limit] of [
+      [-1, 4],
+      [3, 4],
+      [7, 500],
+      [10, 5],
+      [11, 5],
+    ]) {
+      const response = await fetch(
+        `${server.base}/${a}/messages?afterSeq=${afterSeq}&limit=${limit}`
+      );
+      const page = MessagePageSchema.parse(await response.json());
+      assert.equal(page.total, expected.length);
+      assert.deepEqual(
+        page.messages.map(view),
+        expected.slice(afterSeq + 1, afterSeq + 1 + limit).map(view),
+        `page afterSeq=${afterSeq} limit=${limit}`
+      );
+    }
+  } finally {
+    await server.close();
     fixture.cleanup();
   }
 });

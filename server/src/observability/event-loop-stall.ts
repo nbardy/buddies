@@ -47,11 +47,24 @@ function profileThresholdMs(): number {
 
 let activityLabel = 'startup';
 let activityAt = performance.now();
+/** When a labelled() body returned; Infinity while the activity may still be running (routes). */
+let activityEndedAt = Number.POSITIVE_INFINITY;
 
 /** Record what the event loop is about to do. Call at the top of a request, command or timer. */
 export function noteActivity(label: string): void {
   activityLabel = label;
   activityAt = performance.now();
+  activityEndedAt = Number.POSITIVE_INFINITY;
+}
+
+// Fix-guard (2026-10-24): a 1 s timer is nearly always the LAST label, so every later unlabelled
+// stall (async continuations, unlabelled callbacks) was blamed on it: `timer oompa-poll` led
+// stalls.jsonl with sinceActivityMs p50 481 ms though its tick is async. A labelled() body that
+// returned before the stall began is not the suspect. Guard: "labelled() does not claim ..." test.
+function suspect(stallMs: number, detectedAt: number): string {
+  return activityEndedAt > detectedAt - stallMs
+    ? activityLabel
+    : `unlabelled (after ${activityLabel})`;
 }
 
 /**
@@ -64,7 +77,11 @@ export function labelled<Args extends unknown[], R>(
 ): (...args: Args) => R {
   return (...args) => {
     noteActivity(label);
-    return fn(...args);
+    try {
+      return fn(...args);
+    } finally {
+      activityEndedAt = performance.now();
+    }
   };
 }
 
@@ -87,7 +104,7 @@ export function startEventLoopStallMonitor(journal: Pick<ErrorJournal, 'capture'
   let lastProfileAt = Number.NEGATIVE_INFINITY;
 
   const recordStall = (stallMs: number, detectedAt: number, loopP99Ms: number) => {
-    const label = activityLabel;
+    const label = suspect(stallMs, detectedAt);
     void appendPerf('stalls.jsonl', {
       at: new Date().toISOString(),
       ms: Math.round(stallMs),
@@ -111,7 +128,7 @@ export function startEventLoopStallMonitor(journal: Pick<ErrorJournal, 'capture'
   };
 
   const report = (stallMs: number, detectedAt: number) => {
-    const label = activityLabel;
+    const label = suspect(stallMs, detectedAt);
     const previous = reported.get(label);
     if (previous && detectedAt - previous.lastReportedAt < REPORT_WINDOW_MS) {
       previous.suppressed += 1;

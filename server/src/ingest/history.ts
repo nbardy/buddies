@@ -61,6 +61,30 @@ export async function sessionMessages(
 }
 
 /**
+ * One page of the merged settled history of `sessions` (no live overlay), as the client pages it.
+ *
+ * Pattern: one-store-one-index (docs/patterns.md) — the merge and the paging run in the ingest
+ * crate (`Reader::merged_page`); only the requested rows cross napi and are converted here.
+ * Fix-guard (2026-10-24): opening a long conversation read, converted and merged the WHOLE history
+ * of every bound session in JS to slice 500 rows (~310 ms of main thread for 42k rows, up to 1.8 s
+ * on real long histories; now one page of conversions). A live overlay still merges in JS
+ * (`mergeSessionMessages`): its turn-replacement rules need the converted bodies of live rows.
+ * Guards: server/test/ingest-history.test.ts and `merged_page_*` in tests/engine.rs.
+ */
+export async function mergedPage(
+  ingest: Pick<Ingest, 'mergedPage'>,
+  sessions: readonly MergeInput[],
+  page: { afterSeq: number; limit: number }
+): Promise<{ total: number; messages: Message[] }> {
+  const { total, messages } = await ingest.mergedPage(
+    sessions.map(({ sessionId, createdAt, count }) => ({ sessionId, createdAt, count })),
+    page
+  );
+  // `merged_page` resolves every `at` (a missing one inherits the previous row's).
+  return { total, messages: messages.map((native) => toMessage(native, native.at as number)) };
+}
+
+/**
  * The length `mergeSessionMessages(sessions' prefixes, [])` would produce, without building it.
  *
  * Pattern: one-store-one-index (docs/patterns.md) — boot only needs a COUNT, so it is computed by

@@ -28,7 +28,7 @@ import {
 } from '../conversations/runtime';
 import { labelled, noteActivity } from '../observability/event-loop-stall';
 import { mergeSessionMessages } from '../lifecycle/session-history';
-import { extendsHistory, mergedCount, mergedCounts, sessionMessages } from './history';
+import { extendsHistory, mergedCount, mergedCounts, mergedPage, sessionMessages } from './history';
 
 type Records = {
   listSummaries(): Promise<RecordSummary[]>;
@@ -272,7 +272,7 @@ export interface ConversationList {
 }
 
 export interface ConversationListDependencies {
-  ingest: Pick<Ingest, 'listSessions' | 'messages' | 'mergedCounts'>;
+  ingest: Pick<Ingest, 'listSessions' | 'messages' | 'mergedCounts' | 'mergedPage'>;
   records: Records;
   /** The runtime the server holds for this id (it owns run state, config and the overlay). */
   runtime(conversationId: string): ListedRuntime | undefined;
@@ -369,7 +369,19 @@ export async function createConversationList(
     );
   }
 
-  /** The history served at a settle (cached for paging; the key moves with the overlay). */
+  /** The bound sessions' settled prefixes: what the crate merges (`mergedCount`, `mergedPage`). */
+  function prefixes(record: RecordSummary, counts: ReadonlyMap<string, number>) {
+    return boundSessions(record).map((session) => ({
+      ...session,
+      count: counts.get(session.sessionId) ?? 0,
+    }));
+  }
+
+  /**
+   * The history of a record WITH a live overlay, merged in JS and cached for paging (the key moves
+   * with the overlay). Without an overlay history is never built here: the crate serves the count
+   * (`mergedCount`) and each page (`mergedPage`), see `page`.
+   */
   async function history(record: RecordSummary, settled: Settled): Promise<Message[]> {
     const id = record.conversationId;
     const overlay = dependencies.runtime(id)?.messages ?? EMPTY;
@@ -400,17 +412,16 @@ export async function createConversationList(
       const shrank = before !== undefined && count < before.count;
       return { counts, count, overlayAt: 0, epoch: rewritten || shrank ? epoch + 1 : epoch };
     }
-    const previous = served.get(id)?.messages;
-    if (previous === undefined && overlay.length === 0) {
-      // Nothing cached to compare against and no live rows to merge: the count is all a settle
-      // publishes, so do not build the history (it is built when a page opens it).
-      const count = await mergedCount(
-        dependencies.ingest,
-        bound.map((session) => ({ ...session, count: counts.get(session.sessionId) ?? 0 }))
-      );
+    if (overlay.length === 0) {
+      // No live rows to merge: the count is all a settle publishes (the crate serves the pages).
+      // A replaced history is the watcher's `rewritten` flag or a shrink: the old JS merge also
+      // re-compared a cached history (`extendsHistory`), which only an overlay builds now.
+      served.delete(id);
+      const count = await mergedCount(dependencies.ingest, prefixes(record, counts));
       const shrank = before !== undefined && count < before.count;
       return { counts, count, overlayAt: 0, epoch: rewritten || shrank ? epoch + 1 : epoch };
     }
+    const previous = served.get(id)?.messages;
     const next: Settled = { counts, count: 0, overlayAt: overlay.length, epoch };
     const merged = await history(record, next);
     next.count = merged.length;
@@ -699,7 +710,14 @@ export async function createConversationList(
       if (!record) return runtime ? pageOf(0, runtime.messages, afterSeq, limit) : null;
       await settling.get(conversationId);
       const settled = settledOf.get(conversationId) ?? unsettled(record);
-      return pageOf(settled.epoch, await history(record, settled), afterSeq, limit);
+      if ((runtime?.messages.length ?? 0) > 0)
+        return pageOf(settled.epoch, await history(record, settled), afterSeq, limit);
+      const { total, messages } = await mergedPage(
+        dependencies.ingest,
+        prefixes(record, settled.counts),
+        { afterSeq, limit }
+      );
+      return { epoch: settled.epoch, total, afterSeq, messages };
     },
     idle(conversationId) {
       const change = queued.get(conversationId);

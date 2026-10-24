@@ -115,7 +115,7 @@ one queue, and a failed write goes to stderr (not `console.error`, which the jou
   gate and flushed at shutdown), `captureCpuProfile`.
 - `event-loop-stall.ts`: every stall of 100 ms or more also lands in `stalls.jsonl` (the journal keeps one per label
   per minute); a stall of `UNLEASHD_STALL_PROFILE_MS` (default 500) or more captures a 2 s CPU profile into `profiles/`,
-  at most one per 10 minutes. `labelled(name, fn)` wraps every recurring timer so a stall is blamed on it.
+  at most one per 10 minutes. `labelled(name, fn)` wraps every recurring timer so a stall is blamed on it; a stall that begins after the wrapped body returned reads `unlabelled (after <name>)` (async continuations or unlabelled work — label them).
 - `server/src/http/debug-profile-routes.ts`: gated `POST /api/debug/profile?ms=` (`pnpm perf:profile`).
 
 Read them with `pnpm perf:audit` (`tools/perf-audit.ts`), which writes `output/perf-audit/<ts>.md`. Never add boot

@@ -103,3 +103,31 @@ test('labelled() names an otherwise anonymous timer, so its stall is not blamed 
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('labelled() does not claim stalls that run after its synchronous body returns', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'unleashd-stall-after-'));
+  process.env.UNLEASHD_DATA_DIR = directory;
+  const journal = new ErrorJournal({ directory });
+  await journal.initialize();
+  const stop = startEventLoopStallMonitor(journal);
+  try {
+    setTimeout(
+      labelled('timer quick-poller', () => {
+        setTimeout(() => blockEventLoop(200), 50); // someone else's work, later
+      }),
+      10
+    );
+    await delay(400);
+    await flushPerf();
+    const [record] = fs
+      .readFileSync(path.join(directory, 'observability', 'perf', 'stalls.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(record.label, 'unlabelled (after timer quick-poller)');
+  } finally {
+    stop();
+    Reflect.deleteProperty(process.env, 'UNLEASHD_DATA_DIR');
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
