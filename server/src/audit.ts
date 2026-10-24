@@ -1,4 +1,4 @@
-import { getHarness, listHarnesses, resolveBinaryAsync } from '@nbardy/agent-cli';
+import { getHarness, listHarnesses, resolveBinary } from '@nbardy/agent-cli';
 
 export interface AuditResult {
   name: string;
@@ -7,14 +7,14 @@ export interface AuditResult {
   path: string | null;
 }
 
-// Pattern: async-liveness (docs/patterns.md#async-liveness): the PATH walk runs
-// off the event loop and in parallel, so boot never waits on it.
+// resolveBinary is a PATH walk of access/stat calls (no `which` subprocess since agent-cli
+// ef964ef), so the audit is cheap synchronous work and needs no async twin.
 export async function auditLocalAgents(): Promise<AuditResult[]> {
   const results = await Promise.all(
     listHarnesses().map(async (name): Promise<AuditResult> => {
       const config = getHarness(name);
       try {
-        const binPath = await resolveBinaryAsync(config.binary);
+        const binPath = resolveBinary(config.binary);
         return { name, binary: config.binary, installed: true, path: binPath };
       } catch {
         return { name, binary: config.binary, installed: false, path: null };

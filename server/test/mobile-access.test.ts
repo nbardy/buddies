@@ -60,7 +60,7 @@ test('only a Serve handler on the current name, proxying to the UI port, yields 
   assert.equal(stale.kind, 'serve_missing');
   assert.match(stale.kind === 'serve_missing' ? stale.command : '', /http:\/\/127\.0\.0\.1:7489$/);
 
-  // docs/auth.md once pointed Serve at 7499: the dev API, which serves no client.
+  // The requested UI port is authoritative; another local server does not count.
   assert.equal(
     (await probe(web({ [`${HOST}:443`]: 'http://127.0.0.1:7499' }))).kind,
     'serve_missing'

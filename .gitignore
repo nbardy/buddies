@@ -67,6 +67,13 @@ product/releases/launch-2.0/sound/__pycache__/
 !product/releases/launch-2.0/edit/**
 output
 
+# Raw agent audit output stays local; keep Markdown findings and reproduction scripts reviewable.
+agent_notes/**/*.json
+agent_notes/**/*.png
+agent_notes/**/*.webp
+agent_notes/**/*.txt
+agent_notes/**/*.sha256
+
 # Buddy memory profiles — generated runtime state (same class as .buddies/).
 # Each profiles/<buddyId>/memory/*.md carries a generated `updated:` timestamp
 # and is rewritten on every turn, so committing it churns the tree constantly.
