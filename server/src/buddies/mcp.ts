@@ -25,6 +25,7 @@ import {
   evidence,
   key,
   managerRef,
+  taskChanges,
   taskDetail,
 } from './core';
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
@@ -303,7 +304,11 @@ async function writeTask(
       });
     case 'update':
       if (write.changes.evidence) checkedEvidence(write.changes.evidence);
-      return deps.core.upsertTask(grant.principal, { ...write, key: input.key });
+      return deps.core.upsertTask(grant.principal, {
+        ...write,
+        changes: taskChanges(write.changes),
+        key: input.key,
+      });
   }
 }
 

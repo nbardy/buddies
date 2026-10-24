@@ -4,7 +4,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::runs::cancel_queued;
-use crate::store::{Mutation, Store, collect, corrupt, get_buddy, idempotent, new_id, now_iso, require};
+use crate::store::{Mutation, Store, collect, corrupt, get_buddy, idempotent, new_id, now_iso, record_fact, require};
 use crate::types::*;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
@@ -129,16 +129,13 @@ fn create(
         key: Some(key),
     };
     idempotent(tx, &m, |tx| {
-        let position: i64 = match &parent_id {
-            None => 0,
-            Some(parent) => {
-                let parent_ws = get_task(tx, parent)?.workspace_id;
-                if parent_ws != owner.workspace_id {
-                    return Err(CoreError::Invalid(format!("parent {parent} is in workspace {parent_ws}")));
-                }
-                tx.query_row("SELECT coalesce(max(position), -1) + 1 FROM task WHERE parent_id = ?1", [parent], |r| r.get(0))?
+        if let Some(parent) = &parent_id {
+            let parent_ws = get_task(tx, parent)?.workspace_id;
+            if parent_ws != owner.workspace_id {
+                return Err(CoreError::Invalid(format!("parent {parent} is in workspace {parent_ws}")));
             }
-        };
+        }
+        let position = appended_position(tx, parent_id.as_deref())?;
         let id = new_id("task");
         let now = now_iso();
         tx.execute(
@@ -156,6 +153,12 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
     if let Some(new_owner) = &c.owner_id {
         require(tx, actor, Op::WriteTask, &Subject::Buddy { id: new_owner.clone() })?;
     }
+    // Authority for a move: placing a task under a parent writes into that parent's subtree, so
+    // the actor also needs write_task on the PARENT's owner (self-or-transitive-manager; the owner
+    // always) — stricter than create, which checks only the new task's owner. Top level: no more.
+    if let Some(ParentRef::Task { id }) = &c.parent {
+        require(tx, actor, Op::WriteTask, &Subject::Buddy { id: get_task(tx, id)?.owner_id })?;
+    }
     let m = Mutation {
         actor,
         workspace_id: &task.workspace_id,
@@ -164,13 +167,24 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
         op: "task.update",
         payload: json!({"base": base_revision, "title": c.title, "done_criteria": c.done_criteria, "status": c.status.map(|s| s.as_str()),
             "next_action": c.next_action, "blocked_reason": c.blocked_reason, "evidence": c.evidence, "paused": c.paused,
-            "position": c.position, "pin": c.pin, "owner": c.owner_id}),
+            "position": c.position, "pin": c.pin, "owner": c.owner_id, "parent": c.parent}),
         key: Some(key),
     };
     idempotent(tx, &m, |tx| {
         if task.revision != base_revision {
             return Err(CoreError::RevisionConflict { expected: base_revision, current: task.revision });
         }
+        // A move to the parent it already has is no move. A moved task appends (create's rule)
+        // unless the same write names its position.
+        let parent_id = match &c.parent {
+            Some(parent) => checked_move(tx, &task, parent)?,
+            None => task.parent_id.clone(),
+        };
+        let moved = parent_id != task.parent_id;
+        let position = match moved {
+            true => c.position.map_or_else(|| appended_position(tx, parent_id.as_deref()), Ok)?,
+            false => c.position.unwrap_or(task.position),
+        };
         let next = Task {
             title: c.title.unwrap_or(task.title.clone()),
             done_criteria: c.done_criteria.unwrap_or(task.done_criteria.clone()),
@@ -179,8 +193,9 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
             blocked_reason: c.blocked_reason.or(task.blocked_reason.clone()),
             evidence: c.evidence.unwrap_or(task.evidence.clone()),
             paused: c.paused.unwrap_or(task.paused),
-            position: c.position.unwrap_or(task.position),
+            position,
             pin: c.pin.unwrap_or(task.pin),
+            parent_id,
             owner_id: c.owner_id.unwrap_or(task.owner_id.clone()),
             revision: task.revision + 1,
             updated_at: now_iso(),
@@ -190,9 +205,12 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
             return Err(CoreError::Invalid("a blocked task needs a blocked_reason".into()));
         }
         // A pin is a Home-level selection: only a top-level task (an initiative) can carry one.
+        // Post-move parent: a pinned task moves under a parent only if this write unpins it.
         if next.pin < 0 || (next.pin > 0 && next.parent_id.is_some()) {
             return Err(CoreError::Invalid("only a top-level task can be pinned (pin >= 0; 0 unpins)".into()));
         }
+        // A move keeps the epoch: runs belong to the task, not its place. Oompa portfolio admission
+        // re-walks ancestry per request (oompa-portfolio.ts `portfolioTask`): new roots judge it.
         // Pattern: fix-guards (docs/patterns.md#fix-guards)
         // Unpausing used to bump the epoch too, silently cancelling a request queued while the
         // task was paused (it showed `task_paused`, then vanished instead of running). Only
@@ -203,7 +221,8 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
         let epoch = task.epoch + i64::from(invalidates);
         tx.execute(
             "UPDATE task SET title = ?2, done_criteria = ?3, status = ?4, next_action = ?5, blocked_reason = ?6, evidence = ?7,
-               paused = ?8, position = ?9, owner_id = ?10, epoch = ?11, revision = ?12, updated_at = ?13, pin = ?14 WHERE id = ?1",
+               paused = ?8, position = ?9, owner_id = ?10, epoch = ?11, revision = ?12, updated_at = ?13, pin = ?14, parent_id = ?15
+             WHERE id = ?1",
             params![
                 task.id,
                 next.title,
@@ -218,10 +237,41 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
                 epoch,
                 next.revision,
                 next.updated_at,
-                next.pin
+                next.pin,
+                next.parent_id
             ],
         )?;
         cancel_queued(tx, "task_epoch_stale", None, "task_id = ?2 AND task_epoch < ?3", params![next.updated_at, task.id, epoch])?;
+        // The keyed payload is the idempotency hash, so it cannot hold the old parent (write-time
+        // state); an unkeyed `task.move` fact, written once with the update, keeps it.
+        if moved {
+            let payload = json!({"from": task.parent_id, "to": next.parent_id, "revision": next.revision});
+            record_fact(tx, &Mutation { op: "task.move", payload, key: None, ..m }, &task.id)?;
+        }
         Ok(task.id.clone())
     })
+}
+
+/// Where a new child of `parent` goes (create's rule): after its siblings; top level takes 0.
+fn appended_position(tx: &Transaction, parent: Option<&str>) -> Result<i64> {
+    let sql = "SELECT coalesce(max(position), -1) + 1 FROM task WHERE parent_id = ?1";
+    parent.map_or(Ok(0), |parent| Ok(tx.query_row(sql, [parent], |r| r.get(0))?))
+}
+
+/// κ for a move: the new `parent_id`, or a typed refusal. Runs inside the idempotent work, so a
+/// replayed move is not re-judged against the tree it has since changed.
+fn checked_move(tx: &Transaction, task: &Task, parent: &ParentRef) -> Result<Option<String>> {
+    let ParentRef::Task { id } = parent else { return Ok(None) };
+    let parent = get_task(tx, id)?;
+    // The new parent's ancestor chain, itself included (PK lookups; UNION stops on a cycle).
+    let sql = "WITH RECURSIVE up(id) AS (SELECT ?1 UNION SELECT t.parent_id FROM task t JOIN up ON t.id = up.id WHERE t.parent_id IS NOT NULL)
+               SELECT EXISTS(SELECT 1 FROM up WHERE id = ?2)";
+    let cycle: bool = tx.prepare_cached(sql)?.query_row(params![id, task.id], |r| r.get(0))?;
+    let refusal = match () {
+        _ if parent.workspace_id != task.workspace_id => format!("it is in workspace {}", parent.workspace_id),
+        _ if parent.status == TaskStatus::Cancelled => "it is cancelled".to_string(),
+        _ if cycle => "that is the task's own subtree (a cycle)".to_string(),
+        _ => return Ok(Some(parent.id)),
+    };
+    Err(CoreError::Invalid(format!("cannot move {} under {id}: {refusal}", task.id)))
 }
