@@ -18,6 +18,8 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
+  watch,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -40,6 +42,15 @@ const INPUTS = [
 ];
 const INPUT_PATTERNS = [/^client\/tsconfig[^/]*\.json$/];
 const SKIPPED = new Set(['node_modules', 'dist', '.DS_Store']);
+
+/** Is `relative` (repo-relative, '/'-separated) a file the bundle is built from? Same definition as the hash. */
+export function isClientInput(relative) {
+  if (relative.split('/').some((segment) => SKIPPED.has(segment))) return false;
+  return (
+    INPUTS.some((input) => relative === input || relative.startsWith(`${input}/`)) ||
+    INPUT_PATTERNS.some((pattern) => pattern.test(relative))
+  );
+}
 
 function* walk(root, relative) {
   const absolute = path.join(root, relative);
@@ -174,4 +185,97 @@ export async function ensureClientBuild({
   rmSync(previous, { recursive: true, force: true });
   writeFileSync(stampFile, JSON.stringify({ hash: freshness.hash }));
   return { kind: 'built', ms: now() - startedAt };
+}
+
+/**
+ * Keep client/dist current while the dev runtime is up (phones are served the production
+ * bundle, which used to refresh only at boot). Pattern: one build at a time, trailing edge.
+ *
+ * - fs.watch on the hash's own inputs (isClientInput), so a build's writes to dist/ and the
+ *   cache never retrigger it. Events only mark "dirty"; ensureClientBuild's content hash decides
+ *   whether anything really changed, so a touch with identical bytes is a silent no-op.
+ * - Debounce: a build starts `debounceMs` after the LAST event.
+ * - Coalescing: events during a build set `dirty`; when it ends, exactly one more debounced
+ *   build runs, however many edits arrived.
+ * - The build is the existing child + staging + atomic swap path, run under `nice` because the
+ *   machine is often oversubscribed. Nothing here touches the parent's NODE_ENV.
+ * `onOutcome(outcome, ms)` fires for builds that ran (Built or Failed), not for Skipped.
+ */
+export function watchClientBuild({
+  repositoryRoot,
+  cacheDirectory,
+  log = () => {},
+  signal,
+  buildCommand = viteBuildCommand,
+  debounceMs = 3000,
+  niceness = 10,
+  onOutcome = () => {},
+  now = Date.now,
+}) {
+  let timer = null;
+  let building = false;
+  let dirty = false;
+  let closed = false;
+  const niced = (clientRoot, out) => {
+    const spec = buildCommand(clientRoot, out);
+    return {
+      ...spec,
+      command: 'nice',
+      args: ['-n', String(niceness), spec.command, ...spec.args],
+    };
+  };
+  const schedule = () => {
+    clearTimeout(timer);
+    timer = setTimeout(run, debounceMs);
+  };
+  async function run() {
+    if (closed) return;
+    building = true;
+    dirty = false;
+    const startedAt = now();
+    const outcome = await ensureClientBuild({
+      repositoryRoot,
+      cacheDirectory,
+      log,
+      signal,
+      buildCommand: niced,
+      now,
+    }).catch((error) => ({ kind: 'failed', message: error.message }));
+    building = false;
+    if (outcome.kind !== 'skipped') onOutcome(outcome, now() - startedAt);
+    if (dirty && !closed) schedule();
+  }
+  const onEvent = (base) => (_type, filename) => {
+    if (closed || !filename) return;
+    if (!isClientInput(path.posix.join(base, filename.split(path.sep).join('/')))) return;
+    dirty = true;
+    if (!building) schedule();
+  };
+  const watchers = [];
+  const add = (relative, recursive) => {
+    try {
+      watchers.push(watch(path.join(repositoryRoot, relative), { recursive }, onEvent(relative)));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  };
+  const flatDirectories = new Set(['client']); // client/tsconfig*.json (INPUT_PATTERNS)
+  for (const input of INPUTS) {
+    let kind = 'missing';
+    try {
+      kind = statSync(path.join(repositoryRoot, input)).isDirectory() ? 'directory' : 'file';
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (kind === 'directory') add(input, true);
+    else if (kind === 'file') flatDirectories.add(path.posix.dirname(input));
+  }
+  for (const directory of flatDirectories) add(directory, false);
+  return {
+    close() {
+      closed = true;
+      clearTimeout(timer);
+      for (const watcher of watchers) watcher.close();
+    },
+  };
 }

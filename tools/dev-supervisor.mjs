@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createBootRecorder, perfDirectory } from './boot-phases.mjs';
-import { ensureClientBuild } from './client-build.mjs';
+import { ensureClientBuild, watchClientBuild } from './client-build.mjs';
 import { startBackend, startCompiler, startVite } from './dev-runtime.mjs';
 import { LOCAL_DOMAIN_ENV, detectLocalDomain } from './local-domain.mjs';
 
@@ -338,7 +338,7 @@ const log = (line) => process.stdout.write(`${line}\n`);
  * backend or Vite starts. Returns the exit code.
  */
 async function runServices(services, boot, recordBackend = () => {}) {
-  const running = { compilers: [], backend: null, vite: null };
+  const running = { compilers: [], backend: null, vite: null, clientWatch: null };
   const abortClientBuild = new AbortController();
   let stopping = null;
   const press = pressCounter();
@@ -351,6 +351,7 @@ async function runServices(services, boot, recordBackend = () => {}) {
     }
     stopping = name;
     abortClientBuild.abort();
+    running.clientWatch?.close();
     for (const compiler of running.compilers) compiler.close();
     void running.vite?.close();
     if (running.backend) running.backend.stop(name);
@@ -380,6 +381,23 @@ async function runServices(services, boot, recordBackend = () => {}) {
               : `[client-build] ${outcome.kind} (${Math.round(ms)}ms)`
           );
         });
+    }
+    if (services.includes('client-build') && process.env.UNLEASHD_MOBILE_REBUILD !== '0') {
+      // Phones get the production bundle: keep it current as client inputs change.
+      running.clientWatch = watchClientBuild({
+        repositoryRoot,
+        cacheDirectory: COMPILER_STATE,
+        log: (line) => log(`[client-build] ${line}`),
+        signal: abortClientBuild.signal,
+        onOutcome: (outcome, ms) => {
+          boot.phase('client-rebuild', ms, { outcome: outcome.kind });
+          log(
+            outcome.kind === 'failed'
+              ? `[client-build] rebuild failed: ${outcome.message}; keeping the previous client/dist`
+              : `[client-build] rebuilt for mobile (${Math.round(ms)}ms)`
+          );
+        },
+      });
     }
     if (services.includes('compilers')) {
       const startedAt = performance.now();

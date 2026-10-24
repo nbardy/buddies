@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createBootRecorder } from './boot-phases.mjs';
-import { ensureClientBuild } from './client-build.mjs';
+import { ensureClientBuild, watchClientBuild } from './client-build.mjs';
 import { assertPortsFree, claimDevRuntime, taskPlan } from './dev-supervisor.mjs';
 
 test('the client bundle is never a serial step in front of the backend', () => {
@@ -108,6 +108,60 @@ test('a failed client build keeps the previous dist and stays stale', async (t) 
   assert.equal((await ensureClientBuild(failing)).kind, 'failed');
   assert.equal(readFileSync(path.join(dist, 'index.html'), 'utf8'), before);
   assert.equal((await ensureClientBuild(failing)).kind, 'failed', 'still stale, so it retries');
+});
+
+test('client watcher: a burst of edits is one build, an edit during a build is one follow-up', async (t) => {
+  const { root, cache } = clientFixture(t);
+  const buildLog = path.join(root, 'builds.log');
+  // Slow enough that an edit can land mid-build; appends one line per build that ran.
+  const slowBuild = (clientRoot, outDirectory) => ({
+    command: process.execPath,
+    cwd: clientRoot,
+    env: { NODE_ENV: 'production' },
+    args: [
+      '-e',
+      `const fs = require('fs'), path = require('path');
+       fs.appendFileSync(${JSON.stringify(buildLog)}, 'build\\n');
+       setTimeout(() => {
+         fs.mkdirSync(${JSON.stringify(outDirectory)}, { recursive: true });
+         fs.writeFileSync(path.join(${JSON.stringify(outDirectory)}, 'index.html'), 'x');
+       }, 400);`,
+    ],
+  });
+  const builds = () =>
+    existsSync(buildLog) ? readFileSync(buildLog, 'utf8').trim().split('\n').length : 0;
+  const outcomes = [];
+  const watcher = watchClientBuild({
+    repositoryRoot: root,
+    cacheDirectory: cache,
+    buildCommand: slowBuild,
+    debounceMs: 150,
+    onOutcome: (outcome) => outcomes.push(outcome.kind),
+  });
+  t.after(() => watcher.close());
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const until = async (condition) => {
+    for (let waited = 0; !condition(); waited += 20) {
+      assert.ok(waited < 20000, 'timed out');
+      await sleep(20);
+    }
+  };
+  const edit = (n) =>
+    writeFileSync(path.join(root, 'client/src/main.ts'), `export const n = ${n};`);
+  // fs.watch needs a moment to arm before the first edit is guaranteed to be seen.
+  await sleep(200);
+
+  for (let n = 1; n <= 4; n++) {
+    edit(n);
+    await sleep(30);
+  }
+  await until(() => builds() === 1); // the child has started and runs for 400 ms
+  edit(5);
+  edit(6); // both land mid-build
+  await until(() => outcomes.length === 2);
+  await sleep(600); // a stray third build would have started by now
+  assert.equal(builds(), 2, 'four quick edits are one build; mid-build edits are one follow-up');
+  assert.deepEqual(outcomes, ['built', 'built']);
 });
 
 test('boot phases join on the boot id in <data dir>/observability/perf/boot.jsonl', (t) => {

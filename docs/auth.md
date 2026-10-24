@@ -228,18 +228,26 @@ substitute for transport security on an untrusted network.
 Both are cheap and each removes the cleartext-on-the-wire caveat:
 
 1. **Serve over https through Tailscale.** One command, real cert, no config
-   change in this repo. Point it at the port that serves the **client**:
+   change in this repo. Point it at the backend serving the compressed mobile build:
 
    ```bash
-   tailscale serve --bg --https=443 http://127.0.0.1:7489
+   # While running pnpm dev:
+   tailscale serve --bg --https=443 http://127.0.0.1:7499
+   # With pnpm start, use 7489 (or the configured PORT) instead.
    ```
 
-   | Mode | Client (serve this) | API |
+   | Mode | Mobile (serve this) | Desktop |
    |---|---|---|
-   | built app, `pnpm start` | `7489` (or `PORT`): UI, API and `/ws` on one port | same port |
-   | development, `pnpm dev` | `7489`: Vite, which proxies `/api` and `/ws` | `7499`, never serve it |
+   | built app, `pnpm start` | `7489` (or `PORT`): UI, API and `/ws` | same port |
+   | development, `pnpm dev` | `7499`: built UI, API and `/ws` | `7489`: Vite with live updates |
 
-   Serving `7499` in development gives the phone the API with no client to load.
+   `pnpm dev` refreshes `client/dist` at startup after the shared compilers finish
+   and before the servers start, then rebuilds it in a niced child process 3 s after client
+   edits settle (one build at a time, staged and swapped atomically; `UNLEASHD_MOBILE_REBUILD=0`
+   opts out). Desktop edits continue to update through Vite.
+   The dev client compresses its module responses after the auth gate; API
+   compression stays in the backend so streaming responses are not buffered
+   again by Vite. Guard: `tools/dev-client-compression.test.mjs`.
    Setup → **Connect from mobile** (or **Connect mobile** at the bottom of the
    desktop sidebar) reads `tailscale status` and `tailscale serve status`, and
    only shows a URL when Serve answers on this node's *current* MagicDNS name and
