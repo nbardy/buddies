@@ -111,5 +111,6 @@ test('defaultRoots names every provider format', () => {
     'gemini',
     'muse',
     'opencode',
+    'pi',
   ]);
 });
