@@ -77,15 +77,16 @@ export interface OompaOwner {
     readonly expiresAt: number;
   };
   readonly grant: Omit<BuddyGrant, 'observe'>;
-  readonly validators: Record<
-    string,
-    {
-      command: string[];
-      timeout_seconds: number;
-      reconcile_on_rejection?: boolean;
-      source_files: Record<string, string>;
-    }
-  >;
+  readonly validators: Record<string, OompaValidator>;
+  /** Config `task_execution.default_validator`: the oracle for tasks without an entry above.
+   * Absent = none pinned (explicit-only configs and journals written before it existed). */
+  readonly defaultValidator?: OompaValidator;
+}
+export interface OompaValidator {
+  command: string[];
+  timeout_seconds: number;
+  reconcile_on_rejection?: boolean;
+  source_files: Record<string, string>;
 }
 export type ExecutionOwner = TurnOwner | EphemeralOwner | OompaOwner;
 

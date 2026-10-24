@@ -32,6 +32,7 @@ import type { BuddyGrant, Grants, OwnerChat, Role, TurnGrant } from './grants';
 import { attachToRelay } from './mcp-relay';
 import { resolveForWorkspace, wakes } from './mentions';
 import { OompaAccept, OompaAction, type OompaHost, createOompaHost } from './oompa';
+import { oompaAdmits, oompaSelection } from './oompa-scope';
 import {
   TAIL_MAX,
   checkedEvidence,
@@ -797,10 +798,14 @@ const REVIEWER_TOOLS = {
 // Never send a detached worker the general owner tool table. Guard: oompa-mcp.test.ts.
 async function oompaTask(deps: ToolDeps, grant: BuddyGrant, id: string) {
   deps.oompa?.guard(grant);
-  if (!grant.oompa?.taskIds.includes(id)) throw new Error('task is outside this Oompa execution');
+  // Explicit-only grants refuse before any read; subtree membership needs the task's ancestry.
+  if (!grant.oompa?.taskIds.includes(id) && !grant.oompa?.rootTaskIds)
+    throw new Error('task is outside this Oompa execution');
   const task = await deps.core.getTask(id);
   if (task.workspaceId !== grant.workspaceId)
     throw new Error('task is outside this Oompa workspace');
+  if (!(await oompaAdmits(deps.core, grant.oompa, task)))
+    throw new Error('task is outside this Oompa execution');
   return task;
 }
 const OOMPA_TOOLS = {
@@ -811,9 +816,13 @@ const OOMPA_TOOLS = {
     async handler(deps, grant, raw) {
       const { action } = TASKS_TOOL.schema.parse(raw);
       if (action.kind === 'get') {
-        await oompaTask(deps, grant, action.taskId);
+        const task = await oompaTask(deps, grant, action.taskId);
         const detail = await taskDetail(deps.core, grant.author, action.taskId, 20);
-        detail.children = detail.children.filter((task) => grant.oompa!.taskIds.includes(task.id));
+        // Every child of a subtree member is itself one; otherwise only explicit IDs.
+        const subtree = await oompaAdmits(deps.core, { ...grant.oompa!, taskIds: [] }, task);
+        detail.children = detail.children.filter(
+          (child) => subtree || grant.oompa!.taskIds.includes(child.id)
+        );
         return taskDetailView(detail);
       }
       if ('workspace' in action.scope && action.scope.workspace !== grant.workspaceId)
@@ -825,7 +834,11 @@ const OOMPA_TOOLS = {
       // whole selection every loop, and summary rows forced one `get` per task — each also opening
       // the task channel and reading 20 comments. Ten workers x forty tasks dropped connections
       // (swarm 00733e4f, 2026-10-23). The selection is owner-bounded, so one list is one scan.
-      const tasks = await Promise.all(grant.oompa!.taskIds.map((id) => oompaTask(deps, grant, id)));
+      // Roots add their live subtree (with parentId): Oompa derives containers per scan.
+      deps.oompa?.guard(grant);
+      const tasks = await oompaSelection(deps.core, grant.oompa!, grant.workspaceId);
+      if (tasks.some((task) => task.workspaceId !== grant.workspaceId))
+        throw new Error('task is outside this Oompa workspace');
       return tasks
         .filter((task) => action.include === 'all' || isOpenTask(task))
         .filter((task) => !('taskId' in action.scope) || task.parentId === action.scope.taskId)
