@@ -1,0 +1,78 @@
+
+test('review reproduction: a queued model pick suppresses current-thread MCP steering', async () => {
+  const w = await world();
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let arrived!: () => void;
+  const started = new Promise<void>(resolve => { arrived = resolve; });
+  try {
+    w.during.set(1, async () => { arrived(); await held; });
+    const say = async (body: string, replyToId?: string) => {
+      const p = await w.post(OWNER, { kind: 'id', id: w.general.id }, {
+        kind: 'inform', body, replyToId, evidence: [], mentions: [], broadcast: false, key: body,
+      });
+      w.announce(p);
+      return p;
+    };
+    const root = await say(`[@Lead](buddy:${w.lead.id}) continue the design`);
+    await started;
+    w.picks.set(w.lead.id, createDefaultConversationConfig('codex'));
+    const correction = await say(`[@Lead](buddy:${w.lead.id}) 3 tasks × 3 models × 3 versions = 27 subagents`, root.id);
+    await until(async () => (await w.runs(w.lead.id)).find(r => r.input.kind === 'deliver' && r.input.postId === correction.id && r.status === 'queued'), 'queued picked correction');
+    const result = await call(w.turns[0].mcp, 'doc_read', { kind: 'working' });
+    assert.equal(result.isError, false, result.text);
+    assert.equal(result.content.length, 1, 'BROKEN: correction was not appended at a completed Buddy tool');
+    assert.equal(w.turns.length, 1, 'original job continues');
+    const pending = (await w.runs(w.lead.id)).find(r => r.input.kind === 'deliver' && r.input.postId === correction.id)!;
+    assert.equal(pending.status, 'queued', 'BROKEN: correction remains queued');
+  } finally {
+    release();
+    await until(async () => (await w.runs(w.lead.id)).every(r => r.status !== 'running' && r.status !== 'queued'), 'all fake turns drained');
+    await w.close();
+  }
+});
+
+test('review reproduction: same-identity worker progress and revised direction do not route live', async () => {
+  const w = await world();
+  let releaseParent!: () => void;
+  let releaseChild!: () => void;
+  const parentHeld = new Promise<void>(r => { releaseParent = r; });
+  const childHeld = new Promise<void>(r => { releaseChild = r; });
+  let requestId = '';
+  try {
+    w.during.set(1, async turn => {
+      const ask = await call(turn.mcp, 'post', { channel: { direct: [] }, kind: 'request', body: 'Build the proposal files; keep running', worker: { provider: 'codex' }, key: 'review-spawn' });
+      assert.equal(ask.isError, false, ask.text);
+      requestId = ask.value.id;
+      await parentHeld;
+    });
+    w.during.set(2, async () => { await childHeld; });
+    const schedule = await w.core.putSchedule(OWNER, { buddyId: w.lead.id, name: 'review', cron: '0 9 * * *', timezone: 'UTC', prompt: 'Delegate and keep working', enabled: true, key: 'review-schedule' });
+    await w.core.fireSchedule(OWNER, schedule.id);
+    w.emit({ kind: 'changed' });
+    await until(() => requestId && w.turns.length === 2, 'parent and worker both running');
+    const parent = w.turns[0];
+    const child = w.turns[1];
+    const direction = await call(parent.mcp, 'post', { channel: { direct: [] }, replyToId: requestId, body: 'Revised direction: 3×3×3; continue useful work', key: 'review-direction' });
+    assert.equal(direction.isError, false, direction.text);
+    const childTool = await call(child.mcp, 'doc_read', { kind: 'working' });
+    assert.equal(childTool.content.length, 1, 'BROKEN: worker cannot receive its own Buddy-authored direction');
+    const question = await call(child.mcp, 'post', { channel: { direct: [] }, replyToId: requestId, body: 'Question: should the three versions share a rubric?', key: 'review-question' });
+    assert.equal(question.isError, false, question.text);
+    const parentTool = await call(parent.mcp, 'doc_read', { kind: 'working' });
+    assert.equal(parentTool.content.length, 1, 'BROKEN: parent receives no worker question');
+    const rows = await w.runs(w.lead.id);
+    for (const post of [direction.value, question.value]) {
+      assert.ok(!rows.some(r => r.input.kind === 'deliver' && r.input.postId === post.id), 'BROKEN: ordinary inform queued no targeted delivery');
+    }
+    assert.equal(w.stopped.size, 0, 'neither worker nor parent stopped');
+    assert.equal((await w.core.getPost(OWNER, requestId)).request.state, 'awaiting', 'question did not complete the assignment');
+    const answer = await call(child.mcp, 'post', { answers: requestId, body: 'Completed; evidence files available', evidence: [], key: 'review-final' });
+    assert.equal(answer.isError, false, answer.text);
+    assert.ok((await w.runs(w.lead.id)).some(r => r.input.kind === 'deliver' && r.input.postId === answer.value.id), 'existing final answer DOES enqueue a correlated return');
+  } finally {
+    releaseChild(); releaseParent();
+    await until(async () => (await w.runs(w.lead.id)).every(r => r.status !== 'running' && r.status !== 'queued'), 'all fake turns drained');
+    await w.close();
+  }
+});
