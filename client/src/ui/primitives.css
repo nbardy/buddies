@@ -242,3 +242,55 @@
   padding: var(--sp-6) var(--sp-6) 0;
   border-top: 1px solid var(--border-subtle);
 }
+
+/* Icon-only copy button over a block (code blocks in chat and channels): hidden
+   until its .ui-copy-host is hovered or focused, always shown on touch and while
+   it reports Copied / Copy failed. Placement and surface belong to the view. */
+.ui-copy-host {
+  position: relative;
+}
+
+.ui-copy-overlay {
+  position: absolute;
+  z-index: 1;
+  padding: var(--sp-2);
+  border-radius: var(--ui-radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.ui-copy-overlay .copy-btn__label {
+  display: none;
+}
+
+.ui-copy-host:is(:hover, :focus-within) .ui-copy-overlay,
+.ui-copy-overlay:not(.copy-btn--idle) {
+  opacity: 1;
+}
+
+.ui-copy-overlay:is(:hover, :focus-visible) {
+  color: var(--text-emphasis);
+}
+
+/* Result colours for every CopyButton (views/transcript/markdown-components). */
+.copy-btn.copy-btn--copied {
+  color: var(--accent-success);
+}
+
+.copy-btn.copy-btn--failed {
+  color: var(--danger);
+}
+
+@media (hover: none) {
+  .ui-copy-overlay {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-copy-overlay {
+    transition: none;
+  }
+}

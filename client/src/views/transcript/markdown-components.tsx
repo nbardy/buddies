@@ -1,6 +1,5 @@
 import type { ComponentPropsWithoutRef, ReactNode } from 'react';
-import { isValidElement } from 'react';
-import type { Components } from 'react-markdown';
+import type { Components, ExtraProps } from 'react-markdown';
 import { FilePreview, getPreviewType, getPreviewableLocalHref } from '../../components/FilePreview';
 import type { CopyState } from '../../hooks/useCopyAction';
 import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
@@ -147,23 +146,6 @@ function getCodeText(children: unknown): string | null {
   return null;
 }
 
-function getRawCodeText(children: unknown): string | null {
-  if (Array.isArray(children)) {
-    for (const child of children) {
-      const rawCode = getRawCodeText(child);
-      if (rawCode) return rawCode;
-    }
-    return null;
-  }
-
-  if (!isValidElement<Record<string, unknown>>(children)) return null;
-
-  const rawCode = children.props['data-raw-code'];
-  if (typeof rawCode === 'string' && rawCode.length > 0) return rawCode;
-
-  return getRawCodeText(children.props.children);
-}
-
 // -- Copy button --------------------------------------------------------------
 
 function CopyGlyph({ children }: { children: ReactNode }) {
@@ -207,7 +189,7 @@ export const COPY_GLYPH: Record<CopyState, ReactNode> = {
 };
 
 /**
- * The label is always in the DOM; `.message-code-copy-btn` hides it with CSS so
+ * The label is always in the DOM; `.ui-copy-overlay` hides it with CSS so
  * the code-block variant stays icon-only. Keeps the JSX free of a variant prop
  * and keeps the accessible name on `aria-label` either way.
  */
@@ -228,14 +210,26 @@ export function CopyButton({ text, className }: { text: string; className: strin
   );
 }
 
-function CodeBlockFrame({
+/**
+ * A fenced code block with a hover copy button; chat and channel posts share it.
+ * The text comes from the hast node, so highlighting spans never reach the
+ * clipboard. It used to come from a `data-raw-code` attribute looked up on
+ * props that never carried it, so chat code blocks rendered no button at all.
+ */
+export function CodeBlockFrame({
+  node,
   children,
-  rawCode,
+  frameClassName,
+  copyClassName,
   ...preProps
-}: ComponentPropsWithoutRef<'pre'> & { rawCode: string | null }) {
+}: ComponentPropsWithoutRef<'pre'> &
+  ExtraProps & { frameClassName: string; copyClassName: string }) {
   return (
-    <div className="message-code-block">
-      {rawCode && <CopyButton text={rawCode} className="message-code-copy-btn" />}
+    <div className={`${frameClassName} ui-copy-host`}>
+      <CopyButton
+        text={hastText(node).replace(/\n$/, '')}
+        className={`${copyClassName} ui-copy-overlay`}
+      />
       <pre {...preProps}>{children}</pre>
     </div>
   );
@@ -255,13 +249,13 @@ function hastText(node: unknown): string {
 // resolved against workingDirectory; absolute paths pass through unchanged.
 export function makeMarkdownComponents(workingDirectory: string): Components {
   return {
-    pre({ children, ...rest }) {
-      return (
-        <CodeBlockFrame rawCode={getRawCodeText(children)} {...rest}>
-          {children}
-        </CodeBlockFrame>
-      );
-    },
+    pre: (props) => (
+      <CodeBlockFrame
+        frameClassName="message-code-block"
+        copyClassName="message-code-copy-btn"
+        {...props}
+      />
+    ),
     a({ node, href, children, ...rest }) {
       const previewableLocalHref = href ? getPreviewableLocalHref(href) : null;
       if (previewableLocalHref) {
@@ -286,22 +280,21 @@ export function makeMarkdownComponents(workingDirectory: string): Components {
     },
     // Thin dispatcher: classify once, switch exhaustively, zero work in cases.
     code({ children, className, ...rest }) {
-      const rawText = getCodeText(children);
-      const text = rawText?.trim() ?? null;
+      const text = getCodeText(children)?.trim() ?? null;
       const content = classifyCodeContent(text, className);
 
       switch (content.kind) {
         case 'empty':
         case 'plain_code':
           return (
-            <code className={className} data-raw-code={rawText ?? undefined} {...rest}>
+            <code className={className} {...rest}>
               {children}
             </code>
           );
 
         case 'syntax_highlighted':
           return (
-            <code className={content.className} data-raw-code={rawText ?? undefined} {...rest}>
+            <code className={content.className} {...rest}>
               {children}
             </code>
           );
@@ -314,7 +307,7 @@ export function makeMarkdownComponents(workingDirectory: string): Components {
           // all-or-nothing: if ANY line wasn't a valid path, the ENTIRE block
           // lost FilePreview functionality.
           return (
-            <code className={className} data-raw-code={rawText ?? undefined} {...rest}>
+            <code className={className} {...rest}>
               {content.entries.map((entry, i) => (
                 <span key={i}>
                   {entry.kind === 'file_path' ? (
@@ -347,19 +340,14 @@ export function makeMarkdownComponents(workingDirectory: string): Components {
             }
           }
           return (
-            <a
-              href={content.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              data-raw-code={rawText ?? undefined}
-            >
+            <a href={content.url} target="_blank" rel="noopener noreferrer">
               <code {...rest}>{children}</code>
             </a>
           );
 
         case 'single_file_path':
           return (
-            <span data-raw-code={rawText ?? undefined}>
+            <span>
               <FilePreview
                 path={content.path}
                 type={content.type}

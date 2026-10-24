@@ -284,3 +284,34 @@ test('document file URLs classify for the overlay without treating web pages as 
     assert.equal(channelFilePreview(target), null);
   }
 });
+
+// Regression, #buddies-dev 2026-10-12: the chat code-block copy button looked
+// for a `data-raw-code` prop that its `pre` children never carried, so no chat
+// code block rendered one. Chat (highlighted, as live) and channel posts share
+// CodeBlockFrame now; each fence must render exactly one copy button.
+test('fenced code renders a copy button in chat and in channel posts', async () => {
+  const { default: rehypeHighlight } = await import('rehype-highlight');
+  const { makeMarkdownComponents } = await import('../src/views/transcript/markdown-components');
+  const { defineMarkdownFlavor, markdownPipeline, renderMarkdownCached } = await import(
+    '../src/utils/markdown-pipeline'
+  );
+  const text = 'Run:\n\n```bash\necho "one"\n```\n\nand `inline`.\n\n```\ntwo\n```';
+  const copyButtons = (html: string) => html.match(/<button[^>]*ui-copy-overlay[^>]*>/g) ?? [];
+  const chat = renderToStaticMarkup(
+    <MemoryRouter>
+      {renderMarkdownCached(
+        markdownPipeline(defineMarkdownFlavor([]), [rehypeHighlight]),
+        text,
+        makeMarkdownComponents('/tmp')
+      )}
+    </MemoryRouter>
+  );
+  const channel = renderToStaticMarkup(
+    <MemoryRouter>
+      <ChannelMarkdown body={legacyBody(text)} buddyNames={{}} tasks={new Map()} />
+    </MemoryRouter>
+  );
+  assert.match(chat, /hljs-built_in/);
+  assert.equal(copyButtons(chat).length, 2);
+  assert.equal(copyButtons(channel).length, 2);
+});

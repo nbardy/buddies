@@ -238,7 +238,6 @@
 
 /* Code blocks — elevated to darkest bg for clear separation from prose */
 .message-code-block {
-  position: relative;
   margin: 12px 0;
 }
 
@@ -248,48 +247,14 @@
 }
 
 .message-code-copy-btn {
-  position: absolute;
   top: 8px;
   left: 8px;
-  z-index: 1;
   background: transparent;
   border: none;
-  border-radius: var(--ui-radius);
-  color: var(--text-muted);
-  cursor: pointer;
-  opacity: 0;
-  padding: var(--sp-2);
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 
-/* Icon-only variant: CopyButton always renders the label so the same component
-   serves both call sites, and the code-block variant hides it here. The
-   accessible name lives on aria-label, so hiding this is not a11y loss. */
-.message-code-copy-btn .copy-btn__label {
-  display: none;
-}
-
-.message-code-block:hover .message-code-copy-btn,
-.message-code-block:focus-within .message-code-copy-btn,
-.message-code-copy-btn.copy-btn--copied,
-.message-code-copy-btn.copy-btn--failed {
-  opacity: 1;
-}
-
-.message-code-copy-btn:hover,
-.message-code-copy-btn:focus-visible {
+.message-code-copy-btn:is(:hover, :focus-visible, :not(.copy-btn--idle)) {
   background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
-  color: var(--text-emphasis);
-}
-
-.message-code-copy-btn.copy-btn--copied {
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
-  color: var(--accent-success);
-}
-
-.message-code-copy-btn.copy-btn--failed {
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
-  color: var(--danger);
 }
 
 /* -----------------------------------------------------------------------------
@@ -345,14 +310,6 @@
   color: var(--text-emphasis);
 }
 
-.message-action-btn.copy-btn--copied {
-  color: var(--accent-success);
-}
-
-.message-action-btn.copy-btn--failed {
-  color: var(--danger);
-}
-
 /* Keyboard users get no hover; never hide a focused control. */
 .message-action-btn:focus-visible {
   opacity: 1;
@@ -361,8 +318,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .message-action-btn,
-  .message-code-copy-btn {
+  .message-action-btn {
     transition: none;
   }
 }
@@ -573,19 +529,4 @@
 .message-footer-copy:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-.message-footer-copy.copy-btn--copied {
-  color: var(--accent-success);
-}
-
-.message-footer-copy.copy-btn--failed {
-  color: var(--danger);
-}
-
-/* No hover on touch: code-block copy buttons stay visible. */
-@media (hover: none) {
-  .message-code-copy-btn {
-    opacity: 1;
-  }
 }

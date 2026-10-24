@@ -22,6 +22,7 @@ import { useMarkdownPipeline } from '../../utils/lazyMarkdownPlugins';
 import { defineMarkdownFlavor, renderMarkdownCached } from '../../utils/markdown-pipeline';
 import { remarkBreaks } from '../../utils/remark-breaks';
 import { formatToolUse } from '../../utils/tool-presentation';
+import { CodeBlockFrame } from '../../views/transcript/markdown-components';
 import { AskUserQuestionWidget } from '../AskUserQuestion';
 import { BuddyBuilderResultCard } from './BuddyBuilderResultCard';
 import { ChannelTaskOverlay } from './ChannelTaskOverlay';
@@ -320,6 +321,13 @@ const CHANNEL_COMPONENTS: Components = {
       </li>
     );
   },
+  pre: (props) => (
+    <CodeBlockFrame
+      frameClassName="channel-code-block"
+      copyClassName="channel-code-copy-btn"
+      {...props}
+    />
+  ),
   a: ({ href, children }) => <ChannelLink href={href}>{children}</ChannelLink>,
   img: ({ src, alt }) => {
     const source = typeof src === 'string' ? src : '';
