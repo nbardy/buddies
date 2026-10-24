@@ -2154,3 +2154,97 @@ test('only a new owner launch grants an explicit resumed window after expiry wit
     await w.close();
   }
 });
+
+// Owner request 2026-10-24: "point at a parent task and do all of its children". The grant must
+// authorize the root's subtree by canonical ancestry (including children created mid-run), and
+// nothing outside it; a frozen launch-time list would starve new children, and a missing
+// ancestry check would leak every workspace task to a scoped worker.
+test('root task grant admits the live subtree by ancestry and refuses tasks outside it', async () => {
+  const w = await fixture();
+  try {
+    const create = (title: string, parentId?: string) =>
+      w.core.upsertTask(OWNER, {
+        kind: 'create',
+        ownerId: w.buddy.id,
+        title,
+        doneCriteria: `${title} accepted`,
+        key: `root-${title}`,
+        ...(parentId ? { parentId } : {}),
+      });
+    const root = await create('Beta delivery');
+    const epic = await create('Epic', root.id);
+    const leaf = await create('Leaf', epic.id);
+    const base = JSON.parse(fs.readFileSync(w.configPath, 'utf8'));
+    const defaultValidator = Object.values(base.task_execution.validators)[0];
+    const write = (taskExecution: Record<string, unknown>) =>
+      fs.writeFileSync(
+        w.configPath,
+        JSON.stringify({
+          ...base,
+          task_backend: { ...base.task_backend, task_ids: [], root_task_ids: [root.id] },
+          task_execution: taskExecution,
+        })
+      );
+
+    write({ validators: {} });
+    const refused = await rpc(w.endpoint.spec(w.owner()), 'oompa', {
+      action: {
+        kind: 'launch',
+        workspaceId: w.ws.id,
+        buddyId: w.buddy.id,
+        workspacePath: w.repo,
+        configPath: w.configPath,
+        maxSeconds: 60,
+      },
+      key: 'root-no-default',
+    });
+    assert.equal(refused.error, true);
+    assert.match(refused.text, /default_validator/);
+
+    write({ validators: {}, default_validator: defaultValidator });
+    const child = await w.launch();
+    assert.deepEqual(child.grant.oompa!.rootTaskIds, [root.id]);
+    assert.deepEqual(child.grant.oompa!.taskIds, []);
+
+    const get = (taskId: string) => rpc(child.spec, 'tasks', { action: { kind: 'get', taskId } });
+    assert.equal((await get(leaf.id)).error, false, 'grandchild is admitted by ancestry');
+    for (const id of [w.task.id, w.foreign.id])
+      assert.equal((await get(id)).error, true, 'workspace task outside the subtree is refused');
+    const outsideWrite = await rpc(child.spec, 'task_write', {
+      write: {
+        kind: 'update',
+        taskId: w.foreign.id,
+        baseRevision: w.foreign.revision,
+        changes: { status: 'in_progress' },
+      },
+      key: 'root-outside-write',
+    });
+    assert.equal(outsideWrite.error, true);
+    assert.equal((await w.core.getTask(w.foreign.id)).status, 'open');
+
+    const late = await create('Late child', epic.id);
+    assert.equal((await get(late.id)).error, false, 'child created after launch is admitted');
+    const listed = await rpc(child.spec, 'tasks', {
+      action: { kind: 'list', scope: { workspace: w.ws.id }, include: 'all' },
+    });
+    assert.equal(listed.error, false, listed.text);
+    const ids = new Set(listed.value.map((task: { id: string }) => task.id));
+    for (const id of [root.id, epic.id, leaf.id, late.id]) assert.ok(ids.has(id));
+    for (const id of [w.task.id, w.foreign.id]) assert.equal(ids.has(id), false);
+    const row = listed.value.find((task: { id: string }) => task.id === leaf.id);
+    assert.equal(row.parentId, epic.id, 'rows carry parentId so Oompa can derive containers');
+
+    const claimed = await rpc(child.spec, 'task_write', {
+      write: {
+        kind: 'update',
+        taskId: leaf.id,
+        baseRevision: leaf.revision,
+        changes: { status: 'in_progress' },
+      },
+      key: 'root-leaf-claim',
+    });
+    assert.equal(claimed.error, false, claimed.text);
+  } finally {
+    await w.close();
+  }
+});

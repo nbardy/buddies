@@ -41,7 +41,12 @@ export interface BuddyGrant extends GrantBase {
   /** The hooks its process was spawned with: what can reach it mid-turn (harness-steering.ts). */
   readonly hooks: HookSet;
   /** Owner-delegated capability of one host-owned Oompa execution, never a turn token. */
-  readonly oompa?: { readonly executionId: string; readonly taskIds: readonly string[] };
+  readonly oompa?: {
+    readonly executionId: string;
+    readonly taskIds: readonly string[];
+    /** Config root_task_ids: admits each root's live subtree (oompa-scope.ts). Absent = none. */
+    readonly rootTaskIds?: readonly string[];
+  };
 }
 
 /** The owner's Buddy Builder chat: no Buddy of its own; it may only read and edit the team. */
@@ -128,6 +133,7 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
       buddyId: string;
       workspaceId: string;
       taskIds: readonly string[];
+      rootTaskIds: readonly string[];
       principal: Actor;
       expiresAt: number;
     }): BuddyGrant {
@@ -145,7 +151,11 @@ export function createGrants(options: { ttlMs: number; now?: () => number }) {
           hooks: { t: 'unrecorded' },
           author: buddyActor(input.buddyId),
           principal: input.principal,
-          oompa: { executionId: input.executionId, taskIds: [...input.taskIds] },
+          oompa: {
+            executionId: input.executionId,
+            taskIds: [...input.taskIds],
+            ...(input.rootTaskIds.length ? { rootTaskIds: [...input.rootTaskIds] } : {}),
+          },
         },
         ttlMs,
         input.expiresAt
