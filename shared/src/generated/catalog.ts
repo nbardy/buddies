@@ -1,5 +1,5 @@
 // DO NOT EDIT - generated from catalog.jsonc
-// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-10-08.haiku-5.5)
+// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-10-12.muse-wonder-1.0)
 // Generator: shared/scripts/gen-catalog.ts
 // Run: pnpm --filter @unleashd/shared gen:catalog
 
@@ -429,6 +429,38 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
       {
         "id": "muse-spark-1.3-contributor",
         "displayName": "Muse Spark 1.3 Contributor",
+        "reasoning": {
+          "levels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "ultra"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "muse-wonder-1.0",
+        "displayName": "Muse Wonder 1.0",
+        "reasoning": {
+          "levels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "ultra"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "muse-wonder-full-1.0",
+        "displayName": "Muse Wonder Full 1.0",
         "reasoning": {
           "levels": [
             "none",
