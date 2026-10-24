@@ -8,6 +8,7 @@ import {
   adoption,
   holdsGrant,
 } from '../turns/execution-state';
+import { forEachConcurrently } from '../ingest/conversation-list';
 import type { FoundExecution, TurnOwner } from '../turns/executions';
 import type { PolicyAdoption } from '../turns/policy';
 
@@ -31,6 +32,8 @@ export interface AdoptionPorts {
   attemptInterrupted(attemptId: string): void;
   logger: Pick<Console, 'log' | 'warn' | 'error'>;
 }
+
+const ADOPTION_CONCURRENCY = 8;
 
 type Turn = Extract<FoundExecution, { t: 'turn' }>;
 
@@ -85,24 +88,52 @@ export async function adoptExecutions(
   found: readonly FoundExecution[],
   ports: AdoptionPorts
 ): Promise<AdoptedRun[]> {
-  const adopted: AdoptedRun[] = [];
-  for (const item of found) {
-    switch (item.t) {
-      case 'ephemeral':
-      case 'unreadable':
-        ports.discard(item);
-        continue;
-      case 'unstarted':
-        refuse(item, 'the provider never started', ports);
-        continue;
-      case 'turn': {
-        const plan = adoption(item.phase, item.process.t);
-        adopted.push(...(await ADOPT[plan.t](item, plan as never, ports)));
-        continue;
-      }
+  // Fix-guard: serial adoption cost ~0.45 s per turn (16 turns = 7 s of a 18 s boot, 2026-10-23).
+  // Journals of DIFFERENT conversations are independent, so they adopt concurrently (bounded);
+  // journals of ONE conversation stay in scan order, because the second adopt of a busy
+  // conversation is refused and which one wins must not depend on timing. Results keep scan order.
+  const results: AdoptedRun[][] = found.map(() => []);
+  const lanes = new Map<string, number[]>();
+  found.forEach((item, index) => {
+    const key = laneOf(item);
+    const lane = lanes.get(key) ?? [];
+    lane.push(index);
+    lanes.set(key, lane);
+  });
+  await forEachConcurrently([...lanes.values()], ADOPTION_CONCURRENCY, async (lane) => {
+    for (const index of lane) results[index] = await adoptOne(found[index], ports);
+  });
+  return results.flat();
+}
+
+/** Journals of one conversation share a lane; every other journal is its own. */
+function laneOf(item: FoundExecution): string {
+  switch (item.t) {
+    case 'turn':
+    case 'unstarted':
+      return `conversation:${item.owner.conversationId}`;
+    case 'oompa':
+    case 'ephemeral':
+    case 'unreadable':
+      return `journal:${item.dir}`;
+  }
+}
+
+async function adoptOne(item: FoundExecution, ports: AdoptionPorts): Promise<AdoptedRun[]> {
+  switch (item.t) {
+    case 'oompa':
+      return []; // Oompa journals are not this pass's: it never touched them.
+    case 'ephemeral':
+    case 'unreadable':
+      ports.discard(item);
+      return [];
+    case 'unstarted':
+      return refuse(item, 'the provider never started', ports);
+    case 'turn': {
+      const plan = adoption(item.phase, item.process.t);
+      return ADOPT[plan.t](item, plan as never, ports);
     }
   }
-  return adopted;
 }
 
 function refuse(

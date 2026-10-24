@@ -27,6 +27,7 @@ pub enum OpenError {
 // diagnostics, never authority, so a corrupt file is moved aside (kept for `sqlite3 .recover`) and
 // a fresh one opened. Guard: `corrupt_store_is_quarantined_and_replaced`.
 #[cfg(any(feature = "node", test))]
+#[cfg_attr(not(test), allow(dead_code))] // the server uses `open_fast`; this is the strict form
 pub fn open(path: &PathBuf) -> Result<Opened, OpenError> {
     match open_checked(path) {
         Ok(db) => Ok(Opened { db, quarantined: None }),
@@ -61,6 +62,15 @@ fn quarantine(path: &PathBuf) -> std::io::Result<PathBuf> {
 
 #[cfg(any(feature = "node", test))]
 fn open_checked(path: &PathBuf) -> rusqlite::Result<Connection> {
+    let db = open_unverified(path)?;
+    verify(&db)?;
+    Ok(db)
+}
+
+/// Open and migrate without reading every page. Open, the pragmas and the schema batch still touch
+/// the header and schema b-tree, so a hard failure there still surfaces as SQLITE_CORRUPT.
+#[cfg(any(feature = "node", test))]
+fn open_unverified(path: &PathBuf) -> rusqlite::Result<Connection> {
     let db = Connection::open(path)?;
     db.pragma_update(None, "journal_mode", "WAL")?;
     // macOS fsync() does not flush the drive cache; without F_FULLFSYNC a power cut mid-checkpoint
@@ -78,6 +88,12 @@ fn open_checked(path: &PathBuf) -> rusqlite::Result<Connection> {
         CREATE INDEX IF NOT EXISTS turn_attempt_session ON turn_attempt(provider_session_id, updated_at DESC);
         CREATE INDEX IF NOT EXISTS turn_attempt_retention ON turn_attempt(updated_at DESC, attempt_id DESC)
             WHERE state IN ('succeeded','failed','cancelled','interrupted');
+        -- Additive (2026-10-23, no schema bump): `recoverable` at boot reads the few non-terminal rows;
+        -- without this partial index it scanned every row's ~20 KB snapshot (10,002 rows, 198 MB:
+        -- ~1 s of the attempt_journal boot phase). Tiny: only live attempts are in it. The first
+        -- start after upgrading builds it (one scan); an older build ignores it.
+        CREATE INDEX IF NOT EXISTS turn_attempt_open ON turn_attempt(updated_at, attempt_id)
+            WHERE state IN ('queued','starting','running','stopping');
         CREATE TABLE IF NOT EXISTS turn_attempt_import (name TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS turn_attempt_event (
             seq INTEGER PRIMARY KEY, event_id TEXT NOT NULL UNIQUE, attempt_id TEXT,
@@ -86,16 +102,63 @@ fn open_checked(path: &PathBuf) -> rusqlite::Result<Connection> {
         CREATE INDEX IF NOT EXISTS turn_attempt_event_conversation ON turn_attempt_event(conversation_id, seq DESC);
         CREATE INDEX IF NOT EXISTS turn_attempt_event_attempt ON turn_attempt_event(attempt_id, seq DESC);",
     )?;
-    // quick_check reads every page (~0.5 s on a 75 MB store) and reports damage as rows, or
-    // fails outright with SQLITE_CORRUPT on a broken b-tree; both mean "corrupt".
+    Ok(db)
+}
+
+/// quick_check reads every page (~0.5 s on a 75 MB store, 1.3 s on 198 MB) and reports damage as
+/// rows, or fails outright with SQLITE_CORRUPT on a broken b-tree; both mean "corrupt".
+#[cfg(any(feature = "node", test))]
+fn verify(db: &Connection) -> rusqlite::Result<()> {
     let verdict: String = db.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
     match verdict.as_str() {
-        "ok" => Ok(db),
+        "ok" => Ok(()),
         _ => Err(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
             Some(verdict),
         )),
     }
+}
+
+/// Open for the server: the store is usable as soon as it opens; the full-page `quick_check` runs
+/// afterwards via `check_and_replace` on a background thread. Hard corruption at open still quarantines here.
+// Pattern: background-integrity-check (docs/patterns.md#background-integrity-check)
+// Fix-guard: the synchronous quick_check ran serially before the HTTP listener, 1.3 s over a
+// 198 MB store + 45 MB WAL, for a diagnostics-only journal (2026-10-23 boot profile).
+// Guard: `torn_store_is_replaced_after_a_background_check`.
+#[cfg(feature = "node")]
+fn open_fast(path: &PathBuf) -> Result<Opened, OpenError> {
+    match open_unverified(path) {
+        Ok(db) => Ok(Opened { db, quarantined: None }),
+        Err(e) if is_corrupt(&e) => {
+            let moved = quarantine(path)?;
+            Ok(Opened { db: open_unverified(path)?, quarantined: Some(moved) })
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Run `quick_check` on a separate read-only connection (WAL readers do not block the writer). On
+/// damage, swap a fresh store in under the writer's lock and move the old files aside, exactly as
+/// `open` does for a file that fails at open. Returns where the damage went.
+#[cfg(any(feature = "node", test))]
+fn check_and_replace(
+    db: &std::sync::Mutex<Connection>,
+    path: &PathBuf,
+) -> Result<Option<PathBuf>, OpenError> {
+    let reader = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    match verify(&reader) {
+        Ok(()) => return Ok(None),
+        Err(e) if is_corrupt(&e) => {}
+        Err(e) => return Err(e.into()),
+    }
+    drop(reader);
+    let mut guard = db.lock().expect("attempt connection poisoned");
+    // Close the damaged connection before renaming its files; appends wait on the lock.
+    let damaged = std::mem::replace(&mut *guard, Connection::open_in_memory()?);
+    drop(damaged);
+    let moved = quarantine(path)?;
+    *guard = open_unverified(path)?;
+    Ok(Some(moved))
 }
 
 /// Import a complete v1 history in one transaction. A failed import leaves no marker or rows.
@@ -294,23 +357,38 @@ pub mod node {
     #[napi]
     pub struct TurnAttempts {
         db: Arc<Mutex<Connection>>,
-        quarantined: Option<String>,
+        quarantined: Arc<Mutex<Option<String>>>,
     }
 
     #[napi]
     impl TurnAttempts {
         #[napi(factory)]
         pub async fn open(db_path: String) -> Result<Self> {
-            let opened = tokio::task::spawn_blocking(move || open(&PathBuf::from(db_path))).await.map_err(err)?.map_err(err)?;
-            Ok(Self {
-                db: Arc::new(Mutex::new(opened.db)),
-                quarantined: opened.quarantined.map(|p| p.to_string_lossy().into_owned()),
-            })
+            let path = PathBuf::from(db_path);
+            let opened = {
+                let path = path.clone();
+                tokio::task::spawn_blocking(move || open_fast(&path)).await.map_err(err)?.map_err(err)?
+            };
+            let db = Arc::new(Mutex::new(opened.db));
+            let quarantined = Arc::new(Mutex::new(opened.quarantined.map(|p| p.to_string_lossy().into_owned())));
+            {
+                let (db, quarantined) = (db.clone(), quarantined.clone());
+                std::thread::spawn(move || match check_and_replace(&db, &path) {
+                    Ok(Some(moved)) => {
+                        eprintln!("[attempts] background quick_check found damage; moved to {}", moved.display());
+                        *quarantined.lock().expect("quarantine slot poisoned") = Some(moved.to_string_lossy().into_owned());
+                    }
+                    Ok(None) => {}
+                    Err(e) => eprintln!("[attempts] background quick_check failed: {e}"),
+                });
+            }
+            Ok(Self { db, quarantined })
         }
-        /// Directory a corrupt predecessor was moved into when this store opened, if any.
+        /// Directory a corrupt predecessor was moved into when this store opened or when the
+        /// background check found damage, if any.
         #[napi(getter)]
         pub fn quarantined(&self) -> Option<String> {
-            self.quarantined.clone()
+            self.quarantined.lock().expect("quarantine slot poisoned").clone()
         }
         #[napi]
         pub async fn append(&self, snapshot: Option<String>, event: String) -> Result<bool> {
@@ -401,6 +479,11 @@ mod tests {
             "EXPLAIN QUERY PLAN SELECT updated_at, attempt_id FROM turn_attempt WHERE state IN ('succeeded','failed','cancelled','interrupted') ORDER BY updated_at DESC, attempt_id DESC LIMIT 1 OFFSET 10000",
             [], |r| r.get(3)).unwrap();
         assert!(plan.contains("turn_attempt_retention"), "{plan}");
+        // Fix-guard: boot's `recoverable` must not scan the snapshot column of every attempt.
+        let plan: String = db.query_row(
+            "EXPLAIN QUERY PLAN SELECT snapshot FROM turn_attempt WHERE state IN ('queued','starting','running','stopping') ORDER BY updated_at, attempt_id",
+            [], |r| r.get(3)).unwrap();
+        assert!(plan.contains("turn_attempt_open"), "{plan}");
         let tx = db.transaction().unwrap();
         for i in 0..KEEP_TERMINAL {
             let id = format!("a{i:05}");
@@ -462,5 +545,37 @@ mod tests {
         append(&mut opened.db, None, &event).unwrap();
         drop(opened);
         assert!(open(&path).unwrap().quarantined.is_none(), "fresh store reopened as corrupt");
+    }
+
+    /// The server's open skips quick_check. A torn file that still opens must be caught by the
+    /// background check, replaced under the live handle, and keep accepting appends throughout.
+    #[test]
+    fn torn_store_is_replaced_after_a_background_check() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("attempts.sqlite");
+        {
+            let mut db = open(&path).unwrap().db;
+            let tx = db.transaction().unwrap();
+            for i in 0..2000 {
+                tx.execute(
+                    "INSERT INTO turn_attempt_event(event_id, timestamp, event) VALUES (?1, 't', ?2)",
+                    params![format!("e{i}"), "x".repeat(200)],
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+            db.pragma_update(None, "wal_checkpoint", "TRUNCATE").unwrap();
+        }
+        let mut bytes = std::fs::read(&path).unwrap();
+        let len = bytes.len();
+        bytes[len - 16 * 4096..].fill(0);
+        std::fs::write(&path, bytes).unwrap();
+
+        let live = std::sync::Mutex::new(open_unverified(&path).expect("a torn tail still opens"));
+        let moved = check_and_replace(&live, &path).unwrap().expect("damage was not detected");
+        assert!(moved.join("attempts.sqlite").exists());
+        let event = serde_json::json!({"eventId":"fresh","timestamp":"t"}).to_string();
+        append(&mut live.lock().unwrap(), None, &event).unwrap();
+        assert!(check_and_replace(&live, &path).unwrap().is_none(), "fresh store checked as corrupt");
     }
 }

@@ -4,7 +4,8 @@ import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { ChannelModelPicker } from './ChannelModelPicker';
 import { errorText, retryFailedReply } from './api';
-import type { Post, ThreadPage } from './types';
+import { seatsResource } from './channel-data';
+import type { Post, ThreadSeat } from './types';
 import './ChannelComposer.css';
 
 // Retry and new-chat actions reuse the mention chip's model picker. A Buddy turn needs
@@ -117,16 +118,18 @@ export function HarnessPicker({
 /** Failed replies and decision checks share model recovery in the original thread. */
 export function ReplyRetry({ post }: { post: Post }) {
   const retryable = post.purpose === 'reply_failed' && isHarnessRetryFailure(post.body);
-  const { data } = usePolledFetch<ThreadPage>(
-    retryable && post.rootId
-      ? `/api/buddies/posts/${encodeURIComponent(post.rootId)}/thread`
-      : null,
-    30_000
+  // Fix-guard (2026-10-23 request storm): this polled the whole root thread every 30 s per failed
+  // row. It reads the root's seats instead: one batched resource shared by every row and composer
+  // of that thread, refreshed by `channel_changed` naming the root. Guard:
+  // client/test/threads-request-storm.test.ts.
+  const { data } = usePolledFetch<ThreadSeat[]>(
+    retryable && post.rootId ? seatsResource(post.rootId) : null,
+    0
   );
   const author = post.author;
   const seed =
     author.kind === 'buddy'
-      ? (data?.seats.find((seat) => seat.buddyId === author.id)?.config ?? null)
+      ? (data?.find((seat) => seat.buddyId === author.id)?.config ?? null)
       : null;
   if (!retryable) return null;
   return (

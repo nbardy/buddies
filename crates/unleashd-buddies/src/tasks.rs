@@ -68,6 +68,31 @@ impl Store {
         collect(self.conn.prepare_cached(&sql)?.query_map([arg], task_row)?)
     }
 
+    /// The workspace directory's Task list: `list_tasks(Workspace)` without the free-text columns.
+    /// Same WHERE and ORDER BY as that query, so it plans identically.
+    pub fn list_task_summaries(&self, workspace_id: &str) -> Result<Vec<TaskSummary>> {
+        let sql = "SELECT id, workspace_id, owner_id, parent_id, title, status, paused, next_action, blocked_reason, \
+            position, pin, revision, created_at, updated_at FROM task WHERE workspace_id = ?1 ORDER BY updated_at DESC";
+        collect(self.conn.prepare_cached(sql)?.query_map([workspace_id], |r| {
+            Ok(TaskSummary {
+                id: r.get(0)?,
+                workspace_id: r.get(1)?,
+                owner_id: r.get(2)?,
+                parent_id: r.get(3)?,
+                title: r.get(4)?,
+                status: r.get(5)?,
+                paused: r.get(6)?,
+                next_action: r.get(7)?,
+                blocked_reason: r.get(8)?,
+                position: r.get(9)?,
+                pin: r.get(10)?,
+                revision: r.get(11)?,
+                created_at: r.get(12)?,
+                updated_at: r.get(13)?,
+            })
+        })?)
+    }
+
     /// Each Buddy's unfinished top-level tasks in a workspace, and how many of them are blocked:
     /// the directory card's "3 open · 1 blocked". A Buddy with none is absent. The filter repeats
     /// `task_live`'s WHERE term for term, which is what lets SQLite use that partial index.

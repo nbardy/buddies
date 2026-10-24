@@ -35,6 +35,7 @@ function createFixture(activeInitially: boolean) {
   let schedulerStops = 0;
   let flushes = 0;
   let exits = 0;
+  let kills = 0;
   const pendingFlush = deferred();
   const ports: ShutdownPorts = {
     activeSchedulerRuns: () => activeSchedulerRuns,
@@ -54,6 +55,9 @@ function createFixture(activeInitially: boolean) {
     exit: () => {
       exits += 1;
     },
+    kill: () => {
+      kills += 1;
+    },
   };
   return {
     pendingFlush,
@@ -71,6 +75,7 @@ function createFixture(activeInitially: boolean) {
       flushes,
       exits,
     }),
+    kills: () => kills,
   };
 }
 
@@ -218,6 +223,7 @@ test('reload resumes the scheduler when pausing reveals newly active work', asyn
     exit: () => {
       exits += 1;
     },
+    kill: () => undefined,
   });
   assert.equal(controller.completeStartup(), true);
 
@@ -267,6 +273,7 @@ for (const exit of ['reload', 'SIGTERM'] as const) {
       exit: () => {
         exited += 1;
       },
+      kill: () => undefined,
     });
     t.after(() => {
       controller.dispose();
@@ -313,7 +320,7 @@ test('a backend exits when its dev runner goes away', async (t) => {
        const controller = registerShutdownHandlers({ forceExitGraceMs: 1000, flushGraceMs: 1000 }, {
          activeSchedulerRuns: () => 0, pauseScheduler() {},
          resumeScheduler() {}, stopScheduler() {}, flushState() {},
-         exit: (code) => process.exit(code),
+         exit: (code) => process.exit(code), kill() {},
        });
        controller.completeStartup();
        setInterval(() => {}, 1000);
@@ -380,4 +387,24 @@ test('shutdown force-exits on the shutdown grace, not the reload grace', async (
   await Promise.resolve();
   assert.equal(fixture.counts().exits, 1);
   controller.dispose();
+});
+
+/**
+ * Fix-guard (2026-10-23): `--replace` waited 10 s and SIGKILLed a 25 h backend. The process must end
+ * itself within drain grace + flush grace + 2 s even when `exit` does not take effect.
+ */
+test('a shutdown whose exit never lands is killed from inside', async (t) => {
+  const fixture = createFixture(false);
+  const controller = createShutdownController(
+    { forceExitGraceMs: 10, flushGraceMs: 10 },
+    fixture.ports
+  );
+  t.after(() => controller.dispose());
+  assert.equal(controller.completeStartup(), true);
+  controller.handleSigterm();
+  fixture.pendingFlush.resolve();
+  await sleep(500);
+  assert.equal(fixture.kills(), 0, 'the margin has not elapsed yet');
+  await sleep(2_000);
+  assert.equal(fixture.kills(), 1);
 });

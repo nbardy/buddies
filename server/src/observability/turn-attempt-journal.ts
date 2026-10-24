@@ -8,6 +8,7 @@ import {
   isTerminalAttemptState,
 } from '@unleashd/shared';
 import { foldAttempt } from './attempt-fold';
+import { labelled } from './event-loop-stall';
 import { parseJournalEvent } from './legacy-attempts';
 import {
   type StructuredObservabilityLogger,
@@ -70,6 +71,9 @@ export interface TouchTurnAttemptInput {
 
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 // A serialized observation is one SQLite snapshot/event transaction. TurnRunner still owns settlement.
+const BACKGROUND_CHECK_POLL_MS = 5_000;
+const BACKGROUND_CHECK_POLLS = 36; // 3 minutes
+
 export class TurnAttemptJournal {
   readonly serverBootId: string;
   private readonly directory: string;
@@ -112,6 +116,7 @@ export class TurnAttemptJournal {
           serverBootId: this.serverBootId,
           quarantinedTo: store.quarantined,
         });
+      this.watchBackgroundCheck(store);
       // Import and completion marker commit together. Source files stay byte-for-byte untouched.
       await this.importLegacy(store);
       this.store = store;
@@ -144,6 +149,33 @@ export class TurnAttemptJournal {
       });
       return { recoveredAttempts: recoverable.length };
     });
+  }
+
+  /**
+   * Pattern: background-integrity-check (docs/patterns.md#background-integrity-check). `open` no
+   * longer runs quick_check; a Rust thread does, and on damage swaps in a fresh store and sets
+   * `quarantined` LATER. Without this poll that late quarantine was invisible (the open-time log
+   * above only sees damage found at open). The getter is a mutex read, so a 5 s poll that gives up
+   * after the check could plausibly have finished costs nothing.
+   */
+  private watchBackgroundCheck(store: TurnAttempts): void {
+    const alreadyReported = store.quarantined;
+    let polls = 0;
+    const timer = setInterval(
+      labelled('timer attempts-integrity-poll', () => {
+        polls += 1;
+        const moved = store.quarantined;
+        if (moved && moved !== alreadyReported) {
+          this.logger.error('journal_quarantined', {
+            serverBootId: this.serverBootId,
+            quarantinedTo: moved,
+          });
+        } else if (polls < BACKGROUND_CHECK_POLLS) return;
+        clearInterval(timer);
+      }),
+      BACKGROUND_CHECK_POLL_MS
+    );
+    timer.unref();
   }
 
   startAttempt(input: StartTurnAttemptInput): Promise<TurnAttemptSnapshot> {

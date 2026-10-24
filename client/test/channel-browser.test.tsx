@@ -124,7 +124,7 @@ test('workspace slack page resolves the workspace name and member names from the
     key: '/api/buddies/overview',
     load: async () => [rosterFixture([lead, dev], { id: 'ws-slack', name: 'unleashd' })],
   });
-  await loadResource({ key: '/api/buddies/tasks?workspaceId=ws-slack', load: async () => [] });
+  await loadResource({ key: '/api/buddies/workspaces/ws-slack/tasks', load: async () => [] });
   const html = renderToStaticMarkup(
     <MemoryRouter initialEntries={['/buddies/workspaces/ws-slack/channels?channel=ch_a']}>
       <Provider store={jotaiStore}>
@@ -237,11 +237,8 @@ test('posts render markdown mentions, Task chips and media; the rail keeps one B
         workspaceId: 'ws-rich',
         ownerId: 'lead',
         title: 'Ship channels',
-        doneCriteria: 'Shipped',
         status: 'in_progress',
         paused: false,
-        epoch: 1,
-        evidence: [],
         position: 0,
         pin: 0,
         revision: 1,

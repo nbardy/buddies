@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
-import { type ViteDevServer, createLogger, defineConfig } from 'vite';
+import compression from 'compression';
+import { type Connect, type ViteDevServer, createLogger, defineConfig } from 'vite';
 import {
   buildSessionCookie,
   decideAuth,
@@ -221,12 +222,30 @@ function keepPageOnResumePlugin() {
   };
 }
 
+function devCompressionPlugin() {
+  return {
+    name: 'unleashd-dev-compression',
+    configureServer(server: ViteDevServer) {
+      // Phone startup transferred ~4 MB without compression and stalled between imports.
+      // Keep auth first and API stream compression in the backend. Guard: dev-client-compression.test.mjs.
+      server.middlewares.use(
+        compression({
+          filter: (request, response) =>
+            !(request.originalUrl ?? request.url)?.startsWith('/api/') &&
+            compression.filter(request, response),
+        }) as Connect.NextHandleFunction
+      );
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   customLogger: viteLogger,
   plugins: [
     react(),
     devAuthPlugin(devAuthPolicy, devTailnetOwner),
+    devCompressionPlugin(),
     openPreferredDevUrlPlugin(),
     keepPageOnResumePlugin(),
   ],

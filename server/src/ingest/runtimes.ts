@@ -1,11 +1,12 @@
 /**
- * Runtimes built from durable records, never from transcripts (T13b S2): at boot every app-created
- * record becomes one (Buddy seats, pending first messages and forks are looked up by id); any
- * other listed conversation becomes one on first use. Before, a conversation outside the loader's
- * 500-row window 404'd on open. Guard: server/test/ingest-history.test.ts.
+ * Runtimes built from durable records, never from transcripts (T13b S2): at boot only the records
+ * that NEED a live runtime become one (`needsRuntime`); every other listed conversation, app-created
+ * or discovered, becomes one on first use through `materialize`. Before, a conversation outside the
+ * loader's 500-row window 404'd on open. Guards: server/test/ingest-history.test.ts and
+ * server/test/lazy-recovery.test.ts.
  */
 
-import type { SubAgent as NativeSubAgent, SessionRow } from '@unleashd/ingest';
+import type { SubAgent as NativeSubAgent, RecordSummary, SessionRow } from '@unleashd/ingest';
 import type { BuddyContext, ConversationRow, SubAgent } from '@unleashd/shared';
 import { encodeRows } from '@unleashd/shared';
 import type { ConversationRegistry } from '../application/context';
@@ -28,6 +29,8 @@ export interface RuntimeBuilderDependencies {
   configService: Pick<ConversationConfigService, 'hydrate'>;
   /** The list's join of a record with its sessions (undefined before the list booted). */
   joined(conversationId: string): JoinedConversation | undefined;
+  /** Conversations that run or hold input with no command to open them: queued owner inputs and live Buddy runs. */
+  pinned(): Promise<ReadonlySet<string>>;
   createConversation(options: ConversationOptions): ConversationRuntime;
   resolveBuddyConversation(context: BuddyContext): Promise<{
     context: BuddyContext;
@@ -40,7 +43,7 @@ export interface RuntimeBuilderDependencies {
 }
 
 export interface RuntimeBuilder {
-  /** Boot: a runtime for every app-created record. */
+  /** Boot: a runtime for every app-created record that needs one now (the rest: on first use). */
   recover(): Promise<void>;
   /** The runtime of a conversation, built from its record on first use. */
   materialize(conversationId: string): Promise<ConversationRuntime | undefined>;
@@ -75,16 +78,23 @@ export function createRuntimeBuilder(dependencies: RuntimeBuilderDependencies): 
     const joined = dependencies.joined(record.conversationId);
     const workingDirectory = record.workingDirectory ?? joined?.row?.cwd;
     if (!workingDirectory) return null;
-    const hydrated = await dependencies.configService.hydrate({
-      conversationId: record.conversationId,
-      sessionBindings: [],
-      discoveredKind: record.kind,
-      sessionEvidence: {
-        provider: record.config.provider,
-        reportedModel: record.lastResolvedConfig?.modelId,
-        source: 'external_session',
+    // The fork source's runtime is read SYNCHRONOUSLY by the first turn (runtime.ts
+    // `chatForkSource`), so a runtime that has not started a session holds its source's first.
+    const forkSource = record.creation?.resumedFromConversationId;
+    if (forkSource && !record.currentSession) await materialize(forkSource);
+    const hydrated = await dependencies.configService.hydrate(
+      {
+        conversationId: record.conversationId,
+        sessionBindings: [],
+        discoveredKind: record.kind,
+        sessionEvidence: {
+          provider: record.config.provider,
+          reportedModel: record.lastResolvedConfig?.modelId,
+          source: 'external_session',
+        },
       },
-    });
+      record
+    );
     const currentSession =
       hydrated.record.currentSession?.provider === hydrated.state.config.provider
         ? hydrated.record.currentSession
@@ -159,11 +169,38 @@ export function createRuntimeBuilder(dependencies: RuntimeBuilderDependencies): 
     return register(conversationId, () => dependencies.records.getByConversationId(conversationId));
   }
 
+  /**
+   * Whether a record's runtime must exist before anyone opens it. Pattern: lazy-runtimes
+   * (docs/patterns.md#lazy-runtimes). Eager recovery built a runtime per app-created record (8,176
+   * on 2026-10-23, ~4-5 s of boot) though the list index already serves their rows. Every reader
+   * of a runtime by id (runner host, Buddy seats, branches, WS create) now goes through
+   * `materialize`, so a cold record is never "absent" and never re-created. A runtime is needed now
+   * when
+   *  - it is pinned (queued inputs, live Buddy runs), or
+   *  - its first message was never dispatched (nothing else would send it).
+   * Everything else, of any kind, is cold: a record with no transcript is listed from the record
+   * alone (`bareRowOf`), not from a runtime (4,114 runtimes, 0.8-2.8 s of boot, 2026-10-23).
+   * Guards: server/test/ingest-history.test.ts "boot materializes only the records that need a
+   * runtime" and server/test/lazy-buddy-runtimes.test.ts.
+   */
+  function needsRuntime(summary: RecordSummary, pinned: ReadonlySet<string>): boolean {
+    return (
+      pinned.has(summary.conversationId) ||
+      (dependencies.joined(summary.conversationId)?.pendingFirstMessage ?? false)
+    );
+  }
+
   async function recover(): Promise<void> {
-    const summaries = await dependencies.records.listSummaries();
+    const [summaries, pinned] = await Promise.all([
+      dependencies.records.listSummaries(),
+      dependencies.pinned(),
+    ]);
     // Discovered records materialize only on use (eager recovery made 5,275 empty rows, 2026-09-06).
     const appCreated = summaries.filter(
-      (summary) => summary.status === 'active' && summary.provenance !== 'external_discovered'
+      (summary) =>
+        summary.status === 'active' &&
+        summary.provenance !== 'external_discovered' &&
+        needsRuntime(summary, pinned)
     );
     const rows: ConversationRow[] = [];
     const flush = () => {
@@ -190,7 +227,9 @@ export function createRuntimeBuilder(dependencies: RuntimeBuilderDependencies): 
       }
     });
     flush();
-    logger.log(`Recovered ${dependencies.registry.size} app conversations from their records`);
+    logger.log(
+      `Recovered ${dependencies.registry.size} of ${summaries.length} records as runtimes (the rest materialize on first use)`
+    );
   }
 
   return { recover, materialize };

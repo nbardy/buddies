@@ -15,6 +15,8 @@ import {
   type InstalledAgent,
   type MessageBody,
   ProviderSchema,
+  type ThreadSeat,
+  type ThreadSeatsResult,
   buddyExecutionPreferences,
   configFromProviderPreferences,
   legacyBody,
@@ -48,7 +50,7 @@ import type {
   LiveReach,
   Post,
   PostPage,
-  Task,
+  TaskSummary,
   ThreadPage,
   ThreadStat,
 } from './types';
@@ -206,6 +208,19 @@ export function threadFeed(rootId: string, linkedPostId: string | null): PostFee
     opens: linkedPostId === null ? NEWEST : { kind: 'from', postId: linkedPostId },
     page: (value) => ({ ...value, threads: NO_STATS }),
   };
+}
+
+/**
+ * A thread's newest page as one keyed resource: the SAME key the open thread and a card's expanded
+ * replies read, so "Show full message" on a clipped Threads card shares that fetch.
+ */
+export function threadPageResource(rootId: string) {
+  return latestResource(threadFeed(rootId, null));
+}
+
+/** The whole copy of `postId` in a thread page (the root, or a reply in its newest page). */
+export function wholePostIn(page: ThreadPage, postId: string): Post | null {
+  return page.root.id === postId ? page.root : (page.posts.find((p) => p.id === postId) ?? null);
 }
 
 /** One Task's posts across every channel: the channel browser's Task filter (T22). */
@@ -564,20 +579,20 @@ export type WorkspaceDirectory = {
   buddyNames: Readonly<Record<string, string>>;
   taskById: ReadonlyMap<string, ChannelTask>;
   /** Every Task of the workspace, todos included: the Home's pinned-project progress. */
-  tasks: readonly Task[];
+  tasks: readonly TaskSummary[];
   /** The workspace folder; null while the overview has not loaded it. */
   rootPath: string | null;
   references: readonly ChannelReference[];
 };
 
-const NO_TASKS: readonly Task[] = [];
+const NO_TASKS: readonly TaskSummary[] = [];
 const NO_OVERVIEW: BuddyOverview = [];
 
 /** Every lookup the channel views derive from the overview and a workspace's Tasks. */
 export function workspaceDirectory(
   overview: BuddyOverview,
   workspaceId: string,
-  tasks: readonly Task[],
+  tasks: readonly TaskSummary[],
   agent: InstalledAgent | null
 ): WorkspaceDirectory {
   const workspace = findWorkspace(overview, workspaceId);
@@ -596,13 +611,13 @@ export function workspaceDirectory(
 }
 
 export function workspaceTasksUrl(workspaceId: string): string {
-  return `/api/buddies/tasks?workspaceId=${encodeURIComponent(workspaceId)}`;
+  return `/api/buddies/workspaces/${encodeURIComponent(workspaceId)}/tasks`;
 }
 
 /** Members, Tasks and the @ index for one workspace, polled and cached. */
 export function useWorkspaceDirectory(workspaceId: string): WorkspaceDirectory {
   const overview = useBuddyOverview(CHANNEL_BACKSTOP_MS);
-  const tasks = usePolledFetch<Task[]>(workspaceTasksUrl(workspaceId), 15_000);
+  const tasks = usePolledFetch<TaskSummary[]>(workspaceTasksUrl(workspaceId), 15_000);
   // Polled so a first-boot install that lands while a channel is open flips the picker
   // from "Needs an agent" to the installed agent without a reload.
   const agent = usePolledFetch(DEPENDENCIES_STATUS, 15_000).data?.agent ?? null;
@@ -896,6 +911,44 @@ function readUrl(target: ReadTarget): string {
   }
 }
 
+// Pattern: one-write-path (docs/patterns.md#one-write-path)
+// Thread read marks coalesce: every unread card of the Threads view marks itself in the same
+// commit, and a POST per card was a push (and a refetch wave) per card. Marks made within
+// READ_BATCH_MS go out as ONE `reads` request; a thread marked twice keeps the later mark.
+// Fix-guard: threads request storm 2026-10-23. Guard: client/test/threads-request-storm.test.ts.
+export const READ_BATCH_MS = 50;
+let queuedReads = new Map<string, { postId: string; waiters: Array<(error?: unknown) => void> }>();
+let readTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushReads(): void {
+  const batch = queuedReads;
+  queuedReads = new Map();
+  readTimer = null;
+  const reads = [...batch].map(([rootId, { postId }]) => ({ rootId, postId }));
+  const settle = (error?: unknown) => {
+    for (const { waiters } of batch.values()) for (const done of waiters) done(error);
+  };
+  void buddyWrite('read', {}, { reads }).then(
+    () => settle(),
+    (error: unknown) => settle(error ?? new Error('read failed'))
+  );
+}
+
+/** Mark a followed thread read through `postId`; resolves when the batch it joined is written. */
+export function markThreadRead(rootId: string, postId: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const done = (error?: unknown) => (error === undefined ? resolve() : reject(error));
+    const held = queuedReads.get(rootId);
+    if (held) {
+      held.postId = postId; // the latest render is the newest the owner saw
+      held.waiters.push(done);
+    } else {
+      queuedReads.set(rootId, { postId, waiters: [done] });
+    }
+    if (readTimer === null) readTimer = setTimeout(flushReads, READ_BATCH_MS);
+  });
+}
+
 /**
  * The owner is looking at a channel or thread: mark it read through the newest
  * post rendered whenever it is on screen with something unread. A post that
@@ -916,37 +969,90 @@ export function useMarkRead(
     const write =
       kind === 'channel'
         ? buddyWrite('read', {}, { channelId: id, postId: newestPostId })
-        : buddyWrite('read', {}, { rootId: id, postId: newestPostId });
+        : markThreadRead(id, newestPostId);
     void write.catch((error: unknown) =>
       console.warn(`[channels] could not mark ${url} read:`, error)
     );
   }, [url, kind, id, newestPostId, hasUnread, visible]);
 }
 
+// Pattern: batched-reads (docs/patterns.md#batched-reads)
+// Seats are read through ONE batcher: every root asked for within SEATS_BATCH_MS (a view's
+// composers, a thread's failed-reply rows, an invalidation wave) is one `threads/seats?roots=`
+// request, and each root keeps its own cache key. Fix-guard (2026-10-23 request storm): each
+// Threads card's composer fetched the FULL /posts/:id/thread (a 0.09-1.7 s seat scan) on mount.
+// Guard: client/test/threads-request-storm.test.ts.
+export const SEATS_BATCH_MS = 10;
+const SEATS_PER_REQUEST = 50;
+type SeatWaiter = { resolve(seats: ThreadSeat[]): void; reject(error: Error): void };
+let queuedSeats = new Map<string, SeatWaiter[]>();
+let seatsTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushSeats(): void {
+  const batch = queuedSeats;
+  queuedSeats = new Map();
+  seatsTimer = null;
+  const roots = [...batch.keys()];
+  for (let at = 0; at < roots.length; at += SEATS_PER_REQUEST) {
+    const chunk = roots.slice(at, at + SEATS_PER_REQUEST);
+    const query = chunk.map(encodeURIComponent).join(',');
+    buddyApi<Record<string, ThreadSeatsResult>>(`/api/buddies/threads/seats?roots=${query}`).then(
+      (answers) => {
+        for (const root of chunk) {
+          const answer = answers[root];
+          for (const waiter of batch.get(root) ?? []) {
+            if (answer?.kind === 'seats') waiter.resolve(answer.seats);
+            else waiter.reject(new Error(answer?.message ?? 'No seats were returned'));
+          }
+        }
+      },
+      (cause: unknown) => {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        for (const root of chunk) for (const waiter of batch.get(root) ?? []) waiter.reject(error);
+      }
+    );
+  }
+}
+
+function loadSeats(rootId: string): Promise<ThreadSeat[]> {
+  return new Promise<ThreadSeat[]>((resolve, reject) => {
+    queuedSeats.set(rootId, [...(queuedSeats.get(rootId) ?? []), { resolve, reject }]);
+    if (seatsTimer === null) seatsTimer = setTimeout(flushSeats, SEATS_BATCH_MS);
+  });
+}
+
+/** A thread's seats as one keyed resource; every reader of the root shares this entry. */
+export function seatsResource(rootId: string) {
+  return resource(`/api/buddies/threads/seats?roots=${encodeURIComponent(rootId)}`, () =>
+    loadSeats(rootId)
+  );
+}
+
 /**
- * A thread's Buddy seats, owned by whoever composes in it. Reads the same keyed resource as the
- * open thread pane (`threadFeed(rootId, null)`), so the two share one cache entry and one poll.
- * Loading until the first answer; `failed` when the read fails. At the top level (no thread) the
- * composer ignores it.
+ * A thread's Buddy seats, owned by whoever composes in it. Loaded only when `wanted` (the draft
+ * holds or is typing an @mention): a card's composer used to fetch them on mount, 30 per Threads
+ * view. Seats come from the batched `seatsResource`, shared with ReplyRetry. `loading` until the
+ * first answer; `failed` when the read fails. At the top level (no thread) the composer ignores it.
  * Fix-guard: composers used to take `seats` as a prop, and ThreadsPane / ThreadsMobile / TaskPage
  * never passed it, so @mentioning a Buddy in their replies stuck Send on "Loading model…"
  * (task_01a1100d). Guard: client/test/composer-thread-seats.test.tsx.
  */
-export function useThreadSeats(rootId: string | null): {
+export function useThreadSeats(
+  rootId: string | null,
+  wanted: boolean
+): {
   seats: ThreadSeats;
   retry(): void;
 } {
-  const result = usePolledFetch(
-    rootId === null ? null : latestResource(threadFeed(rootId, null)),
-    CHANNEL_BACKSTOP_MS
-  );
+  // Pushed, not polled (`channel_changed` names the root): a poll per composer was the storm.
+  const result = usePolledFetch(rootId === null || !wanted ? null : seatsResource(rootId), 0);
   const retry = () => void result.refetch();
-  // Fix-guard: a failed thread GET used to read as `data?.seats === undefined`, i.e. `loading`,
+  // Fix-guard: a failed seat read used to read as `data === undefined`, i.e. `loading`,
   // so Send stayed disabled forever. Failure is its own state. Guard: composer-thread-seats.test.tsx.
   switch (result.kind) {
     case 'ready':
     case 'stale':
-      return { seats: { kind: 'loaded', seats: result.data.seats }, retry };
+      return { seats: { kind: 'loaded', seats: result.data }, retry };
     case 'failed':
       return { seats: { kind: 'failed' }, retry };
     case 'idle':

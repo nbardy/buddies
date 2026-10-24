@@ -44,7 +44,7 @@ fn owner_unread_matches_inboxes() {
     let request = s.post(&buddy("ic"), ChannelRef::Direct { members: vec![buddy("ic"), Actor::Owner] }, PostInput {
         kind: PostKind::Request, from_conversation_id: Some("sender".into()), ..input("request")
     }).unwrap();
-    let empty = s.create_workspace(&Actor::Owner, WorkspaceInput { name: "empty".into(), root_path: "/tmp/empty".into() }).unwrap();
+    let empty = s.create_workspace(&Actor::Owner, WorkspaceInput { repository_identity: None, name: "empty".into(), root_path: "/tmp/empty".into() }).unwrap();
     let check = |s: &mut unleashd_buddies::Store| {
         let rows = s.owner_unread().unwrap();
         for row in &rows {

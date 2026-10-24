@@ -13,10 +13,14 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import type { ExecutionHandle } from '@nbardy/agent-cli';
 import {
+  type ConversationCreationMetadata,
+  type ConversationKind,
+  buddyKind,
   ConversationDetailSchema,
   type Message,
   MessagePageSchema,
   createDefaultConversationConfig,
+  detectOompaSubcommand,
 } from '@unleashd/shared';
 import express from 'express';
 import type { ConversationRegistry } from '../src/application/context';
@@ -33,6 +37,8 @@ import { bootIngest } from '../src/ingest/boot';
 import type { ConversationList } from '../src/ingest/conversation-list';
 import { createRuntimeBuilder } from '../src/ingest/runtimes';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
+import { mergedCount, sessionMessages } from '../src/ingest/history';
+import { mergeSessionMessages } from '../src/lifecycle/session-history';
 import { fakeBuddyPort } from './fixtures/buddy-port';
 import { testExecutions } from './fixtures/fake-turn';
 import { claudeLine, ingestHome, until } from './fixtures/ingest-home';
@@ -50,7 +56,10 @@ function sessionId(n: number): string {
 }
 
 /** A server over one fixture HOME: list, runtimes and routes, as server.ts composes them. */
-async function serve(fixture: ReturnType<typeof ingestHome>) {
+async function serve(
+  fixture: ReturnType<typeof ingestHome>,
+  pinned: ReadonlySet<string> = new Set()
+) {
   const records = recordStore(fixture.appData);
   const configService = new ConversationConfigService({
     store: records,
@@ -115,6 +124,7 @@ async function serve(fixture: ReturnType<typeof ingestHome>) {
     records,
     configService,
     joined: (id) => booted.list.joined(id),
+    pinned: async () => pinned,
     createConversation: (options) => new Conversation(options),
     resolveBuddyConversation: async () => {
       throw new Error('no Buddies here');
@@ -136,6 +146,7 @@ async function serve(fixture: ReturnType<typeof ingestHome>) {
   return {
     records,
     sent,
+    registry,
     list: booted.list,
     builder,
     /** Every message, paged the way the client pages (500 at a time). */
@@ -385,6 +396,212 @@ test('a transcript rewritten on disk makes loaded clients refetch', async () => 
     assert.deepEqual(after.messages.map(textOf), ['edited question', 'edited answer']);
   } finally {
     await server.close();
+    fixture.cleanup();
+  }
+});
+
+// Boot settles multi-session records from a digest count instead of building every merged
+// history (2026-10-23: ~2 s of main thread over 618 records). The count is only trustworthy if it
+// equals the real merge on a fork (inherited prefix), a repeated identical line inside a session,
+// and a diverging tail.
+test('mergedCount equals the length of the real merge across forked sessions', async () => {
+  const fixture = ingestHome('unleashd-merged-count-');
+  const a = sessionId(1);
+  const b = sessionId(2);
+  const { project } = fixture;
+  const prefix =
+    claudeLine(a, 'user', 'Plan', T0, project) +
+    claudeLine(a, 'assistant', 'A plan', T0 + 1_000, project) +
+    claudeLine(a, 'user', 'Again', T0 + 2_000, project);
+  fs.writeFileSync(fixture.transcript(a), prefix);
+  fs.writeFileSync(
+    fixture.transcript(b),
+    prefix.replaceAll(a, b) +
+      claudeLine(b, 'assistant', 'Shipped', T0 + 3_000, project) +
+      claudeLine(b, 'user', 'Thanks', T0 + 4_000, project)
+  );
+  const { ingest, list } = await bootIngest(
+    { home: fixture.home, appDataDir: fixture.appData },
+    {
+      records: recordStore(fixture.appData),
+      runtime: () => undefined,
+      discover: async () => null,
+      externalActivity: {
+        has: () => false,
+        set: () => undefined,
+        delete: () => undefined,
+        entries: () => new Map<string, number>().entries(),
+      },
+      completionSuppression: { isSuppressed: () => false },
+      externalGraceMs: 30_000,
+      broadcast: () => undefined,
+      logger: { log: () => undefined, warn: () => undefined, error: () => undefined },
+    }
+  );
+  try {
+    const { rows } = await ingest.listSessions({ since: 0 });
+    const bound = rows.filter((row) => [a, b].includes(row.sessionId));
+    assert.equal(bound.length, 2);
+    const real = mergeSessionMessages(
+      await Promise.all(bound.map((row) => sessionMessages(ingest, row, row.messageCount)))
+    );
+    const fast = await mergedCount(
+      ingest,
+      bound.map((row) => ({ ...row, count: row.messageCount }))
+    );
+    assert.equal(real.length, 5, 'prefix of 3 counted once plus 2 new rows');
+    assert.equal(fast, real.length);
+  } finally {
+    list.stop();
+    await ingest.stop();
+    fixture.cleanup();
+  }
+});
+
+test('detectOompaSubcommand still sees quoted and wrapped oompa launches', () => {
+  assert.equal(detectOompaSubcommand('oompa swarm x.json'), 'swarm');
+  assert.equal(detectOompaSubcommand('bash -lc "cd /x && OOMPA run y.json"'), 'run');
+  assert.equal(detectOompaSubcommand('"/usr/bin/oom"\'pa\' swarm z.json'), 'swarm');
+  assert.equal(detectOompaSubcommand('ls -la && git status'), null);
+});
+
+// Fix-guard: eager recovery built one runtime per app-created record (8,176 on 2026-10-23, 4.0 s of
+// an 18 s boot) though the list index already serves their rows. Fails if recover() materializes
+// a cold listed chat again, or if a cold chat stops opening on first use.
+test('boot materializes only the records that need a runtime; a cold chat opens on first use', async () => {
+  const fixture = ingestHome('unleashd-ingest-lazy-');
+  const records = recordStore(fixture.appData);
+  const listed = [1, 2, 3].map(sessionId);
+  const [cold, pinned, coldToo] = listed;
+  const empty = sessionId(4);
+  for (const [n, id] of listed.entries()) {
+    fs.writeFileSync(
+      fixture.transcript(id),
+      claudeLine(id, 'user', `question ${n}`, T0 + n * 1_000, fixture.project)
+    );
+  }
+  for (const id of [...listed, empty]) {
+    await records.create({
+      conversationId: id,
+      kind: { t: 'chat' },
+      sessionBindings: id === empty ? [] : [{ provider: 'claude', sessionId: id }],
+      currentSession: id === empty ? undefined : { provider: 'claude', sessionId: id },
+      config: createDefaultConversationConfig('claude'),
+      workingDirectory: fixture.project,
+      provenance: 'user',
+    });
+  }
+  const server = await serve(fixture, new Set([pinned]));
+  try {
+    await server.builder.recover();
+    // Only pinned (queued inputs / live runs) holds a runtime; the listed chats and the
+    // transcript-less one (listed from its record) stay cold.
+    assert.deepEqual([...server.registry.keys()], [pinned]);
+    assert.ok(server.list.joined(empty)?.row, 'the transcript-less chat is listed from its record');
+    assert.ok(server.list.joined(cold)?.row, 'the cold chat is served from the list index');
+
+    const detail = await server.detail(cold);
+    assert.equal(detail.status, 200, 'a command on a cold conversation must still find a runtime');
+    assert.ok(server.registry.has(cold), 'first use materializes it');
+    assert.ok(!server.registry.has(coldToo), 'and only it');
+  } finally {
+    await server.close();
+    fixture.cleanup();
+  }
+});
+
+const bareKinds: Array<[string, ConversationKind]> = [
+  ['worker', { t: 'worker', swarmId: 'swarm-1', workerId: 'w1', role: 'work' }],
+  ['seat', buddyKind({ buddyId: 'buddy-1', workspaceId: 'workspace-1' })],
+  [
+    'background buddy',
+    buddyKind({ buddyId: 'buddy-1', workspaceId: 'workspace-1', automationRunId: 'run-1' }),
+  ],
+  ['builder', { t: 'builder' }],
+  ['chat', { t: 'chat' }],
+];
+
+async function createBare(
+  server: Awaited<ReturnType<typeof serve>>,
+  fixture: ReturnType<typeof ingestHome>,
+  conversationId: string,
+  kind: ConversationKind,
+  creation?: ConversationCreationMetadata
+) {
+  await server.records.create({
+    conversationId,
+    kind,
+    sessionBindings: [],
+    config: createDefaultConversationConfig('claude'),
+    workingDirectory: fixture.project,
+    creation,
+    provenance: 'user',
+  });
+}
+
+// Fix-guard: transcript-less records (4,114 on 2026-10-23: background Buddy workers, seats that never
+// ran, builders, branches) were built into runtimes at boot only because the runtime was their one
+// list row (0.8-2.8 s). Their row now comes from the record, and sidebar counts read it, so it must
+// deep-equal what the runtime would say. Fails if the two row rules drift apart.
+test('a record without a transcript is listed from the record alone, with the row its runtime would serve', async () => {
+  const fixture = ingestHome('unleashd-ingest-bare-');
+  const server = await serve(fixture);
+  try {
+    const source = sessionId(900);
+    await createBare(server, fixture, source, { t: 'chat' });
+    const cases: Array<[string, ConversationKind, ConversationCreationMetadata | undefined]> = [
+      ...bareKinds.map(([name, kind]): [string, ConversationKind, undefined] => [name, kind, undefined]),
+      ['branch', { t: 'chat' }, { resumedFromConversationId: source }],
+    ];
+    const ids = cases.map((_, n) => sessionId(901 + n));
+    for (const [n, [, kind, creation]] of cases.entries()) {
+      await createBare(server, fixture, ids[n], kind, creation);
+    }
+  } finally {
+    await server.close();
+  }
+  // A restart: every record is cold, so the rows below can only come from the records.
+  const restarted = await serve(fixture);
+  try {
+    await restarted.builder.recover();
+    assert.equal(restarted.registry.size, 0, 'boot builds no runtime for cold transcript-less records');
+    const cold = new Map(restarted.list.rows().map((row) => [row.id, row]));
+    assert.equal(cold.size, bareKinds.length + 2, 'every record is listed without a runtime');
+    for (const [id, row] of cold) {
+      const runtime = await restarted.builder.materialize(id);
+      assert.ok(runtime, `${id} opens on first use`);
+      assert.deepEqual(row, runtime.toRow(), `${id}: record-derived row equals the runtime's`);
+    }
+    assert.equal(restarted.registry.size, cold.size);
+  } finally {
+    await restarted.close();
+    fixture.cleanup();
+  }
+});
+
+test('boot still materializes a never-dispatched first message and leaves its cold neighbours', async () => {
+  const fixture = ingestHome('unleashd-ingest-pending-');
+  const server = await serve(fixture);
+  const [pending, dispatched, plain] = [1, 2, 3].map((n) => sessionId(950 + n));
+  try {
+    await createBare(server, fixture, pending, { t: 'chat' }, { initialMessage: 'hello' });
+    await createBare(
+      server,
+      fixture,
+      dispatched,
+      { t: 'chat' },
+      { initialMessage: 'hello', initialMessageDispatchedAt: new Date(T0).toISOString() }
+    );
+    await createBare(server, fixture, plain, { t: 'chat' });
+  } finally {
+    await server.close();
+  }
+  const restarted = await serve(fixture);
+  try {
+    await restarted.builder.recover();
+    assert.deepEqual([...restarted.registry.keys()], [pending]);
+  } finally {
+    await restarted.close();
     fixture.cleanup();
   }
 });

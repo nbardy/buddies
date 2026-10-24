@@ -738,7 +738,7 @@ fn team_admin_is_owner_only_and_refuses_a_reporting_cycle() {
         reasoning_effort: None,
         key: key.into(),
     };
-    let folder = WorkspaceInput { name: "Docs".into(), root_path: "/tmp/docs".into() };
+    let folder = WorkspaceInput { repository_identity: None, name: "Docs".into(), root_path: "/tmp/docs".into() };
     assert!(matches!(s.create_workspace(&buddy("lead"), folder.clone()), Err(CoreError::Denied(_))));
     let docs = s.create_workspace(&Actor::Owner, folder.clone()).unwrap();
     assert_eq!(s.create_workspace(&Actor::Owner, folder).unwrap().id, docs.id, "one workspace per folder");
@@ -1444,7 +1444,7 @@ fn a_dm_is_one_to_one_and_a_legacy_group_dm_is_read_only() {
 fn new_workspace_has_general_once() {
     let mut f = fixture();
     let s = &mut f.store;
-    let folder = WorkspaceInput { name: "Fresh".into(), root_path: "/tmp/fresh".into() };
+    let folder = WorkspaceInput { repository_identity: None, name: "Fresh".into(), root_path: "/tmp/fresh".into() };
     let ws = s.create_workspace(&Actor::Owner, folder.clone()).unwrap();
     s.create_workspace(&Actor::Owner, folder).unwrap();
     let general = |s: &Store| -> Vec<Channel> {
@@ -1454,7 +1454,7 @@ fn new_workspace_has_general_once() {
     assert_eq!(found.len(), 1, "one #general after create + re-register");
 
     s.set_channel_archived(&Actor::Owner, &found[0].id, true, "arch").unwrap();
-    s.create_workspace(&Actor::Owner, WorkspaceInput { name: "Fresh".into(), root_path: "/tmp/fresh".into() }).unwrap();
+    s.create_workspace(&Actor::Owner, WorkspaceInput { repository_identity: None, name: "Fresh".into(), root_path: "/tmp/fresh".into() }).unwrap();
     assert!(general(s).is_empty(), "archived #general stays archived; no replacement appears");
     assert_eq!(s.archived_channels(&Actor::Owner, &ws.id).unwrap().len(), 1);
 }

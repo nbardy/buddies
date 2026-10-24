@@ -17,7 +17,9 @@ register(
 );
 const { ReplyRetry } = await import('../src/components/buddies/HarnessPicker');
 const { ChannelModelPicker } = await import('../src/components/buddies/ChannelModelPicker');
-const { workspaceDirectory } = await import('../src/components/buddies/channel-data');
+const { seatsResource, workspaceDirectory } = await import(
+  '../src/components/buddies/channel-data'
+);
 const { choiceLabel, mentionChoice, rankReferences } = await import(
   '../src/components/buddies/channel-text'
 );
@@ -153,19 +155,17 @@ test('retry waits for the authoritative thread selection instead of seeding an a
     );
   assert.match(render(), /disabled=""/);
   await loadResource({
-    key: '/api/buddies/posts/thread-retry-waits/thread',
-    load: async () => ({
-      seats: [
-        {
-          buddyId: 'lead',
-          config: {
-            provider: 'codex',
-            model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
-            reasoning: { mode: 'explicit', effort: 'high' },
-          },
+    key: seatsResource('thread-retry-waits').key,
+    load: async () => [
+      {
+        buddyId: 'lead',
+        config: {
+          provider: 'codex',
+          model: { mode: 'explicit', modelId: 'gpt-6.1-sol' },
+          reasoning: { mode: 'explicit', effort: 'high' },
         },
-      ],
-    }),
+      },
+    ],
   });
   assert.doesNotMatch(render(), /disabled=""/);
 });

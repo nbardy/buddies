@@ -320,6 +320,410 @@
       "properties": {},
       "additionalProperties": false
     },
+    "oompa": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "amend"
+                },
+                "ownerScale": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseConfigSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "configPath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "configSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "workspacePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceCommit": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{40}$"
+                },
+                "reviewTaskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reviewRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "taskRevisions": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "baseConfigSha256",
+                "configPath",
+                "configSha256",
+                "workspacePath",
+                "sourceCommit",
+                "reviewTaskId",
+                "reviewRevision",
+                "taskRevisions"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "prerequisite"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "parentTaskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ownerId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "consumer",
+                    "review"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "doneCriteria": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8000
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "parentTaskId",
+                "ownerId",
+                "role",
+                "title",
+                "doneCriteria"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "launch"
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "buddyId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "workspacePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "configPath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 43200
+                },
+                "automationSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 43200
+                },
+                "priorRunId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "resumeRunId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "amendmentId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "portfolio": {
+                  "type": "object",
+                  "properties": {
+                    "rootTaskIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "ownerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "reviewerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "required": [
+                    "rootTaskIds",
+                    "ownerIds",
+                    "reviewerIds"
+                  ],
+                  "additionalProperties": false
+                },
+                "scaleEnvelope": {
+                  "type": "object",
+                  "properties": {
+                    "maxWorkers": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "maxGpuWorkers": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "maxWorkers",
+                    "models",
+                    "maxGpuWorkers"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "kind",
+                "workspaceId",
+                "buddyId",
+                "workspacePath",
+                "configPath",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "continue"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "swarmId": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_-]+$"
+                },
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "workspacePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceCommit": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{40}$"
+                },
+                "command": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "sourceFiles": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "maxSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 600
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "swarmId",
+                "taskId",
+                "baseRevision",
+                "workspacePath",
+                "sourceCommit",
+                "command",
+                "sourceFiles",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "status"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "stop"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "drain"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "requeue"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "taskId",
+                "baseRevision",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "action",
+        "key"
+      ],
+      "additionalProperties": false
+    },
     "post": {
       "type": "object",
       "properties": {
@@ -1355,6 +1759,410 @@
       "properties": {},
       "additionalProperties": false
     },
+    "oompa": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "amend"
+                },
+                "ownerScale": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseConfigSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "configPath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "configSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "workspacePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceCommit": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{40}$"
+                },
+                "reviewTaskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reviewRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "taskRevisions": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "baseConfigSha256",
+                "configPath",
+                "configSha256",
+                "workspacePath",
+                "sourceCommit",
+                "reviewTaskId",
+                "reviewRevision",
+                "taskRevisions"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "prerequisite"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "parentTaskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ownerId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "consumer",
+                    "review"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "doneCriteria": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8000
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "parentTaskId",
+                "ownerId",
+                "role",
+                "title",
+                "doneCriteria"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "launch"
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "buddyId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "workspacePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "configPath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 43200
+                },
+                "automationSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 43200
+                },
+                "priorRunId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "resumeRunId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "amendmentId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "portfolio": {
+                  "type": "object",
+                  "properties": {
+                    "rootTaskIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "ownerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "reviewerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "required": [
+                    "rootTaskIds",
+                    "ownerIds",
+                    "reviewerIds"
+                  ],
+                  "additionalProperties": false
+                },
+                "scaleEnvelope": {
+                  "type": "object",
+                  "properties": {
+                    "maxWorkers": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "maxGpuWorkers": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "maxWorkers",
+                    "models",
+                    "maxGpuWorkers"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "kind",
+                "workspaceId",
+                "buddyId",
+                "workspacePath",
+                "configPath",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "continue"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "swarmId": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_-]+$"
+                },
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "workspacePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceCommit": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{40}$"
+                },
+                "command": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "sourceFiles": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "maxSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 600
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "swarmId",
+                "taskId",
+                "baseRevision",
+                "workspacePath",
+                "sourceCommit",
+                "command",
+                "sourceFiles",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "status"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "stop"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "drain"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "requeue"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "taskId",
+                "baseRevision",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "action",
+        "key"
+      ],
+      "additionalProperties": false
+    },
     "post": {
       "type": "object",
       "properties": {
@@ -2283,6 +3091,410 @@
     }
   },
   "builder": {
+    "oompa": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "amend"
+                },
+                "ownerScale": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseConfigSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "configPath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "configSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "workspacePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceCommit": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{40}$"
+                },
+                "reviewTaskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reviewRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "taskRevisions": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "baseConfigSha256",
+                "configPath",
+                "configSha256",
+                "workspacePath",
+                "sourceCommit",
+                "reviewTaskId",
+                "reviewRevision",
+                "taskRevisions"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "prerequisite"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "parentTaskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ownerId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "consumer",
+                    "review"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "doneCriteria": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8000
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "parentTaskId",
+                "ownerId",
+                "role",
+                "title",
+                "doneCriteria"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "launch"
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "buddyId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "workspacePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "configPath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 43200
+                },
+                "automationSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 43200
+                },
+                "priorRunId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "resumeRunId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "amendmentId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "portfolio": {
+                  "type": "object",
+                  "properties": {
+                    "rootTaskIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "ownerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "reviewerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "required": [
+                    "rootTaskIds",
+                    "ownerIds",
+                    "reviewerIds"
+                  ],
+                  "additionalProperties": false
+                },
+                "scaleEnvelope": {
+                  "type": "object",
+                  "properties": {
+                    "maxWorkers": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "maxGpuWorkers": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "maxWorkers",
+                    "models",
+                    "maxGpuWorkers"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "kind",
+                "workspaceId",
+                "buddyId",
+                "workspacePath",
+                "configPath",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "continue"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "swarmId": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_-]+$"
+                },
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "workspacePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceCommit": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{40}$"
+                },
+                "command": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "sourceFiles": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "maxSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 600
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "swarmId",
+                "taskId",
+                "baseRevision",
+                "workspacePath",
+                "sourceCommit",
+                "command",
+                "sourceFiles",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "status"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "stop"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "drain"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "requeue"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "kind",
+                "runId",
+                "taskId",
+                "baseRevision",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "action",
+        "key"
+      ],
+      "additionalProperties": false
+    },
     "task_write": {
       "type": "object",
       "properties": {

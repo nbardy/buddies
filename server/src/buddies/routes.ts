@@ -6,6 +6,7 @@ import type {
   BuddyChanges,
   ChannelRef,
   DocScope,
+  FollowedThreads,
   Post,
   PostQuery,
   RunQuery,
@@ -20,6 +21,7 @@ import {
   BuddyPatchSchema,
   BuilderOpenSchema,
   ChannelSchema,
+  type ChannelThreads,
   type ConversationConfig,
   DocWriteSchema,
   NewDirectSchema,
@@ -62,6 +64,7 @@ import { resolveForWorkspace, wakes } from './mentions';
 import type { Runner } from './runner';
 import { channelsNamed } from './search-channels';
 import { checkedEvidence } from './tool-views';
+import { workspaceRegistration } from './workspace-registration';
 
 /**
  * The owner's Buddy API over the crate, mounted behind the auth gate (server.ts registers it after
@@ -74,7 +77,7 @@ export interface BuddyRouteDeps {
   runner: Runner;
   channels: Channels;
   uploadsRoot(): string;
-  channelChanged(channelId: string): void;
+  channelChanged(channelId: string, threads: ChannelThreads): void;
   onBuddyArchived(buddyId: string): void;
   /**
    * `workingDirectory` is the workspace the owner opened the Builder from.
@@ -85,9 +88,38 @@ export interface BuddyRouteDeps {
 
 /**
  * κ for "New workspace" on the home screen (port of 6d04860): the folder is resolved to its real
- * path, because the crate's reuse key is the stored root_path string — `~/x`, `/x/` and a symlink
+ * path, so `~/x`, `/x/` and a symlink
  * to `/x` must all find the one workspace. A missing name is the folder's name.
  */
+export const REQUEST_PREVIEW_CHARS = 600;
+/** A post with its body cut to `REQUEST_PREVIEW_CHARS` (a split surrogate pair is dropped). */
+export function previewPost<T extends { body: string }>(post: T): T {
+  if (post.body.length <= REQUEST_PREVIEW_CHARS) return post;
+  const cut = post.body.slice(0, REQUEST_PREVIEW_CHARS).replace(/[\uD800-\uDBFF]$/, '');
+  return { ...post, body: `${cut}…` };
+}
+
+/** A post whose body was cut to a preview carries `clippedFrom`, its full length in chars. */
+export function clipPost<T extends { body: string }>(post: T): T & { clippedFrom?: number } {
+  const cut = previewPost(post);
+  return cut === post ? post : { ...cut, clippedFrom: post.body.length };
+}
+
+// Fix-guard: Threads cards sent every post body whole (GET /workspaces/:id/threads?limit=30 was
+// 144 KB, refetched on every channel change). A card shows a preview and loads the full body
+// from the thread resource on "Show full message". Guard: server/test/buddies-v2.test.ts
+// "threads route clips long bodies".
+export function clipFollowedThreads(followed: FollowedThreads): FollowedThreads {
+  return {
+    ...followed,
+    threads: followed.threads.map((thread) => ({
+      ...thread,
+      root: clipPost(thread.root),
+      tail: { ...thread.tail, posts: thread.tail.posts.map(clipPost) },
+    })),
+  };
+}
+
 function workspaceInput(raw: unknown): { name: string; rootPath: string } {
   const input = WorkspaceSchema.parse(raw);
   const typed = input.rootPath;
@@ -292,7 +324,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         }))
       ),
     [buddyMutationRoute('workspace.create')]: async (req) =>
-      write(core.createWorkspace(OWNER, workspaceInput(req.body))),
+      write(core.createWorkspace(OWNER, await workspaceRegistration(workspaceInput(req.body)))),
     [buddyMutationRoute('builder.open')]: async (req) => {
       const { workspaceId } = BuilderOpenSchema.parse(req.body ?? {});
       if (workspaceId === undefined) return deps.createBuilderConversation();
@@ -346,6 +378,11 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
           : { kind: 'workspace', workspaceId: z.string().min(1).parse(q(req, 'workspaceId')) };
       return core.listTasks(query);
     },
+    // The directory's Task list (cards, @ index, pins), polled every 15 s: no free text. A Task's
+    // doneCriteria/evidence come from GET /tasks/:taskId. Pure read.
+    // Pattern: fix-guards (docs/patterns.md#fix-guards) — full list was 1.7 MB / 896 tasks.
+    'GET 200 /api/buddies/workspaces/:workspaceId/tasks': (req) =>
+      core.listTaskSummaries(p(req, 'workspaceId')),
     'GET 200 /api/buddies/tasks/:taskId': async (req) => ({
       ...(await taskDetail(core, OWNER, p(req, 'taskId'), 100)),
       runs: await core.listRuns({ kind: 'task', taskId: p(req, 'taskId') }, 20),
@@ -384,8 +421,12 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       // "Run now": one silent fire, as a due slot would.
       write(core.fireSchedule(OWNER, p(req, 'scheduleId'))),
     // ---- channels, DMs and the owner's inbox (everything is a post in a channel) ----------------
-    'GET 200 /api/buddies/workspaces/:workspaceId/inbox': (req) =>
-      core.inbox(OWNER, p(req, 'workspaceId')),
+    // `requests` are only ever shown as one-line excerpts or counted, so their bodies are cut to a
+    // preview (full text: GET /posts/:id/thread). `waitingOn` renders in full and stays whole.
+    'GET 200 /api/buddies/workspaces/:workspaceId/inbox': async (req) => {
+      const inbox = await core.inbox(OWNER, p(req, 'workspaceId'));
+      return { ...inbox, requests: inbox.requests.map(previewPost) };
+    },
     // The channel Search panel shows the newest 50 hits plus the channels the words name; paging is
     // the Buddy tool's (channel_read). `@Name` in the text filters to that author (crate-side).
     'GET 200 /api/buddies/workspaces/:workspaceId/search': async (req) => {
@@ -417,14 +458,14 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       const { archived, key } = ChannelArchiveSchema.parse(req.body);
       const channelId = p(req, 'channelId');
       const channel = await write(core.setChannelArchived(OWNER, channelId, archived, key));
-      deps.channelChanged(channelId);
+      deps.channelChanged(channelId, 'all');
       return channel;
     },
     [buddyMutationRoute('channel.rename')]: async (req) => {
       const { name, key } = ChannelRenameSchema.parse(req.body);
       const channelId = p(req, 'channelId');
       const channel = await write(core.renameChannel(OWNER, channelId, name, key));
-      deps.channelChanged(channelId);
+      deps.channelChanged(channelId, 'all');
       return channel;
     },
     [buddyMutationRoute('channel.create')]: (req) =>
@@ -446,12 +487,22 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     },
     'GET 200 /api/buddies/posts/:postId/thread': async (req) => {
       const root = await core.getPost(OWNER, p(req, 'postId'));
-      return {
-        root,
-        ...(await feedPage(req, { kind: 'thread', rootId: root.id })),
-        seats: await channels.threadSeats(root.id),
-      };
+      const page = await feedPage(req, { kind: 'thread', rootId: root.id });
+      // No seats here: they need the WHOLE thread (every page, one slot scan per Buddy) and only
+      // an @mention in a composer reads them, through GET /threads/seats. Fix-guard: threads
+      // request storm 2026-10-23 (every open thread pane paid a 0.09-1.7 s scan, stalls 663ms to
+      // 6048ms). Guard: server/test/buddies-v2.test.ts "thread route carries no seats".
+      return { root, ...page };
     },
+    // The Threads view's composers, in ONE request: seats by thread root (`?roots=a,b,c`).
+    'GET 200 /api/buddies/threads/seats': async (req) =>
+      channels.threadSeatsBatch(
+        z
+          .array(z.string().min(1))
+          .min(1)
+          .max(50)
+          .parse((q(req, 'roots') ?? '').split(',').filter((id) => id !== ''))
+      ),
     // An edit/reaction changes the existing post, without the posted event that starts Buddy replies.
     [buddyMutationRoute('post.edit')]: async (req) => {
       const input = PostEditSchema.parse(req.body);
@@ -485,21 +536,30 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       const read = ReadSchema.parse(req.body);
       if ('channelId' in read) {
         await core.markRead(OWNER, read.channelId, read.postId);
-        deps.channelChanged(read.channelId);
+        // A read mark moves no thread's posts; it refreshes the inbox, unread and Threads views.
+        deps.channelChanged(read.channelId, []);
       } else {
-        const root = await core.getPost(OWNER, read.rootId);
-        await core.markThreadRead(OWNER, root.id, read.postId);
-        deps.channelChanged(root.channelId);
+        const marks = 'reads' in read ? read.reads : [read];
+        // One push per channel however many threads were marked (the Threads view's batch).
+        const channelIds = new Set<string>();
+        for (const mark of marks) {
+          const root = await core.getPost(OWNER, mark.rootId);
+          await core.markThreadRead(OWNER, root.id, mark.postId);
+          channelIds.add(root.channelId);
+        }
+        for (const channelId of channelIds) deps.channelChanged(channelId, []);
       }
       return { ok: true };
     },
     // The Threads view (THREADS_VIEW_2026-09-28.md): followed threads, unread first.
     'GET 200 /api/buddies/workspaces/:workspaceId/threads': (req) =>
-      core.followedThreads(
-        OWNER,
-        p(req, 'workspaceId'),
-        z.coerce.number().int().min(1).max(200).default(30).parse(q(req, 'limit'))
-      ),
+      core
+        .followedThreads(
+          OWNER,
+          p(req, 'workspaceId'),
+          z.coerce.number().int().min(1).max(200).default(30).parse(q(req, 'limit'))
+        )
+        .then(clipFollowedThreads),
     'GET 200 /api/buddies/channels/:channelId/responding': async (req) =>
       channels.responding(p(req, 'channelId')),
     // ---- one buddy: last, so `/api/buddies/tasks` and friends never read as a buddy id ----------

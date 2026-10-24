@@ -1,4 +1,4 @@
-import { getHarness, listHarnesses, resolveBinary } from '@nbardy/agent-cli';
+import { getHarness, listHarnesses, resolveBinaryAsync } from '@nbardy/agent-cli';
 
 export interface AuditResult {
   name: string;
@@ -7,19 +7,20 @@ export interface AuditResult {
   path: string | null;
 }
 
-export function auditLocalAgents(): AuditResult[] {
-  const harnesses = listHarnesses();
-  const results: AuditResult[] = [];
-
-  for (const name of harnesses) {
-    const config = getHarness(name);
-    try {
-      const binPath = resolveBinary(config.binary);
-      results.push({ name, binary: config.binary, installed: true, path: binPath });
-    } catch {
-      results.push({ name, binary: config.binary, installed: false, path: null });
-    }
-  }
+// Pattern: async-liveness (docs/patterns.md#async-liveness): the PATH walk runs
+// off the event loop and in parallel, so boot never waits on it.
+export async function auditLocalAgents(): Promise<AuditResult[]> {
+  const results = await Promise.all(
+    listHarnesses().map(async (name): Promise<AuditResult> => {
+      const config = getHarness(name);
+      try {
+        const binPath = await resolveBinaryAsync(config.binary);
+        return { name, binary: config.binary, installed: true, path: binPath };
+      } catch {
+        return { name, binary: config.binary, installed: false, path: null };
+      }
+    })
+  );
 
   const available = results.filter((result) => result.installed);
   const unavailable = results.filter((result) => !result.installed);

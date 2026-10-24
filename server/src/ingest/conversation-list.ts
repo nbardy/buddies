@@ -26,8 +26,9 @@ import {
   conversationLabel,
   overlayHistoryFields,
 } from '../conversations/runtime';
+import { labelled, noteActivity } from '../observability/event-loop-stall';
 import { mergeSessionMessages } from '../lifecycle/session-history';
-import { extendsHistory, sessionMessages } from './history';
+import { extendsHistory, mergedCount, mergedCounts, sessionMessages } from './history';
 
 type Records = {
   listSummaries(): Promise<RecordSummary[]>;
@@ -35,6 +36,7 @@ type Records = {
     provider: RecordSummary['provider'],
     sessionId: string
   ): Promise<ConversationRecord | undefined>;
+  getByConversationId(conversationId: string): Promise<ConversationRecord | undefined>;
 };
 
 /**
@@ -176,6 +178,39 @@ export function listingFor(
   };
 }
 
+/**
+ * A record with no transcript yet, served from the record alone. Pattern: lazy-runtimes
+ * (docs/patterns.md#lazy-runtimes). Before, the runtime was such a record's only list row, so boot
+ * built 4,114 of them (background Buddy workers, seats that never ran, builders, branches) just to
+ * show a row. The row MUST equal what that record's runtime's `toRow()` says (same fields, same
+ * rules: `overlayHistoryFields` over an empty overlay), or the sidebar counts and labels flip when
+ * a cold record is opened. Guard: server/test/ingest-history.test.ts "a record without a
+ * transcript is listed from the record alone".
+ */
+export function bareRowOf(record: RecordSummary, workingDirectory: string, creation: BareCreation) {
+  const createdAt = Date.parse(record.createdAt);
+  const row: ListedRow = {
+    id: record.conversationId,
+    kind: rowKind(record.kind as SharedKind),
+    parent: null,
+    resumedFrom: creation.resumedFromConversationId ?? null,
+    provider: record.provider,
+    cwd: workingDirectory,
+    label: conversationLabel(undefined, EMPTY),
+    createdAt,
+    activityAt: createdAt,
+    messageCount: 0,
+    done: record.done,
+  };
+  return row;
+}
+
+/** The slice of a record's creation metadata the bare row and the boot dispatch read. */
+type BareCreation = Pick<
+  NonNullable<ConversationRecord['creation']>,
+  'resumedFromConversationId' | 'initialMessage' | 'initialMessageDispatchedAt'
+>;
+
 /** The list's view of a record read after boot (`findBySession`, discovery). */
 export function summaryOf(record: ConversationRecord): RecordSummary {
   const keys = [
@@ -205,8 +240,10 @@ export interface JoinedConversation {
   record: RecordSummary;
   /** Bound sessions in the store, oldest first. */
   sessions: SessionRow[];
-  /** Present when the record is listed (has a transcript and a working directory). */
+  /** Present when the record is listed (a transcript, or a bare record with a working directory). */
   row: ListedRow | null;
+  /** A first message was created with the record and never dispatched: it needs a runtime now. */
+  pendingFirstMessage: boolean;
 }
 
 export interface ConversationList {
@@ -235,7 +272,7 @@ export interface ConversationList {
 }
 
 export interface ConversationListDependencies {
-  ingest: Pick<Ingest, 'listSessions' | 'messages'>;
+  ingest: Pick<Ingest, 'listSessions' | 'messages' | 'mergedCounts'>;
   records: Records;
   /** The runtime the server holds for this id (it owns run state, config and the overlay). */
   runtime(conversationId: string): ListedRuntime | undefined;
@@ -274,6 +311,8 @@ export async function createConversationList(
   const conversationBySession = new Map<string, string>();
   const settledOf = new Map<string, Settled>();
   const rows = new Map<string, ListedRow>();
+  /** Rows of records with no transcript (served from the record; see `bareRowOf`). */
+  const bare = new Map<string, { row: ListedRow; pendingFirstMessage: boolean }>();
   /** Conversations whose transcript changed while their turn ran. */
   const queued = new Map<string, { rewritten: boolean }>();
   const served = new Map<string, { key: string; messages: Message[] }>();
@@ -362,6 +401,16 @@ export async function createConversationList(
       return { counts, count, overlayAt: 0, epoch: rewritten || shrank ? epoch + 1 : epoch };
     }
     const previous = served.get(id)?.messages;
+    if (previous === undefined && overlay.length === 0) {
+      // Nothing cached to compare against and no live rows to merge: the count is all a settle
+      // publishes, so do not build the history (it is built when a page opens it).
+      const count = await mergedCount(
+        dependencies.ingest,
+        bound.map((session) => ({ ...session, count: counts.get(session.sessionId) ?? 0 }))
+      );
+      const shrank = before !== undefined && count < before.count;
+      return { counts, count, overlayAt: 0, epoch: rewritten || shrank ? epoch + 1 : epoch };
+    }
     const next: Settled = { counts, count: 0, overlayAt: overlay.length, epoch };
     const merged = await history(record, next);
     next.count = merged.length;
@@ -413,6 +462,7 @@ export async function createConversationList(
       return;
     }
     rows.set(id, result.row);
+    bare.delete(id);
     if (runtime) {
       // The runtime's row carries the same history fields (historyFields below).
       const fields = historyFields(record, boundSessions(record), next, runtime);
@@ -463,9 +513,33 @@ export async function createConversationList(
     if (bound.length > 1) multiSession.push(record);
     else settledOf.set(record.conversationId, unsettled(record));
   }
-  await forEachConcurrently(multiSession, SETTLE_CONCURRENCY, async (record) => {
-    settledOf.set(record.conversationId, await computeSettle(record, false));
+  // Records with no live rows settle from ONE batched count in the crate; nothing is cached at
+  // boot, so computeSettle's count branch is exactly this (pattern: batched-reads).
+  // Records with no live rows settle from ONE batched count in the crate; nothing is cached at
+  // boot, so computeSettle's count branch is exactly this (pattern: batched-reads).
+  const counted = multiSession.filter(
+    (record) => (dependencies.runtime(record.conversationId)?.messages ?? EMPTY).length === 0
+  );
+  const mergedLengths = await mergedCounts(
+    dependencies.ingest,
+    counted.map((record) =>
+      boundSessions(record).map((session) => ({ ...session, count: session.messageCount }))
+    )
+  );
+  counted.forEach((record, index) => {
+    settledOf.set(record.conversationId, {
+      ...unsettled(record),
+      count: mergedLengths[index],
+    });
   });
+  const counting = new Set(counted);
+  await forEachConcurrently(
+    multiSession.filter((record) => !counting.has(record)),
+    SETTLE_CONCURRENCY,
+    async (record) => {
+      settledOf.set(record.conversationId, await computeSettle(record, false));
+    }
+  );
   for (const record of recordOf.values()) {
     const result = listing(record);
     switch (result.t) {
@@ -479,13 +553,35 @@ export async function createConversationList(
         break;
     }
   }
+  const bareStart = Date.now();
+  const transcriptless = [...recordOf.values()].filter(
+    // Discovered records whose transcript vanished stay unlisted, as they were when only runtimes
+    // listed bare records (recovery skipped them: eager recovery made 5,275 empty rows, 2026-09-06).
+    (record) =>
+      record.provenance !== 'external_discovered' &&
+      record.workingDirectory &&
+      listing(record).t === 'no_transcript'
+  );
+  await forEachConcurrently(transcriptless, SETTLE_CONCURRENCY * 2, async (record) => {
+    const id = record.conversationId;
+    // Per-record isolation: one unreadable record is left unlisted, as before (it had no runtime).
+    try {
+      const creation = (await dependencies.records.getByConversationId(id))?.creation ?? {};
+      bare.set(id, {
+        row: bareRowOf(record, record.workingDirectory as string, creation),
+        pendingFirstMessage: Boolean(creation.initialMessage && !creation.initialMessageDispatchedAt),
+      });
+    } catch (error) {
+      logger.error(`[ingest-list] could not read record ${id}:`, error);
+    }
+  });
   if (withoutCwd > 0) {
     logger.warn(
       `[ingest-list] ${withoutCwd} conversations have no working directory in their record or transcripts (Muse approval-review children); left out of the list`
     );
   }
   logger.log(
-    `[ingest-list] ${rows.size} conversations listed from ${sessions.size} sessions (${discovered} discovered, ${multiSession.length} merged across sessions)`
+    `[ingest-list] ${rows.size} conversations listed from ${sessions.size} sessions (${discovered} discovered, ${multiSession.length} merged across sessions), plus ${bare.size} from their records alone in ${Date.now() - bareStart} ms`
   );
 
   // ---- changes ------------------------------------------------------------------------------
@@ -511,7 +607,10 @@ export async function createConversationList(
         patch: { t: 'run', run: 'running' },
       });
     }
-    backstop ??= setTimeout(expireExternal, dependencies.externalGraceMs);
+    backstop ??= setTimeout(
+      labelled('timer external-grace', expireExternal),
+      dependencies.externalGraceMs
+    );
   }
 
   /** The one backstop: a transcript quiet for the grace period stops showing as running. */
@@ -530,7 +629,10 @@ export async function createConversationList(
       }
     }
     if ([...dependencies.externalActivity.entries()].length > 0) {
-      backstop = setTimeout(expireExternal, dependencies.externalGraceMs);
+      backstop = setTimeout(
+        labelled('timer external-grace', expireExternal),
+        dependencies.externalGraceMs
+      );
     }
   }
 
@@ -562,15 +664,21 @@ export async function createConversationList(
   return {
     // `rows` and `recordOf` share keys (both set by a listed publish, both cleared by forget).
     rows: () =>
-      [...rows].flatMap(([id, row]) => {
+      [...rows, ...[...bare].map(([id, entry]) => [id, entry.row] as const)].flatMap(([id, row]) => {
         const record = recordOf.get(id);
         return record && !dependencies.runtime(id) ? [servedRow(record, row)] : [];
       }),
-    ids: () => [...rows.keys()],
+    ids: () => [...rows.keys(), ...bare.keys()],
     joined(conversationId) {
       const record = recordOf.get(conversationId);
       if (!record) return undefined;
-      return { record, sessions: boundSessions(record), row: rows.get(conversationId) ?? null };
+      const cold = bare.get(conversationId);
+      return {
+        record,
+        sessions: boundSessions(record),
+        row: rows.get(conversationId) ?? cold?.row ?? null,
+        pendingFirstMessage: cold?.pendingFirstMessage ?? false,
+      };
     },
     locate(sessionId) {
       const id = conversationBySession.get(sessionId);
@@ -602,6 +710,7 @@ export async function createConversationList(
       const record = recordOf.get(conversationId);
       recordOf.delete(conversationId);
       rows.delete(conversationId);
+      bare.delete(conversationId);
       settledOf.delete(conversationId);
       served.delete(conversationId);
       queued.delete(conversationId);
@@ -613,6 +722,8 @@ export async function createConversationList(
           logger.error(`[ingest-list] ingest watcher failed: ${event.message}`);
           return;
         case 'changes':
+          // Native watcher callback, not a timer: label it so a relist stall is blamed on ingest.
+          noteActivity('ingest changes');
           pending = pending
             .then(() => relist(event))
             .catch((error: Error) => logger.error('[ingest-list] re-list failed:', error.message));

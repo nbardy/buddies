@@ -46,6 +46,7 @@ export type {
   Task,
   TaskCount,
   TaskStatus,
+  TaskSummary,
   ThreadStat,
   Workspace,
 } from '@unleashd/buddies-core';
@@ -93,13 +94,21 @@ export type ChannelPage = PostPage & { threads: ThreadStat[] };
 /** A Buddy's latest seat in a thread: what its next reply runs on (server channels.ts). */
 export type ThreadSeat = { buddyId: string; config: ConversationConfig };
 
-/** GET /api/buddies/posts/:postId/thread — replies newest first, and each Buddy's seat. */
+/**
+ * GET /api/buddies/posts/:postId/thread — replies newest first. No seats: an older backend still
+ * sends them and nothing reads them; the composer asks `threads/seats` on @mention.
+ */
 export interface ThreadPage {
   root: Post;
   posts: Post[];
   next?: Cursor;
-  seats: ThreadSeat[];
 }
+
+/**
+ * A post on a Threads card whose body the server cut to a preview. `clippedFrom` is the full
+ * length in chars; absent means the body is whole (and from older backends, always whole).
+ */
+export type ClippedPost = Post & { clippedFrom?: number };
 
 export type { ChannelResponse, LiveReach } from '@unleashd/shared';
 

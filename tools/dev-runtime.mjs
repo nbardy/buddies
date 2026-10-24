@@ -97,9 +97,14 @@ export function startCompiler({ name, configPath, sentinel, stateDirectory, log 
 export async function startVite({ clientRoot, overrides = {} }) {
   const entry = createRequire(path.join(clientRoot, 'package.json')).resolve('vite');
   const { createServer } = await import(pathToFileURL(entry).href);
+  // Explicit, never inherited: a production NODE_ENV in this process turned fast refresh off and
+  // re-optimized deps every boot (2026-10-23; the client bundle now builds in a child process,
+  // tools/client-build.mjs). Guard: tools/dev-supervisor.test.mjs.
+  process.env.NODE_ENV = 'development';
   const server = await createServer({
     root: clientRoot,
     configFile: path.join(clientRoot, 'vite.config.ts'),
+    mode: 'development',
     ...overrides,
   });
   await server.listen();
@@ -108,17 +113,29 @@ export async function startVite({ clientRoot, overrides = {} }) {
 }
 
 /** The backend runner; its output is prefixed like the other tools. */
-export function startBackend({ repositoryRoot, env, log }) {
+export function startBackend({
+  repositoryRoot,
+  env,
+  log,
+  nodeArgs = [],
+  onReady = () => {},
+  onSpawn = () => {},
+}) {
   const serverRoot = path.join(repositoryRoot, 'server');
   const runner = createBackendRunner({
     command: process.execPath,
-    args: ['--import', 'tsx', 'src/server.ts'],
+    args: [...nodeArgs, '--import', 'tsx', 'src/server.ts'],
     cwd: serverRoot,
     env,
     watchRoot: repositoryRoot,
     check: esbuildCheck('src/server.ts', serverRoot),
     buildCrate: ensureAddonBuild(repositoryRoot, (line) => log(`[server-watch] ${line}`)),
-    output: linePrefixer('[server]', (line) => process.stdout.write(line)),
+    onSpawn,
+    output: linePrefixer('[server]', (line) => {
+      process.stdout.write(line);
+      // startup.ts prints this once the port is bound: the "backend-ready" boot phase.
+      if (line.includes('Server running on')) onReady();
+    }),
     log: (line) => log(`[server-watch] ${line}`),
     logError: (line) => log(`[server-watch] ${line}`),
   });

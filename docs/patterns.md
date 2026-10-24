@@ -434,3 +434,89 @@ the crate's query-plan guard; Buddy sigils render in a worker (`sigil/client.ts`
 `client/test/sigil-off-main-thread.test.ts`: 12 inline renders blocked "Loading thread…" 0.6–3.5 s). For visual regressions the guard is the screenshot compare loop:
 `pnpm screenshots` before, `pnpm screenshots --baseline <run>` after, which exits non-zero when any screen's
 changed pixels exceed `--threshold` (`tools/lib/screenshot-compare.mjs`; masks in `tools/lib/headless-chrome.mjs`).
+
+## reader-pool
+**Smell:** every crate call locks one `Mutex<Store>`, so reads queue behind each other and behind writes
+(30 parallel thread reads plus runner writes: 10 ms requests took 300 ms - 6 s).
+**Pattern:** one writer connection plus a small pool of SQLITE_OPEN_READ_ONLY connections on the same WAL
+file, all owned by the addon (store-descriptor-isolation still holds). `Database::write` hands a closure
+`&mut Store`, `Database::read` hands `&Store`; every mutating method takes `&mut self`, so a read cannot
+write by construction (and the pooled connections refuse raw writes). A method that records anything
+(read markers, leases, steering takes) is `&mut self` and goes to the writer; a read that must agree with a
+following write belongs inside one `write`. No long-lived read transaction: each call sees every commit made
+before it started.
+**Here:** `crates/unleashd-buddies/src/pool.rs`, lanes chosen in `node.rs` (`read` / `write`).
+Guard: `crates/unleashd-buddies/tests/pool.rs` (`reads_proceed_while_the_writer_is_held`).
+
+## lazy-runtimes
+**Smell:** boot builds a runtime per stored record (8,176 on 2026-10-23, ~4-5 s, growing with data), because
+readers ask the runtime map synchronously and read a cold record as "absent", then replay the create.
+**Pattern:** a stored record IS the conversation; its runtime is a cache built on first use. Every by-id
+reader awaits `runtimeBuilder.materialize(id)` (registered, else built from the record, one build per id).
+A sync reader may only ask "does the record exist"; "absent" never means "re-create" (the replay rebuilds
+the seat from the CALLER's config, which moves with the owner's pick, and conflicts with the stored
+fingerprint). Boot builds only what runs or has no other row: pinned ids (queued inputs, live runs), adoption
+targets, and records with no list row (this includes a pending first message). A runtime that has not started
+a session also materializes its fork source (`chatForkSource` reads it synchronously).
+**Here:** `ingest/runtimes.ts` (`needsRuntime`, fork source in `build`), `buddy-conversation-slots.ts`
+`openConversation`, `buddy-creation-service` `openBranch`, `creation-service` `createOrReuse` (materialize
+BEFORE `createOrReplay`: after it every id has a record), the runner host in `server.ts`, WS `create_conversation`.
+Sync map reads that remain are correct on a cold id: the list overlay (the list serves the row), stop (a cold
+runtime runs nothing), onBuddyArchived (no queue or turn to clear).
+Guards: `server/test/lazy-buddy-runtimes.test.ts`, `server/test/ingest-history.test.ts`.
+
+## debounced-change-feed
+**Smell:** every post, read mark and "replying" change pushed its own `channel_changed` frame, and each frame
+refetched every mounted thread in every channel (2026-10-23 threads request storm: K unread cards = K waves of 30+
+thread GETs).
+**Pattern:** fold a burst into ONE frame per channel (250 ms, like `buddies_changed`) that names the thread roots the
+burst touched (`'all'` absorbs everything, lists union). Clients refresh only the roots a push names.
+**Here:** `server/src/buddies/channel-change-feed.ts` (timer labelled `timer channel-change-feed`);
+client side `invalidateChannelResources(channelId, threads)` in `client/src/atoms/resources.ts`.
+Guards: `server/test/channel-change-feed.test.ts`, `client/test/threads-request-storm.test.ts`.
+
+## batched-reads
+**Smell:** N mounted components each fire their own request for a per-id read (each Threads card's composer fetched the
+full `/posts/:id/thread`, a 0.09-1.7 s seat scan, on mount).
+**Pattern:** one batcher per read kind: every id asked for inside a short window (`SEATS_BATCH_MS` 10 ms for seats,
+`READ_BATCH_MS` 50 ms for read marks) goes out as ONE request of at most N ids, and each id keeps its own cache key so a
+later invalidation refreshes only that id.
+**Here:** `client/src/components/buddies/channel-data.ts` (`SEATS_BATCH_MS`, `READ_BATCH_MS`), served by
+`threads/seats?roots=`. Guard: `client/test/threads-request-storm.test.ts`.
+
+## async-liveness
+**Smell:** a status check that spawns a process synchronously on the event loop. `isOwnWrapper` ran
+`execFileSync('ps')` on every liveness check, once per second per execution: 74% of the server main thread sat in
+`SyncProcessRunner::Spawn` (2026-10-23). The boot agent audit did the same with eight serial `which` spawns.
+**Pattern:** establish identity ONCE (pid + start time, cached), answer liveness with `process.kill(pid, 0)`, and
+re-verify cached identities with ONE async batched `ps` (`verifyExecutions`). Boot lookups use the async twin
+(`resolveBinaryAsync`) in parallel and never block startup. No `execFileSync` / `spawnSync` on the server loop.
+**Here:** `vendor/agent-cli-tool/src/journal.ts` (`verifyExecutions`, called from the 1 s Oompa poll in
+`server/src/buddies/oompa.ts`), `server/src/audit.ts`, `vendor/agent-cli-tool/src/resolve.ts`.
+Guards: `vendor/agent-cli-tool/test/journal-no-sync-spawn.test.ts`, journal.test.ts "liveness never spawns synchronously".
+
+## background-integrity-check
+**Smell:** `PRAGMA quick_check` ran serially before the HTTP listener: 1.3 s over a 198 MB store + 45 MB WAL, for a
+diagnostics-only journal (2026-10-23 boot profile).
+**Pattern:** open usable immediately; a background thread checks a separate read-only connection and, on damage,
+swaps a fresh store in under the writer's lock and moves the old files into `corrupt-<unix secs>/`. Because the
+quarantine can now land AFTER open, the server polls the cheap `quarantined` getter for a few minutes and logs
+`journal_quarantined` when it appears. Authoritative stores (records, buddies) are never auto-replaced.
+**Here:** `crates/unleashd-ingest/src/attempts.rs` (`open_fast`, `check_and_replace`),
+`server/src/observability/turn-attempt-journal.ts` (`watchBackgroundCheck`).
+Guard: `torn_store_is_replaced_after_a_background_check`.
+
+## boot-scans
+**Smell:** a boot read that is "one query" but drags a big column through the page cache. `Writer::known()` read every
+`source` row, each carrying a fold checkpoint of up to 64 KB (1.6 s cold on 11k sources); `recoverable` filtered
+`turn_attempt` by state with no index and read every ~20 KB snapshot (~1 s, 10k rows); `mergedCount` paged 20k messages
+through napi to hash them in JS, one queued call per record (2026-10-23).
+**Pattern:** boot reads are covered by a narrow index (`source_known`, `turn_attempt_open`: additive
+`CREATE INDEX IF NOT EXISTS`, no schema bump, built on the first start after upgrade, ignored by an older build), and a
+derived number is computed where the rows live (`Ingest.mergedCounts`: ONE call for all groups, fanned over read-only
+connections). Nothing per-record crosses napi at boot.
+**Here:** `crates/unleashd-ingest/src/store.rs` (`KNOWN`, `merged_count`), `attempts.rs` (`turn_attempt_open`), `node.rs`
+(`merged_counts`), `server/src/ingest/history.ts`, `conversation-list.ts` boot. Sub-phases in boot.jsonl:
+`ingest_scan`, `ingest_list_build`. Guards: `reading_every_stamp_never_touches_the_checkpoint_pages`,
+`merged_count_counts_an_inherited_prefix_once`, `indexed_latest_and_same_timestamp_retention`, and the TS parity test
+in `server/test/ingest-history.test.ts`.

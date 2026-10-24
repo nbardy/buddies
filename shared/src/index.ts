@@ -441,8 +441,22 @@ const ServerMessageSchema = z.discriminatedUnion('type', [
   // `.default()` on purpose: the frame only invalidates a cache, so an older backend's
   // `listId` frame during a dev reload is classified `invalid` and dropped (one missed
   // refresh), never applied to a made-up channel. Guard: client/test/protocol-skew.test.ts.
-  z.object({ type: z.literal('channel_changed'), channelId: z.string() }),
+  //
+  // `threads`: which thread roots' CONTENT changed. 'all' (also what an older backend's frame
+  // means) refreshes every mounted thread; a list refreshes only those; [] refreshes none (a read
+  // mark or a "replying" change moves no thread's posts). Fix-guard (2026-10-23 request storm):
+  // every read mark used to refetch every mounted thread. It has a default, unlike the rename
+  // above, because a frame without it is still a correct (just wider) invalidation.
+  // Guard: client/test/threads-request-storm.test.ts.
+  z.object({
+    type: z.literal('channel_changed'),
+    channelId: z.string(),
+    threads: z.union([z.literal('all'), z.array(z.string())]).default('all'),
+  }),
 ]);
+
+/** Which thread roots a `channel_changed` touched: D = All ⊕ these ⊕ none (empty list). */
+export type ChannelThreads = 'all' | readonly string[];
 
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 /** What a server builds: rows are encoded (`encodeRows`) before they go out. */

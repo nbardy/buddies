@@ -24,6 +24,8 @@ export interface CreateConversationInput extends CreationFingerprintInput {
 
 export interface ConversationCreationPorts {
   configService: Pick<ConversationConfigService, 'createOrReplay' | 'getRecord'>;
+  /** A registered runtime, else the one built from its stored record (runtimes.ts); undefined when none. */
+  materialize(id: string): Promise<ConversationRuntime | undefined>;
   getConversation(id: string): ConversationRuntime | undefined;
   createConversation(options: ConversationOptions): ConversationRuntime;
   registerConversation(conversation: ConversationRuntime): void;
@@ -54,6 +56,19 @@ export function createConversationService(ports: ConversationCreationPorts) {
   const linking = new Map<string, Promise<void>>();
   const linked = new WeakSet<ConversationRuntime>();
   async function createOrReuse(input: CreateConversationInput): Promise<ConversationRuntime> {
+    // Pattern: lazy-runtimes (docs/patterns.md#lazy-runtimes)
+    // A stored record has no runtime until first use, so "not registered" does NOT mean "not
+    // created": build it from the record first, and the fork source too (the runtime reads it
+    // synchronously on its first turn, runtime.ts `chatForkSource`). Replaying the create over a
+    // cold record would rebuild it from THIS command's config, which may differ from the stored one.
+    // BEFORE createOrReplay: after it every id has a record, and a new one is built inline below.
+    // Guard: server/test/lazy-buddy-runtimes.test.ts.
+    await Promise.all([
+      ports.materialize(input.conversationId),
+      ...(input.resumedFromConversationId
+        ? [ports.materialize(input.resumedFromConversationId)]
+        : []),
+    ]);
     // Even a registry hit must validate the durable command and tombstone.
     const creation = await ports.configService.createOrReplay({
       conversationId: input.conversationId,

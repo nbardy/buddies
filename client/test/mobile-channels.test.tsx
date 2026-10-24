@@ -113,7 +113,7 @@ async function seed() {
         },
       ]),
   });
-  await loadResource({ key: `/api/buddies/tasks?workspaceId=${WS}`, load: async () => [] });
+  await loadResource({ key: `/api/buddies/workspaces/${WS}/tasks`, load: async () => [] });
   await loadResource({ key: '/api/buddies/channels/ch_a/responding', load: async () => [] });
   await loadResource({
     key: '/api/buddies/channels/ch_a/posts?limit=50',
@@ -294,7 +294,7 @@ test('the mobile Task page opens from a channel with details and links each post
       ]),
   });
   await loadResource({
-    key: `/api/buddies/tasks?workspaceId=${ws}`,
+    key: `/api/buddies/workspaces/${ws}/tasks`,
     load: async () => [
       {
         id: 'task-ship',

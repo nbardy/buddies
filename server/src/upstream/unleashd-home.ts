@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import type { Buddy } from '@unleashd/buddies-core';
 import { type BuddiesCore, OWNER, managerRef } from '../buddies/core';
+import { workspaceRegistration } from '../buddies/workspace-registration';
 
 // First-run home for an install: the checkout itself as a Buddy workspace
 // named "Buddies", its #upstream channel, and two Buddies — Product Dev and
@@ -8,20 +9,20 @@ import { type BuddiesCore, OWNER, managerRef } from '../buddies/core';
 // a second run changes nothing. Every write goes through the crate.
 //
 // Idempotence, per piece:
-//   workspace — createWorkspace is idempotent by root path (real path here).
+//   workspace — registration reuses the real path or one missing matching checkout.
 //   channel   — a public channel named "upstream" is reused, else created
 //               under a fixed command key (the crate replays a repeated key).
-//   Buddies   — a seat is filled by our own hire (found by its slug, in any
-//               status: an archived hire stays archived, the owner retired
-//               it), else by a matching active Buddy (e.g. the existing
-//               "Product Development Lead"), else hired under a fixed key.
+//   Buddies   — a seat is filled by our own active hire (found by its slug),
+//               else by a matching active Buddy (e.g. the existing "Product
+//               Development Lead"), else by our own archived hire (it stays
+//               archived: the owner retired it), else hired under a fixed key.
 
 export const BOOTSTRAP_KEY = 'unleashd-bootstrap';
 export const UPSTREAM_CHANNEL_NAME = 'upstream';
 // Public copy is "Buddies" (the 2026-10 rename); the code identifiers, BOOTSTRAP_KEY and
 // the command keys below stay "unleashd" because they are identity, not display.
 // Why existing installs keep their old copy: the name/role/purpose/soul below are written
-// ONLY when a piece is created. Reuse is keyed on the realpath rootPath, the seat slug and
+// ONLY when a piece is created. Reuse is keyed on folder/history identity, the seat slug and
 // the public channel name "upstream" — never on these strings — so an install bootstrapped
 // before the rename keeps whatever the owner sees and edited, and a retired seat stays
 // retired. Do not "rename by name" or rewrite existing rows here; that duplicates the
@@ -91,9 +92,14 @@ async function ensureUpstreamChannel(core: BuddiesCore, workspaceId: string): Pr
 async function ensureSeat(core: BuddiesCore, workspaceId: string, seat: Seat): Promise<string> {
   const buddies = await core.listBuddies(workspaceId);
   const ours = buddies.find((buddy) => buddy.slug === seat.slug);
-  if (ours) return ours.id;
+  // An active Buddy holding the seat beats our own RETIRED hire: merging a duplicate workspace
+  // (2026-10-14 checkout rename) brings in a retired `product-dev`, and returning it made an
+  // archived Buddy the seat. A retired hire with no active holder still stays retired.
+  // Guard: "an active seat holder beats a retired own hire" in server/test/upstream.test.ts.
+  if (ours?.status === 'active') return ours.id;
   const filled = buddies.find((buddy) => buddy.status === 'active' && seat.fills(buddy));
   if (filled) return filled.id;
+  if (ours) return ours.id;
   const key = `${BOOTSTRAP_KEY}:buddy:${seat.slug}`;
   const hired = await core.createBuddy(OWNER, {
     workspaceId,
@@ -118,12 +124,14 @@ export async function bootstrapUnleashdHome(
   core: BuddiesCore,
   repoRoot: string
 ): Promise<UnleashdHome> {
-  const workspace = await core.createWorkspace(OWNER, {
-    name: WORKSPACE_NAME,
-    // The crate's reuse key is the stored root path string: resolve it like the
-    // "New workspace" route does (routes.ts workspaceInput).
-    rootPath: fs.realpathSync(repoRoot),
-  });
+  const workspace = await core.createWorkspace(
+    OWNER,
+    await workspaceRegistration({
+      name: WORKSPACE_NAME,
+      // Canonicalize the folder exactly like New workspace (routes.ts workspaceInput).
+      rootPath: fs.realpathSync(repoRoot),
+    })
+  );
   return {
     repoRoot: workspace.rootPath,
     workspaceId: workspace.id,

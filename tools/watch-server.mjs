@@ -124,6 +124,8 @@ export function createBackendRunner({
   // (chunk) => void. Given, the backend's stdout and stderr are piped through
   // it (the one-process dev runtime prefixes them); absent, they are inherited.
   output,
+  // (pid) => void, called at every (re)spawn so the supervisor's lock names the live backend.
+  onSpawn = () => {},
   settleMs = SETTLE_MS,
   initialBackoffMs = INITIAL_BACKOFF_MS,
   log = (line) => console.log(`[server-watch] ${line}`),
@@ -221,6 +223,7 @@ export function createBackendRunner({
     child.on('message', recordLoaded);
     child.once('exit', (code, signal) => onExit(code, signal, Date.now() - startedAt, child.pid));
     state = { kind: 'running', child };
+    onSpawn(child.pid);
   }
 
   function onExit(code, signal, uptimeMs, pid) {

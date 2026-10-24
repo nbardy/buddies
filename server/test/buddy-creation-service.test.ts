@@ -67,6 +67,7 @@ test('server Buddy creation persists, registers, broadcasts, links, and dispatch
 
   const config = createDefaultConversationConfig('codex');
   const ports = {
+    materialize: async (id: string) => registered.find((c) => c.id === id),
     getConversation: (id: string) => registered.find((c) => c.id === id),
     configService: {
       async createOrReplay(input: unknown) {
@@ -188,6 +189,7 @@ async function openBuilder(binaries: string[]) {
     installedAgent: () => installedAgent({ PATH: dir }),
     resolveWorkingDirectory: (directory: string) => directory,
     createId: () => 'builder-1',
+    materialize: async (id: string) => registry.get(id),
     getConversation: (id: string) => registry.get(id),
     configService: {
       async getRecord() {

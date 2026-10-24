@@ -5,6 +5,8 @@ export interface ShutdownPorts {
   stopScheduler(): void;
   flushState(): void | Promise<void>;
   exit(code?: number): void;
+  /** Last resort when `exit` itself did not end the process: SIGKILL, no handlers, no flush. */
+  kill(): void;
 }
 
 export interface ShutdownOptions {
@@ -21,6 +23,11 @@ export interface ShutdownOptions {
 // and SIGTERM stopped them all; an abrupt death orphaned every run anyway. Exits now wait only
 // for work that lives solely in memory. Only an explicit Stop stops a turn.
 const DRAIN_POLL_INTERVAL_MS = 500;
+// Slack past (drain grace + flush grace) before the process is SIGKILLed from inside.
+// Fix-guard (2026-10-23): `--replace` waited its whole 10 s timeout and SIGKILLed a backend with
+// 25 h uptime, because no timer anywhere guaranteed the process ended once SIGTERM arrived.
+// Guard: server/test/shutdown.test.ts ("a shutdown whose exit never lands is killed").
+const HARD_KILL_MARGIN_MS = 2_000;
 
 export type ShutdownState = 'starting' | 'idle' | 'reloading' | 'shutting_down' | 'exiting';
 
@@ -43,6 +50,15 @@ export function createShutdownController(
   let drainInterval: NodeJS.Timeout | null = null;
   let forceExitTimeout: NodeJS.Timeout | null = null;
   let flushWatchdog: NodeJS.Timeout | null = null;
+  // Not in clearTimers(): every exit path calls that, and this one must survive it. dispose() only.
+  let hardKill: NodeJS.Timeout | null = null;
+  // Set by the first step logged, so every line reads as "+ms since shutdown began".
+  let shutdownStartedAt: number | null = null;
+  const sinceShutdown = () => {
+    shutdownStartedAt ??= Date.now();
+    return Date.now() - shutdownStartedAt;
+  };
+  const step = (message: string) => console.log(`[shutdown +${sinceShutdown()}ms] ${message}`);
   let state: ShutdownState = 'starting';
   let reloadRequested = false;
   let startupPending = true;
@@ -85,6 +101,7 @@ export function createShutdownController(
     state = 'exiting';
     reloadRequested = false;
     clearTimers();
+    step(`flushing state (${code === 0 ? 'exit' : `exit ${code}`})`);
     let pendingFlush: void | Promise<void> = undefined;
     try {
       pendingFlush = ports.flushState();
@@ -110,6 +127,7 @@ export function createShutdownController(
       .then(() => {
         if (flushWatchdog) clearTimeout(flushWatchdog);
         flushWatchdog = null;
+        step('state flushed; exiting');
         ports.exit(code);
       });
     return exitPromise;
@@ -197,10 +215,20 @@ export function createShutdownController(
   const handleShutdown = (signal: 'SIGINT' | 'SIGTERM') => {
     if (state === 'exiting' || state === 'shutting_down') return;
     reloadRequested = false;
+    sinceShutdown();
+    hardKill = setTimeout(
+      () => {
+        console.error(`[shutdown +${sinceShutdown()}ms] still alive; SIGKILL`);
+        ports.kill();
+      },
+      options.forceExitGraceMs + options.flushGraceMs + HARD_KILL_MARGIN_MS
+    );
+    hardKill.unref();
     stopScheduler();
     clearTimers();
     state = 'shutting_down';
     startupPending = false;
+    step(`${signal} received`);
     console.log(
       `${signal} — shutting down; running turns continue and the next backend adopts them`
     );
@@ -231,7 +259,11 @@ export function createShutdownController(
     handleStartupFailure,
     handleSigint,
     handleSigterm,
-    dispose: clearTimers,
+    dispose() {
+      clearTimers();
+      if (hardKill) clearTimeout(hardKill);
+      hardKill = null;
+    },
   };
 }
 

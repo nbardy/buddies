@@ -4,9 +4,15 @@ import { invalidateChannelResources } from '../../atoms/resources';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelMarkdown } from './ChannelMarkdown';
 import { EmojiPicker } from './EmojiPicker';
+import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { buddyWrite, errorText } from './api';
-import { type WorkspaceDirectory, channelPostBody } from './channel-data';
-import type { Post } from './types';
+import {
+  type WorkspaceDirectory,
+  channelPostBody,
+  threadPageResource,
+  wholePostIn,
+} from './channel-data';
+import type { ClippedPost, ThreadPage } from './types';
 import './ChannelPostContent.css';
 
 // Pattern: fix-guards (docs/patterns.md#fix-guards)
@@ -27,10 +33,21 @@ const actionStyle: CSSProperties = {
 // Pattern: one-definition (docs/patterns.md#one-definition)
 // Both shells edit/react to the same post; the edit snapshot pins its revision until Save.
 export function ChannelPostContent({
-  post,
+  post: shown,
   directory,
-}: { post: Post; directory: WorkspaceDirectory }) {
-  const [editing, setEditing] = useState<Post | null>(null);
+}: { post: ClippedPost; directory: WorkspaceDirectory }) {
+  // A Threads card may hold only a preview (server routes.ts clipFollowedThreads). "Show full
+  // message" swaps in the whole copy from the thread resource. Fix-guard: Edit is hidden on a
+  // preview, or Save would overwrite the post with its clipped text.
+  const [asked, setAsked] = useState(false);
+  const thread = usePolledFetch<ThreadPage>(
+    asked && shown.clippedFrom !== undefined ? threadPageResource(shown.rootId ?? shown.id) : null,
+    0
+  );
+  const whole = thread.data === null ? null : wholePostIn(thread.data, shown.id);
+  const post: ClippedPost = whole ?? shown;
+  const clipped = post.clippedFrom !== undefined;
+  const [editing, setEditing] = useState<ClippedPost | null>(null);
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -49,7 +66,7 @@ export function ChannelPostContent({
     void buddyWrite('post.react', { postId: post.id }, { emoji, active })
       .then(() => {
         if (active) recordEmojiUse(emoji);
-        invalidateChannelResources(post.channelId);
+        invalidateChannelResources(post.channelId, [post.rootId ?? post.id]);
       })
       .catch((cause: unknown) => setProblem(errorText(cause)))
       .finally(() => setBusy(false));
@@ -73,7 +90,7 @@ export function ChannelPostContent({
           onCancel={() => setEditing(null)}
           onPosted={() => {
             setEditing(null);
-            invalidateChannelResources(post.channelId);
+            invalidateChannelResources(post.channelId, [post.rootId ?? post.id]);
           }}
         />
       ) : (
@@ -82,6 +99,20 @@ export function ChannelPostContent({
           buddyNames={directory.buddyNames}
           tasks={directory.taskById}
         />
+      )}
+      {clipped && !editing && (
+        <button
+          type="button"
+          className="threads-fold"
+          disabled={thread.kind === 'loading'}
+          onClick={() => setAsked(true)}
+        >
+          {thread.kind === 'failed'
+            ? 'Could not load: retry'
+            : thread.data !== null
+              ? 'Longer than the latest page: open the thread to read it'
+              : `Show full message (${post.clippedFrom} characters)`}
+        </button>
       )}
       {!editing && (
         <div
@@ -113,7 +144,7 @@ export function ChannelPostContent({
               {emoji} {value.count}
             </button>
           ))}
-          {post.author.kind === 'owner' && (
+          {post.author.kind === 'owner' && !clipped && (
             <button
               type="button"
               style={{ ...actionStyle, border: 0 }}

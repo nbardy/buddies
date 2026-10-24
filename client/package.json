@@ -35,6 +35,7 @@
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@types/compression": "^1.8.1",
     "@types/hast": "^3.0.4",
     "@types/mdast": "^4.0.4",
     "@types/node": "^24.10.1",
@@ -42,6 +43,7 @@
     "@types/react-dom": "^19.2.3",
     "@unleashd/buddies-core": "workspace:*",
     "@vitejs/plugin-react": "^5.1.1",
+    "compression": "^1.8.1",
     "typescript": "~5.9.3",
     "unified": "^11.0.5",
     "vite": "^7.2.4"

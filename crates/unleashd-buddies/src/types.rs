@@ -283,6 +283,9 @@ impl DocScope {
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Workspace {
+    /// Registered folders, oldest first. Optional on the wire for older servers.
+    pub folders: Option<Vec<String>>,
+    pub repository_identity: Option<String>,
     pub id: String,
     pub name: String,
     pub root_path: String,
@@ -324,6 +327,30 @@ pub struct Task {
     pub evidence: Vec<String>,
     pub position: i64,
     /// Workspace-home pin: 0 = not pinned, N > 0 = pinned, shown in ascending N. Top-level tasks only.
+    pub pin: i64,
+    pub revision: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A Task as the workspace directory lists it: everything a card, the @ index and pin ordering
+/// read, and none of the free text (`done_criteria`, `evidence`) that lives on `GET /tasks/:id`.
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
+// The full list was 1.7 MB for 896 tasks (~1 MB done_criteria/evidence), polled every 15 s and
+// napi-converted on the main thread. Guard: task_summaries_omit_free_text_and_match_full_list.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct TaskSummary {
+    pub id: String,
+    pub workspace_id: String,
+    pub owner_id: String,
+    pub parent_id: Option<String>,
+    pub title: String,
+    pub status: TaskStatus,
+    pub paused: bool,
+    pub next_action: Option<String>,
+    pub blocked_reason: Option<String>,
+    pub position: i64,
     pub pin: i64,
     pub revision: i64,
     pub created_at: String,
@@ -965,6 +992,7 @@ pub struct BuddyUpdate {
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct WorkspaceInput {
+    pub repository_identity: Option<String>,
     pub name: String,
     pub root_path: String,
 }

@@ -1,5 +1,7 @@
 import { exec } from 'node:child_process';
 import type { Server } from 'node:http';
+import { performance } from 'node:perf_hooks';
+import { bootPhase, timeBootPhase, timeBootPhaseAsync } from '../observability/perf';
 import { ensureAvailablePort } from './port-guard';
 import { askQuestion, checkPort, killProcessOnPort } from './system-ports';
 
@@ -33,7 +35,8 @@ export async function runServerStartup(
   options: StartupOptions,
   ports: StartupPorts
 ): Promise<void> {
-  await ports.initialize();
+  // Boot phases (boot.jsonl): never add startup work without one (docs/error-journal.md, perf).
+  await timeBootPhaseAsync('initialize', () => ports.initialize());
   await ensureAvailablePort(options.port, {
     checkPort,
     askQuestion,
@@ -42,7 +45,9 @@ export async function runServerStartup(
     exit: (code) => process.exit(code),
   });
 
+  const listenStarted = performance.now();
   ports.server.listen(options.port, options.host, () => {
+    bootPhase('listen', performance.now() - listenStarted);
     const localPort = options.development ? options.developmentClientPort : options.port;
     const startUrl = `http://localhost:${localPort}`;
     if (options.development) {
@@ -59,13 +64,14 @@ export async function runServerStartup(
   // Barrier is intentional (59da781): commands on existing history wait for the
   // list and the app conversations' runtimes (hello streams rows with loading:true).
   console.log('Loading conversations before accepting WebSocket commands...');
-  await ports.loadConversations();
+  await timeBootPhaseAsync('conversations_ready', () => ports.loadConversations());
   if (!ports.isStartupActive()) {
     ports.abortStartup();
     return;
   }
-  await ports.startOptionalScheduler();
-  if (!ports.markReady()) {
+  await timeBootPhaseAsync('scheduler_start', () => ports.startOptionalScheduler());
+  const ready = timeBootPhase('mark_ready', () => ports.markReady());
+  if (!ready) {
     ports.pauseOptionalScheduler();
     return;
   }

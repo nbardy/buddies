@@ -58,7 +58,7 @@ export interface ConversationWebSocketDependencies {
   /** Rows of listed conversations the registry does not hold; `hello` adds registry rows. */
   listedRows(): ConversationRow[];
   /** A listed conversation's runtime, built from its record on first use. */
-  materialize(conversationId: string): Promise<unknown>;
+  materialize(conversationId: string): Promise<ConversationRuntime | undefined>;
   /** A deleted conversation leaves the ingest list too (its record is tombstoned). */
   forgetListed(conversationId: string): void;
   sessions: SessionTracking;
@@ -92,6 +92,7 @@ export function registerConversationWebSocket(
 ): void {
   const createOrReuse = createConversationService({
     configService: dependencies.configService,
+    materialize: (id) => dependencies.materialize(id),
     getConversation: (id) => dependencies.registry.get(id),
     createConversation: dependencies.createConversation,
     registerConversation: (conversation) => dependencies.registry.set(conversation),
@@ -183,6 +184,8 @@ export function registerConversationWebSocket(
             const workingDirectory = dependencies.resolveWorkingDirectory(
               buddyResolution?.workingDirectory ?? data.workingDirectory
             );
+            // A fork inherits its source's kind, and a cold source has no runtime to read it from.
+            if (data.kind.t === 'fork') await dependencies.materialize(data.kind.from);
             const kind = createdKind(data.kind, buddyResolution, (id) =>
               dependencies.registry.get(id)
             );

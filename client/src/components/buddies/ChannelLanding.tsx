@@ -26,7 +26,7 @@ import {
   movePin,
   unpin,
 } from './home-view';
-import type { Inbox, Run, Task } from './types';
+import type { Inbox, Run, TaskSummary } from './types';
 import { ActionError, useBuddyAction } from './useBuddyAction';
 // Self-hosted variable fonts (unicode-range subsets, fetched only when Home renders). The app
 // named "Inter" but never shipped it, so Home fell back to the system UI font.
@@ -118,7 +118,7 @@ function TaskSection({
   channelId: string | null;
   frame: 'desktop' | 'mobile';
 }) {
-  const tasks = usePolledFetch<Task[]>(workspaceTasksUrl(workspaceId), 15_000);
+  const tasks = usePolledFetch<TaskSummary[]>(workspaceTasksUrl(workspaceId), 15_000);
   const action = useBuddyAction(async () => tasks.refetch());
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState('');

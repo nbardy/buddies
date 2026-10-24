@@ -182,8 +182,17 @@ export class ConversationConfigService {
     };
   }
 
-  async hydrate(input: HydrateConversationConfigInput): Promise<HydratedConversationConfig> {
+  /**
+   * `known`: the record the caller already read for `input.conversationId`. Boot recovery read
+   * every record and then hydrate read it again (8,176 duplicate reads, ~0.5 s of a 18 s boot,
+   * 2026-10-23); passing it in makes the single read the only one.
+   */
+  async hydrate(
+    input: HydrateConversationConfigInput,
+    known?: ConversationRecord
+  ): Promise<HydratedConversationConfig> {
     const existing =
+      known ??
       (await this.store.getByConversationId(input.conversationId)) ??
       (await findFirstSessionRecord(this.store, input.sessionBindings));
     if (existing) {

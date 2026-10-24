@@ -172,6 +172,37 @@ test('bootstrap reuses an existing "Product Development Lead" as Product Dev', a
   assert.equal((await core.listBuddies(workspace.id)).length, 2);
 });
 
+// Active seats must still beat retired duplicates left by the historical repair.
+test('an active seat holder beats a retired own hire', async (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'unleashd-home-seats-')));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const core = await openCore(root);
+  const original = await bootstrapUnleashdHome(core, root);
+  for (const buddyId of [original.productDevId, original.releaseManagerId])
+    await core.updateBuddy(OWNER, {
+      buddyId,
+      changes: { status: 'archived' },
+      key: `retire-${buddyId}`,
+    });
+  const active = [];
+  for (const [i, name] of ['Product Development Lead', 'Upstream Release Manager'].entries()) {
+    active.push(
+      await core.createBuddy(OWNER, {
+        workspaceId: original.workspaceId,
+        slug: `builder-${i}`,
+        name,
+        role: 'r',
+        manager: managerRef(null),
+        key: name,
+      })
+    );
+  }
+  const home = await bootstrapUnleashdHome(core, root);
+  assert.equal(home.productDevId, active[0].id);
+  assert.equal(home.releaseManagerId, active[1].id);
+  assert.equal((await core.listWorkspaces()).length, 1);
+});
+
 const soulOf = async (core: BuddiesCore, buddyId: string) =>
   (await core.readDoc(OWNER, { buddyId, scope: { kind: 'buddy' }, kind: 'soul', name: '' }))
     ?.content;

@@ -31,6 +31,8 @@ export declare class BuddiesCore {
   upsertTask(actor: Actor, write: TaskWrite): Promise<Task>
   getTask(id: string): Promise<Task>
   listTasks(query: TaskQuery): Promise<Array<Task>>
+  /** Pure read (no writes): eligible for a read-only connection pool. */
+  listTaskSummaries(workspaceId: string): Promise<Array<TaskSummary>>
   taskCounts(workspaceId: string): Promise<Array<TaskCount>>
   enqueueRun(actor: Actor, input: EnqueueInput): Promise<Run>
   /** A foreground chat input with its text (the queued run is the owner's message). */
@@ -744,6 +746,27 @@ export type TaskQuery =
 
 export type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled'
 
+/**
+ * A Task as the workspace directory lists it: everything a card, the @ index and pin ordering
+ * read, and none of the free text (`done_criteria`, `evidence`) that lives on `GET /tasks/:id`.
+ */
+export interface TaskSummary {
+  id: string
+  workspaceId: string
+  ownerId: string
+  parentId?: string
+  title: string
+  status: TaskStatus
+  paused: boolean
+  nextAction?: string
+  blockedReason?: string
+  position: number
+  pin: number
+  revision: number
+  createdAt: string
+  updatedAt: string
+}
+
 /** A task write. Every field of `TaskChanges` is a patch: absent = unchanged. */
 export type TaskWrite =
   | { kind: 'create'; ownerId: string; parentId?: string; title: string; doneCriteria: string; key: string }
@@ -777,6 +800,9 @@ export interface ThreadUnread {
 }
 
 export interface Workspace {
+  /** Registered folders, oldest first. Optional on the wire for older servers. */
+  folders?: Array<string>
+  repositoryIdentity?: string
   id: string
   name: string
   rootPath: string
@@ -784,6 +810,7 @@ export interface Workspace {
 }
 
 export interface WorkspaceInput {
+  repositoryIdentity?: string
   name: string
   rootPath: string
 }

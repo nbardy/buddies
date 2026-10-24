@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import type { CommandError, GeneralCommandError, ServerMessageInput } from '@unleashd/shared';
 import { WebSocket } from 'ws';
+import { labelled } from '../observability/event-loop-stall';
 
 export function sendToClient(ws: WebSocket, data: ServerMessageInput): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
@@ -62,21 +63,24 @@ export function superviseLiveness(ws: WebSocket, intervalMs: number): void {
   ws.on('pong', () => {
     answeredSinceLastPing = true;
   });
-  const timer = setInterval(() => {
-    const now = Date.now();
-    // A live peer can miss a pong when our loop stalled (late tick) or our ping queues behind a
-    // large send (draining buffer); a half-open socket shows neither.
-    const tickWasLate = now - lastTickAt > intervalMs * 1.5;
-    const sendBufferDraining = ws.bufferedAmount > 0 && ws.bufferedAmount < lastBufferedAmount;
-    lastTickAt = now;
-    lastBufferedAmount = ws.bufferedAmount;
-    if (!answeredSinceLastPing && !tickWasLate && !sendBufferDraining) {
-      ws.terminate();
-      return;
-    }
-    answeredSinceLastPing = false;
-    ws.ping();
-  }, intervalMs);
+  const timer = setInterval(
+    labelled('timer ws-liveness', () => {
+      const now = Date.now();
+      // A live peer can miss a pong when our loop stalled (late tick) or our ping queues behind a
+      // large send (draining buffer); a half-open socket shows neither.
+      const tickWasLate = now - lastTickAt > intervalMs * 1.5;
+      const sendBufferDraining = ws.bufferedAmount > 0 && ws.bufferedAmount < lastBufferedAmount;
+      lastTickAt = now;
+      lastBufferedAmount = ws.bufferedAmount;
+      if (!answeredSinceLastPing && !tickWasLate && !sendBufferDraining) {
+        ws.terminate();
+        return;
+      }
+      answeredSinceLastPing = false;
+      ws.ping();
+    }),
+    intervalMs
+  );
   // The HTTP server keeps the process alive; a heartbeat must not.
   timer.unref();
   ws.on('close', () => clearInterval(timer));

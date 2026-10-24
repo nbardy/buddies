@@ -26,6 +26,7 @@ use crate::model::{
 use crate::read::{Apply, Checkpoint, Outcome, RowData, Stamp};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 
 /// 2: `usage_turn`, `session.context`, `session.rate_limits` (T13a).
@@ -66,6 +67,11 @@ CREATE TABLE IF NOT EXISTS session (
   context TEXT,
   rate_limits TEXT
 );
+-- Additive (2026-10-23, no SCHEMA_VERSION bump): covers `KNOWN`, the boot-time read of every
+-- source's stamp. Without it that scan walks the `source` table, whose rows carry the (up to
+-- 64 KB) fold checkpoint inline: 1.6 s of scattered cold reads on 11k sources vs 30 ms over this
+-- index. Built once on the first start after upgrading (~3 s); an older build ignores it.
+CREATE INDEX IF NOT EXISTS source_known ON source(path, format, stamp);
 CREATE INDEX IF NOT EXISTS session_by_rev ON session(rev);
 CREATE INDEX IF NOT EXISTS session_by_id ON session(session_id, activity_at);
 CREATE INDEX IF NOT EXISTS session_rate_limits ON session(activity_at) WHERE rate_limits IS NOT NULL;
@@ -171,7 +177,7 @@ impl Writer {
 
     /// Every source's stamp. The one whole-table read, done once at start.
     pub fn known(&self) -> Result<HashMap<String, Known>> {
-        let mut stmt = self.conn.prepare("SELECT id, path, format, stamp FROM source")?;
+        let mut stmt = self.conn.prepare(KNOWN)?;
         let rows =
             stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?;
         let mut out = HashMap::new();
@@ -434,6 +440,14 @@ pub struct Removed {
     pub rev: i64,
 }
 
+/// One bound session's settled prefix, for `Reader::merged_count`.
+#[derive(Debug, Clone)]
+pub struct MergePrefix {
+    pub session_id: String,
+    pub created_at: f64,
+    pub count: u32,
+}
+
 pub struct Reader {
     conn: Connection,
 }
@@ -477,12 +491,7 @@ impl Reader {
     }
 
     pub fn messages(&self, session_id: &str, after_seq: i64, limit: u32) -> Result<Vec<Message>> {
-        let source: Option<i64> = self
-            .conn
-            .prepare_cached("SELECT source_id FROM session WHERE session_id = ?1 AND listed = 1 ORDER BY activity_at DESC LIMIT 1")?
-            .query_row([session_id], |r| r.get(0))
-            .optional()?;
-        let Some(source) = source else { return Ok(Vec::new()) };
+        let Some(source) = self.source_of(session_id)? else { return Ok(Vec::new()) };
         let mut stmt = self.conn.prepare_cached(
             "SELECT seq, role, at, completed_at, content, tool_name, tool_input FROM message WHERE source_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
         )?;
@@ -504,6 +513,54 @@ impl Reader {
             })
         })
         .collect()
+    }
+
+    /// The number of rows `mergeSessionMessages(prefixes, [])` keeps across forked sessions (the
+    /// server's boot count), computed in one pass over the stored rows instead of paging every
+    /// message through napi (server/src/ingest/history.ts `mergedCount`, 2026-10-23: 618 merged
+    /// records each re-read and SHA-1'd in JS).
+    ///
+    /// The merge keeps one row per (timestamp, role, body) occurrence at the maximum occurrence
+    /// count over sessions, where a missing timestamp inherits the previous message's (the
+    /// session's `created_at` before the first). Each prefix is the session's first `count`
+    /// messages. Rows are identified by a 64-bit hash of the raw stored fields; the same raw row
+    /// always converts to the same body, so raw-equal implies merge-equal. Fix-guard:
+    /// `merged_count_*` in tests/engine.rs and the TS parity test in server/test/ingest-history.test.ts.
+    pub fn merged_count(&self, prefixes: &[MergePrefix]) -> Result<u32> {
+        let mut most: HashMap<u64, u32> = HashMap::new();
+        for prefix in prefixes {
+            let Some(source) = self.source_of(&prefix.session_id)? else { continue };
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT at, role, content, tool_name, tool_input FROM message WHERE source_id = ?1 ORDER BY seq LIMIT ?2",
+            )?;
+            let mut rows = stmt.query(params![source, prefix.count])?;
+            let mut seen: HashMap<u64, u32> = HashMap::new();
+            let mut previous_at = prefix.created_at;
+            while let Some(r) = rows.next()? {
+                let at = r.get::<_, Option<f64>>(0)?.unwrap_or(previous_at);
+                previous_at = at;
+                let mut hasher = DefaultHasher::new();
+                at.to_bits().hash(&mut hasher);
+                for column in 1..5 {
+                    r.get_ref(column)?.as_str_or_null().map_err(rusqlite::Error::from)?.hash(&mut hasher);
+                }
+                *seen.entry(hasher.finish()).or_insert(0) += 1;
+            }
+            for (key, n) in seen {
+                let best = most.entry(key).or_insert(0);
+                *best = (*best).max(n);
+            }
+        }
+        Ok(most.values().sum())
+    }
+
+    /// The source a native session id reads from: the most recently active listed file of it.
+    fn source_of(&self, session_id: &str) -> Result<Option<i64>> {
+        Ok(self
+            .conn
+            .prepare_cached("SELECT source_id FROM session WHERE session_id = ?1 AND listed = 1 ORDER BY activity_at DESC LIMIT 1")?
+            .query_row([session_id], |r| r.get(0))
+            .optional()?)
     }
 
     /// Deep search (`/api/search`): the newest listed messages whose text contains `needle`, ASCII
@@ -624,10 +681,14 @@ impl Writer {
         let queries = [
             WITHDRAW_SHIFT.replace("?1", "1").replace("?2", "0").replace("?3", "9").replace("?4", "1"),
             WITHDRAW_SETTLE.replace("?1", "1"),
+            KNOWN.to_string(),
         ];
         explain(&self.conn, queries.into_iter())
     }
 }
+
+/// Every source's stamp (`Writer::known`); served by the `source_known` covering index.
+pub const KNOWN: &str = "SELECT id, path, format, stamp FROM source";
 
 const SEARCH: &str = "SELECT s.session_id, m.seq, m.role, m.at, m.completed_at, m.content, m.tool_name, m.tool_input
   FROM message m JOIN session s ON s.source_id = m.source_id AND s.listed = 1

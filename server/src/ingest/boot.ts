@@ -9,6 +9,7 @@
 
 import path from 'node:path';
 import { type ChangeEvent, Ingest, defaultRoots } from '@unleashd/ingest';
+import { timeBootPhaseAsync } from '../observability/perf';
 import {
   type ConversationList,
   type ConversationListDependencies,
@@ -26,10 +27,13 @@ export async function bootIngest(
   dependencies: Omit<ConversationListDependencies, 'ingest'>
 ): Promise<BootedIngest> {
   let forward: (event: ChangeEvent) => void = () => undefined;
-  const ingest = await Ingest.start(
-    defaultRoots(options.home),
-    path.join(options.appDataDir, 'ingest.sqlite'),
-    (event) => forward(event)
+  // Sub-phases of boot.jsonl's `ingest_start`: store open + source scan (Rust), then the list build.
+  const ingest = await timeBootPhaseAsync('ingest_scan', () =>
+    Ingest.start(
+      defaultRoots(options.home),
+      path.join(options.appDataDir, 'ingest.sqlite'),
+      (event) => forward(event)
+    )
   );
   const scan = ingest.initialScan;
   const logger = dependencies.logger ?? console;
@@ -38,7 +42,9 @@ export async function bootIngest(
   );
   for (const error of scan.errors) logger.warn(`[ingest] ${error}`);
   provideIngest(ingest);
-  const list = await createConversationList({ ...dependencies, ingest });
+  const list = await timeBootPhaseAsync('ingest_list_build', () =>
+    createConversationList({ ...dependencies, ingest })
+  );
   forward = list.onChange;
   return { ingest, list };
 }

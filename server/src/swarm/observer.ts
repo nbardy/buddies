@@ -1,5 +1,5 @@
 import type { OompaRuntimeSnapshot, SubAgent } from '@unleashd/shared';
-import { noteActivity } from '../observability/event-loop-stall';
+import { labelled } from '../observability/event-loop-stall';
 import type { SubAgentHost } from '../turns/subagents';
 
 /**
@@ -67,10 +67,10 @@ class FolderObserver {
   add(listener: SwarmListener): () => void {
     this.listeners.add(listener);
     if (!this.timer) {
-      this.timer = setInterval(() => {
-        noteActivity('timer swarm-observer');
-        this.refresh('now');
-      }, this.timing.intervalMs);
+      this.timer = setInterval(
+        labelled('timer swarm-observer', () => this.refresh('now')),
+        this.timing.intervalMs
+      );
       this.timer.unref?.();
     }
     // A new watcher needs a snapshot taken after it subscribed (its baseline).

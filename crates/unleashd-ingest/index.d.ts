@@ -45,6 +45,17 @@ export declare class Ingest {
   session(sessionId: string): Promise<SessionRow | null>
   messages(sessionId: string, options: MessagesOptions): Promise<Array<Message>>
   /**
+   * How many rows the server's session merge keeps for each group of sessions' prefixes (the
+   * conversation list's message count for a record bound to several sessions), counted in
+   * Rust over the stored rows: ONE call for all groups, no message crosses napi.
+   *
+   * Fix-guard (2026-10-23): the work is ~90 ms of CPU for 614 records, but on a cold page cache
+   * it is ~1,500 scattered range reads (~1.8 s) on one connection. The groups are split over
+   * `MERGE_READERS` read-only connections of their own (like `search`), so the reads overlap and
+   * the shared `reader` stays free for message pages.
+   */
+  mergedCounts(groups: Array<Array<MergeSession>>): Promise<Array<number>>
+  /**
    * Provider-counted token usage of the turns in `[since, until)`, grouped by session, UTC day
    * or model, plus the latest Codex rate limits. Replaces `/api/usage`'s transcript parsers.
    */
@@ -66,7 +77,10 @@ export declare class Ingest {
 
 export declare class TurnAttempts {
   static open(dbPath: string): Promise<TurnAttempts>
-  /** Directory a corrupt predecessor was moved into when this store opened, if any. */
+  /**
+   * Directory a corrupt predecessor was moved into when this store opened or when the
+   * background check found damage, if any.
+   */
   get quarantined(): string | null
   append(snapshot: string | undefined | null, event: string): Promise<boolean>
   get(id: string): Promise<string | null>
@@ -236,6 +250,14 @@ export type KnowledgeScope =
 export interface ListOptions {
   /** Revision already seen; 0 lists everything. */
   since: number
+}
+
+/** One bound session's settled prefix, as `mergedCounts` takes it. */
+export interface MergeSession {
+  sessionId: string
+  createdAt: number
+  /** The first `count` messages are the prefix. */
+  count: number
 }
 
 export interface Message {

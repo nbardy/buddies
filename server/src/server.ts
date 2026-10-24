@@ -1,7 +1,8 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { ProviderSchema, encodeRows } from '@unleashd/shared';
+import { performance } from 'node:perf_hooks';
+import { CHAT_KIND, ProviderSchema, encodeRows, kindBuddyContext } from '@unleashd/shared';
 import { recordsCarrier } from './turns/intake';
 
 import { attachExecution, executeCommand } from '@nbardy/agent-cli';
@@ -49,6 +50,7 @@ import {
 import { replaceRuntimeConfig } from './conversations/runtime-config';
 import { registerConversationRoutes } from './http/conversation-routes';
 import { registerCoreRoutes } from './http/core-routes';
+import { registerDebugProfileRoutes } from './http/debug-profile-routes';
 import { registerErrorDiagnosticsRoutes } from './http/error-diagnostics-routes';
 import { registerFilesystemRoutes } from './http/filesystem-routes';
 import { createKnownProjectAuthorizer } from './http/known-projects';
@@ -59,7 +61,7 @@ import { registerTurnDiagnosticsRoutes } from './http/turn-diagnostics-routes';
 import { registerUploadRoutes } from './http/upload-routes';
 import { registerUsageRoutes } from './http/usage-routes';
 import { type BootedIngest, bootIngest } from './ingest/boot';
-import type { ConversationList } from './ingest/conversation-list';
+import { type ConversationList, forEachConcurrently } from './ingest/conversation-list';
 import { currentIngest } from './ingest/instance';
 import { createRuntimeBuilder } from './ingest/runtimes';
 import { adoptExecutions, liveGrants } from './lifecycle/adopt-executions';
@@ -76,6 +78,7 @@ import {
   reportBackendExits,
   startEventLoopStallMonitor,
 } from './observability';
+import { bootPhase, flushRouteLatency, routeLatencyMiddleware, timeBootPhase, timeBootPhaseAsync } from './observability/perf';
 import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
@@ -93,6 +96,7 @@ import { validate as isUuid } from 'uuid';
 import { auditLocalAgents } from './audit.js';
 import { createBriefings } from './buddies/briefing';
 import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
+import { createChannelChangeFeed } from './buddies/channel-change-feed';
 import { createCliReplyGate } from './buddies/channel-reply-gate';
 import { createChannels } from './buddies/channels';
 import {
@@ -114,7 +118,7 @@ import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 
-let startupAuditResults: ReturnType<typeof auditLocalAgents> = [];
+let startupAuditResults: Awaited<ReturnType<typeof auditLocalAgents>> = [];
 
 const app = express();
 const server = http.createServer(app);
@@ -323,7 +327,12 @@ async function startIngestList(): Promise<void> {
 // The DB is never the v33 ~/.buddies/buddies.sqlite. A missing file while the v33 one exists fails
 // every Buddy call with the import command (core.ts), while ordinary chats keep working; a
 // first-time install (neither file) starts with an empty database.
+const buddiesOpenStarted = performance.now();
 const buddiesReady = openBuddiesCore(buddiesLocation(buddiesDatabasePath()));
+buddiesReady.then(
+  () => bootPhase('buddies_open', performance.now() - buddiesOpenStarted),
+  () => undefined
+);
 buddiesReady.catch((error) => console.error('[buddies] Buddies are unavailable:', error.message));
 const buddiesCore = lateBoundCore(buddiesReady);
 const buddyEvents = createBuddyEvents();
@@ -385,6 +394,7 @@ const buddyCreationService: BuddyCreationService = createBuddyCreationService({
   resolveWorkingDirectory: resolveWorkingDirectoryInput,
   createId: uuidv4,
   getConversation: (id) => applicationContext.registry.get(id),
+  materialize: (id) => runtimeBuilder.materialize(id),
   createConversation: (options) => new Conversation(options),
   registerConversation: applicationContext.registry.set,
   createConversationLink: createBuddyConversationLink,
@@ -394,16 +404,19 @@ const buddyCreationService: BuddyCreationService = createBuddyCreationService({
 
 // One background Buddy turn = one conversation runtime turn (runCoordinationMessage).
 const buddyRunnerHost: RunnerHost = {
-  admitChat: ({ conversationId, turnId, body, run }) => {
-    const conversation = conversations.get(conversationId);
+  // Pattern: lazy-runtimes (docs/patterns.md#lazy-runtimes)
+  // Every host read of a conversation goes through `materialize` (registered, or built from its
+  // stored record): a cold Buddy seat, DM or branch is NOT absent. Guard: lazy-buddy-runtimes.test.ts.
+  admitChat: async ({ conversationId, turnId, body, run }) => {
+    const conversation = await runtimeBuilder.materialize(conversationId);
     // A deleted conversation's queued message has nowhere to run; its run ends at its lease.
     if (!conversation) throw new Error(`Chat conversation ${conversationId} is not registered`);
     conversation.admitChatClaim(turnId, body, run);
   },
-  registered: (id) => conversations.get(id) !== undefined,
+  registered: async (id) => (await runtimeBuilder.materialize(id)) !== undefined,
   defaultModel: providerDefaultModel,
   reconfigure: async (conversationId, config) => {
-    const conversation = conversations.get(conversationId);
+    const conversation = await runtimeBuilder.materialize(conversationId);
     if (!conversation) throw new Error(`Run conversation ${conversationId} is not registered`);
     await replaceRuntimeConfig(
       conversationConfigService,
@@ -432,7 +445,7 @@ const buddyRunnerHost: RunnerHost = {
     });
   },
   runTurn: async ({ conversationId, context, prompt, leaseToken, deadline, owner }) => {
-    const registered = conversations.get(conversationId);
+    const registered = await runtimeBuilder.materialize(conversationId);
     if (!registered) throw new Error(`Run conversation ${conversationId} is not registered`);
     const conversation = await buddyCreationService.ensureConversationReady(registered);
     // Automatic expiry is max_runtime_timeout, never stop()/user_stop (AGENTS.md). The policy
@@ -556,6 +569,10 @@ registerConversationWebSocket(wss, {
 // Auth first: every route below (API, uploads, and the static app shell) is
 // unreachable without the shared secret.
 registerAuthRoutes(app, AUTH_POLICY, { owner: TAILNET_OWNER, pairing: PAIRING_CODES });
+// After the gate (stays first): per-minute route p50/p90/max (observability/perf.ts) and the
+// gated CPU-profile capture. Pattern: fix-guards (docs/patterns.md#fix-guards)
+app.use(routeLatencyMiddleware());
+registerDebugProfileRoutes(app);
 
 // gzip/deflate every compressible response over 1 KB (JSON API, the app
 // shell's JS/CSS). Mounted AFTER the gate so an unauthenticated caller costs
@@ -607,8 +624,8 @@ const dependencyChecks = registerDependencyRoutes(
 );
 registerMobileAccessRoutes(app, {
   tailscale: TAILSCALE_CANDIDATES,
-  // A phone must reach the CLIENT: Vite's port in development, not the API's.
-  uiPort: process.env.NODE_ENV === 'development' ? DEV_CLIENT_PORT : portNumber,
+  // Phones use the compressed build served by this backend; Vite stays local for live edits.
+  uiPort: portNumber,
   auth: AUTH_POLICY,
   key: keyLocation(process.env, APP_DATA_DIR),
   pairing: PAIRING_CODES,
@@ -644,7 +661,7 @@ const buddiesChanged = () => {
 // A Buddy's stable conversations (DM, thread seats): owner-origin creation.
 const buddyConversations: StableConversationPorts = {
   slot: async (conversationId) => slotOf(await conversationConfigService.getRecord(conversationId)),
-  getConversation: (id) => applicationContext.registry.get(id),
+  getConversation: (id) => runtimeBuilder.materialize(id),
   ensureConversationReady: buddyCreationService.ensureConversationReady,
   createConversation: (input) => buddyCreationService.createServerBuddyConversation(input),
   reconfigure: (conversation, config, provenance) =>
@@ -652,8 +669,7 @@ const buddyConversations: StableConversationPorts = {
 };
 
 // One channel's posts or responders changed: clients refresh only that channel's views.
-const channelChanged = (channelId: string) =>
-  applicationContext.broadcast({ type: 'channel_changed', channelId });
+const channelChanged = createChannelChangeFeed((message) => applicationContext.broadcast(message));
 const buddyChannels = createChannels({
   installedAgent: () => installedAgent(),
   core: buddiesCore,
@@ -739,7 +755,12 @@ registerSearchRoutes(
   async () => {
     const archived = await archivedBuddyIdsOrNone();
     return (conversationId) => {
-      const buddy = conversations.get(conversationId)?.buddyContext;
+      // A cold conversation has no runtime: its Buddy is in the record's kind.
+      const buddy = kindBuddyContext(
+        conversations.get(conversationId)?.kind ??
+          conversationList?.joined(conversationId)?.record.kind ??
+          CHAT_KIND
+      );
       return !buddy || !archived.has(buddy.buddyId);
     };
   }
@@ -804,7 +825,11 @@ shutdownController = registerShutdownHandlers(
     flushState: async () => {
       upstream.stop();
       dependencyChecks.close();
-      await Promise.all([turnAttemptJournal.flush(), errorJournal.flush()]);
+      await Promise.all([
+        turnAttemptJournal.flush(),
+        errorJournal.flush(),
+        flushRouteLatency(),
+      ]);
       await buddyMcp?.close();
       if (bootedIngest) {
         const { ingest, list } = await bootedIngest;
@@ -813,14 +838,40 @@ shutdownController = registerShutdownHandlers(
       }
     },
     exit: (code = 0) => process.exit(code),
+    kill: () => process.kill(process.pid, 'SIGKILL'),
   }
 );
+
+/**
+ * Conversations the Buddy runner's live runs name: they hold runtimes before the runner starts
+ * so the first claim does not pay a build (every host read materializes anyway). When the
+ * Buddy core is unavailable the runner never starts either (startOptionalScheduler), so none.
+ */
+async function liveRunConversations(): Promise<Set<string>> {
+  try {
+    const workspaces = await buddiesCore.listWorkspaces();
+    const runs = await Promise.all(
+      workspaces.map((workspace) =>
+        buddiesCore.listRuns({ kind: 'live', workspaceId: workspace.id }, 1_000)
+      )
+    );
+    return new Set(runs.flat().flatMap((run) => (run.conversationId ? [run.conversationId] : [])));
+  } catch (error) {
+    console.warn('[buddies] Live runs unavailable; no conversation pinned for the runner:', error);
+    return new Set();
+  }
+}
 
 const runtimeBuilder = createRuntimeBuilder({
   registry: applicationContext.registry,
   records: conversationConfigStore,
   configService: conversationConfigService,
   joined: (id) => conversationList?.joined(id),
+  pinned: async () =>
+    new Set([
+      ...(await conversationConfigStore.conversationsWithInputs()),
+      ...(await liveRunConversations()),
+    ]),
   createConversation: (options) => new Conversation(options),
   resolveBuddyConversation,
   dispatchInitialMessage: buddyCreationService.dispatchInitialMessageIfPending,
@@ -829,6 +880,8 @@ const runtimeBuilder = createRuntimeBuilder({
 
 // Boot adoption state: journals found before the attempt sweep, runs their turns execute under.
 let foundExecutions: FoundExecution[] = [];
+const INPUT_HYDRATION_CONCURRENCY = 8;
+let ingestStarting: Promise<void> = Promise.resolve();
 let adoptedRuns: AdoptedRun[] = [];
 
 void runServerStartup(
@@ -844,42 +897,60 @@ void runServerStartup(
   {
     server,
     initialize: async () => {
-      await errorJournal.initialize();
-      await conversationConfigStore.opened();
+      // Every step below is a boot phase (observability/perf.ts, boot.jsonl): new boot work gets one.
+      await timeBootPhaseAsync('error_journal', () => errorJournal.initialize());
+      await timeBootPhaseAsync('records_open', () => conversationConfigStore.opened());
       installConsoleErrorCapture(errorJournal);
-      startEventLoopStallMonitor(errorJournal);
+      timeBootPhase('stall_monitor', () => startEventLoopStallMonitor(errorJournal));
+      // Ingest.start (3.4 s, idle main thread waiting on Rust) needs only the records store, so it
+      // overlaps the rest of initialize (scan, MCP, attempt journal, palette); loadConversations
+      // awaits it. The no-op catch only keeps a failed initialize from leaving it unhandled.
+      ingestStarting = timeBootPhaseAsync('ingest_start', startIngestList);
+      ingestStarting.catch(() => undefined);
       // Crashes the dev runner recorded while no backend was alive to journal them.
       void reportBackendExits(errorJournal, path.join(APP_DATA_DIR, 'observability')).catch(
         (error) => console.error('[backend-exits] Failed to journal recorded backend exits:', error)
       );
       // Journals the previous backend left: their open attempts are adopted, not swept. A live
       // turn's grant is valid again BEFORE the tool endpoint answers (adopt-executions.ts).
-      foundExecutions = execution.scan();
-      for (const grant of liveGrants(foundExecutions)) buddyGrants.adopt(grant);
-      // The one Buddy tool endpoint, on its own loopback listener (never the gated app).
-      buddyMcp = await startMcpEndpoint({
-        core: buddiesCore,
-        events: buddyEvents,
-        grants: buddyGrants,
-        uploadsRoot: () => UPLOADS_DIR,
-        messages: async (id, page) => (await listReady).page(id, page),
-        openBranch: (chat) => buddyCreationService.openBranch(chat),
-        backgroundWork,
-        portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
+      timeBootPhase('execution_scan', () => {
+        foundExecutions = execution.scan();
+        for (const grant of liveGrants(foundExecutions)) buddyGrants.adopt(grant);
       });
+      // The one Buddy tool endpoint, on its own loopback listener (never the gated app).
+      buddyMcp = await timeBootPhaseAsync('mcp_endpoint', () =>
+        startMcpEndpoint({
+          core: buddiesCore,
+          events: buddyEvents,
+          grants: buddyGrants,
+          uploadsRoot: () => UPLOADS_DIR,
+          messages: async (id, page) => (await listReady).page(id, page),
+          openBranch: (chat) => buddyCreationService.openBranch(chat),
+          backgroundWork,
+          portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
+        })
+      );
       // Background, never awaited: bootstrap and the upstream fetch must not
       // hold startup, and their failures are logged after capture is installed.
       upstream.start();
-      startupAuditResults = auditLocalAgents();
-      await turnAttemptJournal.initialize(
-        new Set(
-          foundExecutions.flatMap((found) =>
-            found.t === 'turn' || found.t === 'unstarted' ? [found.owner.attemptId] : []
+      // Background too: the PATH walk is async and parallel (audit.ts); /api/core serves [] until it lands.
+      void auditLocalAgents().then(
+        (results) => {
+          startupAuditResults = results;
+        },
+        (error) => console.warn('[agents] Local agent audit failed:', error)
+      );
+      await timeBootPhaseAsync('attempt_journal', () =>
+        turnAttemptJournal.initialize(
+          new Set(
+            foundExecutions.flatMap((found) =>
+              found.t === 'turn' || found.t === 'unstarted' ? [found.owner.attemptId] : []
+            )
           )
         )
       );
-      await persistedServerState.initialize();
-      await paletteService.initialize();
+      await timeBootPhaseAsync('settings', () => persistedServerState.initialize());
+      await timeBootPhaseAsync('palette', () => paletteService.initialize());
       // Uploads retention: one child-process pass a day, 10 min after boot or a day after the last success. Every place a message or post can
       // name an upload is a reference root; see uploads/gc.ts for the deletion rule.
       startUploadsGc(
@@ -912,7 +983,7 @@ void runServerStartup(
     startOptionalScheduler: async () => {
       try {
         await buddiesReady;
-        await execution.start(adoptedRuns);
+        await timeBootPhaseAsync('runner_start', () => execution.start(adoptedRuns));
         console.log(execution.started);
       } catch (error) {
         console.warn('[buddies] Runner unavailable:', error);
@@ -935,9 +1006,11 @@ void runServerStartup(
     // The list (and every history) comes from the ingest store; app-created records then
     // become runtimes, joined with their sessions. `ready` names both.
     loadConversations: async () => {
-      await startIngestList();
-      await runtimeBuilder.recover();
+      // `ingest_start` (initialize) is the work; this phase is only the wait left over after the rest.
+      await timeBootPhaseAsync('conversation_list_wait', () => ingestStarting);
+      await timeBootPhaseAsync('recovery', () => runtimeBuilder.recover());
       // Before the Buddy runner recovers or claims anything (lifecycle/adopt-executions.ts).
+      const adoptionStarted = performance.now();
       adoptedRuns = await adoptExecutions(foundExecutions, {
         conversation: async (id) => {
           const registered = conversations.get(id) ?? (await runtimeBuilder.materialize(id));
@@ -956,15 +1029,20 @@ void runServerStartup(
           }),
         logger: console,
       });
+      bootPhase('adoption', performance.now() - adoptionStarted);
       // Ordinary chats and Builders: queue the owner messages that were sent and never started.
       // AFTER adoption: queueing starts the head at once, and a turn started before its predecessor
       // is adopted makes adoption fail ("already running") and discards the live turn's journal, so
       // the first turn never ends and the queued one runs beside it (ctrl-c-adoption, 2026-10-07).
       // An adopted conversation is running, so its queue waits for that turn to settle.
-      for (const id of await conversationConfigStore.conversationsWithInputs()) {
-        const conversation = conversations.get(id) ?? (await runtimeBuilder.materialize(id));
-        conversation?.hydrateInputs(await conversationConfigStore.listInputs(id));
-      }
+      await forEachConcurrently(
+        await conversationConfigStore.conversationsWithInputs(),
+        INPUT_HYDRATION_CONCURRENCY,
+        async (id) => {
+          const conversation = conversations.get(id) ?? (await runtimeBuilder.materialize(id));
+          conversation?.hydrateInputs(await conversationConfigStore.listInputs(id));
+        }
+      );
     },
   }
 )

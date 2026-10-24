@@ -3,11 +3,14 @@ import { isDeepStrictEqual } from 'node:util';
 import type { Buddy, Cursor, Post, Responding } from '@unleashd/buddies-core';
 import {
   type ChannelResponse,
+  type ChannelThreads,
   type ConversationConfig,
   type InstalledAgent,
   type LiveReach,
-  type ReplyRetryResult,
   NO_AGENT_INSTALLED,
+  type ReplyRetryResult,
+  type ThreadSeat,
+  type ThreadSeatsResult,
   WAKE_MESSAGE,
   configFromProviderPreferences,
   isHarnessRetryFailure,
@@ -19,6 +22,7 @@ import { profileExecution } from './briefing';
 import {
   type LiveConversation,
   type StableConversationPorts,
+  memoSlots,
   openConversation,
   scanGenerations,
   stableConversationId,
@@ -48,7 +52,8 @@ const buddyAuthor = (post: Post): string[] =>
  */
 const talkOf = (thread: Post[]) => thread.filter((post) => post.purpose !== 'reply_failed');
 
-export type ThreadSeat = { buddyId: string; config: ConversationConfig };
+export type { ThreadSeat } from '@unleashd/shared';
+type Slots = Pick<StableConversationPorts, 'slot'>;
 type SeatRequest = { kind: 'keep' } | { kind: 'chosen'; config: ConversationConfig };
 export type { ChannelResponse } from '@unleashd/shared';
 
@@ -101,7 +106,7 @@ export interface ChannelsPorts {
   /** The agent an unpinned Buddy runs (providers/installed-agent.ts), read per resolution. */
   installedAgent(): InstalledAgent;
   /** A post landed or who is replying changed: push `channel_changed`. */
-  channelChanged(channelId: string): void;
+  channelChanged(channelId: string, threads: ChannelThreads): void;
   /** The hooks of the live Buddy turn in a conversation, null when none is live (grants.ts). */
   liveHooks(conversationId: string): HookSet | null;
   /** The thread follow-up gate (runner.ts `followUpGate`), resolved like the seat's own turn. */
@@ -117,9 +122,10 @@ export function createChannels(ports: ChannelsPorts) {
   ports.events.on((event) => {
     switch (event.kind) {
       case 'posted':
-        return ports.channelChanged(event.channel.id);
+        return ports.channelChanged(event.channel.id, [event.post.rootId ?? event.post.id]);
       case 'responding':
-        return ports.channelChanged(event.channelId);
+        // Who is replying lives under the channel's /responding key; no thread's posts moved.
+        return ports.channelChanged(event.channelId, []);
       case 'changed':
       case 'cancelled':
         return;
@@ -168,13 +174,19 @@ export function createChannels(ports: ChannelsPorts) {
   // Pattern: one-definition (docs/patterns.md#one-definition)
   // A Buddy can post from a DM/worker rather than its derived thread seat. Following the stale
   // seat could query Claude while the latest reply used Sol. Guard: latest thread reply model.
-  async function threadModel(thread: Post[], buddyId: string): Promise<ConversationConfig | null> {
-    for (const post of talkOf(thread).slice().reverse()) {
-      if (post.author.kind !== 'buddy' || post.author.id !== buddyId || !post.conversationId)
-        continue;
-      const slot = await ports.conversations.slot(post.conversationId);
-      if (slot.kind === 'live') return slot.config;
-    }
+  async function threadModel(
+    thread: Post[],
+    buddyId: string,
+    slots: Slots
+  ): Promise<ConversationConfig | null> {
+    // Newest reply first, one read per distinct conversation, all in flight together: it used to
+    // be one serial records await per reply until a live one (threads request storm, 2026-10-23).
+    const ids = new Set<string>();
+    for (const post of talkOf(thread).slice().reverse())
+      if (post.author.kind === 'buddy' && post.author.id === buddyId && post.conversationId)
+        ids.add(post.conversationId);
+    const found = await Promise.all([...ids].map((id) => slots.slot(id)));
+    for (const slot of found) if (slot.kind === 'live') return slot.config;
     return null;
   }
 
@@ -186,11 +198,10 @@ export function createChannels(ports: ChannelsPorts) {
     rootId: string,
     buddyId: string,
     request: SeatRequest,
-    thread?: Post[]
+    thread?: Post[],
+    slots: Slots = ports.conversations
   ) {
-    const seats = await scanGenerations(ports.conversations, (g) =>
-      threadConversationId(rootId, buddyId, g)
-    );
+    const seats = await scanGenerations(slots, (g) => threadConversationId(rootId, buddyId, g));
     // Pattern: one-write-path (docs/patterns.md#one-write-path)
     // Failed explicit picks used to lose to an older successful post (Claude weekly limit,
     // 2026-10-04). The record owns intent; guard: explicit thread choice survives a failed attempt.
@@ -199,7 +210,8 @@ export function createChannels(ports: ChannelsPorts) {
       request.kind === 'keep' && !override
         ? await threadModel(
             thread ?? (await wholeThread(await core.getPost(OWNER, rootId))),
-            buddyId
+            buddyId,
+            slots
           )
         : null;
     const config: ConversationConfig | null =
@@ -246,6 +258,24 @@ export function createChannels(ports: ChannelsPorts) {
   async function directConversation(buddyId: string): Promise<ConversationRuntime> {
     const { current, next, open } = await directSeats(buddyId);
     return open(current?.conversationId ?? next(), current?.config);
+  }
+
+  /** Picker/retry projection of the same choice that drives execution. */
+  async function seatsOf(root: Post, slots: Slots): Promise<ThreadSeat[]> {
+    if (root.rootId) return [];
+    const thread = await wholeThread(root);
+    const buddyIds = new Set<string>();
+    for (const post of thread) {
+      for (const id of buddyAuthor(post)) buddyIds.add(id);
+      for (const id of mentionedIds(post.body)) buddyIds.add(id);
+    }
+    const choices = await Promise.all(
+      [...buddyIds].map(async (buddyId) => ({
+        buddyId,
+        ...(await threadChoice(root.id, buddyId, { kind: 'keep' }, thread, slots)),
+      }))
+    );
+    return choices.flatMap(({ buddyId, config }) => (config ? [{ buddyId, config }] : []));
   }
 
   return {
@@ -303,20 +333,32 @@ export function createChannels(ports: ChannelsPorts) {
 
     /** Picker/retry projection of the same choice that drives execution. */
     async threadSeats(rootId: string): Promise<ThreadSeat[]> {
-      const root = await core.getPost(OWNER, rootId);
-      if (root.rootId) return [];
-      const thread = await wholeThread(root);
-      const buddyIds = new Set<string>();
-      for (const post of thread) {
-        for (const id of buddyAuthor(post)) buddyIds.add(id);
-        for (const id of mentionedIds(post.body)) buddyIds.add(id);
-      }
-      const seats: ThreadSeat[] = [];
-      for (const buddyId of buddyIds) {
-        const { config } = await threadChoice(rootId, buddyId, { kind: 'keep' }, thread);
-        if (config) seats.push({ buddyId, config });
-      }
-      return seats;
+      return seatsOf(await core.getPost(OWNER, rootId), memoSlots(ports.conversations));
+    },
+
+    /** Seats for many roots in one request (the Threads view): one slot read per id, in parallel. */
+    async threadSeatsBatch(rootIds: readonly string[]): Promise<Record<string, ThreadSeatsResult>> {
+      const slots = memoSlots(ports.conversations);
+      const settled = await Promise.allSettled(
+        rootIds.map(async (id) => seatsOf(await core.getPost(OWNER, id), slots))
+      );
+      return Object.fromEntries(
+        rootIds.map((id, i): [string, ThreadSeatsResult] => {
+          const result = settled[i];
+          switch (result.status) {
+            case 'fulfilled':
+              return [id, { kind: 'seats', seats: result.value }];
+            case 'rejected':
+              return [
+                id,
+                {
+                  kind: 'failed',
+                  message: result.reason instanceof Error ? result.reason.message : 'unreadable',
+                },
+              ];
+          }
+        })
+      );
     },
 
     /** Buddies replying in this channel, for "X is replying…": its queued and running deliveries. */

@@ -200,6 +200,16 @@ function isNonLaunchOompaInvocation(args: string[]): boolean {
 
 export function detectOompaSubcommand(command: string, depth = 0): 'run' | 'swarm' | null {
   if (depth > MAX_SHELL_PARSE_DEPTH) return null;
+  // Fix-guard: a hit needs a word that is literally `oompa` once quoting/escapes are removed, so
+  // most commands skip the shell tokenizer. Tokenizing every historical tool call cost 263 ms of
+  // a 618-conversation boot (2026-10-23). Guard: server/test/ingest-history.test.ts.
+  if (
+    !command
+      .toLowerCase()
+      .replace(/['"\\]/g, '')
+      .includes('oompa')
+  )
+    return null;
   const segments = splitCommandChain(command);
   for (const segment of segments) {
     const tokens = splitShellWords(segment);

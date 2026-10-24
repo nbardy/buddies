@@ -100,3 +100,24 @@ outside this workflow.
 
 The automation reuses existing Buddy execution, Tasks and source files. Enabling its schedule and
 background admission remains an explicit owner-controlled operation.
+
+## Performance telemetry (`server/src/observability/perf*.ts`)
+
+Separate from the error journal, and never fed back into it: small JSONL files under
+`<data-dir>/observability/perf/`, mode `0600`, rotated at 5 MiB x 4 like the journal. Writes are fire-and-forget on
+one queue, and a failed write goes to stderr (not `console.error`, which the journal captures).
+
+- `perf-log.ts`: storage, rotation, `perfBootId()` (the supervisor's `UNLEASHD_BOOT_ID`, so supervisor and backend
+  phases share one boot).
+- `perf.ts`: `bootPhase` / `timeBootPhase(Async)` (boot.jsonl, phase names are short and stable: `initialize`,
+  `error_journal`, `ingest_start`, `mcp_endpoint`, `recovery`, `adoption`, `listen`, `mark_ready`, `runner_start`, ...),
+  `routeLatencyMiddleware` (routes.jsonl: per-minute p50/p90/max per normalized route, mounted right after the auth
+  gate and flushed at shutdown), `captureCpuProfile`.
+- `event-loop-stall.ts`: every stall of 100 ms or more also lands in `stalls.jsonl` (the journal keeps one per label
+  per minute); a stall of `UNLEASHD_STALL_PROFILE_MS` (default 500) or more captures a 2 s CPU profile into `profiles/`,
+  at most one per 10 minutes. `labelled(name, fn)` wraps every recurring timer so a stall is blamed on it.
+- `server/src/http/debug-profile-routes.ts`: gated `POST /api/debug/profile?ms=` (`pnpm perf:profile`).
+
+Read them with `pnpm perf:audit` (`tools/perf-audit.ts`), which writes `output/perf-audit/<ts>.md`. Never add boot
+work without a boot phase.
+

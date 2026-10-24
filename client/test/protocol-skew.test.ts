@@ -80,7 +80,9 @@ test('a pre-rename channel_changed frame is invalid; the renamed one names its c
   const frame = classifyServerFrame({ type: 'channel_changed', channelId: 'ch_a' });
   assert.deepEqual(frame, {
     t: 'message',
-    message: { type: 'channel_changed', channelId: 'ch_a' },
+    // `threads` defaults to 'all': a frame from a backend that predates it still refreshes every
+    // thread, as before.
+    message: { type: 'channel_changed', channelId: 'ch_a', threads: 'all' },
   });
 });
 

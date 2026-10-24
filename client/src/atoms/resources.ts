@@ -1,3 +1,4 @@
+import type { ChannelThreads } from '@unleashd/shared';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
 import { jotaiStore } from './store';
@@ -287,19 +288,34 @@ export const invalidateBuddyResources = (): void =>
  * mounted threads, owner inboxes, the Threads view and task keys, which the push does not name. See docs/client-
  * rationale.md#invalidate-channel.
  */
-export const invalidateChannelResources = (channelId: string): void => {
+export const invalidateChannelResources = (
+  channelId: string,
+  threads: ChannelThreads = 'all'
+): void => {
   const channel = `/api/buddies/channels/${encodeURIComponent(channelId)}`;
-  invalidateResources(
-    (key) =>
+  // Fix-guard (2026-10-23 threads request storm): this used to refetch EVERY mounted thread key
+  // (and seat key) for any push, so one read mark in a 30-card Threads view was 30 thread GETs.
+  // Thread-scoped keys now refresh only for the roots the push names. Guard:
+  // client/test/threads-request-storm.test.ts.
+  const touched = (root: string): boolean =>
+    threads === 'all' || threads.includes(decodeURIComponent(root));
+  invalidateResources((key) => {
+    const thread = THREAD_KEY.exec(key) ?? SEATS_KEY.exec(key);
+    if (thread) return touched(thread[1]);
+    return (
       key === channel ||
       key.startsWith(`${channel}/`) ||
-      /^\/api\/buddies\/posts\/[^/]+\/thread/.test(key) ||
       /^\/api\/buddies\/workspaces\/[^/]+\/inbox$/.test(key) ||
       /^\/api\/buddies\/workspaces\/[^/]+\/threads\?/.test(key) ||
       key === '/api/buddies/unread' ||
       /^\/api\/buddies\/tasks\/[^/?]+(\/posts\?.*)?$/.test(key)
-  );
+    );
+  });
 };
+
+/** A thread's posts (`/posts/<root>/thread...`) and its batched seats key; group 1 is the root. */
+const THREAD_KEY = /^\/api\/buddies\/posts\/([^/]+)\/thread/;
+const SEATS_KEY = /^\/api\/buddies\/threads\/seats\?roots=([^&]+)$/;
 
 /**
  * Drop cached data outright. For sign-out / hard reset only: unlike

@@ -17,6 +17,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createBootRecorder, perfDirectory } from './boot-phases.mjs';
+import { ensureClientBuild } from './client-build.mjs';
 import { startBackend, startCompiler, startVite } from './dev-runtime.mjs';
 import { LOCAL_DOMAIN_ENV, detectLocalDomain } from './local-domain.mjs';
 
@@ -97,14 +99,16 @@ export function taskPlan(task, env = process.env) {
           env.UNLEASHD_DEV_PREBUILT === '1'
             ? [ensureAddons]
             : [buildShared, buildCli, ensureAddons],
-        services: ['backend'],
+        // The client bundle builds beside the backend, never before it (tools/client-build.mjs).
+        services: env.UNLEASHD_DEV_PREBUILT === '1' ? ['backend'] : ['client-build', 'backend'],
       };
     case 'dev-client':
       return { steps: [buildShared], services: ['vite'] };
-    // Only the addons: the compilers' first pass is the TS build, and nothing
-    // else starts until it has finished.
+    // Only the addons: the compilers' first pass is the TS build, and the backend and Vite wait
+    // for it. The client bundle (backend-served, for phones) is skipped when fresh and otherwise
+    // builds in a child process in parallel with everything else.
     case 'dev':
-      return { steps: [ensureAddons], services: ['compilers', 'backend', 'vite'] };
+      return { steps: [ensureAddons], services: ['compilers', 'client-build', 'backend', 'vite'] };
     default:
       throw new Error(
         `Unknown task "${task}"; expected dev, dev-server, dev-client, build or typecheck`
@@ -151,7 +155,7 @@ function isAlive(pid) {
   }
 }
 
-// Owner = Recorded({pid, childPgid}) ⊕ Unreadable ⊕ Gone. An unreadable lock
+// Owner = Recorded({pid, childPgid, backendPid}) ⊕ Unreadable ⊕ Gone. An unreadable lock
 // records no process to protect, so it is reclaimed like a dead owner.
 function readOwner(file) {
   let raw;
@@ -162,8 +166,8 @@ function readOwner(file) {
     throw error;
   }
   try {
-    const { pid, childPgid } = JSON.parse(raw);
-    if (Number.isSafeInteger(pid)) return { kind: 'recorded', raw, pid, childPgid };
+    const { pid, childPgid, backendPid } = JSON.parse(raw);
+    if (Number.isSafeInteger(pid)) return { kind: 'recorded', raw, pid, childPgid, backendPid };
   } catch {}
   return { kind: 'unreadable', raw };
 }
@@ -186,13 +190,17 @@ function signal(target, name) {
   }
 }
 
-async function stopOwner({ pid, childPgid }) {
+async function stopOwner({ pid, childPgid, backendPid }) {
   signal(pid, 'SIGTERM');
   const deadline = Date.now() + REPLACE_TIMEOUT_MS;
   while (isAlive(pid) && Date.now() < deadline) await sleep(100);
   // The owner forwards SIGTERM to its child group; the SIGKILLs only land when
   // it could not, so nothing it started outlives it.
+  // childPgid is only the last ONE-SHOT step's group (finished long ago); the backend is a plain
+  // child of the owner in no group of its own, so it is recorded separately (backendPid). Before
+  // 2026-10-23 a replace waited the full timeout and SIGKILLed a 25 h backend without ever naming it.
   if (childPgid) signal(-childPgid, 'SIGKILL');
+  if (backendPid) signal(backendPid, 'SIGKILL');
   signal(pid, 'SIGKILL');
 }
 
@@ -200,10 +208,17 @@ export async function claimDevRuntime({ file = lockPath(), replace = false } = {
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   for (;;) {
     try {
-      writeFileSync(file, JSON.stringify({ pid: process.pid, childPgid: null }), { flag: 'wx' });
+      const record = { pid: process.pid, childPgid: null, backendPid: null };
+      writeFileSync(file, JSON.stringify(record), { flag: 'wx' });
       return {
-        recordChild: (childPgid) =>
-          writeFileSync(file, JSON.stringify({ pid: process.pid, childPgid })),
+        recordChild: (childPgid) => {
+          record.childPgid = childPgid;
+          writeFileSync(file, JSON.stringify(record));
+        },
+        recordBackend: (backendPid) => {
+          record.backendPid = backendPid;
+          writeFileSync(file, JSON.stringify(record));
+        },
         release: () => rmSync(file, { force: true }),
       };
     } catch (error) {
@@ -322,8 +337,9 @@ const log = (line) => process.stdout.write(`${line}\n`);
  * Host `services` until a signal. Compilers finish their first pass before the
  * backend or Vite starts. Returns the exit code.
  */
-async function runServices(services) {
+async function runServices(services, boot, recordBackend = () => {}) {
   const running = { compilers: [], backend: null, vite: null };
+  const abortClientBuild = new AbortController();
   let stopping = null;
   const press = pressCounter();
   const stop = (name) => {
@@ -334,6 +350,7 @@ async function runServices(services) {
       return;
     }
     stopping = name;
+    abortClientBuild.abort();
     for (const compiler of running.compilers) compiler.close();
     void running.vite?.close();
     if (running.backend) running.backend.stop(name);
@@ -342,7 +359,30 @@ async function runServices(services) {
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
   for (const name of signals) process.on(name, stop);
   try {
+    if (services.includes('client-build')) {
+      // Concurrent with everything below, never awaited: the backend serves whatever dist exists
+      // (the old one stays until the new one is complete). It needs no compiler output: vite
+      // aliases @unleashd/shared to its source. Guard: tools/client-build.test.mjs.
+      const startedAt = performance.now();
+      void ensureClientBuild({
+        repositoryRoot,
+        cacheDirectory: COMPILER_STATE,
+        log: (line) => log(`[client-build] ${line}`),
+        signal: abortClientBuild.signal,
+      })
+        .catch((error) => ({ kind: 'failed', message: error.message }))
+        .then((outcome) => {
+          const ms = performance.now() - startedAt;
+          boot.phase('client-build', ms, { outcome: outcome.kind });
+          log(
+            outcome.kind === 'failed'
+              ? `[client-build] failed: ${outcome.message}; keeping the previous client/dist`
+              : `[client-build] ${outcome.kind} (${Math.round(ms)}ms)`
+          );
+        });
+    }
     if (services.includes('compilers')) {
+      const startedAt = performance.now();
       // The build scripts write these CommonJS markers after tsc; watch mode never does.
       await import(
         pathToFileURL(path.join(repositoryRoot, 'shared/scripts/write-cjs-package.mjs')).href
@@ -356,13 +396,33 @@ async function runServices(services) {
         startCompiler({ ...compiler, stateDirectory: COMPILER_STATE, log })
       );
       await Promise.all(running.compilers.map((compiler) => compiler.ready));
+      boot.phase('compilers', performance.now() - startedAt);
     }
     if (stopping) return 130;
     if (services.includes('backend')) {
-      running.backend = startBackend({ repositoryRoot, env: { NODE_ENV: 'development' }, log });
+      boot.phase('backend-spawn', boot.sinceStart());
+      let readyRecorded = false;
+      running.backend = startBackend({
+        repositoryRoot,
+        env: { NODE_ENV: 'development', UNLEASHD_BOOT_ID: boot.bootId },
+        // UNLEASHD_CPU_PROF=1: a .cpuprofile per backend process, written at its exit.
+        nodeArgs:
+          process.env.UNLEASHD_CPU_PROF === '1'
+            ? ['--cpu-prof', `--cpu-prof-dir=${path.join(perfDirectory(), 'profiles')}`]
+            : [],
+        onSpawn: recordBackend,
+        onReady: () => {
+          if (readyRecorded) return;
+          readyRecorded = true;
+          boot.phase('backend-ready', boot.sinceStart());
+        },
+        log,
+      });
     }
     if (services.includes('vite')) {
+      const startedAt = performance.now();
       running.vite = await startVite({ clientRoot: path.join(repositoryRoot, 'client') });
+      boot.phase('vite', performance.now() - startedAt);
     }
     if (running.backend) await running.backend.stopped;
     else await new Promise(() => {});
@@ -381,9 +441,12 @@ export async function runTask({ task, replace }) {
   const runtime = await claimDevRuntime({ replace });
   try {
     await assertPortsFree(DEV_PORTS[task]);
+    const boot = createBootRecorder();
+    const stepsStartedAt = performance.now();
     const code = await runSteps(plan.steps, runtime.recordChild);
+    boot.phase('addons', performance.now() - stepsStartedAt, { exitCode: code });
     if (code !== 0) return code;
-    return await runServices(plan.services);
+    return await runServices(plan.services, boot, runtime.recordBackend);
   } finally {
     runtime.release();
   }

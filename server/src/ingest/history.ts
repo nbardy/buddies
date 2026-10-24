@@ -61,6 +61,42 @@ export async function sessionMessages(
 }
 
 /**
+ * The length `mergeSessionMessages(sessions' prefixes, [])` would produce, without building it.
+ *
+ * Pattern: one-store-one-index (docs/patterns.md) — boot only needs a COUNT, so it is computed by
+ * the ingest crate over the stored rows (`Reader::merged_count`): one row per (timestamp, role,
+ * body) occurrence, at the maximum occurrence count over sessions. No message crosses napi.
+ * Fix-guard: converting + merging 618 histories at boot cost ~2 s of main thread (2026-10-23:
+ * toMessage 727 ms, nativeBody 590 ms, merge 417 ms); the first fix still paged every message
+ * through napi and SHA-1'd it here (~270 ms of main thread plus the page round trips).
+ * Guards: server/test/ingest-history.test.ts (parity with the real merge) and
+ * `merged_count_counts_an_inherited_prefix_once` in crates/unleashd-ingest/tests/engine.rs.
+ */
+export async function mergedCount(
+  ingest: Pick<Ingest, 'mergedCounts'>,
+  sessions: readonly MergeInput[]
+): Promise<number> {
+  return (await mergedCounts(ingest, [sessions]))[0];
+}
+
+/** One bound session's settled prefix: the first `count` messages of `sessionId`. */
+export type MergeInput = Pick<SessionRow, 'sessionId' | 'createdAt'> & { count: number };
+
+/**
+ * `mergedCount` for many records in ONE crate call (boot settles 614 at once). One napi round trip
+ * and one reader-queue slot replace one per record: with the per-record call the same 20k messages
+ * took ~3.5 s of wall on a loaded machine, all of it queueing (2026-10-23).
+ */
+export async function mergedCounts(
+  ingest: Pick<Ingest, 'mergedCounts'>,
+  groups: readonly (readonly MergeInput[])[]
+): Promise<number[]> {
+  return ingest.mergedCounts(
+    groups.map((group) => group.map(({ sessionId, createdAt, count }) => ({ sessionId, createdAt, count })))
+  );
+}
+
+/**
  * `next` keeps every message of `previous` except possibly the last (a streamed reply that grew),
  * so a client may keep its prefix and refetch the tail. The last message is exempt because
  * clients always re-read it.

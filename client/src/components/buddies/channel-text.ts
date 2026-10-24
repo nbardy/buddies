@@ -14,7 +14,7 @@ import { isLocalFilePath } from '@unleashd/shared';
  */
 import type { ChannelReference, ConversationConfig, ProviderCatalog } from '@unleashd/shared';
 import { modelSummary } from '../../views/config/config-options';
-import type { Task, TaskStatus, ThreadSeat } from './types';
+import type { TaskSummary as Task, TaskStatus, ThreadSeat } from './types';
 
 // A Buddy carries what its turn runs on by default, so the composer's mention
 // chip can show it and open the harness/model picker from it.
@@ -175,7 +175,7 @@ export function plainChannelText(body: string): string {
 // ── Tasks ──────────────────────────────────────────────────────────────────
 
 /**
- * A Task as a live post chip shows it: from GET /api/buddies/tasks?workspaceId=
+ * A Task as a live post chip shows it: from GET /api/buddies/workspaces/:id/tasks
  * (every task of the workspace; todos are its child tasks), with the owner's
  * name and todo progress resolved.
  */

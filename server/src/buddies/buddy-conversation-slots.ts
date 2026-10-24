@@ -30,7 +30,8 @@ export function slotOf(record: ConversationRecord | undefined): ConversationSlot
 
 export interface StableConversationPorts {
   slot(conversationId: string): Promise<ConversationSlot>;
-  getConversation(id: string): ConversationRuntime | undefined;
+  /** The runtime, built from its stored record when cold (runtimes.ts `materialize`). */
+  getConversation(id: string): Promise<ConversationRuntime | undefined>;
   ensureConversationReady(conversation: ConversationRuntime): Promise<ConversationRuntime>;
   createConversation(input: {
     context: BuddyContext;
@@ -50,6 +51,25 @@ export interface StableConversationPorts {
 }
 
 const MAX_GENERATIONS = 32;
+const PROBE_WIDTH = 4;
+
+/**
+ * One request's view of the conversation slots: each id is read once however many Buddies and
+ * threads ask. A request-scoped wrapper only, never a process cache: slots change on every pick.
+ */
+export function memoSlots(ports: Pick<StableConversationPorts, 'slot'>) {
+  const reads = new Map<string, Promise<ConversationSlot>>();
+  return {
+    slot(conversationId: string): Promise<ConversationSlot> {
+      let read = reads.get(conversationId);
+      if (read === undefined) {
+        read = ports.slot(conversationId);
+        reads.set(conversationId, read);
+      }
+      return read;
+    },
+  };
+}
 
 // UUID-shaped id derived from a seed, so a (purpose, Buddy, …) tuple always
 // names the same transcript across restarts without storing a mapping.
@@ -75,19 +95,28 @@ export async function scanGenerations(
 ): Promise<{ current: LiveConversation | null; live: string[]; next(): string }> {
   let current: LiveConversation | null = null;
   const live: string[] = [];
-  for (let generation = 0; generation < MAX_GENERATIONS; generation += 1) {
-    const conversationId = idOf(generation);
-    const slot = await ports.slot(conversationId);
-    switch (slot.kind) {
-      case 'absent':
-        return { current, live, next: () => conversationId };
-      case 'deleted':
-        current = null;
-        break;
-      case 'live':
-        current = { conversationId, config: slot.config, provenance: slot.provenance };
-        live.push(conversationId);
-        break;
+  // Fix-guard (2026-10-23 threads request storm: up to 32 SERIAL records awaits per Buddy per
+  // seat read, 0.09-1.7s cold): generations are probed PROBE_WIDTH at a time. The walk below still
+  // applies them in order and stops at the first absent one, so the result is unchanged.
+  // Guard: server/test/thread-seats-reads.test.ts.
+  for (let start = 0; start < MAX_GENERATIONS; start += PROBE_WIDTH) {
+    const ids = Array.from({ length: Math.min(PROBE_WIDTH, MAX_GENERATIONS - start) }, (_, i) =>
+      idOf(start + i)
+    );
+    const slots = await Promise.all(ids.map((id) => ports.slot(id)));
+    for (const [i, slot] of slots.entries()) {
+      const conversationId = ids[i];
+      switch (slot.kind) {
+        case 'absent':
+          return { current, live, next: () => conversationId };
+        case 'deleted':
+          current = null;
+          break;
+        case 'live':
+          current = { conversationId, config: slot.config, provenance: slot.provenance };
+          live.push(conversationId);
+          break;
+      }
     }
   }
   return {
@@ -99,7 +128,10 @@ export async function scanGenerations(
   };
 }
 
-/** Reopen the runtime if it is registered, else create (or replay) it. */
+// Pattern: lazy-runtimes (docs/patterns.md#lazy-runtimes)
+/** Reopen the runtime of a stored record (built on demand), else create it. A cold record is NOT
+ * absent: replaying the create over it would rebuild the seat from THIS call's config, which moves
+ * when the owner's pick did. Guard: server/test/lazy-buddy-runtimes.test.ts. */
 export async function openConversation(
   ports: StableConversationPorts,
   input: {
@@ -110,7 +142,7 @@ export async function openConversation(
     provenance?: ConfigProvenance;
   }
 ): Promise<ConversationRuntime> {
-  const existing = ports.getConversation(input.conversationId);
+  const existing = await ports.getConversation(input.conversationId);
   if (existing) return ports.ensureConversationReady(existing);
   return ports.createConversation({ ...input, deferInitialMessage: true });
 }

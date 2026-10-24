@@ -1,5 +1,7 @@
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import type { ErrorJournal } from './error-journal';
+import { captureCpuProfile, profilerBusy } from './perf';
+import { appendPerf } from './perf-log';
 
 /**
  * Event-loop stall monitor: every pause of the only JS thread longer than
@@ -35,6 +37,14 @@ const HISTOGRAM_RESOLUTION_MS = 10;
 /** One journal write per activity label per window; repeats are summarized in the next write. */
 const REPORT_WINDOW_MS = 60_000;
 
+const PROFILE_WINDOW_MS = 2_000;
+const PROFILE_MIN_GAP_MS = 10 * 60_000;
+
+function profileThresholdMs(): number {
+  const configured = Number(process.env.UNLEASHD_STALL_PROFILE_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 500;
+}
+
 let activityLabel = 'startup';
 let activityAt = performance.now();
 
@@ -43,6 +53,23 @@ export function noteActivity(label: string): void {
   activityLabel = label;
   activityAt = performance.now();
 }
+
+/**
+ * Wraps a timer/event callback so it notes `label` before running. Use for every
+ * recurring timer: `setInterval(labelled('timer foo', tick), ms)`.
+ */
+export function labelled<Args extends unknown[], R>(
+  label: string,
+  fn: (...args: Args) => R
+): (...args: Args) => R {
+  return (...args) => {
+    noteActivity(label);
+    return fn(...args);
+  };
+}
+
+/** The `route` of a stall record: the label when it is an HTTP request ("GET /api/x"), else absent. */
+const HTTP_LABEL = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) \//;
 
 interface ReportedLabel {
   lastReportedAt: number;
@@ -56,6 +83,32 @@ export function startEventLoopStallMonitor(journal: Pick<ErrorJournal, 'capture'
   const reported = new Map<string, ReportedLabel>();
   const delay = monitorEventLoopDelay({ resolution: HISTOGRAM_RESOLUTION_MS });
   delay.enable();
+
+  let lastProfileAt = Number.NEGATIVE_INFINITY;
+
+  const recordStall = (stallMs: number, detectedAt: number, loopP99Ms: number) => {
+    const label = activityLabel;
+    void appendPerf('stalls.jsonl', {
+      at: new Date().toISOString(),
+      ms: Math.round(stallMs),
+      label,
+      route: HTTP_LABEL.test(label) ? label : null,
+      sinceActivityMs: Math.round(detectedAt - activityAt),
+      loopP99Ms: Math.round(loopP99Ms),
+    });
+    if (
+      stallMs >= profileThresholdMs() &&
+      detectedAt - lastProfileAt >= PROFILE_MIN_GAP_MS &&
+      !profilerBusy()
+    ) {
+      lastProfileAt = detectedAt;
+      captureCpuProfile(PROFILE_WINDOW_MS, `stall-${Math.round(stallMs)}ms-${label}`).catch(
+        (error) => {
+          console.log('[event-loop] CPU profile failed:', error);
+        }
+      );
+    }
+  };
 
   const report = (stallMs: number, detectedAt: number) => {
     const label = activityLabel;
@@ -84,8 +137,11 @@ export function startEventLoopStallMonitor(journal: Pick<ErrorJournal, 'capture'
   const timer = setInterval(() => {
     const stallMs = delay.max / 1e6;
     if (stallMs < STALL_THRESHOLD_MS) return;
+    const loopP99Ms = delay.percentile(99) / 1e6;
     delay.reset();
-    report(stallMs, performance.now());
+    const detectedAt = performance.now();
+    recordStall(stallMs, detectedAt, loopP99Ms);
+    report(stallMs, detectedAt);
   }, CHECK_INTERVAL_MS);
   timer.unref();
   return () => {

@@ -59,3 +59,25 @@ describe('static client caching', () => {
     assert.doesNotMatch(await response.text(), /<title>app<\/title>/);
   });
 });
+
+describe('static client before the first build', () => {
+  test('no build yet answers 503 with a retry hint, never the 500 handler', async () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'unleashd-static-empty-'));
+    const app = express();
+    registerStaticClient(app, empty);
+    const listener = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
+      const started = app.listen(0, '127.0.0.1', () => resolve(started));
+    });
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${(listener.address() as AddressInfo).port}/chat/abc`
+      );
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('retry-after'), '5');
+      assert.match(await response.text(), /Client building/);
+    } finally {
+      listener.close();
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
+  });
+});

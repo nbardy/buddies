@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -28,6 +30,7 @@ import {
   type BuddyContext,
   type ConversationConfig,
   type MessagePage,
+  type ThreadSeatsResult,
   bodyText,
   createDefaultConversationConfig,
 } from '@unleashd/shared';
@@ -362,9 +365,9 @@ async function world(reopen?: string, realProvider = false) {
     backstopMs: 200,
     logger: { warn: () => undefined, log: () => undefined },
     host: {
-      admitChat: ({ conversationId, turnId, body, run }) =>
+      admitChat: async ({ conversationId, turnId, body, run }) =>
         conversations.get(conversationId)!.admitChatClaim(turnId, body, run),
-      registered: (id) => conversations.has(id),
+      registered: async (id) => conversations.has(id),
       defaultModel: providerDefaultModel,
       reconfigure: async (conversationId, config) =>
         replaceRuntimeConfig(
@@ -431,6 +434,7 @@ async function world(reopen?: string, realProvider = false) {
     installedAgent: installed,
     resolveWorkingDirectory: (directory) => directory,
     createId: () => `conversation-${++ids}`,
+    materialize: async (id) => conversations.get(id),
     getConversation: (id) => conversations.get(id),
     createConversation: (options) => new Conversation(options),
     registerConversation: (conversation) => conversations.set(conversation.id, conversation),
@@ -440,7 +444,7 @@ async function world(reopen?: string, realProvider = false) {
   });
   const stable: StableConversationPorts = {
     slot: async (id) => slotOf(await configService.getRecord(id)),
-    getConversation: (id) => conversations.get(id),
+    getConversation: async (id) => conversations.get(id),
     ensureConversationReady: creation.ensureConversationReady,
     createConversation: (input) => creation.createServerBuddyConversation(input),
     reconfigure: (conversation, config, provenance) =>
@@ -1683,10 +1687,14 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     const threadRead = async () => {
       const response = await http('GET', `/api/buddies/posts/${root.id}/thread`);
       assert.equal(response.status, 200);
-      return response.body as unknown as {
-        posts: Post[];
-        seats: { buddyId: string; config: ConversationConfig }[];
-      };
+      return response.body as unknown as { posts: Post[] };
+    };
+    const seatsRead = async () => {
+      const response = await http('GET', `/api/buddies/threads/seats?roots=${root.id}`);
+      assert.equal(response.status, 200);
+      const answer = (response.body as unknown as Record<string, ThreadSeatsResult>)[root.id];
+      assert.equal(answer.kind, 'seats');
+      return answer.kind === 'seats' ? answer.seats : [];
     };
     const buddy = {
       kind: 'buddy' as const,
@@ -1697,7 +1705,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     };
     const before = mentionChoice(buddy, new Map(), {
       kind: 'loaded',
-      seats: (await threadRead()).seats,
+      seats: await seatsRead(),
     });
     assert.equal(
       ('config' in before ? before.config : null)?.provider,
@@ -1728,7 +1736,7 @@ test('explicit thread choice survives a failed attempt and records reopen; picke
     );
     const shown = mentionChoice(buddy, new Map(), {
       kind: 'loaded',
-      seats: (await threadRead()).seats,
+      seats: await seatsRead(),
     });
     assert.equal(
       choiceLabel(shown, null),
@@ -4474,13 +4482,61 @@ test('a thread read names each Buddy’s current seat, so the mention chip opens
         key: 'designer-noted',
       }
     );
+    const seats = await http('GET', `/api/buddies/threads/seats?roots=${root.id}`);
+    assert.equal(seats.status, 200);
+    assert.deepEqual(seats.body, {
+      [root.id]: { kind: 'seats', seats: [{ buddyId: w.lead.id, config: pick }] },
+    });
+    // Fix-guard (threads request storm 2026-10-23): the thread read itself never scans seats.
     const thread = await http('GET', `/api/buddies/posts/${root.id}/thread`);
     assert.equal(thread.status, 200);
-    assert.deepEqual((thread.body as unknown as { seats: unknown }).seats, [
-      { buddyId: w.lead.id, config: pick },
-    ]);
+    assert.equal('seats' in (thread.body as object), false, 'thread route carries no seats');
   } finally {
     server.close();
+    await w.close();
+  }
+});
+
+test('threads route clips long bodies and says so; the thread route returns them whole', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const long = 'y'.repeat(5000);
+    const root = await w.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      { kind: 'inform', body: long, evidence: [], mentions: [], broadcast: false, key: 'clip-root' }
+    );
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: 'short reply',
+        replyToId: root.id,
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        key: 'clip-reply',
+      }
+    );
+    const threads = await http('GET', `/api/buddies/workspaces/${w.ws}/threads`);
+    const [card] = (
+      threads.body as unknown as {
+        threads: Array<{
+          root: Post & { clippedFrom?: number };
+          tail: { posts: Array<Post & { clippedFrom?: number }> };
+        }>;
+      }
+    ).threads;
+    assert.ok(card.root.body.length <= 601 && card.root.body.endsWith('…'));
+    assert.equal(card.root.clippedFrom, 5000);
+    assert.equal(card.tail.posts[0].body, 'short reply');
+    assert.equal(card.tail.posts[0].clippedFrom, undefined, 'a short body is not marked');
+    const whole = await http('GET', `/api/buddies/posts/${root.id}/thread`);
+    assert.equal((whole.body as unknown as { root: Post }).root.body, long);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     await w.close();
   }
 });
@@ -4489,7 +4545,7 @@ test('New workspace from a folder: the name defaults to the folder, any spelling
   const w = await world();
   const { server, http } = await ownerHttp(w);
   try {
-    const folder = join(w.scratch, 'Atlas');
+    const folder = join(realpathSync(w.scratch), 'Atlas');
     mkdirSync(folder);
     symlinkSync(folder, join(w.scratch, 'atlas-link'));
     writeFileSync(join(w.scratch, 'notes.txt'), 'x');
@@ -4502,6 +4558,31 @@ test('New workspace from a folder: the name defaults to the folder, any spelling
       name: 'Other name',
     });
     assert.equal((again.body as unknown as { id: string }).id, workspace.id);
+    // Enrich an existing workspace, then register its renamed checkout through the owner API.
+    execFileSync('git', ['init', '--quiet', folder]);
+    execFileSync('git', [
+      '-C',
+      folder,
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.com',
+      'commit',
+      '--quiet',
+      '--allow-empty',
+      '-m',
+      'first',
+    ]);
+    await http('POST', '/api/buddies/workspaces', { rootPath: folder });
+    const moved = join(realpathSync(w.scratch), 'Atlas-renamed');
+    renameSync(folder, moved);
+    const registered = await http('POST', '/api/buddies/workspaces', { rootPath: moved });
+    assert.equal(registered.status, 201, JSON.stringify(registered.body));
+    assert.equal((registered.body as unknown as { id: string }).id, workspace.id);
+    assert.deepEqual((registered.body as unknown as { folders: string[] }).folders, [
+      folder,
+      moved,
+    ]);
     for (const rootPath of [join(w.scratch, 'notes.txt'), join(w.scratch, 'missing'), '/', 'rel'])
       assert.equal(
         (await http('POST', '/api/buddies/workspaces', { rootPath })).status,
@@ -6533,13 +6614,58 @@ test('owner post editing and reactions use real HTTP without starting another re
         0
       );
       await buddyWrite('post.react', { postId: post.id }, { emoji: '1️⃣', active: true });
-      const found = await w.core.searchPosts(OWNER, w.ws, { text: 'updated', channels: [], from: [] }, null, 20);
+      const found = await w.core.searchPosts(
+        OWNER,
+        w.ws,
+        { text: 'updated', channels: [], from: [] },
+        null,
+        20
+      );
       assert.ok(
         found.posts.some((row) => row.id === post.id),
         'search reflects the edited body'
       );
       assert.equal(w.turns.length, 0, 'editing/reactions are never posted events');
     });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await w.close();
+  }
+});
+
+// Regression guard (hot payloads): the workspace directory polls /workspaces/:id/tasks every 15 s;
+// the full list was 1.7 MB for 896 tasks. Summaries carry no free text, and an inbox request is a
+// preview, not a 600+ character body, while the full text stays one GET away.
+test('owner routes: the task directory and inbox requests ship previews, full text stays on the detail routes', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const long = 'z'.repeat(5000);
+    const task = await w.core.upsertTask(OWNER, {
+      kind: 'create',
+      ownerId: w.lead.id,
+      title: 'Ship',
+      doneCriteria: long,
+      key: 'summary-task',
+    });
+    const listed = await http('GET', `/api/buddies/workspaces/${w.ws}/tasks`);
+    const rows = listed.body as unknown as Array<Record<string, unknown>>;
+    assert.equal(rows.find((row) => row.id === task.id)?.title, 'Ship');
+    assert.ok(!JSON.stringify(rows).includes('zzzz'), 'directory rows carry no doneCriteria');
+    const detail = await http('GET', `/api/buddies/tasks/${task.id}`);
+    assert.equal(
+      (detail.body as unknown as { task: { doneCriteria: string } }).task.doneCriteria,
+      long
+    );
+
+    await w.post(
+      buddyActor(w.lead.id),
+      { kind: 'direct', members: [buddyActor(w.lead.id), OWNER] },
+      { kind: 'request', body: long, evidence: [], mentions: [], broadcast: false, key: 'big' }
+    );
+    const inbox = await http('GET', `/api/buddies/workspaces/${w.ws}/inbox`);
+    const [request] = inbox.body.requests;
+    assert.ok(request.body.length <= 601 && request.body.endsWith('…'));
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await w.close();

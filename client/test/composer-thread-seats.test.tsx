@@ -13,7 +13,7 @@ register(
   `)}`,
   import.meta.url
 );
-const { CHANNEL_PAGE, threadFeed, useThreadSeats, workspaceDirectory } = await import(
+const { seatsResource, useThreadSeats, workspaceDirectory } = await import(
   '../src/components/buddies/channel-data'
 );
 const { mentionChoice, choiceLabel } = await import('../src/components/buddies/channel-text');
@@ -25,7 +25,7 @@ const { Provider } = await import('jotai');
 // with a rootId but no `seats`, so an @mention there read `loading` forever and Send stayed
 // disabled. The composer now loads its own thread's seats from the thread's shared resource.
 function Probe({ rootId }: { rootId: string }) {
-  const { seats } = useThreadSeats(rootId);
+  const { seats } = useThreadSeats(rootId, true);
   const buddy = workspaceDirectory(
     [rosterFixture([buddyFixture({ id: 'lead', name: 'Lead' })])],
     'ws-1',
@@ -49,21 +49,19 @@ test('a reply composer given only a rootId resolves a mention from the thread se
       </Provider>
     );
   assert.match(render(), /loading/);
-  // The key the open thread pane polls, so the two share one cache entry.
+  // The batched seats key every composer and ReplyRetry of this root share.
   await loadResource({
-    key: `${threadFeed('thread-seats', null).base}limit=${CHANNEL_PAGE}`,
-    load: async () => ({
-      seats: [
-        {
-          buddyId: 'lead',
-          config: {
-            provider: 'claude',
-            model: { mode: 'explicit', modelId: 'claude-opus-5-5' },
-            reasoning: { mode: 'explicit', effort: 'high' },
-          },
+    key: seatsResource('thread-seats').key,
+    load: async () => [
+      {
+        buddyId: 'lead',
+        config: {
+          provider: 'claude',
+          model: { mode: 'explicit', modelId: 'claude-opus-5-5' },
+          reasoning: { mode: 'explicit', effort: 'high' },
         },
-      ],
-    }),
+      },
+    ],
   });
   assert.match(render(), /seat/);
 });
@@ -72,7 +70,7 @@ test('a reply composer given only a rootId resolves a mention from the thread se
 // said "Loading model…" and Send stayed disabled forever. Failure is its own, retryable state.
 test('a failed thread read is not "loading"', async () => {
   await loadResource({
-    key: `${threadFeed('thread-down', null).base}limit=${CHANNEL_PAGE}`,
+    key: seatsResource('thread-down').key,
     load: async () => {
       throw new Error('HTTP 500');
     },

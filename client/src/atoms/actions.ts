@@ -710,7 +710,7 @@ export function handleMessage(data: ServerMessage): void {
       invalidateBuddyResources();
       return;
     case 'channel_changed':
-      invalidateChannelResources(data.channelId);
+      invalidateChannelResources(data.channelId, data.threads);
       return;
     case 'hello':
       handleHello(data);

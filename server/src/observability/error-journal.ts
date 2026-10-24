@@ -76,6 +76,7 @@ const MAX_MESSAGE_CHARACTERS = 8_000;
 const MAX_STACK_CHARACTERS = 16_000;
 const MAX_NOTE_CHARACTERS = 2_000;
 const MAX_QUERY_LIMIT = 1_000;
+const FOLD_SLICE_LINES = 200;
 
 export class ErrorJournal {
   readonly serverBootId: string;
@@ -87,6 +88,8 @@ export class ErrorJournal {
   private readonly createId: () => string;
   private readonly groups = new Map<string, ErrorGroup>();
   private initialized = false;
+  /** Folding the journal files into `groups`; every operation waits for it (see initialize). */
+  private loading: Promise<void> = Promise.resolve();
   private operationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: ErrorJournalOptions) {
@@ -105,7 +108,13 @@ export class ErrorJournal {
     return this.runExclusive(async () => {
       if (this.initialized) return;
       await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
-      await this.reloadFromDisk();
+      // Fix-guard: parsing ~24 MB of rotated JSONL synchronously before the HTTP listener, and
+      // again on every rotation, stalled the event loop (2026-10-23 boot profile). Boot now starts
+      // the fold in the background in yielding slices; capture/query/acknowledge wait for it
+      // inside their exclusive slot, so ordering and counts are unchanged. Rotation carries the
+      // in-memory groups forward (no re-read). Guard: error-journal.test.ts "rotation".
+      this.loading = this.reloadFromDisk();
+      this.loading.catch(() => undefined);
       this.initialized = true;
     });
   }
@@ -119,6 +128,7 @@ export class ErrorJournal {
   }): Promise<ErrorGroup> {
     return this.runExclusive(async () => {
       this.assertInitialized();
+      await this.loading;
       const message = redactAndBound(input.message, MAX_MESSAGE_CHARACTERS);
       if (!message) throw new Error('Error journal message is required');
       const stack = input.stack ? redactAndBound(input.stack, MAX_STACK_CHARACTERS) : undefined;
@@ -167,6 +177,7 @@ export class ErrorJournal {
   queryGroups(query: ErrorGroupQuery = {}): Promise<ErrorGroup[]> {
     return this.runExclusive(async () => {
       this.assertInitialized();
+      await this.loading;
       const limit = normalizeLimit(query.limit);
       const status = query.status ?? 'unresolved';
       return Array.from(this.groups.values())
@@ -188,6 +199,7 @@ export class ErrorJournal {
   acknowledge(fingerprint: string, note: string): Promise<ErrorGroup> {
     return this.runExclusive(async () => {
       this.assertInitialized();
+      await this.loading;
       const current = this.groups.get(fingerprint);
       if (!current) throw new Error(`Error group not found: ${fingerprint}`);
       const boundedNote = redactAndBound(note, MAX_NOTE_CHARACTERS);
@@ -213,7 +225,7 @@ export class ErrorJournal {
   private async appendUnlocked(event: ErrorJournalEvent): Promise<void> {
     await this.repairActiveFileTerminator();
     const line = `${JSON.stringify(event)}\n`;
-    if (await this.rotateIfNeeded(Buffer.byteLength(line))) await this.reloadFromDisk();
+    await this.rotateIfNeeded(Buffer.byteLength(line));
     await fs.promises.appendFile(this.filePath, line, { encoding: 'utf8', mode: 0o600 });
     applyEvent(this.groups, event);
   }
@@ -258,9 +270,14 @@ export class ErrorJournal {
     this.groups.clear();
     for (const file of this.journalFilesOldestFirst()) {
       const content = await fs.promises.readFile(file, 'utf8').catch(() => '');
-      for (const line of content.split('\n')) {
-        if (!line.trim()) continue;
-        const event = parseEvent(line);
+      const lines = content.split('\n');
+      for (let index = 0; index < lines.length; index += 1) {
+        // Yield between slices so a multi-MB file never holds the loop for its whole parse.
+        if (index % FOLD_SLICE_LINES === FOLD_SLICE_LINES - 1) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        if (!lines[index].trim()) continue;
+        const event = parseEvent(lines[index]);
         if (event) applyEvent(this.groups, event);
       }
     }

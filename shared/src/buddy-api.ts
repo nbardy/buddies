@@ -11,7 +11,7 @@ import type {
 } from '@unleashd/buddies-core';
 import { z } from 'zod';
 import { OwnerPostMentionConfigSchema } from './buddy-channel-posts.js';
-import { ConversationConfigSchema } from './conversation-config.js';
+import { type ConversationConfig, ConversationConfigSchema } from './conversation-config.js';
 import type { UpstreamUpdateResult } from './upstream.js';
 
 // Pattern: one-type-source (docs/patterns.md#one-type-source)
@@ -176,6 +176,16 @@ export const NewDirectSchema = z
 export const ReadSchema = z.union([
   z.object({ channelId: z.string().min(1), postId: z.string().min(1) }).strict(),
   z.object({ rootId: z.string().min(1), postId: z.string().min(1) }).strict(),
+  // The Threads view marks every unread card it shows in ONE request (a POST per card was a wave of
+  // channel_changed pushes and refetches). Each entry is a thread read as above.
+  z
+    .object({
+      reads: z
+        .array(z.object({ rootId: z.string().min(1), postId: z.string().min(1) }).strict())
+        .min(1)
+        .max(200),
+    })
+    .strict(),
 ]);
 
 /**
@@ -405,6 +415,17 @@ export function buddyMutationRoute<K extends BuddyMutation>(operation: K): Buddy
 }
 
 // Pattern: one-type-source (docs/patterns.md#one-type-source)
+/** A Buddy's latest seat in a thread: what its next reply runs on. */
+export type ThreadSeat = { buddyId: string; config: ConversationConfig };
+
+/**
+ * GET /api/buddies/threads/seats?roots=a,b: one answer per requested root. A root that cannot be
+ * read (deleted, not a thread root) fails alone instead of failing the other composers' batch.
+ */
+export type ThreadSeatsResult =
+  | { kind: 'seats'; seats: ThreadSeat[] }
+  | { kind: 'failed'; message: string };
+
 /** A channel delivery with the same waiting reason the claim gate reports. */
 export type ChannelResponse = {
   channelId: string;

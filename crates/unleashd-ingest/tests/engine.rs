@@ -8,7 +8,7 @@ use serde_json::json;
 use std::path::Path;
 use unleashd_ingest::engine::Engine;
 use unleashd_ingest::model::{Format, Root};
-use unleashd_ingest::store::{Committed, Reader, Writer};
+use unleashd_ingest::store::{Committed, MergePrefix, Reader, Writer};
 
 fn user(text: &str) -> String {
     format!("{}\n", json!({ "type": "user", "timestamp": "2026-09-22T00:00:00.000Z", "cwd": "/w", "message": { "content": text } }))
@@ -152,4 +152,44 @@ fn search_finds_listed_messages_newest_first_with_literal_wildcards() {
     assert!(hits.iter().all(|h| h.session_id == "a"));
     let literal = reader.search("100%", 10).unwrap();
     assert_eq!(literal.iter().map(|h| h.message.content.as_str()).collect::<Vec<_>>(), ["Deploy at 100% load"]);
+}
+
+// Fix-guard (2026-10-23): boot counted merged histories by paging every message through napi and
+// hashing it in JS (618 records, seconds of main thread). The count now lives in the store; it
+// must equal what the server's merge keeps: an inherited prefix once, a repeated identical row
+// within a session at its in-session count, and a diverging tail added. The TS parity test
+// (server/test/ingest-history.test.ts) checks the same against the real `mergeSessionMessages`.
+#[test]
+fn merged_count_counts_an_inherited_prefix_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let line = |text: &str, second: u32| {
+        format!(
+            "{}\n",
+            json!({ "type": "user", "timestamp": format!("2026-09-22T00:00:{second:02}.000Z"), "cwd": "/w", "message": { "content": text } })
+        )
+    };
+    // `a`: Plan, Again, Plan (the same row twice). `b` forks it, then diverges.
+    let prefix = format!("{}{}{}", line("Plan", 0), line("Again", 1), line("Plan", 0));
+    write(&dir.path().join("claude/-w/a.jsonl"), &prefix);
+    write(&dir.path().join("claude/-w/b.jsonl"), &format!("{prefix}{}{}", line("Tail one", 3), line("Tail two", 4)));
+    let db = dir.path().join("ingest.sqlite");
+    Engine::open(roots(dir.path()), &db).unwrap().scan(&mut |_| {});
+    let reader = Reader::open(&db).unwrap();
+    let of = |id: &str, count: u32| MergePrefix { session_id: id.to_string(), created_at: 0.0, count };
+    assert_eq!(reader.merged_count(&[of("a", 3)]).unwrap(), 3, "one session: its own prefix");
+    assert_eq!(reader.merged_count(&[of("a", 3), of("b", 5)]).unwrap(), 5, "the fork's prefix counts once");
+    assert_eq!(reader.merged_count(&[of("a", 2), of("b", 5)]).unwrap(), 5, "a shorter settled prefix adds nothing");
+    assert_eq!(reader.merged_count(&[of("a", 1), of("b", 1)]).unwrap(), 1, "only the settled prefix is counted");
+    assert_eq!(reader.merged_count(&[of("missing", 4)]).unwrap(), 0, "an unknown session contributes nothing");
+}
+
+// Fix-guard (2026-10-23): `known()` read the `source` table, whose rows carry the fold checkpoint
+// inline, so a cold start spent 1.6 s on it (11k sources). It must stay on the covering index.
+#[test]
+fn reading_every_stamp_never_touches_the_checkpoint_pages() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("ingest.sqlite");
+    let plans = Writer::open(&db).unwrap().plans().unwrap();
+    let (_, plan) = plans.iter().find(|(q, _)| q == unleashd_ingest::store::KNOWN).expect("known() is in plans()");
+    assert!(plan.iter().any(|line| line.contains("COVERING INDEX")), "known() left its covering index: {plan:?}");
 }

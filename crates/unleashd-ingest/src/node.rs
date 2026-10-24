@@ -4,12 +4,15 @@
 
 use crate::engine::Report;
 use crate::model::{ContextReading, Format, Message, Root, SessionRow, UsageQuery, UsageReport};
-use crate::store::Reader;
+use crate::store::{MergePrefix, Reader};
 use crate::watch::{self, IngestEvent};
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use std::path::PathBuf;
+
+/// Read-only connections `merged_counts` fans out over.
+const MERGE_READERS: usize = 8;
 use std::sync::{Arc, Mutex};
 
 /// What `onChange` receives.
@@ -78,6 +81,15 @@ pub struct MessagesOptions {
     /// Return messages with `seq` greater than this; -1 starts at the first message.
     pub after_seq: i64,
     pub limit: u32,
+}
+
+/// One bound session's settled prefix, as `mergedCounts` takes it.
+#[napi(object)]
+pub struct MergeSession {
+    pub session_id: String,
+    pub created_at: f64,
+    /// The first `count` messages are the prefix.
+    pub count: u32,
 }
 
 fn to_js(e: impl std::fmt::Display) -> Error {
@@ -182,6 +194,49 @@ impl Ingest {
     pub async fn messages(&self, session_id: String, options: MessagesOptions) -> Result<Vec<Message>> {
         let reader = self.reader.clone();
         blocking(move || reader.lock().map_err(to_js)?.messages(&session_id, options.after_seq, options.limit).map_err(to_js)).await
+    }
+
+    /// How many rows the server's session merge keeps for each group of sessions' prefixes (the
+    /// conversation list's message count for a record bound to several sessions), counted in
+    /// Rust over the stored rows: ONE call for all groups, no message crosses napi.
+    ///
+    /// Fix-guard (2026-10-23): the work is ~90 ms of CPU for 614 records, but on a cold page cache
+    /// it is ~1,500 scattered range reads (~1.8 s) on one connection. The groups are split over
+    /// `MERGE_READERS` read-only connections of their own (like `search`), so the reads overlap and
+    /// the shared `reader` stays free for message pages.
+    #[napi]
+    pub async fn merged_counts(&self, groups: Vec<Vec<MergeSession>>) -> Result<Vec<u32>> {
+        let db = self.db.clone();
+        blocking(move || {
+            let groups: Vec<Vec<MergePrefix>> = groups
+                .into_iter()
+                .map(|group| group.into_iter().map(|s| MergePrefix { session_id: s.session_id, created_at: s.created_at, count: s.count }).collect())
+                .collect();
+            let lanes = MERGE_READERS.min(groups.len()).max(1);
+            let mut out = vec![0u32; groups.len()];
+            let results: Vec<Result<Vec<(usize, u32)>>> = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..lanes)
+                    .map(|lane| {
+                        let (db, groups) = (&db, &groups);
+                        scope.spawn(move || -> Result<Vec<(usize, u32)>> {
+                            let reader = Reader::open(db).map_err(to_js)?;
+                            (lane..groups.len())
+                                .step_by(lanes)
+                                .map(|i| Ok((i, reader.merged_count(&groups[i]).map_err(to_js)?)))
+                                .collect()
+                        })
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err(Error::from_reason("[panic] merged_counts lane".to_string())))).collect()
+            });
+            for lane in results {
+                for (i, n) in lane? {
+                    out[i] = n;
+                }
+            }
+            Ok(out)
+        })
+        .await
     }
 
     /// Provider-counted token usage of the turns in `[since, until)`, grouped by session, UTC day

@@ -233,3 +233,31 @@ async function temporaryDirectory(t: test.TestContext): Promise<string> {
   t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
   return directory;
 }
+
+// Fix-guard (2026-10-23): boot parsed ~24 MB of rotated journal synchronously and every rotation
+// parsed it again. Boot now folds in the background and rotation carries state forward; counts
+// must not change, and a capture racing the background fold must still land on the full history.
+test('rotation keeps group counts without re-reading the journal, and a capture right after initialize sees history', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const options = { directory, maxBytes: 1_024, maxRotatedFiles: 3 };
+  const first = new ErrorJournal({ ...options, serverBootId: 'boot-1' });
+  await first.initialize();
+  const capture = (journal: ErrorJournal) =>
+    journal.capture({
+      severity: 'error',
+      component: 'fixture',
+      message: `Repeated ${'y'.repeat(300)}`,
+    });
+  for (let index = 0; index < 4; index += 1) await capture(first);
+
+  const second = new ErrorJournal({ ...options, serverBootId: 'boot-2' });
+  await second.initialize();
+  // The background fold may still be running when this capture queues up behind it.
+  const group = await capture(second);
+  assert.equal(group.count, 5);
+  const reads = t.mock.method(fs.promises, 'readFile');
+  for (let index = 0; index < 4; index += 1) await capture(second); // forces several rotations
+  assert.equal(reads.mock.callCount(), 0, 'rotation re-read the journal files');
+  const [only] = await second.queryGroups({ status: 'all' });
+  assert.equal(only?.count, 9);
+});

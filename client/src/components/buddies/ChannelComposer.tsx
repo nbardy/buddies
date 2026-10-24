@@ -140,7 +140,6 @@ export function ChannelComposer({
     },
   });
 
-  const { seats, retry: retrySeats } = useThreadSeats(rootId);
   const trigger = activeTrigger(view, caret);
   const emojiTrigger = trigger ? null : activeEmojiQuery(text, caret);
   const activeStart = trigger?.start ?? emojiTrigger?.start;
@@ -158,6 +157,11 @@ export function ChannelComposer({
   );
   const selected = matches[Math.min(highlight, matches.length - 1)];
   const mentions = useMemo(() => mentionedBuddies(view, references), [view, references]);
+  // Lazy: a card's composer asks for seats only once the draft holds or is typing an @mention.
+  const { seats, retry: retrySeats } = useThreadSeats(
+    rootId,
+    trigger !== null || mentions.length > 0
+  );
   const ambiguous = useMemo(() => ambiguousNames(view, roster), [view, roster]);
   const foreign = useMemo(() => foreignMentions(view), [view]);
   // Pattern: one-definition (docs/patterns.md#one-definition)

@@ -79,7 +79,7 @@ async function seed() {
     key: '/api/buddies/overview',
     load: async () => [rosterFixture([lead], { id: WS, name: 'unleashd' })],
   });
-  await loadResource({ key: `/api/buddies/tasks?workspaceId=${WS}`, load: async () => [] });
+  await loadResource({ key: `/api/buddies/workspaces/${WS}/tasks`, load: async () => [] });
   // The divider reads the previous chat's config from its detail alone (ChannelDm DmGeneration).
   await loadResource({ key: `/api/conversations/${OLD}`, load: async () => syntheticDetail(OLD) });
 }

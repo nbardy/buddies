@@ -67,6 +67,8 @@ export interface BuddyCreationServicePorts {
   installedAgent(): InstalledAgent;
   resolveWorkingDirectory(input: string): string;
   createId(): string;
+  /** A registered runtime, else the one built from its stored record; undefined when none. */
+  materialize(id: string): Promise<ConversationRuntime | undefined>;
   getConversation(id: string): ConversationRuntime | undefined;
   createConversation(options: ConversationOptions): ConversationRuntime;
   registerConversation(conversation: ConversationRuntime): void;
@@ -269,8 +271,9 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
     workspaceId: string;
   }): Promise<string> {
     const id = stableConversationId(`branch:${chat.conversationId}`);
-    if (ports.getConversation(id)) return id;
-    const parent = ports.getConversation(chat.conversationId);
+    // Pattern: lazy-runtimes (docs/patterns.md#lazy-runtimes): both may be cold records.
+    if (await ports.materialize(id)) return id;
+    const parent = await ports.materialize(chat.conversationId);
     if (!parent) throw new Error(`Owner chat ${chat.conversationId} is not loaded`);
     await createServerBuddyConversation({
       context: {

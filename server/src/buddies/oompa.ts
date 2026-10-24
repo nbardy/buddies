@@ -1,14 +1,24 @@
-import { execFile, execFileSync, spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import fsp from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { executionProcess, killExecution } from '@nbardy/agent-cli';
+import {
+  executionProcess,
+  executionWrapperAlive,
+  isKnownOwnWrapper,
+  killExecution,
+  readPid,
+  trustSpawnedWrapper,
+  verifyExecutions,
+} from '@nbardy/agent-cli';
 import { z } from 'zod';
 import { appDataDirectory } from '../app-data';
 import { type Execution, holdsGrant } from '../turns/execution-state';
 import { type OompaOwner, createExecutionJournals } from '../turns/executions';
+import { labelled } from '../observability/event-loop-stall';
 import type { BuddiesCore } from './core';
 import { decideExecutionGate } from './execution-gate';
 import type { BuddyGrant, Grants, TurnGrant } from './grants';
@@ -242,7 +252,10 @@ export function createOompaHost(options: {
 
   function signal(dir: string) {
     const process = executionProcess(dir);
-    if (process.t === 'live') killExecution(process.pid, dir);
+    // Grace must outlast relay/oompa-run-host.mjs's own 3 s stop timer (it writes exit.json then).
+    // At the default 3 s the SIGKILL raced it and won once liveness stopped paying a sync `ps`
+    // (2026-10-23; oompa-mcp drain tests never saw exit.json).
+    if (process.t === 'live') killExecution(process.pid, dir, 6000);
   }
   function continuations(run: Run) {
     const root = path.join(run.execution.dir, 'continuations');
@@ -260,19 +273,13 @@ export function createOompaHost(options: {
     const file = path.join(run.execution.dir, 'continuation-request.json');
     if (fs.existsSync(file) && read<{ id: string }>(file).id === id) fs.unlinkSync(file);
   }
+  // Fix-guard (2026-10-23): this used to execFileSync('ps') per continuation per second on the
+  // event loop. Identity is cached by the journal (kill(pid, 0) for liveness); the 1 s poll
+  // re-verifies ALL live wrappers with one async `ps` (verifyExecutions).
   function childActive(dir: string) {
-    if (executionProcess(dir).t !== 'ended') return true;
     // exit.json precedes the wrapper's final group kill. Do not resume the
     // task loop in that gap; wait until its exact wrapper is gone.
-    try {
-      const pid = fs.readFileSync(path.join(dir, 'pid'), 'utf8').trim();
-      return execFileSync('ps', ['-p', pid, '-o', 'command='], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).includes(dir);
-    } catch {
-      return false;
-    }
+    return executionProcess(dir).t !== 'ended' || executionWrapperAlive(dir);
   }
   function refreshContinuations(run: Run) {
     for (const { dir, record } of continuations(run)) {
@@ -353,6 +360,59 @@ export function createOompaHost(options: {
     signal(run.execution.dir);
     stopChildren(run);
   }
+  // Pattern: async-liveness (docs/patterns.md#async-liveness)
+  // Fix-guard (2026-10-23): the 1 s poll ran the sync refresh() for EVERY run, ended ones included
+  // (stopChildren + executionProcess per child, each a sync fs call or `ps`): `timer oompa-poll`
+  // was the #1 stall, 145 stalls / 35 s per 30 min, existsSync + spawn in the CPU profile. Now a
+  // run that is terminal and has quiesced its children leaves the poll (`settled`), and a running
+  // run is first PROBED with async fs reads; the sync refresh() only runs when the probe says
+  // something needs acting on. Guard: oompa-mcp "poll tick performs no sync fs or spawn".
+  const settled = new Set<string>();
+  const exists = (file: string) =>
+    fsp.access(file).then(
+      () => true,
+      () => false
+    );
+  type Probe = { t: 'idle' } | { t: 'act' };
+  async function probe(run: Run): Promise<Probe> {
+    const dir = run.execution.dir;
+    if (run.execution.phase.t !== 'running') return { t: 'act' }; // stopping/terminal: transition once
+    if (run.owner.grant.expiresAt <= now()) return { t: 'act' };
+    const pid = await fsp.readFile(path.join(dir, 'pid'), 'utf8').then(
+      (raw) => Number.parseInt(raw, 10),
+      () => Number.NaN
+    );
+    if (!(pid > 0) || !isKnownOwnWrapper(dir, pid)) return { t: 'act' }; // unverified: refresh decides
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return { t: 'act' };
+    }
+    const attention = await Promise.all([
+      exists(path.join(dir, 'exit.json')),
+      exists(path.join(dir, 'drain.json')),
+      exists(path.join(dir, 'continuation-request.json')),
+      run.owner.automation
+        ? exists(path.join(root, run.owner.automation.rootRunId, 'automation-revoked.json'))
+        : false,
+    ]);
+    return attention.some(Boolean) ? { t: 'act' } : { t: 'idle' };
+  }
+  async function pollTick() {
+    const active = [...runs.values()].filter((run) => !settled.has(run.owner.id));
+    for (let i = 0; i < active.length; i += 8) {
+      const batch = active.slice(i, i + 8);
+      const probes = await Promise.all(batch.map(probe));
+      batch.forEach((run, j) => {
+        if (probes[j].t === 'act') refresh(run);
+      });
+    }
+    await verifyExecutions(
+      [...runs.values()]
+        .filter((run) => !settled.has(run.owner.id))
+        .map((run) => run.execution.dir)
+    );
+  }
   function refresh(run: Run) {
     refreshContinuations(run);
     if (run.execution.phase.t === 'stopping' && executionProcess(run.execution.dir).t !== 'live') {
@@ -364,6 +424,7 @@ export function createOompaHost(options: {
     }
     if (run.execution.phase.t !== 'running') {
       stopChildren(run);
+      if (run.execution.phase.t !== 'stopping') settled.add(run.owner.id);
       return;
     }
     if (run.owner.grant.expiresAt <= now() || revoked(run)) return stop(run, true);
@@ -435,6 +496,7 @@ export function createOompaHost(options: {
       });
       if (!child.pid) throw new Error('Could not start Oompa execution host');
       fs.writeFileSync(path.join(dir, 'pid'), String(child.pid), { mode: 0o600 });
+      trustSpawnedWrapper(dir, child.pid); // a fresh fork must never be judged by a first-sight ps
       child.unref();
     } finally {
       fs.closeSync(out);
@@ -1010,9 +1072,19 @@ export function createOompaHost(options: {
         stop(run, true);
       refresh(run);
     }
-  const poll = setInterval(() => {
-    for (const run of runs.values()) refresh(run);
-  }, 1000);
+  let polling = false;
+  const poll = setInterval(
+    labelled('timer oompa-poll', () => {
+      if (polling) return; // never stack ticks under load
+      polling = true;
+      void pollTick()
+        .catch(() => undefined)
+        .finally(() => {
+          polling = false;
+        });
+    }),
+    1000
+  );
   poll.unref();
 
   function forGrant(grant: BuddyGrant): Run {
@@ -1026,6 +1098,8 @@ export function createOompaHost(options: {
 
   return {
     guard: forGrant,
+    /** One poll pass, exposed so a test can drive it deterministically. */
+    tick: pollTick,
     close: () => clearInterval(poll),
     async action(grant: TurnGrant, action: z.infer<typeof OompaAction>, key: string) {
       const ownerInput =

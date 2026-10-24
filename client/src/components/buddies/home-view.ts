@@ -8,7 +8,8 @@
  *   - review, blocked and in-progress todos are unfinished; nested descendants are not counted;
  *   - no todos → "No todos yet", all cancelled → "No active todos", never a made-up 0%.
  */
-import type { Task } from './types';
+import type { TaskSummary as Task } from './types';
+// The Home reads only directory fields: it takes summaries (a full Task is assignable).
 
 /** A pinned project's checklist. D = NoTodos ⊕ NoActive ⊕ Counted. */
 export type ProjectProgress =
