@@ -394,9 +394,8 @@ export interface OwnerUnread {
 }
 
 /**
- * Where a task sits in its workspace's tree. `Top` makes it a top-level task (an initiative,
- * the only kind Home can pin); `Task` places it under that task. Named, not `Option<String>`,
- * so "make top-level" and "unchanged" stay distinct across the napi boundary (as `ManagerRef`).
+ * Where a task sits in its tree: `Top` (an initiative, the only kind Home pins) or under a task.
+ * Named, not `Option<String>`, so "top level" and "unchanged" stay distinct (as `ManagerRef`).
  */
 export type ParentRef =
   | { kind: 'top' }
