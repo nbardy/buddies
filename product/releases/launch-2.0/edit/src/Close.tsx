@@ -24,7 +24,7 @@ type Word = { text: string; beat: number; size: Size; fill: string; ink: string;
 // capture (../footage/2026-09-30_github_repo.png, 2974×1882). Nothing is forked: the click is a
 // cursor and a press flash drawn over the still.
 const REPO_SHOT = staticFile('2026-09-30_github_repo.png');
-const REPO_URL = 'github.com/nbardy/unleashd';
+const REPO_URL = 'github.com/nbardy/buddies';
 const CARD_W = 1500;
 const CHROME_H = 64;
 const SHOT_SCALE = CARD_W / 2974;

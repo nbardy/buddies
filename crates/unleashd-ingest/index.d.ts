@@ -239,7 +239,7 @@ export type Cwd =
 /** The standard provider roots under `home`, including any Gemini sandbox homes that exist. */
 export declare function defaultRoots(home: string): Array<Root>
 
-export type Format = 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' | 'muse'
+export type Format = 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' | 'muse' | 'pi'
 
 /** Who a session belongs to, recovered from in-band markers (and Muse's durable creation record). */
 export type Identity =
@@ -314,7 +314,7 @@ export interface NewRecord {
 
 export type Provenance = 'user' | 'legacy_inferred' | 'external_discovered'
 
-export type Provider = 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' | 'muse'
+export type Provider = 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' | 'muse' | 'pi'
 
 /** Provider-counted tokens of the latest request on one session (`ProviderTurnUsageSchema`). */
 export interface ProviderTurnUsage {

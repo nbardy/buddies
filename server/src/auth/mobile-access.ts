@@ -16,7 +16,7 @@ import type { AuthPolicy, KeyLocation } from './policy';
 export type MobileAccessInput = {
   /** Candidate CLI paths in order; the first that spawns wins. */
   readonly tailscale: readonly string[];
-  /** Port serving the client: the built app's own port, or Vite's in development. */
+  /** Port serving the built client, including the backend's port in development. */
   readonly uiPort: number;
   readonly auth: AuthPolicy;
   readonly key: KeyLocation;

@@ -1,14 +1,14 @@
 /* Workspace Home. Classes are prefixed .landing-* (CSS is global). Sizes come from tokens. */
 .landing {
   --landing-radius: 14px;
-  --landing-body: 'Inter Variable', Inter, system-ui, sans-serif;
-  --landing-display: 'Plus Jakarta Sans Variable', 'Inter Variable', system-ui, sans-serif;
+  --landing-body: "Inter Variable", Inter, system-ui, sans-serif;
+  --landing-display: "Plus Jakarta Sans Variable", "Inter Variable", system-ui, sans-serif;
   --landing-card: color-mix(in srgb, var(--text-bright) 4%, transparent);
   --landing-line: color-mix(in srgb, var(--text-bright) 9%, transparent);
   position: relative;
   isolation: isolate;
   font-family: var(--landing-body);
-  font-feature-settings: 'cv11', 'ss03';
+  font-feature-settings: "cv11", "ss03";
   gap: calc(var(--sp-10) + var(--sp-9));
   width: 100%;
   max-width: 1008px;
@@ -53,18 +53,16 @@
   translate: 0 -22%;
   filter: blur(56px);
   opacity: 0.45;
-  background:
-    radial-gradient(38% 50% at 26% 42%, oklch(0.62 0.2 300), transparent 70%),
+  background: radial-gradient(38% 50% at 26% 42%, oklch(0.62 0.2 300), transparent 70%),
     radial-gradient(36% 52% at 74% 38%, oklch(0.66 0.15 240), transparent 70%),
     radial-gradient(34% 44% at 50% 72%, oklch(0.7 0.17 350), transparent 70%);
   animation: landing-aurora 18s ease-in-out infinite alternate;
 }
 
 .landing-aura::after {
-  content: '';
+  content: "";
   opacity: 0.7;
-  background:
-    radial-gradient(30% 40% at 62% 60%, oklch(0.76 0.12 200), transparent 70%),
+  background: radial-gradient(30% 40% at 62% 60%, oklch(0.76 0.12 200), transparent 70%),
     radial-gradient(28% 40% at 36% 30%, oklch(0.68 0.18 320), transparent 70%);
   animation: landing-aurora 24s ease-in-out infinite alternate-reverse;
 }
@@ -95,9 +93,8 @@
 .landing-composer .channel-composer {
   padding: var(--sp-3);
   border-radius: var(--landing-radius);
-  box-shadow:
-    0 0 0 1px var(--landing-line),
-    0 18px 50px -18px color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: 0 0 0 1px var(--landing-line), 0 18px 50px -18px
+    color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .landing-note {
@@ -198,10 +195,7 @@ a.landing-chip:hover {
   border: 1px solid var(--landing-line);
   border-radius: var(--landing-radius);
   background: var(--landing-card);
-  transition:
-    border-color 0.15s,
-    background 0.15s,
-    transform 0.15s;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
 }
 
 .landing-project:hover {
@@ -235,7 +229,7 @@ a.landing-chip:hover {
 }
 
 /* A pinned card also carries the reorder menu beside its star. */
-.landing-project[data-pinned='true'] .landing-project-title {
+.landing-project[data-pinned="true"] .landing-project-title {
   padding-right: var(--sp-11);
 }
 
@@ -282,12 +276,12 @@ a.landing-chip:hover {
 
 .landing-project:hover .landing-pin,
 .landing-pin:focus-visible,
-.landing-pin[aria-pressed='true'],
+.landing-pin[aria-pressed="true"],
 .landing-project:hover .landing-menu-button {
   opacity: 1;
 }
 
-.landing-pin[aria-pressed='true'] {
+.landing-pin[aria-pressed="true"] {
   color: var(--warning);
 }
 
@@ -379,7 +373,7 @@ a.landing-chip:hover {
 }
 
 .landing-request-from::before {
-  content: '';
+  content: "";
   flex: none;
   width: 7px;
   height: 7px;
@@ -415,7 +409,7 @@ a.landing-chip:hover {
 }
 
 /* Archived channels (outside .landing) share the page's column. */
-section[aria-label='Home'] section[aria-labelledby='archived-channels-heading'] {
+section[aria-label="Home"] section[aria-labelledby="archived-channels-heading"] {
   width: 100%;
   max-width: 1008px;
   margin: 0 auto;
@@ -444,20 +438,20 @@ section[aria-label='Home'] section[aria-labelledby='archived-channels-heading'] 
 }
 
 /* Phone: a tighter hero, and Tasks scroll sideways. */
-.landing[data-frame='mobile'] {
+.landing[data-frame="mobile"] {
   gap: var(--sp-9);
   padding: var(--sp-6) var(--sp-7);
 }
 
-.landing[data-frame='mobile'] .landing-hero {
+.landing[data-frame="mobile"] .landing-hero {
   padding-top: 0;
 }
 
-.landing[data-frame='mobile'] .landing-hero h1 {
+.landing[data-frame="mobile"] .landing-hero h1 {
   font-size: var(--fs-9);
 }
 
-.landing[data-frame='mobile'] .landing-projects {
+.landing[data-frame="mobile"] .landing-projects {
   display: flex;
   overflow-x: auto;
   scroll-snap-type: x proximity;
@@ -465,34 +459,34 @@ section[aria-label='Home'] section[aria-labelledby='archived-channels-heading'] 
   padding-inline: var(--sp-7);
 }
 
-.landing[data-frame='mobile'] .landing-projects > li {
+.landing[data-frame="mobile"] .landing-projects > li {
   flex: none;
   width: 250px;
   scroll-snap-align: start;
 }
 
 /* Phone: Working now is one row that scrolls, never a stack of chips. */
-.landing[data-frame='mobile'] .landing-working,
-.landing[data-frame='mobile'] .landing-working ul {
+.landing[data-frame="mobile"] .landing-working,
+.landing[data-frame="mobile"] .landing-working ul {
   flex-wrap: nowrap;
   overflow-x: auto;
 }
 
-.landing[data-frame='mobile'] .landing-chip {
+.landing[data-frame="mobile"] .landing-chip {
   white-space: nowrap;
 }
 
 /* Phone: a request is a stack (who, then the question) and may wrap. */
-.landing[data-frame='mobile'] .landing-request {
+.landing[data-frame="mobile"] .landing-request {
   flex-direction: column;
   gap: var(--sp-2);
 }
 
-.landing[data-frame='mobile'] .landing-request-from {
+.landing[data-frame="mobile"] .landing-request-from {
   width: auto;
 }
 
-.landing[data-frame='mobile'] .landing-request-body {
+.landing[data-frame="mobile"] .landing-request-body {
   white-space: normal;
   display: -webkit-box;
   -webkit-line-clamp: 3;

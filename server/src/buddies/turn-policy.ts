@@ -277,6 +277,8 @@ export interface BuddyTurnPolicySeed {
 export class BuddyTurnPolicy implements TurnPolicy {
   readonly maxRuntimeMs = null;
   private memory: MemorySnapshot | null;
+  // The workspace root read with the briefing in `prepare`; null until the first turn prepares.
+  private workspaceRoot: string | null = null;
   // The session audience key the current provider session was built under (persisted with it).
   private providerAudienceKey: string | null;
   // Memory generation the current provider session was last briefed with; null means
@@ -406,6 +408,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     this.admitAudience(input, context);
     const current = this.buddies.currentBriefing(context);
     this.memory = createMemorySnapshot(current.briefing, current.memoryGeneration);
+    this.workspaceRoot = current.workingDirectory;
     // Re-brief only when this provider session has not yet seen the current memory generation.
     // From 5c0cec4 (2026-09-20) until 2026-09-24 every turn re-sent a ~20k-char briefing (one
     // session carried 44 copies, ~835k chars). Guard: `resumed Buddy turns re-brief only when
@@ -415,6 +418,10 @@ export class BuddyTurnPolicy implements TurnPolicy {
 
   memorySnapshot(): MemorySnapshot | null {
     return this.memory;
+  }
+
+  turnDirectory(stored: string): string {
+    return this.workspaceRoot ?? stored;
   }
 
   providerPrompt(turn: {

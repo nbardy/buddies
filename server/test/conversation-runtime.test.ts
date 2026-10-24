@@ -47,7 +47,11 @@ function runtimeFixture(
     cancelBuddyChat?: (turnId: string) => void;
     finishBuddyRun?: BuddyPolicyPort['finishRun'];
     reviewCompletedBuddyTurn?: (turn: CompletedBuddyTurn) => void;
-    readCurrentBuddyContext?: () => { briefing: string; memoryGeneration: string };
+    readCurrentBuddyContext?: () => {
+      briefing: string;
+      memoryGeneration: string;
+      workingDirectory?: string;
+    };
     buddyContext?: CompletedBuddyTurn['context'];
     executions?: ConversationRuntimeDependencies['executions'];
   } = {}
@@ -201,6 +205,49 @@ test('resumed Buddy turns re-brief only when the memory generation changes', asy
   assert.deepEqual(
     requests.map((request) => request.resumeSessionId),
     [undefined, 'native-session', 'native-session', 'native-session']
+  );
+});
+
+// Regression 2026-10-14: ~/git/unleashd was renamed to ~/git/buddies. The workspace was re-rooted,
+// but each Buddy conversation still spawned in the folder stored when it was created, so every
+// thread failed with "Working directory does not exist". A Buddy turn runs in the workspace's
+// CURRENT root (read with the briefing), whatever the conversation stored.
+test('a Buddy turn runs in its workspace root, not the folder the conversation stored', async () => {
+  type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
+  const requests: Request[] = [];
+  let root = '/srv/buddies';
+  const fixture = runtimeFixture({
+    readCurrentBuddyContext: () => ({ briefing: 'B', memoryGeneration: '1', workingDirectory: root }),
+    executeTurn: fakeExecuteTurn((request) => {
+      requests.push(request);
+      return {
+        events: (async function* () {
+          yield { type: 'turn.complete' as const, reason: 'success' as const };
+        })(),
+        completed: Promise.resolve({ exitCode: 0, signal: null, sessionId: 's', reason: 'success' }),
+        stop: () => undefined,
+      };
+    }),
+  });
+  const conversation = new fixture.Conversation({
+    done: false,
+    id: 'moved-buddy',
+    workingDirectory: '/srv/unleashd',
+    configState: fixture.configState,
+    kind: buddyKind({ buddyId: 'buddy', workspaceId: 'workspace' }),
+  });
+  const turn = async (content: string) => {
+    conversation.sendMessage(content, { origin: 'owner_input', inputId: content });
+    await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
+  };
+
+  await turn('one');
+  root = '/srv/buddies-renamed-again';
+  await turn('two');
+
+  assert.deepEqual(
+    requests.map((request) => request.cwd),
+    ['/srv/buddies', '/srv/buddies-renamed-again']
   );
 });
 
@@ -909,6 +956,7 @@ test('every harness receives its resolved effort in one request shape', () => {
     gemini: undefined,
     opencode: undefined,
     cursor: undefined,
+    pi: 'medium',
   };
   for (const provider of Object.keys(expected) as Provider[]) {
     const requests: Request[] = [];

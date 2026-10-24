@@ -393,3 +393,25 @@ read_file). Production runs from the repo root, so it only reproduced in dev.
 `resolveDefaultWorkingDirectory` (server/src/http/path-utils.ts) resolves:
 `UNLEASHD_DEFAULT_CWD` → the enclosing pnpm workspace root (at most 4 levels up) →
 `process.cwd()`. It is only a default: a Buddy with a workspace uses its `root_path`.
+
+### Workspace folders survive checkout renames
+
+Registration is the single owner-only write path for workspace folders. Both the
+install bootstrap and New workspace resolve the real path and supply the same Git
+identity: sorted root commits plus the repository-relative folder. The crate
+records the folder list durably and resolves `rootPath` to its newest existing
+folder on reads. Buddy turns already consume that resolved root on every turn.
+
+A new path reuses a workspace only when exactly one matching workspace has no
+remaining folders. Active clones and separate subprojects stay separate;
+ambiguous missing matches fail without changes. Folder existence errors do not
+prove a move. This replaces the manual move/fold operation and its owner route;
+no team rows need merging because registration prevents the duplicate.
+
+Existing roots seed the folder list when the addon opens; registration enriches
+Git identity while the folder still exists. A folder lost before identity was
+recorded cannot be identified automatically. Non-Git/unborn repositories remain
+path-keyed. Shallow history or rewritten roots can change the Git identity, so
+history matching is intentionally conservative. Regression coverage uses real
+renames, Git repositories, addon persistence and bootstrap in
+`server/test/workspace-registration.test.ts`.

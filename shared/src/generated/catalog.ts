@@ -1,11 +1,69 @@
 // DO NOT EDIT - generated from catalog.jsonc
-// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-30.sol-6.1-medium-effort)
+// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-10-12.muse-wonder-1.0)
 // Generator: shared/scripts/gen-catalog.ts
 // Run: pnpm --filter @unleashd/shared gen:catalog
 
 import type { CatalogProvider } from '../provider-catalog.js';
 
 export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
+  {
+    "id": "pi",
+    "displayName": "SoL-Pi",
+    "shortName": "Pi",
+    "models": [
+      {
+        "id": "anthropic/claude-opus-5-5",
+        "displayName": "Opus 5.5",
+        "reasoning": {
+          "levels": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "openai-codex/gpt-6.1-sol",
+        "displayName": "GPT-6.1 Sol",
+        "reasoning": {
+          "levels": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "meta/muse-wonder-1.0",
+        "displayName": "Muse Wonder 1.0",
+        "reasoning": {
+          "levels": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      }
+    ],
+    "defaultModelId": "openai-codex/gpt-6.1-sol",
+    "supportsDynamicModels": true,
+    "aliases": {}
+  },
   {
     "id": "claude",
     "displayName": "Claude",
@@ -42,6 +100,20 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
       {
         "id": "claude-sonnet-5-5",
         "displayName": "Sonnet 5.5",
+        "reasoning": {
+          "levels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "claude-haiku-5-5",
+        "displayName": "Haiku 5.5",
         "reasoning": {
           "levels": [
             "low",
@@ -415,6 +487,38 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
       {
         "id": "muse-spark-1.3-contributor",
         "displayName": "Muse Spark 1.3 Contributor",
+        "reasoning": {
+          "levels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "ultra"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "muse-wonder-1.0",
+        "displayName": "Muse Wonder 1.0",
+        "reasoning": {
+          "levels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "ultra"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "muse-wonder-full-1.0",
+        "displayName": "Muse Wonder Full 1.0",
         "reasoning": {
           "levels": [
             "none",

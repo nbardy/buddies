@@ -334,7 +334,9 @@
 }
 
 .channel-composer-model .config-picker__group--provider {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* A fifth harness wrapped under the default hint. Guard: inspectChannelModelPicker. */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   padding: var(--sp-2);
   background: color-mix(in srgb, var(--text-primary) 5%, transparent);
   border-radius: var(--ui-radius);
@@ -369,9 +371,6 @@
 .channel-composer-model .config-picker__option--default .config-picker__default-hint {
   position: absolute;
   inset: calc(100% + 4px) 0 auto;
-}
-.channel-composer-model .config-picker__group--provider .config-picker__default-hint {
-  top: calc(100% + var(--sp-2) + 4px);
 }
 .channel-composer-model .config-picker__group:has(.config-picker__option--default) {
   margin-bottom: 14px;

@@ -663,7 +663,7 @@ export function buildScreens(found, focus) {
     {
       name: 'thread-selection-picker',
       missing: noThread,
-      views: onBoth(thread, OPEN_THREAD_SELECTION(found.threadRootId, true)),
+      views: Object.fromEntries(Object.entries(onBoth(thread, OPEN_THREAD_SELECTION(found.threadRootId, true))).map(([tree, view]) => [tree, { ...view, verify: `(${inspectChannelModelPicker.toString()})()` }])),
     },
     // The workspace Home. Pins are `Task.pin` on the server and this session refuses writes, so
     // the stars and the reorder menu show only when the data already has pins (task_write or the
@@ -683,6 +683,26 @@ export function buildScreens(found, focus) {
   window.scrollTo(0, document.body.scrollHeight);
   await tick(600);
   return has('.landing');`)
+      ),
+    },
+    {
+      name: 'thread-selection-sol-pi',
+      missing: noThread,
+      views: Object.fromEntries(
+        Object.entries(onBoth(thread)).map(([tree, view]) => [tree, {
+          ...view,
+          prepare: `(async () => {
+            const ready = await ${OPEN_THREAD_SELECTION(found.threadRootId, true)};
+            if (ready === 'SKIP') return ready;
+            const radio = document.querySelector('.channel-composer-model input[value="pi"]');
+            if (!radio) return 'SKIP';
+            radio.click();
+            await new Promise(resolve => setTimeout(resolve, 150));
+            const text = document.querySelector('.channel-composer-model')?.textContent || '';
+            if (!['Opus 5.5', 'GPT-6.1 Sol', 'Muse Wonder 1.0'].every(label => text.includes(label))) throw new Error('SoL-Pi model choices missing');
+          })()`,
+          verify: `(${inspectChannelModelPicker.toString()})()`,
+        }])
       ),
     },
     { name: 'landing', missing: null, views: onBoth(`${channels}?view=home`) },

@@ -29,11 +29,11 @@ macro_rules! str_enum {
 }
 
 // The on-disk layout a source is read with. One parser per format.
-str_enum!(Format { Claude = "claude", Codex = "codex", Cursor = "cursor", Gemini = "gemini", Opencode = "opencode", Muse = "muse" });
+str_enum!(Format { Claude = "claude", Codex = "codex", Cursor = "cursor", Gemini = "gemini", Opencode = "opencode", Muse = "muse", Pi = "pi" });
 
 // The provider a session belongs to. Equal to its format except for Claude-layout files, whose
 // provider is inferred from the model (a Claude Code transcript of a GPT model is codex).
-str_enum!(Provider { Claude = "claude", Codex = "codex", Cursor = "cursor", Gemini = "gemini", Opencode = "opencode", Muse = "muse" });
+str_enum!(Provider { Claude = "claude", Codex = "codex", Cursor = "cursor", Gemini = "gemini", Opencode = "opencode", Muse = "muse", Pi = "pi" });
 
 str_enum!(Role { User = "user", Assistant = "assistant", System = "system" });
 

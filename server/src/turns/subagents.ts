@@ -203,6 +203,7 @@ const SUB_AGENT_FOLDS: Record<Provider, () => ToolFold> = {
   opencode: () => genericFold('opencode'),
   cursor: () => genericFold('cursor'),
   muse: () => genericFold('muse'),
+  pi: () => genericFold('pi'),
 };
 
 /** A fresh fold for one turn of `provider`. */

@@ -34,7 +34,12 @@ export const fixtureConversations = new Map<
 
 export function fakeBuddyPort(
   options: {
-    briefing?: (context: BuddyContext) => { briefing: string; memoryGeneration: string };
+    briefing?: (context: BuddyContext) => {
+      briefing: string;
+      memoryGeneration: string;
+      /** The workspace root (default /tmp). */
+      workingDirectory?: string;
+    };
     /** Replaces the instant claim: a test that wants the run to wait does not claim it. */
     queueChat?: (
       context: BuddyContext,
