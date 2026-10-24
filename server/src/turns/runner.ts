@@ -311,7 +311,7 @@ export class TurnRunner {
         harness: turn.config.provider,
         mode: 'conversation',
         prompt: turn.content,
-        cwd: host.workingDirectory,
+        cwd: host.policy.turnDirectory(host.workingDirectory),
         model: turn.config.modelId,
         resumeSessionId: turn.resume ? host.sessionId : undefined,
         forkSessionId: forking ? turn.forkSourceSessionId : undefined,
@@ -587,7 +587,7 @@ export class TurnRunner {
     // The same signal renews a Buddy run's lease: a live bridge means a live holder (lease ≠
     // deadline; see BuddyTurnPolicy.bridgeAlive).
     this.host.policy.bridgeAlive();
-    this.ports.swarmObservers.poke(this.host.workingDirectory);
+    this.ports.swarmObservers.poke(this.host.policy.turnDirectory(this.host.workingDirectory));
   }
 
   sawOutput(): void {
@@ -623,7 +623,7 @@ export class TurnRunner {
     const command = missingCommand(message);
     // Fix guard: a provider binary missing from PATH reached the owner as nothing (an empty DM
     // bubble, fresh-install trial 2026-10-05). The journaled wrapper is `/bin/sh`, so agent-cli
-    // reports exit 127 as `spawn <cmd> ENOENT` (execute.ts missingBinaryError); it becomes the
+    // reports its own failed lookup as `spawn <cmd> ENOENT`, never a provider's exit 127; it becomes the
     // journaled `spawn_failed` cause, which survives a restart, plus one text naming the provider.
     // Guard: conversation-runtime.test.ts "a missing provider binary".
     this.terminalCauseHint = command ? 'spawn_failed' : cause;
@@ -994,7 +994,7 @@ export class TurnRunner {
     this.stopSwarmWatch?.();
     this.stopSwarmWatch = watchSwarmRuns(
       this.ports.swarmObservers,
-      this.host.workingDirectory,
+      this.host.policy.turnDirectory(this.host.workingDirectory),
       this.subAgentHost
     );
   }

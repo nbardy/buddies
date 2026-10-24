@@ -72,6 +72,12 @@ export interface TurnPolicy {
   }): string;
   /** The input was admitted into history as `content`. */
   admitted(input: TurnInput, content: string): void;
+  /**
+   * The folder this turn runs in, given the conversation's stored one. A Buddy turn runs in its
+   * workspace's CURRENT root: storing it per conversation left every Buddy thread spawning into
+   * ~/git/unleashd after the checkout was renamed (2026-10-14). Guard: buddy-turn-directory.test.ts.
+   */
+  turnDirectory(stored: string): string;
   /** Configuration admission: throws when the provider cannot run this kind. */
   preflight(provider: ProviderName): void;
   /** Right before spawn: extra request fields for this turn. */
@@ -157,6 +163,9 @@ export abstract class NoRunPolicy {
   releaseUnspawned(): void {}
   prepare(): boolean {
     return false;
+  }
+  turnDirectory(stored: string): string {
+    return stored;
   }
   memorySnapshot(): MemorySnapshot | null {
     return null;

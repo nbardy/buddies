@@ -54,15 +54,11 @@ import {
   channelsView,
 } from '../../components/buddies/channels-view';
 import type { Buddy, Channel, ChannelUnread, Inbox } from '../../components/buddies/types';
+import { NEW_WORKSPACE_PATH } from '../../components/buddies/workspace-home';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 import { rowBuddy } from '../../utils/conversation-row';
-import {
-  MobileEmptyPanel,
-  MobileHeaderAction,
-  MobilePage,
-  MobileSection,
-} from '../components/MobileUI';
+import { MobileEmptyPanel, MobilePage, MobileSection } from '../components/MobileUI';
 import { ChannelComposerMobile, MobileChannelComposeFrame } from './ChannelComposerMobile';
 import { Row, type RowContext, ScreenHeader, useChannelsDm } from './ChannelRowsMobile';
 import { buddyWorkspaceActivityAtom, overviewWorkspaces } from './ChannelsIndex';
@@ -273,23 +269,27 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
       </HighlightRow>
     );
   };
+  // The workspace name IS the switcher, as on desktop's rail (owner, 2026-10-12: the separate
+  // "Switch" pill and "Channels and Buddies" subtitle crowded the header).
   return (
     <MobilePage
-      title={directory.workspaceName}
-      subtitle="Channels and Buddies"
-      headerAside={
-        <div className="mobile-channels-header-aside ui-row">
-          {workspaces.length > 1 ? (
-            <MobileHeaderAction
-              aria-expanded={switching}
-              onClick={() => setSwitching((value) => !value)}
-            >
-              Switch
-            </MobileHeaderAction>
-          ) : null}
-          <AppSettingsDropdown />
-        </div>
+      className="mobile-channels-home"
+      title={
+        <button
+          type="button"
+          className="mobile-channels-switcher ui-row"
+          aria-haspopup="true"
+          aria-expanded={switching}
+          onClick={() => setSwitching((value) => !value)}
+        >
+          <BuddySigil name={directory.workspaceName} className="mobile-channels-switcher__emblem" />
+          <span className="ui-truncate">{directory.workspaceName}</span>
+          <span className="mobile-channels-switcher__caret" aria-hidden="true">
+            ⇅
+          </span>
+        </button>
       }
+      headerAside={<AppSettingsDropdown />}
     >
       {switching && (
         <ul className="mobile-channels-list mobile-channels-workspaces">
@@ -310,6 +310,17 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
               </Link>
             </li>
           ))}
+          <li>
+            <Link
+              className="mobile-channels-row ui-row mobile-channels-row--add"
+              to={NEW_WORKSPACE_PATH}
+            >
+              <span className="mobile-channels-row__hash" aria-hidden="true">
+                +
+              </span>
+              <span className="mobile-channels-row__name ui-truncate">New workspace</span>
+            </Link>
+          </li>
         </ul>
       )}
       <ul className="mobile-channels-list">

@@ -317,7 +317,7 @@ def desktop():
     body = f"""
 <aside class="rail"><img src="assets/rail.png" alt=""></aside>
 <main><div class="aura"></div><div class="fade"></div><div class="wrap">
-<div class="id"><img src="assets/emblem-unleashd.png" alt=""><span>unleashd &middot; ~/git/unleashd</span></div>
+<div class="id"><img src="assets/emblem-unleashd.png" alt=""><span>unleashd &middot; ~/git/buddies</span></div>
 <h1>What should the team build next?</h1>
 <p class="lede">7 Buddies &middot; <span class="live">2 working now</span> &middot; {len(REQUESTS)} waiting on you</p>
 <div class="composer"><div class="ph">Describe the work, or <b>@mention</b> a Buddy&hellip;</div>

@@ -65,6 +65,17 @@ Design and history: `agent_notes/2026-09-30_execution-adoption-design.md`.
 Guards: `server/test/execution-adoption.test.ts` (real backend SIGKILLed mid-turn,
 replaced on the same stores), `vendor/agent-cli-tool/test/journal.test.ts`.
 
+Command discovery belongs to the launcher, never provider stderr. The journal wrapper
+records its failed `command -v` lookup in the private `exit.json` as `commandMissing`;
+agent-cli alone converts that to the existing `spawn <command> ENOENT` error. A provider
+that started and then exited 127 keeps its own stderr/exit failure, rather than an
+instruction to install the provider. Older exit records without this evidence are
+replayed as ordinary provider failures. Binary lookup is fresh for each launch's
+environment and cwd (including relative PATH entries and Cursor's legacy fallback),
+so a successful earlier turn cannot freeze the executable used later. Guard:
+`vendor/agent-cli-tool/test/launch-classification.test.ts`, plus conversation-runtime
+"an installed provider exiting 127" and "a missing provider binary".
+
 ## early-turn-complete
 
 A timeout or stop seals the stream: later provider events are dropped so they

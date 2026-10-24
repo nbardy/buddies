@@ -1,0 +1,82 @@
+[
+  {
+    "name": "no-progress ends a silent background turn and frees its seat while child streams outlive N",
+    "seconds": 18.289835
+  },
+  {
+    "name": "a timeout survives a backend crash inside the kill grace: failed as max_runtime_timeout",
+    "seconds": 18.26476
+  },
+  {
+    "name": "an outage longer than the hold: the in-gap call gets a clear tool error, never a hang",
+    "seconds": 14.995771
+  },
+  {
+    "name": "a turn Stopped before the outage: its call held through the outage gets 401, never a post",
+    "seconds": 14.125364
+  },
+  {
+    "name": "an outage: a Buddy post made with no backend lands once after relaunch; its replay creates nothing",
+    "seconds": 13.169099
+  },
+  {
+    "name": "sub-agents of a frozen-hook turn get one notice across a restart, and the parent takes the post",
+    "seconds": 12.775828
+  },
+  {
+    "name": "a turn that finished during the gap is adopted as finished, even past its deadline",
+    "seconds": 12.488124
+  },
+  {
+    "name": "the check fetches without moving the checkout and prefers an `upstream` remote",
+    "seconds": 10.977941
+  },
+  {
+    "name": "pnpm dev:server --replace over a running runtime: agents survive and are adopted",
+    "seconds": 10.407046
+  },
+  {
+    "name": "a holder that dies while the backend stays up is cleared within the lease time",
+    "seconds": 10.229861
+  },
+  {
+    "name": "a heartbeating silent turn outlives its lease; a turn with no provider progress still dies of the idle timer",
+    "seconds": 10.05351
+  },
+  {
+    "name": "a Stop survives a backend crash inside the kill grace: no tools back, killed, cancelled",
+    "seconds": 9.788078
+  },
+  {
+    "name": "a backend on a copied store launches no agent unless execution is opted in",
+    "seconds": 9.729271
+  },
+  {
+    "name": "an owner message queued behind a running turn survives a backend SIGKILL and runs exactly once",
+    "seconds": 9.402759
+  },
+  {
+    "name": "one Ctrl+C on pnpm dev:server: agents survive and the relaunched backend adopts them",
+    "seconds": 9.361612
+  },
+  {
+    "name": "a live turn keeps its run across a freeze of its backend longer than the lease",
+    "seconds": 9.143855
+  },
+  {
+    "name": "one Ctrl+C with a message queued behind the turn: no wait, the turn is adopted and the message kept",
+    "seconds": 7.980281
+  },
+  {
+    "name": "a backend SIGKILLed mid-turn is replaced and the new one adopts every running turn",
+    "seconds": 5.19834
+  },
+  {
+    "name": "the live backend keeps its SQLite locks through an uploads GC pass",
+    "seconds": 4.640837
+  },
+  {
+    "name": "a crash between the drain and the run settle: the next boot settles it complete, once",
+    "seconds": 4.422697
+  }
+]

@@ -1016,10 +1016,11 @@ pub struct AddressedMessage {
     pub post: Post,
 }
 
-// Which posts make a live turn's tool boundary take the thread's unread page (deliveries.rs
-// `take_steering`): any unread post at a Buddy MCP tool call; only an owner post at a native
-// tool hook or a held Stop (Buddy chatter there waits for a Buddy tool call or the next turn).
-str_enum!(SteerTrigger { AnyPost = "any_post", OwnerPost = "owner_post" });
+// Pattern: sum-types (docs/patterns.md#sum-types)
+// The live-turn boundary that takes the thread's unread page (deliveries.rs `take_steering`): any
+// post at a Buddy MCP tool call, only an owner post at a native hook or a held Stop. It also picks
+// what an unanswered take re-delivers (`redeliver_unanswered`).
+str_enum!(SteerBoundary { BuddyTool = "buddy_tool", NativeTool = "native_tool", HeldStop = "held_stop" });
 
 /// What one tool boundary of a live thread turn got (deliveries.rs `take_steering`).
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]

@@ -75,3 +75,21 @@ If you want exactly three tests:
 1. `agent-cli-tool` command contract regression (Gemini + Codex resume + stream flags)
 2. `loadAllConversations/pollForChanges` fixture test
 3. `test/api.test.js` create/reconcile path normalization test
+
+### Server feedback budgets (2026-10-08)
+
+- `pnpm test:server:fast`: seven explicit protocol/configuration/creation/startup/crash-checker
+  files (29 tests). Development feedback only; real backend crash/lease/socket proofs are in full.
+- `pnpm test:server`: all server test files, four concurrent files by default.
+  `UNLEASHD_TEST_CONCURRENCY=N` selects 1–32; increasing it can slow feedback on a busy machine.
+- `pnpm test:server:stress`: the same full coverage with the relay's actual 55 s default and a
+  10 s outage. Normal mode uses a 1.5 s hold only in the no-backend timeout case; successful
+  outage/restart cases retain their 55 s hold. Lease tests use injected lease/heartbeat/idle
+  budgets, real backend SIGSTOP/SIGCONT, and multiple complete lease periods.
+- `TSX_DISABLE_CACHE=1 pnpm test:server[:fast]` measures cold TypeScript transforms. This does
+  not evict OS caches, reinstall dependencies, or force an addon rebuild. `pnpm run bootstrap`
+  prepares a worktree first; addons rebuild only when their own input key misses.
+
+Measurements and failure controls: [2026-10-08 speed evidence](../agent_notes/2026-10-08_test-feedback-speed/README.md).
+The 40× message race experiment remains separate evidence when changing that race path; a
+normal full run still includes its regression. Fast feedback never replaces full release checks.

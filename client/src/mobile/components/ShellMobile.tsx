@@ -30,6 +30,8 @@ type TabDef = {
 
 // Tabs map to the RouteTable leaves (§3). Home is the workspace directory at "/";
 // the conversation list is at /chats. Search lives at /search.
+// No Buddies tab: Buddies are rows in a workspace's channel list, as on desktop's rail
+// (owner, 2026-10-12). /buddies stays reachable from Home's page links.
 const TABS: readonly TabDef[] = [
   { section: 'chats', label: 'Home', to: '/', end: true, icon: '◈', ariaLabel: 'Home' },
   { section: 'channels', label: 'Channels', to: '/channels', icon: '#', ariaLabel: 'Channels' },
@@ -39,13 +41,6 @@ const TABS: readonly TabDef[] = [
     to: '/workers',
     icon: '⬡',
     ariaLabel: 'Swarms',
-  },
-  {
-    section: 'buddies',
-    label: 'Buddies',
-    to: '/buddies',
-    icon: '◎',
-    ariaLabel: 'Buddies',
   },
   { section: 'search', label: 'Search', to: '/search', icon: '⌕', ariaLabel: 'Search' },
 ] as const;

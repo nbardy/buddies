@@ -2234,7 +2234,7 @@ fn a_request_message_sent_inside_a_boundary_window_is_never_lost() {
     // advances the shared mark past both messages.
     s.write_post(&buddy("mid"), to_worker(), msg("second", "m2")).unwrap();
     s.post(&Actor::Owner, me_only(), PostInput { kind: PostKind::Inform, reply_to_id: Some(a.id.clone()), ..request("owner aside", "o1") }).unwrap();
-    let took = s.take_steering(&buddy("mid"), &ca.run.id, &a.id, SteerTrigger::AnyPost, 20).unwrap();
+    let took = s.take_steering(&buddy("mid"), &ca.run.id, &a.id, SteerBoundary::BuddyTool, 20).unwrap();
     assert!(matches!(&took, Steering::Taken { posts, .. } if bodies(posts) == ["owner aside"]), "{took:?}");
     assert_eq!(s.acknowledge_messages("worker-a", &shown).unwrap(), 1);
     let left: Vec<String> = s.pending_messages("worker-a").unwrap().into_iter().map(|m| m.post.body).collect();
@@ -2273,4 +2273,78 @@ fn post_interactions_preserve_threads_and_deliveries_and_survive_reopen() {
     assert_eq!(kept.body, "updated 🚀");
     assert_eq!(kept.reactions.unwrap()[0].actor_key, "owner");
     assert_eq!(reopened.react_post(&Actor::Owner, &root.id, "🚀", false, "remove").unwrap().reactions.unwrap().len(), 0);
+}
+
+// Incident 2026-10-12 (room-runners #game-design, root post_01a11a20-28b7): the owner's "everyone
+// stop posting" (no @mention) reached Game Designer's live turn at a held Stop. The model acted on
+// it (status doc, Tasks) and stayed silent as asked. Decision 6c re-ran the post at settle anyway,
+// and the extra turn answered "already handled". A held-Stop take re-delivers only a post that owes
+// a reply (an @mention or a DM). A tool-call take keeps 6c for every owner post, because there the
+// take can land after the model's last step.
+fn redelivered_after(boundary: SteerBoundary, owed: bool) -> usize {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    let peer = || vec![Mention { buddy_id: "peer".into(), config: None }];
+    s.post(&Actor::Owner, channel.clone(), PostInput { mentions: peer(), ..reply("[@Peer](buddy:peer) look", "start") }).unwrap();
+    let live = s.claim_run(lease(60_000), &[]).unwrap().expect("the mention woke peer");
+    s.bind_run(&live.run.id, &live.lease_token, "seat-peer").unwrap();
+    s.mark_executing(&live.run.id, &live.lease_token).unwrap();
+    // Game Designer followed the thread, so every post was delivered to it.
+    s.follow_thread(&buddy("peer"), &root.id, Some("seat-peer".into()), 20).unwrap();
+    let steer = match owed {
+        true => PostInput { mentions: peer(), ..reply("[@Peer](buddy:peer) and this?", "steer") },
+        false => reply("everyone, stop posting here", "steer"),
+    };
+    s.post(&Actor::Owner, channel, steer).unwrap();
+    let took = s.take_steering(&buddy("peer"), &live.run.id, &root.id, boundary, 20).unwrap();
+    assert!(matches!(&took, Steering::Taken { posts, .. } if posts.len() == 1), "{took:?}");
+    s.settle_run(&live.run.id, &live.lease_token, Outcome::Complete { text: "acted on it, posted nothing".into() }).unwrap();
+    queued(s, "peer")
+}
+
+#[test]
+fn a_held_stop_take_redelivers_only_a_post_that_owes_a_reply() {
+    assert_eq!(redelivered_after(SteerBoundary::HeldStop, false), 0, "read as the next message and acted on: not again");
+    assert_eq!(redelivered_after(SteerBoundary::HeldStop, true), 1, "an @mention still owes a reply (D10)");
+    assert_eq!(redelivered_after(SteerBoundary::NativeTool, false), 1, "a tool-call take may have missed the model (6c)");
+    assert_eq!(redelivered_after(SteerBoundary::BuddyTool, false), 1, "a tool-call take may have missed the model (6c)");
+}
+
+// Incident 2026-10-12: Game Designer's follow in a thread still named a Claude conversation dead
+// since 2026-10-08 ("weekly limit"). The host placed every delivery in the live seat (runner.ts
+// `openSeat`), but the follow never moved, so 50 deliveries were filed under the dead conversation
+// and settled `consumed`. A subscribed delivery placed elsewhere moves the follow, at bind and at
+// defer (a seat busy on another thread). Breaks if `follow_placement` is dropped from either.
+#[test]
+fn a_subscribed_delivery_placed_elsewhere_moves_the_follow() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let (root, reply) = follow_fixture(s);
+    let channel = ChannelRef::Id { id: root.channel_id.clone() };
+    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, from_conversation_id: None, ..request(body, key) };
+    s.follow_thread(&buddy("peer"), &root.id, Some("dead-claude".into()), 20).unwrap();
+    s.post(&Actor::Owner, channel.clone(), reply("first", "p1")).unwrap();
+    let first = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    assert_eq!(first.run.conversation_id.as_deref(), Some("dead-claude"));
+    s.bind_run(&first.run.id, &first.lease_token, "live-seat").unwrap();
+    s.mark_executing(&first.run.id, &first.lease_token).unwrap();
+    let p2 = s.post(&Actor::Owner, channel.clone(), reply("second", "p2")).unwrap().id;
+    let routed = |s: &Store, key: &str| {
+        let runs = s.list_runs(RunQuery::Buddy { buddy_id: "peer".into() }, 50).unwrap();
+        runs.into_iter().find(|r| r.status == RunStatus::Queued && r.input_key.contains(key)).and_then(|r| r.conversation_id)
+    };
+    assert_eq!(routed(s, &p2).as_deref(), Some("live-seat"), "bind moved the follow to where the delivery ran");
+
+    // A second thread followed from the dead conversation, whose delivery finds the seat busy.
+    let other = s.post(&Actor::Owner, channel.clone(), say("another topic", "r2")).unwrap();
+    s.follow_thread(&buddy("peer"), &other.id, Some("dead-claude".into()), 20).unwrap();
+    let in_other = |body: &str, key: &str| PostInput { reply_to_id: Some(other.id.clone()), ..say(body, key) };
+    s.post(&Actor::Owner, channel.clone(), in_other("third", "q1")).unwrap();
+    let waiter = s.claim_run(lease(60_000), &[]).unwrap().expect("the other thread's delivery is claimable");
+    assert!(matches!(s.bind_run(&waiter.run.id, &waiter.lease_token, "live-seat"), Err(CoreError::ConversationBusy(_))));
+    s.defer_run(&waiter.run.id, &waiter.lease_token, "live-seat").unwrap();
+    let q2 = s.post(&Actor::Owner, channel, in_other("fourth", "q2")).unwrap().id;
+    assert_eq!(routed(s, &q2).as_deref(), Some("live-seat"), "defer moved the follow too");
 }

@@ -1,0 +1,784 @@
+{
+  "local": [
+    {
+      "name": "connect-mobile",
+      "sha": "07aa6a5e88fd720e589ed4582031e5e438dca819",
+      "recover": "preserve/owner-20261010/history/connect-mobile",
+      "state": "removed"
+    },
+    {
+      "name": "continuity/adopt-wip-2026-09-30",
+      "sha": "cf24d450f7713d5d66cd42a300936f5890383070",
+      "recover": "preserve/owner-20261010/history/continuity/adopt-wip-2026-09-30",
+      "state": "removed"
+    },
+    {
+      "name": "continuity/ctrl-c-proof",
+      "sha": "c98b9ce1e753ef04ef79049dce3a31a3383c9bfd",
+      "recover": "preserve/owner-20261010/history/continuity/ctrl-c-proof",
+      "state": "removed"
+    },
+    {
+      "name": "continuity/execution-adoption",
+      "sha": "26d9e2819892cd7892afcd18ba0db9d77a75557c",
+      "recover": "preserve/owner-20261010/history/continuity/execution-adoption",
+      "state": "removed"
+    },
+    {
+      "name": "continuity/p1-adopt",
+      "sha": "811f7581ed8e39fad648274e4ac5504a4f581fba",
+      "recover": "preserve/owner-20261010/history/continuity/p1-adopt",
+      "state": "removed"
+    },
+    {
+      "name": "continuity/p1-state",
+      "sha": "d92c4771a3cd7c96629fe7a0e39629c4db4242bd",
+      "recover": "preserve/owner-20261010/history/continuity/p1-state",
+      "state": "removed"
+    },
+    {
+      "name": "continuity/p1-wip-2026-10-02",
+      "sha": "333dc0a87172cbf3763757a56322c702974b9df6",
+      "recover": "preserve/owner-20261010/history/continuity/p1-wip-2026-10-02",
+      "state": "removed"
+    },
+    {
+      "name": "desktop-spike",
+      "sha": "9cf9a3d406ad2f6619af32ce3bc9cd74a0a7d8c5",
+      "recover": "preserve/owner-20261010/history/desktop-spike",
+      "state": "removed"
+    },
+    {
+      "name": "diag/lost-liveness",
+      "sha": "e97555338be839b8839fcc9a37def92744c5535b",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "diagnostic/codex-goal-provenance-20261009",
+      "sha": "ca672e4e40efc6667ba573147674ad9e04aef6a1",
+      "recover": "preserve/owner-20261010/history/diagnostic/codex-goal-provenance-20261009",
+      "state": "removed"
+    },
+    {
+      "name": "feat/channel-search-fuzzy",
+      "sha": "1c96cba4d8662c851aec96a52e2cb0fcbb016965",
+      "recover": "preserve/owner-20261010/history/feat/channel-search-fuzzy",
+      "state": "removed"
+    },
+    {
+      "name": "feat/durable-pending",
+      "sha": "2cb2549dcf2d1725a3b3746c022eca5b7cefc24a",
+      "recover": "preserve/owner-20261010/history/feat/durable-pending",
+      "state": "removed"
+    },
+    {
+      "name": "feat/durable-pending-w1-wip",
+      "sha": "4c22edc0fa66a929c204a10319ed6a67f04780d0",
+      "recover": "preserve/owner-20261010/history/feat/durable-pending-w1-wip",
+      "state": "removed"
+    },
+    {
+      "name": "feat/request-addressed-messages",
+      "sha": "4fcc0be34ba3f0cf92123e45f9ed00e000344ee9",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/background-runtime-cap-20261008",
+      "sha": "dc299ec1e5175e648ccbe521d265e357cbeb9df4",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/codex-launch-classification",
+      "sha": "aafdd827007e6cf43be29efb268192c4ba0a2319",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/composer-thread-seats",
+      "sha": "e22ca8a8698bcf3d8af9c4c1a5d1c1e5e37360c9",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/deps-readiness-budget",
+      "sha": "1cc76099df01f6bb99ff9100a90518e4c0c7d0d3",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/desktop-gitlink-handoff",
+      "sha": "f5142da8638e20c6a20de8d05206364c6c48a03c",
+      "recover": "preserve/owner-20261010/history/fix/desktop-gitlink-handoff",
+      "state": "removed"
+    },
+    {
+      "name": "fix/desktop-gitlink-integrated",
+      "sha": "ed0c22fef7be0642b7260f26a10b5c687af20181",
+      "recover": "preserve/owner-20261010/history/fix/desktop-gitlink-integrated",
+      "state": "removed"
+    },
+    {
+      "name": "fix/emoji-hover-layout",
+      "sha": "75722e52d3ccfd56292e96dc080d9f3e6e8da112",
+      "recover": "preserve/owner-20261011/emoji-original",
+      "state": "removed"
+    },
+    {
+      "name": "fix/hung-turn-liveness",
+      "sha": "fee9b120610297be1c3feb9caff07dd146847fef",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/idle-background-delivery",
+      "sha": "83fd4e115abaac6fe56e41213a686e1f589abee9",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/lease-heartbeat",
+      "sha": "1ad0781e4004133420c547b13526914bb610f356",
+      "recover": "preserve/owner-20261010/history/fix/lease-heartbeat",
+      "state": "removed"
+    },
+    {
+      "name": "fix/missing-cli-visible-error",
+      "sha": "b6054e6440aa6bf3152b7b0f4359efdca9dc0c9e",
+      "recover": "preserve/owner-20261010/history/fix/missing-cli-visible-error",
+      "state": "removed"
+    },
+    {
+      "name": "fix/no-waiting",
+      "sha": "0d7d6ed9d17e375fc6c6653cd694db0a2db167b5",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/owner-first-admission",
+      "sha": "7344d4cda46541679bbcfea3b4dd2c80005433d2",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/persistent-thread-model",
+      "sha": "8a3515059fe41aa4dbb723c8602e2fb890c0f42b",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/plaintext-mentions",
+      "sha": "9f6a4ede80e011faa6105079314be7a6761653f9",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/reply-failed-fanout",
+      "sha": "5214eccba0d49c30b877854350f9776bcff4df18",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/run-active-buddy-index-20260930",
+      "sha": "2fe67e616ba9c85983bcdf827bdd22da32f3c700",
+      "recover": "preserve/owner-20261010/history/fix/run-active-buddy-index-20260930",
+      "state": "removed"
+    },
+    {
+      "name": "fix/steer-any-tool",
+      "sha": "a4696ed9ff13a86b7ed81aef31cf086f1a785746",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/steer-atomic-guard",
+      "sha": "d70d0a8991dc1d951a7597e769e8e468217d5293",
+      "recover": "preserve/owner-20261010/history/fix/steer-atomic-guard",
+      "state": "removed"
+    },
+    {
+      "name": "fix/test-feedback-profile",
+      "sha": "c351432956b516ff31302e87c9baab57e35aae33",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/test-feedback-speed",
+      "sha": "77c7729801564b9812027728158ab064fe6067ef",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "fix/thread-busy-gate",
+      "sha": "f509912e1c3b1f7f8d3dce1d0b028c25daf4aba9",
+      "recover": "preserve/owner-20261010/history/fix/thread-busy-gate",
+      "state": "removed"
+    },
+    {
+      "name": "fix/thread-reply-inject",
+      "sha": "b8a1e3d4d1b47a6f4a36f7dd2d69ea4d19ae3341",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "integrate/branch-sweep-1008",
+      "sha": "4f169034ab9355ef53feba4bd19629daec401a84",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "integrate/launch-1005",
+      "sha": "a4ee3fbe33eb43d3488e6d0194a1884d9a297f0b",
+      "recover": "preserve/owner-20261010/history/integrate/launch-1005",
+      "state": "removed"
+    },
+    {
+      "name": "integrate/launch-1005-with-missing-cli",
+      "sha": "a4ee3fbe33eb43d3488e6d0194a1884d9a297f0b",
+      "recover": "preserve/owner-20261010/history/integrate/launch-1005",
+      "state": "removed"
+    },
+    {
+      "name": "integrate/launch-final-2",
+      "sha": "2a0d882915b906ba62b566a5979b83e7a792b47e",
+      "recover": "preserve/owner-20261010/history/integrate/launch-final-2",
+      "state": "removed"
+    },
+    {
+      "name": "integrate/launch-wave2",
+      "sha": "219414426a569c2b74a1992d792569caca8e0a22",
+      "recover": "preserve/owner-20261010/history/integrate/launch-wave2",
+      "state": "removed"
+    },
+    {
+      "name": "integrate/launch-wave2b",
+      "sha": "a732c3ac51cd568a61a358ff8a55ec2147bcc7de",
+      "recover": "preserve/owner-20261010/history/integrate/launch-wave2b",
+      "state": "removed"
+    },
+    {
+      "name": "integrate/owner-completion-20261010",
+      "sha": "c79fff70f4d417bf2e47dd793600f74b8ae1b9ac",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "integrate/test-feedback-speed-20261008",
+      "sha": "6cb0f9da407012e512e3978aba96401663b4d37f",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "refactor/buddies-core-review",
+      "sha": "e97555338be839b8839fcc9a37def92744c5535b",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "rel/cand-4f16903",
+      "sha": "4f169034ab9355ef53feba4bd19629daec401a84",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "rel/cand-54b9f1f",
+      "sha": "1f2cd4caabf6fae1848e7733ff289fdb022baa52",
+      "recover": "preserve/owner-20261010/history/rel/cand-54b9f1f",
+      "state": "removed"
+    },
+    {
+      "name": "rel/cand-f1011d0",
+      "sha": "f1011d0b4a954a8bee82292ea212768565baa4b3",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "rel/updater-cand",
+      "sha": "aa0c483b042e60bd54a999fc4b588c8ecc2ec37b",
+      "recover": "preserve/owner-20261010/history/rel/updater-cand",
+      "state": "removed"
+    },
+    {
+      "name": "release-verify-a453e61",
+      "sha": "a453e61c6bfa30db83ec837c175bf43ce25cd787",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "rescue/2026-10-04/unleashd-ctrlc",
+      "sha": "0ad1cc8c6abfa8e204bb42ebcd6200cfc8faf6fc",
+      "recover": "preserve/owner-20261010/history/rescue/2026-10-04/unleashd-ctrlc",
+      "state": "removed"
+    },
+    {
+      "name": "rescue/2026-10-05/unleashd-p1guard811",
+      "sha": "e46aa17b210b120a11e6c23fba8d3e207b7a49b7",
+      "recover": "preserve/owner-20261010/history/rescue/2026-10-05/unleashd-p1guard811",
+      "state": "removed"
+    },
+    {
+      "name": "rescue/2026-10-05/unleashd-thread-follow",
+      "sha": "0711d5e441e587f7bf675e081b244d132df61be8",
+      "recover": "preserve/owner-20261010/history/rescue/2026-10-05/unleashd-thread-follow",
+      "state": "removed"
+    },
+    {
+      "name": "rescue/2026-10-06/_wt-missing-cli",
+      "sha": "b3b32496d62b24bbdf68ad985e06338f2bf65558",
+      "recover": "preserve/owner-20261010/history/rescue/2026-10-06/_wt-missing-cli",
+      "state": "removed"
+    },
+    {
+      "name": "rescue/2026-10-09/_wt-lost-liveness",
+      "sha": "fdf7714f924bd620e06996145ba4136e98be75a1",
+      "recover": "preserve/owner-20261010/history/rescue/2026-10-09/_wt-lost-liveness",
+      "state": "removed"
+    },
+    {
+      "name": "review/integration-1008",
+      "sha": "d094cf36e73fa8837334da7147e8009a990b157b",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "site/muse-cursor-harnesses",
+      "sha": "b8a1e3d4d1b47a6f4a36f7dd2d69ea4d19ae3341",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "steer-atomic-rebase",
+      "sha": "acf0a1a0d538dc3727b70df014e552408f2bdfa8",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "test/deps-readiness-budget",
+      "sha": "19f5ea34bc82797b6836f3b3cc9e83f60f5d778b",
+      "recover": "preserve/owner-20261010/history/test/deps-readiness-budget",
+      "state": "removed"
+    },
+    {
+      "name": "test/test-feedback-parallel",
+      "sha": "a0bb1595e5eaeff1d8eefed0ebeffa191c664c7f",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "tmp/no-waiting-baseline",
+      "sha": "4f70a736b6ec0b8a8330785038f5703b38994a22",
+      "recover": "preserve/owner-20261010/history/tmp/no-waiting-baseline",
+      "state": "removed"
+    },
+    {
+      "name": "tmp/p1-guard-811f758",
+      "sha": "811f7581ed8e39fad648274e4ac5504a4f581fba",
+      "recover": "preserve/owner-20261010/history/continuity/p1-adopt",
+      "state": "removed"
+    },
+    {
+      "name": "tmp/rc-trial-1005",
+      "sha": "e6dcbad3857580487cbedeadfd7f20086b12d311",
+      "recover": "preserve/owner-20261010/history/tmp/rc-trial-1005",
+      "state": "removed"
+    },
+    {
+      "name": "ui/action-tooltips-20261009",
+      "sha": "786849f4891be107a3fa44e2d43eae6d459df799",
+      "recover": "preserve/owner-20261010/history/ui/action-tooltips-20261009",
+      "state": "removed"
+    },
+    {
+      "name": "ui/buddy-stars-20261008",
+      "sha": "ef047cecddeb918c203f6de53910a98e2e5192ac",
+      "recover": "preserve/owner-20261010/history/ui/buddy-stars-20261008",
+      "state": "removed"
+    },
+    {
+      "name": "ui/highlight-rows-20261009",
+      "sha": "82740019eab418bdf4c4540a008dd739e7b4be85",
+      "recover": "preserve/owner-20261010/history/ui/highlight-rows-20261009",
+      "state": "removed"
+    },
+    {
+      "name": "ui/visible-action-tooltips-1009",
+      "sha": "7add35eda5784350e1e1eddfdd8dd3404ecdcdb8",
+      "recover": "preserve/owner-20261010/history/ui/visible-action-tooltips-1009",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/diag/lost-liveness",
+      "sha": "e97555338be839b8839fcc9a37def92744c5535b",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/feat/request-addressed-messages",
+      "sha": "4fcc0be34ba3f0cf92123e45f9ed00e000344ee9",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/background-runtime-cap-20261008",
+      "sha": "dc299ec1e5175e648ccbe521d265e357cbeb9df4",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/codex-launch-classification",
+      "sha": "aafdd827007e6cf43be29efb268192c4ba0a2319",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/composer-thread-seats",
+      "sha": "e22ca8a8698bcf3d8af9c4c1a5d1c1e5e37360c9",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/deps-readiness-budget",
+      "sha": "1cc76099df01f6bb99ff9100a90518e4c0c7d0d3",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/hung-turn-liveness",
+      "sha": "fee9b120610297be1c3feb9caff07dd146847fef",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/idle-background-delivery",
+      "sha": "83fd4e115abaac6fe56e41213a686e1f589abee9",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/no-waiting",
+      "sha": "0d7d6ed9d17e375fc6c6653cd694db0a2db167b5",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/owner-first-admission",
+      "sha": "7344d4cda46541679bbcfea3b4dd2c80005433d2",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/persistent-thread-model",
+      "sha": "8a3515059fe41aa4dbb723c8602e2fb890c0f42b",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/plaintext-mentions",
+      "sha": "9f6a4ede80e011faa6105079314be7a6761653f9",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/reply-failed-fanout",
+      "sha": "5214eccba0d49c30b877854350f9776bcff4df18",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/steer-any-tool",
+      "sha": "a4696ed9ff13a86b7ed81aef31cf086f1a785746",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/test-feedback-profile",
+      "sha": "c351432956b516ff31302e87c9baab57e35aae33",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/test-feedback-speed",
+      "sha": "77c7729801564b9812027728158ab064fe6067ef",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/thread-reply-inject",
+      "sha": "b8a1e3d4d1b47a6f4a36f7dd2d69ea4d19ae3341",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/integrate/branch-sweep-1008",
+      "sha": "4f169034ab9355ef53feba4bd19629daec401a84",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/integrate/test-feedback-speed-20261008",
+      "sha": "6cb0f9da407012e512e3978aba96401663b4d37f",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/main",
+      "sha": "40400bc09aa4c199daa20bd2c94e1c1bc5dd8816",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/refactor/buddies-core-review",
+      "sha": "e97555338be839b8839fcc9a37def92744c5535b",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/rel/cand-4f16903",
+      "sha": "4f169034ab9355ef53feba4bd19629daec401a84",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/rel/cand-f1011d0",
+      "sha": "f1011d0b4a954a8bee82292ea212768565baa4b3",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/release-verify-a453e61",
+      "sha": "a453e61c6bfa30db83ec837c175bf43ce25cd787",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/review/integration-1008",
+      "sha": "d094cf36e73fa8837334da7147e8009a990b157b",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/site/muse-cursor-harnesses",
+      "sha": "b8a1e3d4d1b47a6f4a36f7dd2d69ea4d19ae3341",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/steer-atomic-rebase",
+      "sha": "acf0a1a0d538dc3727b70df014e552408f2bdfa8",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/test/test-feedback-parallel",
+      "sha": "a0bb1595e5eaeff1d8eefed0ebeffa191c664c7f",
+      "recover": "main",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/tmp/p1-guard-811f758",
+      "sha": "811f7581ed8e39fad648274e4ac5504a4f581fba",
+      "recover": "preserve/owner-20261010/history/continuity/p1-adopt",
+      "state": "removed"
+    },
+    {
+      "name": "preserve/owner-20261010/history/integrate/launch-1005-with-missing-cli",
+      "sha": "a4ee3fbe33eb43d3488e6d0194a1884d9a297f0b",
+      "recover": "preserve/owner-20261010/history/integrate/launch-1005",
+      "state": "removed"
+    }
+  ],
+  "remote": [
+    {
+      "name": "fix/codex-launch-classification",
+      "sha": "aafdd827007e6cf43be29efb268192c4ba0a2319",
+      "recover": "main"
+    },
+    {
+      "name": "fix/no-waiting",
+      "sha": "0d7d6ed9d17e375fc6c6653cd694db0a2db167b5",
+      "recover": "main"
+    },
+    {
+      "name": "fix/persistent-thread-model",
+      "sha": "8a3515059fe41aa4dbb723c8602e2fb890c0f42b",
+      "recover": "main"
+    },
+    {
+      "name": "fix/steer-atomic-guard",
+      "sha": "acf0a1a0d538dc3727b70df014e552408f2bdfa8",
+      "recover": "main"
+    },
+    {
+      "name": "fix/test-feedback-profile",
+      "sha": "c351432956b516ff31302e87c9baab57e35aae33",
+      "recover": "main"
+    },
+    {
+      "name": "fix/test-feedback-speed",
+      "sha": "77c7729801564b9812027728158ab064fe6067ef",
+      "recover": "main"
+    },
+    {
+      "name": "integrate/test-feedback-speed-20261008",
+      "sha": "6cb0f9da407012e512e3978aba96401663b4d37f",
+      "recover": "main"
+    },
+    {
+      "name": "refactor/buddies-core-review",
+      "sha": "c9f30a174b5aa20c17871bcfbdfd192931a7502a",
+      "recover": "preserve/owner-20261011/core-review-predecessor"
+    },
+    {
+      "name": "preserve/owner-20261010/history/diag/lost-liveness",
+      "sha": "e97555338be839b8839fcc9a37def92744c5535b",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/feat/request-addressed-messages",
+      "sha": "4fcc0be34ba3f0cf92123e45f9ed00e000344ee9",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/background-runtime-cap-20261008",
+      "sha": "dc299ec1e5175e648ccbe521d265e357cbeb9df4",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/codex-launch-classification",
+      "sha": "aafdd827007e6cf43be29efb268192c4ba0a2319",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/composer-thread-seats",
+      "sha": "e22ca8a8698bcf3d8af9c4c1a5d1c1e5e37360c9",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/deps-readiness-budget",
+      "sha": "1cc76099df01f6bb99ff9100a90518e4c0c7d0d3",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/hung-turn-liveness",
+      "sha": "fee9b120610297be1c3feb9caff07dd146847fef",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/idle-background-delivery",
+      "sha": "83fd4e115abaac6fe56e41213a686e1f589abee9",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/no-waiting",
+      "sha": "0d7d6ed9d17e375fc6c6653cd694db0a2db167b5",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/owner-first-admission",
+      "sha": "7344d4cda46541679bbcfea3b4dd2c80005433d2",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/persistent-thread-model",
+      "sha": "8a3515059fe41aa4dbb723c8602e2fb890c0f42b",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/plaintext-mentions",
+      "sha": "9f6a4ede80e011faa6105079314be7a6761653f9",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/reply-failed-fanout",
+      "sha": "5214eccba0d49c30b877854350f9776bcff4df18",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/steer-any-tool",
+      "sha": "a4696ed9ff13a86b7ed81aef31cf086f1a785746",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/test-feedback-profile",
+      "sha": "c351432956b516ff31302e87c9baab57e35aae33",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/test-feedback-speed",
+      "sha": "77c7729801564b9812027728158ab064fe6067ef",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/fix/thread-reply-inject",
+      "sha": "b8a1e3d4d1b47a6f4a36f7dd2d69ea4d19ae3341",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/integrate/branch-sweep-1008",
+      "sha": "4f169034ab9355ef53feba4bd19629daec401a84",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/integrate/test-feedback-speed-20261008",
+      "sha": "6cb0f9da407012e512e3978aba96401663b4d37f",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/main",
+      "sha": "40400bc09aa4c199daa20bd2c94e1c1bc5dd8816",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/refactor/buddies-core-review",
+      "sha": "e97555338be839b8839fcc9a37def92744c5535b",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/rel/cand-4f16903",
+      "sha": "4f169034ab9355ef53feba4bd19629daec401a84",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/rel/cand-f1011d0",
+      "sha": "f1011d0b4a954a8bee82292ea212768565baa4b3",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/release-verify-a453e61",
+      "sha": "a453e61c6bfa30db83ec837c175bf43ce25cd787",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/review/integration-1008",
+      "sha": "d094cf36e73fa8837334da7147e8009a990b157b",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/site/muse-cursor-harnesses",
+      "sha": "b8a1e3d4d1b47a6f4a36f7dd2d69ea4d19ae3341",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/steer-atomic-rebase",
+      "sha": "acf0a1a0d538dc3727b70df014e552408f2bdfa8",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/test/test-feedback-parallel",
+      "sha": "a0bb1595e5eaeff1d8eefed0ebeffa191c664c7f",
+      "recover": "main"
+    },
+    {
+      "name": "preserve/owner-20261010/history/tmp/p1-guard-811f758",
+      "sha": "811f7581ed8e39fad648274e4ac5504a4f581fba",
+      "recover": "preserve/owner-20261010/history/continuity/p1-adopt"
+    },
+    {
+      "name": "preserve/owner-20261010/history/integrate/launch-1005-with-missing-cli",
+      "sha": "a4ee3fbe33eb43d3488e6d0194a1884d9a297f0b",
+      "recover": "preserve/owner-20261010/history/integrate/launch-1005"
+    }
+  ]
+}

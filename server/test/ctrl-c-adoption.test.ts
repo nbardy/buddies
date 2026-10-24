@@ -7,8 +7,8 @@ import path from 'node:path';
 import { after, afterEach, test } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
-import { freePortSync } from './free-port';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
+import { freePortSync } from './free-port';
 
 /**
  * The owner's question (2026-09-30, Task task_01a0f2cb): "if I ctrl+C the server and bring it back
@@ -30,6 +30,9 @@ const TOKEN = 'c7c7c0e9f2b14658a7d3c0e9f2b14658';
 const REPO = path.resolve(__dirname, '..', '..');
 const PNPM = process.env.npm_execpath ?? '';
 const REAL_HOME = os.homedir();
+const REAL_TIME = process.env.UNLEASHD_TEST_REAL_TIME === '1';
+const HOLD_MS = REAL_TIME ? 55_000 : 1_500;
+const OUTAGE_MS = REAL_TIME ? 10_000 : 200;
 
 // Chosen by a SCENARIO marker in the prompt; every step leaves a file in FAKE_DIR. A prompt with
 // no marker (bootstrap, review) answers at once. `down` and `longdown` also call a Buddy tool while
@@ -161,6 +164,10 @@ function makeCase(name: string): Case {
     env: {
       ...process.env,
       HOME: home,
+      NODE_ENV: 'test',
+      // Only the no-backend timeout case uses the short hold: reboot still has a full
+      // 55 s budget in delivery/adoption cases. Guard: default real-time stress mode.
+      UNLEASHD_TEST_RELAY_HOLD_MS: name === 'longdown' && !REAL_TIME ? String(HOLD_MS) : '',
       ...NO_AUTO_INSTALL,
       // The dev task's first step (tools/ensure-addons.mjs) keys the shared addon cache on rustc's
       // version, so the toolchain and that cache stay the real ones; no agent CLI lives there.
@@ -482,7 +489,19 @@ function killProcessesUnder(root: string) {
 
 async function stopGroup(group: DevGroup) {
   signalGroup(group.pgid, 'SIGINT');
-  await Promise.race([group.exited, new Promise((resolve) => setTimeout(resolve, 20_000))]);
+  // A winning exit left the losing 20 s timer alive once per launch.
+  // Guard: full suite wall time includes cleanup, not just test durations.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      group.exited,
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, 20_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
   signalGroup(group.pgid, 'SIGKILL');
 }
 
@@ -597,7 +616,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // to try again (agent_notes/2026-10-05_outage-tool-delivery.md). Now the relay, which outlives the
 // Ctrl+C, holds the call and the relaunched backend delivers it.
 test(
-  'a ~10 s outage: a Buddy post made with no backend lands once after relaunch; its replay creates nothing',
+  'an outage: a Buddy post made with no backend lands once after relaunch; its replay creates nothing',
   { timeout: 300_000 },
   async () => {
     const c = makeCase('downtime');
@@ -612,7 +631,7 @@ test(
       Boolean,
       'tool call in the gap'
     );
-    await sleep(10_000);
+    await sleep(OUTAGE_MS);
     assert.ok(
       !fs.existsSync(path.join(c.fakeDir, 'down.gap')),
       `held while no backend runs, not failed: ${fs.existsSync(path.join(c.fakeDir, 'down.gap')) && work.fake('down.gap')}`
@@ -637,7 +656,7 @@ test(
 );
 
 test(
-  'an outage longer than the hold: the in-gap call gets a clear tool error at ~55 s, never a hang',
+  'an outage longer than the hold: the in-gap call gets a clear tool error, never a hang',
   { timeout: 300_000 },
   async () => {
     const c = makeCase('longdown');
@@ -656,7 +675,7 @@ test(
     assert.match(gap, /^200 tool-error .*NOT delivered/, gap);
     // Before claude's own 60 s request timeout, so the model reads the relay's message.
     const waited = Number(work.fake('longdown.gap-ms'));
-    assert.ok(waited >= 50_000 && waited < 60_000, `held ${waited} ms`);
+    assert.ok(waited >= HOLD_MS - 100 && waited < HOLD_MS + 5_000, `held ${waited} ms`);
     const second = launch(c, 'B');
     await second.ready;
     await assertAdoptedAndCompleted(c, work);
@@ -698,7 +717,8 @@ test(
       Boolean,
       'tool call in the gap'
     );
-    await sleep(3_000);
+    // gap-sent proves the detached caller entered the outage; no 3 s sleep needed.
+    assert.ok(!fs.existsSync(path.join(c.fakeDir, 'stopped.gap')));
     const second = launch(c, 'B');
     await second.ready;
     await eventually(

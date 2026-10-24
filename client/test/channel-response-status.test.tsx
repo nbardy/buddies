@@ -49,3 +49,30 @@ test('a busy thread names its delivery boundary; only capacity names the run lim
     /run limit \(5\/5\)/
   );
 });
+
+// Owner, 2026-10-12: 15 posts queued behind Game Designer's busy turn named it 15 times.
+test('a Buddy with many waiting posts is named once, with the count', () => {
+  const row = (buddyId: string, state: ChannelResponse['state']): ChannelResponse => ({
+    channelId: 'channel',
+    threadRootId: 'root',
+    buddyId,
+    startedAt: '',
+    state,
+    ...(state === 'queued'
+      ? { waiting: { kind: 'conversation_busy' as const }, reach: { kind: 'next_step' as const } }
+      : {}),
+  });
+  const rows = [
+    row('designer', 'background'),
+    ...Array.from({ length: 15 }, () => row('designer', 'queued')),
+    row('engineer', 'replying'),
+    row('ceo', 'queued'),
+  ];
+  const text = respondingText(rows, { designer: 'Game Designer', engineer: 'Eng', ceo: 'CEO' }).get(
+    'root'
+  );
+  assert.equal(
+    text,
+    'Game Designer is running background work… · Game Designer (15 posts) and CEO are taking new messages at its next step… · Eng is replying…'
+  );
+});

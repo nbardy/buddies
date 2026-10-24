@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { type ChildProcess, spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -47,7 +48,11 @@ function runtimeFixture(
     cancelBuddyChat?: (turnId: string) => void;
     finishBuddyRun?: BuddyPolicyPort['finishRun'];
     reviewCompletedBuddyTurn?: (turn: CompletedBuddyTurn) => void;
-    readCurrentBuddyContext?: () => { briefing: string; memoryGeneration: string };
+    readCurrentBuddyContext?: () => {
+      briefing: string;
+      memoryGeneration: string;
+      workingDirectory?: string;
+    };
     buddyContext?: CompletedBuddyTurn['context'];
     executions?: ConversationRuntimeDependencies['executions'];
   } = {}
@@ -201,6 +206,49 @@ test('resumed Buddy turns re-brief only when the memory generation changes', asy
   assert.deepEqual(
     requests.map((request) => request.resumeSessionId),
     [undefined, 'native-session', 'native-session', 'native-session']
+  );
+});
+
+// Regression 2026-10-14: ~/git/unleashd was renamed to ~/git/buddies. The workspace was re-rooted,
+// but each Buddy conversation still spawned in the folder stored when it was created, so every
+// thread failed with "Working directory does not exist". A Buddy turn runs in the workspace's
+// CURRENT root (read with the briefing), whatever the conversation stored.
+test('a Buddy turn runs in its workspace root, not the folder the conversation stored', async () => {
+  type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
+  const requests: Request[] = [];
+  let root = '/srv/buddies';
+  const fixture = runtimeFixture({
+    readCurrentBuddyContext: () => ({ briefing: 'B', memoryGeneration: '1', workingDirectory: root }),
+    executeTurn: fakeExecuteTurn((request) => {
+      requests.push(request);
+      return {
+        events: (async function* () {
+          yield { type: 'turn.complete' as const, reason: 'success' as const };
+        })(),
+        completed: Promise.resolve({ exitCode: 0, signal: null, sessionId: 's', reason: 'success' }),
+        stop: () => undefined,
+      };
+    }),
+  });
+  const conversation = new fixture.Conversation({
+    done: false,
+    id: 'moved-buddy',
+    workingDirectory: '/srv/unleashd',
+    configState: fixture.configState,
+    kind: buddyKind({ buddyId: 'buddy', workspaceId: 'workspace' }),
+  });
+  const turn = async (content: string) => {
+    conversation.sendMessage(content, { origin: 'owner_input', inputId: content });
+    await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
+  };
+
+  await turn('one');
+  root = '/srv/buddies-renamed-again';
+  await turn('two');
+
+  assert.deepEqual(
+    requests.map((request) => request.cwd),
+    ['/srv/buddies', '/srv/buddies-renamed-again']
   );
 });
 
@@ -1768,7 +1816,8 @@ test('a missing provider binary settles the turn with a visible system message n
       failure = reason;
     });
     fixture.conversation.sendMessage('hi');
-    await eventually(() => assert.notEqual(failure, ''));
+    await fixture.conversation.waitForTurnDrain();
+    assert.notEqual(failure, '');
     const notices = fixture.conversation.messages.filter((m) => m.role === 'system');
     assert.equal(notices.length, 1, 'one notice, not one per error channel');
     const text = messageText(notices[0]);
@@ -1781,5 +1830,58 @@ test('a missing provider binary settles the turn with a visible system message n
     );
   } finally {
     process.env.PATH = saved;
+  }
+});
+
+// Fix guard: a real CLI's exit 127 and stderr mentioning codex + a missing nested command
+// became spawn_failed (and a false install instruction after restart). Exercise the runner,
+// actual shell and attempt sink; provider-authored stderr cannot establish a failed launch.
+test('an installed provider exiting 127 keeps its tool failure visible without a Setup instruction', async () => {
+  const saved = process.env.PATH;
+  const dir = mkdtempSync(join(tmpdir(), 'unleashd-provider-exit-'));
+  try {
+    const shim = join(dir, 'codex');
+    writeFileSync(
+      shim,
+      `#!/bin/sh
+printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"working"}}'
+echo 'codex: nested-tool: not found' >&2
+exit 127
+`
+    );
+    chmodSync(shim, 0o755);
+    process.env.PATH = `${dir}:/usr/bin:/bin`;
+    const terminals: { terminalCause: string }[] = [];
+    const fixture = runtimeFixture({
+      turnAttempts: {
+        queued: () => {},
+        starting: () => {},
+        running: () => {},
+        stopping: () => {},
+        activity: () => {},
+        bindProviderSession: () => {},
+        terminal: (result) => terminals.push(result),
+      },
+    });
+    let failure = '';
+    fixture.conversation.once('buddy-turn-failed', (reason: string) => {
+      failure = reason;
+    });
+    fixture.conversation.sendMessage('hi');
+    await fixture.conversation.waitForTurnDrain();
+    assert.notEqual(failure, '');
+    assert.match(failure, /exit=127.*nested-tool: not found/);
+    assert.doesNotMatch(failure, /Setup|spawn codex ENOENT|command was not found on this server/);
+    assert.ok(
+      fixture.conversation.messages.some((m) => m.role === 'system' && messageText(m) === failure)
+    );
+    assert.deepEqual(
+      terminals.map((t) => t.terminalCause),
+      ['provider_error']
+    );
+  } finally {
+    if (saved === undefined) delete process.env.PATH;
+    else process.env.PATH = saved;
+    rmSync(dir, { recursive: true, force: true });
   }
 });

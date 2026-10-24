@@ -236,8 +236,8 @@ impl BuddiesCore {
     /// One tool boundary of a live thread turn: its unread page, taken unless a queued delivery
     /// there carries an explicit pick (deliveries.rs `take_steering`; one transaction).
     #[napi]
-    pub async fn take_steering(&self, actor: Actor, run_id: String, root_id: String, trigger: SteerTrigger, limit: i64) -> napi::Result<Steering> {
-        on_writer(&self.store, move |s| s.take_steering(&actor, &run_id, &root_id, trigger, limit)).await
+    pub async fn take_steering(&self, actor: Actor, run_id: String, root_id: String, boundary: SteerBoundary, limit: i64) -> napi::Result<Steering> {
+        on_writer(&self.store, move |s| s.take_steering(&actor, &run_id, &root_id, boundary, limit)).await
     }
 
     /// The owner posts no native sub-agent of the live turn `run_id` was shown yet, NOT marked read.

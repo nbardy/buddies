@@ -1,0 +1,61 @@
+{
+  "sourceCommit": "912b2a6",
+  "timings": [
+    {
+      "log": "full-cold.log",
+      "mode": "full",
+      "runnerWallMs": 106866,
+      "pass": "331",
+      "fail": "2"
+    },
+    {
+      "log": "fast-warm.log",
+      "mode": "fast",
+      "runnerWallMs": 1300,
+      "pass": "29",
+      "fail": "0"
+    },
+    {
+      "log": "fast-cold.log",
+      "mode": "fast",
+      "runnerWallMs": 1689,
+      "pass": "29",
+      "fail": "0"
+    },
+    {
+      "log": "full-warm.log",
+      "mode": "full",
+      "runnerWallMs": 58999,
+      "pass": "334",
+      "fail": "0"
+    },
+    {
+      "log": "fast-no-transform-cache.log",
+      "mode": "fast",
+      "runnerWallMs": 5208,
+      "pass": "29",
+      "fail": "0"
+    },
+    {
+      "log": "concurrent-A.log",
+      "mode": "full",
+      "runnerWallMs": 95334,
+      "pass": "334",
+      "fail": "0"
+    },
+    {
+      "log": "concurrent-B.log",
+      "mode": "full",
+      "runnerWallMs": 101429,
+      "pass": "334",
+      "fail": "0"
+    },
+    {
+      "log": "full-no-transform-cache.log",
+      "mode": "full",
+      "runnerWallMs": 58569,
+      "pass": "334",
+      "fail": "0"
+    }
+  ]
+}

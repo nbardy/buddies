@@ -42,7 +42,15 @@ const [stateFile, preferredPort, version] = process.argv.slice(2);
 // 55 s, not 60: claude's MCP client aborts a request at 60.0 s (measured; MCP SDK default request
 // timeout), and the relay must answer first so the model gets a clear "not delivered" message
 // instead of "The operation timed out.". codex waited 130 s without aborting.
-const HOLD_MS = 55_000;
+// The 60 s outage proof dominated feedback. Only test/prebuilt-dev children may
+// shorten this budget; ctrl-c-adoption's real-time mode still proves the 55 s default.
+const testHold = Number(process.env.UNLEASHD_TEST_RELAY_HOLD_MS);
+const HOLD_MS =
+  (process.env.NODE_ENV === 'test' || process.env.UNLEASHD_DEV_PREBUILT === '1') &&
+  Number.isInteger(testHold) &&
+  testHold > 0
+    ? testHold
+    : 55_000;
 // A relay with no backend attached and nothing held exits after this long, so a test server on
 // temp stores does not leave relays behind.
 const IDLE_EXIT_MS = 5 * 60_000;

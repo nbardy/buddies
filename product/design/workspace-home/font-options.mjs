@@ -3,7 +3,7 @@
 //   ofl/geist/Geist[wght].ttf, ofl/inter/Inter[opsz,wght].ttf, ofl/instrumentserif/InstrumentSerif-Regular.ttf
 // Run with the dev server up: node product/design/workspace-home/font-options.mjs <workspaceId> <outDir>
 import * as fs from 'node:fs';
-import { openSession, resolveAuthToken, sleep } from '/Users/nicholasbardy/git/unleashd/tools/lib/headless-chrome.mjs';
+import { openSession, resolveAuthToken, sleep } from '../../../tools/lib/headless-chrome.mjs';
 
 const base = 'http://localhost:7489';
 const [workspace, outDir] = process.argv.slice(2);
@@ -15,7 +15,7 @@ const fonts = [
   face('Opt Geist', '/tmp/fonts/Geist[wght].ttf', 'font-weight:100 900;'),
   face('Opt Inter', '/tmp/fonts/Inter[opsz,wght].ttf', 'font-weight:100 900;'),
   face('Opt Instrument Serif', '/tmp/fonts/InstrumentSerif-Regular.ttf'),
-  face('Opt Bricolage', '/Users/nicholasbardy/git/unleashd/product/releases/launch-2.0/fonts/BricolageGrotesque.ttf', 'font-weight:200 800;'),
+  face('Opt Bricolage', new URL('../../releases/launch-2.0/fonts/BricolageGrotesque.ttf', import.meta.url).pathname, 'font-weight:200 800;'),
 ].join('\n');
 
 // Each option: headline, section heads + card titles, and body copy on the Home.
