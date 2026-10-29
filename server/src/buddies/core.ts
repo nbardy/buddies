@@ -6,10 +6,11 @@ import {
   BuddiesCore,
   type BuddyChanges,
   type ManagerRef,
+  type ParentRef,
   type RequestEndpoint,
   type Setting,
 } from '@unleashd/buddies-core';
-import type { BuddyChangesSchema } from '@unleashd/shared';
+import type { BuddyChangesSchema, TaskChangesSchema as TaskChangesWire } from '@unleashd/shared';
 import type { z } from 'zod';
 
 export type { BuddiesCore } from '@unleashd/buddies-core';
@@ -43,6 +44,13 @@ export {
 } from '@unleashd/shared';
 export const managerRef = (id: string | null): ManagerRef =>
   id === null ? { kind: 'nobody' } : { kind: 'buddy', id };
+
+/** κ for a task change: wire `parentId` (absent = no move, null = top level) as a `ParentRef`. */
+export function taskChanges({ parentId, ...rest }: z.infer<typeof TaskChangesWire>) {
+  if (parentId === undefined) return rest;
+  const parent: ParentRef = parentId === null ? { kind: 'top' } : { kind: 'task', id: parentId };
+  return { ...rest, parent };
+}
 
 /** A parsed buddy change as the crate names it: its manager and profile `Setting`s. */
 export function buddyChanges(input: z.infer<typeof BuddyChangesSchema>): BuddyChanges {
