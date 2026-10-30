@@ -95,10 +95,20 @@ export function createRuntimeBuilder(dependencies: RuntimeBuilderDependencies): 
       },
       record
     );
-    const currentSession =
+    let currentSession =
       hydrated.record.currentSession?.provider === hydrated.state.config.provider
         ? hydrated.record.currentSession
         : undefined;
+    // An empty Codex DM can retain a provisional binding from a failed first start. The
+    // completed ingest join has no transcript for it: start fresh on the first send, not resume.
+    // Guard: lazy-buddy-runtimes.test.ts "an empty Codex DM".
+    if (
+      record.kind.t === 'buddy' &&
+      currentSession?.provider === 'codex' &&
+      joined?.sessions.length === 0
+    ) {
+      currentSession = undefined;
+    }
     // A resumed session is no memory-generation boundary: only a record without one (a pending
     // first message) gets the latest briefing.
     const buddy =

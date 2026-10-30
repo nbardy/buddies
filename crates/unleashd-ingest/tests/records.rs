@@ -277,3 +277,22 @@ fn a_v2_file_is_copied_then_migrated_with_its_records_intact() {
     let copies = std::fs::read_dir(dir.path()).unwrap().filter(|e| e.as_ref().unwrap().path().to_string_lossy().ends_with(".sqlite") && e.as_ref().unwrap().path() != db).count();
     assert_eq!(copies, 1, "a current file takes no further copy");
 }
+
+#[test]
+fn invalidating_a_missing_session_survives_reopen_and_preserves_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("records.sqlite");
+    {
+        let mut r = Records::open(&db).unwrap();
+        r.create(new_record("c1"), T0).unwrap();
+        r.invalidate_current_session("c1", "c1-s1", T0).unwrap();
+    }
+    let mut r = Records::open(&db).unwrap();
+    let record = r.get("c1").unwrap().unwrap();
+    assert!(record.current_session.is_none());
+    assert_eq!(record.session_bindings, vec![binding("c1-s1")]);
+    assert!(r.find_by_session(Provider::Codex, "c1-s1").unwrap().is_some());
+    r.set_current_session("c1", binding("c1-s2"), T0).unwrap();
+    let current = r.invalidate_current_session("c1", "c1-s1", T0).unwrap().unwrap();
+    assert_eq!(current.current_session, Some(binding("c1-s2")));
+}

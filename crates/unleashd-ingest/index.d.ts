@@ -17,6 +17,7 @@ export declare class ConversationRecords {
   /** Remove the row (rollback of an unexposed creation). false = missing. */
   purge(conversationId: string): Promise<boolean>
   setCurrentSession(conversationId: string, binding: SessionBinding, at: number): Promise<ConversationRecord | null>
+  invalidateCurrentSession(conversationId: string, sessionId: string, at: number): Promise<ConversationRecord | null>
   setCurrentSessionUsage(conversationId: string, sessionId: string, usage: ProviderTurnUsage, at: number): Promise<ConversationRecord | null>
   addSessionBinding(conversationId: string, binding: SessionBinding, at: number): Promise<ConversationRecord | null>
   /** Lease the first-message delivery to `token` (the caller's random UUID). null = not claimed. */

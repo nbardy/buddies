@@ -514,6 +514,22 @@ impl Records {
         Ok(found.record())
     }
 
+    /// A provider rejected this current session. Keep its display history, but never resume it.
+    pub fn invalidate_current_session(&mut self, id: &str, session_id: &str, at: i64) -> Result<Option<ConversationRecord>> {
+        let found = self.mutate(id, |r| {
+            if !r.current_session.as_ref().is_some_and(|c| c.session_id == session_id) {
+                return Edit::Keep(());
+            }
+            Edit::Write(ConversationRecord {
+                session_bindings: r.all_bindings().into_iter().cloned().collect(),
+                current_session: None,
+                updated_at: validate::iso(at),
+                ..r.clone()
+            }, ())
+        })?;
+        Ok(found.record())
+    }
+
     /// Attach usage to the CURRENT session. A late write for a session that has moved on is
     /// dropped on purpose: usage belongs to the session that produced it.
     pub fn set_current_session_usage(

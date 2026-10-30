@@ -92,6 +92,7 @@ export interface ConversationRuntimeDependencies
     sessionId: string,
     buddyAudienceKey?: string
   ): Promise<void>;
+  invalidateCurrentSession(conversationId: string, sessionId: string): Promise<void>;
   getConversation(id: string):
     | {
         isRunning: boolean;
@@ -403,6 +404,10 @@ export class Conversation extends EventEmitter {
 
   markSessionStarted(started = true): void {
     this._hasStartedSession = started;
+  }
+
+  invalidateSession(): Promise<void> {
+    return this.env.deps.invalidateCurrentSession(this.id, this.sessionId);
   }
 
   persistSession(sessionId: string, audienceKey: string | undefined): Promise<void> {

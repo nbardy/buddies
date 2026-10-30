@@ -502,3 +502,37 @@ test('session hydration never guesses an unknown reported model', async () => {
     assert.equal(futureFable.diagnostics[0]?.code, 'unknown_reported_model');
   });
 });
+
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
+test('an invalidated session stays fresh after hydration', async () => {
+  await withService(async (service, store) => {
+    await service.create({
+      conversationId: CONVERSATION_ID,
+      kind: { t: 'chat' },
+      config: DEFAULT_CONFIG,
+      currentSession: { provider: 'codex', sessionId: 'missing-rollout' },
+    });
+    await service.invalidateCurrentSession(CONVERSATION_ID, 'missing-rollout');
+    const hydrated = await service.hydrate({
+      conversationId: CONVERSATION_ID,
+      discoveredKind: { t: 'chat' },
+      sessionBindings: [],
+      sessionEvidence: { provider: 'codex' },
+    });
+    assert.equal(hydrated.record.currentSession, undefined);
+    assert.equal(hydrated.record.sessionBindings[0]?.sessionId, 'missing-rollout');
+    assert.equal(
+      (await store.findBySession('codex', 'missing-rollout'))?.conversationId,
+      CONVERSATION_ID
+    );
+    await service.setCurrentSession(CONVERSATION_ID, {
+      provider: 'codex',
+      sessionId: 'real-thread',
+    });
+    await service.invalidateCurrentSession(CONVERSATION_ID, 'missing-rollout');
+    assert.equal(
+      (await service.getRecord(CONVERSATION_ID))?.currentSession?.sessionId,
+      'real-thread'
+    );
+  });
+});

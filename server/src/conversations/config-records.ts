@@ -223,6 +223,10 @@ export class ConversationRecordStore {
     );
   }
 
+  async invalidateCurrentSession(conversationId: string, sessionId: string): Promise<void> {
+    await (await this.ready).invalidateCurrentSession(conversationId, sessionId, this.at());
+  }
+
   /** Dropped (no-op) when the record's current session has moved on. */
   async setCurrentSessionUsage(
     conversationId: string,

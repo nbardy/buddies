@@ -41,6 +41,7 @@ const Conversation = createConversationRuntime({
   clearExternalRunningStatus: () => undefined,
   clearLocalCompletionSuppression: () => undefined,
   markLocalCompletionSuppression: () => undefined,
+  invalidateCurrentSession: async () => undefined,
   persistCurrentSession: async () => undefined,
   buddies: fakeBuddyPort(),
   getConversation: () => undefined,

@@ -102,6 +102,11 @@ impl ConversationRecords {
     }
 
     #[napi]
+    pub async fn invalidate_current_session(&self, conversation_id: String, session_id: String, at: i64) -> Result<Option<ConversationRecord>> {
+        call(&self.records, move |r| r.invalidate_current_session(&conversation_id, &session_id, at)).await
+    }
+
+    #[napi]
     pub async fn set_current_session_usage(
         &self,
         conversation_id: String,

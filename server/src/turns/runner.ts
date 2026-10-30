@@ -80,6 +80,7 @@ export interface TurnRunnerHost {
   markSessionStarted(started?: boolean): void;
   /** A provider-generated title; the conversation owns custom-over-ai precedence. */
   observeTitle(title: string, source: 'ai' | 'custom'): void;
+  invalidateSession(): Promise<void>;
   persistSession(sessionId: string, audienceKey: string | undefined): Promise<void>;
   broadcastQueue(): void;
   processQueue(): void;
@@ -615,10 +616,12 @@ export class TurnRunner {
     if (VERBOSE) console.error(`[${this.host.id}] stderr:`, text);
   }
 
-  noteFailure(cause: 'out_of_tokens' | 'provider_error', message: string): void {
+  async noteFailure(cause: 'out_of_tokens' | 'provider_error', message: string): Promise<void> {
     if (this.host.provider === 'codex' && message.includes('no rollout found for thread id')) {
-      // Repair old phantom bindings so the next explicit retry starts a real thread.
+      // Seven failures on one empty DM: clearing only memory revived the phantom on restart.
+      // Guard: config-service invalidation + conversation-runtime missing-rollout retry.
       this.host.markSessionStarted(false);
+      await this.host.invalidateSession();
     }
     const command = missingCommand(message);
     // Fix guard: a provider binary missing from PATH reached the owner as nothing (an empty DM
@@ -1143,10 +1146,10 @@ class EventFold {
         runner.completeMessage(event.reason);
         return;
       case 'out_of_tokens':
-        runner.noteFailure('out_of_tokens', event.message);
+        await runner.noteFailure('out_of_tokens', event.message);
         return;
       case 'error':
-        runner.noteFailure('provider_error', event.message);
+        await runner.noteFailure('provider_error', event.message);
         return;
       case 'stderr':
         runner.noteStderr(event.text);

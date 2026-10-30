@@ -51,6 +51,7 @@ test('a hide set over the WebSocket survives session rotation and a restart', as
       clearExternalRunningStatus: () => undefined,
       clearLocalCompletionSuppression: () => undefined,
       markLocalCompletionSuppression: () => undefined,
+      invalidateCurrentSession: async () => undefined,
       persistCurrentSession: async () => undefined,
       buddies: fakeBuddyPort(),
       getConversation: () => undefined,

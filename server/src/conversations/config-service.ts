@@ -203,13 +203,9 @@ export class ConversationConfigService {
         refreshed =
           (await this.store.addSessionBinding(existing.conversationId, binding)) ?? refreshed;
       }
-      const inferredCurrentSession =
-        existing.currentSession ?? existing.sessionBindings.at(-1) ?? input.currentSession;
-      if (inferredCurrentSession && !existing.currentSession) {
-        refreshed =
-          (await this.store.setCurrentSession(existing.conversationId, inferredCurrentSession)) ??
-          refreshed;
-      }
+      // History bindings are display history, not proof that a provider can resume them.
+      // Re-inferring currentSession resurrected missing Codex rollouts on every restart.
+      // Guard: config-service.test.ts "an invalidated session stays fresh after hydration".
       return { ...(await this.existing(refreshed)), migrated: false, diagnostics: [] };
     }
 
@@ -246,6 +242,10 @@ export class ConversationConfigService {
 
   async setCurrentSession(conversationId: string, binding: SessionBinding): Promise<void> {
     await this.store.setCurrentSession(conversationId, binding);
+  }
+
+  invalidateCurrentSession(conversationId: string, sessionId: string): Promise<void> {
+    return this.store.invalidateCurrentSession(conversationId, sessionId);
   }
 
   setDone(conversationId: string, done: boolean): Promise<ConversationRecord | undefined> {

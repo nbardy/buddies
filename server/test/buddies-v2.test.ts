@@ -428,6 +428,7 @@ async function world(reopen?: string, realProvider = false) {
     clearExternalRunningStatus: () => undefined,
     clearLocalCompletionSuppression: () => undefined,
     markLocalCompletionSuppression: () => undefined,
+    invalidateCurrentSession: async () => undefined,
     persistCurrentSession: (conversation, sessionId, key) =>
       creation.persistCurrentSession(conversation, sessionId, key),
     getConversation: (id) => conversations.get(id),

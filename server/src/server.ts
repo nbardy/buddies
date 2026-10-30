@@ -510,6 +510,8 @@ const Conversation = createConversationRuntime({
   clearExternalRunningStatus: applicationContext.externalActivity.clear,
   clearLocalCompletionSuppression: applicationContext.completionSuppression.clear,
   markLocalCompletionSuppression: applicationContext.completionSuppression.mark,
+  invalidateCurrentSession: (conversationId, sessionId) =>
+    conversationConfigService.invalidateCurrentSession(conversationId, sessionId),
   persistCurrentSession: (conversation, sessionId, buddyAudienceKey) =>
     buddyCreationService.persistCurrentSession(conversation, sessionId, buddyAudienceKey),
   persistSessionUsage: async (conversationId, sessionId, usage) => {

@@ -9,6 +9,7 @@
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import {
   type BuddyContext,
@@ -47,7 +48,7 @@ const context: BuddyContext = { buddyId: 'buddy-1', workspaceId: 'workspace-1' }
 const sid = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 
 /** One backend over a fixture HOME. Calling it again with the same HOME is a restart. */
-async function boot(fixture: ReturnType<typeof ingestHome>) {
+async function boot(fixture: ReturnType<typeof ingestHome>, allowFreshBriefing = false) {
   const records = recordStore(fixture.appData);
   const configService = new ConversationConfigService({
     store: records,
@@ -63,6 +64,7 @@ async function boot(fixture: ReturnType<typeof ingestHome>) {
     clearExternalRunningStatus: () => undefined,
     clearLocalCompletionSuppression: () => undefined,
     markLocalCompletionSuppression: () => undefined,
+    invalidateCurrentSession: async () => undefined,
     persistCurrentSession: async () => undefined,
     buddies: fakeBuddyPort(),
     getConversation: (id) => map.get(id),
@@ -112,8 +114,9 @@ async function boot(fixture: ReturnType<typeof ingestHome>) {
     joined: (id) => booted.list.joined(id),
     pinned: async () => new Set(),
     createConversation: (options) => new Conversation(options),
-    resolveBuddyConversation: async () => {
-      throw new Error('a cold record with a session must not re-brief at boot');
+    resolveBuddyConversation: async (context) => {
+      assert.ok(allowFreshBriefing, 'a cold record with a session must not re-brief at boot');
+      return { context, briefing: 'Fresh Buddy briefing' };
     },
     dispatchInitialMessage: async () => undefined,
     broadcast: () => undefined,
@@ -300,6 +303,63 @@ test('cold Buddy seats, branches and created ids are found by id, never re-creat
     );
   } finally {
     await server.close();
+    fixture.cleanup();
+  }
+});
+
+test('an empty Codex DM starts fresh despite a saved provisional binding', async () => {
+  const fixture = ingestHome('empty-codex-dm-');
+  const server = await boot(fixture);
+  try {
+    const id = sid(900);
+    await server.configService.create({
+      conversationId: id,
+      kind: buddyKind(context),
+      workingDirectory: fixture.project,
+      config: createDefaultConversationConfig('codex'),
+      currentSession: { provider: 'codex', sessionId: 'missing-rollout' },
+    });
+    const existing = sid(901);
+    const transcript = path.join(fixture.home, '.codex', 'sessions', '2026', '09', '01');
+    fs.mkdirSync(transcript, { recursive: true });
+    fs.writeFileSync(
+      path.join(transcript, `rollout-${existing}.jsonl`),
+      `${JSON.stringify({
+        type: 'session_meta',
+        timestamp: new Date(T0).toISOString(),
+        payload: { id: existing, cwd: fixture.project },
+      })}\n${JSON.stringify({
+        type: 'response_item',
+        timestamp: new Date(T0).toISOString(),
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'Earlier message' }],
+        },
+      })}\n`
+    );
+    await server.configService.create({
+      conversationId: existing,
+      kind: buddyKind(context),
+      workingDirectory: fixture.project,
+      config: createDefaultConversationConfig('codex'),
+      currentSession: { provider: 'codex', sessionId: existing },
+    });
+    // Restart: the real ingest scan sees no Codex transcript for this saved DM.
+    await server.close();
+    const restarted = await boot(fixture, true);
+    try {
+      const conversation = await restarted.builder.materialize(id);
+      assert.ok(conversation);
+      assert.equal(conversation.hasStartedSession(), false);
+      assert.equal(conversation.getMemorySnapshot()?.briefing, 'Fresh Buddy briefing');
+      const resumable = await restarted.builder.materialize(existing);
+      assert.equal(resumable?.hasStartedSession(), true);
+      assert.equal(resumable?.sessionId, existing);
+    } finally {
+      await restarted.close();
+    }
+  } finally {
     fixture.cleanup();
   }
 });

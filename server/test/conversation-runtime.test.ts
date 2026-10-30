@@ -41,6 +41,7 @@ function runtimeFixture(
     config?: ConversationConfig;
     getConversation?: ConversationRuntimeDependencies['getConversation'];
     persistCurrentSession?: ConversationRuntimeDependencies['persistCurrentSession'];
+    invalidateCurrentSession?: ConversationRuntimeDependencies['invalidateCurrentSession'];
     executeTurn?: ConversationRuntimeDependencies['executeTurn'];
     turnAttempts?: ConversationRuntimeDependencies['turnAttempts'];
     revokeBuddyControlCapability?: (conversationId: string) => void;
@@ -70,6 +71,7 @@ function runtimeFixture(
     clearExternalRunningStatus: () => undefined,
     clearLocalCompletionSuppression: () => undefined,
     markLocalCompletionSuppression: () => undefined,
+    invalidateCurrentSession: options.invalidateCurrentSession ?? (async () => undefined),
     persistCurrentSession: options.persistCurrentSession ?? (async () => undefined),
     getConversation: options.getConversation ?? (() => undefined),
     readLatestOompaRuntime: async () => ({
@@ -635,7 +637,11 @@ test('a Codex turn that fails before creating a thread retries without resume', 
 test('a missing Codex rollout clears a legacy phantom session binding', async () => {
   type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
   const requests: Request[] = [];
+  const invalidated: string[] = [];
   const fixture = runtimeFixture({
+    invalidateCurrentSession: async (_id, sessionId) => {
+      invalidated.push(sessionId);
+    },
     executeTurn: fakeExecuteTurn((request) => {
       requests.push(request);
       const missing = requests.length === 1;
@@ -677,6 +683,7 @@ test('a missing Codex rollout clears a legacy phantom session binding', async ()
   conversation.sendMessage('Retry');
   await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
 
+  assert.deepEqual(invalidated, ['phantom-thread']);
   assert.equal(requests.length, 2);
   assert.equal(requests[0].resumeSessionId, 'phantom-thread');
   assert.equal(requests[1].resumeSessionId, undefined);
