@@ -42,13 +42,22 @@ export type Feedback =
   | { t: 'resume' }
   | { t: 'stop' };
 
-export type FinishReason = 'done' | 'attempts_spent' | 'deadline' | 'owner_stop';
+/** `setup_failed`: the expedition's integration worktree could not be made (design.md R3). */
+export type FinishReason = 'done' | 'attempts_spent' | 'deadline' | 'owner_stop' | 'setup_failed';
 
 /** The workspace repository, resolved by the launch preflight; `branch` is `expedition/<id>`. */
 export interface Repo {
   root: string;
   baseSha: string;
   branch: string;
+}
+
+/** The expedition's own integration worktree (design.md R3): one Cambium workspace on
+ * `repo.branch`, created at `repo.baseSha`. Its name and path are written in `launched`, so the
+ * launch entry is the intent the create replays from. */
+export interface IntegrationTreeAt {
+  name: string;
+  path: string;
 }
 
 /** Where a worker attempt's worktree is (design.md R1): a work attempt's starts at the expedition
@@ -125,6 +134,29 @@ export interface Validation {
   runs: CheckRun[];
 }
 
+// ---------- Integration (design.md R3) ----------
+
+/** Why a candidate was not merged; every refusal names its phase. `merge`: git reported
+ * conflicts in `paths` (the merge was aborted); `git`: git refused for another reason (aborted
+ * too); `tree`: the integration worktree was not clean on its branch, so nothing was attempted. */
+export type IntegrationRefusal =
+  | { phase: 'merge'; paths: string[] }
+  | { phase: 'git'; reason: string }
+  | { phase: 'tree'; reason: string };
+
+export type IntegrationStatus =
+  | { t: 'pending' }
+  | { t: 'integrated'; mergeSha: string }
+  | { t: 'refused'; refusal: IntegrationRefusal };
+
+/** One candidate commit to merge into the expedition branch, in the order the manager asked. */
+export interface Integration {
+  id: string;
+  claimAttemptId: string;
+  sha: string;
+  status: IntegrationStatus;
+}
+
 // ---------- Ledger ----------
 
 export type Entry =
@@ -139,9 +171,30 @@ export type Entry =
       launcherId: string;
       workspaceId: string;
       repo: Repo;
+      integrationTree: IntegrationTreeAt;
     }
-  /** `expedition/<id>` exists at the base commit (created after `launched` recorded it). */
-  | { t: 'branch_ready'; at: string }
+  /** The integration worktree exists on `expedition/<id>` (made after `launched` named it). */
+  | { t: 'integration_tree_ready'; at: string }
+  /** It could not be made: the expedition finishes `setup_failed` with the reason. */
+  | { t: 'integration_tree_failed'; at: string; reason: string }
+  /** Removed at finish; the branch always stays (it is what the owner merges). */
+  | { t: 'integration_tree_released'; at: string; release: Release }
+  /** Decide's intent, before the merge: integrate this claim's validated commit. */
+  | {
+      t: 'integration_planned';
+      at: string;
+      integrationId: string;
+      claimAttemptId: string;
+      sha: string;
+    }
+  | { t: 'integrated'; at: string; integrationId: string; sha: string; mergeSha: string }
+  | {
+      t: 'integration_refused';
+      at: string;
+      integrationId: string;
+      sha: string;
+      refusal: IntegrationRefusal;
+    }
   /** Intent, written before `git cambium add`: a crash leaves a name the replay adopts. */
   | ({ t: 'worktree_creating'; at: string; attemptId: string; name: string } & WorktreeAt)
   /** Written before the work brief is posted: the brief names this path. */
@@ -255,7 +308,10 @@ export interface State {
   launcherId: string;
   workspaceId: string;
   repo: Repo;
-  branch: { t: 'pending' } | { t: 'ready' };
+  /** The integration worktree on `repo.branch` (its base is `repo.baseSha`). */
+  integrationTree: WorktreeAt & IntegrationTreeAt & { status: WorktreeStatus };
+  /** Candidate merges into `repo.branch`, in plan order (run one at a time). */
+  integrations: Integration[];
   /** Worker (work and check) attempts' worktrees, by attempt id. */
   worktrees: Record<string, Worktree>;
   /** Host-run command-check validations, in plan order (run one at a time). */
@@ -294,7 +350,14 @@ export function fold(entries: readonly Entry[]): State {
     launcherId: first.launcherId,
     workspaceId: first.workspaceId,
     repo: first.repo,
-    branch: { t: 'pending' },
+    integrationTree: {
+      name: first.integrationTree.name,
+      path: first.integrationTree.path,
+      branch: first.repo.branch,
+      baseSha: first.repo.baseSha,
+      status: { t: 'creating' },
+    },
+    integrations: [],
     worktrees: {},
     validations: [],
     doneRequest: { t: 'none' },
@@ -331,6 +394,8 @@ const NEWS: ReadonlySet<Entry['t']> = new Set([
   'validation',
   'done_requested',
   'done_refused',
+  'integrated',
+  'integration_refused',
   'finished',
 ] satisfies Entry['t'][]);
 
@@ -340,8 +405,30 @@ export function apply(s: State, e: Entry): void {
   switch (e.t) {
     case 'launched':
       throw new Error('launched may only open a ledger');
-    case 'branch_ready':
-      s.branch = { t: 'ready' };
+    case 'integration_tree_ready':
+      s.integrationTree.status = { t: 'ready' };
+      return;
+    case 'integration_tree_failed':
+      s.integrationTree.status = { t: 'failed', reason: e.reason };
+      return;
+    case 'integration_tree_released':
+      s.integrationTree.status = e.release;
+      return;
+    case 'integration_planned':
+      s.integrations.push({
+        id: e.integrationId,
+        claimAttemptId: e.claimAttemptId,
+        sha: e.sha,
+        status: { t: 'pending' },
+      });
+      return;
+    case 'integrated':
+      integrationOf(s, e.integrationId).status = { t: 'integrated', mergeSha: e.mergeSha };
+      s.unseen.push(e);
+      return;
+    case 'integration_refused':
+      integrationOf(s, e.integrationId).status = { t: 'refused', refusal: e.refusal };
+      s.unseen.push(e);
       return;
     case 'worktree_creating':
       s.worktrees[e.attemptId] = {
@@ -567,6 +654,18 @@ export function startedOf(s: State, id: string): Extract<ValidationPhase, { t: '
   if (phase.t !== 'started') throw new Error(`validation ${id} is ${phase.t}`);
   return phase;
 }
+export function integrationOf(s: State, id: string): Integration {
+  const integration = byId(s.integrations, id);
+  if (!integration) throw new Error(`unknown integration ${id}`);
+  return integration;
+}
+
+/** The expedition branch head as the ledger knows it: the newest merge the host made, else the
+ * launch base. (The branch is written only by the host's integration worktree.) */
+export const headOf = (s: State): string =>
+  s.integrations.flatMap((i) => (i.status.t === 'integrated' ? [i.status.mergeSha] : [])).at(-1) ??
+  s.repo.baseSha;
+
 export function questionOf(s: State, id: string): Question {
   const question = byId(s.questions, id);
   if (!question) throw new Error(`unknown question ${id}`);

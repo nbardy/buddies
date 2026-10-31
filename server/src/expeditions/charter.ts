@@ -164,6 +164,10 @@ export const ManagerAction = z.discriminatedUnion('do', [
       panel: z.number().int().min(1).max(3),
     })
     .strict(),
+  /** Merge a validated claim's commit into the expedition branch (design.md R3). */
+  z
+    .object({ do: z.literal('integrate'), claimAttempt: ref })
+    .strict(),
   z
     .object({
       do: z.literal('close_question'),

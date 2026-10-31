@@ -15,9 +15,13 @@ import {
 // its own earlier git result by name (git.ts).
 
 export type Effect =
-  /** Create `expedition/<id>` at the base commit the launch recorded. */
-  | { t: 'create_branch' }
   | { t: 'create_crew' }
+  /** Create (or adopt) the integration worktree `launched` named, on `expedition/<id>`. */
+  | { t: 'create_integration_tree' }
+  /** Merge the next planned candidate into the expedition branch (one at a time, in order). */
+  | { t: 'integrate'; integrationId: string }
+  /** At finish: remove the integration worktree, keeping its branch for the owner to merge. */
+  | { t: 'release_integration_tree' }
   /** Record a worker attempt's worktree intent, then create it (it now holds a slot and custody). */
   | { t: 'admit'; attempt: Attempt<WorkerSpec> }
   /** Create or adopt a recorded worktree: the replay path after a crash between intent and ready. */
@@ -40,8 +44,8 @@ export type Effect =
   | { t: 'post_badge' };
 
 export function pendingEffects(s: State): Effect[] {
-  if (s.branch.t === 'pending') return [{ t: 'create_branch' }];
   if (s.crew.t === 'pending') return [{ t: 'create_crew' }];
+  const finished = s.run.t === 'finished';
   const effects: Effect[] = [
     ...(s.badgePost.t === 'pending' ? [{ t: 'post_badge' } as const] : []),
     ...s.statuses
@@ -49,16 +53,35 @@ export function pendingEffects(s: State): Effect[] {
       .map((x): Effect => ({ t: 'post_status', seq: x.seq, text: x.text })),
     ...releases(s),
     ...validationReleases(s),
+    ...(finished && s.integrationTree.status.t === 'ready'
+      ? [{ t: 'release_integration_tree' } as const]
+      : []),
     // A recorded brief is a committed intent: it is completed whatever the run state, because
     // the post may already exist (keyed, so the replay returns it) and its worker may be running.
     ...s.attempts.flatMap((a): Effect[] =>
       a.phase.t === 'posting' ? [{ t: 'post_attempt', attemptId: a.id, body: a.phase.body }] : []
     ),
   ];
-  if (s.run.t === 'finished' || s.run.t === 'paused') return effects;
-  // One validation at a time, in plan order: command checks may be heavy (builds, GPU runs).
+  switch (s.integrationTree.status.t) {
+    case 'creating':
+      return [...effects, { t: 'create_integration_tree' }];
+    case 'failed': // decide finishes the expedition with the reason
+    case 'kept':
+    case 'removed':
+    case 'absent':
+    case 'left':
+      return effects;
+    case 'ready':
+      break;
+  }
+  if (finished || s.run.t === 'paused') return effects;
+  // Merges first, one at a time in plan order; validations wait for them, so a head validation
+  // planned after a merge validates the merged head. Then one validation at a time, in plan
+  // order: command checks may be heavy (builds, GPU runs).
+  const merge = s.integrations.find((i) => i.status.t === 'pending');
   const next = s.validations.find((v) => !validationComplete(s, v));
-  if (next) effects.push(validationEffect(next));
+  if (merge) effects.push({ t: 'integrate', integrationId: merge.id });
+  else if (next) effects.push(validationEffect(next));
   for (const attempt of s.attempts.filter((a) => a.phase.t === 'admitted'))
     effects.push(admittedEffect(attempt, worktreeOf(s, attempt.id)));
   for (const attempt of queued(s).filter((a) => !isWorker(a)))

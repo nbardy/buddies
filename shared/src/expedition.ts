@@ -7,7 +7,7 @@ export type ExpeditionRun =
   | { t: 'waiting_owner'; question: string }
   | {
       t: 'finished';
-      reason: 'done' | 'attempts_spent' | 'deadline' | 'owner_stop';
+      reason: 'done' | 'attempts_spent' | 'deadline' | 'owner_stop' | 'setup_failed';
       summary: string;
     };
 

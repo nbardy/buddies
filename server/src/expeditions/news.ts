@@ -3,6 +3,9 @@ import type {
   Attempt,
   CheckOutcome,
   Entry,
+  FinishReason,
+  Integration,
+  IntegrationRefusal,
   Outcome,
   State,
   Validation,
@@ -12,6 +15,8 @@ import {
   apply,
   attemptOf,
   commandChecks,
+  headOf,
+  integrationOf,
   questionOf,
   validationComplete,
   validationOf,
@@ -92,10 +97,53 @@ function newsLine(s: State, e: Entry): string[] {
       return ['Done proposed: running the command checks on the expedition branch head.'];
     case 'done_refused':
       return [`Done refused: ${clip(e.reason)}`];
+    case 'integrated':
+    case 'integration_refused':
+      return [integrationLabel(s, integrationOf(s, e.integrationId))];
     case 'finished':
-      return [`Finished (${e.reason}): ${e.summary}`];
+      return [`Finished (${e.reason}): ${e.summary}`, ...mergeLine(s, e.reason)];
     default:
       return [];
+  }
+}
+
+/** At done the owner is told what to merge; the host never writes the owner's branches. */
+function mergeLine(s: State, reason: FinishReason): string[] {
+  const merged = s.integrations.filter((i) => i.status.t === 'integrated').length;
+  switch (reason) {
+    case 'done':
+      return [
+        `To take the result, merge branch ${s.repo.branch} (head ${headOf(s).slice(0, 10)}, ${merged} integrated claim(s)); nothing was written to your checkout.`,
+      ];
+    case 'attempts_spent':
+    case 'deadline':
+    case 'owner_stop':
+    case 'setup_failed':
+      return [];
+  }
+}
+
+/** One integration: what was merged into the expedition branch, or why it was not. */
+export function integrationLabel(s: State, i: Integration): string {
+  const what = `integration ${i.id} of ${i.claimAttemptId} (${i.sha.slice(0, 10)}) into ${s.repo.branch}`;
+  switch (i.status.t) {
+    case 'pending':
+      return `${what}: queued`;
+    case 'integrated':
+      return `${what}: MERGED as ${i.status.mergeSha.slice(0, 10)}`;
+    case 'refused':
+      return `${what}: REFUSED — ${refusalLabel(i.status.refusal)}`;
+  }
+}
+
+function refusalLabel(r: IntegrationRefusal): string {
+  switch (r.phase) {
+    case 'merge':
+      return `merge conflict in ${r.paths.join(', ')} (aborted; the branch is unchanged)`;
+    case 'git':
+      return `git refused the merge: ${clip(r.reason)}`;
+    case 'tree':
+      return `the integration tree could not take a merge: ${clip(r.reason)}`;
   }
 }
 

@@ -19,6 +19,8 @@ import {
   commandChecks,
   doneCheckLabel,
   exploreCap,
+  integrationLabel,
+  integrationOf,
   liveWorkers,
   outcomeDetail,
   questionOf,
@@ -74,6 +76,11 @@ function validationsText(s: State): string {
     : `VALIDATIONS (host-run command checks):\n${s.validations.map((v) => `- ${validationLabel(s, v)}`).join('\n') || '- none yet'}`;
 }
 
+/** Every merge into the expedition branch so far, in order. */
+function integrationsText(s: State): string {
+  return `INTEGRATION (the host merges validated claims into ${s.repo.branch}, one at a time; new work starts at its head):\n${s.integrations.map((i) => `- ${integrationLabel(s, i)}`).join('\n') || '- nothing merged yet'}`;
+}
+
 function attemptLine(a: Attempt): string {
   const what =
     a.spec.kind === 'manager'
@@ -104,6 +111,9 @@ function unseenLine(s: State, e: Entry): string {
       return `- ${validationLabel(s, validationOf(s, e.validationId))}`;
     case 'done_refused':
       return `- DONE REFUSED: ${e.reason}`;
+    case 'integrated':
+    case 'integration_refused':
+      return `- ${integrationLabel(s, integrationOf(s, e.integrationId))}`;
     case 'attempt_ended':
       return `- ${e.attemptId} ended: ${outcomeDetail(e.outcome)}`;
     case 'worktree_failed':
@@ -134,6 +144,7 @@ function managerBrief(s: State, id: string): string {
         .join('\n') || '- none'
     }`,
     validationsText(s),
+    integrationsText(s),
     `NEW SINCE YOUR LAST DECISION:\n${s.shown[id].map((e) => unseenLine(s, e)).join('\n') || '- nothing'}`,
     [
       'HOW TO DECIDE:',
@@ -145,6 +156,7 @@ function managerBrief(s: State, id: string): string {
       '- Command checks ($ …) are run by the host on every claimed commit and on the expedition branch head at done; no agent runs or reports them. A claim whose validation FAILED is not done: send work to fix it.',
       '- When different approaches fail the same way, the problem is probably upstream: add a question about measurement or setup.',
       '- Kill (close dead) what a check refuted twice or a prediction falsified. Do not repeat work already in ATTEMPTS.',
+      '- "integrate" merges a claim\'s commit into the expedition branch. It is accepted only once its candidate validation PASSED (when there are command checks) and its latest check panel verified it (when one ran; required when there are no command checks). A merge conflict is refused with the conflicting paths: send work to redo it on the current head. Integrate before "done": done runs the command checks on the branch head, which holds only integrated work.',
       '- "done" needs the latest goal check verified (when there are judged items); the host then runs every command check on the head, and refuses done unless all pass. "ask_owner" only for a decision only the owner can make.',
       '- Work and check attempts are run by other agents with fresh context: write each work brief self-contained.',
     ].join('\n'),
@@ -153,6 +165,7 @@ function managerBrief(s: State, id: string): string {
       '{"do":"add_question","title":"…","detail":"…","scope":"in"|"explore"|"parked","paths":["<repo-relative prefix the work may edit>"]}',
       '{"do":"work","question":"<question id>","seat":<work seat index>,"brief":"<self-contained instructions and the approach to try>"}',
       '{"do":"check","claimAttempt":"<work attempt id>","goal":true|false,"panel":1|2|3}',
+      '{"do":"integrate","claimAttempt":"<work attempt id whose claim passed>"}',
       '{"do":"close_question","question":"<id>","status":"verified"|"dead","why":"…"}',
       '{"do":"ask_owner","question":"…"}',
       '{"do":"done","summary":"…"}',
@@ -298,6 +311,7 @@ export function statusText(s: State, badgeLine: string): string {
     `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet'}`,
     `ATTEMPTS:\n${s.attempts.map(attemptLine).join('\n') || '- none'}`,
     validationsText(s),
+    integrationsText(s),
     s.crew.t === 'ready' ? `Crew Buddy: ${s.crew.buddyId} (its DM holds every attempt).` : '',
   ]
     .filter(Boolean)

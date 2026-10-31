@@ -14,9 +14,10 @@ import {
   branchHead,
   claimHeld,
   discardWorktree,
-  ensureBranch,
   ensureWorktree,
+  mergeCandidate,
   preflight,
+  releaseIntegrationTree,
   releaseWorktree,
 } from './git';
 import {
@@ -33,11 +34,13 @@ import {
   type WorkerSpec,
   attemptOf,
   badge,
+  claimAt,
   claimOf,
   commandChecks,
   configOf,
   decide,
   fold,
+  integrationOf,
   live,
   pendingEffects,
   startedOf,
@@ -203,9 +206,14 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   async function run(s: State, effect: Effect): Promise<Entry[]> {
     switch (effect.t) {
-      case 'create_branch':
-        await ensureBranch(s.repo);
-        return [{ t: 'branch_ready', at: now() }];
+      case 'create_integration_tree':
+        return createIntegrationTree(s);
+      case 'integrate':
+        return integrate(s, effect.integrationId);
+      case 'release_integration_tree': {
+        const release = await releaseIntegrationTree(s.repo.root, s.integrationTree.name);
+        return [{ t: 'integration_tree_released', at: now(), release }];
+      }
       case 'admit': {
         // Intent first: the slot, custody and Cambium name are on disk before `cambium add` runs.
         const { attempt } = effect;
@@ -330,6 +338,35 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         });
         return [{ t: 'badge_posted', at: now(), postId: write.post.id }];
       }
+    }
+  }
+
+  /** `launched` named the tree, so this is the replay path too: an existing workspace by that
+   * name is adopted, a partial add rolled back (git.ts ensureWorktree). */
+  async function createIntegrationTree(s: State): Promise<Entry[]> {
+    const tree = s.integrationTree;
+    const made = await ensureWorktree(s.repo.root, tree.name, tree, 'owned');
+    switch (made.t) {
+      case 'ready':
+        return [{ t: 'integration_tree_ready', at: now() }];
+      case 'failed':
+        return [{ t: 'integration_tree_failed', at: now(), reason: made.reason }];
+    }
+  }
+
+  /** The `integration_planned` intent is already on disk; mergeCandidate recognises a merge it
+   * made before a crash, so the replay records that merge instead of merging twice. */
+  async function integrate(s: State, integrationId: string): Promise<Entry[]> {
+    const integration = integrationOf(s, integrationId);
+    const claim = claimAt(s, integration.claimAttemptId).statement.split('\n')[0].slice(0, 200);
+    const message = `Integrate ${integration.claimAttemptId} (expedition ${s.id}): ${claim}`;
+    const merged = await mergeCandidate(s.integrationTree, integration.sha, message);
+    const ids = { at: now(), integrationId, sha: integration.sha };
+    switch (merged.t) {
+      case 'integrated':
+        return [{ t: 'integrated', ...ids, mergeSha: merged.mergeSha }];
+      case 'refused':
+        return [{ t: 'integration_refused', ...ids, refusal: merged.refusal }];
     }
   }
 
@@ -531,7 +568,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       // The ledger joins the map only once its `launched` line is on disk: every ledger in the
       // map folds (a concurrent tick or launch never meets an empty one).
       const repo = { root: checked.root, baseSha: checked.baseSha, branch: `expedition/${id}` };
-      const launched: Entry = { t: 'launched', at: now(), id, ...input, repo };
+      // The integration tree is named here, in the launch entry: its create replays from it.
+      const integrationTree = {
+        name: worktreeName(id, 'integration'),
+        path: path.join(root, id, 'integration'),
+      };
+      const launched: Entry = { t: 'launched', at: now(), id, ...input, repo, integrationTree };
       await fsp.appendFile(fileOf(id), `${JSON.stringify(launched)}\n`, { mode: 0o600 });
       ledgers.set(id, [launched]);
       // The launch status: the badge in the thread from the first second.

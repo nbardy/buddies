@@ -7,6 +7,8 @@ import { attemptOf, byId, questionOf } from './ledger';
 export const live = (s: State) =>
   s.attempts.filter((a) => a.phase.t === 'posted' || a.phase.t === 'posting');
 export const liveWorkers = (s: State) => live(s).filter((a) => a.spec.kind !== 'manager');
+/** A merge into the expedition branch is planned and not yet run (design.md R3). */
+export const integrating = (s: State) => s.integrations.some((i) => i.status.t === 'pending');
 export const queued = (s: State) => s.attempts.filter((a) => a.phase.t === 'planned');
 /** Settled: nothing will run for it any more (it ended, or was dropped before it started). */
 export const settled = (a: Attempt) => a.phase.t === 'ended' || a.phase.t === 'dropped';
@@ -45,17 +47,20 @@ export const admitted = (s: State) =>
     .filter(isWorker)
     .filter((a) => a.phase.t === 'admitted' || a.phase.t === 'posting' || a.phase.t === 'posted');
 
-/** The claim a check verifies; a check is planned only for an ended claim (decide.ts). */
-export function claimOf(s: State, spec: CheckSpec): Claim {
-  const claim = attemptOf(s, spec.claimAttemptId);
+/** The claim an attempt ended with; checks and integrations are planned only for ended claims
+ * (decide.ts), so a missing one is a corrupt ledger. */
+export function claimAt(s: State, attemptId: string): Claim {
+  const claim = attemptOf(s, attemptId);
   if (
     claim.phase.t !== 'ended' ||
     claim.phase.outcome.t !== 'work' ||
     claim.phase.outcome.result.result !== 'claim'
   )
-    throw new Error(`check of ${spec.claimAttemptId} has no claim to check`);
+    throw new Error(`attempt ${attemptId} has no claim`);
   return claim.phase.outcome.result;
 }
+/** The claim a check verifies. */
+export const claimOf = (s: State, spec: CheckSpec): Claim => claimAt(s, spec.claimAttemptId);
 
 /** The work and check attempts on one question (managers belong to no question). */
 export const attemptsOn = (s: State, questionId: string) =>

@@ -259,7 +259,8 @@ specified packet can be executed mechanically and judged by an executable check.
 - All git/process calls are async (`execFile`/`spawn`), never sync on the server loop.
 
 Built (2026-11-01, `server/src/expeditions/git.ts`, `effects.ts`): launch preflight records
-`repo {root, baseSha, branch}` in the `launched` entry; `branch_ready` follows `git branch`.
+`repo {root, baseSha, branch}` in the `launched` entry (R3 replaced `branch_ready`: the branch is
+created by the integration tree's `cambium add`).
 Every worker attempt (work and check) runs in a host-made tree: a work attempt's starts at the
 expedition branch head, a check's at the candidate commit its claim names (a check never makes
 its own worktree in the owner's repository). An attempt is admitted (phase `admitted`) by writing
@@ -322,8 +323,8 @@ check is recorded (or at finish, never under a running check), its branch droppe
 Done: refused while a done is validating, refused unless the latest goal panel verified (only when
 judged items exist), finished at once when there are no command checks, otherwise finished when
 every command check passed on the head, else `done_refused {reason}` shown to the next manager.
-Host validations count as live work for "never idle" and `attempts_spent`. Gap until R3: nothing
-yet re-validates when the head moves after a passed head validation (integration will).
+Host validations count as live work for "never idle" and `attempts_spent`. (R3 closes the moving-head
+gap: no merge is accepted while a done validates, and a head validation waits for planned merges.)
 
 R2 review fixes (2026-11-01): the host checks a claim against its own attempt branch when it ends
 (`git.ts` `claimHeld`): a `commit` must be new on that branch (an ancestor of its tip, not of its
@@ -347,6 +348,33 @@ a running check, and a crash before the tree or between checks resumes at the fi
   `integrated {sha, mergeSha}`. Every refusal records its phase and identities — never a pointer
   to a log that does not exist.
 - The owner's main is never written. At done, the owner is told the branch to merge.
+
+Built (2026-11-01, `git.ts` `mergeCandidate`, decide `integrate`, effects `integrate`): `launched`
+names the integration tree (`exp-<id>-integration`, `<expeditions root>/<id>/integration`), so the
+launch entry is its intent; `create_integration_tree` runs `cambium add -b expedition/<id>` at the
+base (not `-ephemeral`: it holds the branch for the whole run), adopting the workspace by name on
+replay, and records `integration_tree_ready` (or `integration_tree_failed`, which finishes the
+expedition `setup_failed` with the reason; decide waits for the tree, managers included). The
+crew is created first so the badge and launch status never wait on a large-repository add.
+`{do:'integrate', claimAttempt}` is refused (typed `rejected`) unless the claim names a commit,
+its candidate validation passed (when there are command checks), and its latest check panel
+verified it (when one ran; required when there are no command checks, so nothing merges on a
+worker's word); also while a done is validating (the head stays fixed) and for a claim already
+integrated or queued. Accepted, it writes `integration_planned {integrationId, claimAttemptId,
+sha}`; the host merges planned integrations one at a time, before any validation effect, so a done
+asked in the same decision validates the merged head (a done without command checks is refused
+while a merge is pending). `mergeCandidate` first aborts a merge a crash interrupted
+(`MERGE_HEAD`), then looks for its own earlier merge commit on the branch's first-parent history
+since the base (second parent = the sha) and records that instead of merging twice; it refuses
+`{phase:'tree'}` when the tree is not clean on its branch, `{phase:'git'}` for a sha already
+contained or any non-conflict git failure (aborted), and `{phase:'merge', paths}` (the
+`--diff-filter=U` files) on a conflict, after `git merge --abort`, so the tree stays clean at the
+head. Results (`integrated {sha, mergeSha}` / `integration_refused`) go to the next manager and
+the chat. New work starts at the merged head. At finish the tree is removed (`cambium remove`,
+never forced, the branch kept), and the done post says which branch and head to merge. Known
+limits: merges need a git identity in the workspace repository (a missing one is a `git`
+refusal); a manager briefed between two merges sees the later ones as queued (the next manager
+sees their results).
 
 ### R4. Preflight at launch (κ at the boundary)
 Launch is refused with typed reasons unless: the workspace root is a git repository, the base

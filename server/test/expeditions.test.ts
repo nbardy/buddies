@@ -152,6 +152,11 @@ async function fixture() {
     return git(dir, 'rev-parse', 'HEAD');
   };
   const branchExists = (ref: string) => git(repo, 'branch', '--list', ref) !== '';
+  /** Cambium workspaces besides the expedition's own integration tree. */
+  const workspaces = (id: string) =>
+    (JSON.parse(git(repo, 'cambium', 'list', '--json')) as { name: string }[])
+      .map((w) => w.name)
+      .filter((name) => name !== stateOf(id).integrationTree.name);
   return {
     core,
     lead,
@@ -159,6 +164,7 @@ async function fixture() {
     treeOf,
     commitIn,
     branchExists,
+    workspaces,
     ledgerPath: (id: string) => path.join(root, id, 'ledger.jsonl'),
     spec: () => endpoint.spec(grant),
     ledgerOf,
@@ -365,9 +371,18 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     await f.answer(
       id,
       f.manager(id),
-      json({ actions: [{ do: 'done', summary: 'one check is enough' }] })
+      json({
+        actions: [
+          { do: 'done', summary: 'one check is enough' },
+          { do: 'integrate', claimAttempt: claimId },
+        ],
+      })
     );
     assert.equal(f.stateOf(id).run.t, 'running');
+    const refusedIntegration = () =>
+      f.ledgerOf(id).flatMap((e) => (e.t === 'rejected' && e.action.do === 'integrate' ? [e] : []));
+    // No command checks here, so the check panel is the only evidence: nothing merges before it.
+    assert.match(refusedIntegration().at(-1)?.reason ?? '', /a check panel on it is still running/);
     // The second check refutes: 1 of 2 is no majority, so done stays refused after the panel ends.
     await f.answer(id, second.id, json({ verdict: 'refuted', why: 'fails on a clean checkout' }));
     await f.answer(
@@ -376,11 +391,14 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       json({
         actions: [
           { do: 'done', summary: 'split panel' },
+          { do: 'integrate', claimAttempt: claimId },
           { do: 'check', claimAttempt: claimId, goal: true, panel: 1 },
         ],
       })
     );
     assert.equal(f.stateOf(id).run.t, 'running', 'a split panel does not verify');
+    assert.match(refusedIntegration().at(-1)?.reason ?? '', /latest check panel did not verify/);
+    assert.equal(f.stateOf(id).integrations.length, 0);
     const third = f.liveAttempts(id).find((a) => a.kind === 'check')!;
     await f.answer(id, third.id, json({ verdict: 'verified', why: 'reproduced after rebuild' }));
     await f.answer(
@@ -566,12 +584,13 @@ test('work on overlapping custody waits for the holder even with free slots; dis
     const waiting = f.stateOf(id).attempts.find((a) => a.phase.t === 'planned')!;
     assert.equal(waiting.id in f.stateOf(id).worktrees, false, 'a waiting attempt has no worktree');
 
-    // The expedition branch moves past its launch base (as integration will move it): a commit
-    // on top of it, made without touching any checkout.
+    // The expedition branch moves past its launch base: a commit in its integration tree (where
+    // the host's merges land), never in the owner's checkout.
     const branch = `expedition/${id}`;
     const launchBase = git(f.repo, 'rev-parse', branch);
-    const head = git(f.repo, 'commit-tree', `${branch}^{tree}`, '-p', branch, '-m', 'integrated');
-    git(f.repo, 'update-ref', `refs/heads/${branch}`, head);
+    const integrationTree = f.stateOf(id).integrationTree.path;
+    git(integrationTree, 'commit', '-q', '--allow-empty', '-m', 'integrated');
+    const head = git(f.repo, 'rev-parse', branch);
 
     // The holder ends with a finding: its custody frees and the waiting attempt starts at the
     // expedition branch's current head, not at the launch base.
@@ -613,9 +632,8 @@ test('a crash between creating a worktree and recording it adopts that worktree 
     await f.host.tick(id);
     const after = f.treeOf(id, posted.id);
     assert.deepEqual([after.status.t, after.path, after.branch], ['ready', tree.path, tree.branch]);
-    const workspaces = JSON.parse(git(f.repo, 'cambium', 'list', '--json')) as { name: string }[];
     assert.deepEqual(
-      workspaces.map((w) => w.name),
+      f.workspaces(id),
       [after.name],
       'one Cambium workspace, adopted, not a second'
     );
@@ -701,10 +719,7 @@ test('a crash during cambium add (branch and directory made, no registry entry) 
     );
     process.kill(-add.pid!, 'SIGKILL');
     fs.rmSync(marker);
-    const registered = () =>
-      (JSON.parse(git(f.repo, 'cambium', 'list', '--json')) as { name: string }[]).map(
-        (w) => w.name
-      );
+    const registered = () => f.workspaces(id);
     assert.deepEqual(registered(), [], 'the interrupted add registered nothing');
     assert.equal(fs.existsSync(tree.path), true, 'but left its directory');
 
@@ -850,6 +865,12 @@ test('command checks run on the host: each claimed commit is validated in a fres
       return sha;
     };
     const validations = () => f.ledgerOf(id).flatMap((e) => (e.t === 'validation' ? [e] : []));
+    const claimOfSha = (sha: string) =>
+      f
+        .stateOf(id)
+        .validations.flatMap((v) =>
+          v.target.t === 'candidate' && v.target.sha === sha ? [v.target.claimAttemptId] : []
+        )[0];
 
     // A failing candidate: the host ran the check at that exact commit; the exit code and the
     // output tail are ledger data, and the scratch tree (and its branch) are gone.
@@ -877,6 +898,20 @@ test('command checks run on the host: each claimed commit is validated in a fres
       /NEW SINCE YOUR LAST DECISION:\n- validation \w+ of candidate \w+ of \w+: FAILED — check 0 FAILED \(exit 3\): widget still broken/
     );
 
+    // A failed candidate is never merged into the expedition branch.
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'integrate', claimAttempt: claimOfSha(bad) }] })
+    );
+    assert.ok(
+      f
+        .ledgerOf(id)
+        .some((e) => e.t === 'rejected' && /candidate validation did not pass/.test(e.reason)),
+      'a failed candidate is refused integration'
+    );
+    assert.equal(f.stateOf(id).integrations.length, 0);
+
     // Done is refused: the expedition branch head (still the base) fails the command check.
     await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'try' }] }));
     await f.host.drain();
@@ -892,19 +927,189 @@ test('command checks run on the host: each claimed commit is validated in a fres
     await f.host.drain();
     assert.equal(f.stateOf(id).run.t, 'running', 'a passing candidate is not a passing head');
 
-    // The head carries the fix (as integration will make it): done validates it and finishes.
-    git(f.repo, 'update-ref', `refs/heads/expedition/${id}`, good);
-    await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'fixed' }] }));
+    // Integrate the passing candidate and ask done in the same decision: the head validation
+    // waits for the merge, so it runs on the merged head and finishes.
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [
+          { do: 'integrate', claimAttempt: claimOfSha(good) },
+          { do: 'done', summary: 'fixed' },
+        ],
+      })
+    );
     await f.host.drain();
     s = f.stateOf(id);
     assert.deepEqual(s.run, { t: 'finished', reason: 'done', summary: 'fixed' });
+    const [merged] = s.integrations;
+    if (merged?.status.t !== 'integrated') throw new Error(`not integrated: ${merged?.status.t}`);
+    const branch = `expedition/${id}`;
+    assert.equal(git(f.repo, 'rev-parse', branch), merged.status.mergeSha);
+    assert.equal(git(f.repo, 'rev-parse', `${branch}^2`), good);
     const last = s.validations.at(-1)!;
     assert.deepEqual(last.target, { t: 'head' });
     assert.deepEqual(last.runs, [{ checkIndex: 0, outcome: { t: 'passed' } }]);
+    const { mergeSha } = merged.status;
+    assert.equal(validations().at(-1)?.targetSha, mergeSha, 'done ran on the merge');
+    // The owner is told the branch to merge; the owner's checkout never moved.
+    assert.ok(
+      s.statuses.some((x) =>
+        x.text.includes(`merge branch ${branch} (head ${mergeSha.slice(0, 10)}`)
+      )
+    );
+    assert.equal(git(f.repo, 'rev-parse', 'main'), git(f.repo, 'rev-parse', `${branch}^1`));
+    assert.equal(s.integrationTree.status.t, 'removed', 'the integration tree goes at finish');
     for (const v of s.validations) {
       if (v.phase.t !== 'started') throw new Error(`validation ${v.id} never started`);
       assert.equal(v.phase.treeStatus.t, 'removed', `${v.id} tree released`);
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test('integration merges validated candidates one at a time onto the expedition branch, refuses a conflict with its paths, and replays an applied merge as a no-op', async () => {
+  const f = await fixture();
+  try {
+    const noBroken = {
+      kind: 'command',
+      argv: ['sh', '-c', '! grep -rq BROKEN widget docs'],
+      timeoutSeconds: 30,
+    };
+    const { id } = await rpcLaunch(f, 'merge', 3, { checks: [noBroken] });
+    const branch = `expedition/${id}`;
+    const base = git(f.repo, 'rev-parse', 'main');
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [question('Fix the widget', ['widget']), question('Docs', ['docs'])] })
+    );
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
+    const [qWidget, qDocs] = f.stateOf(id).questions.map((q) => q.id);
+    // Two docs attempts share custody: the second starts when the first ends, still at the base.
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [qWidget, qDocs, qDocs].map((q, n) => ({
+          do: 'work',
+          question: q,
+          seat: n % 2,
+          brief: `attempt ${n}`,
+        })),
+      })
+    );
+    /** A live work attempt on `q` writes `file`, commits, and claims that commit. */
+    const claimOn = async (q: string, file: string, content: string) => {
+      const w = f.liveAttempts(id).find((x) => {
+        const spec = f.stateOf(id).attempts.find((y) => y.id === x.id)!.spec;
+        return spec.kind === 'work' && spec.questionId === q;
+      })!;
+      const tree = f.treeOf(id, w.id);
+      assert.equal(tree.baseSha, base, `${w.id} starts at the launch base`);
+      fs.writeFileSync(path.join(tree.path, file), content);
+      git(tree.path, 'commit', '-q', '-am', `edit ${file}`);
+      const sha = git(tree.path, 'rev-parse', 'HEAD');
+      await f.answer(
+        id,
+        w.id,
+        json({
+          result: 'claim',
+          statement: `edited ${file}`,
+          change: { t: 'commit', sha },
+          evidence: [],
+          howToCheck: 'read it',
+        })
+      );
+      await f.host.drain();
+      return { attemptId: w.id, sha };
+    };
+    const a = await claimOn(qWidget, 'widget/widget.ts', 'export const broken = false;\n');
+    const b = await claimOn(qDocs, 'docs/README.md', '# Widget, by B\n');
+    const c = await claimOn(qDocs, 'docs/README.md', '# Widget, by C\n');
+    assert.ok(
+      f.stateOf(id).validations.every((v) => v.runs.every((r) => r.outcome.t === 'passed')),
+      'every candidate passed on its own'
+    );
+
+    // Integrate all three in order (and A twice): A and B merge, C conflicts with B on the same
+    // file and is refused with that path; A again is a typed rejection, not a second merge.
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [a, b, c, a].map((x) => ({ do: 'integrate', claimAttempt: x.attemptId })),
+      })
+    );
+    await f.host.drain();
+    let s = f.stateOf(id);
+    assert.ok(
+      f
+        .ledgerOf(id)
+        .some((e) => e.t === 'rejected' && /already integrated or being integrated/.test(e.reason))
+    );
+    const statuses = s.integrations.map((i) => [i.claimAttemptId, i.status.t]);
+    assert.deepEqual(statuses, [
+      [a.attemptId, 'integrated'],
+      [b.attemptId, 'integrated'],
+      [c.attemptId, 'refused'],
+    ]);
+    const [ia, ib, ic] = s.integrations;
+    if (ia.status.t !== 'integrated' || ib.status.t !== 'integrated' || ic.status.t !== 'refused')
+      throw new Error('unreachable');
+    assert.deepEqual(ic.status.refusal, { phase: 'merge', paths: ['docs/README.md'] });
+    // In order, each a --no-ff merge of its candidate onto the previous head.
+    const mergeB = ib.status.mergeSha;
+    assert.equal(git(f.repo, 'rev-parse', branch), mergeB);
+    assert.equal(git(f.repo, 'rev-parse', `${mergeB}^1`), ia.status.mergeSha);
+    assert.equal(git(f.repo, 'rev-parse', `${mergeB}^2`), b.sha);
+    assert.equal(git(f.repo, 'rev-parse', `${ia.status.mergeSha}^1`), base);
+    assert.equal(git(f.repo, 'rev-parse', `${ia.status.mergeSha}^2`), a.sha);
+    // The refused merge was aborted: the integration tree is clean at the head, not mid-merge.
+    const tree = s.integrationTree.path;
+    assert.equal(git(tree, 'status', '--porcelain'), '');
+    assert.equal(git(tree, 'rev-parse', 'HEAD'), mergeB);
+    assert.throws(() => git(tree, 'rev-parse', '--verify', '--quiet', 'MERGE_HEAD'));
+    // The owner's checkout and main never moved.
+    assert.equal(git(f.repo, 'rev-parse', 'main'), base);
+    assert.equal(git(f.repo, 'status', '--porcelain'), '');
+    // A later manager is shown every result, conflict paths included (the one live now was
+    // briefed between merges, so it saw some of them still queued).
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'note', text: 'merging' }] }));
+    const shown = await f.core.getPost(
+      OWNER,
+      f.liveAttempts(id).find((x) => x.kind === 'manager')!.requestId
+    );
+    assert.match(shown.body, /REFUSED — merge conflict in docs\/README\.md/);
+
+    // Replay: B's merge was made but its `integrated` line was never written (a crash between
+    // the two). Only that line is dropped: the chat posts after it stay keyed as they were. The
+    // host finds its own merge commit and records it; it never merges B a second time.
+    const lines = fs.readFileSync(f.ledgerPath(id), 'utf8').split('\n').filter(Boolean);
+    const lost = lines.filter((l) => !(l.includes('"t":"integrated"') && l.includes(ib.id)));
+    assert.equal(lost.length, lines.length - 1);
+    fs.writeFileSync(f.ledgerPath(id), `${lost.join('\n')}\n`);
+    assert.equal(f.stateOf(id).integrations[1].status.t, 'pending');
+    f.restart();
+    await f.host.tick(id);
+    await f.host.drain();
+    s = f.stateOf(id);
+    assert.deepEqual(s.integrations[1].status, { t: 'integrated', mergeSha: mergeB });
+    assert.equal(s.integrations[2].status.t, 'refused');
+    assert.equal(git(f.repo, 'rev-parse', branch), mergeB, 'no second merge');
+    assert.equal(git(f.repo, 'rev-list', '--count', '--merges', `${base}..${branch}`), '2');
+
+    // Done after integration: the command checks run on the merged head, and pass.
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'A and B in' }] }));
+    await f.host.drain();
+    s = f.stateOf(id);
+    assert.deepEqual(s.run, { t: 'finished', reason: 'done', summary: 'A and B in' });
+    const head = s.validations.at(-1)!;
+    assert.equal(head.phase.t === 'started' ? head.phase.targetSha : '', mergeB);
+    assert.equal(s.integrationTree.status.t, 'removed');
+    assert.equal(fs.existsSync(tree), false);
+    assert.equal(git(f.repo, 'rev-parse', branch), mergeB, 'the branch outlives its tree');
   } finally {
     await f.close();
   }

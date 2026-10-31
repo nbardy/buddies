@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { ClaimChange } from './charter';
-import type { Release, Repo, WorktreeAt } from './ledger';
+import type { IntegrationRefusal, Release, Repo, WorktreeAt } from './ledger';
 
 // The expedition's git I/O: preflight, the expedition branch, one Cambium worktree per work attempt.
 // Pattern: async-liveness (docs/patterns.md#async-liveness) — every call is an async execFile; a
@@ -19,6 +19,8 @@ const GIT_TIMEOUT_MS = 120_000;
 /** `cambium add` copies the tree: 15–32 s for 20k files, so a 124k-file repo needs minutes. A
  * timeout kills it partway; ensureWorktree recovers that and records a typed failure. */
 const ADD_TIMEOUT_MS = 15 * 60_000;
+/** A merge checks files out in the integration tree: bounded like an add, not like a query. */
+const MERGE_TIMEOUT_MS = 15 * 60_000;
 
 type GitRun = { t: 'ok'; stdout: string } | { t: 'failed'; message: string };
 
@@ -72,18 +74,6 @@ export async function preflight(workspaceRoot: string): Promise<Preflight> {
     tool.t === 'failed' ? '`git cambium` is not available' : '',
   ].filter(Boolean);
   return { t: 'refused', reasons };
-}
-
-/** Creates the expedition branch at its base; an existing one is a replay and is adopted. */
-export async function ensureBranch(repo: Repo): Promise<void> {
-  const existing = await git(repo.root, [
-    'rev-parse',
-    '--verify',
-    '--quiet',
-    `refs/heads/${repo.branch}`,
-  ]);
-  if (existing.t === 'ok') return;
-  await must(git(repo.root, ['branch', repo.branch, repo.baseSha]), `git branch ${repo.branch}`);
 }
 
 export const branchHead = (repo: Repo) =>
@@ -141,6 +131,18 @@ async function recoverLeftovers(root: string, at: WorktreeAt): Promise<Leftovers
   return leftovers(root, at);
 }
 
+/** `ephemeral`: a worker's or a validation's scratch tree, disposable by cleanup tools. `owned`:
+ * the expedition's integration tree, which holds its branch checked out for the whole run. */
+export type Lifetime = 'ephemeral' | 'owned';
+const lifetimeFlags = (l: Lifetime): string[] => {
+  switch (l) {
+    case 'ephemeral':
+      return ['-ephemeral'];
+    case 'owned':
+      return [];
+  }
+};
+
 /** The worktree `ensureWorktree` produced: ready, or a typed failure the ledger records. */
 export type MadeWorktree = { t: 'ready'; at: WorktreeAt } | { t: 'failed'; reason: string };
 
@@ -155,7 +157,8 @@ export type MadeWorktree = { t: 'ready'; at: WorktreeAt } | { t: 'failed'; reaso
 export async function ensureWorktree(
   root: string,
   name: string,
-  plan: WorktreeAt
+  plan: WorktreeAt,
+  lifetime: Lifetime = 'ephemeral'
 ): Promise<MadeWorktree> {
   const base = await git(root, ['rev-parse', '--verify', `${plan.baseSha}^{commit}`]);
   if (base.t === 'failed') return { t: 'failed', reason: `commit ${plan.baseSha} does not exist` };
@@ -166,7 +169,7 @@ export async function ensureWorktree(
     return { t: 'failed', reason: `cambium recover left ${describe(stuck, plan)}` };
   const add = await cambium(
     root,
-    ['add', '-b', plan.branch, '-name', name, '-ephemeral', plan.path, base.stdout],
+    ['add', '-b', plan.branch, '-name', name, ...lifetimeFlags(lifetime), plan.path, base.stdout],
     ADD_TIMEOUT_MS
   );
   if (add.t === 'failed') {
@@ -305,4 +308,109 @@ export async function discardWorktree(
   const removed = await cambium(root, ['remove', '-force', name]);
   if (removed.t === 'failed') return { t: 'left', reason: removed.message };
   return { t: 'removed', branchDeleted: await dropEmptyBranch(root, at) };
+}
+
+// ---------- Integration (design.md R3) ----------
+
+/** What one merge into the expedition branch did. */
+export type Merged =
+  | { t: 'integrated'; mergeSha: string }
+  | { t: 'refused'; refusal: IntegrationRefusal };
+
+/**
+ * The merge commit on the branch's own first-parent history whose second parent is `sha`
+ * (absent: none). Only the expedition's commits are walked (`^base`), so this stays cheap on a
+ * large repository. This is how a replay recognises a merge it already made.
+ */
+async function priorMerge(tree: WorktreeAt, sha: string): Promise<string | undefined> {
+  const merges = await must(
+    git(tree.path, [
+      'rev-list',
+      '--first-parent',
+      '--merges',
+      '--parents',
+      'HEAD',
+      `^${tree.baseSha}`,
+    ]),
+    'listing integration merges'
+  );
+  return merges
+    .split('\n')
+    .map((line) => line.split(' '))
+    .find((commits) => commits.slice(2).includes(sha))?.[0];
+}
+
+/** Why the integration tree cannot take a merge now (empty: it can). */
+async function treeBlockers(tree: WorktreeAt): Promise<string[]> {
+  const [on, status] = await Promise.all([
+    git(tree.path, ['symbolic-ref', '--quiet', 'HEAD']),
+    git(tree.path, ['status', '--porcelain', '--untracked-files=no']),
+  ]);
+  const expected = `refs/heads/${tree.branch}`;
+  return [
+    on.t === 'ok' && on.stdout === expected ? '' : `the integration tree is not on ${tree.branch}`,
+    status.t === 'failed' ? `git status failed: ${status.message}` : '',
+    status.t === 'ok' && status.stdout !== '' ? 'the integration tree has uncommitted changes' : '',
+  ].filter(Boolean);
+}
+
+/**
+ * Merges candidate `sha` into the expedition branch in its integration tree (`git merge --no-ff`).
+ * Replay-safe: a merge a crash interrupted (MERGE_HEAD present) is aborted first, and a candidate
+ * already merged returns its existing merge commit instead of merging again. A conflict is aborted
+ * and refused with the conflicted paths, leaving the tree clean at the branch head; any other git
+ * failure is aborted and refused with git's message. The owner's checkout is never touched.
+ */
+export async function mergeCandidate(
+  tree: WorktreeAt,
+  sha: string,
+  message: string
+): Promise<Merged> {
+  const interrupted = await git(tree.path, ['rev-parse', '--quiet', '--verify', 'MERGE_HEAD']);
+  if (interrupted.t === 'ok') await must(git(tree.path, ['merge', '--abort']), 'git merge --abort');
+  const prior = await priorMerge(tree, sha);
+  if (prior) return { t: 'integrated', mergeSha: prior };
+  const blockers = await treeBlockers(tree);
+  if (blockers.length > 0)
+    return { t: 'refused', refusal: { phase: 'tree', reason: blockers.join('; ') } };
+  const contained = await git(tree.path, ['merge-base', '--is-ancestor', sha, 'HEAD']);
+  if (contained.t === 'ok')
+    return {
+      t: 'refused',
+      refusal: {
+        phase: 'git',
+        reason: `${sha} is already in ${tree.branch} without a merge of its own`,
+      },
+    };
+  const merged = await run(
+    'git',
+    tree.path,
+    ['merge', '--no-ff', '-m', message, sha],
+    MERGE_TIMEOUT_MS
+  );
+  if (merged.t === 'ok')
+    return {
+      t: 'integrated',
+      mergeSha: await must(git(tree.path, ['rev-parse', 'HEAD']), 'the merge commit'),
+    };
+  const conflicted = await git(tree.path, ['diff', '--name-only', '--diff-filter=U']);
+  const paths = conflicted.t === 'ok' ? conflicted.stdout.split('\n').filter(Boolean) : [];
+  const stillMerging = await git(tree.path, ['rev-parse', '--quiet', '--verify', 'MERGE_HEAD']);
+  if (stillMerging.t === 'ok')
+    await must(git(tree.path, ['merge', '--abort']), 'git merge --abort');
+  return paths.length > 0
+    ? { t: 'refused', refusal: { phase: 'merge', paths } }
+    : { t: 'refused', refusal: { phase: 'git', reason: merged.message } };
+}
+
+/**
+ * Removes the integration tree at finish and keeps its branch: the branch is the expedition's
+ * result, which the owner merges. Never forced: a tree with uncommitted changes is `left`.
+ */
+export async function releaseIntegrationTree(root: string, name: string): Promise<Release> {
+  if (!(await cambiumWorkspace(root, name))) return { t: 'absent' };
+  const removed = await cambium(root, ['remove', name]);
+  return removed.t === 'failed'
+    ? { t: 'left', reason: removed.message }
+    : { t: 'removed', branchDeleted: false };
 }

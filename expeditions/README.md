@@ -96,5 +96,9 @@ Crew roster: `crew: { manager, work[], check[] }`, each `{provider, model?, reas
 The manager picks a work seat per attempt; checks run as panels (1–3) on seats other than the
 claim author's model and verify by strict majority.
 
-Not built yet: integrate (merging verified code), external jobs (`Waiting(jobId)`), budget
+Integration (design.md R3): the expedition owns `expedition/<id>`, checked out in one clean
+Cambium tree; the manager's `integrate` merges a validated claim's commit there (`--no-ff`, one at
+a time), done validates that head, and the finish post names the branch for the owner to merge.
+
+Not built yet: external jobs (`Waiting(jobId)`), budget
 envelopes for Buddy launches, the retro/playbook loop, archiving finished crews.

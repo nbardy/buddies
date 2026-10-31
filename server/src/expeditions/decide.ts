@@ -8,6 +8,7 @@ import {
   startedOf,
   validationComplete,
   validationOf,
+  validationPassed,
 } from './ledger';
 import { withStatus } from './news';
 import {
@@ -17,7 +18,9 @@ import {
   exploreCap,
   goalVerified,
   independentCheckSeats,
+  integrating,
   live,
+  panels,
   questionVerified,
   verifiedPanels,
 } from './queries';
@@ -44,6 +47,21 @@ export function decide(s: State, clock: Clock): Entry[] {
     out.push(e);
     apply(s, e);
   };
+  const setup = setupOf(s);
+  switch (setup.t) {
+    case 'waiting':
+      return [];
+    case 'failed':
+      push({
+        t: 'finished',
+        at,
+        reason: 'setup_failed',
+        summary: `The integration worktree could not be made: ${setup.reason}`,
+      });
+      return withStatus(s, out, at);
+    case 'ready':
+      break;
+  }
 
   if (s.unseen.some((e) => e.t === 'feedback' && e.feedback.t === 'stop')) {
     push({ t: 'finished', at, reason: 'owner_stop', summary: 'Stopped by the owner.' });
@@ -65,7 +83,7 @@ export function decide(s: State, clock: Clock): Entry[] {
   const now = runOf(s);
   if (now === 'finished' || now === 'paused') return withStatus(s, out, at);
 
-  if (s.attempts.length >= s.charter.maxAttempts && live(s).length === 0 && !validating(s)) {
+  if (s.attempts.length >= s.charter.maxAttempts && live(s).length === 0 && !hostBusy(s)) {
     push({
       t: 'finished',
       at,
@@ -81,9 +99,9 @@ export function decide(s: State, clock: Clock): Entry[] {
   if (s.run.t === 'running' && !managerLive && budgetLeft && (neverPlanned || s.unseen.length > 0))
     push({ t: 'attempt_planned', at, attemptId: clock.nextId('m'), spec: { kind: 'manager' } });
 
-  // Host validations in flight are work too: their results reach the next manager.
+  // Host validations and merges in flight are work too: their results reach the next manager.
   const idle =
-    s.run.t === 'running' && s.attempts.every((a) => a.phase.t === 'ended') && !validating(s);
+    s.run.t === 'running' && s.attempts.every((a) => a.phase.t === 'ended') && !hostBusy(s);
   if (idle)
     push({
       t: 'needs_owner',
@@ -96,9 +114,64 @@ export function decide(s: State, clock: Clock): Entry[] {
 
 const runOf = (s: State): State['run']['t'] => s.run.t;
 
-/** A host validation still to run or finish, or a done waiting on one. */
-const validating = (s: State) =>
-  s.doneRequest.t === 'validating' || s.validations.some((v) => !validationComplete(s, v));
+/** A host validation or merge still to run or finish, or a done waiting on one. */
+const hostBusy = (s: State) =>
+  s.doneRequest.t === 'validating' ||
+  s.validations.some((v) => !validationComplete(s, v)) ||
+  integrating(s);
+
+/** Decide runs once the integration worktree exists (the expedition's branch is checked out in
+ * it); a tree that could not be made finishes the expedition with the reason. */
+type Setup = { t: 'waiting' } | { t: 'ready' } | { t: 'failed'; reason: string };
+function setupOf(s: State): Setup {
+  const tree = s.integrationTree.status;
+  switch (tree.t) {
+    case 'creating':
+      return { t: 'waiting' };
+    case 'failed':
+      return { t: 'failed', reason: tree.reason };
+    case 'ready':
+    case 'kept':
+    case 'removed':
+    case 'absent':
+    case 'left':
+      return { t: 'ready' };
+  }
+}
+
+/**
+ * Why a claim may not be merged into the expedition branch (design.md R3), empty when it may: its
+ * commit's candidate validation passed (when the charter has command checks), and its latest
+ * check panel verified it (when one ran). With no command checks a verified panel is required:
+ * nothing reaches the branch on a worker's word alone.
+ */
+function integrationBlockers(s: State, claimAttemptId: string): string[] {
+  const hasCommands = commandChecks(s.charter).length > 0;
+  const validation = s.validations.find(
+    (v) => v.target.t === 'candidate' && v.target.claimAttemptId === claimAttemptId
+  );
+  const validationBlocker = !hasCommands
+    ? []
+    : !validation
+      ? ['its commit has no candidate validation']
+      : !validationComplete(s, validation)
+        ? ['its candidate validation is still running']
+        : !validationPassed(s, validation)
+          ? ['its candidate validation did not pass']
+          : [];
+  const own = panels(s).filter((p) => p.claimAttemptId === claimAttemptId);
+  const latest = own.at(-1);
+  const panelBlocker = !latest
+    ? hasCommands
+      ? []
+      : ['it needs a verified check panel (the charter has no command checks)']
+    : latest.verdict === 'pending'
+      ? ['a check panel on it is still running']
+      : latest.verdict === 'not_verified'
+        ? ['its latest check panel did not verify it']
+        : [];
+  return [...validationBlocker, ...panelBlocker];
+}
 
 /**
  * Every ended code claim's candidate commit is validated once by the host (design.md R2), as soon
@@ -226,6 +299,33 @@ function applyAction(
         });
       return;
     }
+    case 'integrate': {
+      const claim = byId(s.attempts, action.claimAttempt);
+      if (!claim || claim.spec.kind !== 'work')
+        return reject(`no work attempt ${action.claimAttempt}`);
+      if (
+        claim.phase.t !== 'ended' ||
+        claim.phase.outcome.t !== 'work' ||
+        claim.phase.outcome.result.result !== 'claim' ||
+        claim.phase.outcome.result.change.t !== 'commit'
+      )
+        return reject('only a claim with a commit is integrated');
+      // The head a done validates stays fixed until that done settles.
+      if (s.doneRequest.t === 'validating')
+        return reject('done is being validated on the current head');
+      if (s.integrations.some((i) => i.claimAttemptId === claim.id && i.status.t !== 'refused'))
+        return reject(`${claim.id} is already integrated or being integrated`);
+      const blockers = integrationBlockers(s, claim.id);
+      if (blockers.length > 0) return reject(blockers.join('; '));
+      push({
+        t: 'integration_planned',
+        at,
+        integrationId: clock.nextId('i'),
+        claimAttemptId: claim.id,
+        sha: claim.phase.outcome.result.change.sha,
+      });
+      return;
+    }
     case 'close_question': {
       const question = byId(s.questions, action.question);
       if (!question) return reject(`no question ${action.question}`);
@@ -254,11 +354,13 @@ function applyAction(
       const judged = judgedBlocker(s);
       if (judged.length > 0) return reject(judged.join('; '));
       if (commandChecks(s.charter).length === 0) {
+        // Nothing validates the head, so done never finishes over a merge still to run.
+        if (integrating(s)) return reject('an integration is still running');
         push({ t: 'finished', at, reason: 'done', summary: action.summary });
         return;
       }
-      // TODO(R3): integration moves the head; a passed head validation then still names the sha
-      // it ran on, and done must refuse when the head moved since.
+      // The head validation starts only after every merge planned before it (effects.ts), and no
+      // merge is accepted while it runs, so it validates the head the owner is told to merge.
       const validationId = clock.nextId('v');
       push({ t: 'validation_planned', at, validationId, target: { t: 'head' } });
       push({ t: 'done_requested', at, validationId, summary: action.summary });
