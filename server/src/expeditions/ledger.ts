@@ -243,6 +243,8 @@ export type Entry =
       scope: QuestionScope;
       /** File custody: normalized repo-relative prefixes (charter.ts CustodyPath). */
       paths: string[];
+      /** Question ids whose verified close this question's work waits for (design.md R5). */
+      after: string[];
     }
   | {
       t: 'question_closed';
@@ -283,6 +285,8 @@ export interface Question {
   detail: string;
   scope: QuestionScope;
   paths: string[];
+  /** Dependencies: work on this question is admitted only once each is closed verified. */
+  after: string[];
   status: 'open' | 'verified' | 'dead';
 }
 
@@ -382,6 +386,7 @@ export function fold(entries: readonly Entry[]): State {
 
 // Pattern: table-driven (docs/patterns.md#table-driven) — one exhaustive handler per entry kind.
 const NEWS: ReadonlySet<Entry['t']> = new Set([
+  'attempt_planned',
   'attempt_posted',
   'worktree_failed',
   'attempt_ended',
@@ -546,6 +551,7 @@ export function apply(s: State, e: Entry): void {
         detail: e.detail,
         scope: e.scope,
         paths: e.paths,
+        after: e.after,
         status: 'open',
       });
       return;

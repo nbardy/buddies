@@ -1,6 +1,6 @@
 import { type Charter, type Claim, type WorkerConfig, sameModel } from './charter';
-import type { Attempt, AttemptSpec, CheckSpec, State, WorkSpec } from './ledger';
-import { attemptOf, byId, questionOf } from './ledger';
+import type { Attempt, AttemptSpec, CheckSpec, Question, State, WorkSpec } from './ledger';
+import { attemptOf, byId, questionOf, validationPassed } from './ledger';
 
 // Pure read-only views over a folded State, shared by decide, effects, briefs, news and the page.
 
@@ -126,3 +126,73 @@ export const independentCheckSeats = (c: Charter, author: WorkerConfig) =>
   c.crew.check
     .map((config, seat) => ({ config, seat }))
     .filter((x) => !sameModel(x.config, author));
+
+// ---------- Dependencies and stages (design.md R5) ----------
+
+/** A question's dependencies not yet closed verified. */
+export const unmetDeps = (s: State, q: Question): string[] =>
+  q.after.filter((id) => questionOf(s, id).status !== 'verified');
+
+/** The dependencies a queued attempt waits for: a work attempt on a question whose dependencies
+ * are not all verified stays queued (holding no slot or custody), never refused or run. */
+export function waitsOn(s: State, a: Attempt): string[] {
+  if (a.phase.t !== 'planned') return [];
+  switch (a.spec.kind) {
+    case 'work':
+      return unmetDeps(s, questionOf(s, a.spec.questionId));
+    case 'manager':
+    case 'check':
+      return [];
+  }
+}
+
+/** Where a question honestly stands: its furthest stage (waiting is held, never failed). */
+export type QuestionStage =
+  | 'planned'
+  | 'waiting'
+  | 'implementing'
+  | 'claimed'
+  | 'checked'
+  | 'validated'
+  | 'integrated'
+  | 'dead';
+
+const workOn = (s: State, questionId: string): Attempt<WorkSpec>[] =>
+  s.attempts.filter(
+    (a): a is Attempt<WorkSpec> => a.spec.kind === 'work' && a.spec.questionId === questionId
+  );
+const hasClaim = (a: Attempt) =>
+  a.phase.t === 'ended' &&
+  a.phase.outcome.t === 'work' &&
+  a.phase.outcome.result.result === 'claim';
+const running = (a: Attempt) =>
+  a.phase.t === 'admitted' || a.phase.t === 'posting' || a.phase.t === 'posted';
+
+/** Pattern: table-driven — the first stage (furthest first) whose test holds; `planned` when
+ * none does (the question has no work, or its work is queued for a slot or its custody). */
+const STAGES: [QuestionStage, (s: State, q: Question, ids: Set<string>) => boolean][] = [
+  ['dead', (_s, q) => q.status === 'dead'],
+  [
+    'integrated',
+    (s, _q, ids) =>
+      s.integrations.some((i) => i.status.t === 'integrated' && ids.has(i.claimAttemptId)),
+  ],
+  [
+    'validated',
+    (s, _q, ids) =>
+      s.validations.some(
+        (v) =>
+          v.target.t === 'candidate' && ids.has(v.target.claimAttemptId) && validationPassed(s, v)
+      ),
+  ],
+  ['checked', (s, q) => questionVerified(s, q.id)],
+  ['claimed', (s, q) => workOn(s, q.id).some(hasClaim)],
+  ['implementing', (s, q) => workOn(s, q.id).some(running)],
+  ['waiting', (s, q) => workOn(s, q.id).some((a) => waitsOn(s, a).length > 0)],
+];
+
+export function questionStage(s: State, q: Question): QuestionStage {
+  const ids = new Set(workOn(s, q.id).map((a) => a.id));
+  for (const [stage, holds] of STAGES) if (holds(s, q, ids)) return stage;
+  return 'planned';
+}

@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
+import fsp from 'node:fs/promises';
 import { constants } from 'node:os';
+import path from 'node:path';
 import { labelled } from '../observability/event-loop-stall';
 import type { CommandCheck } from './charter';
 import type { CheckOutcome } from './ledger';
@@ -19,6 +21,33 @@ export const TAIL_CHARS = 4000;
 const CHECK_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TMPDIR', 'TZ'];
 const checkEnv = (): NodeJS.ProcessEnv =>
   Object.fromEntries(CHECK_ENV.flatMap((k) => (k in process.env ? [[k, process.env[k]]] : [])));
+
+/**
+ * Whether a check's `argv[0]` names an executable file the way `spawn` will look for it under
+ * the check's environment (launch preflight, design.md R4; nothing is run): a bare name on the
+ * server's PATH (the PATH a check gets), a path with a slash relative to the repository root (a
+ * validation tree is a checkout of it) or absolute. A script the expedition itself is meant to
+ * create cannot be named this way: run it through its interpreter (`["sh", "scripts/x.sh"]`).
+ */
+export async function resolvesOnPath(bin: string, repoRoot: string): Promise<boolean> {
+  const candidates = bin.includes('/')
+    ? [path.resolve(repoRoot, bin)]
+    : (process.env.PATH ?? '')
+        .split(path.delimiter)
+        .filter((dir) => path.isAbsolute(dir))
+        .map((dir) => path.join(dir, bin));
+  const found = await Promise.all(candidates.map(executableFile));
+  return found.some(Boolean);
+}
+
+async function executableFile(file: string): Promise<boolean> {
+  try {
+    await fsp.access(file, fsp.constants.X_OK);
+    return (await fsp.stat(file)).isFile();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Runs `argv` in `cwd` with a timeout. The process leads its own group, so a timeout kills

@@ -161,6 +161,7 @@ async function fixture() {
     core,
     lead,
     repo,
+    workspaceId: ws.id,
     treeOf,
     commitIn,
     branchExists,
@@ -802,20 +803,41 @@ test('a claim its own attempt branch does not hold is recorded malformed, and ca
   }
 });
 
-test('launch is refused with a reason when the workspace is not a git repository', async () => {
+test('launch preflight refuses with every reason (no repository, a check executable that does not resolve) and never runs a check', async () => {
   const f = await fixture();
   try {
     const ws = await f.core.createWorkspace(OWNER, { name: 'Plain', rootPath: tempDir('plain-') });
-    await assert.rejects(
+    const missing = (bin: string) => ({ kind: 'command', argv: [bin], timeoutSeconds: 30 });
+    const launch = (key: string, workspaceId: string, done: unknown) =>
       f.host.launch({
-        key: 'plain',
-        charter: Charter.parse(charter('plain')),
+        key,
+        charter: Charter.parse(charter(key, 2, done)),
         origin: { t: 'direct' },
         launcherId: f.lead.id,
-        workspaceId: ws.id,
-      }),
-      /refused: workspace root .* is not a git repository/
+        workspaceId,
+      });
+    await assert.rejects(
+      launch('plain', ws.id, { checks: [missing('no-such-check-xyz')] }),
+      (error: Error) => {
+        assert.match(error.message, /workspace root .* is not a git repository/);
+        assert.match(error.message, /`no-such-check-xyz` is not found/);
+        return true;
+      }
     );
+    // A repository-relative executable resolves only when it exists and is executable there.
+    await assert.rejects(
+      launch('relative', f.workspaceId, { checks: [missing('widget/widget.ts')] }),
+      /`widget\/widget.ts` is not found/
+    );
+    // An accepted launch resolves its checks' executables but runs none of them (a check may be
+    // a paid GPU run): the marker this check would write does not exist after launch.
+    const marker = path.join(tempDir('marker-'), 'ran');
+    const writes = { kind: 'command', argv: ['sh', '-c', `touch ${marker}`], timeoutSeconds: 30 };
+    const state = await launch('accepted', f.workspaceId, { checks: [writes] });
+    await f.host.drain();
+    assert.equal(state.run.t, 'running');
+    assert.equal(fs.existsSync(marker), false, 'preflight ran a check');
+    assert.equal(f.ledgerOf(state.id)[0].t, 'launched');
   } finally {
     await f.close();
   }
@@ -964,6 +986,138 @@ test('command checks run on the host: each claimed commit is validated in a fres
       if (v.phase.t !== 'started') throw new Error(`validation ${v.id} never started`);
       assert.equal(v.phase.treeStatus.t, 'removed', `${v.id} tree released`);
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test('work on a question waits (stage waiting, no worktree) until its dependency is verified, then starts at the merged head; stages follow the ledger', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'deps', 3, { checks: [widgetFixed] });
+    await f.answer(id, f.manager(id), json({ actions: [question('Fix the widget', ['widget'])] }));
+    const q1 = f.stateOf(id).questions[0].id;
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Plan the docs.' });
+    const after = (title: string, deps: string[]) => ({
+      ...question(title, ['docs']),
+      after: deps,
+    });
+    // A dependency must name an existing question: an unknown id is a typed rejection.
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [after('Document the fix', [q1]), after('Bogus', ['q-none'])] })
+    );
+    assert.ok(
+      f
+        .ledgerOf(id)
+        .some((e) => e.t === 'rejected' && /after names no question q-none/.test(e.reason))
+    );
+    const q2 = f.stateOf(id).questions[1].id;
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [q2, q1].map((q) => ({ do: 'work', question: q, seat: 0, brief: `work ${q}` })),
+      })
+    );
+    const stage = (q: string) => f.host.view(id).questions.find((x) => x.id === q)!.stage;
+    const workOn = (q: string) =>
+      f.stateOf(id).attempts.find((a) => a.spec.kind === 'work' && a.spec.questionId === q)!;
+    // Free slots and disjoint custody, yet q2's work is held: queued, no worktree, not refused.
+    assert.equal(workOn(q2).phase.t, 'planned');
+    assert.equal(workOn(q2).id in f.stateOf(id).worktrees, false);
+    assert.equal(stage(q2), 'waiting');
+    assert.equal(stage(q1), 'implementing');
+    assert.ok(
+      f
+        .stateOf(id)
+        .statuses.some((x) =>
+          x.text.includes(`⏸ ${workOn(q2).id} waiting: needs ${q1} verified first`)
+        ),
+      'the chat says why the work waits'
+    );
+
+    // q1's worker fixes the widget and claims its commit; the host validation passes.
+    const w1 = workOn(q1).id;
+    const sha = f.commitIn(f.treeOf(id, w1).path, 'widget/widget.ts');
+    await f.answer(
+      id,
+      w1,
+      json({
+        result: 'claim',
+        statement: 'fixed',
+        change: { t: 'commit', sha },
+        evidence: [],
+        howToCheck: 'run it',
+      })
+    );
+    await f.host.drain();
+    assert.equal(stage(q1), 'validated');
+    const shown = f.host.view(id).attempts.find((a) => a.id === w1)!;
+    assert.equal(shown.worktree.t === 'tree' && shown.worktree.branch, `exp/${id}/${w1}`);
+    assert.equal(stage(q2), 'waiting', 'a validated claim is not a verified question');
+
+    // A blind check verifies it; the manager integrates it and closes q1 verified in one decision.
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'check', claimAttempt: w1, goal: false, panel: 1 }] })
+    );
+    const check = f.liveAttempts(id).find((a) => a.kind === 'check')!;
+    await f.answer(id, check.id, json({ verdict: 'verified', why: 'reproduced' }));
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [
+          { do: 'integrate', claimAttempt: w1 },
+          { do: 'close_question', question: q1, status: 'verified', why: 'checked and merged' },
+        ],
+      })
+    );
+    await f.host.drain();
+    const v = f.host.view(id);
+    assert.equal(stage(q1), 'integrated');
+    assert.equal(v.integration.integrated, 1);
+    // Released, q2's work starts at the merged head: it builds on the dependency's code.
+    assert.equal(stage(q2), 'implementing');
+    assert.equal(f.treeOf(id, workOn(q2).id).baseSha, v.integration.head);
+    assert.equal(git(f.repo, 'rev-parse', `expedition/${id}^2`), sha);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an expedition holding only work that waits on a dropped dependency asks the owner instead of going quiet', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'stuck');
+    await f.answer(id, f.manager(id), json({ actions: [question('Spike', ['widget'])] }));
+    const q1 = f.stateOf(id).questions[0].id;
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Plan the follow-up.' });
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ ...question('Follow-up', ['docs']), after: [q1] }] })
+    );
+    const q2 = f.stateOf(id).questions[1].id;
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Go.' });
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [
+          { do: 'work', question: q2, seat: 0, brief: 'follow up' },
+          { do: 'close_question', question: q1, status: 'dead', why: 'abandoned' },
+        ],
+      })
+    );
+    const s = f.stateOf(id);
+    assert.equal(s.run.t, 'waiting_owner');
+    assert.match(s.run.t === 'waiting_owner' ? s.run.question : '', new RegExp(`waits for ${q1}`));
+    const stages = f.host.view(id).questions.map((q) => q.stage);
+    assert.deepEqual(stages, ['dead', 'waiting']);
   } finally {
     await f.close();
   }
@@ -1126,9 +1280,14 @@ test('a head check that times out or cannot start is recorded as such, and done 
   try {
     // Regression guard: only `passed` counts toward done. Treating "not failed" as passing let a
     // head validation that timed out or errored finish the expedition.
+    // Check 1's executable resolves at launch (the preflight refuses a missing one) and is gone
+    // by the time the head is validated: the spawn error is a typed `error` outcome.
+    const gone = path.join(tempDir('gone-'), 'gone-check');
+    fs.writeFileSync(gone, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const { id } = await rpcLaunch(f, 'timeout', 2, {
-      checks: [command('echo begun; sleep 30', 1), { ...command(''), argv: ['no-such-check-xyz'] }],
+      checks: [command('echo begun; sleep 30', 1), { ...command(''), argv: [gone] }],
     });
+    fs.rmSync(gone);
     await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'surely' }] }));
     await f.host.drain();
     const runs = f.stateOf(id).validations[0].runs;

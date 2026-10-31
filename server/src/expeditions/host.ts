@@ -557,7 +557,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       if (prior) return prior;
       const workspace = (await core.listWorkspaces()).find((w) => w.id === input.workspaceId);
       if (!workspace) throw new LaunchRefused([`no workspace ${input.workspaceId}`]);
-      const checked = await preflight(workspace.rootPath);
+      const bins = commandChecks(input.charter).map(({ check }) => check.argv[0]);
+      const checked = await preflight(workspace.rootPath, bins);
       if (checked.t === 'refused') throw new LaunchRefused(checked.reasons);
       const id = `${input.charter.name
         .toLowerCase()

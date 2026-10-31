@@ -22,7 +22,9 @@ import {
   live,
   panels,
   questionVerified,
+  settled,
   verifiedPanels,
+  waitsOn,
 } from './queries';
 
 // decide: state → intent entries (pure). The guardrails live here: every manager action is
@@ -100,14 +102,22 @@ export function decide(s: State, clock: Clock): Entry[] {
     push({ t: 'attempt_planned', at, attemptId: clock.nextId('m'), spec: { kind: 'manager' } });
 
   // Host validations and merges in flight are work too: their results reach the next manager.
+  // Work waiting on unverified dependencies (design.md R5) cannot start by itself, so it does not
+  // count as running: an expedition holding only waiting work asks, it never goes quiet.
+  const waiting = s.attempts.filter((a) => waitsOn(s, a).length > 0);
   const idle =
-    s.run.t === 'running' && s.attempts.every((a) => a.phase.t === 'ended') && !hostBusy(s);
+    s.run.t === 'running' &&
+    s.attempts.every((a) => settled(a) || waitsOn(s, a).length > 0) &&
+    !hostBusy(s);
   if (idle)
     push({
       t: 'needs_owner',
       at,
-      question:
-        'Nothing is running and the manager planned no further work. Reply with a lesson or note to continue, or stop it.',
+      question: `Nothing is running and the manager planned no further work${
+        waiting.length > 0
+          ? ` (${waiting.map((a) => `${a.id} waits for ${waitsOn(s, a).join(', ')}`).join('; ')}, not verified)`
+          : ''
+      }. Reply with a lesson or note to continue, or stop it.`,
     });
   return withStatus(s, out, at);
 }
@@ -240,7 +250,9 @@ function applyAction(
     return undefined;
   };
   switch (action.do) {
-    case 'add_question':
+    case 'add_question': {
+      const unknown = action.after.filter((q) => !byId(s.questions, q));
+      if (unknown.length > 0) return reject(`after names no question ${unknown.join(', ')}`);
       push({
         t: 'question_added',
         at,
@@ -249,8 +261,10 @@ function applyAction(
         detail: action.detail,
         scope: action.scope,
         paths: action.paths,
+        after: action.after,
       });
       return;
+    }
     case 'work': {
       const question = byId(s.questions, action.question);
       if (!question) return reject(`no question ${action.question}`);

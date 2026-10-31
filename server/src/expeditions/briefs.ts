@@ -24,10 +24,12 @@ import {
   liveWorkers,
   outcomeDetail,
   questionOf,
+  questionStage,
   queued,
   seatLabel,
   validationLabel,
   validationOf,
+  waitsOn,
   worktreeOf,
 } from './model';
 
@@ -66,7 +68,20 @@ function lessonsText(s: State): string {
 }
 
 function questionLine(s: State, q: Question): string {
-  return `- ${q.id} [${q.scope}/${q.status}] ${q.title} (paths: ${q.paths.join(', ')}) — ${attemptsOn(s, q.id).length} attempts`;
+  const after = q.after.length > 0 ? ` (after: ${q.after.join(', ')})` : '';
+  return `- ${q.id} [${q.scope}/${q.status}, stage ${questionStage(s, q)}] ${q.title} (paths: ${q.paths.join(', ')})${after} — ${attemptsOn(s, q.id).length} attempts`;
+}
+
+/** Questions counted by stage (design.md R5): waiting is held work, never a failure. */
+function stagesText(s: State): string {
+  const counts = new Map<string, number>();
+  for (const q of s.questions) {
+    const stage = questionStage(s, q);
+    counts.set(stage, (counts.get(stage) ?? 0) + 1);
+  }
+  return counts.size === 0
+    ? ''
+    : `STAGES: ${[...counts].map(([stage, n]) => `${n} ${stage}`).join(', ')}`;
 }
 
 /** Every validation so far, newest last: what the host ran and how each check ended. */
@@ -81,23 +96,26 @@ function integrationsText(s: State): string {
   return `INTEGRATION (the host merges validated claims into ${s.repo.branch}, one at a time; new work starts at its head):\n${s.integrations.map((i) => `- ${integrationLabel(s, i)}`).join('\n') || '- nothing merged yet'}`;
 }
 
-function attemptLine(a: Attempt): string {
+function attemptLine(s: State, a: Attempt): string {
   const what =
     a.spec.kind === 'manager'
       ? 'manager'
       : a.spec.kind === 'work'
         ? `work on ${a.spec.questionId} (seat ${a.spec.seat})`
         : `check of ${a.spec.claimAttemptId} in panel ${a.spec.panelId}${a.spec.goal ? ' (GOAL)' : ''}`;
-  return `- ${a.id} ${what}: ${phaseDetail(a)}`;
+  return `- ${a.id} ${what}: ${phaseDetail(s, a)}`;
 }
 
-function phaseDetail(a: Attempt): string {
+function phaseDetail(s: State, a: Attempt): string {
   switch (a.phase.t) {
     case 'ended':
       return outcomeDetail(a.phase.outcome);
     case 'dropped':
       return `NOT STARTED (no worktree): ${a.phase.reason}`;
-    case 'planned':
+    case 'planned': {
+      const deps = waitsOn(s, a);
+      return deps.length > 0 ? `waiting for ${deps.join(', ')} to be verified` : 'planned';
+    }
     case 'admitted':
     case 'posting':
     case 'posted':
@@ -140,7 +158,7 @@ function managerBrief(s: State, id: string): string {
     `ATTEMPTS:\n${
       s.attempts
         .filter((a) => a.spec.kind !== 'manager')
-        .map(attemptLine)
+        .map((a) => attemptLine(s, a))
         .join('\n') || '- none'
     }`,
     validationsText(s),
@@ -152,6 +170,7 @@ function managerBrief(s: State, id: string): string {
       '- Ideas outside IN SCOPE go to scope "explore" (budgeted) or "parked" (owner funds it). Never quietly widen scope.',
       '- Start parallel work: one "work" action per question attempt; the host queues beyond the live limit.',
       '- Each question owns file paths (repo-relative prefixes, "." = whole repo). Work on overlapping paths runs one at a time, so split questions by the files they touch to run them in parallel.',
+      '- "after" lists question ids a question depends on: work on it waits (stage waiting, not refused) until each is closed verified. Integrate a dependency\'s claim before closing it when the dependent work builds on its code.',
       '- A claim counts only after "check". Ask a check with goal:true when a claim should satisfy the judged DONE WHEN items.',
       '- Command checks ($ …) are run by the host on every claimed commit and on the expedition branch head at done; no agent runs or reports them. A claim whose validation FAILED is not done: send work to fix it.',
       '- When different approaches fail the same way, the problem is probably upstream: add a question about measurement or setup.',
@@ -162,7 +181,7 @@ function managerBrief(s: State, id: string): string {
     ].join('\n'),
     [
       'ANSWER: a JSON object {"actions":[...]} where each action is one of:',
-      '{"do":"add_question","title":"…","detail":"…","scope":"in"|"explore"|"parked","paths":["<repo-relative prefix the work may edit>"]}',
+      '{"do":"add_question","title":"…","detail":"…","scope":"in"|"explore"|"parked","paths":["<repo-relative prefix the work may edit>"],"after":["<existing question id>"] (optional)}',
       '{"do":"work","question":"<question id>","seat":<work seat index>,"brief":"<self-contained instructions and the approach to try>"}',
       '{"do":"check","claimAttempt":"<work attempt id>","goal":true|false,"panel":1|2|3}',
       '{"do":"integrate","claimAttempt":"<work attempt id whose claim passed>"}',
@@ -309,7 +328,8 @@ export function statusText(s: State, badgeLine: string): string {
     charterText(s.charter),
     lessonsText(s),
     `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet'}`,
-    `ATTEMPTS:\n${s.attempts.map(attemptLine).join('\n') || '- none'}`,
+    stagesText(s),
+    `ATTEMPTS:\n${s.attempts.map((a) => attemptLine(s, a)).join('\n') || '- none'}`,
     validationsText(s),
     integrationsText(s),
     s.crew.t === 'ready' ? `Crew Buddy: ${s.crew.buddyId} (its DM holds every attempt).` : '',

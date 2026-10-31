@@ -2,8 +2,11 @@ import type {
   ExpeditionAttempt,
   ExpeditionDone,
   ExpeditionDoneCheck,
+  ExpeditionIntegration,
   ExpeditionQuestion,
   ExpeditionRun,
+  ExpeditionValidation,
+  ExpeditionWorktree,
 } from '@unleashd/shared';
 
 // Pure view helpers for the expedition badge and page (no React).
@@ -37,6 +40,31 @@ export function attemptState(a: ExpeditionAttempt): string {
       return 'running';
     case 'ended':
       return a.outcome ?? 'ended';
+  }
+}
+
+/** The header's one integration line: the expedition branch, what it holds, the last refusal. */
+export function integrationLine(i: ExpeditionIntegration): string {
+  const queued = i.queued > 0 ? ` · ${i.queued} queued` : '';
+  const line = `Integration: ${i.branch} @ ${i.head.slice(0, 10)} · ${i.integrated} integrated${queued}`;
+  switch (i.lastRefusal.t) {
+    case 'none':
+      return line;
+    case 'refused':
+      return `${line} · last refusal: ${i.lastRefusal.label}`;
+  }
+}
+
+/** The host validations of one attempt's claimed commit, oldest first. */
+export const validationsOf = (all: ExpeditionValidation[], attemptId: string) =>
+  all.filter((x) => x.subject.t === 'candidate' && x.subject.claimAttemptId === attemptId);
+
+export function worktreeLine(tree: ExpeditionWorktree): string | null {
+  switch (tree.t) {
+    case 'none':
+      return null;
+    case 'tree':
+      return `branch ${tree.branch}`;
   }
 }
 

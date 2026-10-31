@@ -381,12 +381,37 @@ Launch is refused with typed reasons unless: the workspace root is a git reposit
 commit resolves, `git cambium` is available, and every `command` check's `argv[0]` resolves on
 PATH. Preflight does not run the checks (they may be paid GPU runs).
 
+Built (2026-11-01, `git.ts` `preflight`, `command.ts` `resolvesOnPath`, host `launch`): the refusal
+(`LaunchRefused`, nothing written) lists every failing condition at once. `argv[0]` resolves the
+way `spawn` will look for it under the check's curated environment: a bare name on the server's
+PATH, a path with a slash against the repository root (a validation tree is a checkout of it) or
+absolute; it must be an executable regular file. A script the expedition itself will create
+cannot be named as `argv[0]`; run it through its interpreter (`["sh", "scripts/x.sh"]`). Known
+limit: an executable present at launch can vanish later; that check is then a typed `error`.
+
 ### R5. Dependencies and honest stages
 - `add_question` takes `after: string[]` (question ids). Work on a question whose dependencies
   are not verified waits (stage `waiting`), it is not refused or silently run.
 - Every question shows one derived stage:
   `planned | waiting | implementing | claimed | checked | validated | integrated | dead`.
   Reports count stages separately; held/waiting is never reported as failed.
+
+Built (2026-11-01, `queries.ts` `waitsOn`/`questionStage`, decide `add_question`, effects
+admission): `after` defaults to `[]`; an id that names no existing question is a typed `rejected`
+(the host assigns ids, so a dependency is always an earlier question and cycles cannot form). A
+dependency is met when its question is closed `verified` (which already requires a verified
+panel). Unmet, the work attempt stays `planned` and admission skips it without taking a slot or
+custody; the chat says `⏸ <attempt> waiting: needs <q> verified first`, and it starts at the
+then-current expedition head (so it builds on an integrated dependency). Waiting work does not
+count as running for "never idle": an expedition holding only waiting work (say its dependency
+closed `dead`) asks the owner, naming what waits on what. The stage is the furthest that holds,
+in the table's order: dead, integrated (a claim on it merged), validated (a claim's candidate
+validation passed), checked (a panel verified it), claimed, implementing (a work attempt admitted
+or running), waiting, else planned. It is in `ExpeditionView.questions[].stage`, the Tasks pane,
+the manager brief and `status` (with a per-stage count). The page header carries one
+`Integration:` line (branch, head, integrated and queued counts, last refusal); the Workers pane
+shows each worker's branch and its claim's validations (each check passed, or failed with its
+exit code). Chat news marks validations ✓/✗, merges ⤵ and refusals ⛔.
 
 ### R6. Measured cost
 Each ended attempt records its measured usage when the run exposes it

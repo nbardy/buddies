@@ -22,7 +22,7 @@ import {
   validationOf,
   validationPassed,
 } from './ledger';
-import { configOf, liveWorkers, verifiedPanels } from './queries';
+import { configOf, liveWorkers, verifiedPanels, waitsOn } from './queries';
 
 // Every human-readable rendering of expedition state: the badge line, the chat news posted once
 // per decision round, attempt/outcome labels for the page, and full outcome text for briefs.
@@ -66,6 +66,13 @@ const clip = (text: string, n = 300) => (text.length > n ? `${text.slice(0, n)}�
 /** The chat line for one notable entry (none for an uninteresting one). */
 function newsLine(s: State, e: Entry): string[] {
   switch (e.t) {
+    case 'attempt_planned': {
+      // Only work held by its question's dependencies (design.md R5); it starts once they verify.
+      const deps = waitsOn(s, attemptOf(s, e.attemptId));
+      return deps.length > 0
+        ? [`⏸ ${e.attemptId} waiting: needs ${deps.join(', ')} verified first`]
+        : [];
+    }
     case 'attempt_posted': {
       const a = attemptOf(s, e.attemptId);
       return a.spec.kind === 'manager' ? [] : [`▶ ${a.id} started: ${attemptLabel(s, a)}`];
@@ -81,7 +88,7 @@ function newsLine(s: State, e: Entry): string[] {
         `${e.status === 'verified' ? '✓ verified' : '✗ dropped'} ${questionOf(s, e.questionId).title}: ${clip(e.why)}`,
       ];
     case 'rejected':
-      return [`refused ${e.action.do}: ${e.reason}`];
+      return [`⛔ refused ${e.action.do}: ${e.reason}`];
     case 'reflection':
       return [`Reflection: ${clip(e.text, 600)}`];
     case 'feedback':
@@ -91,15 +98,18 @@ function newsLine(s: State, e: Entry): string[] {
     case 'validation': {
       // One line per validation, when its last command check is recorded.
       const v = validationOf(s, e.validationId);
-      return validationComplete(s, v) ? [validationLabel(s, v)] : [];
+      return validationComplete(s, v)
+        ? [`${validationPassed(s, v) ? '✓' : '✗'} ${validationLabel(s, v)}`]
+        : [];
     }
     case 'done_requested':
       return ['Done proposed: running the command checks on the expedition branch head.'];
     case 'done_refused':
-      return [`Done refused: ${clip(e.reason)}`];
+      return [`⛔ Done refused: ${clip(e.reason)}`];
     case 'integrated':
+      return [`⤵ ${integrationLabel(s, integrationOf(s, e.integrationId))}`];
     case 'integration_refused':
-      return [integrationLabel(s, integrationOf(s, e.integrationId))];
+      return [`⛔ ${integrationLabel(s, integrationOf(s, e.integrationId))}`];
     case 'finished':
       return [`Finished (${e.reason}): ${e.summary}`, ...mergeLine(s, e.reason)];
     default:

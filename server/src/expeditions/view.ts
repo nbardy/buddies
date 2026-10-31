@@ -1,4 +1,10 @@
-import type { ExpeditionDone, ExpeditionValidation, ExpeditionView } from '@unleashd/shared';
+import type {
+  ExpeditionDone,
+  ExpeditionIntegration,
+  ExpeditionValidation,
+  ExpeditionView,
+  ExpeditionWorktree,
+} from '@unleashd/shared';
 import {
   type AttemptPhase,
   type State,
@@ -9,10 +15,13 @@ import {
   configOf,
   deadlineMs,
   exploreCap,
+  headOf,
+  integrationLabel,
   live,
   liveWorkers,
   outcomeLabel,
   panels,
+  questionStage,
   queued,
   seatLabel,
   validationComplete,
@@ -34,6 +43,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     goal: c.goal,
     done: doneView(c.done),
     validations: s.validations.map((v) => validationView(s, v)),
+    integration: integrationView(s),
     inScope: c.inScope,
     outOfScope: c.outOfScope,
     workspaceId: s.workspaceId,
@@ -60,6 +70,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     },
     questions: s.questions.map((q) => ({
       ...q,
+      stage: questionStage(s, q),
       attempts: attemptsOn(s, q.id).map((a) => a.id),
     })),
     attempts: s.attempts.map((a) => ({
@@ -73,6 +84,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       brief: s.briefs[a.id] ?? null,
       outcome: phaseOutcome(a.phase),
       requestId: a.phase.t === 'posted' || a.phase.t === 'ended' ? a.phase.requestId : null,
+      worktree: worktreeView(s, a.id),
     })),
     panels: panels(s),
     reflections: s.reflections,
@@ -84,13 +96,35 @@ function doneView(done: State['charter']['done']): ExpeditionDone {
   return 'checks' in done ? { t: 'checks', checks: done.checks } : { t: 'owner' };
 }
 
+/** An attempt's worktree, once admission recorded one (managers never have one). */
+function worktreeView(s: State, attemptId: string): ExpeditionWorktree {
+  const tree = s.worktrees[attemptId];
+  return tree ? { t: 'tree', branch: tree.branch, path: tree.path } : { t: 'none' };
+}
+
+function integrationView(s: State): ExpeditionIntegration {
+  const refused = s.integrations.filter((i) => i.status.t === 'refused').at(-1);
+  return {
+    branch: s.repo.branch,
+    head: headOf(s),
+    integrated: s.integrations.filter((i) => i.status.t === 'integrated').length,
+    queued: s.integrations.filter((i) => i.status.t === 'pending').length,
+    lastRefusal: refused ? { t: 'refused', label: integrationLabel(s, refused) } : { t: 'none' },
+  };
+}
+
 function validationView(s: State, v: Validation): ExpeditionValidation {
   return {
     id: v.id,
+    subject:
+      v.target.t === 'candidate'
+        ? { t: 'candidate', claimAttemptId: v.target.claimAttemptId }
+        : { t: 'head' },
     label: validationLabel(s, v),
     verdict: !validationComplete(s, v) ? 'running' : validationPassed(s, v) ? 'passed' : 'failed',
     checks: v.runs.map((r) => ({
       checkIndex: r.checkIndex,
+      passed: r.outcome.t === 'passed',
       outcome: checkOutcomeLabel(r.outcome),
     })),
   };

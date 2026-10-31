@@ -8,6 +8,7 @@ import {
   isWorker,
   queued,
   settled,
+  waitsOn,
 } from './queries';
 
 // The idempotent writes a folded state licenses (pure). The host runs them in order; each carries
@@ -87,11 +88,13 @@ export function pendingEffects(s: State): Effect[] {
   for (const attempt of queued(s).filter((a) => !isWorker(a)))
     effects.push({ t: 'brief_attempt', attempt });
   // Admission (design.md R1): at most maxLive workers, and never two with overlapping custody;
-  // a blocked attempt stays queued (in order) until a slot and its paths free up.
+  // a blocked attempt stays queued (in order) until a slot and its paths free up. Work whose
+  // question's dependencies are not verified (R5) waits too, holding neither slot nor custody.
   const holding = admitted(s);
   const custody = holding.map((a) => custodyOf(s, a));
   let capacity = s.charter.maxLive - holding.length;
   for (const attempt of queued(s).filter(isWorker)) {
+    if (waitsOn(s, attempt).length > 0) continue;
     const paths = custodyOf(s, attempt);
     if (capacity <= 0 || custody.some((c) => custodyOverlaps(c, paths))) continue;
     capacity -= 1;

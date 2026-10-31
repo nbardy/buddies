@@ -1,4 +1,4 @@
-import type { ExpeditionAttempt, ExpeditionView } from '@unleashd/shared';
+import type { ExpeditionAttempt, ExpeditionValidation, ExpeditionView } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type CSSProperties, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -22,7 +22,10 @@ import {
   attemptState,
   doneLines,
   expeditionUrl,
+  integrationLine,
   runLabel,
+  validationsOf,
+  worktreeLine,
 } from './expedition-view';
 import './ChannelBrowser.css';
 import './TaskPage.css';
@@ -120,6 +123,9 @@ function Header({ v }: { v: ExpeditionView }) {
       <p className="ui-muted" style={{ margin: 0 }}>
         {v.goal}
       </p>
+      <p className="ui-muted" style={{ margin: 0 }}>
+        {integrationLine(v.integration)}
+      </p>
       {v.run.t === 'waiting_owner' && (
         <output className="task-page-next ui-surface ui-card" style={{ margin: 0 }}>
           Needs you: {v.run.question} Reply in the chat.
@@ -149,12 +155,25 @@ function FocusPane({ focus, v }: { focus: Focus; v: ExpeditionView }) {
   }
 }
 
-function AttemptRow({ a }: { a: ExpeditionAttempt }) {
+function AttemptRow({
+  a,
+  validations,
+}: { a: ExpeditionAttempt; validations: ExpeditionValidation[] }) {
+  const tree = worktreeLine(a.worktree);
   return (
     <details className="ui-surface ui-card">
       <summary className="ui-choice">
         {a.id} · {a.label} · {attemptState(a)}
+        {tree && ` · ${tree}`}
+        {validations.map((x) => ` · validation ${x.verdict}`).join('')}
       </summary>
+      {validations.flatMap((x) =>
+        x.checks.map((c) => (
+          <p key={`${x.id}-${c.checkIndex}`} className="ui-muted" style={{ margin: 0 }}>
+            {c.passed ? '✓' : '✗'} {x.id} check {c.checkIndex}: {c.outcome}
+          </p>
+        ))
+      )}
       <p className="ui-muted">Instructions</p>
       <pre style={pre}>{a.brief ?? 'Not briefed yet (queued).'}</pre>
     </details>
@@ -170,13 +189,15 @@ function Workers({ v }: { v: ExpeditionView }) {
       {active.length === 0 ? (
         <p className="buddy-panel__empty">Nothing running right now.</p>
       ) : (
-        active.map((a) => <AttemptRow key={a.id} a={a} />)
+        active.map((a) => (
+          <AttemptRow key={a.id} a={a} validations={validationsOf(v.validations, a.id)} />
+        ))
       )}
       {ended.length > 0 && (
         <details className="ui-stack">
           <summary className="ui-choice">Finished · {ended.length}</summary>
           {ended.map((a) => (
-            <AttemptRow key={a.id} a={a} />
+            <AttemptRow key={a.id} a={a} validations={validationsOf(v.validations, a.id)} />
           ))}
         </details>
       )}
@@ -190,10 +211,13 @@ function Tasks({ v }: { v: ExpeditionView }) {
   const row = (q: ExpeditionView['questions'][number]) => (
     <details key={q.id} className="ui-surface ui-card">
       <summary className="ui-choice">
-        {QUESTION_GLYPH[q.status]} {q.title} · {q.scope} · {q.paths.join(', ')} ·{' '}
-        {q.attempts.length} attempts
+        {QUESTION_GLYPH[q.status]} {q.title} <span className="ui-badge">{q.stage}</span> · {q.scope}{' '}
+        · {q.paths.join(', ')} · {q.attempts.length} attempts
       </summary>
       <pre style={pre}>{q.detail}</pre>
+      {q.after.length > 0 && (
+        <p className="ui-muted">After (must be verified first): {q.after.join(', ')}</p>
+      )}
       {q.attempts.length > 0 && <p className="ui-muted">Attempts: {q.attempts.join(', ')}</p>}
     </details>
   );

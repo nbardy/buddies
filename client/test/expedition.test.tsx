@@ -62,7 +62,25 @@ const view: ExpeditionView = {
       { kind: 'judged', text: 'The widget docs describe the fix.' },
     ],
   },
-  validations: [],
+  validations: [
+    {
+      id: 'v1',
+      subject: { t: 'candidate', claimAttemptId: 'w0' },
+      label: 'validation v1 of candidate 1a2b3c4d5e of w0: FAILED',
+      verdict: 'failed',
+      checks: [{ checkIndex: 0, passed: false, outcome: 'FAILED (exit 3): widget still broken' }],
+    },
+  ],
+  integration: {
+    branch: 'expedition/widget-abc123',
+    head: '9f8e7d6c5b4a39281706',
+    integrated: 1,
+    queued: 0,
+    lastRefusal: {
+      t: 'refused',
+      label: 'integration i2 of w0 (1a2b3c4d5e): REFUSED — merge conflict in docs/README.md',
+    },
+  },
   inScope: ['widget'],
   outOfScope: ['the website'],
   workspaceId: 'ws-1',
@@ -87,11 +105,26 @@ const view: ExpeditionView = {
       detail: 'Find it.',
       scope: 'in',
       status: 'open',
+      stage: 'implementing',
       paths: ['widget'],
-      attempts: ['w1'],
+      after: [],
+      attempts: ['w0', 'w1'],
     },
   ],
   attempts: [
+    {
+      id: 'w0',
+      kind: 'work',
+      label: 'work on q1 (codex)',
+      seat: 'codex',
+      questionId: 'q1',
+      phase: 'ended',
+      live: false,
+      brief: 'Patch the widget.',
+      outcome: 'CLAIM: fixed',
+      requestId: 'post-0',
+      worktree: { t: 'tree', branch: 'exp/widget-abc123/w0', path: '/x/w0' },
+    },
     {
       id: 'w1',
       kind: 'work',
@@ -103,6 +136,7 @@ const view: ExpeditionView = {
       brief: 'Bisect the last ten commits.',
       outcome: null,
       requestId: 'post-1',
+      worktree: { t: 'tree', branch: 'exp/widget-abc123/w1', path: '/x/w1' },
     },
   ],
   panels: [],
@@ -127,6 +161,18 @@ test('the expedition page leads with its state, the owner question, and live wor
   assert.match(html, /needs you/);
   assert.match(html, /Should the website be in scope\?/);
   assert.match(html, /Bisect the last ten commits\./);
+  // Where work lands and why it did not: each worker's branch, its claim's host validation with
+  // the exit code, and the expedition branch's last refused merge, all without a click.
+  assert.match(html, /branch exp\/widget-abc123\/w1/);
+  assert.match(
+    html,
+    /w0 · work on q1 \(codex\) · CLAIM: fixed · branch exp\/widget-abc123\/w0 · validation failed/
+  );
+  assert.match(html, /check 0: FAILED \(exit 3\): widget still broken/);
+  assert.match(
+    html,
+    /Integration: expedition\/widget-abc123 @ 9f8e7d6c5b · 1 integrated · last refusal: .*merge conflict in docs\/README\.md/
+  );
   // Lean: reflections and tasks are one click away, not on the first screen.
   assert.doesNotMatch(html, /Two approaches fail the same way\./);
 });

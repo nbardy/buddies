@@ -146,6 +146,9 @@ export const ManagerAction = z.discriminatedUnion('do', [
       scope: QuestionScope,
       /** File custody: work attempts on overlapping paths never run at once. */
       paths: z.array(CustodyPath).min(1).max(20),
+      /** Dependencies (design.md R5): question ids. Work on this question waits (stage
+       * `waiting`) until each is closed verified; an empty list means none. */
+      after: z.array(ref).max(20).default([]),
     })
     .strict(),
   z

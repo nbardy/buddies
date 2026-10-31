@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { ClaimChange } from './charter';
+import { resolvesOnPath } from './command';
 import type { IntegrationRefusal, Release, Repo, WorktreeAt } from './ledger';
 
 // The expedition's git I/O: preflight, the expedition branch, one Cambium worktree per work attempt.
@@ -55,23 +56,38 @@ async function must(ran: Promise<GitRun>, what: string): Promise<string> {
   return done.stdout;
 }
 
-/** Launch preflight (κ at the boundary, design.md R4, minimal): a refusal names every reason. */
+/** Launch preflight (κ at the boundary, design.md R4): a refusal names every reason. */
 export type Preflight =
   | { t: 'ready'; root: string; baseSha: string }
   | { t: 'refused'; reasons: string[] };
 
-export async function preflight(workspaceRoot: string): Promise<Preflight> {
+/**
+ * Refuses a launch unless the workspace root is a git repository, its base commit (HEAD)
+ * resolves, `git cambium` is available, and every command check's `argv[0]` resolves (`bins`,
+ * command.ts resolvesOnPath). It never runs a check: checks may be paid GPU runs.
+ */
+export async function preflight(workspaceRoot: string, bins: string[]): Promise<Preflight> {
   const [top, head, tool] = await Promise.all([
     git(workspaceRoot, ['rev-parse', '--show-toplevel']),
     git(workspaceRoot, ['rev-parse', '--verify', 'HEAD^{commit}']),
     cambium(workspaceRoot, ['version']),
   ]);
-  if (top.t === 'ok' && head.t === 'ok' && tool.t === 'ok')
+  const repoRoot = top.t === 'ok' ? top.stdout : workspaceRoot;
+  const missing = (
+    await Promise.all(
+      [...new Set(bins)].map(async (bin) => ((await resolvesOnPath(bin, repoRoot)) ? [] : [bin]))
+    )
+  ).flat();
+  if (top.t === 'ok' && head.t === 'ok' && tool.t === 'ok' && missing.length === 0)
     return { t: 'ready', root: top.stdout, baseSha: head.stdout };
   const reasons = [
     top.t === 'failed' ? `workspace root ${workspaceRoot} is not a git repository` : '',
     head.t === 'failed' ? 'the base commit (HEAD) does not resolve' : '',
     tool.t === 'failed' ? '`git cambium` is not available' : '',
+    ...missing.map(
+      (bin) =>
+        `command check executable \`${bin}\` is not found (not on PATH, nor an executable file in the repository)`
+    ),
   ].filter(Boolean);
   return { t: 'refused', reasons };
 }

@@ -11,16 +11,34 @@ export type ExpeditionRun =
       summary: string;
     };
 
+/** Where a question stands, derived from the ledger (design.md R5): its furthest stage.
+ * `waiting`: its work is queued until the questions in `after` are verified (held, not failed). */
+export type ExpeditionStage =
+  | 'planned'
+  | 'waiting'
+  | 'implementing'
+  | 'claimed'
+  | 'checked'
+  | 'validated'
+  | 'integrated'
+  | 'dead';
+
 export interface ExpeditionQuestion {
   id: string;
   title: string;
   detail: string;
   scope: 'in' | 'explore' | 'parked';
   status: 'open' | 'verified' | 'dead';
+  stage: ExpeditionStage;
   /** File custody: repo-relative prefixes; work on overlapping paths runs one at a time. */
   paths: string[];
+  /** Question ids this question's work waits for (each must be closed verified). */
+  after: string[];
   attempts: string[];
 }
+
+/** A worker attempt's own git worktree (design.md R1); none for a manager or before admission. */
+export type ExpeditionWorktree = { t: 'none' } | { t: 'tree'; branch: string; path: string };
 
 export interface ExpeditionAttempt {
   id: string;
@@ -35,6 +53,7 @@ export interface ExpeditionAttempt {
   brief: string | null;
   outcome: string | null;
   requestId: string | null;
+  worktree: ExpeditionWorktree;
 }
 
 /** A done check as chartered (design.md R2): a command the host runs, or a judged statement. */
@@ -47,10 +66,22 @@ export type ExpeditionDone = { t: 'checks'; checks: ExpeditionDoneCheck[] } | { 
 /** One host validation: the command checks run on a claim's commit or on the branch head. */
 export interface ExpeditionValidation {
   id: string;
+  /** What it ran on: a claim's candidate commit (shown with that attempt) or the branch head. */
+  subject: { t: 'candidate'; claimAttemptId: string } | { t: 'head' };
   /** e.g. `candidate 1a2b3c4d5e of w12` or `the head 1a2b3c4d5e`, with its verdict. */
   label: string;
   verdict: 'running' | 'passed' | 'failed';
-  checks: { checkIndex: number; outcome: string }[];
+  /** One per recorded command check; `outcome` is `passed` or names the exit code / error. */
+  checks: { checkIndex: number; passed: boolean; outcome: string }[];
+}
+
+/** The expedition's own branch (design.md R3): what was merged into it, and the last refusal. */
+export interface ExpeditionIntegration {
+  branch: string;
+  head: string;
+  integrated: number;
+  queued: number;
+  lastRefusal: { t: 'none' } | { t: 'refused'; label: string };
 }
 
 export interface ExpeditionView {
@@ -61,6 +92,7 @@ export interface ExpeditionView {
   goal: string;
   done: ExpeditionDone;
   validations: ExpeditionValidation[];
+  integration: ExpeditionIntegration;
   inScope: string[];
   outOfScope: string[];
   workspaceId: string;
