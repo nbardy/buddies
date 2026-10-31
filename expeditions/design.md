@@ -236,3 +236,71 @@ Before building the engine:
    without stalling, whether scope held (parking lot vs. what was built).
 4. Build the engine only if B clearly wins, with Integrate and External jobs
    included from the start.
+
+## Revision 2 — after the geometry swarm retrospective (2026-11-01)
+
+Source: the October 31 retrospective of Oompa swarm `cf9ea773` (G1/G2). Its parallel
+implementation and independent review worked; its path from reviewed candidate to accepted,
+merged work failed (a dirty *shared* checkout blocked validation of isolated candidates,
+refusals left no journal, no supported resume, stages were misreported, cost was unmeasured).
+Expeditions as first built had no integration step at all and relied on prompts for isolation,
+so they would have failed the same way. These changes make that path mechanical and host-owned.
+Positioning: an expedition owns the fuzzy front (decompose, write contracts/validators); a fully
+specified packet can be executed mechanically and judged by an executable check.
+
+### R1. Isolation is structural, not a prompt
+- Before a work attempt is briefed, the host creates its worktree:
+  `git cambium add -b exp/<id>/<attemptId> -name exp-<id>-<attemptId> -ephemeral <worktree path>`
+  from the expedition's integration branch head, in the workspace's repository. Intent is in the
+  ledger (`worktree_ready {attemptId, path, branch, baseSha}`) before the brief is posted; the brief
+  names the path and says to work and commit only there. The shared checkout is never edited.
+- Questions declare file custody (`paths: string[]`, repo-relative prefixes). The host never runs
+  two work attempts with overlapping custody at once; overlapping ones wait (queued, not refused).
+- All git/process calls are async (`execFile`/`spawn`), never sync on the server loop.
+
+### R2. Checks are typed: executable or judged
+```
+DoneCheck = { kind: 'command', argv: string[], timeoutSeconds: number }   // host-run
+          | { kind: 'judged', text: string }                               // blind LLM panel
+Done      = { checks: DoneCheck[] } | { ownerJudgment: true }
+```
+- A code claim must name its candidate commit (`commit: sha`). The host validates that immutable
+  commit in a fresh clean worktree (never the worker's tree, never the shared checkout): it runs
+  every `command` check with a timeout and records `validation {targetSha, check, outcome}` where
+  outcome = `passed | failed {exitCode, tail} | timed_out | error {message}`.
+- Done requires: every `command` check passed on the integration head AND the latest goal panel
+  verified the `judged` items by strict majority (when there are any).
+- Reflection never edits checks; the host is the only runner of command checks.
+
+### R3. Integration onto the expedition's own branch, serialized
+- Each expedition owns `expedition/<id>` (created at launch from the base commit) and one clean
+  integration worktree. A manager action `{do:'integrate', claimAttempt}` is accepted only for a
+  claim with a commit whose candidate validation passed (and whose panel verified, if one ran).
+- The host merges one candidate at a time (`git merge --no-ff <sha>`). A conflict aborts the merge
+  and records `integration_refused {phase:'merge', paths}`; success records
+  `integrated {sha, mergeSha}`. Every refusal records its phase and identities — never a pointer
+  to a log that does not exist.
+- The owner's main is never written. At done, the owner is told the branch to merge.
+
+### R4. Preflight at launch (κ at the boundary)
+Launch is refused with typed reasons unless: the workspace root is a git repository, the base
+commit resolves, `git cambium` is available, and every `command` check's `argv[0]` resolves on
+PATH. Preflight does not run the checks (they may be paid GPU runs).
+
+### R5. Dependencies and honest stages
+- `add_question` takes `after: string[]` (question ids). Work on a question whose dependencies
+  are not verified waits (stage `waiting`), it is not refused or silently run.
+- Every question shows one derived stage:
+  `planned | waiting | implementing | claimed | checked | validated | integrated | dead`.
+  Reports count stages separately; held/waiting is never reported as failed.
+
+### R6. Measured cost
+Each ended attempt records its measured usage when the run exposes it
+(`cost: {t:'measured', inputTokens, outputTokens, usd?} | {t:'unmeasured', reason}`); totals show on
+the page. Nothing is estimated or fabricated.
+
+### R7. Kickoff
+A Buddy suggests an expedition when the four tests hold and launches only when asked. The owner
+says, in any thread, DM or channel: *"Launch an expedition: <goal>. Done when <checks>. Budget
+<N> attempts."* The Buddy drafts the charter (asking only for missing done checks), launches, and
+the badge appears in that chat.
