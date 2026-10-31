@@ -7,8 +7,9 @@ import type { ExpeditionView } from '@unleashd/shared';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
+import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
-import { CREW_ROLE, briefOf, parseOutcome, statusText } from './briefs';
+import { CREW_ROLE, briefOf, chatFeedback, parseOutcome, statusText } from './briefs';
 import { runCommand } from './command';
 import {
   branchHead,
@@ -40,6 +41,7 @@ import {
   claimOf,
   commandChecks,
   configOf,
+  custodyOf,
   decide,
   fold,
   integrationOf,
@@ -58,6 +60,8 @@ import { expeditionView } from './view';
 // derived from the expedition and attempt/status id, so replaying an effect after a crash is a no-op.
 
 const BACKSTOP_MS = 60_000;
+/** Chat posts read per page when looking for new owner messages. */
+const CHAT_PAGE = 50;
 const DEBOUNCE_MS = 1_500;
 /** Ticks re-run decide after effects (crew created → first manager); bounded per tick. */
 const ROUNDS_PER_TICK = 4;
@@ -82,6 +86,61 @@ export interface ExpeditionHostOptions {
 
 export type ExpeditionHost = ReturnType<typeof createExpeditionHost>;
 
+/** The chain launches run on (never an expedition id: those are `<slug>-<hex>`). */
+const LAUNCH_CHAIN = 'launch:';
+
+/** A host whose gate is disabled (a copied store) never runs an expedition, so it refuses one. */
+function gateIssues(gate: ExecutionGate): string[] {
+  switch (gate.t) {
+    case 'enabled':
+      return [];
+    case 'disabled':
+      return [`expeditions do not run on this server: ${gate.reason}`];
+  }
+}
+
+/** Each crew seat checked against the provider catalog (worker-config.ts): one issue per seat. */
+function seatIssues(charter: Charter): string[] {
+  const { crew } = charter;
+  return [crew.manager, ...crew.work, ...crew.check].flatMap((seat) => {
+    try {
+      checkedRunConfig(seat);
+      return [];
+    } catch (error) {
+      return [(error as Error).message];
+    }
+  });
+}
+
+/** What the host knows of an expedition id: a ledger it folds, one it set aside because it does
+ * not fold (named, with the reason; the other expeditions keep running), or none. */
+export type Lookup = { t: 'present' } | { t: 'quarantined'; reason: string } | { t: 'missing' };
+
+/** A launch with this (conversation, name) key is still open: the retried call gets it back. */
+export type Launched = { t: 'launched'; state: State } | { t: 'already_running'; state: State };
+
+/**
+ * One ledger line is one append: the batch of entries written together (a decide batch with its
+ * `manager_applied`, an intent, an effect's result). A crash during `appendFile` leaves at most a
+ * torn LAST line, which is a batch that never landed: boot cuts it off (its effect had not run,
+ * or replays idempotently), so a batch is applied whole or not at all.
+ */
+type LedgerFile = { t: 'read'; entries: Entry[]; torn: number } | { t: 'corrupt'; reason: string };
+
+function readLedgerFile(file: string): LedgerFile {
+  // Sync fs at boot only (createExpeditionHost runs once, before any tick).
+  const bytes = fs.readFileSync(file);
+  const end = bytes.lastIndexOf(0x0a) + 1;
+  const torn = bytes.length - end;
+  if (torn > 0) fs.truncateSync(file, end);
+  const lines = bytes.subarray(0, end).toString('utf8').split('\n').filter(Boolean);
+  try {
+    return { t: 'read', entries: lines.flatMap((line) => JSON.parse(line) as Entry[]), torn };
+  } catch (error) {
+    return { t: 'corrupt', reason: `unreadable line: ${(error as Error).message}` };
+  }
+}
+
 /** A launch the preflight refused (design.md R4), with every reason; nothing was written. */
 export class LaunchRefused extends Error {
   constructor(readonly reasons: string[]) {
@@ -93,6 +152,13 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   const { core, events, root, gate, meter } = options;
   const now = () => (options.now ?? (() => new Date()))().toISOString();
   const ledgers = new Map<string, Entry[]>();
+  /** Ledgers that do not fold, with why. Set aside, never deleted: the file stays for the owner. */
+  const quarantined = new Map<string, string>();
+  const quarantine = (id: string, reason: string) => {
+    console.warn(`[expeditions] ${id} quarantined: ${reason}`);
+    ledgers.delete(id);
+    quarantined.set(id, reason);
+  };
   const chains = new Map<string, Promise<void>>();
   /** Validation check jobs running in this process, by `<expedition>/<validation>`. They run
    * outside the tick chain (a check may take hours; a steer must not wait on it) and append each
@@ -102,33 +168,53 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   const jobKey = (id: string, validationId: string) => `${id}/${validationId}`;
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 
-  // Boot: read every ledger once; ticks resume what they explain.
-  for (const id of fs.readdirSync(root)) {
-    const file = path.join(root, id, 'ledger.jsonl');
-    if (!fs.existsSync(file)) continue;
-    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    ledgers.set(
-      id,
-      lines.map((line) => JSON.parse(line) as Entry)
-    );
-  }
-
   const fileOf = (id: string) => path.join(root, id, 'ledger.jsonl');
+  /** One line per batch (see readLedgerFile): a batch lands whole or, torn, not at all. */
+  const line = (entries: Entry[]) => `${JSON.stringify(entries)}\n`;
   async function append(id: string, entries: Entry[]): Promise<void> {
     if (entries.length === 0) return;
     const ledger = ledgers.get(id);
     if (!ledger) throw new Error(`unknown expedition ${id}`);
-    // One write per batch: a decide batch (actions + manager_applied) lands together.
-    await fsp.appendFile(fileOf(id), entries.map((e) => `${JSON.stringify(e)}\n`).join(''), {
-      mode: 0o600,
-    });
+    await fsp.appendFile(fileOf(id), line(entries), { mode: 0o600 });
     ledger.push(...entries);
   }
   const stateOf = (id: string): State => {
     const ledger = ledgers.get(id);
-    if (!ledger) throw new Error(`unknown expedition ${id}`);
+    if (!ledger) {
+      const reason = quarantined.get(id);
+      throw new Error(
+        reason ? `expedition ${id} is quarantined: ${reason}` : `unknown expedition ${id}`
+      );
+    }
     return fold(ledger);
   };
+  /** The state, or none when the ledger no longer folds (a broken invariant): quarantined. */
+  function foldOrQuarantine(id: string): State | undefined {
+    try {
+      return stateOf(id);
+    } catch (error) {
+      quarantine(id, `does not fold: ${(error as Error).message}`);
+      return undefined;
+    }
+  }
+
+  // Boot: read every ledger once; ticks resume what they explain. A ledger that cannot be read
+  // or folded is quarantined, so one bad file never stops the server or the other expeditions.
+  for (const id of fs.readdirSync(root)) {
+    const file = path.join(root, id, 'ledger.jsonl');
+    if (!fs.existsSync(file)) continue;
+    const read = readLedgerFile(file);
+    switch (read.t) {
+      case 'corrupt':
+        quarantine(id, read.reason);
+        continue;
+      case 'read':
+        if (read.torn > 0)
+          console.warn(`[expeditions] ${id}: dropped a torn last append (${read.torn} bytes)`);
+        ledgers.set(id, read.entries);
+        foldOrQuarantine(id);
+    }
+  }
 
   const clock = (): Clock => ({
     now: now(),
@@ -138,7 +224,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   // ---------- Observation: settled requests become attempt_ended ----------
 
   async function observe(s: State): Promise<Entry[]> {
-    const out: Entry[] = [];
+    const out: Entry[] = [...(await observeChat(s))];
     for (const attempt of s.attempts) {
       if (attempt.phase.t !== 'posted') continue;
       const request = await core.getPost(OWNER, attempt.phase.requestId);
@@ -176,9 +262,47 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   }
 
   /**
+   * The owner's messages in the expedition chat (the owner↔crew DM) since the last one recorded,
+   * oldest first, each as a `feedback` entry (briefs.ts chatFeedback): answering "needs you" in
+   * the chat resumes the run, and pause/resume/stop work there, without the steer tool. Keyed by
+   * the post's ordered id (the ledger's chat cursor), so a replay never records one twice.
+   */
+  async function observeChat(s: State): Promise<Entry[]> {
+    if (s.crew.t !== 'ready' || s.run.t === 'finished') return [];
+    const posts = await chatPostsAfter(s.crew.chatChannelId, s.chatCursor);
+    return posts
+      .filter((p) => p.author.kind === 'owner')
+      .map(
+        (p): Entry => ({
+          t: 'feedback',
+          at: now(),
+          from: 'owner',
+          via: { t: 'chat', postId: p.id, ord: p.ord },
+          feedback: chatFeedback(p.body),
+        })
+      );
+  }
+
+  /** The chat's top-level posts newer than the cursor, oldest first (pages newest-first). */
+  async function chatPostsAfter(channelId: string, cursor: State['chatCursor']) {
+    const newer = (ord: string) => cursor.t === 'start' || ord > cursor.ord;
+    const out: Awaited<ReturnType<BuddiesCore['listPosts']>>['posts'] = [];
+    let before: { ord: string } | undefined;
+    for (;;) {
+      const page = await core.listPosts(OWNER, { kind: 'channel', channelId }, before, CHAT_PAGE);
+      const fresh = page.posts.filter((p) => newer(p.ord));
+      out.push(...fresh);
+      if (!page.next || fresh.length < page.posts.length) break;
+      before = page.next;
+    }
+    return out.reverse();
+  }
+
+  /**
    * A work claim's `change` is checked against its own attempt branch (git.ts claimHeld); one the
    * branch does not hold is recorded `malformed` with the reason, so the manager sees it and it is
-   * never validated, checked or integrated on the claim's word alone.
+   * never validated, checked or integrated on the claim's word alone. A commit that edits files
+   * outside its question's custody is not held either: custody is enforced, not advisory.
    */
   async function heldOutcome(
     s: State,
@@ -188,7 +312,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   ): Promise<Outcome> {
     if (outcome.t !== 'work' || outcome.result.result !== 'claim') return outcome;
     const tree = worktreeOf(s, attemptId);
-    const held = await claimHeld(s.repo.root, tree, outcome.result.change);
+    const custody = custodyOf(s, attemptOf(s, attemptId));
+    const held = await claimHeld(s.repo.root, tree, outcome.result.change, custody);
     switch (held.t) {
       case 'held':
         return outcome;
@@ -238,7 +363,13 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         return createWorktree(s, effect.attemptId);
       case 'release_worktree': {
         const tree = worktreeOf(s, effect.attemptId);
-        const release = await releaseWorktree(s.repo.root, tree.name, tree, effect.keepCommits);
+        const release = await releaseWorktree(
+          s.repo.root,
+          tree.name,
+          tree,
+          effect.keepCommits,
+          s.repo.branch
+        );
         return [{ t: 'worktree_released', at: now(), attemptId: effect.attemptId, release }];
       }
       case 'start_validation': {
@@ -522,11 +653,14 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   }
 
   /** Runs `work` on the expedition's chain: after every earlier tick and append, before later ones. */
-  function serialized(id: string, work: () => Promise<void>): Promise<void> {
+  function serialized<T>(id: string, work: () => Promise<T>): Promise<T> {
     const next = (chains.get(id) ?? Promise.resolve()).then(work);
     chains.set(
       id,
-      next.catch(() => undefined)
+      next.then(
+        () => undefined,
+        () => undefined
+      )
     );
     return next;
   }
@@ -540,10 +674,11 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   // A finished expedition stays active while it owes effects (its last status, worktree removal)
   // or has live attempts: their ends are still observed, and only then are their trees released.
+  // A ledger that stops folding is quarantined here, so it never stops the others' ticks.
   const active = () =>
     [...ledgers.keys()].filter((id) => {
-      const s = stateOf(id);
-      return s.run.t !== 'finished' || live(s).length > 0 || pendingEffects(s).length > 0;
+      const s = foldOrQuarantine(id);
+      return !!s && (s.run.t !== 'finished' || live(s).length > 0 || pendingEffects(s).length > 0);
     });
   const tickAll = () => Promise.all(active().map(tick)).then(() => undefined);
 
@@ -552,6 +687,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     debounce = null;
     void tickAll();
   });
+  // A disabled gate (a copied store, execution-gate.ts) never ticks; launch and steer refuse.
   const enabled = gate.t === 'enabled';
   const unsubscribe = enabled
     ? events.on((event) => {
@@ -570,13 +706,18 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   backstop?.unref();
   if (enabled) void tickAll();
 
-  /** Launch preflight (design.md R4) plus the charter's own refusals; reads only. */
+  /**
+   * Every reason a launch of this charter is refused, in one list (draft and launch share it):
+   * execution disabled on this host, the R4 preflight, the charter's own refusals and each crew
+   * seat against the provider catalog. Reads only.
+   */
   async function preflightOf(workspaceId: string, charter: Charter) {
+    const issues = [...gateIssues(gate), ...charterIssues(charter), ...seatIssues(charter)];
     const workspace = (await core.listWorkspaces()).find((w) => w.id === workspaceId);
-    if (!workspace) return { t: 'refused' as const, reasons: [`no workspace ${workspaceId}`] };
+    if (!workspace)
+      return { t: 'refused' as const, reasons: [`no workspace ${workspaceId}`, ...issues] };
     const bins = commandChecks(charter).map(({ check }) => check.argv[0]);
     const checked = await preflight(workspace.rootPath, bins);
-    const issues = charterIssues(charter);
     switch (checked.t) {
       case 'refused':
         return { t: 'refused' as const, reasons: [...checked.reasons, ...issues] };
@@ -585,53 +726,71 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
+  /**
+   * One launch per (conversation, name) while it is open: a retried tool call gets the running
+   * expedition back as `already_running`; once that one finished, the same name launches anew.
+   */
+  async function launchOnce(input: LaunchInput): Promise<Launched> {
+    const prior = [...ledgers.keys()]
+      .map(stateOf)
+      .find((s) => s.key === input.key && s.run.t !== 'finished');
+    if (prior) return { t: 'already_running', state: prior };
+    const checked = await preflightOf(input.workspaceId, input.charter);
+    if (checked.t === 'refused') throw new LaunchRefused(checked.reasons);
+    const id = `${input.charter.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 24)}-${randomUUID().slice(0, 6)}`;
+    await fsp.mkdir(path.join(root, id), { recursive: true, mode: 0o700 });
+    const repo = { root: checked.root, baseSha: checked.baseSha, branch: `expedition/${id}` };
+    // The integration tree is named here, in the launch entry: its create replays from it.
+    const integrationTree = {
+      name: worktreeName(id, 'integration'),
+      path: path.join(root, id, 'integration'),
+    };
+    // One batch: `launched` and the launch status (the badge in the thread from the first
+    // second). The ledger joins the map only once that line is on disk, so every ledger in the
+    // map folds and no tick ever meets a half-written launch.
+    const first: Entry[] = [
+      { t: 'launched', at: now(), id, ...input, repo, integrationTree },
+      {
+        t: 'status',
+        at: now(),
+        seq: 0,
+        text: `⛺ Launched: ${input.charter.goal.slice(0, 300)}\nPlanning…`,
+      },
+    ];
+    await fsp.appendFile(fileOf(id), line(first), { mode: 0o600 });
+    ledgers.set(id, first);
+    await tick(id);
+    return { t: 'launched', state: stateOf(id) };
+  }
+
   return {
     /** What a launch of this charter would refuse, without writing anything (the `draft`). */
     async issues(workspaceId: string, charter: Charter): Promise<string[]> {
       const checked = await preflightOf(workspaceId, charter);
       return checked.t === 'refused' ? checked.reasons : [];
     },
-    async launch(input: LaunchInput): Promise<State> {
-      const prior = [...ledgers.keys()].map(stateOf).find((s) => s.key === input.key);
-      if (prior) return prior;
-      const checked = await preflightOf(input.workspaceId, input.charter);
-      if (checked.t === 'refused') throw new LaunchRefused(checked.reasons);
-      const id = `${input.charter.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 24)}-${randomUUID().slice(0, 6)}`;
-      await fsp.mkdir(path.join(root, id), { recursive: true, mode: 0o700 });
-      // The ledger joins the map only once its `launched` line is on disk: every ledger in the
-      // map folds (a concurrent tick or launch never meets an empty one).
-      const repo = { root: checked.root, baseSha: checked.baseSha, branch: `expedition/${id}` };
-      // The integration tree is named here, in the launch entry: its create replays from it.
-      const integrationTree = {
-        name: worktreeName(id, 'integration'),
-        path: path.join(root, id, 'integration'),
-      };
-      const launched: Entry = { t: 'launched', at: now(), id, ...input, repo, integrationTree };
-      await fsp.appendFile(fileOf(id), `${JSON.stringify(launched)}\n`, { mode: 0o600 });
-      ledgers.set(id, [launched]);
-      // The launch status: the badge in the thread from the first second.
-      await append(id, [
-        {
-          t: 'status',
-          at: now(),
-          seq: 0,
-          text: `⛺ Launched: ${input.charter.goal.slice(0, 300)}\nPlanning…`,
-        },
-      ]);
-      if (enabled) await tick(id);
-      return stateOf(id);
-    },
+    /** Serialized: two concurrent launches with one key cannot both pass the lookup. */
+    launch: (input: LaunchInput): Promise<Launched> =>
+      serialized(LAUNCH_CHAIN, () => launchOnce(input)),
     async steer(id: string, from: string, feedback: Feedback): Promise<State> {
+      if (gate.t === 'disabled') throw new Error(gateIssues(gate).join('; '));
       stateOf(id);
-      await append(id, [{ t: 'feedback', at: now(), from, feedback }]);
-      if (enabled) await tick(id);
+      // Through the chain: a steer never interleaves its write with a running tick's.
+      await serialized(id, () =>
+        append(id, [{ t: 'feedback', at: now(), from, via: { t: 'tool' }, feedback }])
+      );
+      await tick(id);
       return stateOf(id);
     },
-    has: (id: string) => ledgers.has(id),
+    lookup(id: string): Lookup {
+      const reason = quarantined.get(id);
+      if (reason) return { t: 'quarantined', reason };
+      return ledgers.has(id) ? { t: 'present' } : { t: 'missing' };
+    },
     view(id: string): ExpeditionView {
       const s = stateOf(id);
       return expeditionView(s, badge(s, now()), now());

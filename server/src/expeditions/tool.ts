@@ -2,12 +2,11 @@ import type { BuddiesCore } from '@unleashd/buddies-core';
 import { z } from 'zod';
 import type { BuddyGrant } from '../buddies/grants';
 import type { ToolDeps } from '../buddies/mcp';
-import { checkedRunConfig } from '../buddies/worker-config';
-import { type ExpeditionHost, LaunchRefused } from './host';
+import type { ExpeditionHost, Launched } from './host';
 import {
-  type Charter,
   CharterRequest,
   type Origin,
+  type State,
   charterAdvice,
   charterOf,
   charterSummary,
@@ -42,17 +41,34 @@ async function originOf(core: BuddiesCore, grant: BuddyGrant): Promise<Origin> {
   return { t: 'thread', channelId: trigger.channelId, rootId: trigger.rootId ?? trigger.id };
 }
 
-/** Each crew seat checked against the provider catalog (worker-config.ts): one issue per seat. */
-function seatIssues(charter: Charter): string[] {
-  const { crew } = charter;
-  return [crew.manager, ...crew.work, ...crew.check].flatMap((seat) => {
-    try {
-      checkedRunConfig(seat);
-      return [];
-    } catch (error) {
-      return [(error as Error).message];
-    }
-  });
+/** A crew Buddy runs its own expedition's attempts: it may read status, never launch or steer
+ * (a worker could otherwise resume a run the owner paused, or stop it). */
+function notCrew(host: ExpeditionHost, grant: BuddyGrant, what: string): void {
+  if (host.ofCrew(grant.buddyId)) throw new Error(`an expedition crew cannot ${what} expeditions`);
+}
+
+/** A markdown link renders clickable in every chat surface, DM transcripts included. */
+const linkOf = (s: State) => `[⛺ ${s.charter.name}](/expeditions/${s.id})`;
+
+function launchReply(launched: Launched, defaulted: string[]) {
+  switch (launched.t) {
+    case 'launched':
+      return {
+        id: launched.state.id,
+        link: linkOf(launched.state),
+        launched: charterSummary(launched.state.charter),
+        defaulted,
+        next: 'Share the link with the owner. The badge and every update post on their own; the owner steers by replying in the expedition chat.',
+      };
+    case 'already_running':
+      // Not a fresh launch: the charter is the running one's, so no defaults are reported.
+      return {
+        id: launched.state.id,
+        link: linkOf(launched.state),
+        alreadyRunning: `An expedition named "${launched.state.charter.name}" launched from this conversation is still ${launched.state.run.t}; nothing new was launched. Stop it first, or use another name.`,
+        running: charterSummary(launched.state.charter),
+      };
+  }
 }
 
 function ownedBy(host: ExpeditionHost, grant: BuddyGrant, id: string): string {
@@ -69,7 +85,7 @@ export async function expeditionHandler(
   switch (action.do) {
     case 'draft': {
       const { charter, defaulted } = charterOf(action.charter);
-      const issues = [...seatIssues(charter), ...(await host.issues(grant.workspaceId, charter))];
+      const issues = await host.issues(grant.workspaceId, charter);
       return {
         ready: issues.length === 0,
         issues,
@@ -79,32 +95,23 @@ export async function expeditionHandler(
       };
     }
     case 'launch': {
-      if (host.ofCrew(grant.buddyId))
-        throw new Error('an expedition crew cannot launch expeditions');
+      notCrew(host, grant, 'launch');
       const { charter, defaulted } = charterOf(action.charter);
-      const seats = seatIssues(charter);
-      if (seats.length > 0) throw new LaunchRefused(seats);
-      const state = await host.launch({
+      const launched = await host.launch({
         key: `${grant.conversationId}:${charter.name}`,
         charter,
         origin: await originOf(core, grant),
         launcherId: grant.buddyId,
         workspaceId: grant.workspaceId,
       });
-      // A markdown link renders clickable in every chat surface, DM transcripts included.
-      return {
-        id: state.id,
-        link: `[⛺ ${state.charter.name}](/expeditions/${state.id})`,
-        launched: charterSummary(state.charter),
-        defaulted,
-        next: 'Share the link with the owner. The badge and every update post on their own; steer with lessons.',
-      };
+      return launchReply(launched, defaulted);
     }
     case 'status':
       return host.status(ownedBy(host, grant, action.id));
     case 'list':
       return host.list(grant.workspaceId);
     case 'steer': {
+      notCrew(host, grant, 'steer');
       const id = ownedBy(host, grant, action.id);
       await host.steer(id, grant.buddyId, action.feedback);
       return host.status(id);

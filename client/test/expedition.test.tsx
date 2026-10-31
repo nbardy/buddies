@@ -122,10 +122,9 @@ const view: ExpeditionView = {
       label: 'work on q1 (codex)',
       seat: 'codex',
       questionId: 'q1',
-      phase: 'ended',
+      phase: { t: 'ended', outcome: 'CLAIM: fixed' },
       live: false,
       brief: 'Patch the widget.',
-      outcome: 'CLAIM: fixed',
       requestId: 'post-0',
       worktree: { t: 'tree', branch: 'exp/widget-abc123/w0', path: '/x/w0' },
       cost: { t: 'unmeasured', reason: 'muse records no token usage (session s1)' },
@@ -136,10 +135,9 @@ const view: ExpeditionView = {
       label: 'work on q1 (claude)',
       seat: 'claude',
       questionId: 'q1',
-      phase: 'posted',
+      phase: { t: 'posted' },
       live: true,
       brief: 'Bisect the last ten commits.',
-      outcome: null,
       requestId: 'post-1',
       worktree: { t: 'tree', branch: 'exp/widget-abc123/w1', path: '/x/w1' },
       cost: { t: 'none' },
@@ -186,4 +184,21 @@ test('the expedition page leads with its state, the owner question, and live wor
   assert.doesNotMatch(html, /\$\d/);
   // Lean: reflections and tasks are one click away, not on the first screen.
   assert.doesNotMatch(html, /Two approaches fail the same way\./);
+});
+
+// The narrow page opens on the chat. Before the crew Buddy exists there is no chat yet, and the
+// first screen was blank (review 2026-11-01): it must say what is happening instead.
+test('before the crew exists, the chat area says the crew is starting instead of rendering nothing', async () => {
+  const starting: ExpeditionView = { ...view, id: 'widget-new000', crew: { t: 'pending' } };
+  await loadResource({ key: expeditionUrl(starting.id), load: async () => starting });
+  const html = renderToStaticMarkup(
+    <Provider store={jotaiStore}>
+      <MemoryRouter initialEntries={[`/expeditions/${starting.id}`]}>
+        <Routes>
+          <Route path="/expeditions/:id" element={<ExpeditionPage layout="narrow" />} />
+        </Routes>
+      </MemoryRouter>
+    </Provider>
+  );
+  assert.match(html, /Starting the crew/);
 });

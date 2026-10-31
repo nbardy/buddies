@@ -12,7 +12,9 @@ lives in the Buddy briefing (`BUDDY_TOOL_GUIDE`, server/src/buddies/briefing.ts)
 ```
 expedition({ action })
   { do:'draft',  charter: CharterRequest }  → { ready, issues[], advice[], defaulted[], charter }   // launches nothing
-  { do:'launch', charter: CharterRequest }  → { id, link, launched, defaulted[], next } | error listing every refusal
+  { do:'launch', charter: CharterRequest }  → { id, link, launched, defaulted[], next }
+                                            | { id, link, alreadyRunning, running }   // same name from this conversation, still open
+                                            | error listing every refusal
   { do:'status', id }                       → status text (badge, charter, questions, stages, attempts, validations, integration, cost)
   { do:'list' }                             → [{ id, badge }]
   { do:'steer', id, feedback }              // feedback: {t:'lesson'|'note', text} | {t:'pause'|'resume'|'stop'}
@@ -24,14 +26,23 @@ named defaults when left out, and `defaulted` lists each one applied (never a si
 default crew (manager claude; work claude, codex; check codex, claude; provider default models).
 The ledger always stores the full charter.
 
-`issues` (draft) and launch refusals are the same checks: the workspace is a git repository with
-a base commit, `git cambium` is available, every command check's `argv[0]` resolves, every crew
+`issues` (draft) and launch refusals are the same list, built in one place (host.ts
+`preflightOf`): the server may run expeditions (its execution gate is enabled, so never a copied
+store), the workspace is a git repository with a base commit, `git cambium` is available, every
+command check's `argv[0]` resolves (a relative path with a slash must be an executable file
+committed at HEAD: checks run in a checkout of a commit), every crew
 seat is a known provider/model/effort that guarantees the Buddy tools, and every work seat has a
 check seat on another model (claims are never checked by their author's model). `advice` is
 non-blocking: no command check, no out-of-scope fence.
 
+Launch is idempotent per (conversation, name) while that expedition is open: a retry returns it
+as `alreadyRunning` (nothing new launched); once it finished, the same name launches a new one.
+
 Results go to the chat the launch came from (the badge) and to the expedition chat (the
-owner↔crew DM). A crew Buddy cannot launch expeditions. Not built: `ask`, `ledger`, the budget
+owner↔crew DM). The owner steers by writing in that chat: the host records each owner message as
+`feedback` (`pause`, `resume`, `stop`, `lesson: …`, else a note), no tool call needed. A crew
+Buddy cannot launch or steer expeditions (status only), and a Buddy sees and steers only its own
+workspace's expeditions. Not built: `ask`, `ledger`, the budget
 envelope and the AmendGoal/RaiseBudget proposals below.
 
 ## Original design (multi-tool)

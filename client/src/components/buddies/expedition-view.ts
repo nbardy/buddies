@@ -29,18 +29,18 @@ export function runLabel(run: ExpeditionRun): string {
 }
 
 export function attemptState(a: ExpeditionAttempt): string {
-  switch (a.phase) {
+  switch (a.phase.t) {
     case 'planned':
       return 'queued';
     case 'admitted':
       return 'starting';
     case 'dropped':
-      return a.outcome ?? 'not started';
+      return `not started: ${a.phase.reason}`;
     case 'posting':
     case 'posted':
       return 'running';
     case 'ended':
-      return a.outcome ?? 'ended';
+      return a.phase.outcome;
   }
 }
 
@@ -108,7 +108,9 @@ export const QUESTION_GLYPH: Record<ExpeditionQuestion['status'], string> = {
   dead: '✗',
 };
 
-export type Focus = 'workers' | 'tasks' | 'reflections' | 'charter' | 'chat';
+/** The panes beside the chat; the narrow layout also has the chat itself as a focus. */
+export type Pane = 'workers' | 'tasks' | 'reflections' | 'charter';
+export type Focus = Pane | 'chat';
 export const FOCI: { focus: Focus; label: string }[] = [
   { focus: 'workers', label: 'Workers' },
   { focus: 'tasks', label: 'Tasks' },

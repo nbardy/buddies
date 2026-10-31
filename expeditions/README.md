@@ -69,22 +69,36 @@ primitives, using the history only as evidence.
   `pnpm test wind` passes. Budget 20 attempts." (see [How to start one](#how-to-start-one)).
 - It plans, runs on its own, and puts a live **badge** in the chat:
   `⛺ e-wind · running · 4 live · 3 verified · 9/20 · 1.3M tokens`
-- Clicking the badge opens the **inspector**: questions, runs, results, timeline,
-  parking lot, self-reflection.
+- Clicking the badge opens the **page**: tasks with their honest stage, workers (each with its
+  exact instructions, branch, validations and result), reflections and the goal, beside the
+  expedition chat; the header carries the integration line (branch, head, merges, last refusal)
+  and the measured cost.
+- Answer it in that chat: `pause`, `resume`, `stop`, `lesson: …` (binding on every later brief),
+  or anything else as a note the manager reads next (it also answers a "needs you").
 - `@e-wind why did you drop the variational approach?` gets an answer citing runs.
-- When it ends, a **retro**: its self-assessment plus the owner's notes become
-  playbook rules, brief changes and tool issues.
+- Planned, not built: a timeline and parking-lot view, and a **retro** at the end (its
+  self-assessment plus the owner's notes become playbook rules, brief changes and tool issues).
 
 ## As built (2026-11-01, branch feat/expeditions)
 
+All engine code is under `server/src/expeditions/`. The pure core (no I/O) is re-exported by
+`model.ts`; `host.ts` is the only I/O shell.
+
 | Piece | Where |
 |---|---|
-| Engine: ledger, fold, decide, effects | `server/src/expeditions/model.ts`, `host.ts` |
-| Briefs (manager / work / blind check) and answer parsing | `server/src/expeditions/briefs.ts` |
-| Charter schema, launch defaults, draft issues/advice | `server/src/expeditions/charter.ts` |
-| The `expedition` Buddy tool (draft, launch, status, list, steer) | `server/src/expeditions/tool.ts` |
-| Measured attempt cost (tokens from the run's sessions) | `server/src/expeditions/meter.ts` |
-| Page data `GET /api/buddies/expeditions/:id` | `server/src/expeditions/view.ts`, `routes.ts`; type `shared/src/expedition.ts` |
+| Ledger: the `Entry` sum type, folded `State`, `fold`/`apply` | `ledger.ts` |
+| Decide: state → intent entries, every manager-action guardrail | `decide.ts` |
+| Effects: the idempotent writes a state licenses (admission, releases) | `effects.ts` |
+| Read-only queries (live, panels, custody, stages, seats) | `queries.ts` |
+| Badge, chat news lines, outcome/validation/integration labels, cost totals | `news.ts` |
+| Charter schema, launch defaults, draft issues/advice, answer schemas | `charter.ts` |
+| Briefs (manager / work / blind check), answer parsing, owner chat words | `briefs.ts` |
+| Host: ledger files, ticks, observation (runs and owner chat), effects, launch/steer | `host.ts` |
+| Git: preflight, Cambium worktrees, claim checks, merges, releases | `git.ts` |
+| Host-run command checks (curated env, process group, timeout) | `command.ts` |
+| Measured attempt cost (tokens from the run's sessions) | `meter.ts` |
+| The `expedition` Buddy tool (draft, launch, status, list, steer) | `tool.ts` |
+| Page data `GET /api/buddies/expeditions/:id` | `view.ts`, `routes.ts`; type `shared/src/expedition.ts` |
 | Badge chip in any post list (thread, DM, channel) | `client/src/components/buddies/ExpeditionBadge.tsx`, branch in `ChannelPostContent.tsx` |
 | Page `/expeditions/:id` (focus pane + chat) | `client/src/components/buddies/ExpeditionPage.tsx` |
 
@@ -92,7 +106,9 @@ Where things land:
 - **Badge**: one post (purpose `expedition_badge`, evidence `expedition:<id>`) in the chat the
   launch came from; the tool result also returns a markdown link (DM transcripts render it).
 - **Expedition chat**: the owner↔crew DM. Every update (questions, starts, results, checks,
-  reflections, lessons, needs-you, finish) is a crew post there; the owner's post wakes the crew.
+  reflections, lessons, needs-you, finish) is a crew post there. Each owner message there is
+  recorded by the host as steering (`feedback {via: chat}`): `pause`, `resume`, `stop`,
+  `lesson: …`, else a note; the crew only acknowledges it.
 - **Attempts**: requests in the crew's note-to-self DM (plumbing), shown on the page with their
   exact instructions.
 
@@ -119,6 +135,18 @@ the same checks without launching: preflight (repository, base commit, Cambium, 
 check's binary), crew seats against the provider catalog, a work seat with no independent check
 seat; plus advice (no command check, no out-of-scope fence).
 
+Safety boundaries (tested through the real MCP endpoint): a crew Buddy cannot launch or steer
+(it could otherwise resume a run the owner paused); another workspace's Buddy cannot see or
+steer an expedition; a host whose execution gate is disabled (a copied store) refuses launch and
+steer and never ticks; a relaunch of a still-open name returns `alreadyRunning`, a finished name
+launches anew. Recovery: each ledger line is one append batch, so a torn last line (crash during
+the append) is cut off whole at boot; a ledger that does not read or fold is quarantined (the
+page answers 409 with the reason) and the other expeditions keep running.
+
+Known gap (design.md R1): Buddy runs start in the workspace root, not the attempt's worktree; the
+brief sends the worker there. A run-level working directory needs the Buddies crate's
+`RunConfig`, outside this branch.
+
 Not built yet: external jobs (`Waiting(jobId)`), budget
 envelopes for Buddy launches, the retro/playbook loop, archiving finished crews.
 
@@ -144,6 +172,7 @@ Variants that work:
 - "This looks big. Should it be an expedition?" (the Buddy checks the four tests in mcp.md)
 
 After launch: the badge appears in the chat you asked in; click it for the page. Talk to the crew
-in its chat on that page (or ask your Buddy to steer it): a lesson ("never edit generated files") reaches every later brief;
-"pause", "resume" and "stop" do what they say. At done the finish post names the branch to merge;
-nothing is written to your checkout.
+in its chat on that page (or ask your Buddy to steer it): `lesson: never edit generated files`
+reaches every later brief; `pause`, `resume` and `stop` do what they say; anything else is a note
+the manager reads next, which is how you answer a "needs you". At done the finish post names the
+branch to merge; nothing is written to your checkout.

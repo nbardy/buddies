@@ -24,6 +24,9 @@ const prefixOverlap = (a: string, b: string) =>
   a === '.' || b === '.' || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 export const custodyOverlaps = (a: readonly string[], b: readonly string[]) =>
   a.some((x) => b.some((y) => prefixOverlap(x, y)));
+/** A repo-relative file is in custody when one prefix holds it (git.ts claimHeld). */
+export const withinCustody = (file: string, custody: readonly string[]) =>
+  custody.some((p) => p === '.' || file === p || file.startsWith(`${p}/`));
 
 /** A worker attempt's file custody: its question's paths for work, nothing for a check. */
 export function custodyOf(s: State, a: Attempt): readonly string[] {
@@ -102,12 +105,17 @@ export function panels(s: State): Panel[] {
 }
 export const verifiedPanels = (s: State) => panels(s).filter((p) => p.verdict === 'verified');
 
-export const goalVerified = (s: State) =>
+/** The newest goal panel (absent: no goal check was ever asked). */
+export const latestGoalPanel = (s: State): Panel | undefined =>
   panels(s)
     .filter((p) => p.goal)
-    .at(-1)?.verdict === 'verified';
+    .at(-1);
+/** A question is verified while its newest SETTLED panel verified it: a later panel that refuted
+ * the claim withdraws an earlier verification (a stale one must not unlock dependants, R5). */
 export const questionVerified = (s: State, questionId: string) =>
-  verifiedPanels(s).some((p) => p.questionId === questionId);
+  panels(s)
+    .filter((p) => p.questionId === questionId && p.verdict !== 'pending')
+    .at(-1)?.verdict === 'verified';
 
 /** The roster seat an attempt runs on. */
 export function configOf(c: Charter, spec: AttemptSpec): WorkerConfig {

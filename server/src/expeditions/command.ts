@@ -12,6 +12,9 @@ import type { CheckOutcome } from './ledger';
 
 /** The output kept per check: the end is where a failing test or compiler says why. */
 export const TAIL_CHARS = 4000;
+/** After the check exits (or is killed at its timeout), how long a straggler that escaped the
+ * process group (its own session, `setsid`) may hold the output pipes before they are closed. */
+export const PIPE_GRACE_MS = 2000;
 
 /**
  * The only server environment a check sees. A check runs code an agent wrote (the candidate
@@ -23,15 +26,16 @@ const checkEnv = (): NodeJS.ProcessEnv =>
   Object.fromEntries(CHECK_ENV.flatMap((k) => (k in process.env ? [[k, process.env[k]]] : [])));
 
 /**
- * Whether a check's `argv[0]` names an executable file the way `spawn` will look for it under
- * the check's environment (launch preflight, design.md R4; nothing is run): a bare name on the
- * server's PATH (the PATH a check gets), a path with a slash relative to the repository root (a
- * validation tree is a checkout of it) or absolute. A script the expedition itself is meant to
- * create cannot be named this way: run it through its interpreter (`["sh", "scripts/x.sh"]`).
+ * Whether a check's bare or absolute `argv[0]` names an executable file the way `spawn` will look
+ * for it under the check's environment (launch preflight, design.md R4; nothing is run): a bare
+ * name on the server's PATH (the PATH a check gets), or an absolute path. A relative path with a
+ * slash is resolved against the base commit instead (git.ts preflight). A script the expedition
+ * itself is meant to create cannot be named as argv[0]: run it through its interpreter
+ * (`["sh", "scripts/x.sh"]`).
  */
-export async function resolvesOnPath(bin: string, repoRoot: string): Promise<boolean> {
-  const candidates = bin.includes('/')
-    ? [path.resolve(repoRoot, bin)]
+export async function resolvesOnPath(bin: string): Promise<boolean> {
+  const candidates = path.isAbsolute(bin)
+    ? [bin]
     : (process.env.PATH ?? '')
         .split(path.delimiter)
         .filter((dir) => path.isAbsolute(dir))
@@ -88,23 +92,40 @@ export function runCommand(check: CommandCheck, cwd: string): Promise<CheckOutco
         // ESRCH: the group is already gone.
       }
     };
+    // A child that left the group (setsid) survives killGroup and may hold the pipes open, and
+    // 'close' waits for every pipe: without this the check never settles and the validation
+    // stalls with nothing in the ledger. Closing our ends lets 'close' fire.
+    let grace: NodeJS.Timeout | undefined;
+    const closePipesSoon = () => {
+      grace ??= setTimeout(
+        labelled('timer expedition-check-pipe-grace', () => {
+          child.stdout.destroy();
+          child.stderr.destroy();
+        }),
+        PIPE_GRACE_MS
+      );
+    };
     const timer = setTimeout(
       labelled('timer expedition-check-timeout', () => {
         timedOut = true;
         killGroup();
+        closePipesSoon();
       }),
       check.timeoutSeconds * 1000
     );
     child.on('error', (error) => {
       clearTimeout(timer);
+      clearTimeout(grace);
       resolve({ t: 'error', message: `${bin}: ${error.message}` });
     });
     child.on('exit', (code, signal) => {
       exit = { code, signal };
       killGroup();
+      closePipesSoon();
     });
     child.on('close', () => {
       clearTimeout(timer);
+      clearTimeout(grace);
       resolve(outcomeOf(timedOut, exit, tail));
     });
   });

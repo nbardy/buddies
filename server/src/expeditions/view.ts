@@ -1,5 +1,6 @@
 import type {
   ExpeditionAttemptCost,
+  ExpeditionAttemptPhase,
   ExpeditionDone,
   ExpeditionIntegration,
   ExpeditionValidation,
@@ -34,7 +35,7 @@ import {
 } from './model';
 
 // The expedition page's data: one pure projection of the folded ledger (no I/O), served by
-// GET /api/expeditions/:id. The page shows a few of these at a time; nothing here is derived twice.
+// GET /api/buddies/expeditions/:id. The page shows a few of these at a time; nothing here is derived twice.
 
 export function expeditionView(s: State, badgeLine: string, now: string): ExpeditionView {
   const c = s.charter;
@@ -83,10 +84,9 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       label: attemptLabel(s, a),
       seat: seatLabel(configOf(c, a.spec)),
       questionId: a.spec.kind === 'manager' ? null : a.spec.questionId,
-      phase: a.phase.t,
+      phase: phaseView(a.phase),
       live: live(s).some((x) => x.id === a.id),
       brief: s.briefs[a.id] ?? null,
-      outcome: phaseOutcome(a.phase),
       requestId: a.phase.t === 'posted' || a.phase.t === 'ended' ? a.phase.requestId : null,
       worktree: worktreeView(s, a.id),
       cost: attemptCost(s, a.id, a.phase),
@@ -142,17 +142,17 @@ function validationView(s: State, v: Validation): ExpeditionValidation {
   };
 }
 
-/** The page's one-line result: an ended attempt's outcome, a dropped one's reason. */
-function phaseOutcome(phase: AttemptPhase): string | null {
+/** The page's phase: an ended attempt carries its one-line result, a dropped one its reason. */
+function phaseView(phase: AttemptPhase): ExpeditionAttemptPhase {
   switch (phase.t) {
     case 'ended':
-      return outcomeLabel(phase.outcome);
+      return { t: 'ended', outcome: outcomeLabel(phase.outcome) };
     case 'dropped':
-      return `not started: ${phase.reason}`;
+      return { t: 'dropped', reason: phase.reason };
     case 'planned':
     case 'admitted':
     case 'posting':
     case 'posted':
-      return null;
+      return { t: phase.t };
   }
 }

@@ -4,6 +4,7 @@ import type {
   CheckSpec,
   Claim,
   Entry,
+  Feedback,
   Outcome,
   Question,
   State,
@@ -44,8 +45,25 @@ export const CREW_ROLE = [
   'Your final message MUST end with one fenced ```json block in the shape the request names.',
   'Never start other Buddies, workers or schedules. A work or check request names your git worktree:',
   'work only there (cd there first), never in any other checkout; never push. When mentioned in a thread, use the `expedition` tool',
-  '(status) to answer questions about your expedition.',
+  '(status) to answer questions about your expedition. The host records each owner message in your chat with the owner as',
+  'steering by itself (pause, resume, stop, "lesson: …", anything else a note for the manager): just acknowledge it briefly.',
 ].join(' ');
+
+/** Longest owner text kept per chat message (the steer tool's own limit). */
+const CHAT_TEXT_MAX = 2000;
+
+/**
+ * An owner chat message as steering (κ, once, at observation; host.ts observeChat): the word
+ * pause, resume or stop alone; `lesson: …` a binding lesson every later brief carries; anything
+ * else a note the next manager reads (it also answers a pending "needs you").
+ */
+export function chatFeedback(body: string): Feedback {
+  const text = body.trim().slice(0, CHAT_TEXT_MAX);
+  const word = text.toLowerCase().replace(/[.!]+$/, '');
+  if (word === 'pause' || word === 'resume' || word === 'stop') return { t: word };
+  const lesson = /^lesson:\s*(\S[\s\S]*)$/i.exec(text);
+  return lesson ? { t: 'lesson', text: lesson[1] } : { t: 'note', text };
+}
 
 const JSON_RULE = 'End your final message with exactly one fenced ```json block, nothing after it.';
 
@@ -141,6 +159,8 @@ function unseenLine(s: State, e: Entry): string {
       return `- REJECTED ${e.action.do}: ${e.reason}`;
     case 'feedback':
       return `- OWNER ${e.feedback.t}: ${'text' in e.feedback ? e.feedback.text : ''}`;
+    case 'question_added':
+      return `- QUESTION ADDED ${e.questionId} [${e.scope}] ${e.title} (paths: ${e.paths.join(', ')}): start work on it by this id`;
     default:
       return `- ${e.t}`;
   }
@@ -190,7 +210,7 @@ function managerBrief(s: State, id: string): string {
       '{"do":"ask_owner","question":"…"}',
       '{"do":"done","summary":"…"}',
       '{"do":"note","text":"<your reflection: what is working, what is not>"}',
-      'Question ids for new questions are assigned by the host; refer to them next time.',
+      'Question ids for new questions are assigned by the host: the next decision is shown them and starts work on them.',
       JSON_RULE,
     ].join('\n'),
   ]

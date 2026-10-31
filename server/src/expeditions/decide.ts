@@ -1,5 +1,5 @@
 import type { ManagerAction } from './charter';
-import type { Entry, State } from './ledger';
+import type { Entry, Integration, State } from './ledger';
 import {
   apply,
   byId,
@@ -12,14 +12,14 @@ import {
 } from './ledger';
 import { withStatus } from './news';
 import {
+  claimAt,
   configOf,
   deadlineMs,
   exploreAttempts,
   exploreCap,
-  goalVerified,
   independentCheckSeats,
   integrating,
-  live,
+  latestGoalPanel,
   panels,
   questionVerified,
   settled,
@@ -85,7 +85,9 @@ export function decide(s: State, clock: Clock): Entry[] {
   const now = runOf(s);
   if (now === 'finished' || now === 'paused') return withStatus(s, out, at);
 
-  if (s.attempts.length >= s.charter.maxAttempts && live(s).length === 0 && !hostBusy(s)) {
+  // Spent only once nothing can still run: an attempt planned (by this very decision too),
+  // admitted, queued behind maxLive or custody, or live keeps the expedition open until it settles.
+  if (s.attempts.length >= s.charter.maxAttempts && quiescent(s)) {
     push({
       t: 'finished',
       at,
@@ -105,11 +107,7 @@ export function decide(s: State, clock: Clock): Entry[] {
   // Work waiting on unverified dependencies (design.md R5) cannot start by itself, so it does not
   // count as running: an expedition holding only waiting work asks, it never goes quiet.
   const waiting = s.attempts.filter((a) => waitsOn(s, a).length > 0);
-  const idle =
-    s.run.t === 'running' &&
-    s.attempts.every((a) => settled(a) || waitsOn(s, a).length > 0) &&
-    !hostBusy(s);
-  if (idle)
+  if (s.run.t === 'running' && quiescent(s))
     push({
       t: 'needs_owner',
       at,
@@ -129,6 +127,11 @@ const hostBusy = (s: State) =>
   s.doneRequest.t === 'validating' ||
   s.validations.some((v) => !validationComplete(s, v)) ||
   integrating(s);
+
+/** Nothing will run by itself any more: every attempt settled or waits on unverified
+ * dependencies (R5), and no host validation or merge is in flight. */
+const quiescent = (s: State) =>
+  s.attempts.every((a) => settled(a) || waitsOn(s, a).length > 0) && !hostBusy(s);
 
 /** Decide runs once the integration worktree exists (the expedition's branch is checked out in
  * it); a tree that could not be made finishes the expedition with the reason. */
@@ -206,11 +209,44 @@ function planCandidateValidations(s: State, clock: Clock, push: (e: Entry) => vo
   }
 }
 
-/** Why done cannot finish now beyond the head validation: the goal panel, when judged items exist. */
-const judgedBlocker = (s: State): string[] =>
-  judgedChecks(s.charter).length > 0 && !goalVerified(s)
-    ? ['done needs the latest goal check to be verified (the charter has judged items)']
-    : [];
+/**
+ * Why done cannot finish now beyond the head validation, when judged items exist: the latest goal
+ * panel verified a claim, and that claim's commit is merged into the expedition branch. A goal
+ * panel checks the claim's own candidate tree, so a verified goal claim that was never integrated
+ * (or whose merge was refused) would leave the owner a branch without the verified work.
+ */
+function judgedBlocker(s: State, merge: GoalMerge): string[] {
+  if (judgedChecks(s.charter).length === 0) return [];
+  const goal = latestGoalPanel(s);
+  if (goal?.verdict !== 'verified')
+    return ['done needs the latest goal check to be verified (the charter has judged items)'];
+  return goalClaimBlocker(s, goal.claimAttemptId, merge);
+}
+
+/** `merged`: the goal claim's merge has landed. `queued`: it is planned or landed — enough to
+ * start a head validation, which runs only after every planned merge (effects.ts); the done then
+ * settles against `merged`, so a refused merge still refuses it. */
+type GoalMerge = 'merged' | 'queued';
+const MERGE_OK: Record<GoalMerge, ReadonlySet<Integration['status']['t']>> = {
+  merged: new Set(['integrated']),
+  queued: new Set(['integrated', 'pending']),
+};
+
+function goalClaimBlocker(s: State, claimAttemptId: string, merge: GoalMerge): string[] {
+  const { change } = claimAt(s, claimAttemptId);
+  switch (change.t) {
+    case 'no_code':
+      return [];
+    case 'commit':
+      return s.integrations.some(
+        (i) => i.claimAttemptId === claimAttemptId && MERGE_OK[merge].has(i.status.t)
+      )
+        ? []
+        : [
+            `the goal claim ${claimAttemptId} is not integrated into ${s.repo.branch}: integrate it before done`,
+          ];
+  }
+}
 
 /** A done waiting on its head validation finishes once every command check passed there. */
 function settleDoneRequest(s: State, push: (e: Entry) => void, at: string): void {
@@ -221,7 +257,7 @@ function settleDoneRequest(s: State, push: (e: Entry) => void, at: string): void
   const failed = v.runs
     .filter((r) => r.outcome.t !== 'passed')
     .map((r) => `command check ${r.checkIndex} ${r.outcome.t} on the head ${sha}`);
-  const blockers = [...failed, ...judgedBlocker(s)];
+  const blockers = [...failed, ...judgedBlocker(s, 'merged')];
   if (blockers.length > 0) {
     push({ t: 'done_refused', at, reason: blockers.join('; ') });
     return;
@@ -365,9 +401,10 @@ function applyAction(
       // The guardrails (design.md R2): the goal panel verified the judged items, and every
       // command check passed on the expedition branch head, run by the host, never an agent.
       if (s.doneRequest.t === 'validating') return reject('done is already being validated');
-      const judged = judgedBlocker(s);
+      const hasCommands = commandChecks(s.charter).length > 0;
+      const judged = judgedBlocker(s, hasCommands ? 'queued' : 'merged');
       if (judged.length > 0) return reject(judged.join('; '));
-      if (commandChecks(s.charter).length === 0) {
+      if (!hasCommands) {
         // Nothing validates the head, so done never finishes over a merge still to run.
         if (integrating(s)) return reject('an integration is still running');
         push({ t: 'finished', at, reason: 'done', summary: action.summary });

@@ -18,6 +18,7 @@ import { channelsHref } from './channels-view';
 import {
   FOCI,
   type Focus,
+  type Pane,
   QUESTION_GLYPH,
   attemptCostLine,
   attemptState,
@@ -58,9 +59,9 @@ export function ExpeditionPage({ layout }: { layout: 'wide' | 'narrow' }) {
     );
   const v = view.data;
   const foci = layout === 'wide' ? FOCI.filter((f) => f.focus !== 'chat') : FOCI;
-  const chat = v.crew.t === 'ready' && (
-    <ExpeditionChat channelId={v.crew.chatChannelId} workspaceId={v.workspaceId} />
-  );
+  // Wide always shows the chat in its own column, so a 'chat' focus (kept across a resize from
+  // narrow) shows the workers beside it.
+  const widePane: Pane = focus === 'chat' ? 'workers' : focus;
   return (
     <section
       className="task-page ui-stack"
@@ -79,7 +80,7 @@ export function ExpeditionPage({ layout }: { layout: 'wide' | 'narrow' }) {
           >
             {f.label}
             {f.focus === 'workers'
-              ? ` · ${v.attempts.filter((a) => a.phase !== 'ended').length}`
+              ? ` · ${v.attempts.filter((a) => a.phase.t !== 'ended').length}`
               : ''}
             {f.focus === 'tasks' ? ` · ${v.questions.length}` : ''}
           </button>
@@ -97,13 +98,15 @@ export function ExpeditionPage({ layout }: { layout: 'wide' | 'narrow' }) {
           }}
         >
           <div style={column}>
-            <FocusPane focus={focus} v={v} />
+            <FocusPane focus={widePane} v={v} />
           </div>
-          <div style={{ minWidth: 0, minHeight: 0, height: '100%' }}>{chat}</div>
+          <div style={{ minWidth: 0, minHeight: 0, height: '100%' }}>
+            <ChatPane v={v} />
+          </div>
         </div>
       ) : (
         <div style={{ ...column, flex: 1 }}>
-          {focus === 'chat' ? chat : <FocusPane focus={focus} v={v} />}
+          {focus === 'chat' ? <ChatPane v={v} /> : <FocusPane focus={focus} v={v} />}
         </div>
       )}
     </section>
@@ -144,7 +147,17 @@ function Header({ v }: { v: ExpeditionView }) {
   );
 }
 
-function FocusPane({ focus, v }: { focus: Focus; v: ExpeditionView }) {
+/** The expedition chat, once the crew Buddy (its other member) exists. */
+function ChatPane({ v }: { v: ExpeditionView }) {
+  switch (v.crew.t) {
+    case 'ready':
+      return <ExpeditionChat channelId={v.crew.chatChannelId} workspaceId={v.workspaceId} />;
+    case 'pending':
+      return <p className="buddy-panel__empty">Starting the crew… its chat opens here.</p>;
+  }
+}
+
+function FocusPane({ focus, v }: { focus: Pane; v: ExpeditionView }) {
   switch (focus) {
     case 'workers':
       return <Workers v={v} />;
@@ -154,8 +167,6 @@ function FocusPane({ focus, v }: { focus: Focus; v: ExpeditionView }) {
       return <Reflections v={v} />;
     case 'charter':
       return <Charter v={v} />;
-    case 'chat':
-      return null;
   }
 }
 
@@ -191,8 +202,8 @@ function AttemptRow({
 }
 
 function Workers({ v }: { v: ExpeditionView }) {
-  const active = v.attempts.filter((a) => a.phase !== 'ended');
-  const ended = v.attempts.filter((a) => a.phase === 'ended').reverse();
+  const active = v.attempts.filter((a) => a.phase.t !== 'ended');
+  const ended = v.attempts.filter((a) => a.phase.t === 'ended').reverse();
   return (
     <section className="ui-stack" aria-label="Workers">
       <h2 className="ui-section__title">Running and queued · {active.length}</h2>

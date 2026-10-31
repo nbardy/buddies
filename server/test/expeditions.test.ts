@@ -11,6 +11,7 @@ import { Ingest, defaultRoots } from '@unleashd/ingest';
 import express from 'express';
 import { OWNER, buddyActor } from '../src/buddies/core';
 import { createBuddyEvents } from '../src/buddies/events';
+import type { ExecutionGate } from '../src/buddies/execution-gate';
 import { createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint } from '../src/buddies/mcp';
 import { runCommand } from '../src/expeditions/command';
@@ -81,12 +82,12 @@ async function fixture() {
     sessions: new Map<string, string[]>(),
     slot: { t: 'starting' } as IngestSlot,
   };
-  const host = (): ExpeditionHost =>
+  const host = (gate: ExecutionGate = { t: 'enabled' }, at = root): ExpeditionHost =>
     createExpeditionHost({
       core,
       events,
-      root,
-      gate: { t: 'enabled' },
+      root: at,
+      gate,
       meter: {
         ingest: () => meter.slot,
         sessionsOf: async (id) => {
@@ -113,21 +114,25 @@ async function fixture() {
     // The endpoint keeps the first host; `restart` tests drive the new host directly.
     expeditions,
   });
-  const grant = grants.issueBuddy({
-    role: 'worker',
-    buddyId: lead.id,
-    workspaceId: ws.id,
-    conversationId: 'lead-turn',
-    runId: null,
-    subscribes: 'self',
-    hooks: { t: 'unrecorded' },
-  });
+  /** An MCP grant for a Buddy's turn in a workspace (the lead's by default). */
+  const grantFor = (buddyId: string, workspaceId: string) =>
+    grants.issueBuddy({
+      role: 'worker',
+      buddyId,
+      workspaceId,
+      conversationId: `${buddyId}-turn`,
+      runId: null,
+      subscribes: 'self',
+      hooks: { t: 'unrecorded' },
+    });
+  const grant = grantFor(lead.id, ws.id);
   const ledgerOf = (id: string): Entry[] =>
     fs
       .readFileSync(path.join(root, id, 'ledger.jsonl'), 'utf8')
       .split('\n')
       .filter(Boolean)
-      .map((line) => JSON.parse(line));
+      // One line per append batch (host.ts readLedgerFile).
+      .flatMap((line) => JSON.parse(line) as Entry[]);
   const stateOf = (id: string): State => fold(ledgerOf(id));
   /** The live attempt's request and its kind, by attempt id prefix (m/w/c). */
   const liveAttempts = (id: string) =>
@@ -188,6 +193,11 @@ async function fixture() {
     workspaces,
     ledgerPath: (id: string) => path.join(root, id, 'ledger.jsonl'),
     spec: () => endpoint.spec(grant),
+    /** The MCP endpoint as another Buddy in some workspace sees it. */
+    specAs: (buddyId: string, workspaceId: string) => endpoint.spec(grantFor(buddyId, workspaceId)),
+    root,
+    /** A second host on `at` (never the endpoint's): a copied store's, say. */
+    hostWith: host,
     ledgerOf,
     stateOf,
     liveAttempts,
@@ -287,7 +297,10 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       OWNER,
       f.liveAttempts(id).find((a) => a.id === m2)!.requestId
     );
-    assert.match(m2Brief.body, /NEW SINCE YOUR LAST DECISION:\n- REJECTED done/);
+    assert.match(
+      m2Brief.body,
+      new RegExp(`NEW SINCE YOUR LAST DECISION:\\n- QUESTION ADDED ${q} .*\\n.*\\n- REJECTED done`)
+    );
     await f.answer(
       id,
       m2,
@@ -422,15 +435,33 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     assert.equal(f.stateOf(id).integrations.length, 0);
     const third = f.liveAttempts(id).find((a) => a.kind === 'check')!;
     await f.answer(id, third.id, json({ verdict: 'verified', why: 'reproduced after rebuild' }));
+    // A verified goal claim that was never merged cannot finish done: the owner would be told to
+    // merge a branch without the verified work (review 2026-11-01).
     await f.answer(
       id,
       f.manager(id),
       json({
         actions: [
           { do: 'close_question', question: q, status: 'verified', why: 'check verified' },
-          { do: 'done', summary: 'Widget passes, independently verified.' },
+          { do: 'done', summary: 'too early' },
         ],
       })
+    );
+    assert.equal(f.stateOf(id).run.t, 'running');
+    const refusedDone = f
+      .ledgerOf(id)
+      .flatMap((e) => (e.t === 'rejected' && e.action.do === 'done' ? [e.reason] : []));
+    assert.match(refusedDone.at(-1) ?? '', new RegExp(`goal claim ${claimId} is not integrated`));
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'integrate', claimAttempt: claimId }] })
+    );
+    assert.equal(f.stateOf(id).integrations[0].status.t, 'integrated');
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'done', summary: 'Widget passes, independently verified.' }] })
     );
     s = f.stateOf(id);
     assert.deepEqual(s.run, {
@@ -441,14 +472,16 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     assert.equal(s.questions[0].status, 'verified');
     const last = s.statuses.find((x) => x.text.includes('Finished (done)'))!;
     assert.equal(last.post.t, 'posted', 'the finish was posted');
-    // Finished: every idle worktree is gone, and the claim's branch (unintegrated commits)
-    // survives. The still-running work attempt keeps its tree: its worker may be in it.
+    // Finished: every idle worktree is gone; the claim's branch went too, because its commit is
+    // merged into the expedition branch (per-attempt branches do not pile up in the owner's repo).
+    // The still-running work attempt keeps its tree: its worker may be in it.
     const running = work[0].id;
     for (const tree of Object.values(s.worktrees).filter((t) => t.attemptId !== running)) {
       assert.equal(tree.status.t, 'removed', `${tree.attemptId}: ${JSON.stringify(tree.status)}`);
       assert.equal(fs.existsSync(tree.path), false);
     }
-    assert.equal(git(f.repo, 'rev-parse', claimTree.branch), sha);
+    assert.equal(f.branchExists(claimTree.branch), false, 'a merged attempt branch is deleted');
+    git(f.repo, 'merge-base', '--is-ancestor', sha, `expedition/${id}`);
     const runningTree = f.treeOf(id, running);
     assert.equal(runningTree.status.t, 'ready', 'a live worker keeps its tree after finish');
     assert.equal(fs.existsSync(runningTree.path), true);
@@ -535,7 +568,7 @@ test('a crash after posting a request but before recording it re-posts the same 
   }
 });
 
-test('an expedition never goes quiet: an empty plan with nothing running asks the owner, and a lesson resumes it', async () => {
+test('an expedition never goes quiet: an empty plan asks the owner, and the owner answering in the expedition chat resumes it', async () => {
   const f = await fixture();
   try {
     const { id } = await rpcLaunch(f, 'idle');
@@ -544,17 +577,42 @@ test('an expedition never goes quiet: an empty plan with nothing running asks th
     assert.equal(s.run.t, 'waiting_owner');
     assert.match(s.statuses.at(-1)!.text, /Needs you/);
 
-    const steered = await rpc(f.spec(), 'expedition', {
-      action: { do: 'steer', id, feedback: { t: 'lesson', text: 'Start with the logs.' } },
-    });
-    assert.equal(steered.error, false, steered.text);
+    // The owner replies in the chat, not through a tool (review 2026-11-01: a chat reply used to
+    // leave the run stuck at "needs you"). The host records it as steering by itself.
+    if (s.crew.t !== 'ready') throw new Error('crew expected');
+    const chat = { kind: 'id' as const, id: s.crew.chatChannelId };
+    const say = (body: string, key: string) =>
+      f.core.post(OWNER, chat, {
+        kind: 'inform',
+        body,
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        key,
+      });
+    await say('lesson: Start with the logs.', 'owner-1');
+    await f.host.tick(id);
     s = f.stateOf(id);
     assert.equal(s.run.t, 'running');
+    assert.deepEqual(s.lessons, ['Start with the logs.']);
     const brief = await f.core.getPost(
       OWNER,
       f.liveAttempts(id).find((a) => a.kind === 'manager')!.requestId
     );
     assert.match(brief.body, /Start with the logs\./, 'lessons reach every later brief');
+    await f.host.tick(id);
+    const fromChat = () =>
+      f.ledgerOf(id).filter((e) => e.t === 'feedback' && e.via.t === 'chat').length;
+    assert.equal(fromChat(), 1, 'a chat message is recorded once, however often the host ticks');
+
+    // The control words work in the chat too.
+    await say('Pause', 'owner-2');
+    await f.host.tick(id);
+    assert.equal(f.stateOf(id).run.t, 'paused');
+    await say('resume', 'owner-3');
+    await f.host.tick(id);
+    assert.equal(f.stateOf(id).run.t, 'running');
+    assert.equal(fromChat(), 3);
   } finally {
     await f.close();
   }
@@ -583,8 +641,6 @@ test('work on overlapping custody waits for the holder even with free slots; dis
         ],
       })
     );
-    // Questions alone leave nothing new for a manager; an owner note asks for the next decision.
-    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
     const [outer, inner, docs] = f.stateOf(id).questions.map((q) => q.id);
     await f.answer(
       id,
@@ -632,7 +688,6 @@ test('a crash between creating a worktree and recording it adopts that worktree 
   try {
     const { id } = await rpcLaunch(f, 'adopt');
     await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
-    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
     const q = f.stateOf(id).questions[0].id;
     await f.answer(
       id,
@@ -712,7 +767,6 @@ test('a crash during cambium add (branch and directory made, no registry entry) 
     slowCambiumAdd(f.repo, marker);
     const { id } = await rpcLaunch(f, 'partial');
     await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
-    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
     const q = f.stateOf(id).questions[0].id;
     await f.answer(
       id,
@@ -762,10 +816,13 @@ test('a claim its own attempt branch does not hold is recorded malformed, and ca
   try {
     const { id } = await rpcLaunch(f, 'held');
     await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
-    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
     const q = f.stateOf(id).questions[0].id;
-    /** A work attempt that commits in its tree, then claims `change` (given its tree's base). */
-    const claim = async (change: (base: string) => unknown) => {
+    /** A work attempt that commits `file` in its tree, then claims `change` (given its tree's
+     * base and its commit). */
+    const claim = async (
+      change: (base: string, sha: string) => unknown,
+      file = 'widget/widget.ts'
+    ) => {
       await f.answer(
         id,
         f.manager(id),
@@ -773,14 +830,14 @@ test('a claim its own attempt branch does not hold is recorded malformed, and ca
       );
       const work = f.liveAttempts(id).find((a) => a.kind === 'work')!;
       const tree = f.treeOf(id, work.id);
-      f.commitIn(tree.path, 'widget/widget.ts');
+      const sha = f.commitIn(tree.path, file);
       await f.answer(
         id,
         work.id,
         json({
           result: 'claim',
           statement: 'fixed',
-          change: change(tree.baseSha),
+          change: change(tree.baseSha, sha),
           evidence: [],
           howToCheck: 'look',
         })
@@ -806,6 +863,13 @@ test('a claim its own attempt branch does not hold is recorded malformed, and ca
     assert.match(
       JSON.stringify(outcomeOf(hidden)),
       /"t":"malformed","error":"claimed no code, but the attempt branch \S+ has 1 commit/
+    );
+    // A commit outside its question's paths (docs/, while the question owns widget/) is not
+    // held: custody is enforced on what is claimed, so it can never be validated or merged.
+    const trespass = await claim((_base, sha) => ({ t: 'commit', sha }), 'docs/README.md');
+    assert.match(
+      JSON.stringify(outcomeOf(trespass)),
+      /"t":"malformed","error":"claimed commit \w+ changes files outside its question's paths \(widget\): docs\/README.md/
     );
 
     await f.answer(
@@ -849,11 +913,27 @@ test('launch preflight refuses with every reason (no repository, a check executa
       launch('relative', f.workspaceId, { checks: [missing('widget/widget.ts')] }),
       /`widget\/widget.ts` is not found/
     );
+    // A check runs in a checkout of a commit, so an executable script that exists only in the
+    // owner's dirty checkout (untracked here) is refused at launch, not an `error` on every run.
+    fs.mkdirSync(path.join(f.repo, 'tools'));
+    fs.writeFileSync(path.join(f.repo, 'tools', 'check.sh'), '#!/bin/sh\nexit 0\n', {
+      mode: 0o755,
+    });
+    await assert.rejects(
+      launch('untracked', f.workspaceId, { checks: [missing('tools/check.sh')] }),
+      /`tools\/check.sh` is not found .*committed at HEAD/
+    );
+    git(f.repo, 'add', 'tools/check.sh');
+    git(f.repo, 'commit', '-q', '-m', 'add the check');
+    const committed = await launch('committed', f.workspaceId, {
+      checks: [missing('tools/check.sh')],
+    });
+    assert.equal(committed.t, 'launched');
     // An accepted launch resolves its checks' executables but runs none of them (a check may be
     // a paid GPU run): the marker this check would write does not exist after launch.
     const marker = path.join(tempDir('marker-'), 'ran');
     const writes = { kind: 'command', argv: ['sh', '-c', `touch ${marker}`], timeoutSeconds: 30 };
-    const state = await launch('accepted', f.workspaceId, { checks: [writes] });
+    const { state } = await launch('accepted', f.workspaceId, { checks: [writes] });
     await f.host.drain();
     assert.equal(state.run.t, 'running');
     assert.equal(fs.existsSync(marker), false, 'preflight ran a check');
@@ -879,7 +959,6 @@ test('command checks run on the host: each claimed commit is validated in a fres
   try {
     const { id } = await rpcLaunch(f, 'checks', 2, { checks: [widgetFixed] });
     await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
-    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
     const q = f.stateOf(id).questions[0].id;
     const work = async (content: string) => {
       await f.answer(
@@ -1017,7 +1096,6 @@ test('work on a question waits (stage waiting, no worktree) until its dependency
     const { id } = await rpcLaunch(f, 'deps', 3, { checks: [widgetFixed] });
     await f.answer(id, f.manager(id), json({ actions: [question('Fix the widget', ['widget'])] }));
     const q1 = f.stateOf(id).questions[0].id;
-    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Plan the docs.' });
     const after = (title: string, deps: string[]) => ({
       ...question(title, ['docs']),
       after: deps,
@@ -1084,8 +1162,39 @@ test('work on a question waits (stage waiting, no worktree) until its dependency
       f.manager(id),
       json({ actions: [{ do: 'check', claimAttempt: w1, goal: false, panel: 1 }] })
     );
-    const check = f.liveAttempts(id).find((a) => a.kind === 'check')!;
-    await f.answer(id, check.id, json({ verdict: 'verified', why: 'reproduced' }));
+    const liveCheck = () => f.liveAttempts(id).find((a) => a.kind === 'check')!;
+    await f.answer(id, liveCheck().id, json({ verdict: 'verified', why: 'reproduced' }));
+    // A later panel refutes it: the earlier verification is withdrawn, so q1 cannot close
+    // verified on it and its dependants stay held (review 2026-11-01: a stale verified panel
+    // unlocked R5 dependencies).
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'check', claimAttempt: w1, goal: false, panel: 1 }] })
+    );
+    await f.answer(id, liveCheck().id, json({ verdict: 'refuted', why: 'flaky' }));
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [
+          { do: 'close_question', question: q1, status: 'verified', why: 'it was verified once' },
+          { do: 'check', claimAttempt: w1, goal: false, panel: 1 },
+        ],
+      })
+    );
+    assert.ok(
+      f
+        .ledgerOf(id)
+        .some(
+          (e) =>
+            e.t === 'rejected' &&
+            e.action.do === 'close_question' &&
+            /closes verified only after a check verified it/.test(e.reason)
+        )
+    );
+    assert.equal(stage(q2), 'waiting');
+    await f.answer(id, liveCheck().id, json({ verdict: 'verified', why: 'reproduced again' }));
     await f.answer(
       id,
       f.manager(id),
@@ -1115,14 +1224,12 @@ test('an expedition holding only work that waits on a dropped dependency asks th
     const { id } = await rpcLaunch(f, 'stuck');
     await f.answer(id, f.manager(id), json({ actions: [question('Spike', ['widget'])] }));
     const q1 = f.stateOf(id).questions[0].id;
-    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Plan the follow-up.' });
     await f.answer(
       id,
       f.manager(id),
       json({ actions: [{ ...question('Follow-up', ['docs']), after: [q1] }] })
     );
     const q2 = f.stateOf(id).questions[1].id;
-    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Go.' });
     await f.answer(
       id,
       f.manager(id),
@@ -1159,7 +1266,6 @@ test('integration merges validated candidates one at a time onto the expedition 
       f.manager(id),
       json({ actions: [question('Fix the widget', ['widget']), question('Docs', ['docs'])] })
     );
-    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
     const [qWidget, qDocs] = f.stateOf(id).questions.map((q) => q.id);
     // Two docs attempts share custody: the second starts when the first ends, still at the base.
     await f.answer(
@@ -1443,6 +1549,33 @@ test('a command check is killed at its timeout (its whole process group), and an
     cwd
   );
   assert.deepEqual(quick, { t: 'passed' });
+  // A straggler that left the process group (its own session) survives the group kill and holds
+  // the pipes: the check still settles, after the pipe grace, at exit and at the timeout (review
+  // 2026-11-01: it never settled, and the validation stalled with nothing in the ledger).
+  const escaped = (pidFile: string) =>
+    `perl -MPOSIX -e 'POSIX::setsid(); open(F, ">${pidFile}"); print F $$; close(F); sleep 20' &`;
+  const pids = [path.join(cwd, 'a.pid'), path.join(cwd, 'b.pid')];
+  try {
+    const exited = await runCommand(
+      {
+        kind: 'command',
+        argv: ['sh', '-c', `${escaped(pids[0])} sleep 0.5; exit 0`],
+        timeoutSeconds: 20,
+      },
+      cwd
+    );
+    assert.deepEqual(exited, { t: 'passed' });
+    const stuck = await runCommand(
+      { kind: 'command', argv: ['sh', '-c', `${escaped(pids[1])} sleep 30`], timeoutSeconds: 1 },
+      cwd
+    );
+    assert.equal(stuck.t, 'timed_out');
+  } finally {
+    for (const file of pids)
+      try {
+        process.kill(Number(fs.readFileSync(file, 'utf8')), 'SIGKILL');
+      } catch {}
+  }
   // Agent-written code never sees the server's secrets: only a curated environment reaches it.
   process.env.EXPEDITION_TEST_SECRET = 'sk-test';
   try {
@@ -1458,7 +1591,7 @@ test('a command check is killed at its timeout (its whole process group), and an
   } finally {
     Reflect.deleteProperty(process.env, 'EXPEDITION_TEST_SECRET');
   }
-  assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started} ms`);
+  assert.ok(Date.now() - started < 15_000, `took ${Date.now() - started} ms`);
   const missing = await runCommand(
     { kind: 'command', argv: ['no-such-binary-xyz'], timeoutSeconds: 5 },
     cwd
@@ -1624,3 +1757,191 @@ async function rpcLaunch(
   assert.equal(launched.error, false, launched.text);
   return launched.value as { id: string; link: string; launched: string; defaulted: string[] };
 }
+
+test('a manager that spends the last attempt on work keeps the expedition open until that work settles; a decomposing turn is followed by a manager, never "needs you"', async () => {
+  const f = await fixture();
+  try {
+    const launched = await rpc(f.spec(), 'expedition', {
+      action: { do: 'launch', charter: { ...charter('spent'), maxAttempts: 3 } },
+    });
+    assert.equal(launched.error, false, launched.text);
+    const id = launched.value.id as string;
+    // Attempt 1 only decomposes. The host assigns question ids, so the next decision must be
+    // planned to start work on them (review 2026-11-01: this went to "needs you").
+    await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
+    let s = f.stateOf(id);
+    assert.equal(s.run.t, 'running');
+    const q = s.questions[0].id;
+    // Attempt 2 spends the last slot on work: planned work is not a spent budget (review
+    // 2026-11-01: this finished `attempts_spent` in the same decision, the work never briefed).
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'go' }] })
+    );
+    s = f.stateOf(id);
+    assert.equal(s.attempts.length, 3);
+    assert.equal(s.run.t, 'running');
+    const work = f.liveAttempts(id).find((a) => a.kind === 'work');
+    assert.ok(work, 'the last attempt was admitted and briefed');
+    await f.answer(id, work.id, json({ result: 'finding', statement: 'nope', evidence: [] }));
+    s = f.stateOf(id);
+    assert.equal(s.run.t === 'finished' && s.run.reason, 'attempts_spent');
+  } finally {
+    await f.close();
+  }
+});
+
+test('boot cuts a torn last append and quarantines a ledger that does not read or fold; the others keep running', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'torn');
+    const file = f.ledgerPath(id);
+    const before = fs.readFileSync(file, 'utf8');
+    // A crash during appendFile: a partial batch with no newline.
+    fs.appendFileSync(file, '[{"t":"feedback","at":"2026-11-01T00:00:0');
+    const broken = (name: string, text: string) => {
+      fs.mkdirSync(path.join(f.root, name));
+      fs.writeFileSync(path.join(f.root, name, 'ledger.jsonl'), text);
+    };
+    broken('garbage-aaaaaa', 'not json\n');
+    broken(
+      'headless-bbbbbb',
+      `${JSON.stringify([{ t: 'status', at: '2026-11-01T00:00:00Z', seq: 0, text: 'x' }])}\n`
+    );
+    // Before: JSON.parse threw inside createExpeditionHost and aborted server startup.
+    f.restart();
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'the torn batch is cut off, whole');
+    const garbage = f.host.lookup('garbage-aaaaaa');
+    assert.equal(garbage.t, 'quarantined');
+    const headless = f.host.lookup('headless-bbbbbb');
+    assert.match(
+      headless.t === 'quarantined' ? headless.reason : '',
+      /does not fold: ledger must start with launched/
+    );
+    assert.deepEqual(
+      f.host.list(f.workspaceId).map((x) => x.id),
+      [id]
+    );
+    // The healthy expedition steers on: its next append starts on a line of its own.
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'after the crash' });
+    assert.ok(f.ledgerOf(id).some((e) => e.t === 'feedback' && e.via.t === 'tool'));
+    const app = express();
+    registerExpeditionRoutes(app, () => f.host);
+    const server = app.listen(0);
+    try {
+      const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+      const page = await fetch(`${base}/api/buddies/expeditions/garbage-aaaaaa`);
+      assert.equal(page.status, 409);
+      assert.match(((await page.json()) as { error: string }).error, /quarantined/);
+    } finally {
+      server.close();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("the expedition tool refuses a crew launch or steer and another workspace's status or steer; a relaunch returns the running one, and launches anew after it finished", async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'bounds');
+    const s = f.stateOf(id);
+    if (s.crew.t !== 'ready') throw new Error('crew expected');
+    const asCrew = f.specAs(s.crew.buddyId, f.workspaceId);
+    const crewLaunch = await rpc(asCrew, 'expedition', {
+      action: { do: 'launch', charter: charter('nested') },
+    });
+    assert.equal(crewLaunch.error, true);
+    assert.match(crewLaunch.text, /an expedition crew cannot launch expeditions/);
+    // A crew worker must not override the owner: it cannot resume a paused run, or stop one.
+    await f.host.steer(id, f.lead.id, { t: 'pause' });
+    const crewResume = await rpc(asCrew, 'expedition', {
+      action: { do: 'steer', id, feedback: { t: 'resume' } },
+    });
+    assert.match(crewResume.text, /an expedition crew cannot steer expeditions/);
+    assert.equal(f.stateOf(id).run.t, 'paused');
+    assert.equal((await rpc(asCrew, 'expedition', { action: { do: 'status', id } })).error, false);
+
+    const other = await f.core.createWorkspace(OWNER, { name: 'Other', rootPath: tempDir('o-') });
+    const stranger = await f.core.createBuddy(OWNER, {
+      workspaceId: other.id,
+      slug: 'stranger',
+      name: 'Stranger',
+      role: 'Stranger',
+      manager: { kind: 'nobody' },
+      key: 'stranger',
+    });
+    const asStranger = f.specAs(stranger.id, other.id);
+    for (const action of [
+      { do: 'status', id },
+      { do: 'steer', id, feedback: { t: 'stop' } },
+    ]) {
+      const refused = await rpc(asStranger, 'expedition', { action });
+      assert.equal(refused.error, true);
+      assert.match(refused.text, new RegExp(`no expedition ${id} here`));
+    }
+    assert.equal(f.stateOf(id).run.t, 'paused');
+
+    // The same name from the same conversation while it runs: the running one, said so.
+    const again = await rpc(f.spec(), 'expedition', {
+      action: { do: 'launch', charter: charter('bounds') },
+    });
+    assert.equal(again.error, false, again.text);
+    assert.equal(again.value.id, id);
+    assert.match(again.value.alreadyRunning, /still paused; nothing new was launched/);
+    // Once it finished, the same name is a new expedition (review 2026-11-01: it silently
+    // returned the stopped one).
+    const stopped = await rpc(f.spec(), 'expedition', {
+      action: { do: 'steer', id, feedback: { t: 'stop' } },
+    });
+    assert.equal(stopped.error, false, stopped.text);
+    assert.equal(f.stateOf(id).run.t, 'finished');
+    const fresh = await rpcLaunch(f, 'bounds');
+    assert.notEqual(fresh.id, id);
+    assert.match(fresh.launched, /budget 20 attempts/);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a host whose execution gate is disabled (a copied store) refuses launch and steer and never ticks a copied ledger', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'copied');
+    // A copied store: the ledger as it stood at launch, before the crew existed (create_crew pending).
+    const copy = path.join(f.scratch, 'copied');
+    fs.mkdirSync(path.join(copy, id), { recursive: true });
+    const first = fs.readFileSync(f.ledgerPath(id), 'utf8').split('\n')[0];
+    fs.writeFileSync(path.join(copy, id, 'ledger.jsonl'), `${first}\n`);
+    const branches = () => git(f.repo, 'branch', '--list', 'expedition/*');
+    const before = branches();
+    const disabled = f.hostWith({ t: 'disabled', reason: 'a copied store' }, copy);
+    try {
+      const reason = /expeditions do not run on this server: a copied store/;
+      await assert.rejects(
+        disabled.launch({
+          key: 'copy:launch',
+          charter: Charter.parse(charter('copy-launch')),
+          origin: { t: 'direct' },
+          launcherId: f.lead.id,
+          workspaceId: f.workspaceId,
+        }),
+        reason
+      );
+      assert.match(
+        (await disabled.issues(f.workspaceId, Charter.parse(charter('d')))).join(),
+        reason
+      );
+      await assert.rejects(disabled.steer(id, f.lead.id, { t: 'resume' }), reason);
+      await disabled.drain();
+      assert.deepEqual(fs.readdirSync(copy), [id], 'nothing was written');
+      assert.equal(fs.readFileSync(path.join(copy, id, 'ledger.jsonl'), 'utf8'), `${first}\n`);
+      assert.equal(branches(), before, 'no expedition branch or worktree was made');
+    } finally {
+      disabled.close();
+    }
+  } finally {
+    await f.close();
+  }
+});

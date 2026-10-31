@@ -286,9 +286,22 @@ remove are `left {reason}`. Removal never forces: uncommitted changes become
 `worktree_released {left, reason}`. Cambium runs as `git-cambium` directly (a timeout kills the
 process doing the add, not a `git` wrapper), with a 15-minute limit for `add`. Custody paths are
 normalized once (`./a/` → `a`, whole repo = `.`). Cambium keeps its registry in `.git/cambium`, so
-tests use the real tool on a temporary repository. Known gap: Buddy runs start in the workspace
-root; the brief tells the worker to `cd` into its worktree (outside that root), which a provider
-sandbox limited to its start directory may refuse.
+tests use the real tool on a temporary repository. Known gap (still open after the 2026-11-01
+review): Buddy runs start in the workspace root, which IS the owner's shared checkout
+(`briefing.ts` `workingDirectory: workspace.rootPath`); the brief tells the worker to `cd` into
+its worktree under `APP_DATA_DIR/expeditions/<id>/worktrees`, outside that root. So "never edit
+the shared checkout" is still a prompt for the agent's edits, and a provider sandbox limited to
+its start directory (Codex `workspace-write`) can write the shared checkout but not the worktree,
+which pushes a sandboxed worker toward the wrong tree. The structural fix is a run-level working
+directory: an optional `cwd` on the crate's `RunConfig` (persisted on the run row), threaded by
+the Buddy runner into the run conversation's turn directory, and set by `postAttempt` to the
+attempt's worktree. It is not in this branch because it changes the Buddies crate and runner,
+which are at their line ceiling (tools/buddies-line-ceiling) and outside `server/src/expeditions`.
+What IS structural now: claims are checked against their own branch and custody (git.ts
+`claimHeld`), and only host-validated commits merge, so a stray edit in the shared checkout can
+never reach the expedition branch. Also repository-wide: `cambium recover` (used only when an
+attempt's own add left a branch or directory behind) rolls back every dead incomplete Cambium
+create in the owner's repository, other agents' included; Cambium has no per-workspace recover.
 
 ### R2. Checks are typed: executable or judged
 ```
@@ -448,3 +461,42 @@ preflight, each crew seat against the provider catalog, and a work seat with no 
 another model (it could never be checked, so launch refuses it too). The briefing line names the
 owner's phrasing; the tool description stayed within the worker budget. The owner's phrasing and
 variants are in README.md "How to start one".
+
+### R8. Whole-branch review fixes (2026-11-01)
+A review of the whole branch found these; each has an integration test (mutation-checked: the
+guard broken, a test fails) in `server/test/expeditions.test.ts`.
+- **Budget**: `attempts_spent` finishes only when nothing can still run (every attempt settled or
+  waiting on unverified dependencies, no host validation or merge in flight). It used to fire in
+  the same decision that planned the last attempt, which then never ran.
+- **Never idle after planning**: `question_added` is shown to the next manager (the host assigns
+  question ids, so a turn that only decomposes is followed by one that starts work on them). It
+  used to ask the owner after the first planning turn.
+- **Done carries the verified work**: with judged items, done needs the latest goal panel's claim
+  merged into `expedition/<id>` (a `no_code` claim needs no merge). A done with command checks may
+  be asked while that merge is queued (the head validation runs after it) and settles only once
+  it landed; without command checks it needs the merge landed.
+- **Verification is the latest word**: a question is verified while its newest settled panel
+  verified it; a later refuting panel withdraws it (close and R5 dependencies follow).
+- **Custody is enforced**: a claimed commit that changes files outside its question's paths is
+  recorded `malformed` (never validated, checked or merged).
+- **Owner chat steers**: owner messages in the expedition chat become `feedback {via: chat,
+  postId, ord}` (the ledger's chat cursor keeps them once); `pause`/`resume`/`stop`, `lesson: …`,
+  else a note.
+- **Recovery**: one ledger line per append batch; a torn last line is cut off whole at boot (a
+  batch lands whole or not at all, so a decide batch never lands without its `manager_applied`);
+  a ledger that does not read or fold is quarantined (route 409) and every other expedition keeps
+  ticking. Steers and launches go through the serial chains (a launch's `launched` and its status
+  are one batch), so live and replayed state agree.
+- **Tool boundaries**: a crew Buddy cannot launch or steer; another workspace cannot see or steer;
+  a disabled execution gate refuses launch and steer (with its reason, also in `draft`); a relaunch
+  of an open name returns `alreadyRunning`, of a finished one launches anew. Seat checks moved into
+  the host's one refusal list, so `draft` and `launch` agree.
+- **Checks never stall**: after a check exits or times out, a straggler that left the process
+  group may hold the pipes for at most `PIPE_GRACE_MS` before they are closed. A relative
+  `argv[0]` must be an executable committed at HEAD (an untracked script in a dirty checkout is
+  refused at launch).
+- **No branch pile-up**: at finish an attempt branch whose tip the expedition branch holds is
+  deleted (compare-and-delete); unmerged attempt branches stay for the owner; validation branches
+  are scratch and go with their tree.
+- **Page**: the chat area says the crew is starting until it exists; attempt phases carry their
+  outcome in the wire type (no optional-field defaulting).

@@ -58,6 +58,14 @@ export type Feedback =
   | { t: 'resume' }
   | { t: 'stop' };
 
+/** Where owner feedback came from: the `expedition` tool's steer, or an owner message in the
+ * expedition chat (the owner↔crew DM). A chat message carries its post id and ordered id, so the
+ * host records each one once and reads only newer ones (host.ts observeChat). */
+export type FeedbackVia = { t: 'tool' } | { t: 'chat'; postId: string; ord: string };
+
+/** The newest owner chat message already recorded as feedback. */
+export type ChatCursor = { t: 'start' } | { t: 'after'; ord: string };
+
 /** `setup_failed`: the expedition's integration worktree could not be made (design.md R3). */
 export type FinishReason = 'done' | 'attempts_spent' | 'deadline' | 'owner_stop' | 'setup_failed';
 
@@ -273,7 +281,7 @@ export type Entry =
     }
   | { t: 'manager_applied'; at: string; attemptId: string }
   | { t: 'rejected'; at: string; action: ManagerAction; reason: string }
-  | { t: 'feedback'; at: string; from: string; feedback: Feedback }
+  | { t: 'feedback'; at: string; from: string; via: FeedbackVia; feedback: Feedback }
   | { t: 'needs_owner'; at: string; question: string }
   | { t: 'status'; at: string; seq: number; text: string }
   | { t: 'status_posted'; at: string; seq: number; postId: string }
@@ -353,6 +361,7 @@ export interface State {
   attempts: Attempt[];
   questions: Question[];
   lessons: string[];
+  chatCursor: ChatCursor;
   /** Ledger entries a manager has not yet been shown (results, feedback, rejections). */
   unseen: Entry[];
   /** What each manager attempt is shown: the unseen entries at the moment it was planned. */
@@ -395,6 +404,7 @@ export function fold(entries: readonly Entry[]): State {
     attempts: [],
     questions: [],
     lessons: [],
+    chatCursor: { t: 'start' },
     unseen: [],
     shown: {},
     run: { t: 'running' },
@@ -578,6 +588,9 @@ export function apply(s: State, e: Entry): void {
         after: e.after,
         status: 'open',
       });
+      // Shown to the next manager: the host assigns question ids, so a turn that only decomposes
+      // must be followed by one that can start work on them (never idle, decide.ts).
+      s.unseen.push(e);
       return;
     case 'question_closed':
       questionOf(s, e.questionId).status = e.status;
@@ -586,6 +599,7 @@ export function apply(s: State, e: Entry): void {
       s.unseen.push(e);
       return;
     case 'feedback':
+      s.chatCursor = cursorAfter(s.chatCursor, e.via);
       applyFeedback(s, e);
       return;
     case 'needs_owner':
@@ -605,6 +619,15 @@ export function apply(s: State, e: Entry): void {
       s.run = { t: 'finished', reason: e.reason, summary: e.summary };
       s.doneRequest = { t: 'none' };
       return;
+  }
+}
+
+function cursorAfter(cursor: ChatCursor, via: FeedbackVia): ChatCursor {
+  switch (via.t) {
+    case 'tool':
+      return cursor;
+    case 'chat':
+      return { t: 'after', ord: via.ord };
   }
 }
 

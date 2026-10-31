@@ -12,10 +12,17 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
       return;
     }
     const id = String(req.params.id);
-    if (!expeditions.has(id)) {
-      res.status(404).json({ error: `no expedition ${id}` });
-      return;
+    const found = expeditions.lookup(id);
+    switch (found.t) {
+      case 'missing':
+        res.status(404).json({ error: `no expedition ${id}` });
+        return;
+      case 'quarantined':
+        // Its ledger does not fold (host.ts quarantine); the reason is the owner's to read.
+        res.status(409).json({ error: `expedition ${id} is quarantined: ${found.reason}` });
+        return;
+      case 'present':
+        res.json(expeditions.view(id));
     }
-    res.json(expeditions.view(id));
   });
 }

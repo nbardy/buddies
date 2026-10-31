@@ -48,18 +48,26 @@ export type ExpeditionAttemptCost =
   | { t: 'measured'; label: string }
   | { t: 'unmeasured'; reason: string };
 
+/** Where an attempt is. admitted: its worktree is being made; dropped: it never started (no
+ * worktree), with why; ended: its one-line result. */
+export type ExpeditionAttemptPhase =
+  | { t: 'planned' }
+  | { t: 'admitted' }
+  | { t: 'dropped'; reason: string }
+  | { t: 'posting' }
+  | { t: 'posted' }
+  | { t: 'ended'; outcome: string };
+
 export interface ExpeditionAttempt {
   id: string;
   kind: 'manager' | 'work' | 'check';
   label: string;
   seat: string;
   questionId: string | null;
-  /** admitted: its worktree is being made; dropped: it never started (no worktree, see outcome). */
-  phase: 'planned' | 'admitted' | 'dropped' | 'posting' | 'posted' | 'ended';
+  phase: ExpeditionAttemptPhase;
   live: boolean;
   /** The exact instructions the worker received; null until briefed. */
   brief: string | null;
-  outcome: string | null;
   requestId: string | null;
   worktree: ExpeditionWorktree;
   cost: ExpeditionAttemptCost;

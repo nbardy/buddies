@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process';
 import fsp from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { ClaimChange } from './charter';
 import { resolvesOnPath } from './command';
 import type { IntegrationRefusal, Release, Repo, WorktreeAt } from './ledger';
+import { withinCustody } from './queries';
 
 // The expedition's git I/O: preflight, the expedition branch, one Cambium worktree per work attempt.
 // Pattern: async-liveness (docs/patterns.md#async-liveness) — every call is an async execFile; a
@@ -63,8 +65,11 @@ export type Preflight =
 
 /**
  * Refuses a launch unless the workspace root is a git repository, its base commit (HEAD)
- * resolves, `git cambium` is available, and every command check's `argv[0]` resolves (`bins`,
- * command.ts resolvesOnPath). It never runs a check: checks may be paid GPU runs.
+ * resolves, `git cambium` is available, and every command check's `argv[0]` resolves (`bins`):
+ * a bare name or absolute path on the host (command.ts resolvesOnPath), a relative path with a
+ * slash as an executable file COMMITTED at the base (a validation tree is a checkout of a commit,
+ * so an untracked or uncommitted script in a dirty shared checkout must not pass). It never runs
+ * a check: checks may be paid GPU runs.
  */
 export async function preflight(workspaceRoot: string, bins: string[]): Promise<Preflight> {
   const [top, head, tool] = await Promise.all([
@@ -73,10 +78,12 @@ export async function preflight(workspaceRoot: string, bins: string[]): Promise<
     cambium(workspaceRoot, ['version']),
   ]);
   const repoRoot = top.t === 'ok' ? top.stdout : workspaceRoot;
+  const resolves = (bin: string) =>
+    bin.includes('/') && !path.isAbsolute(bin)
+      ? committedExecutable(repoRoot, bin)
+      : resolvesOnPath(bin);
   const missing = (
-    await Promise.all(
-      [...new Set(bins)].map(async (bin) => ((await resolvesOnPath(bin, repoRoot)) ? [] : [bin]))
-    )
+    await Promise.all([...new Set(bins)].map(async (bin) => ((await resolves(bin)) ? [] : [bin])))
   ).flat();
   if (top.t === 'ok' && head.t === 'ok' && tool.t === 'ok' && missing.length === 0)
     return { t: 'ready', root: top.stdout, baseSha: head.stdout };
@@ -86,10 +93,16 @@ export async function preflight(workspaceRoot: string, bins: string[]): Promise<
     tool.t === 'failed' ? '`git cambium` is not available' : '',
     ...missing.map(
       (bin) =>
-        `command check executable \`${bin}\` is not found (not on PATH, nor an executable file in the repository)`
+        `command check executable \`${bin}\` is not found (not on PATH, nor an executable file committed at HEAD)`
     ),
   ].filter(Boolean);
   return { t: 'refused', reasons };
+}
+
+/** Whether `file` (repo-relative) is an executable blob in HEAD's tree (mode 100755). */
+async function committedExecutable(repoRoot: string, file: string): Promise<boolean> {
+  const listed = await git(repoRoot, ['ls-tree', 'HEAD', '--', path.normalize(file)]);
+  return listed.t === 'ok' && listed.stdout.startsWith('100755 blob ');
 }
 
 export const branchHead = (repo: Repo) =>
@@ -139,6 +152,9 @@ async function leftovers(root: string, at: WorktreeAt): Promise<Leftovers> {
  * Rolls back what an interrupted `cambium add` left behind. Cambium journals each create, and
  * `cambium recover` removes an incomplete one's linked worktree and unadvanced branch (it leaves
  * operations whose process is still alive alone). Returns what is still there afterwards.
+ * Repository-wide: Cambium has no per-workspace recover, so this also rolls back other agents'
+ * DEAD incomplete creates in the owner's repository (design.md R1 known limits). It runs only
+ * when this attempt's own branch or directory is left over.
  */
 async function recoverLeftovers(root: string, at: WorktreeAt): Promise<Leftovers> {
   const before = await leftovers(root, at);
@@ -229,13 +245,16 @@ export type ClaimHeld = { t: 'held' } | { t: 'not_held'; reason: string };
 /**
  * The host checks a claim against its own attempt branch instead of trusting its word: a `commit`
  * must be a new commit on that branch (an ancestor of its tip, not of its base), so a claim cannot
- * name the head or another attempt's passing commit; `no_code` means the branch has no commits, so
- * an attempt that committed cannot skip candidate validation by saying it changed nothing.
+ * name the head or another attempt's passing commit, and it may change only files inside its
+ * question's custody (`custody`, repo-relative prefixes), so admission's "no overlapping custody
+ * at once" holds for what is merged, not only for what was briefed. `no_code` means the branch
+ * has no commits, so an attempt that committed cannot skip candidate validation.
  */
 export async function claimHeld(
   root: string,
   at: WorktreeAt,
-  change: ClaimChange
+  change: ClaimChange,
+  custody: readonly string[]
 ): Promise<ClaimHeld> {
   switch (change.t) {
     case 'commit': {
@@ -244,11 +263,24 @@ export async function claimHeld(
         git(root, ['merge-base', '--is-ancestor', change.sha, ref]),
         git(root, ['merge-base', '--is-ancestor', change.sha, at.baseSha]),
       ]);
-      return onBranch.t === 'ok' && inBase.t === 'failed'
+      if (onBranch.t !== 'ok' || inBase.t !== 'failed')
+        return {
+          t: 'not_held',
+          reason: `claimed commit ${change.sha} is not a new commit on the attempt branch ${at.branch}`,
+        };
+      const changed = await must(
+        git(root, ['diff', '--name-only', '--no-renames', at.baseSha, change.sha]),
+        `listing the files ${change.sha} changes`
+      );
+      const outside = changed
+        .split('\n')
+        .filter(Boolean)
+        .filter((file) => !withinCustody(file, custody));
+      return outside.length === 0
         ? { t: 'held' }
         : {
             t: 'not_held',
-            reason: `claimed commit ${change.sha} is not a new commit on the attempt branch ${at.branch}`,
+            reason: `claimed commit ${change.sha} changes files outside its question's paths (${custody.join(', ')}): ${outside.slice(0, 10).join(', ')}`,
           };
     }
     case 'no_code': {
@@ -264,6 +296,13 @@ export async function claimHeld(
   }
 }
 
+/** Deletes a scratch branch at whatever tip it has (compare-and-delete at the tip read). */
+async function dropScratchBranch(root: string, at: WorktreeAt): Promise<boolean> {
+  const ref = `refs/heads/${at.branch}`;
+  const tip = await git(root, ['rev-parse', '--verify', '--quiet', ref]);
+  return tip.t === 'ok' && (await git(root, ['update-ref', '-d', ref, tip.stdout])).t === 'ok';
+}
+
 /**
  * Deletes a branch only while it still points at its base: `update-ref -d <ref> <old>` is an
  * atomic compare-and-delete, so a branch with commits is never deleted. Not `cambium remove
@@ -276,15 +315,32 @@ async function dropEmptyBranch(root: string, at: WorktreeAt): Promise<boolean> {
 }
 
 /**
+ * Deletes a branch whose tip is already in `into` (the expedition branch): its commits are kept
+ * there, so the per-attempt branch is only clutter in the owner's repository. Compare-and-delete
+ * at the tip just read, so a branch that moved is never deleted.
+ */
+async function dropMergedBranch(root: string, at: WorktreeAt, into: string): Promise<boolean> {
+  const ref = `refs/heads/${at.branch}`;
+  const tip = await git(root, ['rev-parse', '--verify', '--quiet', ref]);
+  if (tip.t === 'failed') return false;
+  const merged = await git(root, ['merge-base', '--is-ancestor', tip.stdout, `refs/heads/${into}`]);
+  if (merged.t === 'failed') return false;
+  return (await git(root, ['update-ref', '-d', ref, tip.stdout])).t === 'ok';
+}
+
+/**
  * Ends an attempt's worktree. No commits beyond its base: remove it and its branch. Commits and
- * `keepCommits`: keep it (integration may need it). Commits at the end: remove the tree but never
- * the branch. A refused removal (uncommitted changes) is recorded, never forced.
+ * `keepCommits`: keep it (integration may need it). Commits at the end: remove the tree, and its
+ * branch only when the expedition branch `into` already holds its tip (merged work); unmerged
+ * commits keep their branch for the owner. A refused removal (uncommitted changes) is recorded,
+ * never forced.
  */
 export async function releaseWorktree(
   root: string,
   name: string,
   at: WorktreeAt,
-  keepCommits: boolean
+  keepCommits: boolean,
+  into: string
 ): Promise<Release> {
   if (!(await cambiumWorkspace(root, name))) return releaseUnregistered(root, at);
   const branch = await branchState(root, at);
@@ -292,7 +348,9 @@ export async function releaseWorktree(
   if (commits > 0 && keepCommits) return { t: 'kept', commits };
   const removed = await cambium(root, ['remove', name]);
   if (removed.t === 'failed') return { t: 'left', reason: removed.message };
-  return { t: 'removed', branchDeleted: commits === 0 && (await dropEmptyBranch(root, at)) };
+  const branchDeleted =
+    commits === 0 ? await dropEmptyBranch(root, at) : await dropMergedBranch(root, at, into);
+  return { t: 'removed', branchDeleted };
 }
 
 /**
@@ -312,8 +370,9 @@ async function releaseUnregistered(root: string, at: WorktreeAt): Promise<Releas
 
 /**
  * Discards a validation tree (design.md R2): scratch, so a check's build outputs or edits are
- * removed with `--force`; its branch is dropped only while it still points at its base (a check
- * that committed keeps its branch, reported as `branchDeleted: false`).
+ * removed with `--force`, and its branch with them, commits included (a validation commit is a
+ * check's by-product, never work: the candidate it validated has its own branch). The branch is
+ * compare-and-deleted at the tip just read.
  */
 export async function discardWorktree(
   root: string,
@@ -323,7 +382,7 @@ export async function discardWorktree(
   if (!(await cambiumWorkspace(root, name))) return releaseUnregistered(root, at);
   const removed = await cambium(root, ['remove', '-force', name]);
   if (removed.t === 'failed') return { t: 'left', reason: removed.message };
-  return { t: 'removed', branchDeleted: await dropEmptyBranch(root, at) };
+  return { t: 'removed', branchDeleted: await dropScratchBranch(root, at) };
 }
 
 // ---------- Integration (design.md R3) ----------
