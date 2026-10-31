@@ -220,14 +220,23 @@ test('a Buddy turn runs in its workspace root, not the folder the conversation s
   const requests: Request[] = [];
   let root = '/srv/buddies';
   const fixture = runtimeFixture({
-    readCurrentBuddyContext: () => ({ briefing: 'B', memoryGeneration: '1', workingDirectory: root }),
+    readCurrentBuddyContext: () => ({
+      briefing: 'B',
+      memoryGeneration: '1',
+      workingDirectory: root,
+    }),
     executeTurn: fakeExecuteTurn((request) => {
       requests.push(request);
       return {
         events: (async function* () {
           yield { type: 'turn.complete' as const, reason: 'success' as const };
         })(),
-        completed: Promise.resolve({ exitCode: 0, signal: null, sessionId: 's', reason: 'success' }),
+        completed: Promise.resolve({
+          exitCode: 0,
+          signal: null,
+          sessionId: 's',
+          reason: 'success',
+        }),
         stop: () => undefined,
       };
     }),
@@ -634,61 +643,79 @@ test('a Codex turn that fails before creating a thread retries without resume', 
   assert.equal(conversation.sessionId, 'real-codex-thread');
 });
 
-test('a missing Codex rollout clears a legacy phantom session binding', async () => {
-  type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
-  const requests: Request[] = [];
-  const invalidated: string[] = [];
-  const fixture = runtimeFixture({
-    invalidateCurrentSession: async (_id, sessionId) => {
-      invalidated.push(sessionId);
-    },
-    executeTurn: fakeExecuteTurn((request) => {
-      requests.push(request);
-      const missing = requests.length === 1;
-      return {
-        events: (async function* () {
-          yield { type: 'turn.started' as const };
-          if (missing) {
-            yield {
-              type: 'error' as const,
-              message: 'thread/resume failed: no rollout found for thread id phantom-thread',
-            };
-          } else {
-            yield { type: 'session.started' as const, sessionId: 'new-codex-thread' };
-            yield { type: 'text.delta' as const, text: 'Ready' };
-            yield { type: 'turn.complete' as const, reason: 'success' as const };
-          }
-        })(),
-        completed: Promise.resolve({
-          exitCode: missing ? 1 : 0,
-          signal: null,
-          sessionId: missing ? '' : 'new-codex-thread',
-          reason: missing ? ('error' as const) : ('success' as const),
-        }),
-        stop: () => undefined,
-      };
-    }),
-  });
-  const conversation = new fixture.Conversation({
-    id: 'legacy-codex-conversation',
-    done: false,
-    kind: { t: 'chat' },
-    workingDirectory: '/tmp',
-    configState: fixture.configState,
-    existingSessionId: 'phantom-thread',
-  });
+for (const [label, message] of [
+  ['missing', 'thread/resume failed: no rollout found for thread id phantom-thread'],
+  [
+    'noncanonical',
+    'thread/resume: thread/resume failed: paginated rollout path /tmp/rollout-2026-10-12T12-41-55-517Z-9bc064ee-f395-4743-92a3-3c9e0ad2cc23.jsonl does not have a canonical rollout filename (code -32600)',
+  ],
+]) {
+  test(`a ${label} Codex rollout clears the rejected session binding`, async () => {
+    type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
+    const requests: Request[] = [];
+    const invalidated: string[] = [];
+    const fixture = runtimeFixture({
+      invalidateCurrentSession: async (_id, sessionId) => {
+        invalidated.push(sessionId);
+      },
+      executeTurn: fakeExecuteTurn((request) => {
+        requests.push(request);
+        const missing = requests.length === 1;
+        return {
+          events: (async function* () {
+            yield { type: 'turn.started' as const };
+            if (missing) {
+              yield {
+                type: 'error' as const,
+                message,
+              };
+            } else {
+              yield { type: 'session.started' as const, sessionId: 'new-codex-thread' };
+              yield { type: 'text.delta' as const, text: 'Ready' };
+              yield { type: 'turn.complete' as const, reason: 'success' as const };
+            }
+          })(),
+          completed: Promise.resolve({
+            exitCode: missing ? 1 : 0,
+            signal: null,
+            sessionId: missing ? '' : 'new-codex-thread',
+            reason: missing ? ('error' as const) : ('success' as const),
+          }),
+          stop: () => undefined,
+        };
+      }),
+    });
+    const conversation = new fixture.Conversation({
+      id: 'legacy-codex-conversation',
+      done: false,
+      kind: { t: 'chat' },
+      workingDirectory: '/tmp',
+      configState: fixture.configState,
+      existingSessionId: 'phantom-thread',
+    });
 
-  conversation.sendMessage('Resume');
-  await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
-  conversation.sendMessage('Retry');
-  await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
+    conversation.sendMessage('Resume');
+    await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
+    conversation.sendMessage('Retry');
+    await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
 
-  assert.deepEqual(invalidated, ['phantom-thread']);
-  assert.equal(requests.length, 2);
-  assert.equal(requests[0].resumeSessionId, 'phantom-thread');
-  assert.equal(requests[1].resumeSessionId, undefined);
-  assert.equal(conversation.sessionId, 'new-codex-thread');
-});
+    assert.deepEqual(invalidated, ['phantom-thread']);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].resumeSessionId, 'phantom-thread');
+    assert.equal(requests[1].resumeSessionId, undefined);
+    assert.equal(conversation.sessionId, 'new-codex-thread');
+    assert.ok(
+      conversation.messages.some(
+        (row) => row.role === 'user' && row.body.t === 'text' && row.body.text === 'Resume'
+      )
+    );
+    assert.ok(
+      conversation.messages.some(
+        (row) => row.role === 'system' && row.body.t === 'text' && row.body.text.includes(message)
+      )
+    );
+  });
+}
 
 test('unsupported Buddy provider leaves a queued message retryable', () => {
   const fixture = runtimeFixture({ provider: 'gemini' });

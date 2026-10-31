@@ -617,9 +617,14 @@ export class TurnRunner {
   }
 
   async noteFailure(cause: 'out_of_tokens' | 'provider_error', message: string): Promise<void> {
-    if (this.host.provider === 'codex' && message.includes('no rollout found for thread id')) {
-      // Seven failures on one empty DM: clearing only memory revived the phantom on restart.
-      // Guard: config-service invalidation + conversation-runtime missing-rollout retry.
+    if (
+      this.host.provider === 'codex' &&
+      (message.includes('no rollout found for thread id') ||
+        (message.includes('thread/resume') &&
+          message.includes('does not have a canonical rollout filename')))
+    ) {
+      // Rejected rollout bindings otherwise fail on every retry, including after restart.
+      // Guard: conversation-runtime rejected-rollout retries + config-service durable invalidation.
       this.host.markSessionStarted(false);
       await this.host.invalidateSession();
     }
