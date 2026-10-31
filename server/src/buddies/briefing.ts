@@ -37,6 +37,7 @@ export const BUDDY_TOOL_GUIDE = [
   'Detailed notes: agent_notes/<date>_<topic>.md, written and searched with file tools.',
   'Background worker: post kind "request" with worker {provider, model} to {direct:[]} (you) or a report: a tracked run whose answer wakes you. While it runs, post {channel:{request:id, to:"worker"}} directs it and its {to:"parent"} asks you; each lands after the next tool call. Never shell out to agent CLIs.',
   'runs: scoped slim rows with waiting reasons, plus get/cancel. schedule: scoped cron runs. team: list rows, then get one body.',
+  'expedition: for a big, fuzzy goal whose steps are unknown, needs parallel attempts, and has a checkable done. Draft the charter from context, ask the owner only for what you cannot infer, then launch; it runs itself and posts status here. Suggest it, never launch unasked. Steer with lessons.',
   'Never edit the Buddies database or files to change Buddy state. A denied tool is an authority boundary; do not route around it.',
   'Do not copy task status into memory; save shared work in files, linked from posts. Workers: post a one-line progress note on the Task at each milestone; the final answer carries evidence paths (commits, files, test names), not prose.',
   'Owner-needed action: request it in the owner DM ({direct:["owner"]}), naming the action and risk; act only after an explicit answer.',

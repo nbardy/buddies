@@ -149,7 +149,9 @@ test('tool input schemas change only additively; reshaped forms need a legacy ca
 // 2026-10-23: 3000 -> 3870. The Buddy `oompa` control tool (1,162 chars) shipped over budget; the
 // other tools alone total 2,999, so no rewording fits. Compacted to 831; gating it to grants with
 // Oompa authority would win the rest back.
-const WORKER_DESCRIPTION_BUDGET = 3870;
+// 2026-11-01: 3870 -> 3990. The `expedition` tool (120 chars; usage lives in BUDDY_TOOL_GUIDE and
+// expeditions/mcp.md), so a Buddy can launch an expedition from any thread.
+const WORKER_DESCRIPTION_BUDGET = 3990;
 
 function describedChars(role: Role): number {
   const nested = (node: Json): number => {

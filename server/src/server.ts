@@ -78,7 +78,13 @@ import {
   reportBackendExits,
   startEventLoopStallMonitor,
 } from './observability';
-import { bootPhase, flushRouteLatency, routeLatencyMiddleware, timeBootPhase, timeBootPhaseAsync } from './observability/perf';
+import {
+  bootPhase,
+  flushRouteLatency,
+  routeLatencyMiddleware,
+  timeBootPhase,
+  timeBootPhaseAsync,
+} from './observability/perf';
 import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
@@ -116,6 +122,7 @@ import { createBuddyPolicyPort } from './buddies/policy-port';
 import { registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
+import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 
 let startupAuditResults: Awaited<ReturnType<typeof auditLocalAgents>> = [];
@@ -342,6 +349,7 @@ const backgroundWork = new BackgroundWork();
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
 const buddyBriefings = createBriefings(buddiesCore, () => installedAgent());
 let buddyMcp: McpEndpoint | null = null;
+let expeditionHost: ExpeditionHost | null = null;
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {
   if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
   return buddyMcp.spec(grant);
@@ -827,11 +835,8 @@ shutdownController = registerShutdownHandlers(
     flushState: async () => {
       upstream.stop();
       dependencyChecks.close();
-      await Promise.all([
-        turnAttemptJournal.flush(),
-        errorJournal.flush(),
-        flushRouteLatency(),
-      ]);
+      await Promise.all([turnAttemptJournal.flush(), errorJournal.flush(), flushRouteLatency()]);
+      expeditionHost?.close();
       await buddyMcp?.close();
       if (bootedIngest) {
         const { ingest, list } = await bootedIngest;
@@ -919,6 +924,15 @@ void runServerStartup(
         foundExecutions = execution.scan();
         for (const grant of liveGrants(foundExecutions)) buddyGrants.adopt(grant);
       });
+      // Expeditions (expeditions/README.md): ledgers resume here; inert on a copied store.
+      expeditionHost = timeBootPhase('expeditions', () =>
+        createExpeditionHost({
+          core: buddiesCore,
+          events: buddyEvents,
+          root: path.join(APP_DATA_DIR, 'expeditions'),
+          gate: decideExecutionGate(),
+        })
+      );
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).
       buddyMcp = await timeBootPhaseAsync('mcp_endpoint', () =>
         startMcpEndpoint({
@@ -929,6 +943,7 @@ void runServerStartup(
           messages: async (id, page) => (await listReady).page(id, page),
           openBranch: (chat) => buddyCreationService.openBranch(chat),
           backgroundWork,
+          expeditions: expeditionHost ?? undefined,
           portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
         })
       );
