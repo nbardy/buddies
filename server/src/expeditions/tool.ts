@@ -63,8 +63,10 @@ const catalogModels: ModelsOf = (provider) => {
  * the Buddy posted it, and the post tool refused the relative path as a missing media attachment.
  */
 const pageOf = (s: State) => `/expeditions/${s.id}`;
+// 2026-11-01 smoke: "tell the owner in one line" made a DM-launched Buddy answer in plain text, and
+// the runner fails a delivery turn that ends without a post ("Couldn't reply"), so say `post`.
 const NEXT =
-  'The badge (it opens the page) is already in this chat, posted by the host: do not post the page path or a link. Tell the owner in one line what launched; updates post on their own, and the owner steers by replying in the expedition chat.';
+  'The badge (it opens the page) is already in this chat, posted by the host: do not post the page path or a link. Reply with the post tool in this thread, one line saying what launched; updates post on their own, and the owner steers by replying in the expedition chat.';
 
 function launchReply(launched: Launched, defaulted: string[], resolved: string[]) {
   switch (launched.t) {
