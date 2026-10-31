@@ -17,6 +17,8 @@ export interface ExpeditionQuestion {
   detail: string;
   scope: 'in' | 'explore' | 'parked';
   status: 'open' | 'verified' | 'dead';
+  /** File custody: repo-relative prefixes; work on overlapping paths runs one at a time. */
+  paths: string[];
   attempts: string[];
 }
 

@@ -113,6 +113,7 @@ function applyAction(
         title: action.title,
         detail: action.detail,
         scope: action.scope,
+        paths: action.paths,
       });
       return;
     case 'work': {

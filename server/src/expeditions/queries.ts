@@ -1,6 +1,6 @@
 import { type Charter, type WorkerConfig, sameModel } from './charter';
 import type { Attempt, AttemptSpec, CheckSpec, State } from './ledger';
-import { byId } from './ledger';
+import { byId, questionOf } from './ledger';
 
 // Pure read-only views over a folded State, shared by decide, effects, briefs, news and the page.
 
@@ -14,6 +14,35 @@ export const exploreAttempts = (s: State) =>
   ).length;
 export const exploreCap = (c: Charter) => Math.floor(c.exploreShare * c.maxAttempts);
 export const deadlineMs = (s: State) => Date.parse(s.launchedAt) + s.charter.hours * 3_600_000;
+
+/** Two custody prefixes overlap when one contains the other (`.` is the whole repository). */
+const prefixOverlap = (a: string, b: string) =>
+  a === '.' || b === '.' || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+export const custodyOverlaps = (a: readonly string[], b: readonly string[]) =>
+  a.some((x) => b.some((y) => prefixOverlap(x, y)));
+
+/** A worker attempt's file custody: its question's paths for work, nothing for a check. */
+export function custodyOf(s: State, a: Attempt): readonly string[] {
+  switch (a.spec.kind) {
+    case 'work':
+      return questionOf(s, a.spec.questionId).paths;
+    case 'manager':
+    case 'check':
+      return [];
+  }
+}
+
+/**
+ * Worker attempts holding a live slot and their custody: posted or posting, or still planned with
+ * a worktree already made for them (admitted, about to be briefed).
+ */
+export const admitted = (s: State) =>
+  s.attempts.filter(
+    (a) =>
+      a.spec.kind !== 'manager' &&
+      (a.phase.t === 'posted' || a.phase.t === 'posting' || a.id in s.worktrees) &&
+      a.phase.t !== 'ended'
+  );
 
 /** The work and check attempts on one question (managers belong to no question). */
 export const attemptsOn = (s: State, questionId: string) =>

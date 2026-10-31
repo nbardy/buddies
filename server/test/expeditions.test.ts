@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,7 +13,7 @@ import { createBuddyEvents } from '../src/buddies/events';
 import { createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint } from '../src/buddies/mcp';
 import { type ExpeditionHost, createExpeditionHost } from '../src/expeditions/host';
-import { type Entry, type State, fold } from '../src/expeditions/model';
+import { Charter, type Entry, type State, fold } from '../src/expeditions/model';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import { BackgroundWork } from '../src/turns/background-work';
 import { tempDir } from './fixtures/temp';
@@ -35,12 +36,32 @@ async function rpc(spec: McpServerSpec, name: string, args: Record<string, unkno
   }
 }
 
+/** Test-side git (sync is fine here; the host's git is async). */
+const git = (cwd: string, ...args: string[]) =>
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+/** A throwaway repository with two top-level areas; Cambium keeps its registry inside it. */
+function tempRepo(scratch: string): string {
+  const repo = path.join(scratch, 'repo');
+  fs.mkdirSync(path.join(repo, 'widget'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'docs'));
+  fs.writeFileSync(path.join(repo, 'widget', 'widget.ts'), 'export const broken = true;\n');
+  fs.writeFileSync(path.join(repo, 'docs', 'README.md'), '# Widget\n');
+  git(repo, 'init', '-q', '-b', 'main');
+  git(repo, 'config', 'user.email', 'test@example.com');
+  git(repo, 'config', 'user.name', 'Test');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-q', '-m', 'base');
+  return repo;
+}
+
 const json = (value: unknown) => `Done.\n\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
 
 async function fixture() {
   const scratch = tempDir('expeditions-');
   const core = await BuddiesCore.open(path.join(scratch, 'buddies.sqlite'));
-  const ws = await core.createWorkspace(OWNER, { name: 'Repo', rootPath: scratch });
+  const repo = tempRepo(scratch);
+  const ws = await core.createWorkspace(OWNER, { name: 'Repo', rootPath: repo });
   const lead = await core.createBuddy(OWNER, {
     workspaceId: ws.id,
     slug: 'lead',
@@ -116,9 +137,27 @@ async function fixture() {
     assert.equal(m.length, 1, 'exactly one live manager');
     return m[0].id;
   };
+  /** A work attempt's recorded worktree. */
+  const treeOf = (id: string, attemptId: string) => {
+    const tree = stateOf(id).worktrees[attemptId];
+    if (!tree) throw new Error(`no worktree for ${attemptId}`);
+    return tree;
+  };
+  /** Commits a change inside a worktree, as a worker would; returns the sha. */
+  const commitIn = (dir: string, file: string) => {
+    fs.writeFileSync(path.join(dir, file), 'export const broken = false;\n');
+    git(dir, 'add', '.');
+    git(dir, 'commit', '-q', '-m', `fix ${file}`);
+    return git(dir, 'rev-parse', 'HEAD');
+  };
+  const branchExists = (ref: string) => git(repo, 'branch', '--list', ref) !== '';
   return {
     core,
     lead,
+    repo,
+    treeOf,
+    commitIn,
+    branchExists,
     ledgerPath: (id: string) => path.join(root, id, 'ledger.jsonl'),
     spec: () => endpoint.spec(grant),
     ledgerOf,
@@ -144,14 +183,14 @@ async function fixture() {
   };
 }
 
-const charter = (name: string) => ({
+const charter = (name: string, maxLive = 2) => ({
   name,
   goal: 'Make the widget pass its test.',
   done: { checks: ['pnpm test widget passes'] },
   inScope: ['widget'],
   outOfScope: ['the website'],
   maxAttempts: 20,
-  maxLive: 2,
+  maxLive,
   hours: 4,
   exploreShare: 0.2,
   crew: {
@@ -187,6 +226,14 @@ test('an expedition runs plan → parallel work → blind check → done, and re
             title: 'Why does the widget fail?',
             detail: 'Find it.',
             scope: 'in',
+            paths: ['./widget/'],
+          },
+          {
+            do: 'add_question',
+            title: 'Are the docs stale?',
+            detail: 'Read them.',
+            scope: 'in',
+            paths: ['docs'],
           },
           { do: 'note', text: 'Start narrow; one question first.' },
           { do: 'done', summary: 'All good' },
@@ -194,13 +241,15 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       })
     );
     s = f.stateOf(id);
-    assert.equal(s.questions.length, 1);
+    assert.equal(s.questions.length, 2);
+    assert.deepEqual(s.questions[0].paths, ['widget'], 'custody paths are normalized once');
     assert.equal(s.run.t, 'running');
     assert.ok(
       f.ledgerOf(id).some((e) => e.t === 'rejected' && e.action.do === 'done'),
       'premature done is a typed rejection, not silently applied'
     );
     const q = s.questions[0].id;
+    const q2 = s.questions[1].id;
 
     // The rejection is shown to a fresh manager; it starts three attempts with a live cap of 2.
     const m2 = f.manager(id);
@@ -209,17 +258,32 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       id,
       m2,
       json({
-        actions: [1, 2, 3].map((n) => ({
+        actions: [q, q2, q].map((question, n) => ({
           do: 'work',
-          question: q,
-          seat: (n - 1) % 2,
-          brief: `Approach ${n}: SECRET-BRIEF-${n}`,
+          question,
+          seat: n % 2,
+          brief: `Approach ${n + 1}: SECRET-BRIEF-${n + 1}`,
         })),
       })
     );
     let work = f.liveAttempts(id).filter((a) => a.kind === 'work');
     assert.equal(work.length, 2, 'maxLive bounds parallel work');
     assert.equal(f.stateOf(id).attempts.filter((a) => a.phase.t === 'planned').length, 1);
+
+    // Isolation is structural: each live work attempt has its own worktree at the expedition
+    // branch's base, and its brief names that path; the shared checkout is untouched.
+    const base = git(f.repo, 'rev-parse', 'HEAD');
+    assert.equal(git(f.repo, 'rev-parse', `expedition/${id}`), base);
+    for (const w of work) {
+      const tree = f.treeOf(id, w.id);
+      assert.equal(tree.baseSha, base);
+      assert.equal(git(tree.path, 'rev-parse', 'HEAD'), base);
+      assert.equal(git(tree.path, 'branch', '--show-current'), tree.branch);
+      const brief = await f.core.getPost(OWNER, w.requestId);
+      assert.ok(brief.body.includes(`YOUR WORKTREE: ${tree.path}`), `${w.id} brief names its tree`);
+    }
+    const claimTree = f.treeOf(id, work[0].id);
+    const sha = f.commitIn(claimTree.path, 'widget/widget.ts');
 
     // One claim, one malformed answer: the malformed one is recorded as data, the queued one starts.
     await f.answer(
@@ -228,7 +292,8 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       json({
         result: 'claim',
         statement: 'The widget passes now',
-        evidence: ['commit abc'],
+        commit: sha,
+        evidence: ['widget/widget.ts'],
         howToCheck: 'run the test',
       })
     );
@@ -236,6 +301,14 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     s = f.stateOf(id);
     const malformed = s.attempts.find((a) => a.id === work[1].id);
     assert.equal(malformed?.phase.t === 'ended' && malformed.phase.outcome.t, 'malformed');
+    // The claim's worktree has a commit: kept for integration. The malformed one made none: its
+    // worktree and branch are removed.
+    assert.deepEqual(f.treeOf(id, work[0].id).status, { t: 'kept', commits: 1 });
+    const emptyTree = f.treeOf(id, work[1].id);
+    assert.deepEqual(emptyTree.status, { t: 'removed', branchDeleted: true });
+    assert.equal(fs.existsSync(emptyTree.path), false);
+    assert.equal(f.branchExists(emptyTree.branch), false);
+    assert.equal(git(f.repo, 'status', '--porcelain'), '', 'the shared checkout was never edited');
     work = f.liveAttempts(id).filter((a) => a.kind === 'work');
     assert.equal(work.length, 1, 'the queued attempt took the freed slot');
 
@@ -315,6 +388,14 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       summary: 'Widget passes, independently verified.',
     });
     assert.equal(s.questions[0].status, 'verified');
+    // Finished: every worktree is gone; the claim's branch (unintegrated commits) survives, the
+    // still-running attempt's empty branch does not.
+    for (const tree of Object.values(s.worktrees)) {
+      assert.equal(tree.status.t, 'removed', `${tree.attemptId} worktree released`);
+      assert.equal(fs.existsSync(tree.path), false);
+    }
+    assert.equal(git(f.repo, 'rev-parse', claimTree.branch), sha);
+    assert.equal(f.branchExists(f.treeOf(id, work[0].id).branch), false);
     const last = s.statuses.at(-1)!;
     assert.match(last.text, /Finished \(done\)/);
     assert.equal(last.post.t, 'posted', 'the finish was posted');
@@ -420,9 +501,123 @@ test('an expedition never goes quiet: an empty plan with nothing running asks th
   }
 });
 
-async function rpcLaunch(f: Awaited<ReturnType<typeof fixture>>, name: string) {
+const question = (title: string, paths: string[]) => ({
+  do: 'add_question',
+  title,
+  detail: title,
+  scope: 'in',
+  paths,
+});
+
+test('work on overlapping custody waits for the holder even with free slots; disjoint work runs at once', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'custody', 3);
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [
+          question('Fix the widget', ['widget']),
+          question('Fix the widget core', ['widget/core']),
+          question('Fix the docs', ['docs']),
+        ],
+      })
+    );
+    // Questions alone leave nothing new for a manager; an owner note asks for the next decision.
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
+    const [outer, inner, docs] = f.stateOf(id).questions.map((q) => q.id);
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [outer, inner, docs].map((q) => ({ do: 'work', question: q, seat: 0, brief: q })),
+      })
+    );
+    const questionOfLive = () =>
+      f
+        .liveAttempts(id)
+        .flatMap((a) => {
+          const spec = f.stateOf(id).attempts.find((x) => x.id === a.id)!.spec;
+          return spec.kind === 'work' ? [spec.questionId] : [];
+        })
+        .sort();
+    assert.deepEqual(questionOfLive(), [outer, docs].sort(), 'widget/core waits; docs runs');
+    const waiting = f.stateOf(id).attempts.find((a) => a.phase.t === 'planned')!;
+    assert.equal(waiting.id in f.stateOf(id).worktrees, false, 'a waiting attempt has no worktree');
+
+    // The holder ends with a finding: its custody frees and the waiting attempt starts, based on
+    // the expedition branch head.
+    const holder = f.liveAttempts(id).find((a) => a.kind === 'work')!;
+    await f.answer(id, holder.id, json({ result: 'finding', statement: 'nope', evidence: [] }));
+    assert.deepEqual(questionOfLive(), [docs, inner].sort());
+    assert.equal(f.treeOf(id, waiting.id).baseSha, git(f.repo, 'rev-parse', `expedition/${id}`));
+  } finally {
+    await f.close();
+  }
+});
+
+test('a crash between creating a worktree and recording it adopts that worktree on replay', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'adopt');
+    await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
+    const q = f.stateOf(id).questions[0].id;
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'go' }] })
+    );
+    const posted = f.liveAttempts(id).find((a) => a.kind === 'work')!;
+    const tree = f.treeOf(id, posted.id);
+
+    // Cut the ledger right after the intent: the worktree exists, the ledger says "creating".
+    const file = f.ledgerPath(id);
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    const cut = lines.findIndex((l) => l.includes('"worktree_ready"') && l.includes(posted.id));
+    fs.writeFileSync(file, `${lines.slice(0, cut).join('\n')}\n`);
+    assert.equal(f.stateOf(id).worktrees[posted.id].status.t, 'creating');
+
+    f.restart();
+    await f.host.tick(id);
+    const after = f.treeOf(id, posted.id);
+    assert.deepEqual([after.status.t, after.path, after.branch], ['ready', tree.path, tree.branch]);
+    const workspaces = JSON.parse(git(f.repo, 'cambium', 'list', '--json')) as { name: string }[];
+    assert.deepEqual(
+      workspaces.map((w) => w.name),
+      [after.name],
+      'one Cambium workspace, adopted, not a second'
+    );
+    const replayed = f.liveAttempts(id).find((a) => a.id === posted.id)!;
+    assert.equal(replayed.requestId, posted.requestId, 'the same brief post, not a second');
+  } finally {
+    await f.close();
+  }
+});
+
+test('launch is refused with a reason when the workspace is not a git repository', async () => {
+  const f = await fixture();
+  try {
+    const ws = await f.core.createWorkspace(OWNER, { name: 'Plain', rootPath: tempDir('plain-') });
+    await assert.rejects(
+      f.host.launch({
+        key: 'plain',
+        charter: Charter.parse(charter('plain')),
+        origin: { t: 'direct' },
+        launcherId: f.lead.id,
+        workspaceId: ws.id,
+      }),
+      /refused: workspace root .* is not a git repository/
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+async function rpcLaunch(f: Awaited<ReturnType<typeof fixture>>, name: string, maxLive = 2) {
   const launched = await rpc(f.spec(), 'expedition', {
-    action: { do: 'launch', charter: charter(name) },
+    action: { do: 'launch', charter: charter(name, maxLive) },
   });
   assert.equal(launched.error, false, launched.text);
   return launched.value as { id: string; status: string };

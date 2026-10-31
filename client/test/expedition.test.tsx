@@ -80,6 +80,7 @@ const view: ExpeditionView = {
       detail: 'Find it.',
       scope: 'in',
       status: 'open',
+      paths: ['widget'],
       attempts: ['w1'],
     },
   ],

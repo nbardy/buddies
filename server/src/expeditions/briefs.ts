@@ -21,6 +21,7 @@ import {
   questionOf,
   queued,
   seatLabel,
+  worktreeOf,
 } from './model';
 
 // What each attempt is told. Every brief is rebuilt from the ledger, so lessons and verified
@@ -31,8 +32,8 @@ export const CREW_ROLE = [
   'Expedition crew. Each request you receive is one attempt of an expedition: a manager decision,',
   'a work attempt, or an independent check. Do exactly that one attempt, then answer the request.',
   'Your final message MUST end with one fenced ```json block in the shape the request names.',
-  'Never start other Buddies, workers or schedules. Use git worktrees for code changes and commit',
-  'on your own branch; never push to main. When mentioned in a thread, use the `expedition` tool',
+  'Never start other Buddies, workers or schedules. A work request names your git worktree: edit and',
+  'commit only there, never in any other checkout; never push. When mentioned in a thread, use the `expedition` tool',
   '(status) to answer questions about your expedition.',
 ].join(' ');
 
@@ -58,7 +59,7 @@ function lessonsText(s: State): string {
 }
 
 function questionLine(s: State, q: Question): string {
-  return `- ${q.id} [${q.scope}/${q.status}] ${q.title} — ${attemptsOn(s, q.id).length} attempts`;
+  return `- ${q.id} [${q.scope}/${q.status}] ${q.title} (paths: ${q.paths.join(', ')}) — ${attemptsOn(s, q.id).length} attempts`;
 }
 
 function attemptLine(a: Attempt): string {
@@ -107,6 +108,7 @@ function managerBrief(s: State): string {
       '- Break the goal into questions (unknowns or subgoals). Keep at least two genuinely different approaches alive until one is verified.',
       '- Ideas outside IN SCOPE go to scope "explore" (budgeted) or "parked" (owner funds it). Never quietly widen scope.',
       '- Start parallel work: one "work" action per question attempt; the host queues beyond the live limit.',
+      '- Each question owns file paths (repo-relative prefixes, "." = whole repo). Work on overlapping paths runs one at a time, so split questions by the files they touch to run them in parallel.',
       '- A claim counts only after "check". Ask a check with goal:true when a claim should satisfy DONE WHEN.',
       '- When different approaches fail the same way, the problem is probably upstream: add a question about measurement or setup.',
       '- Kill (close dead) what a check refuted twice or a prediction falsified. Do not repeat work already in ATTEMPTS.',
@@ -115,7 +117,7 @@ function managerBrief(s: State): string {
     ].join('\n'),
     [
       'ANSWER: a JSON object {"actions":[...]} where each action is one of:',
-      '{"do":"add_question","title":"…","detail":"…","scope":"in"|"explore"|"parked"}',
+      '{"do":"add_question","title":"…","detail":"…","scope":"in"|"explore"|"parked","paths":["<repo-relative prefix the work may edit>"]}',
       '{"do":"work","question":"<question id>","seat":<work seat index>,"brief":"<self-contained instructions and the approach to try>"}',
       '{"do":"check","claimAttempt":"<work attempt id>","goal":true|false,"panel":1|2|3}',
       '{"do":"close_question","question":"<id>","status":"verified"|"dead","why":"…"}',
@@ -132,6 +134,7 @@ function managerBrief(s: State): string {
 
 function workBrief(s: State, id: string, spec: WorkSpec): string {
   const q = questionOf(s, spec.questionId);
+  const tree = worktreeOf(s, id);
   const verified = s.attempts.flatMap((x) =>
     x.phase.t === 'ended' &&
     x.phase.outcome.t === 'check' &&
@@ -152,15 +155,20 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
     lessonsText(s),
     `YOUR QUESTION (${q.id}): ${q.title}\n${q.detail}`,
     `YOUR BRIEF:\n${spec.brief}`,
+    [
+      `YOUR WORKTREE: ${tree.path} (branch ${tree.branch}, based on ${tree.baseSha}).`,
+      'Work and commit ONLY in that directory, on that branch: cd there first. Never edit any other',
+      `checkout. Your files: ${q.paths.join(', ')}. A claim must name its commit's full sha.`,
+    ].join(' '),
     `WHAT OTHERS FOUND:\n${findings.join('\n') || '- nothing yet'}${verified.length ? `\n${verified.join('\n')}` : ''}`,
     [
-      'RULES: stay inside your question. Code changes go on your own branch in your own git worktree;',
-      'commit before you claim, and cite the commit and files as evidence. Before you start, state your',
+      'RULES: stay inside your question. Commit before you claim, and cite the files and tests as',
+      'evidence. Before you start, state your',
       'approach and what result you predict; report honestly if the prediction failed.',
     ].join(' '),
     [
       'ANSWER: one of',
-      '{"result":"claim","statement":"<what is now true>","evidence":["<commit/file/test/number>"],"howToCheck":"<how an independent agent can verify it>"}',
+      '{"result":"claim","statement":"<what is now true>","commit":"<full sha of your commit in YOUR WORKTREE>","evidence":["<commit/file/test/number>"],"howToCheck":"<how an independent agent can verify it>"}',
       '{"result":"finding","statement":"<negative or partial result>","evidence":["…"]}',
       '{"result":"blocked","need":"<what is missing>"}',
       JSON_RULE,
@@ -176,6 +184,7 @@ function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): st
     `[expedition ${s.id} · ${s.charter.name} · CHECK ${id}]`,
     'You are an independent verifier. Do not trust the claim; reproduce it yourself.',
     `CLAIM: ${statement.statement}`,
+    `CANDIDATE COMMIT: ${statement.commit} on branch ${worktreeOf(s, spec.claimAttemptId).branch} in ${s.repo.root}. Check it out in a fresh worktree of your own (git worktree add); never edit that repository's checkout.`,
     `EVIDENCE CITED: ${statement.evidence.join('; ') || '(none)'}`,
     `SUGGESTED CHECK: ${statement.howToCheck}`,
     spec.goal ? charterText(s.charter) : '',

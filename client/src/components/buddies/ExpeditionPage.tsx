@@ -189,7 +189,8 @@ function Tasks({ v }: { v: ExpeditionView }) {
   const row = (q: ExpeditionView['questions'][number]) => (
     <details key={q.id} className="ui-surface ui-card">
       <summary className="ui-choice">
-        {QUESTION_GLYPH[q.status]} {q.title} · {q.scope} · {q.attempts.length} attempts
+        {QUESTION_GLYPH[q.status]} {q.title} · {q.scope} · {q.paths.join(', ')} ·{' '}
+        {q.attempts.length} attempts
       </summary>
       <pre style={pre}>{q.detail}</pre>
       {q.attempts.length > 0 && <p className="ui-muted">Attempts: {q.attempts.join(', ')}</p>}

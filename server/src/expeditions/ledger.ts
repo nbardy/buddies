@@ -43,6 +43,40 @@ export type Feedback =
 
 export type FinishReason = 'done' | 'attempts_spent' | 'deadline' | 'owner_stop';
 
+/** The workspace repository, resolved by the launch preflight; `branch` is `expedition/<id>`. */
+export interface Repo {
+  root: string;
+  baseSha: string;
+  branch: string;
+}
+
+/** Where a work attempt's worktree is (design.md R1). */
+export interface WorktreeAt {
+  path: string;
+  branch: string;
+  baseSha: string;
+}
+
+/** How a worktree ended: removed (its branch too when it had no commits), kept for its commits,
+ * or left in place because removal was refused (uncommitted changes are never forced away). */
+export type Release =
+  | { t: 'removed'; branchDeleted: boolean }
+  | { t: 'kept'; commits: number }
+  | { t: 'left'; reason: string };
+
+export type WorktreeStatus = { t: 'creating' } | { t: 'ready' } | Release;
+
+export interface Worktree extends WorktreeAt {
+  attemptId: string;
+  /** The Cambium workspace name, the key that makes create and remove replayable. */
+  name: string;
+  status: WorktreeStatus;
+}
+
+/** The Cambium name of an attempt's worktree. */
+export const worktreeName = (expeditionId: string, attemptId: string) =>
+  `exp-${expeditionId}-${attemptId}`;
+
 // ---------- Ledger ----------
 
 export type Entry =
@@ -56,7 +90,15 @@ export type Entry =
       origin: Origin;
       launcherId: string;
       workspaceId: string;
+      repo: Repo;
     }
+  /** `expedition/<id>` exists at the base commit (created after `launched` recorded it). */
+  | { t: 'branch_ready'; at: string }
+  /** Intent, written before `git cambium add`: a crash leaves a name the replay adopts. */
+  | ({ t: 'worktree_creating'; at: string; attemptId: string; name: string } & WorktreeAt)
+  /** Written before the work brief is posted: the brief names this path. */
+  | ({ t: 'worktree_ready'; at: string; attemptId: string } & WorktreeAt)
+  | { t: 'worktree_released'; at: string; attemptId: string; release: Release }
   /** The crew Buddy and the owner↔crew DM: the expedition's chat, where every update lands. */
   | { t: 'crew_ready'; at: string; buddyId: string; chatChannelId: string }
   /** The one clickable badge post in the chat the launch came from. */
@@ -75,6 +117,8 @@ export type Entry =
       title: string;
       detail: string;
       scope: QuestionScope;
+      /** File custody: normalized repo-relative prefixes (charter.ts CustodyPath). */
+      paths: string[];
     }
   | {
       t: 'question_closed';
@@ -110,6 +154,7 @@ export interface Question {
   title: string;
   detail: string;
   scope: QuestionScope;
+  paths: string[];
   status: 'open' | 'verified' | 'dead';
 }
 
@@ -134,6 +179,10 @@ export interface State {
   origin: Origin;
   launcherId: string;
   workspaceId: string;
+  repo: Repo;
+  branch: { t: 'pending' } | { t: 'ready' };
+  /** Work attempts' worktrees, by attempt id. */
+  worktrees: Record<string, Worktree>;
   launchedAt: string;
   crew: { t: 'pending' } | { t: 'ready'; buddyId: string; chatChannelId: string };
   badgePost: { t: 'pending' } | { t: 'posted'; postId: string };
@@ -163,6 +212,9 @@ export function fold(entries: readonly Entry[]): State {
     origin: first.origin,
     launcherId: first.launcherId,
     workspaceId: first.workspaceId,
+    repo: first.repo,
+    branch: { t: 'pending' },
+    worktrees: {},
     launchedAt: first.at,
     crew: { t: 'pending' },
     badgePost: { t: 'pending' },
@@ -200,6 +252,30 @@ export function apply(s: State, e: Entry): void {
   switch (e.t) {
     case 'launched':
       throw new Error('launched may only open a ledger');
+    case 'branch_ready':
+      s.branch = { t: 'ready' };
+      return;
+    case 'worktree_creating':
+      s.worktrees[e.attemptId] = {
+        attemptId: e.attemptId,
+        name: e.name,
+        path: e.path,
+        branch: e.branch,
+        baseSha: e.baseSha,
+        status: { t: 'creating' },
+      };
+      return;
+    case 'worktree_ready':
+      Object.assign(worktreeOf(s, e.attemptId), {
+        path: e.path,
+        branch: e.branch,
+        baseSha: e.baseSha,
+        status: { t: 'ready' },
+      });
+      return;
+    case 'worktree_released':
+      worktreeOf(s, e.attemptId).status = e.release;
+      return;
     case 'crew_ready':
       s.crew = { t: 'ready', buddyId: e.buddyId, chatChannelId: e.chatChannelId };
       return;
@@ -243,6 +319,7 @@ export function apply(s: State, e: Entry): void {
         title: e.title,
         detail: e.detail,
         scope: e.scope,
+        paths: e.paths,
         status: 'open',
       });
       return;
@@ -307,6 +384,11 @@ export function attemptOf(s: State, id: string): Attempt {
   const attempt = byId(s.attempts, id);
   if (!attempt) throw new Error(`unknown attempt ${id}`);
   return attempt;
+}
+export function worktreeOf(s: State, attemptId: string): Worktree {
+  const worktree = s.worktrees[attemptId];
+  if (!worktree) throw new Error(`attempt ${attemptId} has no worktree`);
+  return worktree;
 }
 export function questionOf(s: State, id: string): Question {
   const question = byId(s.questions, id);

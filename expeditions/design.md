@@ -258,6 +258,20 @@ specified packet can be executed mechanically and judged by an executable check.
   two work attempts with overlapping custody at once; overlapping ones wait (queued, not refused).
 - All git/process calls are async (`execFile`/`spawn`), never sync on the server loop.
 
+Built (2026-11-01, `server/src/expeditions/git.ts`, `effects.ts`): launch preflight records
+`repo {root, baseSha, branch}` in the `launched` entry; `branch_ready` follows `git branch`.
+A work attempt is admitted by writing `worktree_creating {name, path, branch, baseSha}` BEFORE
+`git cambium add`, so it holds its slot and custody at once and a crash leaves a name the replay
+adopts (`cambium list --json`, by name) instead of adding a second workspace. Then
+`worktree_ready`, then the brief. An ended attempt's worktree is removed with its branch when it has
+no commits beyond its base, kept (`worktree_released {kept}`) when it has; at finish every
+remaining tree is removed and only empty branches are deleted. Removal never forces: uncommitted
+changes become `worktree_released {left, reason}`. Custody paths are normalized once (`./a/` → `a`,
+whole repo = `.`). Cambium keeps its registry in `.git/cambium`, so tests use the real tool on a
+temporary repository. Known gap: Buddy runs start in the workspace root; the brief tells the worker
+to `cd` into its worktree (outside that root), which a provider sandbox limited to its start
+directory may refuse.
+
 ### R2. Checks are typed: executable or judged
 ```
 DoneCheck = { kind: 'command', argv: string[], timeoutSeconds: number }   // host-run

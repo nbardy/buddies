@@ -61,6 +61,8 @@ export const WorkResult = z.union([
     .object({
       result: z.literal('claim'),
       statement: z.string().min(1),
+      /** The candidate commit on the attempt's own branch (design.md R1/R2). */
+      commit: z.string().regex(/^[0-9a-f]{40}$/, 'a full 40-character commit sha'),
       evidence: z.array(z.string()),
       howToCheck: z.string().min(1),
     })
@@ -86,6 +88,19 @@ export type CheckResult = z.infer<typeof CheckResult>;
 export const QuestionScope = z.enum(['in', 'explore', 'parked']);
 export type QuestionScope = z.infer<typeof QuestionScope>;
 
+/**
+ * A file-custody prefix, repo-relative, normalized once here: `./a/b/` → `a/b`, the whole
+ * repository → `.`. Absolute paths and `..` are refused (custody never leaves the repository).
+ */
+export const CustodyPath = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((p) => !p.startsWith('/') && !p.split('/').includes('..'), {
+    message: 'a repo-relative path inside the repository',
+  })
+  .transform((p) => p.replace(/^(\.\/)+/, '').replace(/\/+$/, '') || '.');
+
 const ref = z.string().min(1);
 export const ManagerAction = z.discriminatedUnion('do', [
   z
@@ -94,6 +109,8 @@ export const ManagerAction = z.discriminatedUnion('do', [
       title: z.string().min(1).max(200),
       detail: z.string().min(1).max(2000),
       scope: QuestionScope,
+      /** File custody: work attempts on overlapping paths never run at once. */
+      paths: z.array(CustodyPath).min(1).max(20),
     })
     .strict(),
   z

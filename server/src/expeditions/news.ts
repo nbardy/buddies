@@ -122,7 +122,7 @@ export function outcomeDetail(o: Outcome): string {
 function workDetail(r: WorkResult): string {
   switch (r.result) {
     case 'claim':
-      return `CLAIM: ${r.statement} | evidence: ${r.evidence.join('; ')} | check: ${r.howToCheck}`;
+      return `CLAIM: ${r.statement} | commit: ${r.commit} | evidence: ${r.evidence.join('; ')} | check: ${r.howToCheck}`;
     case 'finding':
       return `FINDING: ${r.statement} | evidence: ${r.evidence.join('; ')}`;
     case 'blocked':

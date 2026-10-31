@@ -9,6 +9,7 @@ import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
 import { labelled } from '../observability/event-loop-stall';
 import { CREW_ROLE, briefOf, parseOutcome, statusText } from './briefs';
+import { branchHead, ensureBranch, ensureWorktree, preflight, releaseWorktree } from './git';
 import {
   type Charter,
   type Clock,
@@ -23,6 +24,8 @@ import {
   decide,
   fold,
   pendingEffects,
+  worktreeName,
+  worktreeOf,
 } from './model';
 import { expeditionView } from './view';
 
@@ -53,6 +56,13 @@ export interface ExpeditionHostOptions {
 }
 
 export type ExpeditionHost = ReturnType<typeof createExpeditionHost>;
+
+/** A launch the preflight refused (design.md R4), with every reason; nothing was written. */
+export class LaunchRefused extends Error {
+  constructor(readonly reasons: string[]) {
+    super(`Expedition launch refused: ${reasons.join('; ')}.`);
+  }
+}
 
 export function createExpeditionHost(options: ExpeditionHostOptions) {
   const { core, events, root, gate } = options;
@@ -142,6 +152,31 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   async function run(s: State, effect: Effect): Promise<Entry[]> {
     switch (effect.t) {
+      case 'create_branch':
+        await ensureBranch(s.repo);
+        return [{ t: 'branch_ready', at: now() }];
+      case 'admit_work': {
+        // Intent first: the slot, custody and Cambium name are on disk before `cambium add` runs.
+        await append(s.id, [
+          {
+            t: 'worktree_creating',
+            at: now(),
+            attemptId: effect.attemptId,
+            name: worktreeName(s.id, effect.attemptId),
+            path: path.join(root, s.id, 'worktrees', effect.attemptId),
+            branch: `exp/${s.id}/${effect.attemptId}`,
+            baseSha: await branchHead(s.repo),
+          },
+        ]);
+        return createWorktree(stateOf(s.id), effect.attemptId);
+      }
+      case 'create_worktree':
+        return createWorktree(s, effect.attemptId);
+      case 'release_worktree': {
+        const tree = worktreeOf(s, effect.attemptId);
+        const release = await releaseWorktree(s.repo.root, tree.name, tree, effect.keepCommits);
+        return [{ t: 'worktree_released', at: now(), attemptId: effect.attemptId, release }];
+      }
       case 'create_crew': {
         const crew = await core.createBuddy(OWNER, {
           workspaceId: s.workspaceId,
@@ -207,6 +242,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
+  async function createWorktree(s: State, attemptId: string): Promise<Entry[]> {
+    const tree = worktreeOf(s, attemptId);
+    const at = await ensureWorktree(s.repo.root, tree.name, tree);
+    return [{ t: 'worktree_ready', at: now(), attemptId, ...at }];
+  }
+
   async function postAttempt(s: State, attemptId: string, body: string): Promise<Entry[]> {
     if (s.crew.t !== 'ready') throw new Error('attempt posted before the crew exists');
     const attempt = attemptOf(s, attemptId);
@@ -257,7 +298,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return next;
   }
 
-  const active = () => [...ledgers.keys()].filter((id) => stateOf(id).run.t !== 'finished');
+  // A finished expedition stays active while it owes effects (its last status, worktree removal).
+  const active = () =>
+    [...ledgers.keys()].filter((id) => {
+      const s = stateOf(id);
+      return s.run.t !== 'finished' || pendingEffects(s).length > 0;
+    });
   const tickAll = () => Promise.all(active().map(tick)).then(() => undefined);
 
   let debounce: NodeJS.Timeout | null = null;
@@ -287,6 +333,10 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     async launch(input: LaunchInput): Promise<State> {
       const prior = [...ledgers.keys()].map(stateOf).find((s) => s.key === input.key);
       if (prior) return prior;
+      const workspace = (await core.listWorkspaces()).find((w) => w.id === input.workspaceId);
+      if (!workspace) throw new LaunchRefused([`no workspace ${input.workspaceId}`]);
+      const checked = await preflight(workspace.rootPath);
+      if (checked.t === 'refused') throw new LaunchRefused(checked.reasons);
       const id = `${input.charter.name
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
@@ -295,7 +345,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       await fsp.mkdir(path.join(root, id), { recursive: true, mode: 0o700 });
       // The ledger joins the map only once its `launched` line is on disk: every ledger in the
       // map folds (a concurrent tick or launch never meets an empty one).
-      const launched: Entry = { t: 'launched', at: now(), id, ...input };
+      const repo = { root: checked.root, baseSha: checked.baseSha, branch: `expedition/${id}` };
+      const launched: Entry = { t: 'launched', at: now(), id, ...input, repo };
       await fsp.appendFile(fileOf(id), `${JSON.stringify(launched)}\n`, { mode: 0o600 });
       ledgers.set(id, [launched]);
       // The launch status: the badge in the thread from the first second.
