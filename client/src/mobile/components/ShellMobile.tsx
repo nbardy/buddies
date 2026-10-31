@@ -64,6 +64,8 @@ export function ShellMobile() {
   const activeSection = isPaneRoute
     ? resolveMobileConversationDestination(location.state, conversation).section
     : mobilePrimarySectionForPath(pathname);
+  // The expedition page pins its chat composer, so it also needs a fixed-height pane.
+  const fixedPane = isPaneRoute || pathname.startsWith('/expeditions/');
   const channelsUnread = anyUnread(ownerUnreadTotal(useOwnerUnread().data, null));
 
   return (
@@ -71,10 +73,10 @@ export function ShellMobile() {
     // ([data-device="mobile"] .x), the only device switch views may style on (G9).
     <div
       data-device="mobile"
-      data-scroll={isPaneRoute ? 'pane' : 'page'}
+      data-scroll={fixedPane ? 'pane' : 'page'}
       className="mobile-shell ui-stack"
     >
-      <div className={isPaneRoute ? 'mobile-content mobile-content--pane' : 'mobile-content'}>
+      <div className={fixedPane ? 'mobile-content mobile-content--pane' : 'mobile-content'}>
         <div className="mobile-content__inner">
           <Outlet />
         </div>

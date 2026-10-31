@@ -72,3 +72,29 @@ primitives, using the history only as evidence.
 - `@e-wind why did you drop the variational approach?` gets an answer citing runs.
 - When it ends, a **retro**: its self-assessment plus the owner's notes become
   playbook rules, brief changes and tool issues.
+
+## As built (2026-11-01, branch feat/expeditions)
+
+| Piece | Where |
+|---|---|
+| Engine: ledger, fold, decide, effects | `server/src/expeditions/model.ts`, `host.ts` |
+| Briefs (manager / work / blind check) and answer parsing | `server/src/expeditions/briefs.ts` |
+| The `expedition` Buddy tool (launch, status, list, steer) | `server/src/expeditions/tool.ts` |
+| Page data `GET /api/buddies/expeditions/:id` | `server/src/expeditions/view.ts`, `routes.ts`; type `shared/src/expedition.ts` |
+| Badge chip in any post list (thread, DM, channel) | `client/src/components/buddies/ExpeditionBadge.tsx`, branch in `ChannelPostContent.tsx` |
+| Page `/expeditions/:id` (focus pane + chat) | `client/src/components/buddies/ExpeditionPage.tsx` |
+
+Where things land:
+- **Badge**: one post (purpose `expedition_badge`, evidence `expedition:<id>`) in the chat the
+  launch came from; the tool result also returns a markdown link (DM transcripts render it).
+- **Expedition chat**: the owner↔crew DM. Every update (questions, starts, results, checks,
+  reflections, lessons, needs-you, finish) is a crew post there; the owner's post wakes the crew.
+- **Attempts**: requests in the crew's note-to-self DM (plumbing), shown on the page with their
+  exact instructions.
+
+Crew roster: `crew: { manager, work[], check[] }`, each `{provider, model?, reasoningEffort?}`.
+The manager picks a work seat per attempt; checks run as panels (1–3) on seats other than the
+claim author's model and verify by strict majority.
+
+Not built yet: integrate (merging verified code), external jobs (`Waiting(jobId)`), budget
+envelopes for Buddy launches, the retro/playbook loop, archiving finished crews.

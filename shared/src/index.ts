@@ -526,6 +526,7 @@ export * from './buddy-workspace-activity.js';
 export * from './buddy-channel-posts.js';
 export * from './body-references.js';
 export * from './buddy-api.js';
+export * from './expedition.js';
 export * from './harness-retry.js';
 
 export * from './upstream.js';

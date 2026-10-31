@@ -58,7 +58,12 @@ export async function expeditionHandler(
         launcherId: grant.buddyId,
         workspaceId: grant.workspaceId,
       });
-      return { id: state.id, status: host.status(state.id) };
+      // A markdown link renders clickable in every chat surface, DM transcripts included.
+      return {
+        id: state.id,
+        link: `[⛺ ${state.charter.name}](/expeditions/${state.id})`,
+        status: host.status(state.id),
+      };
     }
     case 'status':
       return host.status(ownedBy(host, grant, action.id));

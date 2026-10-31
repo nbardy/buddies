@@ -123,6 +123,7 @@ import { registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
 import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
+import { registerExpeditionRoutes } from './expeditions/routes';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 
 let startupAuditResults: Awaited<ReturnType<typeof auditLocalAgents>> = [];
@@ -703,6 +704,7 @@ buddyEvents.on((event) => {
   if (event.kind === 'changed') buddiesChanged();
 });
 
+registerExpeditionRoutes(app, () => expeditionHost);
 registerBuddyRoutes(app, {
   core: buddiesCore,
   events: buddyEvents,

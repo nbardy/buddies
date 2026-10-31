@@ -1,14 +1,16 @@
 import { type CSSProperties, useState } from 'react';
 import { recordEmojiUse } from '../../atoms/emoji-usage';
 import { invalidateChannelResources } from '../../atoms/resources';
+import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelMarkdown } from './ChannelMarkdown';
 import { EmojiPicker } from './EmojiPicker';
-import { usePolledFetch } from '../../hooks/usePolledFetch';
+import { ExpeditionBadge } from './ExpeditionBadge';
 import { buddyWrite, errorText } from './api';
 import {
   type WorkspaceDirectory,
   channelPostBody,
+  expeditionOfPost,
   threadPageResource,
   wholePostIn,
 } from './channel-data';
@@ -47,6 +49,7 @@ export function ChannelPostContent({
   const whole = thread.data === null ? null : wholePostIn(thread.data, shown.id);
   const post: ClippedPost = whole ?? shown;
   const clipped = post.clippedFrom !== undefined;
+  const expedition = expeditionOfPost(post);
   const [editing, setEditing] = useState<ClippedPost | null>(null);
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -100,6 +103,7 @@ export function ChannelPostContent({
           tasks={directory.taskById}
         />
       )}
+      {expedition !== null && <ExpeditionBadge id={expedition} />}
       {clipped && !editing && (
         <button
           type="button"

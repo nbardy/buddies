@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { BuddiesCore, ChannelRef } from '@unleashd/buddies-core';
+import type { ExpeditionView } from '@unleashd/shared';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
@@ -23,6 +24,7 @@ import {
   fold,
   pendingEffects,
 } from './model';
+import { expeditionView } from './view';
 
 // Pattern: wake-on-write (docs/patterns.md#wake-on-write) — ticks on the Buddy change bus
 // (debounced) plus one slow backstop; no per-expedition timers.
@@ -162,10 +164,9 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   async function run(s: State, effect: Effect): Promise<Entry[]> {
     switch (effect.t) {
       case 'create_crew': {
-        const slug = `exp-${s.id}`.toLowerCase();
         const crew = await core.createBuddy(OWNER, {
           workspaceId: s.workspaceId,
-          slug,
+          slug: `exp-${s.id}`.toLowerCase(),
           name: `⛺ ${s.charter.name}`,
           role: `${CREW_ROLE} Your expedition id: ${s.id}.`,
           manager: { kind: 'buddy', id: s.launcherId },
@@ -174,7 +175,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
           reasoningEffort: s.charter.crew.manager.reasoningEffort,
           key: `exp:${s.id}:crew`,
         });
-        return [{ t: 'crew_ready', at: now(), buddyId: crew.id }];
+        // The owner↔crew DM is the expedition's chat (opening it is idempotent).
+        const chat = await core.openChannel(OWNER, {
+          kind: 'direct',
+          members: [OWNER, buddyActor(crew.id)],
+        });
+        return [{ t: 'crew_ready', at: now(), buddyId: crew.id, chatChannelId: chat.id }];
       }
       case 'brief_attempt': {
         const body = briefOf(s, effect.attempt);
@@ -186,18 +192,38 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       case 'post_attempt':
         return postAttempt(s, effect.attemptId, effect.body);
       case 'post_status': {
+        if (s.crew.t !== 'ready') throw new Error('status posted before the crew exists');
+        // Crew-authored in its own DM with the owner: wakes nobody, reads as the expedition.
+        const write = await core.post(
+          buddyActor(s.crew.buddyId),
+          { kind: 'id', id: s.crew.chatChannelId },
+          {
+            kind: 'inform',
+            body: effect.text,
+            purpose: 'expedition_status',
+            evidence: [`expedition:${s.id}`],
+            mentions: [],
+            broadcast: false,
+            key: `exp:${s.id}:status:${effect.seq}`,
+          }
+        );
+        return [{ t: 'status_posted', at: now(), seq: effect.seq, postId: write.post.id }];
+      }
+      case 'post_badge': {
+        // The clickable badge in the chat the launch came from; the client renders posts with
+        // this purpose as a live card that opens /expeditions/<id>.
         const target = originRef(s);
         const write = await core.post(buddyActor(s.launcherId), target.channel, {
           kind: 'inform',
-          body: effect.text,
-          purpose: 'expedition_status',
-          evidence: [],
+          body: `⛺ Expedition launched: ${s.charter.name}. ${s.charter.goal.slice(0, 200)}`,
+          purpose: 'expedition_badge',
+          evidence: [`expedition:${s.id}`],
           replyToId: target.replyToId,
           mentions: [],
           broadcast: false,
-          key: `exp:${s.id}:status:${effect.seq}`,
+          key: `exp:${s.id}:badge`,
         });
-        return [{ t: 'status_posted', at: now(), seq: effect.seq, postId: write.post.id }];
+        return [{ t: 'badge_posted', at: now(), postId: write.post.id }];
       }
     }
   }
@@ -206,14 +232,16 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     if (s.crew.t !== 'ready') throw new Error('attempt posted before the crew exists');
     const attempt = s.attempts.find((a) => a.id === attemptId);
     if (!attempt) throw new Error(`unknown attempt ${attemptId}`);
+    // The crew's note-to-self DM holds the attempts (plumbing), so the owner↔crew chat stays a chat.
+    const crew = buddyActor(s.crew.buddyId);
     const write = await core.post(
-      OWNER,
-      { kind: 'direct', members: [OWNER, buddyActor(s.crew.buddyId)] },
+      crew,
+      { kind: 'direct', members: [crew] },
       {
         kind: 'request',
         body,
         purpose: 'expedition_attempt',
-        evidence: [],
+        evidence: [`expedition:${s.id}`],
         mentions: [],
         runConfig: configOf(s.charter, attempt.spec),
         broadcast: false,
@@ -297,7 +325,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
           t: 'status',
           at: now(),
           seq: 0,
-          text: `${badge(stateOf(id), now())}\nLaunched. Planning…`,
+          text: `⛺ Launched: ${input.charter.goal.slice(0, 300)}\nPlanning…`,
         },
       ]);
       if (enabled) await tick(id);
@@ -308,6 +336,11 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       await append(id, [{ t: 'feedback', at: now(), from, feedback }]);
       if (enabled) await tick(id);
       return stateOf(id);
+    },
+    has: (id: string) => ledgers.has(id),
+    view(id: string): ExpeditionView {
+      const s = stateOf(id);
+      return expeditionView(s, badge(s, now()), now());
     },
     status(id: string): string {
       const s = stateOf(id);

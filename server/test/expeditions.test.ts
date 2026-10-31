@@ -6,12 +6,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import { BuddiesCore } from '@unleashd/buddies-core';
+import express from 'express';
 import { OWNER, buddyActor } from '../src/buddies/core';
 import { createBuddyEvents } from '../src/buddies/events';
 import { createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint } from '../src/buddies/mcp';
 import { type ExpeditionHost, createExpeditionHost } from '../src/expeditions/host';
 import { type Entry, type State, fold } from '../src/expeditions/model';
+import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import { BackgroundWork } from '../src/turns/background-work';
 import { tempDir } from './fixtures/temp';
 
@@ -186,6 +188,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
             detail: 'Find it.',
             scope: 'in',
           },
+          { do: 'note', text: 'Start narrow; one question first.' },
           { do: 'done', summary: 'All good' },
         ],
       })
@@ -314,7 +317,53 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     assert.equal(s.questions[0].status, 'verified');
     const last = s.statuses.at(-1)!;
     assert.match(last.text, /Finished \(done\)/);
-    assert.ok(last.postId, 'the finish was posted to the origin');
+    assert.ok(last.postId, 'the finish was posted');
+
+    // Where things land: the badge in the launch chat (the owner↔launcher DM here), every update
+    // and reflection in the expedition chat (owner↔crew DM), attempts in neither.
+    if (s.crew.t !== 'ready' || s.badgePost.t !== 'posted')
+      throw new Error('crew and badge expected');
+    const crew = s.crew;
+    const badge = await f.core.getPost(OWNER, s.badgePost.postId);
+    assert.equal(badge.purpose, 'expedition_badge');
+    assert.deepEqual(badge.evidence, [`expedition:${id}`]);
+    assert.notEqual(badge.channelId, crew.chatChannelId);
+    for (const status of s.statuses) {
+      const post = await f.core.getPost(OWNER, status.postId ?? '');
+      assert.equal(post.channelId, crew.chatChannelId);
+    }
+    assert.deepEqual(
+      s.reflections.map((r) => r.text),
+      ['Start narrow; one question first.']
+    );
+    assert.ok(s.statuses.some((x) => x.text.includes('Reflection: Start narrow')));
+    for (const attempt of s.attempts) {
+      if (attempt.phase.t !== 'ended') continue;
+      const request = await f.core.getPost(OWNER, attempt.phase.requestId);
+      assert.notEqual(request.channelId, crew.chatChannelId, `${attempt.id} cluttered the chat`);
+    }
+
+    // The page's data over HTTP; an unknown id is a 404, not a crash.
+    const app = express();
+    registerExpeditionRoutes(app, () => f.host);
+    const server = app.listen(0);
+    try {
+      const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+      const page = await fetch(`${base}/api/buddies/expeditions/${id}`);
+      assert.equal(page.status, 200);
+      const body = (await page.json()) as {
+        run: { t: string };
+        attempts: { brief: string | null }[];
+      };
+      assert.equal(body.run.t, 'finished');
+      assert.ok(
+        body.attempts.every((a) => a.brief !== null),
+        'every worker shows its instructions'
+      );
+      assert.equal((await fetch(`${base}/api/buddies/expeditions/nope`)).status, 404);
+    } finally {
+      server.close();
+    }
   } finally {
     await f.close();
   }

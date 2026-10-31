@@ -165,7 +165,12 @@ export type Entry =
       launcherId: string;
       workspaceId: string;
     }
-  | { t: 'crew_ready'; at: string; buddyId: string }
+  /** The crew Buddy and the owner↔crew DM: the expedition's chat, where every update lands. */
+  | { t: 'crew_ready'; at: string; buddyId: string; chatChannelId: string }
+  /** The one clickable badge post in the chat the launch came from. */
+  | { t: 'badge_posted'; at: string; postId: string }
+  /** A manager's reflection (its `note` action), kept for the page and the chat. */
+  | { t: 'reflection'; at: string; text: string }
   | { t: 'attempt_planned'; at: string; attemptId: string; spec: AttemptSpec }
   /** The exact brief, written before the request post so a replay sends identical bytes. */
   | { t: 'attempt_posting'; at: string; attemptId: string; body: string }
@@ -229,7 +234,13 @@ export interface State {
   launcherId: string;
   workspaceId: string;
   launchedAt: string;
-  crew: { t: 'pending' } | { t: 'ready'; buddyId: string };
+  crew: { t: 'pending' } | { t: 'ready'; buddyId: string; chatChannelId: string };
+  badgePost: { t: 'pending' } | { t: 'posted'; postId: string };
+  reflections: { at: string; text: string }[];
+  /** Each attempt's exact instructions, by attempt id (absent until briefed). */
+  briefs: Record<string, string>;
+  /** Notable entries since the last chat status post. */
+  news: Entry[];
   attempts: Attempt[];
   questions: Question[];
   lessons: string[];
@@ -254,6 +265,10 @@ export function fold(entries: readonly Entry[]): State {
     workspaceId: first.workspaceId,
     launchedAt: first.at,
     crew: { t: 'pending' },
+    badgePost: { t: 'pending' },
+    reflections: [],
+    briefs: {},
+    news: [],
     attempts: [],
     questions: [],
     lessons: [],
@@ -267,12 +282,31 @@ export function fold(entries: readonly Entry[]): State {
 }
 
 // Pattern: table-driven (docs/patterns.md#table-driven) — one exhaustive handler per entry kind.
+const NEWS: ReadonlySet<Entry['t']> = new Set([
+  'attempt_posted',
+  'attempt_ended',
+  'question_added',
+  'question_closed',
+  'rejected',
+  'reflection',
+  'feedback',
+  'needs_owner',
+  'finished',
+] satisfies Entry['t'][]);
+
 function apply(s: State, e: Entry): void {
+  if (NEWS.has(e.t)) s.news.push(e);
   switch (e.t) {
     case 'launched':
       throw new Error('launched may only open a ledger');
     case 'crew_ready':
-      s.crew = { t: 'ready', buddyId: e.buddyId };
+      s.crew = { t: 'ready', buddyId: e.buddyId, chatChannelId: e.chatChannelId };
+      return;
+    case 'badge_posted':
+      s.badgePost = { t: 'posted', postId: e.postId };
+      return;
+    case 'reflection':
+      s.reflections.push({ at: e.at, text: e.text });
       return;
     case 'attempt_planned':
       s.attempts.push({ id: e.attemptId, spec: e.spec, phase: { t: 'planned' } });
@@ -280,6 +314,7 @@ function apply(s: State, e: Entry): void {
       return;
     case 'attempt_posting':
       attemptOf(s, e.attemptId).phase = { t: 'posting', body: e.body };
+      s.briefs[e.attemptId] = e.body;
       return;
     case 'attempt_posted':
       attemptOf(s, e.attemptId).phase = { t: 'posted', requestId: e.requestId };
@@ -324,6 +359,7 @@ function apply(s: State, e: Entry): void {
       return;
     case 'status':
       s.statuses.push({ seq: e.seq, text: e.text, postId: null });
+      s.news = [];
       return;
     case 'status_posted': {
       const status = s.statuses.find((x) => x.seq === e.seq);
@@ -619,6 +655,7 @@ function applyAction(
       push({ t: 'finished', at, reason: 'done', summary: action.summary });
       return;
     case 'note':
+      push({ t: 'reflection', at, text: action.text });
       return;
   }
 }
@@ -639,27 +676,83 @@ export function badge(s: State, now: string): string {
   return `⛺ ${s.charter.name} · ${phase} · ${liveWorkers(s).length} live · ${verifiedPanels(s).length} verified · ${s.attempts.length}/${s.charter.maxAttempts} attempts · ${elapsed}`;
 }
 
-/** Milestones worth a thread post: launch, first plan, a verification, owner needed, finish. */
+/** One chat post per decision round: everything notable since the last post, in order. */
 function withStatus(s: State, out: Entry[], clock: Clock): Entry[] {
-  const lines: string[] = [];
-  for (const e of out) {
-    if (e.t === 'needs_owner') lines.push(`Needs you: ${e.question}`);
-    if (e.t === 'finished') lines.push(`Finished (${e.reason}): ${e.summary}`);
-    if (e.t === 'question_closed' && e.status === 'verified')
-      lines.push(`Verified: ${questionOf(s, e.questionId).title}`);
-  }
-  const added = out.filter((e) => e.t === 'question_added');
-  if (added.length > 0 && s.statuses.length === 1)
-    lines.push(`Plan:\n${s.questions.map((q) => `- [${q.scope}] ${q.title}`).join('\n')}`);
+  const lines = s.news.flatMap((e) => newsLine(s, e));
   if (lines.length === 0) return out;
   const status: Entry = {
     t: 'status',
     at: clock.now,
     seq: s.statuses.length,
-    text: `${badge(s, clock.now)}\n${lines.join('\n')}`,
+    // The badge line lives on the page header and the launch badge; chat posts carry only news.
+    text: lines.join('\n'),
   };
   apply(s, status);
   return [...out, status];
+}
+
+const clip = (text: string, n = 300) => (text.length > n ? `${text.slice(0, n)}…` : text);
+
+/** The chat line for one notable entry (none for an uninteresting one). */
+function newsLine(s: State, e: Entry): string[] {
+  switch (e.t) {
+    case 'attempt_posted': {
+      const a = attemptOf(s, e.attemptId);
+      return a.spec.kind === 'manager' ? [] : [`▶ ${a.id} started: ${attemptLabel(s, a)}`];
+    }
+    case 'attempt_ended': {
+      const a = attemptOf(s, e.attemptId);
+      return [`${a.id} ${outcomeLabel(e.outcome)}`];
+    }
+    case 'question_added':
+      return [`+ question ${e.questionId} [${e.scope}]: ${e.title}`];
+    case 'question_closed':
+      return [
+        `${e.status === 'verified' ? '✓ verified' : '✗ dropped'} ${questionOf(s, e.questionId).title}: ${clip(e.why)}`,
+      ];
+    case 'rejected':
+      return [`refused ${e.action.do}: ${e.reason}`];
+    case 'reflection':
+      return [`Reflection: ${clip(e.text, 600)}`];
+    case 'feedback':
+      return [`Owner ${e.feedback.t}${'text' in e.feedback ? `: ${clip(e.feedback.text)}` : ''}`];
+    case 'needs_owner':
+      return [`Needs you: ${e.question}`];
+    case 'finished':
+      return [`Finished (${e.reason}): ${e.summary}`];
+    default:
+      return [];
+  }
+}
+
+export function attemptLabel(s: State, a: Attempt): string {
+  switch (a.spec.kind) {
+    case 'manager':
+      return 'manager decision';
+    case 'work':
+      return `work on ${a.spec.questionId} (${seatLabel(configOf(s.charter, a.spec))})`;
+    case 'check':
+      return `${a.spec.goal ? 'goal ' : ''}check of ${a.spec.claimAttemptId} (${seatLabel(configOf(s.charter, a.spec))})`;
+  }
+}
+export const seatLabel = (w: WorkerConfig) =>
+  [w.provider, w.model, w.reasoningEffort].filter(Boolean).join('/');
+
+export function outcomeLabel(o: Outcome): string {
+  switch (o.t) {
+    case 'manager':
+      return `decided ${o.actions.length} actions`;
+    case 'work':
+      return o.result.result === 'blocked'
+        ? `BLOCKED: ${clip(o.result.need)}`
+        : `${o.result.result.toUpperCase()}: ${clip(o.result.statement)}`;
+    case 'check':
+      return `check ${o.result.verdict.toUpperCase()}: ${clip(o.result.why)}`;
+    case 'malformed':
+      return `answered without a valid result (${clip(o.error, 120)})`;
+    case 'failed':
+      return `run ${o.status}`;
+  }
 }
 
 // ---------- Effects licensed by the state ----------
@@ -670,13 +763,17 @@ export type Effect =
   | { t: 'brief_attempt'; attempt: Attempt }
   /** Post a recorded brief: the replay path after a crash between record and post. */
   | { t: 'post_attempt'; attemptId: string; body: string }
-  | { t: 'post_status'; seq: number; text: string };
+  | { t: 'post_status'; seq: number; text: string }
+  | { t: 'post_badge' };
 
 export function pendingEffects(s: State): Effect[] {
   if (s.crew.t === 'pending') return [{ t: 'create_crew' }];
-  const effects: Effect[] = s.statuses
-    .filter((x) => x.postId === null)
-    .map((x) => ({ t: 'post_status', seq: x.seq, text: x.text }));
+  const badgeEffects: Effect[] = s.badgePost.t === 'pending' ? [{ t: 'post_badge' }] : [];
+  const effects: Effect[] = badgeEffects.concat(
+    s.statuses
+      .filter((x) => x.postId === null)
+      .map((x): Effect => ({ t: 'post_status', seq: x.seq, text: x.text }))
+  );
   if (s.run.t === 'finished' || s.run.t === 'paused') return effects;
   for (const attempt of s.attempts)
     if (attempt.phase.t === 'posting')

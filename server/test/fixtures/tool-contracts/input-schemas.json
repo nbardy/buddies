@@ -411,24 +411,51 @@
                       "minimum": 0,
                       "maximum": 0.5
                     },
-                    "worker": {
+                    "crew": {
                       "type": "object",
                       "properties": {
-                        "provider": {
-                          "type": "string",
-                          "minLength": 1
+                        "manager": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "model": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "reasoningEffort": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "provider"
+                          ],
+                          "additionalProperties": false
                         },
-                        "model": {
-                          "type": "string",
-                          "minLength": 1
+                        "work": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/action/anyOf/0/properties/charter/properties/crew/properties/manager"
+                          },
+                          "minItems": 1,
+                          "maxItems": 4
                         },
-                        "reasoningEffort": {
-                          "type": "string",
-                          "minLength": 1
+                        "check": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/action/anyOf/0/properties/charter/properties/crew/properties/manager"
+                          },
+                          "minItems": 1,
+                          "maxItems": 4
                         }
                       },
                       "required": [
-                        "provider"
+                        "manager",
+                        "work",
+                        "check"
                       ],
                       "additionalProperties": false
                     }
@@ -443,7 +470,7 @@
                     "maxLive",
                     "hours",
                     "exploreShare",
-                    "worker"
+                    "crew"
                   ],
                   "additionalProperties": false
                 }
@@ -2090,24 +2117,51 @@
                       "minimum": 0,
                       "maximum": 0.5
                     },
-                    "worker": {
+                    "crew": {
                       "type": "object",
                       "properties": {
-                        "provider": {
-                          "type": "string",
-                          "minLength": 1
+                        "manager": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "model": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "reasoningEffort": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "provider"
+                          ],
+                          "additionalProperties": false
                         },
-                        "model": {
-                          "type": "string",
-                          "minLength": 1
+                        "work": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/action/anyOf/0/properties/charter/properties/crew/properties/manager"
+                          },
+                          "minItems": 1,
+                          "maxItems": 4
                         },
-                        "reasoningEffort": {
-                          "type": "string",
-                          "minLength": 1
+                        "check": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/action/anyOf/0/properties/charter/properties/crew/properties/manager"
+                          },
+                          "minItems": 1,
+                          "maxItems": 4
                         }
                       },
                       "required": [
-                        "provider"
+                        "manager",
+                        "work",
+                        "check"
                       ],
                       "additionalProperties": false
                     }
@@ -2122,7 +2176,7 @@
                     "maxLive",
                     "hours",
                     "exploreShare",
-                    "worker"
+                    "crew"
                   ],
                   "additionalProperties": false
                 }

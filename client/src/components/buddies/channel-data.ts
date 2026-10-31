@@ -524,6 +524,13 @@ export function postPurposeTag(post: Post): string | undefined {
   return post.purpose;
 }
 
+/** The expedition a badge post opens (server expeditions/host.ts `post_badge`), else null. */
+export function expeditionOfPost(post: Post): string | null {
+  if (post.purpose !== 'expedition_badge') return null;
+  const ref = post.evidence.find((item) => item.startsWith('expedition:'));
+  return ref === undefined ? null : ref.slice('expedition:'.length);
+}
+
 export function postPurposeLabel(post: Post): string | null {
   return post.purpose === undefined || post.purpose === 'reply'
     ? null
