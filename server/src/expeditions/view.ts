@@ -2,7 +2,9 @@ import type { ExpeditionView } from '@unleashd/shared';
 import {
   type State,
   attemptLabel,
+  attemptsOn,
   configOf,
+  deadlineMs,
   exploreCap,
   live,
   liveWorkers,
@@ -29,7 +31,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     outOfScope: c.outOfScope,
     workspaceId: s.workspaceId,
     launchedAt: s.launchedAt,
-    deadline: new Date(Date.parse(s.launchedAt) + c.hours * 3_600_000).toISOString(),
+    deadline: new Date(deadlineMs(s)).toISOString(),
     now,
     crew:
       s.crew.t === 'ready'
@@ -51,9 +53,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     },
     questions: s.questions.map((q) => ({
       ...q,
-      attempts: s.attempts
-        .filter((a) => a.spec.kind !== 'manager' && a.spec.questionId === q.id)
-        .map((a) => a.id),
+      attempts: attemptsOn(s, q.id).map((a) => a.id),
     })),
     attempts: s.attempts.map((a) => ({
       id: a.id,

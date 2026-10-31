@@ -1,5 +1,27 @@
-import type { Attempt, Charter, Entry, Outcome, Question, State, WorkerConfig } from './model';
-import { CheckResult, ManagerResult, WorkResult, exploreCap, liveWorkers, queued } from './model';
+import type {
+  Attempt,
+  Charter,
+  CheckSpec,
+  Claim,
+  Entry,
+  Outcome,
+  Question,
+  State,
+  WorkSpec,
+} from './model';
+import {
+  CheckResult,
+  ManagerResult,
+  WorkResult,
+  attemptOf,
+  attemptsOn,
+  exploreCap,
+  liveWorkers,
+  outcomeDetail,
+  questionOf,
+  queued,
+  seatLabel,
+} from './model';
 
 // What each attempt is told. Every brief is rebuilt from the ledger, so lessons and verified
 // results reach every later attempt (expeditions/design.md "Knowledge flows through the Ledger").
@@ -36,40 +58,8 @@ function lessonsText(s: State): string {
 }
 
 function questionLine(s: State, q: Question): string {
-  const attempts = s.attempts.filter(
-    (a) => a.spec.kind !== 'manager' && a.spec.questionId === q.id
-  );
-  return `- ${q.id} [${q.scope}/${q.status}] ${q.title} — ${attempts.length} attempts`;
+  return `- ${q.id} [${q.scope}/${q.status}] ${q.title} — ${attemptsOn(s, q.id).length} attempts`;
 }
-
-function outcomeText(o: Outcome): string {
-  switch (o.t) {
-    case 'manager':
-      return `manager: ${o.actions.length} actions`;
-    case 'work':
-      return workText(o.result);
-    case 'check':
-      return `CHECK ${o.result.verdict.toUpperCase()}: ${o.result.why}`;
-    case 'malformed':
-      return `MALFORMED ANSWER (${o.error}): ${o.raw.slice(0, 400)}`;
-    case 'failed':
-      return `RUN ${o.status.toUpperCase()}`;
-  }
-}
-
-function workText(r: WorkResult): string {
-  switch (r.result) {
-    case 'claim':
-      return `CLAIM: ${r.statement} | evidence: ${r.evidence.join('; ')} | check: ${r.howToCheck}`;
-    case 'finding':
-      return `FINDING: ${r.statement} | evidence: ${r.evidence.join('; ')}`;
-    case 'blocked':
-      return `BLOCKED: ${r.need}`;
-  }
-}
-
-const seatName = (w: WorkerConfig) =>
-  [w.provider, w.model, w.reasoningEffort].filter(Boolean).join('/');
 
 function attemptLine(a: Attempt): string {
   const what =
@@ -78,14 +68,14 @@ function attemptLine(a: Attempt): string {
       : a.spec.kind === 'work'
         ? `work on ${a.spec.questionId} (seat ${a.spec.seat})`
         : `check of ${a.spec.claimAttemptId} in panel ${a.spec.panelId}${a.spec.goal ? ' (GOAL)' : ''}`;
-  const where = a.phase.t === 'ended' ? outcomeText(a.phase.outcome) : a.phase.t;
+  const where = a.phase.t === 'ended' ? outcomeDetail(a.phase.outcome) : a.phase.t;
   return `- ${a.id} ${what}: ${where}`;
 }
 
 function unseenLine(e: Entry): string {
   switch (e.t) {
     case 'attempt_ended':
-      return `- ${e.attemptId} ended: ${outcomeText(e.outcome)}`;
+      return `- ${e.attemptId} ended: ${outcomeDetail(e.outcome)}`;
     case 'rejected':
       return `- REJECTED ${e.action.do}: ${e.reason}`;
     case 'feedback':
@@ -95,7 +85,7 @@ function unseenLine(e: Entry): string {
   }
 }
 
-export function managerBrief(s: State): string {
+function managerBrief(s: State): string {
   const c = s.charter;
   return [
     `[expedition ${s.id} · ${c.name} · MANAGER]`,
@@ -103,7 +93,7 @@ export function managerBrief(s: State): string {
     charterText(c),
     lessonsText(s),
     `LIMITS: ${s.attempts.length}/${c.maxAttempts} attempts used, ${liveWorkers(s).length} live, ${queued(s).length} queued, max ${c.maxLive} live. Explore questions may use at most ${exploreCap(c)} work attempts.`,
-    `CREW: work seats ${c.crew.work.map((w, i) => `${i}=${seatName(w)}`).join(', ')}. Checks run on ${c.crew.check.map(seatName).join(', ')}, never on the claim's own model; a panel of n checks verifies by majority. Spread competing approaches across seats.`,
+    `CREW: work seats ${c.crew.work.map((w, i) => `${i}=${seatLabel(w)}`).join(', ')}. Checks run on ${c.crew.check.map(seatLabel).join(', ')}, never on the claim's own model; a panel of n checks verifies by majority. Spread competing approaches across seats.`,
     `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet: plan first'}`,
     `ATTEMPTS:\n${
       s.attempts
@@ -140,8 +130,8 @@ export function managerBrief(s: State): string {
     .join('\n\n');
 }
 
-export function workBrief(s: State, a: Attempt & { spec: { kind: 'work' } }): string {
-  const q = s.questions.find((x) => x.id === a.spec.questionId);
+function workBrief(s: State, id: string, spec: WorkSpec): string {
+  const q = questionOf(s, spec.questionId);
   const verified = s.attempts.flatMap((x) =>
     x.phase.t === 'ended' &&
     x.phase.outcome.t === 'check' &&
@@ -153,15 +143,15 @@ export function workBrief(s: State, a: Attempt & { spec: { kind: 'work' } }): st
     x.phase.t === 'ended' &&
     x.phase.outcome.t === 'work' &&
     x.phase.outcome.result.result !== 'blocked'
-      ? [`- ${x.id}: ${outcomeText(x.phase.outcome)}`]
+      ? [`- ${x.id}: ${outcomeDetail(x.phase.outcome)}`]
       : []
   );
   return [
-    `[expedition ${s.id} · ${s.charter.name} · WORK ${a.id}]`,
+    `[expedition ${s.id} · ${s.charter.name} · WORK ${id}]`,
     charterText(s.charter),
     lessonsText(s),
-    `YOUR QUESTION (${q?.id}): ${q?.title}\n${q?.detail}`,
-    `YOUR BRIEF:\n${a.spec.brief}`,
+    `YOUR QUESTION (${q.id}): ${q.title}\n${q.detail}`,
+    `YOUR BRIEF:\n${spec.brief}`,
     `WHAT OTHERS FOUND:\n${findings.join('\n') || '- nothing yet'}${verified.length ? `\n${verified.join('\n')}` : ''}`,
     [
       'RULES: stay inside your question. Code changes go on your own branch in your own git worktree;',
@@ -181,21 +171,15 @@ export function workBrief(s: State, a: Attempt & { spec: { kind: 'work' } }): st
 }
 
 /** Blind check: the claim and its evidence, never the author's reasoning. */
-export function checkBrief(
-  s: State,
-  a: Attempt & { spec: { kind: 'check' } },
-  claim: WorkResult
-): string {
-  const statement = claim.result === 'claim' ? claim : null;
-  if (!statement) throw new Error('check brief needs a claim');
+function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): string {
   return [
-    `[expedition ${s.id} · ${s.charter.name} · CHECK ${a.id}]`,
+    `[expedition ${s.id} · ${s.charter.name} · CHECK ${id}]`,
     'You are an independent verifier. Do not trust the claim; reproduce it yourself.',
     `CLAIM: ${statement.statement}`,
     `EVIDENCE CITED: ${statement.evidence.join('; ') || '(none)'}`,
     `SUGGESTED CHECK: ${statement.howToCheck}`,
-    a.spec.goal ? charterText(s.charter) : '',
-    a.spec.goal
+    spec.goal ? charterText(s.charter) : '',
+    spec.goal
       ? 'This is a GOAL check: verify the claim AND that every DONE WHEN item now holds.'
       : '',
     'Verified only if you reproduced it. Refuted if it is false. Unclear if you could not decide; say why.',
@@ -203,6 +187,31 @@ export function checkBrief(
   ]
     .filter(Boolean)
     .join('\n\n');
+}
+
+/** The claim a check verifies; a check is planned only for an ended claim (decide.ts). */
+function claimOf(s: State, spec: CheckSpec): Claim {
+  const claim = attemptOf(s, spec.claimAttemptId);
+  if (
+    claim.phase.t !== 'ended' ||
+    claim.phase.outcome.t !== 'work' ||
+    claim.phase.outcome.result.result !== 'claim'
+  )
+    throw new Error(`check of ${spec.claimAttemptId} has no claim to check`);
+  return claim.phase.outcome.result;
+}
+
+/** The brief for one attempt, built from the ledger as it stands. */
+export function briefOf(s: State, attempt: Attempt): string {
+  const { spec } = attempt;
+  switch (spec.kind) {
+    case 'manager':
+      return managerBrief(s);
+    case 'work':
+      return workBrief(s, attempt.id, spec);
+    case 'check':
+      return checkBrief(s, attempt.id, spec, claimOf(s, spec));
+  }
 }
 
 // ---------- Parsing answers (κ: once, at observation) ----------

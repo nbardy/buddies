@@ -8,9 +8,8 @@ import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
 import { labelled } from '../observability/event-loop-stall';
-import { CREW_ROLE, checkBrief, managerBrief, parseOutcome, statusText, workBrief } from './briefs';
+import { CREW_ROLE, briefOf, parseOutcome, statusText } from './briefs';
 import {
-  type Attempt,
   type Charter,
   type Clock,
   type Effect,
@@ -18,6 +17,7 @@ import {
   type Feedback,
   type Origin,
   type State,
+  attemptOf,
   badge,
   configOf,
   decide,
@@ -131,27 +131,6 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   // ---------- Effects ----------
 
-  function briefOf(s: State, attempt: Attempt): string {
-    switch (attempt.spec.kind) {
-      case 'manager':
-        return managerBrief(s);
-      case 'work':
-        return workBrief(s, attempt as Attempt & { spec: { kind: 'work' } });
-      case 'check': {
-        const claim = s.attempts.find(
-          (a) => a.id === (attempt.spec as { claimAttemptId: string }).claimAttemptId
-        );
-        if (!claim || claim.phase.t !== 'ended' || claim.phase.outcome.t !== 'work')
-          throw new Error(`check ${attempt.id} has no claim to check`);
-        return checkBrief(
-          s,
-          attempt as Attempt & { spec: { kind: 'check' } },
-          claim.phase.outcome.result
-        );
-      }
-    }
-  }
-
   function originRef(s: State): { channel: ChannelRef; replyToId?: string } {
     switch (s.origin.t) {
       case 'thread':
@@ -230,8 +209,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   async function postAttempt(s: State, attemptId: string, body: string): Promise<Entry[]> {
     if (s.crew.t !== 'ready') throw new Error('attempt posted before the crew exists');
-    const attempt = s.attempts.find((a) => a.id === attemptId);
-    if (!attempt) throw new Error(`unknown attempt ${attemptId}`);
+    const attempt = attemptOf(s, attemptId);
     // The crew's note-to-self DM holds the attempts (plumbing), so the owner↔crew chat stays a chat.
     const crew = buddyActor(s.crew.buddyId);
     const write = await core.post(
@@ -307,18 +285,19 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   return {
     async launch(input: LaunchInput): Promise<State> {
-      const prior = [...ledgers.values()].find(
-        (l) => l[0]?.t === 'launched' && l[0].key === input.key
-      );
-      if (prior?.[0]?.t === 'launched') return stateOf(prior[0].id);
+      const prior = [...ledgers.keys()].map(stateOf).find((s) => s.key === input.key);
+      if (prior) return prior;
       const id = `${input.charter.name
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 24)}-${randomUUID().slice(0, 6)}`;
       await fsp.mkdir(path.join(root, id), { recursive: true, mode: 0o700 });
-      ledgers.set(id, []);
-      await append(id, [{ t: 'launched', at: now(), id, ...input }]);
+      // The ledger joins the map only once its `launched` line is on disk: every ledger in the
+      // map folds (a concurrent tick or launch never meets an empty one).
+      const launched: Entry = { t: 'launched', at: now(), id, ...input };
+      await fsp.appendFile(fileOf(id), `${JSON.stringify(launched)}\n`, { mode: 0o600 });
+      ledgers.set(id, [launched]);
       // The launch status: the badge in the thread from the first second.
       await append(id, [
         {

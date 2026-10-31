@@ -171,7 +171,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     let s = f.stateOf(id);
     assert.equal(s.crew.t, 'ready');
     assert.ok(
-      s.statuses.every((x) => x.postId !== null),
+      s.statuses.every((x) => x.post.t === 'posted'),
       'the launch badge was posted'
     );
     const m1 = f.manager(id);
@@ -317,7 +317,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     assert.equal(s.questions[0].status, 'verified');
     const last = s.statuses.at(-1)!;
     assert.match(last.text, /Finished \(done\)/);
-    assert.ok(last.postId, 'the finish was posted');
+    assert.equal(last.post.t, 'posted', 'the finish was posted');
 
     // Where things land: the badge in the launch chat (the owner↔launcher DM here), every update
     // and reflection in the expedition chat (owner↔crew DM), attempts in neither.
@@ -329,7 +329,8 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     assert.deepEqual(badge.evidence, [`expedition:${id}`]);
     assert.notEqual(badge.channelId, crew.chatChannelId);
     for (const status of s.statuses) {
-      const post = await f.core.getPost(OWNER, status.postId ?? '');
+      if (status.post.t !== 'posted') throw new Error(`status ${status.seq} unposted`);
+      const post = await f.core.getPost(OWNER, status.post.postId);
       assert.equal(post.channelId, crew.chatChannelId);
     }
     assert.deepEqual(
