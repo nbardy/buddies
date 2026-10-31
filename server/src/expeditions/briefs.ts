@@ -13,8 +13,8 @@ import {
   CheckResult,
   ManagerResult,
   WorkResult,
-  attemptOf,
   attemptsOn,
+  claimOf,
   exploreCap,
   liveWorkers,
   outcomeDetail,
@@ -32,8 +32,8 @@ export const CREW_ROLE = [
   'Expedition crew. Each request you receive is one attempt of an expedition: a manager decision,',
   'a work attempt, or an independent check. Do exactly that one attempt, then answer the request.',
   'Your final message MUST end with one fenced ```json block in the shape the request names.',
-  'Never start other Buddies, workers or schedules. A work request names your git worktree: edit and',
-  'commit only there, never in any other checkout; never push. When mentioned in a thread, use the `expedition` tool',
+  'Never start other Buddies, workers or schedules. A work or check request names your git worktree:',
+  'work only there (cd there first), never in any other checkout; never push. When mentioned in a thread, use the `expedition` tool',
   '(status) to answer questions about your expedition.',
 ].join(' ');
 
@@ -69,14 +69,29 @@ function attemptLine(a: Attempt): string {
       : a.spec.kind === 'work'
         ? `work on ${a.spec.questionId} (seat ${a.spec.seat})`
         : `check of ${a.spec.claimAttemptId} in panel ${a.spec.panelId}${a.spec.goal ? ' (GOAL)' : ''}`;
-  const where = a.phase.t === 'ended' ? outcomeDetail(a.phase.outcome) : a.phase.t;
-  return `- ${a.id} ${what}: ${where}`;
+  return `- ${a.id} ${what}: ${phaseDetail(a)}`;
+}
+
+function phaseDetail(a: Attempt): string {
+  switch (a.phase.t) {
+    case 'ended':
+      return outcomeDetail(a.phase.outcome);
+    case 'dropped':
+      return `NOT STARTED (no worktree): ${a.phase.reason}`;
+    case 'planned':
+    case 'admitted':
+    case 'posting':
+    case 'posted':
+      return a.phase.t;
+  }
 }
 
 function unseenLine(e: Entry): string {
   switch (e.t) {
     case 'attempt_ended':
       return `- ${e.attemptId} ended: ${outcomeDetail(e.outcome)}`;
+    case 'worktree_failed':
+      return `- ${e.attemptId} NOT STARTED, its worktree could not be made: ${e.reason}`;
     case 'rejected':
       return `- REJECTED ${e.action.do}: ${e.reason}`;
     case 'feedback':
@@ -86,7 +101,7 @@ function unseenLine(e: Entry): string {
   }
 }
 
-function managerBrief(s: State): string {
+function managerBrief(s: State, id: string): string {
   const c = s.charter;
   return [
     `[expedition ${s.id} · ${c.name} · MANAGER]`,
@@ -102,7 +117,7 @@ function managerBrief(s: State): string {
         .map(attemptLine)
         .join('\n') || '- none'
     }`,
-    `NEW SINCE YOUR LAST DECISION:\n${s.unseen.map(unseenLine).join('\n') || '- nothing'}`,
+    `NEW SINCE YOUR LAST DECISION:\n${s.shown[id].map(unseenLine).join('\n') || '- nothing'}`,
     [
       'HOW TO DECIDE:',
       '- Break the goal into questions (unknowns or subgoals). Keep at least two genuinely different approaches alive until one is verified.',
@@ -180,11 +195,16 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
 
 /** Blind check: the claim and its evidence, never the author's reasoning. */
 function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): string {
+  const tree = worktreeOf(s, id);
   return [
     `[expedition ${s.id} · ${s.charter.name} · CHECK ${id}]`,
     'You are an independent verifier. Do not trust the claim; reproduce it yourself.',
     `CLAIM: ${statement.statement}`,
-    `CANDIDATE COMMIT: ${statement.commit} on branch ${worktreeOf(s, spec.claimAttemptId).branch} in ${s.repo.root}. Check it out in a fresh worktree of your own (git worktree add); never edit that repository's checkout.`,
+    [
+      `YOUR WORKTREE: ${tree.path}, checked out at the candidate commit ${tree.baseSha} (branch ${tree.branch}).`,
+      'Reproduce the claim there only: cd there first, never create other worktrees, never edit any',
+      'other checkout, and do not commit.',
+    ].join(' '),
     `EVIDENCE CITED: ${statement.evidence.join('; ') || '(none)'}`,
     `SUGGESTED CHECK: ${statement.howToCheck}`,
     spec.goal ? charterText(s.charter) : '',
@@ -198,24 +218,12 @@ function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): st
     .join('\n\n');
 }
 
-/** The claim a check verifies; a check is planned only for an ended claim (decide.ts). */
-function claimOf(s: State, spec: CheckSpec): Claim {
-  const claim = attemptOf(s, spec.claimAttemptId);
-  if (
-    claim.phase.t !== 'ended' ||
-    claim.phase.outcome.t !== 'work' ||
-    claim.phase.outcome.result.result !== 'claim'
-  )
-    throw new Error(`check of ${spec.claimAttemptId} has no claim to check`);
-  return claim.phase.outcome.result;
-}
-
 /** The brief for one attempt, built from the ledger as it stands. */
 export function briefOf(s: State, attempt: Attempt): string {
   const { spec } = attempt;
   switch (spec.kind) {
     case 'manager':
-      return managerBrief(s);
+      return managerBrief(s, attempt.id);
     case 'work':
       return workBrief(s, attempt.id, spec);
     case 'check':

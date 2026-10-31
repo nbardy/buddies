@@ -1,5 +1,6 @@
 import type { ExpeditionView } from '@unleashd/shared';
 import {
+  type AttemptPhase,
   type State,
   attemptLabel,
   attemptsOn,
@@ -64,11 +65,26 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       phase: a.phase.t,
       live: live(s).some((x) => x.id === a.id),
       brief: s.briefs[a.id] ?? null,
-      outcome: a.phase.t === 'ended' ? outcomeLabel(a.phase.outcome) : null,
+      outcome: phaseOutcome(a.phase),
       requestId: a.phase.t === 'posted' || a.phase.t === 'ended' ? a.phase.requestId : null,
     })),
     panels: panels(s),
     reflections: s.reflections,
     lessons: s.lessons,
   };
+}
+
+/** The page's one-line result: an ended attempt's outcome, a dropped one's reason. */
+function phaseOutcome(phase: AttemptPhase): string | null {
+  switch (phase.t) {
+    case 'ended':
+      return outcomeLabel(phase.outcome);
+    case 'dropped':
+      return `not started: ${phase.reason}`;
+    case 'planned':
+    case 'admitted':
+    case 'posting':
+    case 'posted':
+      return null;
+  }
 }

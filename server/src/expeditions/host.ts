@@ -18,11 +18,14 @@ import {
   type Feedback,
   type Origin,
   type State,
+  type WorkerSpec,
   attemptOf,
   badge,
+  claimOf,
   configOf,
   decide,
   fold,
+  live,
   pendingEffects,
   worktreeName,
   worktreeOf,
@@ -155,20 +158,21 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       case 'create_branch':
         await ensureBranch(s.repo);
         return [{ t: 'branch_ready', at: now() }];
-      case 'admit_work': {
+      case 'admit': {
         // Intent first: the slot, custody and Cambium name are on disk before `cambium add` runs.
+        const { attempt } = effect;
         await append(s.id, [
           {
             t: 'worktree_creating',
             at: now(),
-            attemptId: effect.attemptId,
-            name: worktreeName(s.id, effect.attemptId),
-            path: path.join(root, s.id, 'worktrees', effect.attemptId),
-            branch: `exp/${s.id}/${effect.attemptId}`,
-            baseSha: await branchHead(s.repo),
+            attemptId: attempt.id,
+            name: worktreeName(s.id, attempt.id),
+            path: path.join(root, s.id, 'worktrees', attempt.id),
+            branch: `exp/${s.id}/${attempt.id}`,
+            baseSha: await treeBase(s, attempt.spec),
           },
         ]);
-        return createWorktree(stateOf(s.id), effect.attemptId);
+        return createWorktree(stateOf(s.id), attempt.id);
       }
       case 'create_worktree':
         return createWorktree(s, effect.attemptId);
@@ -242,10 +246,25 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
+  /** Where a worker's tree starts: work at the expedition branch head, a check at its claim. */
+  async function treeBase(s: State, spec: WorkerSpec): Promise<string> {
+    switch (spec.kind) {
+      case 'work':
+        return branchHead(s.repo);
+      case 'check':
+        return claimOf(s, spec).commit;
+    }
+  }
+
   async function createWorktree(s: State, attemptId: string): Promise<Entry[]> {
     const tree = worktreeOf(s, attemptId);
-    const at = await ensureWorktree(s.repo.root, tree.name, tree);
-    return [{ t: 'worktree_ready', at: now(), attemptId, ...at }];
+    const made = await ensureWorktree(s.repo.root, tree.name, tree);
+    switch (made.t) {
+      case 'ready':
+        return [{ t: 'worktree_ready', at: now(), attemptId, ...made.at }];
+      case 'failed':
+        return [{ t: 'worktree_failed', at: now(), attemptId, reason: made.reason }];
+    }
   }
 
   async function postAttempt(s: State, attemptId: string, body: string): Promise<Entry[]> {
@@ -298,11 +317,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return next;
   }
 
-  // A finished expedition stays active while it owes effects (its last status, worktree removal).
+  // A finished expedition stays active while it owes effects (its last status, worktree removal)
+  // or has live attempts: their ends are still observed, and only then are their trees released.
   const active = () =>
     [...ledgers.keys()].filter((id) => {
       const s = stateOf(id);
-      return s.run.t !== 'finished' || pendingEffects(s).length > 0;
+      return s.run.t !== 'finished' || live(s).length > 0 || pendingEffects(s).length > 0;
     });
   const tickAll = () => Promise.all(active().map(tick)).then(() => undefined);
 

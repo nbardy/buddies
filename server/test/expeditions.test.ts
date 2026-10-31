@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -13,7 +13,7 @@ import { createBuddyEvents } from '../src/buddies/events';
 import { createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint } from '../src/buddies/mcp';
 import { type ExpeditionHost, createExpeditionHost } from '../src/expeditions/host';
-import { Charter, type Entry, type State, fold } from '../src/expeditions/model';
+import { Charter, type Entry, type State, fold, panels } from '../src/expeditions/model';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import { BackgroundWork } from '../src/turns/background-work';
 import { tempDir } from './fixtures/temp';
@@ -254,6 +254,11 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     // The rejection is shown to a fresh manager; it starts three attempts with a live cap of 2.
     const m2 = f.manager(id);
     assert.notEqual(m2, m1);
+    const m2Brief = await f.core.getPost(
+      OWNER,
+      f.liveAttempts(id).find((a) => a.id === m2)!.requestId
+    );
+    assert.match(m2Brief.body, /NEW SINCE YOUR LAST DECISION:\n- REJECTED done/);
     await f.answer(
       id,
       m2,
@@ -331,10 +336,15 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     // starts now and the second when a slot frees.
     const check = f.liveAttempts(id).find((a) => a.kind === 'check')!;
 
-    // The check is blind: it sees the claim, never the work attempt's brief.
+    // The check is blind: it sees the claim, never the work attempt's brief. It runs in a tree
+    // of its own the host made at the candidate commit, never in the owner's checkout.
     const checkPost = await f.core.getPost(OWNER, check.requestId);
     assert.match(checkPost.body, /The widget passes now/);
     assert.doesNotMatch(checkPost.body, /SECRET-BRIEF/);
+    const checkTree = f.treeOf(id, check.id);
+    assert.equal(git(checkTree.path, 'rev-parse', 'HEAD'), sha);
+    assert.ok(checkPost.body.includes(`YOUR WORKTREE: ${checkTree.path}`));
+    assert.doesNotMatch(checkPost.body, /git worktree add/);
 
     await f.answer(id, check.id, json({ verdict: 'verified', why: 'reproduced' }));
     const second = f.liveAttempts(id).find((a) => a.kind === 'check')!;
@@ -388,17 +398,25 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       summary: 'Widget passes, independently verified.',
     });
     assert.equal(s.questions[0].status, 'verified');
-    // Finished: every worktree is gone; the claim's branch (unintegrated commits) survives, the
-    // still-running attempt's empty branch does not.
-    for (const tree of Object.values(s.worktrees)) {
-      assert.equal(tree.status.t, 'removed', `${tree.attemptId} worktree released`);
+    const last = s.statuses.find((x) => x.text.includes('Finished (done)'))!;
+    assert.equal(last.post.t, 'posted', 'the finish was posted');
+    // Finished: every idle worktree is gone, and the claim's branch (unintegrated commits)
+    // survives. The still-running work attempt keeps its tree: its worker may be in it.
+    const running = work[0].id;
+    for (const tree of Object.values(s.worktrees).filter((t) => t.attemptId !== running)) {
+      assert.equal(tree.status.t, 'removed', `${tree.attemptId}: ${JSON.stringify(tree.status)}`);
       assert.equal(fs.existsSync(tree.path), false);
     }
     assert.equal(git(f.repo, 'rev-parse', claimTree.branch), sha);
-    assert.equal(f.branchExists(f.treeOf(id, work[0].id).branch), false);
-    const last = s.statuses.at(-1)!;
-    assert.match(last.text, /Finished \(done\)/);
-    assert.equal(last.post.t, 'posted', 'the finish was posted');
+    const runningTree = f.treeOf(id, running);
+    assert.equal(runningTree.status.t, 'ready', 'a live worker keeps its tree after finish');
+    assert.equal(fs.existsSync(runningTree.path), true);
+    // Its end is still observed after finish; only then is its tree (no commits) removed.
+    await f.answer(id, running, json({ result: 'finding', statement: 'late', evidence: [] }));
+    assert.deepEqual(f.treeOf(id, running).status, { t: 'removed', branchDeleted: true });
+    assert.equal(fs.existsSync(runningTree.path), false);
+    assert.equal(f.branchExists(runningTree.branch), false);
+    s = f.stateOf(id);
 
     // Where things land: the badge in the launch chat (the owner↔launcher DM here), every update
     // and reflection in the expedition chat (owner↔crew DM), attempts in neither.
@@ -546,12 +564,22 @@ test('work on overlapping custody waits for the holder even with free slots; dis
     const waiting = f.stateOf(id).attempts.find((a) => a.phase.t === 'planned')!;
     assert.equal(waiting.id in f.stateOf(id).worktrees, false, 'a waiting attempt has no worktree');
 
-    // The holder ends with a finding: its custody frees and the waiting attempt starts, based on
-    // the expedition branch head.
+    // The expedition branch moves past its launch base (as integration will move it): a commit
+    // on top of it, made without touching any checkout.
+    const branch = `expedition/${id}`;
+    const launchBase = git(f.repo, 'rev-parse', branch);
+    const head = git(f.repo, 'commit-tree', `${branch}^{tree}`, '-p', branch, '-m', 'integrated');
+    git(f.repo, 'update-ref', `refs/heads/${branch}`, head);
+
+    // The holder ends with a finding: its custody frees and the waiting attempt starts at the
+    // expedition branch's current head, not at the launch base.
     const holder = f.liveAttempts(id).find((a) => a.kind === 'work')!;
     await f.answer(id, holder.id, json({ result: 'finding', statement: 'nope', evidence: [] }));
     assert.deepEqual(questionOfLive(), [docs, inner].sort());
-    assert.equal(f.treeOf(id, waiting.id).baseSha, git(f.repo, 'rev-parse', `expedition/${id}`));
+    const started = f.treeOf(id, waiting.id);
+    assert.notEqual(head, launchBase);
+    assert.equal(started.baseSha, head);
+    assert.equal(git(started.path, 'rev-parse', 'HEAD'), head);
   } finally {
     await f.close();
   }
@@ -591,6 +619,146 @@ test('a crash between creating a worktree and recording it adopts that worktree 
     );
     const replayed = f.liveAttempts(id).find((a) => a.id === posted.id)!;
     assert.equal(replayed.requestId, posted.requestId, 'the same brief post, not a second');
+  } finally {
+    await f.close();
+  }
+});
+
+/**
+ * Makes every `cambium add` in `repo` block while `marker` exists: a committed `.cambium.toml`
+ * path rule whose prepare command waits on it, allowed by the clone-local config. Cambium runs it
+ * after `git worktree add` made the branch and directory and before it registers the workspace,
+ * which is exactly the window an interrupted add leaves behind.
+ */
+function slowCambiumAdd(repo: string, marker: string) {
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.slow\n');
+  fs.writeFileSync(path.join(repo, 'slow.lock'), '');
+  fs.writeFileSync(
+    path.join(repo, '.cambium.toml'),
+    [
+      'version = 1',
+      '',
+      '[[path]]',
+      'path = ".slow"',
+      'policy = "recreate"',
+      'inputs = ["slow.lock"]',
+      `prepare = ["sh", "-c", "while [ -e '${marker}' ]; do sleep 0.05; done; mkdir -p .slow"]`,
+      '',
+    ].join('\n')
+  );
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-q', '-m', 'slow cambium prepare');
+  git(repo, 'cambium', 'init', '--allow-policy-commands');
+}
+
+const until = async (what: string, ok: () => boolean) => {
+  for (let n = 0; n < 400; n += 1) {
+    if (ok()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+};
+
+test('a crash during cambium add (branch and directory made, no registry entry) is recovered on replay', async () => {
+  const f = await fixture();
+  try {
+    // Regression: a SIGKILLed `cambium add` (or one GIT_TIMEOUT_MS killed) left exp/<n> and its
+    // directory but no `cambium list` entry; the replay ran `cambium add` again, which failed
+    // with "branch already exists" on every tick, so the attempt held its slot forever.
+    const marker = path.join(path.dirname(f.repo), 'hold-cambium-add');
+    slowCambiumAdd(f.repo, marker);
+    const { id } = await rpcLaunch(f, 'partial');
+    await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
+    const q = f.stateOf(id).questions[0].id;
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'go' }] })
+    );
+    const posted = f.liveAttempts(id).find((a) => a.kind === 'work')!;
+    const tree = f.treeOf(id, posted.id);
+
+    // Rewind to the intent, then replay the add the way a crash leaves it: killed mid-prepare.
+    const file = f.ledgerPath(id);
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    const cut = lines.findIndex((l) => l.includes('"worktree_creating"') && l.includes(posted.id));
+    fs.writeFileSync(file, `${lines.slice(0, cut + 1).join('\n')}\n`);
+    git(f.repo, 'cambium', 'remove', '--delete-branch', tree.name);
+    fs.writeFileSync(marker, '');
+    const add = spawn(
+      'git-cambium',
+      ['add', '-b', tree.branch, '-name', tree.name, '-ephemeral', tree.path, tree.baseSha],
+      { cwd: f.repo, detached: true, stdio: 'ignore' }
+    );
+    await until('the interrupted add to make its branch', () => f.branchExists(tree.branch));
+    process.kill(-add.pid!, 'SIGKILL');
+    fs.rmSync(marker);
+    const registered = () =>
+      (JSON.parse(git(f.repo, 'cambium', 'list', '--json')) as { name: string }[]).map(
+        (w) => w.name
+      );
+    assert.deepEqual(registered(), [], 'the interrupted add registered nothing');
+    assert.equal(fs.existsSync(tree.path), true, 'but left its directory');
+
+    f.restart();
+    await f.host.tick(id);
+    const after = f.treeOf(id, posted.id);
+    assert.deepEqual([after.status.t, after.path, after.branch], ['ready', tree.path, tree.branch]);
+    assert.deepEqual(registered(), [tree.name], 'one Cambium workspace');
+    assert.equal(git(after.path, 'rev-parse', 'HEAD'), tree.baseSha);
+    const replayed = f.liveAttempts(id).find((a) => a.id === posted.id)!;
+    assert.equal(replayed.requestId, posted.requestId, 'the same brief post, not a second');
+  } finally {
+    await f.close();
+  }
+});
+
+test('a check whose claimed commit does not exist is dropped as typed data; its panel settles', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'bogus');
+    await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
+    const q = f.stateOf(id).questions[0].id;
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'go' }] })
+    );
+    const work = f.liveAttempts(id).find((a) => a.kind === 'work')!;
+    const bogus = 'f'.repeat(40);
+    await f.answer(
+      id,
+      work.id,
+      json({
+        result: 'claim',
+        statement: 'fixed',
+        commit: bogus,
+        evidence: [],
+        howToCheck: 'look',
+      })
+    );
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'check', claimAttempt: work.id, goal: false, panel: 1 }] })
+    );
+    // No worktree can exist at a commit that does not: the check never starts, the failure is a
+    // ledger entry (not a tick that throws on every retry), and the next manager is shown it.
+    const s = f.stateOf(id);
+    const check = s.attempts.find((a) => a.spec.kind === 'check')!;
+    assert.equal(check.phase.t, 'dropped');
+    assert.ok(f.ledgerOf(id).some((e) => e.t === 'worktree_failed' && e.attemptId === check.id));
+    assert.equal(panels(s)[0].verdict, 'not_verified', 'a dropped check settles its panel');
+    const next = await f.core.getPost(
+      OWNER,
+      f.liveAttempts(id).find((a) => a.kind === 'manager')!.requestId
+    );
+    assert.ok(
+      next.body.includes(`${check.id} NOT STARTED`),
+      'the next manager is told of the drop'
+    );
   } finally {
     await f.close();
   }

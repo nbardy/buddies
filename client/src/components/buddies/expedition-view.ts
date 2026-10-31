@@ -22,6 +22,10 @@ export function attemptState(a: ExpeditionAttempt): string {
   switch (a.phase) {
     case 'planned':
       return 'queued';
+    case 'admitted':
+      return 'starting';
+    case 'dropped':
+      return a.outcome ?? 'not started';
     case 'posting':
     case 'posted':
       return 'running';

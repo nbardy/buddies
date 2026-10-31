@@ -50,7 +50,8 @@ export interface Repo {
   branch: string;
 }
 
-/** Where a work attempt's worktree is (design.md R1). */
+/** Where a worker attempt's worktree is (design.md R1): a work attempt's starts at the expedition
+ * branch head, a check's at the commit its claim names. */
 export interface WorktreeAt {
   path: string;
   branch: string;
@@ -58,13 +59,21 @@ export interface WorktreeAt {
 }
 
 /** How a worktree ended: removed (its branch too when it had no commits), kept for its commits,
- * or left in place because removal was refused (uncommitted changes are never forced away). */
+ * absent (Cambium has no such workspace and nothing of it is left: never made, or a replayed
+ * removal), or left in place because removal was refused (uncommitted changes are never forced
+ * away) or a partial create left a branch or directory Cambium could not roll back. */
 export type Release =
   | { t: 'removed'; branchDeleted: boolean }
   | { t: 'kept'; commits: number }
+  | { t: 'absent' }
   | { t: 'left'; reason: string };
 
-export type WorktreeStatus = { t: 'creating' } | { t: 'ready' } | Release;
+/** `failed`: the worktree could not be made (its attempt is dropped, never briefed). */
+export type WorktreeStatus =
+  | { t: 'creating' }
+  | { t: 'ready' }
+  | { t: 'failed'; reason: string }
+  | Release;
 
 export interface Worktree extends WorktreeAt {
   attemptId: string;
@@ -98,6 +107,8 @@ export type Entry =
   | ({ t: 'worktree_creating'; at: string; attemptId: string; name: string } & WorktreeAt)
   /** Written before the work brief is posted: the brief names this path. */
   | ({ t: 'worktree_ready'; at: string; attemptId: string } & WorktreeAt)
+  /** `cambium add` failed (git.ts rolled back what it could): the attempt is dropped. */
+  | { t: 'worktree_failed'; at: string; attemptId: string; reason: string }
   | { t: 'worktree_released'; at: string; attemptId: string; release: Release }
   /** The crew Buddy and the owner↔crew DM: the expedition's chat, where every update lands. */
   | { t: 'crew_ready'; at: string; buddyId: string; chatChannelId: string }
@@ -139,6 +150,10 @@ export type Entry =
 
 export type AttemptPhase =
   | { t: 'planned' }
+  /** A worker attempt whose worktree intent is recorded: it holds a slot and its custody. */
+  | { t: 'admitted' }
+  /** Never started: its worktree could not be made (`worktree_failed`). */
+  | { t: 'dropped'; reason: string }
   | { t: 'posting'; body: string }
   | { t: 'posted'; requestId: string }
   | { t: 'ended'; requestId: string; outcome: Outcome };
@@ -181,7 +196,7 @@ export interface State {
   workspaceId: string;
   repo: Repo;
   branch: { t: 'pending' } | { t: 'ready' };
-  /** Work attempts' worktrees, by attempt id. */
+  /** Worker (work and check) attempts' worktrees, by attempt id. */
   worktrees: Record<string, Worktree>;
   launchedAt: string;
   crew: { t: 'pending' } | { t: 'ready'; buddyId: string; chatChannelId: string };
@@ -196,6 +211,8 @@ export interface State {
   lessons: string[];
   /** Ledger entries a manager has not yet been shown (results, feedback, rejections). */
   unseen: Entry[];
+  /** What each manager attempt is shown: the unseen entries at the moment it was planned. */
+  shown: Record<string, Entry[]>;
   run: Run;
   statuses: Status[];
   /** Manager attempts whose actions were applied (`manager_applied` entries). */
@@ -225,6 +242,7 @@ export function fold(entries: readonly Entry[]): State {
     questions: [],
     lessons: [],
     unseen: [],
+    shown: {},
     run: { t: 'running' },
     statuses: [],
     appliedManagers: new Set(),
@@ -236,6 +254,7 @@ export function fold(entries: readonly Entry[]): State {
 // Pattern: table-driven (docs/patterns.md#table-driven) — one exhaustive handler per entry kind.
 const NEWS: ReadonlySet<Entry['t']> = new Set([
   'attempt_posted',
+  'worktree_failed',
   'attempt_ended',
   'question_added',
   'question_closed',
@@ -264,6 +283,7 @@ export function apply(s: State, e: Entry): void {
         baseSha: e.baseSha,
         status: { t: 'creating' },
       };
+      attemptOf(s, e.attemptId).phase = { t: 'admitted' };
       return;
     case 'worktree_ready':
       Object.assign(worktreeOf(s, e.attemptId), {
@@ -272,6 +292,12 @@ export function apply(s: State, e: Entry): void {
         baseSha: e.baseSha,
         status: { t: 'ready' },
       });
+      return;
+    case 'worktree_failed':
+      worktreeOf(s, e.attemptId).status = { t: 'failed', reason: e.reason };
+      attemptOf(s, e.attemptId).phase = { t: 'dropped', reason: e.reason };
+      // Shown to the next manager, which may plan the work again.
+      s.unseen.push(e);
       return;
     case 'worktree_released':
       worktreeOf(s, e.attemptId).status = e.release;
@@ -287,7 +313,11 @@ export function apply(s: State, e: Entry): void {
       return;
     case 'attempt_planned':
       s.attempts.push({ id: e.attemptId, spec: e.spec, phase: { t: 'planned' } });
-      if (e.spec.kind === 'manager') s.unseen = [];
+      // A manager is shown what was unseen when it was planned (its brief is built after this).
+      if (e.spec.kind === 'manager') {
+        s.shown[e.attemptId] = s.unseen;
+        s.unseen = [];
+      }
       return;
     case 'attempt_posting':
       attemptOf(s, e.attemptId).phase = { t: 'posting', body: e.body };

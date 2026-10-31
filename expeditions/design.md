@@ -260,17 +260,34 @@ specified packet can be executed mechanically and judged by an executable check.
 
 Built (2026-11-01, `server/src/expeditions/git.ts`, `effects.ts`): launch preflight records
 `repo {root, baseSha, branch}` in the `launched` entry; `branch_ready` follows `git branch`.
-A work attempt is admitted by writing `worktree_creating {name, path, branch, baseSha}` BEFORE
-`git cambium add`, so it holds its slot and custody at once and a crash leaves a name the replay
-adopts (`cambium list --json`, by name) instead of adding a second workspace. Then
-`worktree_ready`, then the brief. An ended attempt's worktree is removed with its branch when it has
-no commits beyond its base, kept (`worktree_released {kept}`) when it has; at finish every
-remaining tree is removed and only empty branches are deleted. Removal never forces: uncommitted
-changes become `worktree_released {left, reason}`. Custody paths are normalized once (`./a/` → `a`,
-whole repo = `.`). Cambium keeps its registry in `.git/cambium`, so tests use the real tool on a
-temporary repository. Known gap: Buddy runs start in the workspace root; the brief tells the worker
-to `cd` into its worktree (outside that root), which a provider sandbox limited to its start
-directory may refuse.
+Every worker attempt (work and check) runs in a host-made tree: a work attempt's starts at the
+expedition branch head, a check's at the candidate commit its claim names (a check never makes
+its own worktree in the owner's repository). An attempt is admitted (phase `admitted`) by writing
+`worktree_creating {name, path, branch, baseSha}` BEFORE `git cambium add`, so it holds its slot
+and custody at once. Replay is idempotent in both crash windows: a registered workspace is
+adopted by name only if it is `ready` at the intended branch and base; an add interrupted partway
+(SIGKILL or timeout: the branch and directory exist but `cambium list` has no entry — reproduced
+on a 20k-file repository) is rolled back with `cambium recover` and added again. Anything Cambium
+cannot make or roll back (a commit that does not exist, a mismatched registry entry) is a typed
+`worktree_failed {reason}`: the attempt is `dropped`, the next manager is shown it, and a panel
+counts a dropped check as settled without a vote — never a tick that throws on every retry. Then
+`worktree_ready`, then the brief.
+Release waits until no worker can be in the tree: its attempt settled (ended or dropped), or the
+expedition finished before the attempt was briefed. A live worker's tree is never removed, even at
+finish; the host keeps observing a finished expedition while attempts are live and releases each
+tree when its attempt ends (nothing cancels running Buddy requests yet). An ended attempt's tree is
+removed with its branch when it has no commits beyond its base, kept (`worktree_released {kept}`)
+when it has; at finish every idle tree is removed and only empty branches are deleted, with an
+atomic `git update-ref -d <branch> <base>` (not `cambium remove --delete-branch`, whose
+`git branch -d` refuses a branch at an unmerged candidate commit). A release with no Cambium
+workspace and nothing on disk is `absent`; a partial create's leftovers that recovery cannot
+remove are `left {reason}`. Removal never forces: uncommitted changes become
+`worktree_released {left, reason}`. Cambium runs as `git-cambium` directly (a timeout kills the
+process doing the add, not a `git` wrapper), with a 15-minute limit for `add`. Custody paths are
+normalized once (`./a/` → `a`, whole repo = `.`). Cambium keeps its registry in `.git/cambium`, so
+tests use the real tool on a temporary repository. Known gap: Buddy runs start in the workspace
+root; the brief tells the worker to `cd` into its worktree (outside that root), which a provider
+sandbox limited to its start directory may refuse.
 
 ### R2. Checks are typed: executable or judged
 ```

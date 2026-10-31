@@ -28,7 +28,8 @@ export interface ExpeditionAttempt {
   label: string;
   seat: string;
   questionId: string | null;
-  phase: 'planned' | 'posting' | 'posted' | 'ended';
+  /** admitted: its worktree is being made; dropped: it never started (no worktree, see outcome). */
+  phase: 'planned' | 'admitted' | 'dropped' | 'posting' | 'posted' | 'ended';
   live: boolean;
   /** The exact instructions the worker received; null until briefed. */
   brief: string | null;

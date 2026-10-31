@@ -1,6 +1,6 @@
-import { type Charter, type WorkerConfig, sameModel } from './charter';
-import type { Attempt, AttemptSpec, CheckSpec, State } from './ledger';
-import { byId, questionOf } from './ledger';
+import { type Charter, type Claim, type WorkerConfig, sameModel } from './charter';
+import type { Attempt, AttemptSpec, CheckSpec, State, WorkSpec } from './ledger';
+import { attemptOf, byId, questionOf } from './ledger';
 
 // Pure read-only views over a folded State, shared by decide, effects, briefs, news and the page.
 
@@ -8,6 +8,8 @@ export const live = (s: State) =>
   s.attempts.filter((a) => a.phase.t === 'posted' || a.phase.t === 'posting');
 export const liveWorkers = (s: State) => live(s).filter((a) => a.spec.kind !== 'manager');
 export const queued = (s: State) => s.attempts.filter((a) => a.phase.t === 'planned');
+/** Settled: nothing will run for it any more (it ended, or was dropped before it started). */
+export const settled = (a: Attempt) => a.phase.t === 'ended' || a.phase.t === 'dropped';
 export const exploreAttempts = (s: State) =>
   s.attempts.filter(
     (a) => a.spec.kind === 'work' && byId(s.questions, a.spec.questionId)?.scope === 'explore'
@@ -32,17 +34,28 @@ export function custodyOf(s: State, a: Attempt): readonly string[] {
   }
 }
 
-/**
- * Worker attempts holding a live slot and their custody: posted or posting, or still planned with
- * a worktree already made for them (admitted, about to be briefed).
- */
+/** The attempts that run in a worktree of their own (design.md R1): every one but a manager. */
+export type WorkerSpec = WorkSpec | CheckSpec;
+export const isWorker = (a: Attempt): a is Attempt<WorkerSpec> => a.spec.kind !== 'manager';
+
+/** Worker attempts holding a live slot and their custody: admitted (worktree intent recorded,
+ * about to be briefed), posting or posted. */
 export const admitted = (s: State) =>
-  s.attempts.filter(
-    (a) =>
-      a.spec.kind !== 'manager' &&
-      (a.phase.t === 'posted' || a.phase.t === 'posting' || a.id in s.worktrees) &&
-      a.phase.t !== 'ended'
-  );
+  s.attempts
+    .filter(isWorker)
+    .filter((a) => a.phase.t === 'admitted' || a.phase.t === 'posting' || a.phase.t === 'posted');
+
+/** The claim a check verifies; a check is planned only for an ended claim (decide.ts). */
+export function claimOf(s: State, spec: CheckSpec): Claim {
+  const claim = attemptOf(s, spec.claimAttemptId);
+  if (
+    claim.phase.t !== 'ended' ||
+    claim.phase.outcome.t !== 'work' ||
+    claim.phase.outcome.result.result !== 'claim'
+  )
+    throw new Error(`check of ${spec.claimAttemptId} has no claim to check`);
+  return claim.phase.outcome.result;
+}
 
 /** The work and check attempts on one question (managers belong to no question). */
 export const attemptsOn = (s: State, questionId: string) =>
@@ -65,7 +78,8 @@ export function panels(s: State): Panel[] {
   for (const c of checks(s)) out.set(c.spec.panelId, [...(out.get(c.spec.panelId) ?? []), c]);
   return [...out.entries()].map(([id, members]) => {
     const first = members[0].spec;
-    const ended = members.every((m) => m.phase.t === 'ended');
+    // A dropped check (its worktree could not be made) settles the panel without a vote.
+    const ended = members.every(settled);
     const yes = members.filter(
       (m) =>
         m.phase.t === 'ended' &&
