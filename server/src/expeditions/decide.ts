@@ -144,8 +144,21 @@ const runOf = (s: State): State['run']['t'] => s.run.t;
  */
 function managerDue(s: State): boolean {
   const hostHolds = s.doneRequest.t === 'validating' || integrating(s);
-  return s.unseen.some((e) => e.t === 'feedback' || (!hostHolds && !claimAwaitingValidation(s, e)));
+  const spent = workerAttempts(s) >= s.charter.maxAttempts;
+  return s.unseen.some(
+    (e) =>
+      e.t === 'feedback' ||
+      (!hostHolds && !claimAwaitingValidation(s, e) && !(spent && managerEcho(e)))
+  );
 }
+
+/**
+ * The manager's own echo: an action the guardrails refused, or a question it just added. Once the
+ * budget is spent neither can lead to work, so neither wakes another manager. 2026-11-01 review:
+ * a manager asking for work past the budget got "attempt budget spent", which was news, which
+ * woke a manager, up to the decision cap (about 2N unmetered turns doing nothing).
+ */
+const managerEcho = (e: Entry) => e.t === 'rejected' || e.t === 'question_added';
 
 /** An ended code claim whose candidate validation has not finished (charter command checks). */
 function claimAwaitingValidation(s: State, e: Entry): boolean {

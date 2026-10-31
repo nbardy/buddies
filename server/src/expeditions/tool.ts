@@ -50,9 +50,12 @@ function notCrew(host: ExpeditionHost, grant: BuddyGrant, what: string): void {
 }
 
 /** The installed catalog's models for a provider (none for an unknown provider, which the seat
- * check refuses by name). */
-const catalogModels: ModelsOf = (provider) =>
-  createProviderCatalog().providers.find((p) => p.id === provider)?.models ?? [];
+ * check refuses by name); open for a provider that accepts ad-hoc model ids. */
+const catalogModels: ModelsOf = (provider) => {
+  const entry = createProviderCatalog().providers.find((p) => p.id === provider);
+  if (!entry) return { t: 'closed', models: [] };
+  return entry.supportsDynamicModels ? { t: 'open' } : { t: 'closed', models: entry.models };
+};
 
 /**
  * The page path as plain data, never a link to post: the host already posted the clickable badge

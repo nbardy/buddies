@@ -135,6 +135,16 @@ export type Verification =
       mergeSha: string;
     };
 
+/** The newest settled panel on a claim refuted it: that withdraws the claim's earlier panel
+ * verification and its host proof alike, so every reader (the host's question close, the badge,
+ * dependants) agrees. 2026-11-01 review: only questionVerified applied it, so a refuted
+ * integrated claim was still closed verified and counted on the badge. */
+const refuted = (s: State, claimAttemptId: string) =>
+  panels(s)
+    .filter((p) => p.claimAttemptId === claimAttemptId && p.verdict !== 'pending')
+    .at(-1)?.verdict === 'not_verified';
+
+/** Host-verified claims a later panel has not refuted. */
 export function hostVerifications(s: State): Extract<Verification, { t: 'host' }>[] {
   if (commandChecks(s.charter).length === 0) return [];
   return s.integrations.flatMap((i) => {
@@ -146,6 +156,7 @@ export function hostVerifications(s: State): Extract<Verification, { t: 'host' }
         validationPassed(s, v)
     );
     if (i.status.t !== 'integrated' || !passed || claim.spec.kind !== 'work') return [];
+    if (refuted(s, claim.id)) return [];
     return [
       {
         t: 'host' as const,
@@ -159,25 +170,21 @@ export function hostVerifications(s: State): Extract<Verification, { t: 'host' }
 }
 
 export const verifications = (s: State): Verification[] => [
-  ...verifiedPanels(s).map(
-    (p): Verification => ({
-      t: 'panel',
-      questionId: p.questionId,
-      claimAttemptId: p.claimAttemptId,
-      panelId: p.id,
-    })
-  ),
+  ...verifiedPanels(s)
+    .filter((p) => !refuted(s, p.claimAttemptId))
+    .map(
+      (p): Verification => ({
+        t: 'panel',
+        questionId: p.questionId,
+        claimAttemptId: p.claimAttemptId,
+        panelId: p.id,
+      })
+    ),
   ...hostVerifications(s),
 ];
 /** Distinct verified claims: the badge's and the page's "verified" count. */
 export const verifiedClaims = (s: State) =>
   new Set(verifications(s).map((v) => v.claimAttemptId)).size;
-
-/** The newest settled panel on a claim refuted it (it withdraws that claim's host proof too). */
-const refuted = (s: State, claimAttemptId: string) =>
-  panels(s)
-    .filter((p) => p.claimAttemptId === claimAttemptId && p.verdict !== 'pending')
-    .at(-1)?.verdict === 'not_verified';
 
 /** A question is verified while its newest SETTLED panel verified it (a later panel that refuted
  * the claim withdraws an earlier verification: a stale one must not unlock dependants, R5), or a
@@ -186,7 +193,7 @@ export const questionVerified = (s: State, questionId: string) =>
   panels(s)
     .filter((p) => p.questionId === questionId && p.verdict !== 'pending')
     .at(-1)?.verdict === 'verified' ||
-  hostVerifications(s).some((h) => h.questionId === questionId && !refuted(s, h.claimAttemptId));
+  hostVerifications(s).some((h) => h.questionId === questionId);
 
 /** Where a manager decision turn starts (design.md R9): the expedition's integration tree, read
  * only (the host merges there), or the repository root while that tree does not exist. */

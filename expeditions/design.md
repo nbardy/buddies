@@ -514,22 +514,34 @@ guard is broken (mutation-checked). Tests: `server/test/expeditions.test.ts`, cr
   that read the answer (a manager brief) as instructions and committed on the owner's main; the
   run failure notice (`runs.rs`) took the same path. Fix at the root: `deliver_to_spawner`
   delivers only to a subscribed spawning conversation; with none, nobody spawned the request and
-  nobody is told. Guards: `a_hosted_self_request_answer_wakes_no_spawner` (crate) and the
-  turn-directory test (no `deliver` run, exactly one crew run per attempt).
+  nobody is told. The same holds for a spawner that unfollowed its worker's thread (the crate
+  records no origin to tell the two apart; unfollowing is the choice to stop hearing it). Guards:
+  `a_hosted_self_request_answer_wakes_no_spawner` and
+  `a_self_worker_failure_notice_wakes_its_spawning_conversation` (crate) and the turn-directory
+  test (no `deliver` run, exactly one crew run per attempt).
 - **P2 — doubled unmetered runs**: the extra turns of P1; gone with it (asserted by run count).
 - **P5/R1 (major) — runs started in the owner's checkout.** Isolation was only the brief saying
   "cd there", and a Codex `workspace-write` sandbox rooted at the owner's checkout could not write
   the attempt worktree at all. Now structural, with no crate schema change: the Buddy briefing
   (`briefing.ts`) takes a turn-directory resolver, `TurnDirectory = {t:'workspace'} |
-  {t:'worktree', runId, path}`, which the server wires to `ExpeditionHost.turnDirectory(context)`.
-  The host matches a crew run's request to its attempt by the exact brief bytes (recorded before
-  the post, so a run claimed before `attempt_posted` still matches): a work or check attempt starts
-  in its worktree, a manager in the integration tree (read only, its brief says so; the repository
-  root before that tree exists), any other crew run (a mention) in the manager's directory, every
-  other Buddy turn in its workspace root. A worktree briefing is cached by run id, never under the
-  Buddy's key (two concurrent attempts of one crew would otherwise get whichever worktree warmed
-  last), and the runner forgets it at settle. Guard: two concurrent work runs of one crew each get
-  their own worktree; a non-expedition Buddy gets the workspace root.
+  {t:'crew', path} | {t:'attempt', runId, path}`, which the server wires to
+  `ExpeditionHost.turnDirectory(context)`. The host matches a crew run's request to a live
+  (posting/posted) attempt by the exact brief bytes (recorded before the post, so a run claimed
+  before `attempt_posted` still matches): a work or check attempt starts in its worktree, a manager
+  in the integration tree (read only, its brief says so; the repository root before that tree
+  exists). Every other crew turn (a mention, the owner's chat with the crew, a worker the crew
+  spawned, a boot or creation warm with no run) starts in the crew's own fixed directory,
+  `<expeditions root>/<id>/crew`, which is no git checkout: not the owner's checkout (the manager
+  directory before setup and after finish) and not the integration tree the host merges into, and
+  it never moves, so a resumed seat finds its session. Every other Buddy turn starts in its
+  workspace root. An attempt briefing is cached by run id, never under the Buddy's key (two
+  concurrent attempts of one crew would otherwise get whichever worktree warmed last), and the
+  runner forgets it at settle; a crew's Buddy-key entry always holds the crew directory, which is
+  what a chat turn reads before its run is armed. The crew lookup reads `crew_ready` entries, not
+  a fold of every ledger per turn. Known leak: an attempt run whose lease expires is ended by the
+  claim gate, not the runner, so its small entry stays until restart. Guards: two concurrent work
+  runs of one crew each get their own worktree; a crew mention, a crew turn with no run and an
+  ended attempt's run all get the crew directory; a non-expedition Buddy gets the workspace root.
 - **P3 (major) — the budget counted manager decisions.** "Budget 6 attempts" allowed one work
   attempt. `maxAttempts` now counts work and check attempts (`workerAttempts`); manager decisions
   have their own cap, `managerCap = 2 × maxAttempts + 2` (one to start each attempt, one to act on
@@ -537,7 +549,9 @@ guard is broken (mutation-checked). Tests: `server/test/expeditions.test.ts`, cr
   last result is still shown to a manager before `attempts_spent`. A manager is woken only when
   something is actionable: owner feedback always; otherwise not while a done validation or a merge
   is in flight, and never for a code claim whose candidate validation is still running (the smoke
-  manager spent turns saying "awaiting host validation"). Badge, page and `status` count work and
+  manager spent turns saying "awaiting host validation"). Once the budget is spent, the manager's
+  own echoes (a refused action, a question it added) are not news, so one manager sees the last
+  result and no refusal chain runs to the decision cap. Badge, page and `status` count work and
   checks; the page also shows decisions.
 - **P4 (major) — done on host checks alone was incoherent.** The question stayed open, panels were
   empty, the badge said "0 verified" on a done expedition, and the manager's `close_question
@@ -546,12 +560,16 @@ guard is broken (mutation-checked). Tests: `server/test/expeditions.test.ts`, cr
   host{validationId, mergeSha}` (queries.ts, on the page as `verifications`). The host closes the
   question verified (its `why` names the validation and merge), dependants unlock, the manager's
   close is accepted, and the badge counts distinct verified claims. A later refuting panel on that
-  claim withdraws it. Judged done items still need a goal panel; the manager brief says both.
+  claim withdraws it everywhere (`hostVerifications`, the badge's `verifications`, the close rule),
+  as it withdraws an earlier verifying panel. A question already closed verified stays closed (as
+  with panels); the manager can close it again with a reason. Judged done items still need a goal panel; the manager brief says both.
 - **P6 — owner model words failed.** "claude haiku" was refused (the catalog takes full ids). The
   charter canonicalizer (`charter.ts charterOf`, given the installed catalog's models) resolves a
   seat model that is not a catalog id when its words pick exactly one model of that provider (by
   id or display name), once, at ingestion, and lists each in `resolved`; otherwise the seat check
-  refuses it listing the valid ids. Aliases resolve too (`sonnet` → `claude-sonnet-5-5`): kept as
+  refuses it listing the valid ids. A provider that accepts ad-hoc ids (`supportsDynamicModels`:
+  pi, opencode) is never resolved: `opencode/gpt-5` would otherwise become `opencode/gpt-5-nano`.
+  Aliases resolve too (`sonnet` → `claude-sonnet-5-5`): kept as
   written, they would defeat the check-independence rule, which compares model strings.
 - **P7 — the launch link was refused when posted.** The result carried
   `[⛺ name](/expeditions/<id>)`; the Buddy posted it and the post tool treated the relative path

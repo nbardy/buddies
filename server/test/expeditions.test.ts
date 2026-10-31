@@ -1185,6 +1185,7 @@ test('work on a question waits (stage waiting, no worktree) until its dependency
       json({ actions: [{ do: 'check', claimAttempt: w1, goal: false, panel: 1 }] })
     );
     await f.answer(id, liveCheck().id, json({ verdict: 'refuted', why: 'flaky' }));
+    assert.equal(f.host.view(id).counts.verified, 0, 'the badge drops a refuted verification');
     await f.answer(
       id,
       f.manager(id),
@@ -1225,6 +1226,61 @@ test('work on a question waits (stage waiting, no worktree) until its dependency
     assert.equal(stage(q2), 'implementing');
     assert.equal(f.treeOf(id, workOn(q2).id).baseSha, v.integration.head);
     assert.equal(git(f.repo, 'rev-parse', `expedition/${id}^2`), sha);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a host-verified claim (command checks passed, merged) lets the manager close its question verified; a later refuting panel withdraws that proof everywhere', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'hostproof', 2, { checks: [widgetFixed] });
+    await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
+    const q = f.stateOf(id).questions[0].id;
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'fix it' }] })
+    );
+    const w = f.liveAttempts(id).find((a) => a.kind === 'work')!;
+    const sha = f.commitIn(f.treeOf(id, w.id).path, 'widget/widget.ts');
+    await f.answer(
+      id,
+      w.id,
+      json({
+        result: 'claim',
+        statement: 'fixed',
+        change: { t: 'commit', sha },
+        evidence: [],
+        howToCheck: 'run it',
+      })
+    );
+    await f.host.drain();
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'integrate', claimAttempt: w.id }] }));
+    await f.host.drain();
+    assert.equal(f.stateOf(id).questions[0].status, 'verified');
+    assert.equal(f.host.view(id).counts.verified, 1);
+
+    // 2026-11-01 smoke incident: the manager's close_question verified was refused on host proof.
+    const closeVerified = { do: 'close_question', question: q, status: 'verified', why: 'merged' };
+    const refusedCloses = () =>
+      f.ledgerOf(id).filter((e) => e.t === 'rejected' && e.action.do === 'close_question').length;
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [closeVerified, { do: 'check', claimAttempt: w.id, goal: false, panel: 1 }] })
+    );
+    assert.equal(refusedCloses(), 0, "host proof accepts the manager's close");
+
+    // A panel refutes the integrated claim: the badge, the page and the close rule all drop it
+    // (2026-11-01 review: only the close rule applied the refutation).
+    const check = f.liveAttempts(id).find((a) => a.kind === 'check')!;
+    await f.answer(id, check.id, json({ verdict: 'refuted', why: 'flaky' }));
+    const v = f.host.view(id);
+    assert.deepEqual(v.verifications, []);
+    assert.equal(v.counts.verified, 0);
+    await f.answer(id, f.manager(id), json({ actions: [closeVerified] }));
+    assert.equal(refusedCloses(), 1, 'a refuted claim no longer proves its question');
   } finally {
     await f.close();
   }
@@ -1806,9 +1862,20 @@ test('the attempt budget counts work and check attempts only; the last result st
     assert.match(v.badge, / 2\/2 attempts /);
     // The budget is spent, but the last result is news: a manager is shown it before the end.
     assert.equal(f.stateOf(id).run.t, 'running');
-    await f.answer(id, f.manager(id), json({ actions: [{ do: 'note', text: 'out of budget' }] }));
+    // That manager asks for more work anyway: refused, and neither the refusal nor its new
+    // question wakes another manager (2026-11-01 review: each refusal was news, so managers
+    // spun up to the decision cap after the budget was gone).
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [{ do: 'work', question: q, seat: 0, brief: 'more' }, question('More', ['docs'])],
+      })
+    );
     const s = f.stateOf(id);
+    assert.ok(s.unseen.some((e) => e.t === 'rejected' && e.reason === 'attempt budget spent'));
     assert.equal(s.run.t === 'finished' && s.run.reason, 'attempts_spent');
+    assert.equal(f.host.view(id).counts.decisions, 4, 'one manager after the spend, no more');
 
     // A manager whose every action is refused cannot spin: decisions have their own cap.
     const spin = await launchBudget2('spin');
@@ -1889,6 +1956,20 @@ test('an attempt run starts in its own worktree (two concurrent runs of one crew
     await briefings.warm(context(null, f.lead.id));
     assert.equal(briefings.current(context(null, f.lead.id)).workingDirectory, f.repo);
 
+    // Every other crew turn starts in the crew's own fixed directory, no git checkout (2026-11-01
+    // review: a mention or the owner's chat with the crew started in the owner's checkout before
+    // setup and after finish). A turn with no run (a boot or creation warm, a chat before its run
+    // is armed) and the ended manager attempt's run (a boot warm of an old conversation) both get
+    // it, under the Buddy's key, which the chat turn reads.
+    const crewDir = path.join(f.root, id, 'crew');
+    await briefings.warm(context(null));
+    assert.equal(briefings.current(context(null)).workingDirectory, crewDir);
+    briefings.forget(managerRun.id); // the runner did at its settle
+    await briefings.warm(context(managerRun.id));
+    assert.equal(briefings.current(context(managerRun.id)).workingDirectory, crewDir);
+    assert.equal(briefings.current(context(null)).workingDirectory, crewDir);
+    assert.ok(fs.statSync(crewDir).isDirectory());
+
     // 2026-11-01 smoke incident: the crew answering its host-posted request enqueued a delivery
     // to the crew itself (no conversation spawned the request), which woke an extra unmetered
     // turn in the workspace root that obeyed the answer and committed on the owner's main.
@@ -1934,6 +2015,23 @@ test('owner model words resolve to the catalog id once, at ingestion; a name tha
       'manager: "sonnet" → claude-sonnet-5-5',
       'work seat 0: "claude haiku" → claude-haiku-5-5',
     ]);
+    // An open provider (opencode accepts ad-hoc ids) keeps its id as written: word matching
+    // would rewrite opencode/gpt-5 to opencode/gpt-5-nano, another model (2026-11-01 review).
+    const open = await rpc(f.spec(), 'expedition', {
+      action: {
+        do: 'draft',
+        charter: {
+          ...seats('haiku', 'gpt-6-sol'),
+          crew: {
+            manager: { provider: 'claude', model: 'claude-sonnet-5-5' },
+            work: [{ provider: 'opencode', model: 'opencode/gpt-5' }],
+            check: [{ provider: 'codex', model: 'gpt-6-sol' }],
+          },
+        },
+      },
+    });
+    assert.equal(open.value.charter.crew.work[0].model, 'opencode/gpt-5', open.text);
+    assert.deepEqual(open.value.resolved, []);
     // "sol" names three codex models: refused, listing the valid ids, never a guess.
     const refused = await rpc(f.spec(), 'expedition', {
       action: { do: 'draft', charter: seats('haiku', 'sol') },

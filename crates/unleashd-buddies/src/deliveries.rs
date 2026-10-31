@@ -249,10 +249,12 @@ pub(crate) fn from_own_worker(tx: &Transaction, actor: &Actor, post: &Post, from
 }
 
 /// Delivers a post its author's own spawner must hear: a self-request's answer or failure. The
-/// author-based fan-out never delivers a Buddy's post to that same Buddy. No subscribed spawner: a
-/// host posted the request (an expedition attempt), so nobody is told. 2026-11-01 smoke incident:
-/// that woke an extra crew turn in the owner's checkout, which obeyed the answer and committed on
-/// main. Guard: `a_hosted_self_request_answer_wakes_no_spawner` (tests/core.rs).
+/// author-based fan-out never delivers a Buddy's post to that same Buddy. No subscribed spawner,
+/// nobody is told: a host posted the request (an expedition attempt), or the spawner unfollowed
+/// the thread (the post records no origin to tell them apart). 2026-11-01 smoke incident: the
+/// hosted case woke an extra crew turn in the owner's checkout, which committed on main. Guards:
+/// `a_hosted_self_request_answer_wakes_no_spawner`,
+/// `a_self_worker_failure_notice_wakes_its_spawning_conversation` (tests/core.rs).
 pub(crate) fn deliver_to_spawner(tx: &Transaction, buddy_id: &str, post: &Post) -> Result<()> {
     match subscription(tx, buddy_id, post.root())? {
         Some(conversation) => enqueue_delivery(tx, buddy_id, post, Some(conversation)).map(|_| ()),

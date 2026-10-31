@@ -118,8 +118,9 @@ Where things land:
   its own answers as new work (design.md R9, P1).
 - **Where runs start**: a work or check attempt's run starts in its own worktree; a manager's in
   the expedition's integration tree (read only by its brief; the repository root before that tree
-  exists); a crew run that is no attempt (a mention) in the same place; every other Buddy turn in
-  its workspace root.
+  exists); every other crew turn (a mention, the owner's chat, a worker it spawned) in the crew's
+  own directory, `<expeditions root>/<id>/crew`, which is no git checkout; every other Buddy turn
+  in its workspace root.
 
 Crew roster: `crew: { manager, work[], check[] }`, each `{provider, model?, reasoningEffort?}`
 (a model may be the owner's words, e.g. `haiku`: it resolves to the catalog id at launch).

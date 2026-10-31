@@ -111,8 +111,12 @@ export const CHARTER_DEFAULTS = {
 const crewLine = (crew: z.infer<typeof Crew>) =>
   `manager ${seatLabel(crew.manager)}; work ${crew.work.map(seatLabel).join(', ')}; check ${crew.check.map(seatLabel).join(', ')}`;
 
-/** A provider's catalog models (host: the installed provider catalog the seat check reads). */
-export type ModelsOf = (provider: string) => readonly { id: string; displayName: string }[];
+/** A provider's models (host: the installed provider catalog the seat check reads): a closed
+ * list, or open for a provider that accepts ad-hoc ids (supportsDynamicModels: pi, opencode). */
+export type ProviderModels =
+  | { t: 'closed'; models: readonly { id: string; displayName: string }[] }
+  | { t: 'open' };
+export type ModelsOf = (provider: string) => ProviderModels;
 
 const nameTokens = (name: string) =>
   name
@@ -133,8 +137,23 @@ function seatOf(
   where: string,
   models: ModelsOf
 ): { seat: WorkerConfig; resolved: string[] } {
-  const model = seat.model;
   const catalog = models(seat.provider);
+  switch (catalog.t) {
+    // An open provider's id outside its list may be valid as written: matching words would
+    // rewrite `opencode/gpt-5` to `opencode/gpt-5-nano`, another model (2026-11-01 review).
+    case 'open':
+      return { seat, resolved: [] };
+    case 'closed':
+      return closedSeatOf(seat, where, catalog.models);
+  }
+}
+
+function closedSeatOf(
+  seat: WorkerConfig,
+  where: string,
+  catalog: readonly { id: string; displayName: string }[]
+): { seat: WorkerConfig; resolved: string[] } {
+  const model = seat.model;
   if (model === undefined || catalog.some((m) => m.id === model)) return { seat, resolved: [] };
   const want = nameTokens(model);
   const matches = catalog.filter((m) => {

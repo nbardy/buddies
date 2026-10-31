@@ -629,6 +629,27 @@ fn a_hosted_self_request_answer_wakes_no_spawner() {
     assert!(woke.is_none(), "neither the answer nor the failure notice wakes a spawner turn: {woke:?}");
 }
 
+// 2026-11-01 review: deliver_to_spawner now delivers only to a subscribed conversation (see
+// a_hosted_self_request_answer_wakes_no_spawner). A worker a conversation spawned for itself still
+// must report its failure there: removing the runs.rs run_failed delivery left every other test
+// green.
+#[test]
+fn a_self_worker_failure_notice_wakes_its_spawning_conversation() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
+    let spawned = s.post(&buddy("mid"), me_only(), request("sweep", "w1")).unwrap();
+    let worker = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    s.bind_run(&worker.run.id, &worker.lease_token, "worker-a").unwrap();
+    s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap();
+    assert_eq!(s.get_post(&Actor::Owner, &spawned.id).unwrap().request, RequestState::Failed);
+    let back = s.claim_run(lease(60_000), &[]).unwrap().expect("the failure notice wakes the spawner");
+    assert_eq!(back.run.conversation_id.as_deref(), Some("conv-sender"), "on the spawning conversation");
+    let Delivery::Posts { posts, .. } = s.deliver_posts(&back.run.id).unwrap() else { panic!("the notice was not shown") };
+    assert_eq!(posts.len(), 1);
+    assert!(posts[0].body.contains("failed (provider_error)"), "{}", posts[0].body);
+}
+
 #[test]
 fn two_answerers_race_and_exactly_one_answer_lands() {
     let f = fixture();

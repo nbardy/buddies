@@ -15,10 +15,13 @@ export interface ResolvedBuddyConversation {
   execution: BuddyExecution;
 }
 
-/** A turn's cwd: the workspace root, or a run's own worktree (expeditions host.ts turnDirectory).
- * 2026-11-01 smoke incident: crew attempts ran in the owner's checkout, isolated only by a brief,
- * and a Codex sandbox rooted there could not write the attempt worktree. */
-export type TurnDirectory = { t: 'workspace' } | { t: 'worktree'; runId: string; path: string };
+/** A turn's cwd (expeditions host.ts turnDirectory): workspace root, a crew's fixed directory, or
+ * one attempt run's. 2026-11-01 smoke incident: crew turns ran in the owner's checkout, isolated
+ * only by a brief, and a Codex sandbox rooted there could not write the attempt worktree. */
+export type TurnDirectory =
+  | { t: 'workspace' }
+  | { t: 'crew'; path: string }
+  | { t: 'attempt'; runId: string; path: string };
 export const WORKSPACE_DIRECTORY: TurnDirectory = { t: 'workspace' };
 
 const MAX = { soul: 10_000, memory: 6_000, tasks: 4_000 } as const;
@@ -140,7 +143,7 @@ export async function composeBriefing(
     // Steady-state turns re-brief only when this changes, so it covers what the Buddy must see
     // promptly (identity, soul, memory) and leaves out what changes every turn (tasks).
     memoryGeneration: `memory:${working?.revision ?? 0}:${longTerm?.revision ?? 0}:identity:${identity}`,
-    workingDirectory: directory.t === 'worktree' ? directory.path : workspace.rootPath,
+    workingDirectory: directory.t === 'workspace' ? workspace.rootPath : directory.path,
     execution: profileExecution(buddy, installed),
   };
 }
@@ -163,9 +166,10 @@ export type Briefings = ReturnType<typeof createBriefings>;
 /**
  * The runtime reads a briefing synchronously as it admits a turn, while the core is async. The
  * runner (and the conversation creator) warm the entry right before each turn, so `current` reads
- * what was just composed. A cold entry is an error, never an empty briefing. A run with its own
- * worktree is kept by run id, never under the Buddy's key: two concurrent attempt runs of one
- * crew would otherwise start in whichever worktree warmed last. The runner forgets it at settle.
+ * what was just composed. A cold entry is an error, never an empty briefing. An attempt run is
+ * kept by run id (concurrent attempts of one crew must not share a worktree), forgotten at settle.
+ * Any other turn is kept by Buddy; a crew's entry is always its own directory, never the owner's
+ * checkout, whatever warmed it (a chat reads it before its run is armed: 2026-11-01 review).
  */
 export function createBriefings(
   core: BuddiesCore,
@@ -178,7 +182,7 @@ export function createBriefings(
     async warm(context: BuddyContext): Promise<ResolvedBuddyConversation> {
       const directory = await directoryOf(context);
       const resolved = await composeBriefing(core, context, installed(), directory);
-      if (directory.t === 'worktree') runs.set(directory.runId, resolved);
+      if (directory.t === 'attempt') runs.set(directory.runId, resolved);
       else cache.set(keyOf(context), resolved);
       return resolved;
     },

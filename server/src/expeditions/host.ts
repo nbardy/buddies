@@ -636,43 +636,63 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   }
 
   /** Where an attempt's run starts (design.md R9): a worker in its own worktree, a manager in
-   * the read-only integration tree. */
+   * the read-only integration tree (or the repository root before it exists; its brief says
+   * read only). */
   function attemptDirectory(s: State, attempt: Attempt, runId: string): TurnDirectory {
     switch (attempt.spec.kind) {
       case 'work':
       case 'check':
-        return { t: 'worktree', runId, path: worktreeOf(s, attempt.id).path };
+        return { t: 'attempt', runId, path: worktreeOf(s, attempt.id).path };
       case 'manager':
-        return { t: 'worktree', runId, path: managerDirectory(s) };
+        return { t: 'attempt', runId, path: managerDirectory(s) };
     }
   }
 
+  /** A crew's own directory: its expedition's folder in the host store, never a git checkout.
+   * 2026-11-01 review: non-attempt crew turns (a mention, the owner's chat, a worker the crew
+   * spawned) started in managerDirectory, which is the owner's checkout before setup and after
+   * finish, or the integration tree the host merges into; and a seat whose cwd moved between
+   * the two could not resume its session. One fixed directory for every such turn. */
+  async function crewDirectory(id: string): Promise<TurnDirectory> {
+    const dir = path.join(root, id, 'crew');
+    await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
+    return { t: 'crew', path: dir };
+  }
+
+  /** The live attempt whose request a run answers, matched by its exact brief bytes, which the
+   * ledger holds before the post exists (a run can be claimed before `attempt_posted` is
+   * appended). Only posting/posted attempts: a boot warm of an old conversation's ended run must
+   * not route (and cache) by run id (2026-11-01 review: it leaked a per-run briefing). */
+  async function attemptOfRun(s: State, runId: string): Promise<Attempt | undefined> {
+    const run = await core.getRun(runId);
+    if (run.input.kind !== 'post') return undefined;
+    const body = (await core.getPost(OWNER, run.input.postId)).body;
+    return s.attempts.find(
+      (a) => (a.phase.t === 'posting' || a.phase.t === 'posted') && s.briefs[a.id] === body
+    );
+  }
+
   /**
-   * κ for a Buddy turn's directory: a crew run answering one of its expedition's attempt requests
-   * starts in that attempt's directory; another crew run (a mention) in the manager's read-only
-   * one, never the owner's checkout; any other Buddy turn in its workspace root. The request is
-   * matched by its exact brief bytes, which the ledger holds before the post exists (a run can be
-   * claimed before `attempt_posted` is appended).
+   * κ for a Buddy turn's directory: a crew run answering one of its expedition's live attempt
+   * requests starts in that attempt's directory; any other crew turn in the crew's own directory;
+   * any other Buddy's turn in its workspace root.
    */
   async function turnDirectory(context: BuddyContext): Promise<TurnDirectory> {
     const id = crewOf(context.buddyId);
+    if (!id) return WORKSPACE_DIRECTORY;
     const runId = context.coordinationRunId;
-    if (!id || !runId) return WORKSPACE_DIRECTORY;
+    if (!runId) return crewDirectory(id);
     const s = stateOf(id);
-    const run = await core.getRun(runId);
-    const body =
-      run.input.kind === 'post' ? (await core.getPost(OWNER, run.input.postId)).body : undefined;
-    const attempt = s.attempts.find((a) => body !== undefined && s.briefs[a.id] === body);
-    return attempt
-      ? attemptDirectory(s, attempt, runId)
-      : { t: 'worktree', runId, path: managerDirectory(s) };
+    const attempt = await attemptOfRun(s, runId);
+    return attempt ? attemptDirectory(s, attempt, runId) : crewDirectory(id);
   }
 
+  /** The expedition a Buddy crews. Reads the `crew_ready` entry, not a fold: this runs on every
+   * Buddy turn's warm (2026-11-01 review: folding every ledger per turn). */
   function crewOf(buddyId: string): string | undefined {
-    return [...ledgers.keys()].find((id) => {
-      const s = foldOrQuarantine(id);
-      return s?.crew.t === 'ready' && s.crew.buddyId === buddyId;
-    });
+    return [...ledgers].find(([, entries]) =>
+      entries.some((e) => e.t === 'crew_ready' && e.buddyId === buddyId)
+    )?.[0];
   }
 
   // ---------- Tick ----------
