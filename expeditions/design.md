@@ -325,6 +325,19 @@ every command check passed on the head, else `done_refused {reason}` shown to th
 Host validations count as live work for "never idle" and `attempts_spent`. Gap until R3: nothing
 yet re-validates when the head moves after a passed head validation (integration will).
 
+R2 review fixes (2026-11-01): the host checks a claim against its own attempt branch when it ends
+(`git.ts` `claimHeld`): a `commit` must be new on that branch (an ancestor of its tip, not of its
+base), and `no_code` requires a branch with no commits. A claim the branch does not hold is
+recorded `malformed` with the reason, so it is never validated or checked on its word (it could
+otherwise name the head, or hide a commit from validation). A check gets a curated environment
+(PATH, HOME, USER, LOGNAME, SHELL, LANG, LC_ALL, TMPDIR, TZ), never the server's provider keys.
+Known limits: pause and finish stop a validation only between checks (a running check runs to its
+end or timeout, and its tree is released after); a check outlives a server crash in its own process
+group and the replay re-runs it beside that orphan (no pid is recorded); a tree whose
+`cambium add` failed has no release (recover already ran; leftovers are named in the reason).
+Tested end to end: timed_out and error head checks refuse done, finish never removes a tree under
+a running check, and a crash before the tree or between checks resumes at the first unrecorded one.
+
 ### R3. Integration onto the expedition's own branch, serialized
 - Each expedition owns `expedition/<id>` (created at launch from the base commit) and one clean
   integration worktree. A manager action `{do:'integrate', claimAttempt}` is accepted only for a

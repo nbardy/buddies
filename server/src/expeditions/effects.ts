@@ -104,7 +104,9 @@ function validationTreeEffect(validationId: string, tree: WorktreeStatus): Effec
 }
 
 /** Validation trees are scratch: discarded once every check is recorded, or at finish (the host
- * never removes a tree its own check job is still running in, host.ts). */
+ * never removes a tree its own check job is still running in, host.ts). A `failed` tree has no
+ * release: ensureWorktree already ran `cambium recover` on what a failed add left, and anything
+ * still on disk is named in the failure reason (the same as a worker tree, `releases` below). */
 function validationReleases(s: State): Effect[] {
   const finished = s.run.t === 'finished';
   return s.validations.flatMap((v): Effect[] => {

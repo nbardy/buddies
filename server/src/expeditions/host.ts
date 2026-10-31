@@ -12,6 +12,7 @@ import { CREW_ROLE, briefOf, parseOutcome, statusText } from './briefs';
 import { runCommand } from './command';
 import {
   branchHead,
+  claimHeld,
   discardWorktree,
   ensureBranch,
   ensureWorktree,
@@ -26,6 +27,7 @@ import {
   type Entry,
   type Feedback,
   type Origin,
+  type Outcome,
   type State,
   type ValidationTarget,
   type WorkerSpec,
@@ -143,7 +145,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
             t: 'attempt_ended',
             at: now(),
             attemptId: attempt.id,
-            outcome: parseOutcome(attempt.spec.kind, answer.body),
+            outcome: await heldOutcome(
+              s,
+              attempt.id,
+              answer.body,
+              parseOutcome(attempt.spec.kind, answer.body)
+            ),
           });
           continue;
         }
@@ -159,6 +166,28 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       }
     }
     return out;
+  }
+
+  /**
+   * A work claim's `change` is checked against its own attempt branch (git.ts claimHeld); one the
+   * branch does not hold is recorded `malformed` with the reason, so the manager sees it and it is
+   * never validated, checked or integrated on the claim's word alone.
+   */
+  async function heldOutcome(
+    s: State,
+    attemptId: string,
+    body: string,
+    outcome: Outcome
+  ): Promise<Outcome> {
+    if (outcome.t !== 'work' || outcome.result.result !== 'claim') return outcome;
+    const tree = worktreeOf(s, attemptId);
+    const held = await claimHeld(s.repo.root, tree, outcome.result.change);
+    switch (held.t) {
+      case 'held':
+        return outcome;
+      case 'not_held':
+        return { t: 'malformed', error: held.reason, raw: body };
+    }
   }
 
   // ---------- Effects ----------
@@ -360,7 +389,10 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   /**
    * Runs the validation's unrecorded command checks one by one in its tree, appending each result
    * through the expedition's chain. Each check re-reads the ledger: a finished or paused
-   * expedition stops here (a resume continues from the first unrecorded check).
+   * expedition stops here (a resume continues from the first unrecorded check). Only between
+   * checks: a check already running is not interrupted by pause or finish; it runs to its end or
+   * its timeout (up to charter's timeoutSeconds), its result is recorded, and only then is the
+   * tree released (`release_validation` waits for the job).
    */
   async function runChecks(id: string, validationId: string): Promise<void> {
     for (;;) {

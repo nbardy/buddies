@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import type { ClaimChange } from './charter';
 import type { Release, Repo, WorktreeAt } from './ledger';
 
 // The expedition's git I/O: preflight, the expedition branch, one Cambium worktree per work attempt.
@@ -201,6 +202,47 @@ async function branchState(root: string, at: WorktreeAt): Promise<BranchState> {
     `counting ${at.branch} commits`
   );
   return { t: 'present', commits: Number(count) };
+}
+
+/** Whether a work claim's `change` is what its attempt branch holds (design.md R2). */
+export type ClaimHeld = { t: 'held' } | { t: 'not_held'; reason: string };
+
+/**
+ * The host checks a claim against its own attempt branch instead of trusting its word: a `commit`
+ * must be a new commit on that branch (an ancestor of its tip, not of its base), so a claim cannot
+ * name the head or another attempt's passing commit; `no_code` means the branch has no commits, so
+ * an attempt that committed cannot skip candidate validation by saying it changed nothing.
+ */
+export async function claimHeld(
+  root: string,
+  at: WorktreeAt,
+  change: ClaimChange
+): Promise<ClaimHeld> {
+  switch (change.t) {
+    case 'commit': {
+      const ref = `refs/heads/${at.branch}`;
+      const [onBranch, inBase] = await Promise.all([
+        git(root, ['merge-base', '--is-ancestor', change.sha, ref]),
+        git(root, ['merge-base', '--is-ancestor', change.sha, at.baseSha]),
+      ]);
+      return onBranch.t === 'ok' && inBase.t === 'failed'
+        ? { t: 'held' }
+        : {
+            t: 'not_held',
+            reason: `claimed commit ${change.sha} is not a new commit on the attempt branch ${at.branch}`,
+          };
+    }
+    case 'no_code': {
+      const branch = await branchState(root, at);
+      const commits = branch.t === 'present' ? branch.commits : 0;
+      return commits === 0
+        ? { t: 'held' }
+        : {
+            t: 'not_held',
+            reason: `claimed no code, but the attempt branch ${at.branch} has ${commits} commit(s)`,
+          };
+    }
+  }
 }
 
 /**

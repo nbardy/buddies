@@ -14,7 +14,7 @@ import { createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint } from '../src/buddies/mcp';
 import { runCommand } from '../src/expeditions/command';
 import { type ExpeditionHost, createExpeditionHost } from '../src/expeditions/host';
-import { Charter, type Entry, type State, fold, panels } from '../src/expeditions/model';
+import { Charter, type Entry, type State, fold } from '../src/expeditions/model';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import { BackgroundWork } from '../src/turns/background-work';
 import { tempDir } from './fixtures/temp';
@@ -630,7 +630,9 @@ test('a crash between creating a worktree and recording it adopts that worktree 
  * Makes every `cambium add` in `repo` block while `marker` exists: a committed `.cambium.toml`
  * path rule whose prepare command waits on it, allowed by the clone-local config. Cambium runs it
  * after `git worktree add` made the branch and directory and before it registers the workspace,
- * which is exactly the window an interrupted add leaves behind.
+ * which is exactly the window an interrupted add leaves behind. It touches `<marker>.started` on
+ * entry: the branch appears before the directory is populated, so a kill timed on the branch alone
+ * raced the checkout (flaky: no directory left, or a half-made one Cambium could not adopt).
  */
 function slowCambiumAdd(repo: string, marker: string) {
   fs.writeFileSync(path.join(repo, '.gitignore'), '.slow\n');
@@ -644,7 +646,7 @@ function slowCambiumAdd(repo: string, marker: string) {
       'path = ".slow"',
       'policy = "recreate"',
       'inputs = ["slow.lock"]',
-      `prepare = ["sh", "-c", "while [ -e '${marker}' ]; do sleep 0.05; done; mkdir -p .slow"]`,
+      `prepare = ["sh", "-c", "touch '${marker}.started'; while [ -e '${marker}' ]; do sleep 0.05; done; mkdir -p .slow"]`,
       '',
     ].join('\n')
   );
@@ -688,12 +690,15 @@ test('a crash during cambium add (branch and directory made, no registry entry) 
     fs.writeFileSync(file, `${lines.slice(0, cut + 1).join('\n')}\n`);
     git(f.repo, 'cambium', 'remove', '--delete-branch', tree.name);
     fs.writeFileSync(marker, '');
+    fs.rmSync(`${marker}.started`, { force: true }); // left by the attempt's own (unheld) add
     const add = spawn(
       'git-cambium',
       ['add', '-b', tree.branch, '-name', tree.name, '-ephemeral', tree.path, tree.baseSha],
       { cwd: f.repo, detached: true, stdio: 'ignore' }
     );
-    await until('the interrupted add to make its branch', () => f.branchExists(tree.branch));
+    await until('the interrupted add to reach its prepare step', () =>
+      fs.existsSync(`${marker}.started`)
+    );
     process.kill(-add.pid!, 'SIGKILL');
     fs.rmSync(marker);
     const registered = () =>
@@ -716,51 +721,67 @@ test('a crash during cambium add (branch and directory made, no registry entry) 
   }
 });
 
-test('a check whose claimed commit does not exist is dropped as typed data; its panel settles', async () => {
+test('a claim its own attempt branch does not hold is recorded malformed, and cannot be checked', async () => {
   const f = await fixture();
   try {
-    const { id } = await rpcLaunch(f, 'bogus');
+    const { id } = await rpcLaunch(f, 'held');
     await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
     await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
     const q = f.stateOf(id).questions[0].id;
+    /** A work attempt that commits in its tree, then claims `change` (given its tree's base). */
+    const claim = async (change: (base: string) => unknown) => {
+      await f.answer(
+        id,
+        f.manager(id),
+        json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'go' }] })
+      );
+      const work = f.liveAttempts(id).find((a) => a.kind === 'work')!;
+      const tree = f.treeOf(id, work.id);
+      f.commitIn(tree.path, 'widget/widget.ts');
+      await f.answer(
+        id,
+        work.id,
+        json({
+          result: 'claim',
+          statement: 'fixed',
+          change: change(tree.baseSha),
+          evidence: [],
+          howToCheck: 'look',
+        })
+      );
+      return work.id;
+    };
+    const outcomeOf = (attemptId: string) => {
+      const ended = f
+        .ledgerOf(id)
+        .find((e) => e.t === 'attempt_ended' && e.attemptId === attemptId);
+      return ended?.t === 'attempt_ended' ? ended.outcome : undefined;
+    };
+
+    // Naming a commit that is not new on its own branch (here the head every tree starts from,
+    // which might pass every check) would let a claim borrow validation it never earned.
+    const borrowed = await claim((base) => ({ t: 'commit', sha: base }));
+    assert.match(
+      JSON.stringify(outcomeOf(borrowed)),
+      /"t":"malformed","error":"claimed commit \w+ is not a new commit on the attempt branch/
+    );
+    // Saying "no code" after committing would skip candidate validation.
+    const hidden = await claim(() => ({ t: 'no_code' }));
+    assert.match(
+      JSON.stringify(outcomeOf(hidden)),
+      /"t":"malformed","error":"claimed no code, but the attempt branch \S+ has 1 commit/
+    );
+
     await f.answer(
       id,
       f.manager(id),
-      json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'go' }] })
-    );
-    const work = f.liveAttempts(id).find((a) => a.kind === 'work')!;
-    const bogus = 'f'.repeat(40);
-    await f.answer(
-      id,
-      work.id,
-      json({
-        result: 'claim',
-        statement: 'fixed',
-        change: { t: 'commit', sha: bogus },
-        evidence: [],
-        howToCheck: 'look',
-      })
-    );
-    await f.answer(
-      id,
-      f.manager(id),
-      json({ actions: [{ do: 'check', claimAttempt: work.id, goal: false, panel: 1 }] })
-    );
-    // No worktree can exist at a commit that does not: the check never starts, the failure is a
-    // ledger entry (not a tick that throws on every retry), and the next manager is shown it.
-    const s = f.stateOf(id);
-    const check = s.attempts.find((a) => a.spec.kind === 'check')!;
-    assert.equal(check.phase.t, 'dropped');
-    assert.ok(f.ledgerOf(id).some((e) => e.t === 'worktree_failed' && e.attemptId === check.id));
-    assert.equal(panels(s)[0].verdict, 'not_verified', 'a dropped check settles its panel');
-    const next = await f.core.getPost(
-      OWNER,
-      f.liveAttempts(id).find((a) => a.kind === 'manager')!.requestId
+      json({ actions: [{ do: 'check', claimAttempt: borrowed, goal: false, panel: 1 }] })
     );
     assert.ok(
-      next.body.includes(`${check.id} NOT STARTED`),
-      'the next manager is told of the drop'
+      f.ledgerOf(id).some((e) => e.t === 'rejected' && /no parsed result/.test(e.reason)),
+      'a check of a claim the branch does not hold is refused'
     );
+    assert.equal(f.stateOf(id).attempts.filter((a) => a.spec.kind === 'check').length, 0);
   } finally {
     await f.close();
   }
@@ -889,6 +910,140 @@ test('command checks run on the host: each claimed commit is validated in a fres
   }
 });
 
+const command = (script: string, timeoutSeconds = 30) => ({
+  kind: 'command',
+  argv: ['sh', '-c', script],
+  timeoutSeconds,
+});
+
+test('a head check that times out or cannot start is recorded as such, and done is refused for it', async () => {
+  const f = await fixture();
+  try {
+    // Regression guard: only `passed` counts toward done. Treating "not failed" as passing let a
+    // head validation that timed out or errored finish the expedition.
+    const { id } = await rpcLaunch(f, 'timeout', 2, {
+      checks: [command('echo begun; sleep 30', 1), { ...command(''), argv: ['no-such-check-xyz'] }],
+    });
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'surely' }] }));
+    await f.host.drain();
+    const runs = f.stateOf(id).validations[0].runs;
+    assert.equal(runs[0].outcome.t, 'timed_out');
+    assert.match(runs[0].outcome.t === 'timed_out' ? runs[0].outcome.tail : '', /begun/);
+    assert.equal(runs[1].outcome.t, 'error');
+    const refused = f.ledgerOf(id).find((e) => e.t === 'done_refused');
+    assert.match(
+      refused?.t === 'done_refused' ? refused.reason : '',
+      /command check 0 timed_out on the head \w+; command check 1 error on the head/
+    );
+    assert.equal(f.stateOf(id).run.t, 'running');
+  } finally {
+    await f.close();
+  }
+});
+
+test('finishing while a check runs never removes the tree under it; the tree goes once the check ends', async () => {
+  const f = await fixture();
+  try {
+    const marker = path.join(path.dirname(f.repo), 'hold-check');
+    fs.writeFileSync(marker, '');
+    const { id } = await rpcLaunch(f, 'held-tree', 2, {
+      checks: [command(`while [ -e '${marker}' ]; do sleep 0.05; done`, 60)],
+    });
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'try' }] }));
+    const started = () => {
+      const v = f.stateOf(id).validations[0];
+      return v?.phase.t === 'started' && v.phase.treeStatus.t === 'ready' ? v.phase.tree : null;
+    };
+    await until('the head check to start', () => started() !== null);
+    const tree = started()!;
+
+    await f.host.steer(id, f.lead.id, { t: 'stop' });
+    assert.equal(f.stateOf(id).run.t, 'finished');
+    assert.equal(fs.existsSync(tree.path), true, 'the running check keeps its tree');
+    assert.equal(started()?.path, tree.path, 'no release recorded while the check runs');
+
+    fs.rmSync(marker);
+    await f.host.drain();
+    const v = f.stateOf(id).validations[0];
+    assert.deepEqual(v.runs, [{ checkIndex: 0, outcome: { t: 'passed' } }]);
+    assert.equal(v.phase.t === 'started' ? v.phase.treeStatus.t : v.phase.t, 'removed');
+    assert.equal(fs.existsSync(tree.path), false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a validation interrupted by a crash resumes from the ledger: before its tree, and between checks', async () => {
+  const f = await fixture();
+  try {
+    const scratch = path.dirname(f.repo);
+    const counts = [0, 1].map((n) => path.join(scratch, `ran-${n}`));
+    const ran = () =>
+      counts.map((c) => (fs.existsSync(c) ? fs.readFileSync(c, 'utf8').split('\n').length - 1 : 0));
+    const { id } = await rpcLaunch(f, 'replay', 2, {
+      checks: counts.map((c) => command(`echo run >> '${c}'`)),
+    });
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'fixed' }] }));
+    await f.host.drain();
+    assert.equal(f.stateOf(id).run.t, 'finished');
+    assert.deepEqual(ran(), [1, 1]);
+    const v = f.stateOf(id).validations[0];
+    if (v.phase.t !== 'started') throw new Error('validation never started');
+    const { tree } = v.phase;
+
+    /** Rewinds the ledger to (and including) the first line matching `keep`. */
+    const crashAfter = (keep: (line: string) => boolean) => {
+      const lines = fs.readFileSync(f.ledgerPath(id), 'utf8').split('\n').filter(Boolean);
+      fs.writeFileSync(
+        f.ledgerPath(id),
+        `${lines.slice(0, lines.findIndex(keep) + 1).join('\n')}\n`
+      );
+    };
+    const replay = async () => {
+      f.restart();
+      await f.host.tick(id);
+      await f.host.drain();
+      const after = f.stateOf(id);
+      assert.equal(after.run.t, 'finished');
+      const runs = after.validations[0].runs.map((r) => [r.checkIndex, r.outcome.t]);
+      assert.deepEqual(
+        runs,
+        [
+          [0, 'passed'],
+          [1, 'passed'],
+        ],
+        'each check recorded once'
+      );
+      assert.equal(fs.existsSync(tree.path), false, 'the replayed tree is released');
+    };
+
+    // Crash after the intent, before `cambium add`: the tree is made from the recorded intent.
+    crashAfter((l) => l.includes('"t":"validation_started"'));
+    assert.equal(f.branchExists(tree.branch), false);
+    await replay();
+    assert.deepEqual(ran(), [2, 2]);
+
+    // Crash after the first check was recorded, its tree still there: only check 1 runs again.
+    crashAfter((l) => l.includes('"t":"validation"'));
+    git(
+      f.repo,
+      'cambium',
+      'add',
+      '-b',
+      tree.branch,
+      '-name',
+      tree.name,
+      '-ephemeral',
+      tree.path,
+      tree.baseSha
+    );
+    await replay();
+    assert.deepEqual(ran(), [2, 3]);
+  } finally {
+    await f.close();
+  }
+});
+
 test('a command check is killed at its timeout (its whole process group), and an exited check never waits on a background child', async () => {
   const cwd = tempDir('check-');
   const started = Date.now();
@@ -904,6 +1059,21 @@ test('a command check is killed at its timeout (its whole process group), and an
     cwd
   );
   assert.deepEqual(quick, { t: 'passed' });
+  // Agent-written code never sees the server's secrets: only a curated environment reaches it.
+  process.env.EXPEDITION_TEST_SECRET = 'sk-test';
+  try {
+    const env = await runCommand(
+      {
+        kind: 'command',
+        argv: ['sh', '-c', 'test -z "$EXPEDITION_TEST_SECRET"'],
+        timeoutSeconds: 5,
+      },
+      cwd
+    );
+    assert.deepEqual(env, { t: 'passed' }, 'the server environment leaked into a check');
+  } finally {
+    Reflect.deleteProperty(process.env, 'EXPEDITION_TEST_SECRET');
+  }
   assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started} ms`);
   const missing = await runCommand(
     { kind: 'command', argv: ['no-such-binary-xyz'], timeoutSeconds: 5 },
