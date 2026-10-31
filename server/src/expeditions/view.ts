@@ -1,9 +1,11 @@
-import type { ExpeditionView } from '@unleashd/shared';
+import type { ExpeditionDone, ExpeditionValidation, ExpeditionView } from '@unleashd/shared';
 import {
   type AttemptPhase,
   type State,
+  type Validation,
   attemptLabel,
   attemptsOn,
+  checkOutcomeLabel,
   configOf,
   deadlineMs,
   exploreCap,
@@ -13,6 +15,9 @@ import {
   panels,
   queued,
   seatLabel,
+  validationComplete,
+  validationLabel,
+  validationPassed,
   verifiedPanels,
 } from './model';
 
@@ -27,7 +32,8 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     badge: badgeLine,
     run: s.run,
     goal: c.goal,
-    done: 'checks' in c.done ? c.done.checks : ['The owner judges completion.'],
+    done: doneView(c.done),
+    validations: s.validations.map((v) => validationView(s, v)),
     inScope: c.inScope,
     outOfScope: c.outOfScope,
     workspaceId: s.workspaceId,
@@ -71,6 +77,22 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     panels: panels(s),
     reflections: s.reflections,
     lessons: s.lessons,
+  };
+}
+
+function doneView(done: State['charter']['done']): ExpeditionDone {
+  return 'checks' in done ? { t: 'checks', checks: done.checks } : { t: 'owner' };
+}
+
+function validationView(s: State, v: Validation): ExpeditionValidation {
+  return {
+    id: v.id,
+    label: validationLabel(s, v),
+    verdict: !validationComplete(s, v) ? 'running' : validationPassed(s, v) ? 'passed' : 'failed',
+    checks: v.runs.map((r) => ({
+      checkIndex: r.checkIndex,
+      outcome: checkOutcomeLabel(r.outcome),
+    })),
   };
 }
 

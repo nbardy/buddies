@@ -30,10 +30,33 @@ export const Crew = z
   })
   .strict();
 
+/**
+ * One done check (design.md R2). `command`: an argv the HOST runs (never an agent, never edited by
+ * reflection) in a fresh clean worktree at the commit under validation; exit 0 passes. `judged`:
+ * a statement a blind goal-check panel verifies by strict majority.
+ */
+export const DoneCheck = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('command'),
+      argv: z.array(z.string().min(1)).min(1).max(64),
+      timeoutSeconds: z
+        .number()
+        .int()
+        .min(1)
+        .max(6 * 3600),
+    })
+    .strict(),
+  z.object({ kind: z.literal('judged'), text: z.string().trim().min(1).max(1000) }).strict(),
+]);
+export type DoneCheck = z.infer<typeof DoneCheck>;
+export type CommandCheck = Extract<DoneCheck, { kind: 'command' }>;
+
 export const Done = z.union([
-  z.object({ checks: z.array(z.string().trim().min(1)).min(1).max(10) }).strict(),
+  z.object({ checks: z.array(DoneCheck).min(1).max(10) }).strict(),
   z.object({ ownerJudgment: z.literal(true) }).strict(),
 ]);
+export type Done = z.infer<typeof Done>;
 
 export const Charter = z
   .object({
@@ -56,13 +79,25 @@ export type Origin = { t: 'thread'; channelId: string; rootId: string } | { t: '
 
 // ---------- Attempt results ----------
 
+export const ClaimChange = z.discriminatedUnion('t', [
+  z
+    .object({
+      t: z.literal('commit'),
+      sha: z.string().regex(/^[0-9a-f]{40}$/, 'a full 40-character commit sha'),
+    })
+    .strict(),
+  z.object({ t: z.literal('no_code') }).strict(),
+]);
+export type ClaimChange = z.infer<typeof ClaimChange>;
+
 export const WorkResult = z.union([
   z
     .object({
       result: z.literal('claim'),
       statement: z.string().min(1),
-      /** The candidate commit on the attempt's own branch (design.md R1/R2). */
-      commit: z.string().regex(/^[0-9a-f]{40}$/, 'a full 40-character commit sha'),
+      /** What the claim changed (design.md R2): a code claim names its immutable candidate commit
+       * on the attempt's own branch; a claim about something other than code says so. */
+      change: ClaimChange,
       evidence: z.array(z.string()),
       howToCheck: z.string().min(1),
     })

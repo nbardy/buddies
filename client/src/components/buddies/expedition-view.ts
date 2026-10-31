@@ -1,4 +1,10 @@
-import type { ExpeditionAttempt, ExpeditionQuestion, ExpeditionRun } from '@unleashd/shared';
+import type {
+  ExpeditionAttempt,
+  ExpeditionDone,
+  ExpeditionDoneCheck,
+  ExpeditionQuestion,
+  ExpeditionRun,
+} from '@unleashd/shared';
 
 // Pure view helpers for the expedition badge and page (no React).
 
@@ -31,6 +37,25 @@ export function attemptState(a: ExpeditionAttempt): string {
       return 'running';
     case 'ended':
       return a.outcome ?? 'ended';
+  }
+}
+
+/** The Goal pane's "done when" lines: what the host runs, and what a blind panel judges. */
+export function doneLines(done: ExpeditionDone): string[] {
+  switch (done.t) {
+    case 'owner':
+      return ['The owner judges completion.'];
+    case 'checks':
+      return done.checks.map(doneCheckLine);
+  }
+}
+
+function doneCheckLine(check: ExpeditionDoneCheck): string {
+  switch (check.kind) {
+    case 'command':
+      return `$ ${check.argv.join(' ')} — run by the host, ${check.timeoutSeconds}s limit`;
+    case 'judged':
+      return `${check.text} — judged by a blind check panel`;
   }
 }
 

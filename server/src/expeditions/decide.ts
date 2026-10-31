@@ -1,6 +1,14 @@
 import type { ManagerAction } from './charter';
 import type { Entry, State } from './ledger';
-import { apply, byId } from './ledger';
+import {
+  apply,
+  byId,
+  commandChecks,
+  judgedChecks,
+  startedOf,
+  validationComplete,
+  validationOf,
+} from './ledger';
 import { withStatus } from './news';
 import {
   configOf,
@@ -51,11 +59,13 @@ export function decide(s: State, clock: Clock): Entry[] {
     for (const action of pending.actions) applyAction(s, action, clock, push);
     push({ t: 'manager_applied', at, attemptId: pending.attemptId });
   }
+  planCandidateValidations(s, clock, push);
+  settleDoneRequest(s, push, at);
   // Re-read through a call: applyAction mutates s.run, which TS's narrowing above cannot see.
   const now = runOf(s);
   if (now === 'finished' || now === 'paused') return withStatus(s, out, at);
 
-  if (s.attempts.length >= s.charter.maxAttempts && live(s).length === 0) {
+  if (s.attempts.length >= s.charter.maxAttempts && live(s).length === 0 && !validating(s)) {
     push({
       t: 'finished',
       at,
@@ -71,7 +81,9 @@ export function decide(s: State, clock: Clock): Entry[] {
   if (s.run.t === 'running' && !managerLive && budgetLeft && (neverPlanned || s.unseen.length > 0))
     push({ t: 'attempt_planned', at, attemptId: clock.nextId('m'), spec: { kind: 'manager' } });
 
-  const idle = s.run.t === 'running' && s.attempts.every((a) => a.phase.t === 'ended');
+  // Host validations in flight are work too: their results reach the next manager.
+  const idle =
+    s.run.t === 'running' && s.attempts.every((a) => a.phase.t === 'ended') && !validating(s);
   if (idle)
     push({
       t: 'needs_owner',
@@ -83,6 +95,56 @@ export function decide(s: State, clock: Clock): Entry[] {
 }
 
 const runOf = (s: State): State['run']['t'] => s.run.t;
+
+/** A host validation still to run or finish, or a done waiting on one. */
+const validating = (s: State) =>
+  s.doneRequest.t === 'validating' || s.validations.some((v) => !validationComplete(s, v));
+
+/**
+ * Every ended code claim's candidate commit is validated once by the host (design.md R2), as soon
+ * as it ends: no agent runs or reports command checks. A charter without command checks has
+ * nothing to run.
+ */
+function planCandidateValidations(s: State, clock: Clock, push: (e: Entry) => void): void {
+  if (commandChecks(s.charter).length === 0) return;
+  const validated = new Set(
+    s.validations.flatMap((v) => (v.target.t === 'candidate' ? [v.target.claimAttemptId] : []))
+  );
+  for (const a of s.attempts) {
+    if (a.phase.t !== 'ended' || a.phase.outcome.t !== 'work' || validated.has(a.id)) continue;
+    const result = a.phase.outcome.result;
+    if (result.result !== 'claim' || result.change.t !== 'commit') continue;
+    push({
+      t: 'validation_planned',
+      at: clock.now,
+      validationId: clock.nextId('v'),
+      target: { t: 'candidate', claimAttemptId: a.id, sha: result.change.sha },
+    });
+  }
+}
+
+/** Why done cannot finish now beyond the head validation: the goal panel, when judged items exist. */
+const judgedBlocker = (s: State): string[] =>
+  judgedChecks(s.charter).length > 0 && !goalVerified(s)
+    ? ['done needs the latest goal check to be verified (the charter has judged items)']
+    : [];
+
+/** A done waiting on its head validation finishes once every command check passed there. */
+function settleDoneRequest(s: State, push: (e: Entry) => void, at: string): void {
+  if (s.doneRequest.t !== 'validating' || s.run.t === 'finished') return;
+  const v = validationOf(s, s.doneRequest.validationId);
+  if (!validationComplete(s, v)) return;
+  const sha = startedOf(s, v.id).targetSha;
+  const failed = v.runs
+    .filter((r) => r.outcome.t !== 'passed')
+    .map((r) => `command check ${r.checkIndex} ${r.outcome.t} on the head ${sha}`);
+  const blockers = [...failed, ...judgedBlocker(s)];
+  if (blockers.length > 0) {
+    push({ t: 'done_refused', at, reason: blockers.join('; ') });
+    return;
+  }
+  push({ t: 'finished', at, reason: 'done', summary: s.doneRequest.summary });
+}
 
 /** The newest ended manager attempt whose actions are not yet applied (absent: none pending). */
 function pendingManager(s: State): { attemptId: string; actions: ManagerAction[] } | undefined {
@@ -181,15 +243,27 @@ function applyAction(
     case 'ask_owner':
       push({ t: 'needs_owner', at, question: action.question });
       return;
-    case 'done':
+    case 'done': {
       if ('ownerJudgment' in s.charter.done) {
         push({ t: 'needs_owner', at, question: `Proposes done: ${action.summary}` });
         return;
       }
-      // The guardrail: done only after an independent goal check verified it.
-      if (!goalVerified(s)) return reject('done needs the latest goal check to be verified');
-      push({ t: 'finished', at, reason: 'done', summary: action.summary });
+      // The guardrails (design.md R2): the goal panel verified the judged items, and every
+      // command check passed on the expedition branch head, run by the host, never an agent.
+      if (s.doneRequest.t === 'validating') return reject('done is already being validated');
+      const judged = judgedBlocker(s);
+      if (judged.length > 0) return reject(judged.join('; '));
+      if (commandChecks(s.charter).length === 0) {
+        push({ t: 'finished', at, reason: 'done', summary: action.summary });
+        return;
+      }
+      // TODO(R3): integration moves the head; a passed head validation then still names the sha
+      // it ran on, and done must refuse when the head moved since.
+      const validationId = clock.nextId('v');
+      push({ t: 'validation_planned', at, validationId, target: { t: 'head' } });
+      push({ t: 'done_requested', at, validationId, summary: action.summary });
       return;
+    }
     case 'note':
       push({ t: 'reflection', at, text: action.text });
       return;

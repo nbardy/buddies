@@ -12,6 +12,7 @@ import { OWNER, buddyActor } from '../src/buddies/core';
 import { createBuddyEvents } from '../src/buddies/events';
 import { createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint } from '../src/buddies/mcp';
+import { runCommand } from '../src/expeditions/command';
 import { type ExpeditionHost, createExpeditionHost } from '../src/expeditions/host';
 import { Charter, type Entry, type State, fold, panels } from '../src/expeditions/model';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
@@ -183,10 +184,11 @@ async function fixture() {
   };
 }
 
-const charter = (name: string, maxLive = 2) => ({
+const judged = { checks: [{ kind: 'judged', text: 'pnpm test widget passes' }] };
+const charter = (name: string, maxLive = 2, done: unknown = judged) => ({
   name,
   goal: 'Make the widget pass its test.',
-  done: { checks: ['pnpm test widget passes'] },
+  done,
   inScope: ['widget'],
   outOfScope: ['the website'],
   maxAttempts: 20,
@@ -297,7 +299,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       json({
         result: 'claim',
         statement: 'The widget passes now',
-        commit: sha,
+        change: { t: 'commit', sha },
         evidence: ['widget/widget.ts'],
         howToCheck: 'run the test',
       })
@@ -734,7 +736,7 @@ test('a check whose claimed commit does not exist is dropped as typed data; its 
       json({
         result: 'claim',
         statement: 'fixed',
-        commit: bogus,
+        change: { t: 'commit', sha: bogus },
         evidence: [],
         howToCheck: 'look',
       })
@@ -783,9 +785,141 @@ test('launch is refused with a reason when the workspace is not a git repository
   }
 });
 
-async function rpcLaunch(f: Awaited<ReturnType<typeof fixture>>, name: string, maxLive = 2) {
+/** A command done check: exits 0 only when the widget is fixed, else says why on stderr. */
+const widgetFixed = {
+  kind: 'command',
+  argv: [
+    process.execPath,
+    '-e',
+    "const ok = require('fs').readFileSync('widget/widget.ts', 'utf8').includes('broken = false'); if (!ok) { console.error('widget still broken'); process.exit(3); }",
+  ],
+  timeoutSeconds: 30,
+};
+
+test('command checks run on the host: each claimed commit is validated in a fresh tree, and done waits for every command check to pass on the head', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'checks', 2, { checks: [widgetFixed] });
+    await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Start the work.' });
+    const q = f.stateOf(id).questions[0].id;
+    const work = async (content: string) => {
+      await f.answer(
+        id,
+        f.manager(id),
+        json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'fix it' }] })
+      );
+      const w = f.liveAttempts(id).find((a) => a.kind === 'work')!;
+      const tree = f.treeOf(id, w.id);
+      fs.writeFileSync(path.join(tree.path, 'widget', 'widget.ts'), content);
+      git(tree.path, 'commit', '-q', '-am', 'attempt');
+      const sha = git(tree.path, 'rev-parse', 'HEAD');
+      await f.answer(
+        id,
+        w.id,
+        json({
+          result: 'claim',
+          statement: 'fixed',
+          change: { t: 'commit', sha },
+          evidence: [],
+          howToCheck: 'run it',
+        })
+      );
+      await f.host.drain();
+      return sha;
+    };
+    const validations = () => f.ledgerOf(id).flatMap((e) => (e.t === 'validation' ? [e] : []));
+
+    // A failing candidate: the host ran the check at that exact commit; the exit code and the
+    // output tail are ledger data, and the scratch tree (and its branch) are gone.
+    const bad = await work('export const broken = true; // tried\n');
+    const [failed] = validations();
+    assert.equal(failed.targetSha, bad);
+    assert.equal(failed.checkIndex, 0);
+    assert.equal(failed.outcome.t, 'failed');
+    if (failed.outcome.t !== 'failed') throw new Error('unreachable');
+    assert.equal(failed.outcome.exitCode, 3);
+    assert.match(failed.outcome.tail, /widget still broken/);
+    const v1 = f.stateOf(id).validations[0];
+    if (v1.phase.t !== 'started') throw new Error('validation never started');
+    assert.deepEqual(v1.phase.treeStatus, { t: 'removed', branchDeleted: true });
+    assert.equal(fs.existsSync(v1.phase.tree.path), false);
+    assert.equal(git(f.repo, 'status', '--porcelain'), '', 'the shared checkout was never used');
+    // The manager planned when the claim ended saw it running; the next one is shown the result.
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'note', text: 'validating' }] }));
+    const shown = await f.core.getPost(
+      OWNER,
+      f.liveAttempts(id).find((a) => a.kind === 'manager')!.requestId
+    );
+    assert.match(
+      shown.body,
+      /NEW SINCE YOUR LAST DECISION:\n- validation \w+ of candidate \w+ of \w+: FAILED — check 0 FAILED \(exit 3\): widget still broken/
+    );
+
+    // Done is refused: the expedition branch head (still the base) fails the command check.
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'try' }] }));
+    await f.host.drain();
+    let s = f.stateOf(id);
+    assert.equal(s.run.t, 'running', 'done before the command checks pass on the head');
+    assert.ok(f.ledgerOf(id).some((e) => e.t === 'done_refused'));
+    assert.equal(validations().at(-1)?.targetSha, git(f.repo, 'rev-parse', `expedition/${id}`));
+
+    // A passing candidate passes its validation, but the head still lacks it: done stays refused.
+    const good = await work('export const broken = false;\n');
+    assert.deepEqual(validations().find((v) => v.targetSha === good)?.outcome, { t: 'passed' });
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'again' }] }));
+    await f.host.drain();
+    assert.equal(f.stateOf(id).run.t, 'running', 'a passing candidate is not a passing head');
+
+    // The head carries the fix (as integration will make it): done validates it and finishes.
+    git(f.repo, 'update-ref', `refs/heads/expedition/${id}`, good);
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'fixed' }] }));
+    await f.host.drain();
+    s = f.stateOf(id);
+    assert.deepEqual(s.run, { t: 'finished', reason: 'done', summary: 'fixed' });
+    const last = s.validations.at(-1)!;
+    assert.deepEqual(last.target, { t: 'head' });
+    assert.deepEqual(last.runs, [{ checkIndex: 0, outcome: { t: 'passed' } }]);
+    for (const v of s.validations) {
+      if (v.phase.t !== 'started') throw new Error(`validation ${v.id} never started`);
+      assert.equal(v.phase.treeStatus.t, 'removed', `${v.id} tree released`);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test('a command check is killed at its timeout (its whole process group), and an exited check never waits on a background child', async () => {
+  const cwd = tempDir('check-');
+  const started = Date.now();
+  const slow = await runCommand(
+    { kind: 'command', argv: ['sh', '-c', 'echo begun; sleep 30 & sleep 30'], timeoutSeconds: 1 },
+    cwd
+  );
+  assert.equal(slow.t, 'timed_out');
+  assert.match(slow.t === 'timed_out' ? slow.tail : '', /begun/);
+  // Exit 0 with a straggler holding stdout: passed at once, not after the straggler's 30 s.
+  const quick = await runCommand(
+    { kind: 'command', argv: ['sh', '-c', 'sleep 30 & exit 0'], timeoutSeconds: 20 },
+    cwd
+  );
+  assert.deepEqual(quick, { t: 'passed' });
+  assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started} ms`);
+  const missing = await runCommand(
+    { kind: 'command', argv: ['no-such-binary-xyz'], timeoutSeconds: 5 },
+    cwd
+  );
+  assert.equal(missing.t, 'error');
+});
+
+async function rpcLaunch(
+  f: Awaited<ReturnType<typeof fixture>>,
+  name: string,
+  maxLive = 2,
+  done: unknown = judged
+) {
   const launched = await rpc(f.spec(), 'expedition', {
-    action: { do: 'launch', charter: charter(name, maxLive) },
+    action: { do: 'launch', charter: charter(name, maxLive, done) },
   });
   assert.equal(launched.error, false, launched.text);
   return launched.value as { id: string; status: string };

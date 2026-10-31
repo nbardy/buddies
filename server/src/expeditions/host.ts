@@ -9,24 +9,37 @@ import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
 import { labelled } from '../observability/event-loop-stall';
 import { CREW_ROLE, briefOf, parseOutcome, statusText } from './briefs';
-import { branchHead, ensureBranch, ensureWorktree, preflight, releaseWorktree } from './git';
+import { runCommand } from './command';
+import {
+  branchHead,
+  discardWorktree,
+  ensureBranch,
+  ensureWorktree,
+  preflight,
+  releaseWorktree,
+} from './git';
 import {
   type Charter,
+  type ClaimChange,
   type Clock,
   type Effect,
   type Entry,
   type Feedback,
   type Origin,
   type State,
+  type ValidationTarget,
   type WorkerSpec,
   attemptOf,
   badge,
   claimOf,
+  commandChecks,
   configOf,
   decide,
   fold,
   live,
   pendingEffects,
+  startedOf,
+  validationOf,
   worktreeName,
   worktreeOf,
 } from './model';
@@ -72,6 +85,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   const now = () => (options.now ?? (() => new Date()))().toISOString();
   const ledgers = new Map<string, Entry[]>();
   const chains = new Map<string, Promise<void>>();
+  /** Validation check jobs running in this process, by `<expedition>/<validation>`. They run
+   * outside the tick chain (a check may take hours; a steer must not wait on it) and append each
+   * result through the chain. In-memory only: after a restart the ledger's unrecorded checks are
+   * the work, and `run_validation` resumes them. */
+  const jobs = new Map<string, Promise<void>>();
+  const jobKey = (id: string, validationId: string) => `${id}/${validationId}`;
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 
   // Boot: read every ledger once; ticks resume what they explain.
@@ -181,6 +200,45 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         const release = await releaseWorktree(s.repo.root, tree.name, tree, effect.keepCommits);
         return [{ t: 'worktree_released', at: now(), attemptId: effect.attemptId, release }];
       }
+      case 'start_validation': {
+        // Intent first: the resolved sha and the tree's name are on disk before `cambium add`.
+        const v = validationOf(s, effect.validationId);
+        await append(s.id, [
+          {
+            t: 'validation_started',
+            at: now(),
+            validationId: v.id,
+            name: worktreeName(s.id, v.id),
+            path: path.join(root, s.id, 'validations', v.id),
+            branch: `exp/${s.id}/${v.id}`,
+            baseSha: await validationSha(s, v.target),
+          },
+        ]);
+        return createValidationTree(stateOf(s.id), v.id);
+      }
+      case 'create_validation_tree':
+        return createValidationTree(s, effect.validationId);
+      case 'run_validation': {
+        const key = jobKey(s.id, effect.validationId);
+        if (jobs.has(key)) return [];
+        const job = runChecks(s.id, effect.validationId)
+          .catch((error) => console.warn(`[expeditions] validation ${key} failed:`, error))
+          .finally(() => {
+            jobs.delete(key);
+            void tick(s.id);
+          });
+        jobs.set(key, job);
+        return [];
+      }
+      case 'release_validation': {
+        // Never pull a tree from under this host's own running check.
+        if (jobs.has(jobKey(s.id, effect.validationId))) return [];
+        const { tree } = startedOf(s, effect.validationId);
+        const release = await discardWorktree(s.repo.root, tree.name, tree);
+        return [
+          { t: 'validation_released', at: now(), validationId: effect.validationId, release },
+        ];
+      }
       case 'create_crew': {
         const crew = await core.createBuddy(OWNER, {
           workspaceId: s.workspaceId,
@@ -246,13 +304,79 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
-  /** Where a worker's tree starts: work at the expedition branch head, a check at its claim. */
+  /** Where a worker's tree starts: work at the expedition branch head, a check at its claim's
+   * candidate commit (a claim that changed no code is checked at the head). */
   async function treeBase(s: State, spec: WorkerSpec): Promise<string> {
     switch (spec.kind) {
       case 'work':
         return branchHead(s.repo);
       case 'check':
-        return claimOf(s, spec).commit;
+        return changeBase(s, claimOf(s, spec).change);
+    }
+  }
+  async function changeBase(s: State, change: ClaimChange): Promise<string> {
+    switch (change.t) {
+      case 'commit':
+        return change.sha;
+      case 'no_code':
+        return branchHead(s.repo);
+    }
+  }
+
+  /** The immutable commit a validation runs on: the claim's, or the head as it is now. */
+  async function validationSha(s: State, target: ValidationTarget): Promise<string> {
+    switch (target.t) {
+      case 'candidate':
+        return target.sha;
+      case 'head':
+        return branchHead(s.repo);
+    }
+  }
+
+  /** A fresh clean tree at the target; when none can be made, every check is a typed error. */
+  async function createValidationTree(s: State, validationId: string): Promise<Entry[]> {
+    const { tree, targetSha } = startedOf(s, validationId);
+    const made = await ensureWorktree(s.repo.root, tree.name, tree);
+    switch (made.t) {
+      case 'ready':
+        return [{ t: 'validation_tree_ready', at: now(), validationId }];
+      case 'failed':
+        return [
+          { t: 'validation_tree_failed', at: now(), validationId, reason: made.reason },
+          ...commandChecks(s.charter).map(
+            ({ index }): Entry => ({
+              t: 'validation',
+              at: now(),
+              validationId,
+              targetSha,
+              checkIndex: index,
+              outcome: { t: 'error', message: `no validation worktree: ${made.reason}` },
+            })
+          ),
+        ];
+    }
+  }
+
+  /**
+   * Runs the validation's unrecorded command checks one by one in its tree, appending each result
+   * through the expedition's chain. Each check re-reads the ledger: a finished or paused
+   * expedition stops here (a resume continues from the first unrecorded check).
+   */
+  async function runChecks(id: string, validationId: string): Promise<void> {
+    for (;;) {
+      const s = stateOf(id);
+      if (s.run.t === 'finished' || s.run.t === 'paused') return;
+      const v = validationOf(s, validationId);
+      const done = new Set(v.runs.map((r) => r.checkIndex));
+      const next = commandChecks(s.charter).find((c) => !done.has(c.index));
+      if (!next) return;
+      const { tree, targetSha } = startedOf(s, validationId);
+      const outcome = await runCommand(next.check, tree.path);
+      await serialized(id, () =>
+        append(id, [
+          { t: 'validation', at: now(), validationId, targetSha, checkIndex: next.index, outcome },
+        ])
+      );
     }
   }
 
@@ -294,27 +418,36 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   async function tickOnce(id: string): Promise<void> {
     let wrote = false;
     for (let round = 0; round < ROUNDS_PER_TICK; round += 1) {
+      const before = ledgers.get(id)?.length ?? 0;
       await append(id, await observe(stateOf(id)));
-      const intents = decide(stateOf(id), clock());
-      await append(id, intents);
-      const effects = pendingEffects(stateOf(id));
-      for (const effect of effects) {
+      await append(id, decide(stateOf(id), clock()));
+      for (const effect of pendingEffects(stateOf(id))) {
         // Each effect reads the state its predecessor left (a brief sees earlier postings).
         await append(id, await run(stateOf(id), effect));
       }
-      if (intents.length === 0 && effects.length === 0) break;
+      // A round that wrote nothing is settled (a running check job's effect writes nothing), so
+      // the tick neither spins nor emits a change that would wake itself again.
+      if ((ledgers.get(id)?.length ?? 0) === before) break;
       wrote = true;
     }
     if (wrote) events.emit({ kind: 'changed' });
   }
 
+  /** Runs `work` on the expedition's chain: after every earlier tick and append, before later ones. */
+  function serialized(id: string, work: () => Promise<void>): Promise<void> {
+    const next = (chains.get(id) ?? Promise.resolve()).then(work);
+    chains.set(
+      id,
+      next.catch(() => undefined)
+    );
+    return next;
+  }
+
   /** Serialized per expedition; a failed tick is logged and retried by the next wake. */
   function tick(id: string): Promise<void> {
-    const next = (chains.get(id) ?? Promise.resolve())
-      .then(() => tickOnce(id))
-      .catch((error) => console.warn(`[expeditions] tick ${id} failed:`, error));
-    chains.set(id, next);
-    return next;
+    return serialized(id, () => tickOnce(id)).catch((error) =>
+      console.warn(`[expeditions] tick ${id} failed:`, error)
+    );
   }
 
   // A finished expedition stays active while it owes effects (its last status, worktree removal)
@@ -412,6 +545,13 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     workspaceOf: (id: string) => stateOf(id).workspaceId,
     /** Tests drive ticks directly. */
     tick,
+    /** Tests: resolves once no validation check job runs and the ticks they woke have settled. */
+    async drain(): Promise<void> {
+      do {
+        await Promise.all([...jobs.values()]);
+        await Promise.all([...chains.values()]);
+      } while (jobs.size > 0);
+    },
     close(): void {
       unsubscribe();
       if (backstop) clearInterval(backstop);

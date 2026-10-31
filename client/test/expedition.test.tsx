@@ -55,7 +55,14 @@ const view: ExpeditionView = {
   badge: '⛺ widget · needs you',
   run: { t: 'waiting_owner', question: 'Should the website be in scope?' },
   goal: 'Make the widget pass its test.',
-  done: ['pnpm test widget passes'],
+  done: {
+    t: 'checks',
+    checks: [
+      { kind: 'command', argv: ['pnpm', 'test', 'widget'], timeoutSeconds: 600 },
+      { kind: 'judged', text: 'The widget docs describe the fix.' },
+    ],
+  },
+  validations: [],
   inScope: ['widget'],
   outOfScope: ['the website'],
   workspaceId: 'ws-1',

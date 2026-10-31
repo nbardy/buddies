@@ -46,6 +46,13 @@ with typed checks, not a prose skill:
    issues. No silent defaults: a missing done check is either supplied or
    explicitly declared `OwnerJudgment`.
 
+Built shape (2026-11-01, design.md R2): `done` is `{ checks: DoneCheck[] }` or
+`{ ownerJudgment: true }`, with
+`DoneCheck = { kind: 'command', argv: string[], timeoutSeconds } | { kind: 'judged', text }`.
+Prefer a `command` check whenever completion can be tested (`["pnpm","test","widget"]`): the
+host runs it on every claimed commit and on the expedition branch head at done, and no agent
+can report it passed. `judged` items are verified by a blind goal-check panel.
+
 The tool guide in the Buddy briefing carries a short how-to: when to suggest an
 expedition (below), the intake steps, and the permission rules.
 

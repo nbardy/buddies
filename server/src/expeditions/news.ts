@@ -1,6 +1,22 @@
-import { type WorkResult, seatLabel } from './charter';
-import type { Attempt, Entry, Outcome, State } from './ledger';
-import { apply, attemptOf, questionOf } from './ledger';
+import { type ClaimChange, type DoneCheck, type WorkResult, seatLabel } from './charter';
+import type {
+  Attempt,
+  CheckOutcome,
+  Entry,
+  Outcome,
+  State,
+  Validation,
+  ValidationPhase,
+} from './ledger';
+import {
+  apply,
+  attemptOf,
+  commandChecks,
+  questionOf,
+  validationComplete,
+  validationOf,
+  validationPassed,
+} from './ledger';
 import { configOf, liveWorkers, verifiedPanels } from './queries';
 
 // Every human-readable rendering of expedition state: the badge line, the chat news posted once
@@ -67,6 +83,15 @@ function newsLine(s: State, e: Entry): string[] {
       return [`Owner ${e.feedback.t}${'text' in e.feedback ? `: ${clip(e.feedback.text)}` : ''}`];
     case 'needs_owner':
       return [`Needs you: ${e.question}`];
+    case 'validation': {
+      // One line per validation, when its last command check is recorded.
+      const v = validationOf(s, e.validationId);
+      return validationComplete(s, v) ? [validationLabel(s, v)] : [];
+    }
+    case 'done_requested':
+      return ['Done proposed: running the command checks on the expedition branch head.'];
+    case 'done_refused':
+      return [`Done refused: ${clip(e.reason)}`];
     case 'finished':
       return [`Finished (${e.reason}): ${e.summary}`];
     default:
@@ -122,10 +147,71 @@ export function outcomeDetail(o: Outcome): string {
 function workDetail(r: WorkResult): string {
   switch (r.result) {
     case 'claim':
-      return `CLAIM: ${r.statement} | commit: ${r.commit} | evidence: ${r.evidence.join('; ')} | check: ${r.howToCheck}`;
+      return `CLAIM: ${r.statement} | ${changeLabel(r.change)} | evidence: ${r.evidence.join('; ')} | check: ${r.howToCheck}`;
     case 'finding':
       return `FINDING: ${r.statement} | evidence: ${r.evidence.join('; ')}`;
     case 'blocked':
       return `BLOCKED: ${r.need}`;
+  }
+}
+
+export function changeLabel(change: ClaimChange): string {
+  switch (change.t) {
+    case 'commit':
+      return `commit ${change.sha}`;
+    case 'no_code':
+      return 'no code change';
+  }
+}
+
+/** A done check as the owner wrote it: a command shows its argv, a judged item its text. */
+export function doneCheckLabel(check: DoneCheck): string {
+  switch (check.kind) {
+    case 'command':
+      return `$ ${check.argv.join(' ')} (host-run, ${check.timeoutSeconds}s timeout, exit 0 passes)`;
+    case 'judged':
+      return `${check.text} (judged by a blind goal-check panel)`;
+  }
+}
+
+export function checkOutcomeLabel(o: CheckOutcome): string {
+  switch (o.t) {
+    case 'passed':
+      return 'passed';
+    case 'failed':
+      return `FAILED (exit ${o.exitCode}): ${clip(o.tail.trim().split('\n').slice(-5).join(' / '), 400)}`;
+    case 'timed_out':
+      return 'TIMED OUT';
+    case 'error':
+      return `ERROR: ${clip(o.message, 300)}`;
+  }
+}
+
+/** What a validation ran on and how far it got, one line. */
+export function validationLabel(s: State, v: Validation): string {
+  const runs = v.runs.map((r) => `check ${r.checkIndex} ${checkOutcomeLabel(r.outcome)}`);
+  const state = !validationComplete(s, v)
+    ? `running (${v.runs.length}/${commandChecks(s.charter).length})`
+    : validationPassed(s, v)
+      ? 'PASSED'
+      : 'FAILED';
+  return `validation ${v.id} of ${subjectOf(v)}: ${state}${runs.length ? ` — ${runs.join('; ')}` : ''}`;
+}
+
+function subjectOf(v: Validation): string {
+  switch (v.target.t) {
+    case 'candidate':
+      return `candidate ${v.target.sha.slice(0, 10)} of ${v.target.claimAttemptId}`;
+    case 'head':
+      return `the head ${shaOf(v.phase)}`;
+  }
+}
+
+function shaOf(phase: ValidationPhase): string {
+  switch (phase.t) {
+    case 'planned':
+      return '(not yet resolved)';
+    case 'started':
+      return phase.targetSha.slice(0, 10);
   }
 }

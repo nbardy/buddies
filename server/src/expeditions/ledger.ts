@@ -1,6 +1,7 @@
 import type {
   Charter,
   CheckResult,
+  CommandCheck,
   ManagerAction,
   Origin,
   QuestionScope,
@@ -82,9 +83,47 @@ export interface Worktree extends WorktreeAt {
   status: WorktreeStatus;
 }
 
-/** The Cambium name of an attempt's worktree. */
+/** The Cambium name of a worker attempt's or a validation's worktree. */
 export const worktreeName = (expeditionId: string, attemptId: string) =>
   `exp-${expeditionId}-${attemptId}`;
+
+// ---------- Validations (design.md R2) ----------
+
+/** What a validation runs the charter's command checks against: a claim's immutable candidate
+ * commit, or the expedition branch head when the manager asks done (resolved by the host). */
+export type ValidationTarget =
+  | { t: 'candidate'; claimAttemptId: string; sha: string }
+  | { t: 'head' };
+
+/** One command check's result. The output tail is bounded (command.ts TAIL_CHARS). */
+export type CheckOutcome =
+  | { t: 'passed' }
+  | { t: 'failed'; exitCode: number; tail: string }
+  | { t: 'timed_out'; tail: string }
+  | { t: 'error'; message: string };
+
+export interface CheckRun {
+  /** The check's index in `charter.done.checks` (only `command` checks run). */
+  checkIndex: number;
+  outcome: CheckOutcome;
+}
+
+export type ValidationPhase =
+  | { t: 'planned' }
+  /** The host resolved the target and recorded its fresh worktree before creating it. */
+  | {
+      t: 'started';
+      targetSha: string;
+      tree: WorktreeAt & { name: string };
+      treeStatus: WorktreeStatus;
+    };
+
+export interface Validation {
+  id: string;
+  target: ValidationTarget;
+  phase: ValidationPhase;
+  runs: CheckRun[];
+}
 
 // ---------- Ledger ----------
 
@@ -110,6 +149,27 @@ export type Entry =
   /** `cambium add` failed (git.ts rolled back what it could): the attempt is dropped. */
   | { t: 'worktree_failed'; at: string; attemptId: string; reason: string }
   | { t: 'worktree_released'; at: string; attemptId: string; release: Release }
+  /** Decide's intent: validate a target (a claim's commit as soon as it ends; the head at done). */
+  | { t: 'validation_planned'; at: string; validationId: string; target: ValidationTarget }
+  /** Host intent, before `cambium add`: the resolved sha (the tree's base) and the tree's name. */
+  | ({ t: 'validation_started'; at: string; validationId: string; name: string } & WorktreeAt)
+  | { t: 'validation_tree_ready'; at: string; validationId: string }
+  /** No tree: every command check is recorded as `error` in the same append. */
+  | { t: 'validation_tree_failed'; at: string; validationId: string; reason: string }
+  /** One command check ran (host only; never an agent's report). */
+  | {
+      t: 'validation';
+      at: string;
+      validationId: string;
+      targetSha: string;
+      checkIndex: number;
+      outcome: CheckOutcome;
+    }
+  | { t: 'validation_released'; at: string; validationId: string; release: Release }
+  /** A manager's done awaiting the head validation (written with its `validation_planned`). */
+  | { t: 'done_requested'; at: string; validationId: string; summary: string }
+  /** The head validation (or the goal panel) did not hold: the manager is shown why. */
+  | { t: 'done_refused'; at: string; reason: string }
   /** The crew Buddy and the owner↔crew DM: the expedition's chat, where every update lands. */
   | { t: 'crew_ready'; at: string; buddyId: string; chatChannelId: string }
   /** The one clickable badge post in the chat the launch came from. */
@@ -198,6 +258,10 @@ export interface State {
   branch: { t: 'pending' } | { t: 'ready' };
   /** Worker (work and check) attempts' worktrees, by attempt id. */
   worktrees: Record<string, Worktree>;
+  /** Host-run command-check validations, in plan order (run one at a time). */
+  validations: Validation[];
+  /** A manager's done waits on its head validation; `finished` or `done_refused` settles it. */
+  doneRequest: { t: 'none' } | { t: 'validating'; validationId: string; summary: string };
   launchedAt: string;
   crew: { t: 'pending' } | { t: 'ready'; buddyId: string; chatChannelId: string };
   badgePost: { t: 'pending' } | { t: 'posted'; postId: string };
@@ -232,6 +296,8 @@ export function fold(entries: readonly Entry[]): State {
     repo: first.repo,
     branch: { t: 'pending' },
     worktrees: {},
+    validations: [],
+    doneRequest: { t: 'none' },
     launchedAt: first.at,
     crew: { t: 'pending' },
     badgePost: { t: 'pending' },
@@ -262,6 +328,9 @@ const NEWS: ReadonlySet<Entry['t']> = new Set([
   'reflection',
   'feedback',
   'needs_owner',
+  'validation',
+  'done_requested',
+  'done_refused',
   'finished',
 ] satisfies Entry['t'][]);
 
@@ -301,6 +370,46 @@ export function apply(s: State, e: Entry): void {
       return;
     case 'worktree_released':
       worktreeOf(s, e.attemptId).status = e.release;
+      return;
+    case 'validation_planned':
+      s.validations.push({
+        id: e.validationId,
+        target: e.target,
+        phase: { t: 'planned' },
+        runs: [],
+      });
+      return;
+    case 'validation_started':
+      validationOf(s, e.validationId).phase = {
+        t: 'started',
+        targetSha: e.baseSha,
+        tree: { name: e.name, path: e.path, branch: e.branch, baseSha: e.baseSha },
+        treeStatus: { t: 'creating' },
+      };
+      return;
+    case 'validation_tree_ready':
+      startedOf(s, e.validationId).treeStatus = { t: 'ready' };
+      return;
+    case 'validation_tree_failed':
+      startedOf(s, e.validationId).treeStatus = { t: 'failed', reason: e.reason };
+      return;
+    case 'validation': {
+      const v = validationOf(s, e.validationId);
+      v.runs.push({ checkIndex: e.checkIndex, outcome: e.outcome });
+      // A finished candidate validation is shown to the next manager (it may integrate or retry);
+      // a head validation is reported through the done it decides (`finished` / `done_refused`).
+      if (validationComplete(s, v) && reportsToManager(v.target)) s.unseen.push(e);
+      return;
+    }
+    case 'validation_released':
+      startedOf(s, e.validationId).treeStatus = e.release;
+      return;
+    case 'done_requested':
+      s.doneRequest = { t: 'validating', validationId: e.validationId, summary: e.summary };
+      return;
+    case 'done_refused':
+      s.doneRequest = { t: 'none' };
+      s.unseen.push(e);
       return;
     case 'crew_ready':
       s.crew = { t: 'ready', buddyId: e.buddyId, chatChannelId: e.chatChannelId };
@@ -377,9 +486,36 @@ export function apply(s: State, e: Entry): void {
     }
     case 'finished':
       s.run = { t: 'finished', reason: e.reason, summary: e.summary };
+      s.doneRequest = { t: 'none' };
       return;
   }
 }
+
+function reportsToManager(target: ValidationTarget): boolean {
+  switch (target.t) {
+    case 'candidate':
+      return true;
+    case 'head':
+      return false;
+  }
+}
+
+/** The charter's command checks with their indexes (none for owner judgment). */
+export function commandChecks(c: Charter): { index: number; check: CommandCheck }[] {
+  const checks = 'checks' in c.done ? c.done.checks : [];
+  return checks.flatMap((check, index) => (check.kind === 'command' ? [{ index, check }] : []));
+}
+/** The charter's judged done items (the goal panel verifies them). */
+export function judgedChecks(c: Charter): string[] {
+  const checks = 'checks' in c.done ? c.done.checks : [];
+  return checks.flatMap((check) => (check.kind === 'judged' ? [check.text] : []));
+}
+
+/** Every command check has a recorded outcome (a failed tree records `error` for each). */
+export const validationComplete = (s: State, v: Validation) =>
+  v.runs.length >= commandChecks(s.charter).length;
+export const validationPassed = (s: State, v: Validation) =>
+  validationComplete(s, v) && v.runs.every((r) => r.outcome.t === 'passed');
 
 function applyFeedback(s: State, e: Extract<Entry, { t: 'feedback' }>): void {
   if (s.run.t === 'finished') return;
@@ -419,6 +555,17 @@ export function worktreeOf(s: State, attemptId: string): Worktree {
   const worktree = s.worktrees[attemptId];
   if (!worktree) throw new Error(`attempt ${attemptId} has no worktree`);
   return worktree;
+}
+export function validationOf(s: State, id: string): Validation {
+  const validation = byId(s.validations, id);
+  if (!validation) throw new Error(`unknown validation ${id}`);
+  return validation;
+}
+/** A validation the ledger says started (its tree recorded); otherwise a corrupt ledger. */
+export function startedOf(s: State, id: string): Extract<ValidationPhase, { t: 'started' }> {
+  const { phase } = validationOf(s, id);
+  if (phase.t !== 'started') throw new Error(`validation ${id} is ${phase.t}`);
+  return phase;
 }
 export function questionOf(s: State, id: string): Question {
   const question = byId(s.questions, id);

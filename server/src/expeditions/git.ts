@@ -248,3 +248,19 @@ async function releaseUnregistered(root: string, at: WorktreeAt): Promise<Releas
   const empty = branch.t === 'present' && branch.commits === 0;
   return { t: 'removed', branchDeleted: empty && (await dropEmptyBranch(root, at)) };
 }
+
+/**
+ * Discards a validation tree (design.md R2): scratch, so a check's build outputs or edits are
+ * removed with `--force`; its branch is dropped only while it still points at its base (a check
+ * that committed keeps its branch, reported as `branchDeleted: false`).
+ */
+export async function discardWorktree(
+  root: string,
+  name: string,
+  at: WorktreeAt
+): Promise<Release> {
+  if (!(await cambiumWorkspace(root, name))) return releaseUnregistered(root, at);
+  const removed = await cambium(root, ['remove', '-force', name]);
+  if (removed.t === 'failed') return { t: 'left', reason: removed.message };
+  return { t: 'removed', branchDeleted: await dropEmptyBranch(root, at) };
+}

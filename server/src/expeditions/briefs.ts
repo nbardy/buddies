@@ -14,13 +14,18 @@ import {
   ManagerResult,
   WorkResult,
   attemptsOn,
+  changeLabel,
   claimOf,
+  commandChecks,
+  doneCheckLabel,
   exploreCap,
   liveWorkers,
   outcomeDetail,
   questionOf,
   queued,
   seatLabel,
+  validationLabel,
+  validationOf,
   worktreeOf,
 } from './model';
 
@@ -42,7 +47,7 @@ const JSON_RULE = 'End your final message with exactly one fenced ```json block,
 function charterText(c: Charter): string {
   const done =
     'checks' in c.done
-      ? c.done.checks.map((x) => `- ${x}`).join('\n')
+      ? c.done.checks.map((x, i) => `- [${i}] ${doneCheckLabel(x)}`).join('\n')
       : '- The owner judges completion (no mechanical check).';
   return [
     `GOAL: ${c.goal}`,
@@ -60,6 +65,13 @@ function lessonsText(s: State): string {
 
 function questionLine(s: State, q: Question): string {
   return `- ${q.id} [${q.scope}/${q.status}] ${q.title} (paths: ${q.paths.join(', ')}) — ${attemptsOn(s, q.id).length} attempts`;
+}
+
+/** Every validation so far, newest last: what the host ran and how each check ended. */
+function validationsText(s: State): string {
+  return commandChecks(s.charter).length === 0
+    ? ''
+    : `VALIDATIONS (host-run command checks):\n${s.validations.map((v) => `- ${validationLabel(s, v)}`).join('\n') || '- none yet'}`;
 }
 
 function attemptLine(a: Attempt): string {
@@ -86,8 +98,12 @@ function phaseDetail(a: Attempt): string {
   }
 }
 
-function unseenLine(e: Entry): string {
+function unseenLine(s: State, e: Entry): string {
   switch (e.t) {
+    case 'validation':
+      return `- ${validationLabel(s, validationOf(s, e.validationId))}`;
+    case 'done_refused':
+      return `- DONE REFUSED: ${e.reason}`;
     case 'attempt_ended':
       return `- ${e.attemptId} ended: ${outcomeDetail(e.outcome)}`;
     case 'worktree_failed':
@@ -117,17 +133,19 @@ function managerBrief(s: State, id: string): string {
         .map(attemptLine)
         .join('\n') || '- none'
     }`,
-    `NEW SINCE YOUR LAST DECISION:\n${s.shown[id].map(unseenLine).join('\n') || '- nothing'}`,
+    validationsText(s),
+    `NEW SINCE YOUR LAST DECISION:\n${s.shown[id].map((e) => unseenLine(s, e)).join('\n') || '- nothing'}`,
     [
       'HOW TO DECIDE:',
       '- Break the goal into questions (unknowns or subgoals). Keep at least two genuinely different approaches alive until one is verified.',
       '- Ideas outside IN SCOPE go to scope "explore" (budgeted) or "parked" (owner funds it). Never quietly widen scope.',
       '- Start parallel work: one "work" action per question attempt; the host queues beyond the live limit.',
       '- Each question owns file paths (repo-relative prefixes, "." = whole repo). Work on overlapping paths runs one at a time, so split questions by the files they touch to run them in parallel.',
-      '- A claim counts only after "check". Ask a check with goal:true when a claim should satisfy DONE WHEN.',
+      '- A claim counts only after "check". Ask a check with goal:true when a claim should satisfy the judged DONE WHEN items.',
+      '- Command checks ($ …) are run by the host on every claimed commit and on the expedition branch head at done; no agent runs or reports them. A claim whose validation FAILED is not done: send work to fix it.',
       '- When different approaches fail the same way, the problem is probably upstream: add a question about measurement or setup.',
       '- Kill (close dead) what a check refuted twice or a prediction falsified. Do not repeat work already in ATTEMPTS.',
-      '- "done" is refused unless the latest goal check verified it. "ask_owner" only for a decision only the owner can make.',
+      '- "done" needs the latest goal check verified (when there are judged items); the host then runs every command check on the head, and refuses done unless all pass. "ask_owner" only for a decision only the owner can make.',
       '- Work and check attempts are run by other agents with fresh context: write each work brief self-contained.',
     ].join('\n'),
     [
@@ -173,7 +191,8 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
     [
       `YOUR WORKTREE: ${tree.path} (branch ${tree.branch}, based on ${tree.baseSha}).`,
       'Work and commit ONLY in that directory, on that branch: cd there first. Never edit any other',
-      `checkout. Your files: ${q.paths.join(', ')}. A claim must name its commit's full sha.`,
+      `checkout. Your files: ${q.paths.join(', ')}. A code claim must name its commit's full sha;`,
+      'the host runs the command checks in DONE WHEN on that exact commit.',
     ].join(' '),
     `WHAT OTHERS FOUND:\n${findings.join('\n') || '- nothing yet'}${verified.length ? `\n${verified.join('\n')}` : ''}`,
     [
@@ -183,7 +202,7 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
     ].join(' '),
     [
       'ANSWER: one of',
-      '{"result":"claim","statement":"<what is now true>","commit":"<full sha of your commit in YOUR WORKTREE>","evidence":["<commit/file/test/number>"],"howToCheck":"<how an independent agent can verify it>"}',
+      '{"result":"claim","statement":"<what is now true>","change":{"t":"commit","sha":"<full sha of your commit in YOUR WORKTREE>"} or {"t":"no_code"},"evidence":["<commit/file/test/number>"],"howToCheck":"<how an independent agent can verify it>"}',
       '{"result":"finding","statement":"<negative or partial result>","evidence":["…"]}',
       '{"result":"blocked","need":"<what is missing>"}',
       JSON_RULE,
@@ -201,7 +220,7 @@ function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): st
     'You are an independent verifier. Do not trust the claim; reproduce it yourself.',
     `CLAIM: ${statement.statement}`,
     [
-      `YOUR WORKTREE: ${tree.path}, checked out at the candidate commit ${tree.baseSha} (branch ${tree.branch}).`,
+      `YOUR WORKTREE: ${tree.path}, checked out at ${tree.baseSha} (the claim names ${changeLabel(statement.change)}; branch ${tree.branch}).`,
       'Reproduce the claim there only: cd there first, never create other worktrees, never edit any',
       'other checkout, and do not commit.',
     ].join(' '),
@@ -209,7 +228,7 @@ function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): st
     `SUGGESTED CHECK: ${statement.howToCheck}`,
     spec.goal ? charterText(s.charter) : '',
     spec.goal
-      ? 'This is a GOAL check: verify the claim AND that every DONE WHEN item now holds.'
+      ? 'This is a GOAL check: verify the claim AND that every judged DONE WHEN item now holds. Command checks ($ …) are run by the host, not by you.'
       : '',
     'Verified only if you reproduced it. Refuted if it is false. Unclear if you could not decide; say why.',
     ['ANSWER: {"verdict":"verified"|"refuted"|"unclear","why":"…"}', JSON_RULE].join('\n'),
@@ -278,6 +297,7 @@ export function statusText(s: State, badgeLine: string): string {
     lessonsText(s),
     `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet'}`,
     `ATTEMPTS:\n${s.attempts.map(attemptLine).join('\n') || '- none'}`,
+    validationsText(s),
     s.crew.t === 'ready' ? `Crew Buddy: ${s.crew.buddyId} (its DM holds every attempt).` : '',
   ]
     .filter(Boolean)

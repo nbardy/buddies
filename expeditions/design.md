@@ -303,6 +303,28 @@ Done      = { checks: DoneCheck[] } | { ownerJudgment: true }
   verified the `judged` items by strict majority (when there are any).
 - Reflection never edits checks; the host is the only runner of command checks.
 
+Built (2026-11-01, `charter.ts` `DoneCheck`/`ClaimChange`, `ledger.ts` validations, `command.ts`,
+host `run_validation`): a claim's `change` is a sum, `{t:'commit', sha}` or `{t:'no_code'}` (a
+check of a no-code claim starts at the branch head). Decide plans `validation_planned {target}` for
+every ended code claim (target `candidate`, its sha) when the charter has command checks, and for
+the head when the manager asks done (with `done_requested`). The host resolves the sha and records
+`validation_started` (the tree's name, path, branch and base = the sha) BEFORE `cambium add`; a tree
+that cannot be made records `validation_tree_failed` and an `error` outcome per check, never a
+throwing tick. Checks run one validation at a time per expedition, outside the tick chain (a check
+may run for hours; a steer must not wait on it), each appended through the chain as
+`validation {validationId, targetSha, checkIndex, outcome}`; a restart resumes at the first
+unrecorded check (a check interrupted by the crash runs again). `runCommand` spawns argv (no shell)
+as its own process group, kills the group at the timeout, kills stragglers once the command
+exits (a background child holding the pipes never stalls the result), and keeps a 4000-character
+output tail (`timed_out` keeps its tail too). Each check re-reads the ledger: a paused or finished
+expedition stops between checks. The tree is discarded with `cambium remove -force` once every
+check is recorded (or at finish, never under a running check), its branch dropped only while empty.
+Done: refused while a done is validating, refused unless the latest goal panel verified (only when
+judged items exist), finished at once when there are no command checks, otherwise finished when
+every command check passed on the head, else `done_refused {reason}` shown to the next manager.
+Host validations count as live work for "never idle" and `attempts_spent`. Gap until R3: nothing
+yet re-validates when the head moves after a passed head validation (integration will).
+
 ### R3. Integration onto the expedition's own branch, serialized
 - Each expedition owns `expedition/<id>` (created at launch from the base commit) and one clean
   integration worktree. A manager action `{do:'integrate', claimAttempt}` is accepted only for a

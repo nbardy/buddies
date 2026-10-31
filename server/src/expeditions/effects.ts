@@ -1,5 +1,5 @@
-import type { Attempt, State, Worktree } from './ledger';
-import { attemptOf, worktreeOf } from './ledger';
+import type { Attempt, State, Validation, Worktree, WorktreeStatus } from './ledger';
+import { attemptOf, validationComplete, worktreeOf } from './ledger';
 import {
   type WorkerSpec,
   admitted,
@@ -24,6 +24,14 @@ export type Effect =
   | { t: 'create_worktree'; attemptId: string }
   /** A settled attempt's worktree (keepCommits) or, once finished, every idle one. */
   | { t: 'release_worktree'; attemptId: string; keepCommits: boolean }
+  /** Resolve a planned validation's sha, record its tree intent, create the tree. */
+  | { t: 'start_validation'; validationId: string }
+  /** Create or adopt a recorded validation tree (the replay path, as `create_worktree`). */
+  | { t: 'create_validation_tree'; validationId: string }
+  /** Run the command checks not yet recorded, in the host, in the background. */
+  | { t: 'run_validation'; validationId: string }
+  /** A validation's tree, once its checks are recorded (or the expedition finished): discarded. */
+  | { t: 'release_validation'; validationId: string }
   /** Build and record the brief (then post it). */
   | { t: 'brief_attempt'; attempt: Attempt }
   /** Post a recorded brief: the replay path after a crash between record and post. */
@@ -40,6 +48,7 @@ export function pendingEffects(s: State): Effect[] {
       .filter((x) => x.post.t === 'pending')
       .map((x): Effect => ({ t: 'post_status', seq: x.seq, text: x.text })),
     ...releases(s),
+    ...validationReleases(s),
     // A recorded brief is a committed intent: it is completed whatever the run state, because
     // the post may already exist (keyed, so the replay returns it) and its worker may be running.
     ...s.attempts.flatMap((a): Effect[] =>
@@ -47,6 +56,9 @@ export function pendingEffects(s: State): Effect[] {
     ),
   ];
   if (s.run.t === 'finished' || s.run.t === 'paused') return effects;
+  // One validation at a time, in plan order: command checks may be heavy (builds, GPU runs).
+  const next = s.validations.find((v) => !validationComplete(s, v));
+  if (next) effects.push(validationEffect(next));
   for (const attempt of s.attempts.filter((a) => a.phase.t === 'admitted'))
     effects.push(admittedEffect(attempt, worktreeOf(s, attempt.id)));
   for (const attempt of queued(s).filter((a) => !isWorker(a)))
@@ -64,6 +76,45 @@ export function pendingEffects(s: State): Effect[] {
     effects.push({ t: 'admit', attempt });
   }
   return effects;
+}
+
+/** The next step for the validation in progress. */
+function validationEffect(v: Validation): Effect {
+  switch (v.phase.t) {
+    case 'planned':
+      return { t: 'start_validation', validationId: v.id };
+    case 'started':
+      return validationTreeEffect(v.id, v.phase.treeStatus);
+  }
+}
+
+function validationTreeEffect(validationId: string, tree: WorktreeStatus): Effect {
+  switch (tree.t) {
+    case 'creating':
+      return { t: 'create_validation_tree', validationId };
+    case 'ready':
+      return { t: 'run_validation', validationId };
+    case 'failed':
+    case 'kept':
+    case 'removed':
+    case 'absent':
+    case 'left':
+      throw new Error(`incomplete validation ${validationId} has a ${tree.t} tree`);
+  }
+}
+
+/** Validation trees are scratch: discarded once every check is recorded, or at finish (the host
+ * never removes a tree its own check job is still running in, host.ts). */
+function validationReleases(s: State): Effect[] {
+  const finished = s.run.t === 'finished';
+  return s.validations.flatMap((v): Effect[] => {
+    if (v.phase.t !== 'started') return [];
+    const status = v.phase.treeStatus.t;
+    const held = status === 'creating' || status === 'ready';
+    return held && (finished || validationComplete(s, v))
+      ? [{ t: 'release_validation', validationId: v.id }]
+      : [];
+  });
 }
 
 /** The next step for an admitted attempt: finish its worktree, then brief it. */

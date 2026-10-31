@@ -20,6 +20,7 @@ import {
   type Focus,
   QUESTION_GLYPH,
   attemptState,
+  doneLines,
   expeditionUrl,
   runLabel,
 } from './expedition-view';
@@ -260,7 +261,13 @@ function Charter({ v }: { v: ExpeditionView }) {
       <h2 className="ui-section__title">Goal</h2>
       <pre style={pre}>{v.goal}</pre>
       <h2 className="ui-section__title">Done when</h2>
-      {list(v.done)}
+      {list(doneLines(v.done))}
+      {v.validations.length > 0 && (
+        <>
+          <h2 className="ui-section__title">Validations</h2>
+          {list(v.validations.map((x) => x.label).reverse())}
+        </>
+      )}
       <h2 className="ui-section__title">In scope</h2>
       {list(v.inScope)}
       <h2 className="ui-section__title">Out of scope</h2>
