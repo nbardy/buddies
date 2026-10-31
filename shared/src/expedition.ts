@@ -40,6 +40,14 @@ export interface ExpeditionQuestion {
 /** A worker attempt's own git worktree (design.md R1); none for a manager or before admission. */
 export type ExpeditionWorktree = { t: 'none' } | { t: 'tree'; branch: string; path: string };
 
+/** An attempt's measured cost (design.md R6): provider-counted tokens, never an estimate.
+ * `none`: it has not ended (or never ran); `settling`: ended, its run's usage not read yet. */
+export type ExpeditionAttemptCost =
+  | { t: 'none' }
+  | { t: 'settling' }
+  | { t: 'measured'; label: string }
+  | { t: 'unmeasured'; reason: string };
+
 export interface ExpeditionAttempt {
   id: string;
   kind: 'manager' | 'work' | 'check';
@@ -54,6 +62,7 @@ export interface ExpeditionAttempt {
   outcome: string | null;
   requestId: string | null;
   worktree: ExpeditionWorktree;
+  cost: ExpeditionAttemptCost;
 }
 
 /** A done check as chartered (design.md R2): a command the host runs, or a judged statement. */
@@ -93,6 +102,8 @@ export interface ExpeditionView {
   done: ExpeditionDone;
   validations: ExpeditionValidation[];
   integration: ExpeditionIntegration;
+  /** Measured spend: `short` for the badge, `line` for the header (sums, unmeasured, settling). */
+  cost: { short: string; line: string };
   inScope: string[];
   outOfScope: string[];
   workspaceId: string;

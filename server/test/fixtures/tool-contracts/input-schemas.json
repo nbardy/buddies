@@ -325,7 +325,7 @@
               "properties": {
                 "do": {
                   "type": "string",
-                  "const": "launch"
+                  "const": "draft"
                 },
                 "charter": {
                   "type": "object",
@@ -512,15 +512,26 @@
                     "name",
                     "goal",
                     "done",
-                    "inScope",
-                    "outOfScope",
-                    "maxAttempts",
-                    "maxLive",
-                    "hours",
-                    "exploreShare",
-                    "crew"
+                    "maxAttempts"
                   ],
                   "additionalProperties": false
+                }
+              },
+              "required": [
+                "do",
+                "charter"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "launch"
+                },
+                "charter": {
+                  "$ref": "#/properties/action/anyOf/0/properties/charter"
                 }
               },
               "required": [
@@ -2079,7 +2090,7 @@
               "properties": {
                 "do": {
                   "type": "string",
-                  "const": "launch"
+                  "const": "draft"
                 },
                 "charter": {
                   "type": "object",
@@ -2266,15 +2277,26 @@
                     "name",
                     "goal",
                     "done",
-                    "inScope",
-                    "outOfScope",
-                    "maxAttempts",
-                    "maxLive",
-                    "hours",
-                    "exploreShare",
-                    "crew"
+                    "maxAttempts"
                   ],
                   "additionalProperties": false
+                }
+              },
+              "required": [
+                "do",
+                "charter"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "launch"
+                },
+                "charter": {
+                  "$ref": "#/properties/action/anyOf/0/properties/charter"
                 }
               },
               "required": [

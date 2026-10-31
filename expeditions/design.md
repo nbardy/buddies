@@ -418,8 +418,33 @@ Each ended attempt records its measured usage when the run exposes it
 (`cost: {t:'measured', inputTokens, outputTokens, usd?} | {t:'unmeasured', reason}`); totals show on
 the page. Nothing is estimated or fabricated.
 
+Built (2026-11-01, `meter.ts`, effect `meter_attempt`, entry `attempt_metered`): the crate's `Run`
+carries no usage, but each request run executes in a conversation of its own
+(`buddy-run-<runId>`; a retry continues there), and the ingest store keeps provider-counted
+totals per session (`SessionRow.usage`). So once an attempt has ended AND every run that executed
+its request has settled (and 15 s have passed for the transcript watcher, `INDEX_GRACE_MS`: read
+earlier, the last turn would be missing and the count wrong rather than absent), the host sums
+the sessions those conversations bound: `measured {inputTokens, outputTokens, cacheReadTokens,
+cacheWriteTokens}`. Until then the effect writes nothing and is retried (a finished expedition
+stays active until every ended attempt is metered). `unmeasured {reason}`: no run executed the
+request, a provider that records no usage (Claude, Codex and OpenCode do), a session not in the
+store, a conversation without a record. No `usd`: the crate keeps tokens, and pricing them would
+be the usage panel's estimate. Totals (`news.ts costTotals`) show on the page header, the badge and
+`status`, with the not-measured count and reasons. Known limit: a run that starts after metering
+(its request was already answered) is not counted.
+
 ### R7. Kickoff
 A Buddy suggests an expedition when the four tests hold and launches only when asked. The owner
 says, in any thread, DM or channel: *"Launch an expedition: <goal>. Done when <checks>. Budget
 <N> attempts."* The Buddy drafts the charter (asking only for missing done checks), launches, and
 the badge appears in that chat.
+
+Built (2026-11-01, `charter.ts` `CharterRequest`/`charterOf`/`charterIssues`/`charterAdvice`,
+`tool.ts`): the launch input requires only name, goal, done and maxAttempts; scope, maxLive,
+hours, exploreShare and crew take NAMED defaults (`CHARTER_DEFAULTS`, `DEFAULT_CREW`) and the
+result's `defaulted` lists each applied, beside `launched` (a one-line summary) and the link. A
+`draft` action returns `{ready, issues, advice, defaulted, charter}` without writing: the R4
+preflight, each crew seat against the provider catalog, and a work seat with no check seat on
+another model (it could never be checked, so launch refuses it too). The briefing line names the
+owner's phrasing; the tool description stayed within the worker budget. The owner's phrasing and
+variants are in README.md "How to start one".

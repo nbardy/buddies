@@ -74,6 +74,102 @@ export const Charter = z
   .strict();
 export type Charter = z.infer<typeof Charter>;
 
+// ---------- Kickoff (design.md R7) ----------
+
+/**
+ * What a launch or draft names. Only the WHAT is required: name, goal, done checks and the attempt
+ * budget. The rest may be left out and take the NAMED defaults below; the tool result lists every
+ * default applied (provenance as data, never a silent fill). The ledger always holds the full
+ * `Charter`.
+ */
+export const CharterRequest = Charter.partial({
+  inScope: true,
+  outOfScope: true,
+  maxLive: true,
+  hours: true,
+  exploreShare: true,
+  crew: true,
+});
+export type CharterRequest = z.infer<typeof CharterRequest>;
+
+/** The default crew: a Claude manager, work and checks on Claude and Codex (so every claim has a
+ * check seat on the other model), each on its provider's default model. */
+export const DEFAULT_CREW: z.infer<typeof Crew> = {
+  manager: { provider: 'claude' },
+  work: [{ provider: 'claude' }, { provider: 'codex' }],
+  check: [{ provider: 'codex' }, { provider: 'claude' }],
+};
+export const CHARTER_DEFAULTS = {
+  inScope: [] as string[],
+  outOfScope: [] as string[],
+  maxLive: 2,
+  hours: 8,
+  exploreShare: 0.2,
+  crew: DEFAULT_CREW,
+};
+
+const crewLine = (crew: z.infer<typeof Crew>) =>
+  `manager ${seatLabel(crew.manager)}; work ${crew.work.map(seatLabel).join(', ')}; check ${crew.check.map(seatLabel).join(', ')}`;
+
+/** κ for a launch: the full charter, and one line per default it applied. */
+export function charterOf(request: CharterRequest): { charter: Charter; defaulted: string[] } {
+  const charter: Charter = {
+    ...request,
+    inScope: request.inScope ?? CHARTER_DEFAULTS.inScope,
+    outOfScope: request.outOfScope ?? CHARTER_DEFAULTS.outOfScope,
+    maxLive: request.maxLive ?? CHARTER_DEFAULTS.maxLive,
+    hours: request.hours ?? CHARTER_DEFAULTS.hours,
+    exploreShare: request.exploreShare ?? CHARTER_DEFAULTS.exploreShare,
+    crew: request.crew ?? CHARTER_DEFAULTS.crew,
+  };
+  const shown: Record<keyof typeof CHARTER_DEFAULTS, string> = {
+    inScope: 'inScope: none stated (the goal is the scope)',
+    outOfScope: 'outOfScope: none stated (no fence)',
+    maxLive: `maxLive: ${CHARTER_DEFAULTS.maxLive}`,
+    hours: `hours: ${CHARTER_DEFAULTS.hours}`,
+    exploreShare: `exploreShare: ${CHARTER_DEFAULTS.exploreShare}`,
+    crew: `crew: the default crew (${crewLine(DEFAULT_CREW)})`,
+  };
+  const keys = Object.keys(shown) as (keyof typeof CHARTER_DEFAULTS)[];
+  return { charter, defaulted: keys.filter((k) => request[k] === undefined).map((k) => shown[k]) };
+}
+
+/**
+ * What refuses a launch before any I/O: a work seat no check seat can verify (checks never run on
+ * the claim author's model, so its claims could never be checked).
+ */
+export function charterIssues(c: Charter): string[] {
+  return c.crew.work.flatMap((w, seat) =>
+    c.crew.check.some((x) => !sameModel(x, w))
+      ? []
+      : [`work seat ${seat} (${seatLabel(w)}) has no check seat on another model`]
+  );
+}
+
+/** Non-blocking: what would make the charter checkable by the host rather than by judgment. */
+export function charterAdvice(c: Charter): string[] {
+  const checks = 'checks' in c.done ? c.done.checks : [];
+  return [
+    ...(checks.some((x) => x.kind === 'command')
+      ? []
+      : [
+          'no command check: if completion can be tested, add one (e.g. {kind:"command", argv:["pnpm","test"], timeoutSeconds:600}); the host runs it on every claimed commit and at done',
+        ]),
+    ...(c.outOfScope.length > 0 ? [] : ['no outOfScope fence: name what the crew must not touch']),
+  ];
+}
+
+/** The tool result's one-paragraph account of what a launch started. */
+export function charterSummary(c: Charter): string {
+  const done =
+    'checks' in c.done
+      ? c.done.checks
+          .map((x) => (x.kind === 'command' ? `$ ${x.argv.join(' ')}` : `judged: ${x.text}`))
+          .join('; ')
+      : 'the owner judges it';
+  return `${c.name}: ${c.goal.slice(0, 200)} | done when ${done} | budget ${c.maxAttempts} attempts, ${c.maxLive} live, ${c.hours}h, explore ${c.exploreShare} | crew ${crewLine(c.crew)}`;
+}
+
 /** Where status posts go: the thread the launch came from, or the owner↔launcher DM. */
 export type Origin = { t: 'thread'; channelId: string; rootId: string } | { t: 'direct' };
 

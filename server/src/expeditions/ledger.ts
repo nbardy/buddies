@@ -35,6 +35,22 @@ export type Outcome =
   | { t: 'malformed'; error: string; raw: string }
   | { t: 'failed'; status: 'failed' | 'cancelled' };
 
+/**
+ * What an ended attempt cost (design.md R6), read once its Buddy run(s) settled (host meter.ts).
+ * `measured`: the provider-counted tokens of every session the attempt's run conversations bound,
+ * retries included. No USD: only an estimate could price them, and nothing here is estimated.
+ * `unmeasured`: why no count exists (a provider that records none, a run that never executed).
+ */
+export type AttemptCost =
+  | {
+      t: 'measured';
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+    }
+  | { t: 'unmeasured'; reason: string };
+
 export type Feedback =
   | { t: 'lesson'; text: string }
   | { t: 'note'; text: string }
@@ -234,6 +250,8 @@ export type Entry =
   | { t: 'attempt_posting'; at: string; attemptId: string; body: string }
   | { t: 'attempt_posted'; at: string; attemptId: string; requestId: string }
   | { t: 'attempt_ended'; at: string; attemptId: string; outcome: Outcome }
+  /** Its settled run's measured cost, or why there is none (never an estimate). */
+  | { t: 'attempt_metered'; at: string; attemptId: string; cost: AttemptCost }
   | {
       t: 'question_added';
       at: string;
@@ -328,6 +346,8 @@ export interface State {
   reflections: { at: string; text: string }[];
   /** Each attempt's exact instructions, by attempt id (absent until briefed). */
   briefs: Record<string, string>;
+  /** Each ended attempt's cost, by attempt id (absent until its run settled and was metered). */
+  costs: Record<string, AttemptCost>;
   /** Notable entries since the last chat status post. */
   news: Entry[];
   attempts: Attempt[];
@@ -370,6 +390,7 @@ export function fold(entries: readonly Entry[]): State {
     badgePost: { t: 'pending' },
     reflections: [],
     briefs: {},
+    costs: {},
     news: [],
     attempts: [],
     questions: [],
@@ -541,6 +562,9 @@ export function apply(s: State, e: Entry): void {
         s.unseen.push(e);
       return;
     }
+    case 'attempt_metered':
+      s.costs[e.attemptId] = e.cost;
+      return;
     case 'manager_applied':
       s.appliedManagers.add(e.attemptId);
       return;

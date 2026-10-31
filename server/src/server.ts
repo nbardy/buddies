@@ -123,6 +123,7 @@ import { registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
 import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
+import { boundSessions } from './expeditions/meter';
 import { registerExpeditionRoutes } from './expeditions/routes';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 
@@ -933,6 +934,10 @@ void runServerStartup(
           events: buddyEvents,
           root: path.join(APP_DATA_DIR, 'expeditions'),
           gate: decideExecutionGate(),
+          meter: {
+            ingest: currentIngest,
+            sessionsOf: async (id) => boundSessions(await conversationConfigService.getRecord(id)),
+          },
         })
       );
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).

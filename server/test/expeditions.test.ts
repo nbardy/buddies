@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import { BuddiesCore } from '@unleashd/buddies-core';
+import { Ingest, defaultRoots } from '@unleashd/ingest';
 import express from 'express';
 import { OWNER, buddyActor } from '../src/buddies/core';
 import { createBuddyEvents } from '../src/buddies/events';
@@ -16,6 +17,7 @@ import { runCommand } from '../src/expeditions/command';
 import { type ExpeditionHost, createExpeditionHost } from '../src/expeditions/host';
 import { Charter, type Entry, type State, fold } from '../src/expeditions/model';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
+import type { IngestSlot } from '../src/ingest/instance';
 import { BackgroundWork } from '../src/turns/background-work';
 import { tempDir } from './fixtures/temp';
 
@@ -74,12 +76,24 @@ async function fixture() {
   const root = path.join(scratch, 'expeditions');
   const events = createBuddyEvents();
   let clock = Date.parse('2026-11-01T00:00:00Z');
+  // Attempt cost (meter.ts): the conversation→sessions map and the transcript store a test sets.
+  const meter = {
+    sessions: new Map<string, string[]>(),
+    slot: { t: 'starting' } as IngestSlot,
+  };
   const host = (): ExpeditionHost =>
     createExpeditionHost({
       core,
       events,
       root,
       gate: { t: 'enabled' },
+      meter: {
+        ingest: () => meter.slot,
+        sessionsOf: async (id) => {
+          const ids = meter.sessions.get(id);
+          return ids ? { t: 'record', sessionIds: ids } : { t: 'missing' };
+        },
+      },
       now: () => {
         clock += 1000;
         return new Date(clock);
@@ -161,6 +175,12 @@ async function fixture() {
     core,
     lead,
     repo,
+    meter,
+    scratch,
+    /** Sets the host clock (it advances 1s per read). */
+    setClock(ms: number) {
+      clock = ms;
+    },
     workspaceId: ws.id,
     treeOf,
     commitIn,
@@ -1446,6 +1466,152 @@ test('a command check is killed at its timeout (its whole process group), and an
   assert.equal(missing.t, 'error');
 });
 
+test('an ended attempt records the tokens its settled run measured, never before the transcript is indexed; a run that never executed is "not measured"', async () => {
+  const f = await fixture();
+  const home = tempDir('expedition-meter-home-');
+  // The crew run's transcript: one Claude session with two billed requests.
+  const session = 'eeeeeeee-5555-4555-8555-eeeeeeeeeeee';
+  const turn = (id: string, usage: Record<string, number>) =>
+    JSON.stringify({
+      type: 'assistant',
+      sessionId: session,
+      cwd: f.repo,
+      timestamp: new Date().toISOString(),
+      message: { id, model: 'claude-opus-5-5', usage, content: [{ type: 'text', text: 'ok' }] },
+    });
+  const transcript = path.join(home, '.claude', 'projects', '-tmp-exp', `${session}.jsonl`);
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
+  fs.writeFileSync(
+    transcript,
+    [
+      JSON.stringify({
+        type: 'user',
+        sessionId: session,
+        cwd: f.repo,
+        message: { content: 'plan' },
+      }),
+      turn('r1', { input_tokens: 1_000, output_tokens: 200, cache_read_input_tokens: 5_000 }),
+      turn('r2', { input_tokens: 500, output_tokens: 100, cache_creation_input_tokens: 300 }),
+      '',
+    ].join('\n')
+  );
+  const ingest = await Ingest.start(defaultRoots(home), path.join(home, 'ingest.sqlite'), () => {});
+  try {
+    f.meter.slot = { t: 'ready', ingest };
+    const { id } = await rpcLaunch(f, 'meter');
+    const m1 = f.manager(id);
+    const requestId = f.liveAttempts(id)[0].requestId;
+    // Execute the manager's request the way the Buddy runner does: claim, bind a conversation,
+    // mark executing, answer, settle.
+    let claim = await f.core.claimRun(BUDGETS, []);
+    while (claim && !(claim.run.input.kind === 'post' && claim.run.input.postId === requestId))
+      claim = await f.core.claimRun(BUDGETS, []);
+    if (!claim) throw new Error('the manager request run was never claimable');
+    const conversationId = `buddy-run-${claim.run.id}`;
+    f.meter.sessions.set(conversationId, [session]);
+    await f.core.bindRun(claim.run.id, claim.leaseToken, conversationId);
+    await f.core.markExecuting(claim.run.id, claim.leaseToken);
+    f.setClock(Date.now());
+    await f.answer(id, m1, json({ actions: [] }));
+    // Answered but the run has not settled: the attempt ended, its cost is not read yet.
+    assert.ok(!(m1 in f.stateOf(id).costs), 'metered a run that is still running');
+    await f.core.settleRun(claim.run.id, claim.leaseToken, { kind: 'complete', text: 'done' });
+    f.setClock(Date.now());
+    await f.host.tick(id);
+    // Settled, but its last transcript lines may not be indexed yet (meter.ts INDEX_GRACE_MS).
+    assert.ok(!(m1 in f.stateOf(id).costs), 'metered inside the transcript-index grace');
+    f.setClock(Date.now() + 20_000);
+    await f.host.tick(id);
+    assert.deepEqual(f.stateOf(id).costs[m1], {
+      t: 'measured',
+      inputTokens: 1_500,
+      outputTokens: 300,
+      cacheReadTokens: 5_000,
+      cacheWriteTokens: 300,
+    });
+    // An empty plan asks the owner; a note starts the next manager, answered with no run at all
+    // (as every other test does): not measured, with the reason; totals count only the measured.
+    await f.host.steer(id, f.lead.id, { t: 'note', text: 'Go on.' });
+    const m2 = f.manager(id);
+    await f.answer(id, m2, json({ actions: [] }));
+    assert.deepEqual(f.stateOf(id).costs[m2], {
+      t: 'unmeasured',
+      reason: 'no Buddy run executed this request',
+    });
+    const view = f.host.view(id);
+    assert.match(view.cost.line, /^Cost: 2k input \+ 300 output tokens .* over 1 measured attempt/);
+    assert.match(view.cost.line, /1 not measured \(no Buddy run executed this request\)/);
+    assert.equal(view.cost.short, '2k tokens');
+    assert.match(f.host.status(id), /Cost: 2k input/);
+  } finally {
+    await ingest.stop();
+    await f.close();
+  }
+});
+
+test('draft validates a charter without launching; launch fills only named defaults and says which', async () => {
+  const f = await fixture();
+  try {
+    // Only the WHAT: name, goal, done, budget.
+    const minimal = {
+      name: 'minimal',
+      goal: 'Make the widget pass its test.',
+      done: { checks: [{ kind: 'command', argv: ['no-such-binary-xyz'], timeoutSeconds: 60 }] },
+      maxAttempts: 10,
+    };
+    const drafted = await rpc(f.spec(), 'expedition', {
+      action: { do: 'draft', charter: minimal },
+    });
+    assert.equal(drafted.error, false, drafted.text);
+    assert.equal(drafted.value.ready, false);
+    assert.ok(
+      drafted.value.issues.some((i: string) => i.includes('no-such-binary-xyz')),
+      drafted.text
+    );
+    assert.ok(drafted.value.defaulted.some((d: string) => d.startsWith('crew: the default crew')));
+    assert.ok(drafted.value.advice.some((a: string) => a.startsWith('no outOfScope fence')));
+    assert.deepEqual(f.host.list(f.workspaceId), [], 'a draft launched nothing');
+
+    // A roster whose only check seat is the work seat's model could never check a claim.
+    const sameModel = {
+      ...minimal,
+      done: { checks: [{ kind: 'command', argv: ['sh', '-c', 'true'], timeoutSeconds: 60 }] },
+      crew: {
+        manager: { provider: 'claude' },
+        work: [{ provider: 'claude' }],
+        check: [{ provider: 'claude' }],
+      },
+    };
+    const refused = await rpc(f.spec(), 'expedition', {
+      action: { do: 'launch', charter: sameModel },
+    });
+    assert.equal(refused.error, true);
+    assert.match(refused.text, /work seat 0 \(claude\) has no check seat on another model/);
+    assert.deepEqual(f.host.list(f.workspaceId), []);
+
+    const launched = await rpc(f.spec(), 'expedition', {
+      action: { do: 'launch', charter: { ...sameModel, crew: undefined } },
+    });
+    assert.equal(launched.error, false, launched.text);
+    assert.match(launched.value.link, /^\[⛺ minimal\]\(\/expeditions\/minimal-/);
+    assert.match(
+      launched.value.launched,
+      /done when \$ sh -c true \| budget 10 attempts, 2 live, 8h/
+    );
+    assert.deepEqual(
+      launched.value.defaulted.map((d: string) => d.split(':')[0]),
+      ['inScope', 'outOfScope', 'maxLive', 'hours', 'exploreShare', 'crew']
+    );
+    // The ledger holds the full charter, defaults written out.
+    const c = f.stateOf(launched.value.id).charter;
+    assert.deepEqual([c.maxLive, c.hours, c.exploreShare, c.crew.check.length], [2, 8, 0.2, 2]);
+  } finally {
+    await f.close();
+  }
+});
+
+const BUDGETS = { leaseMs: 60_000, chatDeadlineMs: 60_000, turnDeadlineMs: 60_000 };
+
 async function rpcLaunch(
   f: Awaited<ReturnType<typeof fixture>>,
   name: string,
@@ -1456,5 +1622,5 @@ async function rpcLaunch(
     action: { do: 'launch', charter: charter(name, maxLive, done) },
   });
   assert.equal(launched.error, false, launched.text);
-  return launched.value as { id: string; status: string };
+  return launched.value as { id: string; link: string; launched: string; defaulted: string[] };
 }

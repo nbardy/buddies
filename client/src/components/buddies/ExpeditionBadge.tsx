@@ -9,7 +9,7 @@ export function ExpeditionBadge({ id }: { id: string }) {
   const view = usePolledFetch<ExpeditionView>(expeditionUrl(id), 15_000);
   const v = view.data;
   const stats = v
-    ? ` · ${runLabel(v.run)} · ${v.counts.live} live · ${v.counts.verified} verified · ${v.counts.attempts}/${v.counts.maxAttempts}`
+    ? ` · ${runLabel(v.run)} · ${v.counts.live} live · ${v.counts.verified} verified · ${v.counts.attempts}/${v.counts.maxAttempts} · ${v.cost.short}`
     : view.kind === 'failed'
       ? ' · unavailable'
       : '';

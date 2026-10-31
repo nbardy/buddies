@@ -1,6 +1,7 @@
 import { type ClaimChange, type DoneCheck, type WorkResult, seatLabel } from './charter';
 import type {
   Attempt,
+  AttemptCost,
   CheckOutcome,
   Entry,
   FinishReason,
@@ -43,7 +44,55 @@ function runLabel(run: State['run']): string {
 export function badge(s: State, now: string): string {
   const mins = Math.round((Date.parse(now) - Date.parse(s.launchedAt)) / 60_000);
   const elapsed = mins >= 60 ? `${Math.floor(mins / 60)}h${mins % 60}m` : `${mins}m`;
-  return `⛺ ${s.charter.name} · ${runLabel(s.run)} · ${liveWorkers(s).length} live · ${verifiedPanels(s).length} verified · ${s.attempts.length}/${s.charter.maxAttempts} attempts · ${elapsed}`;
+  return `⛺ ${s.charter.name} · ${runLabel(s.run)} · ${liveWorkers(s).length} live · ${verifiedPanels(s).length} verified · ${s.attempts.length}/${s.charter.maxAttempts} attempts · ${elapsed} · ${costTotals(s).short}`;
+}
+
+// ---------- Cost (design.md R6): measured tokens only, never an estimate ----------
+
+/** Compact token count: 950, 41k, 1.3M. */
+export const tokens = (n: number) =>
+  n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
+
+/** One attempt's cost as shown on the page. */
+export function costLabel(c: AttemptCost): string {
+  switch (c.t) {
+    case 'measured':
+      return `${tokens(c.inputTokens)} in · ${tokens(c.outputTokens)} out · cache ${tokens(c.cacheReadTokens)} read, ${tokens(c.cacheWriteTokens)} written`;
+    case 'unmeasured':
+      return `not measured: ${c.reason}`;
+  }
+}
+
+/**
+ * The expedition's measured spend: token sums over the measured attempts, and how many ended
+ * attempts are not measured (with their reasons) or still settling. `short` is the badge's part,
+ * `line` the page header's and the status's.
+ */
+export function costTotals(s: State): { short: string; line: string } {
+  const ended = s.attempts.filter((a) => a.phase.t === 'ended');
+  const costs = ended.flatMap((a) => (a.id in s.costs ? [s.costs[a.id]] : []));
+  const measured = costs.flatMap((c) => (c.t === 'measured' ? [c] : []));
+  const reasons = [...new Set(costs.flatMap((c) => (c.t === 'unmeasured' ? [c.reason] : [])))];
+  const unmeasured = costs.length - measured.length;
+  const settling = ended.length - costs.length;
+  const sum = (pick: (c: (typeof measured)[number]) => number) =>
+    measured.reduce((n, c) => n + pick(c), 0);
+  const input = sum((c) => c.inputTokens);
+  const output = sum((c) => c.outputTokens);
+  const tail = [
+    unmeasured > 0 ? `${unmeasured} not measured (${reasons.join('; ')})` : '',
+    settling > 0 ? `${settling} settling` : '',
+  ].filter(Boolean);
+  const rest = tail.length > 0 ? `; ${tail.join('; ')}` : '';
+  if (measured.length === 0)
+    return {
+      short: ended.length === 0 ? 'no cost yet' : 'cost not measured',
+      line: ended.length === 0 ? 'Cost: no attempt has ended yet.' : `Cost: not measured${rest}.`,
+    };
+  return {
+    short: `${tokens(input + output)} tokens`,
+    line: `Cost: ${tokens(input)} input + ${tokens(output)} output tokens (cache ${tokens(sum((c) => c.cacheReadTokens))} read, ${tokens(sum((c) => c.cacheWriteTokens))} written) over ${measured.length} measured attempt(s)${rest}. Tokens only: no price is estimated.`,
+  };
 }
 
 /** One chat post per decision round: everything notable since the last post, in order. */

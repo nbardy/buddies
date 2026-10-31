@@ -19,6 +19,7 @@ import {
   FOCI,
   type Focus,
   QUESTION_GLYPH,
+  attemptCostLine,
   attemptState,
   doneLines,
   expeditionUrl,
@@ -126,6 +127,9 @@ function Header({ v }: { v: ExpeditionView }) {
       <p className="ui-muted" style={{ margin: 0 }}>
         {integrationLine(v.integration)}
       </p>
+      <p className="ui-muted" style={{ margin: 0 }}>
+        {v.cost.line}
+      </p>
       {v.run.t === 'waiting_owner' && (
         <output className="task-page-next ui-surface ui-card" style={{ margin: 0 }}>
           Needs you: {v.run.question} Reply in the chat.
@@ -160,6 +164,7 @@ function AttemptRow({
   validations,
 }: { a: ExpeditionAttempt; validations: ExpeditionValidation[] }) {
   const tree = worktreeLine(a.worktree);
+  const cost = attemptCostLine(a.cost);
   return (
     <details className="ui-surface ui-card">
       <summary className="ui-choice">
@@ -173,6 +178,11 @@ function AttemptRow({
             {c.passed ? '✓' : '✗'} {x.id} check {c.checkIndex}: {c.outcome}
           </p>
         ))
+      )}
+      {cost && (
+        <p className="ui-muted" style={{ margin: 0 }}>
+          Cost: {cost}
+        </p>
       )}
       <p className="ui-muted">Instructions</p>
       <pre style={pre}>{a.brief ?? 'Not briefed yet (queued).'}</pre>

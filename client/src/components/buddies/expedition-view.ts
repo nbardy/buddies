@@ -1,5 +1,6 @@
 import type {
   ExpeditionAttempt,
+  ExpeditionAttemptCost,
   ExpeditionDone,
   ExpeditionDoneCheck,
   ExpeditionIntegration,
@@ -40,6 +41,20 @@ export function attemptState(a: ExpeditionAttempt): string {
       return 'running';
     case 'ended':
       return a.outcome ?? 'ended';
+  }
+}
+
+/** An attempt's measured cost (design.md R6); null before it ended. Never an estimate. */
+export function attemptCostLine(cost: ExpeditionAttemptCost): string | null {
+  switch (cost.t) {
+    case 'none':
+      return null;
+    case 'settling':
+      return 'reading its run’s token usage…';
+    case 'measured':
+      return cost.label;
+    case 'unmeasured':
+      return `not measured (${cost.reason})`;
   }
 }
 

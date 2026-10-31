@@ -3,8 +3,15 @@ import { z } from 'zod';
 import type { BuddyGrant } from '../buddies/grants';
 import type { ToolDeps } from '../buddies/mcp';
 import { checkedRunConfig } from '../buddies/worker-config';
-import type { ExpeditionHost } from './host';
-import { Charter, type Origin } from './model';
+import { type ExpeditionHost, LaunchRefused } from './host';
+import {
+  type Charter,
+  CharterRequest,
+  type Origin,
+  charterAdvice,
+  charterOf,
+  charterSummary,
+} from './model';
 
 // The one `expedition` Buddy tool. Its description is paid on every worker turn
 // (tool-contract.test.ts budget), so usage detail lives in BUDDY_TOOL_GUIDE and expeditions/mcp.md.
@@ -15,7 +22,8 @@ const Steer = z.union([
 ]);
 
 export const ExpeditionAction = z.discriminatedUnion('do', [
-  z.object({ do: z.literal('launch'), charter: Charter }).strict(),
+  z.object({ do: z.literal('draft'), charter: CharterRequest }).strict(),
+  z.object({ do: z.literal('launch'), charter: CharterRequest }).strict(),
   z.object({ do: z.literal('status'), id: z.string().min(1) }).strict(),
   z.object({ do: z.literal('list') }).strict(),
   z.object({ do: z.literal('steer'), id: z.string().min(1), feedback: Steer }).strict(),
@@ -23,7 +31,7 @@ export const ExpeditionAction = z.discriminatedUnion('do', [
 export type ExpeditionAction = z.infer<typeof ExpeditionAction>;
 
 export const EXPEDITION_DESCRIPTION =
-  'Self-running expedition toward a fuzzy goal; counts only verified results; posts status here. launch, status, list, steer.';
+  'Self-running expedition to a fuzzy goal; only verified results count. draft (validate only), launch, status, list, steer.';
 
 /** The thread this turn answers, when it was started by a post (else the owner DM). */
 async function originOf(core: BuddiesCore, grant: BuddyGrant): Promise<Origin> {
@@ -32,6 +40,19 @@ async function originOf(core: BuddiesCore, grant: BuddyGrant): Promise<Origin> {
   if (run.input.kind !== 'deliver' && run.input.kind !== 'post') return { t: 'direct' };
   const trigger = await core.getPost(grant.author, run.input.postId);
   return { t: 'thread', channelId: trigger.channelId, rootId: trigger.rootId ?? trigger.id };
+}
+
+/** Each crew seat checked against the provider catalog (worker-config.ts): one issue per seat. */
+function seatIssues(charter: Charter): string[] {
+  const { crew } = charter;
+  return [crew.manager, ...crew.work, ...crew.check].flatMap((seat) => {
+    try {
+      checkedRunConfig(seat);
+      return [];
+    } catch (error) {
+      return [(error as Error).message];
+    }
+  });
 }
 
 function ownedBy(host: ExpeditionHost, grant: BuddyGrant, id: string): string {
@@ -46,14 +67,26 @@ export async function expeditionHandler(
   action: ExpeditionAction
 ): Promise<unknown> {
   switch (action.do) {
+    case 'draft': {
+      const { charter, defaulted } = charterOf(action.charter);
+      const issues = [...seatIssues(charter), ...(await host.issues(grant.workspaceId, charter))];
+      return {
+        ready: issues.length === 0,
+        issues,
+        advice: charterAdvice(charter),
+        defaulted,
+        charter,
+      };
+    }
     case 'launch': {
       if (host.ofCrew(grant.buddyId))
         throw new Error('an expedition crew cannot launch expeditions');
-      const { crew } = action.charter;
-      for (const seat of [crew.manager, ...crew.work, ...crew.check]) checkedRunConfig(seat);
+      const { charter, defaulted } = charterOf(action.charter);
+      const seats = seatIssues(charter);
+      if (seats.length > 0) throw new LaunchRefused(seats);
       const state = await host.launch({
-        key: `${grant.conversationId}:${action.charter.name}`,
-        charter: action.charter,
+        key: `${grant.conversationId}:${charter.name}`,
+        charter,
         origin: await originOf(core, grant),
         launcherId: grant.buddyId,
         workspaceId: grant.workspaceId,
@@ -62,7 +95,9 @@ export async function expeditionHandler(
       return {
         id: state.id,
         link: `[⛺ ${state.charter.name}](/expeditions/${state.id})`,
-        status: host.status(state.id),
+        launched: charterSummary(state.charter),
+        defaulted,
+        next: 'Share the link with the owner. The badge and every update post on their own; steer with lessons.',
       };
     }
     case 'status':

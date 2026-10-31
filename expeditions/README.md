@@ -4,8 +4,9 @@
 > disposable agents, an append-only ledger, and a human who steers by teaching
 > lessons.
 
-Status: **design, not built** (2026-11-01). Nothing here has run. The first
-step is a by-hand prototype (see [design.md § Proof plan](./design.md#proof-plan)).
+Status: **built on branch `feat/expeditions`** (2026-11-01; design.md Revision 2, R1–R7). Tested
+end to end through the real Buddies crate and MCP endpoint; not yet run on a real goal. See
+[As built](#as-built-2026-11-01-branch-featexpeditions) and [How to start one](#how-to-start-one).
 
 | File | Contents |
 |---|---|
@@ -64,9 +65,10 @@ primitives, using the history only as evidence.
 
 ## How the owner experiences it
 
-- In a Buddy chat: "launch expedition: get wind setup right in Engine E, $3".
+- In a Buddy chat: "Launch an expedition: get wind setup right in Engine E. Done when
+  `pnpm test wind` passes. Budget 20 attempts." (see [How to start one](#how-to-start-one)).
 - It plans, runs on its own, and puts a live **badge** in the chat:
-  `⛺ e-wind · running · 4 live · 3 verified · $1.12 / $3 · 2h10m · 1 needs you`
+  `⛺ e-wind · running · 4 live · 3 verified · 9/20 · 1.3M tokens`
 - Clicking the badge opens the **inspector**: questions, runs, results, timeline,
   parking lot, self-reflection.
 - `@e-wind why did you drop the variational approach?` gets an answer citing runs.
@@ -79,7 +81,9 @@ primitives, using the history only as evidence.
 |---|---|
 | Engine: ledger, fold, decide, effects | `server/src/expeditions/model.ts`, `host.ts` |
 | Briefs (manager / work / blind check) and answer parsing | `server/src/expeditions/briefs.ts` |
-| The `expedition` Buddy tool (launch, status, list, steer) | `server/src/expeditions/tool.ts` |
+| Charter schema, launch defaults, draft issues/advice | `server/src/expeditions/charter.ts` |
+| The `expedition` Buddy tool (draft, launch, status, list, steer) | `server/src/expeditions/tool.ts` |
+| Measured attempt cost (tokens from the run's sessions) | `server/src/expeditions/meter.ts` |
 | Page data `GET /api/buddies/expeditions/:id` | `server/src/expeditions/view.ts`, `routes.ts`; type `shared/src/expedition.ts` |
 | Badge chip in any post list (thread, DM, channel) | `client/src/components/buddies/ExpeditionBadge.tsx`, branch in `ChannelPostContent.tsx` |
 | Page `/expeditions/:id` (focus pane + chat) | `client/src/components/buddies/ExpeditionPage.tsx` |
@@ -100,5 +104,46 @@ Integration (design.md R3): the expedition owns `expedition/<id>`, checked out i
 Cambium tree; the manager's `integrate` merges a validated claim's commit there (`--no-ff`, one at
 a time), done validates that head, and the finish post names the branch for the owner to merge.
 
+Cost (design.md R6): each ended attempt records `attempt_metered {cost}` once its Buddy run(s)
+settled: the provider-counted tokens of every session the run conversations bound
+(`measured {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`), or
+`unmeasured {reason}` (a provider that records no usage, a request answered without a run). The
+page header, the badge and `status` show the sums and how many attempts are not measured. Tokens
+only: no dollar figure, because only an estimate could price them.
+
+Kickoff (design.md R7): a launch names only the WHAT (name, goal, done, maxAttempts); scope,
+maxLive (2), hours (8), exploreShare (0.2) and crew (the default crew: manager claude; work
+claude, codex; check codex, claude) may be left out, and the tool result lists every default it
+applied (`defaulted`) with a one-line summary of what launched and the page link. `draft` runs
+the same checks without launching: preflight (repository, base commit, Cambium, each command
+check's binary), crew seats against the provider catalog, a work seat with no independent check
+seat; plus advice (no command check, no out-of-scope fence).
+
 Not built yet: external jobs (`Waiting(jobId)`), budget
 envelopes for Buddy launches, the retro/playbook loop, archiving finished crews.
+
+## How to start one
+
+Type this to any Buddy, in a thread, a DM or a channel (one message):
+
+> Launch an expedition: *make the widget tests pass on Linux and macOS*. Done when
+> `pnpm test widget` passes. Budget 20 attempts.
+
+What each part does:
+- **Goal**: the fuzzy WHAT. The crew plans the steps; you never list them.
+- **Done when**: say a command when completion can be tested (`pnpm test widget`, `cargo test -p
+  foo`). The host runs it on every claimed commit and on the expedition branch at done; no agent
+  can report it passed. Otherwise say what a reviewer should confirm ("the docs describe the
+  fix"), or "I'll judge it".
+- **Budget**: attempts (2–60). Optional extras, in plain words: "at most 3 at once", "stop after
+  6 hours", "don't touch the website", "use codex for the work".
+
+Variants that work:
+- "Draft an expedition for … and show me the charter first." (the Buddy calls `draft`, shows the
+  issues and defaults, and launches when you say go)
+- "This looks big. Should it be an expedition?" (the Buddy checks the four tests in mcp.md)
+
+After launch: the badge appears in the chat you asked in; click it for the page. Talk to the crew
+in its chat on that page (or ask your Buddy to steer it): a lesson ("never edit generated files") reaches every later brief;
+"pause", "resume" and "stop" do what they say. At done the finish post names the branch to merge;
+nothing is written to your checkout.

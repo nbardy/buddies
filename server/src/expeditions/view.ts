@@ -1,4 +1,5 @@
 import type {
+  ExpeditionAttemptCost,
   ExpeditionDone,
   ExpeditionIntegration,
   ExpeditionValidation,
@@ -13,6 +14,8 @@ import {
   attemptsOn,
   checkOutcomeLabel,
   configOf,
+  costLabel,
+  costTotals,
   deadlineMs,
   exploreCap,
   headOf,
@@ -44,6 +47,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     done: doneView(c.done),
     validations: s.validations.map((v) => validationView(s, v)),
     integration: integrationView(s),
+    cost: costTotals(s),
     inScope: c.inScope,
     outOfScope: c.outOfScope,
     workspaceId: s.workspaceId,
@@ -85,6 +89,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       outcome: phaseOutcome(a.phase),
       requestId: a.phase.t === 'posted' || a.phase.t === 'ended' ? a.phase.requestId : null,
       worktree: worktreeView(s, a.id),
+      cost: attemptCost(s, a.id, a.phase),
     })),
     panels: panels(s),
     reflections: s.reflections,
@@ -94,6 +99,13 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
 
 function doneView(done: State['charter']['done']): ExpeditionDone {
   return 'checks' in done ? { t: 'checks', checks: done.checks } : { t: 'owner' };
+}
+
+/** An ended attempt's metered cost; `settling` until the host read it (meter.ts). */
+function attemptCost(s: State, attemptId: string, phase: AttemptPhase): ExpeditionAttemptCost {
+  const cost = s.costs[attemptId];
+  if (cost) return cost.t === 'measured' ? { t: 'measured', label: costLabel(cost) } : cost;
+  return phase.t === 'ended' ? { t: 'settling' } : { t: 'none' };
 }
 
 /** An attempt's worktree, once admission recorded one (managers never have one). */

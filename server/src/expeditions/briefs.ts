@@ -17,6 +17,7 @@ import {
   changeLabel,
   claimOf,
   commandChecks,
+  costTotals,
   doneCheckLabel,
   exploreCap,
   integrationLabel,
@@ -332,6 +333,7 @@ export function statusText(s: State, badgeLine: string): string {
     `ATTEMPTS:\n${s.attempts.map((a) => attemptLine(s, a)).join('\n') || '- none'}`,
     validationsText(s),
     integrationsText(s),
+    costTotals(s).line,
     s.crew.t === 'ready' ? `Crew Buddy: ${s.crew.buddyId} (its DM holds every attempt).` : '',
   ]
     .filter(Boolean)

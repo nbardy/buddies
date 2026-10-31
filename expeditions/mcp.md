@@ -1,8 +1,40 @@
 # Expedition MCP surface and Buddy behaviour
 
-Status: design, not built (2026-11-01). Primitives: [design.md](./design.md).
+Status: built as ONE tool, `expedition` (2026-11-01, `server/src/expeditions/tool.ts`); the
+original multi-tool design is kept below where it still differs. Primitives:
+[design.md](./design.md). How the owner starts one: [README.md](./README.md#how-to-start-one).
 
-## Tools
+## The tool as built
+
+One tool keeps the per-turn description cost to one line (tool-contract.test.ts budget); usage
+lives in the Buddy briefing (`BUDDY_TOOL_GUIDE`, server/src/buddies/briefing.ts) and here.
+
+```
+expedition({ action })
+  { do:'draft',  charter: CharterRequest }  → { ready, issues[], advice[], defaulted[], charter }   // launches nothing
+  { do:'launch', charter: CharterRequest }  → { id, link, launched, defaulted[], next } | error listing every refusal
+  { do:'status', id }                       → status text (badge, charter, questions, stages, attempts, validations, integration, cost)
+  { do:'list' }                             → [{ id, badge }]
+  { do:'steer', id, feedback }              // feedback: {t:'lesson'|'note', text} | {t:'pause'|'resume'|'stop'}
+```
+
+`CharterRequest` requires only the WHAT: `name`, `goal`, `done`, `maxAttempts`. The rest take
+named defaults when left out, and `defaulted` lists each one applied (never a silent fill):
+`inScope`/`outOfScope` none stated, `maxLive` 2, `hours` 8, `exploreShare` 0.2, `crew` the
+default crew (manager claude; work claude, codex; check codex, claude; provider default models).
+The ledger always stores the full charter.
+
+`issues` (draft) and launch refusals are the same checks: the workspace is a git repository with
+a base commit, `git cambium` is available, every command check's `argv[0]` resolves, every crew
+seat is a known provider/model/effort that guarantees the Buddy tools, and every work seat has a
+check seat on another model (claims are never checked by their author's model). `advice` is
+non-blocking: no command check, no out-of-scope fence.
+
+Results go to the chat the launch came from (the badge) and to the expedition chat (the
+owner↔crew DM). A crew Buddy cannot launch expeditions. Not built: `ask`, `ledger`, the budget
+envelope and the AmendGoal/RaiseBudget proposals below.
+
+## Original design (multi-tool)
 
 ```
 expedition_draft(request, context?)
@@ -35,16 +67,17 @@ So "only the owner changes the WHAT" holds even when a Buddy drives.
 The Buddy does not need to be good at writing charters. Crafting is an intake
 with typed checks, not a prose skill:
 
-1. **Draft.** The Buddy calls `expedition_draft` with the owner's request and
-   any context (linked docs, task, repo). The engine returns a charter plus
-   `issues[]`: missing done check, no scope fence, budget absent, goal too broad
-   to plan, a done check that cannot fail.
+1. **Draft.** The Buddy fills a charter from the owner's request and context and,
+   when unsure, calls `{do:'draft'}`. As built it returns `issues[]` (what a launch
+   would refuse), `advice[]` (no command check, no scope fence) and the defaults it
+   would apply; a missing `done` or `maxAttempts` is a schema error naming the field.
 2. **Fill gaps.** The Buddy fills what it can from context and asks the owner
    only for what it cannot infer, usually the budget and the done check, in one
    message.
-3. **Launch.** `expedition_launch` refuses a charter with unresolved blocking
-   issues. No silent defaults: a missing done check is either supplied or
-   explicitly declared `OwnerJudgment`.
+3. **Launch.** `{do:'launch'}` refuses a charter with blocking issues, listing all
+   of them. No silent defaults: a missing done check is either supplied or
+   explicitly declared `{ownerJudgment:true}`; optional limits take named defaults
+   the result lists.
 
 Built shape (2026-11-01, design.md R2): `done` is `{ checks: DoneCheck[] }` or
 `{ ownerJudgment: true }`, with
@@ -77,7 +110,7 @@ optional, but it is the highest-leverage point to steer.
 
 It suggests; it never launches unprompted (cost). One line at the end of its
 reply, e.g. "This looks like an expedition: the steps aren't known and it needs
-parallel attempts. Want me to draft one for $3?"
+parallel attempts. Want me to draft one with a 20-attempt budget?"
 
 It suggests only when all four hold (same ladder as
 [workflows-vs-expeditions.md](./workflows-vs-expeditions.md#which-one-to-use)):

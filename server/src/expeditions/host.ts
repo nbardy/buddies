@@ -20,6 +20,7 @@ import {
   releaseIntegrationTree,
   releaseWorktree,
 } from './git';
+import { type MeterPorts, meterRequest } from './meter';
 import {
   type Charter,
   type ClaimChange,
@@ -34,6 +35,7 @@ import {
   type WorkerSpec,
   attemptOf,
   badge,
+  charterIssues,
   claimAt,
   claimOf,
   commandChecks,
@@ -73,6 +75,8 @@ export interface ExpeditionHostOptions {
   events: BuddyEvents;
   root: string;
   gate: ExecutionGate;
+  /** Where attempt cost is read from (meter.ts): conversation records and the transcript store. */
+  meter: MeterPorts;
   now?: () => Date;
 }
 
@@ -86,7 +90,7 @@ export class LaunchRefused extends Error {
 }
 
 export function createExpeditionHost(options: ExpeditionHostOptions) {
-  const { core, events, root, gate } = options;
+  const { core, events, root, gate, meter } = options;
   const now = () => (options.now ?? (() => new Date()))().toISOString();
   const ledgers = new Map<string, Entry[]>();
   const chains = new Map<string, Promise<void>>();
@@ -304,6 +308,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       }
       case 'post_attempt':
         return postAttempt(s, effect.attemptId, effect.body);
+      case 'meter_attempt':
+        return meterAttempt(s, effect.attemptId, effect.requestId);
       case 'post_status': {
         if (s.crew.t !== 'ready') throw new Error('status posted before the crew exists');
         // Crew-authored in its own DM with the owner: wakes nobody, reads as the expedition.
@@ -338,6 +344,19 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         });
         return [{ t: 'badge_posted', at: now(), postId: write.post.id }];
       }
+    }
+  }
+
+  /** A read, not a write: nothing is recorded while the attempt's run is still settling. */
+  async function meterAttempt(s: State, attemptId: string, requestId: string): Promise<Entry[]> {
+    if (s.crew.t !== 'ready') throw new Error('attempt metered before the crew exists');
+    const nowMs = Date.parse(now());
+    const metering = await meterRequest(core, meter, s.crew.buddyId, requestId, nowMs);
+    switch (metering.t) {
+      case 'settling':
+        return [];
+      case 'metered':
+        return [{ t: 'attempt_metered', at: now(), attemptId, cost: metering.cost }];
     }
   }
 
@@ -551,14 +570,31 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   backstop?.unref();
   if (enabled) void tickAll();
 
+  /** Launch preflight (design.md R4) plus the charter's own refusals; reads only. */
+  async function preflightOf(workspaceId: string, charter: Charter) {
+    const workspace = (await core.listWorkspaces()).find((w) => w.id === workspaceId);
+    if (!workspace) return { t: 'refused' as const, reasons: [`no workspace ${workspaceId}`] };
+    const bins = commandChecks(charter).map(({ check }) => check.argv[0]);
+    const checked = await preflight(workspace.rootPath, bins);
+    const issues = charterIssues(charter);
+    switch (checked.t) {
+      case 'refused':
+        return { t: 'refused' as const, reasons: [...checked.reasons, ...issues] };
+      case 'ready':
+        return issues.length > 0 ? { t: 'refused' as const, reasons: issues } : checked;
+    }
+  }
+
   return {
+    /** What a launch of this charter would refuse, without writing anything (the `draft`). */
+    async issues(workspaceId: string, charter: Charter): Promise<string[]> {
+      const checked = await preflightOf(workspaceId, charter);
+      return checked.t === 'refused' ? checked.reasons : [];
+    },
     async launch(input: LaunchInput): Promise<State> {
       const prior = [...ledgers.keys()].map(stateOf).find((s) => s.key === input.key);
       if (prior) return prior;
-      const workspace = (await core.listWorkspaces()).find((w) => w.id === input.workspaceId);
-      if (!workspace) throw new LaunchRefused([`no workspace ${input.workspaceId}`]);
-      const bins = commandChecks(input.charter).map(({ check }) => check.argv[0]);
-      const checked = await preflight(workspace.rootPath, bins);
+      const checked = await preflightOf(input.workspaceId, input.charter);
       if (checked.t === 'refused') throw new LaunchRefused(checked.reasons);
       const id = `${input.charter.name
         .toLowerCase()

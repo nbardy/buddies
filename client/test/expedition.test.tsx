@@ -81,6 +81,10 @@ const view: ExpeditionView = {
       label: 'integration i2 of w0 (1a2b3c4d5e): REFUSED — merge conflict in docs/README.md',
     },
   },
+  cost: {
+    short: '2k tokens',
+    line: 'Cost: 2k input + 300 output tokens (cache 5k read, 300 written) over 1 measured attempt(s); 1 not measured (muse records no token usage (session s1)). Tokens only: no price is estimated.',
+  },
   inScope: ['widget'],
   outOfScope: ['the website'],
   workspaceId: 'ws-1',
@@ -124,6 +128,7 @@ const view: ExpeditionView = {
       outcome: 'CLAIM: fixed',
       requestId: 'post-0',
       worktree: { t: 'tree', branch: 'exp/widget-abc123/w0', path: '/x/w0' },
+      cost: { t: 'unmeasured', reason: 'muse records no token usage (session s1)' },
     },
     {
       id: 'w1',
@@ -137,6 +142,7 @@ const view: ExpeditionView = {
       outcome: null,
       requestId: 'post-1',
       worktree: { t: 'tree', branch: 'exp/widget-abc123/w1', path: '/x/w1' },
+      cost: { t: 'none' },
     },
   ],
   panels: [],
@@ -173,6 +179,11 @@ test('the expedition page leads with its state, the owner question, and live wor
     html,
     /Integration: expedition\/widget-abc123 @ 9f8e7d6c5b · 1 integrated · last refusal: .*merge conflict in docs\/README\.md/
   );
+  // Spend is measured or says why not (design.md R6): an unmeasured attempt is never shown as
+  // free, and nothing is priced.
+  assert.match(html, /Cost: 2k input \+ 300 output tokens .* 1 not measured/);
+  assert.match(html, /Cost: not measured \(muse records no token usage \(session s1\)\)/);
+  assert.doesNotMatch(html, /\$\d/);
   // Lean: reflections and tasks are one click away, not on the first screen.
   assert.doesNotMatch(html, /Two approaches fail the same way\./);
 });

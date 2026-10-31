@@ -41,6 +41,9 @@ export type Effect =
   | { t: 'brief_attempt'; attempt: Attempt }
   /** Post a recorded brief: the replay path after a crash between record and post. */
   | { t: 'post_attempt'; attemptId: string; body: string }
+  /** Read an ended attempt's measured cost once its run settled (design.md R6); writes nothing
+   * while the run is still settling, so it is retried on the next tick. */
+  | { t: 'meter_attempt'; attemptId: string; requestId: string }
   | { t: 'post_status'; seq: number; text: string }
   | { t: 'post_badge' };
 
@@ -61,6 +64,12 @@ export function pendingEffects(s: State): Effect[] {
     // the post may already exist (keyed, so the replay returns it) and its worker may be running.
     ...s.attempts.flatMap((a): Effect[] =>
       a.phase.t === 'posting' ? [{ t: 'post_attempt', attemptId: a.id, body: a.phase.body }] : []
+    ),
+    // Metering is a read: it runs whatever the run state, finished and paused included.
+    ...s.attempts.flatMap((a): Effect[] =>
+      a.phase.t === 'ended' && !(a.id in s.costs)
+        ? [{ t: 'meter_attempt', attemptId: a.id, requestId: a.phase.requestId }]
+        : []
     ),
   ];
   switch (s.integrationTree.status.t) {
