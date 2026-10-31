@@ -23,7 +23,7 @@ import {
   validationOf,
   validationPassed,
 } from './ledger';
-import { configOf, liveWorkers, verifiedPanels, waitsOn } from './queries';
+import { configOf, liveWorkers, verifiedClaims, waitsOn, workerAttempts } from './queries';
 
 // Every human-readable rendering of expedition state: the badge line, the chat news posted once
 // per decision round, attempt/outcome labels for the page, and full outcome text for briefs.
@@ -44,7 +44,7 @@ function runLabel(run: State['run']): string {
 export function badge(s: State, now: string): string {
   const mins = Math.round((Date.parse(now) - Date.parse(s.launchedAt)) / 60_000);
   const elapsed = mins >= 60 ? `${Math.floor(mins / 60)}h${mins % 60}m` : `${mins}m`;
-  return `⛺ ${s.charter.name} · ${runLabel(s.run)} · ${liveWorkers(s).length} live · ${verifiedPanels(s).length} verified · ${s.attempts.length}/${s.charter.maxAttempts} attempts · ${elapsed} · ${costTotals(s).short}`;
+  return `⛺ ${s.charter.name} · ${runLabel(s.run)} · ${liveWorkers(s).length} live · ${verifiedClaims(s)} verified · ${workerAttempts(s)}/${s.charter.maxAttempts} attempts · ${elapsed} · ${costTotals(s).short}`;
 }
 
 // ---------- Cost (design.md R6): measured tokens only, never an estimate ----------
@@ -175,6 +175,7 @@ function mergeLine(s: State, reason: FinishReason): string[] {
         `To take the result, merge branch ${s.repo.branch} (head ${headOf(s).slice(0, 10)}, ${merged} integrated claim(s)); nothing was written to your checkout.`,
       ];
     case 'attempts_spent':
+    case 'decisions_spent':
     case 'deadline':
     case 'owner_stop':
     case 'setup_failed':

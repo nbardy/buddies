@@ -1,6 +1,6 @@
 import { type Charter, type Claim, type WorkerConfig, sameModel } from './charter';
 import type { Attempt, AttemptSpec, CheckSpec, Question, State, WorkSpec } from './ledger';
-import { attemptOf, byId, questionOf, validationPassed } from './ledger';
+import { attemptOf, byId, commandChecks, questionOf, validationPassed } from './ledger';
 
 // Pure read-only views over a folded State, shared by decide, effects, briefs, news and the page.
 
@@ -16,6 +16,14 @@ export const exploreAttempts = (s: State) =>
   s.attempts.filter(
     (a) => a.spec.kind === 'work' && byId(s.questions, a.spec.questionId)?.scope === 'explore'
   ).length;
+/** What the owner's attempt budget counts: work and check attempts, never manager decisions
+ * (design.md R9: "Budget 6 attempts" allowed one work attempt while decisions counted). */
+export const workerAttempts = (s: State) => s.attempts.filter(isWorker).length;
+export const managerTurns = (s: State) => s.attempts.filter((a) => !isWorker(a)).length;
+/** Manager decisions are bounded apart from the budget, so a manager that keeps deciding nothing
+ * cannot spin: two per budgeted attempt (one to start it, one to act on its result) plus two
+ * (the first plan and the done). */
+export const managerCap = (c: Charter) => 2 * c.maxAttempts + 2;
 export const exploreCap = (c: Charter) => Math.floor(c.exploreShare * c.maxAttempts);
 export const deadlineMs = (s: State) => Date.parse(s.launchedAt) + s.charter.hours * 3_600_000;
 
@@ -110,12 +118,91 @@ export const latestGoalPanel = (s: State): Panel | undefined =>
   panels(s)
     .filter((p) => p.goal)
     .at(-1);
-/** A question is verified while its newest SETTLED panel verified it: a later panel that refuted
- * the claim withdraws an earlier verification (a stale one must not unlock dependants, R5). */
+/**
+ * Why a claim counts as verified (design.md R9), as data: a check panel's majority, or, when the
+ * charter has command checks, the host's own proof: every command check passed on the claim's
+ * commit and that commit was merged into the expedition branch. Judged done items still need a
+ * goal panel (decide.ts judgedBlocker). 2026-11-01 smoke incident: a done reached on host checks
+ * alone left its question open, the badge at "0 verified", and refused close_question verified.
+ */
+export type Verification =
+  | { t: 'panel'; questionId: string; claimAttemptId: string; panelId: string }
+  | {
+      t: 'host';
+      questionId: string;
+      claimAttemptId: string;
+      validationId: string;
+      mergeSha: string;
+    };
+
+export function hostVerifications(s: State): Extract<Verification, { t: 'host' }>[] {
+  if (commandChecks(s.charter).length === 0) return [];
+  return s.integrations.flatMap((i) => {
+    const claim = attemptOf(s, i.claimAttemptId);
+    const passed = s.validations.find(
+      (v) =>
+        v.target.t === 'candidate' &&
+        v.target.claimAttemptId === i.claimAttemptId &&
+        validationPassed(s, v)
+    );
+    if (i.status.t !== 'integrated' || !passed || claim.spec.kind !== 'work') return [];
+    return [
+      {
+        t: 'host' as const,
+        questionId: claim.spec.questionId,
+        claimAttemptId: claim.id,
+        validationId: passed.id,
+        mergeSha: i.status.mergeSha,
+      },
+    ];
+  });
+}
+
+export const verifications = (s: State): Verification[] => [
+  ...verifiedPanels(s).map(
+    (p): Verification => ({
+      t: 'panel',
+      questionId: p.questionId,
+      claimAttemptId: p.claimAttemptId,
+      panelId: p.id,
+    })
+  ),
+  ...hostVerifications(s),
+];
+/** Distinct verified claims: the badge's and the page's "verified" count. */
+export const verifiedClaims = (s: State) =>
+  new Set(verifications(s).map((v) => v.claimAttemptId)).size;
+
+/** The newest settled panel on a claim refuted it (it withdraws that claim's host proof too). */
+const refuted = (s: State, claimAttemptId: string) =>
+  panels(s)
+    .filter((p) => p.claimAttemptId === claimAttemptId && p.verdict !== 'pending')
+    .at(-1)?.verdict === 'not_verified';
+
+/** A question is verified while its newest SETTLED panel verified it (a later panel that refuted
+ * the claim withdraws an earlier verification: a stale one must not unlock dependants, R5), or a
+ * claim on it is host-verified and no panel refuted that claim. */
 export const questionVerified = (s: State, questionId: string) =>
   panels(s)
     .filter((p) => p.questionId === questionId && p.verdict !== 'pending')
-    .at(-1)?.verdict === 'verified';
+    .at(-1)?.verdict === 'verified' ||
+  hostVerifications(s).some((h) => h.questionId === questionId && !refuted(s, h.claimAttemptId));
+
+/** Where a manager decision turn starts (design.md R9): the expedition's integration tree, read
+ * only (the host merges there), or the repository root while that tree does not exist. */
+export function managerDirectory(s: State): string {
+  switch (s.integrationTree.status.t) {
+    case 'ready':
+      return s.integrationTree.path;
+    case 'creating':
+    case 'failed':
+    case 'removed':
+    case 'kept':
+    case 'absent':
+    case 'left':
+      return s.repo.root;
+  }
+}
 
 /** The roster seat an attempt runs on. */
 export function configOf(c: Charter, spec: AttemptSpec): WorkerConfig {

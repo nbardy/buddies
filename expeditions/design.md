@@ -286,8 +286,8 @@ remove are `left {reason}`. Removal never forces: uncommitted changes become
 `worktree_released {left, reason}`. Cambium runs as `git-cambium` directly (a timeout kills the
 process doing the add, not a `git` wrapper), with a 15-minute limit for `add`. Custody paths are
 normalized once (`./a/` → `a`, whole repo = `.`). Cambium keeps its registry in `.git/cambium`, so
-tests use the real tool on a temporary repository. Known gap (still open after the 2026-11-01
-review): Buddy runs start in the workspace root, which IS the owner's shared checkout
+tests use the real tool on a temporary repository. Gap, CLOSED by R9 (a host-provided turn
+directory, no crate change): Buddy runs started in the workspace root, which IS the owner's shared checkout
 (`briefing.ts` `workingDirectory: workspace.rootPath`); the brief tells the worker to `cd` into
 its worktree under `APP_DATA_DIR/expeditions/<id>/worktrees`, outside that root. So "never edit
 the shared checkout" is still a prompt for the agent's edits, and a provider sandbox limited to
@@ -455,8 +455,9 @@ the badge appears in that chat.
 Built (2026-11-01, `charter.ts` `CharterRequest`/`charterOf`/`charterIssues`/`charterAdvice`,
 `tool.ts`): the launch input requires only name, goal, done and maxAttempts; scope, maxLive,
 hours, exploreShare and crew take NAMED defaults (`CHARTER_DEFAULTS`, `DEFAULT_CREW`) and the
-result's `defaulted` lists each applied, beside `launched` (a one-line summary) and the link. A
-`draft` action returns `{ready, issues, advice, defaulted, charter}` without writing: the R4
+result's `defaulted` lists each applied, beside `launched` (a one-line summary) and the page path
+(R9: data, not a link to post). A `draft` action returns `{ready, issues, advice, defaulted,
+resolved, charter}` without writing: the R4
 preflight, each crew seat against the provider catalog, and a work seat with no check seat on
 another model (it could never be checked, so launch refuses it too). The briefing line names the
 owner's phrasing; the tool description stayed within the worker budget. The owner's phrasing and
@@ -500,3 +501,62 @@ guard broken, a test fails) in `server/test/expeditions.test.ts`.
   are scratch and go with their tree.
 - **Page**: the chat area says the crew is starting until it exists; attempt phases carry their
   outcome in the wire type (no optional-field defaulting).
+
+### R9. Live smoke findings and fixes (2026-11-01)
+One live smoke at d954222: a real Buddy launched an expedition on a toy repository with temp
+stores. Each fix carries a comment naming the incident at its site and a test that fails when the
+guard is broken (mutation-checked). Tests: `server/test/expeditions.test.ts`, crate
+`tests/core.rs`.
+- **P1 (severe) — a hosted attempt's answer woke the crew.** The crew answering its own
+  host-posted request went through `posts.rs answer` → `deliveries::deliver_to_spawner`, which
+  enqueued a delivery even with no conversation subscribed to the request thread (the host posts
+  attempts with none). That woke an extra crew turn in the workspace root (the owner's checkout)
+  that read the answer (a manager brief) as instructions and committed on the owner's main; the
+  run failure notice (`runs.rs`) took the same path. Fix at the root: `deliver_to_spawner`
+  delivers only to a subscribed spawning conversation; with none, nobody spawned the request and
+  nobody is told. Guards: `a_hosted_self_request_answer_wakes_no_spawner` (crate) and the
+  turn-directory test (no `deliver` run, exactly one crew run per attempt).
+- **P2 — doubled unmetered runs**: the extra turns of P1; gone with it (asserted by run count).
+- **P5/R1 (major) — runs started in the owner's checkout.** Isolation was only the brief saying
+  "cd there", and a Codex `workspace-write` sandbox rooted at the owner's checkout could not write
+  the attempt worktree at all. Now structural, with no crate schema change: the Buddy briefing
+  (`briefing.ts`) takes a turn-directory resolver, `TurnDirectory = {t:'workspace'} |
+  {t:'worktree', runId, path}`, which the server wires to `ExpeditionHost.turnDirectory(context)`.
+  The host matches a crew run's request to its attempt by the exact brief bytes (recorded before
+  the post, so a run claimed before `attempt_posted` still matches): a work or check attempt starts
+  in its worktree, a manager in the integration tree (read only, its brief says so; the repository
+  root before that tree exists), any other crew run (a mention) in the manager's directory, every
+  other Buddy turn in its workspace root. A worktree briefing is cached by run id, never under the
+  Buddy's key (two concurrent attempts of one crew would otherwise get whichever worktree warmed
+  last), and the runner forgets it at settle. Guard: two concurrent work runs of one crew each get
+  their own worktree; a non-expedition Buddy gets the workspace root.
+- **P3 (major) — the budget counted manager decisions.** "Budget 6 attempts" allowed one work
+  attempt. `maxAttempts` now counts work and check attempts (`workerAttempts`); manager decisions
+  have their own cap, `managerCap = 2 × maxAttempts + 2` (one to start each attempt, one to act on
+  its result, plus the first plan and the done), finishing `decisions_spent` when it runs out. The
+  last result is still shown to a manager before `attempts_spent`. A manager is woken only when
+  something is actionable: owner feedback always; otherwise not while a done validation or a merge
+  is in flight, and never for a code claim whose candidate validation is still running (the smoke
+  manager spent turns saying "awaiting host validation"). Badge, page and `status` count work and
+  checks; the page also shows decisions.
+- **P4 (major) — done on host checks alone was incoherent.** The question stayed open, panels were
+  empty, the badge said "0 verified" on a done expedition, and the manager's `close_question
+  verified` was refused. Now a claim whose candidate validation passed every command check and
+  that was integrated is verified for its question: `Verification = panel{panelId} |
+  host{validationId, mergeSha}` (queries.ts, on the page as `verifications`). The host closes the
+  question verified (its `why` names the validation and merge), dependants unlock, the manager's
+  close is accepted, and the badge counts distinct verified claims. A later refuting panel on that
+  claim withdraws it. Judged done items still need a goal panel; the manager brief says both.
+- **P6 — owner model words failed.** "claude haiku" was refused (the catalog takes full ids). The
+  charter canonicalizer (`charter.ts charterOf`, given the installed catalog's models) resolves a
+  seat model that is not a catalog id when its words pick exactly one model of that provider (by
+  id or display name), once, at ingestion, and lists each in `resolved`; otherwise the seat check
+  refuses it listing the valid ids. Aliases resolve too (`sonnet` → `claude-sonnet-5-5`): kept as
+  written, they would defeat the check-independence rule, which compares model strings.
+- **P7 — the launch link was refused when posted.** The result carried
+  `[⛺ name](/expeditions/<id>)`; the Buddy posted it and the post tool treated the relative path
+  as a media attachment. The result now carries `page` (the path as data) and `next` says the badge
+  is already in the chat; `BUDDY_TOOL_GUIDE` says to post no link.
+- The badge lands as a threaded reply to the owner's launch post in a DM (kept; README says so).
+- Out of scope: P8, an orphan MCP relay process after the server is killed (pre-existing Buddies
+  behavior).

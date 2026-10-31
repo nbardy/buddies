@@ -15,6 +15,12 @@ export interface ResolvedBuddyConversation {
   execution: BuddyExecution;
 }
 
+/** A turn's cwd: the workspace root, or a run's own worktree (expeditions host.ts turnDirectory).
+ * 2026-11-01 smoke incident: crew attempts ran in the owner's checkout, isolated only by a brief,
+ * and a Codex sandbox rooted there could not write the attempt worktree. */
+export type TurnDirectory = { t: 'workspace' } | { t: 'worktree'; runId: string; path: string };
+export const WORKSPACE_DIRECTORY: TurnDirectory = { t: 'workspace' };
+
 const MAX = { soul: 10_000, memory: 6_000, tasks: 4_000 } as const;
 const BRIEFING_MAX_CHARACTERS = 40_000;
 
@@ -37,7 +43,7 @@ export const BUDDY_TOOL_GUIDE = [
   'Detailed notes: agent_notes/<date>_<topic>.md, written and searched with file tools.',
   'Background worker: post kind "request" with worker {provider, model} to {direct:[]} (you) or a report: a tracked run whose answer wakes you. While it runs, post {channel:{request:id, to:"worker"}} directs it and its {to:"parent"} asks you; each lands after the next tool call. Never shell out to agent CLIs.',
   'runs: scoped slim rows with waiting reasons, plus get/cancel. schedule: scoped cron runs. team: list rows, then get one body.',
-  'expedition: for a big, fuzzy goal with unknown steps, parallel attempts and a checkable done; suggest it, never launch unasked. Asked ("launch an expedition: <goal>. Done when <check>. Budget <N> attempts"), fill name, goal, done (a command check when testable) and maxAttempts from context; ask the owner only for a missing done check or budget; the rest have defaults the result lists. Use draft when unsure, then launch and share the returned link. Steer with lessons.',
+  'expedition: for a big, fuzzy goal with unknown steps, parallel attempts and a checkable done; suggest it, never launch unasked. Asked ("launch an expedition: <goal>. Done when <check>. Budget <N> attempts"), fill name, goal, done (a command check when testable) and maxAttempts from context; ask the owner only for a missing done check or budget; the rest have defaults the result lists. Use draft when unsure, then launch; the host posts its badge in this chat, so post no link. Steer with lessons.',
   'Never edit the Buddies database or files to change Buddy state. A denied tool is an authority boundary; do not route around it.',
   'Do not copy task status into memory; save shared work in files, linked from posts. Workers: post a one-line progress note on the Task at each milestone; the final answer carries evidence paths (commits, files, test names), not prose.',
   'Owner-needed action: request it in the owner DM ({direct:["owner"]}), naming the action and risk; act only after an explicit answer.',
@@ -71,7 +77,8 @@ export async function readBuddyState(core: BuddiesCore, buddyId: string) {
 export async function composeBriefing(
   core: BuddiesCore,
   context: BuddyContext,
-  installed: InstalledAgent
+  installed: InstalledAgent,
+  directory: TurnDirectory
 ): Promise<ResolvedBuddyConversation> {
   const buddy: Buddy = await core.getBuddy(context.buddyId);
   if (buddy.status !== 'active')
@@ -133,7 +140,7 @@ export async function composeBriefing(
     // Steady-state turns re-brief only when this changes, so it covers what the Buddy must see
     // promptly (identity, soul, memory) and leaves out what changes every turn (tasks).
     memoryGeneration: `memory:${working?.revision ?? 0}:${longTerm?.revision ?? 0}:identity:${identity}`,
-    workingDirectory: workspace.rootPath,
+    workingDirectory: directory.t === 'worktree' ? directory.path : workspace.rootPath,
     execution: profileExecution(buddy, installed),
   };
 }
@@ -156,18 +163,29 @@ export type Briefings = ReturnType<typeof createBriefings>;
 /**
  * The runtime reads a briefing synchronously as it admits a turn, while the core is async. The
  * runner (and the conversation creator) warm the entry right before each turn, so `current` reads
- * what was just composed. A cold entry is an error, never an empty briefing.
+ * what was just composed. A cold entry is an error, never an empty briefing. A run with its own
+ * worktree is kept by run id, never under the Buddy's key: two concurrent attempt runs of one
+ * crew would otherwise start in whichever worktree warmed last. The runner forgets it at settle.
  */
-export function createBriefings(core: BuddiesCore, installed: () => InstalledAgent) {
+export function createBriefings(
+  core: BuddiesCore,
+  installed: () => InstalledAgent,
+  directoryOf: (context: BuddyContext) => Promise<TurnDirectory>
+) {
   const cache = new Map<string, ResolvedBuddyConversation>();
+  const runs = new Map<string, ResolvedBuddyConversation>();
   return {
     async warm(context: BuddyContext): Promise<ResolvedBuddyConversation> {
-      const resolved = await composeBriefing(core, context, installed());
-      cache.set(keyOf(context), resolved);
+      const directory = await directoryOf(context);
+      const resolved = await composeBriefing(core, context, installed(), directory);
+      if (directory.t === 'worktree') runs.set(directory.runId, resolved);
+      else cache.set(keyOf(context), resolved);
       return resolved;
     },
+    forget: (runId: string) => runs.delete(runId),
     current(context: BuddyContext): ResolvedBuddyConversation {
-      const resolved = cache.get(keyOf(context));
+      const own = context.coordinationRunId ? runs.get(context.coordinationRunId) : undefined;
+      const resolved = own ?? cache.get(keyOf(context));
       if (!resolved)
         throw new Error(`No briefing was composed for ${keyOf(context)} before its turn`);
       return resolved;

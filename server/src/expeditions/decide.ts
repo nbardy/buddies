@@ -17,14 +17,18 @@ import {
   deadlineMs,
   exploreAttempts,
   exploreCap,
+  hostVerifications,
   independentCheckSeats,
   integrating,
   latestGoalPanel,
+  managerCap,
+  managerTurns,
   panels,
   questionVerified,
   settled,
-  verifiedPanels,
+  verifiedClaims,
   waitsOn,
+  workerAttempts,
 } from './queries';
 
 // decide: state → intent entries (pure). The guardrails live here: every manager action is
@@ -80,28 +84,39 @@ export function decide(s: State, clock: Clock): Entry[] {
     push({ t: 'manager_applied', at, attemptId: pending.attemptId });
   }
   planCandidateValidations(s, clock, push);
+  closeHostVerified(s, push, at);
   settleDoneRequest(s, push, at);
   // Re-read through a call: applyAction mutates s.run, which TS's narrowing above cannot see.
   const now = runOf(s);
   if (now === 'finished' || now === 'paused') return withStatus(s, out, at);
 
-  // Spent only once nothing can still run: an attempt planned (by this very decision too),
-  // admitted, queued behind maxLive or custody, or live keeps the expedition open until it settles.
-  if (s.attempts.length >= s.charter.maxAttempts && quiescent(s)) {
+  // Manager decisions are not budgeted attempts (design.md R9); they stop at their own cap.
+  const managerLive = s.attempts.some((a) => a.spec.kind === 'manager' && a.phase.t !== 'ended');
+  const neverPlanned = managerTurns(s) === 0;
+  const decisionsLeft = managerTurns(s) < managerCap(s.charter);
+  if (s.run.t === 'running' && !managerLive && decisionsLeft && (neverPlanned || managerDue(s)))
+    push({ t: 'attempt_planned', at, attemptId: clock.nextId('m'), spec: { kind: 'manager' } });
+
+  // Spent only once nothing can still run: an attempt planned (by this very decision too, a
+  // manager included), admitted, queued behind maxLive or custody, or live keeps it open.
+  const spent =
+    workerAttempts(s) >= s.charter.maxAttempts
+      ? { reason: 'attempts_spent' as const, what: `All ${s.charter.maxAttempts} attempts used` }
+      : !decisionsLeft
+        ? {
+            reason: 'decisions_spent' as const,
+            what: `All ${managerCap(s.charter)} manager decisions used`,
+          }
+        : null;
+  if (spent && quiescent(s)) {
     push({
       t: 'finished',
       at,
-      reason: 'attempts_spent',
-      summary: `All ${s.charter.maxAttempts} attempts used; ${verifiedPanels(s).length} claims verified.`,
+      reason: spent.reason,
+      summary: `${spent.what}; ${verifiedClaims(s)} claims verified.`,
     });
     return withStatus(s, out, at);
   }
-
-  const managerLive = s.attempts.some((a) => a.spec.kind === 'manager' && a.phase.t !== 'ended');
-  const neverPlanned = !s.attempts.some((a) => a.spec.kind === 'manager');
-  const budgetLeft = s.attempts.length < s.charter.maxAttempts;
-  if (s.run.t === 'running' && !managerLive && budgetLeft && (neverPlanned || s.unseen.length > 0))
-    push({ t: 'attempt_planned', at, attemptId: clock.nextId('m'), spec: { kind: 'manager' } });
 
   // Host validations and merges in flight are work too: their results reach the next manager.
   // Work waiting on unverified dependencies (design.md R5) cannot start by itself, so it does not
@@ -121,6 +136,45 @@ export function decide(s: State, clock: Clock): Entry[] {
 }
 
 const runOf = (s: State): State['run']['t'] => s.run.t;
+
+/**
+ * A manager turn is due when it has something to act on. While the host validates or merges, a
+ * result that waits on it is not news yet: the manager could only say "awaiting validation"
+ * (2026-11-01 smoke incident: turns wasted on exactly that). Owner feedback is always news.
+ */
+function managerDue(s: State): boolean {
+  const hostHolds = s.doneRequest.t === 'validating' || integrating(s);
+  return s.unseen.some((e) => e.t === 'feedback' || (!hostHolds && !claimAwaitingValidation(s, e)));
+}
+
+/** An ended code claim whose candidate validation has not finished (charter command checks). */
+function claimAwaitingValidation(s: State, e: Entry): boolean {
+  if (e.t !== 'attempt_ended' || e.outcome.t !== 'work') return false;
+  const result = e.outcome.result;
+  if (result.result !== 'claim' || result.change.t !== 'commit') return false;
+  if (commandChecks(s.charter).length === 0) return false;
+  return !s.validations.some(
+    (v) =>
+      v.target.t === 'candidate' &&
+      v.target.claimAttemptId === e.attemptId &&
+      validationComplete(s, v)
+  );
+}
+
+/** A host-verified claim (queries.ts Verification) closes its open question verified, which
+ * unlocks the questions that wait on it (R5). The why names the host's proof. */
+function closeHostVerified(s: State, push: (e: Entry) => void, at: string): void {
+  for (const h of hostVerifications(s)) {
+    if (byId(s.questions, h.questionId)?.status !== 'open') continue;
+    push({
+      t: 'question_closed',
+      at,
+      questionId: h.questionId,
+      status: 'verified',
+      why: `host-verified: ${h.claimAttemptId} passed every command check (validation ${h.validationId}) and merged into ${s.repo.branch} as ${h.mergeSha.slice(0, 10)}`,
+    });
+  }
+}
 
 /** A host validation or merge still to run or finish, or a done waiting on one. */
 const hostBusy = (s: State) =>
@@ -309,7 +363,7 @@ function applyAction(
       if (question.scope === 'parked') return reject('parked questions need owner funding');
       if (question.scope === 'explore' && exploreAttempts(s) >= exploreCap(s.charter))
         return reject(`explore share spent (${exploreCap(s.charter)} attempts)`);
-      if (s.attempts.length >= s.charter.maxAttempts) return reject('attempt budget spent');
+      if (workerAttempts(s) >= s.charter.maxAttempts) return reject('attempt budget spent');
       if (action.seat >= s.charter.crew.work.length)
         return reject(`no work seat ${action.seat} (0..${s.charter.crew.work.length - 1})`);
       push({
@@ -327,7 +381,7 @@ function applyAction(
       if (claim.phase.t !== 'ended' || claim.phase.outcome.t !== 'work')
         return reject('that attempt has no parsed result');
       if (claim.phase.outcome.result.result !== 'claim') return reject('only claims are checked');
-      if (s.attempts.length + action.panel > s.charter.maxAttempts)
+      if (workerAttempts(s) + action.panel > s.charter.maxAttempts)
         return reject('attempt budget spent');
       // Independence: a check never runs on the model that made the claim.
       const seats = independentCheckSeats(s.charter, configOf(s.charter, claim.spec));
@@ -380,7 +434,9 @@ function applyAction(
       const question = byId(s.questions, action.question);
       if (!question) return reject(`no question ${action.question}`);
       if (action.status === 'verified' && !questionVerified(s, question.id))
-        return reject('a question closes verified only after a check verified it');
+        return reject(
+          'a question closes verified only after a check panel verified it, or its claim passed every command check and was integrated'
+        );
       push({
         t: 'question_closed',
         at,

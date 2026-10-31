@@ -9,6 +9,7 @@ import type { McpServerSpec } from '@nbardy/agent-cli';
 import { BuddiesCore } from '@unleashd/buddies-core';
 import { Ingest, defaultRoots } from '@unleashd/ingest';
 import express from 'express';
+import { createBriefings } from '../src/buddies/briefing';
 import { OWNER, buddyActor } from '../src/buddies/core';
 import { createBuddyEvents } from '../src/buddies/events';
 import type { ExecutionGate } from '../src/buddies/execution-gate';
@@ -1008,15 +1009,15 @@ test('command checks run on the host: each claimed commit is validated in a fres
     assert.deepEqual(v1.phase.treeStatus, { t: 'removed', branchDeleted: true });
     assert.equal(fs.existsSync(v1.phase.tree.path), false);
     assert.equal(git(f.repo, 'status', '--porcelain'), '', 'the shared checkout was never used');
-    // The manager planned when the claim ended saw it running; the next one is shown the result.
-    await f.answer(id, f.manager(id), json({ actions: [{ do: 'note', text: 'validating' }] }));
+    // No manager is woken while the claim's validation runs (it could only say "awaiting
+    // validation": 2026-11-01 smoke incident); the one planned once it finished is shown both.
     const shown = await f.core.getPost(
       OWNER,
       f.liveAttempts(id).find((a) => a.kind === 'manager')!.requestId
     );
     assert.match(
       shown.body,
-      /NEW SINCE YOUR LAST DECISION:\n- validation \w+ of candidate \w+ of \w+: FAILED — check 0 FAILED \(exit 3\): widget still broken/
+      /NEW SINCE YOUR LAST DECISION:\n- \w+ ended: CLAIM: fixed .*\n- validation \w+ of candidate \w+ of \w+: FAILED — check 0 FAILED \(exit 3\): widget still broken/
     );
 
     // A failed candidate is never merged into the expedition branch.
@@ -1080,6 +1081,17 @@ test('command checks run on the host: each claimed commit is validated in a fres
       )
     );
     assert.equal(git(f.repo, 'rev-parse', 'main'), git(f.repo, 'rev-parse', `${branch}^1`));
+    // Host-verified (design.md R9): its command checks passed and it merged, so its question
+    // closed verified with no panel, and it counts. 2026-11-01 smoke incident: a done expedition
+    // showed the question open and "0 verified".
+    assert.equal(s.questions[0].status, 'verified');
+    const v = f.host.view(id);
+    assert.deepEqual(
+      v.verifications.map((x) => [x.t, x.claimAttemptId]),
+      [['host', claimOfSha(good)]]
+    );
+    assert.equal(v.counts.verified, 1);
+    assert.match(v.badge, / 1 verified /);
     assert.equal(s.integrationTree.status.t, 'removed', 'the integration tree goes at finish');
     for (const v of s.validations) {
       if (v.phase.t !== 'started') throw new Error(`validation ${v.id} never started`);
@@ -1190,7 +1202,7 @@ test('work on a question waits (stage waiting, no worktree) until its dependency
           (e) =>
             e.t === 'rejected' &&
             e.action.do === 'close_question' &&
-            /closes verified only after a check verified it/.test(e.reason)
+            /closes verified only after a check panel verified it/.test(e.reason)
         )
     );
     assert.equal(stage(q2), 'waiting');
@@ -1354,9 +1366,8 @@ test('integration merges validated candidates one at a time onto the expedition 
     // The owner's checkout and main never moved.
     assert.equal(git(f.repo, 'rev-parse', 'main'), base);
     assert.equal(git(f.repo, 'status', '--porcelain'), '');
-    // A later manager is shown every result, conflict paths included (the one live now was
-    // briefed between merges, so it saw some of them still queued).
-    await f.answer(id, f.manager(id), json({ actions: [{ do: 'note', text: 'merging' }] }));
+    // No manager is planned while merges run; the next one is shown every result, conflict
+    // paths included.
     const shown = await f.core.getPost(
       OWNER,
       f.liveAttempts(id).find((x) => x.kind === 'manager')!.requestId
@@ -1726,7 +1737,11 @@ test('draft validates a charter without launching; launch fills only named defau
       action: { do: 'launch', charter: { ...sameModel, crew: undefined } },
     });
     assert.equal(launched.error, false, launched.text);
-    assert.match(launched.value.link, /^\[⛺ minimal\]\(\/expeditions\/minimal-/);
+    // The page path is data, never a markdown link to post: the host already posted the badge
+    // (2026-11-01 smoke incident: the posted link was refused as a missing media attachment).
+    assert.match(launched.value.page, /^\/expeditions\/minimal-[0-9a-f]{6}$/);
+    assert.equal('link' in launched.value, false);
+    assert.match(launched.value.next, /already in this chat/);
     assert.match(
       launched.value.launched,
       /done when \$ sh -c true \| budget 10 attempts, 2 live, 8h/
@@ -1755,38 +1770,176 @@ async function rpcLaunch(
     action: { do: 'launch', charter: charter(name, maxLive, done) },
   });
   assert.equal(launched.error, false, launched.text);
-  return launched.value as { id: string; link: string; launched: string; defaulted: string[] };
+  return launched.value as { id: string; page: string; launched: string; defaulted: string[] };
 }
 
-test('a manager that spends the last attempt on work keeps the expedition open until that work settles; a decomposing turn is followed by a manager, never "needs you"', async () => {
+test('the attempt budget counts work and check attempts only; the last result still reaches a manager; decisions stop at their own cap', async () => {
   const f = await fixture();
   try {
-    const launched = await rpc(f.spec(), 'expedition', {
-      action: { do: 'launch', charter: { ...charter('spent'), maxAttempts: 3 } },
-    });
-    assert.equal(launched.error, false, launched.text);
-    const id = launched.value.id as string;
-    // Attempt 1 only decomposes. The host assigns question ids, so the next decision must be
-    // planned to start work on them (review 2026-11-01: this went to "needs you").
+    // 2026-11-01 smoke incident: "Budget 6 attempts" allowed ONE work attempt, because manager
+    // decisions counted against it. Here a budget of 2 runs two work attempts after any number
+    // of decisions.
+    const launchBudget2 = async (name: string) => {
+      const launched = await rpc(f.spec(), 'expedition', {
+        action: { do: 'launch', charter: { ...charter(name), maxAttempts: 2 } },
+      });
+      assert.equal(launched.error, false, launched.text);
+      return launched.value.id as string;
+    };
+    const id = await launchBudget2('spent');
     await f.answer(id, f.manager(id), json({ actions: [question('Fix it', ['widget'])] }));
-    let s = f.stateOf(id);
-    assert.equal(s.run.t, 'running');
-    const q = s.questions[0].id;
-    // Attempt 2 spends the last slot on work: planned work is not a spent budget (review
-    // 2026-11-01: this finished `attempts_spent` in the same decision, the work never briefed).
+    const q = f.stateOf(id).questions[0].id;
+    const workOnce = async () => {
+      await f.answer(
+        id,
+        f.manager(id),
+        json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'go' }] })
+      );
+      const work = f.liveAttempts(id).find((a) => a.kind === 'work');
+      assert.ok(work, 'the work attempt was admitted and briefed');
+      await f.answer(id, work.id, json({ result: 'finding', statement: 'nope', evidence: [] }));
+    };
+    await workOnce();
+    await workOnce();
+    let v = f.host.view(id);
+    assert.deepEqual([v.counts.attempts, v.counts.decisions], [2, 4]);
+    assert.match(v.badge, / 2\/2 attempts /);
+    // The budget is spent, but the last result is news: a manager is shown it before the end.
+    assert.equal(f.stateOf(id).run.t, 'running');
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'note', text: 'out of budget' }] }));
+    const s = f.stateOf(id);
+    assert.equal(s.run.t === 'finished' && s.run.reason, 'attempts_spent');
+
+    // A manager whose every action is refused cannot spin: decisions have their own cap.
+    const spin = await launchBudget2('spin');
+    let turns = 0;
+    while (f.liveAttempts(spin).some((a) => a.kind === 'manager')) {
+      turns += 1;
+      const bogus = { do: 'close_question', question: 'q-none', status: 'dead', why: 'x' };
+      await f.answer(spin, f.manager(spin), json({ actions: [bogus] }));
+      assert.ok(turns <= 50, 'manager turns are bounded');
+    }
+    v = f.host.view(spin);
+    assert.equal(turns, v.counts.maxDecisions);
+    assert.deepEqual(v.run.t === 'finished' && v.run.reason, 'decisions_spent');
+    assert.equal(v.counts.attempts, 0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an attempt run starts in its own worktree (two concurrent runs of one crew do not collide), a manager in the integration tree, any other Buddy in its workspace; answering a hosted attempt wakes no extra crew run', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'dirs', 2);
     await f.answer(
       id,
       f.manager(id),
-      json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'go' }] })
+      json({ actions: [question('Widget', ['widget']), question('Docs', ['docs'])] })
     );
-    s = f.stateOf(id);
-    assert.equal(s.attempts.length, 3);
-    assert.equal(s.run.t, 'running');
-    const work = f.liveAttempts(id).find((a) => a.kind === 'work');
-    assert.ok(work, 'the last attempt was admitted and briefed');
-    await f.answer(id, work.id, json({ result: 'finding', statement: 'nope', evidence: [] }));
-    s = f.stateOf(id);
-    assert.equal(s.run.t === 'finished' && s.run.reason, 'attempts_spent');
+    const [q1, q2] = f.stateOf(id).questions.map((q) => q.id);
+    const managerId = f.manager(id);
+    const s0 = f.stateOf(id);
+    if (s0.crew.t !== 'ready') throw new Error('crew expected');
+    const crewId = s0.crew.buddyId;
+    const runOf = async (requestId: string) => {
+      const runs = await f.core.listRuns({ kind: 'buddy', buddyId: crewId }, 100);
+      const run = runs.find((r) => r.input.kind === 'post' && r.input.postId === requestId);
+      if (!run) throw new Error(`no run for ${requestId}`);
+      return run;
+    };
+    const context = (runId: string | null, buddyId = crewId) => ({
+      buddyId,
+      workspaceId: f.workspaceId,
+      coordinationRunId: runId,
+    });
+    const briefings = createBriefings(
+      f.core,
+      () => ({ kind: 'agent', provider: 'codex' }) as const,
+      (c) => f.host.turnDirectory(c)
+    );
+    const managerRun = await runOf(f.liveAttempts(id).find((a) => a.id === managerId)!.requestId);
+    await briefings.warm(context(managerRun.id));
+    assert.equal(
+      briefings.current(context(managerRun.id)).workingDirectory,
+      f.stateOf(id).integrationTree.path,
+      'a manager starts in the integration tree, never the owner checkout'
+    );
+
+    await f.answer(
+      id,
+      managerId,
+      json({
+        actions: [q1, q2].map((question, n) => ({ do: 'work', question, seat: n, brief: 'go' })),
+      })
+    );
+    const work = f.liveAttempts(id).filter((a) => a.kind === 'work');
+    assert.equal(work.length, 2);
+    const runs = await Promise.all(work.map((w) => runOf(w.requestId)));
+    // Both warm before either turn reads its briefing: a per-Buddy cache would hand both runs
+    // the worktree of whichever warmed last.
+    await Promise.all(runs.map((r) => briefings.warm(context(r.id))));
+    work.forEach((w, n) => {
+      assert.equal(
+        briefings.current(context(runs[n].id)).workingDirectory,
+        f.treeOf(id, w.id).path,
+        `${w.id} starts in its own worktree`
+      );
+    });
+    await briefings.warm(context(null, f.lead.id));
+    assert.equal(briefings.current(context(null, f.lead.id)).workingDirectory, f.repo);
+
+    // 2026-11-01 smoke incident: the crew answering its host-posted request enqueued a delivery
+    // to the crew itself (no conversation spawned the request), which woke an extra unmetered
+    // turn in the workspace root that obeyed the answer and committed on the owner's main.
+    await f.answer(id, work[0].id, json({ result: 'finding', statement: 'no', evidence: [] }));
+    const crewRuns = await f.core.listRuns({ kind: 'buddy', buddyId: crewId }, 100);
+    assert.deepEqual(
+      crewRuns.filter((r) => r.input.kind === 'deliver'),
+      [],
+      'no delivery wakes the crew'
+    );
+    const posted = f
+      .stateOf(id)
+      .attempts.filter((a) => a.phase.t === 'posted' || a.phase.t === 'ended');
+    assert.equal(crewRuns.length, posted.length, 'one crew run per attempt, no extra');
+  } finally {
+    await f.close();
+  }
+});
+
+test('owner model words resolve to the catalog id once, at ingestion; a name that picks no single model is refused with the valid ids', async () => {
+  const f = await fixture();
+  try {
+    const seats = (work: string, check: string) => ({
+      ...charter('models', 2, {
+        checks: [{ kind: 'command', argv: ['sh', '-c', 'true'], timeoutSeconds: 30 }],
+      }),
+      crew: {
+        manager: { provider: 'claude', model: 'sonnet' },
+        work: [{ provider: 'claude', model: work }],
+        check: [{ provider: 'codex', model: check }],
+      },
+    });
+    // 2026-11-01 smoke incident: "claude haiku" failed the launch (the catalog takes full ids).
+    const drafted = await rpc(f.spec(), 'expedition', {
+      action: { do: 'draft', charter: seats('claude haiku', 'gpt-6-sol') },
+    });
+    assert.equal(drafted.error, false, drafted.text);
+    assert.equal(drafted.value.ready, true, drafted.text);
+    assert.equal(drafted.value.charter.crew.work[0].model, 'claude-haiku-5-5');
+    // An alias kept as written would defeat the independence rule (it compares model strings).
+    assert.equal(drafted.value.charter.crew.manager.model, 'claude-sonnet-5-5');
+    assert.deepEqual(drafted.value.resolved, [
+      'manager: "sonnet" → claude-sonnet-5-5',
+      'work seat 0: "claude haiku" → claude-haiku-5-5',
+    ]);
+    // "sol" names three codex models: refused, listing the valid ids, never a guess.
+    const refused = await rpc(f.spec(), 'expedition', {
+      action: { do: 'draft', charter: seats('haiku', 'sol') },
+    });
+    assert.equal(refused.value.ready, false);
+    assert.match(refused.value.issues.join('\n'), /codex: sol \(valid: .*gpt-6-sol/);
   } finally {
     await f.close();
   }

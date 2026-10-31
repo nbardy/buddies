@@ -100,7 +100,7 @@ import { createUpstreamService } from './upstream/routes';
 import { type SessionRow, defaultRoots } from '@unleashd/ingest';
 import { validate as isUuid } from 'uuid';
 import { auditLocalAgents } from './audit.js';
-import { createBriefings } from './buddies/briefing';
+import { WORKSPACE_DIRECTORY, createBriefings } from './buddies/briefing';
 import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
 import { createChannelChangeFeed } from './buddies/channel-change-feed';
 import { createCliReplyGate } from './buddies/channel-reply-gate';
@@ -349,7 +349,14 @@ const buddyEvents = createBuddyEvents();
 const backgroundWork = new BackgroundWork();
 // A grant lives as long as its run's lease at most; settle and turn end revoke it sooner.
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
-const buddyBriefings = createBriefings(buddiesCore, () => installedAgent());
+// A turn's directory: an expedition attempt run starts in its own worktree (expeditions
+// host.ts `turnDirectory`); every other Buddy turn in its workspace root.
+const buddyBriefings = createBriefings(
+  buddiesCore,
+  () => installedAgent(),
+  (context) =>
+    expeditionHost ? expeditionHost.turnDirectory(context) : Promise.resolve(WORKSPACE_DIRECTORY)
+);
 let buddyMcp: McpEndpoint | null = null;
 let expeditionHost: ExpeditionHost | null = null;
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {

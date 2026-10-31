@@ -121,7 +121,8 @@ function Header({ v }: { v: ExpeditionView }) {
         <span className="ui-badge">{runLabel(v.run)}</span>
         <span className="ui-muted">
           {v.counts.live} live · {v.counts.queued} queued · {v.counts.verified} verified ·{' '}
-          {v.counts.attempts}/{v.counts.maxAttempts} attempts
+          {v.counts.attempts}/{v.counts.maxAttempts} attempts · {v.counts.decisions}/
+          {v.counts.maxDecisions} decisions
         </span>
       </div>
       <p className="ui-muted" style={{ margin: 0 }}>

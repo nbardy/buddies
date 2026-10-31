@@ -2,9 +2,11 @@ import type { BuddiesCore } from '@unleashd/buddies-core';
 import { z } from 'zod';
 import type { BuddyGrant } from '../buddies/grants';
 import type { ToolDeps } from '../buddies/mcp';
+import { createProviderCatalog } from '../providers/catalog-service';
 import type { ExpeditionHost, Launched } from './host';
 import {
   CharterRequest,
+  type ModelsOf,
   type Origin,
   type State,
   charterAdvice,
@@ -47,24 +49,36 @@ function notCrew(host: ExpeditionHost, grant: BuddyGrant, what: string): void {
   if (host.ofCrew(grant.buddyId)) throw new Error(`an expedition crew cannot ${what} expeditions`);
 }
 
-/** A markdown link renders clickable in every chat surface, DM transcripts included. */
-const linkOf = (s: State) => `[⛺ ${s.charter.name}](/expeditions/${s.id})`;
+/** The installed catalog's models for a provider (none for an unknown provider, which the seat
+ * check refuses by name). */
+const catalogModels: ModelsOf = (provider) =>
+  createProviderCatalog().providers.find((p) => p.id === provider)?.models ?? [];
 
-function launchReply(launched: Launched, defaulted: string[]) {
+/**
+ * The page path as plain data, never a link to post: the host already posted the clickable badge
+ * in the launch chat. 2026-11-01 smoke incident: the reply carried `[⛺ name](/expeditions/<id>)`,
+ * the Buddy posted it, and the post tool refused the relative path as a missing media attachment.
+ */
+const pageOf = (s: State) => `/expeditions/${s.id}`;
+const NEXT =
+  'The badge (it opens the page) is already in this chat, posted by the host: do not post the page path or a link. Tell the owner in one line what launched; updates post on their own, and the owner steers by replying in the expedition chat.';
+
+function launchReply(launched: Launched, defaulted: string[], resolved: string[]) {
   switch (launched.t) {
     case 'launched':
       return {
         id: launched.state.id,
-        link: linkOf(launched.state),
+        page: pageOf(launched.state),
         launched: charterSummary(launched.state.charter),
         defaulted,
-        next: 'Share the link with the owner. The badge and every update post on their own; the owner steers by replying in the expedition chat.',
+        resolved,
+        next: NEXT,
       };
     case 'already_running':
       // Not a fresh launch: the charter is the running one's, so no defaults are reported.
       return {
         id: launched.state.id,
-        link: linkOf(launched.state),
+        page: pageOf(launched.state),
         alreadyRunning: `An expedition named "${launched.state.charter.name}" launched from this conversation is still ${launched.state.run.t}; nothing new was launched. Stop it first, or use another name.`,
         running: charterSummary(launched.state.charter),
       };
@@ -84,19 +98,20 @@ export async function expeditionHandler(
 ): Promise<unknown> {
   switch (action.do) {
     case 'draft': {
-      const { charter, defaulted } = charterOf(action.charter);
+      const { charter, defaulted, resolved } = charterOf(action.charter, catalogModels);
       const issues = await host.issues(grant.workspaceId, charter);
       return {
         ready: issues.length === 0,
         issues,
         advice: charterAdvice(charter),
         defaulted,
+        resolved,
         charter,
       };
     }
     case 'launch': {
       notCrew(host, grant, 'launch');
-      const { charter, defaulted } = charterOf(action.charter);
+      const { charter, defaulted, resolved } = charterOf(action.charter, catalogModels);
       const launched = await host.launch({
         key: `${grant.conversationId}:${charter.name}`,
         charter,
@@ -104,7 +119,7 @@ export async function expeditionHandler(
         launcherId: grant.buddyId,
         workspaceId: grant.workspaceId,
       });
-      return launchReply(launched, defaulted);
+      return launchReply(launched, defaulted, resolved);
     }
     case 'status':
       return host.status(ownedBy(host, grant, action.id));

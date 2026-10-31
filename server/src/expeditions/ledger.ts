@@ -66,8 +66,15 @@ export type FeedbackVia = { t: 'tool' } | { t: 'chat'; postId: string; ord: stri
 /** The newest owner chat message already recorded as feedback. */
 export type ChatCursor = { t: 'start' } | { t: 'after'; ord: string };
 
-/** `setup_failed`: the expedition's integration worktree could not be made (design.md R3). */
-export type FinishReason = 'done' | 'attempts_spent' | 'deadline' | 'owner_stop' | 'setup_failed';
+/** `setup_failed`: the expedition's integration worktree could not be made (design.md R3).
+ * `decisions_spent`: the manager-decision cap (queries.ts managerCap) ran out (design.md R9). */
+export type FinishReason =
+  | 'done'
+  | 'attempts_spent'
+  | 'decisions_spent'
+  | 'deadline'
+  | 'owner_stop'
+  | 'setup_failed';
 
 /** The workspace repository, resolved by the launch preflight; `branch` is `expedition/<id>`. */
 export interface Repo {

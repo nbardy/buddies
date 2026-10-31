@@ -225,6 +225,7 @@ export function createRunner(options: {
 
   async function settle(run: Run, leaseToken: string, outcome: Outcome): Promise<void> {
     grants.revokeRun(run.id);
+    briefings.forget(run.id);
     try {
       const current = await core.getRun(run.id);
       // A run the owner asked to stop can only end cancelled (crate rule).

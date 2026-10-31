@@ -11,9 +11,9 @@ lives in the Buddy briefing (`BUDDY_TOOL_GUIDE`, server/src/buddies/briefing.ts)
 
 ```
 expedition({ action })
-  { do:'draft',  charter: CharterRequest }  → { ready, issues[], advice[], defaulted[], charter }   // launches nothing
-  { do:'launch', charter: CharterRequest }  → { id, link, launched, defaulted[], next }
-                                            | { id, link, alreadyRunning, running }   // same name from this conversation, still open
+  { do:'draft',  charter: CharterRequest }  → { ready, issues[], advice[], defaulted[], resolved[], charter }   // launches nothing
+  { do:'launch', charter: CharterRequest }  → { id, page, launched, defaulted[], resolved[], next }
+                                            | { id, page, alreadyRunning, running }   // same name from this conversation, still open
                                             | error listing every refusal
   { do:'status', id }                       → status text (badge, charter, questions, stages, attempts, validations, integration, cost)
   { do:'list' }                             → [{ id, badge }]
@@ -24,7 +24,16 @@ expedition({ action })
 named defaults when left out, and `defaulted` lists each one applied (never a silent fill):
 `inScope`/`outOfScope` none stated, `maxLive` 2, `hours` 8, `exploreShare` 0.2, `crew` the
 default crew (manager claude; work claude, codex; check codex, claude; provider default models).
-The ledger always stores the full charter.
+The ledger always stores the full charter. Seat models may be the owner's words: a name that is
+not a catalog id resolves once, at ingestion, when its words pick exactly one of that provider's
+catalog models by id or display name (`haiku` or `claude haiku` → `claude-haiku-5-5`, `sonnet` →
+`claude-sonnet-5-5`, `fable`), and `resolved` lists each one; a name that picks none or several
+(`codex sol`) is left as written and refused with the valid ids. Never an invented id.
+
+`page` is the expedition page's path as plain data, not a link to post: the host has already
+posted the clickable badge in the launch chat, and `next` tells the Buddy so. (2026-11-01 smoke:
+the old `link` was markdown with a relative path; a Buddy posted it and the post tool refused it
+as a missing media attachment.)
 
 `issues` (draft) and launch refusals are the same list, built in one place (host.ts
 `preflightOf`): the server may run expeditions (its execution gate is enabled, so never a copied

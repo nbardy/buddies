@@ -24,6 +24,9 @@ import {
   integrationLabel,
   integrationOf,
   liveWorkers,
+  managerCap,
+  managerDirectory,
+  managerTurns,
   outcomeDetail,
   questionOf,
   questionStage,
@@ -32,6 +35,7 @@ import {
   validationLabel,
   validationOf,
   waitsOn,
+  workerAttempts,
   worktreeOf,
 } from './model';
 
@@ -43,8 +47,8 @@ export const CREW_ROLE = [
   'Expedition crew. Each request you receive is one attempt of an expedition: a manager decision,',
   'a work attempt, or an independent check. Do exactly that one attempt, then answer the request.',
   'Your final message MUST end with one fenced ```json block in the shape the request names.',
-  'Never start other Buddies, workers or schedules. A work or check request names your git worktree:',
-  'work only there (cd there first), never in any other checkout; never push. When mentioned in a thread, use the `expedition` tool',
+  'Never start other Buddies, workers or schedules. A work or check request names your git worktree, where your turn starts:',
+  'work only there, never in any other checkout; never push. When mentioned in a thread, use the `expedition` tool',
   '(status) to answer questions about your expedition. The host records each owner message in your chat with the owner as',
   'steering by itself (pause, resume, stop, "lesson: …", anything else a note for the manager): just acknowledge it briefly.',
 ].join(' ');
@@ -173,7 +177,8 @@ function managerBrief(s: State, id: string): string {
     'You manage this expedition for one decision. Read the state, decide the next actions, answer.',
     charterText(c),
     lessonsText(s),
-    `LIMITS: ${s.attempts.length}/${c.maxAttempts} attempts used, ${liveWorkers(s).length} live, ${queued(s).length} queued, max ${c.maxLive} live. Explore questions may use at most ${exploreCap(c)} work attempts.`,
+    `YOUR DIRECTORY: ${managerDirectory(s)} (the expedition branch's integration tree, or the repository root before it exists). Read only: never edit, commit or run git commands that change it; the host merges there.`,
+    `LIMITS: ${workerAttempts(s)}/${c.maxAttempts} work and check attempts used, ${liveWorkers(s).length} live, ${queued(s).length} queued, max ${c.maxLive} live. Explore questions may use at most ${exploreCap(c)} work attempts. This is decision ${managerTurns(s)} of at most ${managerCap(c)}; you are woken only when there is something to act on, never to wait for the host.`,
     `CREW: work seats ${c.crew.work.map((w, i) => `${i}=${seatLabel(w)}`).join(', ')}. Checks run on ${c.crew.check.map(seatLabel).join(', ')}, never on the claim's own model; a panel of n checks verifies by majority. Spread competing approaches across seats.`,
     `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet: plan first'}`,
     `ATTEMPTS:\n${
@@ -192,7 +197,7 @@ function managerBrief(s: State, id: string): string {
       '- Start parallel work: one "work" action per question attempt; the host queues beyond the live limit.',
       '- Each question owns file paths (repo-relative prefixes, "." = whole repo). Work on overlapping paths runs one at a time, so split questions by the files they touch to run them in parallel.',
       '- "after" lists question ids a question depends on: work on it waits (stage waiting, not refused) until each is closed verified. Integrate a dependency\'s claim before closing it when the dependent work builds on its code.',
-      '- A claim counts only after "check". Ask a check with goal:true when a claim should satisfy the judged DONE WHEN items.',
+      '- A claim counts as verified after a "check" panel verifies it, or (host-verified) when its candidate validation PASSED every command check and you integrated it: the host then closes its question verified, which unlocks the questions after it. Ask a check with goal:true when a claim should satisfy the judged DONE WHEN items: those always need a panel.',
       '- Command checks ($ …) are run by the host on every claimed commit and on the expedition branch head at done; no agent runs or reports them. A claim whose validation FAILED is not done: send work to fix it.',
       '- When different approaches fail the same way, the problem is probably upstream: add a question about measurement or setup.',
       '- Kill (close dead) what a check refuted twice or a prediction falsified. Do not repeat work already in ATTEMPTS.',
@@ -243,7 +248,7 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
     `YOUR BRIEF:\n${spec.brief}`,
     [
       `YOUR WORKTREE: ${tree.path} (branch ${tree.branch}, based on ${tree.baseSha}).`,
-      'Work and commit ONLY in that directory, on that branch: cd there first. Never edit any other',
+      'Your turn starts there. Work and commit ONLY in that directory, on that branch. Never edit any other',
       `checkout. Your files: ${q.paths.join(', ')}. A code claim must name its commit's full sha;`,
       'the host runs the command checks in DONE WHEN on that exact commit.',
     ].join(' '),
@@ -274,7 +279,7 @@ function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): st
     `CLAIM: ${statement.statement}`,
     [
       `YOUR WORKTREE: ${tree.path}, checked out at ${tree.baseSha} (the claim names ${changeLabel(statement.change)}; branch ${tree.branch}).`,
-      'Reproduce the claim there only: cd there first, never create other worktrees, never edit any',
+      'Your turn starts there. Reproduce the claim there only: never create other worktrees, never edit any',
       'other checkout, and do not commit.',
     ].join(' '),
     `EVIDENCE CITED: ${statement.evidence.join('; ') || '(none)'}`,

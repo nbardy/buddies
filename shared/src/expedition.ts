@@ -7,7 +7,13 @@ export type ExpeditionRun =
   | { t: 'waiting_owner'; question: string }
   | {
       t: 'finished';
-      reason: 'done' | 'attempts_spent' | 'deadline' | 'owner_stop' | 'setup_failed';
+      reason:
+        | 'done'
+        | 'attempts_spent'
+        | 'decisions_spent'
+        | 'deadline'
+        | 'owner_stop'
+        | 'setup_failed';
       summary: string;
     };
 
@@ -121,8 +127,12 @@ export interface ExpeditionView {
   crew: { t: 'pending' } | { t: 'ready'; buddyId: string; chatChannelId: string };
   roster: { manager: string; work: string[]; check: string[] };
   counts: {
+    /** Work and check attempts: what the owner's budget counts (design.md R9). */
     attempts: number;
     maxAttempts: number;
+    /** Manager decisions, bounded apart from the budget. */
+    decisions: number;
+    maxDecisions: number;
     live: number;
     maxLive: number;
     queued: number;
@@ -138,6 +148,18 @@ export interface ExpeditionView {
     goal: boolean;
     verdict: 'pending' | 'verified' | 'not_verified';
   }[];
+  /** Each verified claim and why: a panel's majority, or the host's passed command checks plus
+   * its merge into the expedition branch (design.md R9). */
+  verifications: (
+    | { t: 'panel'; questionId: string; claimAttemptId: string; panelId: string }
+    | {
+        t: 'host';
+        questionId: string;
+        claimAttemptId: string;
+        validationId: string;
+        mergeSha: string;
+      }
+  )[];
   reflections: { at: string; text: string }[];
   lessons: string[];
 }

@@ -41,7 +41,12 @@ import { buddyWrite, retryFailedReply } from '../../client/src/components/buddie
 import { choiceLabel, mentionChoice } from '../../client/src/components/buddies/channel-text';
 import { scheduleFieldsOf } from '../../client/src/components/buddies/schedule-fields';
 import { reorderTasks } from '../../client/src/components/buddies/task-actions';
-import { BUDDY_TOOL_GUIDE, composeBriefing, createBriefings } from '../src/buddies/briefing';
+import {
+  BUDDY_TOOL_GUIDE,
+  WORKSPACE_DIRECTORY,
+  composeBriefing,
+  createBriefings,
+} from '../src/buddies/briefing';
 import { type StableConversationPorts, slotOf } from '../src/buddies/buddy-conversation-slots';
 import {
   type GateVerdict,
@@ -215,7 +220,7 @@ async function world(reopen?: string, realProvider = false) {
   mkdirSync(agentBin, { recursive: true });
   writeFileSync(join(agentBin, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
   const installed = () => installedAgent({ PATH: agentBin });
-  const briefings = createBriefings(core, installed);
+  const briefings = createBriefings(core, installed, async () => WORKSPACE_DIRECTORY);
   // A transcript per conversation id, read through the same MessageSource shape production uses.
   const transcripts = new Map<string, MessagePage['messages']>();
   const endpoint = await startMcpEndpoint({
@@ -3395,7 +3400,12 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     );
     assert.equal(JSON.parse(receipt.payload).status, 'complete');
 
-    const next = await composeBriefing(core, chat('chat-B'), { kind: 'agent', provider: 'codex' });
+    const next = await composeBriefing(
+      core,
+      chat('chat-B'),
+      { kind: 'agent', provider: 'codex' },
+      WORKSPACE_DIRECTORY
+    );
     assert.match(next.briefing, /step 2 of 3 done/, 'working memory reaches the next chat');
     assert.match(next.briefing, /Owner prefers restrained UI/, 'long-term memory reaches it');
     const ownerTab = await core.readDoc(OWNER, {
@@ -3459,7 +3469,12 @@ test('briefing generation tracks its MCP guide and scope identity', async () => 
   const w = await world();
   const context = { buddyId: w.lead.id, workspaceId: w.ws };
   try {
-    const before = await composeBriefing(w.core, context, { kind: 'agent', provider: 'codex' });
+    const before = await composeBriefing(
+      w.core,
+      context,
+      { kind: 'agent', provider: 'codex' },
+      WORKSPACE_DIRECTORY
+    );
     assert.match(before.briefing, new RegExp(`Your ids: buddyId ${w.lead.id}`));
     const identity = createHash('sha256')
       .update(JSON.stringify([w.lead.name, w.lead.role, 0, w.lead.id, w.ws, BUDDY_TOOL_GUIDE]))

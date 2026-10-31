@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { BuddiesCore, ChannelRef } from '@unleashd/buddies-core';
-import type { ExpeditionView } from '@unleashd/shared';
+import type { BuddyContext, ExpeditionView } from '@unleashd/shared';
+import { type TurnDirectory, WORKSPACE_DIRECTORY } from '../buddies/briefing';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
@@ -23,6 +24,7 @@ import {
 } from './git';
 import { type MeterPorts, meterRequest } from './meter';
 import {
+  type Attempt,
   type Charter,
   type ClaimChange,
   type Clock,
@@ -46,6 +48,7 @@ import {
   fold,
   integrationOf,
   live,
+  managerDirectory,
   pendingEffects,
   startedOf,
   validationOf,
@@ -632,6 +635,46 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return [{ t: 'attempt_posted', at: now(), attemptId, requestId: write.post.id }];
   }
 
+  /** Where an attempt's run starts (design.md R9): a worker in its own worktree, a manager in
+   * the read-only integration tree. */
+  function attemptDirectory(s: State, attempt: Attempt, runId: string): TurnDirectory {
+    switch (attempt.spec.kind) {
+      case 'work':
+      case 'check':
+        return { t: 'worktree', runId, path: worktreeOf(s, attempt.id).path };
+      case 'manager':
+        return { t: 'worktree', runId, path: managerDirectory(s) };
+    }
+  }
+
+  /**
+   * κ for a Buddy turn's directory: a crew run answering one of its expedition's attempt requests
+   * starts in that attempt's directory; another crew run (a mention) in the manager's read-only
+   * one, never the owner's checkout; any other Buddy turn in its workspace root. The request is
+   * matched by its exact brief bytes, which the ledger holds before the post exists (a run can be
+   * claimed before `attempt_posted` is appended).
+   */
+  async function turnDirectory(context: BuddyContext): Promise<TurnDirectory> {
+    const id = crewOf(context.buddyId);
+    const runId = context.coordinationRunId;
+    if (!id || !runId) return WORKSPACE_DIRECTORY;
+    const s = stateOf(id);
+    const run = await core.getRun(runId);
+    const body =
+      run.input.kind === 'post' ? (await core.getPost(OWNER, run.input.postId)).body : undefined;
+    const attempt = s.attempts.find((a) => body !== undefined && s.briefs[a.id] === body);
+    return attempt
+      ? attemptDirectory(s, attempt, runId)
+      : { t: 'worktree', runId, path: managerDirectory(s) };
+  }
+
+  function crewOf(buddyId: string): string | undefined {
+    return [...ledgers.keys()].find((id) => {
+      const s = foldOrQuarantine(id);
+      return s?.crew.t === 'ready' && s.crew.buddyId === buddyId;
+    });
+  }
+
   // ---------- Tick ----------
 
   async function tickOnce(id: string): Promise<void> {
@@ -806,12 +849,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         .map((s) => ({ id: s.id, badge: badge(s, now()) }));
     },
     /** The expedition a crew Buddy belongs to, so a mentioned crew can answer about itself. */
-    ofCrew(buddyId: string): string | undefined {
-      return [...ledgers.keys()].find((id) => {
-        const s = stateOf(id);
-        return s.crew.t === 'ready' && s.crew.buddyId === buddyId;
-      });
-    },
+    ofCrew: crewOf,
+    turnDirectory,
     workspaceOf: (id: string) => stateOf(id).workspaceId,
     /** Tests drive ticks directly. */
     tick,

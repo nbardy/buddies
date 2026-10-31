@@ -23,6 +23,8 @@ import {
   integrationLabel,
   live,
   liveWorkers,
+  managerCap,
+  managerTurns,
   outcomeLabel,
   panels,
   questionStage,
@@ -31,7 +33,9 @@ import {
   validationComplete,
   validationLabel,
   validationPassed,
-  verifiedPanels,
+  verifications,
+  verifiedClaims,
+  workerAttempts,
 } from './model';
 
 // The expedition page's data: one pure projection of the folded ledger (no I/O), served by
@@ -65,12 +69,14 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       check: c.crew.check.map(seatLabel),
     },
     counts: {
-      attempts: s.attempts.length,
+      attempts: workerAttempts(s),
       maxAttempts: c.maxAttempts,
+      decisions: managerTurns(s),
+      maxDecisions: managerCap(c),
       live: liveWorkers(s).length,
       maxLive: c.maxLive,
       queued: queued(s).length,
-      verified: verifiedPanels(s).length,
+      verified: verifiedClaims(s),
       exploreCap: exploreCap(c),
     },
     questions: s.questions.map((q) => ({
@@ -92,6 +98,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       cost: attemptCost(s, a.id, a.phase),
     })),
     panels: panels(s),
+    verifications: verifications(s),
     reflections: s.reflections,
     lessons: s.lessons,
   };

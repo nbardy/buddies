@@ -96,6 +96,8 @@ const view: ExpeditionView = {
   counts: {
     attempts: 3,
     maxAttempts: 20,
+    decisions: 2,
+    maxDecisions: 42,
     live: 1,
     maxLive: 2,
     queued: 0,
@@ -144,6 +146,7 @@ const view: ExpeditionView = {
     },
   ],
   panels: [],
+  verifications: [],
   reflections: [{ at: '2026-11-01T00:05:00.000Z', text: 'Two approaches fail the same way.' }],
   lessons: [],
 };

@@ -4,8 +4,9 @@
 > disposable agents, an append-only ledger, and a human who steers by teaching
 > lessons.
 
-Status: **built on branch `feat/expeditions`** (2026-11-01; design.md Revision 2, R1–R7). Tested
-end to end through the real Buddies crate and MCP endpoint; not yet run on a real goal. See
+Status: **built on branch `feat/expeditions`** (2026-11-01; design.md Revision 2, R1–R9). Tested
+end to end through the real Buddies crate and MCP endpoint; one live smoke on a toy repository
+(design.md R9 lists what it found and the fixes); not yet run on a real goal. See
 [As built](#as-built-2026-11-01-branch-featexpeditions) and [How to start one](#how-to-start-one).
 
 | File | Contents |
@@ -68,7 +69,8 @@ primitives, using the history only as evidence.
 - In a Buddy chat: "Launch an expedition: get wind setup right in Engine E. Done when
   `pnpm test wind` passes. Budget 20 attempts." (see [How to start one](#how-to-start-one)).
 - It plans, runs on its own, and puts a live **badge** in the chat:
-  `⛺ e-wind · running · 4 live · 3 verified · 9/20 · 1.3M tokens`
+  `⛺ e-wind · running · 4 live · 3 verified · 9/20 attempts · 1.3M tokens` (attempts = work and
+  checks; manager decisions are not budgeted, they have their own cap)
 - Clicking the badge opens the **page**: tasks with their honest stage, workers (each with its
   exact instructions, branch, validations and result), reflections and the goal, beside the
   expedition chat; the header carries the integration line (branch, head, merges, last refusal)
@@ -104,17 +106,31 @@ All engine code is under `server/src/expeditions/`. The pure core (no I/O) is re
 
 Where things land:
 - **Badge**: one post (purpose `expedition_badge`, evidence `expedition:<id>`) in the chat the
-  launch came from; the tool result also returns a markdown link (DM transcripts render it).
+  launch came from, posted by the host as the launching Buddy: in a thread or channel, a reply in
+  that thread; in a DM, a threaded reply to the owner's launch message. The tool result returns
+  the page path as data (`page`) and tells the Buddy the badge is already there; it posts no link.
 - **Expedition chat**: the owner↔crew DM. Every update (questions, starts, results, checks,
   reflections, lessons, needs-you, finish) is a crew post there. Each owner message there is
   recorded by the host as steering (`feedback {via: chat}`): `pause`, `resume`, `stop`,
   `lesson: …`, else a note; the crew only acknowledges it.
 - **Attempts**: requests in the crew's note-to-self DM (plumbing), shown on the page with their
-  exact instructions.
+  exact instructions. Answering one wakes nobody (the host observes it); the crew is never handed
+  its own answers as new work (design.md R9, P1).
+- **Where runs start**: a work or check attempt's run starts in its own worktree; a manager's in
+  the expedition's integration tree (read only by its brief; the repository root before that tree
+  exists); a crew run that is no attempt (a mention) in the same place; every other Buddy turn in
+  its workspace root.
 
-Crew roster: `crew: { manager, work[], check[] }`, each `{provider, model?, reasoningEffort?}`.
+Crew roster: `crew: { manager, work[], check[] }`, each `{provider, model?, reasoningEffort?}`
+(a model may be the owner's words, e.g. `haiku`: it resolves to the catalog id at launch).
 The manager picks a work seat per attempt; checks run as panels (1–3) on seats other than the
-claim author's model and verify by strict majority.
+claim author's model and verify by strict majority. With command checks, a claim whose candidate
+validation passed and that was integrated is also verified (host-verified): its question closes
+verified and it counts on the badge. Judged done items always need a panel.
+
+Budget: `maxAttempts` counts work and check attempts. Manager decisions are bounded separately at
+`2 × maxAttempts + 2` (finish reason `decisions_spent`), and a manager is woken only when it has
+something to act on (never just to wait for a host validation or merge).
 
 Integration (design.md R3): the expedition owns `expedition/<id>`, checked out in one clean
 Cambium tree; the manager's `integrate` merges a validated claim's commit there (`--no-ff`, one at
@@ -143,9 +159,11 @@ launches anew. Recovery: each ledger line is one append batch, so a torn last li
 the append) is cut off whole at boot; a ledger that does not read or fold is quarantined (the
 page answers 409 with the reason) and the other expeditions keep running.
 
-Known gap (design.md R1): Buddy runs start in the workspace root, not the attempt's worktree; the
-brief sends the worker there. A run-level working directory needs the Buddies crate's
-`RunConfig`, outside this branch.
+Closed gap (design.md R1, R9): Buddy runs used to start in the workspace root with only the brief
+sending the worker to its worktree; they now start there (see "Where runs start").
+
+Known, out of scope: killing the server can leave the Buddy MCP relay process running (it
+predates expeditions; pre-existing Buddies behavior).
 
 Not built yet: external jobs (`Waiting(jobId)`), budget
 envelopes for Buddy launches, the retro/playbook loop, archiving finished crews.
@@ -163,15 +181,17 @@ What each part does:
   foo`). The host runs it on every claimed commit and on the expedition branch at done; no agent
   can report it passed. Otherwise say what a reviewer should confirm ("the docs describe the
   fix"), or "I'll judge it".
-- **Budget**: attempts (2–60). Optional extras, in plain words: "at most 3 at once", "stop after
-  6 hours", "don't touch the website", "use codex for the work".
+- **Budget**: attempts (2–60): work and check attempts; the manager's decisions are not counted.
+  Optional extras, in plain words: "at most 3 at once", "stop after 6 hours", "don't touch the
+  website", "use codex for the work", "check with claude haiku".
 
 Variants that work:
 - "Draft an expedition for … and show me the charter first." (the Buddy calls `draft`, shows the
   issues and defaults, and launches when you say go)
 - "This looks big. Should it be an expedition?" (the Buddy checks the four tests in mcp.md)
 
-After launch: the badge appears in the chat you asked in; click it for the page. Talk to the crew
+After launch: the badge appears in the chat you asked in (in a DM, as a threaded reply to your
+launch message); click it for the page. Talk to the crew
 in its chat on that page (or ask your Buddy to steer it): `lesson: never edit generated files`
 reaches every later brief; `pause`, `resume` and `stop` do what they say; anything else is a note
 the manager reads next, which is how you answer a "needs you". At done the finish post names the

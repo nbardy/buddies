@@ -111,8 +111,58 @@ export const CHARTER_DEFAULTS = {
 const crewLine = (crew: z.infer<typeof Crew>) =>
   `manager ${seatLabel(crew.manager)}; work ${crew.work.map(seatLabel).join(', ')}; check ${crew.check.map(seatLabel).join(', ')}`;
 
-/** κ for a launch: the full charter, and one line per default it applied. */
-export function charterOf(request: CharterRequest): { charter: Charter; defaulted: string[] } {
+/** A provider's catalog models (host: the installed provider catalog the seat check reads). */
+export type ModelsOf = (provider: string) => readonly { id: string; displayName: string }[];
+
+const nameTokens = (name: string) =>
+  name
+    .toLowerCase()
+    .split(/[\s\-_/.]+/)
+    .filter(Boolean);
+
+/**
+ * A seat's model as the catalog names it (design.md R9). Owners say "claude haiku" or "sonnet";
+ * the catalog takes `claude-haiku-5-5`. A name that is not a catalog id resolves when its words
+ * pick exactly one of the provider's models (by id or display name); anything else is left as
+ * written, and the seat check refuses it listing the valid ids (host.ts seatIssues). Never an
+ * invented id. 2026-11-01 smoke incident: "claude haiku" failed the launch; an alias kept as
+ * written would also defeat the check-independence rule, which compares model strings.
+ */
+function seatOf(
+  seat: WorkerConfig,
+  where: string,
+  models: ModelsOf
+): { seat: WorkerConfig; resolved: string[] } {
+  const model = seat.model;
+  const catalog = models(seat.provider);
+  if (model === undefined || catalog.some((m) => m.id === model)) return { seat, resolved: [] };
+  const want = nameTokens(model);
+  const matches = catalog.filter((m) => {
+    const have = new Set([...nameTokens(m.id), ...nameTokens(m.displayName)]);
+    return want.every((t) => have.has(t));
+  });
+  if (matches.length !== 1) return { seat, resolved: [] };
+  const id = matches[0].id;
+  return { seat: { ...seat, model: id }, resolved: [`${where}: "${model}" → ${id}`] };
+}
+
+function crewOf(crew: z.infer<typeof Crew>, models: ModelsOf) {
+  const manager = seatOf(crew.manager, 'manager', models);
+  const work = crew.work.map((w, i) => seatOf(w, `work seat ${i}`, models));
+  const check = crew.check.map((w, i) => seatOf(w, `check seat ${i}`, models));
+  return {
+    crew: { manager: manager.seat, work: work.map((x) => x.seat), check: check.map((x) => x.seat) },
+    resolved: [manager, ...work, ...check].flatMap((x) => x.resolved),
+  };
+}
+
+/** κ for a launch: the full charter, one line per default it applied, and one per seat model
+ * name it resolved to a catalog id. */
+export function charterOf(
+  request: CharterRequest,
+  models: ModelsOf
+): { charter: Charter; defaulted: string[]; resolved: string[] } {
+  const seats = crewOf(request.crew ?? CHARTER_DEFAULTS.crew, models);
   const charter: Charter = {
     ...request,
     inScope: request.inScope ?? CHARTER_DEFAULTS.inScope,
@@ -120,7 +170,7 @@ export function charterOf(request: CharterRequest): { charter: Charter; defaulte
     maxLive: request.maxLive ?? CHARTER_DEFAULTS.maxLive,
     hours: request.hours ?? CHARTER_DEFAULTS.hours,
     exploreShare: request.exploreShare ?? CHARTER_DEFAULTS.exploreShare,
-    crew: request.crew ?? CHARTER_DEFAULTS.crew,
+    crew: seats.crew,
   };
   const shown: Record<keyof typeof CHARTER_DEFAULTS, string> = {
     inScope: 'inScope: none stated (the goal is the scope)',
@@ -131,7 +181,11 @@ export function charterOf(request: CharterRequest): { charter: Charter; defaulte
     crew: `crew: the default crew (${crewLine(DEFAULT_CREW)})`,
   };
   const keys = Object.keys(shown) as (keyof typeof CHARTER_DEFAULTS)[];
-  return { charter, defaulted: keys.filter((k) => request[k] === undefined).map((k) => shown[k]) };
+  return {
+    charter,
+    defaulted: keys.filter((k) => request[k] === undefined).map((k) => shown[k]),
+    resolved: seats.resolved,
+  };
 }
 
 /**

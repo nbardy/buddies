@@ -606,6 +606,29 @@ fn a_worker_request_runs_on_its_own_config_and_returns_to_the_spawner() {
     assert!(matches!(inform, Err(CoreError::Invalid(_))), "an inform starts no run to configure");
 }
 
+// 2026-11-01 expedition smoke incident: a host posts a self-request for a Buddy with no
+// conversation (an expedition attempt). Its answer and its failure notice used to enqueue a
+// conversation-less delivery that woke an extra turn in the workspace root, which obeyed the answer
+// as instructions. No conversation spawned it, so nobody is told.
+#[test]
+fn a_hosted_self_request_answer_wakes_no_spawner() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
+    let hosted = |body: &str, key: &str| PostInput { from_conversation_id: None, ..request(body, key) };
+    let answered = s.post(&buddy("mid"), me_only(), hosted("attempt 1", "h1")).unwrap();
+    let failed = s.post(&buddy("mid"), me_only(), hosted("attempt 2", "h2")).unwrap();
+    let a = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    let b = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    s.bind_run(&a.run.id, &a.lease_token, "attempt-a").unwrap();
+    s.answer(&buddy("mid"), AnswerInput { from_conversation_id: Some("attempt-a".into()), ..answer_input(&answered.id, "brief: commit on main", "a1") }).unwrap();
+    s.settle_run(&a.run.id, &a.lease_token, Outcome::Complete { text: "done".into() }).unwrap();
+    s.settle_run(&b.run.id, &b.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() }).unwrap();
+    assert_eq!(s.get_post(&Actor::Owner, &failed.id).unwrap().request, RequestState::Failed);
+    let woke = s.claim_run(lease(60_000), &[]).unwrap();
+    assert!(woke.is_none(), "neither the answer nor the failure notice wakes a spawner turn: {woke:?}");
+}
+
 #[test]
 fn two_answerers_race_and_exactly_one_answer_lands() {
     let f = fixture();
