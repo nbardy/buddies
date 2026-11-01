@@ -97,8 +97,10 @@ All engine code is under `server/src/expeditions/`. The pure core (no I/O) is re
 | Briefs (manager / work / blind check / repair), answer parsing, owner chat words | `briefs.ts` |
 | Host: ticks (typed observation, failure backoff), one handler per effect, launch/steer | `host.ts` |
 | Ledger file: durable append (fsync, cut back on failure), exclusive create, boot read | `store.ts` |
-| Git: preflight, Cambium worktrees, claim checks, merges, releases | `git.ts` |
-| Host-run command checks (curated env, process group, timeout) | `command.ts` |
+| Git: preflight, Cambium worktrees, claim checks, merges (hooks off, scrubbed env) | `git.ts` |
+| Tree release: guard ladder, salvage refs, ignored-output harvest, forced remove | `release.ts` |
+| Host-run command checks (curated env, throwaway HOME/TMPDIR, process group, timeout) | `command.ts` |
+| Validator source pins and the `expedition.validation/v1` report | `pins.ts` |
 | Measured attempt cost (tokens from the run's sessions) | `meter.ts` |
 | The `expedition` Buddy tool (draft, launch, status, list, steer) | `tool.ts` |
 | Page data `GET /api/buddies/expeditions/:id` | `view.ts`, `routes.ts`; type `shared/src/expedition.ts` |
@@ -143,6 +145,22 @@ too). One that cannot be read gets ONE repair request on the same seat (it quote
 the schema); a work attempt still unreadable after that whose branch holds commits ends as
 `unreported_commits` with the shas, and the manager may `claim` one, which the host checks
 against that attempt's branch and paths before it is validated like any claim.
+
+A check panel's verdict counts only when it is explicit: exactly one verdict object, ending the
+answer (a quoted example followed by the real verdict, or prose after it, is not a verdict).
+
+Host-run checks (design.md R11): each runs with a throwaway HOME and TMPDIR beside its tree, never
+the owner's. The repository files its argv names are hashed at the target commit before the run and
+re-read after; a check that changed its own validator is an `error`, and every check result carries
+its `expedition.validation/v1` report. A check job interrupted by a server restart is recorded
+`validation_interrupted` and re-run on the same commit in a fresh tree. Host git never runs
+repository hooks.
+
+Stop and release: when an expedition finishes, its live attempts' runs are cancelled the way the
+owner's Stop cancels them; one still running 5 minutes later is ended `abandoned`. A tree is
+removed only past a guard ladder (no uncommitted changes, on its branch, no half-done merge); its
+unintegrated commits are first pinned at `refs/salvage/expeditions/<id>/<tree>` and its ignored
+`output/` copied to `<expeditions root>/<id>/harvest/<tree>/`; a refused tree is left for the owner.
 
 Budget: `maxAttempts` counts work and check attempts. Manager decisions are bounded separately at
 `2 × maxAttempts + 2` (finish reason `decisions_spent`), and a manager is woken only when it has

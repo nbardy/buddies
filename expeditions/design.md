@@ -639,7 +639,8 @@ was integrated. Ledgers written before R11 fold through one κ (`ledger.ts canon
 data; the goal command never becomes a candidate gate by default), and a `validation_planned`
 without `checks` gets the charter's commands, which is what it ran. Trust note: the manager (an
 agent) now names commands the host runs. They run with the same curated environment as done
-commands, on agent-written code that a done command would run anyway.
+commands (and, since #3, a throwaway HOME and TMPDIR), on agent-written code that a done
+command would run anyway.
 
 **L2 — answers lost on format.** The manager answered a bare JSON object, the worker that
 committed the verifier (`w64130b`) a prose summary; both became `malformed` and the commit was
@@ -703,30 +704,95 @@ finished expedition with nothing live (`expeditionPollMs`); `buddies_changed` st
 kind. A missing attempt branch is typed (`BranchState.missing`): `no_code` on it is not held, and
 release removes the tree without pretending to drop a branch (it used to count as zero commits).
 
-**Still open (R11 part 2).** Stop and deadline cancel live attempts (#2); a throwaway HOME and
-TMPDIR for checks (#3); a scrubbed git environment with `core.hooksPath=/dev/null` (#7); forced
-release with a submodule (#9); checks across a restart (#10); and the oompa ports below.
+**Audit #2 — stop and deadline cancel live attempts.** Once an expedition is finished (any
+reason), each posted attempt gets one `cancel_attempt` effect: the host lists the crew's runs for
+that attempt's requests and cancels every unsettled one exactly as the owner's Stop does (the
+crate's `cancelRun`, then the `cancelled` event the runner kills the turn on), recording
+`attempt_cancel_requested {runIds}`. A run that ends answers or fails as usual; one still not ended
+`CANCEL_GRACE_MS` (5 min) after the request is ended by the host as `abandoned {reason}`, so its
+tree and slot are released instead of held by a run that ignored its stop. A recorded brief is
+still posted after finish (it may already exist) and is then cancelled the same way.
+
+**Audit #3 — a throwaway HOME for checks.** `runCommand` takes a scratch directory beside the
+validation tree (`<tree>.scratch`, never inside it, so a "clean checkout" check is not disturbed),
+makes `home/` and `tmp/` there empty for the run, passes them as `HOME` and `TMPDIR`, and removes
+them after. The curated environment no longer carries the owner's HOME, so a check cannot read
+`~/.ssh`, `~/.aws` or a CLI's saved token. Network and separate-user isolation are not attempted
+(audit open question 6).
+
+**Audit #7 — host git without hooks or secrets.** Every host git and Cambium process runs with
+`gitEnv()`: an allowlist (PATH, HOME for the owner's git identity, USER, LOGNAME, LANG, LC_ALL,
+TZ, TMPDIR, `GIT_AUTHOR_*`/`GIT_COMMITTER_*`) plus `GIT_CONFIG_COUNT=1`,
+`core.hooksPath=/dev/null` as command-line config, which outranks a repository's own
+`core.hooksPath` and reaches Cambium's child git processes. A repository hook (post-checkout on a
+tree add, pre-merge-commit/post-merge on an integration) never runs for the host.
+
+**Audit #9 — release is forced once its guards pass.** Release moved to `release.ts`. A worker's
+tree goes through oompa's guard ladder in order: git cannot read it, it has uncommitted or
+untracked changes, it is off its own branch (when that branch exists), or a merge, rebase,
+cherry-pick or revert is half-done. Any rung refuses: the tree is `left {reason}`, never forced.
+Past the ladder, unintegrated commits are salvaged and ignored output harvested (below), and only
+then is the tree removed with `cambium remove -force`; a plain remove refuses a tree whose
+submodule was initialized ("working trees containing submodules cannot be moved or removed",
+reproduced), so such trees leaked. Validation trees are scratch: no dirty rung, but they are
+salvaged and harvested too.
+
+**Audit #10 — checks across a restart: typed interruption, re-run on the same sha.** The host
+appends `validation_running` before it starts a check job. A process that finds a validation
+`running` that it never started itself (it keeps the keys of jobs it started) knows the job died
+with an earlier process: it discards that tree (salvage and harvest first) and appends
+`validation_interrupted {release}`; the validation goes back to `planned` with `interruptions + 1`,
+and its next tree has a fresh name (`<validation>-r<n>`), so it never adopts the tree an orphaned
+check may still be writing into. Checks already recorded are kept; the unrecorded ones run again
+on the same immutable sha. Chosen over adoption because adoption needs a detached wrapper with
+pid and exit files that outlives the server, and a pid from another boot cannot be trusted; a
+re-run on an immutable commit is correct by contract and costs only its time. Known limit: the
+orphan is not killed (its tree is pulled away, so it fails fast).
+
+**Oompa ports.** Each has an incident-replay test (see the table below):
+- *Strict verdict parsing.* A check panel answer counts only with exactly one verdict object that
+  ends the answer: a quoted example verdict followed by the real one, or prose after the verdict
+  ("Actually NOT verified…"), is `malformed` (one repair turn, then not counted). The verdict enum
+  already refuses "not verified" and plain prose such as "NOT APPROVED".
+- *Validator source pins.* Before each check the host hashes (SHA-256) every repository file its
+  argv names, as committed at the target sha, and refuses to run when the tree's bytes differ;
+  after the run it re-reads them. A check that changed its own validator is recorded `error`
+  whatever it exited. Every `validation` entry carries its report
+  `{t:'expedition.validation/v1', targetSha, pins, pinCheck: held|changed|unpinned}`; entries
+  written before this fold as `unpinned` with reason `legacy`.
+- *Salvage ref.* Before a tree whose branch holds commits the expedition branch does not is
+  removed, the tip is pinned at `refs/salvage/expeditions/<id>/<attempt-or-validation>` and
+  recorded `preserved {salvaged}`. Unmerged attempt branches also stay, as before.
+- *Harvest of ignored output.* Before removal, ignored files under `output/` (`HARVEST_DIRS`) are
+  copied (copy-on-write where possible) into `<root>/<id>/harvest/<tree>/` at the same relative
+  paths and recorded `preserved {harvested, files, bytes}`. Over 512 MiB or 10 000 files the
+  harvest is refused whole and the tree is `left`, never half-copied.
 
 ### Lessons from oompa
 The oompa audit (2026-11-01) read oompa's history for the failures it paid for. Its durable value
 is that catalogue, not its loop, so expeditions take mechanisms one at a time with an incident
 replay each, and keep their own loop, ledger and integration.
+"Ported" means the mechanism is reimplemented here with an incident-replay test; "Idea" means
+only the lesson shaped an existing design; "Kept" means expeditions already had their own answer.
 
 | Oompa incident | Refinement | Expeditions |
 |---|---|---|
 | A dirty root index made every later `checkout main` fail | Abort the merge, clear MERGE_HEAD before releasing | Idea: `mergeCandidate` aborts an interrupted merge first (R3), in its own tree |
-| Run 9f004a39 deleted ~2.5 h of approved work | Clean up only after a successful merge; pin a `salvage/` ref | To port (part 2): `refs/salvage/expeditions/<id>/<attempt>` before deleting unintegrated work |
+| Run 9f004a39 deleted ~2.5 h of approved work | Clean up only after a successful merge; pin a `salvage/` ref | Ported: `refs/salvage/expeditions/<id>/<tree>` before removing a tree with unintegrated commits |
 | Merge-no-claim killed 32 of 36 worker lifetimes | Non-fatal, bounced back as a CLAIM prompt | Idea, done here: `unreported_commits` + the manager's `claim` (L2) |
 | Overlapping swarms: 18 of 22 stale-base rejections | One swarm per project | Idea: custody admission (R1) and one integration chain per expedition |
 | Dead runs showed "completed" for ~20 h | A truthful `stopped.json` | Idea: the ledger is the only state; finish reasons are typed |
-| A corrupt worktree entry burned 20/20 iterations; 124 checkouts left 9.7 GiB | Stale-worktree handling, then Cambium | Kept: Cambium trees, typed `worktree_failed` (R1); to port: removal guard ladder and harvest of ignored output |
+| A corrupt worktree entry burned 20/20 iterations; 124 checkouts left 9.7 GiB | Stale-worktree handling, then Cambium | Kept: Cambium trees, typed `worktree_failed` (R1). Ported: the removal guard ladder, then a forced remove (#9), and the harvest of ignored output (swarm 455987ea lost a paid run's raw gauges to a "clean" removal) |
 | A retry started a model on the wrong base | Bounded create plus a verified HEAD | Kept: adoption checks branch and base (R1); idea: merge checks the head (R11 #6) |
 | Swarm 455987ea left claims stuck `in_progress` | CAS release of abandoned claims | Does not apply: expeditions have no shared claim queue; the ledger is single-writer per expedition (serial chain) |
 | Swarm e992a8d9 resumed 9 times against a missing target | Typed blocked returns | Kept: `blocked {need}` and typed outcomes |
 | The "stale task loop" | A no-diff merge completes the task | Kept: `no_code` claims, checked against the branch (R2) |
 | Reviews judged on `--stat`, biased verdicts | Real diff, latest round, neutral wording | Idea: blind checks reproduce at the candidate commit (R2) |
-| `\bAPPROVED\b` counted "NOT APPROVED" | Strict explicit-approval parsing | To port (part 2): strict panel verdict parsing |
+| `\bAPPROVED\b` counted "NOT APPROVED" | Strict explicit-approval parsing | Ported: one verdict that ends the answer. Also fixed at the source: the Buddies oompa host now requires `task_execution`, so oompa never falls back to that queue path |
 | A `$&` in a diff crashed every review | `Matcher/quoteReplacement` | Idea: briefs are built by concatenation, never regex replacement |
 | One hung cycle burned 434 minutes | Three counters collapsed to one knob | Idea: one attempt budget plus a derived decision cap (R9 P3), timeouts on every check |
 | The first startup died on a closed stdin | Probe the workers' real execution path | Idea: the smoke runs real crew turns (R9) |
-| Validator replaced by the candidate | SHA-256 pins before and after, typed report | To port (part 2): pins on a check's files at the candidate sha, `expedition.validation/v1` |
+| Validator replaced by the candidate | SHA-256 pins before and after, typed report | Ported: pins on the files a check's argv names at the target sha, verified after the run, `expedition.validation/v1` in every `validation` entry |
+| Only the oompa host survived a restart (detached wrapper with pid and exit files) | Process adoption | Idea only: a typed `validation_interrupted` and a re-run on the same sha in a fresh tree (#10); adoption needs a wrapper that outlives the server |
+| Its harness adapters are a thin pipe to `agent-cli` | A catalogue of provider quirks | Idea only: crew turns run through the Buddy runner, which owns the harness |
+| Its worker loop is one ~420-line loop/recur | Bounded resumes, wrap-up nudge, salvage on death | Idea only: attempts stay single-shot (one request, one immutable commit); retries are typed outcomes, never a second loop |

@@ -74,7 +74,10 @@ Results go to the chat the launch came from (the badge) and to the expedition ch
 owner↔crew DM). The owner steers by writing in that chat: the host records each owner message as
 `feedback` (`pause`, `resume`, `stop`, `extend 3h`, `lesson: …`, else a note), no tool call
 needed. `resume` re-plans: the next manager decision runs under the host's current rules, which
-is how a run left at "needs you" continues after a host upgrade (nothing resumes by itself). A crew
+is how a run left at "needs you" continues after a host upgrade (nothing resumes by itself).
+`stop` (and the deadline) also cancels the live attempts' runs, as the owner's Stop does; a run
+still going 5 minutes later is ended `abandoned` and its tree released (unintegrated commits are
+pinned at `refs/salvage/expeditions/<id>/<tree>` first). A crew
 Buddy cannot launch or steer expeditions (status only), and a Buddy sees and steers only its own
 workspace's expeditions. Not built: `ask`, `ledger`, the budget
 envelope and the AmendGoal/RaiseBudget proposals below.
