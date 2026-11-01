@@ -35,16 +35,34 @@ export const Crew = z
  * reflection) in a fresh clean worktree at the commit under validation; exit 0 passes. `judged`:
  * a statement a blind goal-check panel verifies by strict majority.
  */
+/**
+ * One argv element a host-run check may carry, checked once here (audit 2026-11-01 #5): a NUL byte
+ * makes `spawn` throw before the check starts, and a thrown check job was re-run on every tick (a
+ * hot loop). The executable must not carry stray whitespace either: it is never a shell word.
+ */
+const ArgvWord = z
+  .string()
+  .min(1)
+  .refine((w) => !w.includes('\0'), { message: 'an argv element may not contain a NUL byte' });
+export const Argv = z
+  .array(ArgvWord)
+  .min(1)
+  .max(64)
+  .refine((argv) => argv[0] === argv[0].trim(), {
+    message: 'argv[0] (the executable) may not start or end with whitespace',
+  });
+const TimeoutSeconds = z
+  .number()
+  .int()
+  .min(1)
+  .max(6 * 3600);
+
 export const DoneCheck = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('command'),
-      argv: z.array(z.string().min(1)).min(1).max(64),
-      timeoutSeconds: z
-        .number()
-        .int()
-        .min(1)
-        .max(6 * 3600),
+      argv: Argv,
+      timeoutSeconds: TimeoutSeconds,
     })
     .strict(),
   z.object({ kind: z.literal('judged'), text: z.string().trim().min(1).max(1000) }).strict(),
@@ -235,7 +253,7 @@ export function charterAdvice(c: Charter): string[] {
     ...(checks.some((x) => x.kind === 'command')
       ? []
       : [
-          'no command check: if completion can be tested, add one (e.g. {kind:"command", argv:["pnpm","test"], timeoutSeconds:600}); the host runs it on every claimed commit and at done',
+          'no command check: if completion can be tested, add one (e.g. {kind:"command", argv:["pnpm","test"], timeoutSeconds:600}); the host runs it on the expedition branch head at done',
         ]),
     ...(c.outOfScope.length > 0 ? [] : ['no outOfScope fence: name what the crew must not touch']),
   ];
@@ -303,6 +321,31 @@ export const CustodyPath = z
   })
   .transform((p) => p.replace(/^(\.\/)+/, '').replace(/\/+$/, '') || '.');
 
+/**
+ * How a question's claims are accepted (design.md R11). `command`: the host runs this argv on the
+ * claim's immutable candidate commit in a fresh tree, exactly as it runs the charter's checks at
+ * done (exit 0 passes). `panel`: an independent check panel on another model verifies the claim.
+ * The goal's done checks run only on the expedition branch at done, never on a candidate unless
+ * the manager names one as a question's acceptance. 2026-11-01 incident
+ * (own-engine-geometry-opti-1b837b): the charter's done command, fail-closed until every goal
+ * item passed, ran on every candidate, so no preparation commit could ever integrate.
+ */
+export const Acceptance = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('command'), argv: Argv, timeoutSeconds: TimeoutSeconds }).strict(),
+  z.object({ t: z.literal('panel') }).strict(),
+]);
+export type Acceptance = z.infer<typeof Acceptance>;
+
+/** A work claim as a manager names it for an attempt whose answer did not report it (R11). */
+export const ClaimDraft = z
+  .object({
+    statement: z.string().min(1),
+    sha: z.string().regex(/^[0-9a-f]{40}$/, 'a full 40-character commit sha'),
+    evidence: z.array(z.string()).max(20),
+    howToCheck: z.string().min(1),
+  })
+  .strict();
+
 const ref = z.string().min(1);
 export const ManagerAction = z.discriminatedUnion('do', [
   z
@@ -316,7 +359,17 @@ export const ManagerAction = z.discriminatedUnion('do', [
       /** Dependencies (design.md R5): question ids. Work on this question waits (stage
        * `waiting`) until each is closed verified; an empty list means none. */
       after: z.array(ref).max(20).default([]),
+      /** How its claims are accepted (R11): required, never inferred from the goal. */
+      acceptance: Acceptance,
     })
+    .strict(),
+  /** Changes an open question's acceptance; claims validated before keep their validation. */
+  z
+    .object({ do: z.literal('set_acceptance'), question: ref, acceptance: Acceptance })
+    .strict(),
+  /** Claims the commits a work attempt made but did not report (R11): its answer was malformed. */
+  z
+    .object({ do: z.literal('claim'), attempt: ref, claim: ClaimDraft })
     .strict(),
   z
     .object({

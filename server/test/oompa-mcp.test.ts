@@ -436,6 +436,39 @@ test('ordinary launch Buddy can monitor and stop, while peers, foreign scope and
   }
 });
 
+test('a launch config without task_execution is refused: oompa would fall back to its queue worker', async () => {
+  // Audit 2026-11-01: with task_execution absent, oompa dispatches to its queue worker, whose
+  // reviewer counts any "APPROVED" substring as approval (so "NOT APPROVED" passes) and whose
+  // merge prompt works in the primary checkout. The host refuses such a config at launch.
+  const w = await fixture();
+  try {
+    const config = JSON.parse(fs.readFileSync(w.configPath, 'utf8'));
+    config.task_execution = undefined;
+    const queueOnly = path.join(w.scratch, 'queue-only.json');
+    fs.writeFileSync(queueOnly, JSON.stringify(config));
+    const refused = await rpc(w.endpoint.spec(w.owner()), 'oompa', {
+      action: {
+        kind: 'launch',
+        workspaceId: w.ws.id,
+        buddyId: w.buddy.id,
+        workspacePath: w.repo,
+        configPath: queueOnly,
+        maxSeconds: 60,
+      },
+      key: 'queue-only-launch',
+    });
+    assert.equal(refused.error, true, refused.text);
+    assert.match(refused.text, /task_execution/);
+    assert.equal(
+      fs.existsSync(path.join(w.scratch, 'oompa-executions')),
+      false,
+      'nothing launched'
+    );
+  } finally {
+    await w.close();
+  }
+});
+
 test('only the pinned host oracle can accept, integrates the exact candidate, and replay runs no oracle twice', async () => {
   const w = await fixture();
   try {

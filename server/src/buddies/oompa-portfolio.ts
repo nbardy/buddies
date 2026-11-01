@@ -88,7 +88,7 @@ export type PortfolioConfig = {
     buddy_id: string;
     [key: string]: unknown;
   };
-  task_execution?: {
+  task_execution: {
     validators: Record<string, { timeout_seconds: number; reconcile_on_rejection?: boolean }>;
     [key: string]: unknown;
   };
@@ -177,7 +177,7 @@ export function amendmentDelta(
     stable(without(base.task_backend, ['task_ids', 'owner_by_task', 'dependencies'])) !==
       stable(without(next.task_backend, ['task_ids', 'owner_by_task', 'dependencies'])) ||
     stable(
-      without(base.task_execution ?? {}, [
+      without(base.task_execution, [
         'validators',
         'task_readiness',
         'prepare_only_task_ids',
@@ -185,7 +185,7 @@ export function amendmentDelta(
       ])
     ) !==
       stable(
-        without(next.task_execution ?? {}, [
+        without(next.task_execution, [
           'validators',
           'task_readiness',
           'prepare_only_task_ids',
@@ -194,7 +194,7 @@ export function amendmentDelta(
       )
   )
     throw new Error('amendment changes frozen harness, model, spend or task budget controls');
-  if (next.resume_swarm_id !== undefined || next.task_execution?.owner_window !== undefined)
+  if (next.resume_swarm_id !== undefined || next.task_execution.owner_window !== undefined)
     throw new Error('resume identity and owner window are host-owned');
   const ids = new Set(next.task_backend.task_ids);
   for (const id of base.task_backend.task_ids) {
@@ -220,8 +220,8 @@ export function amendmentDelta(
     visited.add(id);
   }
   for (const id of ids) visit(id);
-  const oldValidators = base.task_execution?.validators ?? {};
-  const newValidators = next.task_execution?.validators ?? {};
+  const oldValidators = base.task_execution.validators;
+  const newValidators = next.task_execution.validators;
   const changed = Object.keys(newValidators).filter(
     (id) =>
       stable(without(oldValidators[id] ?? {}, ['reconcile_on_rejection'])) !==
@@ -240,8 +240,8 @@ export function amendmentDelta(
     if (newValidators[id].timeout_seconds > (oldValidators[id]?.timeout_seconds ?? 600))
       throw new Error('validator amendment exceeds approved timeout');
   }
-  const oldPrepare = (base.task_execution?.prepare_only_task_ids ?? []) as string[];
-  const newPrepare = (next.task_execution?.prepare_only_task_ids ?? []) as string[];
+  const oldPrepare = (base.task_execution.prepare_only_task_ids ?? []) as string[];
+  const newPrepare = (next.task_execution.prepare_only_task_ids ?? []) as string[];
   for (const id of oldPrepare)
     if (!newPrepare.includes(id)) throw new Error('cannot change existing preparation mode');
   for (const id of newPrepare)
@@ -259,7 +259,7 @@ export function amendmentDelta(
         })
         .strict()
     )
-    .parse(next.task_execution?.task_readiness ?? {});
+    .parse(next.task_execution.task_readiness ?? {});
   for (const id of ids)
     if (!base.task_backend.task_ids.includes(id) && readiness[id]?.blocker_class !== 'internal')
       throw new Error('new executable prerequisites require reviewed internal classification');
@@ -271,7 +271,7 @@ export function amendmentDelta(
     )
       throw new Error('observed prerequisites cannot fabricate an executable consumer');
   for (const [id, old] of Object.entries(
-    (base.task_execution?.task_readiness ?? {}) as Record<
+    (base.task_execution.task_readiness ?? {}) as Record<
       string,
       { blocker_class: string; role?: string }
     >

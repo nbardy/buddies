@@ -1,9 +1,9 @@
 import type { ManagerAction } from './charter';
-import type { Entry, Integration, State } from './ledger';
+import type { Entry, Integration, Outcome, State, Validation } from './ledger';
 import {
   apply,
   byId,
-  commandChecks,
+  doneValidationChecks,
   judgedChecks,
   startedOf,
   validationComplete,
@@ -12,6 +12,9 @@ import {
 } from './ledger';
 import { withStatus } from './news';
 import {
+  type Panel,
+  acceptanceOf,
+  candidateValidation,
   claimAt,
   configOf,
   deadlineMs,
@@ -53,22 +56,9 @@ export function decide(s: State, clock: Clock): Entry[] {
     out.push(e);
     apply(s, e);
   };
-  const setup = setupOf(s);
-  switch (setup.t) {
-    case 'waiting':
-      return [];
-    case 'failed':
-      push({
-        t: 'finished',
-        at,
-        reason: 'setup_failed',
-        summary: `The integration worktree could not be made: ${setup.reason}`,
-      });
-      return withStatus(s, out, at);
-    case 'ready':
-      break;
-  }
-
+  // The owner's stop and the deadline come first, before setup and before anything the host
+  // observed: neither may wait on a tree still being made or an observation that keeps failing
+  // (audit 2026-11-01 #1, the wedge).
   if (s.unseen.some((e) => e.t === 'feedback' && e.feedback.t === 'stop')) {
     push({ t: 'finished', at, reason: 'owner_stop', summary: 'Stopped by the owner.' });
     return withStatus(s, out, at);
@@ -76,6 +66,16 @@ export function decide(s: State, clock: Clock): Entry[] {
   if (Date.parse(at) >= deadlineMs(s)) {
     push({ t: 'finished', at, reason: 'deadline', summary: 'Deadline reached.' });
     return withStatus(s, out, at);
+  }
+  const setup = setupOf(s);
+  switch (setup.t) {
+    case 'waiting':
+      return [];
+    case 'failed':
+      push({ t: 'finished', at, reason: 'setup_failed', summary: setup.reason });
+      return withStatus(s, out, at);
+    case 'ready':
+      break;
   }
 
   const pending = pendingManager(s);
@@ -137,6 +137,24 @@ export function decide(s: State, clock: Clock): Entry[] {
 
 const runOf = (s: State): State['run']['t'] => s.run.t;
 
+/** A work attempt's end whose commits a manager may claim (R11): anything but a code claim. A
+ * legacy end (a pre-R11 `malformed` or `finding` whose branch kept a commit, 2026-11-01 incident:
+ * w64130b and w475a3b) is claimable too; the host then checks its branch holds the commit. */
+function claimable(o: Outcome): boolean {
+  switch (o.t) {
+    case 'work':
+      return o.result.result !== 'claim' || o.result.change.t !== 'commit';
+    case 'malformed':
+    case 'unreported_commits':
+    case 'failed':
+    case 'abandoned':
+      return true;
+    case 'manager':
+    case 'check':
+      return false;
+  }
+}
+
 /**
  * A manager turn is due when it has something to act on. While the host validates or merges, a
  * result that waits on it is not news yet: the manager could only say "awaiting validation"
@@ -158,20 +176,35 @@ function managerDue(s: State): boolean {
  * a manager asking for work past the budget got "attempt budget spent", which was news, which
  * woke a manager, up to the decision cap (about 2N unmetered turns doing nothing).
  */
-const managerEcho = (e: Entry) => e.t === 'rejected' || e.t === 'question_added';
+const managerEcho = (e: Entry) =>
+  e.t === 'rejected' || e.t === 'question_added' || e.t === 'acceptance_set';
 
-/** An ended code claim whose candidate validation has not finished (charter command checks). */
+/** A code claim (ended, or adopted from unreported commits) whose question is accepted by a
+ * command and whose candidate validation has not finished. */
 function claimAwaitingValidation(s: State, e: Entry): boolean {
-  if (e.t !== 'attempt_ended' || e.outcome.t !== 'work') return false;
-  const result = e.outcome.result;
-  if (result.result !== 'claim' || result.change.t !== 'commit') return false;
-  if (commandChecks(s.charter).length === 0) return false;
-  return !s.validations.some(
-    (v) =>
-      v.target.t === 'candidate' &&
-      v.target.claimAttemptId === e.attemptId &&
-      validationComplete(s, v)
-  );
+  switch (e.t) {
+    case 'attempt_ended':
+    case 'claim_adopted':
+      return awaitsValidation(s, e.attemptId);
+    default:
+      return false;
+  }
+}
+
+function awaitsValidation(s: State, attemptId: string): boolean {
+  const attempt = byId(s.attempts, attemptId);
+  if (attempt?.spec.kind !== 'work' || attempt.phase.t !== 'ended') return false;
+  if (codeClaim(attempt.phase.outcome) === undefined) return false;
+  if (acceptanceOf(s, attempt.spec.questionId).t !== 'command') return false;
+  const validation = candidateValidation(s, attemptId);
+  return !validation || !validationComplete(validation);
+}
+
+/** The candidate commit an outcome claims (absent: not a code claim). */
+function codeClaim(o: Outcome): string | undefined {
+  if (o.t !== 'work' || o.result.result !== 'claim' || o.result.change.t !== 'commit')
+    return undefined;
+  return o.result.change.sha;
 }
 
 /** A host-verified claim (queries.ts Verification) closes its open question verified, which
@@ -189,11 +222,14 @@ function closeHostVerified(s: State, push: (e: Entry) => void, at: string): void
   }
 }
 
-/** A host validation or merge still to run or finish, or a done waiting on one. */
+/** A host validation, merge or claim adoption still to run or finish, or a done waiting on one.
+ * (A pending adoption is host work: without it the decision that claimed unreported commits
+ * looked quiescent and asked the owner before the claim could be validated.) */
 const hostBusy = (s: State) =>
   s.doneRequest.t === 'validating' ||
-  s.validations.some((v) => !validationComplete(s, v)) ||
-  integrating(s);
+  s.validations.some((v) => !validationComplete(v)) ||
+  integrating(s) ||
+  Object.values(s.adoptions).some((a) => a.t === 'pending');
 
 /** Nothing will run by itself any more: every attempt settled or waits on unverified
  * dependencies (R5), and no host validation or merge is in flight. */
@@ -201,15 +237,21 @@ const quiescent = (s: State) =>
   s.attempts.every((a) => settled(a) || waitsOn(s, a).length > 0) && !hostBusy(s);
 
 /** Decide runs once the integration worktree exists (the expedition's branch is checked out in
- * it); a tree that could not be made finishes the expedition with the reason. */
+ * it) and the manager's own tree does (R11); a tree that could not be made finishes the
+ * expedition with the reason. */
 type Setup = { t: 'waiting' } | { t: 'ready' } | { t: 'failed'; reason: string };
 function setupOf(s: State): Setup {
+  const integration = integrationSetup(s);
+  return integration.t === 'ready' ? managerSetup(s) : integration;
+}
+
+function integrationSetup(s: State): Setup {
   const tree = s.integrationTree.status;
   switch (tree.t) {
     case 'creating':
       return { t: 'waiting' };
     case 'failed':
-      return { t: 'failed', reason: tree.reason };
+      return { t: 'failed', reason: `The integration worktree could not be made: ${tree.reason}` };
     case 'ready':
     case 'kept':
     case 'removed':
@@ -219,59 +261,91 @@ function setupOf(s: State): Setup {
   }
 }
 
-/**
- * Why a claim may not be merged into the expedition branch (design.md R3), empty when it may: its
- * commit's candidate validation passed (when the charter has command checks), and its latest
- * check panel verified it (when one ran). With no command checks a verified panel is required:
- * nothing reaches the branch on a worker's word alone.
- */
-function integrationBlockers(s: State, claimAttemptId: string): string[] {
-  const hasCommands = commandChecks(s.charter).length > 0;
-  const validation = s.validations.find(
-    (v) => v.target.t === 'candidate' && v.target.claimAttemptId === claimAttemptId
-  );
-  const validationBlocker = !hasCommands
-    ? []
-    : !validation
-      ? ['its commit has no candidate validation']
-      : !validationComplete(s, validation)
-        ? ['its candidate validation is still running']
-        : !validationPassed(s, validation)
-          ? ['its candidate validation did not pass']
-          : [];
-  const own = panels(s).filter((p) => p.claimAttemptId === claimAttemptId);
-  const latest = own.at(-1);
-  const panelBlocker = !latest
-    ? hasCommands
-      ? []
-      : ['it needs a verified check panel (the charter has no command checks)']
-    : latest.verdict === 'pending'
-      ? ['a check panel on it is still running']
-      : latest.verdict === 'not_verified'
-        ? ['its latest check panel did not verify it']
-        : [];
-  return [...validationBlocker, ...panelBlocker];
+function managerSetup(s: State): Setup {
+  switch (s.managerTree.t) {
+    case 'missing':
+      return { t: 'waiting' };
+    case 'failed':
+      return {
+        t: 'failed',
+        reason: `The manager's worktree could not be made: ${s.managerTree.reason}`,
+      };
+    case 'ready':
+    case 'released':
+      return { t: 'ready' };
+  }
 }
 
 /**
- * Every ended code claim's candidate commit is validated once by the host (design.md R2), as soon
- * as it ends: no agent runs or reports command checks. A charter without command checks has
- * nothing to run.
+ * Why a claim may not be merged into the expedition branch (design.md R3, R11), empty when it
+ * may. Only its question's CURRENT acceptance decides (a validation planned under an earlier one
+ * never does): `command` needs the claim's validation for that acceptance passed, and no panel
+ * that ran on it refuted it; `panel` needs its latest check panel verified. Nothing reaches the
+ * branch on a worker's word alone.
+ */
+function integrationBlockers(s: State, claimAttemptId: string, questionId: string): string[] {
+  const latest = panels(s)
+    .filter((p) => p.claimAttemptId === claimAttemptId)
+    .at(-1);
+  const rule = acceptanceOf(s, questionId);
+  switch (rule.t) {
+    case 'command':
+      return [
+        ...commandBlocker(candidateValidation(s, claimAttemptId), questionId, rule.argv),
+        ...(latest?.verdict === 'not_verified' ? ['its latest check panel refuted it'] : []),
+        ...(latest?.verdict === 'pending' ? ['a check panel on it is still running'] : []),
+      ];
+    case 'panel':
+      return panelBlocker(latest, questionId);
+  }
+}
+
+function commandBlocker(
+  validation: Validation | undefined,
+  questionId: string,
+  argv: string[]
+): string[] {
+  if (!validation)
+    return [
+      `its commit has no candidate validation under the current acceptance of ${questionId} ($ ${argv.join(' ')})`,
+    ];
+  if (!validationComplete(validation)) return ['its candidate validation is still running'];
+  return validationPassed(validation) ? [] : ['its candidate validation did not pass'];
+}
+
+function panelBlocker(latest: Panel | undefined, questionId: string): string[] {
+  if (!latest)
+    return [`it needs a verified check panel (question ${questionId} is accepted by a panel)`];
+  switch (latest.verdict) {
+    case 'verified':
+      return [];
+    case 'pending':
+      return ['a check panel on it is still running'];
+    case 'not_verified':
+      return ['its latest check panel did not verify it'];
+  }
+}
+
+/**
+ * Every code claim on a question accepted by a `command` is validated by the host (design.md R2,
+ * R11) once per acceptance revision, as soon as it ends (or a manager's claim of its unreported
+ * commits is adopted), and again when the manager changes that acceptance while the claim is not
+ * merged: the host runs the command on the immutable candidate commit; no agent runs or reports
+ * it. The goal's done checks never run here (they run on the head at done).
  */
 function planCandidateValidations(s: State, clock: Clock, push: (e: Entry) => void): void {
-  if (commandChecks(s.charter).length === 0) return;
-  const validated = new Set(
-    s.validations.flatMap((v) => (v.target.t === 'candidate' ? [v.target.claimAttemptId] : []))
-  );
   for (const a of s.attempts) {
-    if (a.phase.t !== 'ended' || a.phase.outcome.t !== 'work' || validated.has(a.id)) continue;
-    const result = a.phase.outcome.result;
-    if (result.result !== 'claim' || result.change.t !== 'commit') continue;
+    if (a.spec.kind !== 'work' || a.phase.t !== 'ended') continue;
+    const sha = codeClaim(a.phase.outcome);
+    const rule = acceptanceOf(s, a.spec.questionId);
+    if (sha === undefined || rule.t !== 'command' || candidateValidation(s, a.id)) continue;
+    if (s.integrations.some((i) => i.claimAttemptId === a.id && i.status.t !== 'refused')) continue;
     push({
       t: 'validation_planned',
       at: clock.now,
       validationId: clock.nextId('v'),
-      target: { t: 'candidate', claimAttemptId: a.id, sha: result.change.sha },
+      target: { t: 'candidate', claimAttemptId: a.id, sha },
+      checks: [{ index: 0, argv: rule.argv, timeoutSeconds: rule.timeoutSeconds }],
     });
   }
 }
@@ -319,12 +393,13 @@ function goalClaimBlocker(s: State, claimAttemptId: string, merge: GoalMerge): s
 function settleDoneRequest(s: State, push: (e: Entry) => void, at: string): void {
   if (s.doneRequest.t !== 'validating' || s.run.t === 'finished') return;
   const v = validationOf(s, s.doneRequest.validationId);
-  if (!validationComplete(s, v)) return;
+  if (!validationComplete(v)) return;
   const sha = startedOf(s, v.id).targetSha;
   const failed = v.runs
     .filter((r) => r.outcome.t !== 'passed')
     .map((r) => `command check ${r.checkIndex} ${r.outcome.t} on the head ${sha}`);
-  const blockers = [...failed, ...judgedBlocker(s, 'merged')];
+  const unrun = v.failure.t === 'failed' ? [`the checks could not run: ${v.failure.reason}`] : [];
+  const blockers = [...unrun, ...failed, ...judgedBlocker(s, 'merged')];
   if (blockers.length > 0) {
     push({ t: 'done_refused', at, reason: blockers.join('; ') });
     return;
@@ -365,6 +440,40 @@ function applyAction(
         scope: action.scope,
         paths: action.paths,
         after: action.after,
+        acceptance: { rule: action.acceptance, provenance: 'manager' },
+      });
+      return;
+    }
+    case 'set_acceptance': {
+      const question = byId(s.questions, action.question);
+      if (!question) return reject(`no question ${action.question}`);
+      if (question.status !== 'open')
+        return reject(`question ${question.id} is ${question.status}`);
+      push({ t: 'acceptance_set', at, questionId: question.id, acceptance: action.acceptance });
+      return;
+    }
+    case 'claim': {
+      const attempt = byId(s.attempts, action.attempt);
+      if (!attempt || attempt.spec.kind !== 'work')
+        return reject(`no work attempt ${action.attempt}`);
+      if (attempt.phase.t !== 'ended' || !claimable(attempt.phase.outcome))
+        return reject(
+          `only a work attempt that ended without a code claim (unreported commits, malformed, a finding, blocked, failed) is claimed; ${attempt.id} is ${attempt.phase.t === 'ended' ? 'a code claim' : attempt.phase.t}`
+        );
+      const prior = s.adoptions[attempt.id];
+      if (prior && prior.t !== 'refused')
+        return reject(`${attempt.id} is already claimed (${prior.t})`);
+      push({
+        t: 'claim_planned',
+        at,
+        attemptId: attempt.id,
+        claim: {
+          result: 'claim',
+          statement: action.claim.statement,
+          change: { t: 'commit', sha: action.claim.sha },
+          evidence: action.claim.evidence,
+          howToCheck: action.claim.howToCheck,
+        },
       });
       return;
     }
@@ -432,7 +541,7 @@ function applyAction(
         return reject('done is being validated on the current head');
       if (s.integrations.some((i) => i.claimAttemptId === claim.id && i.status.t !== 'refused'))
         return reject(`${claim.id} is already integrated or being integrated`);
-      const blockers = integrationBlockers(s, claim.id);
+      const blockers = integrationBlockers(s, claim.id, claim.spec.questionId);
       if (blockers.length > 0) return reject(blockers.join('; '));
       push({
         t: 'integration_planned',
@@ -470,7 +579,8 @@ function applyAction(
       // The guardrails (design.md R2): the goal panel verified the judged items, and every
       // command check passed on the expedition branch head, run by the host, never an agent.
       if (s.doneRequest.t === 'validating') return reject('done is already being validated');
-      const hasCommands = commandChecks(s.charter).length > 0;
+      const checks = doneValidationChecks(s.charter);
+      const hasCommands = checks.length > 0;
       const judged = judgedBlocker(s, hasCommands ? 'queued' : 'merged');
       if (judged.length > 0) return reject(judged.join('; '));
       if (!hasCommands) {
@@ -482,7 +592,7 @@ function applyAction(
       // The head validation starts only after every merge planned before it (effects.ts), and no
       // merge is accepted while it runs, so it validates the head the owner is told to merge.
       const validationId = clock.nextId('v');
-      push({ t: 'validation_planned', at, validationId, target: { t: 'head' } });
+      push({ t: 'validation_planned', at, validationId, target: { t: 'head' }, checks });
       push({ t: 'done_requested', at, validationId, summary: action.summary });
       return;
     }

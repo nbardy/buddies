@@ -622,6 +622,25 @@
                         "t"
                       ],
                       "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "t": {
+                          "type": "string",
+                          "const": "extend"
+                        },
+                        "hours": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 72
+                        }
+                      },
+                      "required": [
+                        "t",
+                        "hours"
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 }
@@ -2385,6 +2404,25 @@
                       },
                       "required": [
                         "t"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "t": {
+                          "type": "string",
+                          "const": "extend"
+                        },
+                        "hours": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 72
+                        }
+                      },
+                      "required": [
+                        "t",
+                        "hours"
                       ],
                       "additionalProperties": false
                     }

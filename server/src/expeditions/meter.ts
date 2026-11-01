@@ -38,23 +38,51 @@ export type Metering = { t: 'settling' } | { t: 'metered'; cost: AttemptCost };
  */
 export const INDEX_GRACE_MS = 15_000;
 /** A crew Buddy's runs: its attempts plus chat deliveries; far below this for one expedition. */
-const RUN_SCAN_LIMIT = 2_000;
-const SETTLED: ReadonlySet<Run['status']> = new Set(['complete', 'failed', 'cancelled']);
+export const RUN_SCAN_LIMIT = 2_000;
+export const SETTLED: ReadonlySet<Run['status']> = new Set(['complete', 'failed', 'cancelled']);
 
 const unmeasured = (reason: string): Metering => ({
   t: 'metered',
   cost: { t: 'unmeasured', reason },
 });
 
+/**
+ * Metering is display only, so it never holds an expedition open for long: past this window after
+ * the attempt ended, a run still settling is recorded "not measured" with the reason. Audit
+ * 2026-11-01: a run that never settled kept a finished expedition active (ticked every minute)
+ * forever, its only pending effect a read.
+ */
+export const SETTLE_WINDOW_MS = 60 * 60_000;
+
+/** An attempt's cost over every request it posted (its brief and a repair, design.md R11). */
 export async function meterRequest(
   core: BuddiesCore,
   ports: MeterPorts,
   crewBuddyId: string,
-  requestId: string,
+  requestIds: readonly string[],
+  nowMs: number,
+  endedAtMs: number
+): Promise<Metering> {
+  const metering = await measure(core, ports, crewBuddyId, new Set(requestIds), nowMs);
+  switch (metering.t) {
+    case 'metered':
+      return metering;
+    case 'settling':
+      return nowMs - endedAtMs > SETTLE_WINDOW_MS
+        ? unmeasured(`its runs did not settle within ${SETTLE_WINDOW_MS / 60_000} minutes`)
+        : metering;
+  }
+}
+
+async function measure(
+  core: BuddiesCore,
+  ports: MeterPorts,
+  crewBuddyId: string,
+  requestIds: ReadonlySet<string>,
   nowMs: number
 ): Promise<Metering> {
   const runs = (await core.listRuns({ kind: 'buddy', buddyId: crewBuddyId }, RUN_SCAN_LIMIT))
-    .filter((r) => r.input.kind === 'post' && r.input.postId === requestId)
+    .filter((r) => r.input.kind === 'post' && requestIds.has(r.input.postId))
     // A run that never reached its spawn (still queued, or the request was answered first) spent
     // nothing and may never run.
     .filter((r) => r.executingAt !== undefined);

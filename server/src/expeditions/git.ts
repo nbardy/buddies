@@ -25,7 +25,33 @@ const ADD_TIMEOUT_MS = 15 * 60_000;
 /** A merge checks files out in the integration tree: bounded like an add, not like a query. */
 const MERGE_TIMEOUT_MS = 15 * 60_000;
 
-type GitRun = { t: 'ok'; stdout: string } | { t: 'failed'; message: string };
+export type GitRun = { t: 'ok'; stdout: string } | { t: 'failed'; message: string };
+
+/**
+ * The only server environment the host's git and Cambium see (audit 2026-11-01 #7): git ran with
+ * the full server environment, so a repository hook (post-checkout on a worktree add, post-merge
+ * on an integration) ran agent-written code with every provider key in reach. Hooks are off for
+ * every host git process, Cambium's children included: `GIT_CONFIG_*` is command-line config, so
+ * it outranks a repository's own `core.hooksPath`. HOME stays: git reads the owner's identity
+ * (user.name for a merge commit) from it. Fix-guard: "a repository hook never runs for the host".
+ * `core.fsmonitor` is off for the same reason (a repository config may name a command for it).
+ * Known limit (design.md R11): other config-named commands still run, e.g. a `filter.<x>.smudge`
+ * selected by a committed .gitattributes; git has no switch that turns every filter off, and a
+ * worker in a linked worktree can write the shared .git/config. They see only this environment.
+ */
+const GIT_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR'];
+const IDENTITY = /^GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)$/;
+export const gitEnv = (): NodeJS.ProcessEnv => ({
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => GIT_ENV.includes(k) || IDENTITY.test(k))
+  ),
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_0: 'core.hooksPath',
+  GIT_CONFIG_VALUE_0: '/dev/null',
+  GIT_CONFIG_KEY_1: 'core.fsmonitor',
+  GIT_CONFIG_VALUE_1: 'false',
+  GIT_TERMINAL_PROMPT: '0',
+});
 
 async function run(
   bin: 'git' | 'git-cambium',
@@ -36,6 +62,7 @@ async function run(
   try {
     const { stdout } = await exec(bin, args, {
       cwd,
+      env: gitEnv(),
       timeout,
       maxBuffer: 16 * 1024 * 1024,
     });
@@ -46,10 +73,10 @@ async function run(
   }
 }
 
-const git = (cwd: string, args: string[]) => run('git', cwd, args);
+export const git = (cwd: string, args: string[]) => run('git', cwd, args);
 /** Cambium runs as `git-cambium` itself, not through `git cambium`: a timeout must kill the process
  * doing the work, not a `git` wrapper whose child would finish the add after we recorded failure. */
-const cambium = (cwd: string, args: string[], timeout = GIT_TIMEOUT_MS) =>
+export const cambium = (cwd: string, args: string[], timeout = GIT_TIMEOUT_MS) =>
   run('git-cambium', cwd, args, timeout);
 
 async function must(ran: Promise<GitRun>, what: string): Promise<string> {
@@ -119,7 +146,7 @@ const CambiumWorkspace = z.object({
   base_commit: z.string(),
 });
 
-async function cambiumWorkspace(root: string, name: string) {
+export async function cambiumWorkspace(root: string, name: string) {
   const listed = z
     .array(CambiumWorkspace.passthrough())
     .parse(JSON.parse(await must(cambium(root, ['list', '--json']), 'cambium list')));
@@ -127,12 +154,12 @@ async function cambiumWorkspace(root: string, name: string) {
 }
 
 /** What an interrupted `cambium add` can leave with no registry entry: its branch, its path. */
-interface Leftovers {
+export interface Leftovers {
   branch: boolean;
   dir: boolean;
 }
-const nothingLeft = (l: Leftovers) => !l.branch && !l.dir;
-const describe = (l: Leftovers, at: WorktreeAt) =>
+export const nothingLeft = (l: Leftovers) => !l.branch && !l.dir;
+export const describe = (l: Leftovers, at: WorktreeAt) =>
   [l.branch ? `branch ${at.branch}` : '', l.dir ? `directory ${at.path}` : '']
     .filter(Boolean)
     .join(' and ');
@@ -156,7 +183,7 @@ async function leftovers(root: string, at: WorktreeAt): Promise<Leftovers> {
  * DEAD incomplete creates in the owner's repository (design.md R1 known limits). It runs only
  * when this attempt's own branch or directory is left over.
  */
-async function recoverLeftovers(root: string, at: WorktreeAt): Promise<Leftovers> {
+export async function recoverLeftovers(root: string, at: WorktreeAt): Promise<Leftovers> {
   const before = await leftovers(root, at);
   if (nothingLeft(before)) return before;
   await cambium(root, ['recover', '--json']);
@@ -225,18 +252,33 @@ function adopted(w: z.infer<typeof CambiumWorkspace>, plan: WorktreeAt): MadeWor
     : { t: 'failed', reason: `Cambium workspace ${w.name} does not match: ${mismatch.join(', ')}` };
 }
 
-/** A worktree branch's commits beyond its base (`missing`: no such branch). */
-type BranchState = { t: 'missing' } | { t: 'present'; commits: number };
+/** A worktree branch's commits beyond its base, oldest first (`missing`: no such branch). */
+export type BranchState = { t: 'missing' } | { t: 'present'; shas: string[] };
 
-async function branchState(root: string, at: WorktreeAt): Promise<BranchState> {
+export async function branchState(root: string, at: WorktreeAt): Promise<BranchState> {
   const ref = `refs/heads/${at.branch}`;
   const exists = await git(root, ['rev-parse', '--verify', '--quiet', ref]);
   if (exists.t === 'failed') return { t: 'missing' };
-  const count = await must(
-    git(root, ['rev-list', '--count', `${at.baseSha}..${ref}`]),
-    `counting ${at.branch} commits`
+  const listed = await must(
+    git(root, ['rev-list', '--reverse', `${at.baseSha}..${ref}`]),
+    `listing ${at.branch} commits`
   );
-  return { t: 'present', commits: Number(count) };
+  return { t: 'present', shas: listed.split('\n').filter(Boolean) };
+}
+
+/**
+ * The commits an attempt made beyond its base, oldest first (design.md R11): what an answer that
+ * reported no valid result left on its branch. A missing branch made none (it is never created
+ * without the worktree, so nothing was committed on it).
+ */
+export async function attemptCommits(root: string, at: WorktreeAt): Promise<string[]> {
+  const branch = await branchState(root, at);
+  switch (branch.t) {
+    case 'missing':
+      return [];
+    case 'present':
+      return branch.shas;
+  }
 }
 
 /** Whether a work claim's `change` is what its attempt branch holds (design.md R2). */
@@ -283,106 +325,25 @@ export async function claimHeld(
             reason: `claimed commit ${change.sha} changes files outside its question's paths (${custody.join(', ')}): ${outside.slice(0, 10).join(', ')}`,
           };
     }
-    case 'no_code': {
-      const branch = await branchState(root, at);
-      const commits = branch.t === 'present' ? branch.commits : 0;
-      return commits === 0
-        ? { t: 'held' }
-        : {
-            t: 'not_held',
-            reason: `claimed no code, but the attempt branch ${at.branch} has ${commits} commit(s)`,
-          };
-    }
+    case 'no_code':
+      return noCodeHeld(await branchState(root, at), at);
   }
 }
 
-/** Deletes a scratch branch at whatever tip it has (compare-and-delete at the tip read). */
-async function dropScratchBranch(root: string, at: WorktreeAt): Promise<boolean> {
-  const ref = `refs/heads/${at.branch}`;
-  const tip = await git(root, ['rev-parse', '--verify', '--quiet', ref]);
-  return tip.t === 'ok' && (await git(root, ['update-ref', '-d', ref, tip.stdout])).t === 'ok';
-}
-
-/**
- * Deletes a branch only while it still points at its base: `update-ref -d <ref> <old>` is an
- * atomic compare-and-delete, so a branch with commits is never deleted. Not `cambium remove
- * --delete-branch`: that runs `git branch -d`, which refuses a branch whose base is not merged
- * into the owner's HEAD (every check tree's base is an unmerged candidate commit).
- */
-async function dropEmptyBranch(root: string, at: WorktreeAt): Promise<boolean> {
-  const dropped = await git(root, ['update-ref', '-d', `refs/heads/${at.branch}`, at.baseSha]);
-  return dropped.t === 'ok';
-}
-
-/**
- * Deletes a branch whose tip is already in `into` (the expedition branch): its commits are kept
- * there, so the per-attempt branch is only clutter in the owner's repository. Compare-and-delete
- * at the tip just read, so a branch that moved is never deleted.
- */
-async function dropMergedBranch(root: string, at: WorktreeAt, into: string): Promise<boolean> {
-  const ref = `refs/heads/${at.branch}`;
-  const tip = await git(root, ['rev-parse', '--verify', '--quiet', ref]);
-  if (tip.t === 'failed') return false;
-  const merged = await git(root, ['merge-base', '--is-ancestor', tip.stdout, `refs/heads/${into}`]);
-  if (merged.t === 'failed') return false;
-  return (await git(root, ['update-ref', '-d', ref, tip.stdout])).t === 'ok';
-}
-
-/**
- * Ends an attempt's worktree. No commits beyond its base: remove it and its branch. Commits and
- * `keepCommits`: keep it (integration may need it). Commits at the end: remove the tree, and its
- * branch only when the expedition branch `into` already holds its tip (merged work); unmerged
- * commits keep their branch for the owner. A refused removal (uncommitted changes) is recorded,
- * never forced.
- */
-export async function releaseWorktree(
-  root: string,
-  name: string,
-  at: WorktreeAt,
-  keepCommits: boolean,
-  into: string
-): Promise<Release> {
-  if (!(await cambiumWorkspace(root, name))) return releaseUnregistered(root, at);
-  const branch = await branchState(root, at);
-  const commits = branch.t === 'present' ? branch.commits : 0;
-  if (commits > 0 && keepCommits) return { t: 'kept', commits };
-  const removed = await cambium(root, ['remove', name]);
-  if (removed.t === 'failed') return { t: 'left', reason: removed.message };
-  const branchDeleted =
-    commits === 0 ? await dropEmptyBranch(root, at) : await dropMergedBranch(root, at, into);
-  return { t: 'removed', branchDeleted };
-}
-
-/**
- * No Cambium workspace by that name. Nothing on disk: `absent` (never made, or a replayed
- * release). A partial create's branch and directory are rolled back by `cambium recover`. A branch
- * alone is a removal interrupted before its branch was dropped: dropped now if it is empty.
- */
-async function releaseUnregistered(root: string, at: WorktreeAt): Promise<Release> {
-  const left = await recoverLeftovers(root, at);
-  if (nothingLeft(left)) return { t: 'absent' };
-  if (left.dir)
-    return { t: 'left', reason: `no Cambium workspace, but ${describe(left, at)} remain` };
-  const branch = await branchState(root, at);
-  const empty = branch.t === 'present' && branch.commits === 0;
-  return { t: 'removed', branchDeleted: empty && (await dropEmptyBranch(root, at)) };
-}
-
-/**
- * Discards a validation tree (design.md R2): scratch, so a check's build outputs or edits are
- * removed with `--force`, and its branch with them, commits included (a validation commit is a
- * check's by-product, never work: the candidate it validated has its own branch). The branch is
- * compare-and-deleted at the tip just read.
- */
-export async function discardWorktree(
-  root: string,
-  name: string,
-  at: WorktreeAt
-): Promise<Release> {
-  if (!(await cambiumWorkspace(root, name))) return releaseUnregistered(root, at);
-  const removed = await cambium(root, ['remove', '-force', name]);
-  if (removed.t === 'failed') return { t: 'left', reason: removed.message };
-  return { t: 'removed', branchDeleted: await dropScratchBranch(root, at) };
+/** `no_code` holds only on an attempt branch that exists with no commits: a missing branch is
+ * not "zero commits" (audit 2026-11-01: that fallback hid a branch deleted under the attempt). */
+function noCodeHeld(branch: BranchState, at: WorktreeAt): ClaimHeld {
+  switch (branch.t) {
+    case 'missing':
+      return { t: 'not_held', reason: `the attempt branch ${at.branch} does not exist` };
+    case 'present':
+      return branch.shas.length === 0
+        ? { t: 'held' }
+        : {
+            t: 'not_held',
+            reason: `claimed no code, but the attempt branch ${at.branch} has ${branch.shas.length} commit(s)`,
+          };
+  }
 }
 
 // ---------- Integration (design.md R3) ----------
@@ -439,12 +400,24 @@ async function treeBlockers(tree: WorktreeAt): Promise<string[]> {
 export async function mergeCandidate(
   tree: WorktreeAt,
   sha: string,
-  message: string
+  message: string,
+  expectedHead: string
 ): Promise<Merged> {
   const interrupted = await git(tree.path, ['rev-parse', '--quiet', '--verify', 'MERGE_HEAD']);
   if (interrupted.t === 'ok') await must(git(tree.path, ['merge', '--abort']), 'git merge --abort');
   const prior = await priorMerge(tree, sha);
   if (prior) return { t: 'integrated', mergeSha: prior };
+  // The branch must be where the ledger left it (audit 2026-11-01 #6): anything else moved it, and
+  // merging on top would hand the owner commits no validation ever saw.
+  const head = await git(tree.path, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  if (head.t === 'failed' || head.stdout !== expectedHead)
+    return {
+      t: 'refused',
+      refusal: {
+        phase: 'tree',
+        reason: `the expedition branch head is ${head.t === 'ok' ? head.stdout : 'unreadable'}, not ${expectedHead} as the ledger records: it moved outside the host`,
+      },
+    };
   const blockers = await treeBlockers(tree);
   if (blockers.length > 0)
     return { t: 'refused', refusal: { phase: 'tree', reason: blockers.join('; ') } };
@@ -485,6 +458,71 @@ export async function mergeCandidate(
 export async function releaseIntegrationTree(root: string, name: string): Promise<Release> {
   if (!(await cambiumWorkspace(root, name))) return { t: 'absent' };
   const removed = await cambium(root, ['remove', name]);
+  return removed.t === 'failed'
+    ? { t: 'left', reason: removed.message }
+    : { t: 'removed', branchDeleted: false };
+}
+
+// ---------- The manager's tree (design.md R11) ----------
+
+/** Whether `dir` is a linked worktree of the repository (compared by real path). */
+async function registeredWorktree(root: string, dir: string): Promise<boolean> {
+  const listed = await must(git(root, ['worktree', 'list', '--porcelain']), 'git worktree list');
+  const want = await fsp.realpath(dir).catch(() => path.resolve(dir));
+  const trees = listed
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length));
+  const real = await Promise.all(trees.map((t) => fsp.realpath(t).catch(() => t)));
+  return real.includes(want);
+}
+
+/**
+ * Moves a detached tree to `sha`, discarding anything a turn left there: the manager's tree is
+ * read-only by contract and host-owned, so every decision starts from the current head.
+ */
+export async function syncDetachedTree(dir: string, sha: string): Promise<void> {
+  await must(git(dir, ['checkout', '--quiet', '--detach', '--force', sha]), `checkout ${sha}`);
+  await must(git(dir, ['clean', '-fdq']), 'git clean');
+}
+
+/**
+ * The manager's detached worktree at `sha`: adopted when a crash left it registered, made with
+ * `git worktree add --detach` otherwise (no branch: a manager never commits). A directory left
+ * by an interrupted add is pruned first; anything still in the way is a typed failure.
+ */
+export async function ensureDetachedTree(
+  root: string,
+  dir: string,
+  sha: string
+): Promise<MadeWorktree> {
+  try {
+    if (!(await registeredWorktree(root, dir))) {
+      await git(root, ['worktree', 'prune']);
+      const left = await fsp.lstat(dir).then(
+        () => true,
+        () => false
+      );
+      if (left) return { t: 'failed', reason: `${dir} exists and is not a worktree` };
+      const add = await run(
+        'git',
+        root,
+        ['worktree', 'add', '--quiet', '--detach', dir, sha],
+        ADD_TIMEOUT_MS
+      );
+      if (add.t === 'failed') return { t: 'failed', reason: `git worktree add: ${add.message}` };
+    }
+    await syncDetachedTree(dir, sha);
+    return { t: 'ready', at: { path: dir, branch: '(detached)', baseSha: sha } };
+  } catch (error) {
+    return { t: 'failed', reason: (error as Error).message };
+  }
+}
+
+/** Removes the manager's tree at finish: scratch, so `--force`; `absent` when it is not there. */
+export async function releaseDetachedTree(root: string, dir: string): Promise<Release> {
+  if (!(await registeredWorktree(root, dir))) return { t: 'absent' };
+  const removed = await git(root, ['worktree', 'remove', '--force', dir]);
   return removed.t === 'failed'
     ? { t: 'left', reason: removed.message }
     : { t: 'removed', branchDeleted: false };

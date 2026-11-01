@@ -1,6 +1,8 @@
 import type {
+  Acceptance,
   Charter,
   CheckResult,
+  Claim,
   CommandCheck,
   ManagerAction,
   Origin,
@@ -27,13 +29,65 @@ export type CheckSpec = {
 };
 export type AttemptSpec = { kind: 'manager' } | WorkSpec | CheckSpec;
 
-/** What an ended attempt produced. `malformed` and `failed` are data, never silently dropped. */
-export type Outcome =
+/** How an attempt ended by itself. `malformed` and `failed` are data, never silently dropped. */
+export type EndOutcome =
   | { t: 'manager'; actions: ManagerAction[] }
   | { t: 'work'; result: WorkResult }
   | { t: 'check'; result: CheckResult }
   | { t: 'malformed'; error: string; raw: string }
-  | { t: 'failed'; status: 'failed' | 'cancelled' };
+  | { t: 'failed'; status: 'failed' | 'cancelled' }
+  /** The host asked its runs to stop (owner stop, deadline) and they did not end within the grace
+   * (host.ts CANCEL_GRACE_MS): the attempt is ended by the host so its tree can be released. */
+  | { t: 'abandoned'; reason: string };
+
+/**
+ * What an ended attempt produced. `unreported_commits`: a work attempt that ended with anything
+ * but a code claim (`ended`: a finding, blocked, malformed, failed, cancelled or abandoned) while
+ * its attempt branch holds commits beyond its base (`shas`, oldest first); the manager may claim
+ * them (`claim` action, design.md R11). 2026-11-01 incident: w64130b committed its verifier and
+ * answered without the json block, and w475a3b committed ACCEPTANCE_ROUTE.md and answered a
+ * `finding`; both commits were left on kept branches nothing could integrate.
+ */
+export type Outcome = EndOutcome | { t: 'unreported_commits'; shas: string[]; ended: EndOutcome };
+
+/** Which request of an attempt is out: its brief, or the one repair request a malformed answer
+ * gets (design.md R11: one format repair turn on the same seat before the answer is final). */
+export type Round = 'brief' | 'repair';
+
+/** A question's acceptance (charter.ts Acceptance) and where it came from: declared by the
+ * manager, or `legacy` for a question added before per-question acceptance existed (R11). A
+ * legacy question folds with an explicit panel, never with the goal's done command. */
+export interface QuestionAcceptance {
+  rule: Acceptance;
+  provenance: 'manager' | 'legacy';
+}
+
+/**
+ * A question's acceptance as the fold knows it: `rev` counts its declarations (0 when the
+ * question was added, +1 per `acceptance_set`), and `trustedSha` is the expedition branch head
+ * (headOf) when it was declared. A candidate validation is judged only under the revision it was
+ * planned for (a changed acceptance plans a new one), and the validator files its command names
+ * are trusted at `trustedSha`: a candidate that changed them is refused (pins.ts).
+ */
+export interface DeclaredAcceptance extends QuestionAcceptance {
+  rev: number;
+  trustedSha: string;
+}
+
+/** A manager's claim for an attempt's unreported commits, until the host checks the branch. */
+export type Adoption =
+  | { t: 'pending'; claim: Claim }
+  | { t: 'adopted' }
+  | { t: 'refused'; reason: string };
+
+/** The manager's own detached, read-only worktree (design.md R11, audit #6): a manager turn
+ * never starts in the owner's checkout nor in the integration tree the host merges into.
+ * `missing`: not made yet (every ledger written before R11 starts here). */
+export type ManagerTree =
+  | { t: 'missing' }
+  | { t: 'ready'; path: string }
+  | { t: 'failed'; reason: string }
+  | { t: 'released'; release: Release };
 
 /**
  * What an ended attempt cost (design.md R6), read once its Buddy run(s) settled (host meter.ts).
@@ -56,7 +110,9 @@ export type Feedback =
   | { t: 'note'; text: string }
   | { t: 'pause' }
   | { t: 'resume' }
-  | { t: 'stop' };
+  | { t: 'stop' }
+  /** Moves the deadline by `hours` (the owner's call; the charter itself is never edited). */
+  | { t: 'extend'; hours: number };
 
 /** Where owner feedback came from: the `expedition` tool's steer, or an owner message in the
  * expedition chat (the owner↔crew DM). A chat message carries its post id and ordered id, so the
@@ -135,6 +191,33 @@ export type ValidationTarget =
   | { t: 'candidate'; claimAttemptId: string; sha: string }
   | { t: 'head' };
 
+/** A repository file a check's argv named, hashed at the candidate commit (pins.ts). */
+export interface SourcePin {
+  path: string;
+  sha256: string;
+}
+
+/** The pinned files re-read after the run: unchanged, changed by the run (the outcome is then an
+ * error), or never pinned (no tree, the tree did not match the commit, or a legacy record). */
+export type PinCheck =
+  | { t: 'held' }
+  | { t: 'changed'; paths: string[] }
+  | { t: 'unpinned'; reason: string };
+
+/** The typed record of one host-run check (ported from oompa's `oompa.task-validation/v1`). */
+export interface ValidationReport {
+  t: 'expedition.validation/v1';
+  targetSha: string;
+  pins: SourcePin[];
+  pinCheck: PinCheck;
+}
+
+/** What a tree's release kept before removing it (release.ts): commits pinned at a salvage ref,
+ * ignored run output copied into the expedition's folder. */
+export type Preserved =
+  | { t: 'salvaged'; ref: string; sha: string }
+  | { t: 'harvested'; dir: string; files: number; bytes: number };
+
 /** One command check's result. The output tail is bounded (command.ts TAIL_CHARS). */
 export type CheckOutcome =
   | { t: 'passed' }
@@ -143,9 +226,19 @@ export type CheckOutcome =
   | { t: 'error'; message: string };
 
 export interface CheckRun {
-  /** The check's index in `charter.done.checks` (only `command` checks run). */
+  /** The check's `index` in its validation's `checks`. */
   checkIndex: number;
   outcome: CheckOutcome;
+  report: ValidationReport;
+}
+
+/** One host-run command a validation runs, frozen when it is planned (R11): the question's
+ * `command` acceptance for a candidate (index 0), the charter's command checks for the head
+ * (their index in `charter.done.checks`). */
+export interface ValidationCheck {
+  index: number;
+  argv: string[];
+  timeoutSeconds: number;
 }
 
 export type ValidationPhase =
@@ -156,14 +249,35 @@ export type ValidationPhase =
       targetSha: string;
       tree: WorktreeAt & { name: string };
       treeStatus: WorktreeStatus;
+      /** `running`: a host process started its check job (`validation_running`). A process that
+       * finds `running` without having started the job itself knows the job died with an earlier
+       * process (audit 2026-11-01 #10). */
+      job: { t: 'idle' } | { t: 'running' };
     };
+
+/** What a validation answers for (derived when it is planned): the charter's done checks at the
+ * head, or one revision of a question's acceptance for a candidate (design.md R11). */
+export type ValidationBasis =
+  | { t: 'done' }
+  | { t: 'acceptance'; questionId: string; rev: number; trustedSha: string };
 
 export interface Validation {
   id: string;
   target: ValidationTarget;
+  basis: ValidationBasis;
+  checks: ValidationCheck[];
   phase: ValidationPhase;
   runs: CheckRun[];
+  /** `failed`: the host could not run its checks at all (a terminal `validation_failed`). */
+  failure: { t: 'none' } | { t: 'failed'; reason: string };
+  /** Times its check job died with a host process; each restart gets a fresh tree. */
+  interruptions: number;
 }
+
+/** The id a validation's tree is named by: a fresh name per restart after an interruption, so the
+ * new tree never adopts the one an orphaned check may still be writing into. */
+export const validationTreeId = (v: Validation) =>
+  v.interruptions === 0 ? v.id : `${v.id}-r${v.interruptions}`;
 
 // ---------- Integration (design.md R3) ----------
 
@@ -234,7 +348,16 @@ export type Entry =
   | { t: 'worktree_failed'; at: string; attemptId: string; reason: string }
   | { t: 'worktree_released'; at: string; attemptId: string; release: Release }
   /** Decide's intent: validate a target (a claim's commit as soon as it ends; the head at done). */
-  | { t: 'validation_planned'; at: string; validationId: string; target: ValidationTarget }
+  | {
+      t: 'validation_planned';
+      at: string;
+      validationId: string;
+      target: ValidationTarget;
+      checks: ValidationCheck[];
+    }
+  /** The host could not run the checks at all (the job threw): terminal, never re-run (audit #5:
+   * a rejected job was re-run on every tick, a hot loop). */
+  | { t: 'validation_failed'; at: string; validationId: string; reason: string }
   /** Host intent, before `cambium add`: the resolved sha (the tree's base) and the tree's name. */
   | ({ t: 'validation_started'; at: string; validationId: string; name: string } & WorktreeAt)
   | { t: 'validation_tree_ready'; at: string; validationId: string }
@@ -248,8 +371,19 @@ export type Entry =
       targetSha: string;
       checkIndex: number;
       outcome: CheckOutcome;
+      report: ValidationReport;
     }
   | { t: 'validation_released'; at: string; validationId: string; release: Release }
+  /** Intent, before the host starts the check job in this process (audit #10). */
+  | { t: 'validation_running'; at: string; validationId: string }
+  /** The job died with an earlier host process: its tree was discarded (`release`) and the
+   * unrecorded checks run again in a fresh tree at the same immutable sha. */
+  | { t: 'validation_interrupted'; at: string; validationId: string; release: Release }
+  /** What a tree's release kept (release.ts), recorded with the release; `treeOf` is the attempt
+   * or validation id. */
+  | { t: 'preserved'; at: string; treeOf: string; preserved: Preserved }
+  /** The host asked an attempt's live runs to stop (owner stop or deadline, audit #2). */
+  | { t: 'attempt_cancel_requested'; at: string; attemptId: string; runIds: string[] }
   /** A manager's done awaiting the head validation (written with its `validation_planned`). */
   | { t: 'done_requested'; at: string; validationId: string; summary: string }
   /** The head validation (or the goal panel) did not hold: the manager is shown why. */
@@ -264,6 +398,18 @@ export type Entry =
   /** The exact brief, written before the request post so a replay sends identical bytes. */
   | { t: 'attempt_posting'; at: string; attemptId: string; body: string }
   | { t: 'attempt_posted'; at: string; attemptId: string; requestId: string }
+  /** The one repair request a malformed answer gets (R11), recorded before it is posted. */
+  | { t: 'attempt_repair_posting'; at: string; attemptId: string; error: string; body: string }
+  /** A manager's claim of an attempt's unreported commits, before the host checks the branch. */
+  | { t: 'claim_planned'; at: string; attemptId: string; claim: Claim }
+  /** The branch holds the claimed commit inside custody: the attempt's outcome is now the claim. */
+  | { t: 'claim_adopted'; at: string; attemptId: string }
+  | { t: 'claim_refused'; at: string; attemptId: string; reason: string }
+  | { t: 'manager_tree_ready'; at: string; path: string }
+  | { t: 'manager_tree_failed'; at: string; reason: string }
+  | { t: 'manager_tree_released'; at: string; release: Release }
+  /** Ticks kept failing (audit #1): recorded once per backoff step, with the last reason. */
+  | { t: 'tick_failed'; at: string; failures: number; reason: string }
   | { t: 'attempt_ended'; at: string; attemptId: string; outcome: Outcome }
   /** Its settled run's measured cost, or why there is none (never an estimate). */
   | { t: 'attempt_metered'; at: string; attemptId: string; cost: AttemptCost }
@@ -278,7 +424,9 @@ export type Entry =
       paths: string[];
       /** Question ids whose verified close this question's work waits for (design.md R5). */
       after: string[];
+      acceptance: QuestionAcceptance;
     }
+  | { t: 'acceptance_set'; at: string; questionId: string; acceptance: Acceptance }
   | {
       t: 'question_closed';
       at: string;
@@ -302,9 +450,9 @@ export type AttemptPhase =
   | { t: 'admitted' }
   /** Never started: its worktree could not be made (`worktree_failed`). */
   | { t: 'dropped'; reason: string }
-  | { t: 'posting'; body: string }
-  | { t: 'posted'; requestId: string }
-  | { t: 'ended'; requestId: string; outcome: Outcome };
+  | { t: 'posting'; body: string; round: Round }
+  | { t: 'posted'; requestId: string; round: Round }
+  | { t: 'ended'; requestId: string; outcome: Outcome; endedAt: string };
 
 export interface Attempt<S extends AttemptSpec = AttemptSpec> {
   id: string;
@@ -320,6 +468,7 @@ export interface Question {
   paths: string[];
   /** Dependencies: work on this question is admitted only once each is closed verified. */
   after: string[];
+  acceptance: DeclaredAcceptance;
   status: 'open' | 'verified' | 'dead';
 }
 
@@ -327,8 +476,10 @@ export type Run =
   | { t: 'running' }
   | { t: 'paused' }
   | { t: 'waiting_owner'; question: string }
-  /** `at`: when it finished, so the page shows how long it took (not time left). */
-  | { t: 'finished'; reason: FinishReason; summary: string; at: string };
+  // `at`: when it finished. The page shows how long it took (not time left), and it stops the
+  // badge's clock: a finished expedition read "finished · 10m" two minutes after it ended (live
+  // e2e 2026-11-01) and kept growing for as long as it was listed.
+  | { t: 'finished'; at: string; reason: FinishReason; summary: string };
 
 /** A chat status post: written to the ledger first, then posted. */
 export interface Status {
@@ -362,8 +513,24 @@ export interface State {
   reflections: { at: string; text: string }[];
   /** Each attempt's exact instructions, by attempt id (absent until briefed). */
   briefs: Record<string, string>;
+  /** Each repaired attempt's repair request body, by attempt id (R11). */
+  repairs: Record<string, string>;
+  /** Every request id an attempt posted (its brief, then a repair), by attempt id: metering
+   * counts them all. */
+  requests: Record<string, string[]>;
+  /** Manager claims of unreported commits, by attempt id (R11). */
+  adoptions: Record<string, Adoption>;
+  managerTree: ManagerTree;
+  /** Hours the owner added to the deadline (`extend` feedback). */
+  extendedHours: number;
+  /** The last recorded run of failed ticks (audit #1), for the page and status. */
+  tickFailure: { t: 'none' } | { t: 'failing'; at: string; failures: number; reason: string };
   /** Each ended attempt's cost, by attempt id (absent until its run settled and was metered). */
   costs: Record<string, AttemptCost>;
+  /** Live attempts the host asked to stop, by attempt id, with when (audit #2). */
+  cancels: Record<string, { at: string; runIds: string[] }>;
+  /** What tree releases kept (salvage refs, harvested output), in order. */
+  preserved: { treeOf: string; preserved: Preserved }[];
   /** Notable entries since the last chat status post. */
   news: Entry[];
   attempts: Attempt[];
@@ -380,9 +547,64 @@ export interface State {
   appliedManagers: Set<string>;
 }
 
-export function fold(entries: readonly Entry[]): State {
-  const [first, ...rest] = entries;
+// ---------- Stored entries (κ for the ledger file) ----------
+
+/** Entry shapes written before R11 (2026-11-01). Ledgers in the wild hold them; `canonical`
+ * upgrades each into the current Entry with explicit legacy data, never a silent default. */
+type LegacyEntry =
+  | Omit<Extract<Entry, { t: 'question_added' }>, 'acceptance'>
+  | Omit<Extract<Entry, { t: 'validation_planned' }>, 'checks'>
+  | Omit<Extract<Entry, { t: 'validation' }>, 'report'>;
+export type StoredEntry = Entry | LegacyEntry;
+
+/** The charter's command checks as a head validation runs them (their charter index). */
+export const doneValidationChecks = (c: Charter): ValidationCheck[] =>
+  commandChecks(c).map(({ index, check }) => ({
+    index,
+    argv: check.argv,
+    timeoutSeconds: check.timeoutSeconds,
+  }));
+
+/**
+ * One stored entry as the current Entry. A legacy question gets an explicit `panel` acceptance
+ * with provenance `legacy` (R11: the goal's done command never becomes a candidate gate by
+ * default); a legacy validation ran the charter's command checks, so it is recorded with them.
+ */
+function canonical(e: StoredEntry, c: Charter): Entry {
+  if (e.t === 'attempt_ended' && e.outcome.t === 'manager')
+    return { ...e, outcome: { t: 'manager', actions: e.outcome.actions.map(legacyAction) } };
+  if (e.t === 'question_added' && !('acceptance' in e))
+    return { ...e, acceptance: { rule: { t: 'panel' }, provenance: 'legacy' } };
+  if (e.t === 'validation_planned' && !('checks' in e))
+    return { ...e, checks: doneValidationChecks(c) };
+  // A check recorded before source pins (part 2 of R11) ran unpinned: said so, never implied.
+  if (e.t === 'validation' && !('report' in e))
+    return {
+      ...e,
+      report: {
+        t: 'expedition.validation/v1',
+        targetSha: e.targetSha,
+        pins: [],
+        pinCheck: { t: 'unpinned', reason: 'recorded before source pins (legacy)' },
+      },
+    };
+  return e as Entry;
+}
+
+/** A pre-R11 manager's add_question carries no acceptance. Decided after an upgrade (the host
+ * stopped between observing the answer and applying it) it would add a question without one, and
+ * every later tick would throw on it; it gets the legacy panel instead. The question then reads
+ * as manager-declared: the manager did name it, the acceptance it named is the legacy default. */
+function legacyAction(a: ManagerAction): ManagerAction {
+  return a.do === 'add_question' && !('acceptance' in a)
+    ? ({ ...(a as object), acceptance: { t: 'panel' } } as ManagerAction)
+    : a;
+}
+
+export function fold(stored: readonly StoredEntry[]): State {
+  const [first, ...rest] = stored;
   if (!first || first.t !== 'launched') throw new Error('ledger must start with launched');
+  const entries = rest.map((e) => canonical(e, first.charter));
   const state: State = {
     id: first.id,
     key: first.key,
@@ -407,7 +629,15 @@ export function fold(entries: readonly Entry[]): State {
     badgePost: { t: 'pending' },
     reflections: [],
     briefs: {},
+    repairs: {},
+    requests: {},
+    adoptions: {},
+    managerTree: { t: 'missing' },
+    extendedHours: 0,
+    tickFailure: { t: 'none' },
     costs: {},
+    cancels: {},
+    preserved: [],
     news: [],
     attempts: [],
     questions: [],
@@ -419,7 +649,7 @@ export function fold(entries: readonly Entry[]): State {
     statuses: [],
     appliedManagers: new Set(),
   };
-  for (const entry of rest) apply(state, entry);
+  for (const entry of entries) apply(state, entry);
   return state;
 }
 
@@ -440,6 +670,10 @@ const NEWS: ReadonlySet<Entry['t']> = new Set([
   'done_refused',
   'integrated',
   'integration_refused',
+  'validation_failed',
+  'claim_adopted',
+  'claim_refused',
+  'tick_failed',
   'finished',
 ] satisfies Entry['t'][]);
 
@@ -506,16 +740,27 @@ export function apply(s: State, e: Entry): void {
       s.validations.push({
         id: e.validationId,
         target: e.target,
+        basis: basisOf(s, e.target),
+        checks: e.checks,
         phase: { t: 'planned' },
         runs: [],
+        failure: { t: 'none' },
+        interruptions: 0,
       });
       return;
+    case 'validation_failed': {
+      const v = validationOf(s, e.validationId);
+      v.failure = { t: 'failed', reason: e.reason };
+      if (reportsToManager(v.target)) s.unseen.push(e);
+      return;
+    }
     case 'validation_started':
       validationOf(s, e.validationId).phase = {
         t: 'started',
         targetSha: e.baseSha,
         tree: { name: e.name, path: e.path, branch: e.branch, baseSha: e.baseSha },
         treeStatus: { t: 'creating' },
+        job: { t: 'idle' },
       };
       return;
     case 'validation_tree_ready':
@@ -526,14 +771,30 @@ export function apply(s: State, e: Entry): void {
       return;
     case 'validation': {
       const v = validationOf(s, e.validationId);
-      v.runs.push({ checkIndex: e.checkIndex, outcome: e.outcome });
+      v.runs.push({ checkIndex: e.checkIndex, outcome: e.outcome, report: e.report });
       // A finished candidate validation is shown to the next manager (it may integrate or retry);
       // a head validation is reported through the done it decides (`finished` / `done_refused`).
-      if (validationComplete(s, v) && reportsToManager(v.target)) s.unseen.push(e);
+      if (validationComplete(v) && reportsToManager(v.target)) s.unseen.push(e);
       return;
     }
     case 'validation_released':
       startedOf(s, e.validationId).treeStatus = e.release;
+      return;
+    case 'validation_running':
+      startedOf(s, e.validationId).job = { t: 'running' };
+      return;
+    case 'validation_interrupted': {
+      startedOf(s, e.validationId);
+      const v = validationOf(s, e.validationId);
+      v.phase = { t: 'planned' };
+      v.interruptions += 1;
+      return;
+    }
+    case 'preserved':
+      s.preserved.push({ treeOf: e.treeOf, preserved: e.preserved });
+      return;
+    case 'attempt_cancel_requested':
+      s.cancels[e.attemptId] = { at: e.at, runIds: e.runIds };
       return;
     case 'done_requested':
       s.doneRequest = { t: 'validating', validationId: e.validationId, summary: e.summary };
@@ -560,16 +821,33 @@ export function apply(s: State, e: Entry): void {
       }
       return;
     case 'attempt_posting':
-      attemptOf(s, e.attemptId).phase = { t: 'posting', body: e.body };
+      attemptOf(s, e.attemptId).phase = { t: 'posting', body: e.body, round: 'brief' };
       s.briefs[e.attemptId] = e.body;
       return;
-    case 'attempt_posted':
-      attemptOf(s, e.attemptId).phase = { t: 'posted', requestId: e.requestId };
+    case 'attempt_repair_posting': {
+      const attempt = attemptOf(s, e.attemptId);
+      if (attempt.phase.t !== 'posted' || attempt.phase.round !== 'brief')
+        throw new Error(`attempt ${e.attemptId} repaired outside its brief round`);
+      attempt.phase = { t: 'posting', body: e.body, round: 'repair' };
+      s.repairs[e.attemptId] = e.body;
       return;
+    }
+    case 'attempt_posted': {
+      const attempt = attemptOf(s, e.attemptId);
+      if (attempt.phase.t !== 'posting') throw new Error(`attempt ${e.attemptId} posted unbriefed`);
+      attempt.phase = { t: 'posted', requestId: e.requestId, round: attempt.phase.round };
+      s.requests[e.attemptId] = [...(s.requests[e.attemptId] ?? []), e.requestId];
+      return;
+    }
     case 'attempt_ended': {
       const attempt = attemptOf(s, e.attemptId);
       if (attempt.phase.t !== 'posted') throw new Error(`attempt ${e.attemptId} ended unposted`);
-      attempt.phase = { t: 'ended', requestId: attempt.phase.requestId, outcome: e.outcome };
+      attempt.phase = {
+        t: 'ended',
+        requestId: attempt.phase.requestId,
+        outcome: e.outcome,
+        endedAt: e.at,
+      };
       // A manager's actions are applied, not shown back; its malformed or failed end is shown,
       // so the next manager turn retries instead of the expedition going quiet.
       if (
@@ -580,6 +858,35 @@ export function apply(s: State, e: Entry): void {
         s.unseen.push(e);
       return;
     }
+    case 'claim_planned':
+      s.adoptions[e.attemptId] = { t: 'pending', claim: e.claim };
+      return;
+    case 'claim_adopted': {
+      const adoption = s.adoptions[e.attemptId];
+      const attempt = attemptOf(s, e.attemptId);
+      if (adoption?.t !== 'pending' || attempt.phase.t !== 'ended')
+        throw new Error(`claim of ${e.attemptId} adopted unplanned`);
+      attempt.phase = { ...attempt.phase, outcome: { t: 'work', result: adoption.claim } };
+      s.adoptions[e.attemptId] = { t: 'adopted' };
+      s.unseen.push(e);
+      return;
+    }
+    case 'claim_refused':
+      s.adoptions[e.attemptId] = { t: 'refused', reason: e.reason };
+      s.unseen.push(e);
+      return;
+    case 'manager_tree_ready':
+      s.managerTree = { t: 'ready', path: e.path };
+      return;
+    case 'manager_tree_failed':
+      s.managerTree = { t: 'failed', reason: e.reason };
+      return;
+    case 'manager_tree_released':
+      s.managerTree = { t: 'released', release: e.release };
+      return;
+    case 'tick_failed':
+      s.tickFailure = { t: 'failing', at: e.at, failures: e.failures, reason: e.reason };
+      return;
     case 'attempt_metered':
       s.costs[e.attemptId] = e.cost;
       return;
@@ -594,12 +901,27 @@ export function apply(s: State, e: Entry): void {
         scope: e.scope,
         paths: e.paths,
         after: e.after,
+        acceptance: { ...e.acceptance, rev: 0, trustedSha: headOf(s) },
         status: 'open',
       });
       // Shown to the next manager: the host assigns question ids, so a turn that only decomposes
       // must be followed by one that can start work on them (never idle, decide.ts).
       s.unseen.push(e);
       return;
+    case 'acceptance_set': {
+      const question = questionOf(s, e.questionId);
+      question.acceptance = {
+        rule: e.acceptance,
+        provenance: 'manager',
+        rev: question.acceptance.rev + 1,
+        trustedSha: headOf(s),
+      };
+      // Shown to the next manager like question_added: a turn that only fixes an acceptance must
+      // be followed by one that acts on it. 2026-11-01 review: a set_acceptance-only decision
+      // left nothing unseen, so the run looked quiescent and asked the owner again (the L3 loop).
+      s.unseen.push(e);
+      return;
+    }
     case 'question_closed':
       questionOf(s, e.questionId).status = e.status;
       return;
@@ -624,7 +946,7 @@ export function apply(s: State, e: Entry): void {
       return;
     }
     case 'finished':
-      s.run = { t: 'finished', reason: e.reason, summary: e.summary, at: e.at };
+      s.run = { t: 'finished', at: e.at, reason: e.reason, summary: e.summary };
       s.doneRequest = { t: 'none' };
       return;
   }
@@ -636,6 +958,21 @@ function cursorAfter(cursor: ChatCursor, via: FeedbackVia): ChatCursor {
       return cursor;
     case 'chat':
       return { t: 'after', ord: via.ord };
+  }
+}
+
+/** A candidate validation answers for its claim's question's acceptance as it stands now. */
+function basisOf(s: State, target: ValidationTarget): ValidationBasis {
+  switch (target.t) {
+    case 'head':
+      return { t: 'done' };
+    case 'candidate': {
+      const claim = attemptOf(s, target.claimAttemptId);
+      if (claim.spec.kind !== 'work')
+        throw new Error(`validation of ${claim.id}, which is not a work attempt`);
+      const { rev, trustedSha } = questionOf(s, claim.spec.questionId).acceptance;
+      return { t: 'acceptance', questionId: claim.spec.questionId, rev, trustedSha };
+    }
   }
 }
 
@@ -659,11 +996,12 @@ export function judgedChecks(c: Charter): string[] {
   return checks.flatMap((check) => (check.kind === 'judged' ? [check.text] : []));
 }
 
-/** Every command check has a recorded outcome (a failed tree records `error` for each). */
-export const validationComplete = (s: State, v: Validation) =>
-  v.runs.length >= commandChecks(s.charter).length;
-export const validationPassed = (s: State, v: Validation) =>
-  validationComplete(s, v) && v.runs.every((r) => r.outcome.t === 'passed');
+/** Every check has a recorded outcome (a failed tree records `error` for each), or the host
+ * recorded that it could not run them at all. */
+export const validationComplete = (v: Validation) =>
+  v.failure.t === 'failed' || v.runs.length >= v.checks.length;
+export const validationPassed = (v: Validation) =>
+  validationComplete(v) && v.failure.t === 'none' && v.runs.every((r) => r.outcome.t === 'passed');
 
 function applyFeedback(s: State, e: Extract<Entry, { t: 'feedback' }>): void {
   if (s.run.t === 'finished') return;
@@ -681,7 +1019,15 @@ function applyFeedback(s: State, e: Extract<Entry, { t: 'feedback' }>): void {
       s.run = { t: 'paused' };
       return;
     case 'resume':
+      // Shown to the next manager, so a resume re-plans (R11, 2026-11-01 incident): without it a
+      // resume from "needs you" left nothing unseen, decide found nothing to act on, and the run
+      // asked the owner again at once.
+      s.unseen.push(e);
       s.run = { t: 'running' };
+      return;
+    case 'extend':
+      s.extendedHours += e.feedback.hours;
+      s.unseen.push(e);
       return;
     case 'stop':
       // `finished` is appended by decide, so the stop is recorded with its reason.

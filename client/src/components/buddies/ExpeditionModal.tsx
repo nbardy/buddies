@@ -51,6 +51,7 @@ import {
   attemptTone,
   budgetLine,
   draftUrl,
+  expeditionPollMs,
   expeditionUrl,
   limitItems,
   runLabel,
@@ -303,7 +304,11 @@ function LiveModal({
   presentation,
   onClose,
 }: { id: string; presentation: Presentation; onClose(): void }) {
-  const view = usePolledFetch<ExpeditionView>(expeditionUrl(id), POLL_MS);
+  const [pollMs, setPollMs] = useState(POLL_MS);
+  const view = usePolledFetch<ExpeditionView>(expeditionUrl(id), pollMs);
+  // A finished expedition stops polling (audit #8); derived from the last response.
+  const nextPollMs = expeditionPollMs(view.data, POLL_MS);
+  if (nextPollMs !== pollMs) setPollMs(nextPollMs);
   if (!view.data)
     return (
       <Pending

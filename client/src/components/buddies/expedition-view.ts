@@ -24,6 +24,14 @@ export const draftUrl = (draftId: string, workspaceId: string) =>
 /** Crew Buddies: kept off the Buddies roster (atoms/buddy-visibility.ts). */
 export const EXPEDITION_CREWS_URL = '/api/buddies/expeditions/crews';
 
+/**
+ * How often a live expedition view polls: never once it finished with nothing live (audit
+ * 2026-11-01 #8: every open badge and modal kept polling a finished expedition forever). A
+ * finished expedition still refreshes on `buddies_changed` pushes (its key is under /api/buddies).
+ */
+export const expeditionPollMs = (view: ExpeditionView | null, liveMs: number) =>
+  view !== null && view.run.t === 'finished' && view.counts.live === 0 ? 0 : liveMs;
+
 /** The colour family of a pill, dot or chip (Expedition.css `.expedition-tone-*`). */
 export type Tone = 'ok' | 'warn' | 'info' | 'bad' | 'muted';
 

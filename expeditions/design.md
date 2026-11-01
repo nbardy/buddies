@@ -318,7 +318,8 @@ Done      = { checks: DoneCheck[] } | { ownerJudgment: true }
 - Reflection never edits checks; the host is the only runner of command checks.
 
 Built (2026-11-01, `charter.ts` `DoneCheck`/`ClaimChange`, `ledger.ts` validations, `command.ts`,
-host `run_validation`): a claim's `change` is a sum, `{t:'commit', sha}` or `{t:'no_code'}` (a
+host `run_validation`; candidate validation SUPERSEDED by R11: a candidate runs its question's
+acceptance, never the done commands): a claim's `change` is a sum, `{t:'commit', sha}` or `{t:'no_code'}` (a
 check of a no-code claim starts at the branch head). Decide plans `validation_planned {target}` for
 every ended code claim (target `candidate`, its sha) when the charter has command checks, and for
 the head when the manager asks done (with `done_requested`). The host resolves the sha and records
@@ -444,7 +445,8 @@ request, a provider that records no usage (Claude, Codex and OpenCode do), a ses
 store, a conversation without a record. No `usd`: the crate keeps tokens, and pricing them would
 be the usage panel's estimate. Totals (`news.ts costTotals`) show on the page header, the badge and
 `status`, with the not-measured count and reasons. Known limit: a run that starts after metering
-(its request was already answered) is not counted.
+(its request was already answered) is not counted. R11: the wait is bounded (`SETTLE_WINDOW_MS`,
+one hour after the attempt ended, then `unmeasured`), and a repaired attempt meters both requests.
 
 ### R7. Kickoff
 A Buddy suggests an expedition when the four tests hold and launches only when asked. The owner
@@ -529,7 +531,7 @@ guard is broken (mutation-checked). Tests: `server/test/expeditions.test.ts`, cr
   (posting/posted) attempt by the exact brief bytes (recorded before the post, so a run claimed
   before `attempt_posted` still matches): a work or check attempt starts in its worktree, a manager
   in the integration tree (read only, its brief says so; the repository root before that tree
-  exists). Every other crew turn (a mention, the owner's chat with the crew, a worker the crew
+  exists; SUPERSEDED by R11: its own detached tree). Every other crew turn (a mention, the owner's chat with the crew, a worker the crew
   spawned, a boot or creation warm with no run) starts in the crew's own fixed directory,
   `<expeditions root>/<id>/crew`, which is no git checkout: not the owner's checkout (the manager
   directory before setup and after finish) and not the integration tree the host merges into, and
@@ -636,3 +638,246 @@ post was cut mid-word ("…Engin"); the crew Buddy was listed as a team member.
   status post markdown, roster incl. the phone directory), `expedition-overlay.test.ts` (routing).
   Not covered by tests: Esc/backdrop closing (the client tests render static markup with no DOM);
   the browser pass checks it.
+
+### R11. Robustness and per-question acceptance (2026-11-01)
+Sources: the live incident on expedition `own-engine-geometry-opti-1b837b` (2026-11-01, ledger
+replayed as `server/test/fixtures/expeditions/own-engine-geometry-1b837b.ledger.jsonl`) and the
+oompa audit's expedition robustness list (sections 4 and 5). Each fix names its incident at the
+code site and has an integration test in `server/test/expeditions.test.ts` that fails with the
+guard broken (each mutation-checked once).
+
+**L1 — per-question acceptance (the design deadlock).** The charter's done command
+(`verify.py`, fail-closed until G1–G9 all pass) ran on every claimed candidate before integration,
+so no preparation commit could ever integrate, and the manager ended asking for a "host
+maintainer". Now the goal's done checks run on the expedition branch head at done ONLY. Every
+question carries `acceptance: {rule, provenance}` with
+`rule = {t:'command', argv, timeoutSeconds} | {t:'panel'}`, required on `add_question` and
+changeable on an open question with `set_acceptance`. A `command` acceptance is host-run on the
+claim's immutable candidate in a fresh tree, exactly as before (a validation now freezes its
+`checks` when planned: the acceptance for a candidate, the charter's commands for the head). A
+`panel` acceptance needs a verified independent check panel before `integrate`; a `command`
+acceptance needs the candidate validation of the CURRENT acceptance passed, and a refuting panel
+on it blocks the merge. Each declaration is a revision (`rev`, `trustedSha` = the expedition head
+when it was declared; ledger.ts `DeclaredAcceptance`). A validation records the revision it was
+planned for (`basis`), only the current revision's validation decides a claim, and a
+`set_acceptance` plans a new validation for every unmerged claim on that question (2026-11-01
+review: one validation per claim, kept whatever the acceptance became, meant a claim first
+validated by a command that could not pass, or a pre-R11 validation of `verify.py`, never
+integrated: the same deadlock at the level of one claim). `acceptance_set` is shown to the next
+manager like `question_added`, so a turn that only fixes an acceptance is followed by one that
+acts on it instead of a quiescent "needs you". Host
+verification (R9 P4) follows: a claim is host-verified when its candidate validation passed and it
+was integrated. Ledgers written before R11 fold through one κ (`ledger.ts canonical`): a
+`question_added` without acceptance becomes `{rule:{t:'panel'}, provenance:'legacy'}` (explicit
+data; the goal command never becomes a candidate gate by default), and a `validation_planned`
+without `checks` gets the charter's commands, which is what it ran. Trust note: the manager (an
+agent) now names commands the host runs. They run with the same curated environment as done
+commands (and, since #3, a throwaway HOME and TMPDIR), on agent-written code that a done
+command would run anyway.
+
+**L2 — answers lost on format.** The manager answered a bare JSON object, the worker that
+committed the verifier (`w64130b`) a prose summary; both became `malformed` and the commit was
+ignored. Now `parseOutcome` takes a bare top-level JSON object that ends the answer after the
+last fenced json block (or with no fence), else that last fenced block (strict schema unchanged).
+The bare final object wins so an answer that quotes a fenced snippet and ends with its own result
+is not read as the snippet. A first answer that does not parse is not final: the host
+records `attempt_repair_posting {error, body}` and posts ONE repair request on the same seat
+(keyed `exp:<id>:attempt:<a>:repair`; it quotes the answer and the schema; a worker's repair run
+starts in the same worktree, matched by its bytes). Phases carry the round
+(`posting|posted {round: brief|repair}`); a malformed repair answer ends the attempt. No repair
+is posted once the expedition is finished: the answer ends the attempt as it is (2026-11-01
+review: a repair after stop started a paid run the one-shot cancel never stopped). A work attempt
+that ends with anything but a code claim (a finding, blocked, malformed, failed, cancelled,
+abandoned; a claim its branch does not hold is malformed) while its branch holds commits beyond
+its base ends `unreported_commits {shas, ended}` (`ended` is how it ended by itself). The
+live run had two such commits: `w64130b` (malformed) and `w475a3b` (a `finding` whose tree was
+kept with ACCEPTANCE_ROUTE.md). The manager may `claim` a commit of such an attempt (or of a
+legacy `malformed`, `finding`, `blocked` or failed one): `claim_planned`, then
+the host checks the claim against that attempt's branch and custody (`claimHeld`, as for any
+claim) and records `claim_adopted` (the attempt's outcome becomes the claim, validated or checked
+per its question's acceptance) or `claim_refused {reason}`. A pending adoption counts as host
+work (else the deciding turn looked quiescent and asked the owner). Metering counts every request
+of an attempt.
+
+**L3 — recovery after an upgrade.** Nothing resumes by itself at boot: a ledger in `needs_owner`
+stays there. The owner resumes by writing in the expedition chat (or a Buddy steers): `resume` now
+re-plans (it is shown to the next manager; before, a resume from "needs you" left nothing unseen
+and the run asked again at once), as does any note. The next manager runs under the new rules and
+can claim the dropped commit. `extend <hours>` (chat) / `{t:'extend', hours}` (tool) moves the
+deadline, since a run left waiting may be past it. The incident-replay test folds the scrubbed
+live ledger, resumes it from the chat, claims `w64130b`'s commit, validates it with the question's
+own command (never `verify.py`) and integrates it.
+
+**Audit #1 — the wedge.** Observation is typed data: each posted attempt and the chat are read on
+their own, and a failure is a reason, never a throw before decide. Decide checks the owner's stop
+and the deadline before setup and everything else. A tick whose observation failed or that threw
+extends the expedition's failure streak; after 3 in a row the host appends `tick_failed {failures,
+reason}` (news, page `status`) and waits a doubling backoff (1 min up to 30 min); an owner steer,
+or an owner post in the expedition chat (the L3 resume path), retries at once. Effects run each
+on its own: one that throws is a reason of that tick, never a stop for the effects after it, and
+a finished expedition's `cancel_attempt` effects come first (2026-11-01 review: a failing tree
+release kept the stop's cancels from running).
+
+**Audit #4 — ledger tear.** `store.ts appendBatch` writes, then fsyncs, then the host applies; a
+write that fails is cut back (`ftruncate`) to the size before it, so a failed append never leaves
+half a line for the next one to be glued onto (which boot would quarantine).
+
+**Audit #5 — hot retry.** A check job that throws (spawn refused) records one terminal
+`validation_failed {reason}`; the validation is complete and failed, done is refused with the
+reason, and it is never re-run. Charter and acceptance argv refuse a NUL byte and an `argv[0]`
+with surrounding whitespace at ingestion.
+
+**Audit #6 — the manager's tree, and the head before a merge.** A manager decision runs in its own
+detached worktree (`git worktree add --detach`, `<root>/<id>/manager`), made once the integration
+tree exists (a pre-R11 ledger gets one on its first tick), reset to the branch head before every
+manager brief, released at finish once no manager runs in it. It is never the owner's checkout and
+never the integration tree; decide waits for it like the integration tree, and its failure
+finishes `setup_failed`. Before each merge `mergeCandidate` requires the integration tree's HEAD to
+be the ledger's head (`headOf`): a branch moved outside the host is refused
+`{phase:'tree', reason}`, never merged onto.
+
+**Audit #8 — incremental fold.** The host keeps each expedition's folded state and applies every
+appended batch to it (boot folds once); decide works on a clone (it applies its own intents). The
+test compares the host's view with a fresh replay of the file. The modal and badge stop polling a
+finished expedition with nothing live (`expeditionPollMs`); `buddies_changed` still refreshes them.
+
+**Also fixed.** Display-only metering no longer keeps a never-settling run's expedition active
+(bounded window). Creation is exclusive (`mkdir` without `recursive`, ledger opened `wx`).
+`list` reads only expeditions that fold. `run()` is a thin dispatcher over one handler per effect
+kind. A missing attempt branch is typed (`BranchState.missing`): `no_code` on it is not held, and
+release removes the tree without pretending to drop a branch (it used to count as zero commits).
+
+**Audit #2 — stop and deadline cancel live attempts.** Once an expedition is finished (any
+reason), each posted attempt gets one `cancel_attempt` effect: the host lists the crew's runs for
+that attempt's requests and cancels every unsettled one exactly as the owner's Stop does (the
+crate's `cancelRun`, then the `cancelled` event the runner kills the turn on), recording
+`attempt_cancel_requested {runIds}`. A run that ends answers or fails as usual; one still not ended
+`CANCEL_GRACE_MS` (5 min) after the request is ended by the host as `abandoned {reason}`, so its
+tree and slot are released instead of held by a run that ignored its stop. A recorded brief is
+still posted after finish (it may already exist) and is then cancelled the same way.
+
+**Audit #3 — a throwaway HOME for checks.** `runCommand` takes a scratch directory beside the
+validation tree (`<tree>.scratch`, never inside it, so a "clean checkout" check is not disturbed),
+makes `home/` and `tmp/` there empty for the run, passes them as `HOME` and `TMPDIR`, and removes
+them after. The curated environment no longer carries the owner's HOME, so `$HOME/.ssh`,
+`~/.aws` and a CLI's saved token by HOME are not where a check looks. This hides `$HOME`, not
+the owner's files: there is no sandbox and USER/LOGNAME pass through, so a check that names the
+owner's home by absolute path (or `~user`) still reads it. Network and separate-user isolation
+are not attempted (audit open question 6).
+
+**Audit #7 — host git without hooks or secrets.** Every host git and Cambium process runs with
+`gitEnv()`: an allowlist (PATH, HOME for the owner's git identity, USER, LOGNAME, LANG, LC_ALL,
+TZ, TMPDIR, `GIT_AUTHOR_*`/`GIT_COMMITTER_*`) plus `GIT_CONFIG_COUNT=2`,
+`core.hooksPath=/dev/null` and `core.fsmonitor=false` as command-line config, which outranks a
+repository's own settings and reaches Cambium's child git processes. A repository hook
+(post-checkout on a tree add, pre-merge-commit/post-merge on an integration) never runs for the
+host. Known limit: other config-named commands still run in host git, e.g. a
+`filter.<x>.smudge`/`clean` selected by a committed .gitattributes, or `diff.external`, and a
+worker in a linked worktree can write the shared .git/config (reproduced in review). Git has no
+switch that turns every filter off. Such a command sees only this environment (no provider keys),
+but the owner's real HOME.
+
+**Audit #9 — release is forced once its guards pass.** Release moved to `release.ts`. A worker's
+tree goes through oompa's guard ladder in order: git cannot read it, it has uncommitted or
+untracked changes, it is off its own branch (when that branch exists), or a merge, rebase,
+cherry-pick or revert is half-done. Any rung refuses: the tree is `left {reason}`, never forced.
+Past the ladder, unintegrated commits are salvaged and ignored output harvested (below), and only
+then is the tree removed with `cambium remove -force`; a plain remove refuses a tree whose
+submodule was initialized ("working trees containing submodules cannot be moved or removed",
+reproduced), so such trees leaked. Validation trees are scratch: no dirty rung, but they are
+salvaged and harvested too.
+
+**Audit #10 — checks across a restart: typed interruption, re-run on the same sha.** The host
+appends `validation_running` before it starts a check job. A process that finds a validation
+`running` that it never started itself (it keeps the keys of jobs it started) knows the job died
+with an earlier process: it discards that tree (salvage and harvest first) and appends
+`validation_interrupted {release}`; the validation goes back to `planned` with `interruptions + 1`,
+and its next tree has a fresh name (`<validation>-r<n>`), so it never adopts the tree an orphaned
+check may still be writing into. Checks already recorded are kept; the unrecorded ones run again
+on the same immutable sha. Chosen over adoption because adoption needs a detached wrapper with
+pid and exit files that outlives the server, and a pid from another boot cannot be trusted; a
+re-run on an immutable commit is correct by contract and costs only its time. Known limit: the
+orphan is not killed (its tree is pulled away, so it fails fast).
+
+**Oompa ports.** Each has an incident-replay test (see the table below):
+- *Strict verdict parsing.* A check panel answer counts only with exactly one verdict object that
+  ends the answer: a quoted example verdict followed by the real one, or prose after the verdict
+  ("Actually NOT verified…"), is `malformed` (one repair turn, then not counted). The verdict enum
+  already refuses "not verified" and plain prose such as "NOT APPROVED".
+- *Validator source pins.* A candidate validation trusts the validator files its acceptance's
+  argv names as they were committed at the acceptance's `trustedSha` (the expedition head when
+  the manager declared it): a candidate whose bytes for such a file differ is refused before it
+  runs (`error`, "the candidate changed the validator …; re-declare the acceptance"), so a worker
+  cannot commit `exit 0` to the validator that accepts its own work (2026-11-01 review: pins taken
+  at the candidate sha only recorded the cheat's own hash). A file the trusted commit does not
+  have (a validator the candidate adds) is trusted at the candidate. At done the head is the
+  trust root. The host then hashes (SHA-256) the pinned files, refuses to run when the tree's
+  bytes differ, and re-reads them after the run: a check that changed its own validator is
+  recorded `error` whatever it exited. A git failure while pinning ends the job
+  `validation_failed {reason}`; it never runs unpinned. Every `validation` entry carries its report
+  `{t:'expedition.validation/v1', targetSha, pins, pinCheck: held|changed|unpinned}`; entries
+  written before this fold as `unpinned` with reason `legacy`.
+- *Salvage ref.* Before a tree whose branch holds commits the expedition branch does not is
+  removed, the tip is pinned at `refs/salvage/expeditions/<id>/<attempt-or-validation>` and
+  recorded `preserved {salvaged}`. Unmerged attempt branches also stay, as before.
+- *Harvest of ignored output.* Before removal, ignored files under `output/` (`HARVEST_DIRS`) are
+  copied (copy-on-write where possible) into `<root>/<id>/harvest/<tree>/` at the same relative
+  paths and recorded `preserved {harvested, files, bytes}`. Over 512 MiB or 10 000 files the
+  harvest is refused whole and the tree is `left`, never half-copied.
+
+### R11 live delivery on a real repository (2026-11-01)
+The first end-to-end delivery (audit plan step 3), at `bfbb0c4`, on a local `--shared` clone of
+wave_sim `main` (23k files, ~870 MB checkout, one 863 MB submodule initialized) whose checkout was
+made deliberately dirty (two modified tracked docs, one of them the target `agent_notes/README.md`,
+and an untracked file). Throwaway server and stores; one Buddy, Sonnet 5.5, low effort. The owner
+asked for two tasks (a check script and a README section) with done = the script passes.
+- Finished `done` in 8 min: 4 worker attempts of a budget of 6 (2 work, 2 check), 7 manager
+  decisions, one answer-repair round. The manager declared `panel` acceptance on both questions;
+  each claim was verified by an independent check and merged `--no-ff` onto
+  `expedition/<id>` (two merge commits). The done command ran exactly once, as one head
+  validation of the merged branch in a fresh tree (pins held); no intermediate claim ran it.
+- Owner checkout: `git status --porcelain=v2`, HEAD and the SHA-256 of every dirty file were
+  identical before and after; the submodule was untouched. Refs: only `expedition/<id>` was
+  added. Every attempt, validation, integration and manager tree was removed and its scratch branch
+  deleted (`git worktree list` back to the owner's checkout alone); no salvage or harvest was
+  needed, because both claims merged.
+- Runs: 12 crew runs, one per posted request (11 attempts + 1 repair), plus the launching
+  Buddy's one turn; no stray deliveries. Cost: 34k input + 10k output tokens (604k cache read,
+  284k written), measured from the providers.
+- Wall time is dominated by tree I/O on a repository this size: each worktree add took 40–70 s and
+  each removal 6–16 s, about 4 of the 8 minutes.
+- Found and fixed: a finished expedition's badge clock kept running ("finished · 10m" two minutes
+  after the finish). `Run.finished` now carries `at` and the badge's elapsed time stops there.
+- Not exercised live: populated submodules inside attempt trees (`git worktree add` leaves them
+  empty, so the forced removal of a tree holding one is covered by the test only), check HOME
+  isolation (the done script never reads HOME; covered by "a check cannot read the owner's home"),
+  salvage and harvest.
+
+### Lessons from oompa
+The oompa audit (2026-11-01) read oompa's history for the failures it paid for. Its durable value
+is that catalogue, not its loop, so expeditions take mechanisms one at a time with an incident
+replay each, and keep their own loop, ledger and integration.
+"Ported" means the mechanism is reimplemented here with an incident-replay test; "Idea" means
+only the lesson shaped an existing design; "Kept" means expeditions already had their own answer.
+
+| Oompa incident | Refinement | Expeditions |
+|---|---|---|
+| A dirty root index made every later `checkout main` fail | Abort the merge, clear MERGE_HEAD before releasing | Idea: `mergeCandidate` aborts an interrupted merge first (R3), in its own tree |
+| Run 9f004a39 deleted ~2.5 h of approved work | Clean up only after a successful merge; pin a `salvage/` ref | Ported: `refs/salvage/expeditions/<id>/<tree>` before removing a tree with unintegrated commits |
+| Merge-no-claim killed 32 of 36 worker lifetimes | Non-fatal, bounced back as a CLAIM prompt | Idea, done here: `unreported_commits` + the manager's `claim` (L2) |
+| Overlapping swarms: 18 of 22 stale-base rejections | One swarm per project | Idea: custody admission (R1) and one integration chain per expedition |
+| Dead runs showed "completed" for ~20 h | A truthful `stopped.json` | Idea: the ledger is the only state; finish reasons are typed |
+| A corrupt worktree entry burned 20/20 iterations; 124 checkouts left 9.7 GiB | Stale-worktree handling, then Cambium | Kept: Cambium trees, typed `worktree_failed` (R1). Ported: the removal guard ladder, then a forced remove (#9), and the harvest of ignored output (swarm 455987ea lost a paid run's raw gauges to a "clean" removal) |
+| A retry started a model on the wrong base | Bounded create plus a verified HEAD | Kept: adoption checks branch and base (R1); idea: merge checks the head (R11 #6) |
+| Swarm 455987ea left claims stuck `in_progress` | CAS release of abandoned claims | Does not apply: expeditions have no shared claim queue; the ledger is single-writer per expedition (serial chain) |
+| Swarm e992a8d9 resumed 9 times against a missing target | Typed blocked returns | Kept: `blocked {need}` and typed outcomes |
+| The "stale task loop" | A no-diff merge completes the task | Kept: `no_code` claims, checked against the branch (R2) |
+| Reviews judged on `--stat`, biased verdicts | Real diff, latest round, neutral wording | Idea: blind checks reproduce at the candidate commit (R2) |
+| `\bAPPROVED\b` counted "NOT APPROVED" | Strict explicit-approval parsing | Ported: one verdict that ends the answer. Also fixed at the source: the Buddies oompa host now requires `task_execution`, so oompa never falls back to that queue path |
+| A `$&` in a diff crashed every review | `Matcher/quoteReplacement` | Idea: briefs are built by concatenation, never regex replacement |
+| One hung cycle burned 434 minutes | Three counters collapsed to one knob | Idea: one attempt budget plus a derived decision cap (R9 P3), timeouts on every check |
+| The first startup died on a closed stdin | Probe the workers' real execution path | Idea: the smoke runs real crew turns (R9) |
+| Validator replaced by the candidate | SHA-256 pins before and after, typed report | Ported: the files a check's argv names are trusted at the head when the acceptance was declared (a candidate that changed them is refused), hashed before and re-read after the run, `expedition.validation/v1` in every `validation` entry |
+| Only the oompa host survived a restart (detached wrapper with pid and exit files) | Process adoption | Idea only: a typed `validation_interrupted` and a re-run on the same sha in a fresh tree (#10); adoption needs a wrapper that outlives the server |
+| Its harness adapters are a thin pipe to `agent-cli` | A catalogue of provider quirks | Idea only: crew turns run through the Buddy runner, which owns the harness |
+| Its worker loop is one ~420-line loop/recur | Bounded resumes, wrap-up nudge, salvage on death | Idea only: attempts stay single-shot (one request, one immutable commit); retries are typed outcomes, never a second loop |

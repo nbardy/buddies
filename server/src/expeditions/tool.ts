@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { BuddyGrant } from '../buddies/grants';
 import type { ToolDeps } from '../buddies/mcp';
 import { createProviderCatalog } from '../providers/catalog-service';
+import { EXTEND_MAX_HOURS } from './briefs';
 import type { ExpeditionHost, Launched } from './host';
 import {
   type CharterDefault,
@@ -19,9 +20,11 @@ import {
 // The one `expedition` Buddy tool. Its description is paid on every worker turn
 // (tool-contract.test.ts budget), so usage detail lives in BUDDY_TOOL_GUIDE and expeditions/mcp.md.
 
+/** `resume` re-plans (design.md R11); `extend` moves the deadline by up to 72 hours. */
 const Steer = z.union([
   z.object({ t: z.enum(['lesson', 'note']), text: z.string().trim().min(1).max(2000) }).strict(),
   z.object({ t: z.enum(['pause', 'resume', 'stop']) }).strict(),
+  z.object({ t: z.literal('extend'), hours: z.number().positive().max(EXTEND_MAX_HOURS) }).strict(),
 ]);
 
 export const ExpeditionAction = z.discriminatedUnion('do', [

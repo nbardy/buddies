@@ -8,6 +8,8 @@ export type ExpeditionRun =
   | { t: 'waiting_owner'; question: string }
   | {
       t: 'finished';
+      /** When it finished: the header shows how long it took, and the badge's clock stops. */
+      at: string;
       reason:
         | 'done'
         | 'attempts_spent'
@@ -16,8 +18,6 @@ export type ExpeditionRun =
         | 'owner_stop'
         | 'setup_failed';
       summary: string;
-      /** When it finished: the header shows how long it took, not time left. */
-      at: string;
     };
 
 /** Where a question stands, derived from the ledger (design.md R5): its furthest stage.
@@ -43,6 +43,12 @@ export interface ExpeditionQuestion {
   paths: string[];
   /** The questions this question's work waits for (each must be closed verified). */
   after: { id: string; title: string }[];
+  /** How its claims are accepted (design.md R11): a host-run command on the candidate commit,
+   * or an independent check panel; `legacy` marks a question added before acceptance existed. */
+  acceptance: {
+    rule: { t: 'command'; argv: string[]; timeoutSeconds: number } | { t: 'panel' };
+    provenance: 'manager' | 'legacy';
+  };
   attempts: string[];
 }
 

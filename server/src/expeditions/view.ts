@@ -73,7 +73,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     badge: badgeLine,
     run: s.run,
     charter: charterView(c),
-    validations: s.validations.map((v) => validationView(s, v)),
+    validations: s.validations.map(validationView),
     integration: integrationView(s),
     cost: costTotals(s),
     workspaceId: s.workspaceId,
@@ -141,15 +141,15 @@ function integrationView(s: State): ExpeditionIntegration {
   };
 }
 
-function validationView(s: State, v: Validation): ExpeditionValidation {
+function validationView(v: Validation): ExpeditionValidation {
   return {
     id: v.id,
     subject:
       v.target.t === 'candidate'
         ? { t: 'candidate', claimAttemptId: v.target.claimAttemptId }
         : { t: 'head' },
-    label: validationLabel(s, v),
-    verdict: !validationComplete(s, v) ? 'running' : validationPassed(s, v) ? 'passed' : 'failed',
+    label: validationLabel(v),
+    verdict: !validationComplete(v) ? 'running' : validationPassed(v) ? 'passed' : 'failed',
     checks: v.runs.map((r) => ({
       checkIndex: r.checkIndex,
       passed: r.outcome.t === 'passed',

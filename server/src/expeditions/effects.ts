@@ -1,4 +1,4 @@
-import type { Attempt, State, Validation, Worktree, WorktreeStatus } from './ledger';
+import type { Attempt, Round, State, Validation, Worktree, WorktreeStatus } from './ledger';
 import { attemptOf, validationComplete, worktreeOf } from './ledger';
 import {
   type WorkerSpec,
@@ -23,6 +23,12 @@ export type Effect =
   | { t: 'integrate'; integrationId: string }
   /** At finish: remove the integration worktree, keeping its branch for the owner to merge. */
   | { t: 'release_integration_tree' }
+  /** Make (or adopt) the manager's detached read-only worktree (design.md R11). */
+  | { t: 'create_manager_tree' }
+  /** At finish, once no manager runs in it: remove the manager's worktree. */
+  | { t: 'release_manager_tree' }
+  /** Check a manager's claim of an attempt's unreported commits against its branch (R11). */
+  | { t: 'adopt_claim'; attemptId: string }
   /** Record a worker attempt's worktree intent, then create it (it now holds a slot and custody). */
   | { t: 'admit'; attempt: Attempt<WorkerSpec> }
   /** Create or adopt a recorded worktree: the replay path after a crash between intent and ready. */
@@ -39,18 +45,31 @@ export type Effect =
   | { t: 'release_validation'; validationId: string }
   /** Build and record the brief (then post it). */
   | { t: 'brief_attempt'; attempt: Attempt }
-  /** Post a recorded brief: the replay path after a crash between record and post. */
-  | { t: 'post_attempt'; attemptId: string; body: string }
-  /** Read an ended attempt's measured cost once its run settled (design.md R6); writes nothing
-   * while the run is still settling, so it is retried on the next tick. */
-  | { t: 'meter_attempt'; attemptId: string; requestId: string }
+  /** Post a recorded brief or repair request: also the replay path after a crash between record
+   * and post (keyed by attempt and round, so a replay returns the same post). */
+  | { t: 'post_attempt'; attemptId: string; body: string; round: Round }
+  /** Read an ended attempt's measured cost once its runs settled (design.md R6); writes nothing
+   * while they are still settling (until meter.ts SETTLE_WINDOW_MS after `endedAt`). */
+  | { t: 'meter_attempt'; attemptId: string; requestIds: string[]; endedAt: string }
   | { t: 'post_status'; seq: number; text: string }
-  | { t: 'post_badge' };
+  | { t: 'post_badge' }
+  /** A finished expedition's live attempt: ask its runs to stop (audit 2026-11-01 #2). */
+  | { t: 'cancel_attempt'; attemptId: string };
 
 export function pendingEffects(s: State): Effect[] {
   if (s.crew.t === 'pending') return [{ t: 'create_crew' }];
   const finished = s.run.t === 'finished';
   const effects: Effect[] = [
+    // Finished: nothing a live attempt does can matter any more, so its runs are asked to stop
+    // (once); its end, or the host's `abandoned` after the grace, then releases its tree. First,
+    // so stopping paid runs never waits behind a status post or a tree release.
+    ...(finished
+      ? s.attempts.flatMap((a): Effect[] =>
+          a.phase.t === 'posted' && !(a.id in s.cancels)
+            ? [{ t: 'cancel_attempt', attemptId: a.id }]
+            : []
+        )
+      : []),
     ...(s.badgePost.t === 'pending' ? [{ t: 'post_badge' } as const] : []),
     ...s.statuses
       .filter((x) => x.post.t === 'pending')
@@ -63,18 +82,29 @@ export function pendingEffects(s: State): Effect[] {
     // A recorded brief is a committed intent: it is completed whatever the run state, because
     // the post may already exist (keyed, so the replay returns it) and its worker may be running.
     ...s.attempts.flatMap((a): Effect[] =>
-      a.phase.t === 'posting' ? [{ t: 'post_attempt', attemptId: a.id, body: a.phase.body }] : []
+      a.phase.t === 'posting'
+        ? [{ t: 'post_attempt', attemptId: a.id, body: a.phase.body, round: a.phase.round }]
+        : []
     ),
     // Metering is a read: it runs whatever the run state, finished and paused included.
     ...s.attempts.flatMap((a): Effect[] =>
       a.phase.t === 'ended' && !(a.id in s.costs)
-        ? [{ t: 'meter_attempt', attemptId: a.id, requestId: a.phase.requestId }]
+        ? [
+            {
+              t: 'meter_attempt',
+              attemptId: a.id,
+              requestIds: s.requests[a.id] ?? [a.phase.requestId],
+              endedAt: a.phase.endedAt,
+            },
+          ]
         : []
     ),
+    ...managerTreeEffects(s),
   ];
   switch (s.integrationTree.status.t) {
     case 'creating':
-      return [...effects, { t: 'create_integration_tree' }];
+      // A run stopped before its tree was made never makes it (decide finishes first, #1).
+      return finished ? effects : [...effects, { t: 'create_integration_tree' }];
     case 'failed': // decide finishes the expedition with the reason
     case 'kept':
     case 'removed':
@@ -89,13 +119,17 @@ export function pendingEffects(s: State): Effect[] {
   // planned after a merge validates the merged head. Then one validation at a time, in plan
   // order: command checks may be heavy (builds, GPU runs).
   const merge = s.integrations.find((i) => i.status.t === 'pending');
-  const next = s.validations.find((v) => !validationComplete(s, v));
+  const next = s.validations.find((v) => !validationComplete(v));
   if (merge) effects.push({ t: 'integrate', integrationId: merge.id });
   else if (next) effects.push(validationEffect(next));
+  for (const attemptId of Object.keys(s.adoptions))
+    if (s.adoptions[attemptId].t === 'pending') effects.push({ t: 'adopt_claim', attemptId });
   for (const attempt of s.attempts.filter((a) => a.phase.t === 'admitted'))
     effects.push(admittedEffect(attempt, worktreeOf(s, attempt.id)));
-  for (const attempt of queued(s).filter((a) => !isWorker(a)))
-    effects.push({ t: 'brief_attempt', attempt });
+  // A manager is briefed only in its own tree (R11); decide plans none before it is ready.
+  if (s.managerTree.t === 'ready')
+    for (const attempt of queued(s).filter((a) => !isWorker(a)))
+      effects.push({ t: 'brief_attempt', attempt });
   // Admission (design.md R1): at most maxLive workers, and never two with overlapping custody;
   // a blocked attempt stays queued (in order) until a slot and its paths free up. Work whose
   // question's dependencies are not verified (R5) waits too, holding neither slot nor custody.
@@ -111,6 +145,26 @@ export function pendingEffects(s: State): Effect[] {
     effects.push({ t: 'admit', attempt });
   }
   return effects;
+}
+
+/** The manager's tree is made once the integration tree is ready (a ledger written before R11
+ * gets one on its first tick), and released at finish once no manager decision runs in it. */
+function managerTreeEffects(s: State): Effect[] {
+  const finished = s.run.t === 'finished';
+  const managerLive = s.attempts.some(
+    (a) => a.spec.kind === 'manager' && (a.phase.t === 'posting' || a.phase.t === 'posted')
+  );
+  switch (s.managerTree.t) {
+    case 'missing':
+      return !finished && s.integrationTree.status.t === 'ready'
+        ? [{ t: 'create_manager_tree' }]
+        : [];
+    case 'ready':
+      return finished && !managerLive ? [{ t: 'release_manager_tree' }] : [];
+    case 'failed':
+    case 'released':
+      return [];
+  }
 }
 
 /** The next step for the validation in progress. */
@@ -148,7 +202,7 @@ function validationReleases(s: State): Effect[] {
     if (v.phase.t !== 'started') return [];
     const status = v.phase.treeStatus.t;
     const held = status === 'creating' || status === 'ready';
-    return held && (finished || validationComplete(s, v))
+    return held && (finished || validationComplete(v))
       ? [{ t: 'release_validation', validationId: v.id }]
       : [];
   });

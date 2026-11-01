@@ -19,11 +19,33 @@ export const PIPE_GRACE_MS = 2000;
 /**
  * The only server environment a check sees. A check runs code an agent wrote (the candidate
  * commit), so provider keys and tokens in the server's environment must not reach it: it gets
- * what a build needs to find its tools and a home, nothing else.
+ * what a build needs to find its tools, nothing else. HOME and TMPDIR are a throwaway pair made
+ * for this one run (audit 2026-11-01 #3: HOME was the owner's, so a check could read
+ * `~/.ssh`, `~/.aws` or a CLI's saved token). Fix-guard: "a check cannot read the owner's home".
  */
-const CHECK_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TMPDIR', 'TZ'];
-const checkEnv = (): NodeJS.ProcessEnv =>
-  Object.fromEntries(CHECK_ENV.flatMap((k) => (k in process.env ? [[k, process.env[k]]] : [])));
+const CHECK_ENV = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TZ'];
+const checkEnv = (scratch: CheckScratch): NodeJS.ProcessEnv => ({
+  ...Object.fromEntries(CHECK_ENV.flatMap((k) => (k in process.env ? [[k, process.env[k]]] : []))),
+  HOME: scratch.home,
+  TMPDIR: scratch.tmp,
+});
+
+/** A check run's own HOME and TMPDIR, inside `dir` (beside its validation tree, never in it: a
+ * check that asserts a clean checkout must not see them). Made empty before the run, removed
+ * after it. */
+interface CheckScratch {
+  dir: string;
+  home: string;
+  tmp: string;
+}
+
+async function freshScratch(dir: string): Promise<CheckScratch> {
+  await fsp.rm(dir, { recursive: true, force: true });
+  const scratch = { dir, home: path.join(dir, 'home'), tmp: path.join(dir, 'tmp') };
+  await fsp.mkdir(scratch.home, { recursive: true, mode: 0o700 });
+  await fsp.mkdir(scratch.tmp, { recursive: true, mode: 0o700 });
+  return scratch;
+}
 
 /**
  * Whether a check's bare or absolute `argv[0]` names an executable file the way `spawn` will look
@@ -60,12 +82,33 @@ async function executableFile(file: string): Promise<boolean> {
  * interleaved) is kept as a bounded tail.
  *
  * Known limit: leading its own group also means a check outlives a server crash. The ledger holds
- * no pid (one could not be trusted across a reboot), so on replay `run_validation` runs the
- * interrupted check again in the same tree while the orphan may still be running there; the two
- * can race on build outputs, and the orphan is never killed (it ends at its own pace, unbounded
- * by the timeout). The recorded outcome is always the replayed run's.
+ * no pid (one could not be trusted across a reboot), so the orphan is never killed (it ends at
+ * its own pace, unbounded by the timeout). On replay the interrupted validation's tree is
+ * discarded and its unrecorded checks run again in a FRESH tree at the same sha (host.ts
+ * `interrupted`, audit #10), so the two never share build outputs; the recorded outcome is the
+ * replayed run's.
+ * Known limit: the throwaway HOME hides `$HOME`, not the owner's files. There is no sandbox, and
+ * USER/LOGNAME pass through, so a check that names the owner's home by path (or `~user`) still
+ * reads it (design.md R11).
  */
-export function runCommand(check: CommandCheck, cwd: string): Promise<CheckOutcome> {
+export async function runCommand(
+  check: Pick<CommandCheck, 'argv' | 'timeoutSeconds'>,
+  cwd: string,
+  scratchDir: string
+): Promise<CheckOutcome> {
+  const scratch = await freshScratch(scratchDir);
+  try {
+    return await spawnCheck(check, cwd, scratch);
+  } finally {
+    await fsp.rm(scratch.dir, { recursive: true, force: true });
+  }
+}
+
+function spawnCheck(
+  check: Pick<CommandCheck, 'argv' | 'timeoutSeconds'>,
+  cwd: string,
+  scratch: CheckScratch
+): Promise<CheckOutcome> {
   const [bin, ...args] = check.argv;
   return new Promise((resolve) => {
     let tail = '';
@@ -76,7 +119,7 @@ export function runCommand(check: CommandCheck, cwd: string): Promise<CheckOutco
     };
     const child = spawn(bin, args, {
       cwd,
-      env: checkEnv(),
+      env: checkEnv(scratch),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

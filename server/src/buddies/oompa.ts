@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
-import fsp from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -10,15 +10,14 @@ import {
   executionWrapperAlive,
   isKnownOwnWrapper,
   killExecution,
-  readPid,
   trustSpawnedWrapper,
   verifyExecutions,
 } from '@nbardy/agent-cli';
 import { z } from 'zod';
 import { appDataDirectory } from '../app-data';
+import { labelled } from '../observability/event-loop-stall';
 import { type Execution, holdsGrant } from '../turns/execution-state';
 import { type OompaOwner, createExecutionJournals } from '../turns/executions';
-import { labelled } from '../observability/event-loop-stall';
 import type { BuddiesCore } from './core';
 import { decideExecutionGate } from './execution-gate';
 import type { BuddyGrant, Grants, TurnGrant } from './grants';
@@ -65,10 +64,9 @@ const Backend = z
 const Config = z
   .object({
     task_backend: Backend,
-    task_execution: z
-      .object({ validators: z.record(Validator) })
-      .passthrough()
-      .optional(),
+    // Required (audit 2026-11-01): without it oompa falls back to its queue worker, which counts
+    // any "APPROVED" substring ("NOT APPROVED") as approval and merges in the primary checkout.
+    task_execution: z.object({ validators: z.record(Validator) }).passthrough(),
   })
   .passthrough();
 
@@ -408,9 +406,7 @@ export function createOompaHost(options: {
       });
     }
     await verifyExecutions(
-      [...runs.values()]
-        .filter((run) => !settled.has(run.owner.id))
-        .map((run) => run.execution.dir)
+      [...runs.values()].filter((run) => !settled.has(run.owner.id)).map((run) => run.execution.dir)
     );
   }
   function refresh(run: Run) {
@@ -809,7 +805,7 @@ export function createOompaHost(options: {
   function baseConfig(run: Run) {
     const config = Config.parse(read<unknown>(path.join(run.execution.dir, 'config.json')));
     config.resume_swarm_id = undefined;
-    if (config.task_execution) config.task_execution.owner_window = undefined;
+    config.task_execution.owner_window = undefined;
     return config;
   }
   async function amend(grant: TurnGrant, run: Run, action: z.infer<typeof Amendment>, key: string) {
@@ -883,7 +879,7 @@ export function createOompaHost(options: {
       !review.evidence.includes(reviewBinding)
     )
       throw new Error('missing canonical independent delta review binding');
-    for (const taskId of changed) await pins(source, config.task_execution!.validators[taskId]);
+    for (const taskId of changed) await pins(source, config.task_execution.validators[taskId]);
     delegated(grant, run, true);
     latestDrained(run);
     if ((await cleanCommit(source)) !== action.sourceCommit)
@@ -1361,7 +1357,7 @@ export function createOompaHost(options: {
         taskOwners,
         automation,
         grant: record,
-        validators: config.task_execution?.validators ?? {},
+        validators: config.task_execution.validators,
       };
       const execution = journals.forOompa(owner);
       const run = { owner, execution };
@@ -1372,8 +1368,6 @@ export function createOompaHost(options: {
         // Resume the existing Oompa execution state, including attempts/session/task deadlines.
         // A plain run here silently reset those budgets. Guard: overnight delegation renewal.
         if (action.resumeRunId) {
-          if (!config.task_execution)
-            throw new Error('owner resumed window requires selected task execution');
           config.task_execution.owner_window = {
             authorization_id: id,
             expires_at_ms: expiresAt,
