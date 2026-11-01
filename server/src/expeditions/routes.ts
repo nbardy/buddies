@@ -16,6 +16,13 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
     return expeditions;
   };
 
+  // Every expedition, newest launch first: the channel rail's section and the index pane.
+  app.get('/api/buddies/expeditions', (_req, res) => {
+    const expeditions = ready(res);
+    if (!expeditions) return;
+    res.json(expeditions.summaries());
+  });
+
   app.get('/api/buddies/expeditions/crews', (_req, res) => {
     const expeditions = ready(res);
     if (!expeditions) return;

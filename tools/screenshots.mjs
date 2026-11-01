@@ -607,6 +607,7 @@ export function buildScreens(found, focus) {
     },
     // ── Buddies ──
     { name: 'buddies', missing: null, views: onBoth('/buddies') },
+    { name: 'expeditions', missing: null, views: onBoth('/expeditions') },
     ...employeeTabs().map((tab) => ({
       name: `buddy-${tab}`,
       missing: noBuddy,
