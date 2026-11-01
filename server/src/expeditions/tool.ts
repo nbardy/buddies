@@ -5,6 +5,7 @@ import type { ToolDeps } from '../buddies/mcp';
 import { createProviderCatalog } from '../providers/catalog-service';
 import type { ExpeditionHost, Launched } from './host';
 import {
+  type CharterDefault,
   CharterRequest,
   type ModelsOf,
   type Origin,
@@ -12,6 +13,7 @@ import {
   charterAdvice,
   charterOf,
   charterSummary,
+  defaultedLines,
 } from './model';
 
 // The one `expedition` Buddy tool. Its description is paid on every worker turn
@@ -32,7 +34,7 @@ export const ExpeditionAction = z.discriminatedUnion('do', [
 export type ExpeditionAction = z.infer<typeof ExpeditionAction>;
 
 export const EXPEDITION_DESCRIPTION =
-  'Self-running expedition to a fuzzy goal; only verified results count. draft (validate only), launch, status, list, steer.';
+  'Self-running expedition to a fuzzy goal; only verified results count. draft (posts a card), launch, status, list, steer.';
 
 /** The thread this turn answers, when it was started by a post (else the owner DM). */
 async function originOf(core: BuddiesCore, grant: BuddyGrant): Promise<Origin> {
@@ -68,14 +70,25 @@ const pageOf = (s: State) => `/expeditions/${s.id}`;
 const NEXT =
   'The badge (it opens the page) is already in this chat, posted by the host: do not post the page path or a link. Reply with the post tool in this thread, one line saying what launched; updates post on their own, and the owner steers by replying in the expedition chat.';
 
-function launchReply(launched: Launched, defaulted: string[], resolved: string[]) {
+// 2026-11-01 owner request: a draft is a card in the chat (Info opens the charter, Launch starts
+// it), so the Buddy neither pastes the charter nor asks the owner to type "launch it".
+const DRAFT_NEXT =
+  'The host posted the draft card in this chat (Info shows the charter, issues and defaults; Launch starts it). Reply with the post tool in this thread, one line; do not paste the charter or ask the owner to type "launch it".';
+const DRAFT_FIX =
+  'Its Launch is disabled until the issues are fixed: say what blocks it, and draft again with the fix (the new card replaces this one).';
+
+/** One open expedition, and one open draft, per (conversation, name). */
+const launchKey = (grant: BuddyGrant, charter: { name: string }) =>
+  `${grant.conversationId}:${charter.name}`;
+
+function launchReply(launched: Launched, defaulted: CharterDefault[], resolved: string[]) {
   switch (launched.t) {
     case 'launched':
       return {
         id: launched.state.id,
         page: pageOf(launched.state),
         launched: charterSummary(launched.state.charter),
-        defaulted,
+        defaulted: defaultedLines(defaulted),
         resolved,
         next: NEXT,
       };
@@ -103,27 +116,44 @@ export async function expeditionHandler(
 ): Promise<unknown> {
   switch (action.do) {
     case 'draft': {
+      notCrew(host, grant, 'draft');
       const { charter, defaulted, resolved } = charterOf(action.charter, catalogModels);
       const issues = await host.issues(grant.workspaceId, charter);
-      return {
-        ready: issues.length === 0,
+      const draft = await host.drafts.draft({
+        key: launchKey(grant, charter),
+        charter,
         issues,
         advice: charterAdvice(charter),
         defaulted,
         resolved,
-        charter,
+        origin: await originOf(core, grant),
+        launcherId: grant.buddyId,
+        workspaceId: grant.workspaceId,
+      });
+      return {
+        draftId: draft.id,
+        ready: issues.length === 0,
+        issues,
+        advice: draft.advice,
+        defaulted: defaultedLines(defaulted),
+        resolved,
+        drafted: charterSummary(charter),
+        next: issues.length === 0 ? DRAFT_NEXT : `${DRAFT_NEXT} ${DRAFT_FIX}`,
       };
     }
     case 'launch': {
       notCrew(host, grant, 'launch');
       const { charter, defaulted, resolved } = charterOf(action.charter, catalogModels);
+      const key = launchKey(grant, charter);
       const launched = await host.launch({
-        key: `${grant.conversationId}:${charter.name}`,
+        key,
         charter,
         origin: await originOf(core, grant),
         launcherId: grant.buddyId,
         workspaceId: grant.workspaceId,
       });
+      // A card drafted under this key would otherwise still offer Launch.
+      if (launched.t === 'launched') await host.drafts.launchedByTool(key, launched.state.id);
       return launchReply(launched, defaulted, resolved);
     }
     case 'status':

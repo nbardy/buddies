@@ -1,3 +1,4 @@
+import type { ExpeditionCrews } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useRef } from 'react';
 import {
@@ -6,6 +7,7 @@ import {
   workerDetailsResource,
 } from '../atoms/buddy-background';
 import { createConversation } from '../atoms/commands';
+import { EXPEDITION_CREWS_URL } from '../components/buddies/expedition-view';
 import { findWorkspace } from '../components/buddies/roster';
 import type { BuddyDetail, BuddyOverview } from '../components/buddies/types';
 import { isRowRunning } from '../utils/conversation-row';
@@ -27,6 +29,12 @@ export function useBuddyOverview(
   enabled = true
 ): UsePolledFetchResult<BuddyOverview> {
   return usePolledFetch<BuddyOverview>(BUDDY_OVERVIEW_URL, intervalMs, enabled);
+}
+
+/** Loads the expedition crew list the rosters hide (atoms/buddy-visibility.ts). Keyed under
+ * /api/buddies, so a new crew Buddy (`buddies_changed`) refreshes it without polling. */
+export function useExpeditionCrews(): void {
+  usePolledFetch<ExpeditionCrews>(EXPEDITION_CREWS_URL, 0);
 }
 
 export const buddyDetailUrl = (buddyId: string): string =>

@@ -108,7 +108,7 @@ export const CHARTER_DEFAULTS = {
   crew: DEFAULT_CREW,
 };
 
-const crewLine = (crew: z.infer<typeof Crew>) =>
+export const crewLine = (crew: z.infer<typeof Crew>) =>
   `manager ${seatLabel(crew.manager)}; work ${crew.work.map(seatLabel).join(', ')}; check ${crew.check.map(seatLabel).join(', ')}`;
 
 /** A provider's models (host: the installed provider catalog the seat check reads): a closed
@@ -175,12 +175,16 @@ function crewOf(crew: z.infer<typeof Crew>, models: ModelsOf) {
   };
 }
 
-/** κ for a launch: the full charter, one line per default it applied, and one per seat model
- * name it resolved to a catalog id. */
+/** The charter fields a request may leave out; the draft view marks each one it defaulted. */
+export type CharterDefault = keyof typeof CHARTER_DEFAULTS;
+export const CHARTER_DEFAULT_KEYS = Object.keys(CHARTER_DEFAULTS) as CharterDefault[];
+
+/** κ for a launch: the full charter, the fields it defaulted, and one line per seat model name it
+ * resolved to a catalog id. */
 export function charterOf(
   request: CharterRequest,
   models: ModelsOf
-): { charter: Charter; defaulted: string[]; resolved: string[] } {
+): { charter: Charter; defaulted: CharterDefault[]; resolved: string[] } {
   const seats = crewOf(request.crew ?? CHARTER_DEFAULTS.crew, models);
   const charter: Charter = {
     ...request,
@@ -191,7 +195,17 @@ export function charterOf(
     exploreShare: request.exploreShare ?? CHARTER_DEFAULTS.exploreShare,
     crew: seats.crew,
   };
-  const shown: Record<keyof typeof CHARTER_DEFAULTS, string> = {
+  return {
+    charter,
+    defaulted: CHARTER_DEFAULT_KEYS.filter((k) => request[k] === undefined),
+    resolved: seats.resolved,
+  };
+}
+
+/** The tool result's line per defaulted field (the Buddy reads field names; the card shows a
+ * "default" marker on the value instead, client ExpeditionModal). */
+export function defaultedLines(keys: CharterDefault[]): string[] {
+  const shown: Record<CharterDefault, string> = {
     inScope: 'inScope: none stated (the goal is the scope)',
     outOfScope: 'outOfScope: none stated (no fence)',
     maxLive: `maxLive: ${CHARTER_DEFAULTS.maxLive}`,
@@ -199,12 +213,7 @@ export function charterOf(
     exploreShare: `exploreShare: ${CHARTER_DEFAULTS.exploreShare}`,
     crew: `crew: the default crew (${crewLine(DEFAULT_CREW)})`,
   };
-  const keys = Object.keys(shown) as (keyof typeof CHARTER_DEFAULTS)[];
-  return {
-    charter,
-    defaulted: keys.filter((k) => request[k] === undefined).map((k) => shown[k]),
-    resolved: seats.resolved,
-  };
+  return keys.map((k) => shown[k]);
 }
 
 /**
@@ -230,17 +239,6 @@ export function charterAdvice(c: Charter): string[] {
         ]),
     ...(c.outOfScope.length > 0 ? [] : ['no outOfScope fence: name what the crew must not touch']),
   ];
-}
-
-/** The tool result's one-paragraph account of what a launch started. */
-export function charterSummary(c: Charter): string {
-  const done =
-    'checks' in c.done
-      ? c.done.checks
-          .map((x) => (x.kind === 'command' ? `$ ${x.argv.join(' ')}` : `judged: ${x.text}`))
-          .join('; ')
-      : 'the owner judges it';
-  return `${c.name}: ${c.goal.slice(0, 200)} | done when ${done} | budget ${c.maxAttempts} attempts, ${c.maxLive} live, ${c.hours}h, explore ${c.exploreShare} | crew ${crewLine(c.crew)}`;
 }
 
 /** Where status posts go: the thread the launch came from, or the owner↔launcher DM. */

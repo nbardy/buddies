@@ -11,7 +11,7 @@ lives in the Buddy briefing (`BUDDY_TOOL_GUIDE`, server/src/buddies/briefing.ts)
 
 ```
 expedition({ action })
-  { do:'draft',  charter: CharterRequest }  → { ready, issues[], advice[], defaulted[], resolved[], charter }   // launches nothing
+  { do:'draft',  charter: CharterRequest }  → { draftId, ready, issues[], advice[], defaulted[], resolved[], drafted, next }   // posts a card; launches nothing
   { do:'launch', charter: CharterRequest }  → { id, page, launched, defaulted[], resolved[], next }
                                             | { id, page, alreadyRunning, running }   // same name from this conversation, still open
                                             | error listing every refusal
@@ -34,6 +34,31 @@ catalog models by id or display name (`haiku` or `claude haiku` → `claude-haik
 posted the clickable badge in the launch chat, and `next` tells the Buddy so. (2026-11-01 smoke:
 the old `link` was markdown with a relative path; a Buddy posted it and the post tool refused it
 as a missing media attachment.)
+
+### Draft (design.md R10)
+
+`draft` validates the charter like `launch` and launches nothing. It persists the canonical
+charter with its issues, advice, defaulted fields (stored as field names, `inScope`…`crew`; the
+card marks each value `default`, while the tool result's `defaulted` keeps one line per field),
+resolved model words, origin (the same thread-or-DM rule
+as launch), launcher and workspace at `<appData>/expeditions/drafts/<draftId>.json` (one atomic
+write), and the host posts ONE draft card where the launch badge would go: purpose
+`expedition_draft`, evidence `expedition-draft:<draftId>`, idempotency key `exp-draft:<draftId>`,
+plain fallback text `⛺ Draft expedition: <name>`. Re-drafting a name in the same conversation
+supersedes the older open draft. A crew Buddy cannot draft. The result carries no charter to
+paste: `drafted` is a one-line summary and `next` tells the Buddy the card is in the chat, to
+reply in one line with the post tool, and not to ask the owner to type "launch it". When it is
+not `ready`, `next` also says Launch stays disabled until the issues are fixed and a new draft
+replaces the card.
+
+The owner launches from the card over HTTP (server/src/expeditions/routes.ts, behind the owner
+auth gate like every `/api` route): `GET /api/buddies/expeditions/drafts/:draftId?workspaceId=`
+returns `ExpeditionDraftView` (an open draft's issues re-checked on read), and `POST
+/api/buddies/expeditions/drafts/:draftId/launch {workspaceId}` runs the host's own launch with its
+refusal list: 200 `{expeditionId}` (again on a second click), 409 for a superseded draft (naming
+the newer one) or a same-name expedition still open, 422 with every refusal, 404 for another
+workspace's draft. A tool `launch` of the same name from the same conversation also marks that
+open draft launched.
 
 `issues` (draft) and launch refusals are the same list, built in one place (host.ts
 `preflightOf`): the server may run expeditions (its execution gate is enabled, so never a copied
@@ -88,9 +113,10 @@ The Buddy does not need to be good at writing charters. Crafting is an intake
 with typed checks, not a prose skill:
 
 1. **Draft.** The Buddy fills a charter from the owner's request and context and,
-   when unsure, calls `{do:'draft'}`. As built it returns `issues[]` (what a launch
-   would refuse), `advice[]` (no command check, no scope fence) and the defaults it
-   would apply; a missing `done` or `maxAttempts` is a schema error naming the field.
+   when unsure, calls `{do:'draft'}`. As built it posts the draft card (Info, Launch)
+   in the chat and returns `issues[]` (what a launch would refuse), `advice[]` (no
+   command check, no scope fence) and the defaults it applied; a missing `done` or
+   `maxAttempts` is a schema error naming the field.
 2. **Fill gaps.** The Buddy fills what it can from context and asks the owner
    only for what it cannot infer, usually the budget and the done check, in one
    message.

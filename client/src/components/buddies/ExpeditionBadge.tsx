@@ -1,26 +1,39 @@
 import type { ExpeditionView } from '@unleashd/shared';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
-import { expeditionHref, expeditionUrl, runLabel } from './expedition-view';
+import { backgroundOf } from './expedition-overlay';
+import { expeditionHref, expeditionUrl, runLabel, runTone } from './expedition-view';
 import './BuddyWorkerThreadBadge.css';
+import './Expedition.css';
 
-// The live badge a launch leaves in its chat (thread, DM or channel): one line, opens the page.
+// The live badge a launch leaves in its chat (thread, DM or channel): one line, opens the
+// expedition modal over the chat (the URL is /expeditions/:id, so the link also travels).
 export function ExpeditionBadge({ id }: { id: string }) {
   const view = usePolledFetch<ExpeditionView>(expeditionUrl(id), 15_000);
+  const location = useLocation();
   const v = view.data;
-  const stats = v
-    ? ` · ${runLabel(v.run)} · ${v.counts.live} live · ${v.counts.verified} verified · ${v.counts.attempts}/${v.counts.maxAttempts} · ${v.cost.short}`
-    : view.kind === 'failed'
-      ? ' · unavailable'
-      : '';
   return (
     <Link
-      className="buddy-worker-thread-badge ui-inline-row ui-card"
+      className="buddy-worker-thread-badge ui-inline-row ui-card expedition-badge"
       to={expeditionHref(id)}
-      aria-label={`Open expedition ${v?.name ?? id}`}
+      state={{ background: backgroundOf(location) }}
+      aria-label={`Open expedition ${v?.charter.name ?? id}`}
     >
-      ⛺ {v?.name ?? 'Expedition'}
-      {stats} ↗
+      ⛺ <strong className="ui-truncate">{v?.charter.name ?? 'Expedition'}</strong>
+      {v ? (
+        <>
+          <span className={`expedition-pill expedition-tone-${runTone(v.run)}`}>
+            {runLabel(v.run)}
+          </span>
+          <span className="ui-truncate">
+            {v.counts.live} live · {v.counts.verified} verified · {v.counts.attempts}/
+            {v.counts.maxAttempts} · {v.cost.short}
+          </span>
+        </>
+      ) : (
+        view.kind === 'failed' && <span>unavailable</span>
+      )}{' '}
+      ↗
     </Link>
   );
 }

@@ -2,6 +2,7 @@ import { atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
 import { inboxUrl, railChannels } from '../components/buddies/channel-data';
 import type { Buddy, Inbox } from '../components/buddies/types';
+import { rosterHiddenBuddyIdsAtom } from './buddy-visibility';
 import { type ResourceEntry, resourceAtomFamily } from './resources';
 import { starredBuddyIdsAtom, starredChannelIdsAtom } from './ui';
 
@@ -29,9 +30,12 @@ export const channelRailFamily = atomFamily((workspaceId: string) =>
 export const buddyRailFamily = atomFamily((members: readonly Buddy[]) =>
   atom((get) => {
     const stars = new Set(get(starredBuddyIdsAtom));
+    // Expedition crews are reached through their badge and modal, not the Buddies rail.
+    const hidden = get(rosterHiddenBuddyIdsAtom);
+    const team = members.filter((buddy) => !hidden.has(buddy.id));
     return [
-      ...members.filter((buddy) => stars.has(buddy.id)),
-      ...members.filter((buddy) => !stars.has(buddy.id)),
+      ...team.filter((buddy) => stars.has(buddy.id)),
+      ...team.filter((buddy) => !stars.has(buddy.id)),
     ];
   })
 );

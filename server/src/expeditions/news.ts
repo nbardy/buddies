@@ -1,4 +1,13 @@
-import { type ClaimChange, type DoneCheck, type WorkResult, seatLabel } from './charter';
+import {
+  type Charter,
+  type CheckResult,
+  type ClaimChange,
+  type DoneCheck,
+  type QuestionScope,
+  type WorkResult,
+  crewLine,
+  seatLabel,
+} from './charter';
 import type {
   Attempt,
   AttemptCost,
@@ -104,13 +113,74 @@ export function withStatus(s: State, out: Entry[], at: string): Entry[] {
     at,
     seq: s.statuses.length,
     // The badge line lives on the page header and the launch badge; chat posts carry only news.
-    text: lines.join('\n'),
+    text: lines.join('\n').trim(),
   };
   apply(s, status);
   return [...out, status];
 }
 
-const clip = (text: string, n = 300) => (text.length > n ? `${text.slice(0, n)}…` : text);
+/**
+ * One line of at most `n` characters, cut at a word boundary with `…` when cut. Every chat line is
+ * one line, so its markdown cannot open a list or code block that swallows the lines after it.
+ * 2026-11-01 owner screenshot: the launch post read "…Engin" (a raw `slice` cut a word mid-way).
+ * Only a single word longer than `n` (a URL, a hash) is cut inside, since it has no boundary.
+ */
+export function clip(text: string, n = 300): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= n) return flat;
+  const head = flat.slice(0, n + 1);
+  const space = head.lastIndexOf(' ');
+  return `${(space > 0 ? head.slice(0, space) : flat.slice(0, n)).replace(/[\s,;:.]+$/, '')}…`;
+}
+
+/**
+ * A markdown block (an owner question, a finish summary) kept as written, lists and code blocks
+ * included, cut at a word boundary with `…` past `n` characters. Its own paragraph in the post
+ * (blank lines around it), so it neither runs into the lines around it nor swallows them.
+ */
+export function clipBlock(label: string, text: string, n = 2000): string {
+  const body = text.trim();
+  const head = body.slice(0, n + 1);
+  const space = head.search(/\s\S*$/);
+  const cut = body.length <= n ? body : `${head.slice(0, space > 0 ? space : n).trimEnd()}…`;
+  return `\n${label}\n\n${cut}\n`;
+}
+
+/** Markdown punctuation in a plain name (a charter name is any 1–60 characters) shown literally. */
+export const literal = (text: string): string => text.replace(/[\\`*_[\]<>#|~]/g, '\\$&');
+
+/**
+ * The goal's first sentence as plain prose, for a one-line mention (the launch post, the badge's
+ * fallback text): headings dropped, quote and list markers stripped,
+ * cut at a word boundary. The full goal renders as markdown in the modal.
+ */
+export function goalSummary(goal: string, n = 160): string {
+  // A heading is a title ("## Goal"), not prose: it is dropped, not folded into the sentence.
+  const prose = goal
+    .split('\n')
+    .filter((line) => !/^\s*#{1,6}\s/.test(line))
+    .map((line) => line.replace(/^\s*(>\s*|[-*+]\s+|\d+[.)]\s+)/, '').trim())
+    .filter(Boolean)
+    .join(' ');
+  // A sentence ends at . ! ? before a capital or the end: "e.g. the" does not end one.
+  const sentence = /^(.+?[.!?])(\s+(?=[A-Z"'(\[])|$)/.exec(prose)?.[1] ?? prose;
+  return clip(sentence, n);
+}
+
+/** The tool result's one-paragraph account of what a launch started. */
+export function charterSummary(c: Charter): string {
+  const done =
+    'checks' in c.done
+      ? c.done.checks
+          .map((x) => (x.kind === 'command' ? `$ ${x.argv.join(' ')}` : `judged: ${x.text}`))
+          .join('; ')
+      : 'the owner judges it';
+  return `${c.name}: ${clip(c.goal, 200)} | done when ${done} | budget ${c.maxAttempts} attempts, ${c.maxLive} live, ${c.hours}h, explore ${c.exploreShare} | crew ${crewLine(c.crew)}`;
+}
+
+/** The first status of every expedition: what launched, then the planning line on its own. */
+export const launchNews = (c: { name: string; goal: string }) =>
+  `⛺ Launched **${literal(c.name)}**: ${goalSummary(c.goal)}\n\nPlanning…`;
 
 /** The chat line for one notable entry (none for an uninteresting one). */
 function newsLine(s: State, e: Entry): string[] {
@@ -118,20 +188,24 @@ function newsLine(s: State, e: Entry): string[] {
     case 'attempt_planned': {
       // Only work held by its question's dependencies (design.md R5); it starts once they verify.
       const deps = waitsOn(s, attemptOf(s, e.attemptId));
+      // Titles, not ids: the chat is read by the owner (2026-11-01 review: raw ids read as debug).
       return deps.length > 0
-        ? [`⏸ ${e.attemptId} waiting: needs ${deps.join(', ')} verified first`]
+        ? [
+            `⏸ ${attemptTitle(s, attemptOf(s, e.attemptId))} waits until ${deps.map((q) => quoted(questionOf(s, q).title)).join(', ')} is verified`,
+          ]
         : [];
     }
     case 'attempt_posted': {
       const a = attemptOf(s, e.attemptId);
-      return a.spec.kind === 'manager' ? [] : [`▶ ${a.id} started: ${attemptLabel(s, a)}`];
+      return a.spec.kind === 'manager' ? [] : [`▶ Started: ${attemptLabel(s, a)}`];
     }
     case 'attempt_ended': {
       const a = attemptOf(s, e.attemptId);
-      return [`${a.id} ${outcomeLabel(e.outcome)}`];
+      return [`${attemptTitle(s, a)} → ${outcomeLabel(e.outcome)}`];
     }
     case 'question_added':
-      return [`+ question ${e.questionId} [${e.scope}]: ${e.title}`];
+      // Never a leading `+ `: markdown reads it as a list that swallows the lines after it.
+      return [`➕ New ${SCOPE_WORD[e.scope]}: ${clip(e.title)}`];
     case 'question_closed':
       return [
         `${e.status === 'verified' ? '✓ verified' : '✗ dropped'} ${questionOf(s, e.questionId).title}: ${clip(e.why)}`,
@@ -143,7 +217,7 @@ function newsLine(s: State, e: Entry): string[] {
     case 'feedback':
       return [`Owner ${e.feedback.t}${'text' in e.feedback ? `: ${clip(e.feedback.text)}` : ''}`];
     case 'needs_owner':
-      return [`Needs you: ${e.question}`];
+      return [clipBlock('**Needs you:**', e.question)];
     case 'validation': {
       // One line per validation, when its last command check is recorded.
       const v = validationOf(s, e.validationId);
@@ -160,7 +234,10 @@ function newsLine(s: State, e: Entry): string[] {
     case 'integration_refused':
       return [`⛔ ${integrationLabel(s, integrationOf(s, e.integrationId))}`];
     case 'finished':
-      return [`Finished (${e.reason}): ${e.summary}`, ...mergeLine(s, e.reason)];
+      return [
+        clipBlock(`**Result** (${e.reason.replaceAll('_', ' ')}):`, e.summary),
+        ...mergeLine(s, e.reason),
+      ];
     default:
       return [];
   }
@@ -207,33 +284,67 @@ function refusalLabel(r: IntegrationRefusal): string {
   }
 }
 
-export function attemptLabel(s: State, a: Attempt): string {
+const SCOPE_WORD: Record<QuestionScope, string> = {
+  in: 'question',
+  explore: 'exploration question',
+  parked: 'parked question',
+};
+
+/** A title in quotes, clipped: a question's title is free text from the manager. */
+const quoted = (title: string) => `“${clip(title, 80)}”`;
+
+/** What an attempt is, by question title (never a raw id): the page's card title and the news. */
+export function attemptTitle(s: State, a: Attempt): string {
   switch (a.spec.kind) {
     case 'manager':
-      return 'manager decision';
+      return 'Manager decision';
     case 'work':
-      return `work on ${a.spec.questionId} (${seatLabel(configOf(s.charter, a.spec))})`;
+      return `Work on ${quoted(questionOf(s, a.spec.questionId).title)}`;
     case 'check':
-      return `${a.spec.goal ? 'goal ' : ''}check of ${a.spec.claimAttemptId} (${seatLabel(configOf(s.charter, a.spec))})`;
+      return `${a.spec.goal ? 'Goal check' : 'Check'} of the claim on ${quoted(questionOf(s, a.spec.questionId).title)}`;
   }
 }
 
-/** One clipped line per outcome: the chat news and the page. */
-export function outcomeLabel(o: Outcome): string {
+/** The title with the seat it runs on, for the chat's "started" line. */
+export function attemptLabel(s: State, a: Attempt): string {
+  switch (a.spec.kind) {
+    case 'manager':
+      return attemptTitle(s, a);
+    case 'work':
+    case 'check':
+      return `${attemptTitle(s, a)} (${seatLabel(configOf(s.charter, a.spec))})`;
+  }
+}
+
+/** An outcome as a verdict word and its clipped one-line summary: the page's outcome block. */
+export function outcomeParts(o: Outcome): { verdict: string; summary: string } {
   switch (o.t) {
     case 'manager':
-      return `decided ${o.actions.length} actions`;
+      return { verdict: 'Decided', summary: `${o.actions.length} actions` };
     case 'work':
       return o.result.result === 'blocked'
-        ? `BLOCKED: ${clip(o.result.need)}`
-        : `${o.result.result.toUpperCase()}: ${clip(o.result.statement)}`;
+        ? { verdict: 'Blocked', summary: clip(o.result.need) }
+        : { verdict: WORK_VERDICT[o.result.result], summary: clip(o.result.statement) };
     case 'check':
-      return `check ${o.result.verdict.toUpperCase()}: ${clip(o.result.why)}`;
+      return { verdict: CHECK_VERDICT[o.result.verdict], summary: clip(o.result.why) };
     case 'malformed':
-      return `answered without a valid result (${clip(o.error, 120)})`;
+      return { verdict: 'No valid result', summary: clip(o.error, 120) };
     case 'failed':
-      return `run ${o.status}`;
+      return { verdict: 'Run failed', summary: `the run ended ${o.status}` };
   }
+}
+
+const WORK_VERDICT = { claim: 'Claim', finding: 'Finding' } as const;
+const CHECK_VERDICT: Record<CheckResult['verdict'], string> = {
+  verified: 'Verified',
+  refuted: 'Refuted',
+  unclear: 'Unclear',
+};
+
+/** One clipped line per outcome: the chat news. */
+export function outcomeLabel(o: Outcome): string {
+  const { verdict, summary } = outcomeParts(o);
+  return `${verdict}: ${summary}`;
 }
 
 /** The full outcome, evidence included: what briefs show the next manager and workers. */

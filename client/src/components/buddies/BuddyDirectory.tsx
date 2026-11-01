@@ -1,6 +1,6 @@
 import { useAtomValue } from 'jotai';
 import { type ReactNode, useState } from 'react';
-import { archivedBuddyIdsAtom } from '../../atoms/buddy-visibility';
+import { rosterHiddenBuddyIdsAtom } from '../../atoms/buddy-visibility';
 import type { BuddyOverview } from './types';
 import { directoryEntries, filterDirectoryEntries } from './ui-contract';
 
@@ -20,10 +20,10 @@ export function BuddyDirectory({
   /** Under the intro: the overview's last refresh failed, but this is what it holds. */
   notice?: ReactNode;
 }) {
-  const archived = useAtomValue(archivedBuddyIdsAtom);
+  const hidden = useAtomValue(rosterHiddenBuddyIdsAtom);
   const [query, setQuery] = useState('');
   const visibleBuddies = filterDirectoryEntries(directoryEntries(overview), query).filter(
-    (entry) => !archived.has(entry.buddy.id)
+    (entry) => !hidden.has(entry.buddy.id)
   );
 
   return (

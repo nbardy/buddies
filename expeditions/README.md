@@ -102,7 +102,7 @@ All engine code is under `server/src/expeditions/`. The pure core (no I/O) is re
 | The `expedition` Buddy tool (draft, launch, status, list, steer) | `tool.ts` |
 | Page data `GET /api/buddies/expeditions/:id` | `view.ts`, `routes.ts`; type `shared/src/expedition.ts` |
 | Badge chip in any post list (thread, DM, channel) | `client/src/components/buddies/ExpeditionBadge.tsx`, branch in `ChannelPostContent.tsx` |
-| Page `/expeditions/:id` (focus pane + chat) | `client/src/components/buddies/ExpeditionPage.tsx` |
+| Modal `/expeditions/:id` over the current view (tabs + chat; draft mode too) | `client/src/components/buddies/ExpeditionModal.tsx`, `expedition-overlay.ts` |
 
 Where things land:
 - **Badge**: one post (purpose `expedition_badge`, evidence `expedition:<id>`) in the chat the
@@ -187,13 +187,29 @@ What each part does:
   website", "use codex for the work", "check with claude haiku".
 
 Variants that work:
-- "Draft an expedition for … and show me the charter first." (the Buddy calls `draft`, shows the
-  issues and defaults, and launches when you say go)
+- "Draft an expedition for … first." The Buddy calls `draft`, and a **draft card** appears in the
+  chat (where the badge would go): `⛺ <name>` with a `draft` pill, the goal's first line, the
+  budget (`6 attempts · 3 at once · 12 h`) and two buttons. **Info** opens the expedition modal on
+  the draft: goal, issues, advice and the charter, each value the host filled in marked `default`
+  (`2 at once`, `8 h limit`, the default crew). **Launch** starts it through
+  the same launch as the tool, re-checking the issues when you click; it is disabled, with the
+  reason, while issues stand or after a newer draft of the same name replaced it. After launch the
+  card's pill reads `launched` and its button **Launched →** opens the live expedition. The Buddy replies in one line; it does
+  not paste the charter or ask you to type "launch it".
 - "This looks big. Should it be an expedition?" (the Buddy checks the four tests in mcp.md)
 
 After launch: the badge appears in the chat you asked in (in a DM, as a threaded reply to your
-launch message); click it for the page. Talk to the crew
-in its chat on that page (or ask your Buddy to steer it): `lesson: never edit generated files`
+launch message); click it to open the **expedition modal** over the chat (the URL is
+`/expeditions/<id>`, so a link or a reload opens it too; on a phone it is a full-height sheet).
+The header shows the status pill, attempts and decisions against their caps (bars), live/queued/
+verified, elapsed and time left (how long it took, once finished), measured cost and the expedition
+branch (click to copy). Below it: a "needs you" callout with a reply shortcut (or the **Result**
+once finished), the goal (rendered markdown, "Show more"), and tabs for Workers (one card per
+attempt, titled by its question: outcome, seat, stage, branch, cost, validations, and its brief and
+full instructions collapsed), Tasks (stage and scope chips, dependencies by title, paths),
+Reflections and Charter; the chat sits beside them on desktop
+and is a tab on the phone. Esc, the backdrop or ✕ close it. Talk to the crew
+in its chat in the modal (or ask your Buddy to steer it): `lesson: never edit generated files`
 reaches every later brief; `pause`, `resume` and `stop` do what they say; anything else is a note
 the manager reads next, which is how you answer a "needs you". At done the finish post names the
 branch to merge; nothing is written to your checkout.

@@ -8,12 +8,17 @@ import {
   lazy,
   useEffect,
 } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { handleMessage } from './atoms/actions';
 import { jotaiStore } from './atoms/store';
 import { UpdateBanner } from './components/UpdateBanner';
 import { UpstreamUpdatePrompt } from './components/buddies/UpstreamUpdatePrompt';
 import { useOwnerUnreadTitle } from './components/buddies/channel-data';
+import {
+  type ExpeditionOverlay,
+  baseOf,
+  expeditionOverlay,
+} from './components/buddies/expedition-overlay';
 import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
 import { initSettings } from './stores/settingsStore';
@@ -94,8 +99,8 @@ const BuddyWorkspaceActivity = lazyNamed(() =>
 const ChannelsIndex = lazyNamed(() =>
   import('./mobile/channels/ChannelsIndex').then((m) => m.ChannelsIndex)
 );
-const ExpeditionPage = lazyNamed(() =>
-  import('./components/buddies/ExpeditionPage').then((m) => m.ExpeditionPage)
+const ExpeditionModal = lazyNamed(() =>
+  import('./components/buddies/ExpeditionModal').then((m) => m.ExpeditionModal)
 );
 const ExpeditionsIndex = lazyNamed(() =>
   import('./components/buddies/ExpeditionsIndex').then((m) => m.ExpeditionsIndex)
@@ -149,11 +154,6 @@ const ROUTES: RouteDef[] = [
     mobile: () => <BuddyWorkspaceActivity />,
   },
   { path: '/expeditions', desktop: () => <ExpeditionsIndex />, mobile: () => <ExpeditionsIndex /> },
-  {
-    path: '/expeditions/:id',
-    desktop: () => <ExpeditionPage layout="wide" />,
-    mobile: () => <ExpeditionPage layout="narrow" />,
-  },
   {
     path: '/buddies/:buddyId',
     desktop: () => <BuddiesDashboard />,
@@ -241,12 +241,27 @@ const SHELLS: Record<DeviceKind, ComponentType> = {
 
 // The route-level boundary sits inside the shell, so loading a destination never
 // blanks the sidebar or tab bar.
+// /expeditions/:id is a modal, not a page (owner, 2026-11-01): the routes render at the view it
+// was opened over (components/buddies/expedition-overlay.ts), or at home on a direct load, and the
+// modal sits on top (baseOf picks the location the routes render at). The phone gets a full-height
+// sheet (the modal follows the viewport width).
+/** The live expedition modal for the URL. Closing returns to the view it opened over (Back), or
+ * replaces a direct load with home. */
+function ExpeditionRoute({ overlay }: { overlay: Exclude<ExpeditionOverlay, { t: 'none' }> }) {
+  const navigate = useNavigate();
+  const close = () => (overlay.t === 'over' ? navigate(-1) : navigate('/', { replace: true }));
+  return <ExpeditionModal target={{ t: 'live', id: overlay.id }} onClose={close} />;
+}
+
 function AppRoutes({ device }: { device: DeviceKind }) {
   const Shell = SHELLS[device]; // δ #1 — shell
   const pick = (r: RouteDef) => (device === 'mobile' ? r.mobile() : r.desktop()); // δ #2 — leaf
+  const location = useLocation();
+  const overlay = expeditionOverlay(location);
   return (
     <Suspense fallback={null}>
-      <Routes>
+      {overlay.t !== 'none' && <ExpeditionRoute overlay={overlay} />}
+      <Routes location={baseOf(location, overlay)}>
         {OUTSIDE_SHELL[device]}
         <Route element={<Shell />}>
           {ROUTES.map((r) => (

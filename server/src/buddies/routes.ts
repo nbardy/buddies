@@ -15,10 +15,10 @@ import type {
 import {
   BuddyCreateSchema,
   type BuddyMediaResult,
-  type BuddyMutation,
   type BuddyMutationResults,
   type BuddyMutationRoute,
   BuddyPatchSchema,
+  type BuddyRouteMutation,
   BuilderOpenSchema,
   ChannelSchema,
   type ChannelThreads,
@@ -580,7 +580,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     [buddyMutationRoute('buddy.archive')]: (req) =>
       archive(p(req, 'buddyId'), { status: 'archived' }, `archive:${p(req, 'buddyId')}`),
   } satisfies Record<string, Handler> & {
-    [K in Exclude<BuddyMutation, 'upstream.update'> as BuddyMutationRoute<K>]: (
+    [K in BuddyRouteMutation as BuddyMutationRoute<K>]: (
       req: Request
     ) => Promise<BuddyMutationResults[K]>;
   };

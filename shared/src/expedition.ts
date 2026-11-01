@@ -1,5 +1,6 @@
-// The expedition page's wire shape (GET /api/buddies/expeditions/:id). One type source: the
-// server's projection (server/src/expeditions/view.ts) returns it; the client page reads it.
+// The expedition modal's wire shapes: a live expedition (GET /api/buddies/expeditions/:id) and a
+// draft (GET /api/buddies/expeditions/drafts/:draftId). One type source: the server's projections
+// (server/src/expeditions/view.ts) return them; the client modal and cards read them.
 
 export type ExpeditionRun =
   | { t: 'running' }
@@ -15,6 +16,8 @@ export type ExpeditionRun =
         | 'owner_stop'
         | 'setup_failed';
       summary: string;
+      /** When it finished: the header shows how long it took, not time left. */
+      at: string;
     };
 
 /** Where a question stands, derived from the ledger (design.md R5): its furthest stage.
@@ -38,8 +41,8 @@ export interface ExpeditionQuestion {
   stage: ExpeditionStage;
   /** File custody: repo-relative prefixes; work on overlapping paths runs one at a time. */
   paths: string[];
-  /** Question ids this question's work waits for (each must be closed verified). */
-  after: string[];
+  /** The questions this question's work waits for (each must be closed verified). */
+  after: { id: string; title: string }[];
   attempts: string[];
 }
 
@@ -55,19 +58,24 @@ export type ExpeditionAttemptCost =
   | { t: 'unmeasured'; reason: string };
 
 /** Where an attempt is. admitted: its worktree is being made; dropped: it never started (no
- * worktree), with why; ended: its one-line result. */
+ * worktree), with why; ended: its result as a verdict word (Claim, Blocked, Verified…) and a
+ * one-line summary. */
 export type ExpeditionAttemptPhase =
   | { t: 'planned' }
   | { t: 'admitted' }
   | { t: 'dropped'; reason: string }
   | { t: 'posting' }
   | { t: 'posted' }
-  | { t: 'ended'; outcome: string };
+  | { t: 'ended'; verdict: string; summary: string };
 
 export interface ExpeditionAttempt {
   id: string;
   kind: 'manager' | 'work' | 'check';
+  /** By question title, never a raw id, e.g. `Work on “Add mul()”`. */
   label: string;
+  /** The manager's brief for a work attempt (markdown); absent for a manager or a check, which
+   * have no assignment of their own beyond `brief`. */
+  ask: string | null;
   seat: string;
   questionId: string | null;
   phase: ExpeditionAttemptPhase;
@@ -107,25 +115,33 @@ export interface ExpeditionIntegration {
   lastRefusal: { t: 'none' } | { t: 'refused'; label: string };
 }
 
-export interface ExpeditionView {
-  id: string;
+/** The owner's charter as shown in the Charter tab: the same for a draft and a live expedition. */
+export interface ExpeditionCharterView {
   name: string;
-  badge: string;
-  run: ExpeditionRun;
+  /** Markdown, as the Buddy wrote it. */
   goal: string;
   done: ExpeditionDone;
+  inScope: string[];
+  outOfScope: string[];
+  /** Seat labels, e.g. `codex/gpt-5/high`. */
+  roster: { manager: string; work: string[]; check: string[] };
+  limits: { maxAttempts: number; maxLive: number; hours: number; exploreShare: number };
+}
+
+export interface ExpeditionView {
+  id: string;
+  badge: string;
+  run: ExpeditionRun;
+  charter: ExpeditionCharterView;
   validations: ExpeditionValidation[];
   integration: ExpeditionIntegration;
   /** Measured spend: `short` for the badge, `line` for the header (sums, unmeasured, settling). */
   cost: { short: string; line: string };
-  inScope: string[];
-  outOfScope: string[];
   workspaceId: string;
   launchedAt: string;
   deadline: string;
   now: string;
   crew: { t: 'pending' } | { t: 'ready'; buddyId: string; chatChannelId: string };
-  roster: { manager: string; work: string[]; check: string[] };
   counts: {
     /** Work and check attempts: what the owner's budget counts (design.md R9). */
     attempts: number;
@@ -164,9 +180,45 @@ export interface ExpeditionView {
   lessons: string[];
 }
 
+// ---------- Drafts (design.md R10) ----------
+
+/** Where a draft stands: launchable, launched (once), or replaced by a newer draft of the same
+ * name in the same conversation. */
+export type ExpeditionDraftState =
+  | { t: 'open' }
+  | { t: 'launched'; expeditionId: string }
+  | { t: 'superseded'; by: string };
+
+/** A charter field the request left out and the host defaulted (the modal marks its value). */
+export type ExpeditionDefault =
+  | 'inScope'
+  | 'outOfScope'
+  | 'maxLive'
+  | 'hours'
+  | 'exploreShare'
+  | 'crew';
+
+export interface ExpeditionDraftView {
+  id: string;
+  workspaceId: string;
+  createdAt: string;
+  state: ExpeditionDraftState;
+  charter: ExpeditionCharterView;
+  /** What refuses its launch, re-checked on every read of an open draft (empty: launchable). */
+  issues: string[];
+  /** Non-blocking suggestions, the defaults the charter took, and owner model words resolved. */
+  advice: string[];
+  defaulted: ExpeditionDefault[];
+  resolved: string[];
+}
+
+/** Crew Buddies (one per expedition): reached through badges and the modal, never the roster. */
+export interface ExpeditionCrews {
+  buddyIds: string[];
+}
 /** One row of the expedition list (GET /api/buddies/expeditions), newest launch first: what the
  * sidebar and the index page show without fetching every full view. */
 export type ExpeditionSummary = Pick<
   ExpeditionView,
-  'id' | 'name' | 'run' | 'workspaceId' | 'launchedAt' | 'counts' | 'cost'
->;
+  'id' | 'run' | 'workspaceId' | 'launchedAt' | 'counts' | 'cost'
+> & { name: ExpeditionCharterView['name'] };

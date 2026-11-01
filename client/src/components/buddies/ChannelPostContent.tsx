@@ -6,11 +6,13 @@ import { ChannelComposer } from './ChannelComposer';
 import { ChannelMarkdown } from './ChannelMarkdown';
 import { EmojiPicker } from './EmojiPicker';
 import { ExpeditionBadge } from './ExpeditionBadge';
+import { ExpeditionDraftCard } from './ExpeditionDraftCard';
 import { buddyWrite, errorText } from './api';
 import {
+  type ExpeditionCard,
   type WorkspaceDirectory,
   channelPostBody,
-  expeditionOfPost,
+  expeditionCardOf,
   threadPageResource,
   wholePostIn,
 } from './channel-data';
@@ -49,7 +51,6 @@ export function ChannelPostContent({
   const whole = thread.data === null ? null : wholePostIn(thread.data, shown.id);
   const post: ClippedPost = whole ?? shown;
   const clipped = post.clippedFrom !== undefined;
-  const expedition = expeditionOfPost(post);
   const [editing, setEditing] = useState<ClippedPost | null>(null);
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -97,13 +98,8 @@ export function ChannelPostContent({
           }}
         />
       ) : (
-        <ChannelMarkdown
-          body={channelPostBody(post)}
-          buddyNames={directory.buddyNames}
-          tasks={directory.taskById}
-        />
+        <PostBody post={post} directory={directory} />
       )}
-      {expedition !== null && <ExpeditionBadge id={expedition} />}
       {clipped && !editing && (
         <button
           type="button"
@@ -195,4 +191,24 @@ export function ChannelPostContent({
       )}
     </div>
   );
+}
+
+/** δ: a post's text, or the expedition card a host post carries in place of its plain fallback
+ * text (the fallback is for readers without the card: a Buddy reading the thread). */
+function PostBody({ post, directory }: { post: ClippedPost; directory: WorkspaceDirectory }) {
+  const card: ExpeditionCard = expeditionCardOf(post);
+  switch (card.t) {
+    case 'none':
+      return (
+        <ChannelMarkdown
+          body={channelPostBody(post)}
+          buddyNames={directory.buddyNames}
+          tasks={directory.taskById}
+        />
+      );
+    case 'badge':
+      return <ExpeditionBadge id={card.id} />;
+    case 'draft':
+      return <ExpeditionDraftCard draftId={card.draftId} workspaceId={directory.workspaceId} />;
+  }
 }

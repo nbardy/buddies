@@ -5,7 +5,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { buddyRailFamily, channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { openSetupAt, setThreadWidth, threadWidthAtom } from '../../atoms/ui';
-import { useBuddyOverview } from '../../hooks/useBuddyData';
+import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
 import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { rowBuddy } from '../../utils/conversation-row';
 import { Chat } from '../Chat';
@@ -703,6 +703,7 @@ export function ChannelBrowser({
   const archived = useArchivedChannels(workspaceId);
   const rail = useAtomValue(channelRailFamily(workspaceId));
   const buddyRail = useAtomValue(buddyRailFamily(directory.activeMembers));
+  useExpeditionCrews();
   useWarmChannelPosts(rail.channels);
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);

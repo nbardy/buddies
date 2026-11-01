@@ -348,9 +348,19 @@ export const buddyMutations = {
     status: 201,
     body: NoBodySchema,
   },
+  // A draft card's Launch (server/src/expeditions/routes.ts): the workspace the card is shown in.
+  'expedition.launch': {
+    method: 'POST',
+    path: '/api/buddies/expeditions/drafts/:draftId/launch',
+    status: 200,
+    body: z.object({ workspaceId: z.string().min(1) }).strict(),
+  },
 } as const;
 
 export type BuddyMutation = keyof typeof buddyMutations;
+/** The mutations server/src/buddies/routes.ts serves; the rest have their own route owners
+ * (server/src/upstream, server/src/expeditions). */
+export type BuddyRouteMutation = Exclude<BuddyMutation, 'upstream.update' | 'expedition.launch'>;
 type Contract<K extends BuddyMutation> = (typeof buddyMutations)[K];
 export type BuddyMutationBody<K extends BuddyMutation> = z.input<Contract<K>['body']>;
 type WithOptionalKey<T> = T extends { key: string } ? Omit<T, 'key'> & { key?: string } : T;
@@ -406,6 +416,7 @@ export interface BuddyMutationResults {
   'reply.retry': ReplyRetryResult;
   read: { ok: boolean };
   'upstream.update': UpstreamUpdateResult;
+  'expedition.launch': { expeditionId: string };
 }
 export type BuddyMutationRoute<K extends BuddyMutation> =
   `${Contract<K>['method']} ${Contract<K>['status']} ${Contract<K>['path']}`;

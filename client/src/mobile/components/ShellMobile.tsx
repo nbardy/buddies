@@ -64,8 +64,9 @@ export function ShellMobile() {
   const activeSection = isPaneRoute
     ? resolveMobileConversationDestination(location.state, conversation).section
     : mobilePrimarySectionForPath(pathname);
-  // The expedition page pins its chat composer, so it also needs a fixed-height pane.
-  const fixedPane = isPaneRoute || pathname.startsWith('/expeditions/');
+  // The expedition modal (/expeditions/:id) is a sheet over the view it opened from (App.tsx),
+  // not a pane of this shell.
+  const fixedPane = isPaneRoute;
   const channelsUnread = anyUnread(ownerUnreadTotal(useOwnerUnread().data, null));
 
   return (

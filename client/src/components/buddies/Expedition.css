@@ -1,0 +1,166 @@
+/* Expedition modal, badge and draft card. The modal is a .channel-task-overlay (the Task
+   overlay's dialog) widened; markdown uses the file preview's .file-preview-markdown surface.
+   One colour system: a .expedition-tone-* class sets --tone; pills, dots and chips read it.
+   The phone layout keys off .expedition-modal--sheet (gate G9: no width @media here). */
+.expedition-tone-ok { --tone: var(--theme-success); }
+.expedition-tone-warn { --tone: var(--theme-warning); }
+.expedition-tone-info { --tone: var(--accent-primary); }
+.expedition-tone-bad { --tone: var(--theme-danger); }
+.expedition-tone-muted { --tone: var(--text-muted); }
+
+/* One type scale for both modes: the dialog sits in the top layer and otherwise inherits the
+   page's 16px, so a live modal read larger than the same charter in a draft (2026-11-01). */
+.expedition-modal { font-size: var(--fs-4); line-height: 1.5; }
+.expedition-modal:focus { outline: none; }
+.expedition-modal :focus:not(:focus-visible) { outline: none; box-shadow: none; }
+.expedition-modal :focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 1px; box-shadow: none; }
+.expedition-modal--dialog { width: min(1100px, 92vw); max-height: 86vh; overflow: hidden; }
+.expedition-modal--dialog.expedition-modal--live { height: 86vh; max-height: none; }
+/* A draft sizes to its content: a narrower dialog, its body scrolling under the footer. */
+.expedition-modal--dialog.expedition-modal--draft { width: min(760px, 92vw); }
+.expedition-modal--draft .expedition-pane { min-height: 0; overflow-y: auto; }
+
+/* The phone's full-height sheet. */
+.expedition-modal--sheet {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: max(var(--sp-5), env(safe-area-inset-top)) var(--sp-5)
+    max(var(--sp-5), env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 0;
+  font-size: var(--fs-5);
+  overflow-y: auto;
+}
+
+.expedition-modal-header { align-items: center; flex-wrap: nowrap; min-width: 0; }
+.expedition-modal-title { min-width: 0; color: var(--text-bright); font-size: var(--fs-7); }
+.expedition-modal-close { margin-inline-start: auto; }
+.expedition-pill { flex: none; padding: var(--sp-1) var(--sp-4); border-radius: 999px; font-size: var(--fs-2); font-weight: 600; white-space: nowrap; color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent); }
+
+/* The raised surface every stat, chip, callout and card shares. */
+.expedition-stat, .expedition-chip, .expedition-callout, .expedition-card { border: 1px solid var(--border-subtle); border-radius: var(--ui-radius); background: var(--bg-raised-1); }
+.expedition-card-head, .expedition-card-meta, .expedition-launch, .expedition-disclosures { flex-wrap: wrap; gap: var(--sp-3) var(--sp-4); min-width: 0; }
+.expedition-card-meta { display: flex; align-items: center; font-size: var(--fs-3); }
+.expedition-card-meta code { font-family: var(--font-mono); color: var(--text-primary); }
+
+/* Header stats: label over value, the two budgets with a bar; a 2-column grid on the phone. */
+.expedition-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--sp-4); }
+.expedition-modal--sheet .expedition-meters { grid-template-columns: 1fr 1fr; }
+.expedition-stat { display: grid; gap: var(--sp-1); min-width: 0; padding: var(--sp-3) var(--sp-5); }
+.expedition-stat-label { color: var(--text-muted); font-size: var(--fs-2); text-transform: uppercase; letter-spacing: 0.05em; }
+.expedition-stat-value { overflow: hidden; color: var(--text-bright); text-overflow: ellipsis; white-space: nowrap; }
+.expedition-bar { height: 4px; border-radius: 2px; overflow: hidden; background: var(--bg-raised-3); }
+.expedition-bar > span { display: block; height: 100%; background: var(--accent-primary); }
+
+.expedition-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-4);
+  color: var(--tone, var(--text-secondary));
+  font-size: var(--fs-3);
+  white-space: nowrap;
+}
+
+.expedition-chip--small { padding: 0 var(--sp-3); font-size: var(--fs-2); }
+.expedition-chip--mono { font-family: var(--font-mono); cursor: pointer; }
+.expedition-path { padding: 0 var(--sp-3); border-radius: var(--ui-radius); background: var(--bg-raised-2); font: var(--fs-2) var(--font-mono); }
+/* A value the host filled in for a draft (replaces the raw `maxLive: 2` list, 2026-11-01). */
+.expedition-default { padding: 0 var(--sp-2); border: 1px dashed var(--border-default); border-radius: var(--ui-radius); color: var(--text-muted); font-size: var(--fs-1); text-transform: uppercase; }
+
+/* The preview popup's markdown surface, at the width of its container
+   (before the caps below, which it would otherwise override at equal specificity). */
+.expedition-markdown.file-preview-markdown { width: auto; max-height: none; padding: var(--sp-5) var(--sp-6); overflow: visible; }
+
+/* Above the tabs, the goal and the owner question scroll inside a cap: the dialog's height is
+   fixed, so unbounded text there would squeeze the tabs and chat to nothing (2026-11-01 review). */
+.expedition-goal .expedition-markdown, .expedition-callout .expedition-markdown { max-height: 26vh; overflow-y: auto; }
+.expedition-goal--clamped .expedition-markdown { max-height: 5.4em; overflow: hidden; mask-image: linear-gradient(to bottom, black 55%, transparent); }
+.expedition-link { padding: 0; border: 0; background: none; color: var(--accent-primary); font-size: var(--fs-3); cursor: pointer; }
+.expedition-callout { gap: var(--sp-3); margin: 0; padding: var(--sp-5) var(--sp-6); border-left: 3px solid var(--tone, var(--accent-primary)); }
+
+.expedition-button {
+  padding: var(--sp-2) var(--sp-6);
+  border: 1px solid var(--border-default);
+  border-radius: var(--ui-radius);
+  background: var(--bg-raised-2);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.expedition-button--primary { border-color: transparent; background: var(--accent); color: var(--text-on-accent); }
+.expedition-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Segmented tabs: body size, the active one a filled segment; a scrolling strip on the phone. */
+.expedition-tabs {
+  align-self: flex-start;
+  flex: none;
+  gap: var(--sp-1);
+  max-width: 100%;
+  padding: var(--sp-1);
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--ui-radius);
+  background: var(--bg-raised-1);
+  scrollbar-width: none;
+}
+
+.expedition-tab {
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-6);
+  border: 0;
+  border-radius: var(--ui-radius);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.expedition-tab[aria-selected="true"] { background: var(--accent-primary); color: var(--text-on-accent); }
+.expedition-tab-count { opacity: 0.7; font-size: var(--fs-2); }
+
+/* The dialog: tabs and their pane on the left, the expedition chat as a right column. */
+.expedition-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 38%); gap: var(--sp-7); flex: 1; min-height: 0; }
+.expedition-main { gap: var(--sp-5); min-height: 0; }
+.expedition-modal--dialog .expedition-pane { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* Vertical rhythm: sections apart, a heading close to its content (2026-11-01 review: the
+   Charter's headings sat flush on the section above, as .ui-stack has no gap). */
+.expedition-stack { display: flex; flex-direction: column; gap: var(--sp-7); }
+.expedition-section { gap: var(--sp-3); }
+.expedition-bullets { margin: 0; padding-inline-start: var(--sp-8); }
+.expedition-chat-column, .expedition-chat { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.expedition-modal--sheet .expedition-chat-column { height: 70dvh; }
+.expedition-chat-messages { flex: 1; min-height: 0; overflow-y: auto; }
+/* The chat's sticky day band drew over the first message inside the modal's scroller. */
+.expedition-chat-messages .channel-browser-day { position: static; background: none; }
+.expedition-card { gap: var(--sp-3); padding: var(--sp-5) var(--sp-6); }
+.expedition-card-title { min-width: 0; color: var(--text-bright); }
+.expedition-card-id { margin-inline-start: auto; color: var(--text-muted); font-family: var(--font-mono); font-size: var(--fs-1); opacity: 0.6; }
+.expedition-card:hover .expedition-card-id { opacity: 1; }
+.expedition-outcome { margin: 0; padding: var(--sp-3) var(--sp-5); border-radius: var(--ui-radius); background: var(--bg-raised-2); }
+.expedition-outcome-verdict { color: var(--text-bright); font-weight: 600; }
+.expedition-validation { font-size: var(--fs-3); color: var(--text-muted); }
+.expedition-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 22%, transparent); }
+.expedition-timeline { display: grid; gap: var(--sp-6); margin: 0; padding: 0 0 0 var(--sp-6); border-left: 2px solid var(--border-subtle); list-style: none; }
+.expedition-timeline li { gap: var(--sp-2); }
+.expedition-time { color: var(--text-muted); font-size: var(--fs-2); }
+.expedition-scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-7); }
+.expedition-footer { justify-content: flex-end; gap: var(--sp-3); padding-top: var(--sp-5); border-top: 1px solid var(--border-subtle); }
+.expedition-error { color: var(--theme-danger); }
+
+/* The live badge: one line, its summary ellipsized (it wrapped on the phone). */
+.expedition-badge { gap: var(--sp-2); max-width: 100%; white-space: nowrap; overflow: hidden; }
+
+/* The draft card: a sibling of the badge chip, a little taller for its buttons. */
+.expedition-draft-card { display: inline-flex; gap: var(--sp-2); max-width: min(520px, 100%); margin-inline-start: 0; padding: var(--sp-3) var(--sp-5); }
+.expedition-draft-card-title { gap: var(--sp-2); min-width: 0; color: var(--text-bright); }
+.expedition-draft-card-actions { gap: var(--sp-3); }
