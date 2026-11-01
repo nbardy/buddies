@@ -17,6 +17,7 @@ import type {
   IntegrationRefusal,
   Outcome,
   QuestionAcceptance,
+  Run,
   State,
   Validation,
   ValidationPhase,
@@ -50,9 +51,21 @@ function runLabel(run: State['run']): string {
 }
 
 export function badge(s: State, now: string): string {
-  const mins = Math.round((Date.parse(now) - Date.parse(s.launchedAt)) / 60_000);
+  const mins = Math.round((Date.parse(clockEnd(s.run, now)) - Date.parse(s.launchedAt)) / 60_000);
   const elapsed = mins >= 60 ? `${Math.floor(mins / 60)}h${mins % 60}m` : `${mins}m`;
   return `⛺ ${s.charter.name} · ${runLabel(s.run)} · ${liveWorkers(s).length} live · ${verifiedClaims(s)} verified · ${workerAttempts(s)}/${s.charter.maxAttempts} attempts · ${elapsed} · ${costTotals(s).short}`;
+}
+
+/** Where the badge's elapsed time stops: at the finish, else now. */
+function clockEnd(run: Run, now: string): string {
+  switch (run.t) {
+    case 'finished':
+      return run.at;
+    case 'running':
+    case 'paused':
+    case 'waiting_owner':
+      return now;
+  }
 }
 
 // ---------- Cost (design.md R6): measured tokens only, never an estimate ----------

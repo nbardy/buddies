@@ -8,6 +8,7 @@ export type ExpeditionRun =
   | { t: 'waiting_owner'; question: string }
   | {
       t: 'finished';
+      at: string;
       reason:
         | 'done'
         | 'attempts_spent'

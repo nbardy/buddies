@@ -476,7 +476,9 @@ export type Run =
   | { t: 'running' }
   | { t: 'paused' }
   | { t: 'waiting_owner'; question: string }
-  | { t: 'finished'; reason: FinishReason; summary: string };
+  // `at` stops the badge's clock: a finished expedition read "finished · 10m" two minutes after it
+  // ended (live e2e 2026-11-01) and kept growing for as long as it was listed.
+  | { t: 'finished'; at: string; reason: FinishReason; summary: string };
 
 /** A chat status post: written to the ledger first, then posted. */
 export interface Status {
@@ -943,7 +945,7 @@ export function apply(s: State, e: Entry): void {
       return;
     }
     case 'finished':
-      s.run = { t: 'finished', reason: e.reason, summary: e.summary };
+      s.run = { t: 'finished', at: e.at, reason: e.reason, summary: e.summary };
       s.doneRequest = { t: 'none' };
       return;
   }

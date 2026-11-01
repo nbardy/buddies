@@ -497,11 +497,11 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       json({ actions: [{ do: 'done', summary: 'Widget passes, independently verified.' }] })
     );
     s = f.stateOf(id);
-    assert.deepEqual(s.run, {
-      t: 'finished',
-      reason: 'done',
-      summary: 'Widget passes, independently verified.',
-    });
+    assert.ok(s.run.t === 'finished');
+    assert.deepEqual(
+      [s.run.reason, s.run.summary],
+      ['done', 'Widget passes, independently verified.']
+    );
     assert.equal(s.questions[0].status, 'verified');
     const last = s.statuses.find((x) => x.text.includes('Finished (done)'))!;
     assert.equal(last.post.t, 'posted', 'the finish was posted');
@@ -1137,7 +1137,8 @@ test('command checks run on the host: each claimed commit is validated in a fres
     );
     await f.host.drain();
     s = f.stateOf(id);
-    assert.deepEqual(s.run, { t: 'finished', reason: 'done', summary: 'fixed' });
+    assert.ok(s.run.t === 'finished');
+    assert.deepEqual([s.run.reason, s.run.summary], ['done', 'fixed']);
     const [merged] = s.integrations;
     if (merged?.status.t !== 'integrated') throw new Error(`not integrated: ${merged?.status.t}`);
     const branch = `expedition/${id}`;
@@ -1538,7 +1539,8 @@ test('integration merges validated candidates one at a time onto the expedition 
     await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'A and B in' }] }));
     await f.host.drain();
     s = f.stateOf(id);
-    assert.deepEqual(s.run, { t: 'finished', reason: 'done', summary: 'A and B in' });
+    assert.ok(s.run.t === 'finished');
+    assert.deepEqual([s.run.reason, s.run.summary], ['done', 'A and B in']);
     const head = s.validations.at(-1)!;
     assert.equal(head.phase.t === 'started' ? head.phase.targetSha : '', mergeB);
     assert.equal(s.integrationTree.status.t, 'removed');
@@ -2169,6 +2171,11 @@ test('the attempt budget counts work and check attempts only; the last result st
     assert.ok(s.unseen.some((e) => e.t === 'rejected' && e.reason === 'attempt budget spent'));
     assert.equal(s.run.t === 'finished' && s.run.reason, 'attempts_spent');
     assert.equal(f.host.view(id).counts.decisions, 4, 'one manager after the spend, no more');
+    // Live e2e 2026-11-01: a finished expedition's badge read "finished · 10m" two minutes after
+    // it ended and kept counting. Its elapsed time stops at the finish.
+    const finishedBadge = f.host.view(id).badge;
+    f.setClock(Date.parse('2026-11-01T03:00:00Z'));
+    assert.equal(f.host.view(id).badge, finishedBadge, 'the finished badge clock stopped');
 
     // A manager whose every action is refused cannot spin: decisions have their own cap.
     const spin = await launchBudget2('spin');

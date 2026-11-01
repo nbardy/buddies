@@ -801,6 +801,34 @@ orphan is not killed (its tree is pulled away, so it fails fast).
   paths and recorded `preserved {harvested, files, bytes}`. Over 512 MiB or 10 000 files the
   harvest is refused whole and the tree is `left`, never half-copied.
 
+### R11 live delivery on a real repository (2026-11-01)
+The first end-to-end delivery (audit plan step 3), at `bfbb0c4`, on a local `--shared` clone of
+wave_sim `main` (23k files, ~870 MB checkout, one 863 MB submodule initialized) whose checkout was
+made deliberately dirty (two modified tracked docs, one of them the target `agent_notes/README.md`,
+and an untracked file). Throwaway server and stores; one Buddy, Sonnet 5.5, low effort. The owner
+asked for two tasks (a check script and a README section) with done = the script passes.
+- Finished `done` in 8 min: 4 worker attempts of a budget of 6 (2 work, 2 check), 7 manager
+  decisions, one answer-repair round. The manager declared `panel` acceptance on both questions;
+  each claim was verified by an independent check and merged `--no-ff` onto
+  `expedition/<id>` (two merge commits). The done command ran exactly once, as one head
+  validation of the merged branch in a fresh tree (pins held); no intermediate claim ran it.
+- Owner checkout: `git status --porcelain=v2`, HEAD and the SHA-256 of every dirty file were
+  identical before and after; the submodule was untouched. Refs: only `expedition/<id>` was
+  added. Every attempt, validation, integration and manager tree was removed and its scratch branch
+  deleted (`git worktree list` back to the owner's checkout alone); no salvage or harvest was
+  needed, because both claims merged.
+- Runs: 12 crew runs, one per posted request (11 attempts + 1 repair), plus the launching
+  Buddy's one turn; no stray deliveries. Cost: 34k input + 10k output tokens (604k cache read,
+  284k written), measured from the providers.
+- Wall time is dominated by tree I/O on a repository this size: each worktree add took 40–70 s and
+  each removal 6–16 s, about 4 of the 8 minutes.
+- Found and fixed: a finished expedition's badge clock kept running ("finished · 10m" two minutes
+  after the finish). `Run.finished` now carries `at` and the badge's elapsed time stops there.
+- Not exercised live: populated submodules inside attempt trees (`git worktree add` leaves them
+  empty, so the forced removal of a tree holding one is covered by the test only), check HOME
+  isolation (the done script never reads HOME; covered by "a check cannot read the owner's home"),
+  salvage and harvest.
+
 ### Lessons from oompa
 The oompa audit (2026-11-01) read oompa's history for the failures it paid for. Its durable value
 is that catalogue, not its loop, so expeditions take mechanisms one at a time with an incident
