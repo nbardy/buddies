@@ -406,10 +406,38 @@ export function parseOutcome(kind: Attempt['spec']['kind'], body: string): Outco
       return parsed.success ? { t: 'work', result: parsed.data } : malformed(parsed.error.message);
     }
     case 'check': {
+      const ambiguous = verdictAmbiguity(body);
+      if (ambiguous) return malformed(ambiguous);
       const parsed = CheckResult.safeParse(json.value);
       return parsed.success ? { t: 'check', result: parsed.data } : malformed(parsed.error.message);
     }
   }
+}
+
+/**
+ * A check's verdict must be explicit (ported from oompa's `explicit-approval?`): exactly one
+ * verdict object in the answer, and it ends the answer. Oompa incident (audit 2026-11-01): its
+ * queue reviewer approved on any `\bAPPROVED\b`, so "NOT APPROVED" passed; its strict parse also
+ * refuses a quoted example verdict followed by the real one, and prose after the verdict. Here
+ * the enum already refuses "not verified" and plain prose; this refuses the other two shapes, so a
+ * panel vote counts only an unambiguous final verdict. Returns why it is ambiguous (none: it is not).
+ */
+function verdictAmbiguity(body: string): string | undefined {
+  const fences = [...body.matchAll(FENCE)];
+  const verdicts = fences.filter((m) => {
+    const block = parsed(m[1] ?? '');
+    return (
+      block.ok &&
+      typeof block.value === 'object' &&
+      block.value !== null &&
+      'verdict' in block.value
+    );
+  });
+  if (verdicts.length > 1) return `${verdicts.length} verdict blocks: give exactly one verdict`;
+  const last = fences.at(-1);
+  if (last && body.slice((last.index ?? 0) + last[0].length).trim() !== '')
+    return 'text follows the verdict block: the verdict must end the answer';
+  return undefined;
 }
 
 /** The status view the `expedition` tool returns (and the crew answers @mentions from). */

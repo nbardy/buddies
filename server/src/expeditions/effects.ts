@@ -52,7 +52,9 @@ export type Effect =
    * while they are still settling (until meter.ts SETTLE_WINDOW_MS after `endedAt`). */
   | { t: 'meter_attempt'; attemptId: string; requestIds: string[]; endedAt: string }
   | { t: 'post_status'; seq: number; text: string }
-  | { t: 'post_badge' };
+  | { t: 'post_badge' }
+  /** A finished expedition's live attempt: ask its runs to stop (audit 2026-11-01 #2). */
+  | { t: 'cancel_attempt'; attemptId: string };
 
 export function pendingEffects(s: State): Effect[] {
   if (s.crew.t === 'pending') return [{ t: 'create_crew' }];
@@ -88,6 +90,15 @@ export function pendingEffects(s: State): Effect[] {
         : []
     ),
     ...managerTreeEffects(s),
+    // Finished: nothing a live attempt does can matter any more, so its runs are asked to stop
+    // (once); its end, or the host's `abandoned` after the grace, then releases its tree.
+    ...(finished
+      ? s.attempts.flatMap((a): Effect[] =>
+          a.phase.t === 'posted' && !(a.id in s.cancels)
+            ? [{ t: 'cancel_attempt', attemptId: a.id }]
+            : []
+        )
+      : []),
   ];
   switch (s.integrationTree.status.t) {
     case 'creating':

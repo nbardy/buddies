@@ -38,8 +38,8 @@ export type Metering = { t: 'settling' } | { t: 'metered'; cost: AttemptCost };
  */
 export const INDEX_GRACE_MS = 15_000;
 /** A crew Buddy's runs: its attempts plus chat deliveries; far below this for one expedition. */
-const RUN_SCAN_LIMIT = 2_000;
-const SETTLED: ReadonlySet<Run['status']> = new Set(['complete', 'failed', 'cancelled']);
+export const RUN_SCAN_LIMIT = 2_000;
+export const SETTLED: ReadonlySet<Run['status']> = new Set(['complete', 'failed', 'cancelled']);
 
 const unmeasured = (reason: string): Metering => ({
   t: 'metered',

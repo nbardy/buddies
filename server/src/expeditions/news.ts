@@ -321,6 +321,8 @@ export function outcomeLabel(o: Outcome): string {
       return `answered without a valid result but committed ${o.shas.length} commit(s) (${o.shas.map((x) => x.slice(0, 10)).join(', ')}): claimable`;
     case 'failed':
       return `run ${o.status}`;
+    case 'abandoned':
+      return `abandoned after the host's stop (${clip(o.reason, 120)})`;
   }
 }
 
@@ -339,6 +341,8 @@ export function outcomeDetail(o: Outcome): string {
       return `UNREPORTED COMMITS (${o.error}): its branch holds ${o.shas.join(', ')}; "claim" one to have it validated. Its answer: ${o.raw.slice(0, 400)}`;
     case 'failed':
       return `RUN ${o.status.toUpperCase()}`;
+    case 'abandoned':
+      return `ABANDONED: ${o.reason}`;
   }
 }
 

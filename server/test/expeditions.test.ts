@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -16,8 +17,13 @@ import { createBuddyEvents } from '../src/buddies/events';
 import type { ExecutionGate } from '../src/buddies/execution-gate';
 import { createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint } from '../src/buddies/mcp';
+import { parseOutcome } from '../src/expeditions/briefs';
 import { runCommand } from '../src/expeditions/command';
-import { type ExpeditionHost, createExpeditionHost } from '../src/expeditions/host';
+import {
+  CANCEL_GRACE_MS,
+  type ExpeditionHost,
+  createExpeditionHost,
+} from '../src/expeditions/host';
 import { Charter, type Entry, type State, fold } from '../src/expeditions/model';
 import { clip, goalSummary } from '../src/expeditions/news';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
@@ -63,6 +69,10 @@ function tempRepo(scratch: string): string {
   git(repo, 'commit', '-q', '-m', 'base');
   return repo;
 }
+
+/** A validation's check results without their pin reports (pins.ts), for comparing outcomes. */
+const outcomes = (v: { runs: { checkIndex: number; outcome: unknown }[] }) =>
+  v.runs.map(({ checkIndex, outcome }) => ({ checkIndex, outcome }));
 
 const json = (value: unknown) => `Done.\n\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
 
@@ -1134,7 +1144,7 @@ test('command checks run on the host: each claimed commit is validated in a fres
     assert.equal(git(f.repo, 'rev-parse', `${branch}^2`), good);
     const last = s.validations.at(-1)!;
     assert.deepEqual(last.target, { t: 'head' });
-    assert.deepEqual(last.runs, [{ checkIndex: 0, outcome: { t: 'passed' } }]);
+    assert.deepEqual(outcomes(last), [{ checkIndex: 0, outcome: { t: 'passed' } }]);
     const { mergeSha } = merged.status;
     assert.equal(validations().at(-1)?.targetSha, mergeSha, 'done ran on the merge');
     // The owner is told the branch to merge; the owner's checkout never moved.
@@ -1598,7 +1608,7 @@ test('finishing while a check runs never removes the tree under it; the tree goe
     fs.rmSync(marker);
     await f.host.drain();
     const v = f.stateOf(id).validations[0];
-    assert.deepEqual(v.runs, [{ checkIndex: 0, outcome: { t: 'passed' } }]);
+    assert.deepEqual(outcomes(v), [{ checkIndex: 0, outcome: { t: 'passed' } }]);
     assert.equal(v.phase.t === 'started' ? v.phase.treeStatus.t : v.phase.t, 'removed');
     assert.equal(fs.existsSync(tree.path), false);
   } finally {
@@ -1672,6 +1682,16 @@ test('a validation interrupted by a crash resumes from the ledger: before its tr
     );
     await replay();
     assert.deepEqual(ran(), [2, 3]);
+    // Audit 2026-11-01 #10: the job died with the old process (`validation_running` was on disk),
+    // so the restart is typed `interrupted` and runs in a FRESH tree at the same sha, never in the
+    // tree an orphaned check may still be writing into.
+    const interrupted = f.ledgerOf(id).filter((e) => e.t === 'validation_interrupted');
+    assert.equal(interrupted.length, 1);
+    const rerun = f.stateOf(id).validations[0];
+    if (rerun.phase.t !== 'started') throw new Error('validation never restarted');
+    assert.notEqual(rerun.phase.tree.path, tree.path);
+    assert.equal(rerun.phase.targetSha, v.phase.targetSha, 'the same immutable sha');
+    assert.equal(rerun.interruptions, 1);
   } finally {
     await f.close();
   }
@@ -1679,17 +1699,20 @@ test('a validation interrupted by a crash resumes from the ledger: before its tr
 
 test('a command check is killed at its timeout (its whole process group), and an exited check never waits on a background child', async () => {
   const cwd = tempDir('check-');
+  const scratch = `${cwd}.scratch`;
   const started = Date.now();
   const slow = await runCommand(
     { argv: ['sh', '-c', 'echo begun; sleep 30 & sleep 30'], timeoutSeconds: 1 },
-    cwd
+    cwd,
+    scratch
   );
   assert.equal(slow.t, 'timed_out');
   assert.match(slow.t === 'timed_out' ? slow.tail : '', /begun/);
   // Exit 0 with a straggler holding stdout: passed at once, not after the straggler's 30 s.
   const quick = await runCommand(
     { argv: ['sh', '-c', 'sleep 30 & exit 0'], timeoutSeconds: 20 },
-    cwd
+    cwd,
+    scratch
   );
   assert.deepEqual(quick, { t: 'passed' });
   // A straggler that left the process group (its own session) survives the group kill and holds
@@ -1704,12 +1727,14 @@ test('a command check is killed at its timeout (its whole process group), and an
         argv: ['sh', '-c', `${escaped(pids[0])} sleep 0.5; exit 0`],
         timeoutSeconds: 20,
       },
-      cwd
+      cwd,
+      scratch
     );
     assert.deepEqual(exited, { t: 'passed' });
     const stuck = await runCommand(
       { argv: ['sh', '-c', `${escaped(pids[1])} sleep 30`], timeoutSeconds: 1 },
-      cwd
+      cwd,
+      scratch
     );
     assert.equal(stuck.t, 'timed_out');
   } finally {
@@ -1726,14 +1751,43 @@ test('a command check is killed at its timeout (its whole process group), and an
         argv: ['sh', '-c', 'test -z "$EXPEDITION_TEST_SECRET"'],
         timeoutSeconds: 5,
       },
-      cwd
+      cwd,
+      scratch
     );
     assert.deepEqual(env, { t: 'passed' }, 'the server environment leaked into a check');
   } finally {
     Reflect.deleteProperty(process.env, 'EXPEDITION_TEST_SECRET');
   }
+  // Audit 2026-11-01 #3: HOME was the owner's, so agent-written check code could read ~/.ssh.
+  // A check gets a throwaway HOME and TMPDIR, made empty for the run and removed after it.
+  const realHome = process.env.HOME;
+  const owner = tempDir('owner-home-');
+  fs.mkdirSync(path.join(owner, '.ssh'));
+  fs.writeFileSync(path.join(owner, '.ssh', 'config'), 'IdentityFile OWNER-SECRET-KEY\n');
+  process.env.HOME = owner;
+  try {
+    const home = await runCommand(
+      {
+        argv: ['sh', '-c', 'echo "home=$HOME tmp=$TMPDIR"; cat "$HOME/.ssh/config"'],
+        timeoutSeconds: 5,
+      },
+      cwd,
+      scratch
+    );
+    assert.equal(home.t, 'failed', "a check read the owner's ~/.ssh/config");
+    const tail = home.t === 'failed' ? home.tail : '';
+    assert.doesNotMatch(tail, /OWNER-SECRET-KEY/);
+    assert.match(tail, new RegExp(`home=${scratch}/home tmp=${scratch}/tmp`));
+    assert.equal(fs.existsSync(scratch), false, 'the throwaway home is removed after the run');
+  } finally {
+    process.env.HOME = realHome;
+  }
   assert.ok(Date.now() - started < 15_000, `took ${Date.now() - started} ms`);
-  const missing = await runCommand({ argv: ['no-such-binary-xyz'], timeoutSeconds: 5 }, cwd);
+  const missing = await runCommand(
+    { argv: ['no-such-binary-xyz'], timeoutSeconds: 5 },
+    cwd,
+    scratch
+  );
   assert.equal(missing.t, 'error');
 });
 
@@ -2624,7 +2678,7 @@ test('a ledger shaped like the 2026-11-01 incident folds after the upgrade; "res
     const [v] = s.validations;
     assert.deepEqual(v.target, { t: 'candidate', claimAttemptId: 'w64130b', sha: verifierSha });
     assert.deepEqual(v.checks, [{ index: 0, argv: acceptance.argv, timeoutSeconds: 30 }]);
-    assert.deepEqual(v.runs, [{ checkIndex: 0, outcome: { t: 'passed' } }]);
+    assert.deepEqual(outcomes(v), [{ checkIndex: 0, outcome: { t: 'passed' } }]);
     assert.ok(
       !JSON.stringify(s.validations).includes('verify.py"]'),
       'the goal verifier never ran on a candidate'
@@ -2698,7 +2752,7 @@ test('a work answer still unreadable after its one repair, whose branch holds co
     await f.host.drain();
     const s = f.stateOf(id);
     const v = s.validations.find((x) => x.target.t === 'candidate')!;
-    assert.deepEqual(v.runs, [{ checkIndex: 0, outcome: { t: 'passed' } }]);
+    assert.deepEqual(outcomes(v), [{ checkIndex: 0, outcome: { t: 'passed' } }]);
     assert.deepEqual(v.checks[0].argv, widgetFixed.argv, 'its question command, not exit 7');
   } finally {
     await f.close();
@@ -2890,4 +2944,203 @@ test('expedition creation is exclusive: a second create of the same id refuses a
     /EEXIST/
   );
   assert.equal(fs.readFileSync(file, 'utf8'), `${JSON.stringify(first)}\n`);
+});
+
+test('a check verdict counts only when explicit: one verdict that ends the answer (oompa "NOT APPROVED" incident)', () => {
+  // Oompa's queue reviewer approved on any `\bAPPROVED\b`, so "NOT APPROVED" passed (audit
+  // 2026-11-01). Its strict parse (explicit-approval?) also refused a quoted example verdict
+  // followed by the real one, and prose after the verdict; a panel vote here does the same.
+  const fence = (v: unknown) => `\`\`\`json\n${JSON.stringify(v)}\n\`\`\``;
+  const verified = { verdict: 'verified', why: 'the test passes' };
+  const refuted = { verdict: 'refuted', why: 'the test fails' };
+  const notCounted = [
+    'NOT APPROVED',
+    'The candidate appears verified, but I have no final verdict.',
+    fence({ verdict: 'not verified', why: 'x' }),
+    `Here is a quoted example:\n${fence(verified)}\nMy verdict:\n${fence(refuted)}`,
+    `${fence(verified)}\nActually NOT verified: the test fails on a clean checkout.`,
+  ];
+  for (const body of notCounted)
+    assert.equal(parseOutcome('check', body).t, 'malformed', `counted as a verdict: ${body}`);
+  for (const body of [`Checked.\n${fence(verified)}\n`, `Checked.\n${JSON.stringify(verified)}`])
+    assert.deepEqual(parseOutcome('check', body), { t: 'check', result: verified });
+});
+
+test('host git never runs repository hooks; a check that rewrites its own validator never passes, and every check records its pinned validator bytes', async () => {
+  // Audit 2026-11-01 #7: host git (worktree adds, validation trees, integration merges) inherited
+  // the full server environment and ran repository hooks, so a hook saw every provider key.
+  // Oompa port: validator source pins, verified after the run (`expedition.validation/v1`).
+  const f = await fixture();
+  const marker = path.join(f.scratch, 'hook-ran');
+  process.env.EXPEDITION_HOOK_SECRET = 'sk-hook-secret';
+  try {
+    const honest = "grep -q 'broken = false' widget/widget.ts\n";
+    fs.writeFileSync(path.join(f.repo, 'widget', 'check.sh'), honest);
+    git(f.repo, 'add', '.');
+    git(f.repo, 'commit', '-q', '-m', 'validator');
+    for (const hook of ['post-checkout', 'post-merge', 'pre-merge-commit']) {
+      const file = path.join(f.repo, '.git', 'hooks', hook);
+      fs.writeFileSync(file, `#!/bin/sh\necho "${hook} $EXPEDITION_HOOK_SECRET" >> '${marker}'\n`);
+      fs.chmodSync(file, 0o755);
+    }
+    const { id } = await rpcLaunch(f, 'pins');
+    const check = { argv: ['sh', 'widget/check.sh'], timeoutSeconds: 30 };
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [question('Fix it', ['widget'], accept(check))] })
+    );
+    const q = f.stateOf(id).questions[0].id;
+    const work = async (validator: string) => {
+      await f.answer(
+        id,
+        f.manager(id),
+        json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'fix it' }] })
+      );
+      const w = f.liveAttempts(id).find((a) => a.kind === 'work')!.id;
+      const tree = f.treeOf(id, w).path;
+      fs.writeFileSync(path.join(tree, 'widget', 'check.sh'), validator);
+      const sha = f.commitIn(tree, 'widget/widget.ts');
+      const claim = { statement: 'fixed', evidence: [], howToCheck: 'run it' };
+      await f.answer(id, w, json({ result: 'claim', ...claim, change: { t: 'commit', sha } }));
+      await f.host.drain();
+      const v = f
+        .stateOf(id)
+        .validations.find((x) => x.target.t === 'candidate' && x.target.sha === sha)!;
+      return { w, run: v.runs[0] };
+    };
+    const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+
+    // The candidate's validator rewrites itself to `exit 0` while it runs: never a pass.
+    const cheat = `printf 'exit 0\\n' > widget/check.sh\n${honest}`;
+    const cheated = await work(cheat);
+    assert.equal(cheated.run.outcome.t, 'error');
+    assert.match(
+      JSON.stringify(cheated.run.outcome),
+      /changed its own validator source.*widget\/check\.sh/
+    );
+    assert.deepEqual(cheated.run.report.pins, [{ path: 'widget/check.sh', sha256: sha256(cheat) }]);
+    assert.deepEqual(cheated.run.report.pinCheck, { t: 'changed', paths: ['widget/check.sh'] });
+
+    // An honest candidate passes with its pins held, and is merged.
+    const fixed = await work(honest);
+    assert.deepEqual(fixed.run.outcome, { t: 'passed' });
+    assert.equal(fixed.run.report.t, 'expedition.validation/v1');
+    assert.deepEqual(fixed.run.report.pins, [{ path: 'widget/check.sh', sha256: sha256(honest) }]);
+    assert.deepEqual(fixed.run.report.pinCheck, { t: 'held' });
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'integrate', claimAttempt: fixed.w }] })
+    );
+    assert.equal(f.stateOf(id).integrations[0]?.status.t, 'integrated');
+    assert.equal(
+      fs.existsSync(marker),
+      false,
+      `a repository hook ran for the host: ${fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : ''}`
+    );
+  } finally {
+    Reflect.deleteProperty(process.env, 'EXPEDITION_HOOK_SECRET');
+    await f.close();
+  }
+});
+
+test('stop cancels live attempts and releases every tree safely: a submodule tree is force-removed after its guards pass, unintegrated commits are salvaged, ignored output harvested, a dirty tree left', async () => {
+  // Audit 2026-11-01 #2 (stop cancelled nothing), #9 (release never forced, so a tree with an
+  // initialized submodule leaked), and the oompa ports: salvage refs (run 9f004a39 deleted ~2.5 h
+  // of approved work) and harvesting ignored output (swarm 455987ea lost a paid run's gauges).
+  const f = await fixture();
+  try {
+    const sub = path.join(f.scratch, 'sub');
+    fs.mkdirSync(sub);
+    git(sub, 'init', '-q');
+    git(
+      sub,
+      '-c',
+      'user.email=t@e',
+      '-c',
+      'user.name=T',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      's'
+    );
+    fs.writeFileSync(path.join(f.repo, '.gitignore'), 'output/\n');
+    git(f.repo, '-c', 'protocol.file.allow=always', 'submodule', '-q', 'add', sub, 'vendor/sub');
+    git(f.repo, 'add', '.');
+    git(f.repo, 'commit', '-q', '-m', 'submodule and ignored output');
+    const { id } = await rpcLaunch(f, 'release', 3);
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: [question('A', ['widget']), question('B', ['docs']), question('C', ['notes'])],
+      })
+    );
+    const qs = f.stateOf(id).questions.map((q) => q.id);
+    await f.answer(
+      id,
+      f.manager(id),
+      json({
+        actions: qs.map((question, seat) => ({
+          do: 'work',
+          question,
+          seat: seat % 2,
+          brief: 'go',
+        })),
+      })
+    );
+    const [w1, w2, w3] = f
+      .liveAttempts(id)
+      .filter((a) => a.kind === 'work')
+      .map((a) => a.id);
+    const finding = json({ result: 'finding', statement: 'partial', evidence: [] });
+
+    // w1 builds (submodule initialized), commits, writes ignored run output, reports a finding.
+    const t1 = f.treeOf(id, w1).path;
+    git(t1, '-c', 'protocol.file.allow=always', 'submodule', '-q', 'update', '--init');
+    const sha = f.commitIn(t1, 'widget/widget.ts');
+    fs.mkdirSync(path.join(t1, 'output'));
+    fs.writeFileSync(path.join(t1, 'output', 'run.log'), 'gauges\n');
+    await f.answer(id, w1, finding);
+    // w2 leaves an uncommitted edit; w3 never answers.
+    const t2 = f.treeOf(id, w2).path;
+    fs.writeFileSync(path.join(t2, 'docs', 'README.md'), 'half done\n');
+    await f.answer(id, w2, finding);
+
+    await f.host.steer(id, f.lead.id, { t: 'stop' });
+    let s = f.stateOf(id);
+    assert.equal(s.run.t, 'finished');
+    const cancel = s.cancels[w3];
+    assert.ok(cancel && cancel.runIds.length > 0, 'the live attempt was asked to stop');
+    for (const runId of cancel.runIds)
+      assert.equal((await f.core.getRun(runId)).status, 'cancelled');
+
+    // w1: salvaged, harvested, then force-removed; its unmerged branch stays for the owner.
+    assert.deepEqual(s.worktrees[w1].status, { t: 'removed', branchDeleted: false });
+    assert.equal(fs.existsSync(t1), false);
+    assert.equal(git(f.repo, 'rev-parse', `refs/salvage/expeditions/${id}/${w1}`), sha);
+    const harvested = path.join(f.root, id, 'harvest', w1, 'output', 'run.log');
+    assert.equal(fs.readFileSync(harvested, 'utf8'), 'gauges\n');
+    assert.deepEqual(
+      s.preserved.filter((p) => p.treeOf === w1).map((p) => p.preserved.t),
+      ['salvaged', 'harvested']
+    );
+    // w2: never forced away with its uncommitted change.
+    assert.equal(s.worktrees[w2].status.t, 'left');
+    assert.match(JSON.stringify(s.worktrees[w2].status), /uncommitted changes/);
+    assert.equal(fs.existsSync(t2), true);
+
+    // w3's run ignored the stop (no runner here): after the grace the host abandons it and its
+    // tree goes.
+    f.setClock(Date.parse(cancel.at) + CANCEL_GRACE_MS + 60_000);
+    await f.host.tick(id);
+    s = f.stateOf(id);
+    const ended = s.attempts.find((a) => a.id === w3)!;
+    assert.equal(ended.phase.t === 'ended' && ended.phase.outcome.t, 'abandoned');
+    assert.deepEqual(s.worktrees[w3].status, { t: 'removed', branchDeleted: true });
+  } finally {
+    await f.close();
+  }
 });

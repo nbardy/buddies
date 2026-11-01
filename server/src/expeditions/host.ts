@@ -17,21 +17,20 @@ import {
   attemptCommits,
   branchHead,
   claimHeld,
-  discardWorktree,
   ensureDetachedTree,
   ensureWorktree,
   mergeCandidate,
   preflight,
   releaseDetachedTree,
   releaseIntegrationTree,
-  releaseWorktree,
   syncDetachedTree,
 } from './git';
-import { type MeterPorts, meterRequest } from './meter';
+import { type MeterPorts, RUN_SCAN_LIMIT, SETTLED, meterRequest } from './meter';
 import {
   type Attempt,
   type AttemptPhase,
   type Charter,
+  type CheckOutcome,
   type ClaimChange,
   type Clock,
   type Effect,
@@ -40,6 +39,7 @@ import {
   type Origin,
   type Outcome,
   type State,
+  type ValidationReport,
   type ValidationTarget,
   type WorkerSpec,
   apply,
@@ -61,9 +61,12 @@ import {
   pendingEffects,
   startedOf,
   validationOf,
+  validationTreeId,
   worktreeName,
   worktreeOf,
 } from './model';
+import { pinSources, pinnedOutcome, report, verifyPins } from './pins';
+import { type Keep, type Released, discardWorktree, releaseWorktree } from './release';
 import { appendBatch, createLedger, readLedgerFile } from './store';
 import { expeditionView } from './view';
 
@@ -87,6 +90,9 @@ const ROUNDS_PER_TICK = 4;
 const TICK_FAILURE_LIMIT = 3;
 const BACKOFF_BASE_MS = 60_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
+/** After the host asks a finished expedition's live attempt to stop (audit #2), how long its runs
+ * may take to end before the host ends the attempt `abandoned` and releases its tree. */
+export const CANCEL_GRACE_MS = 5 * 60_000;
 
 export interface LaunchInput {
   key: string;
@@ -193,6 +199,9 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
    * the work, and `run_validation` resumes them. */
   const jobs = new Map<string, Promise<void>>();
   const jobKey = (id: string, validationId: string) => `${id}/${validationId}`;
+  /** Check jobs this process started (running or since ended): a `running` job not here died
+   * with an earlier process (runValidation). */
+  const ranHere = new Set<string>();
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 
   const fileOf = (id: string) => path.join(root, id, 'ledger.jsonl');
@@ -293,7 +302,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     switch (request.request.state) {
       case 'awaiting':
       case 'none':
-        return [];
+        return abandonedAfterGrace(s, attempt);
       case 'answered': {
         const answer = await core.getPost(OWNER, request.request.answerId);
         return answered(s, attempt, phase, answer.body);
@@ -309,6 +318,17 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
           },
         ];
     }
+  }
+
+  /** A cancelled attempt whose runs did not end within the grace is ended by the host (audit #2):
+   * a run that ignores its stop must not hold a tree and a slot forever. */
+  function abandonedAfterGrace(s: State, attempt: Attempt): Entry[] {
+    const cancel = s.cancels[attempt.id];
+    if (!cancel || Date.parse(now()) - Date.parse(cancel.at) < CANCEL_GRACE_MS) return [];
+    const reason = `its runs (${cancel.runIds.join(', ') || 'none found'}) did not end within ${CANCEL_GRACE_MS / 60_000} minutes of the host's stop`;
+    return [
+      { t: 'attempt_ended', at: now(), attemptId: attempt.id, outcome: { t: 'abandoned', reason } },
+    ];
   }
 
   /**
@@ -443,11 +463,39 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     meter_attempt: (s, e) => meterAttempt(s, e),
     post_status: (s, e) => postStatus(s, e.seq, e.text),
     post_badge: (s) => postBadge(s),
+    cancel_attempt: (s, e) => cancelAttempt(s, e.attemptId),
   };
   function run<E extends Effect>(s: State, effect: E): Promise<Entry[]> {
     const handler = handlers[effect.t] as (s: State, e: E) => Promise<Entry[]>;
     return handler(s, effect);
   }
+
+  /**
+   * Asks every unsettled run of a finished expedition's live attempt to stop, exactly as the
+   * owner's Stop does (runner.ts `cancel`: the crate's cancelRun, then the `cancelled` event the
+   * runner kills the turn on). 2026-11-01 audit #2: stop and deadline cancelled nothing, so live
+   * workers ran on, unbounded, after the expedition finished.
+   */
+  async function cancelAttempt(s: State, attemptId: string): Promise<Entry[]> {
+    if (s.crew.t !== 'ready') throw new Error('attempt cancelled before the crew exists');
+    const posts = new Set(s.requests[attemptId]);
+    const runs = (
+      await core.listRuns({ kind: 'buddy', buddyId: s.crew.buddyId }, RUN_SCAN_LIMIT)
+    ).filter((r) => r.input.kind === 'post' && posts.has(r.input.postId) && !SETTLED.has(r.status));
+    for (const r of runs) {
+      const run = await core.cancelRun(OWNER, r.id);
+      events.emit({ kind: 'cancelled', run });
+    }
+    return [{ t: 'attempt_cancel_requested', at: now(), attemptId, runIds: runs.map((r) => r.id) }];
+  }
+
+  /** Where a tree's leftovers go when it is released (release.ts Keep). */
+  const keepOf = (s: State, treeOf: string): Keep => ({
+    salvageRef: `refs/salvage/expeditions/${s.id}/${treeOf}`,
+    harvestDir: path.join(root, s.id, 'harvest', treeOf),
+  });
+  const preservedEntries = (treeOf: string, released: Released): Entry[] =>
+    released.preserved.map((preserved) => ({ t: 'preserved', at: now(), treeOf, preserved }));
 
   async function createCrew(s: State): Promise<Entry[]> {
     const crew = await core.createBuddy(OWNER, {
@@ -533,32 +581,52 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     keepCommits: boolean
   ): Promise<Entry[]> {
     const tree = worktreeOf(s, attemptId);
-    const release = await releaseWorktree(s.repo.root, tree.name, tree, keepCommits, s.repo.branch);
-    return [{ t: 'worktree_released', at: now(), attemptId, release }];
+    const released = await releaseWorktree(
+      s.repo.root,
+      tree.name,
+      tree,
+      keepCommits,
+      s.repo.branch,
+      keepOf(s, attemptId)
+    );
+    return [
+      ...preservedEntries(attemptId, released),
+      { t: 'worktree_released', at: now(), attemptId, release: released.release },
+    ];
   }
 
   /** Intent first: the resolved sha and the tree's name are on disk before `cambium add`. */
   async function startValidation(s: State, validationId: string): Promise<Entry[]> {
     const v = validationOf(s, validationId);
+    const treeId = validationTreeId(v);
     await append(s.id, [
       {
         t: 'validation_started',
         at: now(),
         validationId: v.id,
-        name: worktreeName(s.id, v.id),
-        path: path.join(root, s.id, 'validations', v.id),
-        branch: `exp/${s.id}/${v.id}`,
+        name: worktreeName(s.id, treeId),
+        path: path.join(root, s.id, 'validations', treeId),
+        branch: `exp/${s.id}/${treeId}`,
         baseSha: await validationSha(s, v.target),
       },
     ]);
     return createValidationTree(stateOf(s.id), v.id);
   }
 
-  /** Starts the check job in the background (never twice for one validation). A job that
-   * throws records a terminal `validation_failed` (audit #5), so it is never re-run hot. */
+  /**
+   * Starts the check job in the background (never twice for one validation), recording
+   * `validation_running` first. A job the ledger says is running that this process never started
+   * died with an earlier process (audit #10): its tree is discarded and the validation restarts in
+   * a fresh tree at the same immutable sha, keeping the checks already recorded. A job that throws
+   * records a terminal `validation_failed` (audit #5), so it is never re-run hot.
+   */
   async function runValidation(s: State, validationId: string): Promise<Entry[]> {
     const key = jobKey(s.id, validationId);
     if (jobs.has(key)) return [];
+    const phase = startedOf(s, validationId);
+    if (phase.job.t === 'running' && !ranHere.has(key)) return interrupted(s, validationId);
+    ranHere.add(key);
+    await append(s.id, [{ t: 'validation_running', at: now(), validationId }]);
     const id = s.id;
     const job = runChecks(id, validationId)
       .catch((error: unknown) => {
@@ -580,12 +648,32 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return [];
   }
 
+  /**
+   * Why restart rather than adopt (design.md R11): adopting a check across a restart needs a
+   * detached wrapper with pid and exit files that outlives the server, and a pid from another
+   * boot cannot be trusted. The candidate sha is immutable and its checks are re-runnable by
+   * contract, so a fresh run on the same sha is correct at the price of the time it re-spends; a
+   * fresh tree (validationTreeId) keeps it from racing an orphan on build outputs, and discarding
+   * the old tree pulls the orphan's files away so it fails fast instead of running on unseen.
+   */
+  async function interrupted(s: State, validationId: string): Promise<Entry[]> {
+    const { tree } = startedOf(s, validationId);
+    const released = await discardWorktree(s.repo.root, tree.name, tree, keepOf(s, validationId));
+    return [
+      ...preservedEntries(validationId, released),
+      { t: 'validation_interrupted', at: now(), validationId, release: released.release },
+    ];
+  }
+
   /** Never pull a tree from under this host's own running check. */
   async function releaseValidation(s: State, validationId: string): Promise<Entry[]> {
     if (jobs.has(jobKey(s.id, validationId))) return [];
     const { tree } = startedOf(s, validationId);
-    const release = await discardWorktree(s.repo.root, tree.name, tree);
-    return [{ t: 'validation_released', at: now(), validationId, release }];
+    const released = await discardWorktree(s.repo.root, tree.name, tree, keepOf(s, validationId));
+    return [
+      ...preservedEntries(validationId, released),
+      { t: 'validation_released', at: now(), validationId, release: released.release },
+    ];
   }
 
   /** Build and record the brief, then post it. A manager's tree is moved to the branch head
@@ -746,6 +834,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
               targetSha,
               checkIndex: index,
               outcome: { t: 'error', message: `no validation worktree: ${made.reason}` },
+              report: report(targetSha, [], { t: 'unpinned', reason: 'no validation worktree' }),
             })
           ),
         ];
@@ -769,12 +858,40 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       const next = v.checks.find((c) => !done.has(c.index));
       if (!next || v.failure.t === 'failed') return;
       const { tree, targetSha } = startedOf(s, validationId);
-      const outcome = await runCommand(next, tree.path);
+      const ran = await runPinned(next, tree.path, targetSha);
       await serialized(id, () =>
         append(id, [
-          { t: 'validation', at: now(), validationId, targetSha, checkIndex: next.index, outcome },
+          { t: 'validation', at: now(), validationId, targetSha, checkIndex: next.index, ...ran },
         ])
       );
+    }
+  }
+
+  /**
+   * One check with its validator sources pinned (pins.ts): hashed at the target sha before the
+   * run, re-read after it; a changed validator never passes. Its HOME and TMPDIR are a throwaway
+   * pair beside the tree (command.ts), removed when the run ends.
+   */
+  async function runPinned(
+    check: { argv: string[]; timeoutSeconds: number },
+    treePath: string,
+    targetSha: string
+  ): Promise<{ outcome: CheckOutcome; report: ValidationReport }> {
+    const pinned = await pinSources(treePath, targetSha, check.argv);
+    switch (pinned.t) {
+      case 'mismatch':
+        return {
+          outcome: { t: 'error', message: pinned.reason },
+          report: report(targetSha, [], { t: 'unpinned', reason: pinned.reason }),
+        };
+      case 'pinned': {
+        const outcome = await runCommand(check, treePath, `${treePath}.scratch`);
+        const after = await verifyPins(treePath, pinned.pins);
+        return {
+          outcome: pinnedOutcome(outcome, after),
+          report: report(targetSha, pinned.pins, after),
+        };
+      }
     }
   }
 

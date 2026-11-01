@@ -42,7 +42,10 @@ export type Outcome =
   | { t: 'check'; result: CheckResult }
   | { t: 'malformed'; error: string; raw: string }
   | { t: 'unreported_commits'; error: string; raw: string; shas: string[] }
-  | { t: 'failed'; status: 'failed' | 'cancelled' };
+  | { t: 'failed'; status: 'failed' | 'cancelled' }
+  /** The host asked its runs to stop (owner stop, deadline) and they did not end within the grace
+   * (host.ts CANCEL_GRACE_MS): the attempt is ended by the host so its tree can be released. */
+  | { t: 'abandoned'; reason: string };
 
 /** Which request of an attempt is out: its brief, or the one repair request a malformed answer
  * gets (design.md R11: one format repair turn on the same seat before the answer is final). */
@@ -173,6 +176,33 @@ export type ValidationTarget =
   | { t: 'candidate'; claimAttemptId: string; sha: string }
   | { t: 'head' };
 
+/** A repository file a check's argv named, hashed at the candidate commit (pins.ts). */
+export interface SourcePin {
+  path: string;
+  sha256: string;
+}
+
+/** The pinned files re-read after the run: unchanged, changed by the run (the outcome is then an
+ * error), or never pinned (no tree, the tree did not match the commit, or a legacy record). */
+export type PinCheck =
+  | { t: 'held' }
+  | { t: 'changed'; paths: string[] }
+  | { t: 'unpinned'; reason: string };
+
+/** The typed record of one host-run check (ported from oompa's `oompa.task-validation/v1`). */
+export interface ValidationReport {
+  t: 'expedition.validation/v1';
+  targetSha: string;
+  pins: SourcePin[];
+  pinCheck: PinCheck;
+}
+
+/** What a tree's release kept before removing it (release.ts): commits pinned at a salvage ref,
+ * ignored run output copied into the expedition's folder. */
+export type Preserved =
+  | { t: 'salvaged'; ref: string; sha: string }
+  | { t: 'harvested'; dir: string; files: number; bytes: number };
+
 /** One command check's result. The output tail is bounded (command.ts TAIL_CHARS). */
 export type CheckOutcome =
   | { t: 'passed' }
@@ -184,6 +214,7 @@ export interface CheckRun {
   /** The check's `index` in its validation's `checks`. */
   checkIndex: number;
   outcome: CheckOutcome;
+  report: ValidationReport;
 }
 
 /** One host-run command a validation runs, frozen when it is planned (R11): the question's
@@ -203,6 +234,10 @@ export type ValidationPhase =
       targetSha: string;
       tree: WorktreeAt & { name: string };
       treeStatus: WorktreeStatus;
+      /** `running`: a host process started its check job (`validation_running`). A process that
+       * finds `running` without having started the job itself knows the job died with an earlier
+       * process (audit 2026-11-01 #10). */
+      job: { t: 'idle' } | { t: 'running' };
     };
 
 export interface Validation {
@@ -213,7 +248,14 @@ export interface Validation {
   runs: CheckRun[];
   /** `failed`: the host could not run its checks at all (a terminal `validation_failed`). */
   failure: { t: 'none' } | { t: 'failed'; reason: string };
+  /** Times its check job died with a host process; each restart gets a fresh tree. */
+  interruptions: number;
 }
+
+/** The id a validation's tree is named by: a fresh name per restart after an interruption, so the
+ * new tree never adopts the one an orphaned check may still be writing into. */
+export const validationTreeId = (v: Validation) =>
+  v.interruptions === 0 ? v.id : `${v.id}-r${v.interruptions}`;
 
 // ---------- Integration (design.md R3) ----------
 
@@ -307,8 +349,19 @@ export type Entry =
       targetSha: string;
       checkIndex: number;
       outcome: CheckOutcome;
+      report: ValidationReport;
     }
   | { t: 'validation_released'; at: string; validationId: string; release: Release }
+  /** Intent, before the host starts the check job in this process (audit #10). */
+  | { t: 'validation_running'; at: string; validationId: string }
+  /** The job died with an earlier host process: its tree was discarded (`release`) and the
+   * unrecorded checks run again in a fresh tree at the same immutable sha. */
+  | { t: 'validation_interrupted'; at: string; validationId: string; release: Release }
+  /** What a tree's release kept (release.ts), recorded with the release; `treeOf` is the attempt
+   * or validation id. */
+  | { t: 'preserved'; at: string; treeOf: string; preserved: Preserved }
+  /** The host asked an attempt's live runs to stop (owner stop or deadline, audit #2). */
+  | { t: 'attempt_cancel_requested'; at: string; attemptId: string; runIds: string[] }
   /** A manager's done awaiting the head validation (written with its `validation_planned`). */
   | { t: 'done_requested'; at: string; validationId: string; summary: string }
   /** The head validation (or the goal panel) did not hold: the manager is shown why. */
@@ -449,6 +502,10 @@ export interface State {
   tickFailure: { t: 'none' } | { t: 'failing'; at: string; failures: number; reason: string };
   /** Each ended attempt's cost, by attempt id (absent until its run settled and was metered). */
   costs: Record<string, AttemptCost>;
+  /** Live attempts the host asked to stop, by attempt id, with when (audit #2). */
+  cancels: Record<string, { at: string; runIds: string[] }>;
+  /** What tree releases kept (salvage refs, harvested output), in order. */
+  preserved: { treeOf: string; preserved: Preserved }[];
   /** Notable entries since the last chat status post. */
   news: Entry[];
   attempts: Attempt[];
@@ -471,7 +528,8 @@ export interface State {
  * upgrades each into the current Entry with explicit legacy data, never a silent default. */
 type LegacyEntry =
   | Omit<Extract<Entry, { t: 'question_added' }>, 'acceptance'>
-  | Omit<Extract<Entry, { t: 'validation_planned' }>, 'checks'>;
+  | Omit<Extract<Entry, { t: 'validation_planned' }>, 'checks'>
+  | Omit<Extract<Entry, { t: 'validation' }>, 'report'>;
 export type StoredEntry = Entry | LegacyEntry;
 
 /** The charter's command checks as a head validation runs them (their charter index). */
@@ -492,6 +550,17 @@ function canonical(e: StoredEntry, c: Charter): Entry {
     return { ...e, acceptance: { rule: { t: 'panel' }, provenance: 'legacy' } };
   if (e.t === 'validation_planned' && !('checks' in e))
     return { ...e, checks: doneValidationChecks(c) };
+  // A check recorded before source pins (part 2 of R11) ran unpinned: said so, never implied.
+  if (e.t === 'validation' && !('report' in e))
+    return {
+      ...e,
+      report: {
+        t: 'expedition.validation/v1',
+        targetSha: e.targetSha,
+        pins: [],
+        pinCheck: { t: 'unpinned', reason: 'recorded before source pins (legacy)' },
+      },
+    };
   return e as Entry;
 }
 
@@ -530,6 +599,8 @@ export function fold(stored: readonly StoredEntry[]): State {
     extendedHours: 0,
     tickFailure: { t: 'none' },
     costs: {},
+    cancels: {},
+    preserved: [],
     news: [],
     attempts: [],
     questions: [],
@@ -636,6 +707,7 @@ export function apply(s: State, e: Entry): void {
         phase: { t: 'planned' },
         runs: [],
         failure: { t: 'none' },
+        interruptions: 0,
       });
       return;
     case 'validation_failed': {
@@ -650,6 +722,7 @@ export function apply(s: State, e: Entry): void {
         targetSha: e.baseSha,
         tree: { name: e.name, path: e.path, branch: e.branch, baseSha: e.baseSha },
         treeStatus: { t: 'creating' },
+        job: { t: 'idle' },
       };
       return;
     case 'validation_tree_ready':
@@ -660,7 +733,7 @@ export function apply(s: State, e: Entry): void {
       return;
     case 'validation': {
       const v = validationOf(s, e.validationId);
-      v.runs.push({ checkIndex: e.checkIndex, outcome: e.outcome });
+      v.runs.push({ checkIndex: e.checkIndex, outcome: e.outcome, report: e.report });
       // A finished candidate validation is shown to the next manager (it may integrate or retry);
       // a head validation is reported through the done it decides (`finished` / `done_refused`).
       if (validationComplete(v) && reportsToManager(v.target)) s.unseen.push(e);
@@ -668,6 +741,22 @@ export function apply(s: State, e: Entry): void {
     }
     case 'validation_released':
       startedOf(s, e.validationId).treeStatus = e.release;
+      return;
+    case 'validation_running':
+      startedOf(s, e.validationId).job = { t: 'running' };
+      return;
+    case 'validation_interrupted': {
+      startedOf(s, e.validationId);
+      const v = validationOf(s, e.validationId);
+      v.phase = { t: 'planned' };
+      v.interruptions += 1;
+      return;
+    }
+    case 'preserved':
+      s.preserved.push({ treeOf: e.treeOf, preserved: e.preserved });
+      return;
+    case 'attempt_cancel_requested':
+      s.cancels[e.attemptId] = { at: e.at, runIds: e.runIds };
       return;
     case 'done_requested':
       s.doneRequest = { t: 'validating', validationId: e.validationId, summary: e.summary };
