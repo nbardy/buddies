@@ -12,10 +12,12 @@ import {
 
 // Fix-guard: the Chats sidebar is absent on workspace channels, so adding its section
 // left the owner's actual rail unchanged. Guard: channel-browser.test.tsx renders this route.
+// Keep these rows as rail siblings: a wrapper made the header :first-child,
+// skipping the shared section spacing (browser proof: expedition-header-after).
 export function ChannelExpeditions() {
   const list = usePolledFetch<ExpeditionSummary[]>(EXPEDITIONS_URL, 10_000);
   return (
-    <section aria-label="Expeditions">
+    <>
       <div className="channel-browser-rail-section-row ui-row">
         <Link className="channel-browser-rail-section ui-muted" to={EXPEDITIONS_HREF}>
           Expeditions
@@ -51,6 +53,6 @@ export function ChannelExpeditions() {
           </li>
         ))}
       </ul>
-    </section>
+    </>
   );
 }
