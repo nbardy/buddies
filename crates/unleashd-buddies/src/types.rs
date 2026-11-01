@@ -698,6 +698,18 @@ pub struct TaskChanges {
     /// 0 unpins; N > 0 pins at order N (lower = earlier). Only a top-level task can be pinned.
     pub pin: Option<i64>,
     pub owner_id: Option<String>,
+    /// A move (reparent): absent = unchanged. See `ParentRef` and tasks.rs `checked_move`.
+    pub parent: Option<ParentRef>,
+}
+
+/// Where a task sits in its tree: `Top` (an initiative, the only kind Home pins) or under a task.
+/// Named, not `Option<String>`, so "top level" and "unchanged" stay distinct (as `ManagerRef`).
+#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum ParentRef {
+    Top,
+    Task { id: String },
 }
 
 /// A task write. Every field of `TaskChanges` is a patch: absent = unchanged.

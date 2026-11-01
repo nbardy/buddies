@@ -393,6 +393,14 @@ export interface OwnerUnread {
   unreadThreads: number
 }
 
+/**
+ * Where a task sits in its tree: `Top` (an initiative, the only kind Home pins) or under a task.
+ * Named, not `Option<String>`, so "top level" and "unchanged" stay distinct (as `ManagerRef`).
+ */
+export type ParentRef =
+  | { kind: 'top' }
+  | { kind: 'task'; id: string }
+
 export interface Post {
   editRevision?: number
   editedAt?: string
@@ -730,6 +738,8 @@ export interface TaskChanges {
   /** 0 unpins; N > 0 pins at order N (lower = earlier). Only a top-level task can be pinned. */
   pin?: number
   ownerId?: string
+  /** A move (reparent): absent = unchanged. See `ParentRef` and tasks.rs `checked_move`. */
+  parent?: ParentRef
 }
 
 /** One Buddy's unfinished top-level tasks: `open` counts every one (blocked included). */
