@@ -94,8 +94,9 @@ All engine code is under `server/src/expeditions/`. The pure core (no I/O) is re
 | Read-only queries (live, panels, custody, stages, seats) | `queries.ts` |
 | Badge, chat news lines, outcome/validation/integration labels, cost totals | `news.ts` |
 | Charter schema, launch defaults, draft issues/advice, answer schemas | `charter.ts` |
-| Briefs (manager / work / blind check), answer parsing, owner chat words | `briefs.ts` |
-| Host: ledger files, ticks, observation (runs and owner chat), effects, launch/steer | `host.ts` |
+| Briefs (manager / work / blind check / repair), answer parsing, owner chat words | `briefs.ts` |
+| Host: ticks (typed observation, failure backoff), one handler per effect, launch/steer | `host.ts` |
+| Ledger file: durable append (fsync, cut back on failure), exclusive create, boot read | `store.ts` |
 | Git: preflight, Cambium worktrees, claim checks, merges, releases | `git.ts` |
 | Host-run command checks (curated env, process group, timeout) | `command.ts` |
 | Measured attempt cost (tokens from the run's sessions) | `meter.ts` |
@@ -111,23 +112,37 @@ Where things land:
   the page path as data (`page`) and tells the Buddy the badge is already there; it posts no link.
 - **Expedition chat**: the owner↔crew DM. Every update (questions, starts, results, checks,
   reflections, lessons, needs-you, finish) is a crew post there. Each owner message there is
-  recorded by the host as steering (`feedback {via: chat}`): `pause`, `resume`, `stop`,
-  `lesson: …`, else a note; the crew only acknowledges it.
+  recorded by the host as steering (`feedback {via: chat}`): `pause`, `resume` (also re-plans:
+  a new manager decision), `stop`, `extend 3h` (moves the deadline), `lesson: …`, else a note;
+  the crew only acknowledges it.
 - **Attempts**: requests in the crew's note-to-self DM (plumbing), shown on the page with their
   exact instructions. Answering one wakes nobody (the host observes it); the crew is never handed
   its own answers as new work (design.md R9, P1).
 - **Where runs start**: a work or check attempt's run starts in its own worktree; a manager's in
-  the expedition's integration tree (read only by its brief; the repository root before that tree
-  exists); every other crew turn (a mention, the owner's chat, a worker it spawned) in the crew's
+  its own detached checkout of the expedition branch head (`<expeditions root>/<id>/manager`,
+  reset before every decision; never the owner's checkout, never the integration tree); every
+  other crew turn (a mention, the owner's chat, a worker it spawned) in the crew's
   own directory, `<expeditions root>/<id>/crew`, which is no git checkout; every other Buddy turn
   in its workspace root.
 
 Crew roster: `crew: { manager, work[], check[] }`, each `{provider, model?, reasoningEffort?}`
 (a model may be the owner's words, e.g. `haiku`: it resolves to the catalog id at launch).
 The manager picks a work seat per attempt; checks run as panels (1–3) on seats other than the
-claim author's model and verify by strict majority. With command checks, a claim whose candidate
-validation passed and that was integrated is also verified (host-verified): its question closes
-verified and it counts on the badge. Judged done items always need a panel.
+claim author's model and verify by strict majority.
+
+Acceptance is per question (design.md R11): every question the manager adds names how its claims
+are accepted, `{t:'command', argv, timeoutSeconds}` (the host runs it on the claim's exact commit
+in a fresh tree) or `{t:'panel'}` (an independent check panel). The charter's done commands run
+only on the expedition branch head at done, never on a candidate unless the manager names one as
+a question's acceptance, so preparation steps can integrate before the goal holds. A claim whose
+command acceptance passed and that was integrated is verified (host-verified): its question closes
+verified and it counts on the badge. Judged done items always need a goal panel.
+
+Answers: an attempt's answer ends with a fenced json block (a final bare JSON object is accepted
+too). One that cannot be read gets ONE repair request on the same seat (it quotes the answer and
+the schema); a work attempt still unreadable after that whose branch holds commits ends as
+`unreported_commits` with the shas, and the manager may `claim` one, which the host checks
+against that attempt's branch and paths before it is validated like any claim.
 
 Budget: `maxAttempts` counts work and check attempts. Manager decisions are bounded separately at
 `2 × maxAttempts + 2` (finish reason `decisions_spent`), and a manager is woken only when it has
@@ -179,8 +194,8 @@ Type this to any Buddy, in a thread, a DM or a channel (one message):
 What each part does:
 - **Goal**: the fuzzy WHAT. The crew plans the steps; you never list them.
 - **Done when**: say a command when completion can be tested (`pnpm test widget`, `cargo test -p
-  foo`). The host runs it on every claimed commit and on the expedition branch at done; no agent
-  can report it passed. Otherwise say what a reviewer should confirm ("the docs describe the
+  foo`). The host runs it on the expedition branch at done; no agent can report it passed. (Each
+  step's own acceptance is the manager's: a test that can pass for that step, or a check panel.) Otherwise say what a reviewer should confirm ("the docs describe the
   fix"), or "I'll judge it".
 - **Budget**: attempts (2–60): work and check attempts; the manager's decisions are not counted.
   Optional extras, in plain words: "at most 3 at once", "stop after 6 hours", "don't touch the
@@ -207,6 +222,8 @@ Workers (one card per attempt: kind, seat, stage, cost, validations, its instruc
 (stage chips, dependencies, paths), Reflections and Charter; the chat sits beside them on desktop
 and is a tab on the phone. Esc, the backdrop or ✕ close it. Talk to the crew
 in its chat in the modal (or ask your Buddy to steer it): `lesson: never edit generated files`
-reaches every later brief; `pause`, `resume` and `stop` do what they say; anything else is a note
-the manager reads next, which is how you answer a "needs you". At done the finish post names the
+reaches every later brief; `pause` and `stop` do what they say; `resume` continues and re-plans
+(after a host upgrade, `resume` is how a run stuck at "needs you" picks up the new rules; nothing
+resumes by itself); `extend 2h` moves the deadline; anything else is a note the manager reads
+next, which is how you answer a "needs you". At done the finish post names the
 branch to merge; nothing is written to your checkout.

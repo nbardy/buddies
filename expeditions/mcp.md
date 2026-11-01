@@ -17,7 +17,7 @@ expedition({ action })
                                             | error listing every refusal
   { do:'status', id }                       → status text (badge, charter, questions, stages, attempts, validations, integration, cost)
   { do:'list' }                             → [{ id, badge }]
-  { do:'steer', id, feedback }              // feedback: {t:'lesson'|'note', text} | {t:'pause'|'resume'|'stop'}
+  { do:'steer', id, feedback }              // feedback: {t:'lesson'|'note', text} | {t:'pause'|'resume'|'stop'} | {t:'extend', hours}
 ```
 
 `CharterRequest` requires only the WHAT: `name`, `goal`, `done`, `maxAttempts`. The rest take
@@ -72,7 +72,9 @@ as `alreadyRunning` (nothing new launched); once it finished, the same name laun
 
 Results go to the chat the launch came from (the badge) and to the expedition chat (the
 owner↔crew DM). The owner steers by writing in that chat: the host records each owner message as
-`feedback` (`pause`, `resume`, `stop`, `lesson: …`, else a note), no tool call needed. A crew
+`feedback` (`pause`, `resume`, `stop`, `extend 3h`, `lesson: …`, else a note), no tool call
+needed. `resume` re-plans: the next manager decision runs under the host's current rules, which
+is how a run left at "needs you" continues after a host upgrade (nothing resumes by itself). A crew
 Buddy cannot launch or steer expeditions (status only), and a Buddy sees and steers only its own
 workspace's expeditions. Not built: `ask`, `ledger`, the budget
 envelope and the AmendGoal/RaiseBudget proposals below.
@@ -127,8 +129,23 @@ Built shape (2026-11-01, design.md R2): `done` is `{ checks: DoneCheck[] }` or
 `{ ownerJudgment: true }`, with
 `DoneCheck = { kind: 'command', argv: string[], timeoutSeconds } | { kind: 'judged', text }`.
 Prefer a `command` check whenever completion can be tested (`["pnpm","test","widget"]`): the
-host runs it on every claimed commit and on the expedition branch head at done, and no agent
-can report it passed. `judged` items are verified by a blind goal-check panel.
+host runs it on the expedition branch head at done, and no agent can report it passed. `judged`
+items are verified by a blind goal-check panel. An argv element may not contain a NUL byte, and
+`argv[0]` may not carry surrounding whitespace (refused at ingestion).
+
+Per-question acceptance (design.md R11): the done checks are the GOAL's. Each question the
+manager adds names its own acceptance, `{t:'command', argv, timeoutSeconds}` (host-run on the
+claim's immutable candidate commit, exactly like a done command) or `{t:'panel'}` (an independent
+check panel on another model). The done commands never run on a candidate unless the manager names
+one as a question's acceptance, so a fail-closed final verifier does not block the preparation
+steps that build toward it (2026-11-01 incident `own-engine-geometry-opti-1b837b`). Questions added
+before R11 fold with `{t:'panel'}`, provenance `legacy`; the manager may change any open
+question's acceptance with `set_acceptance`.
+
+Answers (R11): an attempt's answer ends with a fenced json block, or a bare JSON object that ends
+the answer. One that cannot be read gets one repair request on the same seat before it is final; a
+work attempt whose final answer has no valid result but whose branch holds commits ends as
+`unreported_commits {shas}`, and the manager's `claim` action names one of them as its claim.
 
 The tool guide in the Buddy briefing carries a short how-to: when to suggest an
 expedition (below), the intake steps, and the permission rules.
