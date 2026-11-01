@@ -231,7 +231,6 @@
 .expedition-index-text { flex: 1; min-width: 0; gap: var(--sp-1); }
 .expedition-index-text strong { color: var(--text-bright); }
 .expedition-index-text > span { font-size: var(--fs-3); }
-.expedition-home-row .landing-request-from::before { content: none; }
 .expedition-chat-head { justify-content: space-between; align-items: baseline; }
 .expedition-chat-open { font-size: var(--fs-3); text-decoration: none; }
 .expedition-chat-open:hover { color: var(--text-emphasis); }

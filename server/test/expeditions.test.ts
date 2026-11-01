@@ -537,7 +537,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
         'every worker shows its instructions'
       );
       assert.equal((await fetch(`${base}/api/buddies/expeditions/nope`)).status, 404);
-      // The sidebar's list reads the same fold: this expedition, finished (not a stale "running").
+      // The channel rail's list reads the same fold: this expedition, finished (not a stale "running").
       const list = (await (await fetch(`${base}/api/buddies/expeditions`)).json()) as {
         id: string;
         run: { t: string };

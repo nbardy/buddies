@@ -33,20 +33,62 @@ export function useWorkspaceExpeditions(workspaceId: string) {
 /** Most rows the rail lists; the section header opens the rest. */
 const RAIL_ROWS = 6;
 
-/** The desktop rail's section, between Channels and Buddies, in the rail's own row styling. */
+/** The class names of one shell's rail rows: the desktop channel rail or the phone's list. */
+export type RailRowClasses = { row: string; hash: string; name: string };
+
+const DESKTOP_ROW: RailRowClasses = {
+  row: '',
+  hash: 'channel-browser-hash',
+  name: 'channel-browser-channel-name ui-truncate',
+};
+
+/** One expedition as a rail row, shared by both shells so the dot, the emphasis and the
+ * needs-you flag cannot drift apart. */
+export function ExpeditionRailRow({
+  expedition: e,
+  classes,
+}: { expedition: ExpeditionSummary; classes: RailRowClasses }) {
+  const open = useOpenExpedition();
+  return (
+    <li>
+      <button
+        type="button"
+        className={classes.row || undefined}
+        data-unread={railEmphasis(e.run)}
+        onClick={() => open(e.id)}
+        title={`${e.name} — ${runLabel(e.run)}\n${summaryLine(e)}`}
+      >
+        <span className={`${classes.hash} expedition-rail-dot`} aria-hidden="true">
+          <span className="conversation-row__dot" data-status={runDot(e.run)} />
+        </span>
+        <span className={classes.name}>{e.name}</span>
+        {needsYou(e.run) && <span className="expedition-rail-flag">needs you</span>}
+      </button>
+    </li>
+  );
+}
+
+/** The rail's last row: the count of every expedition, opening the index pane. */
+export function allExpeditionsLabel(count: number): string {
+  return `All expeditions (${count})`;
+}
+
+/** The desktop rail's section, between Channels and Buddies, in the rail's own row styling.
+ * Absent until the workspace has an expedition, like the phone's section. */
 export function RailExpeditions({
   workspaceId,
   current,
 }: { workspaceId: string; current: boolean }) {
   const { loaded, all, active } = useWorkspaceExpeditions(workspaceId);
-  const open = useOpenExpedition();
   const navigate = useNavigate();
+  if (!loaded || all.length === 0) return null;
+  const index = channelsHref(workspaceId, { kind: 'expeditions' });
   return (
     <>
       <div className="channel-browser-rail-section-row ui-row">
         <Link
           className="channel-browser-rail-section ui-muted"
-          to={channelsHref(workspaceId, { kind: 'expeditions' })}
+          to={index}
           aria-current={current ? 'page' : undefined}
           title="Every expedition in this workspace"
         >
@@ -55,42 +97,24 @@ export function RailExpeditions({
       </div>
       <ul className="channel-browser-channels" aria-label="Expeditions">
         {active.slice(0, RAIL_ROWS).map((e) => (
-          <li key={e.id}>
-            <button
-              type="button"
-              data-unread={railEmphasis(e.run)}
-              onClick={() => open(e.id)}
-              title={`${e.name} — ${runLabel(e.run)}\n${summaryLine(e)}`}
-            >
-              <span className="channel-browser-hash expedition-rail-dot" aria-hidden="true">
-                <span className="conversation-row__dot" data-status={runDot(e.run)} />
-              </span>
-              <span className="channel-browser-channel-name ui-truncate">{e.name}</span>
-              {needsYou(e.run) && <span className="expedition-rail-flag">needs you</span>}
-            </button>
-          </li>
+          <ExpeditionRailRow key={e.id} expedition={e} classes={DESKTOP_ROW} />
         ))}
-        {loaded && all.length > 0 && (
-          <li>
-            <button
-              type="button"
-              data-unread="read"
-              aria-current={current ? 'page' : undefined}
-              onClick={() => navigate(channelsHref(workspaceId, { kind: 'expeditions' }))}
-            >
-              <span className="channel-browser-hash ui-muted" aria-hidden="true">
-                ⋯
-              </span>
-              <span className="channel-browser-channel-name ui-truncate">
-                All expeditions{active.length > RAIL_ROWS ? ` (${all.length})` : ''}
-              </span>
-            </button>
-          </li>
-        )}
+        <li>
+          <button
+            type="button"
+            data-unread="read"
+            aria-current={current ? 'page' : undefined}
+            onClick={() => navigate(index)}
+          >
+            <span className="channel-browser-hash ui-muted" aria-hidden="true">
+              ⋯
+            </span>
+            <span className="channel-browser-channel-name ui-truncate">
+              {allExpeditionsLabel(all.length)}
+            </span>
+          </button>
+        </li>
       </ul>
-      {loaded && all.length === 0 && (
-        <p className="channel-browser-rail-empty ui-muted">None yet. Ask a Buddy to launch one.</p>
-      )}
     </>
   );
 }
@@ -187,7 +211,9 @@ export function HomeExpeditions({ workspaceId }: { workspaceId: string }) {
               className="landing-request expedition-home-row"
               onClick={() => open(e.id)}
             >
-              <span className="landing-request-from ui-row">
+              {/* data-own-dot: the run-state dot replaces the landing row's accent dot
+                  (ChannelLanding.css owns that rule). */}
+              <span className="landing-request-from ui-row" data-own-dot="">
                 <span className="conversation-row__dot" data-status={runDot(e.run)} />
                 {e.name}
               </span>

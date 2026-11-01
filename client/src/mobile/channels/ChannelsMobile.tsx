@@ -15,7 +15,13 @@ import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelL
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { BuddyStar, ChannelStar } from '../../components/buddies/ChannelStar';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
-import { ExpeditionList, useWorkspaceExpeditions } from '../../components/buddies/ExpeditionList';
+import {
+  ExpeditionList,
+  ExpeditionRailRow,
+  type RailRowClasses,
+  allExpeditionsLabel,
+  useWorkspaceExpeditions,
+} from '../../components/buddies/ExpeditionList';
 import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
 import { HighlightRow } from '../../components/buddies/HighlightRow';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
@@ -54,8 +60,6 @@ import {
   channelsHref,
   channelsView,
 } from '../../components/buddies/channels-view';
-import { useOpenExpedition } from '../../components/buddies/expedition-overlay';
-import { needsYou, railEmphasis, runDot, runLabel } from '../../components/buddies/expedition-view';
 import type { Buddy, Channel, ChannelUnread, Inbox } from '../../components/buddies/types';
 import { NEW_WORKSPACE_PATH } from '../../components/buddies/workspace-home';
 import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
@@ -397,28 +401,20 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
 
 // Desktop's rail Expeditions section as touch rows: the unfinished ones (needing you first) open
 // the expedition sheet over Home; "All expeditions" opens the index screen.
+const MOBILE_ROW: RailRowClasses = {
+  row: 'mobile-channels-row ui-row',
+  hash: 'mobile-channels-row__hash',
+  name: 'mobile-channels-row__name ui-truncate',
+};
+
 function ExpeditionSection({ workspaceId }: { workspaceId: string }) {
   const { loaded, all, active } = useWorkspaceExpeditions(workspaceId);
-  const open = useOpenExpedition();
   if (!loaded || all.length === 0) return null;
   return (
     <MobileSection title="Expeditions">
       <ul className="mobile-channels-list" aria-label="Expeditions">
         {active.map((e) => (
-          <li key={e.id}>
-            <button
-              type="button"
-              className="mobile-channels-row ui-row"
-              data-unread={railEmphasis(e.run)}
-              onClick={() => open(e.id)}
-            >
-              <span className="mobile-channels-row__hash" aria-hidden="true">
-                <span className="conversation-row__dot" data-status={runDot(e.run)} />
-              </span>
-              <span className="mobile-channels-row__name ui-truncate">{e.name}</span>
-              {needsYou(e.run) && <span className="expedition-rail-flag">{runLabel(e.run)}</span>}
-            </button>
-          </li>
+          <ExpeditionRailRow key={e.id} expedition={e} classes={MOBILE_ROW} />
         ))}
         <li>
           <Link
@@ -429,7 +425,9 @@ function ExpeditionSection({ workspaceId }: { workspaceId: string }) {
             <span className="mobile-channels-row__hash" aria-hidden="true">
               ⋯
             </span>
-            <span className="mobile-channels-row__name ui-truncate">All expeditions</span>
+            <span className="mobile-channels-row__name ui-truncate">
+              {allExpeditionsLabel(all.length)}
+            </span>
           </Link>
         </li>
       </ul>

@@ -1,6 +1,6 @@
 import type { ExpeditionView } from '@unleashd/shared';
 import { type Location, useLocation, useNavigate } from 'react-router-dom';
-import { usePolledFetch } from '../../hooks/usePolledFetch';
+import { type PolledState, usePolledFetch } from '../../hooks/usePolledFetch';
 import { channelsHref } from './channels-view';
 import { expeditionHref, expeditionUrl } from './expedition-view';
 
@@ -49,14 +49,23 @@ export function useOpenExpedition(): (id: string) => void {
 }
 
 /** Where the routes render under the modal, and where closing it goes. */
-export type OverlayBase =
-  | { t: 'page'; routes: Location }
-  | { t: 'over'; routes: Location }
+export type OverlayBase = { t: 'page'; routes: Location } | ModalBase;
+
+/** The bases that carry a modal (every overlay but 'none'), with the expedition it shows. */
+export type ModalBase =
+  | { t: 'over'; id: string; routes: Location }
   /** A direct load whose workspace is known: the channels view's expedition index. */
-  | { t: 'landed'; routes: string }
+  | { t: 'landed'; id: string; routes: string }
   /** A direct load still reading its expedition: nothing under the modal yet (App.tsx renders an
    * empty route at this path), so the old shell never flashes behind it. */
-  | { t: 'pending'; routes: Location };
+  | { t: 'pending'; id: string; routes: Location }
+  /** A direct load whose expedition could not be read (unknown/deleted id, HTTP error): the
+   * modal shows the error over the channels expedition index (/expeditions resolves the
+   * workspace), and closing lands there instead of on an empty page. */
+  | { t: 'unresolved'; id: string; routes: string };
+
+/** The channels-view expedition index for an unknown workspace (App.tsx routes it). */
+export const EXPEDITIONS_INDEX_PATH = '/expeditions';
 
 export function useOverlayBase(location: Location, overlay: ExpeditionOverlay): OverlayBase {
   // The modal reads the same key, so a direct load fetches the expedition once.
@@ -68,13 +77,30 @@ export function useOverlayBase(location: Location, overlay: ExpeditionOverlay): 
     case 'none':
       return { t: 'page', routes: location };
     case 'over':
-      return { t: 'over', routes: overlay.background };
+      return { t: 'over', id: overlay.id, routes: overlay.background };
     case 'direct':
-      return direct.data
-        ? {
-            t: 'landed',
-            routes: channelsHref(direct.data.workspaceId, { kind: 'expeditions' }),
-          }
-        : { t: 'pending', routes: location };
+      return directBase(overlay.id, direct, location);
+  }
+}
+
+/** δ over the direct load's fetch state: one base per cache variant. */
+function directBase(
+  id: string,
+  direct: PolledState<ExpeditionView>,
+  location: Location
+): ModalBase {
+  switch (direct.kind) {
+    case 'idle':
+    case 'loading':
+      return { t: 'pending', id, routes: location };
+    case 'ready':
+    case 'stale':
+      return {
+        t: 'landed',
+        id,
+        routes: channelsHref(direct.data.workspaceId, { kind: 'expeditions' }),
+      };
+    case 'failed':
+      return { t: 'unresolved', id, routes: EXPEDITIONS_INDEX_PATH };
   }
 }

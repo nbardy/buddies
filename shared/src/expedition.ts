@@ -201,7 +201,7 @@ export interface ExpeditionCrews {
   buddyIds: string[];
 }
 /** One row of the expedition list (GET /api/buddies/expeditions), newest launch first: what the
- * sidebar and the index page show without fetching every full view. */
+ * channel rail, the expedition index pane and Home show without fetching every full view. */
 export type ExpeditionSummary = Pick<
   ExpeditionView,
   'id' | 'run' | 'workspaceId' | 'launchedAt' | 'counts' | 'cost'

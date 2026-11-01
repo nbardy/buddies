@@ -408,15 +408,16 @@ test('the channel rail lists this workspace’s unfinished expeditions between C
     'needing you comes first'
   );
   assert.doesNotMatch(rail, /exp-finished|exp-elsewhere/);
-  assert.match(rail, /All expeditions/);
+  // The count covers the finished ones too: 3 active + 1 finished used to read with no count.
+  assert.match(rail, /All expeditions \(4\)/);
 });
 
 /** Renders the app's real route table at `url`, waiting for its lazy chunks. */
-async function appAt(url: string): Promise<string> {
+async function appAt(url: string, device: 'desktop' | 'mobile' = 'desktop'): Promise<string> {
   const { prelude } = await prerenderToNodeStream(
     <Provider store={jotaiStore}>
       <MemoryRouter initialEntries={[url]}>
-        <AppRoutes device="desktop" />
+        <AppRoutes device={device} />
       </MemoryRouter>
     </Provider>
   );
@@ -438,6 +439,35 @@ test('a deep link to an expedition opens its modal over the channels view of its
   assert.match(html, /<section class="channel-browser-pane ui-stack" aria-label="Expeditions">/);
   assert.match(html, /Should the website be in scope\?/, 'the modal is open');
   assert.doesNotMatch(html, /class="sidebar/, 'never the old conversations shell');
+});
+
+// The phone shell takes the same route: the sheet over ChannelsMobile, never the old shell.
+test('on the phone, a deep link opens the expedition sheet over the channels view', async () => {
+  await loadResource({ key: expeditionUrl(view.id), load: async () => view });
+  const html = await appAt(`/expeditions/${view.id}`, 'mobile');
+  assert.match(html, /Should the website be in scope\?/, 'the sheet is open');
+  assert.match(
+    html,
+    /mobile-ui-page__title">Expeditions</,
+    'the channels expedition screen is underneath'
+  );
+  assert.match(html, /aria-label="Channels" class="[^"]*mobile-tab--active/, 'in the Channels tab');
+  assert.doesNotMatch(html, /class="sidebar/);
+});
+
+// A deleted or unknown id used to leave the base 'pending' forever: a blank page under the modal,
+// and closing went to the old home. It now lands on the channels expedition index with the error.
+test('a deep link to an unreadable expedition shows the error over the channels expedition index', async () => {
+  await loadResource({
+    key: expeditionUrl('exp-gone'),
+    load: async () => {
+      throw new Error('HTTP 404');
+    },
+  });
+  const html = await appAt('/expeditions/exp-gone');
+  assert.match(html, /HTTP 404/, 'the modal says why');
+  assert.match(html, /Channels/, 'the channels expedition index is underneath');
+  assert.doesNotMatch(html, /class="sidebar/);
 });
 
 test('the old conversations sidebar has no expedition section', async () => {
