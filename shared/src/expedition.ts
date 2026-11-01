@@ -163,3 +163,10 @@ export interface ExpeditionView {
   reflections: { at: string; text: string }[];
   lessons: string[];
 }
+
+/** One row of the expedition list (GET /api/buddies/expeditions), newest launch first: what the
+ * sidebar and the index page show without fetching every full view. */
+export type ExpeditionSummary = Pick<
+  ExpeditionView,
+  'id' | 'name' | 'run' | 'workspaceId' | 'launchedAt' | 'counts' | 'cost'
+>;

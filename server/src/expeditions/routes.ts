@@ -5,6 +5,15 @@ import type { ExpeditionHost } from './host';
 // the Buddy routes (whose `/api/buddies/:buddyId` would capture this path). The key lives under
 // `/api/buddies` so `buddies_changed` pushes refresh mounted pages (client atoms/resources.ts).
 export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHost | null): void {
+  // The list for the sidebar section and the index page (client SidebarExpeditions).
+  app.get('/api/buddies/expeditions', (_req, res) => {
+    const expeditions = host();
+    if (!expeditions) {
+      res.status(503).json({ error: 'expeditions are starting' });
+      return;
+    }
+    res.json(expeditions.summaries());
+  });
   app.get('/api/buddies/expeditions/:id', (req, res) => {
     const expeditions = host();
     if (!expeditions) {

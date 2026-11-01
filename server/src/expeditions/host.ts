@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { BuddiesCore, ChannelRef } from '@unleashd/buddies-core';
-import type { BuddyContext, ExpeditionView } from '@unleashd/shared';
+import type { BuddyContext, ExpeditionSummary, ExpeditionView } from '@unleashd/shared';
 import { type TurnDirectory, WORKSPACE_DIRECTORY } from '../buddies/briefing';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
@@ -43,6 +43,7 @@ import {
   claimOf,
   commandChecks,
   configOf,
+  costTotals,
   custodyOf,
   decide,
   fold,
@@ -55,7 +56,7 @@ import {
   worktreeName,
   worktreeOf,
 } from './model';
-import { expeditionView } from './view';
+import { countsOf, expeditionView } from './view';
 
 // Pattern: wake-on-write (docs/patterns.md#wake-on-write) — ticks on the Buddy change bus
 // (debounced) plus one slow backstop; no per-expedition timers.
@@ -867,6 +868,21 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         .map(stateOf)
         .filter((s) => s.workspaceId === workspaceId)
         .map((s) => ({ id: s.id, badge: badge(s, now()) }));
+    },
+    /** Every foldable expedition, newest launch first (quarantined ledgers are not in `ledgers`). */
+    summaries(): ExpeditionSummary[] {
+      return [...ledgers.keys()]
+        .map(stateOf)
+        .sort((a, b) => b.launchedAt.localeCompare(a.launchedAt))
+        .map((s) => ({
+          id: s.id,
+          name: s.charter.name,
+          run: s.run,
+          workspaceId: s.workspaceId,
+          launchedAt: s.launchedAt,
+          counts: countsOf(s),
+          cost: costTotals(s),
+        }));
     },
     /** The expedition a crew Buddy belongs to, so a mentioned crew can answer about itself. */
     ofCrew: crewOf,

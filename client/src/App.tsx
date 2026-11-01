@@ -97,6 +97,9 @@ const ChannelsIndex = lazyNamed(() =>
 const ExpeditionPage = lazyNamed(() =>
   import('./components/buddies/ExpeditionPage').then((m) => m.ExpeditionPage)
 );
+const ExpeditionsIndex = lazyNamed(() =>
+  import('./components/buddies/ExpeditionsIndex').then((m) => m.ExpeditionsIndex)
+);
 const WorkspaceHome = lazyNamed(() =>
   import('./components/buddies/WorkspaceHome').then((m) => m.WorkspaceHome)
 );
@@ -145,6 +148,7 @@ const ROUTES: RouteDef[] = [
     desktop: () => <BuddyWorkspaceActivity />,
     mobile: () => <BuddyWorkspaceActivity />,
   },
+  { path: '/expeditions', desktop: () => <ExpeditionsIndex />, mobile: () => <ExpeditionsIndex /> },
   {
     path: '/expeditions/:id',
     desktop: () => <ExpeditionPage layout="wide" />,

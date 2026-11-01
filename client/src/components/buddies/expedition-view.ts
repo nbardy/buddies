@@ -6,6 +6,7 @@ import type {
   ExpeditionIntegration,
   ExpeditionQuestion,
   ExpeditionRun,
+  ExpeditionSummary,
   ExpeditionValidation,
   ExpeditionWorktree,
 } from '@unleashd/shared';
@@ -14,6 +15,30 @@ import type {
 
 export const expeditionUrl = (id: string) => `/api/buddies/expeditions/${encodeURIComponent(id)}`;
 export const expeditionHref = (id: string) => `/expeditions/${encodeURIComponent(id)}`;
+/** Every expedition, newest launch first (server expeditions/routes.ts). Under `/api/buddies`, so
+ * `buddies_changed` refreshes it like the page. */
+export const EXPEDITIONS_URL = '/api/buddies/expeditions';
+export const EXPEDITIONS_HREF = '/expeditions';
+/** How many of the newest expeditions the sidebar lists under its header. */
+export const SIDEBAR_RECENT_EXPEDITIONS = 5;
+
+/** The sidebar dot (ConversationRow.css statuses): green while it runs, amber while it waits on
+ * the owner, grey once paused or finished. */
+export function runDot(run: ExpeditionRun): 'running' | 'queued' | 'idle' {
+  switch (run.t) {
+    case 'running':
+      return 'running';
+    case 'waiting_owner':
+      return 'queued';
+    case 'paused':
+    case 'finished':
+      return 'idle';
+  }
+}
+
+/** The list's one progress line (the header's counts, shorter). */
+export const summaryLine = (e: ExpeditionSummary) =>
+  `${e.counts.live} live · ${e.counts.verified} verified · ${e.counts.attempts}/${e.counts.maxAttempts} attempts · ${e.cost.short}`;
 
 export function runLabel(run: ExpeditionRun): string {
   switch (run.t) {

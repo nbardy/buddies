@@ -68,17 +68,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       work: c.crew.work.map(seatLabel),
       check: c.crew.check.map(seatLabel),
     },
-    counts: {
-      attempts: workerAttempts(s),
-      maxAttempts: c.maxAttempts,
-      decisions: managerTurns(s),
-      maxDecisions: managerCap(c),
-      live: liveWorkers(s).length,
-      maxLive: c.maxLive,
-      queued: queued(s).length,
-      verified: verifiedClaims(s),
-      exploreCap: exploreCap(c),
-    },
+    counts: countsOf(s),
     questions: s.questions.map((q) => ({
       ...q,
       stage: questionStage(s, q),
@@ -162,4 +152,20 @@ function phaseView(phase: AttemptPhase): ExpeditionAttemptPhase {
     case 'posted':
       return { t: phase.t };
   }
+}
+
+/** The header's and the expedition list's counts (budget, decisions, live, verified). */
+export function countsOf(s: State): ExpeditionView['counts'] {
+  const c = s.charter;
+  return {
+    attempts: workerAttempts(s),
+    maxAttempts: c.maxAttempts,
+    decisions: managerTurns(s),
+    maxDecisions: managerCap(c),
+    live: liveWorkers(s).length,
+    maxLive: c.maxLive,
+    queued: queued(s).length,
+    verified: verifiedClaims(s),
+    exploreCap: exploreCap(c),
+  };
 }

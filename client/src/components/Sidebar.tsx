@@ -22,6 +22,7 @@ import {
   type DirectoryStart,
   NewConversationForm,
 } from '../views/new-conversation/NewConversationForm';
+import { SidebarExpeditions } from './SidebarExpeditions';
 import { DmIcon, WakeIcon, WakeIndicator } from './buddies/WakeIndicator';
 import { useBuddyDirectActions } from './buddies/buddy-direct-actions';
 import { buddyTabPath } from './buddies/buddy-tabs';
@@ -305,6 +306,63 @@ export function Sidebar() {
               </div>
             </button>
           ))}
+        {channelsWorkspaces.length > 0 && (
+          <div className="sidebar-section">
+            <div className="folder-group">
+              <div
+                className="folder-group-header ui-control ui-row"
+                onClick={() => toggleGalleryCollapsed('__channels__')}
+              >
+                <button
+                  type="button"
+                  className="folder-group-name ui-truncate folder-group-name-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    navigate(
+                      `/buddies/workspaces/${encodeURIComponent(channelsWorkspaces[0].workspaceId)}/channels`
+                    );
+                  }}
+                >
+                  Channels
+                </button>
+                <span className="folder-group-count ui-muted">
+                  {channelsWorkspaces.length || ''}
+                </span>
+              </div>
+              {!collapsedSet.has('__channels__') &&
+                channelsWorkspaces.map((project) => {
+                  const path = `/buddies/workspaces/${encodeURIComponent(project.workspaceId)}/channels`;
+                  const isActive = location.pathname === path;
+                  const unread = ownerUnreadTotal(ownerUnread, project.workspaceId);
+                  return (
+                    <div
+                      key={project.workspaceId}
+                      className={`folder-group-header ui-control ui-row sidebar-channels-row ${isActive ? 'active' : ''}`}
+                    >
+                      <Link
+                        className="folder-group-name ui-truncate sidebar-project-link"
+                        to={path}
+                        aria-current={isActive ? 'page' : undefined}
+                        data-unread={anyUnread(unread) || undefined}
+                        title={`${project.name} channels`}
+                      >
+                        <span className="folder-group-name ui-truncate"># {project.name}</span>
+                      </Link>
+                      {unread.requests > 0 && (
+                        <span
+                          className="sidebar-channels-badge"
+                          aria-label={`${unread.requests} requests waiting on you`}
+                        >
+                          {unread.requests}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+        <SidebarExpeditions collapsed={collapsedSet.has('__expeditions__')} />
         <div className="sidebar-section">
           <div className="folder-group folder-group--buddies">
             <div
@@ -550,62 +608,6 @@ export function Sidebar() {
               })}
           </div>
         </div>
-        {channelsWorkspaces.length > 0 && (
-          <div className="sidebar-section">
-            <div className="folder-group">
-              <div
-                className="folder-group-header ui-control ui-row"
-                onClick={() => toggleGalleryCollapsed('__channels__')}
-              >
-                <button
-                  type="button"
-                  className="folder-group-name ui-truncate folder-group-name-button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    navigate(
-                      `/buddies/workspaces/${encodeURIComponent(channelsWorkspaces[0].workspaceId)}/channels`
-                    );
-                  }}
-                >
-                  Channels
-                </button>
-                <span className="folder-group-count ui-muted">
-                  {channelsWorkspaces.length || ''}
-                </span>
-              </div>
-              {!collapsedSet.has('__channels__') &&
-                channelsWorkspaces.map((project) => {
-                  const path = `/buddies/workspaces/${encodeURIComponent(project.workspaceId)}/channels`;
-                  const isActive = location.pathname === path;
-                  const unread = ownerUnreadTotal(ownerUnread, project.workspaceId);
-                  return (
-                    <div
-                      key={project.workspaceId}
-                      className={`folder-group-header ui-control ui-row sidebar-channels-row ${isActive ? 'active' : ''}`}
-                    >
-                      <Link
-                        className="folder-group-name ui-truncate sidebar-project-link"
-                        to={path}
-                        aria-current={isActive ? 'page' : undefined}
-                        data-unread={anyUnread(unread) || undefined}
-                        title={`${project.name} channels`}
-                      >
-                        <span className="folder-group-name ui-truncate"># {project.name}</span>
-                      </Link>
-                      {unread.requests > 0 && (
-                        <span
-                          className="sidebar-channels-badge"
-                          aria-label={`${unread.requests} requests waiting on you`}
-                        >
-                          {unread.requests}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-        )}
         {
           <>
             {recentGroups.length > 0 && (
