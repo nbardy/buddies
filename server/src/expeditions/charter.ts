@@ -253,9 +253,11 @@ export function charterAdvice(c: Charter): string[] {
     ...(checks.some((x) => x.kind === 'command')
       ? []
       : [
-          'no command check: if completion can be tested, add one (e.g. {kind:"command", argv:["pnpm","test"], timeoutSeconds:600}); the host runs it on the expedition branch head at done',
+          'No command check: if completion can be tested, add one (e.g. {kind:"command", argv:["pnpm","test"], timeoutSeconds:600}); the host runs it on the expedition branch head at done',
         ]),
-    ...(c.outOfScope.length > 0 ? [] : ['no outOfScope fence: name what the crew must not touch']),
+    ...(c.outOfScope.length > 0
+      ? []
+      : ['No out-of-scope fence (outOfScope): name what the crew must not touch']),
   ];
 }
 

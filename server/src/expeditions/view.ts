@@ -13,16 +13,18 @@ import {
   type Charter,
   type State,
   type Validation,
+  type WorkerConfig,
   attemptTitle,
   attemptsOn,
   checkOutcomeLabel,
   configOf,
   costLabel,
+  costShort,
   costTotals,
   deadlineMs,
   exploreCap,
   headOf,
-  integrationLabel,
+  integrationHeadline,
   live,
   liveWorkers,
   managerCap,
@@ -32,9 +34,8 @@ import {
   questionOf,
   questionStage,
   queued,
-  seatLabel,
   validationComplete,
-  validationLabel,
+  validationHeadline,
   validationPassed,
   verifications,
   verifiedClaims,
@@ -45,6 +46,12 @@ import {
 // GET /api/buddies/expeditions/:id. The modal shows a few of these at a time; nothing here is
 // derived twice. `charterView` is shared with drafts (drafts.ts), so both render one Charter tab.
 
+/** A seat as the owner reads it: provider and model, `default model` when the charter named
+ * none (the provider picks it at run time), and the effort when set. 2026-11-01 visual pass: a
+ * card read only "claude". */
+const seatName = (w: WorkerConfig) =>
+  [w.provider, w.model ?? 'default model', w.reasoningEffort].filter(Boolean).join(' · ');
+
 export function charterView(c: Charter): ExpeditionCharterView {
   return {
     name: c.name,
@@ -53,9 +60,9 @@ export function charterView(c: Charter): ExpeditionCharterView {
     inScope: c.inScope,
     outOfScope: c.outOfScope,
     roster: {
-      manager: seatLabel(c.crew.manager),
-      work: c.crew.work.map(seatLabel),
-      check: c.crew.check.map(seatLabel),
+      manager: seatName(c.crew.manager),
+      work: c.crew.work.map(seatName),
+      check: c.crew.check.map(seatName),
     },
     limits: {
       maxAttempts: c.maxAttempts,
@@ -73,7 +80,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     badge: badgeLine,
     run: s.run,
     charter: charterView(c),
-    validations: s.validations.map(validationView),
+    validations: s.validations.map((v) => validationView(s, v)),
     integration: integrationView(s),
     cost: costTotals(s),
     workspaceId: s.workspaceId,
@@ -97,7 +104,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       kind: a.spec.kind,
       label: attemptTitle(s, a),
       ask: a.spec.kind === 'work' ? a.spec.brief : null,
-      seat: seatLabel(configOf(c, a.spec)),
+      seat: seatName(configOf(c, a.spec)),
       questionId: a.spec.kind === 'manager' ? null : a.spec.questionId,
       phase: phaseView(a.phase),
       live: live(s).some((x) => x.id === a.id),
@@ -120,7 +127,10 @@ function doneView(done: Charter['done']): ExpeditionDone {
 /** An ended attempt's metered cost; `settling` until the host read it (meter.ts). */
 function attemptCost(s: State, attemptId: string, phase: AttemptPhase): ExpeditionAttemptCost {
   const cost = s.costs[attemptId];
-  if (cost) return cost.t === 'measured' ? { t: 'measured', label: costLabel(cost) } : cost;
+  if (cost)
+    return cost.t === 'measured'
+      ? { t: 'measured', label: costShort(cost), detail: costLabel(cost) }
+      : cost;
   return phase.t === 'ended' ? { t: 'settling' } : { t: 'none' };
 }
 
@@ -137,18 +147,18 @@ function integrationView(s: State): ExpeditionIntegration {
     head: headOf(s),
     integrated: s.integrations.filter((i) => i.status.t === 'integrated').length,
     queued: s.integrations.filter((i) => i.status.t === 'pending').length,
-    lastRefusal: refused ? { t: 'refused', label: integrationLabel(s, refused) } : { t: 'none' },
+    lastRefusal: refused ? { t: 'refused', label: integrationHeadline(s, refused) } : { t: 'none' },
   };
 }
 
-function validationView(v: Validation): ExpeditionValidation {
+function validationView(s: State, v: Validation): ExpeditionValidation {
   return {
     id: v.id,
     subject:
       v.target.t === 'candidate'
         ? { t: 'candidate', claimAttemptId: v.target.claimAttemptId }
         : { t: 'head' },
-    label: validationLabel(v),
+    label: validationHeadline(s, v),
     verdict: !validationComplete(v) ? 'running' : validationPassed(v) ? 'passed' : 'failed',
     checks: v.runs.map((r) => ({
       checkIndex: r.checkIndex,

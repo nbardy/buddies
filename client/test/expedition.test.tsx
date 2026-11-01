@@ -180,7 +180,7 @@ test('the expedition modal leads with its state, the owner question, the goal as
   await loadResource({ key: expeditionUrl(view.id), load: async () => view });
   const html = inModal(<ExpeditionModal target={{ t: 'live', id: view.id }} onClose={close} />);
   assert.match(html, /<dialog[^>]*aria-label="Expedition widget"/);
-  assert.match(html, /needs you/);
+  assert.match(html, /Needs you/);
   assert.match(html, /Should the website be in scope\?/);
   assert.match(html, /Make the <strong>widget<\/strong> pass its test\./);
   assert.match(html, /<ol>\s*<li>Find the failure<\/li>/);
@@ -190,13 +190,13 @@ test('the expedition modal leads with its state, the owner question, the goal as
   // Where work lands and why it did not: the worker's branch, its claim's host validation with
   // the exit code, and the expedition branch's last refused merge.
   assert.match(html, /branch exp\/widget-abc123\/w1/);
-  assert.match(html, /validation failed/);
-  assert.match(html, /check 0: FAILED \(exit 3\): widget still broken/);
+  assert.match(html, /checks failed/);
+  assert.match(html, /check 1: FAILED \(exit 3\): widget still broken/);
   assert.match(html, /expedition\/widget-abc123 @ 9f8e7d6/);
   assert.match(html, /last refusal: .*merge conflict in docs\/README\.md/);
   // Spend is measured or says why not (design.md R6); nothing is priced.
   assert.match(html, /title="Cost: 2k input \+ 300 output tokens .* 1 not measured/);
-  assert.match(html, />not measured \(muse records no token usage \(session s1\)\)</);
+  assert.match(html, /title="muse records no token usage \(session s1\)">not measured</);
   assert.doesNotMatch(html, /\$\d/);
   // Reflections are one tab away, not on the first screen.
   assert.doesNotMatch(html, /Two approaches fail the same way\./);
@@ -220,7 +220,7 @@ test('a finished expedition shows how long it took and one Result callout, not t
   assert.match(html, /took 4m/);
   assert.doesNotMatch(html, / left</);
   assert.match(html, /<strong>Result<\/strong>/);
-  assert.equal(html.match(/finished \(done\)/g)?.length, 1, 'the status is the pill only');
+  assert.equal(html.match(/>Done</g)?.length, 1, 'the status is the pill only');
 });
 
 // Before the crew Buddy exists there is no chat yet; the chat column must say what is happening.

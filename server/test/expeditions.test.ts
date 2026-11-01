@@ -1939,7 +1939,7 @@ test('draft validates a charter without launching; launch fills only named defau
       drafted.text
     );
     assert.ok(drafted.value.defaulted.some((d: string) => d.startsWith('crew: the default crew')));
-    assert.ok(drafted.value.advice.some((a: string) => a.startsWith('no outOfScope fence')));
+    assert.ok(drafted.value.advice.some((a: string) => a.startsWith('No out-of-scope fence')));
     assert.deepEqual(f.host.list(f.workspaceId), [], 'a draft launched nothing');
 
     // A roster whose only check seat is the work seat's model could never check a claim.
@@ -3136,6 +3136,15 @@ test('a work answer still unreadable after its one repair, whose branch holds co
     const v = s.validations.find((x) => x.target.t === 'candidate')!;
     assert.deepEqual(outcomes(v), [{ checkIndex: 0, outcome: { t: 'passed' } }]);
     assert.deepEqual(v.checks[0].argv, widgetFixed.argv, 'its question command, not exit 7');
+    // The owner's chat names the claim by title and its sha as code, never the attempt or
+    // validation ids (2026-11-01 visual pass: "validation v37789f of candidate … of wef7487").
+    await f.host.tick(id);
+    const chat = f
+      .stateOf(id)
+      .statuses.map((x) => x.text)
+      .join('\n');
+    assert.match(chat, new RegExp(`Check passed on \`${sha.slice(0, 7)}\` from Work on “Fix it”`));
+    assert.doesNotMatch(chat, new RegExp(`\\b(${v.id}|${w})\\b`), chat);
   } finally {
     await f.close();
   }

@@ -239,7 +239,7 @@ function answerFormat(kind: Attempt['spec']['kind']): string {
         '{"do":"integrate","claimAttempt":"<work attempt id whose claim passed>"}',
         '{"do":"close_question","question":"<id>","status":"verified"|"dead","why":"…"}',
         '{"do":"ask_owner","question":"…"}',
-        '{"do":"done","summary":"…"}',
+        '{"do":"done","summary":"<for the owner: what is true now, tasks by title, no attempt or validation ids>"}',
         '{"do":"note","text":"<your reflection: what is working, what is not>"}',
         'Question ids for new questions are assigned by the host: the next decision is shown them and starts work on them.',
         JSON_RULE,

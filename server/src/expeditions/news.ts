@@ -1,3 +1,4 @@
+import { expeditionRunLabel } from '@unleashd/shared';
 import {
   type Charter,
   type CheckResult,
@@ -39,23 +40,10 @@ import { configOf, liveWorkers, verifiedClaims, waitsOn, workerAttempts } from '
 // Every human-readable rendering of expedition state: the badge line, the chat news posted once
 // per decision round, attempt/outcome labels for the page, and full outcome text for briefs.
 
-function runLabel(run: State['run']): string {
-  switch (run.t) {
-    case 'running':
-      return 'running';
-    case 'paused':
-      return 'paused';
-    case 'waiting_owner':
-      return 'needs you';
-    case 'finished':
-      return `finished (${run.reason})`;
-  }
-}
-
 export function badge(s: State, now: string): string {
   const mins = Math.round((Date.parse(clockEnd(s.run, now)) - Date.parse(s.launchedAt)) / 60_000);
   const elapsed = mins >= 60 ? `${Math.floor(mins / 60)}h${mins % 60}m` : `${mins}m`;
-  return `⛺ ${s.charter.name} · ${runLabel(s.run)} · ${liveWorkers(s).length} live · ${verifiedClaims(s)} verified · ${workerAttempts(s)}/${s.charter.maxAttempts} attempts · ${elapsed} · ${costTotals(s).short}`;
+  return `⛺ ${s.charter.name} · ${expeditionRunLabel(s.run)} · ${liveWorkers(s).length} live · ${verifiedClaims(s)} verified · ${workerAttempts(s)}/${s.charter.maxAttempts} attempts · ${elapsed} · ${costTotals(s).short}`;
 }
 
 /** Where the badge's elapsed time stops: at the finish, else now. */
@@ -76,7 +64,11 @@ function clockEnd(run: Run, now: string): string {
 export const tokens = (n: number) =>
   n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
 
-/** One attempt's cost as shown on the page. */
+/** One measured attempt's cost on its card: one token figure (the detail is its title). */
+export const costShort = (c: Extract<AttemptCost, { t: 'measured' }>) =>
+  `${tokens(c.inputTokens + c.outputTokens)} tokens`;
+
+/** One attempt's cost in full: input, output and cache. */
 export function costLabel(c: AttemptCost): string {
   switch (c.t) {
     case 'measured':
@@ -231,11 +223,15 @@ function newsLine(s: State, e: Entry): string[] {
     case 'feedback':
       return [`Owner ${feedbackLabel(e.feedback)}`];
     case 'validation_failed':
-      return [`✗ ${validationLabel(validationOf(s, e.validationId))}`];
+      return [`✗ ${validationHeadline(s, validationOf(s, e.validationId))}`];
     case 'claim_adopted':
-      return [`${e.attemptId}: the manager's claim of its unreported commit was adopted`];
+      return [
+        `${attemptTitle(s, attemptOf(s, e.attemptId))}: its unreported commit was claimed by the manager`,
+      ];
     case 'claim_refused':
-      return [`⛔ claim of ${e.attemptId} refused: ${clip(e.reason)}`];
+      return [
+        `⛔ claim of ${attemptTitle(s, attemptOf(s, e.attemptId))} refused: ${clip(e.reason)}`,
+      ];
     case 'tick_failed':
       return [`⚠ the host failed ${e.failures} ticks in a row, backing off: ${clip(e.reason)}`];
     case 'needs_owner':
@@ -244,7 +240,7 @@ function newsLine(s: State, e: Entry): string[] {
       // One line per validation, when its last command check is recorded.
       const v = validationOf(s, e.validationId);
       return validationComplete(v)
-        ? [`${validationPassed(v) ? '✓' : '✗'} ${validationLabel(v)}`]
+        ? [`${validationPassed(v) ? '✓' : '✗'} ${validationHeadline(s, v)}`]
         : [];
     }
     case 'done_requested':
@@ -252,14 +248,11 @@ function newsLine(s: State, e: Entry): string[] {
     case 'done_refused':
       return [`⛔ Done refused: ${clip(e.reason)}`];
     case 'integrated':
-      return [`⤵ ${integrationLabel(s, integrationOf(s, e.integrationId))}`];
+      return [`⤵ ${integrationHeadline(s, integrationOf(s, e.integrationId))}`];
     case 'integration_refused':
-      return [`⛔ ${integrationLabel(s, integrationOf(s, e.integrationId))}`];
+      return [`⛔ ${integrationHeadline(s, integrationOf(s, e.integrationId))}`];
     case 'finished':
-      return [
-        clipBlock(`**Result** (${e.reason.replaceAll('_', ' ')}):`, e.summary),
-        ...mergeLine(s, e.reason),
-      ];
+      return [clipBlock(`**${expeditionRunLabel(s.run)}:**`, e.summary), ...mergeLine(s, e.reason)];
     default:
       return [];
   }
@@ -317,6 +310,19 @@ export function integrationLabel(s: State, i: Integration): string {
       return `${what}: MERGED as ${i.status.mergeSha.slice(0, 10)}`;
     case 'refused':
       return `${what}: REFUSED — ${refusalLabel(i.status.refusal)}`;
+  }
+}
+
+/** An integration for the owner (chat, page): the claim by its title, its sha as code, no ids. */
+export function integrationHeadline(s: State, i: Integration): string {
+  const what = `\`${i.sha.slice(0, 7)}\` from ${attemptTitle(s, attemptOf(s, i.claimAttemptId))}`;
+  switch (i.status.t) {
+    case 'pending':
+      return `Merging ${what} into ${s.repo.branch}`;
+    case 'integrated':
+      return `Merged ${what} into ${s.repo.branch}`;
+    case 'refused':
+      return `Could not merge ${what}: ${refusalLabel(i.status.refusal)}`;
   }
 }
 
@@ -476,6 +482,40 @@ export function validationLabel(v: Validation): string {
       ? 'PASSED'
       : 'FAILED';
   return `validation ${v.id} of ${subjectOf(v)}: ${state}${runs.length ? ` — ${runs.join('; ')}` : ''}`;
+}
+
+/**
+ * A validation for the owner (chat, the Charter's list): what it ran on by title and short sha,
+ * and only the checks that did not pass. 2026-11-01 visual pass: "validation v37789f of candidate
+ * dd142c7227 of wef7487: PASSED — check 0 passed" in the chat read as debug output. The manager's
+ * brief keeps validationLabel, whose ids it acts on.
+ */
+export function validationHeadline(s: State, v: Validation): string {
+  const on =
+    v.target.t === 'candidate'
+      ? `\`${v.target.sha.slice(0, 7)}\` from ${attemptTitle(s, attemptOf(s, v.target.claimAttemptId))}`
+      : headOn(v.phase);
+  const total = v.checks.length;
+  const problems = [
+    ...v.runs
+      .filter((r) => r.outcome.t !== 'passed')
+      .map((r) => `check ${r.checkIndex + 1}: ${checkOutcomeLabel(r.outcome)}`),
+    ...(v.failure.t === 'failed' ? [`could not run: ${clip(v.failure.reason, 300)}`] : []),
+  ];
+  const detail = problems.length > 0 ? ` — ${problems.join('; ')}` : '';
+  if (!validationComplete(v)) return `Checks running on ${on} (${v.runs.length}/${total})`;
+  return validationPassed(v)
+    ? `${total === 1 ? 'Check' : `All ${total} checks`} passed on ${on}`
+    : `Checks failed on ${on}${detail}`;
+}
+
+function headOn(phase: ValidationPhase): string {
+  switch (phase.t) {
+    case 'planned':
+      return 'the expedition branch head';
+    case 'started':
+      return `the expedition branch head \`${phase.targetSha.slice(0, 7)}\``;
+  }
 }
 
 function subjectOf(v: Validation): string {

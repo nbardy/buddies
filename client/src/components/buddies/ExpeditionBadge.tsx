@@ -32,13 +32,16 @@ export function ExpeditionBadge({ id }: { id: string }) {
       state={{ background: backgroundOf(location) }}
       aria-label={`Open expedition ${v?.charter.name ?? id}`}
     >
-      ⛺ <strong className="ui-truncate">{v?.charter.name ?? 'Expedition'}</strong>
+      ⛺{' '}
+      <strong className="ui-truncate expedition-badge-name">
+        {v?.charter.name ?? 'Expedition'}
+      </strong>
       {v ? (
         <>
           <span className={`expedition-pill expedition-tone-${runTone(v.run)}`}>
             {runLabel(v.run)}
           </span>
-          <span className="ui-truncate">
+          <span className="ui-truncate expedition-badge-counts">
             {v.counts.live} live · {v.counts.verified} verified · {v.counts.attempts}/
             {v.counts.maxAttempts} · {v.cost.short}
           </span>

@@ -1,17 +1,18 @@
-import type {
-  ExpeditionAttempt,
-  ExpeditionAttemptCost,
-  ExpeditionCharterView,
-  ExpeditionDefault,
-  ExpeditionDraftState,
-  ExpeditionDraftView,
-  ExpeditionQuestion,
-  ExpeditionRun,
-  ExpeditionStage,
-  ExpeditionSummary,
-  ExpeditionValidation,
-  ExpeditionView,
-  ExpeditionWorktree,
+import {
+  type ExpeditionAttempt,
+  type ExpeditionAttemptCost,
+  type ExpeditionCharterView,
+  type ExpeditionDefault,
+  type ExpeditionDraftState,
+  type ExpeditionDraftView,
+  type ExpeditionQuestion,
+  type ExpeditionRun,
+  type ExpeditionStage,
+  type ExpeditionSummary,
+  type ExpeditionValidation,
+  type ExpeditionView,
+  type ExpeditionWorktree,
+  expeditionRunLabel,
 } from '@unleashd/shared';
 
 // Pure view helpers for the expedition badge, draft card and modal (no React).
@@ -146,18 +147,8 @@ export const activeExpeditions = (
 export const summaryLine = (e: ExpeditionSummary) =>
   `${e.counts.live} live · ${e.counts.verified} verified · ${e.counts.attempts}/${e.counts.maxAttempts} attempts · ${e.cost.short}`;
 
-export function runLabel(run: ExpeditionRun): string {
-  switch (run.t) {
-    case 'running':
-      return 'running';
-    case 'paused':
-      return 'paused';
-    case 'waiting_owner':
-      return 'needs you';
-    case 'finished':
-      return `finished (${run.reason.replaceAll('_', ' ')})`;
-  }
-}
+/** The pill, badge and list label: one definition with the server's badge (shared). */
+export const runLabel = expeditionRunLabel;
 
 export function attemptState(a: ExpeditionAttempt): string {
   switch (a.phase.t) {
@@ -233,7 +224,7 @@ export interface LimitItem {
   defaulted: boolean;
 }
 
-/** The Charter's limits in words (`2 at once`, `8 h limit`, `explore share 20%`), each marked
+/** The Charter's limits in words (`2 at once`, `8 h limit`, `up to 20% of attempts exploring`), each marked
  * when defaulted. 2026-11-01 review: the draft listed raw `maxLive: 2` keys as a second list. */
 export function limitItems(
   limits: ExpeditionCharterView['limits'],
@@ -244,24 +235,38 @@ export function limitItems(
     { text: `${limits.maxLive} at once`, defaulted: defaults.has('maxLive') },
     { text: `${limits.hours} h limit`, defaulted: defaults.has('hours') },
     {
-      text: `explore share ${Math.round(limits.exploreShare * 100)}%`,
+      text: `up to ${Math.round(limits.exploreShare * 100)}% of attempts exploring`,
       defaulted: defaults.has('exploreShare'),
     },
   ];
 }
 
-/** An attempt's measured cost (design.md R6); null before it ended. Never an estimate. */
-export function attemptCostLine(cost: ExpeditionAttemptCost): string | null {
+/** An attempt's measured cost (design.md R6) as one figure and its breakdown (the title); null
+ * before it ended. Never an estimate. */
+export function attemptCostLine(
+  cost: ExpeditionAttemptCost
+): { text: string; title: string } | null {
   switch (cost.t) {
     case 'none':
       return null;
     case 'settling':
-      return 'reading its run’s token usage…';
+      return {
+        text: 'reading token usage…',
+        title: 'Its run settled; its token usage is read shortly',
+      };
     case 'measured':
-      return cost.label;
+      return { text: cost.label, title: cost.detail };
     case 'unmeasured':
-      return `not measured (${cost.reason})`;
+      return { text: 'not measured', title: cost.reason };
   }
+}
+
+/** The header's "now" tile: every attempt running (manager decisions and checks included, as the
+ * Workers tab lists them), queued work, verified claims. 2026-11-01 visual pass: the tile read
+ * "0 live" while the Workers tab listed the running manager. */
+export function nowLine(v: ExpeditionView): string {
+  const running = v.attempts.filter((a) => a.live).length;
+  return `${running} running · ${v.counts.queued} queued · ${v.counts.verified} verified`;
 }
 
 /** The host validations of one attempt's claimed commit, oldest first. */

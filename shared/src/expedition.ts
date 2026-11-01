@@ -20,6 +20,35 @@ export type ExpeditionRun =
       summary: string;
     };
 
+/** Why a finished expedition stopped, in the owner's words (the pill and the result line). */
+const STOPPED: Record<
+  Exclude<Extract<ExpeditionRun, { t: 'finished' }>['reason'], 'done'>,
+  string
+> = {
+  attempts_spent: 'attempts used up',
+  decisions_spent: 'decisions used up',
+  deadline: 'deadline reached',
+  owner_stop: 'stopped by you',
+  setup_failed: 'setup failed',
+};
+
+/**
+ * The run state as the owner reads it: the pill, the badge, the list rows. One definition for the
+ * server's badge and the client (2026-11-01 visual pass: "finished (done)" said it twice).
+ */
+export function expeditionRunLabel(run: ExpeditionRun): string {
+  switch (run.t) {
+    case 'running':
+      return 'Running';
+    case 'paused':
+      return 'Paused';
+    case 'waiting_owner':
+      return 'Needs you';
+    case 'finished':
+      return run.reason === 'done' ? 'Done' : `Stopped · ${STOPPED[run.reason]}`;
+  }
+}
+
 /** Where a question stands, derived from the ledger (design.md R5): its furthest stage.
  * `waiting`: its work is queued until the questions in `after` are verified (held, not failed). */
 export type ExpeditionStage =
@@ -60,7 +89,8 @@ export type ExpeditionWorktree = { t: 'none' } | { t: 'tree'; branch: string; pa
 export type ExpeditionAttemptCost =
   | { t: 'none' }
   | { t: 'settling' }
-  | { t: 'measured'; label: string }
+  /** `label`: one token figure for the card; `detail`: input, output and cache, for its title. */
+  | { t: 'measured'; label: string; detail: string }
   | { t: 'unmeasured'; reason: string };
 
 /** Where an attempt is. admitted: its worktree is being made; dropped: it never started (no

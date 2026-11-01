@@ -49,11 +49,11 @@ import {
   attemptOutcome,
   attemptState,
   attemptTone,
-  budgetLine,
   draftUrl,
   expeditionPollMs,
   expeditionUrl,
   limitItems,
+  nowLine,
   runLabel,
   runTone,
   shortTime,
@@ -417,10 +417,7 @@ function LiveBody({
       <div className="expedition-meters">
         <Meter label="Attempts" value={v.counts.attempts} max={v.counts.maxAttempts} />
         <Meter label="Decisions" value={v.counts.decisions} max={v.counts.maxDecisions} />
-        <Stat
-          label="Workers"
-          value={`${v.counts.live} live · ${v.counts.queued} queued · ${v.counts.verified} verified`}
-        />
+        <Stat label="Now" value={nowLine(v)} />
         <Stat
           label="Time"
           value={timeLine(v)}
@@ -433,7 +430,7 @@ function LiveBody({
       </div>
       {stale && <p role="alert">{stale.message}</p>}
       <RunCallout v={v} onReply={reply} />
-      <Goal goal={v.charter.goal} />
+      <GoalOf v={v} />
       {presentation === 'dialog' ? (
         <div className="expedition-columns">
           <div className="expedition-main ui-stack">
@@ -458,6 +455,24 @@ function LiveBody({
       )}
     </>
   );
+}
+
+/** δ over the run: while it runs the goal stays in view; once finished it folds under the
+ * result (2026-11-01 visual pass: result + goal took ~330px above the tabs at 1440x900). */
+function GoalOf({ v }: { v: ExpeditionView }) {
+  switch (v.run.t) {
+    case 'running':
+    case 'paused':
+    case 'waiting_owner':
+      return <Goal goal={v.charter.goal} />;
+    case 'finished':
+      return (
+        <details className="expedition-goal-folded">
+          <summary className="expedition-link">Goal</summary>
+          <Goal goal={v.charter.goal} />
+        </details>
+      );
+  }
 }
 
 const PANEL_ID = 'expedition-panel';
@@ -533,11 +548,13 @@ function WorkerCard({
     <article className="expedition-card ui-stack">
       <div className="ui-row expedition-card-head">
         <span className={`expedition-dot expedition-tone-${attemptTone(a)}`} aria-hidden="true" />
-        <strong className="ui-truncate expedition-card-title">{a.label}</strong>
+        <strong
+          className="ui-truncate expedition-card-title"
+          title={`${a.label} (attempt ${a.id})`}
+        >
+          {a.label}
+        </strong>
         <span className="expedition-chip expedition-chip--small">{a.kind}</span>
-        <span className="expedition-card-id" title={`Attempt ${a.id}`}>
-          {a.id}
-        </span>
       </div>
       {outcome.t === 'outcome' && (
         <p className="expedition-outcome">
@@ -546,10 +563,10 @@ function WorkerCard({
       )}
       {validations.map((x) => (
         <div key={x.id} className="expedition-validation">
-          <span className="expedition-chip expedition-chip--small">validation {x.verdict}</span>
+          <span className="expedition-chip expedition-chip--small">checks {x.verdict}</span>
           {x.checks.map((c) => (
             <div key={c.checkIndex}>
-              {c.passed ? '✓' : '✗'} check {c.checkIndex}: {c.outcome}
+              {c.passed ? '✓' : '✗'} check {c.checkIndex + 1}: {c.outcome}
             </div>
           ))}
         </div>
@@ -558,7 +575,7 @@ function WorkerCard({
         <span>{a.seat}</span>
         <span>{attemptState(a)}</span>
         {tree && <code>{tree}</code>}
-        {cost && <span title={cost}>{cost}</span>}
+        {cost && <span title={cost.title}>{cost.text}</span>}
       </div>
       {/* Collapsed by default (2026-11-01 review: the open crew prompt read as debug output). */}
       <div className="ui-row expedition-disclosures">
@@ -746,19 +763,38 @@ function CharterPane({
           <ScopeList items={charter.outOfScope} defaulted={defaults.has('outOfScope')} />
         </Section>
       </div>
-      <Section title="Crew">
-        <div className="expedition-card-meta">
-          <span className="ui-muted">manager</span> <code>{roster.manager}</code>
-          <span className="ui-muted">work</span>
-          {roster.work.map((s, i) => (
-            <code key={`w${i}-${s}`}>{s}</code>
-          ))}
-          <span className="ui-muted">check</span>
-          {roster.check.map((s, i) => (
-            <code key={`c${i}-${s}`}>{s}</code>
-          ))}
-          <DefaultMark on={defaults.has('crew')} />
-        </div>
+      <Section
+        title={
+          <>
+            Crew <DefaultMark on={defaults.has('crew')} />
+          </>
+        }
+      >
+        {/* One labelled row per role (2026-11-01 visual pass: "manager claude work claude codex
+            check codex claude" ran labels and values together). */}
+        <dl className="expedition-crew">
+          <dt>Manager</dt>
+          <dd>
+            <span className="expedition-chip">{roster.manager}</span>
+          </dd>
+          <dt>Work seats</dt>
+          <dd>
+            {roster.work.map((seat, i) => (
+              <span key={`w${i}-${seat}`} className="expedition-chip">
+                {seat}
+              </span>
+            ))}
+          </dd>
+          <dt>Checks</dt>
+          <dd>
+            {roster.check.map((seat, i) => (
+              <span key={`c${i}-${seat}`} className="expedition-chip">
+                {seat}
+              </span>
+            ))}
+            <span className="ui-muted">never the claim author's model</span>
+          </dd>
+        </dl>
       </Section>
       <Section title="Limits">
         <div className="expedition-card-meta">
@@ -872,30 +908,42 @@ function DraftModal({
         <>
           <strong className="expedition-modal-title ui-truncate">⛺ {d.charter.name}</strong>
           <span className={`expedition-pill expedition-tone-${pill.tone}`}>{pill.label}</span>
-          <span className="ui-muted">{budgetLine(d.charter.limits)}</span>
         </>
       }
     >
       <WithDirectory workspaceId={d.workspaceId}>
-        <div className="expedition-pane expedition-stack">
-          <Goal goal={d.charter.goal} />
-          {d.issues.length > 0 && (
-            <section className="expedition-callout expedition-tone-bad ui-stack">
-              <strong>Launch is blocked until these are fixed</strong>
-              <Bullets items={d.issues} />
-            </section>
-          )}
-          {d.advice.length > 0 && (
+        {/* The live dialog's layout (2026-11-01 visual pass): the charter on the left, what
+            needs attention before launch in the right column where the live chat sits. */}
+        <Goal goal={d.charter.goal} />
+        <div className="expedition-columns">
+          <div className="expedition-pane expedition-stack">
+            <CharterPane charter={d.charter} lessons={[]} defaults={new Set(d.defaulted)} />
+          </div>
+          <aside className="expedition-pane expedition-stack" aria-label="Before launch">
+            {d.issues.length > 0 && (
+              <section className="expedition-callout expedition-tone-bad ui-stack">
+                <strong>Launch is blocked until these are fixed</strong>
+                <Bullets items={d.issues} />
+              </section>
+            )}
             <Section title="Advice">
-              <Bullets items={d.advice} />
+              {d.advice.length > 0 ? (
+                <Bullets items={d.advice} />
+              ) : (
+                <p className="ui-muted">Nothing to add: the charter is checkable as written.</p>
+              )}
             </Section>
-          )}
-          <CharterPane charter={d.charter} lessons={[]} defaults={new Set(d.defaulted)} />
-          {d.resolved.length > 0 && (
-            <Section title="Model names resolved">
-              <Bullets items={d.resolved} />
-            </Section>
-          )}
+            {d.defaulted.length > 0 && (
+              <p className="ui-muted">
+                <DefaultMark on /> marks a value the request left out; the default applies.
+              </p>
+            )}
+            {d.resolved.length > 0 && (
+              <Section title="Model names resolved">
+                <Bullets items={d.resolved} />
+              </Section>
+            )}
+          </aside>
         </div>
       </WithDirectory>
       <footer className="expedition-footer ui-row">
