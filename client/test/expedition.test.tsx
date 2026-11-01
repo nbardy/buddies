@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
-import type { ExpeditionDraftView, ExpeditionView } from '@unleashd/shared';
+import type { ExpeditionDraftView, ExpeditionSummary, ExpeditionView } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { CODEX_INSTALLED } from './fixtures/buddy-roster';
 import { postFixture } from './fixtures/channel-posts';
@@ -362,4 +362,170 @@ test('expedition crew Buddies are absent from the Buddies roster and rail', asyn
     phone.groups.flatMap((g) => g.entries.map((e) => e.buddy.id)),
     ['lead']
   );
+});
+
+// ---------- Expeditions in the channels view (owner, 2026-11-01) ----------
+// "we added the expeditions to the old conversation UI and not to the new slack UI". These pin the
+// place: the channel rail lists them, a deep link opens the modal over the channels view, and the
+// old conversations sidebar has no expedition section.
+
+const { ChannelBrowser } = await import('../src/components/buddies/ChannelBrowser');
+const { EXPEDITIONS_URL } = await import('../src/components/buddies/expedition-view');
+const { inboxFixture, publicChannel } = await import('./fixtures/channel-posts');
+const { rosterFixture } = await import('./fixtures/buddy-roster');
+const { AppRoutes } = await import('../src/App');
+const { Sidebar } = await import('../src/components/Sidebar');
+const { prerenderToNodeStream } = await import('react-dom/static');
+
+const summary = (
+  id: string,
+  run: ExpeditionView['run'],
+  workspaceId = 'ws-rail'
+): ExpeditionSummary => ({
+  id,
+  name: id,
+  run,
+  workspaceId,
+  launchedAt: '2026-11-01T00:00:00.000Z',
+  counts: view.counts,
+  cost: view.cost,
+});
+
+async function railHtml(): Promise<string> {
+  await loadResource({
+    key: '/api/buddies/workspaces/ws-rail/inbox',
+    load: async () =>
+      inboxFixture([{ channel: publicChannel('ch_rail', 'general', 'ws-rail'), unread: 0 }]),
+  });
+  await loadResource({
+    key: EXPEDITIONS_URL,
+    load: async () => [
+      summary('exp-running', { t: 'running' }),
+      summary('exp-waiting', { t: 'waiting_owner', question: 'Which API?' }),
+      summary('exp-paused', { t: 'paused' }),
+      summary('exp-finished', { t: 'finished', reason: 'done' } as ExpeditionView['run']),
+      summary('exp-elsewhere', { t: 'running' }, 'ws-other'),
+    ],
+  });
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={['/']}>
+      <Provider store={jotaiStore}>
+        <ChannelBrowser
+          workspaceId="ws-rail"
+          directory={workspaceDirectory(
+            [rosterFixture([], { id: 'ws-rail', name: 'rail' })],
+            'ws-rail',
+            [],
+            CODEX_INSTALLED
+          )}
+          availableConversationIds={new Set()}
+        />
+      </Provider>
+    </MemoryRouter>
+  );
+  return html.slice(html.indexOf('<nav'), html.indexOf('</nav>'));
+}
+
+/** The rail button whose name is `id` (its attributes and children). */
+const railRow = (rail: string, id: string) => {
+  const end = rail.indexOf(`>${id}</span>`);
+  assert.ok(end > 0, `${id} is in the rail`);
+  return rail.slice(rail.lastIndexOf('<button', end), rail.indexOf('</button>', end));
+};
+
+// A wrong dot or a lost emphasis hides an expedition that is stuck waiting on the owner.
+test('the channel rail lists this workspace’s unfinished expeditions between Channels and Buddies, with a status dot and needs-you emphasis', async () => {
+  const rail = await railHtml();
+  const section = rail.indexOf('>Expeditions</a>');
+  assert.ok(section > rail.indexOf('>general</span>'), 'after the channels');
+  assert.ok(section < rail.indexOf('>Buddies</h3>'), 'before the Buddies');
+  assert.match(railRow(rail, 'exp-running'), /data-status="running"/);
+  assert.doesNotMatch(railRow(rail, 'exp-running'), /data-unread/);
+  const waiting = railRow(rail, 'exp-waiting');
+  assert.match(waiting, /data-status="queued"/);
+  assert.match(waiting, /data-unread="new"/);
+  assert.match(waiting, /needs you/);
+  assert.match(railRow(rail, 'exp-paused'), /data-status="idle"/);
+  assert.match(railRow(rail, 'exp-paused'), /data-unread="read"/);
+  assert.ok(
+    rail.indexOf('>exp-waiting<') < rail.indexOf('>exp-running<'),
+    'needing you comes first'
+  );
+  assert.doesNotMatch(rail, /exp-finished|exp-elsewhere/);
+  // The count covers the finished ones too: 3 active + 1 finished used to read with no count.
+  assert.match(rail, /All expeditions \(4\)/);
+});
+
+/** Renders the app's real route table at `url`, waiting for its lazy chunks. */
+async function appAt(url: string, device: 'desktop' | 'mobile' = 'desktop'): Promise<string> {
+  const { prelude } = await prerenderToNodeStream(
+    <Provider store={jotaiStore}>
+      <MemoryRouter initialEntries={[url]}>
+        <AppRoutes device={device} />
+      </MemoryRouter>
+    </Provider>
+  );
+  let html = '';
+  for await (const chunk of prelude) html += chunk;
+  return html;
+}
+
+// A deep link (reload, pasted URL) must land in the channels view of the expedition's workspace with
+// the modal over it — it used to open over the old shell's home.
+test('a deep link to an expedition opens its modal over the channels view of its workspace', async () => {
+  await loadResource({ key: expeditionUrl(view.id), load: async () => view });
+  await loadResource({
+    key: '/api/buddies/workspaces/ws-1/inbox',
+    load: async () => inboxFixture([{ channel: publicChannel('ch_1', 'general'), unread: 0 }]),
+  });
+  const html = await appAt(`/expeditions/${view.id}`);
+  assert.match(html, /class="channel-browser"/, 'the channels view is underneath');
+  assert.match(html, /<section class="channel-browser-pane ui-stack" aria-label="Expeditions">/);
+  assert.match(html, /Should the website be in scope\?/, 'the modal is open');
+  assert.doesNotMatch(html, /class="sidebar/, 'never the old conversations shell');
+});
+
+// The phone shell takes the same route: the sheet over ChannelsMobile, never the old shell.
+test('on the phone, a deep link opens the expedition sheet over the channels view', async () => {
+  await loadResource({ key: expeditionUrl(view.id), load: async () => view });
+  const html = await appAt(`/expeditions/${view.id}`, 'mobile');
+  assert.match(html, /Should the website be in scope\?/, 'the sheet is open');
+  assert.match(
+    html,
+    /mobile-ui-page__title">Expeditions</,
+    'the channels expedition screen is underneath'
+  );
+  assert.match(html, /aria-label="Channels" class="[^"]*mobile-tab--active/, 'in the Channels tab');
+  assert.doesNotMatch(html, /class="sidebar/);
+});
+
+// A deleted or unknown id used to leave the base 'pending' forever: a blank page under the modal,
+// and closing went to the old home. It now lands on the channels expedition index with the error.
+test('a deep link to an unreadable expedition shows the error over the channels expedition index', async () => {
+  await loadResource({
+    key: expeditionUrl('exp-gone'),
+    load: async () => {
+      throw new Error('HTTP 404');
+    },
+  });
+  const html = await appAt('/expeditions/exp-gone');
+  assert.match(html, /HTTP 404/, 'the modal says why');
+  assert.match(html, /Channels/, 'the channels expedition index is underneath');
+  assert.doesNotMatch(html, /class="sidebar/);
+});
+
+test('the old conversations sidebar has no expedition section', async () => {
+  await loadResource({
+    key: EXPEDITIONS_URL,
+    load: async () => [summary('exp-running', { t: 'running' })],
+  });
+  const html = renderToStaticMarkup(
+    <Provider store={jotaiStore}>
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    </Provider>
+  );
+  assert.match(html, /Buddies/, 'the sidebar rendered');
+  assert.doesNotMatch(html, /Expeditions|exp-running|\/expeditions/);
 });

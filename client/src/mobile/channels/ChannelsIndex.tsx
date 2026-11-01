@@ -1,10 +1,10 @@
 import { useAtomValue } from 'jotai';
 import { Navigate } from 'react-router-dom';
 import { listField } from '../../atoms/conversations';
+import { type ChannelsView, channelsHref } from '../../components/buddies/channels-view';
 import type { BuddyOverview } from '../../components/buddies/types';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { MobileEmptyPanel, MobilePage } from '../components/MobileUI';
-import { channelsHref } from '../../components/buddies/channels-view';
 
 // Its own module because BOTH device trees route /channels here (App.tsx).
 // Living in ChannelsMobile.tsx made the desktop load the mobile channels chunk.
@@ -30,11 +30,12 @@ export function overviewWorkspaces(
     .sort((a, b) => b.lastActiveMs - a.lastActiveMs || a.name.localeCompare(b.name));
 }
 
-/** /channels — the tab's entry: open the most recently active workspace's channels. */
-export function ChannelsIndex() {
+/** /channels — the tab's entry: open the most recently active workspace's channels. Also
+ * /expeditions (`screen` expeditions): the old index URL lands on that workspace's index pane. */
+export function ChannelsIndex({ screen }: { screen: ChannelsView }) {
   const overview = useBuddyOverview();
   const [first] = overviewWorkspaces(overview.data, useAtomValue(buddyWorkspaceActivityAtom));
-  if (first) return <Navigate to={channelsHref(first.id, { kind: 'home' })} replace />;
+  if (first) return <Navigate to={channelsHref(first.id, screen)} replace />;
   return (
     <MobilePage title="Channels" subtitle={overview.data ? 'No workspaces' : 'Loading…'}>
       {overview.data && (

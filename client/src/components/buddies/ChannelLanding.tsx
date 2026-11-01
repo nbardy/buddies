@@ -6,6 +6,7 @@ import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { BuddySigil } from './BuddySigil';
 import { liveRunsUrl } from './BuddyWorkspaceActivity';
 import { ChannelComposer } from './ChannelComposer';
+import { HomeExpeditions } from './ExpeditionList';
 import { TaskProgress } from './TaskProgress';
 import { buddyWrite } from './api';
 import {
@@ -101,6 +102,7 @@ export function ChannelLanding({
         frame={frame}
       />
       <WaitingOnYou workspaceId={workspaceId} directory={directory} inbox={inbox} />
+      <HomeExpeditions workspaceId={workspaceId} />
     </div>
   );
 }

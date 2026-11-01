@@ -16,7 +16,6 @@ import { ArchivedChannels, ChannelHeaderControls, useArchivedChannels } from './
 import type { OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelDm } from './ChannelDm';
-import { ChannelExpeditions } from './ChannelExpeditions';
 import { ChannelLanding } from './ChannelLanding';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { LeadRow, Replying, type RowContext, renderRow, renderRows } from './ChannelRows';
@@ -24,6 +23,7 @@ import { ChannelSearch } from './ChannelSearch';
 import { ChannelStar } from './ChannelStar';
 import { ChannelWorkers } from './ChannelWorkers';
 import { CopyLinkButton } from './CopyLinkButton';
+import { ExpeditionsPane, RailExpeditions } from './ExpeditionList';
 import { GroupDmNotice } from './GroupDmNotice';
 import { HighlightRow } from './HighlightRow';
 import { TaskFilter } from './TaskFilter';
@@ -838,7 +838,7 @@ export function ChannelBrowser({
           ) : (
             <ul className="channel-browser-channels">{rail.channels.map(railRow)}</ul>
           )}
-          <ChannelExpeditions />
+          <RailExpeditions workspaceId={workspaceId} current={view.kind === 'expeditions'} />
           <div className="channel-browser-rail-section-row ui-row">
             <h3 className="channel-browser-rail-section ui-muted">Buddies</h3>
             <button
@@ -920,6 +920,7 @@ export function ChannelBrowser({
               onConversation={openDm}
             />
           ),
+          expeditions: () => <ExpeditionsPane workspaceId={workspaceId} />,
           threads: () => (
             <ThreadsPane
               key={workspaceId}
@@ -988,6 +989,7 @@ type MainPanes = {
   workers(buddyId: string): ReactNode;
   dm(conversationId: string): ReactNode;
   threads(): ReactNode;
+  expeditions(): ReactNode;
   channel(): ReactNode;
   task(taskId: string, channelId: string): ReactNode;
 };
@@ -1003,6 +1005,8 @@ function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
       return panes.dm(view.conversationId);
     case 'threads':
       return panes.threads();
+    case 'expeditions':
+      return panes.expeditions();
     case 'task':
       return panes.task(view.taskId, view.channelId);
     case 'channel':

@@ -378,7 +378,7 @@ a.landing-chip:hover {
   font-weight: 600;
 }
 
-.landing-request-from::before {
+.landing-request-from:not([data-own-dot])::before {
   content: '';
   flex: none;
   width: 7px;

@@ -14,10 +14,12 @@ import { jotaiStore } from './atoms/store';
 import { UpdateBanner } from './components/UpdateBanner';
 import { UpstreamUpdatePrompt } from './components/buddies/UpstreamUpdatePrompt';
 import { useOwnerUnreadTitle } from './components/buddies/channel-data';
+import type { ChannelsView } from './components/buddies/channels-view';
 import {
-  type ExpeditionOverlay,
-  baseOf,
+  EXPEDITIONS_INDEX_PATH,
+  type ModalBase,
   expeditionOverlay,
+  useOverlayBase,
 } from './components/buddies/expedition-overlay';
 import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
@@ -102,9 +104,6 @@ const ChannelsIndex = lazyNamed(() =>
 const ExpeditionModal = lazyNamed(() =>
   import('./components/buddies/ExpeditionModal').then((m) => m.ExpeditionModal)
 );
-const ExpeditionsIndex = lazyNamed(() =>
-  import('./components/buddies/ExpeditionsIndex').then((m) => m.ExpeditionsIndex)
-);
 const WorkspaceHome = lazyNamed(() =>
   import('./components/buddies/WorkspaceHome').then((m) => m.WorkspaceHome)
 );
@@ -140,6 +139,10 @@ const ChannelsMobile = lazyNamed(() =>
 // =============================================================================
 type RouteDef = { path: string; desktop: () => ReactElement; mobile: () => ReactElement };
 
+// Where the index routes land in the channels view (mobile/channels/ChannelsIndex.tsx).
+const CHANNELS_HOME: ChannelsView = { kind: 'home' };
+const EXPEDITIONS_SCREEN: ChannelsView = { kind: 'expeditions' };
+
 const ROUTES: RouteDef[] = [
   {
     path: '/chats',
@@ -153,7 +156,6 @@ const ROUTES: RouteDef[] = [
     desktop: () => <BuddyWorkspaceActivity />,
     mobile: () => <BuddyWorkspaceActivity />,
   },
-  { path: '/expeditions', desktop: () => <ExpeditionsIndex />, mobile: () => <ExpeditionsIndex /> },
   {
     path: '/buddies/:buddyId',
     desktop: () => <BuddiesDashboard />,
@@ -189,7 +191,11 @@ const ROUTES: RouteDef[] = [
   },
   { path: '/search', desktop: () => <Gallery />, mobile: () => <SearchMobile /> },
   // The Channels tab's entry: redirects to the first workspace's channels.
-  { path: '/channels', desktop: () => <ChannelsIndex />, mobile: () => <ChannelsIndex /> },
+  {
+    path: '/channels',
+    desktop: () => <ChannelsIndex screen={CHANNELS_HOME} />,
+    mobile: () => <ChannelsIndex screen={CHANNELS_HOME} />,
+  },
 ];
 
 // Channels mount differently per device, at the SAME URL so links travel.
@@ -200,11 +206,25 @@ const ROUTES: RouteDef[] = [
 // thread is an immersive pane (ShellMobile hides the tab bar there).
 // The workspace home at `/` follows the same split: desktop full-screen with
 // no conversations sidebar (owner, 2026-09-25), mobile inside the tab bar.
+// The expedition index lives in the channels view (owner, 2026-11-01); /expeditions resolves the
+// workspace and lands there, mounted where the channels view mounts so the old conversations shell
+// never shows while it resolves (nor under an unreadable expedition's modal).
 const CHANNELS_PATH = '/buddies/workspaces/:workspaceId/channels';
+const EXPEDITIONS_INDEX = (
+  <Route
+    path={EXPEDITIONS_INDEX_PATH}
+    element={
+      <Suspense fallback={null}>
+        <ChannelsIndex screen={EXPEDITIONS_SCREEN} />
+      </Suspense>
+    }
+  />
+);
 const OUTSIDE_SHELL: Record<DeviceKind, ReactElement | null> = {
   desktop: (
     <>
       <Route path={CHANNELS_PATH} element={<WorkspaceSlack />} />
+      {EXPEDITIONS_INDEX}
       <Route path="/" element={<WorkspaceHome />} />
     </>
   ),
@@ -214,6 +234,7 @@ const INSIDE_SHELL: Record<DeviceKind, ReactElement | null> = {
   desktop: null,
   mobile: (
     <>
+      {EXPEDITIONS_INDEX}
       <Route
         path="/"
         element={
@@ -242,27 +263,40 @@ const SHELLS: Record<DeviceKind, ComponentType> = {
 // The route-level boundary sits inside the shell, so loading a destination never
 // blanks the sidebar or tab bar.
 // /expeditions/:id is a modal, not a page (owner, 2026-11-01): the routes render at the view it
-// was opened over (components/buddies/expedition-overlay.ts), or at home on a direct load, and the
-// modal sits on top (baseOf picks the location the routes render at). The phone gets a full-height
-// sheet (the modal follows the viewport width).
+// was opened over (components/buddies/expedition-overlay.ts), or, on a direct load, at its
+// workspace's expedition index in the channels view, and the modal sits on top. The phone gets a
+// full-height sheet (the modal follows the viewport width).
+
 /** The live expedition modal for the URL. Closing returns to the view it opened over (Back), or
- * replaces a direct load with home. */
-function ExpeditionRoute({ overlay }: { overlay: Exclude<ExpeditionOverlay, { t: 'none' }> }) {
+ * replaces a direct load with the channels view under it (home while that is still loading). */
+function ExpeditionRoute({ base }: { base: ModalBase }) {
   const navigate = useNavigate();
-  const close = () => (overlay.t === 'over' ? navigate(-1) : navigate('/', { replace: true }));
-  return <ExpeditionModal target={{ t: 'live', id: overlay.id }} onClose={close} />;
+  const close = () => {
+    switch (base.t) {
+      case 'over':
+        return navigate(-1);
+      case 'landed':
+      case 'unresolved':
+        return navigate(base.routes, { replace: true });
+      case 'pending':
+        return navigate('/', { replace: true });
+    }
+  };
+  return <ExpeditionModal target={{ t: 'live', id: base.id }} onClose={close} />;
 }
 
-function AppRoutes({ device }: { device: DeviceKind }) {
+export function AppRoutes({ device }: { device: DeviceKind }) {
   const Shell = SHELLS[device]; // δ #1 — shell
   const pick = (r: RouteDef) => (device === 'mobile' ? r.mobile() : r.desktop()); // δ #2 — leaf
   const location = useLocation();
   const overlay = expeditionOverlay(location);
+  const base = useOverlayBase(location, overlay);
   return (
     <Suspense fallback={null}>
-      {overlay.t !== 'none' && <ExpeditionRoute overlay={overlay} />}
-      <Routes location={baseOf(location, overlay)}>
+      {base.t !== 'page' && <ExpeditionRoute base={base} />}
+      <Routes location={base.routes}>
         {OUTSIDE_SHELL[device]}
+        <Route path="/expeditions/:id" element={null} />
         <Route element={<Shell />}>
           {ROUTES.map((r) => (
             <Route
