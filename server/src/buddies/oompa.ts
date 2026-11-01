@@ -69,6 +69,17 @@ const Config = z
     task_execution: z.object({ validators: z.record(Validator) }).passthrough(),
   })
   .passthrough();
+// Persisted data keeps a reader: a run pinned before 961aaba may be queue mode (no task_execution).
+// Reading/adopting it stays legal; only a NEW launch or an amendment needs the Config above.
+const Pinned = z.union([
+  Config.transform((config) => ({ t: 'task_execution' as const, config })),
+  z
+    .object({ task_backend: Backend, task_execution: z.undefined() })
+    .passthrough()
+    .transform((config) => ({ t: 'legacy_queue' as const, config })),
+]);
+const pinned = (run: Run) =>
+  Pinned.parse(read<unknown>(path.join(run.execution.dir, 'config.json')));
 
 export const OompaAction = z.discriminatedUnion('kind', [
   Amendment,
@@ -682,7 +693,7 @@ export function createOompaHost(options: {
         throw new Error('Oompa host needs restart with continuation handshake support');
       if (!run.owner.grant.oompa!.taskIds.includes(request.taskId))
         throw new Error('task is outside this Oompa execution');
-      const config = Config.parse(read<unknown>(path.join(run.execution.dir, 'config.json')));
+      const { config } = pinned(run);
       const task = await options.core.getTask(request.taskId);
       if (
         task.workspaceId !== run.owner.grant.workspaceId ||
@@ -803,7 +814,10 @@ export function createOompaHost(options: {
     }
   }
   function baseConfig(run: Run) {
-    const config = Config.parse(read<unknown>(path.join(run.execution.dir, 'config.json')));
+    const base = pinned(run);
+    if (base.t === 'legacy_queue')
+      throw new Error('a queue-mode run (no task_execution) cannot be amended; launch a new run');
+    const { config } = base;
     config.resume_swarm_id = undefined;
     config.task_execution.owner_window = undefined;
     return config;

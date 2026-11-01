@@ -469,6 +469,46 @@ test('a launch config without task_execution is refused: oompa would fall back t
   }
 });
 
+test('a run pinned before task_execution was required is still adopted and served (status, diagnostic)', async () => {
+  // Persisted data keeps a reader (961aaba made task_execution required): a queue-mode run that
+  // was live across that upgrade must still reload, report status and run a diagnostic. Before
+  // the Pinned reader, Config.parse of its pinned config.json threw on every one of those calls.
+  const w = await fixture();
+  try {
+    const child = await w.launch();
+    await until(async () => fs.existsSync(path.join(w.repo, 'runs/test-swarm/workers/w0.json')));
+    const pin = path.join(child.run.logDirectory, 'config.json');
+    const legacy = JSON.parse(fs.readFileSync(pin, 'utf8'));
+    legacy.task_execution = undefined;
+    fs.writeFileSync(pin, JSON.stringify(legacy));
+    await w.restart();
+    const status = await rpc(w.endpoint.spec(w.owner()), 'oompa', {
+      action: { kind: 'status', runId: child.run.runId },
+      key: 'legacy-status',
+    });
+    assert.equal(status.error, false, status.text);
+    const started = await rpc(w.endpoint.spec(w.owner()), 'oompa', {
+      action: {
+        kind: 'continue',
+        runId: child.run.runId,
+        swarmId: 'test-swarm',
+        taskId: w.task.id,
+        baseRevision: w.task.revision,
+        workspacePath: w.candidate,
+        sourceCommit: w.commit,
+        command: [process.execPath, 'diagnostic.mjs', '100'],
+        sourceFiles: { 'diagnostic.mjs': w.diagnosticHash },
+        maxSeconds: 10,
+      },
+      key: 'legacy-diagnostic',
+    });
+    assert.equal(started.error, false, started.text);
+    assert.equal(started.value.continuations.length, 1);
+  } finally {
+    await w.close();
+  }
+});
+
 test('only the pinned host oracle can accept, integrates the exact candidate, and replay runs no oracle twice', async () => {
   const w = await fixture();
   try {
