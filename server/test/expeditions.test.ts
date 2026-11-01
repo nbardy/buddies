@@ -24,7 +24,14 @@ import {
   type ExpeditionHost,
   createExpeditionHost,
 } from '../src/expeditions/host';
-import { Charter, type Entry, type State, fold } from '../src/expeditions/model';
+import {
+  Charter,
+  type Entry,
+  type State,
+  fold,
+  panels,
+  workerAttempts,
+} from '../src/expeditions/model';
 import { clip, clipBlock, goalSummary, launchNews } from '../src/expeditions/news';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import { createLedger } from '../src/expeditions/store';
@@ -2672,15 +2679,77 @@ test('a host whose execution gate is disabled (a copied store) refuses launch an
 
 // ---------- R11: robustness and per-question acceptance (2026-11-01) ----------
 
-const LIVE_ID = 'own-engine-geometry-opti-1b837b';
-const LIVE_FIXTURE = path.join(
-  __dirname,
-  'fixtures',
-  'expeditions',
-  'own-engine-geometry-1b837b.ledger.jsonl'
-);
+/** A live ledger from 2026-11-01, scrubbed (fixtures/expeditions-live/README.md): cut just
+ * before its deadline `finished`, i.e. in the state it was stuck in. */
+const liveFixture = (id: string) =>
+  path.join(__dirname, 'fixtures', 'expeditions-live', `${id}.ledger.jsonl`);
 
-test('a ledger shaped like the 2026-11-01 incident folds after the upgrade; "resume" re-plans; the unreported verifier commit is claimed and validated by its question acceptance, never by the goal verifier', async () => {
+/**
+ * Replays a live ledger into the test fixture: a crew Buddy and its chat, the integration tree the
+ * ledger says is ready, the placeholders filled, and a host restarted at `at` (inside the run's
+ * deadline). The crew Buddy has to exist: decide plans nothing for an expedition without one.
+ */
+async function replayLive(f: Awaited<ReturnType<typeof fixture>>, id: string, at: string) {
+  const crew = await f.core.createBuddy(OWNER, {
+    workspaceId: f.workspaceId,
+    slug: `exp-${id}`.slice(0, 40),
+    name: 'Live crew',
+    role: 'crew',
+    manager: { kind: 'buddy', id: f.lead.id },
+    key: `live-crew-${id}`,
+  });
+  const chat = await f.core.openChannel(OWNER, {
+    kind: 'direct',
+    members: [OWNER, buddyActor(crew.id)],
+  });
+  const base = git(f.repo, 'rev-parse', 'HEAD');
+  const dir = path.join(f.root, id);
+  git(
+    f.repo,
+    'cambium',
+    'add',
+    '-b',
+    `expedition/${id}`,
+    '-name',
+    `exp-${id}-integration`,
+    path.join(dir, 'integration'),
+    base
+  );
+  const fill: Record<string, string> = {
+    ID: id,
+    ROOT: f.root,
+    REPO: f.repo,
+    BASE: base,
+    CREW: crew.id,
+    CHAT: chat.id,
+    LAUNCHER: f.lead.id,
+    WORKSPACE: f.workspaceId,
+    KEY: `conversation:${id}`,
+  };
+  const ledger = fs
+    .readFileSync(liveFixture(id), 'utf8')
+    .replace(/\{\{(\w+)\}\}/g, (_m, k: string) => {
+      if (!(k in fill)) throw new Error(`unfilled placeholder ${k}`);
+      return fill[k];
+    });
+  fs.writeFileSync(f.ledgerPath(id), ledger);
+  f.setClock(Date.parse(at));
+  f.restart();
+  /** The owner's message in the expedition chat, then one tick (the host reads it as feedback). */
+  const say = async (body: string) => {
+    await f.core.post(
+      OWNER,
+      { kind: 'id', id: chat.id },
+      { kind: 'inform', body, evidence: [], mentions: [], broadcast: false, key: `owner-${body}` }
+    );
+    await f.host.tick(id);
+  };
+  return { crew, chat, base, dir, say };
+}
+
+const LIVE_ID = 'own-engine-geometry-opti-1b837b';
+
+test('the live geometry ledger (2026-11-01) folds after the upgrade; "resume" re-plans; the unreported verifier commit is claimed and validated by its question acceptance, never by the goal verifier', async () => {
   // Incident own-engine-geometry-opti-1b837b: the host ran the charter's fail-closed done
   // command (verify.py) on every candidate, so no preparation commit could integrate (L1); the
   // worker that committed the verifier answered without a json block and its commit was dropped,
@@ -2690,32 +2759,10 @@ test('a ledger shaped like the 2026-11-01 incident folds after the upgrade; "res
   // malformed attempt's commit cannot be claimed.
   const f = await fixture();
   try {
-    const crew = await f.core.createBuddy(OWNER, {
-      workspaceId: f.workspaceId,
-      slug: 'exp-live',
-      name: 'Live crew',
-      role: 'crew',
-      manager: { kind: 'buddy', id: f.lead.id },
-      key: 'live-crew',
-    });
-    const chat = await f.core.openChannel(OWNER, {
-      kind: 'direct',
-      members: [OWNER, buddyActor(crew.id)],
-    });
-    const base = git(f.repo, 'rev-parse', 'HEAD');
-    const dir = path.join(f.root, LIVE_ID);
-    // The integration tree the ledger says is ready, and w64130b's kept tree with its commit.
-    git(
-      f.repo,
-      'cambium',
-      'add',
-      '-b',
-      `expedition/${LIVE_ID}`,
-      '-name',
-      `exp-${LIVE_ID}-integration`,
-      path.join(dir, 'integration'),
-      base
-    );
+    // Just after w64130b's answer was recorded (03:42Z), inside the 4 h deadline (07:22Z).
+    const { base, dir, say } = await replayLive(f, LIVE_ID, '2026-11-01T03:45:00Z');
+    // w64130b's kept tree with its commit (live: 48ce327, "fail-closed verifier", answered with
+    // no json block).
     const verifierTree = path.join(dir, 'worktrees', 'w64130b');
     git(
       f.repo,
@@ -2758,25 +2805,6 @@ test('a ledger shaped like the 2026-11-01 incident folds after the upgrade; "res
     git(routeTree, 'add', '.');
     git(routeTree, 'commit', '-q', '-m', 'acceptance route');
     const routeSha = git(routeTree, 'rev-parse', 'HEAD');
-    const fill: Record<string, string> = {
-      ID: LIVE_ID,
-      ROOT: f.root,
-      REPO: f.repo,
-      BASE: base,
-      CREW: crew.id,
-      CHAT: chat.id,
-      LAUNCHER: f.lead.id,
-      WORKSPACE: f.workspaceId,
-      KEY: 'conversation:Own-engine geometry',
-      VERIFIER_SHA: verifierSha,
-    };
-    const ledger = fs
-      .readFileSync(LIVE_FIXTURE, 'utf8')
-      .replace(/\{\{(\w+)\}\}/g, (_m, k: string) => fill[k] ?? `{{${k}}}`);
-    fs.writeFileSync(f.ledgerPath(LIVE_ID), ledger);
-    f.setClock(Date.parse('2026-11-01T00:30:00Z'));
-    f.restart();
-
     // It folds: legacy questions carry an explicit panel acceptance marked legacy.
     assert.deepEqual(f.host.lookup(LIVE_ID), { t: 'present' });
     let s = f.stateOf(LIVE_ID);
@@ -2797,19 +2825,7 @@ test('a ledger shaped like the 2026-11-01 incident folds after the upgrade; "res
     assert.equal(f.liveAttempts(LIVE_ID).length, 0, 'no auto-resume');
 
     // The owner answers in the chat: "resume" re-plans with the new acceptance model.
-    await f.core.post(
-      OWNER,
-      { kind: 'id', id: chat.id },
-      {
-        kind: 'inform',
-        body: 'resume',
-        evidence: [],
-        mentions: [],
-        broadcast: false,
-        key: 'owner-resume',
-      }
-    );
-    await f.host.tick(LIVE_ID);
+    await say('resume');
     assert.equal(f.stateOf(LIVE_ID).run.t, 'running');
     const m = f.manager(LIVE_ID);
     const brief = await f.core.getPost(OWNER, f.liveAttempts(LIVE_ID)[0].requestId);
@@ -2886,6 +2902,184 @@ test('a ledger shaped like the 2026-11-01 incident folds after the upgrade; "res
       verifierSha,
       'the verifier commit is on the expedition branch'
     );
+  } finally {
+    await f.close();
+  }
+});
+
+// The four expeditions stuck in "needs you" on 2026-11-01 (each later finished at its deadline;
+// the fixtures are cut before that, in the stuck state). Re-breaks if a live ledger stops folding,
+// a boot resumes one by itself, or a resume cannot get past the stuck point.
+const LIVE = {
+  actualGame: 'actual-game-daily-local--e3153c',
+  beach: 'emergent-beach-design-r1-bfeaca',
+  dual: 'one-qualified-dualsphysi-404846',
+  geometry: LIVE_ID,
+};
+
+test('each live 2026-11-01 ledger folds and boots without resuming; dualsphysics keeps its real owner question', async () => {
+  for (const id of Object.values(LIVE)) {
+    const f = await fixture();
+    try {
+      const asked = fold(
+        fs
+          .readFileSync(liveFixture(id), 'utf8')
+          .split('\n')
+          .filter(Boolean)
+          .flatMap((line) => JSON.parse(line) as Entry[])
+      ).run;
+      assert.equal(asked.t, 'waiting_owner', id);
+      await replayLive(f, id, '2026-11-01T05:00:00Z');
+      assert.deepEqual(f.host.lookup(id), { t: 'present' }, id);
+      await f.host.tick(id);
+      const s = f.stateOf(id);
+      assert.deepEqual(s.run, asked, `${id}: booting the upgrade changed what it asks`);
+      assert.equal(f.liveAttempts(id).length, 0, `${id}: nothing starts before the owner answers`);
+      assert.ok(
+        s.questions.every(
+          (q) => q.acceptance.provenance === 'legacy' && q.acceptance.rule.t === 'panel'
+        ),
+        `${id}: a legacy question folds with a panel, never the goal's done command`
+      );
+    } finally {
+      await f.close();
+    }
+  }
+  // The manager's own question about missing native evidence, not a host-made "nothing is running".
+  const dual = fold(
+    fs
+      .readFileSync(liveFixture(LIVE.dual), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .flatMap((line) => JSON.parse(line) as Entry[])
+  ).run;
+  assert.ok(
+    dual.t === 'waiting_owner' && /blocked on original evidence delivery/.test(dual.question)
+  );
+});
+
+test('live actual-game: after "resume" its three malformed reviewer verdicts get the repair turn they never had, read under the strict schema, and verify the claim', async () => {
+  // Incident: c71c918, c2babbc and cee2896 each reproduced w7d647b and answered "VERIFIED." in
+  // prose with no json block (pre-R11: no repair turn), so all three panels read not_verified
+  // and the manager asked the owner for a "host repair". Re-breaks if a legacy malformed check
+  // is never repaired, is repaired without the owner's resume, or a repair costs budget.
+  const f = await fixture();
+  try {
+    const id = LIVE.actualGame;
+    const { crew, say } = await replayLive(f, id, '2026-11-01T05:00:00Z');
+    const checks = ['c71c918', 'c2babbc', 'cee2896'];
+    const before = f.stateOf(id);
+    assert.deepEqual(
+      panels(before).map((p) => p.verdict),
+      ['not_verified', 'not_verified', 'not_verified']
+    );
+    await say('resume');
+    let s = f.stateOf(id);
+    assert.equal(s.run.t, 'running');
+    for (const c of checks) {
+      const a = s.attempts.find((x) => x.id === c)!;
+      assert.equal(a.phase.t, 'posted', `${c} was not reopened for its repair`);
+      assert.match(s.repairs[c], /REPAIR/);
+      assert.match(s.repairs[c], /VERIFIED/i, 'the repair quotes the answer it could not read');
+      assert.match(s.repairs[c], /"verdict"/, 'and names the check schema');
+    }
+    assert.equal(workerAttempts(s), workerAttempts(before), 'a repair is not a new attempt');
+    assert.deepEqual(
+      panels(s).map((p) => p.verdict),
+      ['pending', 'pending', 'pending']
+    );
+    // Its tree was released at the time: the repair runs in the crew's directory, not a gone path.
+    const request = f.liveAttempts(id).find((a) => a.id === checks[0])!.requestId;
+    const run = (await f.core.listRuns({ kind: 'buddy', buddyId: crew.id }, 100)).find(
+      (r) => r.input.kind === 'post' && r.input.postId === request
+    );
+    if (!run) throw new Error('no run for the repair request');
+    const dir = await f.host.turnDirectory({
+      buddyId: crew.id,
+      workspaceId: f.workspaceId,
+      coordinationRunId: run.id,
+    });
+    assert.deepEqual(dir, { t: 'crew', path: path.join(f.root, id, 'crew') });
+
+    for (const c of checks)
+      await f.answer(
+        id,
+        c,
+        json({ verdict: 'verified', why: 'Reproduced: 6 docs files, sums pass.' })
+      );
+    s = f.stateOf(id);
+    assert.deepEqual(
+      panels(s).map((p) => p.verdict),
+      ['verified', 'verified', 'verified']
+    );
+    assert.ok(
+      s.attempts.every((a) => a.phase.t !== 'posted' || a.spec.kind === 'manager'),
+      'every repaired check ended'
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('live emergent-beach: "resume" re-plans a manager instead of asking the owner again', async () => {
+  // Incident: four manager answers in a row failed to parse (a brief over 4000 characters, then
+  // fences quoted inside briefs) and the run ended in the host's "Nothing is running" question.
+  const f = await fixture();
+  try {
+    const id = LIVE.beach;
+    const { say } = await replayLive(f, id, '2026-11-01T05:00:00Z');
+    const asked = f.ledgerOf(id).filter((e) => e.t === 'needs_owner').length;
+    await say('resume');
+    assert.equal(f.stateOf(id).run.t, 'running');
+    f.manager(id);
+    assert.equal(
+      f.ledgerOf(id).filter((e) => e.t === 'needs_owner').length,
+      asked,
+      'asked the owner again'
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('a host-side parse failure never by itself asks the owner: one repair, then a typed failure the next manager is shown', async () => {
+  // Re-breaks if a malformed answer (manager or worker, after its one repair) leaves the run
+  // quiescent and the host asks the owner, as emergent-beach-design-r1 and actual-game did.
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'parse-failures', 2);
+    const m1 = f.manager(id);
+    await f.answer(id, m1, 'I would like to add a question but here is no json.');
+    assert.equal(
+      f.manager(id),
+      m1,
+      'the malformed manager answer got its repair on the same attempt'
+    );
+    await f.answer(id, m1, 'Still no json.');
+    const m2 = f.manager(id);
+    assert.notEqual(m2, m1, 'the next manager retries');
+    const m2Brief = await f.core.getPost(
+      OWNER,
+      f.liveAttempts(id).find((a) => a.id === m2)!.requestId
+    );
+    assert.match(m2Brief.body, new RegExp(`${m1}`), 'and is shown the failed decision');
+
+    await f.answer(id, m2, json({ actions: [question('Widget', ['widget'])] }));
+    const q = f.stateOf(id).questions[0].id;
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'look around' }] })
+    );
+    const w = f.liveAttempts(id).find((a) => a.kind === 'work')!.id;
+    await f.answer(id, w, 'Looked around, nothing to report, no json.');
+    await f.answer(id, w, 'Still no json.');
+    const ended = f.stateOf(id).attempts.find((a) => a.id === w)!;
+    assert.ok(ended.phase.t === 'ended' && ended.phase.outcome.t === 'malformed');
+    f.manager(id);
+    const s = f.stateOf(id);
+    assert.equal(s.run.t, 'running');
+    assert.ok(!f.ledgerOf(id).some((e) => e.t === 'needs_owner'), 'the host asked the owner');
   } finally {
     await f.close();
   }

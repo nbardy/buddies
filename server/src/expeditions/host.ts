@@ -943,9 +943,27 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     switch (attempt.spec.kind) {
       case 'work':
       case 'check':
-        return Promise.resolve({ t: 'attempt', runId, path: worktreeOf(s, attempt.id).path });
+        return workerTurnDirectory(s, attempt.id, runId);
       case 'manager':
         return managerTurnDirectory(s, runId);
+    }
+  }
+
+  /** A worker runs in its own worktree while the tree exists. A legacy check repaired after its
+   * tree was released (decide.ts repairLegacyChecks) only restates its verdict: it runs in the
+   * crew's directory, never in a path that is gone. */
+  function workerTurnDirectory(s: State, attemptId: string, runId: string): Promise<TurnDirectory> {
+    const tree = worktreeOf(s, attemptId);
+    switch (tree.status.t) {
+      case 'creating':
+      case 'ready':
+        return Promise.resolve({ t: 'attempt', runId, path: tree.path });
+      case 'failed':
+      case 'kept':
+      case 'removed':
+      case 'absent':
+      case 'left':
+        return crewDirectory(s.id);
     }
   }
 

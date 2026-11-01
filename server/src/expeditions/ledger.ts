@@ -826,10 +826,13 @@ export function apply(s: State, e: Entry): void {
       return;
     case 'attempt_repair_posting': {
       const attempt = attemptOf(s, e.attemptId);
-      if (attempt.phase.t !== 'posted' || attempt.phase.round !== 'brief')
+      if (!repairable(s, attempt))
         throw new Error(`attempt ${e.attemptId} repaired outside its brief round`);
       attempt.phase = { t: 'posting', body: e.body, round: 'repair' };
       s.repairs[e.attemptId] = e.body;
+      // A reopened legacy check (decide.ts repairLegacyChecks) is metered again over both its
+      // requests once it ends: its earlier cost covered only the first.
+      delete s.costs[e.attemptId];
       return;
     }
     case 'attempt_posted': {
@@ -1035,6 +1038,15 @@ function applyFeedback(s: State, e: Extract<Entry, { t: 'feedback' }>): void {
       return;
   }
 }
+
+/** A repair is posted for an answer in its brief round, or for a check that ended malformed
+ * before R11 gave it one (decide.ts repairLegacyChecks). */
+const repairable = (s: State, a: Attempt) =>
+  (a.phase.t === 'posted' && a.phase.round === 'brief') ||
+  (a.spec.kind === 'check' &&
+    a.phase.t === 'ended' &&
+    a.phase.outcome.t === 'malformed' &&
+    !(a.id in s.repairs));
 
 export const byId = <T extends { id: string }>(rows: T[], id: string) =>
   rows.find((r) => r.id === id);

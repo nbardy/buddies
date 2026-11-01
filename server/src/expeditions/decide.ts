@@ -1,3 +1,4 @@
+import { repairBrief } from './briefs';
 import type { ManagerAction } from './charter';
 import type { Entry, Integration, Outcome, State, Validation } from './ledger';
 import {
@@ -90,6 +91,8 @@ export function decide(s: State, clock: Clock): Entry[] {
   const now = runOf(s);
   if (now === 'finished' || now === 'paused') return withStatus(s, out, at);
 
+  if (s.run.t === 'running') repairLegacyChecks(s, push, at);
+
   // Manager decisions are not budgeted attempts (design.md R9); they stop at their own cap.
   const managerLive = s.attempts.some((a) => a.spec.kind === 'manager' && a.phase.t !== 'ended');
   const neverPlanned = managerTurns(s) === 0;
@@ -136,6 +139,33 @@ export function decide(s: State, clock: Clock): Entry[] {
 }
 
 const runOf = (s: State): State['run']['t'] => s.run.t;
+
+/**
+ * A check that ended `malformed` with no repair on record never had the one repair turn every
+ * malformed answer gets (design.md R11): it ended before R11. 2026-11-01 incident
+ * actual-game-daily-local--e3153c: reviewers c71c918, c2babbc and cee2896 each reproduced the
+ * claim and wrote "VERIFIED." in prose with no json block, so all three panels read
+ * not_verified and the manager could only ask the owner for a "host repair". While the run is
+ * running (after the owner's resume, never by itself from "needs you") it gets that repair now:
+ * its panel reopens and the verdict is read under the strict schema, never inferred from prose.
+ * Since R11 a malformed check is repaired as it answers, so only a legacy end matches.
+ */
+function repairLegacyChecks(s: State, push: (e: Entry) => void, at: string): void {
+  for (const a of s.attempts)
+    if (
+      a.spec.kind === 'check' &&
+      a.phase.t === 'ended' &&
+      a.phase.outcome.t === 'malformed' &&
+      !(a.id in s.repairs)
+    )
+      push({
+        t: 'attempt_repair_posting',
+        at,
+        attemptId: a.id,
+        error: a.phase.outcome.error,
+        body: repairBrief(s, a, a.phase.outcome.error, a.phase.outcome.raw),
+      });
+}
 
 /** A work attempt's end whose commits a manager may claim (R11): anything but a code claim. A
  * legacy end (a pre-R11 `malformed` or `finding` whose branch kept a commit, 2026-11-01 incident:

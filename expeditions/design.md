@@ -641,7 +641,8 @@ post was cut mid-word ("…Engin"); the crew Buddy was listed as a team member.
 
 ### R11. Robustness and per-question acceptance (2026-11-01)
 Sources: the live incident on expedition `own-engine-geometry-opti-1b837b` (2026-11-01, ledger
-replayed as `server/test/fixtures/expeditions/own-engine-geometry-1b837b.ledger.jsonl`) and the
+replayed from `server/test/fixtures/expeditions-live/`, with the three other expeditions stuck
+that day) and the
 oompa audit's expedition robustness list (sections 4 and 5). Each fix names its incident at the
 code site and has an integration test in `server/test/expeditions.test.ts` that fails with the
 guard broken (each mutation-checked once).
@@ -698,6 +699,14 @@ claim) and records `claim_adopted` (the attempt's outcome becomes the claim, val
 per its question's acceptance) or `claim_refused {reason}`. A pending adoption counts as host
 work (else the deciding turn looked quiescent and asked the owner). Metering counts every request
 of an attempt.
+A check that ended `malformed` before R11 never had its repair (live `actual-game-daily-local`:
+three reviewers wrote "VERIFIED." in prose, all three panels read not_verified, and the manager
+asked the owner for a "host repair"). While the run is `running` (after the owner's resume; never
+from "needs you" by itself) decide reopens each such check with the same `attempt_repair_posting`
+(`repairLegacyChecks`): its panel is pending again, the verdict is read under the strict schema,
+the attempt is metered again over both requests, and its run starts in the crew directory when
+its tree was already released. A host parse failure therefore never asks the owner by itself:
+one repair, then a typed `malformed` end the next manager is shown.
 
 **L3 — recovery after an upgrade.** Nothing resumes by itself at boot: a ledger in `needs_owner`
 stays there. The owner resumes by writing in the expedition chat (or a Buddy steers): `resume` now
