@@ -1,6 +1,7 @@
 import type {
   ExpeditionAttemptCost,
   ExpeditionAttemptPhase,
+  ExpeditionCharterView,
   ExpeditionDone,
   ExpeditionIntegration,
   ExpeditionValidation,
@@ -9,6 +10,7 @@ import type {
 } from '@unleashd/shared';
 import {
   type AttemptPhase,
+  type Charter,
   type State,
   type Validation,
   attemptLabel,
@@ -38,23 +40,41 @@ import {
   workerAttempts,
 } from './model';
 
-// The expedition page's data: one pure projection of the folded ledger (no I/O), served by
-// GET /api/buddies/expeditions/:id. The page shows a few of these at a time; nothing here is derived twice.
+// The expedition modal's data: one pure projection of the folded ledger (no I/O), served by
+// GET /api/buddies/expeditions/:id. The modal shows a few of these at a time; nothing here is
+// derived twice. `charterView` is shared with drafts (drafts.ts), so both render one Charter tab.
+
+export function charterView(c: Charter): ExpeditionCharterView {
+  return {
+    name: c.name,
+    goal: c.goal,
+    done: doneView(c.done),
+    inScope: c.inScope,
+    outOfScope: c.outOfScope,
+    roster: {
+      manager: seatLabel(c.crew.manager),
+      work: c.crew.work.map(seatLabel),
+      check: c.crew.check.map(seatLabel),
+    },
+    limits: {
+      maxAttempts: c.maxAttempts,
+      maxLive: c.maxLive,
+      hours: c.hours,
+      exploreShare: c.exploreShare,
+    },
+  };
+}
 
 export function expeditionView(s: State, badgeLine: string, now: string): ExpeditionView {
   const c = s.charter;
   return {
     id: s.id,
-    name: c.name,
     badge: badgeLine,
     run: s.run,
-    goal: c.goal,
-    done: doneView(c.done),
+    charter: charterView(c),
     validations: s.validations.map((v) => validationView(s, v)),
     integration: integrationView(s),
     cost: costTotals(s),
-    inScope: c.inScope,
-    outOfScope: c.outOfScope,
     workspaceId: s.workspaceId,
     launchedAt: s.launchedAt,
     deadline: new Date(deadlineMs(s)).toISOString(),
@@ -63,11 +83,6 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       s.crew.t === 'ready'
         ? { t: 'ready' as const, buddyId: s.crew.buddyId, chatChannelId: s.crew.chatChannelId }
         : { t: 'pending' as const },
-    roster: {
-      manager: seatLabel(c.crew.manager),
-      work: c.crew.work.map(seatLabel),
-      check: c.crew.check.map(seatLabel),
-    },
     counts: {
       attempts: workerAttempts(s),
       maxAttempts: c.maxAttempts,
@@ -104,7 +119,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
   };
 }
 
-function doneView(done: State['charter']['done']): ExpeditionDone {
+function doneView(done: Charter['done']): ExpeditionDone {
   return 'checks' in done ? { t: 'checks', checks: done.checks } : { t: 'owner' };
 }
 

@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import type { Buddy, WorkspaceRoster } from '../components/buddies/types';
-import { archivedBuddyIdsAtom } from './buddy-visibility';
+import { archivedBuddyIdsAtom, expeditionCrewIdsAtom } from './buddy-visibility';
 import {
   type ConversationListEntry,
   type CreateCommand,
@@ -89,7 +89,8 @@ function sameBuddyProjects(a: BuddySidebarProject[], b: BuddySidebarProject[]): 
 
 function buildProjects(
   overview: BuddySidebarOverview | null,
-  archived: ReadonlySet<string>,
+  /** Not on the roster: archived Buddies and expedition crews. */
+  hidden: ReadonlySet<string>,
   all: readonly ConversationListEntry[],
   ids: ReadonlySet<string>,
   pendingCreates: readonly CreateCommand[]
@@ -138,7 +139,7 @@ function buildProjects(
   // Buddies, or creation targets from those IDs.
   for (const workspace of overview ?? []) {
     for (const buddy of workspace.buddies) {
-      if (buddy.status === 'active' && !archived.has(buddy.id)) ensure(buddy, workspace);
+      if (buddy.status === 'active' && !hidden.has(buddy.id)) ensure(buddy, workspace);
     }
   }
   // `all` is newest-first, so the first foreground entry per item is its latest
@@ -243,7 +244,7 @@ export interface BuddySidebar {
 export const buddySidebarAtom = atomWithPrevious((get, previous: BuddySidebar | undefined) => {
   const projects = buildProjects(
     get(buddySidebarOverviewAtom),
-    get(archivedBuddyIdsAtom),
+    new Set([...get(archivedBuddyIdsAtom), ...get(expeditionCrewIdsAtom)]),
     get(listField('buddyEntries')),
     get(listField('idSet')),
     pendingCreatesOf(get(commandsAtom))

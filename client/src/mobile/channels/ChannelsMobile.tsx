@@ -55,7 +55,7 @@ import {
 } from '../../components/buddies/channels-view';
 import type { Buddy, Channel, ChannelUnread, Inbox } from '../../components/buddies/types';
 import { NEW_WORKSPACE_PATH } from '../../components/buddies/workspace-home';
-import { useBuddyOverview } from '../../hooks/useBuddyData';
+import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 import { rowBuddy } from '../../utils/conversation-row';
 import { MobileEmptyPanel, MobilePage, MobileSection } from '../components/MobileUI';
@@ -396,6 +396,7 @@ function BuddySection({
 }) {
   const openDm = useChannelsDm();
   const buddyRail = useAtomValue(buddyRailFamily(members));
+  useExpeditionCrews();
   const newBuddy = useNewBuddy(openDm, workspaceId);
   const [teamCreator, setTeamCreator] = useState(false);
   const creating = useAtomValue(listField('builders')).find((entry) => !entry.done);

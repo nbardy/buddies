@@ -1,5 +1,6 @@
-// The expedition page's wire shape (GET /api/buddies/expeditions/:id). One type source: the
-// server's projection (server/src/expeditions/view.ts) returns it; the client page reads it.
+// The expedition modal's wire shapes: a live expedition (GET /api/buddies/expeditions/:id) and a
+// draft (GET /api/buddies/expeditions/drafts/:draftId). One type source: the server's projections
+// (server/src/expeditions/view.ts) return them; the client modal and cards read them.
 
 export type ExpeditionRun =
   | { t: 'running' }
@@ -107,25 +108,33 @@ export interface ExpeditionIntegration {
   lastRefusal: { t: 'none' } | { t: 'refused'; label: string };
 }
 
-export interface ExpeditionView {
-  id: string;
+/** The owner's charter as shown in the Charter tab: the same for a draft and a live expedition. */
+export interface ExpeditionCharterView {
   name: string;
-  badge: string;
-  run: ExpeditionRun;
+  /** Markdown, as the Buddy wrote it. */
   goal: string;
   done: ExpeditionDone;
+  inScope: string[];
+  outOfScope: string[];
+  /** Seat labels, e.g. `codex/gpt-5/high`. */
+  roster: { manager: string; work: string[]; check: string[] };
+  limits: { maxAttempts: number; maxLive: number; hours: number; exploreShare: number };
+}
+
+export interface ExpeditionView {
+  id: string;
+  badge: string;
+  run: ExpeditionRun;
+  charter: ExpeditionCharterView;
   validations: ExpeditionValidation[];
   integration: ExpeditionIntegration;
   /** Measured spend: `short` for the badge, `line` for the header (sums, unmeasured, settling). */
   cost: { short: string; line: string };
-  inScope: string[];
-  outOfScope: string[];
   workspaceId: string;
   launchedAt: string;
   deadline: string;
   now: string;
   crew: { t: 'pending' } | { t: 'ready'; buddyId: string; chatChannelId: string };
-  roster: { manager: string; work: string[]; check: string[] };
   counts: {
     /** Work and check attempts: what the owner's budget counts (design.md R9). */
     attempts: number;
@@ -162,4 +171,32 @@ export interface ExpeditionView {
   )[];
   reflections: { at: string; text: string }[];
   lessons: string[];
+}
+
+// ---------- Drafts (design.md R10) ----------
+
+/** Where a draft stands: launchable, launched (once), or replaced by a newer draft of the same
+ * name in the same conversation. */
+export type ExpeditionDraftState =
+  | { t: 'open' }
+  | { t: 'launched'; expeditionId: string }
+  | { t: 'superseded'; by: string };
+
+export interface ExpeditionDraftView {
+  id: string;
+  workspaceId: string;
+  createdAt: string;
+  state: ExpeditionDraftState;
+  charter: ExpeditionCharterView;
+  /** What refuses its launch, re-checked on every read of an open draft (empty: launchable). */
+  issues: string[];
+  /** Non-blocking suggestions, the defaults the charter took, and owner model words resolved. */
+  advice: string[];
+  defaulted: string[];
+  resolved: string[];
+}
+
+/** Crew Buddies (one per expedition): reached through badges and the modal, never the roster. */
+export interface ExpeditionCrews {
+  buddyIds: string[];
 }

@@ -1,0 +1,211 @@
+/* Expedition modal, badge and draft card. The modal is a .channel-task-overlay (the Task
+   overlay's dialog) widened; markdown uses the file preview's .file-preview-markdown surface.
+   One colour system: a .expedition-tone-* class sets --tone; pills, dots and chips read it. */
+.expedition-tone-ok { --tone: var(--theme-success); }
+.expedition-tone-warn { --tone: var(--theme-warning); }
+.expedition-tone-info { --tone: var(--accent-primary); }
+.expedition-tone-bad { --tone: var(--theme-danger); }
+.expedition-tone-muted { --tone: var(--text-muted); }
+
+.expedition-modal--dialog {
+  width: min(1100px, 92vw);
+  height: 86vh;
+  max-height: none;
+  overflow: hidden;
+}
+
+/* The phone's full-height sheet (the caller picks the presentation per device). */
+.expedition-modal--sheet {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: var(--sp-5);
+  border: 0;
+  border-radius: 0;
+  overflow-y: auto;
+}
+
+.expedition-modal-header { align-items: center; }
+.expedition-modal-title { color: var(--text-bright); font-size: var(--fs-6); }
+.expedition-modal-close { margin-inline-start: auto; }
+
+.expedition-pill {
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: 999px;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+}
+
+.expedition-meters,
+.expedition-card-head,
+.expedition-card-meta,
+.expedition-launch {
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.expedition-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--ui-radius);
+  background: var(--bg-raised-1);
+  color: var(--tone, var(--text-secondary));
+  font-size: var(--fs-2);
+}
+
+.expedition-chip meter { width: 48px; height: 6px; }
+.expedition-chip--mono { font-family: var(--font-mono); cursor: pointer; }
+
+.expedition-goal--clamped .expedition-markdown {
+  max-height: 5.4em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black 55%, transparent);
+}
+
+/* The preview popup's markdown surface, at the width of its container. */
+.expedition-markdown.file-preview-markdown {
+  width: auto;
+  max-height: none;
+  padding: var(--sp-4) var(--sp-5);
+  overflow: visible;
+}
+
+.expedition-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-primary);
+  font-size: var(--fs-2);
+  cursor: pointer;
+}
+
+.expedition-callout {
+  gap: var(--sp-3);
+  margin: 0;
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--tone, var(--accent-primary));
+  border-radius: var(--ui-radius);
+  background: var(--bg-raised-1);
+}
+
+.expedition-button,
+.expedition-tab {
+  padding: var(--sp-2) var(--sp-5);
+  border: 1px solid var(--border-default);
+  border-radius: var(--ui-radius);
+  background: var(--bg-raised-2);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.expedition-button--primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.expedition-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Segmented tabs. */
+.expedition-tabs {
+  align-self: flex-start;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  border-radius: var(--ui-radius);
+  background: var(--bg-raised-1);
+}
+
+.expedition-tab { border-color: transparent; background: none; color: var(--text-secondary); }
+.expedition-tab[aria-selected='true'] { background: var(--bg-raised-2); color: var(--text-bright); }
+
+/* The dialog: tabs and their pane on the left, the expedition chat as a right column. */
+.expedition-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 38%);
+  gap: var(--sp-5);
+  flex: 1;
+  min-height: 0;
+}
+
+.expedition-main { gap: var(--sp-4); min-height: 0; }
+
+.expedition-modal--dialog .expedition-pane { flex: 1; min-height: 0; overflow-y: auto; }
+
+.expedition-chat-column,
+.expedition-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.expedition-modal--sheet .expedition-chat-column { height: 70dvh; }
+.expedition-chat-messages { flex: 1; min-height: 0; overflow-y: auto; }
+.expedition-section { gap: var(--sp-3); }
+
+.expedition-card {
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--ui-radius);
+  background: var(--bg-raised-1);
+}
+
+.expedition-card-meta { font-size: var(--fs-2); }
+.expedition-card-meta code { font-family: var(--font-mono); color: var(--text-primary); }
+.expedition-card-id { margin-inline-start: auto; font-family: var(--font-mono); }
+
+.expedition-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 22%, transparent);
+}
+
+.expedition-timeline {
+  display: grid;
+  gap: var(--sp-4);
+  margin: 0;
+  padding: 0 0 0 var(--sp-5);
+  border-left: 2px solid var(--border-subtle);
+  list-style: none;
+}
+
+.expedition-scope {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-5);
+}
+
+.expedition-footer {
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.expedition-error { color: var(--theme-danger); }
+.expedition-badge { gap: var(--sp-2); }
+
+/* The draft card: a sibling of the badge chip, a little taller for its buttons. */
+.expedition-draft-card {
+  display: inline-flex;
+  gap: var(--sp-2);
+  max-width: min(520px, 100%);
+  margin-inline-start: 0;
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.expedition-draft-card-title { gap: var(--sp-1); color: var(--text-bright); }
+.expedition-draft-card-actions { gap: var(--sp-3); }

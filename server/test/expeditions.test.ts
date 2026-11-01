@@ -18,6 +18,7 @@ import { startMcpEndpoint } from '../src/buddies/mcp';
 import { runCommand } from '../src/expeditions/command';
 import { type ExpeditionHost, createExpeditionHost } from '../src/expeditions/host';
 import { Charter, type Entry, type State, fold } from '../src/expeditions/model';
+import { clip, goalSummary } from '../src/expeditions/news';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import type { IngestSlot } from '../src/ingest/instance';
 import { BackgroundWork } from '../src/turns/background-work';
@@ -1814,6 +1815,151 @@ test('draft validates a charter without launching; launch fills only named defau
   }
 });
 
+/** Every post the owner can read in the workspace with this purpose (any channel, DMs too). */
+async function postsWithPurpose(f: Awaited<ReturnType<typeof fixture>>, purpose: string) {
+  const out = [];
+  for (const { channel } of (await f.core.inbox(OWNER, f.workspaceId)).channels) {
+    const { posts } = await f.core.listPosts(
+      OWNER,
+      { kind: 'channel', channelId: channel.id },
+      null,
+      200
+    );
+    out.push(...posts.filter((p) => p.purpose === purpose));
+  }
+  return out;
+}
+
+// 2026-11-01 owner request: a draft is a card in the chat (Info, Launch), launched over HTTP
+// through the tool's own launch path. These are the ways a card could launch the wrong thing,
+// launch twice, launch for another workspace, or land in the wrong chat.
+test('draft posts one card where the badge goes; the card launches once over HTTP, never a superseded draft, never from another workspace, never by a crew', async () => {
+  const f = await fixture();
+  const app = express();
+  app.use(express.json());
+  registerExpeditionRoutes(app, () => f.host);
+  const server = app.listen(0);
+  try {
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const draftOf = (id: string, workspaceId = f.workspaceId) =>
+      fetch(`${base}/api/buddies/expeditions/drafts/${id}?workspaceId=${workspaceId}`);
+    const launchDraft = (id: string, workspaceId = f.workspaceId) =>
+      fetch(`${base}/api/buddies/expeditions/drafts/${id}/launch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId }),
+      });
+
+    const drafted = await rpc(f.spec(), 'expedition', {
+      action: { do: 'draft', charter: charter('cardy') },
+    });
+    assert.equal(drafted.error, false, drafted.text);
+    assert.equal(drafted.value.ready, true, drafted.text);
+    assert.match(drafted.value.next, /draft card in this chat/);
+    assert.equal('charter' in drafted.value, false, 'the Buddy gets no charter to paste');
+    const draftId: string = drafted.value.draftId;
+    const cards = await postsWithPurpose(f, 'expedition_draft');
+    assert.equal(cards.length, 1);
+    assert.deepEqual(cards[0].evidence, [`expedition-draft:${draftId}`]);
+    assert.equal(cards[0].body, '⛺ Draft expedition: cardy');
+
+    const view = (await (await draftOf(draftId)).json()) as {
+      state: { t: string };
+      charter: { name: string; goal: string };
+      issues: string[];
+    };
+    assert.deepEqual(view.state, { t: 'open' });
+    assert.equal(view.charter.name, 'cardy');
+    assert.deepEqual(view.issues, []);
+
+    // Another workspace sees no draft and cannot launch it.
+    assert.equal((await draftOf(draftId, 'ws-other')).status, 404);
+    assert.equal((await launchDraft(draftId, 'ws-other')).status, 404);
+    assert.deepEqual(f.host.list(f.workspaceId), []);
+
+    // Launch: the same host path as the tool; a second click answers the same expedition.
+    const first = await launchDraft(draftId);
+    assert.equal(first.status, 200);
+    const { expeditionId } = (await first.json()) as { expeditionId: string };
+    const second = await launchDraft(draftId);
+    assert.deepEqual(await second.json(), { expeditionId });
+    assert.deepEqual(
+      f.host.list(f.workspaceId).map((x) => x.id),
+      [expeditionId]
+    );
+    assert.deepEqual(((await (await draftOf(draftId)).json()) as typeof view).state, {
+      t: 'launched',
+      expeditionId,
+    });
+    // The badge lands in the card's chat (one placement rule), and the launch post names the
+    // charter and its goal's first sentence, with "Planning…" as its own paragraph.
+    const s = f.stateOf(expeditionId);
+    if (s.badgePost.t !== 'posted') throw new Error('badge expected');
+    const badge = await f.core.getPost(OWNER, s.badgePost.postId);
+    assert.equal(badge.channelId, cards[0].channelId);
+    assert.equal(
+      s.statuses[0].text,
+      '⛺ Launched **cardy**: Make the widget pass its test.\n\nPlanning…'
+    );
+
+    // Re-drafting a name in the same conversation supersedes the open draft: its Launch is a 409
+    // naming the newer draft, and the newer one still launches.
+    const older = (
+      await rpc(f.spec(), 'expedition', { action: { do: 'draft', charter: charter('twice') } })
+    ).value.draftId as string;
+    const newer = (
+      await rpc(f.spec(), 'expedition', { action: { do: 'draft', charter: charter('twice', 3) } })
+    ).value.draftId as string;
+    const refused = await launchDraft(older);
+    assert.equal(refused.status, 409);
+    assert.match(((await refused.json()) as { error: string }).error, new RegExp(newer));
+    assert.deepEqual(((await (await draftOf(newer)).json()) as typeof view).state, { t: 'open' });
+
+    // Launching by the tool closes that name's open card too, so it no longer offers Launch.
+    const viaTool = await rpcLaunch(f, 'twice', 3);
+    assert.deepEqual(((await (await draftOf(newer)).json()) as typeof view).state, {
+      t: 'launched',
+      expeditionId: viaTool.id,
+    });
+
+    // A crew Buddy cannot draft (it could otherwise put a Launch button in front of the owner).
+    if (s.crew.t !== 'ready') throw new Error('crew expected');
+    const crewDraft = await rpc(f.specAs(s.crew.buddyId, f.workspaceId), 'expedition', {
+      action: { do: 'draft', charter: charter('nested') },
+    });
+    assert.equal(crewDraft.error, true);
+    assert.match(crewDraft.text, /an expedition crew cannot draft expeditions/);
+
+    // A restarted host reads the drafts back: the launched card still says launched.
+    f.restart();
+    assert.deepEqual(((await (await draftOf(draftId)).json()) as typeof view).state, {
+      t: 'launched',
+      expeditionId,
+    });
+  } finally {
+    server.close();
+    await f.close();
+  }
+});
+
+// 2026-11-01 owner screenshot: the launch post read "…Engin", a raw slice cut mid-word.
+test('chat lines are clipped at a word boundary, never inside a word; a goal summary is its first sentence', () => {
+  const words =
+    'Build the beach erosion model on the Engine with real sediment transport and tides'.split(' ');
+  const text = words.join(' ');
+  for (let n = 5; n < text.length; n++) {
+    const out = clip(text, n);
+    assert.ok(out.length <= n + 1, `${n}: ${out}`);
+    const kept = out.replace(/…$/, '').split(' ');
+    for (const word of kept) assert.ok(words.includes(word), `${n}: "${word}" is a cut word`);
+  }
+  assert.equal(clip(text, 500), text);
+  assert.equal(
+    goalSummary('## Goal\n1. Make the widget pass. Then document it.\n2. Ship.'),
+    'Make the widget pass.'
+  );
+});
+
 const BUDGETS = { leaseMs: 60_000, chatDeadlineMs: 60_000, turnDeadlineMs: 60_000 };
 
 async function rpcLaunch(
@@ -2008,9 +2154,13 @@ test('owner model words resolve to the catalog id once, at ingestion; a name tha
     });
     assert.equal(drafted.error, false, drafted.text);
     assert.equal(drafted.value.ready, true, drafted.text);
-    assert.equal(drafted.value.charter.crew.work[0].model, 'claude-haiku-5-5');
+    // The canonical charter is what the draft persisted (and what its card launches).
+    const persisted = (r: { value: { draftId: string } }) =>
+      JSON.parse(fs.readFileSync(path.join(f.root, 'drafts', `${r.value.draftId}.json`), 'utf8'))
+        .charter;
+    assert.equal(persisted(drafted).crew.work[0].model, 'claude-haiku-5-5');
     // An alias kept as written would defeat the independence rule (it compares model strings).
-    assert.equal(drafted.value.charter.crew.manager.model, 'claude-sonnet-5-5');
+    assert.equal(persisted(drafted).crew.manager.model, 'claude-sonnet-5-5');
     assert.deepEqual(drafted.value.resolved, [
       'manager: "sonnet" → claude-sonnet-5-5',
       'work seat 0: "claude haiku" → claude-haiku-5-5',
@@ -2030,7 +2180,7 @@ test('owner model words resolve to the catalog id once, at ingestion; a name tha
         },
       },
     });
-    assert.equal(open.value.charter.crew.work[0].model, 'opencode/gpt-5', open.text);
+    assert.equal(persisted(open).crew.work[0].model, 'opencode/gpt-5', open.text);
     assert.deepEqual(open.value.resolved, []);
     // "sol" names three codex models: refused, listing the valid ids, never a guess.
     const refused = await rpc(f.spec(), 'expedition', {
@@ -2185,6 +2335,22 @@ test('a host whose execution gate is disabled (a copied store) refuses launch an
         reason
       );
       await assert.rejects(disabled.steer(id, f.lead.id, { t: 'resume' }), reason);
+      // A draft would write its file and post a card with a Launch that can never work.
+      const c = Charter.parse(charter('copy-draft'));
+      await assert.rejects(
+        disabled.drafts.draft({
+          key: 'copy:draft',
+          charter: c,
+          issues: [],
+          advice: [],
+          defaulted: [],
+          resolved: [],
+          origin: { t: 'direct' },
+          launcherId: f.lead.id,
+          workspaceId: f.workspaceId,
+        }),
+        reason
+      );
       await disabled.drain();
       assert.deepEqual(fs.readdirSync(copy), [id], 'nothing was written');
       assert.equal(fs.readFileSync(path.join(copy, id, 'ledger.jsonl'), 'utf8'), `${first}\n`);

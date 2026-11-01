@@ -108,7 +108,7 @@ export const CHARTER_DEFAULTS = {
   crew: DEFAULT_CREW,
 };
 
-const crewLine = (crew: z.infer<typeof Crew>) =>
+export const crewLine = (crew: z.infer<typeof Crew>) =>
   `manager ${seatLabel(crew.manager)}; work ${crew.work.map(seatLabel).join(', ')}; check ${crew.check.map(seatLabel).join(', ')}`;
 
 /** A provider's models (host: the installed provider catalog the seat check reads): a closed
@@ -230,17 +230,6 @@ export function charterAdvice(c: Charter): string[] {
         ]),
     ...(c.outOfScope.length > 0 ? [] : ['no outOfScope fence: name what the crew must not touch']),
   ];
-}
-
-/** The tool result's one-paragraph account of what a launch started. */
-export function charterSummary(c: Charter): string {
-  const done =
-    'checks' in c.done
-      ? c.done.checks
-          .map((x) => (x.kind === 'command' ? `$ ${x.argv.join(' ')}` : `judged: ${x.text}`))
-          .join('; ')
-      : 'the owner judges it';
-  return `${c.name}: ${c.goal.slice(0, 200)} | done when ${done} | budget ${c.maxAttempts} attempts, ${c.maxLive} live, ${c.hours}h, explore ${c.exploreShare} | crew ${crewLine(c.crew)}`;
 }
 
 /** Where status posts go: the thread the launch came from, or the owner↔launcher DM. */

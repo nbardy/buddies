@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import type { BuddiesCore, ChannelRef } from '@unleashd/buddies-core';
+import type { BuddiesCore } from '@unleashd/buddies-core';
 import type { BuddyContext, ExpeditionView } from '@unleashd/shared';
 import { type TurnDirectory, WORKSPACE_DIRECTORY } from '../buddies/briefing';
 import { OWNER, buddyActor } from '../buddies/core';
@@ -12,6 +12,7 @@ import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
 import { CREW_ROLE, briefOf, chatFeedback, parseOutcome, statusText } from './briefs';
 import { runCommand } from './command';
+import { type DraftInput, type LaunchOutcome, createDraftStore, placementOf } from './drafts';
 import {
   branchHead,
   claimHeld,
@@ -46,7 +47,9 @@ import {
   custodyOf,
   decide,
   fold,
+  goalSummary,
   integrationOf,
+  launchNews,
   live,
   managerDirectory,
   pendingEffects,
@@ -327,15 +330,6 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   // ---------- Effects ----------
 
-  function originRef(s: State): { channel: ChannelRef; replyToId?: string } {
-    switch (s.origin.t) {
-      case 'thread':
-        return { channel: { kind: 'id', id: s.origin.channelId }, replyToId: s.origin.rootId };
-      case 'direct':
-        return { channel: { kind: 'direct', members: [OWNER, buddyActor(s.launcherId)] } };
-    }
-  }
-
   async function run(s: State, effect: Effect): Promise<Entry[]> {
     switch (effect.t) {
       case 'create_integration_tree':
@@ -465,10 +459,11 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       case 'post_badge': {
         // The clickable badge in the chat the launch came from; the client renders posts with
         // this purpose as a live card that opens /expeditions/<id>.
-        const target = originRef(s);
+        const target = placementOf(s.origin, s.launcherId);
         const write = await core.post(buddyActor(s.launcherId), target.channel, {
           kind: 'inform',
-          body: `⛺ Expedition launched: ${s.charter.name}. ${s.charter.goal.slice(0, 200)}`,
+          // Fallback text for readers without the card (a Buddy reading the thread).
+          body: `⛺ Expedition launched: ${s.charter.name}. ${goalSummary(s.charter.goal)}`,
           purpose: 'expedition_badge',
           evidence: [`expedition:${s.id}`],
           replyToId: target.replyToId,
@@ -821,7 +816,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         t: 'status',
         at: now(),
         seq: 0,
-        text: `⛺ Launched: ${input.charter.goal.slice(0, 300)}\nPlanning…`,
+        text: launchNews(input.charter),
       },
     ];
     await fsp.appendFile(fileOf(id), line(first), { mode: 0o600 });
@@ -830,15 +825,39 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return { t: 'launched', state: stateOf(id) };
   }
 
+  /** What a launch of this charter would refuse, without writing anything (the `draft`). */
+  async function issues(workspaceId: string, charter: Charter): Promise<string[]> {
+    const checked = await preflightOf(workspaceId, charter);
+    return checked.t === 'refused' ? checked.reasons : [];
+  }
+  /** Serialized: two concurrent launches with one key cannot both pass the lookup. */
+  const launch = (input: LaunchInput): Promise<Launched> =>
+    serialized(LAUNCH_CHAIN, () => launchOnce(input));
+  // Drafts launch through this same path; a refusal is data for the card, not a thrown error.
+  const drafts = createDraftStore({
+    core,
+    events,
+    dir: path.join(root, 'drafts'),
+    issues,
+    now,
+    launch: (input): Promise<LaunchOutcome> =>
+      launch(input).catch((error: unknown) => {
+        if (error instanceof LaunchRefused) return { t: 'refused', reasons: error.reasons };
+        throw error;
+      }),
+  });
+
   return {
-    /** What a launch of this charter would refuse, without writing anything (the `draft`). */
-    async issues(workspaceId: string, charter: Charter): Promise<string[]> {
-      const checked = await preflightOf(workspaceId, charter);
-      return checked.t === 'refused' ? checked.reasons : [];
+    issues,
+    launch,
+    drafts: {
+      ...drafts,
+      /** A copied store drafts nothing either: the gate refuses before any file is written. */
+      draft: async (input: DraftInput) => {
+        if (gate.t === 'disabled') throw new Error(gateIssues(gate).join('; '));
+        return drafts.draft(input);
+      },
     },
-    /** Serialized: two concurrent launches with one key cannot both pass the lookup. */
-    launch: (input: LaunchInput): Promise<Launched> =>
-      serialized(LAUNCH_CHAIN, () => launchOnce(input)),
     async steer(id: string, from: string, feedback: Feedback): Promise<State> {
       if (gate.t === 'disabled') throw new Error(gateIssues(gate).join('; '));
       stateOf(id);
@@ -870,6 +889,11 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     },
     /** The expedition a crew Buddy belongs to, so a mentioned crew can answer about itself. */
     ofCrew: crewOf,
+    /** Every crew Buddy (the client keeps them off the Buddies roster). */
+    crews: (): string[] =>
+      [...ledgers.values()].flatMap((entries) =>
+        entries.flatMap((e) => (e.t === 'crew_ready' ? [e.buddyId] : []))
+      ),
     turnDirectory,
     workspaceOf: (id: string) => stateOf(id).workspaceId,
     /** Tests drive ticks directly. */

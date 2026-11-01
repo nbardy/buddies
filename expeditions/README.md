@@ -187,13 +187,26 @@ What each part does:
   website", "use codex for the work", "check with claude haiku".
 
 Variants that work:
-- "Draft an expedition for … and show me the charter first." (the Buddy calls `draft`, shows the
-  issues and defaults, and launches when you say go)
+- "Draft an expedition for … first." The Buddy calls `draft`, and a **draft card** appears in the
+  chat (where the badge would go): `⛺ Draft · <name>`, the goal's first line, the budget
+  (`6 attempts · 3 at once · 12 h`) and two buttons. **Info** opens the expedition modal on the
+  draft: goal, charter, issues, advice and every default it filled. **Launch** starts it through
+  the same launch as the tool, re-checking the issues when you click; it is disabled, with the
+  reason, while issues stand or after a newer draft of the same name replaced it. After launch the
+  card reads **Launched →** and opens the live expedition. The Buddy replies in one line; it does
+  not paste the charter or ask you to type "launch it".
 - "This looks big. Should it be an expedition?" (the Buddy checks the four tests in mcp.md)
 
 After launch: the badge appears in the chat you asked in (in a DM, as a threaded reply to your
-launch message); click it for the page. Talk to the crew
-in its chat on that page (or ask your Buddy to steer it): `lesson: never edit generated files`
+launch message); click it to open the **expedition modal** over the chat (the URL is
+`/expeditions/<id>`, so a link or a reload opens it too; on a phone it is a full-height sheet).
+The header shows the status pill, attempts and decisions against their caps, live/queued/verified,
+elapsed and time left, measured cost and the expedition branch (click to copy). Below it: a "needs
+you" callout with a reply shortcut, the goal (rendered markdown, "Show more"), and tabs for
+Workers (one card per attempt: kind, seat, stage, cost, validations, its instructions), Tasks
+(stage chips, dependencies, paths), Reflections and Charter; the chat sits beside them on desktop
+and is a tab on the phone. Esc, the backdrop or ✕ close it. Talk to the crew
+in its chat in the modal (or ask your Buddy to steer it): `lesson: never edit generated files`
 reaches every later brief; `pause`, `resume` and `stop` do what they say; anything else is a note
 the manager reads next, which is how you answer a "needs you". At done the finish post names the
 branch to merge; nothing is written to your checkout.

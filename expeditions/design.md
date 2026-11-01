@@ -578,3 +578,37 @@ guard is broken (mutation-checked). Tests: `server/test/expeditions.test.ts`, cr
 - The badge lands as a threaded reply to the owner's launch post in a DM (kept; README says so).
 - Out of scope: P8, an orphan MCP relay process after the server is killed (pre-existing Buddies
   behavior).
+
+### R10. Draft card, expedition modal, clean chat lines (2026-11-01)
+Owner requests with screenshots: a draft should be a widget with Info and Launch; the full-page
+expedition view was ugly, hid the goal's markdown and replaced the conversation pane; the launch
+post was cut mid-word ("…Engin"); the crew Buddy was listed as a team member.
+- **Drafts persist and post a card** (`drafts.ts`, one store owned by the host). A draft is
+  `{t:'open'} | {t:'launched', expeditionId} | {t:'superseded', by}`, stored whole and atomically
+  at `<root>/drafts/<draftId>.json` (the directory is made on first save, so a copied store with
+  its gate disabled writes nothing, and the host refuses `draft` there). The card goes where the
+  badge goes (`placementOf`, shared with `post_badge`). The card's Launch (HTTP, `routes.ts`) and
+  the tool's `launch` share `host.launch`, its serialization and its refusal list; a refusal is
+  data for the card, not a thrown error. Writes are serialized: a double click is one expedition,
+  a second click answers the same id. A draft is visible only in its own workspace. Wire shapes:
+  `ExpeditionDraftView`, and `ExpeditionCharterView`, which a live view and a draft share
+  (`view.ts charterView`) so the modal has one Charter tab.
+- **One modal** (`client/.../ExpeditionModal.tsx`), live or draft, on the shared `ModalDialog`
+  (native `<dialog>`: Esc, backdrop, focus trap, focus back to the opener) also used by the Task
+  overlay and the file viewer, styled as a widened `.channel-task-overlay` with markdown in the
+  file preview's `.file-preview-markdown` surface. `/expeditions/:id` opens it over the view it was
+  opened from (react-router background location, `expedition-overlay.ts`), over home on a direct
+  load; a full-height sheet on the phone. The old page is deleted.
+- **Chat lines never cut a word** (`news.ts clip`): one flattened line, cut at a word boundary
+  with `…`. The launch post is `⛺ Launched **<name>**: <goal's first sentence>` with `Planning…`
+  as its own paragraph (`goalSummary` drops headings and list markers). Status posts were plain
+  markdown all along; they broke because a raw slice of the goal carried cut list and emphasis
+  markers, and a `+ question` line opened a list that swallowed the lines after it.
+- **Crew Buddies off the roster**: `GET /api/buddies/expeditions/crews` lists every crew Buddy
+  (from `crew_ready` entries, never a name pattern); the sidebar and the channel rail hide them.
+- Guards: `expeditions.test.ts` (draft card placement and evidence, HTTP view and launch,
+  idempotent second click, superseded 409, other workspace 404, crew cannot draft, tool launch
+  closes the card, restart keeps launched, clip never splits a word), `expedition.test.tsx`
+  (card buttons and disabled reasons, modal markdown, status post markdown, roster).
+  Not covered by tests: Esc/backdrop closing (the client tests render static markup with no DOM);
+  the browser pass checks it.

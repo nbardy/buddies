@@ -1,19 +1,89 @@
 import type {
   ExpeditionAttempt,
   ExpeditionAttemptCost,
+  ExpeditionCharterView,
   ExpeditionDone,
   ExpeditionDoneCheck,
-  ExpeditionIntegration,
+  ExpeditionDraftView,
   ExpeditionQuestion,
   ExpeditionRun,
+  ExpeditionStage,
   ExpeditionValidation,
   ExpeditionWorktree,
 } from '@unleashd/shared';
 
-// Pure view helpers for the expedition badge and page (no React).
+// Pure view helpers for the expedition badge, draft card and modal (no React).
 
 export const expeditionUrl = (id: string) => `/api/buddies/expeditions/${encodeURIComponent(id)}`;
 export const expeditionHref = (id: string) => `/expeditions/${encodeURIComponent(id)}`;
+/** A draft is read only from the workspace it was drafted in (server expeditions/routes.ts). */
+export const draftUrl = (draftId: string, workspaceId: string) =>
+  `/api/buddies/expeditions/drafts/${encodeURIComponent(draftId)}?workspaceId=${encodeURIComponent(workspaceId)}`;
+/** Crew Buddies: kept off the Buddies roster (atoms/buddy-visibility.ts). */
+export const EXPEDITION_CREWS_URL = '/api/buddies/expeditions/crews';
+
+/** The colour family of a pill, dot or chip (Expedition.css `.expedition-tone-*`). */
+export type Tone = 'ok' | 'warn' | 'info' | 'bad' | 'muted';
+
+export function runTone(run: ExpeditionRun): Tone {
+  switch (run.t) {
+    case 'running':
+      return 'ok';
+    case 'waiting_owner':
+      return 'warn';
+    case 'paused':
+      return 'muted';
+    case 'finished':
+      return 'info';
+  }
+}
+
+/** A worker's dot: queued, live, never started, or ended. */
+export function attemptTone(a: ExpeditionAttempt): Tone {
+  switch (a.phase.t) {
+    case 'planned':
+    case 'admitted':
+      return 'muted';
+    case 'posting':
+    case 'posted':
+      return 'ok';
+    case 'dropped':
+      return 'bad';
+    case 'ended':
+      return 'info';
+  }
+}
+
+export const STAGE_TONE: Record<ExpeditionStage, Tone> = {
+  planned: 'muted',
+  waiting: 'muted',
+  implementing: 'info',
+  claimed: 'info',
+  checked: 'warn',
+  validated: 'warn',
+  integrated: 'ok',
+  dead: 'bad',
+};
+
+/** The card's budget line, e.g. `6 attempts · 3 at once · 12 h`. */
+export const budgetLine = (limits: ExpeditionCharterView['limits']) =>
+  `${limits.maxAttempts} attempts · ${limits.maxLive} at once · ${limits.hours} h`;
+
+/** `2h 05m` / `14m`: a duration between two instants, for the header. */
+export function durationLabel(fromIso: string, toIso: string): string {
+  const minutes = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 60_000));
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `${hours}h ${String(minutes % 60).padStart(2, '0')}m` : `${minutes}m`;
+}
+
+/** The goal's first prose line as plain text, for the draft card (headings are titles, skipped;
+ * the same rule as the server's goalSummary in expeditions/news.ts). */
+export const goalLine = (goal: string) =>
+  goal
+    .split('\n')
+    .filter((line) => !/^\s*#{1,6}\s/.test(line))
+    .map((line) => line.replace(/^\s*(>\s*|[-*+]\s+|\d+[.)]\s+)/, '').trim())
+    .find(Boolean) ?? '';
 
 export function runLabel(run: ExpeditionRun): string {
   switch (run.t) {
@@ -58,18 +128,6 @@ export function attemptCostLine(cost: ExpeditionAttemptCost): string | null {
   }
 }
 
-/** The header's one integration line: the expedition branch, what it holds, the last refusal. */
-export function integrationLine(i: ExpeditionIntegration): string {
-  const queued = i.queued > 0 ? ` · ${i.queued} queued` : '';
-  const line = `Integration: ${i.branch} @ ${i.head.slice(0, 10)} · ${i.integrated} integrated${queued}`;
-  switch (i.lastRefusal.t) {
-    case 'none':
-      return line;
-    case 'refused':
-      return `${line} · last refusal: ${i.lastRefusal.label}`;
-  }
-}
-
 /** The host validations of one attempt's claimed commit, oldest first. */
 export const validationsOf = (all: ExpeditionValidation[], attemptId: string) =>
   all.filter((x) => x.subject.t === 'candidate' && x.subject.claimAttemptId === attemptId);
@@ -108,13 +166,35 @@ export const QUESTION_GLYPH: Record<ExpeditionQuestion['status'], string> = {
   dead: '✗',
 };
 
-/** The panes beside the chat; the narrow layout also has the chat itself as a focus. */
+/** The modal's tabs. The dialog shows the chat as its own column; the sheet makes it a tab. */
 export type Pane = 'workers' | 'tasks' | 'reflections' | 'charter';
 export type Focus = Pane | 'chat';
 export const FOCI: { focus: Focus; label: string }[] = [
   { focus: 'workers', label: 'Workers' },
   { focus: 'tasks', label: 'Tasks' },
   { focus: 'reflections', label: 'Reflections' },
-  { focus: 'charter', label: 'Goal' },
+  { focus: 'charter', label: 'Charter' },
   { focus: 'chat', label: 'Chat' },
 ];
+
+/** What a draft offers right now: one variant per button the card and modal footer show. */
+export type DraftAction =
+  | { t: 'launch' }
+  | { t: 'blocked'; reason: string }
+  | { t: 'launched'; expeditionId: string };
+
+export function draftAction(d: ExpeditionDraftView): DraftAction {
+  switch (d.state.t) {
+    case 'launched':
+      return { t: 'launched', expeditionId: d.state.expeditionId };
+    case 'superseded':
+      return { t: 'blocked', reason: 'Replaced by a newer draft in this chat' };
+    case 'open':
+      return d.issues.length === 0
+        ? { t: 'launch' }
+        : {
+            t: 'blocked',
+            reason: `${d.issues.length} ${d.issues.length === 1 ? 'issue' : 'issues'} to fix first (Info)`,
+          };
+  }
+}

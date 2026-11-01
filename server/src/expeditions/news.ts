@@ -1,4 +1,11 @@
-import { type ClaimChange, type DoneCheck, type WorkResult, seatLabel } from './charter';
+import {
+  type Charter,
+  type ClaimChange,
+  type DoneCheck,
+  type WorkResult,
+  crewLine,
+  seatLabel,
+} from './charter';
 import type {
   Attempt,
   AttemptCost,
@@ -110,7 +117,51 @@ export function withStatus(s: State, out: Entry[], at: string): Entry[] {
   return [...out, status];
 }
 
-const clip = (text: string, n = 300) => (text.length > n ? `${text.slice(0, n)}…` : text);
+/**
+ * One line of at most `n` characters, cut at a word boundary with `…` when cut. Every chat line is
+ * one line, so its markdown cannot open a list or code block that swallows the lines after it.
+ * 2026-11-01 owner screenshot: the launch post read "…Engin" (a raw `slice` cut a word mid-way).
+ * Only a single word longer than `n` (a URL, a hash) is cut inside, since it has no boundary.
+ */
+export function clip(text: string, n = 300): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= n) return flat;
+  const head = flat.slice(0, n + 1);
+  const space = head.lastIndexOf(' ');
+  return `${(space > 0 ? head.slice(0, space) : flat.slice(0, n)).replace(/[\s,;:.]+$/, '')}…`;
+}
+
+/**
+ * The goal's first sentence as plain prose, for a one-line mention (the launch post, the badge's
+ * fallback text): headings dropped, quote and list markers stripped,
+ * cut at a word boundary. The full goal renders as markdown in the modal.
+ */
+export function goalSummary(goal: string, n = 160): string {
+  // A heading is a title ("## Goal"), not prose: it is dropped, not folded into the sentence.
+  const prose = goal
+    .split('\n')
+    .filter((line) => !/^\s*#{1,6}\s/.test(line))
+    .map((line) => line.replace(/^\s*(>\s*|[-*+]\s+|\d+[.)]\s+)/, '').trim())
+    .filter(Boolean)
+    .join(' ');
+  const sentence = /^(.+?[.!?])(\s|$)/.exec(prose)?.[1] ?? prose;
+  return clip(sentence, n);
+}
+
+/** The tool result's one-paragraph account of what a launch started. */
+export function charterSummary(c: Charter): string {
+  const done =
+    'checks' in c.done
+      ? c.done.checks
+          .map((x) => (x.kind === 'command' ? `$ ${x.argv.join(' ')}` : `judged: ${x.text}`))
+          .join('; ')
+      : 'the owner judges it';
+  return `${c.name}: ${clip(c.goal, 200)} | done when ${done} | budget ${c.maxAttempts} attempts, ${c.maxLive} live, ${c.hours}h, explore ${c.exploreShare} | crew ${crewLine(c.crew)}`;
+}
+
+/** The first status of every expedition: what launched, then the planning line on its own. */
+export const launchNews = (c: { name: string; goal: string }) =>
+  `⛺ Launched **${c.name}**: ${goalSummary(c.goal)}\n\nPlanning…`;
 
 /** The chat line for one notable entry (none for an uninteresting one). */
 function newsLine(s: State, e: Entry): string[] {
@@ -131,7 +182,8 @@ function newsLine(s: State, e: Entry): string[] {
       return [`${a.id} ${outcomeLabel(e.outcome)}`];
     }
     case 'question_added':
-      return [`+ question ${e.questionId} [${e.scope}]: ${e.title}`];
+      // Never a leading `+ `: markdown reads it as a list that swallows the lines after it.
+      return [`➕ question ${e.questionId} (${e.scope}): ${clip(e.title)}`];
     case 'question_closed':
       return [
         `${e.status === 'verified' ? '✓ verified' : '✗ dropped'} ${questionOf(s, e.questionId).title}: ${clip(e.why)}`,
@@ -143,7 +195,7 @@ function newsLine(s: State, e: Entry): string[] {
     case 'feedback':
       return [`Owner ${e.feedback.t}${'text' in e.feedback ? `: ${clip(e.feedback.text)}` : ''}`];
     case 'needs_owner':
-      return [`Needs you: ${e.question}`];
+      return [`Needs you: ${clip(e.question, 2000)}`];
     case 'validation': {
       // One line per validation, when its last command check is recorded.
       const v = validationOf(s, e.validationId);
@@ -160,7 +212,7 @@ function newsLine(s: State, e: Entry): string[] {
     case 'integration_refused':
       return [`⛔ ${integrationLabel(s, integrationOf(s, e.integrationId))}`];
     case 'finished':
-      return [`Finished (${e.reason}): ${e.summary}`, ...mergeLine(s, e.reason)];
+      return [`Finished (${e.reason}): ${clip(e.summary, 2000)}`, ...mergeLine(s, e.reason)];
     default:
       return [];
   }
