@@ -34,7 +34,7 @@ export function ChannelExpeditions() {
       )}
       <ul className="channel-browser-buddies">
         {list.data?.slice(0, SIDEBAR_RECENT_EXPEDITIONS).map((expedition) => (
-          <li key={expedition.id} className="channel-browser-buddy">
+          <li key={expedition.id} className="channel-browser-buddy ui-truncate">
             <Link
               className="channel-browser-buddy-link ui-row"
               to={expeditionHref(expedition.id)}
@@ -44,7 +44,9 @@ export function ChannelExpeditions() {
                 ⚑
               </span>
               <span className="channel-browser-channel-name ui-truncate">{expedition.name}</span>
-              <small className="ui-muted">{runLabel(expedition.run)}</small>
+              <small className="ui-muted" style={{ flexShrink: 0 }}>
+                {runLabel(expedition.run)}
+              </small>
             </Link>
           </li>
         ))}
