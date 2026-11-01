@@ -510,7 +510,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       ['done', 'Widget passes, independently verified.']
     );
     assert.equal(s.questions[0].status, 'verified');
-    const last = s.statuses.find((x) => x.text.includes('**Result** (done)'))!;
+    const last = s.statuses.find((x) => x.text.includes('**Done:**'))!;
     assert.equal(last.post.t, 'posted', 'the finish was posted');
     // Finished: every idle worktree is gone; the claim's branch went too, because its commit is
     // merged into the expedition branch (per-attempt branches do not pile up in the owner's repo).

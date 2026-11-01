@@ -17,7 +17,8 @@
 .expedition-modal--dialog { width: min(1100px, 92vw); max-height: 86vh; overflow: hidden; }
 .expedition-modal--dialog.expedition-modal--live { height: 86vh; max-height: none; }
 /* A draft sizes to its content: a narrower dialog, its body scrolling under the footer. */
-.expedition-modal--draft .expedition-columns { flex: 0 1 auto; }
+.expedition-modal--draft .expedition-columns { flex: 0 1 auto; grid-template-rows: minmax(0, 1fr); }
+.expedition-modal--sheet .expedition-columns { grid-template-columns: minmax(0, 1fr); }
 .expedition-modal--draft .expedition-pane { min-height: 0; overflow-y: auto; }
 
 /* The phone's full-height sheet. */
