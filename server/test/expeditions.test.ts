@@ -10,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import { BuddiesCore } from '@unleashd/buddies-core';
 import { Ingest, defaultRoots } from '@unleashd/ingest';
+import type { Provider } from '@unleashd/shared';
 import express from 'express';
 import { createBriefings } from '../src/buddies/briefing';
 import { OWNER, buddyActor } from '../src/buddies/core';
@@ -104,12 +105,17 @@ async function fixture() {
     sessions: new Map<string, string[]>(),
     slot: { t: 'starting' } as IngestSlot,
   };
-  const host = (gate: ExecutionGate = { t: 'enabled' }, at = root): ExpeditionHost =>
+  const host = (
+    gate: ExecutionGate = { t: 'enabled' },
+    at = root,
+    installed: (provider: Provider) => boolean = () => true
+  ): ExpeditionHost =>
     createExpeditionHost({
       core,
       events,
       root: at,
       gate,
+      installed,
       meter: {
         ingest: () => meter.slot,
         sessionsOf: async (id) => {
@@ -1168,7 +1174,7 @@ test('command checks run on the host: each claimed commit is validated in a fres
     // The owner is told the branch to merge; the owner's checkout never moved.
     assert.ok(
       s.statuses.some((x) =>
-        x.text.includes(`merge branch ${branch} (head ${mergeSha.slice(0, 10)}`)
+        x.text.includes(`merge branch ${branch} (head \`${mergeSha.slice(0, 7)}\`, 1 merged claim)`)
       )
     );
     assert.equal(git(f.repo, 'rev-parse', 'main'), git(f.repo, 'rev-parse', `${branch}^1`));
@@ -1363,6 +1369,16 @@ test('a host-verified claim (command checks passed, merged) lets the manager clo
     await f.host.drain();
     assert.equal(f.stateOf(id).questions[0].status, 'verified');
     assert.equal(f.host.view(id).counts.verified, 1);
+    // The host's close reaches the owner's chat verbatim: by title, never the attempt or
+    // validation id (2026-11-02 visual pass: "host-verified: w7b1d11 … (validation vf469ad)").
+    await f.host.tick(id);
+    const chat = f
+      .stateOf(id)
+      .statuses.map((x) => x.text)
+      .join('\n');
+    const validation = f.stateOf(id).validations.find((x) => x.target.t === 'candidate')!;
+    assert.match(chat, /✓ verified Fix it: host-verified: Work on “Fix it” passed every command/);
+    assert.doesNotMatch(chat, new RegExp(`\\b(${validation.id}|${w.id})\\b`), chat);
 
     // 2026-11-01 smoke incident: the manager's close_question verified was refused on host proof.
     const closeVerified = { do: 'close_question', question: q, status: 'verified', why: 'merged' };
@@ -2615,6 +2631,53 @@ test("the expedition tool refuses a crew launch or steer and another workspace's
     const fresh = await rpcLaunch(f, 'bounds');
     assert.notEqual(fresh.id, id);
     assert.match(fresh.launched, /budget 20 attempts/);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a crew seat on a harness this host has not installed is a draft issue and refuses the launch', async () => {
+  // 2026-11-02 visual pass: on a host without codex the default crew drafted with no issue and
+  // launched; the manager planned a retry "on seat 1 (codex)" and a claude claim's independent
+  // check could only run on codex. Re-breaks if seatIssues stops asking the host what is installed.
+  const f = await fixture();
+  try {
+    const noCodex = f.hostWith(
+      { t: 'enabled' },
+      path.join(f.scratch, 'no-codex'),
+      (p) => p !== 'codex'
+    );
+    try {
+      const c = Charter.parse(charter('no-codex'));
+      assert.deepEqual(
+        (await noCodex.issues(f.workspaceId, c)).filter((i) => /not installed/.test(i)),
+        [
+          'work seat 1: codex is not installed on this host; name a crew without it',
+          'check seat 0: codex is not installed on this host; name a crew without it',
+        ]
+      );
+      await assert.rejects(
+        noCodex.launch({
+          key: 'no-codex:launch',
+          charter: c,
+          origin: { t: 'direct' },
+          launcherId: f.lead.id,
+          workspaceId: f.workspaceId,
+        }),
+        /work seat 1: codex is not installed/
+      );
+      const claudeOnly = Charter.parse({
+        ...charter('claude-only'),
+        crew: {
+          manager: { provider: 'claude' },
+          work: [{ provider: 'claude', model: 'claude-sonnet-5-5' }],
+          check: [{ provider: 'claude', model: 'claude-haiku-5-5' }],
+        },
+      });
+      assert.deepEqual(await noCodex.issues(f.workspaceId, claudeOnly), []);
+    } finally {
+      noCodex.close();
+    }
   } finally {
     await f.close();
   }

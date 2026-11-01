@@ -1,8 +1,11 @@
 import type { ExpeditionView } from '@unleashd/shared';
+import { useAtomValue } from 'jotai';
 import { type Location, useLocation, useNavigate } from 'react-router-dom';
+import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { type PolledState, usePolledFetch } from '../../hooks/usePolledFetch';
 import { channelsHref } from './channels-view';
 import { expeditionHref, expeditionUrl } from './expedition-view';
+import { buddyWorkspaceActivityAtom, overviewWorkspaces } from './workspace-order';
 
 // The expedition modal is route-addressable (/expeditions/:id) and opens OVER the view it was
 // opened from: the opener pushes the URL with `state.background`, and App.tsx renders its routes
@@ -60,9 +63,16 @@ export type ModalBase =
    * empty route at this path), so the old shell never flashes behind it. */
   | { t: 'pending'; id: string; routes: Location }
   /** A direct load whose expedition could not be read (unknown/deleted id, HTTP error): the
-   * modal shows the error over the channels expedition index (/expeditions resolves the
-   * workspace), and closing lands there instead of on an empty page. */
+   * modal shows the error over the channels expedition index of the workspace /expeditions would
+   * pick (or /expeditions itself when there is none), and closing lands there instead of on an
+   * empty page. Never /expeditions while a workspace exists: its redirect REPLACES the URL, which
+   * dropped the modal and its not-found message (2026-11-02 visual pass: /expeditions/nope
+   * showed the bare index). */
   | { t: 'unresolved'; id: string; routes: string };
+
+/** The workspace an unreadable expedition lands in: still loading, the one /expeditions picks,
+ * or none at all. */
+type Landing = { t: 'loading' } | { t: 'workspace'; id: string } | { t: 'none' };
 
 /** The channels-view expedition index for an unknown workspace (App.tsx routes it). */
 export const EXPEDITIONS_INDEX_PATH = '/expeditions';
@@ -73,13 +83,21 @@ export function useOverlayBase(location: Location, overlay: ExpeditionOverlay): 
     overlay.t === 'direct' ? expeditionUrl(overlay.id) : null,
     0
   );
+  const overview = useBuddyOverview(0, overlay.t === 'direct');
+  const [first] = overviewWorkspaces(overview.data, useAtomValue(buddyWorkspaceActivityAtom));
+  const landing: Landing =
+    overview.data === null
+      ? { t: 'loading' }
+      : first
+        ? { t: 'workspace', id: first.id }
+        : { t: 'none' };
   switch (overlay.t) {
     case 'none':
       return { t: 'page', routes: location };
     case 'over':
       return { t: 'over', id: overlay.id, routes: overlay.background };
     case 'direct':
-      return directBase(overlay.id, direct, location);
+      return directBase(overlay.id, direct, landing, location);
   }
 }
 
@@ -87,6 +105,7 @@ export function useOverlayBase(location: Location, overlay: ExpeditionOverlay): 
 function directBase(
   id: string,
   direct: PolledState<ExpeditionView>,
+  landing: Landing,
   location: Location
 ): ModalBase {
   switch (direct.kind) {
@@ -101,6 +120,18 @@ function directBase(
         routes: channelsHref(direct.data.workspaceId, { kind: 'expeditions' }),
       };
     case 'failed':
+      return unresolvedBase(id, landing, location);
+  }
+}
+
+/** δ over where an unreadable expedition lands: nothing under it until the workspace is known. */
+function unresolvedBase(id: string, landing: Landing, location: Location): ModalBase {
+  switch (landing.t) {
+    case 'loading':
+      return { t: 'pending', id, routes: location };
+    case 'workspace':
+      return { t: 'unresolved', id, routes: channelsHref(landing.id, { kind: 'expeditions' }) };
+    case 'none':
       return { t: 'unresolved', id, routes: EXPEDITIONS_INDEX_PATH };
   }
 }

@@ -460,7 +460,9 @@ hours, exploreShare and crew take NAMED defaults (`CHARTER_DEFAULTS`, `DEFAULT_C
 result's `defaulted` lists each applied, beside `launched` (a one-line summary) and the page path
 (R9: data, not a link to post). A `draft` action returns `{ready, issues, advice, defaulted,
 resolved, charter}` without writing: the R4
-preflight, each crew seat against the provider catalog, and a work seat with no check seat on
+preflight, each crew seat against the provider catalog and the host's installed harnesses
+(2026-11-02: the default crew's codex seats launched on a host without codex, where a claude
+claim's independent check could never start), and a work seat with no check seat on
 another model (it could never be checked, so launch refuses it too). The briefing line names the
 owner's phrasing; the tool description stayed within the worker budget. The owner's phrasing and
 variants are in README.md "How to start one".

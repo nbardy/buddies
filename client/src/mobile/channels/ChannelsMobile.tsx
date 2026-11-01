@@ -62,13 +62,16 @@ import {
 } from '../../components/buddies/channels-view';
 import type { Buddy, Channel, ChannelUnread, Inbox } from '../../components/buddies/types';
 import { NEW_WORKSPACE_PATH } from '../../components/buddies/workspace-home';
+import {
+  buddyWorkspaceActivityAtom,
+  overviewWorkspaces,
+} from '../../components/buddies/workspace-order';
 import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 import { rowBuddy } from '../../utils/conversation-row';
 import { MobileEmptyPanel, MobilePage, MobileSection } from '../components/MobileUI';
 import { ChannelComposerMobile, MobileChannelComposeFrame } from './ChannelComposerMobile';
 import { Row, type RowContext, ScreenHeader, useChannelsDm } from './ChannelRowsMobile';
-import { buddyWorkspaceActivityAtom, overviewWorkspaces } from './ChannelsIndex';
 import { ThreadsScreen } from './ThreadsMobile';
 
 // Channels on a phone, following Slack's mobile app: one screen at a time.

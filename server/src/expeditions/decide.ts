@@ -3,6 +3,7 @@ import type { ManagerAction } from './charter';
 import type { Entry, Integration, Outcome, State, Validation } from './ledger';
 import {
   apply,
+  attemptOf,
   byId,
   doneValidationChecks,
   judgedChecks,
@@ -11,7 +12,7 @@ import {
   validationOf,
   validationPassed,
 } from './ledger';
-import { withStatus } from './news';
+import { attemptTitle, withStatus } from './news';
 import {
   type Panel,
   acceptanceOf,
@@ -238,7 +239,10 @@ function codeClaim(o: Outcome): string | undefined {
 }
 
 /** A host-verified claim (queries.ts Verification) closes its open question verified, which
- * unlocks the questions that wait on it (R5). The why names the host's proof. */
+ * unlocks the questions that wait on it (R5). The why names the host's proof in owner words: the
+ * owner's chat prints it verbatim. 2026-11-02 visual pass: "host-verified: w7b1d11 passed every
+ * command check (validation vf469ad)" was the one raw-id line left in the chat; the manager's
+ * brief lists the validations and attempts by id already. */
 function closeHostVerified(s: State, push: (e: Entry) => void, at: string): void {
   for (const h of hostVerifications(s)) {
     if (byId(s.questions, h.questionId)?.status !== 'open') continue;
@@ -247,7 +251,7 @@ function closeHostVerified(s: State, push: (e: Entry) => void, at: string): void
       at,
       questionId: h.questionId,
       status: 'verified',
-      why: `host-verified: ${h.claimAttemptId} passed every command check (validation ${h.validationId}) and merged into ${s.repo.branch} as ${h.mergeSha.slice(0, 10)}`,
+      why: `host-verified: ${attemptTitle(s, attemptOf(s, h.claimAttemptId))} passed every command check and merged into ${s.repo.branch} as \`${h.mergeSha.slice(0, 7)}\``,
     });
   }
 }

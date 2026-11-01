@@ -5,7 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { CHAT_KIND, ProviderSchema, encodeRows, kindBuddyContext } from '@unleashd/shared';
 import { recordsCarrier } from './turns/intake';
 
-import { attachExecution, executeCommand } from '@nbardy/agent-cli';
+import { attachExecution, executeCommand, getHarness } from '@nbardy/agent-cli';
 import compression from 'compression';
 import express, { type ErrorRequestHandler } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -89,7 +89,7 @@ import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { createDependencyChecks, registerDependencyRoutes } from './providers/dependencies';
-import { installedAgent } from './providers/installed-agent';
+import { installedAgent, onPath } from './providers/installed-agent';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
@@ -945,6 +945,7 @@ void runServerStartup(
             ingest: currentIngest,
             sessionsOf: async (id) => boundSessions(await conversationConfigService.getRecord(id)),
           },
+          installed: (provider) => onPath(getHarness(provider).binary, process.env),
         })
       );
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).

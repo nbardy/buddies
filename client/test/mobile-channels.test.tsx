@@ -259,7 +259,7 @@ test('mobile Home starts and lists a Buddy setup chat; a held post offers its co
 // Regression guard: the Channels tab once opened the alphabetically first
 // workspace (an empty one) instead of where the team was active.
 test('the Channels tab opens the most recently active workspace first', async () => {
-  const { overviewWorkspaces } = await import('../src/mobile/channels/ChannelsIndex');
+  const { overviewWorkspaces } = await import('../src/components/buddies/workspace-order');
   const ordered = overviewWorkspaces(
     [
       rosterFixture([], { id: 'a', name: 'alpha-empty' }),

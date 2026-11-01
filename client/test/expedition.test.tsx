@@ -192,7 +192,7 @@ test('the expedition modal leads with its state, the owner question, the goal as
   assert.match(html, /branch exp\/widget-abc123\/w1/);
   assert.match(html, /checks failed/);
   assert.match(html, /check 1: FAILED \(exit 3\): widget still broken/);
-  assert.match(html, /expedition\/widget-abc123 @ 9f8e7d6/);
+  assert.match(html, /expedition\/widget-abc123(<[^>]+>)*@ 9f8e7d6/);
   assert.match(html, /last refusal: .*merge conflict in docs\/README\.md/);
   // Spend is measured or says why not (design.md R6); nothing is priced.
   assert.match(html, /title="Cost: 2k input \+ 300 output tokens .* 1 not measured/);
@@ -509,9 +509,24 @@ test('a deep link to an unreadable expedition shows the error over the channels 
       throw new Error('HTTP 404');
     },
   });
+  // With a workspace known, the base is that workspace's index itself, never /expeditions: its
+  // redirect replaces the URL and dropped the modal (2026-11-02 visual pass: /expeditions/nope
+  // showed the bare index with no not-found message).
+  await loadResource({
+    key: '/api/buddies/overview',
+    load: async () => [rosterFixture([], { id: 'ws-1', name: 'one' })],
+  });
+  await loadResource({
+    key: '/api/buddies/workspaces/ws-1/inbox',
+    load: async () => inboxFixture([{ channel: publicChannel('ch_1', 'general'), unread: 0 }]),
+  });
   const html = await appAt('/expeditions/exp-gone');
   assert.match(html, /HTTP 404/, 'the modal says why');
-  assert.match(html, /Channels/, 'the channels expedition index is underneath');
+  assert.match(
+    html,
+    /<section class="channel-browser-pane ui-stack" aria-label="Expeditions">/,
+    'the workspace’s channels expedition index is underneath'
+  );
   assert.doesNotMatch(html, /class="sidebar/);
 });
 

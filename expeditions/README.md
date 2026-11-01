@@ -186,8 +186,9 @@ maxLive (2), hours (8), exploreShare (0.2) and crew (the default crew: manager c
 claude, codex; check codex, claude) may be left out, and the tool result lists every default it
 applied (`defaulted`) with a one-line summary of what launched and the page link. `draft` runs
 the same checks without launching: preflight (repository, base commit, Cambium, each command
-check's binary), crew seats against the provider catalog, a work seat with no independent check
-seat; plus advice (no command check, no out-of-scope fence).
+check's binary), crew seats against the provider catalog and this host's installed harnesses (a
+seat on a harness that is not on PATH, e.g. the default crew's codex seats on a claude-only host,
+is an issue naming the seat), a work seat with no independent check seat; plus advice (no command check, no out-of-scope fence).
 
 Safety boundaries (tested through the real MCP endpoint): a crew Buddy cannot launch or steer
 (it could otherwise resume a run the owner paused); another workspace's Buddy cannot see or

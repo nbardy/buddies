@@ -274,7 +274,10 @@ function BranchChip({ branch, head }: { branch: string; head: string }) {
       onClick={copy}
       title={`${COPY_LABEL[state]} ${branch}`}
     >
-      {branch} @ {head.slice(0, 7)} · {COPY_LABEL[state]}
+      <span className="ui-truncate">{branch}</span>
+      <span className="expedition-chip-tail">
+        @ {head.slice(0, 7)} · {COPY_LABEL[state]}
+      </span>
     </button>
   );
 }

@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { BuddiesCore } from '@unleashd/buddies-core';
-import type { BuddyContext, ExpeditionSummary, ExpeditionView } from '@unleashd/shared';
+import {
+  type BuddyContext,
+  type ExpeditionSummary,
+  type ExpeditionView,
+  type Provider,
+  ProviderSchema,
+} from '@unleashd/shared';
 import { type TurnDirectory, WORKSPACE_DIRECTORY } from '../buddies/briefing';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
@@ -112,6 +118,10 @@ export interface ExpeditionHostOptions {
   gate: ExecutionGate;
   /** Where attempt cost is read from (meter.ts): conversation records and the transcript store. */
   meter: MeterPorts;
+  /** Whether a provider's harness binary is on the PATH the runner spawns with (server: the
+   * installed-agent PATH walk). A seat on a missing harness is a launch issue, never a spawn
+   * ENOENT mid-expedition. */
+  installed: (provider: Provider) => boolean;
   now?: () => Date;
 }
 
@@ -130,16 +140,30 @@ function gateIssues(gate: ExecutionGate): string[] {
   }
 }
 
-/** Each crew seat checked against the provider catalog (worker-config.ts): one issue per seat. */
-function seatIssues(charter: Charter): string[] {
+/**
+ * Each crew seat checked against the provider catalog (worker-config.ts) and against this host's
+ * installed harnesses: one issue per seat. 2026-11-02 visual pass: on a host without codex the
+ * default crew (codex work and check seats) drafted with no issue and launched; the manager then
+ * planned "send the retry to seat 1 (codex)", and a claude claim's independent check could only
+ * run on codex, a spawn that cannot start.
+ */
+function seatIssues(charter: Charter, installed: (provider: Provider) => boolean): string[] {
   const { crew } = charter;
-  return [crew.manager, ...crew.work, ...crew.check].flatMap((seat) => {
+  const seats = [
+    { where: 'manager', seat: crew.manager },
+    ...crew.work.map((seat, i) => ({ where: `work seat ${i}`, seat })),
+    ...crew.check.map((seat, i) => ({ where: `check seat ${i}`, seat })),
+  ];
+  return seats.flatMap(({ where, seat }) => {
     try {
       checkedRunConfig(seat);
-      return [];
     } catch (error) {
       return [(error as Error).message];
     }
+    const provider = ProviderSchema.parse(seat.provider);
+    return installed(provider)
+      ? []
+      : [`${where}: ${provider} is not installed on this host; name a crew without it`];
   });
 }
 
@@ -176,7 +200,7 @@ interface Streak {
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function createExpeditionHost(options: ExpeditionHostOptions) {
-  const { core, events, root, gate, meter } = options;
+  const { core, events, root, gate, meter, installed } = options;
   const now = () => (options.now ?? (() => new Date()))().toISOString();
   /**
    * Each expedition's folded state, kept current by applying every appended batch (audit
@@ -1164,7 +1188,11 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
    * seat against the provider catalog. Reads only.
    */
   async function preflightOf(workspaceId: string, charter: Charter) {
-    const issues = [...gateIssues(gate), ...charterIssues(charter), ...seatIssues(charter)];
+    const issues = [
+      ...gateIssues(gate),
+      ...charterIssues(charter),
+      ...seatIssues(charter, installed),
+    ];
     const workspace = (await core.listWorkspaces()).find((w) => w.id === workspaceId);
     if (!workspace)
       return { t: 'refused' as const, reasons: [`no workspace ${workspaceId}`, ...issues] };

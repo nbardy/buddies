@@ -264,7 +264,7 @@ function mergeLine(s: State, reason: FinishReason): string[] {
   switch (reason) {
     case 'done':
       return [
-        `To take the result, merge branch ${s.repo.branch} (head ${headOf(s).slice(0, 10)}, ${merged} integrated claim(s)); nothing was written to your checkout.`,
+        `To take the result, merge branch ${s.repo.branch} (head \`${headOf(s).slice(0, 7)}\`, ${merged} merged ${merged === 1 ? 'claim' : 'claims'}); nothing was written to your checkout.`,
       ];
     case 'attempts_spent':
     case 'decisions_spent':
