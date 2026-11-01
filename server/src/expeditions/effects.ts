@@ -60,6 +60,16 @@ export function pendingEffects(s: State): Effect[] {
   if (s.crew.t === 'pending') return [{ t: 'create_crew' }];
   const finished = s.run.t === 'finished';
   const effects: Effect[] = [
+    // Finished: nothing a live attempt does can matter any more, so its runs are asked to stop
+    // (once); its end, or the host's `abandoned` after the grace, then releases its tree. First,
+    // so stopping paid runs never waits behind a status post or a tree release.
+    ...(finished
+      ? s.attempts.flatMap((a): Effect[] =>
+          a.phase.t === 'posted' && !(a.id in s.cancels)
+            ? [{ t: 'cancel_attempt', attemptId: a.id }]
+            : []
+        )
+      : []),
     ...(s.badgePost.t === 'pending' ? [{ t: 'post_badge' } as const] : []),
     ...s.statuses
       .filter((x) => x.post.t === 'pending')
@@ -90,15 +100,6 @@ export function pendingEffects(s: State): Effect[] {
         : []
     ),
     ...managerTreeEffects(s),
-    // Finished: nothing a live attempt does can matter any more, so its runs are asked to stop
-    // (once); its end, or the host's `abandoned` after the grace, then releases its tree.
-    ...(finished
-      ? s.attempts.flatMap((a): Effect[] =>
-          a.phase.t === 'posted' && !(a.id in s.cancels)
-            ? [{ t: 'cancel_attempt', attemptId: a.id }]
-            : []
-        )
-      : []),
   ];
   switch (s.integrationTree.status.t) {
     case 'creating':

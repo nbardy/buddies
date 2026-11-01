@@ -153,12 +153,28 @@ const refuted = (s: State, claimAttemptId: string) =>
     .filter((p) => p.claimAttemptId === claimAttemptId && p.verdict !== 'pending')
     .at(-1)?.verdict === 'not_verified';
 
-/** The host validation of a claim's candidate commit (absent: none was planned for it). One per
- * claim: planned once, from its question's `command` acceptance (design.md R11). */
-export const candidateValidation = (s: State, claimAttemptId: string): Validation | undefined =>
-  s.validations.find(
-    (v) => v.target.t === 'candidate' && v.target.claimAttemptId === claimAttemptId
-  );
+/**
+ * The host validation of a claim's candidate commit under its question's CURRENT acceptance
+ * (absent: none was planned for that revision). One per claim and acceptance revision (design.md
+ * R11): a validation planned under an earlier acceptance never decides the claim any more.
+ * 2026-11-01 review: one validation per claim, kept whatever the acceptance became, meant a claim
+ * first validated by a command that could not pass (the goal verifier, or a pre-R11 validation of
+ * the charter's checks) could never integrate, the geometry deadlock at the level of one claim.
+ */
+export function candidateValidation(s: State, claimAttemptId: string): Validation | undefined {
+  const claim = attemptOf(s, claimAttemptId);
+  if (claim.spec.kind !== 'work') return undefined;
+  const { rev } = questionOf(s, claim.spec.questionId).acceptance;
+  return s.validations
+    .filter(
+      (v) =>
+        v.target.t === 'candidate' &&
+        v.target.claimAttemptId === claimAttemptId &&
+        v.basis.t === 'acceptance' &&
+        v.basis.rev === rev
+    )
+    .at(-1);
+}
 
 /** Host-verified claims a later panel has not refuted: the claim's candidate validation (its
  * question's command acceptance, or a legacy validation of the charter's checks) passed, and its

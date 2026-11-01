@@ -24,7 +24,7 @@
 [{"t":"attempt_posting","at":"2026-10-31T23:00:19.000Z","attemptId":"w64130b","body":"[legacy work brief w64130b]"}]
 [{"t":"attempt_posted","at":"2026-10-31T23:00:19.000Z","attemptId":"w64130b","requestId":"post_legacy_w64130b"}]
 [{"t":"attempt_ended","at":"2026-10-31T23:00:20.000Z","attemptId":"w475a3b","outcome":{"t":"work","result":{"result":"finding","statement":"Neither route is usable now: the host runs the final verifier on every candidate.","evidence":[]}}},{"t":"attempt_planned","at":"2026-10-31T23:00:20.000Z","attemptId":"m78cabb","spec":{"kind":"manager"}}]
-[{"t":"worktree_released","at":"2026-10-31T23:00:21.000Z","attemptId":"w475a3b","release":{"t":"absent"}}]
+[{"t":"worktree_released","at":"2026-10-31T23:00:21.000Z","attemptId":"w475a3b","release":{"t":"kept","commits":1}}]
 [{"t":"attempt_posting","at":"2026-10-31T23:00:22.000Z","attemptId":"m78cabb","body":"[legacy manager brief m78cabb]"}]
 [{"t":"attempt_posted","at":"2026-10-31T23:00:22.000Z","attemptId":"m78cabb","requestId":"post_legacy_m78cabb"}]
 [{"t":"attempt_ended","at":"2026-10-31T23:00:23.000Z","attemptId":"m78cabb","outcome":{"t":"manager","actions":[{"do":"ask_owner","question":"Please designate the accountable host integration maintainer: the host requires the final verifier to pass before any preparation commit can integrate."}]}}]

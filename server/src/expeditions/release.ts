@@ -220,8 +220,8 @@ export async function releaseWorktree(
 ): Promise<Released> {
   if (!(await cambiumWorkspace(root, name))) return only(await releaseUnregistered(root, at));
   const branch = await branchState(root, at);
-  const commits = branch.t === 'present' ? branch.shas.length : 0;
-  if (commits > 0 && keepCommits) return only({ t: 'kept', commits });
+  const kept = keptRelease(branch, keepCommits);
+  if (kept) return only(kept);
   const blockers = await removalBlockers(at, branch);
   if (blockers.length > 0) return only({ t: 'left', reason: blockers.join('; ') });
   const tip = await unintegratedTip(root, at, into);
@@ -233,9 +233,25 @@ export async function releaseWorktree(
       return { release: { t: 'removed', branchDeleted: false }, preserved: removed.preserved };
     case 'present': {
       const branchDeleted =
-        commits === 0 ? await dropEmptyBranch(root, at) : await dropMergedBranch(root, at, into);
+        branch.shas.length === 0
+          ? await dropEmptyBranch(root, at)
+          : await dropMergedBranch(root, at, into);
       return { release: { t: 'removed', branchDeleted }, preserved: removed.preserved };
     }
+  }
+}
+
+/** A tree kept for its commits (absent: it is not kept). A missing branch has no commits to
+ * keep: the guard ladder decides that tree like any other (2026-11-01 review: it counted as a
+ * branch with 0 commits, a silent default). */
+function keptRelease(branch: BranchState, keepCommits: boolean): Release | undefined {
+  switch (branch.t) {
+    case 'present':
+      return keepCommits && branch.shas.length > 0
+        ? { t: 'kept', commits: branch.shas.length }
+        : undefined;
+    case 'missing':
+      return undefined;
   }
 }
 

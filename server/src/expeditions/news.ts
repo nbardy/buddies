@@ -318,7 +318,7 @@ export function outcomeLabel(o: Outcome): string {
     case 'malformed':
       return `answered without a valid result (${clip(o.error, 120)})`;
     case 'unreported_commits':
-      return `answered without a valid result but committed ${o.shas.length} commit(s) (${o.shas.map((x) => x.slice(0, 10)).join(', ')}): claimable`;
+      return `${outcomeLabel(o.ended)}; its branch holds ${o.shas.length} unreported commit(s) (${o.shas.map((x) => x.slice(0, 10)).join(', ')}): claimable`;
     case 'failed':
       return `run ${o.status}`;
     case 'abandoned':
@@ -338,7 +338,7 @@ export function outcomeDetail(o: Outcome): string {
     case 'malformed':
       return `MALFORMED ANSWER (${o.error}): ${o.raw.slice(0, 400)}`;
     case 'unreported_commits':
-      return `UNREPORTED COMMITS (${o.error}): its branch holds ${o.shas.join(', ')}; "claim" one to have it validated. Its answer: ${o.raw.slice(0, 400)}`;
+      return `UNREPORTED COMMITS: its branch holds ${o.shas.join(', ')}; "claim" one to have it validated. It ended: ${outcomeDetail(o.ended)}`;
     case 'failed':
       return `RUN ${o.status.toUpperCase()}`;
     case 'abandoned':

@@ -143,11 +143,14 @@ check panel on another model). The done commands never run on a candidate unless
 one as a question's acceptance, so a fail-closed final verifier does not block the preparation
 steps that build toward it (2026-11-01 incident `own-engine-geometry-opti-1b837b`). Questions added
 before R11 fold with `{t:'panel'}`, provenance `legacy`; the manager may change any open
-question's acceptance with `set_acceptance`.
+question's acceptance with `set_acceptance`, which re-validates the question's unmerged claims
+(only the current acceptance decides). A command acceptance trusts its validator files at the
+expedition head when it was declared; a candidate that changes them is refused.
 
 Answers (R11): an attempt's answer ends with a fenced json block, or a bare JSON object that ends
-the answer. One that cannot be read gets one repair request on the same seat before it is final; a
-work attempt whose final answer has no valid result but whose branch holds commits ends as
+the answer. One that cannot be read gets one repair request on the same seat before it is final
+(not after the expedition finished); a work attempt that ends with anything but a code claim (an
+unreadable answer, a finding, blocked, failed) while its branch holds commits ends as
 `unreported_commits {shas}`, and the manager's `claim` action names one of them as its claim.
 
 The tool guide in the Buddy briefing carries a short how-to: when to suggest an

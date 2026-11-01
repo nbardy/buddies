@@ -1,5 +1,5 @@
 import type { ManagerAction } from './charter';
-import type { Entry, Integration, Outcome, State } from './ledger';
+import type { Entry, Integration, Outcome, State, Validation } from './ledger';
 import {
   apply,
   byId,
@@ -12,6 +12,7 @@ import {
 } from './ledger';
 import { withStatus } from './news';
 import {
+  type Panel,
   acceptanceOf,
   candidateValidation,
   claimAt,
@@ -136,8 +137,23 @@ export function decide(s: State, clock: Clock): Entry[] {
 
 const runOf = (s: State): State['run']['t'] => s.run.t;
 
-/** Outcomes whose commits a manager may claim (R11): the answer reported no valid result. */
-const CLAIMABLE: ReadonlySet<Outcome['t']> = new Set(['malformed', 'unreported_commits']);
+/** A work attempt's end whose commits a manager may claim (R11): anything but a code claim. A
+ * legacy end (a pre-R11 `malformed` or `finding` whose branch kept a commit, 2026-11-01 incident:
+ * w64130b and w475a3b) is claimable too; the host then checks its branch holds the commit. */
+function claimable(o: Outcome): boolean {
+  switch (o.t) {
+    case 'work':
+      return o.result.result !== 'claim' || o.result.change.t !== 'commit';
+    case 'malformed':
+    case 'unreported_commits':
+    case 'failed':
+    case 'abandoned':
+      return true;
+    case 'manager':
+    case 'check':
+      return false;
+  }
+}
 
 /**
  * A manager turn is due when it has something to act on. While the host validates or merges, a
@@ -160,7 +176,8 @@ function managerDue(s: State): boolean {
  * a manager asking for work past the budget got "attempt budget spent", which was news, which
  * woke a manager, up to the decision cap (about 2N unmetered turns doing nothing).
  */
-const managerEcho = (e: Entry) => e.t === 'rejected' || e.t === 'question_added';
+const managerEcho = (e: Entry) =>
+  e.t === 'rejected' || e.t === 'question_added' || e.t === 'acceptance_set';
 
 /** A code claim (ended, or adopted from unreported commits) whose question is accepted by a
  * command and whose candidate validation has not finished. */
@@ -261,60 +278,60 @@ function managerSetup(s: State): Setup {
 
 /**
  * Why a claim may not be merged into the expedition branch (design.md R3, R11), empty when it
- * may. Its question's acceptance decides: `command` needs the claim's candidate validation
- * passed; `panel` needs its latest check panel verified. Either way a panel that ran must not
- * have refuted it, and a validation that ran (a legacy one included) must have passed: nothing
- * reaches the branch on a worker's word alone.
+ * may. Only its question's CURRENT acceptance decides (a validation planned under an earlier one
+ * never does): `command` needs the claim's validation for that acceptance passed, and no panel
+ * that ran on it refuted it; `panel` needs its latest check panel verified. Nothing reaches the
+ * branch on a worker's word alone.
  */
 function integrationBlockers(s: State, claimAttemptId: string, questionId: string): string[] {
-  const validation = candidateValidation(s, claimAttemptId);
   const latest = panels(s)
     .filter((p) => p.claimAttemptId === claimAttemptId)
     .at(-1);
-  const validationBlocker = !validation
-    ? []
-    : !validationComplete(validation)
-      ? ['its candidate validation is still running']
-      : !validationPassed(validation)
-        ? ['its candidate validation did not pass']
-        : [];
-  const panelBlocker = !latest
-    ? []
-    : latest.verdict === 'pending'
-      ? ['a check panel on it is still running']
-      : latest.verdict === 'not_verified'
-        ? ['its latest check panel did not verify it']
-        : [];
-  const ran = { validation: validation !== undefined, panel: latest !== undefined };
-  return [...acceptanceBlocker(s, questionId, ran), ...validationBlocker, ...panelBlocker];
-}
-
-/** What the question's acceptance itself still needs: its own kind of proof must have run. */
-function acceptanceBlocker(
-  s: State,
-  questionId: string,
-  ran: { validation: boolean; panel: boolean }
-): string[] {
   const rule = acceptanceOf(s, questionId);
   switch (rule.t) {
     case 'command':
-      return ran.validation
-        ? []
-        : [
-            `its commit has no candidate validation (question ${questionId} is accepted by $ ${rule.argv.join(' ')})`,
-          ];
+      return [
+        ...commandBlocker(candidateValidation(s, claimAttemptId), questionId, rule.argv),
+        ...(latest?.verdict === 'not_verified' ? ['its latest check panel refuted it'] : []),
+        ...(latest?.verdict === 'pending' ? ['a check panel on it is still running'] : []),
+      ];
     case 'panel':
-      return ran.panel
-        ? []
-        : [`it needs a verified check panel (question ${questionId} is accepted by a panel)`];
+      return panelBlocker(latest, questionId);
+  }
+}
+
+function commandBlocker(
+  validation: Validation | undefined,
+  questionId: string,
+  argv: string[]
+): string[] {
+  if (!validation)
+    return [
+      `its commit has no candidate validation under the current acceptance of ${questionId} ($ ${argv.join(' ')})`,
+    ];
+  if (!validationComplete(validation)) return ['its candidate validation is still running'];
+  return validationPassed(validation) ? [] : ['its candidate validation did not pass'];
+}
+
+function panelBlocker(latest: Panel | undefined, questionId: string): string[] {
+  if (!latest)
+    return [`it needs a verified check panel (question ${questionId} is accepted by a panel)`];
+  switch (latest.verdict) {
+    case 'verified':
+      return [];
+    case 'pending':
+      return ['a check panel on it is still running'];
+    case 'not_verified':
+      return ['its latest check panel did not verify it'];
   }
 }
 
 /**
- * Every code claim on a question accepted by a `command` is validated once by the host (design.md
- * R2, R11), as soon as it ends (or a manager's claim of its unreported commits is adopted): the
- * host runs that command on the immutable candidate commit; no agent runs or reports it. The
- * goal's done checks never run here (they run on the head at done).
+ * Every code claim on a question accepted by a `command` is validated by the host (design.md R2,
+ * R11) once per acceptance revision, as soon as it ends (or a manager's claim of its unreported
+ * commits is adopted), and again when the manager changes that acceptance while the claim is not
+ * merged: the host runs the command on the immutable candidate commit; no agent runs or reports
+ * it. The goal's done checks never run here (they run on the head at done).
  */
 function planCandidateValidations(s: State, clock: Clock, push: (e: Entry) => void): void {
   for (const a of s.attempts) {
@@ -322,6 +339,7 @@ function planCandidateValidations(s: State, clock: Clock, push: (e: Entry) => vo
     const sha = codeClaim(a.phase.outcome);
     const rule = acceptanceOf(s, a.spec.questionId);
     if (sha === undefined || rule.t !== 'command' || candidateValidation(s, a.id)) continue;
+    if (s.integrations.some((i) => i.claimAttemptId === a.id && i.status.t !== 'refused')) continue;
     push({
       t: 'validation_planned',
       at: clock.now,
@@ -438,9 +456,9 @@ function applyAction(
       const attempt = byId(s.attempts, action.attempt);
       if (!attempt || attempt.spec.kind !== 'work')
         return reject(`no work attempt ${action.attempt}`);
-      if (attempt.phase.t !== 'ended' || !CLAIMABLE.has(attempt.phase.outcome.t))
+      if (attempt.phase.t !== 'ended' || !claimable(attempt.phase.outcome))
         return reject(
-          `only a work attempt that ended without a valid result (malformed or unreported commits) is claimed; ${attempt.id} is ${attempt.phase.t}`
+          `only a work attempt that ended without a code claim (unreported commits, malformed, a finding, blocked, failed) is claimed; ${attempt.id} is ${attempt.phase.t === 'ended' ? 'a code claim' : attempt.phase.t}`
         );
       const prior = s.adoptions[attempt.id];
       if (prior && prior.t !== 'refused')

@@ -82,10 +82,14 @@ async function executableFile(file: string): Promise<boolean> {
  * interleaved) is kept as a bounded tail.
  *
  * Known limit: leading its own group also means a check outlives a server crash. The ledger holds
- * no pid (one could not be trusted across a reboot), so on replay `run_validation` runs the
- * interrupted check again in the same tree while the orphan may still be running there; the two
- * can race on build outputs, and the orphan is never killed (it ends at its own pace, unbounded
- * by the timeout). The recorded outcome is always the replayed run's.
+ * no pid (one could not be trusted across a reboot), so the orphan is never killed (it ends at
+ * its own pace, unbounded by the timeout). On replay the interrupted validation's tree is
+ * discarded and its unrecorded checks run again in a FRESH tree at the same sha (host.ts
+ * `interrupted`, audit #10), so the two never share build outputs; the recorded outcome is the
+ * replayed run's.
+ * Known limit: the throwaway HOME hides `$HOME`, not the owner's files. There is no sandbox, and
+ * USER/LOGNAME pass through, so a check that names the owner's home by path (or `~user`) still
+ * reads it (design.md R11).
  */
 export async function runCommand(
   check: Pick<CommandCheck, 'argv' | 'timeoutSeconds'>,

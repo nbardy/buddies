@@ -631,8 +631,17 @@ question carries `acceptance: {rule, provenance}` with
 changeable on an open question with `set_acceptance`. A `command` acceptance is host-run on the
 claim's immutable candidate in a fresh tree, exactly as before (a validation now freezes its
 `checks` when planned: the acceptance for a candidate, the charter's commands for the head). A
-`panel` acceptance needs a verified independent check panel before `integrate`. Either way a
-validation that ran must have passed and a later refuting panel blocks the merge. Host
+`panel` acceptance needs a verified independent check panel before `integrate`; a `command`
+acceptance needs the candidate validation of the CURRENT acceptance passed, and a refuting panel
+on it blocks the merge. Each declaration is a revision (`rev`, `trustedSha` = the expedition head
+when it was declared; ledger.ts `DeclaredAcceptance`). A validation records the revision it was
+planned for (`basis`), only the current revision's validation decides a claim, and a
+`set_acceptance` plans a new validation for every unmerged claim on that question (2026-11-01
+review: one validation per claim, kept whatever the acceptance became, meant a claim first
+validated by a command that could not pass, or a pre-R11 validation of `verify.py`, never
+integrated: the same deadlock at the level of one claim). `acceptance_set` is shown to the next
+manager like `question_added`, so a turn that only fixes an acceptance is followed by one that
+acts on it instead of a quiescent "needs you". Host
 verification (R9 P4) follows: a claim is host-verified when its candidate validation passed and it
 was integrated. Ledgers written before R11 fold through one κ (`ledger.ts canonical`): a
 `question_added` without acceptance becomes `{rule:{t:'panel'}, provenance:'legacy'}` (explicit
@@ -644,15 +653,22 @@ command would run anyway.
 
 **L2 — answers lost on format.** The manager answered a bare JSON object, the worker that
 committed the verifier (`w64130b`) a prose summary; both became `malformed` and the commit was
-ignored. Now `parseOutcome` takes the last fenced json block, or a bare JSON object that ends the
-answer (strict schema unchanged). A first answer that does not parse is not final: the host
+ignored. Now `parseOutcome` takes a bare top-level JSON object that ends the answer after the
+last fenced json block (or with no fence), else that last fenced block (strict schema unchanged).
+The bare final object wins so an answer that quotes a fenced snippet and ends with its own result
+is not read as the snippet. A first answer that does not parse is not final: the host
 records `attempt_repair_posting {error, body}` and posts ONE repair request on the same seat
 (keyed `exp:<id>:attempt:<a>:repair`; it quotes the answer and the schema; a worker's repair run
 starts in the same worktree, matched by its bytes). Phases carry the round
-(`posting|posted {round: brief|repair}`); a malformed repair answer ends the attempt. A work
-attempt whose final answer has no valid result (including a claim its branch does not hold) while
-its branch holds commits beyond its base ends `unreported_commits {error, raw, shas}`. The manager
-may `claim` a commit of such an attempt (or of a legacy `malformed` one): `claim_planned`, then
+(`posting|posted {round: brief|repair}`); a malformed repair answer ends the attempt. No repair
+is posted once the expedition is finished: the answer ends the attempt as it is (2026-11-01
+review: a repair after stop started a paid run the one-shot cancel never stopped). A work attempt
+that ends with anything but a code claim (a finding, blocked, malformed, failed, cancelled,
+abandoned; a claim its branch does not hold is malformed) while its branch holds commits beyond
+its base ends `unreported_commits {shas, ended}` (`ended` is how it ended by itself). The
+live run had two such commits: `w64130b` (malformed) and `w475a3b` (a `finding` whose tree was
+kept with ACCEPTANCE_ROUTE.md). The manager may `claim` a commit of such an attempt (or of a
+legacy `malformed`, `finding`, `blocked` or failed one): `claim_planned`, then
 the host checks the claim against that attempt's branch and custody (`claimHeld`, as for any
 claim) and records `claim_adopted` (the attempt's outcome becomes the claim, validated or checked
 per its question's acceptance) or `claim_refused {reason}`. A pending adoption counts as host
@@ -672,8 +688,11 @@ own command (never `verify.py`) and integrates it.
 their own, and a failure is a reason, never a throw before decide. Decide checks the owner's stop
 and the deadline before setup and everything else. A tick whose observation failed or that threw
 extends the expedition's failure streak; after 3 in a row the host appends `tick_failed {failures,
-reason}` (news, page `status`) and waits a doubling backoff (1 min up to 30 min); an owner steer
-retries at once.
+reason}` (news, page `status`) and waits a doubling backoff (1 min up to 30 min); an owner steer,
+or an owner post in the expedition chat (the L3 resume path), retries at once. Effects run each
+on its own: one that throws is a reason of that tick, never a stop for the effects after it, and
+a finished expedition's `cancel_attempt` effects come first (2026-11-01 review: a failing tree
+release kept the stop's cancels from running).
 
 **Audit #4 — ledger tear.** `store.ts appendBatch` writes, then fsyncs, then the host applies; a
 write that fails is cut back (`ftruncate`) to the size before it, so a failed append never leaves
@@ -716,16 +735,23 @@ still posted after finish (it may already exist) and is then cancelled the same 
 **Audit #3 — a throwaway HOME for checks.** `runCommand` takes a scratch directory beside the
 validation tree (`<tree>.scratch`, never inside it, so a "clean checkout" check is not disturbed),
 makes `home/` and `tmp/` there empty for the run, passes them as `HOME` and `TMPDIR`, and removes
-them after. The curated environment no longer carries the owner's HOME, so a check cannot read
-`~/.ssh`, `~/.aws` or a CLI's saved token. Network and separate-user isolation are not attempted
-(audit open question 6).
+them after. The curated environment no longer carries the owner's HOME, so `$HOME/.ssh`,
+`~/.aws` and a CLI's saved token by HOME are not where a check looks. This hides `$HOME`, not
+the owner's files: there is no sandbox and USER/LOGNAME pass through, so a check that names the
+owner's home by absolute path (or `~user`) still reads it. Network and separate-user isolation
+are not attempted (audit open question 6).
 
 **Audit #7 — host git without hooks or secrets.** Every host git and Cambium process runs with
 `gitEnv()`: an allowlist (PATH, HOME for the owner's git identity, USER, LOGNAME, LANG, LC_ALL,
-TZ, TMPDIR, `GIT_AUTHOR_*`/`GIT_COMMITTER_*`) plus `GIT_CONFIG_COUNT=1`,
-`core.hooksPath=/dev/null` as command-line config, which outranks a repository's own
-`core.hooksPath` and reaches Cambium's child git processes. A repository hook (post-checkout on a
-tree add, pre-merge-commit/post-merge on an integration) never runs for the host.
+TZ, TMPDIR, `GIT_AUTHOR_*`/`GIT_COMMITTER_*`) plus `GIT_CONFIG_COUNT=2`,
+`core.hooksPath=/dev/null` and `core.fsmonitor=false` as command-line config, which outranks a
+repository's own settings and reaches Cambium's child git processes. A repository hook
+(post-checkout on a tree add, pre-merge-commit/post-merge on an integration) never runs for the
+host. Known limit: other config-named commands still run in host git, e.g. a
+`filter.<x>.smudge`/`clean` selected by a committed .gitattributes, or `diff.external`, and a
+worker in a linked worktree can write the shared .git/config (reproduced in review). Git has no
+switch that turns every filter off. Such a command sees only this environment (no provider keys),
+but the owner's real HOME.
 
 **Audit #9 — release is forced once its guards pass.** Release moved to `release.ts`. A worker's
 tree goes through oompa's guard ladder in order: git cannot read it, it has uncommitted or
@@ -754,10 +780,17 @@ orphan is not killed (its tree is pulled away, so it fails fast).
   ends the answer: a quoted example verdict followed by the real one, or prose after the verdict
   ("Actually NOT verified…"), is `malformed` (one repair turn, then not counted). The verdict enum
   already refuses "not verified" and plain prose such as "NOT APPROVED".
-- *Validator source pins.* Before each check the host hashes (SHA-256) every repository file its
-  argv names, as committed at the target sha, and refuses to run when the tree's bytes differ;
-  after the run it re-reads them. A check that changed its own validator is recorded `error`
-  whatever it exited. Every `validation` entry carries its report
+- *Validator source pins.* A candidate validation trusts the validator files its acceptance's
+  argv names as they were committed at the acceptance's `trustedSha` (the expedition head when
+  the manager declared it): a candidate whose bytes for such a file differ is refused before it
+  runs (`error`, "the candidate changed the validator …; re-declare the acceptance"), so a worker
+  cannot commit `exit 0` to the validator that accepts its own work (2026-11-01 review: pins taken
+  at the candidate sha only recorded the cheat's own hash). A file the trusted commit does not
+  have (a validator the candidate adds) is trusted at the candidate. At done the head is the
+  trust root. The host then hashes (SHA-256) the pinned files, refuses to run when the tree's
+  bytes differ, and re-reads them after the run: a check that changed its own validator is
+  recorded `error` whatever it exited. A git failure while pinning ends the job
+  `validation_failed {reason}`; it never runs unpinned. Every `validation` entry carries its report
   `{t:'expedition.validation/v1', targetSha, pins, pinCheck: held|changed|unpinned}`; entries
   written before this fold as `unpinned` with reason `legacy`.
 - *Salvage ref.* Before a tree whose branch holds commits the expedition branch does not is
@@ -792,7 +825,7 @@ only the lesson shaped an existing design; "Kept" means expeditions already had 
 | A `$&` in a diff crashed every review | `Matcher/quoteReplacement` | Idea: briefs are built by concatenation, never regex replacement |
 | One hung cycle burned 434 minutes | Three counters collapsed to one knob | Idea: one attempt budget plus a derived decision cap (R9 P3), timeouts on every check |
 | The first startup died on a closed stdin | Probe the workers' real execution path | Idea: the smoke runs real crew turns (R9) |
-| Validator replaced by the candidate | SHA-256 pins before and after, typed report | Ported: pins on the files a check's argv names at the target sha, verified after the run, `expedition.validation/v1` in every `validation` entry |
+| Validator replaced by the candidate | SHA-256 pins before and after, typed report | Ported: the files a check's argv names are trusted at the head when the acceptance was declared (a candidate that changed them is refused), hashed before and re-read after the run, `expedition.validation/v1` in every `validation` entry |
 | Only the oompa host survived a restart (detached wrapper with pid and exit files) | Process adoption | Idea only: a typed `validation_interrupted` and a re-run on the same sha in a fresh tree (#10); adoption needs a wrapper that outlives the server |
 | Its harness adapters are a thin pipe to `agent-cli` | A catalogue of provider quirks | Idea only: crew turns run through the Buddy runner, which owns the harness |
 | Its worker loop is one ~420-line loop/recur | Bounded resumes, wrap-up nudge, salvage on death | Idea only: attempts stay single-shot (one request, one immutable commit); retries are typed outcomes, never a second loop |

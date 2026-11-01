@@ -34,11 +34,13 @@ import {
   type ClaimChange,
   type Clock,
   type Effect,
+  type EndOutcome,
   type Entry,
   type Feedback,
   type Origin,
   type Outcome,
   type State,
+  type ValidationBasis,
   type ValidationReport,
   type ValidationTarget,
   type WorkerSpec,
@@ -154,9 +156,9 @@ export class LaunchRefused extends Error {
   }
 }
 
-/** One tick's end: settled, or some observation could not be made (typed data, audit #1: an
- * observe error used to throw before decide, so a stop or the deadline never landed). */
-type TickResult = { t: 'ok' } | { t: 'observe_failed'; reasons: string[] };
+/** One tick's end: settled, or some observation or effect could not be made (typed data, audit
+ * #1: an observe error used to throw before decide, so a stop or the deadline never landed). */
+type TickResult = { t: 'ok' } | { t: 'part_failed'; reasons: string[] };
 
 /** What observation produced: the entries, and why any part of it could not be read. */
 interface Observed {
@@ -309,31 +311,35 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       }
       case 'failed':
       case 'cancelled':
-        return [
-          {
-            t: 'attempt_ended',
-            at: now(),
-            attemptId: attempt.id,
-            outcome: { t: 'failed', status: request.request.state },
-          },
-        ];
+        return [await ended(s, attempt, { t: 'failed', status: request.request.state })];
     }
+  }
+
+  /** Every attempt end goes through here, so no end of a work attempt drops its commits. */
+  async function ended(s: State, attempt: Attempt, outcome: EndOutcome): Promise<Entry> {
+    return {
+      t: 'attempt_ended',
+      at: now(),
+      attemptId: attempt.id,
+      outcome: await unreported(s, attempt, outcome),
+    };
   }
 
   /** A cancelled attempt whose runs did not end within the grace is ended by the host (audit #2):
    * a run that ignores its stop must not hold a tree and a slot forever. */
-  function abandonedAfterGrace(s: State, attempt: Attempt): Entry[] {
+  async function abandonedAfterGrace(s: State, attempt: Attempt): Promise<Entry[]> {
     const cancel = s.cancels[attempt.id];
     if (!cancel || Date.parse(now()) - Date.parse(cancel.at) < CANCEL_GRACE_MS) return [];
     const reason = `its runs (${cancel.runIds.join(', ') || 'none found'}) did not end within ${CANCEL_GRACE_MS / 60_000} minutes of the host's stop`;
-    return [
-      { t: 'attempt_ended', at: now(), attemptId: attempt.id, outcome: { t: 'abandoned', reason } },
-    ];
+    return [await ended(s, attempt, { t: 'abandoned', reason })];
   }
 
   /**
    * An answer. A first answer that does not parse gets ONE repair request on the same seat
-   * (design.md R11) instead of ending the attempt; any other answer ends it with what it holds.
+   * (design.md R11) instead of ending the attempt, while the expedition runs; any other answer
+   * ends it with what it holds. Never on a finished expedition: 2026-11-01 review, an answer that
+   * arrived after the owner's stop was repaired, which started a new paid run on the seat that
+   * the one-shot cancel (already recorded for the attempt) never stopped.
    */
   async function answered(
     s: State,
@@ -342,7 +348,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     body: string
   ): Promise<Entry[]> {
     const parsed = parseOutcome(attempt.spec.kind, body);
-    if (parsed.t === 'malformed' && phase.round === 'brief')
+    if (parsed.t === 'malformed' && phase.round === 'brief' && s.run.t !== 'finished')
       return [
         {
           t: 'attempt_repair_posting',
@@ -352,27 +358,20 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
           body: repairBrief(s, attempt, parsed.error, body),
         },
       ];
-    return [
-      {
-        t: 'attempt_ended',
-        at: now(),
-        attemptId: attempt.id,
-        outcome: await unreported(s, attempt, await heldOutcome(s, attempt.id, body, parsed)),
-      },
-    ];
+    return [await ended(s, attempt, await heldOutcome(s, attempt.id, body, parsed))];
   }
 
   /**
-   * A work answer that ends without a valid result while its branch holds commits beyond its base
-   * is `unreported_commits`, with the shas, so the manager can claim them (design.md R11).
-   * 2026-11-01 incident: w64130b's verifier commit was dropped with its malformed answer.
+   * A work attempt that ends with anything but a code claim (a finding, blocked, malformed,
+   * failed, cancelled, abandoned) while its branch holds commits beyond its base is
+   * `unreported_commits`, with the shas, so the manager can claim them (design.md R11).
+   * 2026-11-01 incident: w64130b's verifier commit was dropped with its malformed answer, and
+   * w475a3b's ACCEPTANCE_ROUTE.md commit with its `finding`.
    */
-  async function unreported(s: State, attempt: Attempt, outcome: Outcome): Promise<Outcome> {
-    if (outcome.t !== 'malformed' || attempt.spec.kind !== 'work') return outcome;
+  async function unreported(s: State, attempt: Attempt, outcome: EndOutcome): Promise<Outcome> {
+    if (attempt.spec.kind !== 'work' || reportsCommit(outcome)) return outcome;
     const shas = await attemptCommits(s.repo.root, worktreeOf(s, attempt.id));
-    return shas.length === 0
-      ? outcome
-      : { t: 'unreported_commits', error: outcome.error, raw: outcome.raw, shas };
+    return shas.length === 0 ? outcome : { t: 'unreported_commits', shas, ended: outcome };
   }
 
   /**
@@ -422,8 +421,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     s: State,
     attemptId: string,
     body: string,
-    outcome: Outcome
-  ): Promise<Outcome> {
+    outcome: EndOutcome
+  ): Promise<EndOutcome> {
     if (outcome.t !== 'work' || outcome.result.result !== 'claim') return outcome;
     const tree = worktreeOf(s, attemptId);
     const custody = custodyOf(s, attemptOf(s, attemptId));
@@ -858,7 +857,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       const next = v.checks.find((c) => !done.has(c.index));
       if (!next || v.failure.t === 'failed') return;
       const { tree, targetSha } = startedOf(s, validationId);
-      const ran = await runPinned(next, tree.path, targetSha);
+      const ran = await runPinned(next, tree.path, targetSha, trustedSha(v.basis, targetSha));
       await serialized(id, () =>
         append(id, [
           { t: 'validation', at: now(), validationId, targetSha, checkIndex: next.index, ...ran },
@@ -875,9 +874,10 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   async function runPinned(
     check: { argv: string[]; timeoutSeconds: number },
     treePath: string,
-    targetSha: string
+    targetSha: string,
+    trusted: string
   ): Promise<{ outcome: CheckOutcome; report: ValidationReport }> {
-    const pinned = await pinSources(treePath, targetSha, check.argv);
+    const pinned = await pinSources(treePath, targetSha, trusted, check.argv);
     switch (pinned.t) {
       case 'mismatch':
         return {
@@ -1017,8 +1017,15 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       await append(id, observed.entries);
       await append(id, decide(forDecide(id), clock()));
       for (const effect of pendingEffects(stateOf(id))) {
-        // Each effect reads the state its predecessor left (a brief sees earlier postings).
-        await append(id, await run(stateOf(id), effect));
+        // Each effect reads the state its predecessor left (a brief sees earlier postings), and
+        // runs on its own: one that throws is a typed failure of this tick, never a stop for the
+        // effects after it. 2026-11-01 review: a release whose `cambium list` failed kept every
+        // later effect, the stop's cancel_attempt included, from running.
+        try {
+          await append(id, await run(stateOf(id), effect));
+        } catch (error) {
+          failures.push(`effect ${effect.t}: ${errorText(error)}`);
+        }
       }
       // A round that wrote nothing is settled (a running check job's effect writes nothing), so
       // the tick neither spins nor emits a change that would wake itself again.
@@ -1028,7 +1035,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     if (wrote) events.emit({ kind: 'changed' });
     // One reason per distinct failure: each round re-observes, and would repeat it.
     const reasons = [...new Set(failures)];
-    return reasons.length === 0 ? { t: 'ok' } : { t: 'observe_failed', reasons };
+    return reasons.length === 0 ? { t: 'ok' } : { t: 'part_failed', reasons };
   }
 
   /** Runs `work` on the expedition's chain: after every earlier tick and append, before later ones. */
@@ -1063,7 +1070,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       case 'ok':
         streaks.delete(id);
         return Promise.resolve();
-      case 'observe_failed':
+      case 'part_failed':
         return tickFailed(id, result.reasons);
     }
   }
@@ -1098,6 +1105,14 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     );
   const tickAll = () => Promise.all(active().map(tick)).then(() => undefined);
 
+  /** The owner wrote in an expedition's chat: its next tick runs whatever a failing streak's
+   * backoff says, as a steer does. 2026-11-01 review: "resume" in the chat (the L3 recovery path)
+   * waited out up to 30 minutes of backoff, because only the steer tool cleared the streak. */
+  function ownerPosted(channelId: string): void {
+    for (const [id, s] of states)
+      if (s.crew.t === 'ready' && s.crew.chatChannelId === channelId) streaks.delete(id);
+  }
+
   let debounce: NodeJS.Timeout | null = null;
   const wake = labelled('timer expeditions-wake', () => {
     debounce = null;
@@ -1108,6 +1123,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   const unsubscribe = enabled
     ? events.on((event) => {
         if (event.kind !== 'changed' && event.kind !== 'posted') return;
+        if (event.kind === 'posted' && event.post.author.kind === 'owner')
+          ownerPosted(event.channel.id);
         if (debounce || active().length === 0) return;
         debounce = setTimeout(wake, DEBOUNCE_MS);
         debounce.unref();
@@ -1279,4 +1296,22 @@ function requestKey(id: string, attemptId: string, round: 'brief' | 'repair'): s
 function postedPhase(attempt: Attempt): Extract<AttemptPhase, { t: 'posted' }> {
   if (attempt.phase.t !== 'posted') throw new Error(`attempt ${attempt.id} is ${attempt.phase.t}`);
   return attempt.phase;
+}
+
+/** The end of a work attempt that reports its commit: a code claim (held or not, its commits are
+ * then the claim's business, host.ts heldOutcome). */
+function reportsCommit(o: EndOutcome): boolean {
+  return o.t === 'work' && o.result.result === 'claim' && o.result.change.t === 'commit';
+}
+
+/** Whose validator bytes a validation trusts (pins.ts): for a candidate, the expedition branch
+ * when its question's acceptance was declared; at done, the head itself (the owner's branch is
+ * the trust root there). */
+function trustedSha(basis: ValidationBasis, targetSha: string): string {
+  switch (basis.t) {
+    case 'done':
+      return targetSha;
+    case 'acceptance':
+      return basis.trustedSha;
+  }
 }

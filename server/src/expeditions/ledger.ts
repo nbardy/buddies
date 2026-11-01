@@ -29,23 +29,26 @@ export type CheckSpec = {
 };
 export type AttemptSpec = { kind: 'manager' } | WorkSpec | CheckSpec;
 
-/**
- * What an ended attempt produced. `malformed` and `failed` are data, never silently dropped.
- * `unreported_commits`: a work answer that reported no valid result while its attempt branch holds
- * commits beyond its base (`shas`, oldest first); the manager may claim them (`claim` action,
- * design.md R11). 2026-11-01 incident: w64130b committed its verifier, answered without the json
- * block, and the commit was ignored.
- */
-export type Outcome =
+/** How an attempt ended by itself. `malformed` and `failed` are data, never silently dropped. */
+export type EndOutcome =
   | { t: 'manager'; actions: ManagerAction[] }
   | { t: 'work'; result: WorkResult }
   | { t: 'check'; result: CheckResult }
   | { t: 'malformed'; error: string; raw: string }
-  | { t: 'unreported_commits'; error: string; raw: string; shas: string[] }
   | { t: 'failed'; status: 'failed' | 'cancelled' }
   /** The host asked its runs to stop (owner stop, deadline) and they did not end within the grace
    * (host.ts CANCEL_GRACE_MS): the attempt is ended by the host so its tree can be released. */
   | { t: 'abandoned'; reason: string };
+
+/**
+ * What an ended attempt produced. `unreported_commits`: a work attempt that ended with anything
+ * but a code claim (`ended`: a finding, blocked, malformed, failed, cancelled or abandoned) while
+ * its attempt branch holds commits beyond its base (`shas`, oldest first); the manager may claim
+ * them (`claim` action, design.md R11). 2026-11-01 incident: w64130b committed its verifier and
+ * answered without the json block, and w475a3b committed ACCEPTANCE_ROUTE.md and answered a
+ * `finding`; both commits were left on kept branches nothing could integrate.
+ */
+export type Outcome = EndOutcome | { t: 'unreported_commits'; shas: string[]; ended: EndOutcome };
 
 /** Which request of an attempt is out: its brief, or the one repair request a malformed answer
  * gets (design.md R11: one format repair turn on the same seat before the answer is final). */
@@ -57,6 +60,18 @@ export type Round = 'brief' | 'repair';
 export interface QuestionAcceptance {
   rule: Acceptance;
   provenance: 'manager' | 'legacy';
+}
+
+/**
+ * A question's acceptance as the fold knows it: `rev` counts its declarations (0 when the
+ * question was added, +1 per `acceptance_set`), and `trustedSha` is the expedition branch head
+ * (headOf) when it was declared. A candidate validation is judged only under the revision it was
+ * planned for (a changed acceptance plans a new one), and the validator files its command names
+ * are trusted at `trustedSha`: a candidate that changed them is refused (pins.ts).
+ */
+export interface DeclaredAcceptance extends QuestionAcceptance {
+  rev: number;
+  trustedSha: string;
 }
 
 /** A manager's claim for an attempt's unreported commits, until the host checks the branch. */
@@ -240,9 +255,16 @@ export type ValidationPhase =
       job: { t: 'idle' } | { t: 'running' };
     };
 
+/** What a validation answers for (derived when it is planned): the charter's done checks at the
+ * head, or one revision of a question's acceptance for a candidate (design.md R11). */
+export type ValidationBasis =
+  | { t: 'done' }
+  | { t: 'acceptance'; questionId: string; rev: number; trustedSha: string };
+
 export interface Validation {
   id: string;
   target: ValidationTarget;
+  basis: ValidationBasis;
   checks: ValidationCheck[];
   phase: ValidationPhase;
   runs: CheckRun[];
@@ -446,7 +468,7 @@ export interface Question {
   paths: string[];
   /** Dependencies: work on this question is admitted only once each is closed verified. */
   after: string[];
-  acceptance: QuestionAcceptance;
+  acceptance: DeclaredAcceptance;
   status: 'open' | 'verified' | 'dead';
 }
 
@@ -546,6 +568,8 @@ export const doneValidationChecks = (c: Charter): ValidationCheck[] =>
  * default); a legacy validation ran the charter's command checks, so it is recorded with them.
  */
 function canonical(e: StoredEntry, c: Charter): Entry {
+  if (e.t === 'attempt_ended' && e.outcome.t === 'manager')
+    return { ...e, outcome: { t: 'manager', actions: e.outcome.actions.map(legacyAction) } };
   if (e.t === 'question_added' && !('acceptance' in e))
     return { ...e, acceptance: { rule: { t: 'panel' }, provenance: 'legacy' } };
   if (e.t === 'validation_planned' && !('checks' in e))
@@ -562,6 +586,16 @@ function canonical(e: StoredEntry, c: Charter): Entry {
       },
     };
   return e as Entry;
+}
+
+/** A pre-R11 manager's add_question carries no acceptance. Decided after an upgrade (the host
+ * stopped between observing the answer and applying it) it would add a question without one, and
+ * every later tick would throw on it; it gets the legacy panel instead. The question then reads
+ * as manager-declared: the manager did name it, the acceptance it named is the legacy default. */
+function legacyAction(a: ManagerAction): ManagerAction {
+  return a.do === 'add_question' && !('acceptance' in a)
+    ? ({ ...(a as object), acceptance: { t: 'panel' } } as ManagerAction)
+    : a;
 }
 
 export function fold(stored: readonly StoredEntry[]): State {
@@ -703,6 +737,7 @@ export function apply(s: State, e: Entry): void {
       s.validations.push({
         id: e.validationId,
         target: e.target,
+        basis: basisOf(s, e.target),
         checks: e.checks,
         phase: { t: 'planned' },
         runs: [],
@@ -863,16 +898,27 @@ export function apply(s: State, e: Entry): void {
         scope: e.scope,
         paths: e.paths,
         after: e.after,
-        acceptance: e.acceptance,
+        acceptance: { ...e.acceptance, rev: 0, trustedSha: headOf(s) },
         status: 'open',
       });
       // Shown to the next manager: the host assigns question ids, so a turn that only decomposes
       // must be followed by one that can start work on them (never idle, decide.ts).
       s.unseen.push(e);
       return;
-    case 'acceptance_set':
-      questionOf(s, e.questionId).acceptance = { rule: e.acceptance, provenance: 'manager' };
+    case 'acceptance_set': {
+      const question = questionOf(s, e.questionId);
+      question.acceptance = {
+        rule: e.acceptance,
+        provenance: 'manager',
+        rev: question.acceptance.rev + 1,
+        trustedSha: headOf(s),
+      };
+      // Shown to the next manager like question_added: a turn that only fixes an acceptance must
+      // be followed by one that acts on it. 2026-11-01 review: a set_acceptance-only decision
+      // left nothing unseen, so the run looked quiescent and asked the owner again (the L3 loop).
+      s.unseen.push(e);
       return;
+    }
     case 'question_closed':
       questionOf(s, e.questionId).status = e.status;
       return;
@@ -909,6 +955,21 @@ function cursorAfter(cursor: ChatCursor, via: FeedbackVia): ChatCursor {
       return cursor;
     case 'chat':
       return { t: 'after', ord: via.ord };
+  }
+}
+
+/** A candidate validation answers for its claim's question's acceptance as it stands now. */
+function basisOf(s: State, target: ValidationTarget): ValidationBasis {
+  switch (target.t) {
+    case 'head':
+      return { t: 'done' };
+    case 'candidate': {
+      const claim = attemptOf(s, target.claimAttemptId);
+      if (claim.spec.kind !== 'work')
+        throw new Error(`validation of ${claim.id}, which is not a work attempt`);
+      const { rev, trustedSha } = questionOf(s, claim.spec.questionId).acceptance;
+      return { t: 'acceptance', questionId: claim.spec.questionId, rev, trustedSha };
+    }
   }
 }
 

@@ -3,9 +3,9 @@ import type {
   Charter,
   CheckSpec,
   Claim,
+  EndOutcome,
   Entry,
   Feedback,
-  Outcome,
   Question,
   State,
   WorkSpec,
@@ -209,10 +209,10 @@ function managerBrief(s: State, id: string): string {
       '- Start parallel work: one "work" action per question attempt; the host queues beyond the live limit.',
       '- Each question owns file paths (repo-relative prefixes, "." = whole repo). Work on overlapping paths runs one at a time, so split questions by the files they touch to run them in parallel.',
       '- "after" lists question ids a question depends on: work on it waits (stage waiting, not refused) until each is closed verified. Integrate a dependency\'s claim before closing it when the dependent work builds on its code.',
-      '- ACCEPTANCE: every question names how its claims are accepted. {"t":"command","argv":[…],"timeoutSeconds":n}: the host runs that argv on the claim\'s exact commit in a fresh tree (exit 0 passes); use a command that can pass for THIS step (its own tests, a build), never the final goal verifier for a preparation step. {"t":"panel"}: an independent check panel on another model must verify it ("check" action). Change it with "set_acceptance"; legacy questions are accepted by a panel.',
+      '- ACCEPTANCE: every question names how its claims are accepted. {"t":"command","argv":[…],"timeoutSeconds":n}: the host runs that argv on the claim\'s exact commit in a fresh tree (exit 0 passes); use a command that can pass for THIS step (its own tests, a build), never the final goal verifier for a preparation step. {"t":"panel"}: an independent check panel on another model must verify it ("check" action). Change it with "set_acceptance": that re-validates the question\'s unmerged claims, and only the current acceptance decides. The validator files a command names are trusted as they are on the expedition branch when you declare it: a candidate that changes them is refused (re-declare to trust new bytes). Legacy questions are accepted by a panel.',
       "- The DONE WHEN commands ($ …) run on the expedition branch head at done only, never on a candidate unless you name one as a question's acceptance. No agent runs or reports host commands.",
       '- A claim counts as verified after a "check" panel verifies it, or (host-verified) when its command acceptance PASSED on its commit and you integrated it: the host then closes its question verified, which unlocks the questions after it. Ask a check with goal:true when a claim should satisfy the judged DONE WHEN items: those always need a panel. A claim whose validation FAILED is not done: send work to fix it.',
-      '- A work attempt that ended MALFORMED or with UNREPORTED COMMITS made commits it did not claim: "claim" names one of its commits (full sha) as its claim, and the host checks it is on that attempt\'s branch and inside its paths before accepting it.',
+      '- A work attempt that ended with UNREPORTED COMMITS (or a legacy MALFORMED or FINDING whose branch kept a commit) made commits it did not claim: "claim" names one of its commits (full sha) as its claim, and the host checks it is on that attempt\'s branch and inside its paths before accepting it.',
       '- When different approaches fail the same way, the problem is probably upstream: add a question about measurement or setup.',
       '- Kill (close dead) what a check refuted twice or a prediction falsified. Do not repeat work already in ATTEMPTS.',
       '- "integrate" merges a claim\'s commit into the expedition branch. It is accepted only once its question\'s acceptance holds (its command PASSED on the commit, or a panel verified it) and no later panel refuted it. A merge conflict is refused with the conflicting paths: send work to redo it on the current head. Integrate before "done": done runs the DONE WHEN commands on the branch head, which holds only integrated work.',
@@ -361,14 +361,28 @@ const FENCE = /```json\s*([\s\S]*?)```/g;
 
 type Json = { ok: true; value: unknown } | { ok: false; error: string };
 
+/** Where an answer's result was read from: its last fenced block (with any text after it), or a
+ * bare object that ends the answer. */
+type Found =
+  | { t: 'fence'; json: Json; after: string }
+  | { t: 'bare'; json: Json }
+  | { t: 'none'; error: string };
+
 /**
- * The answer's result: its last fenced ```json block, or else a bare JSON object that ends the
- * answer (design.md R11; 2026-11-01 incident: a manager answered `{"actions":[…]}` with no fence
- * and the decision was dropped). The schema check after this is unchanged and strict.
+ * The answer's result (design.md R11): a bare top-level JSON object that ends the answer after
+ * the last fenced ```json block (or with no fence at all), else that last fenced block. A bare
+ * final object wins over an earlier fence: 2026-11-01 review, an answer quoting a fenced snippet
+ * (a config it edited, a worker's result) and ending with its own bare result parsed the snippet,
+ * and lost the repair turn on it. 2026-11-01 incident: a manager answered `{"actions":[…]}` with
+ * no fence and the decision was dropped. The schema check after this is unchanged and strict.
  */
-function lastJson(body: string): Json {
+function findJson(body: string): Found {
   const last = [...body.matchAll(FENCE)].at(-1);
-  return last ? parsed(last[1] ?? '') : trailingObject(body);
+  const tailStart = last ? (last.index ?? 0) + last[0].length : 0;
+  const bare = trailingObject(body.slice(tailStart));
+  if (bare) return { t: 'bare', json: bare };
+  if (last) return { t: 'fence', json: parsed(last[1] ?? ''), after: body.slice(tailStart) };
+  return { t: 'none', error: 'no ```json block or final JSON object' };
 }
 
 function parsed(text: string): Json {
@@ -379,36 +393,45 @@ function parsed(text: string): Json {
   }
 }
 
-/** The longest suffix of the answer that parses as one JSON object (it must end the answer). */
-function trailingObject(body: string): Json {
-  const text = body.trimEnd();
-  if (!text.endsWith('}')) return { ok: false, error: 'no ```json block or final JSON object' };
-  for (let i = text.indexOf('{'); i >= 0; i = text.indexOf('{', i + 1)) {
-    const tried = parsed(text.slice(i));
-    if (tried.ok && typeof tried.value === 'object' && tried.value !== null) return tried;
+const isObject = (j: Json) => j.ok && typeof j.value === 'object' && j.value !== null;
+
+/**
+ * The bare JSON object that ends `text` (absent: none). It starts at a `{` that opens a line; the
+ * first such line whose suffix parses as one object wins, so the object is the longest one. Line
+ * starts only: trying every `{` re-parsed the suffix from each brace, quadratic on a large
+ * brace-heavy answer (2026-11-01 review).
+ */
+function trailingObject(text: string): Json | undefined {
+  const trimmed = text.trimEnd();
+  if (!trimmed.endsWith('}')) return undefined;
+  for (const m of trimmed.matchAll(/^[ \t]*\{/gm)) {
+    const tried = parsed(trimmed.slice((m.index ?? 0) + m[0].length - 1));
+    if (isObject(tried)) return tried;
   }
-  return { ok: false, error: 'no ```json block, and the final {…} is not valid JSON' };
+  return undefined;
 }
 
-export function parseOutcome(kind: Attempt['spec']['kind'], body: string): Outcome {
-  const json = lastJson(body);
-  if (!json.ok) return { t: 'malformed', error: json.error, raw: body };
-  const malformed = (error: string): Outcome => ({ t: 'malformed', error, raw: body });
+export function parseOutcome(kind: Attempt['spec']['kind'], body: string): EndOutcome {
+  const found = findJson(body);
+  const malformed = (error: string): EndOutcome => ({ t: 'malformed', error, raw: body });
+  if (found.t === 'none') return malformed(found.error);
+  if (!found.json.ok) return malformed(found.json.error);
+  const value = found.json.value;
   switch (kind) {
     case 'manager': {
-      const parsed = ManagerResult.safeParse(json.value);
+      const parsed = ManagerResult.safeParse(value);
       return parsed.success
         ? { t: 'manager', actions: parsed.data.actions }
         : malformed(parsed.error.message);
     }
     case 'work': {
-      const parsed = WorkResult.safeParse(json.value);
+      const parsed = WorkResult.safeParse(value);
       return parsed.success ? { t: 'work', result: parsed.data } : malformed(parsed.error.message);
     }
     case 'check': {
-      const ambiguous = verdictAmbiguity(body);
+      const ambiguous = verdictAmbiguity(body, found);
       if (ambiguous) return malformed(ambiguous);
-      const parsed = CheckResult.safeParse(json.value);
+      const parsed = CheckResult.safeParse(value);
       return parsed.success ? { t: 'check', result: parsed.data } : malformed(parsed.error.message);
     }
   }
@@ -416,26 +439,17 @@ export function parseOutcome(kind: Attempt['spec']['kind'], body: string): Outco
 
 /**
  * A check's verdict must be explicit (ported from oompa's `explicit-approval?`): exactly one
- * verdict object in the answer, and it ends the answer. Oompa incident (audit 2026-11-01): its
- * queue reviewer approved on any `\bAPPROVED\b`, so "NOT APPROVED" passed; its strict parse also
+ * verdict in the answer, and it ends the answer. Oompa incident (audit 2026-11-01): its queue
+ * reviewer approved on any `\bAPPROVED\b`, so "NOT APPROVED" passed; its strict parse also
  * refuses a quoted example verdict followed by the real one, and prose after the verdict. Here
- * the enum already refuses "not verified" and plain prose; this refuses the other two shapes, so a
- * panel vote counts only an unambiguous final verdict. Returns why it is ambiguous (none: it is not).
+ * the enum already refuses "not verified" and plain prose; this refuses the other two shapes, in
+ * fences and bare objects alike (every `"verdict":` key in the answer counts), so a panel vote
+ * counts only an unambiguous final verdict. Returns why it is ambiguous (none: it is not).
  */
-function verdictAmbiguity(body: string): string | undefined {
-  const fences = [...body.matchAll(FENCE)];
-  const verdicts = fences.filter((m) => {
-    const block = parsed(m[1] ?? '');
-    return (
-      block.ok &&
-      typeof block.value === 'object' &&
-      block.value !== null &&
-      'verdict' in block.value
-    );
-  });
-  if (verdicts.length > 1) return `${verdicts.length} verdict blocks: give exactly one verdict`;
-  const last = fences.at(-1);
-  if (last && body.slice((last.index ?? 0) + last[0].length).trim() !== '')
+function verdictAmbiguity(body: string, found: Found): string | undefined {
+  const verdicts = body.match(/"verdict"\s*:/g)?.length ?? 0;
+  if (verdicts > 1) return `${verdicts} verdicts in the answer: give exactly one verdict`;
+  if (found.t === 'fence' && found.after.trim() !== '')
     return 'text follows the verdict block: the verdict must end the answer';
   return undefined;
 }

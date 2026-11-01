@@ -138,11 +138,15 @@ in a fresh tree) or `{t:'panel'}` (an independent check panel). The charter's do
 only on the expedition branch head at done, never on a candidate unless the manager names one as
 a question's acceptance, so preparation steps can integrate before the goal holds. A claim whose
 command acceptance passed and that was integrated is verified (host-verified): its question closes
-verified and it counts on the badge. Judged done items always need a goal panel.
+verified and it counts on the badge. Judged done items always need a goal panel. Changing an
+acceptance (`set_acceptance`) re-validates every unmerged claim on that question; only the current
+acceptance decides. A command acceptance trusts its validator files as they were on the
+expedition branch when it was declared: a candidate that changes them is refused.
 
 Answers: an attempt's answer ends with a fenced json block (a final bare JSON object is accepted
 too). One that cannot be read gets ONE repair request on the same seat (it quotes the answer and
-the schema); a work attempt still unreadable after that whose branch holds commits ends as
+the schema; never once the expedition is finished); a work attempt that ends with anything but a
+code claim (unreadable, a finding, blocked, failed) while its branch holds commits ends as
 `unreported_commits` with the shas, and the manager may `claim` one, which the host checks
 against that attempt's branch and paths before it is validated like any claim.
 

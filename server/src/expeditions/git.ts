@@ -34,6 +34,10 @@ export type GitRun = { t: 'ok'; stdout: string } | { t: 'failed'; message: strin
  * every host git process, Cambium's children included: `GIT_CONFIG_*` is command-line config, so
  * it outranks a repository's own `core.hooksPath`. HOME stays: git reads the owner's identity
  * (user.name for a merge commit) from it. Fix-guard: "a repository hook never runs for the host".
+ * `core.fsmonitor` is off for the same reason (a repository config may name a command for it).
+ * Known limit (design.md R11): other config-named commands still run, e.g. a `filter.<x>.smudge`
+ * selected by a committed .gitattributes; git has no switch that turns every filter off, and a
+ * worker in a linked worktree can write the shared .git/config. They see only this environment.
  */
 const GIT_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR'];
 const IDENTITY = /^GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)$/;
@@ -41,9 +45,11 @@ export const gitEnv = (): NodeJS.ProcessEnv => ({
   ...Object.fromEntries(
     Object.entries(process.env).filter(([k]) => GIT_ENV.includes(k) || IDENTITY.test(k))
   ),
-  GIT_CONFIG_COUNT: '1',
+  GIT_CONFIG_COUNT: '2',
   GIT_CONFIG_KEY_0: 'core.hooksPath',
   GIT_CONFIG_VALUE_0: '/dev/null',
+  GIT_CONFIG_KEY_1: 'core.fsmonitor',
+  GIT_CONFIG_VALUE_1: 'false',
   GIT_TERMINAL_PROMPT: '0',
 });
 

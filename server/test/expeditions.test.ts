@@ -13,7 +13,7 @@ import { Ingest, defaultRoots } from '@unleashd/ingest';
 import express from 'express';
 import { createBriefings } from '../src/buddies/briefing';
 import { OWNER, buddyActor } from '../src/buddies/core';
-import { createBuddyEvents } from '../src/buddies/events';
+import { announcePost, createBuddyEvents } from '../src/buddies/events';
 import type { ExecutionGate } from '../src/buddies/execution-gate';
 import { createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint } from '../src/buddies/mcp';
@@ -194,6 +194,7 @@ async function fixture() {
       .filter((name) => name !== stateOf(id).integrationTree.name);
   return {
     core,
+    events,
     lead,
     repo,
     meter,
@@ -901,20 +902,20 @@ test('a claim its own attempt branch does not hold is recorded malformed, and ca
     assert.match(
       JSON.stringify(outcomeOf(borrowed)),
       // Its branch holds a commit it did not claim: the manager sees it and may claim it (R11).
-      /"t":"unreported_commits","error":"claimed commit \w+ is not a new commit on the attempt branch/
+      /"t":"unreported_commits","shas":\["\w+"\],"ended":\{"t":"malformed","error":"claimed commit \w+ is not a new commit on the attempt branch/
     );
     // Saying "no code" after committing would skip candidate validation.
     const hidden = await claim(() => ({ t: 'no_code' }));
     assert.match(
       JSON.stringify(outcomeOf(hidden)),
-      /"t":"unreported_commits","error":"claimed no code, but the attempt branch \S+ has 1 commit/
+      /"t":"unreported_commits","shas":\["\w+"\],"ended":\{"t":"malformed","error":"claimed no code, but the attempt branch \S+ has 1 commit/
     );
     // A commit outside its question's paths (docs/, while the question owns widget/) is not
     // held: custody is enforced on what is claimed, so it can never be validated or merged.
     const trespass = await claim((_base, sha) => ({ t: 'commit', sha }), 'docs/README.md');
     assert.match(
       JSON.stringify(outcomeOf(trespass)),
-      /"t":"unreported_commits","error":"claimed commit \w+ changes files outside its question's paths \(widget\): docs\/README.md/
+      /"t":"unreported_commits","shas":\["\w+"\],"ended":\{"t":"malformed","error":"claimed commit \w+ changes files outside its question's paths \(widget\): docs\/README.md/
     );
 
     await f.answer(
@@ -2582,6 +2583,27 @@ test('a ledger shaped like the 2026-11-01 incident folds after the upgrade; "res
     git(verifierTree, 'add', '.');
     git(verifierTree, 'commit', '-q', '-m', 'fail-closed verifier');
     const verifierSha = git(verifierTree, 'rev-parse', 'HEAD');
+    // w475a3b answered a `finding` but its kept branch holds ACCEPTANCE_ROUTE.md (live ledger:
+    // released `kept, commits:1`): the second commit the incident left nothing able to integrate.
+    const routeTree = path.join(dir, 'worktrees', 'w475a3b');
+    git(
+      f.repo,
+      'cambium',
+      'add',
+      '-b',
+      `exp/${LIVE_ID}/w475a3b`,
+      '-name',
+      `exp-${LIVE_ID}-w475a3b`,
+      '-ephemeral',
+      routeTree,
+      base
+    );
+    const routeDir = path.join(routeTree, 'agent_notes', '2026-10-30_own_geometry');
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(path.join(routeDir, 'ACCEPTANCE_ROUTE.md'), '# Acceptance route\n');
+    git(routeTree, 'add', '.');
+    git(routeTree, 'commit', '-q', '-m', 'acceptance route');
+    const routeSha = git(routeTree, 'rev-parse', 'HEAD');
     const fill: Record<string, string> = {
       ID: LIVE_ID,
       ROOT: f.root,
@@ -2606,10 +2628,10 @@ test('a ledger shaped like the 2026-11-01 incident folds after the upgrade; "res
     let s = f.stateOf(LIVE_ID);
     assert.equal(s.run.t, 'waiting_owner');
     assert.deepEqual(
-      s.questions.map((q) => q.acceptance),
+      s.questions.map(({ acceptance: { rule, provenance, rev } }) => ({ rule, provenance, rev })),
       [
-        { rule: { t: 'panel' }, provenance: 'legacy' },
-        { rule: { t: 'panel' }, provenance: 'legacy' },
+        { rule: { t: 'panel' }, provenance: 'legacy', rev: 0 },
+        { rule: { t: 'panel' }, provenance: 'legacy', rev: 0 },
       ]
     );
     // Booting after the upgrade does not resume it by itself (no manager), but gives the manager
@@ -2669,12 +2691,24 @@ test('a ledger shaped like the 2026-11-01 incident folds after the upgrade; "res
               howToCheck: 'the file exists at that commit',
             },
           },
+          {
+            do: 'claim',
+            attempt: 'w475a3b',
+            claim: {
+              statement: 'The acceptance route is written down',
+              sha: routeSha,
+              evidence: ['agent_notes/2026-10-30_own_geometry/ACCEPTANCE_ROUTE.md'],
+              howToCheck: 'read it',
+            },
+          },
         ],
       })}`
     );
     await f.host.drain();
     s = f.stateOf(LIVE_ID);
     assert.deepEqual(s.adoptions.w64130b, { t: 'adopted' });
+    // The `finding` attempt's kept commit is claimable too (2026-11-01 review).
+    assert.deepEqual(s.adoptions.w475a3b, { t: 'adopted' });
     const [v] = s.validations;
     assert.deepEqual(v.target, { t: 'candidate', claimAttemptId: 'w64130b', sha: verifierSha });
     assert.deepEqual(v.checks, [{ index: 0, argv: acceptance.argv, timeoutSeconds: 30 }]);
@@ -2759,6 +2793,84 @@ test('a work answer still unreadable after its one repair, whose branch holds co
   }
 });
 
+test('a changed acceptance re-validates an unmerged claim and only the current one decides; an answer arriving after stop is never repaired', async () => {
+  // 2026-11-01 review (the geometry deadlock at the level of one claim): a claim got exactly one
+  // candidate validation, kept whatever its acceptance became, so a claim first validated by a
+  // command that could not pass could never integrate. Re-breaks if set_acceptance does not plan
+  // a new validation, or integration still reads the old one. Second half: a malformed answer
+  // after the owner's stop got its repair request, a new paid run the one-shot cancel never
+  // stopped.
+  const f = await fixture();
+  try {
+    const exit7 = { argv: ['sh', '-c', 'exit 7'], timeoutSeconds: 30 };
+    const { id } = await rpcLaunch(f, 'reaccept', 2);
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [question('Fix it', ['widget'], accept(exit7)), question('Docs', ['docs'])] })
+    );
+    const [q, q2] = f.stateOf(id).questions.map((x) => x.id);
+    // A decision made only of set_acceptance (no claim to re-validate) still leads to another
+    // manager turn: acceptance_set is news, never a quiescent "needs you" (the L3 loop).
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'set_acceptance', question: q2, acceptance: { t: 'panel' } }] })
+    );
+    assert.equal(f.stateOf(id).run.t, 'running');
+    assert.equal(f.stateOf(id).questions[1].acceptance.rev, 1);
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'work', question: q, seat: 0, brief: 'fix it' }] })
+    );
+    const w = f.liveAttempts(id).find((a) => a.kind === 'work')!.id;
+    const sha = f.commitIn(f.treeOf(id, w).path, 'widget/widget.ts');
+    const claim = { statement: 'fixed', evidence: [], howToCheck: 'run it' };
+    await f.answer(id, w, json({ result: 'claim', ...claim, change: { t: 'commit', sha } }));
+    await f.host.drain();
+    assert.deepEqual(
+      f.stateOf(id).validations.map((v) => v.runs.map((r) => r.outcome.t).join()),
+      ['failed'],
+      'the first acceptance cannot pass'
+    );
+
+    // A set_acceptance-only decision is followed by another manager turn, never "needs you".
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'set_acceptance', question: q, acceptance: accept(widgetFixed) }] })
+    );
+    await f.host.drain();
+    let s = f.stateOf(id);
+    assert.equal(s.run.t, 'running');
+    assert.deepEqual(
+      s.validations.map((v) => v.runs.map((r) => r.outcome.t).join()),
+      ['failed', 'passed'],
+      'the changed acceptance plans a new validation of the same candidate'
+    );
+    await f.answer(id, f.manager(id), json({ actions: [{ do: 'integrate', claimAttempt: w }] }));
+    s = f.stateOf(id);
+    assert.equal(s.integrations[0]?.status.t, 'integrated');
+
+    // Stop while a worker is finishing; its answer then arrives without a json block.
+    await f.answer(
+      id,
+      f.manager(id),
+      json({ actions: [{ do: 'work', question: q2, seat: 1, brief: 'docs' }] })
+    );
+    const w2 = f.liveAttempts(id).find((a) => a.kind === 'work')!.id;
+    await f.host.steer(id, f.lead.id, { t: 'stop' });
+    await f.answer(id, w2, 'Done, no json.');
+    s = f.stateOf(id);
+    const ended = s.attempts.find((a) => a.id === w2)!;
+    assert.equal(ended.phase.t === 'ended' && ended.phase.outcome.t, 'malformed');
+    assert.equal(s.requests[w2].length, 1, 'no repair request after finish');
+  } finally {
+    await f.close();
+  }
+});
+
 test('observation that keeps failing never wedges the run: the owner stop still finishes it, failures are recorded once per backoff step, and the deadline (moved by extend) still lands', async () => {
   // Audit 2026-11-01 #1: observe ran before decide and a persistent error threw, so a stop or the
   // deadline never landed and the tick retried hot with only a console warning.
@@ -2780,6 +2892,30 @@ test('observation that keeps failing never wedges the run: the owner stop still 
       JSON.stringify(failed()[0]),
       /"failures":3,"reason":"attempt m\w+: crate unavailable"/
     );
+    // An owner post in the expedition chat (the L3 resume path) is read at once, never after the
+    // backoff (2026-11-01 review: only the steer tool cleared it, up to 30 minutes).
+    f.core.getPost = getPost;
+    const crew = f.stateOf(id).crew;
+    if (crew.t !== 'ready') throw new Error('crew not ready');
+    const feedbacks = () => f.ledgerOf(id).filter((e) => e.t === 'feedback').length;
+    const before = feedbacks();
+    // Announced as the chat route does (routes.ts emits `posted`), which is what wakes the host.
+    const ownerPost = await f.core.post(
+      OWNER,
+      { kind: 'id', id: crew.chatChannelId },
+      {
+        kind: 'inform',
+        body: 'carry on',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        key: 'owner-note-wedge',
+      }
+    );
+    await announcePost(f, OWNER, ownerPost.post);
+    await f.host.tick(id);
+    assert.equal(feedbacks(), before + 1, 'the owner post is observed despite the backoff');
+    breakReads();
     await f.host.steer(id, f.lead.id, { t: 'stop' });
     assert.equal(f.stateOf(id).run.t, 'finished');
     f.core.getPost = getPost;
@@ -2964,6 +3100,18 @@ test('a check verdict counts only when explicit: one verdict that ends the answe
     assert.equal(parseOutcome('check', body).t, 'malformed', `counted as a verdict: ${body}`);
   for (const body of [`Checked.\n${fence(verified)}\n`, `Checked.\n${JSON.stringify(verified)}`])
     assert.deepEqual(parseOutcome('check', body), { t: 'check', result: verified });
+  // The bare-JSON path (L2) holds the same rule: two bare verdicts are ambiguous.
+  assert.equal(
+    parseOutcome('check', `${JSON.stringify(verified)} actually\n${JSON.stringify(refuted)}`).t,
+    'malformed'
+  );
+  // 2026-11-01 review: an answer quoting a fenced snippet and ending with its own bare result
+  // parsed the snippet (malformed, a repair turn lost). The final bare object wins.
+  const finding = { result: 'finding', statement: 'done', evidence: [] };
+  assert.deepEqual(
+    parseOutcome('work', `I edited:\n${fence({ port: 1 })}\nResult:\n${JSON.stringify(finding)}`),
+    { t: 'work', result: finding }
+  );
 });
 
 test('host git never runs repository hooks; a check that rewrites its own validator never passes, and every check records its pinned validator bytes', async () => {
@@ -2974,7 +3122,10 @@ test('host git never runs repository hooks; a check that rewrites its own valida
   const marker = path.join(f.scratch, 'hook-ran');
   process.env.EXPEDITION_HOOK_SECRET = 'sk-hook-secret';
   try {
-    const honest = "grep -q 'broken = false' widget/widget.ts\n";
+    // The trusted validator rewrites itself when a candidate ships widget/rewrite (a stand-in for
+    // a test runner that patches its own test while it runs).
+    const honest =
+      "[ -f widget/rewrite ] && printf 'exit 0\\n' > widget/check.sh\ngrep -q 'broken = false' widget/widget.ts\n";
     fs.writeFileSync(path.join(f.repo, 'widget', 'check.sh'), honest);
     git(f.repo, 'add', '.');
     git(f.repo, 'commit', '-q', '-m', 'validator');
@@ -2991,7 +3142,7 @@ test('host git never runs repository hooks; a check that rewrites its own valida
       json({ actions: [question('Fix it', ['widget'], accept(check))] })
     );
     const q = f.stateOf(id).questions[0].id;
-    const work = async (validator: string) => {
+    const work = async (validator: string, rewrite = false) => {
       await f.answer(
         id,
         f.manager(id),
@@ -3000,6 +3151,7 @@ test('host git never runs repository hooks; a check that rewrites its own valida
       const w = f.liveAttempts(id).find((a) => a.kind === 'work')!.id;
       const tree = f.treeOf(id, w).path;
       fs.writeFileSync(path.join(tree, 'widget', 'check.sh'), validator);
+      if (rewrite) fs.writeFileSync(path.join(tree, 'widget', 'rewrite'), '');
       const sha = f.commitIn(tree, 'widget/widget.ts');
       const claim = { statement: 'fixed', evidence: [], howToCheck: 'run it' };
       await f.answer(id, w, json({ result: 'claim', ...claim, change: { t: 'commit', sha } }));
@@ -3011,15 +3163,27 @@ test('host git never runs repository hooks; a check that rewrites its own valida
     };
     const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
-    // The candidate's validator rewrites itself to `exit 0` while it runs: never a pass.
-    const cheat = `printf 'exit 0\\n' > widget/check.sh\n${honest}`;
-    const cheated = await work(cheat);
+    // 2026-11-01 review: pins taken at the candidate sha only recorded a committed cheat's own
+    // hash. A candidate that commits `exit 0` to the validator its acceptance names is refused
+    // before it runs: the validator is trusted as it was when the acceptance was declared.
+    const committed = await work('exit 0\n');
+    assert.equal(committed.run.outcome.t, 'error');
+    assert.match(
+      JSON.stringify(committed.run.outcome),
+      /the candidate changed the validator widget\/check\.sh/
+    );
+    assert.deepEqual(committed.run.report.pins, []);
+
+    // The trusted validator rewrites itself to `exit 0` while it runs: never a pass.
+    const cheated = await work(honest, true);
     assert.equal(cheated.run.outcome.t, 'error');
     assert.match(
       JSON.stringify(cheated.run.outcome),
       /changed its own validator source.*widget\/check\.sh/
     );
-    assert.deepEqual(cheated.run.report.pins, [{ path: 'widget/check.sh', sha256: sha256(cheat) }]);
+    assert.deepEqual(cheated.run.report.pins, [
+      { path: 'widget/check.sh', sha256: sha256(honest) },
+    ]);
     assert.deepEqual(cheated.run.report.pinCheck, { t: 'changed', paths: ['widget/check.sh'] });
 
     // An honest candidate passes with its pins held, and is merged.
@@ -3104,6 +3268,13 @@ test('stop cancels live attempts and releases every tree safely: a submodule tre
     fs.mkdirSync(path.join(t1, 'output'));
     fs.writeFileSync(path.join(t1, 'output', 'run.log'), 'gauges\n');
     await f.answer(id, w1, finding);
+    // A finding whose branch holds a commit is claimable data, never a dropped commit
+    // (2026-11-01 review: live w475a3b answered `finding` with ACCEPTANCE_ROUTE.md committed).
+    const w1End = f.stateOf(id).attempts.find((a) => a.id === w1)!.phase;
+    assert.deepEqual(
+      w1End.t === 'ended' && w1End.outcome.t === 'unreported_commits' && w1End.outcome.shas,
+      [sha]
+    );
     // w2 leaves an uncommitted edit; w3 never answers.
     const t2 = f.treeOf(id, w2).path;
     fs.writeFileSync(path.join(t2, 'docs', 'README.md'), 'half done\n');
