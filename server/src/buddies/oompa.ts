@@ -65,10 +65,9 @@ const Backend = z
 const Config = z
   .object({
     task_backend: Backend,
-    task_execution: z
-      .object({ validators: z.record(Validator) })
-      .passthrough()
-      .optional(),
+    // Required (audit 2026-11-01): without it oompa falls back to its queue worker, which counts
+    // any "APPROVED" substring ("NOT APPROVED") as approval and merges in the primary checkout.
+    task_execution: z.object({ validators: z.record(Validator) }).passthrough(),
   })
   .passthrough();
 
@@ -809,7 +808,7 @@ export function createOompaHost(options: {
   function baseConfig(run: Run) {
     const config = Config.parse(read<unknown>(path.join(run.execution.dir, 'config.json')));
     config.resume_swarm_id = undefined;
-    if (config.task_execution) config.task_execution.owner_window = undefined;
+    config.task_execution.owner_window = undefined;
     return config;
   }
   async function amend(grant: TurnGrant, run: Run, action: z.infer<typeof Amendment>, key: string) {
