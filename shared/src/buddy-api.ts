@@ -42,6 +42,10 @@ export const TaskChangesSchema = z.object({
   // Home pin: 0 unpins, N > 0 pins at order N (lower = earlier); top-level Tasks only (the crate refuses others).
   pin: z.number().int().min(0).optional(),
   ownerId: z.string().optional(),
+  // Move (reparent): a task id in the same workspace, or null for top level. The crate refuses a
+  // missing, foreign-workspace or cancelled parent, a cycle, and a pinned task moved under a parent.
+  // No .describe(): the worker tool-description budget (tool-contract.test.ts) has no headroom.
+  parentId: z.string().min(1).nullable().optional(),
 });
 
 export const ScheduleFieldsSchema = z.object({

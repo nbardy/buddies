@@ -57,6 +57,7 @@ import {
   buddyChanges,
   coreError,
   managerRef,
+  taskChanges,
   taskDetail,
 } from './core';
 import { type BuddyEvents, announcePost } from './events';
@@ -396,12 +397,17 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     [buddyMutationRoute('task.create')]: (req) =>
       write(core.upsertTask(OWNER, { kind: 'create', ...TaskCreateSchema.parse(req.body) })),
     [buddyMutationRoute('task.update')]: (req) => {
-      const changes = TaskUpdateSchema.parse(req.body);
+      const update = TaskUpdateSchema.parse(req.body);
       // The evidence cap holds on every write path, not only MCP `task_write`: an owner write of
       // a long entry would otherwise bloat every later `tasks get` the same way (2026-10-06).
-      if (changes.changes.evidence) checkedEvidence(changes.changes.evidence);
+      if (update.changes.evidence) checkedEvidence(update.changes.evidence);
       return write(
-        core.upsertTask(OWNER, { kind: 'update', taskId: p(req, 'taskId'), ...changes })
+        core.upsertTask(OWNER, {
+          kind: 'update',
+          taskId: p(req, 'taskId'),
+          ...update,
+          changes: taskChanges(update.changes),
+        })
       );
     },
     // ---- runs -----------------------------------------------------------------------------------

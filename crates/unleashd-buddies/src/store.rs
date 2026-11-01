@@ -285,6 +285,11 @@ fn record(tx: &Transaction, m: &Mutation, hash: &str, result_ref: Option<&str>) 
     Ok(tx.last_insert_rowid())
 }
 
+/// Records an unkeyed fact inside a keyed mutation's work (which already made it run once).
+pub(crate) fn record_fact(tx: &Transaction, m: &Mutation, result_ref: &str) -> Result<i64> {
+    record(tx, m, &sha256_hex(m.payload.to_string().as_bytes()), Some(result_ref))
+}
+
 /// Runs `work` once per (actor, workspace, key) and records the mutation event. A replay
 /// returns the first result's id without running `work`.
 pub(crate) fn idempotent(tx: &Transaction, m: &Mutation, work: impl FnOnce(&Transaction) -> Result<String>) -> Result<String> {

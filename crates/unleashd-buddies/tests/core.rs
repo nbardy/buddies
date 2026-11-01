@@ -258,6 +258,55 @@ fn pin_is_an_ordinary_task_update_on_top_level_tasks_only() {
     assert_eq!(s.upsert_task(&buddy(&actor), write).unwrap().pin, 0, "0 unpins");
 }
 
+// A move (reparent) is an ordinary CAS update. These pin what the server test cannot see: the
+// keyed payload never holds write-time state (a retry must replay, not conflict), an accepted move
+// is not re-judged against the tree it later changed, the old parent survives as a `task.move`
+// fact written once, and a pinned task is never silently unpinned by moving under a parent.
+#[test]
+fn a_move_replays_records_its_old_parent_once_and_never_silently_unpins() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let make = |s: &mut unleashd_buddies::Store, parent: Option<String>, key: &str| {
+        s.upsert_task(
+            &buddy("ic"),
+            TaskWrite::Create { owner_id: "ic".into(), parent_id: parent, title: key.into(), done_criteria: "d".into(), key: key.into() },
+        )
+        .unwrap()
+    };
+    let a = make(s, None, "a");
+    let b = make(s, None, "b");
+    make(s, Some(b.id.clone()), "b-child");
+    let update = |task_id: &str, base_revision: i64, changes: TaskChanges, key: &str| TaskWrite::Update {
+        task_id: task_id.into(),
+        base_revision,
+        key: key.into(),
+        changes,
+    };
+    let mv = |task: &Task, parent: ParentRef, pin: Option<i64>, key: &str| {
+        update(&task.id, task.revision, TaskChanges { parent: Some(parent), pin, ..Default::default() }, key)
+    };
+    let pinned = s.upsert_task(&buddy("ic"), update(&a.id, 1, TaskChanges { pin: Some(2), ..Default::default() }, "pin")).unwrap();
+    let under_b = ParentRef::Task { id: b.id.clone() };
+    let refused = s.upsert_task(&buddy("ic"), mv(&pinned, under_b.clone(), None, "m0")).unwrap_err();
+    assert!(matches!(refused, CoreError::Invalid(_)), "{refused}");
+    assert_eq!(s.get_task(&a.id).unwrap().parent_id, None, "a refused move leaves the task in place");
+
+    let moved = s.upsert_task(&buddy("ic"), mv(&pinned, under_b.clone(), Some(0), "m1")).unwrap();
+    assert_eq!((moved.parent_id.as_deref(), moved.pin, moved.position), (Some(b.id.as_str()), 0, 1), "appended after b's child");
+    // The parent is cancelled after the move: a retry of that move still replays its first result.
+    let cancel = TaskChanges { status: Some(TaskStatus::Cancelled), ..Default::default() };
+    s.upsert_task(&buddy("ic"), update(&b.id, b.revision, cancel, "cancel-b")).unwrap();
+    assert_eq!(s.upsert_task(&buddy("ic"), mv(&pinned, under_b, Some(0), "m1")).unwrap().revision, moved.revision);
+    // "Top" and "unchanged" hash differently: the same key cannot replay one as the other.
+    let conflict = s.upsert_task(&buddy("ic"), mv(&pinned, ParentRef::Top, Some(0), "m1")).unwrap_err();
+    assert!(matches!(conflict, CoreError::IdempotencyConflict(_)), "{conflict}");
+
+    let facts: Vec<_> = s.list_events("ic", i64::MAX, 100).unwrap().into_iter().filter(|e| e.op == "task.move").collect();
+    assert_eq!(facts.len(), 1, "one fact per accepted move, none on replay");
+    let payload: serde_json::Value = serde_json::from_str(&facts[0].payload).unwrap();
+    assert_eq!(payload, serde_json::json!({"from": null, "to": b.id, "revision": moved.revision}));
+}
+
 // Home's reorder is two ordinary pin updates; the order must read back from a fresh store (the
 // phone and the Buddies read the file, not the writer's memory).
 #[test]
