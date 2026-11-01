@@ -16,6 +16,7 @@ import { ArchivedChannels, ChannelHeaderControls, useArchivedChannels } from './
 import type { OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelDm } from './ChannelDm';
+import { ChannelExpeditions } from './ChannelExpeditions';
 import { ChannelLanding } from './ChannelLanding';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { LeadRow, Replying, type RowContext, renderRow, renderRows } from './ChannelRows';
@@ -836,6 +837,7 @@ export function ChannelBrowser({
           ) : (
             <ul className="channel-browser-channels">{rail.channels.map(railRow)}</ul>
           )}
+          <ChannelExpeditions />
           <div className="channel-browser-rail-section-row ui-row">
             <h3 className="channel-browser-rail-section ui-muted">Buddies</h3>
             <button

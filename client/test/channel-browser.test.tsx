@@ -370,3 +370,12 @@ test('the rail starts and lists a Buddy setup chat; a held post offers its conve
     jotaiStore.set(rowsAtom, new Map());
   }
 });
+
+// The owner's Channels route replaces Sidebar entirely; exercise its own rail.
+test('workspace channels rail links Expeditions between Channels and Buddies', () => {
+  const html = render('ws-slack', slackDirectory());
+  const channels = html.indexOf('>Channels</a>');
+  const expeditions = html.indexOf('href="/expeditions"');
+  const buddies = html.indexOf('>Buddies</h3>');
+  assert.ok(channels >= 0 && expeditions > channels && buddies > expeditions);
+});
