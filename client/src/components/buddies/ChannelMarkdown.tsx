@@ -6,7 +6,6 @@ import {
   memo,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -26,6 +25,7 @@ import { CodeBlockFrame } from '../../views/transcript/markdown-components';
 import { AskUserQuestionWidget } from '../AskUserQuestion';
 import { BuddyBuilderResultCard } from './BuddyBuilderResultCard';
 import { ChannelTaskOverlay } from './ChannelTaskOverlay';
+import { ModalDialog } from './ModalDialog';
 import {
   type ChannelFileKind,
   type ChannelTask,
@@ -432,32 +432,8 @@ function HtmlFile({ src, label }: { src: string; label: string }) {
 // Fix-guard: Markdown attachments downloaded instead of opening a readable document.
 // channel-markdown.test.tsx and the browser viewer checks cover the shared overlay and file route.
 function ChannelFileOverlay({ file, onClose }: { file: ChannelFile; onClose(): void }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (!dialog.open) dialog.showModal();
-    dialog.focus();
-    const onCancel = (event: Event) => {
-      event.preventDefault();
-      onClose();
-    };
-    dialog.addEventListener('cancel', onCancel);
-    return () => {
-      dialog.removeEventListener('cancel', onCancel);
-      if (dialog.open) dialog.close();
-    };
-  }, [onClose]);
   return (
-    <dialog
-      ref={dialogRef}
-      className="channel-file-overlay"
-      tabIndex={-1}
-      aria-label={file.label}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <ModalDialog className="channel-file-overlay" label={file.label} onClose={onClose}>
       <button
         type="button"
         className="channel-file-close"
@@ -494,7 +470,7 @@ function ChannelFileOverlay({ file, onClose }: { file: ChannelFile; onClose(): v
           )}
         </section>
       )}
-    </dialog>
+    </ModalDialog>
   );
 }
 
