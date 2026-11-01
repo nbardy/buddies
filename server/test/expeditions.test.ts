@@ -1377,7 +1377,7 @@ test('a host-verified claim (command checks passed, merged) lets the manager clo
       .statuses.map((x) => x.text)
       .join('\n');
     const validation = f.stateOf(id).validations.find((x) => x.target.t === 'candidate')!;
-    assert.match(chat, /✓ verified Fix it: host-verified: Work on “Fix it” passed every command/);
+    assert.match(chat, /✓ verified Fix it: host-verified: its claim passed every command check/);
     assert.doesNotMatch(chat, new RegExp(`\\b(${validation.id}|${w.id})\\b`), chat);
 
     // 2026-11-01 smoke incident: the manager's close_question verified was refused on host proof.

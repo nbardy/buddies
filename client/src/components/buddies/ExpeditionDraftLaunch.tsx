@@ -31,9 +31,11 @@ export function DraftLaunchButton({
         </button>
       );
     case 'blocked':
+      // A quiet disabled button, never the accent: a replaced draft's dimmed accent Launch still
+      // read as the card's action (2026-11-02 visual pass).
       return (
         <span className="ui-row expedition-launch">
-          <button type="button" className="expedition-button expedition-button--primary" disabled>
+          <button type="button" className="expedition-button" disabled>
             Launch
           </button>
           <span className="ui-muted">{action.reason}</span>

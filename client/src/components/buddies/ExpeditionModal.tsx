@@ -22,7 +22,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { listField } from '../../atoms/conversations';
 import { invalidateChannelResources } from '../../atoms/resources';
 import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
-import { usePolledFetch } from '../../hooks/usePolledFetch';
+import { type PolledState, usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelMarkdown } from './ChannelMarkdown';
 import { type RowContext, renderRows } from './ChannelRows';
@@ -140,8 +140,9 @@ function ExpeditionMarkdown({ text }: { text: string }) {
   );
 }
 
-/** Which modal: the live one is a fixed-height workspace; a draft sizes to its content. */
-type Kind = 'live' | 'draft';
+/** Which modal: the live one is a fixed-height workspace; a draft and a notice (an expedition or
+ * draft that could not be read) size to their content. */
+type Kind = 'live' | 'draft' | 'notice';
 
 function Shell({
   label,
@@ -181,31 +182,57 @@ function Shell({
   );
 }
 
-/** Waiting for the first read, or it failed: the shell with one line, so Esc still closes. */
+/** The first read of an expedition or draft: still loading (the shell with one line, so Esc still
+ * closes), or it failed. */
+type FirstRead = { t: 'loading' } | { t: 'failed'; error: Error };
+
+const firstRead = (view: PolledState<unknown>): FirstRead =>
+  view.kind === 'failed' ? { t: 'failed', error: view.error } : { t: 'loading' };
+
+/** δ over the first read: a loading shell at the modal's own size, or a compact notice. A failed
+ * read used to fill the 86vh live dialog with a lone tent and "HTTP 404" (2026-11-02 visual
+ * pass of /expeditions/nope). */
 function Pending({
   label,
   kind,
   presentation,
   onClose,
-  error,
+  read,
 }: {
   label: string;
   kind: Kind;
   presentation: Presentation;
   onClose(): void;
-  error: Error | null;
+  read: FirstRead;
 }) {
-  return (
-    <Shell
-      label={label}
-      kind={kind}
-      presentation={presentation}
-      onClose={onClose}
-      title={<strong>⛺</strong>}
-    >
-      <output className="buddy-panel__empty">{error ? error.message : `Loading ${label}…`}</output>
-    </Shell>
-  );
+  switch (read.t) {
+    case 'loading':
+      return (
+        <Shell
+          label={label}
+          kind={kind}
+          presentation={presentation}
+          onClose={onClose}
+          title={<strong>⛺</strong>}
+        >
+          <output className="buddy-panel__empty">{`Loading ${label}…`}</output>
+        </Shell>
+      );
+    case 'failed':
+      return (
+        <Shell
+          label={label}
+          kind="notice"
+          presentation={presentation}
+          onClose={onClose}
+          title={<strong>{`⛺ This ${label} could not be opened`}</strong>}
+        >
+          <p className="ui-muted">
+            {`It may have been deleted, or the link is wrong (${read.error.message}).`}
+          </p>
+        </Shell>
+      );
+  }
 }
 
 /** The goal, rendered, clamped to a few lines until "Show more". */
@@ -319,7 +346,7 @@ function LiveModal({
         kind="live"
         presentation={presentation}
         onClose={onClose}
-        error={view.kind === 'failed' ? view.error : null}
+        read={firstRead(view)}
       />
     );
   const v = view.data;
@@ -896,7 +923,7 @@ function DraftModal({
         kind="draft"
         presentation={presentation}
         onClose={onClose}
-        error={view.kind === 'failed' ? view.error : null}
+        read={firstRead(view)}
       />
     );
   const d = view.data;

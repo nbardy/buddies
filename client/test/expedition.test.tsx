@@ -521,7 +521,8 @@ test('a deep link to an unreadable expedition shows the error over the channels 
     load: async () => inboxFixture([{ channel: publicChannel('ch_1', 'general'), unread: 0 }]),
   });
   const html = await appAt('/expeditions/exp-gone');
-  assert.match(html, /HTTP 404/, 'the modal says why');
+  assert.match(html, /This expedition could not be opened/, 'the modal says what happened');
+  assert.match(html, /HTTP 404/, 'and why');
   assert.match(
     html,
     /<section class="channel-browser-pane ui-stack" aria-label="Expeditions">/,
