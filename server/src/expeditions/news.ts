@@ -1,7 +1,9 @@
 import {
   type Charter,
+  type CheckResult,
   type ClaimChange,
   type DoneCheck,
+  type QuestionScope,
   type WorkResult,
   crewLine,
   seatLabel,
@@ -186,21 +188,24 @@ function newsLine(s: State, e: Entry): string[] {
     case 'attempt_planned': {
       // Only work held by its question's dependencies (design.md R5); it starts once they verify.
       const deps = waitsOn(s, attemptOf(s, e.attemptId));
+      // Titles, not ids: the chat is read by the owner (2026-11-01 review: raw ids read as debug).
       return deps.length > 0
-        ? [`⏸ ${e.attemptId} waiting: needs ${deps.join(', ')} verified first`]
+        ? [
+            `⏸ ${attemptTitle(s, attemptOf(s, e.attemptId))} waits until ${deps.map((q) => quoted(questionOf(s, q).title)).join(', ')} is verified`,
+          ]
         : [];
     }
     case 'attempt_posted': {
       const a = attemptOf(s, e.attemptId);
-      return a.spec.kind === 'manager' ? [] : [`▶ ${a.id} started: ${attemptLabel(s, a)}`];
+      return a.spec.kind === 'manager' ? [] : [`▶ Started: ${attemptLabel(s, a)}`];
     }
     case 'attempt_ended': {
       const a = attemptOf(s, e.attemptId);
-      return [`${a.id} ${outcomeLabel(e.outcome)}`];
+      return [`${attemptTitle(s, a)} → ${outcomeLabel(e.outcome)}`];
     }
     case 'question_added':
       // Never a leading `+ `: markdown reads it as a list that swallows the lines after it.
-      return [`➕ question ${e.questionId} (${e.scope}): ${clip(e.title)}`];
+      return [`➕ New ${SCOPE_WORD[e.scope]}: ${clip(e.title)}`];
     case 'question_closed':
       return [
         `${e.status === 'verified' ? '✓ verified' : '✗ dropped'} ${questionOf(s, e.questionId).title}: ${clip(e.why)}`,
@@ -229,7 +234,10 @@ function newsLine(s: State, e: Entry): string[] {
     case 'integration_refused':
       return [`⛔ ${integrationLabel(s, integrationOf(s, e.integrationId))}`];
     case 'finished':
-      return [clipBlock(`**Finished (${e.reason}):**`, e.summary), ...mergeLine(s, e.reason)];
+      return [
+        clipBlock(`**Result** (${e.reason.replaceAll('_', ' ')}):`, e.summary),
+        ...mergeLine(s, e.reason),
+      ];
     default:
       return [];
   }
@@ -276,33 +284,67 @@ function refusalLabel(r: IntegrationRefusal): string {
   }
 }
 
-export function attemptLabel(s: State, a: Attempt): string {
+const SCOPE_WORD: Record<QuestionScope, string> = {
+  in: 'question',
+  explore: 'exploration question',
+  parked: 'parked question',
+};
+
+/** A title in quotes, clipped: a question's title is free text from the manager. */
+const quoted = (title: string) => `“${clip(title, 80)}”`;
+
+/** What an attempt is, by question title (never a raw id): the page's card title and the news. */
+export function attemptTitle(s: State, a: Attempt): string {
   switch (a.spec.kind) {
     case 'manager':
-      return 'manager decision';
+      return 'Manager decision';
     case 'work':
-      return `work on ${a.spec.questionId} (${seatLabel(configOf(s.charter, a.spec))})`;
+      return `Work on ${quoted(questionOf(s, a.spec.questionId).title)}`;
     case 'check':
-      return `${a.spec.goal ? 'goal ' : ''}check of ${a.spec.claimAttemptId} (${seatLabel(configOf(s.charter, a.spec))})`;
+      return `${a.spec.goal ? 'Goal check' : 'Check'} of the claim on ${quoted(questionOf(s, a.spec.questionId).title)}`;
   }
 }
 
-/** One clipped line per outcome: the chat news and the page. */
-export function outcomeLabel(o: Outcome): string {
+/** The title with the seat it runs on, for the chat's "started" line. */
+export function attemptLabel(s: State, a: Attempt): string {
+  switch (a.spec.kind) {
+    case 'manager':
+      return attemptTitle(s, a);
+    case 'work':
+    case 'check':
+      return `${attemptTitle(s, a)} (${seatLabel(configOf(s.charter, a.spec))})`;
+  }
+}
+
+/** An outcome as a verdict word and its clipped one-line summary: the page's outcome block. */
+export function outcomeParts(o: Outcome): { verdict: string; summary: string } {
   switch (o.t) {
     case 'manager':
-      return `decided ${o.actions.length} actions`;
+      return { verdict: 'Decided', summary: `${o.actions.length} actions` };
     case 'work':
       return o.result.result === 'blocked'
-        ? `BLOCKED: ${clip(o.result.need)}`
-        : `${o.result.result.toUpperCase()}: ${clip(o.result.statement)}`;
+        ? { verdict: 'Blocked', summary: clip(o.result.need) }
+        : { verdict: WORK_VERDICT[o.result.result], summary: clip(o.result.statement) };
     case 'check':
-      return `check ${o.result.verdict.toUpperCase()}: ${clip(o.result.why)}`;
+      return { verdict: CHECK_VERDICT[o.result.verdict], summary: clip(o.result.why) };
     case 'malformed':
-      return `answered without a valid result (${clip(o.error, 120)})`;
+      return { verdict: 'No valid result', summary: clip(o.error, 120) };
     case 'failed':
-      return `run ${o.status}`;
+      return { verdict: 'Run failed', summary: `the run ended ${o.status}` };
   }
+}
+
+const WORK_VERDICT = { claim: 'Claim', finding: 'Finding' } as const;
+const CHECK_VERDICT: Record<CheckResult['verdict'], string> = {
+  verified: 'Verified',
+  refuted: 'Refuted',
+  unclear: 'Unclear',
+};
+
+/** One clipped line per outcome: the chat news. */
+export function outcomeLabel(o: Outcome): string {
+  const { verdict, summary } = outcomeParts(o);
+  return `${verdict}: ${summary}`;
 }
 
 /** The full outcome, evidence included: what briefs show the next manager and workers. */

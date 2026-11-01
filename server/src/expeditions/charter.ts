@@ -175,12 +175,16 @@ function crewOf(crew: z.infer<typeof Crew>, models: ModelsOf) {
   };
 }
 
-/** κ for a launch: the full charter, one line per default it applied, and one per seat model
- * name it resolved to a catalog id. */
+/** The charter fields a request may leave out; the draft view marks each one it defaulted. */
+export type CharterDefault = keyof typeof CHARTER_DEFAULTS;
+export const CHARTER_DEFAULT_KEYS = Object.keys(CHARTER_DEFAULTS) as CharterDefault[];
+
+/** κ for a launch: the full charter, the fields it defaulted, and one line per seat model name it
+ * resolved to a catalog id. */
 export function charterOf(
   request: CharterRequest,
   models: ModelsOf
-): { charter: Charter; defaulted: string[]; resolved: string[] } {
+): { charter: Charter; defaulted: CharterDefault[]; resolved: string[] } {
   const seats = crewOf(request.crew ?? CHARTER_DEFAULTS.crew, models);
   const charter: Charter = {
     ...request,
@@ -191,7 +195,17 @@ export function charterOf(
     exploreShare: request.exploreShare ?? CHARTER_DEFAULTS.exploreShare,
     crew: seats.crew,
   };
-  const shown: Record<keyof typeof CHARTER_DEFAULTS, string> = {
+  return {
+    charter,
+    defaulted: CHARTER_DEFAULT_KEYS.filter((k) => request[k] === undefined),
+    resolved: seats.resolved,
+  };
+}
+
+/** The tool result's line per defaulted field (the Buddy reads field names; the card shows a
+ * "default" marker on the value instead, client ExpeditionModal). */
+export function defaultedLines(keys: CharterDefault[]): string[] {
+  const shown: Record<CharterDefault, string> = {
     inScope: 'inScope: none stated (the goal is the scope)',
     outOfScope: 'outOfScope: none stated (no fence)',
     maxLive: `maxLive: ${CHARTER_DEFAULTS.maxLive}`,
@@ -199,12 +213,7 @@ export function charterOf(
     exploreShare: `exploreShare: ${CHARTER_DEFAULTS.exploreShare}`,
     crew: `crew: the default crew (${crewLine(DEFAULT_CREW)})`,
   };
-  const keys = Object.keys(shown) as (keyof typeof CHARTER_DEFAULTS)[];
-  return {
-    charter,
-    defaulted: keys.filter((k) => request[k] === undefined).map((k) => shown[k]),
-    resolved: seats.resolved,
-  };
+  return keys.map((k) => shown[k]);
 }
 
 /**

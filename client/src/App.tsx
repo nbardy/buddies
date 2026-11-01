@@ -240,22 +240,13 @@ const SHELLS: Record<DeviceKind, ComponentType> = {
 // /expeditions/:id is a modal, not a page (owner, 2026-11-01): the routes render at the view it
 // was opened over (components/buddies/expedition-overlay.ts), or at home on a direct load, and the
 // modal sits on top (baseOf picks the location the routes render at). The phone gets a full-height
-// sheet.
+// sheet (the modal follows the viewport width).
 /** The live expedition modal for the URL. Closing returns to the view it opened over (Back), or
  * replaces a direct load with home. */
-function ExpeditionRoute({
-  overlay,
-  device,
-}: { overlay: Exclude<ExpeditionOverlay, { t: 'none' }>; device: DeviceKind }) {
+function ExpeditionRoute({ overlay }: { overlay: Exclude<ExpeditionOverlay, { t: 'none' }> }) {
   const navigate = useNavigate();
   const close = () => (overlay.t === 'over' ? navigate(-1) : navigate('/', { replace: true }));
-  return (
-    <ExpeditionModal
-      target={{ t: 'live', id: overlay.id }}
-      presentation={device === 'mobile' ? 'sheet' : 'dialog'}
-      onClose={close}
-    />
-  );
+  return <ExpeditionModal target={{ t: 'live', id: overlay.id }} onClose={close} />;
 }
 
 function AppRoutes({ device }: { device: DeviceKind }) {
@@ -265,7 +256,7 @@ function AppRoutes({ device }: { device: DeviceKind }) {
   const overlay = expeditionOverlay(location);
   return (
     <Suspense fallback={null}>
-      {overlay.t !== 'none' && <ExpeditionRoute overlay={overlay} device={device} />}
+      {overlay.t !== 'none' && <ExpeditionRoute overlay={overlay} />}
       <Routes location={baseOf(location, overlay)}>
         {OUTSIDE_SHELL[device]}
         <Route element={<Shell />}>

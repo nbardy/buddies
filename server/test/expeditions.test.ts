@@ -470,9 +470,10 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       t: 'finished',
       reason: 'done',
       summary: 'Widget passes, independently verified.',
+      at: s.run.t === 'finished' ? s.run.at : '',
     });
     assert.equal(s.questions[0].status, 'verified');
-    const last = s.statuses.find((x) => x.text.includes('Finished (done)'))!;
+    const last = s.statuses.find((x) => x.text.includes('**Result** (done)'))!;
     assert.equal(last.post.t, 'posted', 'the finish was posted');
     // Finished: every idle worktree is gone; the claim's branch went too, because its commit is
     // merged into the expedition branch (per-attempt branches do not pile up in the owner's repo).
@@ -1064,7 +1065,10 @@ test('command checks run on the host: each claimed commit is validated in a fres
     );
     await f.host.drain();
     s = f.stateOf(id);
-    assert.deepEqual(s.run, { t: 'finished', reason: 'done', summary: 'fixed' });
+    assert.deepEqual(
+      { ...s.run, at: null },
+      { t: 'finished', reason: 'done', summary: 'fixed', at: null }
+    );
     const [merged] = s.integrations;
     if (merged?.status.t !== 'integrated') throw new Error(`not integrated: ${merged?.status.t}`);
     const branch = `expedition/${id}`;
@@ -1140,14 +1144,18 @@ test('work on a question waits (stage waiting, no worktree) until its dependency
     assert.equal(workOn(q2).id in f.stateOf(id).worktrees, false);
     assert.equal(stage(q2), 'waiting');
     assert.equal(stage(q1), 'implementing');
-    assert.ok(
-      f
-        .stateOf(id)
-        .statuses.some((x) =>
-          x.text.includes(`⏸ ${workOn(q2).id} waiting: needs ${q1} verified first`)
-        ),
+    // By title, never raw ids (2026-11-01 review: "▶ w9102f5 started: work on qa218ed").
+    const chat = f
+      .stateOf(id)
+      .statuses.map((x) => x.text)
+      .join('\n');
+    assert.match(
+      chat,
+      /⏸ Work on “Document the fix” waits until “Fix the widget” is verified/,
       'the chat says why the work waits'
     );
+    assert.match(chat, /▶ Started: Work on “Fix the widget” \(claude[^)]*\)/);
+    assert.ok(!chat.includes(workOn(q1).id) && !chat.includes(q1), chat);
 
     // q1's worker fixes the widget and claims its commit; the host validation passes.
     const w1 = workOn(q1).id;
@@ -1452,7 +1460,10 @@ test('integration merges validated candidates one at a time onto the expedition 
     await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'A and B in' }] }));
     await f.host.drain();
     s = f.stateOf(id);
-    assert.deepEqual(s.run, { t: 'finished', reason: 'done', summary: 'A and B in' });
+    assert.deepEqual(
+      { ...s.run, at: null },
+      { t: 'finished', reason: 'done', summary: 'A and B in', at: null }
+    );
     const head = s.validations.at(-1)!;
     assert.equal(head.phase.t === 'started' ? head.phase.targetSha : '', mergeB);
     assert.equal(s.integrationTree.status.t, 'removed');

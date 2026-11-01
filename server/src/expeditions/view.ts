@@ -13,7 +13,7 @@ import {
   type Charter,
   type State,
   type Validation,
-  attemptLabel,
+  attemptTitle,
   attemptsOn,
   checkOutcomeLabel,
   configOf,
@@ -27,8 +27,9 @@ import {
   liveWorkers,
   managerCap,
   managerTurns,
-  outcomeLabel,
+  outcomeParts,
   panels,
+  questionOf,
   questionStage,
   queued,
   seatLabel,
@@ -96,13 +97,16 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     },
     questions: s.questions.map((q) => ({
       ...q,
+      // By title: the owner reads them (the manager's `after` names only questions it added).
+      after: q.after.map((id) => ({ id, title: questionOf(s, id).title })),
       stage: questionStage(s, q),
       attempts: attemptsOn(s, q.id).map((a) => a.id),
     })),
     attempts: s.attempts.map((a) => ({
       id: a.id,
       kind: a.spec.kind,
-      label: attemptLabel(s, a),
+      label: attemptTitle(s, a),
+      ask: a.spec.kind === 'work' ? a.spec.brief : null,
       seat: seatLabel(configOf(c, a.spec)),
       questionId: a.spec.kind === 'manager' ? null : a.spec.questionId,
       phase: phaseView(a.phase),
@@ -168,7 +172,7 @@ function validationView(s: State, v: Validation): ExpeditionValidation {
 function phaseView(phase: AttemptPhase): ExpeditionAttemptPhase {
   switch (phase.t) {
     case 'ended':
-      return { t: 'ended', outcome: outcomeLabel(phase.outcome) };
+      return { t: 'ended', ...outcomeParts(phase.outcome) };
     case 'dropped':
       return { t: 'dropped', reason: phase.reason };
     case 'planned':

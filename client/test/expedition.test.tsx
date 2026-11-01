@@ -17,7 +17,9 @@ register(
 );
 const { ChannelPostContent } = await import('../src/components/buddies/ChannelPostContent');
 const { ExpeditionModal } = await import('../src/components/buddies/ExpeditionModal');
-const { workspaceDirectory } = await import('../src/components/buddies/channel-data');
+const { postPurposeLabel, workspaceDirectory } = await import(
+  '../src/components/buddies/channel-data'
+);
 const { draftUrl, expeditionUrl, EXPEDITION_CREWS_URL } = await import(
   '../src/components/buddies/expedition-view'
 );
@@ -130,10 +132,11 @@ const view: ExpeditionView = {
     {
       id: 'w0',
       kind: 'work',
-      label: 'work on q1 (codex)',
+      label: 'Work on “Why does the widget fail?”',
+      ask: 'Patch the widget at its root.',
       seat: 'codex',
       questionId: 'q1',
-      phase: { t: 'ended', outcome: 'CLAIM: fixed' },
+      phase: { t: 'ended', verdict: 'Claim', summary: 'fixed' },
       live: false,
       brief: 'Patch the widget.',
       requestId: 'post-0',
@@ -143,7 +146,8 @@ const view: ExpeditionView = {
     {
       id: 'w1',
       kind: 'work',
-      label: 'work on q1 (claude)',
+      label: 'Work on “Why does the widget fail?”',
+      ask: 'Bisect it.',
       seat: 'claude',
       questionId: 'q1',
       phase: { t: 'posted' },
@@ -173,9 +177,7 @@ const close = () => {};
 // owner unable to unblock it. The goal renders as markdown (it showed raw `1.` and `**`).
 test('the expedition modal leads with its state, the owner question, the goal as markdown, and live workers with their instructions', async () => {
   await loadResource({ key: expeditionUrl(view.id), load: async () => view });
-  const html = inModal(
-    <ExpeditionModal target={{ t: 'live', id: view.id }} presentation="dialog" onClose={close} />
-  );
+  const html = inModal(<ExpeditionModal target={{ t: 'live', id: view.id }} onClose={close} />);
   assert.match(html, /<dialog[^>]*aria-label="Expedition widget"/);
   assert.match(html, /needs you/);
   assert.match(html, /Should the website be in scope\?/);
@@ -193,23 +195,38 @@ test('the expedition modal leads with its state, the owner question, the goal as
   assert.match(html, /last refusal: .*merge conflict in docs\/README\.md/);
   // Spend is measured or says why not (design.md R6); nothing is priced.
   assert.match(html, /title="Cost: 2k input \+ 300 output tokens .* 1 not measured/);
-  assert.match(html, /Cost: not measured \(muse records no token usage \(session s1\)\)/);
+  assert.match(html, />not measured \(muse records no token usage \(session s1\)\)</);
   assert.doesNotMatch(html, /\$\d/);
   // Reflections are one tab away, not on the first screen.
   assert.doesNotMatch(html, /Two approaches fail the same way\./);
+});
+
+// 2026-11-01 review: a finished expedition showed "7h 56m left" and its status three times.
+test('a finished expedition shows how long it took and one Result callout, not time left', async () => {
+  const done: ExpeditionView = {
+    ...view,
+    id: 'widget-done00',
+    run: {
+      t: 'finished',
+      reason: 'done',
+      summary: 'Widget fixed.',
+      at: '2026-11-01T00:04:00.000Z',
+    },
+    now: '2026-11-01T00:30:00.000Z',
+  };
+  await loadResource({ key: expeditionUrl(done.id), load: async () => done });
+  const html = inModal(<ExpeditionModal target={{ t: 'live', id: done.id }} onClose={close} />);
+  assert.match(html, /took 4m/);
+  assert.doesNotMatch(html, / left</);
+  assert.match(html, /<strong>Result<\/strong>/);
+  assert.equal(html.match(/finished \(done\)/g)?.length, 1, 'the status is the pill only');
 });
 
 // Before the crew Buddy exists there is no chat yet; the chat column must say what is happening.
 test('before the crew exists, the chat says the crew is starting instead of rendering nothing', async () => {
   const starting: ExpeditionView = { ...view, id: 'widget-new000', crew: { t: 'pending' } };
   await loadResource({ key: expeditionUrl(starting.id), load: async () => starting });
-  const html = inModal(
-    <ExpeditionModal
-      target={{ t: 'live', id: starting.id }}
-      presentation="dialog"
-      onClose={close}
-    />
-  );
+  const html = inModal(<ExpeditionModal target={{ t: 'live', id: starting.id }} onClose={close} />);
   assert.match(html, /Starting the crew/);
 });
 
@@ -224,7 +241,7 @@ const draft = (id: string, patch: Partial<ExpeditionDraftView> = {}): Expedition
   },
   issues: [],
   advice: [],
-  defaulted: ['crew: the default crew'],
+  defaulted: ['crew', 'maxLive'],
   resolved: [],
   ...patch,
 });
@@ -245,7 +262,10 @@ const launchButton = (html: string) => /<button[^>]*>Launch<\/button>/.exec(html
 // stayed enabled with issues would only fail on click; one hidden after launch strands the owner.
 test('a draft card shows Info and Launch; Launch is disabled with its reason while issues stand; a launched draft opens the expedition', async () => {
   const open = await cardOf(draft('dopen'));
-  assert.match(open, /Draft ·<\/span> <strong>widget<\/strong>/);
+  assert.match(
+    open,
+    /<strong[^>]*>widget<\/strong><span class="expedition-pill[^"]*">draft<\/span>/
+  );
   assert.match(open, /6 attempts · 3 at once · 12 h/);
   assert.match(open, />Info<\/button>/);
   assert.doesNotMatch(launchButton(open), /disabled/);
@@ -263,6 +283,11 @@ test('a draft card shows Info and Launch; Launch is disabled with its reason whi
     draft('dlaunched', { state: { t: 'launched', expeditionId: 'widget-abc123' } })
   );
   assert.match(launched, />Launched →<\/button>/);
+  assert.match(
+    launched,
+    /<span class="expedition-pill[^"]*">launched<\/span>/,
+    'the header says so'
+  );
   assert.equal(launchButton(launched), '');
 });
 
@@ -270,15 +295,14 @@ test('the draft modal shows the charter with its issues and defaults, and a Laun
   const d = draft('dmodal', { issues: ['codex: no such model gpt-0'] });
   await loadResource({ key: draftUrl(d.id, 'ws-1'), load: async () => d });
   const html = inModal(
-    <ExpeditionModal
-      target={{ t: 'draft', draftId: d.id, workspaceId: 'ws-1' }}
-      presentation="dialog"
-      onClose={close}
-    />
+    <ExpeditionModal target={{ t: 'draft', draftId: d.id, workspaceId: 'ws-1' }} onClose={close} />
   );
   assert.match(html, /Make the <strong>widget<\/strong> pass/);
   assert.match(html, /codex: no such model gpt-0/);
-  assert.match(html, /crew: the default crew/);
+  // Defaults are marked on their values, in words (2026-11-01 review: raw `maxLive: 2` keys).
+  assert.match(html, /3 at once<span class="expedition-default"[^>]*>default<\/span>/);
+  assert.doesNotMatch(html, /12 h limit<span class="expedition-default"/);
+  assert.doesNotMatch(html, /maxLive/);
   assert.match(html, /<code>\$ pnpm test widget<\/code>/);
   assert.match(launchButton(html), /disabled/);
   assert.match(html, />Close<\/button>/);
@@ -297,6 +321,14 @@ test('an expedition status post renders as markdown in the chat', () => {
   );
   assert.match(html, /<strong>widget<\/strong>/);
   assert.match(html, /<p>Planning…<\/p>/);
+});
+
+// 2026-11-01 review: green mono "expedition draft/badge/status" tags sat above every host post in
+// both shells (ChannelRows, ChannelRowsMobile read this one label); other purposes keep theirs.
+test('expedition host posts carry no purpose tag; other purposes still do', () => {
+  for (const purpose of ['expedition_badge', 'expedition_draft', 'expedition_status'])
+    assert.equal(postPurposeLabel(postFixture({ id: `p-${purpose}`, purpose })), null, purpose);
+  assert.equal(postPurposeLabel(postFixture({ id: 'p-standup', purpose: 'standup' })), 'standup');
 });
 
 // Crew Buddies are expedition machinery (2026-11-01 screenshot: "⛺ Emergent beach de…" listed as

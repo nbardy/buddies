@@ -1,9 +1,8 @@
 import type { ExpeditionDraftView } from '@unleashd/shared';
 import { Suspense, lazy, useState } from 'react';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
-import { useDeviceKind } from '../../mobile/hooks/useDeviceKind';
 import { DraftLaunchButton } from './ExpeditionDraftLaunch';
-import { budgetLine, draftUrl, goalLine } from './expedition-view';
+import { DRAFT_PILL, budgetLine, draftUrl, goalLine } from './expedition-view';
 import './BuddyWorkerThreadBadge.css';
 import './Expedition.css';
 
@@ -31,13 +30,15 @@ export function ExpeditionDraftCard({
     );
   const d = view.data;
   const issues = d.state.t === 'open' ? d.issues.length : 0;
+  const pill = DRAFT_PILL[d.state.t];
   return (
     <section
       className="buddy-worker-thread-badge ui-card ui-stack expedition-draft-card"
       aria-label={`Draft expedition ${d.charter.name}`}
     >
       <div className="ui-row expedition-draft-card-title">
-        ⛺ <span className="ui-muted">Draft ·</span> <strong>{d.charter.name}</strong>
+        ⛺ <strong className="ui-truncate">{d.charter.name}</strong>
+        <span className={`expedition-pill expedition-tone-${pill.tone}`}>{pill.label}</span>
       </div>
       <span className="ui-truncate">{goalLine(d.charter.goal)}</span>
       <span className="ui-muted">
@@ -57,20 +58,15 @@ export function ExpeditionDraftCard({
   );
 }
 
-/** Info: the expedition modal on this draft, a sheet on the phone. */
+/** Info: the expedition modal on this draft (a sheet at phone width). */
 function DraftInfo({
   draftId,
   workspaceId,
   onClose,
 }: { draftId: string; workspaceId: string; onClose(): void }) {
-  const device = useDeviceKind();
   return (
     <Suspense fallback={null}>
-      <ExpeditionModal
-        target={{ t: 'draft', draftId, workspaceId }}
-        presentation={device === 'mobile' ? 'sheet' : 'dialog'}
-        onClose={onClose}
-      />
+      <ExpeditionModal target={{ t: 'draft', draftId, workspaceId }} onClose={onClose} />
     </Suspense>
   );
 }

@@ -38,7 +38,9 @@ as a missing media attachment.)
 ### Draft (design.md R10)
 
 `draft` validates the charter like `launch` and launches nothing. It persists the canonical
-charter with its issues, advice, defaults, resolved model words, origin (the same thread-or-DM rule
+charter with its issues, advice, defaulted fields (stored as field names, `inScope`…`crew`; the
+card marks each value `default`, while the tool result's `defaulted` keeps one line per field),
+resolved model words, origin (the same thread-or-DM rule
 as launch), launcher and workspace at `<appData>/expeditions/drafts/<draftId>.json` (one atomic
 write), and the host posts ONE draft card where the launch badge would go: purpose
 `expedition_draft`, evidence `expedition-draft:<draftId>`, idempotency key `exp-draft:<draftId>`,

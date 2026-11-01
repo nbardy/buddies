@@ -16,6 +16,8 @@ export type ExpeditionRun =
         | 'owner_stop'
         | 'setup_failed';
       summary: string;
+      /** When it finished: the header shows how long it took, not time left. */
+      at: string;
     };
 
 /** Where a question stands, derived from the ledger (design.md R5): its furthest stage.
@@ -39,8 +41,8 @@ export interface ExpeditionQuestion {
   stage: ExpeditionStage;
   /** File custody: repo-relative prefixes; work on overlapping paths runs one at a time. */
   paths: string[];
-  /** Question ids this question's work waits for (each must be closed verified). */
-  after: string[];
+  /** The questions this question's work waits for (each must be closed verified). */
+  after: { id: string; title: string }[];
   attempts: string[];
 }
 
@@ -56,19 +58,24 @@ export type ExpeditionAttemptCost =
   | { t: 'unmeasured'; reason: string };
 
 /** Where an attempt is. admitted: its worktree is being made; dropped: it never started (no
- * worktree), with why; ended: its one-line result. */
+ * worktree), with why; ended: its result as a verdict word (Claim, Blocked, Verified…) and a
+ * one-line summary. */
 export type ExpeditionAttemptPhase =
   | { t: 'planned' }
   | { t: 'admitted' }
   | { t: 'dropped'; reason: string }
   | { t: 'posting' }
   | { t: 'posted' }
-  | { t: 'ended'; outcome: string };
+  | { t: 'ended'; verdict: string; summary: string };
 
 export interface ExpeditionAttempt {
   id: string;
   kind: 'manager' | 'work' | 'check';
+  /** By question title, never a raw id, e.g. `Work on “Add mul()”`. */
   label: string;
+  /** The manager's brief for a work attempt (markdown); absent for a manager or a check, which
+   * have no assignment of their own beyond `brief`. */
+  ask: string | null;
   seat: string;
   questionId: string | null;
   phase: ExpeditionAttemptPhase;
@@ -182,6 +189,15 @@ export type ExpeditionDraftState =
   | { t: 'launched'; expeditionId: string }
   | { t: 'superseded'; by: string };
 
+/** A charter field the request left out and the host defaulted (the modal marks its value). */
+export type ExpeditionDefault =
+  | 'inScope'
+  | 'outOfScope'
+  | 'maxLive'
+  | 'hours'
+  | 'exploreShare'
+  | 'crew';
+
 export interface ExpeditionDraftView {
   id: string;
   workspaceId: string;
@@ -192,7 +208,7 @@ export interface ExpeditionDraftView {
   issues: string[];
   /** Non-blocking suggestions, the defaults the charter took, and owner model words resolved. */
   advice: string[];
-  defaulted: string[];
+  defaulted: ExpeditionDefault[];
   resolved: string[];
 }
 

@@ -552,10 +552,20 @@ export function expeditionCardOf(post: Post): ExpeditionCard {
 }
 
 export function postPurposeLabel(post: Post): string | null {
-  return post.purpose === undefined || post.purpose === 'reply'
+  return post.purpose === undefined || UNLABELLED_PURPOSES.has(post.purpose)
     ? null
     : post.purpose.replaceAll('_', ' ');
 }
+
+/** Purposes shown without a tag: a reply is conversation; the expedition host's posts are their
+ * own label (the card, the badge, the ⛺ status line). 2026-11-01 review: the green mono
+ * "expedition draft/badge/status" tags read as debug output above every one of them. */
+const UNLABELLED_PURPOSES: ReadonlySet<string> = new Set([
+  'reply',
+  'expedition_badge',
+  'expedition_draft',
+  'expedition_status',
+]);
 
 // ── The workspace directory ─────────────────────────────────────────────────
 

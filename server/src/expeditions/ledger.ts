@@ -327,7 +327,8 @@ export type Run =
   | { t: 'running' }
   | { t: 'paused' }
   | { t: 'waiting_owner'; question: string }
-  | { t: 'finished'; reason: FinishReason; summary: string };
+  /** `at`: when it finished, so the page shows how long it took (not time left). */
+  | { t: 'finished'; reason: FinishReason; summary: string; at: string };
 
 /** A chat status post: written to the ledger first, then posted. */
 export interface Status {
@@ -623,7 +624,7 @@ export function apply(s: State, e: Entry): void {
       return;
     }
     case 'finished':
-      s.run = { t: 'finished', reason: e.reason, summary: e.summary };
+      s.run = { t: 'finished', reason: e.reason, summary: e.summary, at: e.at };
       s.doneRequest = { t: 'none' };
       return;
   }

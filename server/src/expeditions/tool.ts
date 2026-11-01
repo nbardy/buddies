@@ -5,6 +5,7 @@ import type { ToolDeps } from '../buddies/mcp';
 import { createProviderCatalog } from '../providers/catalog-service';
 import type { ExpeditionHost, Launched } from './host';
 import {
+  type CharterDefault,
   CharterRequest,
   type ModelsOf,
   type Origin,
@@ -12,6 +13,7 @@ import {
   charterAdvice,
   charterOf,
   charterSummary,
+  defaultedLines,
 } from './model';
 
 // The one `expedition` Buddy tool. Its description is paid on every worker turn
@@ -79,14 +81,14 @@ const DRAFT_FIX =
 const launchKey = (grant: BuddyGrant, charter: { name: string }) =>
   `${grant.conversationId}:${charter.name}`;
 
-function launchReply(launched: Launched, defaulted: string[], resolved: string[]) {
+function launchReply(launched: Launched, defaulted: CharterDefault[], resolved: string[]) {
   switch (launched.t) {
     case 'launched':
       return {
         id: launched.state.id,
         page: pageOf(launched.state),
         launched: charterSummary(launched.state.charter),
-        defaulted,
+        defaulted: defaultedLines(defaulted),
         resolved,
         next: NEXT,
       };
@@ -133,7 +135,7 @@ export async function expeditionHandler(
         ready: issues.length === 0,
         issues,
         advice: draft.advice,
-        defaulted,
+        defaulted: defaultedLines(defaulted),
         resolved,
         drafted: charterSummary(charter),
         next: issues.length === 0 ? DRAFT_NEXT : `${DRAFT_NEXT} ${DRAFT_FIX}`,

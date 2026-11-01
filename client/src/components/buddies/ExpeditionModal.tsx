@@ -1,8 +1,9 @@
 import type {
   ExpeditionAttempt,
   ExpeditionCharterView,
-  ExpeditionDraftState,
+  ExpeditionDefault,
   ExpeditionDraftView,
+  ExpeditionQuestion,
   ExpeditionValidation,
   ExpeditionView,
 } from '@unleashd/shared';
@@ -15,6 +16,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listField } from '../../atoms/conversations';
@@ -36,21 +38,25 @@ import {
 } from './channel-data';
 import { channelsHref } from './channels-view';
 import {
+  DRAFT_PILL,
   FOCI,
   type Focus,
   type Pane,
   QUESTION_GLYPH,
+  SCOPE_LABEL,
   STAGE_TONE,
   attemptCostLine,
+  attemptOutcome,
   attemptState,
   attemptTone,
   budgetLine,
-  doneLines,
   draftUrl,
-  durationLabel,
   expeditionUrl,
+  limitItems,
   runLabel,
   runTone,
+  shortTime,
+  timeLine,
   validationsOf,
   worktreeLine,
 } from './expedition-view';
@@ -72,11 +78,30 @@ export type Presentation = 'dialog' | 'sheet';
 
 const POLL_MS = 5_000;
 
+// The sheet/dialog choice follows the viewport while the modal is open (2026-11-01 review: a
+// window resized from phone to desktop width kept a full-bleed sheet). The shell's own choice is
+// sticky per load (useDeviceKind); the modal is short-lived, so re-laying it out loses nothing.
+// Same breakpoint as useDeviceKind.
+const SHEET_QUERY = '(max-width: 768px)';
+const subscribeViewport = (onChange: () => void) => {
+  const query = window.matchMedia(SHEET_QUERY);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+};
+const viewportPresentation = (): Presentation =>
+  window.matchMedia(SHEET_QUERY).matches ? 'sheet' : 'dialog';
+/** A static render (tests) has no viewport: it renders the dialog. */
+const staticPresentation = (): Presentation => 'dialog';
+
 export function ExpeditionModal({
   target,
-  presentation,
   onClose,
-}: { target: ExpeditionTarget; presentation: Presentation; onClose(): void }) {
+}: { target: ExpeditionTarget; onClose(): void }) {
+  const presentation = useSyncExternalStore(
+    subscribeViewport,
+    viewportPresentation,
+    staticPresentation
+  );
   switch (target.t) {
     case 'live':
       return <LiveModal id={target.id} presentation={presentation} onClose={onClose} />;
@@ -114,14 +139,19 @@ function ExpeditionMarkdown({ text }: { text: string }) {
   );
 }
 
+/** Which modal: the live one is a fixed-height workspace; a draft sizes to its content. */
+type Kind = 'live' | 'draft';
+
 function Shell({
   label,
+  kind,
   presentation,
   onClose,
   title,
   children,
 }: {
   label: string;
+  kind: Kind;
   presentation: Presentation;
   onClose(): void;
   title: ReactNode;
@@ -129,7 +159,7 @@ function Shell({
 }) {
   return (
     <ModalDialog
-      className={`channel-task-overlay ui-card ui-stack expedition-modal expedition-modal--${presentation}`}
+      className={`channel-task-overlay ui-card ui-stack expedition-modal expedition-modal--${presentation} expedition-modal--${kind}`}
       label={label}
       onClose={onClose}
     >
@@ -153,12 +183,25 @@ function Shell({
 /** Waiting for the first read, or it failed: the shell with one line, so Esc still closes. */
 function Pending({
   label,
+  kind,
   presentation,
   onClose,
   error,
-}: { label: string; presentation: Presentation; onClose(): void; error: Error | null }) {
+}: {
+  label: string;
+  kind: Kind;
+  presentation: Presentation;
+  onClose(): void;
+  error: Error | null;
+}) {
   return (
-    <Shell label={label} presentation={presentation} onClose={onClose} title={<strong>⛺</strong>}>
+    <Shell
+      label={label}
+      kind={kind}
+      presentation={presentation}
+      onClose={onClose}
+      title={<strong>⛺</strong>}
+    >
       <output className="buddy-panel__empty">{error ? error.message : `Loading ${label}…`}</output>
     </Shell>
   );
@@ -187,7 +230,7 @@ function Goal({ goal }: { goal: string }) {
 /** A plain list; keyed by position, since two entries may read the same. */
 function Bullets({ items }: { items: readonly string[] }) {
   return (
-    <ul>
+    <ul className="expedition-bullets">
       {items.map((item, i) => (
         <li key={i}>{item}</li>
       ))}
@@ -195,11 +238,28 @@ function Bullets({ items }: { items: readonly string[] }) {
   );
 }
 
+/** A labelled count with its own bar: a track and a distinct fill (2026-11-01 review: the native
+ * <meter> read as full at 0/4). */
 function Meter({ label, value, max }: { label: string; value: number; max: number }) {
+  const share = max > 0 ? Math.min(1, value / max) : 0;
   return (
-    <span className="expedition-chip" title={`${label}: ${value} of ${max}`}>
-      <span className="ui-muted">{label}</span> {value}/{max}
-      <meter min={0} max={max} value={value} />
+    <span className="expedition-stat" title={`${label}: ${value} of ${max}`}>
+      <span className="expedition-stat-label">{label}</span>
+      <span className="expedition-stat-value">
+        {value}/{max}
+      </span>
+      <span className="expedition-bar" aria-hidden="true">
+        <span style={{ width: `${share * 100}%` }} />
+      </span>
+    </span>
+  );
+}
+
+function Stat({ label, value, title }: { label: string; value: string; title?: string }) {
+  return (
+    <span className="expedition-stat" title={title}>
+      <span className="expedition-stat-label">{label}</span>
+      <span className="expedition-stat-value">{value}</span>
     </span>
   );
 }
@@ -218,6 +278,24 @@ function BranchChip({ branch, head }: { branch: string; head: string }) {
   );
 }
 
+/** The small "default" marker on a value the host filled in for the draft. */
+function DefaultMark({ on }: { on: boolean }) {
+  return on ? (
+    <span className="expedition-default" title="Not stated in the request; the default applies">
+      default
+    </span>
+  ) : null;
+}
+
+function Section({ title, children }: { title: ReactNode; children: ReactNode }) {
+  return (
+    <section className="expedition-section ui-stack">
+      <h3 className="ui-section__title">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
 // ---------- Live ----------
 
 function LiveModal({
@@ -230,6 +308,7 @@ function LiveModal({
     return (
       <Pending
         label="expedition"
+        kind="live"
         presentation={presentation}
         onClose={onClose}
         error={view.kind === 'failed' ? view.error : null}
@@ -239,11 +318,12 @@ function LiveModal({
   return (
     <Shell
       label={`Expedition ${v.charter.name}`}
+      kind="live"
       presentation={presentation}
       onClose={onClose}
       title={
         <>
-          <strong className="expedition-modal-title">⛺ {v.charter.name}</strong>
+          <strong className="expedition-modal-title ui-truncate">⛺ {v.charter.name}</strong>
           <span className={`expedition-pill expedition-tone-${runTone(v.run)}`}>
             {runLabel(v.run)}
           </span>
@@ -275,12 +355,13 @@ function LiveBody({
     setFocus('chat');
     requestAnimationFrame(() => chatRef.current?.querySelector('textarea')?.focus());
   };
-  const counts: Record<Focus, string> = {
-    workers: ` ${v.attempts.filter((a) => a.phase.t !== 'ended').length}`,
-    tasks: ` ${v.questions.length}`,
-    reflections: ` ${v.reflections.length}`,
-    charter: '',
-    chat: '',
+  // Totals (2026-11-01 review: "Workers 0" beside four finished workers read as broken).
+  const counts: Record<Focus, number | null> = {
+    workers: v.attempts.length,
+    tasks: v.questions.length,
+    reflections: v.reflections.length,
+    charter: null,
+    chat: null,
   };
   // Arrow keys move between tabs (the WAI-ARIA tabs pattern); the pane is their tabpanel.
   const step = (by: number) => {
@@ -314,7 +395,9 @@ function LiveBody({
           onClick={() => setFocus(f.focus)}
         >
           {f.label}
-          <span className="ui-muted">{counts[f.focus]}</span>
+          {counts[f.focus] !== null && (
+            <span className="expedition-tab-count">{counts[f.focus]}</span>
+          )}
         </button>
       ))}
     </div>
@@ -326,21 +409,21 @@ function LiveBody({
   );
   return (
     <>
-      <div className="expedition-meters ui-row">
+      <div className="expedition-meters">
         <Meter label="Attempts" value={v.counts.attempts} max={v.counts.maxAttempts} />
         <Meter label="Decisions" value={v.counts.decisions} max={v.counts.maxDecisions} />
-        <span className="expedition-chip">
-          {v.counts.live} live · {v.counts.queued} queued · {v.counts.verified} verified
-        </span>
-        <span
-          className="expedition-chip"
+        <Stat
+          label="Workers"
+          value={`${v.counts.live} live · ${v.counts.queued} queued · ${v.counts.verified} verified`}
+        />
+        <Stat
+          label="Time"
+          value={timeLine(v)}
           title={`Deadline ${new Date(v.deadline).toLocaleString()}`}
-        >
-          {durationLabel(v.launchedAt, v.now)} elapsed · {durationLabel(v.now, v.deadline)} left
-        </span>
-        <span className="expedition-chip" title={v.cost.line}>
-          {v.cost.short}
-        </span>
+        />
+        <Stat label="Cost" value={v.cost.short} title={v.cost.line} />
+      </div>
+      <div className="ui-row">
         <BranchChip branch={v.integration.branch} head={v.integration.head} />
       </div>
       {stale && <p role="alert">{stale.message}</p>}
@@ -380,7 +463,8 @@ const panelProps = (pane: Focus) => ({
   className: 'expedition-pane',
 });
 
-/** The owner's attention line: an open question, or how it finished; nothing while it runs. */
+/** The owner's attention line: an open question, or the result; nothing while it runs. The
+ * status itself is the header pill only (2026-11-01 review: it was repeated three times). */
 function RunCallout({ v, onReply }: { v: ExpeditionView; onReply(): void }) {
   switch (v.run.t) {
     case 'running':
@@ -402,7 +486,7 @@ function RunCallout({ v, onReply }: { v: ExpeditionView; onReply(): void }) {
     case 'finished':
       return (
         <section className="expedition-callout ui-stack" aria-label="Result">
-          <strong>{runLabel(v.run)}</strong>
+          <strong>Result</strong>
           <ExpeditionMarkdown text={v.run.summary} />
         </section>
       );
@@ -419,14 +503,10 @@ function LivePane({ pane, v }: { pane: Pane; v: ExpeditionView }) {
       return <Reflections v={v} />;
     case 'charter':
       return (
-        <CharterPane charter={v.charter} lessons={v.lessons}>
+        <CharterPane charter={v.charter} lessons={v.lessons} defaults={NO_DEFAULTS}>
           {v.validations.length > 0 && (
             <Section title="Validations">
-              <ul>
-                {[...v.validations].reverse().map((x) => (
-                  <li key={x.id}>{x.label}</li>
-                ))}
-              </ul>
+              <Bullets items={[...v.validations].reverse().map((x) => x.label)} />
             </Section>
           )}
         </CharterPane>
@@ -434,54 +514,63 @@ function LivePane({ pane, v }: { pane: Pane; v: ExpeditionView }) {
   }
 }
 
+/** A live expedition's charter is as launched: nothing is marked as a draft default. */
+const NO_DEFAULTS: ReadonlySet<ExpeditionDefault> = new Set();
+
 function WorkerCard({
   a,
   validations,
 }: { a: ExpeditionAttempt; validations: ExpeditionValidation[] }) {
   const tree = worktreeLine(a.worktree);
   const cost = attemptCostLine(a.cost);
+  const outcome = attemptOutcome(a);
   return (
     <article className="expedition-card ui-stack">
       <div className="ui-row expedition-card-head">
         <span className={`expedition-dot expedition-tone-${attemptTone(a)}`} aria-hidden="true" />
-        <span className="expedition-chip">{a.kind}</span>
-        <strong className="ui-truncate">{a.label}</strong>
-        <span className="ui-muted expedition-card-id">{a.id}</span>
+        <strong className="ui-truncate expedition-card-title">{a.label}</strong>
+        <span className="expedition-chip expedition-chip--small">{a.kind}</span>
+        <span className="expedition-card-id" title={`Attempt ${a.id}`}>
+          {a.id}
+        </span>
       </div>
-      <div className="ui-row expedition-card-meta ui-muted">
-        <code>{a.seat}</code>
-        <span>{attemptState(a)}</span>
-        {tree && <code>{tree}</code>}
-        {cost && <span>Cost: {cost}</span>}
-      </div>
+      {outcome.t === 'outcome' && (
+        <p className="expedition-outcome">
+          <span className="expedition-outcome-verdict">{outcome.verdict}</span> {outcome.summary}
+        </p>
+      )}
       {validations.map((x) => (
-        <div key={x.id} className="expedition-card-meta ui-muted">
-          <span className="expedition-chip">validation {x.verdict}</span>
+        <div key={x.id} className="expedition-validation">
+          <span className="expedition-chip expedition-chip--small">validation {x.verdict}</span>
           {x.checks.map((c) => (
             <div key={c.checkIndex}>
-              {c.passed ? '✓' : '✗'} {x.id} check {c.checkIndex}: {c.outcome}
+              {c.passed ? '✓' : '✗'} check {c.checkIndex}: {c.outcome}
             </div>
           ))}
         </div>
       ))}
-      <details open={a.live}>
-        <summary className="expedition-link">Instructions</summary>
-        {a.brief === null ? (
-          <p className="ui-muted">Not briefed yet (queued).</p>
-        ) : (
-          <ExpeditionMarkdown text={a.brief} />
+      <div className="expedition-card-meta ui-muted">
+        <span>{a.seat}</span>
+        <span>{attemptState(a)}</span>
+        {tree && <code>{tree}</code>}
+        {cost && <span title={cost}>{cost}</span>}
+      </div>
+      {/* Collapsed by default (2026-11-01 review: the open crew prompt read as debug output). */}
+      <div className="ui-row expedition-disclosures">
+        {a.ask !== null && (
+          <details>
+            <summary className="expedition-link">Brief</summary>
+            <ExpeditionMarkdown text={a.ask} />
+          </details>
         )}
-      </details>
+        {a.brief !== null && (
+          <details>
+            <summary className="expedition-link">Full instructions</summary>
+            <ExpeditionMarkdown text={a.brief} />
+          </details>
+        )}
+      </div>
     </article>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="expedition-section ui-stack">
-      <h3 className="ui-section__title">{title}</h3>
-      {children}
-    </section>
   );
 }
 
@@ -492,7 +581,7 @@ function Workers({ v }: { v: ExpeditionView }) {
     <WorkerCard key={a.id} a={a} validations={validationsOf(v.validations, a.id)} />
   );
   return (
-    <div className="ui-stack" aria-label="Workers">
+    <div className="expedition-stack" aria-label="Workers">
       {v.integration.lastRefusal.t === 'refused' && (
         <p className="expedition-callout ui-muted">
           {v.integration.integrated} integrated · last refusal: {v.integration.lastRefusal.label}
@@ -515,21 +604,35 @@ function Workers({ v }: { v: ExpeditionView }) {
 function Tasks({ v }: { v: ExpeditionView }) {
   const open = v.questions.filter((q) => q.status === 'open');
   const closed = v.questions.filter((q) => q.status !== 'open');
-  const card = (q: ExpeditionView['questions'][number]) => (
+  const card = (q: ExpeditionQuestion) => (
     <article key={q.id} className="expedition-card ui-stack">
       <div className="ui-row expedition-card-head">
         <span aria-hidden="true">{QUESTION_GLYPH[q.status]}</span>
-        <strong>{q.title}</strong>
-        <span className={`expedition-chip expedition-tone-${STAGE_TONE[q.stage]}`}>{q.stage}</span>
-        <span className="ui-muted">{q.scope}</span>
+        <strong className="expedition-card-title">{q.title}</strong>
+        <span
+          className={`expedition-chip expedition-chip--small expedition-tone-${STAGE_TONE[q.stage]}`}
+        >
+          {q.stage}
+        </span>
+        <span className="expedition-chip expedition-chip--small">{SCOPE_LABEL[q.scope]}</span>
       </div>
-      <div className="ui-row expedition-card-meta ui-muted">
-        {q.paths.map((p) => (
-          <code key={p}>{p}</code>
-        ))}
-        {q.after.length > 0 && <span>after {q.after.join(', ')} verified</span>}
-        {q.attempts.length > 0 && <span>attempts {q.attempts.join(', ')}</span>}
-      </div>
+      {(q.paths.length > 0 || q.after.length > 0) && (
+        <div className="expedition-card-meta ui-muted">
+          {q.paths.map((p) => (
+            <code key={p} className="expedition-path">
+              {p}
+            </code>
+          ))}
+          {q.after.length > 0 && (
+            <span>after {q.after.map((dep) => `“${dep.title}”`).join(', ')} is verified</span>
+          )}
+          {q.attempts.length > 0 && (
+            <span>
+              {q.attempts.length} {q.attempts.length === 1 ? 'attempt' : 'attempts'}
+            </span>
+          )}
+        </div>
+      )}
       <details>
         <summary className="expedition-link">Detail</summary>
         <ExpeditionMarkdown text={q.detail} />
@@ -537,7 +640,7 @@ function Tasks({ v }: { v: ExpeditionView }) {
     </article>
   );
   return (
-    <div className="ui-stack" aria-label="Tasks">
+    <div className="expedition-stack" aria-label="Tasks">
       <Section title={`Open · ${open.length}`}>
         {open.length === 0 ? (
           <p className="buddy-panel__empty">No open tasks; the manager plans them.</p>
@@ -554,15 +657,19 @@ function Tasks({ v }: { v: ExpeditionView }) {
 
 function Reflections({ v }: { v: ExpeditionView }) {
   return (
-    <div className="ui-stack" aria-label="Reflections">
+    <div className="expedition-stack" aria-label="Reflections">
       {v.reflections.length === 0 ? (
         <p className="buddy-panel__empty">No reflections yet.</p>
       ) : (
         <ol className="expedition-timeline">
           {[...v.reflections].reverse().map((r, i) => (
-            <li key={`${v.reflections.length - i}-${r.at}`}>
-              <time dateTime={r.at} className="ui-muted">
-                {new Date(r.at).toLocaleString()}
+            <li key={`${v.reflections.length - i}-${r.at}`} className="ui-stack">
+              <time
+                dateTime={r.at}
+                className="expedition-time"
+                title={new Date(r.at).toLocaleString()}
+              >
+                {shortTime(r.at, v.now)}
               </time>
               <ExpeditionMarkdown text={r.text} />
             </li>
@@ -573,17 +680,39 @@ function Reflections({ v }: { v: ExpeditionView }) {
   );
 }
 
-/** The Charter tab: identical for a draft and a live expedition. */
+/** Repo paths (or plain scope words) as chips; the empty list says so, marked when defaulted. */
+function ScopeList({ items, defaulted }: { items: string[]; defaulted: boolean }) {
+  return items.length === 0 ? (
+    <p className="ui-muted">
+      None stated <DefaultMark on={defaulted} />
+    </p>
+  ) : (
+    <div className="expedition-card-meta">
+      {items.map((item, i) => (
+        <code key={`${i}-${item}`} className="expedition-path">
+          {item}
+        </code>
+      ))}
+      <DefaultMark on={defaulted} />
+    </div>
+  );
+}
+
+/** The Charter tab: identical for a draft and a live expedition; a draft marks its defaults. */
 function CharterPane({
   charter,
   lessons,
+  defaults,
   children,
-}: { charter: ExpeditionCharterView; lessons: string[]; children?: ReactNode }) {
-  const list = (items: string[]) =>
-    items.length === 0 ? <p className="ui-muted">Not listed.</p> : <Bullets items={items} />;
+}: {
+  charter: ExpeditionCharterView;
+  lessons: string[];
+  defaults: ReadonlySet<ExpeditionDefault>;
+  children?: ReactNode;
+}) {
   const { roster, limits } = charter;
   return (
-    <div className="ui-stack" aria-label="Charter">
+    <div className="expedition-stack" aria-label="Charter">
       <Section title="Done when">
         <ul className="expedition-checks">
           {charter.done.t === 'checks' ? (
@@ -600,16 +729,20 @@ function CharterPane({
               )
             )
           ) : (
-            <li>{doneLines(charter.done)[0]}</li>
+            <li>The owner judges completion.</li>
           )}
         </ul>
       </Section>
       <div className="expedition-scope">
-        <Section title="In scope">{list(charter.inScope)}</Section>
-        <Section title="Out of scope">{list(charter.outOfScope)}</Section>
+        <Section title="In scope">
+          <ScopeList items={charter.inScope} defaulted={defaults.has('inScope')} />
+        </Section>
+        <Section title="Out of scope">
+          <ScopeList items={charter.outOfScope} defaulted={defaults.has('outOfScope')} />
+        </Section>
       </div>
       <Section title="Crew">
-        <div className="ui-row expedition-card-meta">
+        <div className="expedition-card-meta">
           <span className="ui-muted">manager</span> <code>{roster.manager}</code>
           <span className="ui-muted">work</span>
           {roster.work.map((s, i) => (
@@ -619,15 +752,23 @@ function CharterPane({
           {roster.check.map((s, i) => (
             <code key={`c${i}-${s}`}>{s}</code>
           ))}
+          <DefaultMark on={defaults.has('crew')} />
         </div>
       </Section>
       <Section title="Limits">
-        <p className="ui-muted">
-          {budgetLine(limits)} · explore share {Math.round(limits.exploreShare * 100)}%
-        </p>
+        <div className="expedition-card-meta">
+          {limitItems(limits, defaults).map((item) => (
+            <span key={item.text} className="expedition-chip">
+              {item.text}
+              <DefaultMark on={item.defaulted} />
+            </span>
+          ))}
+        </div>
       </Section>
       {lessons.length > 0 && (
-        <Section title="Your lessons (in every brief)">{list(lessons)}</Section>
+        <Section title="Your lessons (in every brief)">
+          <Bullets items={lessons} />
+        </Section>
       )}
       {children}
     </div>
@@ -699,29 +840,30 @@ function DraftModal({
     return (
       <Pending
         label="draft"
+        kind="draft"
         presentation={presentation}
         onClose={onClose}
         error={view.kind === 'failed' ? view.error : null}
       />
     );
   const d = view.data;
+  const pill = DRAFT_PILL[d.state.t];
   return (
     <Shell
       label={`Draft expedition ${d.charter.name}`}
+      kind="draft"
       presentation={presentation}
       onClose={onClose}
       title={
         <>
-          <strong className="expedition-modal-title">⛺ Draft · {d.charter.name}</strong>
-          <span className={`expedition-pill expedition-tone-${DRAFT_PILL[d.state.t].tone}`}>
-            {DRAFT_PILL[d.state.t].label}
-          </span>
+          <strong className="expedition-modal-title ui-truncate">⛺ {d.charter.name}</strong>
+          <span className={`expedition-pill expedition-tone-${pill.tone}`}>{pill.label}</span>
           <span className="ui-muted">{budgetLine(d.charter.limits)}</span>
         </>
       }
     >
       <WithDirectory workspaceId={d.workspaceId}>
-        <div className="expedition-pane ui-stack">
+        <div className="expedition-pane expedition-stack">
           <Goal goal={d.charter.goal} />
           {d.issues.length > 0 && (
             <section className="expedition-callout expedition-tone-bad ui-stack">
@@ -734,36 +876,20 @@ function DraftModal({
               <Bullets items={d.advice} />
             </Section>
           )}
-          {d.defaulted.length + d.resolved.length > 0 && (
-            <Section title="Filled in for you">
-              <Bullets items={[...d.defaulted, ...d.resolved]} />
+          <CharterPane charter={d.charter} lessons={[]} defaults={new Set(d.defaulted)} />
+          {d.resolved.length > 0 && (
+            <Section title="Model names resolved">
+              <Bullets items={d.resolved} />
             </Section>
           )}
-          <CharterPane charter={d.charter} lessons={[]} />
         </div>
       </WithDirectory>
-      <DraftFooter d={d} refetch={view.refetch} onClose={onClose} />
+      <footer className="expedition-footer ui-row">
+        <DraftLaunchButton d={d} refetch={view.refetch} onOpen={onClose} />
+        <button type="button" className="expedition-button" onClick={onClose}>
+          Close
+        </button>
+      </footer>
     </Shell>
-  );
-}
-
-const DRAFT_PILL: Record<ExpeditionDraftState['t'], { label: string; tone: string }> = {
-  open: { label: 'draft', tone: 'info' },
-  launched: { label: 'launched', tone: 'ok' },
-  superseded: { label: 'replaced', tone: 'muted' },
-};
-
-function DraftFooter({
-  d,
-  refetch,
-  onClose,
-}: { d: ExpeditionDraftView; refetch(): Promise<void>; onClose(): void }) {
-  return (
-    <footer className="expedition-footer ui-row">
-      <DraftLaunchButton d={d} refetch={refetch} onOpen={onClose} />
-      <button type="button" className="expedition-button" onClick={onClose}>
-        Close
-      </button>
-    </footer>
   );
 }

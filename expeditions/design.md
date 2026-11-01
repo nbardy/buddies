@@ -605,7 +605,18 @@ post was cut mid-word ("…Engin"); the crew Buddy was listed as a team member.
   file preview's `.file-preview-markdown` surface, rendered through the chat's own
   `ChannelMarkdown` (line breaks, Buddy/Task links, code) so there is one markdown flavor. `/expeditions/:id` opens it over the view it was
   opened from (react-router background location, `expedition-overlay.ts`), over home on a direct
-  load; a full-height sheet on the phone. The old page is deleted.
+  load; a full-height sheet at phone width (it follows the viewport while open). The old page is
+  deleted.
+- **Polish pass (2026-11-01 click-through)**: one type scale (the top-layer dialog had inherited
+  the page's 16px); section rhythm; bars with a distinct track; filled active tab; totals on tabs;
+  `:focus-visible` rings only; non-sticky day band in the modal chat; a finished run shows `took
+  …` and one **Result** callout (`ExpeditionRun.finished.at`). The view names work by question
+  title (`attemptTitle`), carries the manager's brief apart from the full prompt (`ask`), splits an
+  outcome into `verdict` + `summary`, and gives `after` with titles. A draft's `defaulted` is the
+  list of charter fields (`ExpeditionDefault`), shown as a `default` marker on the values; the tool
+  result still lists them as lines (`defaultedLines`). Chat news uses titles, never ids (`▶ Started:
+  Work on “…” (seat)`, `➕ New question: …`, `**Result** (done):`), and the host's expedition
+  posts carry no purpose tag (`postPurposeLabel`).
 - **Chat lines never cut a word** (`news.ts clip`): one flattened line, cut at a word boundary
   with `…`. The launch post is `⛺ Launched **<name>**: <goal's first sentence>` with `Planning…`
   as its own paragraph (`goalSummary` drops headings and list markers). Status posts were plain

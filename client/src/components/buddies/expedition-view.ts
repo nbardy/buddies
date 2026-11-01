@@ -2,13 +2,14 @@ import type {
   ExpeditionAttempt,
   ExpeditionAttemptCost,
   ExpeditionCharterView,
-  ExpeditionDone,
-  ExpeditionDoneCheck,
+  ExpeditionDefault,
+  ExpeditionDraftState,
   ExpeditionDraftView,
   ExpeditionQuestion,
   ExpeditionRun,
   ExpeditionStage,
   ExpeditionValidation,
+  ExpeditionView,
   ExpeditionWorktree,
 } from '@unleashd/shared';
 
@@ -105,13 +106,88 @@ export function attemptState(a: ExpeditionAttempt): string {
     case 'admitted':
       return 'starting';
     case 'dropped':
-      return `not started: ${a.phase.reason}`;
+      return 'not started';
     case 'posting':
     case 'posted':
       return 'running';
     case 'ended':
-      return a.phase.outcome;
+      return 'finished';
   }
+}
+
+/** A worker card's outcome block: what it produced, or why it never started. */
+export type AttemptOutcome = { t: 'none' } | { t: 'outcome'; verdict: string; summary: string };
+
+export function attemptOutcome(a: ExpeditionAttempt): AttemptOutcome {
+  switch (a.phase.t) {
+    case 'planned':
+    case 'admitted':
+    case 'posting':
+    case 'posted':
+      return { t: 'none' };
+    case 'dropped':
+      return { t: 'outcome', verdict: 'Not started', summary: a.phase.reason };
+    case 'ended':
+      return { t: 'outcome', verdict: a.phase.verdict, summary: a.phase.summary };
+  }
+}
+
+/** The header's time: elapsed and left while it runs; how long it took once finished
+ * (2026-11-01 review: a finished expedition showed "7h 56m left"). */
+export function timeLine(v: ExpeditionView): string {
+  switch (v.run.t) {
+    case 'running':
+    case 'paused':
+    case 'waiting_owner':
+      return `${durationLabel(v.launchedAt, v.now)} elapsed · ${durationLabel(v.now, v.deadline)} left`;
+    case 'finished':
+      return `took ${durationLabel(v.launchedAt, v.run.at)}`;
+  }
+}
+
+/** A short time for a caption: `1:42 PM` today, `Nov 1, 1:42 PM` on another day. */
+export function shortTime(iso: string, nowIso: string): string {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return at.toDateString() === new Date(nowIso).toDateString()
+    ? time
+    : `${at.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
+}
+
+export const SCOPE_LABEL: Record<ExpeditionQuestion['scope'], string> = {
+  in: 'in scope',
+  explore: 'explore',
+  parked: 'parked',
+};
+
+/** A draft's pill on the card and in the modal header. */
+export const DRAFT_PILL: Record<ExpeditionDraftState['t'], { label: string; tone: Tone }> = {
+  open: { label: 'draft', tone: 'info' },
+  launched: { label: 'launched', tone: 'ok' },
+  superseded: { label: 'replaced', tone: 'muted' },
+};
+
+/** One limit as the Charter shows it, marked when the host filled it in. */
+export interface LimitItem {
+  text: string;
+  defaulted: boolean;
+}
+
+/** The Charter's limits in words (`2 at once`, `8 h limit`, `explore share 20%`), each marked
+ * when defaulted. 2026-11-01 review: the draft listed raw `maxLive: 2` keys as a second list. */
+export function limitItems(
+  limits: ExpeditionCharterView['limits'],
+  defaults: ReadonlySet<ExpeditionDefault>
+): LimitItem[] {
+  return [
+    { text: `${limits.maxAttempts} attempts`, defaulted: false },
+    { text: `${limits.maxLive} at once`, defaulted: defaults.has('maxLive') },
+    { text: `${limits.hours} h limit`, defaulted: defaults.has('hours') },
+    {
+      text: `explore share ${Math.round(limits.exploreShare * 100)}%`,
+      defaulted: defaults.has('exploreShare'),
+    },
+  ];
 }
 
 /** An attempt's measured cost (design.md R6); null before it ended. Never an estimate. */
@@ -138,25 +214,6 @@ export function worktreeLine(tree: ExpeditionWorktree): string | null {
       return null;
     case 'tree':
       return `branch ${tree.branch}`;
-  }
-}
-
-/** The Goal pane's "done when" lines: what the host runs, and what a blind panel judges. */
-export function doneLines(done: ExpeditionDone): string[] {
-  switch (done.t) {
-    case 'owner':
-      return ['The owner judges completion.'];
-    case 'checks':
-      return done.checks.map(doneCheckLine);
-  }
-}
-
-function doneCheckLine(check: ExpeditionDoneCheck): string {
-  switch (check.kind) {
-    case 'command':
-      return `$ ${check.argv.join(' ')} — run by the host, ${check.timeoutSeconds}s limit`;
-    case 'judged':
-      return `${check.text} — judged by a blind check panel`;
   }
 }
 

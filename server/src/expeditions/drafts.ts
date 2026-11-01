@@ -9,7 +9,7 @@ import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import { announcePost } from '../buddies/events';
 import type { LaunchInput, Launched } from './host';
-import { Charter, type Origin } from './model';
+import { CHARTER_DEFAULT_KEYS, Charter, type CharterDefault, type Origin } from './model';
 import { charterView } from './view';
 
 // Expedition drafts (design.md R10): the `draft` action persists a validated charter and the host
@@ -36,7 +36,8 @@ const DraftRecord = z
     /** As checked when drafted; an open draft's view re-checks them on every read. */
     issues: Strings,
     advice: Strings,
-    defaulted: Strings,
+    /** The charter fields the request left out (the view marks each value as a default). */
+    defaulted: z.array(z.enum(CHARTER_DEFAULT_KEYS as [CharterDefault, ...CharterDefault[]])),
     resolved: Strings,
     origin: z.discriminatedUnion('t', [
       z.object({ t: z.literal('thread'), channelId: z.string(), rootId: z.string() }).strict(),
