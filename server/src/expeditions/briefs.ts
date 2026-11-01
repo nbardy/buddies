@@ -14,10 +14,10 @@ import {
   CheckResult,
   ManagerResult,
   WorkResult,
+  acceptanceLabel,
   attemptsOn,
   changeLabel,
   claimOf,
-  commandChecks,
   costTotals,
   doneCheckLabel,
   exploreCap,
@@ -56,15 +56,23 @@ export const CREW_ROLE = [
 /** Longest owner text kept per chat message (the steer tool's own limit). */
 const CHAT_TEXT_MAX = 2000;
 
+/** The most hours one `extend` adds (the charter's own `hours` limit). */
+export const EXTEND_MAX_HOURS = 72;
+
 /**
  * An owner chat message as steering (κ, once, at observation; host.ts observeChat): the word
- * pause, resume or stop alone; `lesson: …` a binding lesson every later brief carries; anything
- * else a note the next manager reads (it also answers a pending "needs you").
+ * pause, resume or stop alone (resume re-plans, R11); `extend 3h` moves the deadline; `lesson: …`
+ * a binding lesson every later brief carries; anything else a note the next manager reads (it
+ * also answers a pending "needs you"). An `extend` outside 0–72 hours is kept as a note, so the
+ * manager and the page show it, never silently clamped.
  */
 export function chatFeedback(body: string): Feedback {
   const text = body.trim().slice(0, CHAT_TEXT_MAX);
   const word = text.toLowerCase().replace(/[.!]+$/, '');
   if (word === 'pause' || word === 'resume' || word === 'stop') return { t: word };
+  const extend = /^extend:?\s*(\d+(?:\.\d+)?)\s*(h|hours?)?$/i.exec(word);
+  const hours = extend ? Number(extend[1]) : 0;
+  if (extend && hours > 0 && hours <= EXTEND_MAX_HOURS) return { t: 'extend', hours };
   const lesson = /^lesson:\s*(\S[\s\S]*)$/i.exec(text);
   return lesson ? { t: 'lesson', text: lesson[1] } : { t: 'note', text };
 }
@@ -92,7 +100,7 @@ function lessonsText(s: State): string {
 
 function questionLine(s: State, q: Question): string {
   const after = q.after.length > 0 ? ` (after: ${q.after.join(', ')})` : '';
-  return `- ${q.id} [${q.scope}/${q.status}, stage ${questionStage(s, q)}] ${q.title} (paths: ${q.paths.join(', ')})${after} — ${attemptsOn(s, q.id).length} attempts`;
+  return `- ${q.id} [${q.scope}/${q.status}, stage ${questionStage(s, q)}] ${q.title} (paths: ${q.paths.join(', ')})${after}; accepted by ${acceptanceLabel(q.acceptance)} — ${attemptsOn(s, q.id).length} attempts`;
 }
 
 /** Questions counted by stage (design.md R5): waiting is held work, never a failure. */
@@ -109,9 +117,7 @@ function stagesText(s: State): string {
 
 /** Every validation so far, newest last: what the host ran and how each check ended. */
 function validationsText(s: State): string {
-  return commandChecks(s.charter).length === 0
-    ? ''
-    : `VALIDATIONS (host-run command checks):\n${s.validations.map((v) => `- ${validationLabel(s, v)}`).join('\n') || '- none yet'}`;
+  return `VALIDATIONS (host-run commands: a question's command acceptance on a candidate, the DONE WHEN commands on the head at done):\n${s.validations.map((v) => `- ${validationLabel(v)}`).join('\n') || '- none yet'}`;
 }
 
 /** Every merge into the expedition branch so far, in order. */
@@ -149,7 +155,7 @@ function phaseDetail(s: State, a: Attempt): string {
 function unseenLine(s: State, e: Entry): string {
   switch (e.t) {
     case 'validation':
-      return `- ${validationLabel(s, validationOf(s, e.validationId))}`;
+      return `- ${validationLabel(validationOf(s, e.validationId))}`;
     case 'done_refused':
       return `- DONE REFUSED: ${e.reason}`;
     case 'integrated':
@@ -164,7 +170,13 @@ function unseenLine(s: State, e: Entry): string {
     case 'feedback':
       return `- OWNER ${e.feedback.t}: ${'text' in e.feedback ? e.feedback.text : ''}`;
     case 'question_added':
-      return `- QUESTION ADDED ${e.questionId} [${e.scope}] ${e.title} (paths: ${e.paths.join(', ')}): start work on it by this id`;
+      return `- QUESTION ADDED ${e.questionId} [${e.scope}] ${e.title} (paths: ${e.paths.join(', ')}; accepted by ${acceptanceLabel(e.acceptance)}): start work on it by this id`;
+    case 'validation_failed':
+      return `- ${validationLabel(validationOf(s, e.validationId))}`;
+    case 'claim_adopted':
+      return `- CLAIM ADOPTED for ${e.attemptId}: its commit is now its claim (validated or checked as its question's acceptance says)`;
+    case 'claim_refused':
+      return `- CLAIM REFUSED for ${e.attemptId}: ${e.reason}`;
     default:
       return `- ${e.t}`;
   }
@@ -177,7 +189,7 @@ function managerBrief(s: State, id: string): string {
     'You manage this expedition for one decision. Read the state, decide the next actions, answer.',
     charterText(c),
     lessonsText(s),
-    `YOUR DIRECTORY: ${managerDirectory(s)} (the expedition branch's integration tree, or the repository root before it exists). Read only: never edit, commit or run git commands that change it; the host merges there.`,
+    `YOUR DIRECTORY: ${managerDirectory(s)} (your own detached checkout of the expedition branch head, reset before every decision). Read only: never edit or commit there; the host merges in its own tree.`,
     `LIMITS: ${workerAttempts(s)}/${c.maxAttempts} work and check attempts used, ${liveWorkers(s).length} live, ${queued(s).length} queued, max ${c.maxLive} live. Explore questions may use at most ${exploreCap(c)} work attempts. This is decision ${managerTurns(s)} of at most ${managerCap(c)}; you are woken only when there is something to act on, never to wait for the host.`,
     `CREW: work seats ${c.crew.work.map((w, i) => `${i}=${seatLabel(w)}`).join(', ')}. Checks run on ${c.crew.check.map(seatLabel).join(', ')}, never on the claim's own model; a panel of n checks verifies by majority. Spread competing approaches across seats.`,
     `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet: plan first'}`,
@@ -197,30 +209,71 @@ function managerBrief(s: State, id: string): string {
       '- Start parallel work: one "work" action per question attempt; the host queues beyond the live limit.',
       '- Each question owns file paths (repo-relative prefixes, "." = whole repo). Work on overlapping paths runs one at a time, so split questions by the files they touch to run them in parallel.',
       '- "after" lists question ids a question depends on: work on it waits (stage waiting, not refused) until each is closed verified. Integrate a dependency\'s claim before closing it when the dependent work builds on its code.',
-      '- A claim counts as verified after a "check" panel verifies it, or (host-verified) when its candidate validation PASSED every command check and you integrated it: the host then closes its question verified, which unlocks the questions after it. Ask a check with goal:true when a claim should satisfy the judged DONE WHEN items: those always need a panel.',
-      '- Command checks ($ …) are run by the host on every claimed commit and on the expedition branch head at done; no agent runs or reports them. A claim whose validation FAILED is not done: send work to fix it.',
+      '- ACCEPTANCE: every question names how its claims are accepted. {"t":"command","argv":[…],"timeoutSeconds":n}: the host runs that argv on the claim\'s exact commit in a fresh tree (exit 0 passes); use a command that can pass for THIS step (its own tests, a build), never the final goal verifier for a preparation step. {"t":"panel"}: an independent check panel on another model must verify it ("check" action). Change it with "set_acceptance"; legacy questions are accepted by a panel.',
+      "- The DONE WHEN commands ($ …) run on the expedition branch head at done only, never on a candidate unless you name one as a question's acceptance. No agent runs or reports host commands.",
+      '- A claim counts as verified after a "check" panel verifies it, or (host-verified) when its command acceptance PASSED on its commit and you integrated it: the host then closes its question verified, which unlocks the questions after it. Ask a check with goal:true when a claim should satisfy the judged DONE WHEN items: those always need a panel. A claim whose validation FAILED is not done: send work to fix it.',
+      '- A work attempt that ended MALFORMED or with UNREPORTED COMMITS made commits it did not claim: "claim" names one of its commits (full sha) as its claim, and the host checks it is on that attempt\'s branch and inside its paths before accepting it.',
       '- When different approaches fail the same way, the problem is probably upstream: add a question about measurement or setup.',
       '- Kill (close dead) what a check refuted twice or a prediction falsified. Do not repeat work already in ATTEMPTS.',
-      '- "integrate" merges a claim\'s commit into the expedition branch. It is accepted only once its candidate validation PASSED (when there are command checks) and its latest check panel verified it (when one ran; required when there are no command checks). A merge conflict is refused with the conflicting paths: send work to redo it on the current head. Integrate before "done": done runs the command checks on the branch head, which holds only integrated work.',
+      '- "integrate" merges a claim\'s commit into the expedition branch. It is accepted only once its question\'s acceptance holds (its command PASSED on the commit, or a panel verified it) and no later panel refuted it. A merge conflict is refused with the conflicting paths: send work to redo it on the current head. Integrate before "done": done runs the DONE WHEN commands on the branch head, which holds only integrated work.',
       '- "done" needs the latest goal check verified (when there are judged items); the host then runs every command check on the head, and refuses done unless all pass. "ask_owner" only for a decision only the owner can make.',
       '- Work and check attempts are run by other agents with fresh context: write each work brief self-contained.',
     ].join('\n'),
-    [
-      'ANSWER: a JSON object {"actions":[...]} where each action is one of:',
-      '{"do":"add_question","title":"…","detail":"…","scope":"in"|"explore"|"parked","paths":["<repo-relative prefix the work may edit>"],"after":["<existing question id>"] (optional)}',
-      '{"do":"work","question":"<question id>","seat":<work seat index>,"brief":"<self-contained instructions and the approach to try>"}',
-      '{"do":"check","claimAttempt":"<work attempt id>","goal":true|false,"panel":1|2|3}',
-      '{"do":"integrate","claimAttempt":"<work attempt id whose claim passed>"}',
-      '{"do":"close_question","question":"<id>","status":"verified"|"dead","why":"…"}',
-      '{"do":"ask_owner","question":"…"}',
-      '{"do":"done","summary":"…"}',
-      '{"do":"note","text":"<your reflection: what is working, what is not>"}',
-      'Question ids for new questions are assigned by the host: the next decision is shown them and starts work on them.',
-      JSON_RULE,
-    ].join('\n'),
+    answerFormat('manager'),
   ]
     .filter(Boolean)
     .join('\n\n');
+}
+
+/** What each attempt kind must answer: its brief's last section, and the repair request's. */
+function answerFormat(kind: Attempt['spec']['kind']): string {
+  switch (kind) {
+    case 'manager':
+      return [
+        'ANSWER: a JSON object {"actions":[...]} where each action is one of:',
+        '{"do":"add_question","title":"…","detail":"…","scope":"in"|"explore"|"parked","paths":["<repo-relative prefix the work may edit>"],"after":["<existing question id>"] (optional),"acceptance":{"t":"command","argv":["<exe>","<arg>"],"timeoutSeconds":<n>}|{"t":"panel"}}',
+        '{"do":"set_acceptance","question":"<question id>","acceptance":{"t":"command","argv":[…],"timeoutSeconds":<n>}|{"t":"panel"}}',
+        '{"do":"work","question":"<question id>","seat":<work seat index>,"brief":"<self-contained instructions and the approach to try>"}',
+        '{"do":"check","claimAttempt":"<work attempt id>","goal":true|false,"panel":1|2|3}',
+        '{"do":"claim","attempt":"<work attempt id that ended malformed or with unreported commits>","claim":{"statement":"…","sha":"<full sha on its branch>","evidence":["…"],"howToCheck":"…"}}',
+        '{"do":"integrate","claimAttempt":"<work attempt id whose claim passed>"}',
+        '{"do":"close_question","question":"<id>","status":"verified"|"dead","why":"…"}',
+        '{"do":"ask_owner","question":"…"}',
+        '{"do":"done","summary":"…"}',
+        '{"do":"note","text":"<your reflection: what is working, what is not>"}',
+        'Question ids for new questions are assigned by the host: the next decision is shown them and starts work on them.',
+        JSON_RULE,
+      ].join('\n');
+    case 'work':
+      return [
+        'ANSWER: one of',
+        '{"result":"claim","statement":"<what is now true>","change":{"t":"commit","sha":"<full sha of your commit in YOUR WORKTREE>"} or {"t":"no_code"},"evidence":["<commit/file/test/number>"],"howToCheck":"<how an independent agent can verify it>"}',
+        '{"result":"finding","statement":"<negative or partial result>","evidence":["…"]}',
+        '{"result":"blocked","need":"<what is missing>"}',
+        JSON_RULE,
+      ].join('\n');
+    case 'check':
+      return ['ANSWER: {"verdict":"verified"|"refuted"|"unclear","why":"…"}', JSON_RULE].join('\n');
+  }
+}
+
+/** Longest part of a malformed answer quoted back in its repair request. */
+const REPAIR_QUOTE = 6000;
+
+/**
+ * The one repair request a malformed answer gets (design.md R11), on the same seat and, for a
+ * worker, in the same worktree (host.ts matches its run by these bytes). 2026-11-01 incident: a
+ * manager answered a bare JSON object and a worker a prose summary of its commit; both were
+ * dropped as malformed with no second chance.
+ */
+export function repairBrief(s: State, attempt: Attempt, error: string, raw: string): string {
+  const quoted = raw.length > REPAIR_QUOTE ? `…${raw.slice(-REPAIR_QUOTE)}` : raw;
+  return [
+    `[expedition ${s.id} · ${s.charter.name} · REPAIR ${attempt.id}]`,
+    `Your answer to attempt ${attempt.id} could not be read (${error}). Do not redo the work: reply with the same result in the required format. Your answer must end with the json block.`,
+    answerFormat(attempt.spec.kind),
+    `YOUR PREVIOUS ANSWER:\n${quoted}`,
+  ].join('\n\n');
 }
 
 function workBrief(s: State, id: string, spec: WorkSpec): string {
@@ -249,8 +302,8 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
     [
       `YOUR WORKTREE: ${tree.path} (branch ${tree.branch}, based on ${tree.baseSha}).`,
       'Your turn starts there. Work and commit ONLY in that directory, on that branch. Never edit any other',
-      `checkout. Your files: ${q.paths.join(', ')}. A code claim must name its commit's full sha;`,
-      'the host runs the command checks in DONE WHEN on that exact commit.',
+      `checkout. Your files: ${q.paths.join(', ')}. A code claim must name its commit's full sha.`,
+      `Your claim is accepted by ${acceptanceLabel(q.acceptance)}.`,
     ].join(' '),
     `WHAT OTHERS FOUND:\n${findings.join('\n') || '- nothing yet'}${verified.length ? `\n${verified.join('\n')}` : ''}`,
     [
@@ -258,13 +311,7 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
       'evidence. Before you start, state your',
       'approach and what result you predict; report honestly if the prediction failed.',
     ].join(' '),
-    [
-      'ANSWER: one of',
-      '{"result":"claim","statement":"<what is now true>","change":{"t":"commit","sha":"<full sha of your commit in YOUR WORKTREE>"} or {"t":"no_code"},"evidence":["<commit/file/test/number>"],"howToCheck":"<how an independent agent can verify it>"}',
-      '{"result":"finding","statement":"<negative or partial result>","evidence":["…"]}',
-      '{"result":"blocked","need":"<what is missing>"}',
-      JSON_RULE,
-    ].join('\n'),
+    answerFormat('work'),
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -289,7 +336,7 @@ function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): st
       ? 'This is a GOAL check: verify the claim AND that every judged DONE WHEN item now holds. Command checks ($ …) are run by the host, not by you.'
       : '',
     'Verified only if you reproduced it. Refuted if it is false. Unclear if you could not decide; say why.',
-    ['ANSWER: {"verdict":"verified"|"refuted"|"unclear","why":"…"}', JSON_RULE].join('\n'),
+    answerFormat('check'),
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -312,15 +359,35 @@ export function briefOf(s: State, attempt: Attempt): string {
 
 const FENCE = /```json\s*([\s\S]*?)```/g;
 
-function lastJson(body: string): { ok: true; value: unknown } | { ok: false; error: string } {
-  const blocks = [...body.matchAll(FENCE)];
-  const last = blocks.at(-1);
-  if (!last) return { ok: false, error: 'no ```json block' };
+type Json = { ok: true; value: unknown } | { ok: false; error: string };
+
+/**
+ * The answer's result: its last fenced ```json block, or else a bare JSON object that ends the
+ * answer (design.md R11; 2026-11-01 incident: a manager answered `{"actions":[…]}` with no fence
+ * and the decision was dropped). The schema check after this is unchanged and strict.
+ */
+function lastJson(body: string): Json {
+  const last = [...body.matchAll(FENCE)].at(-1);
+  return last ? parsed(last[1] ?? '') : trailingObject(body);
+}
+
+function parsed(text: string): Json {
   try {
-    return { ok: true, value: JSON.parse(last[1] ?? '') };
+    return { ok: true, value: JSON.parse(text) };
   } catch (error) {
     return { ok: false, error: `invalid JSON: ${error instanceof Error ? error.message : error}` };
   }
+}
+
+/** The longest suffix of the answer that parses as one JSON object (it must end the answer). */
+function trailingObject(body: string): Json {
+  const text = body.trimEnd();
+  if (!text.endsWith('}')) return { ok: false, error: 'no ```json block or final JSON object' };
+  for (let i = text.indexOf('{'); i >= 0; i = text.indexOf('{', i + 1)) {
+    const tried = parsed(text.slice(i));
+    if (tried.ok && typeof tried.value === 'object' && tried.value !== null) return tried;
+  }
+  return { ok: false, error: 'no ```json block, and the final {…} is not valid JSON' };
 }
 
 export function parseOutcome(kind: Attempt['spec']['kind'], body: string): Outcome {
@@ -351,6 +418,9 @@ export function statusText(s: State, badgeLine: string): string {
     badgeLine,
     s.run.t === 'waiting_owner' ? `NEEDS YOU: ${s.run.question}` : '',
     s.run.t === 'finished' ? `FINISHED: ${s.run.summary}` : '',
+    s.tickFailure.t === 'failing'
+      ? `HOST TROUBLE: ${s.tickFailure.failures} ticks failed in a row (last at ${s.tickFailure.at}): ${s.tickFailure.reason}`
+      : '',
     charterText(s.charter),
     lessonsText(s),
     `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet'}`,

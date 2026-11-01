@@ -1,6 +1,14 @@
 import { type Charter, type Claim, type WorkerConfig, sameModel } from './charter';
-import type { Attempt, AttemptSpec, CheckSpec, Question, State, WorkSpec } from './ledger';
-import { attemptOf, byId, commandChecks, questionOf, validationPassed } from './ledger';
+import type {
+  Attempt,
+  AttemptSpec,
+  CheckSpec,
+  Question,
+  State,
+  Validation,
+  WorkSpec,
+} from './ledger';
+import { attemptOf, byId, questionOf, validationPassed } from './ledger';
 
 // Pure read-only views over a folded State, shared by decide, effects, briefs, news and the page.
 
@@ -25,7 +33,8 @@ export const managerTurns = (s: State) => s.attempts.filter((a) => !isWorker(a))
  * (the first plan and the done). */
 export const managerCap = (c: Charter) => 2 * c.maxAttempts + 2;
 export const exploreCap = (c: Charter) => Math.floor(c.exploreShare * c.maxAttempts);
-export const deadlineMs = (s: State) => Date.parse(s.launchedAt) + s.charter.hours * 3_600_000;
+export const deadlineMs = (s: State) =>
+  Date.parse(s.launchedAt) + (s.charter.hours + s.extendedHours) * 3_600_000;
 
 /** Two custody prefixes overlap when one contains the other (`.` is the whole repository). */
 const prefixOverlap = (a: string, b: string) =>
@@ -144,17 +153,21 @@ const refuted = (s: State, claimAttemptId: string) =>
     .filter((p) => p.claimAttemptId === claimAttemptId && p.verdict !== 'pending')
     .at(-1)?.verdict === 'not_verified';
 
-/** Host-verified claims a later panel has not refuted. */
+/** The host validation of a claim's candidate commit (absent: none was planned for it). One per
+ * claim: planned once, from its question's `command` acceptance (design.md R11). */
+export const candidateValidation = (s: State, claimAttemptId: string): Validation | undefined =>
+  s.validations.find(
+    (v) => v.target.t === 'candidate' && v.target.claimAttemptId === claimAttemptId
+  );
+
+/** Host-verified claims a later panel has not refuted: the claim's candidate validation (its
+ * question's command acceptance, or a legacy validation of the charter's checks) passed, and its
+ * commit was merged into the expedition branch. */
 export function hostVerifications(s: State): Extract<Verification, { t: 'host' }>[] {
-  if (commandChecks(s.charter).length === 0) return [];
   return s.integrations.flatMap((i) => {
     const claim = attemptOf(s, i.claimAttemptId);
-    const passed = s.validations.find(
-      (v) =>
-        v.target.t === 'candidate' &&
-        v.target.claimAttemptId === i.claimAttemptId &&
-        validationPassed(s, v)
-    );
+    const validation = candidateValidation(s, i.claimAttemptId);
+    const passed = validation && validationPassed(validation) ? validation : undefined;
     if (i.status.t !== 'integrated' || !passed || claim.spec.kind !== 'work') return [];
     if (refuted(s, claim.id)) return [];
     return [
@@ -195,21 +208,25 @@ export const questionVerified = (s: State, questionId: string) =>
     .at(-1)?.verdict === 'verified' ||
   hostVerifications(s).some((h) => h.questionId === questionId);
 
-/** Where a manager decision turn starts (design.md R9): the expedition's integration tree, read
- * only (the host merges there), or the repository root while that tree does not exist. */
+/** Where a manager decision turn starts (design.md R11): its own detached read-only worktree.
+ * Never the owner's checkout nor the integration tree the host merges into (audit 2026-11-01 #6:
+ * before the integration tree existed a manager started in the owner's repository root). A
+ * manager is briefed only once that tree is ready (effects.ts), so any other state here is a
+ * broken invariant. */
 export function managerDirectory(s: State): string {
-  switch (s.integrationTree.status.t) {
+  switch (s.managerTree.t) {
     case 'ready':
-      return s.integrationTree.path;
-    case 'creating':
+      return s.managerTree.path;
+    case 'missing':
     case 'failed':
-    case 'removed':
-    case 'kept':
-    case 'absent':
-    case 'left':
-      return s.repo.root;
+    case 'released':
+      throw new Error(`expedition ${s.id} has no manager tree (${s.managerTree.t})`);
   }
 }
+
+/** A question's acceptance rule (charter.ts Acceptance). */
+export const acceptanceOf = (s: State, questionId: string) =>
+  questionOf(s, questionId).acceptance.rule;
 
 /** The roster seat an attempt runs on. */
 export function configOf(c: Charter, spec: AttemptSpec): WorkerConfig {
@@ -283,8 +300,7 @@ const STAGES: [QuestionStage, (s: State, q: Question, ids: Set<string>) => boole
     'validated',
     (s, _q, ids) =>
       s.validations.some(
-        (v) =>
-          v.target.t === 'candidate' && ids.has(v.target.claimAttemptId) && validationPassed(s, v)
+        (v) => v.target.t === 'candidate' && ids.has(v.target.claimAttemptId) && validationPassed(v)
       ),
   ],
   ['checked', (s, q) => questionVerified(s, q.id)],

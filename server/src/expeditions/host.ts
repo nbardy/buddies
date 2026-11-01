@@ -10,22 +10,27 @@ import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
 import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
-import { CREW_ROLE, briefOf, chatFeedback, parseOutcome, statusText } from './briefs';
+import { CREW_ROLE, briefOf, chatFeedback, parseOutcome, repairBrief, statusText } from './briefs';
 import { runCommand } from './command';
 import { type DraftInput, type LaunchOutcome, createDraftStore, placementOf } from './drafts';
 import {
+  attemptCommits,
   branchHead,
   claimHeld,
   discardWorktree,
+  ensureDetachedTree,
   ensureWorktree,
   mergeCandidate,
   preflight,
+  releaseDetachedTree,
   releaseIntegrationTree,
   releaseWorktree,
+  syncDetachedTree,
 } from './git';
 import { type MeterPorts, meterRequest } from './meter';
 import {
   type Attempt,
+  type AttemptPhase,
   type Charter,
   type ClaimChange,
   type Clock,
@@ -37,6 +42,7 @@ import {
   type State,
   type ValidationTarget,
   type WorkerSpec,
+  apply,
   attemptOf,
   badge,
   charterIssues,
@@ -48,16 +54,17 @@ import {
   decide,
   fold,
   goalSummary,
+  headOf,
   integrationOf,
   launchNews,
   live,
-  managerDirectory,
   pendingEffects,
   startedOf,
   validationOf,
   worktreeName,
   worktreeOf,
 } from './model';
+import { appendBatch, createLedger, readLedgerFile } from './store';
 import { expeditionView } from './view';
 
 // Pattern: wake-on-write (docs/patterns.md#wake-on-write) — ticks on the Buddy change bus
@@ -71,6 +78,15 @@ const CHAT_PAGE = 50;
 const DEBOUNCE_MS = 1_500;
 /** Ticks re-run decide after effects (crew created → first manager); bounded per tick. */
 const ROUNDS_PER_TICK = 4;
+/**
+ * Failed ticks in a row before the host records `tick_failed` and backs off (audit 2026-11-01
+ * #1): the backoff doubles from BACKOFF_BASE_MS up to BACKOFF_MAX_MS, so a persistent failure
+ * costs a bounded number of attempts and log lines, never a hot loop. An owner steer retries at
+ * once.
+ */
+const TICK_FAILURE_LIMIT = 3;
+const BACKOFF_BASE_MS = 60_000;
+const BACKOFF_MAX_MS = 30 * 60_000;
 
 export interface LaunchInput {
   key: string;
@@ -125,28 +141,6 @@ export type Lookup = { t: 'present' } | { t: 'quarantined'; reason: string } | {
 /** A launch with this (conversation, name) key is still open: the retried call gets it back. */
 export type Launched = { t: 'launched'; state: State } | { t: 'already_running'; state: State };
 
-/**
- * One ledger line is one append: the batch of entries written together (a decide batch with its
- * `manager_applied`, an intent, an effect's result). A crash during `appendFile` leaves at most a
- * torn LAST line, which is a batch that never landed: boot cuts it off (its effect had not run,
- * or replays idempotently), so a batch is applied whole or not at all.
- */
-type LedgerFile = { t: 'read'; entries: Entry[]; torn: number } | { t: 'corrupt'; reason: string };
-
-function readLedgerFile(file: string): LedgerFile {
-  // Sync fs at boot only (createExpeditionHost runs once, before any tick).
-  const bytes = fs.readFileSync(file);
-  const end = bytes.lastIndexOf(0x0a) + 1;
-  const torn = bytes.length - end;
-  if (torn > 0) fs.truncateSync(file, end);
-  const lines = bytes.subarray(0, end).toString('utf8').split('\n').filter(Boolean);
-  try {
-    return { t: 'read', entries: lines.flatMap((line) => JSON.parse(line) as Entry[]), torn };
-  } catch (error) {
-    return { t: 'corrupt', reason: `unreadable line: ${(error as Error).message}` };
-  }
-}
-
 /** A launch the preflight refused (design.md R4), with every reason; nothing was written. */
 export class LaunchRefused extends Error {
   constructor(readonly reasons: string[]) {
@@ -154,18 +148,45 @@ export class LaunchRefused extends Error {
   }
 }
 
+/** One tick's end: settled, or some observation could not be made (typed data, audit #1: an
+ * observe error used to throw before decide, so a stop or the deadline never landed). */
+type TickResult = { t: 'ok' } | { t: 'observe_failed'; reasons: string[] };
+
+/** What observation produced: the entries, and why any part of it could not be read. */
+interface Observed {
+  entries: Entry[];
+  failures: string[];
+}
+
+/** A tick's failure streak, and until when ticks wait (`until`, host-clock ms). */
+interface Streak {
+  failures: number;
+  until: number;
+}
+
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 export function createExpeditionHost(options: ExpeditionHostOptions) {
   const { core, events, root, gate, meter } = options;
   const now = () => (options.now ?? (() => new Date()))().toISOString();
-  const ledgers = new Map<string, Entry[]>();
+  /**
+   * Each expedition's folded state, kept current by applying every appended batch (audit
+   * 2026-11-01 #8: every event re-folded every ledger from its first entry). Readers get the
+   * live object; decide mutates, so it gets a clone (`forDecide`). `counts` is each ledger's
+   * entry count: a tick compares it to tell whether a round wrote anything.
+   */
+  const states = new Map<string, State>();
+  const counts = new Map<string, number>();
   /** Ledgers that do not fold, with why. Set aside, never deleted: the file stays for the owner. */
   const quarantined = new Map<string, string>();
   const quarantine = (id: string, reason: string) => {
     console.warn(`[expeditions] ${id} quarantined: ${reason}`);
-    ledgers.delete(id);
+    states.delete(id);
+    counts.delete(id);
     quarantined.set(id, reason);
   };
   const chains = new Map<string, Promise<void>>();
+  const streaks = new Map<string, Streak>();
   /** Validation check jobs running in this process, by `<expedition>/<validation>`. They run
    * outside the tick chain (a check may take hours; a steer must not wait on it) and append each
    * result through the chain. In-memory only: after a restart the ledger's unrecorded checks are
@@ -175,34 +196,31 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 
   const fileOf = (id: string) => path.join(root, id, 'ledger.jsonl');
-  /** One line per batch (see readLedgerFile): a batch lands whole or, torn, not at all. */
-  const line = (entries: Entry[]) => `${JSON.stringify(entries)}\n`;
+  /** Durable first (store.ts appendBatch), then applied to the cached state. An entry that no
+   * longer applies is a broken invariant: the expedition is quarantined, the others go on. */
   async function append(id: string, entries: Entry[]): Promise<void> {
     if (entries.length === 0) return;
-    const ledger = ledgers.get(id);
-    if (!ledger) throw new Error(`unknown expedition ${id}`);
-    await fsp.appendFile(fileOf(id), line(entries), { mode: 0o600 });
-    ledger.push(...entries);
+    const state = stateOf(id);
+    await appendBatch(fileOf(id), entries);
+    counts.set(id, (counts.get(id) ?? 0) + entries.length);
+    try {
+      for (const entry of entries) apply(state, entry);
+    } catch (error) {
+      quarantine(id, `does not fold: ${errorText(error)}`);
+      throw error;
+    }
   }
   const stateOf = (id: string): State => {
-    const ledger = ledgers.get(id);
-    if (!ledger) {
-      const reason = quarantined.get(id);
-      throw new Error(
-        reason ? `expedition ${id} is quarantined: ${reason}` : `unknown expedition ${id}`
-      );
-    }
-    return fold(ledger);
+    const state = states.get(id);
+    if (state) return state;
+    const reason = quarantined.get(id);
+    throw new Error(
+      reason ? `expedition ${id} is quarantined: ${reason}` : `unknown expedition ${id}`
+    );
   };
-  /** The state, or none when the ledger no longer folds (a broken invariant): quarantined. */
-  function foldOrQuarantine(id: string): State | undefined {
-    try {
-      return stateOf(id);
-    } catch (error) {
-      quarantine(id, `does not fold: ${(error as Error).message}`);
-      return undefined;
-    }
-  }
+  /** decide applies its own intents as it writes them, so it works on a copy: the cache is
+   * applied once, by `append`. */
+  const forDecide = (id: string): State => structuredClone(stateOf(id));
 
   // Boot: read every ledger once; ticks resume what they explain. A ledger that cannot be read
   // or folded is quarantined, so one bad file never stops the server or the other expeditions.
@@ -217,8 +235,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       case 'read':
         if (read.torn > 0)
           console.warn(`[expeditions] ${id}: dropped a torn last append (${read.torn} bytes)`);
-        ledgers.set(id, read.entries);
-        foldOrQuarantine(id);
+        try {
+          states.set(id, fold(read.entries));
+          counts.set(id, read.entries.length);
+        } catch (error) {
+          quarantine(id, `does not fold: ${errorText(error)}`);
+        }
     }
   }
 
@@ -229,42 +251,108 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   // ---------- Observation: settled requests become attempt_ended ----------
 
-  async function observe(s: State): Promise<Entry[]> {
-    const out: Entry[] = [...(await observeChat(s))];
-    for (const attempt of s.attempts) {
-      if (attempt.phase.t !== 'posted') continue;
-      const request = await core.getPost(OWNER, attempt.phase.requestId);
-      switch (request.request.state) {
-        case 'awaiting':
-        case 'none':
-          continue;
-        case 'answered': {
-          const answer = await core.getPost(OWNER, request.request.answerId);
-          out.push({
-            t: 'attempt_ended',
-            at: now(),
-            attemptId: attempt.id,
-            outcome: await heldOutcome(
-              s,
-              attempt.id,
-              answer.body,
-              parseOutcome(attempt.spec.kind, answer.body)
-            ),
-          });
-          continue;
-        }
+  /** Every part observed on its own: one request (or the chat) that cannot be read is a typed
+   * failure, and the rest is still recorded and decided on. */
+  async function observe(s: State): Promise<Observed> {
+    const parts: [string, () => Promise<Entry[]>][] = [
+      ['the expedition chat', () => observeChat(s)],
+      ...s.attempts.flatMap((attempt): [string, () => Promise<Entry[]>][] =>
+        attempt.phase.t === 'posted'
+          ? [[`attempt ${attempt.id}`, () => observeAttempt(s, attempt)]]
+          : []
+      ),
+    ];
+    const observed: Observed = { entries: [], failures: [] };
+    for (const [what, read] of parts) {
+      const part = await observing(what, read);
+      switch (part.t) {
+        case 'ok':
+          observed.entries.push(...part.entries);
+          break;
         case 'failed':
-        case 'cancelled':
-          out.push({
+          observed.failures.push(part.reason);
+      }
+    }
+    return observed;
+  }
+
+  async function observing(
+    what: string,
+    read: () => Promise<Entry[]>
+  ): Promise<{ t: 'ok'; entries: Entry[] } | { t: 'failed'; reason: string }> {
+    try {
+      return { t: 'ok', entries: await read() };
+    } catch (error) {
+      return { t: 'failed', reason: `${what}: ${errorText(error)}` };
+    }
+  }
+
+  async function observeAttempt(s: State, attempt: Attempt): Promise<Entry[]> {
+    const phase = postedPhase(attempt);
+    const request = await core.getPost(OWNER, phase.requestId);
+    switch (request.request.state) {
+      case 'awaiting':
+      case 'none':
+        return [];
+      case 'answered': {
+        const answer = await core.getPost(OWNER, request.request.answerId);
+        return answered(s, attempt, phase, answer.body);
+      }
+      case 'failed':
+      case 'cancelled':
+        return [
+          {
             t: 'attempt_ended',
             at: now(),
             attemptId: attempt.id,
             outcome: { t: 'failed', status: request.request.state },
-          });
-          continue;
-      }
+          },
+        ];
     }
-    return out;
+  }
+
+  /**
+   * An answer. A first answer that does not parse gets ONE repair request on the same seat
+   * (design.md R11) instead of ending the attempt; any other answer ends it with what it holds.
+   */
+  async function answered(
+    s: State,
+    attempt: Attempt,
+    phase: Extract<AttemptPhase, { t: 'posted' }>,
+    body: string
+  ): Promise<Entry[]> {
+    const parsed = parseOutcome(attempt.spec.kind, body);
+    if (parsed.t === 'malformed' && phase.round === 'brief')
+      return [
+        {
+          t: 'attempt_repair_posting',
+          at: now(),
+          attemptId: attempt.id,
+          error: parsed.error,
+          body: repairBrief(s, attempt, parsed.error, body),
+        },
+      ];
+    return [
+      {
+        t: 'attempt_ended',
+        at: now(),
+        attemptId: attempt.id,
+        outcome: await unreported(s, attempt, await heldOutcome(s, attempt.id, body, parsed)),
+      },
+    ];
+  }
+
+  /**
+   * A work answer that ends without a valid result while its branch holds commits beyond its base
+   * is `unreported_commits`, with the shas, so the manager can claim them (design.md R11).
+   * 2026-11-01 incident: w64130b's verifier commit was dropped with its malformed answer.
+   */
+  async function unreported(s: State, attempt: Attempt, outcome: Outcome): Promise<Outcome> {
+    if (outcome.t !== 'malformed' || attempt.spec.kind !== 'work') return outcome;
+    const shas = await attemptCommits(s.repo.root, worktreeOf(s, attempt.id));
+    return shas.length === 0
+      ? outcome
+      : { t: 'unreported_commits', error: outcome.error, raw: outcome.raw, shas };
   }
 
   /**
@@ -328,164 +416,256 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
-  // ---------- Effects ----------
+  // ---------- Effects: one handler per effect kind ----------
 
-  async function run(s: State, effect: Effect): Promise<Entry[]> {
-    switch (effect.t) {
-      case 'create_integration_tree':
-        return createIntegrationTree(s);
-      case 'integrate':
-        return integrate(s, effect.integrationId);
-      case 'release_integration_tree': {
-        const release = await releaseIntegrationTree(s.repo.root, s.integrationTree.name);
-        return [{ t: 'integration_tree_released', at: now(), release }];
-      }
-      case 'admit': {
-        // Intent first: the slot, custody and Cambium name are on disk before `cambium add` runs.
-        const { attempt } = effect;
-        await append(s.id, [
-          {
-            t: 'worktree_creating',
-            at: now(),
-            attemptId: attempt.id,
-            name: worktreeName(s.id, attempt.id),
-            path: path.join(root, s.id, 'worktrees', attempt.id),
-            branch: `exp/${s.id}/${attempt.id}`,
-            baseSha: await treeBase(s, attempt.spec),
-          },
-        ]);
-        return createWorktree(stateOf(s.id), attempt.id);
-      }
-      case 'create_worktree':
-        return createWorktree(s, effect.attemptId);
-      case 'release_worktree': {
-        const tree = worktreeOf(s, effect.attemptId);
-        const release = await releaseWorktree(
-          s.repo.root,
-          tree.name,
-          tree,
-          effect.keepCommits,
-          s.repo.branch
-        );
-        return [{ t: 'worktree_released', at: now(), attemptId: effect.attemptId, release }];
-      }
-      case 'start_validation': {
-        // Intent first: the resolved sha and the tree's name are on disk before `cambium add`.
-        const v = validationOf(s, effect.validationId);
-        await append(s.id, [
-          {
-            t: 'validation_started',
-            at: now(),
-            validationId: v.id,
-            name: worktreeName(s.id, v.id),
-            path: path.join(root, s.id, 'validations', v.id),
-            branch: `exp/${s.id}/${v.id}`,
-            baseSha: await validationSha(s, v.target),
-          },
-        ]);
-        return createValidationTree(stateOf(s.id), v.id);
-      }
-      case 'create_validation_tree':
-        return createValidationTree(s, effect.validationId);
-      case 'run_validation': {
-        const key = jobKey(s.id, effect.validationId);
-        if (jobs.has(key)) return [];
-        const job = runChecks(s.id, effect.validationId)
-          .catch((error) => console.warn(`[expeditions] validation ${key} failed:`, error))
-          .finally(() => {
-            jobs.delete(key);
-            void tick(s.id);
-          });
-        jobs.set(key, job);
-        return [];
-      }
-      case 'release_validation': {
-        // Never pull a tree from under this host's own running check.
-        if (jobs.has(jobKey(s.id, effect.validationId))) return [];
-        const { tree } = startedOf(s, effect.validationId);
-        const release = await discardWorktree(s.repo.root, tree.name, tree);
-        return [
-          { t: 'validation_released', at: now(), validationId: effect.validationId, release },
-        ];
-      }
-      case 'create_crew': {
-        const crew = await core.createBuddy(OWNER, {
-          workspaceId: s.workspaceId,
-          slug: `exp-${s.id}`.toLowerCase(),
-          name: `⛺ ${s.charter.name}`,
-          role: `${CREW_ROLE} Your expedition id: ${s.id}.`,
-          manager: { kind: 'buddy', id: s.launcherId },
-          provider: s.charter.crew.manager.provider,
-          model: s.charter.crew.manager.model,
-          reasoningEffort: s.charter.crew.manager.reasoningEffort,
-          key: `exp:${s.id}:crew`,
-        });
-        // The owner↔crew DM is the expedition's chat (opening it is idempotent).
-        const chat = await core.openChannel(OWNER, {
-          kind: 'direct',
-          members: [OWNER, buddyActor(crew.id)],
-        });
-        return [{ t: 'crew_ready', at: now(), buddyId: crew.id, chatChannelId: chat.id }];
-      }
-      case 'brief_attempt': {
-        const body = briefOf(s, effect.attempt);
-        await append(s.id, [
-          { t: 'attempt_posting', at: now(), attemptId: effect.attempt.id, body },
-        ]);
-        return postAttempt(s, effect.attempt.id, body);
-      }
-      case 'post_attempt':
-        return postAttempt(s, effect.attemptId, effect.body);
-      case 'meter_attempt':
-        return meterAttempt(s, effect.attemptId, effect.requestId);
-      case 'post_status': {
-        if (s.crew.t !== 'ready') throw new Error('status posted before the crew exists');
-        // Crew-authored in its own DM with the owner: wakes nobody, reads as the expedition.
-        const write = await core.post(
-          buddyActor(s.crew.buddyId),
-          { kind: 'id', id: s.crew.chatChannelId },
-          {
-            kind: 'inform',
-            body: effect.text,
-            purpose: 'expedition_status',
-            evidence: [`expedition:${s.id}`],
-            mentions: [],
-            broadcast: false,
-            key: `exp:${s.id}:status:${effect.seq}`,
-          }
-        );
-        return [{ t: 'status_posted', at: now(), seq: effect.seq, postId: write.post.id }];
-      }
-      case 'post_badge': {
-        // The clickable badge in the chat the launch came from; the client renders posts with
-        // this purpose as a live card that opens /expeditions/<id>.
-        const target = placementOf(s.origin, s.launcherId);
-        const write = await core.post(buddyActor(s.launcherId), target.channel, {
-          kind: 'inform',
-          // Fallback text for readers without the card (a Buddy reading the thread).
-          body: `⛺ Expedition launched: ${s.charter.name}. ${goalSummary(s.charter.goal)}`,
-          purpose: 'expedition_badge',
-          evidence: [`expedition:${s.id}`],
-          replyToId: target.replyToId,
-          mentions: [],
-          broadcast: false,
-          key: `exp:${s.id}:badge`,
-        });
-        return [{ t: 'badge_posted', at: now(), postId: write.post.id }];
-      }
+  // Pattern: table-driven (docs/patterns.md#table-driven) — `run` only selects the handler.
+  // Audit 2026-11-01: `run` was one switch doing every effect's work inline.
+  type Handlers = {
+    [K in Effect['t']]: (s: State, e: Extract<Effect, { t: K }>) => Promise<Entry[]>;
+  };
+  const handlers: Handlers = {
+    create_crew: (s) => createCrew(s),
+    create_integration_tree: (s) => createIntegrationTree(s),
+    integrate: (s, e) => integrate(s, e.integrationId),
+    release_integration_tree: (s) => releaseIntegration(s),
+    create_manager_tree: (s) => createManagerTree(s),
+    release_manager_tree: (s) => releaseManagerTree(s),
+    adopt_claim: (s, e) => adoptClaim(s, e.attemptId),
+    admit: (s, e) => admit(s, e.attempt),
+    create_worktree: (s, e) => createWorktree(s, e.attemptId),
+    release_worktree: (s, e) => releaseAttemptTree(s, e.attemptId, e.keepCommits),
+    start_validation: (s, e) => startValidation(s, e.validationId),
+    create_validation_tree: (s, e) => createValidationTree(s, e.validationId),
+    run_validation: (s, e) => runValidation(s, e.validationId),
+    release_validation: (s, e) => releaseValidation(s, e.validationId),
+    brief_attempt: (s, e) => briefAttempt(s, e.attempt),
+    post_attempt: (s, e) => postAttempt(s, e.attemptId, e.body, e.round),
+    meter_attempt: (s, e) => meterAttempt(s, e),
+    post_status: (s, e) => postStatus(s, e.seq, e.text),
+    post_badge: (s) => postBadge(s),
+  };
+  function run<E extends Effect>(s: State, effect: E): Promise<Entry[]> {
+    const handler = handlers[effect.t] as (s: State, e: E) => Promise<Entry[]>;
+    return handler(s, effect);
+  }
+
+  async function createCrew(s: State): Promise<Entry[]> {
+    const crew = await core.createBuddy(OWNER, {
+      workspaceId: s.workspaceId,
+      slug: `exp-${s.id}`.toLowerCase(),
+      name: `⛺ ${s.charter.name}`,
+      role: `${CREW_ROLE} Your expedition id: ${s.id}.`,
+      manager: { kind: 'buddy', id: s.launcherId },
+      provider: s.charter.crew.manager.provider,
+      model: s.charter.crew.manager.model,
+      reasoningEffort: s.charter.crew.manager.reasoningEffort,
+      key: `exp:${s.id}:crew`,
+    });
+    // The owner↔crew DM is the expedition's chat (opening it is idempotent).
+    const chat = await core.openChannel(OWNER, {
+      kind: 'direct',
+      members: [OWNER, buddyActor(crew.id)],
+    });
+    return [{ t: 'crew_ready', at: now(), buddyId: crew.id, chatChannelId: chat.id }];
+  }
+
+  async function releaseIntegration(s: State): Promise<Entry[]> {
+    const release = await releaseIntegrationTree(s.repo.root, s.integrationTree.name);
+    return [{ t: 'integration_tree_released', at: now(), release }];
+  }
+
+  /** The manager's own tree (design.md R11) is a fixed path in the expedition's folder, made at
+   * the branch head; an existing registration there is adopted (the replay path). */
+  async function createManagerTree(s: State): Promise<Entry[]> {
+    const made = await ensureDetachedTree(
+      s.repo.root,
+      path.join(root, s.id, 'manager'),
+      await branchHead(s.repo)
+    );
+    switch (made.t) {
+      case 'ready':
+        return [{ t: 'manager_tree_ready', at: now(), path: made.at.path }];
+      case 'failed':
+        return [{ t: 'manager_tree_failed', at: now(), reason: made.reason }];
     }
   }
 
-  /** A read, not a write: nothing is recorded while the attempt's run is still settling. */
-  async function meterAttempt(s: State, attemptId: string, requestId: string): Promise<Entry[]> {
+  async function releaseManagerTree(s: State): Promise<Entry[]> {
+    const release = await releaseDetachedTree(s.repo.root, path.join(root, s.id, 'manager'));
+    return [{ t: 'manager_tree_released', at: now(), release }];
+  }
+
+  /** A manager's claim of an attempt's unreported commits holds only when the attempt's own
+   * branch holds the commit inside its question's custody (git.ts claimHeld), like any claim. */
+  async function adoptClaim(s: State, attemptId: string): Promise<Entry[]> {
+    const adoption = s.adoptions[attemptId];
+    if (adoption?.t !== 'pending') throw new Error(`no pending claim of ${attemptId}`);
+    const tree = worktreeOf(s, attemptId);
+    const custody = custodyOf(s, attemptOf(s, attemptId));
+    const held = await claimHeld(s.repo.root, tree, adoption.claim.change, custody);
+    switch (held.t) {
+      case 'held':
+        return [{ t: 'claim_adopted', at: now(), attemptId }];
+      case 'not_held':
+        return [{ t: 'claim_refused', at: now(), attemptId, reason: held.reason }];
+    }
+  }
+
+  /** Intent first: the slot, custody and Cambium name are on disk before `cambium add` runs. */
+  async function admit(s: State, attempt: Attempt<WorkerSpec>): Promise<Entry[]> {
+    await append(s.id, [
+      {
+        t: 'worktree_creating',
+        at: now(),
+        attemptId: attempt.id,
+        name: worktreeName(s.id, attempt.id),
+        path: path.join(root, s.id, 'worktrees', attempt.id),
+        branch: `exp/${s.id}/${attempt.id}`,
+        baseSha: await treeBase(s, attempt.spec),
+      },
+    ]);
+    return createWorktree(stateOf(s.id), attempt.id);
+  }
+
+  async function releaseAttemptTree(
+    s: State,
+    attemptId: string,
+    keepCommits: boolean
+  ): Promise<Entry[]> {
+    const tree = worktreeOf(s, attemptId);
+    const release = await releaseWorktree(s.repo.root, tree.name, tree, keepCommits, s.repo.branch);
+    return [{ t: 'worktree_released', at: now(), attemptId, release }];
+  }
+
+  /** Intent first: the resolved sha and the tree's name are on disk before `cambium add`. */
+  async function startValidation(s: State, validationId: string): Promise<Entry[]> {
+    const v = validationOf(s, validationId);
+    await append(s.id, [
+      {
+        t: 'validation_started',
+        at: now(),
+        validationId: v.id,
+        name: worktreeName(s.id, v.id),
+        path: path.join(root, s.id, 'validations', v.id),
+        branch: `exp/${s.id}/${v.id}`,
+        baseSha: await validationSha(s, v.target),
+      },
+    ]);
+    return createValidationTree(stateOf(s.id), v.id);
+  }
+
+  /** Starts the check job in the background (never twice for one validation). A job that
+   * throws records a terminal `validation_failed` (audit #5), so it is never re-run hot. */
+  async function runValidation(s: State, validationId: string): Promise<Entry[]> {
+    const key = jobKey(s.id, validationId);
+    if (jobs.has(key)) return [];
+    const id = s.id;
+    const job = runChecks(id, validationId)
+      .catch((error: unknown) => {
+        console.warn(`[expeditions] validation ${key} could not run:`, error);
+        return serialized(id, () =>
+          append(id, [
+            { t: 'validation_failed', at: now(), validationId, reason: errorText(error) },
+          ])
+        );
+      })
+      .catch((error: unknown) =>
+        console.warn(`[expeditions] validation ${key} failure not recorded:`, error)
+      )
+      .finally(() => {
+        jobs.delete(key);
+        void tick(id);
+      });
+    jobs.set(key, job);
+    return [];
+  }
+
+  /** Never pull a tree from under this host's own running check. */
+  async function releaseValidation(s: State, validationId: string): Promise<Entry[]> {
+    if (jobs.has(jobKey(s.id, validationId))) return [];
+    const { tree } = startedOf(s, validationId);
+    const release = await discardWorktree(s.repo.root, tree.name, tree);
+    return [{ t: 'validation_released', at: now(), validationId, release }];
+  }
+
+  /** Build and record the brief, then post it. A manager's tree is moved to the branch head
+   * first, so the decision reads what it is told about (R11). */
+  async function briefAttempt(s: State, attempt: Attempt): Promise<Entry[]> {
+    await syncBeforeBrief(s, attempt);
+    const body = briefOf(s, attempt);
+    await append(s.id, [{ t: 'attempt_posting', at: now(), attemptId: attempt.id, body }]);
+    return postAttempt(s, attempt.id, body, 'brief');
+  }
+
+  async function syncBeforeBrief(s: State, attempt: Attempt): Promise<void> {
+    switch (attempt.spec.kind) {
+      case 'manager':
+        if (s.managerTree.t !== 'ready') throw new Error('a manager briefed without its tree');
+        await syncDetachedTree(s.managerTree.path, await branchHead(s.repo));
+        return;
+      case 'work':
+      case 'check':
+        return;
+    }
+  }
+
+  async function postStatus(s: State, seq: number, text: string): Promise<Entry[]> {
+    if (s.crew.t !== 'ready') throw new Error('status posted before the crew exists');
+    // Crew-authored in its own DM with the owner: wakes nobody, reads as the expedition.
+    const write = await core.post(
+      buddyActor(s.crew.buddyId),
+      { kind: 'id', id: s.crew.chatChannelId },
+      {
+        kind: 'inform',
+        body: text,
+        purpose: 'expedition_status',
+        evidence: [`expedition:${s.id}`],
+        mentions: [],
+        broadcast: false,
+        key: `exp:${s.id}:status:${seq}`,
+      }
+    );
+    return [{ t: 'status_posted', at: now(), seq, postId: write.post.id }];
+  }
+
+  /** The clickable badge in the chat the launch came from; the client renders posts with this
+   * purpose as a live card that opens /expeditions/<id>. */
+  async function postBadge(s: State): Promise<Entry[]> {
+    const target = placementOf(s.origin, s.launcherId);
+    const write = await core.post(buddyActor(s.launcherId), target.channel, {
+      kind: 'inform',
+      // Fallback text for readers without the card (a Buddy reading the thread).
+      body: `⛺ Expedition launched: ${s.charter.name}. ${goalSummary(s.charter.goal)}`,
+      purpose: 'expedition_badge',
+      evidence: [`expedition:${s.id}`],
+      replyToId: target.replyToId,
+      mentions: [],
+      broadcast: false,
+      key: `exp:${s.id}:badge`,
+    });
+    return [{ t: 'badge_posted', at: now(), postId: write.post.id }];
+  }
+
+  /** A read, not a write: nothing is recorded while the attempt's runs are still settling. */
+  async function meterAttempt(
+    s: State,
+    e: Extract<Effect, { t: 'meter_attempt' }>
+  ): Promise<Entry[]> {
     if (s.crew.t !== 'ready') throw new Error('attempt metered before the crew exists');
     const nowMs = Date.parse(now());
-    const metering = await meterRequest(core, meter, s.crew.buddyId, requestId, nowMs);
+    const metering = await meterRequest(
+      core,
+      meter,
+      s.crew.buddyId,
+      e.requestIds,
+      nowMs,
+      Date.parse(e.endedAt)
+    );
     switch (metering.t) {
       case 'settling':
         return [];
       case 'metered':
-        return [{ t: 'attempt_metered', at: now(), attemptId, cost: metering.cost }];
+        return [{ t: 'attempt_metered', at: now(), attemptId: e.attemptId, cost: metering.cost }];
     }
   }
 
@@ -503,12 +683,13 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   }
 
   /** The `integration_planned` intent is already on disk; mergeCandidate recognises a merge it
-   * made before a crash, so the replay records that merge instead of merging twice. */
+   * made before a crash, so the replay records that merge instead of merging twice, and refuses
+   * a branch whose head is not the ledger's (`headOf`). */
   async function integrate(s: State, integrationId: string): Promise<Entry[]> {
     const integration = integrationOf(s, integrationId);
     const claim = claimAt(s, integration.claimAttemptId).statement.split('\n')[0].slice(0, 200);
     const message = `Integrate ${integration.claimAttemptId} (expedition ${s.id}): ${claim}`;
-    const merged = await mergeCandidate(s.integrationTree, integration.sha, message);
+    const merged = await mergeCandidate(s.integrationTree, integration.sha, message, headOf(s));
     const ids = { at: now(), integrationId, sha: integration.sha };
     switch (merged.t) {
       case 'integrated':
@@ -557,7 +738,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       case 'failed':
         return [
           { t: 'validation_tree_failed', at: now(), validationId, reason: made.reason },
-          ...commandChecks(s.charter).map(
+          ...validationOf(s, validationId).checks.map(
             ({ index }): Entry => ({
               t: 'validation',
               at: now(),
@@ -572,12 +753,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   }
 
   /**
-   * Runs the validation's unrecorded command checks one by one in its tree, appending each result
-   * through the expedition's chain. Each check re-reads the ledger: a finished or paused
-   * expedition stops here (a resume continues from the first unrecorded check). Only between
-   * checks: a check already running is not interrupted by pause or finish; it runs to its end or
-   * its timeout (up to charter's timeoutSeconds), its result is recorded, and only then is the
-   * tree released (`release_validation` waits for the job).
+   * Runs the validation's unrecorded checks (frozen in its plan: a question's acceptance, or the
+   * charter's done commands at the head) one by one in its tree, appending each result through
+   * the expedition's chain. Each check re-reads the ledger: a finished or paused expedition stops
+   * here (a resume continues from the first unrecorded check). Only between checks: a check
+   * already running is not interrupted by pause or finish; it runs to its end or its timeout, its
+   * result is recorded, and only then is the tree released (`release_validation` waits for it).
    */
   async function runChecks(id: string, validationId: string): Promise<void> {
     for (;;) {
@@ -585,10 +766,10 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       if (s.run.t === 'finished' || s.run.t === 'paused') return;
       const v = validationOf(s, validationId);
       const done = new Set(v.runs.map((r) => r.checkIndex));
-      const next = commandChecks(s.charter).find((c) => !done.has(c.index));
-      if (!next) return;
+      const next = v.checks.find((c) => !done.has(c.index));
+      if (!next || v.failure.t === 'failed') return;
       const { tree, targetSha } = startedOf(s, validationId);
-      const outcome = await runCommand(next.check, tree.path);
+      const outcome = await runCommand(next, tree.path);
       await serialized(id, () =>
         append(id, [
           { t: 'validation', at: now(), validationId, targetSha, checkIndex: next.index, outcome },
@@ -608,7 +789,14 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
-  async function postAttempt(s: State, attemptId: string, body: string): Promise<Entry[]> {
+  /** Posts a recorded brief or repair request, keyed by attempt and round (a replay returns the
+   * same post). */
+  async function postAttempt(
+    s: State,
+    attemptId: string,
+    body: string,
+    round: 'brief' | 'repair'
+  ): Promise<Entry[]> {
     if (s.crew.t !== 'ready') throw new Error('attempt posted before the crew exists');
     const attempt = attemptOf(s, attemptId);
     // The crew's note-to-self DM holds the attempts (plumbing), so the owner↔crew chat stays a chat.
@@ -624,22 +812,33 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         mentions: [],
         runConfig: configOf(s.charter, attempt.spec),
         broadcast: false,
-        key: `exp:${s.id}:attempt:${attemptId}`,
+        key: requestKey(s.id, attemptId, round),
       }
     );
     return [{ t: 'attempt_posted', at: now(), attemptId, requestId: write.post.id }];
   }
 
-  /** Where an attempt's run starts (design.md R9): a worker in its own worktree, a manager in
-   * the read-only integration tree (or the repository root before it exists; its brief says
-   * read only). */
-  function attemptDirectory(s: State, attempt: Attempt, runId: string): TurnDirectory {
+  /** Where an attempt's run starts (design.md R9, R11): a worker in its own worktree, a manager
+   * in its own detached tree. A manager live before that tree existed (a ledger written before
+   * R11) runs in the crew's own directory: never a git checkout of the owner's. */
+  function attemptDirectory(s: State, attempt: Attempt, runId: string): Promise<TurnDirectory> {
     switch (attempt.spec.kind) {
       case 'work':
       case 'check':
-        return { t: 'attempt', runId, path: worktreeOf(s, attempt.id).path };
+        return Promise.resolve({ t: 'attempt', runId, path: worktreeOf(s, attempt.id).path });
       case 'manager':
-        return { t: 'attempt', runId, path: managerDirectory(s) };
+        return managerTurnDirectory(s, runId);
+    }
+  }
+
+  function managerTurnDirectory(s: State, runId: string): Promise<TurnDirectory> {
+    switch (s.managerTree.t) {
+      case 'ready':
+        return Promise.resolve({ t: 'attempt', runId, path: s.managerTree.path });
+      case 'missing':
+      case 'failed':
+      case 'released':
+        return crewDirectory(s.id);
     }
   }
 
@@ -654,16 +853,18 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return { t: 'crew', path: dir };
   }
 
-  /** The live attempt whose request a run answers, matched by its exact brief bytes, which the
-   * ledger holds before the post exists (a run can be claimed before `attempt_posted` is
-   * appended). Only posting/posted attempts: a boot warm of an old conversation's ended run must
-   * not route (and cache) by run id (2026-11-01 review: it leaked a per-run briefing). */
+  /** The live attempt whose request a run answers, matched by its exact brief or repair bytes,
+   * which the ledger holds before the post exists (a run can be claimed before `attempt_posted`
+   * is appended). Only posting/posted attempts: a boot warm of an old conversation's ended run
+   * must not route (and cache) by run id (2026-11-01 review: it leaked a per-run briefing). */
   async function attemptOfRun(s: State, runId: string): Promise<Attempt | undefined> {
     const run = await core.getRun(runId);
     if (run.input.kind !== 'post') return undefined;
     const body = (await core.getPost(OWNER, run.input.postId)).body;
     return s.attempts.find(
-      (a) => (a.phase.t === 'posting' || a.phase.t === 'posted') && s.briefs[a.id] === body
+      (a) =>
+        (a.phase.t === 'posting' || a.phase.t === 'posted') &&
+        (s.briefs[a.id] === body || s.repairs[a.id] === body)
     );
   }
 
@@ -682,32 +883,35 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return attempt ? attemptDirectory(s, attempt, runId) : crewDirectory(id);
   }
 
-  /** The expedition a Buddy crews. Reads the `crew_ready` entry, not a fold: this runs on every
-   * Buddy turn's warm (2026-11-01 review: folding every ledger per turn). */
+  /** The expedition a Buddy crews (from the cached states: no fold per Buddy turn). */
   function crewOf(buddyId: string): string | undefined {
-    return [...ledgers].find(([, entries]) =>
-      entries.some((e) => e.t === 'crew_ready' && e.buddyId === buddyId)
-    )?.[0];
+    return [...states].find(([, s]) => s.crew.t === 'ready' && s.crew.buddyId === buddyId)?.[0];
   }
 
   // ---------- Tick ----------
 
-  async function tickOnce(id: string): Promise<void> {
+  async function tickOnce(id: string): Promise<TickResult> {
     let wrote = false;
+    const failures: string[] = [];
     for (let round = 0; round < ROUNDS_PER_TICK; round += 1) {
-      const before = ledgers.get(id)?.length ?? 0;
-      await append(id, await observe(stateOf(id)));
-      await append(id, decide(stateOf(id), clock()));
+      const before = counts.get(id) ?? 0;
+      const observed = await observe(stateOf(id));
+      failures.push(...observed.failures);
+      await append(id, observed.entries);
+      await append(id, decide(forDecide(id), clock()));
       for (const effect of pendingEffects(stateOf(id))) {
         // Each effect reads the state its predecessor left (a brief sees earlier postings).
         await append(id, await run(stateOf(id), effect));
       }
       // A round that wrote nothing is settled (a running check job's effect writes nothing), so
       // the tick neither spins nor emits a change that would wake itself again.
-      if ((ledgers.get(id)?.length ?? 0) === before) break;
+      if ((counts.get(id) ?? 0) === before) break;
       wrote = true;
     }
     if (wrote) events.emit({ kind: 'changed' });
+    // One reason per distinct failure: each round re-observes, and would repeat it.
+    const reasons = [...new Set(failures)];
+    return reasons.length === 0 ? { t: 'ok' } : { t: 'observe_failed', reasons };
   }
 
   /** Runs `work` on the expedition's chain: after every earlier tick and append, before later ones. */
@@ -723,21 +927,58 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return next;
   }
 
-  /** Serialized per expedition; a failed tick is logged and retried by the next wake. */
+  /**
+   * Serialized per expedition. A tick that throws, or whose observation failed, extends the
+   * expedition's failure streak; after TICK_FAILURE_LIMIT in a row the host records `tick_failed`
+   * and waits a doubling backoff before the next tick (audit #1). A clean tick ends the streak.
+   */
   function tick(id: string): Promise<void> {
-    return serialized(id, () => tickOnce(id)).catch((error) =>
-      console.warn(`[expeditions] tick ${id} failed:`, error)
+    const streak = streaks.get(id);
+    if (streak && Date.parse(now()) < streak.until) return Promise.resolve();
+    return serialized(id, () => tickOnce(id)).then(
+      (result) => tickSettled(id, result),
+      (error: unknown) => tickFailed(id, [errorText(error)])
     );
   }
 
-  // A finished expedition stays active while it owes effects (its last status, worktree removal)
-  // or has live attempts: their ends are still observed, and only then are their trees released.
-  // A ledger that stops folding is quarantined here, so it never stops the others' ticks.
+  function tickSettled(id: string, result: TickResult): Promise<void> {
+    switch (result.t) {
+      case 'ok':
+        streaks.delete(id);
+        return Promise.resolve();
+      case 'observe_failed':
+        return tickFailed(id, result.reasons);
+    }
+  }
+
+  async function tickFailed(id: string, reasons: string[]): Promise<void> {
+    const failures = (streaks.get(id)?.failures ?? 0) + 1;
+    const reason = reasons.join('; ');
+    console.warn(`[expeditions] tick ${id} failed (${failures} in a row): ${reason}`);
+    if (failures < TICK_FAILURE_LIMIT) {
+      streaks.set(id, { failures, until: 0 });
+      return;
+    }
+    const backoff = Math.min(
+      BACKOFF_BASE_MS * 2 ** (failures - TICK_FAILURE_LIMIT),
+      BACKOFF_MAX_MS
+    );
+    streaks.set(id, { failures, until: Date.parse(now()) + backoff });
+    if (!states.has(id)) return;
+    await serialized(id, () =>
+      append(id, [{ t: 'tick_failed', at: now(), failures, reason: reason.slice(0, 2000) }])
+    ).catch((error: unknown) =>
+      console.warn(`[expeditions] ${id}: tick_failed not recorded:`, error)
+    );
+  }
+
+  // A finished expedition stays active while it owes effects (its last status, worktree removal,
+  // a bounded metering read) or has live attempts: their ends are still observed, and only then
+  // are their trees released. Reads the cached states: no fold per event.
   const active = () =>
-    [...ledgers.keys()].filter((id) => {
-      const s = foldOrQuarantine(id);
-      return !!s && (s.run.t !== 'finished' || live(s).length > 0 || pendingEffects(s).length > 0);
-    });
+    [...states].flatMap(([id, s]) =>
+      s.run.t !== 'finished' || live(s).length > 0 || pendingEffects(s).length > 0 ? [id] : []
+    );
   const tickAll = () => Promise.all(active().map(tick)).then(() => undefined);
 
   let debounce: NodeJS.Timeout | null = null;
@@ -789,9 +1030,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
    * expedition back as `already_running`; once that one finished, the same name launches anew.
    */
   async function launchOnce(input: LaunchInput): Promise<Launched> {
-    const prior = [...ledgers.keys()]
-      .map(stateOf)
-      .find((s) => s.key === input.key && s.run.t !== 'finished');
+    const prior = [...states.values()].find((s) => s.key === input.key && s.run.t !== 'finished');
     if (prior) return { t: 'already_running', state: prior };
     const checked = await preflightOf(input.workspaceId, input.charter);
     if (checked.t === 'refused') throw new LaunchRefused(checked.reasons);
@@ -800,7 +1039,6 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 24)}-${randomUUID().slice(0, 6)}`;
-    await fsp.mkdir(path.join(root, id), { recursive: true, mode: 0o700 });
     const repo = { root: checked.root, baseSha: checked.baseSha, branch: `expedition/${id}` };
     // The integration tree is named here, in the launch entry: its create replays from it.
     const integrationTree = {
@@ -808,19 +1046,15 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       path: path.join(root, id, 'integration'),
     };
     // One batch: `launched` and the launch status (the badge in the thread from the first
-    // second). The ledger joins the map only once that line is on disk, so every ledger in the
-    // map folds and no tick ever meets a half-written launch.
+    // second). The state joins the map only once that line is on disk, so every expedition in
+    // the map folds and no tick ever meets a half-written launch.
     const first: Entry[] = [
       { t: 'launched', at: now(), id, ...input, repo, integrationTree },
-      {
-        t: 'status',
-        at: now(),
-        seq: 0,
-        text: launchNews(input.charter),
-      },
+      { t: 'status', at: now(), seq: 0, text: launchNews(input.charter) },
     ];
-    await fsp.appendFile(fileOf(id), line(first), { mode: 0o600 });
-    ledgers.set(id, first);
+    await createLedger(path.join(root, id), fileOf(id), first);
+    states.set(id, fold(first));
+    counts.set(id, first.length);
     await tick(id);
     return { t: 'launched', state: stateOf(id) };
   }
@@ -865,13 +1099,15 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       await serialized(id, () =>
         append(id, [{ t: 'feedback', at: now(), from, via: { t: 'tool' }, feedback }])
       );
+      // The owner's word retries at once, whatever a failing streak's backoff says.
+      streaks.delete(id);
       await tick(id);
       return stateOf(id);
     },
     lookup(id: string): Lookup {
       const reason = quarantined.get(id);
       if (reason) return { t: 'quarantined', reason };
-      return ledgers.has(id) ? { t: 'present' } : { t: 'missing' };
+      return states.has(id) ? { t: 'present' } : { t: 'missing' };
     },
     view(id: string): ExpeditionView {
       const s = stateOf(id);
@@ -881,9 +1117,9 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       const s = stateOf(id);
       return statusText(s, badge(s, now()));
     },
+    /** Only expeditions that fold: a quarantined ledger never fails the listing. */
     list(workspaceId: string): { id: string; badge: string }[] {
-      return [...ledgers.keys()]
-        .map(stateOf)
+      return [...states.values()]
         .filter((s) => s.workspaceId === workspaceId)
         .map((s) => ({ id: s.id, badge: badge(s, now()) }));
     },
@@ -891,9 +1127,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     ofCrew: crewOf,
     /** Every crew Buddy (the client keeps them off the Buddies roster). */
     crews: (): string[] =>
-      [...ledgers.values()].flatMap((entries) =>
-        entries.flatMap((e) => (e.t === 'crew_ready' ? [e.buddyId] : []))
-      ),
+      [...states.values()].flatMap((s) => (s.crew.t === 'ready' ? [s.crew.buddyId] : [])),
     turnDirectory,
     workspaceOf: (id: string) => stateOf(id).workspaceId,
     /** Tests drive ticks directly. */
@@ -911,4 +1145,21 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       if (debounce) clearTimeout(debounce);
     },
   };
+}
+
+/** Attempt request keys: the brief's is unchanged since R1, so a replay of an older ledger finds
+ * its earlier post; the repair has its own. */
+function requestKey(id: string, attemptId: string, round: 'brief' | 'repair'): string {
+  switch (round) {
+    case 'brief':
+      return `exp:${id}:attempt:${attemptId}`;
+    case 'repair':
+      return `exp:${id}:attempt:${attemptId}:repair`;
+  }
+}
+
+/** A posted attempt's phase (the observer reads only posted attempts). */
+function postedPhase(attempt: Attempt): Extract<AttemptPhase, { t: 'posted' }> {
+  if (attempt.phase.t !== 'posted') throw new Error(`attempt ${attempt.id} is ${attempt.phase.t}`);
+  return attempt.phase;
 }

@@ -65,7 +65,10 @@ async function executableFile(file: string): Promise<boolean> {
  * can race on build outputs, and the orphan is never killed (it ends at its own pace, unbounded
  * by the timeout). The recorded outcome is always the replayed run's.
  */
-export function runCommand(check: CommandCheck, cwd: string): Promise<CheckOutcome> {
+export function runCommand(
+  check: Pick<CommandCheck, 'argv' | 'timeoutSeconds'>,
+  cwd: string
+): Promise<CheckOutcome> {
   const [bin, ...args] = check.argv;
   return new Promise((resolve) => {
     let tail = '';

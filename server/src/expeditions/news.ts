@@ -11,10 +11,12 @@ import type {
   AttemptCost,
   CheckOutcome,
   Entry,
+  Feedback,
   FinishReason,
   Integration,
   IntegrationRefusal,
   Outcome,
+  QuestionAcceptance,
   State,
   Validation,
   ValidationPhase,
@@ -22,7 +24,6 @@ import type {
 import {
   apply,
   attemptOf,
-  commandChecks,
   headOf,
   integrationOf,
   questionOf,
@@ -193,14 +194,22 @@ function newsLine(s: State, e: Entry): string[] {
     case 'reflection':
       return [`Reflection: ${clip(e.text, 600)}`];
     case 'feedback':
-      return [`Owner ${e.feedback.t}${'text' in e.feedback ? `: ${clip(e.feedback.text)}` : ''}`];
+      return [`Owner ${feedbackLabel(e.feedback)}`];
+    case 'validation_failed':
+      return [`✗ ${validationLabel(validationOf(s, e.validationId))}`];
+    case 'claim_adopted':
+      return [`${e.attemptId}: the manager's claim of its unreported commit was adopted`];
+    case 'claim_refused':
+      return [`⛔ claim of ${e.attemptId} refused: ${clip(e.reason)}`];
+    case 'tick_failed':
+      return [`⚠ the host failed ${e.failures} ticks in a row, backing off: ${clip(e.reason)}`];
     case 'needs_owner':
       return [`Needs you: ${clip(e.question, 2000)}`];
     case 'validation': {
       // One line per validation, when its last command check is recorded.
       const v = validationOf(s, e.validationId);
-      return validationComplete(s, v)
-        ? [`${validationPassed(s, v) ? '✓' : '✗'} ${validationLabel(s, v)}`]
+      return validationComplete(v)
+        ? [`${validationPassed(v) ? '✓' : '✗'} ${validationLabel(v)}`]
         : [];
     }
     case 'done_requested':
@@ -232,6 +241,31 @@ function mergeLine(s: State, reason: FinishReason): string[] {
     case 'owner_stop':
     case 'setup_failed':
       return [];
+  }
+}
+
+function feedbackLabel(f: Feedback): string {
+  switch (f.t) {
+    case 'lesson':
+    case 'note':
+      return `${f.t}: ${clip(f.text)}`;
+    case 'extend':
+      return `extended the deadline by ${f.hours}h`;
+    case 'pause':
+    case 'resume':
+    case 'stop':
+      return f.t;
+  }
+}
+
+/** How a question's claims are accepted (design.md R11), one line. */
+export function acceptanceLabel(a: QuestionAcceptance): string {
+  const legacy = a.provenance === 'legacy' ? ' (legacy question: set by default)' : '';
+  switch (a.rule.t) {
+    case 'command':
+      return `$ ${a.rule.argv.join(' ')} on its commit (host-run, ${a.rule.timeoutSeconds}s)${legacy}`;
+    case 'panel':
+      return `an independent check panel${legacy}`;
   }
 }
 
@@ -283,6 +317,8 @@ export function outcomeLabel(o: Outcome): string {
       return `check ${o.result.verdict.toUpperCase()}: ${clip(o.result.why)}`;
     case 'malformed':
       return `answered without a valid result (${clip(o.error, 120)})`;
+    case 'unreported_commits':
+      return `answered without a valid result but committed ${o.shas.length} commit(s) (${o.shas.map((x) => x.slice(0, 10)).join(', ')}): claimable`;
     case 'failed':
       return `run ${o.status}`;
   }
@@ -299,6 +335,8 @@ export function outcomeDetail(o: Outcome): string {
       return `CHECK ${o.result.verdict.toUpperCase()}: ${o.result.why}`;
     case 'malformed':
       return `MALFORMED ANSWER (${o.error}): ${o.raw.slice(0, 400)}`;
+    case 'unreported_commits':
+      return `UNREPORTED COMMITS (${o.error}): its branch holds ${o.shas.join(', ')}; "claim" one to have it validated. Its answer: ${o.raw.slice(0, 400)}`;
     case 'failed':
       return `RUN ${o.status.toUpperCase()}`;
   }
@@ -348,11 +386,14 @@ export function checkOutcomeLabel(o: CheckOutcome): string {
 }
 
 /** What a validation ran on and how far it got, one line. */
-export function validationLabel(s: State, v: Validation): string {
-  const runs = v.runs.map((r) => `check ${r.checkIndex} ${checkOutcomeLabel(r.outcome)}`);
-  const state = !validationComplete(s, v)
-    ? `running (${v.runs.length}/${commandChecks(s.charter).length})`
-    : validationPassed(s, v)
+export function validationLabel(v: Validation): string {
+  const runs = [
+    ...v.runs.map((r) => `check ${r.checkIndex} ${checkOutcomeLabel(r.outcome)}`),
+    ...(v.failure.t === 'failed' ? [`could not run: ${clip(v.failure.reason, 300)}`] : []),
+  ];
+  const state = !validationComplete(v)
+    ? `running (${v.runs.length}/${v.checks.length})`
+    : validationPassed(v)
       ? 'PASSED'
       : 'FAILED';
   return `validation ${v.id} of ${subjectOf(v)}: ${state}${runs.length ? ` — ${runs.join('; ')}` : ''}`;
