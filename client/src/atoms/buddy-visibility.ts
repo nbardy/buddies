@@ -18,4 +18,13 @@ export const expeditionCrewIdsAtom = atom((get): ReadonlySet<string> => {
     ? new Set(entry.value.buddyIds)
     : NO_CREWS;
 });
+// Until the list loads, or while it fails, no crew is known and none is hidden: a crew Buddy
+// briefly listed is harmless, a real teammate hidden on a guess is not (deliberate, not a guess).
 const NO_CREWS: ReadonlySet<string> = new Set();
+
+/** Every Buddy kept off the rosters (archived ∪ expedition crews): the one set the sidebar, the
+ * channel rail and both Buddies directories filter by. */
+export const rosterHiddenBuddyIdsAtom = atom(
+  (get): ReadonlySet<string> =>
+    new Set([...get(archivedBuddyIdsAtom), ...get(expeditionCrewIdsAtom)])
+);

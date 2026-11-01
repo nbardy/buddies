@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import type { Buddy, WorkspaceRoster } from '../components/buddies/types';
-import { archivedBuddyIdsAtom, expeditionCrewIdsAtom } from './buddy-visibility';
+import { rosterHiddenBuddyIdsAtom } from './buddy-visibility';
 import {
   type ConversationListEntry,
   type CreateCommand,
@@ -244,7 +244,7 @@ export interface BuddySidebar {
 export const buddySidebarAtom = atomWithPrevious((get, previous: BuddySidebar | undefined) => {
   const projects = buildProjects(
     get(buddySidebarOverviewAtom),
-    new Set([...get(archivedBuddyIdsAtom), ...get(expeditionCrewIdsAtom)]),
+    get(rosterHiddenBuddyIdsAtom),
     get(listField('buddyEntries')),
     get(listField('idSet')),
     pendingCreatesOf(get(commandsAtom))

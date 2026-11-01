@@ -21,7 +21,7 @@
   height: 100dvh;
   max-height: none;
   margin: 0;
-  padding: var(--sp-5);
+  padding: max(var(--sp-5), env(safe-area-inset-top)) var(--sp-5) max(var(--sp-5), env(safe-area-inset-bottom));
   border: 0;
   border-radius: 0;
   overflow-y: auto;
@@ -64,19 +64,19 @@
 .expedition-chip meter { width: 48px; height: 6px; }
 .expedition-chip--mono { font-family: var(--font-mono); cursor: pointer; }
 
-.expedition-goal--clamped .expedition-markdown {
-  max-height: 5.4em;
-  overflow: hidden;
-  mask-image: linear-gradient(to bottom, black 55%, transparent);
-}
-
-/* The preview popup's markdown surface, at the width of its container. */
+/* The preview popup's markdown surface, at the width of its container
+   (before the caps below, which it would otherwise override at equal specificity). */
 .expedition-markdown.file-preview-markdown {
   width: auto;
   max-height: none;
   padding: var(--sp-4) var(--sp-5);
   overflow: visible;
 }
+
+/* Above the tabs, the goal and the owner question scroll inside a cap: the dialog's height is
+   fixed, so unbounded text there would squeeze the tabs and chat to nothing (2026-11-01 review). */
+.expedition-goal .expedition-markdown, .expedition-callout .expedition-markdown { max-height: 26vh; overflow-y: auto; }
+.expedition-goal--clamped .expedition-markdown { max-height: 5.4em; overflow: hidden; mask-image: linear-gradient(to bottom, black 55%, transparent); }
 
 .expedition-link {
   padding: 0;

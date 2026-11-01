@@ -18,7 +18,7 @@ import { startMcpEndpoint } from '../src/buddies/mcp';
 import { runCommand } from '../src/expeditions/command';
 import { type ExpeditionHost, createExpeditionHost } from '../src/expeditions/host';
 import { Charter, type Entry, type State, fold } from '../src/expeditions/model';
-import { clip, goalSummary } from '../src/expeditions/news';
+import { clip, clipBlock, goalSummary, launchNews } from '../src/expeditions/news';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import type { IngestSlot } from '../src/ingest/instance';
 import { BackgroundWork } from '../src/turns/background-work';
@@ -1699,6 +1699,9 @@ test('an ended attempt records the tokens its settled run measured, never before
   const ingest = await Ingest.start(defaultRoots(home), path.join(home, 'ingest.sqlite'), () => {});
   try {
     f.meter.slot = { t: 'ready', ingest };
+    // The test moves the clock to wall time below; launching at the fixture's fixed 2026-11-01
+    // 00:00Z put the 4 h deadline behind wall time from 04:00Z that day, and the run finished.
+    f.setClock(Date.now());
     const { id } = await rpcLaunch(f, 'meter');
     const m1 = f.manager(id);
     const requestId = f.liveAttempts(id)[0].requestId;
@@ -1930,12 +1933,135 @@ test('draft posts one card where the badge goes; the card launches once over HTT
     assert.equal(crewDraft.error, true);
     assert.match(crewDraft.text, /an expedition crew cannot draft expeditions/);
 
-    // A restarted host reads the drafts back: the launched card still says launched.
+    // The rosters hide crew Buddies by the server's explicit list (crew_ready entries).
+    const crews = (await (await fetch(`${base}/api/buddies/expeditions/crews`)).json()) as {
+      buddyIds: string[];
+    };
+    assert.ok(crews.buddyIds.includes(s.crew.buddyId), JSON.stringify(crews));
+    assert.equal(crews.buddyIds.includes(f.lead.id), false);
+
+    // 2026-11-01 review: host.launch appends the ledger before the draft is saved launched. A
+    // crash in between left the draft open: a click then got "stop it first" about the
+    // expedition this very draft started, and once that finished, launched a second one.
+    const recordOf = (id: string) =>
+      JSON.parse(fs.readFileSync(path.join(f.root, 'drafts', `${id}.json`), 'utf8'));
+    const launchBehind = async (name: string) => {
+      const id = (
+        await rpc(f.spec(), 'expedition', { action: { do: 'draft', charter: charter(name) } })
+      ).value.draftId as string;
+      const r = recordOf(id);
+      const behind = await f.host.launch({
+        key: r.key,
+        charter: r.charter,
+        origin: r.origin,
+        launcherId: r.launcherId,
+        workspaceId: r.workspaceId,
+      });
+      if (behind.t !== 'launched') throw new Error('launch expected');
+      assert.deepEqual(recordOf(id).state, { t: 'open' }, 'the crash: draft never marked');
+      return { id, expeditionId: behind.state.id };
+    };
+    const raced = await launchBehind('raced');
+    const click = await launchDraft(raced.id);
+    assert.equal(click.status, 200, await click.clone().text());
+    assert.deepEqual(await click.json(), { expeditionId: raced.expeditionId });
+    const crashed = await launchBehind('crashed');
+
+    // A restarted host reads the drafts back: the launched card still says launched, and the
+    // crashed draft is launched from its ledger.
     f.restart();
     assert.deepEqual(((await (await draftOf(draftId)).json()) as typeof view).state, {
       t: 'launched',
       expeditionId,
     });
+    assert.deepEqual(((await (await draftOf(crashed.id)).json()) as typeof view).state, {
+      t: 'launched',
+      expeditionId: crashed.expeditionId,
+    });
+    // A draft file that is not a draft is named at boot and reads as no draft, never a guess.
+    fs.writeFileSync(
+      path.join(f.root, 'drafts', 'draft-0000beef.json'),
+      JSON.stringify({ ...recordOf(crashed.id), id: 'draft-0000beef', charter: { name: 'x' } })
+    );
+    f.restart();
+    assert.equal((await draftOf('draft-0000beef')).status, 404);
+  } finally {
+    server.close();
+    await f.close();
+  }
+});
+
+// A card must land in the conversation the draft came from (a thread's root, or the DM), and its
+// Launch must reflect the charter as it stands at click time, not as it stood when drafted.
+test('a thread draft posts its card in that thread; an open draft re-checks its issues on read and on Launch', async () => {
+  const f = await fixture();
+  const app = express();
+  app.use(express.json());
+  registerExpeditionRoutes(app, () => f.host);
+  const server = app.listen(0);
+  try {
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const channel = await f.core.createChannel(OWNER, {
+      workspaceId: f.workspaceId,
+      name: 'planning',
+      purpose: 'Plans',
+      key: 'planning',
+    });
+    const root = await f.core.post(
+      OWNER,
+      { kind: 'id', id: channel.id },
+      {
+        kind: 'inform',
+        body: 'Draft the widget expedition.',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        key: 'root',
+      }
+    );
+    const input = (name: string, done: unknown, issues: string[]) => ({
+      key: `thread:${name}`,
+      charter: Charter.parse(charter(name, 2, done)),
+      issues,
+      advice: [],
+      defaulted: [],
+      resolved: [],
+      origin: { t: 'thread' as const, channelId: channel.id, rootId: root.post.id },
+      launcherId: f.lead.id,
+      workspaceId: f.workspaceId,
+    });
+    // Drafted with a stale issue that no longer holds: the view re-checks and shows none.
+    const fine = await f.host.drafts.draft(input('fine', judged, ['stale: binary missing']));
+    // Replies are not channel-feed rows: the card is read from the thread itself.
+    const thread = await f.core.listPosts(
+      OWNER,
+      { kind: 'thread', rootId: root.post.id },
+      null,
+      50
+    );
+    const cards = thread.posts.filter((p) => p.purpose === 'expedition_draft');
+    assert.equal(cards.length, 1, JSON.stringify(thread.posts.map((p) => p.body)));
+    const [card] = cards;
+    assert.equal(card.channelId, channel.id);
+    assert.equal(card.rootId, root.post.id);
+    const view = await fetch(
+      `${base}/api/buddies/expeditions/drafts/${fine.id}?workspaceId=${f.workspaceId}`
+    );
+    assert.deepEqual(((await view.json()) as { issues: string[] }).issues, []);
+
+    // Drafted with no issues, but its check's binary is missing: Launch is refused (422) at click.
+    const missing = {
+      checks: [{ kind: 'command', argv: ['no-such-binary-xyz'], timeoutSeconds: 60 }],
+    };
+    const broken = await f.host.drafts.draft(input('broken', missing, []));
+    const refused = await fetch(`${base}/api/buddies/expeditions/drafts/${broken.id}/launch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspaceId: f.workspaceId }),
+    });
+    assert.equal(refused.status, 422);
+    assert.match(((await refused.json()) as { error: string }).error, /no-such-binary-xyz/);
+    assert.deepEqual(f.host.list(f.workspaceId), []);
   } finally {
     server.close();
     await f.close();
@@ -1958,6 +2084,17 @@ test('chat lines are clipped at a word boundary, never inside a word; a goal sum
     goalSummary('## Goal\n1. Make the widget pass. Then document it.\n2. Ship.'),
     'Make the widget pass.'
   );
+  assert.equal(
+    goalSummary('Use tools, e.g. the linter. Then ship.'),
+    'Use tools, e.g. the linter.'
+  );
+  // A charter name is plain text: its markdown punctuation cannot open emphasis in the post.
+  assert.match(launchNews({ name: 'fix *all*_x', goal: 'Go.' }), /\*\*fix \\\*all\\\*\\_x\*\*/);
+  // An owner question keeps its list (its own paragraph), and a long one is cut between words.
+  const block = clipBlock('**Needs you:**', '1. Option A\n2. Option B');
+  assert.match(block, /\n\n1\. Option A\n2\. Option B\n$/);
+  const long = clipBlock('L', text, 30).trim().split('\n\n')[1];
+  for (const word of long.replace(/…$/, '').split(' ')) assert.ok(words.includes(word), long);
 });
 
 const BUDGETS = { leaseMs: 60_000, chatDeadlineMs: 60_000, turnDeadlineMs: 60_000 };

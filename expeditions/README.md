@@ -102,7 +102,7 @@ All engine code is under `server/src/expeditions/`. The pure core (no I/O) is re
 | The `expedition` Buddy tool (draft, launch, status, list, steer) | `tool.ts` |
 | Page data `GET /api/buddies/expeditions/:id` | `view.ts`, `routes.ts`; type `shared/src/expedition.ts` |
 | Badge chip in any post list (thread, DM, channel) | `client/src/components/buddies/ExpeditionBadge.tsx`, branch in `ChannelPostContent.tsx` |
-| Page `/expeditions/:id` (focus pane + chat) | `client/src/components/buddies/ExpeditionPage.tsx` |
+| Modal `/expeditions/:id` over the current view (tabs + chat; draft mode too) | `client/src/components/buddies/ExpeditionModal.tsx`, `expedition-overlay.ts` |
 
 Where things land:
 - **Badge**: one post (purpose `expedition_badge`, evidence `expedition:<id>`) in the chat the

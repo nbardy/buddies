@@ -3,12 +3,13 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { BuddiesCore, ChannelRef } from '@unleashd/buddies-core';
-import type { ExpeditionDraftState, ExpeditionDraftView } from '@unleashd/shared';
+import type { ExpeditionDraftView } from '@unleashd/shared';
+import { z } from 'zod';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import { announcePost } from '../buddies/events';
 import type { LaunchInput, Launched } from './host';
-import type { Charter, Origin } from './model';
+import { Charter, type Origin } from './model';
 import { charterView } from './view';
 
 // Expedition drafts (design.md R10): the `draft` action persists a validated charter and the host
@@ -18,23 +19,39 @@ import { charterView } from './view';
 // `exp-draft:<draftId>`, so a replayed post is a no-op.
 // Pattern: sum-types (docs/patterns.md#sum-types) — a draft is open, launched or superseded.
 
-/** A draft as stored at `<appData>/expeditions/drafts/<draftId>.json` (one atomic write each). */
-export interface DraftRecord {
-  id: string;
-  createdAt: string;
-  /** `<conversation>:<name>`: the launch key, and what a newer draft supersedes by. */
-  key: string;
-  charter: Charter;
-  /** As checked when drafted; an open draft's view re-checks them on every read. */
-  issues: string[];
-  advice: string[];
-  defaulted: string[];
-  resolved: string[];
-  origin: Origin;
-  launcherId: string;
-  workspaceId: string;
-  state: ExpeditionDraftState;
-}
+const DRAFT_ID = /^draft-[0-9a-f]{8}$/;
+
+const Strings = z.array(z.string());
+
+/** A draft as stored at `<appData>/expeditions/drafts/<draftId>.json` (one atomic write each).
+ * Also κ for boot: a file read back is parsed by this schema, so a malformed or stale-schema
+ * draft is named in the log at boot, never met later inside a view or a launch. */
+const DraftRecord = z
+  .object({
+    id: z.string().regex(DRAFT_ID),
+    createdAt: z.string(),
+    /** `<conversation>:<name>`: the launch key, and what a newer draft supersedes by. */
+    key: z.string().min(1),
+    charter: Charter,
+    /** As checked when drafted; an open draft's view re-checks them on every read. */
+    issues: Strings,
+    advice: Strings,
+    defaulted: Strings,
+    resolved: Strings,
+    origin: z.discriminatedUnion('t', [
+      z.object({ t: z.literal('thread'), channelId: z.string(), rootId: z.string() }).strict(),
+      z.object({ t: z.literal('direct') }).strict(),
+    ]),
+    launcherId: z.string(),
+    workspaceId: z.string(),
+    state: z.discriminatedUnion('t', [
+      z.object({ t: z.literal('open') }).strict(),
+      z.object({ t: z.literal('launched'), expeditionId: z.string() }).strict(),
+      z.object({ t: z.literal('superseded'), by: z.string() }).strict(),
+    ]),
+  })
+  .strict();
+export type DraftRecord = z.infer<typeof DraftRecord>;
 
 export type DraftInput = Omit<DraftRecord, 'id' | 'createdAt' | 'state'>;
 
@@ -58,10 +75,29 @@ export interface DraftStoreOptions {
   dir: string;
   launch(input: LaunchInput): Promise<LaunchOutcome>;
   issues(workspaceId: string, charter: Charter): Promise<string[]>;
+  /** Every expedition launched so far: its launch key and when (each ledger's `launched` entry). */
+  launches(): { key: string; id: string; at: string }[];
   now(): string;
 }
 
-const DRAFT_ID = /^draft-[0-9a-f]{8}$/;
+/**
+ * An open draft whose key launched at or after the draft was made is launched (2026-11-01
+ * review: a crash between host.launch's ledger append and the draft's save left it open, and
+ * once that expedition finished a click launched a second one from the same draft). Recomputed
+ * from the ledgers on every boot, so it holds without a write (a copied store writes nothing).
+ * A tool launch of the same name from the same conversation after the draft counts too, as
+ * launchedByTool already records.
+ */
+function reconciled(
+  draft: DraftRecord,
+  launches: { key: string; id: string; at: string }[]
+): DraftRecord {
+  if (draft.state.t !== 'open') return draft;
+  const launch = launches
+    .filter((l) => l.key === draft.key && l.at >= draft.createdAt)
+    .sort((a, b) => a.at.localeCompare(b.at))[0];
+  return launch ? { ...draft, state: { t: 'launched', expeditionId: launch.id } } : draft;
+}
 
 /** Where a post for this origin goes: the launch thread, or the owner↔launcher DM (the badge's
  * and the draft card's one placement rule). */
@@ -82,15 +118,18 @@ export type DraftStore = ReturnType<typeof createDraftStore>;
 export function createDraftStore(options: DraftStoreOptions) {
   const { core, events, dir } = options;
   const drafts = new Map<string, DraftRecord>();
-  // Boot: read every draft once (sync fs, once, like the host's ledgers). An unreadable file is
-  // named in the log and left on disk; its card then reads "no draft" (404), never a guess.
-  // The directory is made by the first save, not here: a host on a copied store (execution gate
-  // disabled) must write nothing.
+  // Boot: read every draft once (sync fs, once, like the host's ledgers). An unreadable or
+  // malformed file is named in the log and left on disk; its card then reads "no draft" (404),
+  // never a guess. A leftover `<id>.json.<rand>.tmp` (a crash mid-save) is skipped, not removed:
+  // a host on a copied store (execution gate disabled) must write nothing, so the directory is
+  // also made by the first save, not here.
   for (const file of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
     const id = file.replace(/\.json$/, '');
     if (!DRAFT_ID.test(id) || !file.endsWith('.json')) continue;
     try {
-      drafts.set(id, JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) as DraftRecord);
+      const record = DraftRecord.parse(JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')));
+      if (record.id !== id) throw new Error(`it records id ${record.id}`);
+      drafts.set(id, reconciled(record, options.launches()));
     } catch (error) {
       console.warn(`[expeditions] draft ${id} unreadable: ${(error as Error).message}`);
     }
@@ -163,6 +202,12 @@ export function createDraftStore(options: DraftStoreOptions) {
       case 'refused':
         return outcome;
       case 'already_running':
+        // Launched since this draft was made (the tool, or this card before a crash cut off its
+        // markLaunched): that launch is this draft's, so the card answers it, not "stop it".
+        if (outcome.state.launchedAt >= draft.createdAt) {
+          await markLaunched(draft, outcome.state.id);
+          return { t: 'launched', expeditionId: outcome.state.id };
+        }
         return {
           t: 'already_running',
           expeditionId: outcome.state.id,
@@ -187,11 +232,13 @@ export function createDraftStore(options: DraftStoreOptions) {
           createdAt: options.now(),
           state: { t: 'open' },
         };
-        await save(draft);
-        for (const older of drafts.values()) {
-          if (older.key === draft.key && older.id !== draft.id && older.state.t === 'open')
+        // The older open drafts are closed BEFORE the new one is written: a crash between the
+        // writes leaves no open draft under the key (the Buddy re-drafts), never two Launches.
+        for (const older of [...drafts.values()]) {
+          if (older.key === draft.key && older.state.t === 'open')
             await save({ ...older, state: { t: 'superseded', by: draft.id } });
         }
+        await save(draft);
         const target = placementOf(draft.origin, draft.launcherId);
         const write = await core.post(buddyActor(draft.launcherId), target.channel, {
           kind: 'inform',

@@ -48,7 +48,7 @@ export function ExpeditionDraftCard({
         <button type="button" className="expedition-button" onClick={() => setInfo(true)}>
           Info
         </button>
-        <DraftLaunchButton d={d} refetch={view.refetch} />
+        <DraftLaunchButton d={d} refetch={view.refetch} onOpen={() => setInfo(false)} />
       </div>
       {info && (
         <DraftInfo draftId={draftId} workspaceId={workspaceId} onClose={() => setInfo(false)} />

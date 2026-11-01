@@ -590,25 +590,38 @@ post was cut mid-word ("…Engin"); the crew Buddy was listed as a team member.
   badge goes (`placementOf`, shared with `post_badge`). The card's Launch (HTTP, `routes.ts`) and
   the tool's `launch` share `host.launch`, its serialization and its refusal list; a refusal is
   data for the card, not a thrown error. Writes are serialized: a double click is one expedition,
-  a second click answers the same id. A draft is visible only in its own workspace. Wire shapes:
+  a second click answers the same id. A draft is read and launched only under its own workspace;
+  that is a consistency check, not an access boundary (the client names the workspace and every
+  `/api` caller is the owner). Crash safety: the store reads each file through a zod schema at boot
+  (a malformed draft is logged and reads 404), and an open draft whose key launched at or after
+  its `createdAt` is launched (recomputed from the ledgers on every boot, and at click time when
+  the launch answers `already_running`), so a crash between the ledger append and the draft save
+  never lets one draft launch twice. Superseded drafts are written before the new one. Wire shapes:
   `ExpeditionDraftView`, and `ExpeditionCharterView`, which a live view and a draft share
   (`view.ts charterView`) so the modal has one Charter tab.
 - **One modal** (`client/.../ExpeditionModal.tsx`), live or draft, on the shared `ModalDialog`
   (native `<dialog>`: Esc, backdrop, focus trap, focus back to the opener) also used by the Task
   overlay and the file viewer, styled as a widened `.channel-task-overlay` with markdown in the
-  file preview's `.file-preview-markdown` surface. `/expeditions/:id` opens it over the view it was
+  file preview's `.file-preview-markdown` surface, rendered through the chat's own
+  `ChannelMarkdown` (line breaks, Buddy/Task links, code) so there is one markdown flavor. `/expeditions/:id` opens it over the view it was
   opened from (react-router background location, `expedition-overlay.ts`), over home on a direct
   load; a full-height sheet on the phone. The old page is deleted.
 - **Chat lines never cut a word** (`news.ts clip`): one flattened line, cut at a word boundary
   with `…`. The launch post is `⛺ Launched **<name>**: <goal's first sentence>` with `Planning…`
   as its own paragraph (`goalSummary` drops headings and list markers). Status posts were plain
   markdown all along; they broke because a raw slice of the goal carried cut list and emphasis
-  markers, and a `+ question` line opened a list that swallowed the lines after it.
+  markers, and a `+ question` line opened a list that swallowed the lines after it. The owner
+  question and the finish summary keep their markdown (`clipBlock`: own paragraph, word-boundary
+  cut), and the charter name is escaped (`literal`).
 - **Crew Buddies off the roster**: `GET /api/buddies/expeditions/crews` lists every crew Buddy
-  (from `crew_ready` entries, never a name pattern); the sidebar and the channel rail hide them.
+  (from `crew_ready` entries, never a name pattern); the sidebar, the channel rail and both Buddies
+  directories hide them through one `rosterHiddenBuddyIdsAtom`. Until the list loads (or while it
+  fails) no crew is hidden: a crew briefly listed is harmless, a teammate hidden on a guess is not.
 - Guards: `expeditions.test.ts` (draft card placement and evidence, HTTP view and launch,
   idempotent second click, superseded 409, other workspace 404, crew cannot draft, tool launch
-  closes the card, restart keeps launched, clip never splits a word), `expedition.test.tsx`
-  (card buttons and disabled reasons, modal markdown, status post markdown, roster).
+  closes the card, restart keeps launched, crash-window reconcile, malformed file at boot, thread
+  placement, open-draft issue re-check, 422 at click, crews endpoint, clip never splits a word),
+  `expedition.test.tsx` (card buttons and disabled reasons, modal markdown through ChannelMarkdown,
+  status post markdown, roster incl. the phone directory), `expedition-overlay.test.ts` (routing).
   Not covered by tests: Esc/backdrop closing (the client tests render static markup with no DOM);
   the browser pass checks it.

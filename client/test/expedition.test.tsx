@@ -23,6 +23,7 @@ const { draftUrl, expeditionUrl, EXPEDITION_CREWS_URL } = await import(
 );
 const { buddySidebarAtom, buddySidebarOverviewAtom } = await import('../src/atoms/buddy-sidebar');
 const { buddyRailFamily } = await import('../src/atoms/channel-rail');
+const { mobileBuddyDirectoryAtom } = await import('../src/mobile/atoms/buddies');
 const { loadResource } = await import('../src/atoms/resources');
 const { jotaiStore } = await import('../src/atoms/store');
 const { Provider } = await import('jotai');
@@ -147,7 +148,7 @@ const view: ExpeditionView = {
       questionId: 'q1',
       phase: { t: 'posted' },
       live: true,
-      brief: 'Bisect the last ten commits.',
+      brief: 'Bisect the last ten commits.\nStart at @lead.',
       requestId: 'post-1',
       worktree: { t: 'tree', branch: 'exp/widget-abc123/w1', path: '/x/w1' },
       cost: { t: 'none' },
@@ -180,7 +181,9 @@ test('the expedition modal leads with its state, the owner question, the goal as
   assert.match(html, /Should the website be in scope\?/);
   assert.match(html, /Make the <strong>widget<\/strong> pass its test\./);
   assert.match(html, /<ol>\s*<li>Find the failure<\/li>/);
-  assert.match(html, /Bisect the last ten commits\./);
+  // Through the chat's own markdown (ChannelMarkdown): a single newline is a line break, as in
+  // chat (react-markdown alone ran the lines together).
+  assert.match(html, /Bisect the last ten commits\.<br\/?>\s*Start at/);
   // Where work lands and why it did not: the worker's branch, its claim's host validation with
   // the exit code, and the expedition branch's last refused merge.
   assert.match(html, /branch exp\/widget-abc123\/w1/);
@@ -316,6 +319,15 @@ test('expedition crew Buddies are absent from the Buddies roster and rail', asyn
   const members = [lead, crew] as unknown as Parameters<typeof buddyRailFamily>[0];
   assert.deepEqual(
     jotaiStore.get(buddyRailFamily(members)).map((b) => b.id),
+    ['lead']
+  );
+  // The phone's Buddies directory is its roster: crews are off it too.
+  const overview = [
+    { id: 'ws-1', name: 'Repo', rootPath: '/repo', buddies: [lead, crew], taskCounts: [] },
+  ] as unknown as Parameters<typeof mobileBuddyDirectoryAtom>[0];
+  const phone = jotaiStore.get(mobileBuddyDirectoryAtom(overview, ''));
+  assert.deepEqual(
+    phone.groups.flatMap((g) => g.entries.map((e) => e.buddy.id)),
     ['lead']
   );
 });

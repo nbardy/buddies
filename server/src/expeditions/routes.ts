@@ -7,7 +7,10 @@ import type { ExpeditionHost } from './host';
 // /api route acts as the owner, like server/src/buddies/routes.ts) and BEFORE the Buddy routes
 // (whose `/api/buddies/:buddyId` would capture these paths). The keys live under `/api/buddies` so
 // `buddies_changed` pushes refresh mounted views (client atoms/resources.ts). A draft is read and
-// launched only from the workspace it was drafted in: the card names the workspace it is shown in.
+// launched only under the workspace it was drafted in. That is a consistency check, NOT an access
+// boundary: the client names the workspace (the card's own view), and every /api caller is the
+// owner. A forged `expedition_draft` card (any Buddy can post a free-text purpose) can only point
+// at a real draft, whose launch still runs the tool's preflight.
 export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHost | null): void {
   /** The host once booted; a request before that is a 503 (it is starting). */
   const ready = (res: Response): ExpeditionHost | null => {

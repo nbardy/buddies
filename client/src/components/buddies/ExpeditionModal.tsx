@@ -1,24 +1,33 @@
 import type {
   ExpeditionAttempt,
   ExpeditionCharterView,
+  ExpeditionDraftState,
   ExpeditionDraftView,
   ExpeditionValidation,
   ExpeditionView,
 } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
-import Markdown from 'react-markdown';
+import {
+  type ReactNode,
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
-import remarkGfm from 'remark-gfm';
 import { listField } from '../../atoms/conversations';
 import { invalidateChannelResources } from '../../atoms/resources';
 import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChannelComposer } from './ChannelComposer';
+import { ChannelMarkdown } from './ChannelMarkdown';
 import { type RowContext, renderRows } from './ChannelRows';
 import { DraftLaunchButton } from './ExpeditionDraftLaunch';
 import { ModalDialog } from './ModalDialog';
 import {
+  type WorkspaceDirectory,
   channelFeed,
   channelRows,
   useChannelFeed,
@@ -83,11 +92,24 @@ export function ExpeditionModal({
   }
 }
 
-/** Markdown in the file preview's document surface (FilePreview.css). */
-export function ExpeditionMarkdown({ text }: { text: string }) {
+/** The workspace directory the modal's markdown resolves Buddy mentions and Task refs against.
+ * Provided once per modal body (WithDirectory); a markdown block outside one is a bug, named. */
+const DirectoryContext = createContext<WorkspaceDirectory | null>(null);
+
+function WithDirectory({ workspaceId, children }: { workspaceId: string; children: ReactNode }) {
+  const directory = useWorkspaceDirectory(workspaceId);
+  return <DirectoryContext.Provider value={directory}>{children}</DirectoryContext.Provider>;
+}
+
+/** Markdown exactly as the chat renders it (ChannelMarkdown: line breaks, buddy:/task: links,
+ * highlighted code), on the file preview's document surface (FilePreview.css). */
+function ExpeditionMarkdown({ text }: { text: string }) {
+  const directory = useContext(DirectoryContext);
+  const body = useMemo(() => ({ t: 'text' as const, text }), [text]);
+  if (!directory) throw new Error('ExpeditionMarkdown outside an expedition modal body');
   return (
     <div className="file-preview-markdown expedition-markdown">
-      <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+      <ChannelMarkdown body={body} buddyNames={directory.buddyNames} tasks={directory.taskById} />
     </div>
   );
 }
@@ -145,16 +167,31 @@ function Pending({
 /** The goal, rendered, clamped to a few lines until "Show more". */
 function Goal({ goal }: { goal: string }) {
   const [open, setOpen] = useState(false);
+  // About what the clamp shows (~3 lines); a shorter goal has nothing more to show.
+  const long = goal.length > 240 || goal.trim().split('\n').length > 3;
   return (
     <section
-      className={open ? 'expedition-goal' : 'expedition-goal expedition-goal--clamped'}
+      className={open || !long ? 'expedition-goal' : 'expedition-goal expedition-goal--clamped'}
       aria-label="Goal"
     >
       <ExpeditionMarkdown text={goal} />
-      <button type="button" className="expedition-link" onClick={() => setOpen(!open)}>
-        {open ? 'Show less' : 'Show more'}
-      </button>
+      {long && (
+        <button type="button" className="expedition-link" onClick={() => setOpen(!open)}>
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      )}
     </section>
+  );
+}
+
+/** A plain list; keyed by position, since two entries may read the same. */
+function Bullets({ items }: { items: readonly string[] }) {
+  return (
+    <ul>
+      {items.map((item, i) => (
+        <li key={i}>{item}</li>
+      ))}
+    </ul>
   );
 }
 
@@ -213,11 +250,13 @@ function LiveModal({
         </>
       }
     >
-      <LiveBody
-        v={v}
-        presentation={presentation}
-        stale={view.kind === 'stale' ? view.error : null}
-      />
+      <WithDirectory workspaceId={v.workspaceId}>
+        <LiveBody
+          v={v}
+          presentation={presentation}
+          stale={view.kind === 'stale' ? view.error : null}
+        />
+      </WithDirectory>
     </Shell>
   );
 }
@@ -243,14 +282,34 @@ function LiveBody({
     charter: '',
     chat: '',
   };
+  // Arrow keys move between tabs (the WAI-ARIA tabs pattern); the pane is their tabpanel.
+  const step = (by: number) => {
+    const at = foci.findIndex((f) => f.focus === pane);
+    const next = foci[(at + by + foci.length) % foci.length].focus;
+    setFocus(next);
+    document.getElementById(`expedition-tab-${next}`)?.focus();
+  };
   const tabs = (
-    <div className="expedition-tabs ui-row" role="tablist" aria-label="Expedition">
+    <div
+      className="expedition-tabs ui-row"
+      role="tablist"
+      aria-label="Expedition"
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+          event.preventDefault();
+          step(event.key === 'ArrowRight' ? 1 : -1);
+        }
+      }}
+    >
       {foci.map((f) => (
         <button
           key={f.focus}
+          id={`expedition-tab-${f.focus}`}
           type="button"
           role="tab"
           aria-selected={pane === f.focus}
+          aria-controls={PANEL_ID}
+          tabIndex={pane === f.focus ? 0 : -1}
           className="expedition-tab"
           onClick={() => setFocus(f.focus)}
         >
@@ -291,7 +350,7 @@ function LiveBody({
         <div className="expedition-columns">
           <div className="expedition-main ui-stack">
             {tabs}
-            <div className="expedition-pane">
+            <div {...panelProps(pane)}>
               <LivePane pane={pane as Pane} v={v} />
             </div>
           </div>
@@ -301,9 +360,9 @@ function LiveBody({
         <div className="expedition-main ui-stack">
           {tabs}
           {pane === 'chat' ? (
-            chat
+            <div {...panelProps(pane)}>{chat}</div>
           ) : (
-            <div className="expedition-pane">
+            <div {...panelProps(pane)}>
               <LivePane pane={pane} v={v} />
             </div>
           )}
@@ -313,6 +372,14 @@ function LiveBody({
   );
 }
 
+const PANEL_ID = 'expedition-panel';
+const panelProps = (pane: Focus) => ({
+  id: PANEL_ID,
+  role: 'tabpanel',
+  'aria-labelledby': `expedition-tab-${pane}`,
+  className: 'expedition-pane',
+});
+
 /** The owner's attention line: an open question, or how it finished; nothing while it runs. */
 function RunCallout({ v, onReply }: { v: ExpeditionView; onReply(): void }) {
   switch (v.run.t) {
@@ -321,13 +388,16 @@ function RunCallout({ v, onReply }: { v: ExpeditionView; onReply(): void }) {
       return null;
     case 'waiting_owner':
       return (
-        <output className="expedition-callout expedition-tone-warn ui-stack">
+        <section
+          className="expedition-callout expedition-tone-warn ui-stack"
+          aria-label="Needs you"
+        >
           <strong>Needs you</strong>
           <ExpeditionMarkdown text={v.run.question} />
           <button type="button" className="expedition-button" onClick={onReply}>
             Reply in chat
           </button>
-        </output>
+        </section>
       );
     case 'finished':
       return (
@@ -489,8 +559,8 @@ function Reflections({ v }: { v: ExpeditionView }) {
         <p className="buddy-panel__empty">No reflections yet.</p>
       ) : (
         <ol className="expedition-timeline">
-          {[...v.reflections].reverse().map((r) => (
-            <li key={r.at}>
+          {[...v.reflections].reverse().map((r, i) => (
+            <li key={`${v.reflections.length - i}-${r.at}`}>
               <time dateTime={r.at} className="ui-muted">
                 {new Date(r.at).toLocaleString()}
               </time>
@@ -510,29 +580,21 @@ function CharterPane({
   children,
 }: { charter: ExpeditionCharterView; lessons: string[]; children?: ReactNode }) {
   const list = (items: string[]) =>
-    items.length === 0 ? (
-      <p className="ui-muted">Not listed.</p>
-    ) : (
-      <ul>
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    );
+    items.length === 0 ? <p className="ui-muted">Not listed.</p> : <Bullets items={items} />;
   const { roster, limits } = charter;
   return (
     <div className="ui-stack" aria-label="Charter">
       <Section title="Done when">
         <ul className="expedition-checks">
           {charter.done.t === 'checks' ? (
-            charter.done.checks.map((check) =>
+            charter.done.checks.map((check, i) =>
               check.kind === 'command' ? (
-                <li key={check.argv.join(' ')}>
+                <li key={`${i}-command`}>
                   <code>$ {check.argv.join(' ')}</code>{' '}
                   <span className="ui-muted">run by the host · {check.timeoutSeconds}s limit</span>
                 </li>
               ) : (
-                <li key={check.text}>
+                <li key={`${i}-judged`}>
                   {check.text} <span className="ui-muted">· judged by a blind check panel</span>
                 </li>
               )
@@ -651,46 +713,45 @@ function DraftModal({
       title={
         <>
           <strong className="expedition-modal-title">⛺ Draft · {d.charter.name}</strong>
+          <span className={`expedition-pill expedition-tone-${DRAFT_PILL[d.state.t].tone}`}>
+            {DRAFT_PILL[d.state.t].label}
+          </span>
           <span className="ui-muted">{budgetLine(d.charter.limits)}</span>
         </>
       }
     >
-      <div className="expedition-pane ui-stack">
-        <Goal goal={d.charter.goal} />
-        {d.issues.length > 0 && (
-          <section className="expedition-callout expedition-tone-bad ui-stack">
-            <strong>Launch is blocked until these are fixed</strong>
-            <ul>
-              {d.issues.map((issue) => (
-                <li key={issue}>{issue}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {d.advice.length > 0 && (
-          <Section title="Advice">
-            <ul>
-              {d.advice.map((a) => (
-                <li key={a}>{a}</li>
-              ))}
-            </ul>
-          </Section>
-        )}
-        {d.defaulted.length + d.resolved.length > 0 && (
-          <Section title="Filled in for you">
-            <ul>
-              {[...d.defaulted, ...d.resolved].map((a) => (
-                <li key={a}>{a}</li>
-              ))}
-            </ul>
-          </Section>
-        )}
-        <CharterPane charter={d.charter} lessons={[]} />
-      </div>
+      <WithDirectory workspaceId={d.workspaceId}>
+        <div className="expedition-pane ui-stack">
+          <Goal goal={d.charter.goal} />
+          {d.issues.length > 0 && (
+            <section className="expedition-callout expedition-tone-bad ui-stack">
+              <strong>Launch is blocked until these are fixed</strong>
+              <Bullets items={d.issues} />
+            </section>
+          )}
+          {d.advice.length > 0 && (
+            <Section title="Advice">
+              <Bullets items={d.advice} />
+            </Section>
+          )}
+          {d.defaulted.length + d.resolved.length > 0 && (
+            <Section title="Filled in for you">
+              <Bullets items={[...d.defaulted, ...d.resolved]} />
+            </Section>
+          )}
+          <CharterPane charter={d.charter} lessons={[]} />
+        </div>
+      </WithDirectory>
       <DraftFooter d={d} refetch={view.refetch} onClose={onClose} />
     </Shell>
   );
 }
+
+const DRAFT_PILL: Record<ExpeditionDraftState['t'], { label: string; tone: string }> = {
+  open: { label: 'draft', tone: 'info' },
+  launched: { label: 'launched', tone: 'ok' },
+  superseded: { label: 'replaced', tone: 'muted' },
+};
 
 function DraftFooter({
   d,
@@ -699,7 +760,7 @@ function DraftFooter({
 }: { d: ExpeditionDraftView; refetch(): Promise<void>; onClose(): void }) {
   return (
     <footer className="expedition-footer ui-row">
-      <DraftLaunchButton d={d} refetch={refetch} />
+      <DraftLaunchButton d={d} refetch={refetch} onOpen={onClose} />
       <button type="button" className="expedition-button" onClick={onClose}>
         Close
       </button>

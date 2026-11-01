@@ -31,6 +31,18 @@ export function expeditionOverlay(location: Location): ExpeditionOverlay {
   return background ? { t: 'over', id, background } : { t: 'direct', id };
 }
 
+/** What the routes render under the modal: the location itself, the opener's view, or home. */
+export function baseOf(location: Location, overlay: ExpeditionOverlay): Location | string {
+  switch (overlay.t) {
+    case 'none':
+      return location;
+    case 'over':
+      return overlay.background;
+    case 'direct':
+      return '/';
+  }
+}
+
 /** The background to keep when opening a modal: a modal opened from inside another keeps the
  * original view underneath, never the first modal's URL. */
 export function backgroundOf(location: Location): Location {

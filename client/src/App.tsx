@@ -8,21 +8,17 @@ import {
   lazy,
   useEffect,
 } from 'react';
-import {
-  BrowserRouter,
-  Navigate,
-  Route,
-  type Location as RouterLocation,
-  Routes,
-  useLocation,
-  useNavigate,
-} from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { handleMessage } from './atoms/actions';
 import { jotaiStore } from './atoms/store';
 import { UpdateBanner } from './components/UpdateBanner';
 import { UpstreamUpdatePrompt } from './components/buddies/UpstreamUpdatePrompt';
 import { useOwnerUnreadTitle } from './components/buddies/channel-data';
-import { type ExpeditionOverlay, expeditionOverlay } from './components/buddies/expedition-overlay';
+import {
+  type ExpeditionOverlay,
+  baseOf,
+  expeditionOverlay,
+} from './components/buddies/expedition-overlay';
 import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
 import { initSettings } from './stores/settingsStore';
@@ -243,19 +239,8 @@ const SHELLS: Record<DeviceKind, ComponentType> = {
 // blanks the sidebar or tab bar.
 // /expeditions/:id is a modal, not a page (owner, 2026-11-01): the routes render at the view it
 // was opened over (components/buddies/expedition-overlay.ts), or at home on a direct load, and the
-// modal sits on top. The phone gets a full-height sheet.
-/** Where the routes render: the location itself, the view a modal opened over, or home. */
-function baseOf(location: RouterLocation, overlay: ExpeditionOverlay): RouterLocation | string {
-  switch (overlay.t) {
-    case 'none':
-      return location;
-    case 'over':
-      return overlay.background;
-    case 'direct':
-      return '/';
-  }
-}
-
+// modal sits on top (baseOf picks the location the routes render at). The phone gets a full-height
+// sheet.
 /** The live expedition modal for the URL. Closing returns to the view it opened over (Back), or
  * replaces a direct load with home. */
 function ExpeditionRoute({

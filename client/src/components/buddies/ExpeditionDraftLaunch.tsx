@@ -5,11 +5,14 @@ import { draftAction } from './expedition-view';
 import './Expedition.css';
 
 // Pattern: one-definition (docs/patterns.md#one-definition)
-/** Launch, its blocked reason, or "Launched →": one control for the card and the modal. */
+/** Launch, its blocked reason, or "Launched →": one control for the card and the modal.
+ * `onOpen` runs before "Launched →" opens the live modal: the draft modal closes first, so the
+ * live one never stacks over it (closing it would show the stale draft again). */
 export function DraftLaunchButton({
   d,
   refetch,
-}: { d: ExpeditionDraftView; refetch(): Promise<void> }) {
+  onOpen,
+}: { d: ExpeditionDraftView; refetch(): Promise<void>; onOpen(): void }) {
   const { state, launch } = useDraftLaunch(d, refetch);
   const openExpedition = useOpenExpedition();
   const action = draftAction(d);
@@ -19,7 +22,10 @@ export function DraftLaunchButton({
         <button
           type="button"
           className="expedition-button"
-          onClick={() => openExpedition(action.expeditionId)}
+          onClick={() => {
+            onOpen();
+            openExpedition(action.expeditionId);
+          }}
         >
           Launched →
         </button>

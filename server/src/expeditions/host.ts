@@ -840,6 +840,11 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     dir: path.join(root, 'drafts'),
     issues,
     now,
+    // Each ledger's first entry is its `launched` (launchOnce writes it in the first batch).
+    launches: () =>
+      [...ledgers].flatMap(([id, [first]]) =>
+        first?.t === 'launched' ? [{ key: first.key, id, at: first.at }] : []
+      ),
     launch: (input): Promise<LaunchOutcome> =>
       launch(input).catch((error: unknown) => {
         if (error instanceof LaunchRefused) return { t: 'refused', reasons: error.reasons };

@@ -111,7 +111,7 @@ export function withStatus(s: State, out: Entry[], at: string): Entry[] {
     at,
     seq: s.statuses.length,
     // The badge line lives on the page header and the launch badge; chat posts carry only news.
-    text: lines.join('\n'),
+    text: lines.join('\n').trim(),
   };
   apply(s, status);
   return [...out, status];
@@ -132,6 +132,22 @@ export function clip(text: string, n = 300): string {
 }
 
 /**
+ * A markdown block (an owner question, a finish summary) kept as written, lists and code blocks
+ * included, cut at a word boundary with `…` past `n` characters. Its own paragraph in the post
+ * (blank lines around it), so it neither runs into the lines around it nor swallows them.
+ */
+export function clipBlock(label: string, text: string, n = 2000): string {
+  const body = text.trim();
+  const head = body.slice(0, n + 1);
+  const space = head.search(/\s\S*$/);
+  const cut = body.length <= n ? body : `${head.slice(0, space > 0 ? space : n).trimEnd()}…`;
+  return `\n${label}\n\n${cut}\n`;
+}
+
+/** Markdown punctuation in a plain name (a charter name is any 1–60 characters) shown literally. */
+export const literal = (text: string): string => text.replace(/[\\`*_[\]<>#|~]/g, '\\$&');
+
+/**
  * The goal's first sentence as plain prose, for a one-line mention (the launch post, the badge's
  * fallback text): headings dropped, quote and list markers stripped,
  * cut at a word boundary. The full goal renders as markdown in the modal.
@@ -144,7 +160,8 @@ export function goalSummary(goal: string, n = 160): string {
     .map((line) => line.replace(/^\s*(>\s*|[-*+]\s+|\d+[.)]\s+)/, '').trim())
     .filter(Boolean)
     .join(' ');
-  const sentence = /^(.+?[.!?])(\s|$)/.exec(prose)?.[1] ?? prose;
+  // A sentence ends at . ! ? before a capital or the end: "e.g. the" does not end one.
+  const sentence = /^(.+?[.!?])(\s+(?=[A-Z"'(\[])|$)/.exec(prose)?.[1] ?? prose;
   return clip(sentence, n);
 }
 
@@ -161,7 +178,7 @@ export function charterSummary(c: Charter): string {
 
 /** The first status of every expedition: what launched, then the planning line on its own. */
 export const launchNews = (c: { name: string; goal: string }) =>
-  `⛺ Launched **${c.name}**: ${goalSummary(c.goal)}\n\nPlanning…`;
+  `⛺ Launched **${literal(c.name)}**: ${goalSummary(c.goal)}\n\nPlanning…`;
 
 /** The chat line for one notable entry (none for an uninteresting one). */
 function newsLine(s: State, e: Entry): string[] {
@@ -195,7 +212,7 @@ function newsLine(s: State, e: Entry): string[] {
     case 'feedback':
       return [`Owner ${e.feedback.t}${'text' in e.feedback ? `: ${clip(e.feedback.text)}` : ''}`];
     case 'needs_owner':
-      return [`Needs you: ${clip(e.question, 2000)}`];
+      return [clipBlock('**Needs you:**', e.question)];
     case 'validation': {
       // One line per validation, when its last command check is recorded.
       const v = validationOf(s, e.validationId);
@@ -212,7 +229,7 @@ function newsLine(s: State, e: Entry): string[] {
     case 'integration_refused':
       return [`⛔ ${integrationLabel(s, integrationOf(s, e.integrationId))}`];
     case 'finished':
-      return [`Finished (${e.reason}): ${clip(e.summary, 2000)}`, ...mergeLine(s, e.reason)];
+      return [clipBlock(`**Finished (${e.reason}):**`, e.summary), ...mergeLine(s, e.reason)];
     default:
       return [];
   }
