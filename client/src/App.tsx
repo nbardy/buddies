@@ -8,21 +8,19 @@ import {
   lazy,
   useEffect,
 } from 'react';
-import {
-  BrowserRouter,
-  Navigate,
-  Route,
-  type Location as RouterLocation,
-  Routes,
-  useLocation,
-  useNavigate,
-} from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { handleMessage } from './atoms/actions';
 import { jotaiStore } from './atoms/store';
 import { UpdateBanner } from './components/UpdateBanner';
 import { UpstreamUpdatePrompt } from './components/buddies/UpstreamUpdatePrompt';
 import { useOwnerUnreadTitle } from './components/buddies/channel-data';
-import { type ExpeditionOverlay, expeditionOverlay } from './components/buddies/expedition-overlay';
+import type { ChannelsView } from './components/buddies/channels-view';
+import {
+  type ExpeditionOverlay,
+  type OverlayBase,
+  expeditionOverlay,
+  useOverlayBase,
+} from './components/buddies/expedition-overlay';
 import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
 import { initSettings } from './stores/settingsStore';
@@ -106,9 +104,6 @@ const ChannelsIndex = lazyNamed(() =>
 const ExpeditionModal = lazyNamed(() =>
   import('./components/buddies/ExpeditionModal').then((m) => m.ExpeditionModal)
 );
-const ExpeditionsIndex = lazyNamed(() =>
-  import('./components/buddies/ExpeditionsIndex').then((m) => m.ExpeditionsIndex)
-);
 const WorkspaceHome = lazyNamed(() =>
   import('./components/buddies/WorkspaceHome').then((m) => m.WorkspaceHome)
 );
@@ -144,6 +139,10 @@ const ChannelsMobile = lazyNamed(() =>
 // =============================================================================
 type RouteDef = { path: string; desktop: () => ReactElement; mobile: () => ReactElement };
 
+// Where the index routes land in the channels view (mobile/channels/ChannelsIndex.tsx).
+const CHANNELS_HOME: ChannelsView = { kind: 'home' };
+const EXPEDITIONS_SCREEN: ChannelsView = { kind: 'expeditions' };
+
 const ROUTES: RouteDef[] = [
   {
     path: '/chats',
@@ -157,7 +156,12 @@ const ROUTES: RouteDef[] = [
     desktop: () => <BuddyWorkspaceActivity />,
     mobile: () => <BuddyWorkspaceActivity />,
   },
-  { path: '/expeditions', desktop: () => <ExpeditionsIndex />, mobile: () => <ExpeditionsIndex /> },
+  // The expedition index lives in the channels view (owner, 2026-11-01); the old URL lands there.
+  {
+    path: '/expeditions',
+    desktop: () => <ChannelsIndex screen={EXPEDITIONS_SCREEN} />,
+    mobile: () => <ChannelsIndex screen={EXPEDITIONS_SCREEN} />,
+  },
   {
     path: '/buddies/:buddyId',
     desktop: () => <BuddiesDashboard />,
@@ -193,7 +197,11 @@ const ROUTES: RouteDef[] = [
   },
   { path: '/search', desktop: () => <Gallery />, mobile: () => <SearchMobile /> },
   // The Channels tab's entry: redirects to the first workspace's channels.
-  { path: '/channels', desktop: () => <ChannelsIndex />, mobile: () => <ChannelsIndex /> },
+  {
+    path: '/channels',
+    desktop: () => <ChannelsIndex screen={CHANNELS_HOME} />,
+    mobile: () => <ChannelsIndex screen={CHANNELS_HOME} />,
+  },
 ];
 
 // Channels mount differently per device, at the SAME URL so links travel.
@@ -246,28 +254,33 @@ const SHELLS: Record<DeviceKind, ComponentType> = {
 // The route-level boundary sits inside the shell, so loading a destination never
 // blanks the sidebar or tab bar.
 // /expeditions/:id is a modal, not a page (owner, 2026-11-01): the routes render at the view it
-// was opened over (components/buddies/expedition-overlay.ts), or at home on a direct load, and the
-// modal sits on top. The phone gets a full-height sheet.
-/** Where the routes render: the location itself, the view a modal opened over, or home. */
-function baseOf(location: RouterLocation, overlay: ExpeditionOverlay): RouterLocation | string {
-  switch (overlay.t) {
-    case 'none':
-      return location;
-    case 'over':
-      return overlay.background;
-    case 'direct':
-      return '/';
-  }
-}
+// was opened over (components/buddies/expedition-overlay.ts), or, on a direct load, at its
+// workspace's expedition index in the channels view, and the modal sits on top. The phone gets a
+// full-height sheet.
 
 /** The live expedition modal for the URL. Closing returns to the view it opened over (Back), or
- * replaces a direct load with home. */
+ * replaces a direct load with the channels view under it (home while that is unknown). */
 function ExpeditionRoute({
   overlay,
+  base,
   device,
-}: { overlay: Exclude<ExpeditionOverlay, { t: 'none' }>; device: DeviceKind }) {
+}: {
+  overlay: Exclude<ExpeditionOverlay, { t: 'none' }>;
+  base: OverlayBase;
+  device: DeviceKind;
+}) {
   const navigate = useNavigate();
-  const close = () => (overlay.t === 'over' ? navigate(-1) : navigate('/', { replace: true }));
+  const close = () => {
+    switch (base.t) {
+      case 'over':
+        return navigate(-1);
+      case 'landed':
+        return navigate(base.routes, { replace: true });
+      case 'page':
+      case 'pending':
+        return navigate('/', { replace: true });
+    }
+  };
   return (
     <ExpeditionModal
       target={{ t: 'live', id: overlay.id }}
@@ -277,16 +290,18 @@ function ExpeditionRoute({
   );
 }
 
-function AppRoutes({ device }: { device: DeviceKind }) {
+export function AppRoutes({ device }: { device: DeviceKind }) {
   const Shell = SHELLS[device]; // δ #1 — shell
   const pick = (r: RouteDef) => (device === 'mobile' ? r.mobile() : r.desktop()); // δ #2 — leaf
   const location = useLocation();
   const overlay = expeditionOverlay(location);
+  const base = useOverlayBase(location, overlay);
   return (
     <Suspense fallback={null}>
-      {overlay.t !== 'none' && <ExpeditionRoute overlay={overlay} device={device} />}
-      <Routes location={baseOf(location, overlay)}>
+      {overlay.t !== 'none' && <ExpeditionRoute overlay={overlay} base={base} device={device} />}
+      <Routes location={base.routes}>
         {OUTSIDE_SHELL[device]}
+        <Route path="/expeditions/:id" element={null} />
         <Route element={<Shell />}>
           {ROUTES.map((r) => (
             <Route

@@ -85,14 +85,14 @@ export const goalLine = (goal: string) =>
     .filter((line) => !/^\s*#{1,6}\s/.test(line))
     .map((line) => line.replace(/^\s*(>\s*|[-*+]\s+|\d+[.)]\s+)/, '').trim())
     .find(Boolean) ?? '';
-/** Every expedition, newest launch first (server expeditions/routes.ts). Under `/api/buddies`, so
- * `buddies_changed` refreshes it like the page. */
-export const EXPEDITIONS_URL = '/api/buddies/expeditions';
-export const EXPEDITIONS_HREF = '/expeditions';
-/** How many of the newest expeditions the sidebar lists under its header. */
-export const SIDEBAR_RECENT_EXPEDITIONS = 5;
 
-/** The sidebar dot (ConversationRow.css statuses): green while it runs, amber while it waits on
+/** Every expedition, newest launch first (server expeditions/routes.ts). Under `/api/buddies`, so
+ * `buddies_changed` refreshes it like the modal. */
+export const EXPEDITIONS_URL = '/api/buddies/expeditions';
+/** How often the rail, the index and Home re-read the list (pushes refresh it sooner). */
+export const EXPEDITIONS_POLL_MS = 10_000;
+
+/** The rail dot (ConversationRow.css statuses): green while it runs, amber while it waits on
  * the owner, grey once paused or finished. */
 export function runDot(run: ExpeditionRun): 'running' | 'queued' | 'idle' {
   switch (run.t) {
@@ -105,6 +105,33 @@ export function runDot(run: ExpeditionRun): 'running' | 'queued' | 'idle' {
       return 'idle';
   }
 }
+
+/** Whether the owner's attention is asked: the rail row goes bold, Home lists it first. */
+export const needsYou = (run: ExpeditionRun): boolean => run.t === 'waiting_owner';
+
+/** The rail row's weight, in the channel rows' unread vocabulary (ChannelBrowser.css): bold when
+ * it needs the owner, dimmed while paused, plain while it runs. */
+export function railEmphasis(run: ExpeditionRun): 'new' | 'read' | undefined {
+  switch (run.t) {
+    case 'waiting_owner':
+      return 'new';
+    case 'paused':
+      return 'read';
+    case 'running':
+    case 'finished':
+      return undefined;
+  }
+}
+
+/** What the channel rail and Home list: this workspace's unfinished expeditions, the ones waiting
+ * on the owner first, each group newest launch first (the list arrives newest first). */
+export const activeExpeditions = (
+  list: readonly ExpeditionSummary[],
+  workspaceId: string
+): ExpeditionSummary[] => {
+  const mine = list.filter((e) => e.workspaceId === workspaceId && e.run.t !== 'finished');
+  return [...mine.filter((e) => needsYou(e.run)), ...mine.filter((e) => !needsYou(e.run))];
+};
 
 /** The list's one progress line (the header's counts, shorter). */
 export const summaryLine = (e: ExpeditionSummary) =>

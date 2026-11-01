@@ -15,6 +15,7 @@ import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelL
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { BuddyStar, ChannelStar } from '../../components/buddies/ChannelStar';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
+import { ExpeditionList, useWorkspaceExpeditions } from '../../components/buddies/ExpeditionList';
 import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
 import { HighlightRow } from '../../components/buddies/HighlightRow';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
@@ -53,6 +54,8 @@ import {
   channelsHref,
   channelsView,
 } from '../../components/buddies/channels-view';
+import { useOpenExpedition } from '../../components/buddies/expedition-overlay';
+import { needsYou, railEmphasis, runDot, runLabel } from '../../components/buddies/expedition-view';
 import type { Buddy, Channel, ChannelUnread, Inbox } from '../../components/buddies/types';
 import { NEW_WORKSPACE_PATH } from '../../components/buddies/workspace-home';
 import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
@@ -121,6 +124,12 @@ function renderScreen(screen: ChannelsView, context: ScreenContext) {
       return <ChannelsHome context={context} />;
     case 'landing':
       return <LandingScreen context={context} />;
+    case 'expeditions':
+      return (
+        <MobilePage title="Expeditions" subtitle={context.directory.workspaceName}>
+          <ExpeditionList workspaceId={context.workspaceId} />
+        </MobilePage>
+      );
     case 'threads':
       return (
         <ThreadsScreen
@@ -378,10 +387,53 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
         {inbox === null && <MobileEmptyPanel>Loading channels…</MobileEmptyPanel>}
       </MobileSection>
       <ArchivedChannels workspaceId={workspaceId} channels={context.archived} />
+      <ExpeditionSection workspaceId={workspaceId} />
       <MobileSection title="Buddies" meta="Tap to message · ☀ to wake">
         <BuddySection members={directory.activeMembers} workspaceId={workspaceId} />
       </MobileSection>
     </MobilePage>
+  );
+}
+
+// Desktop's rail Expeditions section as touch rows: the unfinished ones (needing you first) open
+// the expedition sheet over Home; "All expeditions" opens the index screen.
+function ExpeditionSection({ workspaceId }: { workspaceId: string }) {
+  const { loaded, all, active } = useWorkspaceExpeditions(workspaceId);
+  const open = useOpenExpedition();
+  if (!loaded || all.length === 0) return null;
+  return (
+    <MobileSection title="Expeditions">
+      <ul className="mobile-channels-list" aria-label="Expeditions">
+        {active.map((e) => (
+          <li key={e.id}>
+            <button
+              type="button"
+              className="mobile-channels-row ui-row"
+              data-unread={railEmphasis(e.run)}
+              onClick={() => open(e.id)}
+            >
+              <span className="mobile-channels-row__hash" aria-hidden="true">
+                <span className="conversation-row__dot" data-status={runDot(e.run)} />
+              </span>
+              <span className="mobile-channels-row__name ui-truncate">{e.name}</span>
+              {needsYou(e.run) && <span className="expedition-rail-flag">{runLabel(e.run)}</span>}
+            </button>
+          </li>
+        ))}
+        <li>
+          <Link
+            className="mobile-channels-row ui-row"
+            data-unread="read"
+            to={channelsHref(workspaceId, { kind: 'expeditions' })}
+          >
+            <span className="mobile-channels-row__hash" aria-hidden="true">
+              ⋯
+            </span>
+            <span className="mobile-channels-row__name ui-truncate">All expeditions</span>
+          </Link>
+        </li>
+      </ul>
+    </MobileSection>
   );
 }
 

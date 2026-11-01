@@ -8,7 +8,7 @@ import type {
 import { useAtomValue } from 'jotai';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import { listField } from '../../atoms/conversations';
 import { invalidateChannelResources } from '../../atoms/resources';
@@ -604,7 +604,16 @@ function ExpeditionChat({ channelId, workspaceId }: { channelId: string; workspa
   };
   return (
     <section className="expedition-chat ui-stack" aria-label="Expedition chat">
-      <h3 className="ui-section__title">Chat</h3>
+      {/* The same DM, full size in the channels view, the way Slack opens one. */}
+      <div className="expedition-chat-head ui-row">
+        <h3 className="ui-section__title">Chat</h3>
+        <Link
+          className="expedition-chat-open ui-muted"
+          to={channelsHref(workspaceId, { kind: 'channel', channelId })}
+        >
+          Open as DM ↗
+        </Link>
+      </div>
       {posts === null ? (
         <p className="buddy-panel__empty">Loading chat…</p>
       ) : (

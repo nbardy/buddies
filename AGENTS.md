@@ -35,6 +35,9 @@ client/src/mobile/*                → mobile view tree (second shell, same core
 client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen indexes
 server/src/expeditions/            → expedition engine (ledger, tick, crew, `expedition` tool,
                                      GET /api/buddies/expeditions/:id); design: expeditions/
+client/src/components/buddies/ExpeditionList.tsx → expeditions live in the CHANNELS view (rail
+                                     section, ?view=expeditions index, Home); /expeditions/:id is a
+                                     modal over it (expedition-overlay.ts). Never the old Sidebar.tsx.
 {server,client}/src/swarm/          → QUARANTINED swarm/oompa viewer; outside code imports
                                      only swarm/index.ts (guard: swarm-quarantine.test.ts)
 ```

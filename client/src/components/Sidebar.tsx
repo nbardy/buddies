@@ -22,7 +22,6 @@ import {
   type DirectoryStart,
   NewConversationForm,
 } from '../views/new-conversation/NewConversationForm';
-import { SidebarExpeditions } from './SidebarExpeditions';
 import { DmIcon, WakeIcon, WakeIndicator } from './buddies/WakeIndicator';
 import { useBuddyDirectActions } from './buddies/buddy-direct-actions';
 import { buddyTabPath } from './buddies/buddy-tabs';
@@ -363,7 +362,6 @@ export function Sidebar() {
             </div>
           </div>
         )}
-        <SidebarExpeditions collapsed={collapsedSet.has('__expeditions__')} />
         <div className="sidebar-section">
           <div className="folder-group folder-group--buddies">
             <div

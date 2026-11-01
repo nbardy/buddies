@@ -71,6 +71,8 @@
 }
 
 /* The preview popup's markdown surface, at the width of its container. */
+/* The app's list reset clipped ordered-list markers ("1." showed as "."). */
+.expedition-markdown :is(ol, ul) { padding-inline-start: var(--sp-8); }
 .expedition-markdown.file-preview-markdown {
   width: auto;
   max-height: none;
@@ -209,3 +211,27 @@
 
 .expedition-draft-card-title { gap: var(--sp-1); color: var(--text-bright); }
 .expedition-draft-card-actions { gap: var(--sp-3); }
+
+/* Expeditions in the channels view (ExpeditionList.tsx): rail rows reuse the channel rows; the
+   status dot takes the hash column; "needs you" is a small amber flag at the row's end. */
+.expedition-rail-dot { display: grid; place-items: center; }
+.expedition-rail-flag { flex: none; color: var(--warning); font: 600 var(--fs-1) / 1 var(--font-mono); letter-spacing: 0.04em; text-transform: uppercase; }
+.expedition-index { gap: var(--sp-8); max-width: 920px; padding: var(--sp-7) var(--sp-9); }
+.expedition-index-empty { padding: var(--sp-7) var(--sp-9); }
+.expedition-index-group { margin: 0 0 var(--sp-3); font: 600 var(--fs-1) / 1.6 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.expedition-index-rows { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border-subtle); border-radius: var(--ui-radius); overflow: hidden; }
+.expedition-index-rows > li + li { border-top: 1px solid var(--border-subtle); }
+.expedition-index-row,
+.expedition-home-row { width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.expedition-index-row { display: flex; align-items: flex-start; gap: var(--sp-5); padding: var(--sp-5) var(--sp-6); }
+.expedition-index-row:hover,
+.expedition-index-row:focus-visible { background: color-mix(in srgb, var(--text-emphasis) 6%, transparent); }
+.expedition-index-row[data-needs-you] { box-shadow: inset 3px 0 0 var(--warning); }
+.expedition-index-row > .conversation-row__dot { margin-top: var(--sp-4); }
+.expedition-index-text { flex: 1; min-width: 0; gap: var(--sp-1); }
+.expedition-index-text strong { color: var(--text-bright); }
+.expedition-index-text > span { font-size: var(--fs-3); }
+.expedition-home-row .landing-request-from::before { content: none; }
+.expedition-chat-head { justify-content: space-between; align-items: baseline; }
+.expedition-chat-open { font-size: var(--fs-3); text-decoration: none; }
+.expedition-chat-open:hover { color: var(--text-emphasis); }
