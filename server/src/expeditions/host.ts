@@ -15,7 +15,7 @@ import { type TurnDirectory, WORKSPACE_DIRECTORY } from '../buddies/briefing';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
-import { DEFAULT_CWD, checkedRunConfig } from '../buddies/worker-config';
+import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
 import { CREW_ROLE, briefOf, chatFeedback, parseOutcome, repairBrief, statusText } from './briefs';
 import { killCheck, pidfileOf, runCommand } from './command';
@@ -36,6 +36,7 @@ import { type MeterPorts, RUN_SCAN_LIMIT, SETTLED, meterRequest } from './meter'
 import {
   type Attempt,
   type AttemptPhase,
+  type ByTree,
   type Charter,
   type CheckOutcome,
   type ClaimChange,
@@ -44,25 +45,28 @@ import {
   type EndOutcome,
   type Entry,
   type Feedback,
+  INTEGRATION_TREE,
   type Origin,
   type Outcome,
-  type Release,
+  type Place,
+  type ReleaseStage,
   type RetireChat,
-  type RetireTree,
   type Round,
   type State,
+  type TreeId,
   type ValidationBasis,
   type ValidationReport,
   type ValidationTarget,
-  type WorkerSpec,
   apply,
   attemptOf,
   badge,
+  byTree,
   charterIssues,
   claimAt,
   claimOf,
   commandChecks,
   configOf,
+  currentTree,
   custodyOf,
   decide,
   fold,
@@ -73,15 +77,16 @@ import {
   live,
   managerDirectory,
   pendingEffects,
-  startedOf,
+  treeKey,
+  treeOf,
   validationOf,
-  validationTreeId,
-  worktreeName,
+  workspaceOf,
   worktreeOf,
 } from './model';
 import { pinSources, pinnedOutcome, report, verifyPins } from './pins';
 import {
   type Keep,
+  type ReleasePolicy,
   type Released,
   discardWorktree,
   releaseDetachedTree,
@@ -534,26 +539,18 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   };
   const handlers: Handlers = {
     create_crew: (s) => createCrew(s),
-    create_integration_tree: (s) => createIntegrationTree(s),
     integrate: (s, e) => integrate(s, e.integrationId),
-    release_integration_tree: (s) => releaseIntegration(s),
-    create_manager_tree: (s) => createManagerTree(s),
-    release_manager_tree: (s) => releaseManagerTree(s),
     adopt_claim: (s, e) => adoptClaim(s, e.attemptId),
-    admit: (s, e) => admit(s, e.attempt),
-    create_worktree: (s, e) => createWorktree(s, e.attemptId),
-    release_worktree: (s, e) => releaseAttemptTree(s, e.attemptId, e.keepCommits),
-    start_validation: (s, e) => startValidation(s, e.validationId),
-    create_validation_tree: (s, e) => createValidationTree(s, e.validationId),
+    plan_tree: (s, e) => planTree(s, e.tree),
+    create_tree: (s, e) => createTree(s, e.tree),
+    release_tree: (s, e) => releaseTree(s, e.tree, e.stage),
     run_validation: (s, e) => runValidation(s, e.validationId),
-    release_validation: (s, e) => releaseValidation(s, e.validationId),
     brief_attempt: (s, e) => briefAttempt(s, e.attempt),
     post_attempt: (s, e) => postAttempt(s, e.attemptId, e.body, e.round),
     meter_attempt: (s, e) => meterAttempt(s, e),
     post_status: (s, e) => postStatus(s, e.seq, e.text),
     post_badge: (s) => postBadge(s),
     cancel_attempt: (s, e) => cancelAttempt(s, e.attemptId),
-    retire_tree: (s, e) => retireTree(s, e.tree),
     archive_branches: (s) => archiveBranches(s),
     archive_chats: (s, e) => archiveChats(s, e.chats),
     archive_crew: (s) => archiveCrew(s),
@@ -584,77 +581,160 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return [{ t: 'attempt_cancel_requested', at: now(), attemptId, runIds: runs.map((r) => r.id) }];
   }
 
-  /** Where a tree's leftovers go when it is released (release.ts Keep). */
-  const keepOf = (s: State, treeOf: string): Keep => ({
-    salvageRef: `refs/salvage/expeditions/${s.id}/${treeOf}`,
-    harvestDir: path.join(root, s.id, 'harvest', treeOf),
+  // ---------- Trees: one model (ledger.ts TreeId), one handler per tree kind ----------
+
+  /** Where a tree is: a workspace under the expedition's folder on its own branch, or the
+   * manager's detached tree. Named in its `tree_planned` intent, so the create replays from it. */
+  const workspace = (
+    id: string,
+    dir: string,
+    key: string,
+    at: { branch: string; baseSha: string },
+    lifetime: 'ephemeral' | 'owned'
+  ): Place => ({
+    t: 'workspace',
+    name: `exp-${id}-${key}`,
+    path: path.join(root, id, dir),
+    ...at,
+    lifetime,
   });
-  const preservedEntries = (treeOf: string, released: Released): Entry[] =>
-    released.preserved.map((preserved) => ({ t: 'preserved', at: now(), treeOf, preserved }));
-
-  // ---------- Retirement (plan A6): one handler per step ----------
-
-  /** A tree retirement could not remove is a refusal: retirement waits for the owner. */
-  const refusedTree = (branch: string, release: Release): Entry[] =>
-    release.t === 'left'
-      ? [{ t: 'archive_refused', at: now(), branch, reason: `tree left: ${release.reason}` }]
-      : [];
-
-  type TreeHandlers = {
-    [K in RetireTree['t']]: (s: State, tree: Extract<RetireTree, { t: K }>) => Promise<Entry[]>;
+  /** The integration tree holds the expedition branch, made at the launch base. */
+  const integrationPlace = (id: string, repo: State['repo']) =>
+    workspace(id, 'integration', 'integration', repo, 'owned');
+  /** A worker's or a validation's scratch tree, on its own `exp/<id>/<key>` branch. */
+  const scratchPlace = (s: State, dir: string, key: string, baseSha: string) =>
+    workspace(
+      s.id,
+      path.join(dir, key),
+      key,
+      { branch: `exp/${s.id}/${key}`, baseSha },
+      'ephemeral'
+    );
+  const PLACES: ByTree<[State], Promise<Place>> = {
+    integration: async (_id, s) => integrationPlace(s.id, s.repo),
+    manager: async (_id, s) => ({ t: 'detached', path: path.join(root, s.id, 'manager') }),
+    attempt: async (id, s) =>
+      scratchPlace(s, 'worktrees', treeKey(id), await treeBase(s, attemptOf(s, id.attemptId))),
+    validation: async (id, s) =>
+      scratchPlace(
+        s,
+        'validations',
+        treeKey(id),
+        await validationSha(s, validationOf(s, id.validationId).target)
+      ),
   };
-  const retireTrees: TreeHandlers = {
-    attempt: async (s, { attemptId }) => {
-      const tree = worktreeOf(s, attemptId);
-      const released = await releaseWorktree(
+
+  /** Intent first: the tree's place (its slot and custody, for an attempt) is on disk before
+   * anything is made. */
+  async function planTree(s: State, tree: TreeId): Promise<Entry[]> {
+    const place = await byTree(PLACES, tree, s);
+    await append(s.id, [{ t: 'tree_planned', at: now(), tree, place }]);
+    return createTree(stateOf(s.id), tree);
+  }
+
+  /** The replay path too: a workspace by the planned name is adopted, a partial add rolled back
+   * (git.ts ensureWorktree); the manager's detached tree is adopted by its path. */
+  async function createTree(s: State, tree: TreeId): Promise<Entry[]> {
+    const made = await make(s, treeOf(s, tree).place);
+    switch (made.t) {
+      case 'ready':
+        return [{ t: 'tree_ready', at: now(), tree }];
+      case 'failed':
+        return [
+          { t: 'tree_failed', at: now(), tree, reason: made.reason },
+          ...failedWith(tree, made.reason),
+        ];
+    }
+  }
+
+  async function make(s: State, place: Place) {
+    switch (place.t) {
+      case 'workspace':
+        return ensureWorktree(s.repo.root, place.name, place, place.lifetime);
+      case 'detached':
+        return ensureDetachedTree(s.repo.root, place.path, await branchHead(s.repo));
+    }
+  }
+
+  /** A validation with no tree cannot run its checks at all: a terminal `validation_failed`. */
+  function failedWith(tree: TreeId, reason: string): Entry[] {
+    switch (tree.t) {
+      case 'validation':
+        return [
+          {
+            t: 'validation_failed',
+            at: now(),
+            validationId: tree.validationId,
+            reason: `no validation worktree: ${reason}`,
+          },
+        ];
+      case 'integration':
+      case 'manager':
+      case 'attempt':
+        return [];
+    }
+  }
+
+  /** Where a tree's leftovers go when it is released (release.ts Keep). */
+  const keepOf = (s: State, tree: TreeId): Keep => ({
+    salvageRef: `refs/salvage/expeditions/${s.id}/${treeKey(tree)}`,
+    harvestDir: path.join(root, s.id, 'harvest', treeKey(tree)),
+  });
+
+  /** A guarded tree's release per stage: running keeps an attempt tree with commits for
+   * integration; finish never forces uncommitted work away; retire snapshots it and goes on. */
+  const STAGES: Record<ReleaseStage, { keepCommits: boolean; policy: ReleasePolicy }> = {
+    running: { keepCommits: true, policy: { t: 'finish' } },
+    finished: { keepCommits: false, policy: { t: 'finish' } },
+    retiring: { keepCommits: false, policy: { t: 'retire' } },
+  };
+  const RELEASES: ByTree<[State, ReleaseStage], Promise<Released | 'busy'>> = {
+    integration: (id, s, stage) =>
+      releaseIntegrationTree(s.repo.root, workspaceOf(s, id), keepOf(s, id), STAGES[stage].policy),
+    manager: (id, s) => releaseDetachedTree(s.repo.root, treeOf(s, id).place.path, keepOf(s, id)),
+    attempt: (id, s, stage) =>
+      releaseWorktree(
         s.repo.root,
-        tree,
-        false,
+        workspaceOf(s, id),
+        STAGES[stage].keepCommits,
         s.repo.branch,
-        keepOf(s, attemptId),
-        { t: 'retire' }
-      );
-      return [
-        ...preservedEntries(attemptId, released),
-        { t: 'worktree_released', at: now(), attemptId, release: released.release },
-        ...refusedTree(tree.branch, released.release),
-      ];
-    },
-    validation: async (s, { validationId }) => {
-      const { tree } = startedOf(s, validationId);
-      const released = await discardWorktree(s.repo.root, tree, keepOf(s, validationId));
-      return [
-        ...preservedEntries(validationId, released),
-        { t: 'validation_released', at: now(), validationId, release: released.release },
-        ...refusedTree(tree.branch, released.release),
-      ];
-    },
-    integration: async (s) => {
-      const released = await releaseIntegrationTree(
-        s.repo.root,
-        s.integrationTree,
-        keepOf(s, 'integration'),
-        { t: 'retire' }
-      );
-      return [
-        ...preservedEntries('integration', released),
-        { t: 'integration_tree_released', at: now(), release: released.release },
-        ...refusedTree(s.repo.branch, released.release),
-      ];
-    },
-    manager: async (s) => {
-      const dir = path.join(root, s.id, 'manager');
-      const released = await releaseDetachedTree(s.repo.root, dir, keepOf(s, 'manager'));
-      return [
-        ...preservedEntries('manager', released),
-        { t: 'manager_tree_released', at: now(), release: released.release },
-        ...refusedTree(`(manager tree ${dir})`, released.release),
-      ];
-    },
+        keepOf(s, id),
+        STAGES[stage].policy
+      ),
+    // Never pulled from under this host's own running check.
+    validation: async (id, s) =>
+      jobs.has(jobKey(s.id, id.validationId))
+        ? 'busy'
+        : discardWorktree(s.repo.root, workspaceOf(s, id), keepOf(s, id)),
   };
-  function retireTree<T extends RetireTree>(s: State, tree: T): Promise<Entry[]> {
-    const handler = retireTrees[tree.t] as (s: State, tree: T) => Promise<Entry[]>;
-    return handler(s, tree);
+
+  /** How a refusal names a tree: its branch, or the manager's path. */
+  function treeLabel(place: Place): string {
+    switch (place.t) {
+      case 'workspace':
+        return place.branch;
+      case 'detached':
+        return `(manager tree ${place.path})`;
+    }
+  }
+
+  /** At retirement a tree it could not remove is a refusal: retirement waits for the owner. */
+  async function releaseTree(s: State, tree: TreeId, stage: ReleaseStage): Promise<Entry[]> {
+    const released = await byTree(RELEASES, tree, s, stage);
+    if (released === 'busy') return [];
+    const { release, preserved } = released;
+    const refused =
+      stage === 'retiring' && release.t === 'left'
+        ? [
+            {
+              t: 'archive_refused' as const,
+              at: now(),
+              branch: treeLabel(treeOf(s, tree).place),
+              reason: `tree left: ${release.reason}`,
+            },
+          ]
+        : [];
+    return [{ t: 'tree_released', at: now(), tree, release, preserved }, ...refused];
   }
 
   /**
@@ -757,47 +837,6 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return [{ t: 'crew_ready', at: now(), buddyId: crew.id, chatChannelId: chat.id }];
   }
 
-  async function releaseIntegration(s: State): Promise<Entry[]> {
-    const released = await releaseIntegrationTree(
-      s.repo.root,
-      s.integrationTree,
-      keepOf(s, 'integration'),
-      { t: 'finish' }
-    );
-    return [
-      ...preservedEntries('integration', released),
-      { t: 'integration_tree_released', at: now(), release: released.release },
-    ];
-  }
-
-  /** The manager's own tree (design.md R11) is a fixed path in the expedition's folder, made at
-   * the branch head; an existing registration there is adopted (the replay path). */
-  async function createManagerTree(s: State): Promise<Entry[]> {
-    const made = await ensureDetachedTree(
-      s.repo.root,
-      path.join(root, s.id, 'manager'),
-      await branchHead(s.repo)
-    );
-    switch (made.t) {
-      case 'ready':
-        return [{ t: 'manager_tree_ready', at: now(), path: made.at.path }];
-      case 'failed':
-        return [{ t: 'manager_tree_failed', at: now(), reason: made.reason }];
-    }
-  }
-
-  async function releaseManagerTree(s: State): Promise<Entry[]> {
-    const released = await releaseDetachedTree(
-      s.repo.root,
-      path.join(root, s.id, 'manager'),
-      keepOf(s, 'manager')
-    );
-    return [
-      ...preservedEntries('manager', released),
-      { t: 'manager_tree_released', at: now(), release: released.release },
-    ];
-  }
-
   /** A manager's claim of an attempt's unreported commits holds only when the attempt's own
    * branch holds the commit inside its question's custody (git.ts claimHeld), like any claim. */
   async function adoptClaim(s: State, attemptId: string): Promise<Entry[]> {
@@ -814,60 +853,6 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
-  /** Intent first: the slot, custody and Cambium name are on disk before `cambium add` runs. */
-  async function admit(s: State, attempt: Attempt<WorkerSpec>): Promise<Entry[]> {
-    await append(s.id, [
-      {
-        t: 'worktree_creating',
-        at: now(),
-        attemptId: attempt.id,
-        name: worktreeName(s.id, attempt.id),
-        path: path.join(root, s.id, 'worktrees', attempt.id),
-        branch: `exp/${s.id}/${attempt.id}`,
-        baseSha: await treeBase(s, attempt.spec),
-      },
-    ]);
-    return createWorktree(stateOf(s.id), attempt.id);
-  }
-
-  async function releaseAttemptTree(
-    s: State,
-    attemptId: string,
-    keepCommits: boolean
-  ): Promise<Entry[]> {
-    const tree = worktreeOf(s, attemptId);
-    const released = await releaseWorktree(
-      s.repo.root,
-      tree,
-      keepCommits,
-      s.repo.branch,
-      keepOf(s, attemptId),
-      { t: 'finish' }
-    );
-    return [
-      ...preservedEntries(attemptId, released),
-      { t: 'worktree_released', at: now(), attemptId, release: released.release },
-    ];
-  }
-
-  /** Intent first: the resolved sha and the tree's name are on disk before `cambium add`. */
-  async function startValidation(s: State, validationId: string): Promise<Entry[]> {
-    const v = validationOf(s, validationId);
-    const treeId = validationTreeId(v);
-    await append(s.id, [
-      {
-        t: 'validation_started',
-        at: now(),
-        validationId: v.id,
-        name: worktreeName(s.id, treeId),
-        path: path.join(root, s.id, 'validations', treeId),
-        branch: `exp/${s.id}/${treeId}`,
-        baseSha: await validationSha(s, v.target),
-      },
-    ]);
-    return createValidationTree(stateOf(s.id), v.id);
-  }
-
   /**
    * Starts the check job in the background (never twice for one validation), recording
    * `validation_running` first. A job the ledger says is running that this process never started
@@ -878,8 +863,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   async function runValidation(s: State, validationId: string): Promise<Entry[]> {
     const key = jobKey(s.id, validationId);
     if (jobs.has(key)) return [];
-    const phase = startedOf(s, validationId);
-    if (phase.job.t === 'running' && !ranHere.has(key)) return interrupted(s, validationId);
+    if (validationOf(s, validationId).job.t === 'running' && !ranHere.has(key))
+      return interrupted(s, validationId);
     ranHere.add(key);
     await append(s.id, [{ t: 'validation_running', at: now(), validationId }]);
     const id = s.id;
@@ -908,34 +893,21 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
    * detached wrapper with pid and exit files that outlives the server, and a pid from another
    * boot cannot be trusted. The candidate sha is immutable and its checks are re-runnable by
    * contract, so a fresh run on the same sha is correct at the price of the time it re-spends; a
-   * fresh tree (validationTreeId) keeps it from racing an orphan on build outputs, and discarding
-   * the old tree pulls the orphan's files away so it fails fast instead of running on unseen.
+   * fresh tree (the next TreeId restart) keeps it from racing an orphan on build outputs, and
+   * releasing the old tree pulls the orphan's files away so it fails fast instead of running on
+   * unseen.
    */
   async function interrupted(s: State, validationId: string): Promise<Entry[]> {
-    const { tree } = startedOf(s, validationId);
+    const { id: tree, place } = currentTree(s, validationOf(s, validationId));
     // The orphaned check, while it still runs (its pidfile survives only a crash): killed before
     // its tree is pulled, so the replay never races it.
-    const killed = await killCheck(pidfileOf(`${tree.path}.scratch`));
+    const killed = await killCheck(pidfileOf(`${place.path}.scratch`));
     if (killed.t === 'killed')
       console.log(
         `[expeditions] ${s.id}: killed the orphaned check ${killed.pid} of ${validationId}`
       );
-    const released = await discardWorktree(s.repo.root, tree, keepOf(s, validationId));
-    return [
-      ...preservedEntries(validationId, released),
-      { t: 'validation_interrupted', at: now(), validationId, release: released.release },
-    ];
-  }
-
-  /** Never pull a tree from under this host's own running check. */
-  async function releaseValidation(s: State, validationId: string): Promise<Entry[]> {
-    if (jobs.has(jobKey(s.id, validationId))) return [];
-    const { tree } = startedOf(s, validationId);
-    const released = await discardWorktree(s.repo.root, tree, keepOf(s, validationId));
-    return [
-      ...preservedEntries(validationId, released),
-      { t: 'validation_released', at: now(), validationId, release: released.release },
-    ];
+    const released = await discardWorktree(s.repo.root, workspaceOf(s, tree), keepOf(s, tree));
+    return [{ t: 'tree_released', at: now(), tree, ...released }];
   }
 
   /** Build and record the brief, then post it. A manager's tree is moved to the branch head
@@ -950,8 +922,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   async function syncBeforeBrief(s: State, attempt: Attempt): Promise<void> {
     switch (attempt.spec.kind) {
       case 'manager':
-        if (s.managerTree.t !== 'ready') throw new Error('a manager briefed without its tree');
-        await syncDetachedTree(s.managerTree.path, await branchHead(s.repo));
+        await syncDetachedTree(managerDirectory(s), await branchHead(s.repo));
         return;
       case 'work':
       case 'check':
@@ -1019,19 +990,6 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
-  /** `launched` named the tree, so this is the replay path too: an existing workspace by that
-   * name is adopted, a partial add rolled back (git.ts ensureWorktree). */
-  async function createIntegrationTree(s: State): Promise<Entry[]> {
-    const tree = s.integrationTree;
-    const made = await ensureWorktree(s.repo.root, tree.name, tree, 'owned');
-    switch (made.t) {
-      case 'ready':
-        return [{ t: 'integration_tree_ready', at: now() }];
-      case 'failed':
-        return [{ t: 'integration_tree_failed', at: now(), reason: made.reason }];
-    }
-  }
-
   /** The `integration_planned` intent is already on disk; mergeCandidate recognises a merge it
    * made before a crash, so the replay records that merge instead of merging twice, and refuses
    * a branch whose head is not the ledger's (`headOf`). */
@@ -1039,7 +997,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     const integration = integrationOf(s, integrationId);
     const claim = claimAt(s, integration.claimAttemptId).statement.split('\n')[0].slice(0, 200);
     const message = `Integrate ${integration.claimAttemptId} (expedition ${s.id}): ${claim}`;
-    const merged = await mergeCandidate(s.integrationTree, integration.sha, message, headOf(s));
+    const merged = await mergeCandidate(
+      workspaceOf(s, INTEGRATION_TREE),
+      integration.sha,
+      message,
+      headOf(s)
+    );
     const ids = { at: now(), integrationId, sha: integration.sha };
     switch (merged.t) {
       case 'integrated':
@@ -1051,12 +1014,14 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   /** Where a worker's tree starts: work at the expedition branch head, a check at its claim's
    * candidate commit (a claim that changed no code is checked at the head). */
-  async function treeBase(s: State, spec: WorkerSpec): Promise<string> {
-    switch (spec.kind) {
+  async function treeBase(s: State, attempt: Attempt): Promise<string> {
+    switch (attempt.spec.kind) {
       case 'work':
         return branchHead(s.repo);
       case 'check':
-        return changeBase(s, claimOf(s, spec).change);
+        return changeBase(s, claimOf(s, attempt.spec).change);
+      case 'manager':
+        throw new Error(`manager ${attempt.id} has no attempt tree`);
     }
   }
   async function changeBase(s: State, change: ClaimChange): Promise<string> {
@@ -1078,31 +1043,6 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
-  /** A fresh clean tree at the target; when none can be made, every check is a typed error. */
-  async function createValidationTree(s: State, validationId: string): Promise<Entry[]> {
-    const { tree, targetSha } = startedOf(s, validationId);
-    const made = await ensureWorktree(s.repo.root, tree.name, tree);
-    switch (made.t) {
-      case 'ready':
-        return [{ t: 'validation_tree_ready', at: now(), validationId }];
-      case 'failed':
-        return [
-          { t: 'validation_tree_failed', at: now(), validationId, reason: made.reason },
-          ...validationOf(s, validationId).checks.map(
-            ({ index }): Entry => ({
-              t: 'validation',
-              at: now(),
-              validationId,
-              targetSha,
-              checkIndex: index,
-              outcome: { t: 'error', message: `no validation worktree: ${made.reason}` },
-              report: report(targetSha, [], { t: 'unpinned', reason: 'no validation worktree' }),
-            })
-          ),
-        ];
-    }
-  }
-
   /**
    * Runs the validation's unrecorded checks (frozen in its plan: a question's acceptance, or the
    * charter's done commands at the head) one by one in its tree, appending each result through
@@ -1119,7 +1059,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       const done = new Set(v.runs.map((r) => r.checkIndex));
       const next = v.checks.find((c) => !done.has(c.index));
       if (!next || v.failure.t === 'failed') return;
-      const { tree, targetSha } = startedOf(s, validationId);
+      const tree = workspaceOf(s, currentTree(s, v).id);
+      const targetSha = tree.baseSha;
       const ran = await runPinned(next, tree.path, targetSha, trustedSha(v.basis, targetSha));
       await serialized(id, () =>
         append(id, [
@@ -1158,17 +1099,6 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     }
   }
 
-  async function createWorktree(s: State, attemptId: string): Promise<Entry[]> {
-    const tree = worktreeOf(s, attemptId);
-    const made = await ensureWorktree(s.repo.root, tree.name, tree);
-    switch (made.t) {
-      case 'ready':
-        return [{ t: 'worktree_ready', at: now(), attemptId, ...made.at }];
-      case 'failed':
-        return [{ t: 'worktree_failed', at: now(), attemptId, reason: made.reason }];
-    }
-  }
-
   /** Posts a recorded brief or repair request, keyed by attempt and round (a replay returns the
    * same post). */
   async function postAttempt(
@@ -1190,7 +1120,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         purpose: 'expedition_attempt',
         evidence: [`expedition:${s.id}`],
         mentions: [],
-        runConfig: { ...configOf(s.charter, attempt.spec), cwd: DEFAULT_CWD },
+        // The run starts in the attempt's own tree (crate RunConfig.cwd, plan B5): the run
+        // carries it, so no turn re-derives it from the ledger.
+        runConfig: {
+          ...configOf(s.charter, attempt.spec),
+          cwd: { kind: 'path', path: attemptDirectory(s, attempt) },
+        },
         broadcast: false,
         key: requestKey(s.id, attemptId, round),
       }
@@ -1199,31 +1134,14 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   }
 
   /** Where an attempt's run starts (design.md R9, R11): a worker in its own worktree, a manager
-   * in its own detached tree. A live attempt holds its tree (effects.ts releases it only once the
-   * attempt settled, and briefs a manager only once its tree is ready), so any other tree state
-   * is a broken invariant: thrown, never a run started somewhere else. */
-  function attemptDirectory(s: State, attempt: Attempt, runId: string): TurnDirectory {
+   * in its own detached tree. An attempt is briefed only once its tree is ready (effects.ts). */
+  function attemptDirectory(s: State, attempt: Attempt): string {
     switch (attempt.spec.kind) {
       case 'work':
       case 'check':
-        return { t: 'run', runId, path: workerTreePath(s, attempt.id) };
+        return worktreeOf(s, attempt.id).path;
       case 'manager':
-        return { t: 'run', runId, path: managerDirectory(s) };
-    }
-  }
-
-  function workerTreePath(s: State, attemptId: string): string {
-    const tree = worktreeOf(s, attemptId);
-    switch (tree.status.t) {
-      case 'ready':
-        return tree.path;
-      case 'creating':
-      case 'failed':
-      case 'kept':
-      case 'removed':
-      case 'absent':
-      case 'left':
-        throw new Error(`live attempt ${attemptId} has a ${tree.status.t} worktree`);
+        return managerDirectory(s);
     }
   }
 
@@ -1238,34 +1156,14 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return { t: 'crew', path: dir };
   }
 
-  /** The live attempt whose request a run answers, matched by its exact brief or repair bytes,
-   * which the ledger holds before the post exists (a run can be claimed before `attempt_posted`
-   * is appended). Only posting/posted attempts: a boot warm of an old conversation's ended run
-   * must not route (and cache) by run id (2026-11-01 review: it leaked a per-run briefing). */
-  async function attemptOfRun(s: State, runId: string): Promise<Attempt | undefined> {
-    const run = await core.getRun(runId);
-    if (run.input.kind !== 'post') return undefined;
-    const body = (await core.getPost(OWNER, run.input.postId)).body;
-    return s.attempts.find(
-      (a) =>
-        (a.phase.t === 'posting' || a.phase.t === 'posted') &&
-        (s.briefs[a.id] === body || s.repairs[a.id] === body)
-    );
-  }
-
   /**
-   * κ for a Buddy turn's directory: a crew run answering one of its expedition's live attempt
-   * requests starts in that attempt's directory; any other crew turn in the crew's own directory;
-   * any other Buddy's turn in its workspace root.
+   * κ for a Buddy turn's directory when its run names none (crate RunConfig.cwd `default`): a
+   * crew's turn (a mention, the owner's chat) in the crew's own directory; any other Buddy's in
+   * its workspace root. An attempt run carries its tree as its cwd (postAttempt).
    */
   async function turnDirectory(context: BuddyContext): Promise<TurnDirectory> {
     const id = crewOf(context.buddyId);
-    if (!id) return WORKSPACE_DIRECTORY;
-    const runId = context.coordinationRunId;
-    if (!runId) return crewDirectory(id);
-    const s = stateOf(id);
-    const attempt = await attemptOfRun(s, runId);
-    return attempt ? attemptDirectory(s, attempt, runId) : crewDirectory(id);
+    return id ? crewDirectory(id) : WORKSPACE_DIRECTORY;
   }
 
   /** Every ready crew's Buddy id. */
@@ -1524,16 +1422,18 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       .replace(/^-|-$/g, '')
       .slice(0, 24)}-${randomUUID().slice(0, 6)}`;
     const repo = { root: checked.root, baseSha: checked.baseSha, branch: `expedition/${id}` };
-    // The integration tree is named here, in the launch entry: its create replays from it.
-    const integrationTree = {
-      name: worktreeName(id, 'integration'),
-      path: path.join(root, id, 'integration'),
-    };
-    // One batch: `launched` and the launch status (the badge in the thread from the first
-    // second). The state joins the map only once that line is on disk, so every expedition in
-    // the map folds and no tick ever meets a half-written launch.
+    // One batch: `launched`, the integration tree's intent (its create replays from it) and the
+    // launch status (the badge in the thread from the first second). The state joins the map
+    // only once that line is on disk, so every expedition in the map folds and no tick ever meets
+    // a half-written launch.
     const first: Entry[] = [
-      { t: 'launched', at: now(), id, ...input, repo, integrationTree },
+      { t: 'launched', at: now(), id, ...input, repo },
+      {
+        t: 'tree_planned',
+        at: now(),
+        tree: INTEGRATION_TREE,
+        place: integrationPlace(id, repo),
+      },
       { t: 'status', at: now(), seq: 0, text: launchNews(input.charter) },
     ];
     await createLedger(path.join(root, id), fileOf(id), first);

@@ -10,6 +10,7 @@ import express from 'express';
 import { createBriefings } from '../src/buddies/briefing';
 import { OWNER } from '../src/buddies/core';
 import { announcePost } from '../src/buddies/events';
+import { cwdOf } from '../src/buddies/worker-config';
 import { parseOutcome } from '../src/expeditions/briefs';
 import { runCommand } from '../src/expeditions/command';
 import { CANCEL_GRACE_MS, type ExpeditionHost } from '../src/expeditions/host';
@@ -292,8 +293,9 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     // merged into the expedition branch (per-attempt branches do not pile up in the owner's repo).
     // The still-running work attempt keeps its tree: its worker may be in it.
     const running = work[0].id;
-    for (const tree of Object.values(s.worktrees).filter((t) => t.attemptId !== running)) {
-      assert.equal(tree.status.t, 'removed', `${tree.attemptId}: ${JSON.stringify(tree.status)}`);
+    for (const a of s.attempts.filter((x) => x.spec.kind !== 'manager' && x.id !== running)) {
+      const tree = f.treeOf(id, a.id);
+      assert.equal(tree.status.t, 'removed', `${a.id}: ${JSON.stringify(tree.status)}`);
       assert.equal(fs.existsSync(tree.path), false);
     }
     assert.equal(f.branchExists(claimTree.branch), false, 'a merged attempt branch is deleted');
@@ -496,13 +498,13 @@ test('work on overlapping custody waits for the holder even with free slots; dis
         .sort();
     assert.deepEqual(questionOfLive(), [outer, docs].sort(), 'widget/core waits; docs runs');
     const waiting = f.stateOf(id).attempts.find((a) => a.phase.t === 'planned')!;
-    assert.equal(waiting.id in f.stateOf(id).worktrees, false, 'a waiting attempt has no worktree');
+    assert.equal(waiting.id in f.stateOf(id).trees, false, 'a waiting attempt has no worktree');
 
     // The expedition branch moves past its launch base: a commit in its integration tree (where
     // the host's merges land), never in the owner's checkout.
     const branch = `expedition/${id}`;
     const launchBase = git(f.repo, 'rev-parse', branch);
-    const integrationTree = f.stateOf(id).integrationTree.path;
+    const integrationTree = f.integrationTree(id).path;
     git(integrationTree, 'commit', '-q', '--allow-empty', '-m', 'integrated');
     const head = git(f.repo, 'rev-parse', branch);
 
@@ -537,9 +539,9 @@ test('a crash between creating a worktree and recording it adopts that worktree 
     // Cut the ledger right after the intent: the worktree exists, the ledger says "creating".
     const file = f.ledgerPath(id);
     const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    const cut = lines.findIndex((l) => l.includes('"worktree_ready"') && l.includes(posted.id));
+    const cut = lines.findIndex((l) => l.includes('"tree_ready"') && l.includes(posted.id));
     fs.writeFileSync(file, `${lines.slice(0, cut).join('\n')}\n`);
-    assert.equal(f.stateOf(id).worktrees[posted.id].status.t, 'creating');
+    assert.equal(f.treeOf(id, posted.id).status.t, 'creating');
 
     f.restart();
     await f.host.tick(id);
@@ -616,7 +618,7 @@ test('a crash during cambium add (branch and directory made, no registry entry) 
     // Rewind to the intent, then replay the add the way a crash leaves it: killed mid-prepare.
     const file = f.ledgerPath(id);
     const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    const cut = lines.findIndex((l) => l.includes('"worktree_creating"') && l.includes(posted.id));
+    const cut = lines.findIndex((l) => l.includes('"tree_planned"') && l.includes(posted.id));
     fs.writeFileSync(file, `${lines.slice(0, cut + 1).join('\n')}\n`);
     git(f.repo, 'cambium', 'remove', '--delete-branch', tree.name);
     fs.writeFileSync(marker, '');
@@ -870,10 +872,9 @@ test('command checks run on the host: each claimed commit is validated in a fres
     if (failed.outcome.t !== 'failed') throw new Error('unreachable');
     assert.equal(failed.outcome.exitCode, 3);
     assert.match(failed.outcome.tail, /widget still broken/);
-    const v1 = f.stateOf(id).validations[0];
-    if (v1.phase.t !== 'started') throw new Error('validation never started');
-    assert.deepEqual(v1.phase.treeStatus, { t: 'removed', branchDeleted: true });
-    assert.equal(fs.existsSync(v1.phase.tree.path), false);
+    const v1 = f.validationTree(id, f.stateOf(id).validations[0]);
+    assert.deepEqual(v1.status, { t: 'removed', branchDeleted: true });
+    assert.equal(fs.existsSync(v1.path), false);
     assert.equal(git(f.repo, 'status', '--porcelain'), '', 'the shared checkout was never used');
     // No manager is woken while the claim's validation runs (it could only say "awaiting
     // validation": 2026-11-01 smoke incident); the one planned once it finished is shown both.
@@ -959,11 +960,9 @@ test('command checks run on the host: each claimed commit is validated in a fres
     );
     assert.equal(v.counts.verified, 1);
     assert.match(v.badge, / 1 verified /);
-    assert.equal(s.integrationTree.status.t, 'removed', 'the integration tree goes at finish');
-    for (const v of s.validations) {
-      if (v.phase.t !== 'started') throw new Error(`validation ${v.id} never started`);
-      assert.equal(v.phase.treeStatus.t, 'removed', `${v.id} tree released`);
-    }
+    assert.equal(f.integrationTree(id).status.t, 'removed', 'the integration tree goes at finish');
+    for (const v of s.validations)
+      assert.equal(f.validationTree(id, v).status.t, 'removed', `${v.id} tree released`);
   } finally {
     await f.close();
   }
@@ -1007,7 +1006,7 @@ test('work on a question waits (stage waiting, no worktree) until its dependency
       f.stateOf(id).attempts.find((a) => a.spec.kind === 'work' && a.spec.questionId === q)!;
     // Free slots and disjoint custody, yet q2's work is held: queued, no worktree, not refused.
     assert.equal(workOn(q2).phase.t, 'planned');
-    assert.equal(workOn(q2).id in f.stateOf(id).worktrees, false);
+    assert.equal(workOn(q2).id in f.stateOf(id).trees, false);
     assert.equal(stage(q2), 'waiting');
     assert.equal(stage(q1), 'implementing');
     // By title, never raw ids (2026-11-01 review: "▶ w9102f5 started: work on qa218ed").
@@ -1309,7 +1308,7 @@ test('integration merges validated candidates one at a time onto the expedition 
     assert.equal(git(f.repo, 'rev-parse', `${ia.status.mergeSha}^1`), base);
     assert.equal(git(f.repo, 'rev-parse', `${ia.status.mergeSha}^2`), a.sha);
     // The refused merge was aborted: the integration tree is clean at the head, not mid-merge.
-    const tree = s.integrationTree.path;
+    const tree = f.integrationTree(id).path;
     assert.equal(git(tree, 'status', '--porcelain'), '');
     assert.equal(git(tree, 'rev-parse', 'HEAD'), mergeB);
     assert.throws(() => git(tree, 'rev-parse', '--verify', '--quiet', 'MERGE_HEAD'));
@@ -1348,8 +1347,8 @@ test('integration merges validated candidates one at a time onto the expedition 
     assert.ok(s.run.t === 'finished');
     assert.deepEqual([s.run.reason, s.run.summary], ['done', 'A and B in']);
     const head = s.validations.at(-1)!;
-    assert.equal(head.phase.t === 'started' ? head.phase.targetSha : '', mergeB);
-    assert.equal(s.integrationTree.status.t, 'removed');
+    assert.equal(f.validationTree(id, head).baseSha, mergeB);
+    assert.equal(f.integrationTree(id).status.t, 'removed');
     assert.equal(fs.existsSync(tree), false);
     assert.equal(git(f.repo, 'rev-parse', branch), mergeB, 'the branch outlives its tree');
   } finally {
@@ -1404,7 +1403,8 @@ test('finishing while a check runs never removes the tree under it; the tree goe
     await f.answer(id, f.manager(id), json({ actions: [{ do: 'done', summary: 'try' }] }));
     const started = () => {
       const v = f.stateOf(id).validations[0];
-      return v?.phase.t === 'started' && v.phase.treeStatus.t === 'ready' ? v.phase.tree : null;
+      const tree = v?.trees.length ? f.validationTree(id, v) : null;
+      return tree?.status.t === 'ready' ? tree : null;
     };
     await until('the head check to start', () => started() !== null);
     const tree = started()!;
@@ -1418,7 +1418,7 @@ test('finishing while a check runs never removes the tree under it; the tree goe
     await f.host.drain();
     const v = f.stateOf(id).validations[0];
     assert.deepEqual(outcomes(v), [{ checkIndex: 0, outcome: { t: 'passed' } }]);
-    assert.equal(v.phase.t === 'started' ? v.phase.treeStatus.t : v.phase.t, 'removed');
+    assert.equal(f.validationTree(id, v).status.t, 'removed');
     assert.equal(fs.existsSync(tree.path), false);
   } finally {
     await f.close();
@@ -1439,9 +1439,7 @@ test('a validation interrupted by a crash resumes from the ledger: before its tr
     await f.host.drain();
     assert.equal(f.stateOf(id).run.t, 'finished');
     assert.deepEqual(ran(), [1, 1]);
-    const v = f.stateOf(id).validations[0];
-    if (v.phase.t !== 'started') throw new Error('validation never started');
-    const { tree } = v.phase;
+    const tree = f.validationTree(id, f.stateOf(id).validations[0]);
 
     /** Rewinds the ledger to (and including) the first line matching `keep`. */
     const crashAfter = (keep: (line: string) => boolean) => {
@@ -1470,13 +1468,13 @@ test('a validation interrupted by a crash resumes from the ledger: before its tr
     };
 
     // Crash after the intent, before `cambium add`: the tree is made from the recorded intent.
-    crashAfter((l) => l.includes('"t":"validation_started"'));
+    crashAfter((l) => l.includes('"t":"tree_planned"') && l.includes('"t":"validation"'));
     assert.equal(f.branchExists(tree.branch), false);
     await replay();
     assert.deepEqual(ran(), [2, 2]);
 
     // Crash after the first check was recorded, its tree still there: only check 1 runs again.
-    crashAfter((l) => l.includes('"t":"validation"'));
+    crashAfter((l) => l.includes('{"t":"validation","at"'));
     git(
       f.repo,
       'cambium',
@@ -1494,13 +1492,11 @@ test('a validation interrupted by a crash resumes from the ledger: before its tr
     // Audit 2026-11-01 #10: the job died with the old process (`validation_running` was on disk),
     // so the restart is typed `interrupted` and runs in a FRESH tree at the same sha, never in the
     // tree an orphaned check may still be writing into.
-    const interrupted = f.ledgerOf(id).filter((e) => e.t === 'validation_interrupted');
-    assert.equal(interrupted.length, 1);
     const rerun = f.stateOf(id).validations[0];
-    if (rerun.phase.t !== 'started') throw new Error('validation never restarted');
-    assert.notEqual(rerun.phase.tree.path, tree.path);
-    assert.equal(rerun.phase.targetSha, v.phase.targetSha, 'the same immutable sha');
-    assert.equal(rerun.interruptions, 1);
+    assert.deepEqual(rerun.trees, [rerun.id, `${rerun.id}-r1`], 'a restart is a new tree');
+    const fresh = f.validationTree(id, rerun);
+    assert.notEqual(fresh.path, tree.path);
+    assert.equal(fresh.baseSha, tree.baseSha, 'the same immutable sha');
   } finally {
     await f.close();
   }
@@ -2145,18 +2141,25 @@ test('an attempt run starts in its own worktree (two concurrent runs of one crew
       (c) => f.host.turnDirectory(c)
     );
     const managerRun = await runOf(f.liveAttempts(id).find((a) => a.id === managerId)!.requestId);
-    await briefings.warm(context(managerRun.id));
+    // The run carries its directory (crate RunConfig.cwd), as the runner warms it.
+    await briefings.warmRun(context(managerRun.id), managerRun.id, cwdOf(managerRun.config));
     // R11 (audit #6): the manager's own detached tree, never the owner's checkout nor the
     // integration tree the host merges into.
-    const managerTree = f.stateOf(id).managerTree;
-    if (managerTree.t !== 'ready') throw new Error(`manager tree ${managerTree.t}`);
-    assert.equal(briefings.current(context(managerRun.id)).workingDirectory, managerTree.path);
-    assert.notEqual(managerTree.path, f.stateOf(id).integrationTree.path);
+    const managerTree = f.stateOf(id).trees.manager;
+    assert.equal(managerTree.status.t, 'ready');
     assert.equal(
-      git(managerTree.path, 'rev-parse', 'HEAD'),
+      briefings.current(context(managerRun.id)).workingDirectory,
+      managerTree.place.path
+    );
+    assert.notEqual(managerTree.place.path, f.integrationTree(id).path);
+    assert.equal(
+      git(managerTree.place.path, 'rev-parse', 'HEAD'),
       git(f.repo, 'rev-parse', `expedition/${id}`)
     );
-    assert.throws(() => git(managerTree.path, 'symbolic-ref', '-q', 'HEAD'), 'detached: no branch');
+    assert.throws(
+      () => git(managerTree.place.path, 'symbolic-ref', '-q', 'HEAD'),
+      'detached: no branch'
+    );
 
     await f.answer(
       id,
@@ -2170,7 +2173,7 @@ test('an attempt run starts in its own worktree (two concurrent runs of one crew
     const runs = await Promise.all(work.map((w) => runOf(w.requestId)));
     // Both warm before either turn reads its briefing: a per-Buddy cache would hand both runs
     // the worktree of whichever warmed last.
-    await Promise.all(runs.map((r) => briefings.warm(context(r.id))));
+    await Promise.all(runs.map((r) => briefings.warmRun(context(r.id), r.id, cwdOf(r.config))));
     work.forEach((w, n) => {
       assert.equal(
         briefings.current(context(runs[n].id)).workingDirectory,
@@ -2853,7 +2856,7 @@ test('the integration head is verified before each merge: a branch moved outside
     );
     await f.host.drain();
     // Someone commits onto the expedition branch outside the host (audit 2026-11-01 #6).
-    const integration = f.stateOf(id).integrationTree.path;
+    const integration = f.integrationTree(id).path;
     git(integration, 'commit', '-q', '--allow-empty', '-m', 'outside the host');
     await f.answer(id, f.manager(id), json({ actions: [{ do: 'integrate', claimAttempt: w }] }));
     const [i] = f.stateOf(id).integrations;
@@ -3095,18 +3098,18 @@ test('stop cancels live attempts and releases every tree safely: a submodule tre
       assert.equal((await f.core.getRun(runId)).status, 'cancelled');
 
     // w1: salvaged, harvested, then force-removed; its unmerged branch stays for the owner.
-    assert.deepEqual(s.worktrees[w1].status, { t: 'removed', branchDeleted: false });
+    assert.deepEqual(f.treeOf(id, w1).status, { t: 'removed', branchDeleted: false });
     assert.equal(fs.existsSync(t1), false);
     assert.equal(git(f.repo, 'rev-parse', `refs/salvage/expeditions/${id}/${w1}`), sha);
     const harvested = path.join(f.root, id, 'harvest', w1, 'output', 'run.log');
     assert.equal(fs.readFileSync(harvested, 'utf8'), 'gauges\n');
     assert.deepEqual(
-      s.preserved.filter((p) => p.treeOf === w1).map((p) => p.preserved.t),
+      f.treeOf(id, w1).preserved.map((p) => p.t),
       ['salvaged', 'harvested']
     );
     // w2: never forced away with its uncommitted change.
-    assert.equal(s.worktrees[w2].status.t, 'left');
-    assert.match(JSON.stringify(s.worktrees[w2].status), /uncommitted changes/);
+    assert.equal(f.treeOf(id, w2).status.t, 'left');
+    assert.match(JSON.stringify(f.treeOf(id, w2).status), /uncommitted changes/);
     assert.equal(fs.existsSync(t2), true);
 
     // w3's run ignored the stop (no runner here): after the grace the host abandons it and its
@@ -3116,7 +3119,7 @@ test('stop cancels live attempts and releases every tree safely: a submodule tre
     s = f.stateOf(id);
     const ended = s.attempts.find((a) => a.id === w3)!;
     assert.equal(ended.phase.t === 'ended' && ended.phase.outcome.t, 'abandoned');
-    assert.deepEqual(s.worktrees[w3].status, { t: 'removed', branchDeleted: true });
+    assert.deepEqual(f.treeOf(id, w3).status, { t: 'removed', branchDeleted: true });
   } finally {
     await f.close();
   }

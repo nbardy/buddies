@@ -13,7 +13,16 @@ import type { ExecutionGate } from '../../src/buddies/execution-gate';
 import { createGrants } from '../../src/buddies/grants';
 import { startMcpEndpoint } from '../../src/buddies/mcp';
 import { type ExpeditionHost, createExpeditionHost } from '../../src/expeditions/host';
-import { type Entry, type State, fold } from '../../src/expeditions/model';
+import {
+  type Entry,
+  INTEGRATION_TREE,
+  type State,
+  type Validation,
+  currentTree,
+  fold,
+  workspaceOf,
+  worktreeOf,
+} from '../../src/expeditions/model';
 import type { IngestSlot } from '../../src/ingest/instance';
 import { BackgroundWork } from '../../src/turns/background-work';
 import { tempDir } from './temp';
@@ -168,11 +177,12 @@ export async function fixture() {
     return m[0].id;
   };
   /** A work attempt's recorded worktree. */
-  const treeOf = (id: string, attemptId: string) => {
-    const tree = stateOf(id).worktrees[attemptId];
-    if (!tree) throw new Error(`no worktree for ${attemptId}`);
-    return tree;
-  };
+  const treeOf = (id: string, attemptId: string) => worktreeOf(stateOf(id), attemptId);
+  /** The expedition's integration tree. */
+  const integrationTree = (id: string) => workspaceOf(stateOf(id), INTEGRATION_TREE);
+  /** The tree a validation's checks run in (its newest). */
+  const validationTree = (id: string, v: Validation) =>
+    workspaceOf(stateOf(id), currentTree(stateOf(id), v).id);
   /** Commits a change inside a worktree, as a worker would; returns the sha. */
   const commitIn = (dir: string, file: string) => {
     fs.writeFileSync(path.join(dir, file), 'export const broken = false;\n');
@@ -185,7 +195,7 @@ export async function fixture() {
   const workspaces = (id: string) =>
     (JSON.parse(git(repo, 'cambium', 'list', '--json')) as { name: string }[])
       .map((w) => w.name)
-      .filter((name) => name !== stateOf(id).integrationTree.name);
+      .filter((name) => name !== workspaceOf(stateOf(id), INTEGRATION_TREE).name);
   return {
     core,
     events,
@@ -199,6 +209,8 @@ export async function fixture() {
     },
     workspaceId: ws.id,
     treeOf,
+    integrationTree,
+    validationTree,
     commitIn,
     branchExists,
     workspaces,

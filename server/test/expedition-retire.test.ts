@@ -202,3 +202,29 @@ test('stop_and_retire stops an open expedition first; a ref origin cannot confir
     await f.close();
   }
 });
+
+// Retirement is what let B5 change the ledger format (one tree model): every live ledger was
+// retired first and is served from its snapshot. A ledger still in the older per-kind tree format
+// must not fold with those lines skipped (stored lines are parsed unchecked): that left it with no
+// integration tree, failing every tick. It is quarantined at boot, and the file stays.
+test('a ledger with an entry of no known kind is quarantined at boot, never folded around it', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await rpcLaunch(f, 'old-format');
+    const at = '2026-11-01T00:00:00Z';
+    fs.appendFileSync(
+      f.ledgerPath(id),
+      `${JSON.stringify([{ t: 'integration_tree_ready', at }])}\n`
+    );
+    f.restart();
+    const found = f.host.lookup(id);
+    assert.equal(found.t, 'quarantined');
+    assert.match(
+      found.t === 'quarantined' ? found.reason : '',
+      /unknown ledger entry integration_tree_ready/
+    );
+    assert.ok(fs.existsSync(f.ledgerPath(id)), 'the file stays for the owner');
+  } finally {
+    await f.close();
+  }
+});

@@ -349,8 +349,9 @@ const buddyEvents = createBuddyEvents();
 const backgroundWork = new BackgroundWork();
 // A grant lives as long as its run's lease at most; settle and turn end revoke it sooner.
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
-// A turn's directory: an expedition attempt run starts in its own worktree (expeditions
-// host.ts `turnDirectory`); every other Buddy turn in its workspace root.
+// A turn's directory when its run names none (an expedition attempt's run carries its tree as
+// RunConfig.cwd): a crew's turn in the crew's own directory (expeditions host.ts
+// `turnDirectory`); every other Buddy turn in its workspace root.
 const buddyBriefings = createBriefings(
   buddiesCore,
   () => installedAgent(),

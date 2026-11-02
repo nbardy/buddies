@@ -8,7 +8,15 @@ import type {
   Validation,
   WorkSpec,
 } from './ledger';
-import { attemptOf, byId, interruptedEnd, questionOf, validationPassed } from './ledger';
+import {
+  MANAGER_TREE,
+  attemptOf,
+  byId,
+  interruptedEnd,
+  questionOf,
+  treeOf,
+  validationPassed,
+} from './ledger';
 
 // Pure read-only views over a folded State, shared by decide, effects, briefs, news and the page.
 
@@ -235,14 +243,10 @@ export const questionVerified = (s: State, questionId: string) =>
  * manager is briefed only once that tree is ready (effects.ts), so any other state here is a
  * broken invariant. */
 export function managerDirectory(s: State): string {
-  switch (s.managerTree.t) {
-    case 'ready':
-      return s.managerTree.path;
-    case 'missing':
-    case 'failed':
-    case 'released':
-      throw new Error(`expedition ${s.id} has no manager tree (${s.managerTree.t})`);
-  }
+  const tree = treeOf(s, MANAGER_TREE);
+  if (tree.status.t !== 'ready')
+    throw new Error(`expedition ${s.id} has no manager tree (${tree.status.t})`);
+  return tree.place.path;
 }
 
 /** A question's acceptance rule (charter.ts Acceptance). */

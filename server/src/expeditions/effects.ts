@@ -1,15 +1,17 @@
-import type {
-  Attempt,
-  RetireChat,
-  Round,
-  State,
-  Validation,
-  Worktree,
-  WorktreeStatus,
-} from './ledger';
-import { attemptOf, validationComplete, worktreeOf } from './ledger';
+import type { Attempt, RetireChat, Round, State, Tree, TreeId, TreeStatus } from './ledger';
 import {
-  type WorkerSpec,
+  type ByTree,
+  INTEGRATION_TREE,
+  MANAGER_TREE,
+  attemptOf,
+  byTree,
+  treeKey,
+  treeOf,
+  validationComplete,
+  validationOf,
+  worktreeOf,
+} from './ledger';
+import {
   admitted,
   custodyOf,
   custodyOverlaps,
@@ -26,32 +28,19 @@ import {
 
 export type Effect =
   | { t: 'create_crew' }
-  /** Create (or adopt) the integration worktree `launched` named, on `expedition/<id>`. */
-  | { t: 'create_integration_tree' }
   /** Merge the next planned candidate into the expedition branch (one at a time, in order). */
   | { t: 'integrate'; integrationId: string }
-  /** At finish: remove the integration worktree, keeping its branch for the owner to merge. */
-  | { t: 'release_integration_tree' }
-  /** Make (or adopt) the manager's detached read-only worktree (design.md R11). */
-  | { t: 'create_manager_tree' }
-  /** At finish, once no manager runs in it: remove the manager's worktree. */
-  | { t: 'release_manager_tree' }
   /** Check a manager's claim of an attempt's unreported commits against its branch (R11). */
   | { t: 'adopt_claim'; attemptId: string }
-  /** Record a worker attempt's worktree intent, then create it (it now holds a slot and custody). */
-  | { t: 'admit'; attempt: Attempt<WorkerSpec> }
-  /** Create or adopt a recorded worktree: the replay path after a crash between intent and ready. */
-  | { t: 'create_worktree'; attemptId: string }
-  /** A settled attempt's worktree (keepCommits) or, once finished, every idle one. */
-  | { t: 'release_worktree'; attemptId: string; keepCommits: boolean }
-  /** Resolve a planned validation's sha, record its tree intent, create the tree. */
-  | { t: 'start_validation'; validationId: string }
-  /** Create or adopt a recorded validation tree (the replay path, as `create_worktree`). */
-  | { t: 'create_validation_tree'; validationId: string }
+  /** Resolve a tree's place, record it (`tree_planned`), then make it. For an attempt this is
+   * admission: from the intent on it holds a slot and its custody. */
+  | { t: 'plan_tree'; tree: TreeId }
+  /** Make or adopt a planned tree: the replay path after a crash between intent and ready. */
+  | { t: 'create_tree'; tree: TreeId }
+  /** End a tree no one works in any more, under the release its stage asks for (host.ts). */
+  | { t: 'release_tree'; tree: TreeId; stage: ReleaseStage }
   /** Run the command checks not yet recorded, in the host, in the background. */
   | { t: 'run_validation'; validationId: string }
-  /** A validation's tree, once its checks are recorded (or the expedition finished): discarded. */
-  | { t: 'release_validation'; validationId: string }
   /** Build and record the brief (then post it). */
   | { t: 'brief_attempt'; attempt: Attempt }
   /** Post a recorded brief or repair request: also the replay path after a crash between record
@@ -65,9 +54,8 @@ export type Effect =
   /** A finished expedition's live attempt: ask its runs to stop (audit 2026-11-01 #2). */
   | { t: 'cancel_attempt'; attemptId: string }
   // ---------- Retirement (plan A6), in this order, each once the one before it is done ----------
-  /** A tree finish left (`left`, `kept`, or an integration tree never made): released again under
-   * the retire policy (release.ts), which snapshots uncommitted changes instead of refusing. */
-  | { t: 'retire_tree'; tree: RetireTree }
+  // A tree finish left (`left`, `kept`, `failed`) is released again at stage `retiring`, whose
+  // policy (release.ts) snapshots uncommitted changes instead of refusing.
   /** Every expedition ref archived as a tag on origin, then deleted (git.ts archiveBranch). */
   | { t: 'archive_branches' }
   /** The crew chat and the crew's attempts DM archived (never a DM with another Buddy). */
@@ -79,12 +67,12 @@ export type Effect =
   /** The retired ledger frozen as a snapshot and its folder moved to `.retired` (retired.ts). */
   | { t: 'file_retired' };
 
-/** A tree a retirement removes, one handler each in the host. */
-export type RetireTree =
-  | { t: 'attempt'; attemptId: string }
-  | { t: 'validation'; validationId: string }
-  | { t: 'integration' }
-  | { t: 'manager' };
+/**
+ * Which release a tree gets: while the expedition runs (an attempt with commits keeps its tree for
+ * integration), at finish (every tree goes; uncommitted work leaves it in place), or at retirement
+ * (it goes whatever it holds, uncommitted changes snapshotted first).
+ */
+export type ReleaseStage = 'running' | 'finished' | 'retiring';
 
 /** δ over the retirement: an active expedition owes its run's effects, a retiring one those and
  * then its retirement steps, a retired one only its filing. */
@@ -116,10 +104,6 @@ function runEffects(s: State): Effect[] {
     ...(s.badgePost.t === 'pending' ? [{ t: 'post_badge' } as const] : []),
     ...unpostedStatuses(s).map((x): Effect => ({ t: 'post_status', seq: x.seq, text: x.text })),
     ...releases(s),
-    ...validationReleases(s),
-    ...(finished && s.integrationTree.status.t === 'ready'
-      ? [{ t: 'release_integration_tree' } as const]
-      : []),
     // A recorded brief is a committed intent: it is completed whatever the run state, because
     // the post may already exist (keyed, so the replay returns it) and its worker may be running.
     ...s.attempts.flatMap((a): Effect[] =>
@@ -140,35 +124,33 @@ function runEffects(s: State): Effect[] {
           ]
         : []
     ),
-    ...managerTreeEffects(s),
+    // A planned tree is made (or adopted) until the expedition finishes; one a stop caught still
+    // being made is released instead, never made (decide finishes first, audit #1).
+    ...(finished
+      ? []
+      : Object.values(s.trees).flatMap((t): Effect[] =>
+          t.status.t === 'creating' ? [{ t: 'create_tree', tree: t.id }] : []
+        )),
   ];
-  switch (s.integrationTree.status.t) {
-    case 'creating':
-      // A run stopped before its tree was made never makes it (decide finishes first, #1).
-      return finished ? effects : [...effects, { t: 'create_integration_tree' }];
-    case 'failed': // decide finishes the expedition with the reason
-    case 'kept':
-    case 'removed':
-    case 'absent':
-    case 'left':
-      return effects;
-    case 'ready':
-      break;
-  }
-  if (finished || s.run.t === 'paused') return effects;
+  // Nothing new starts before the integration tree is ready (a failed one finishes the run).
+  if (finished || s.run.t === 'paused' || !ready(s, INTEGRATION_TREE)) return effects;
+  // The manager's own tree (design.md R11), made once, after the integration tree.
+  if (!(treeKey(MANAGER_TREE) in s.trees)) effects.push({ t: 'plan_tree', tree: MANAGER_TREE });
   // Merges first, one at a time in plan order; validations wait for them, so a head validation
   // planned after a merge validates the merged head. Then one validation at a time, in plan
   // order: command checks may be heavy (builds, GPU runs).
   const merge = s.integrations.find((i) => i.status.t === 'pending');
   const next = s.validations.find((v) => !validationComplete(v));
   if (merge) effects.push({ t: 'integrate', integrationId: merge.id });
-  else if (next) effects.push(validationEffect(next));
+  else if (next) effects.push(...validationEffects(s, next.id));
   for (const attemptId of Object.keys(s.adoptions))
     if (s.adoptions[attemptId].t === 'pending') effects.push({ t: 'adopt_claim', attemptId });
+  // An admitted attempt is briefed once its tree is ready.
   for (const attempt of s.attempts.filter((a) => a.phase.t === 'admitted'))
-    effects.push(admittedEffect(attempt, worktreeOf(s, attempt.id)));
+    if (worktreeOf(s, attempt.id).status.t === 'ready')
+      effects.push({ t: 'brief_attempt', attempt });
   // A manager is briefed only in its own tree (R11); decide plans none before it is ready.
-  if (s.managerTree.t === 'ready')
+  if (ready(s, MANAGER_TREE))
     for (const attempt of queued(s).filter((a) => !isWorker(a)))
       effects.push({ t: 'brief_attempt', attempt });
   // Admission (design.md R1): at most maxLive workers, and never two with overlapping custody;
@@ -183,109 +165,62 @@ function runEffects(s: State): Effect[] {
     if (capacity <= 0 || custody.some((c) => custodyOverlaps(c, paths))) continue;
     capacity -= 1;
     custody.push(paths);
-    effects.push({ t: 'admit', attempt });
+    effects.push({ t: 'plan_tree', tree: { t: 'attempt', attemptId: attempt.id } });
   }
   return effects;
 }
 
-/** The manager's tree is made once the integration tree is ready, and released at finish once no manager decision runs in it. */
-function managerTreeEffects(s: State): Effect[] {
-  const finished = s.run.t === 'finished';
-  const managerLive = s.attempts.some(
-    (a) => a.spec.kind === 'manager' && (a.phase.t === 'posting' || a.phase.t === 'posted')
-  );
-  switch (s.managerTree.t) {
-    case 'missing':
-      return !finished && s.integrationTree.status.t === 'ready'
-        ? [{ t: 'create_manager_tree' }]
-        : [];
-    case 'ready':
-      return finished && !managerLive ? [{ t: 'release_manager_tree' }] : [];
-    case 'failed':
-    case 'released':
+const ready = (s: State, id: TreeId) =>
+  treeKey(id) in s.trees && treeOf(s, id).status.t === 'ready';
+
+/** The next step for the validation in progress: its first tree, its check job in it once it is
+ * ready, or a fresh tree after the job died with a host process and its tree was released. A
+ * tree still being made is `create_tree`'s. */
+function validationEffects(s: State, validationId: string): Effect[] {
+  const v = validationOf(s, validationId);
+  const plan: Effect = {
+    t: 'plan_tree',
+    tree: { t: 'validation', validationId, restart: v.trees.length },
+  };
+  const key = v.trees.at(-1);
+  if (key === undefined) return [plan];
+  const status = s.trees[key].status;
+  switch (status.t) {
+    case 'creating':
       return [];
-  }
-}
-
-/** The next step for the validation in progress. */
-function validationEffect(v: Validation): Effect {
-  switch (v.phase.t) {
-    case 'planned':
-      return { t: 'start_validation', validationId: v.id };
-    case 'started':
-      return validationTreeEffect(v.id, v.phase.treeStatus);
-  }
-}
-
-function validationTreeEffect(validationId: string, tree: WorktreeStatus): Effect {
-  switch (tree.t) {
-    case 'creating':
-      return { t: 'create_validation_tree', validationId };
     case 'ready':
-      return { t: 'run_validation', validationId };
-    case 'failed':
+      return [{ t: 'run_validation', validationId }];
     case 'kept':
     case 'removed':
     case 'absent':
     case 'left':
-      throw new Error(`incomplete validation ${validationId} has a ${tree.t} tree`);
-  }
-}
-
-/** Validation trees are scratch: discarded once every check is recorded, or at finish (the host
- * never removes a tree its own check job is still running in, host.ts). A `failed` tree has no
- * release: ensureWorktree already ran `cambium recover` on what a failed add left, and anything
- * still on disk is named in the failure reason (the same as a worker tree, `releases` below). */
-function validationReleases(s: State): Effect[] {
-  const finished = s.run.t === 'finished';
-  return s.validations.flatMap((v): Effect[] => {
-    if (v.phase.t !== 'started') return [];
-    const status = v.phase.treeStatus.t;
-    const held = status === 'creating' || status === 'ready';
-    return held && (finished || validationComplete(v))
-      ? [{ t: 'release_validation', validationId: v.id }]
-      : [];
-  });
-}
-
-/** The next step for an admitted attempt: finish its worktree, then brief it. */
-function admittedEffect(attempt: Attempt, worktree: Worktree): Effect {
-  switch (worktree.status.t) {
-    case 'creating':
-      return { t: 'create_worktree', attemptId: attempt.id };
-    case 'ready':
-      return { t: 'brief_attempt', attempt };
+      return [plan];
     case 'failed':
-    case 'kept':
-    case 'removed':
-    case 'absent':
-    case 'left':
-      throw new Error(`admitted attempt ${attempt.id} has a ${worktree.status.t} worktree`);
+      throw new Error(`incomplete validation ${validationId} has a failed tree`);
   }
 }
 
 /**
- * Worktrees due for release. A tree is released only once no worker can be in it: its attempt
- * settled, or the expedition finished before the attempt was briefed. A posting or posted
- * attempt's tree is never pulled from under its running worker, even after finish; it is released
- * when that attempt ends (the host keeps observing a finished expedition while attempts are live).
- * Before finish a tree with commits is kept for integration; at finish every tree goes and only
- * branches without commits are deleted.
+ * Trees due for release: one no one can be in any more (`vacated`), and an attempt tree kept for
+ * its commits once the expedition finished. A posting or posted attempt's tree is never pulled
+ * from under its running worker, even after finish; it is released when that attempt ends (the
+ * host keeps observing a finished expedition while attempts are live). A `failed` tree has no
+ * release: ensureWorktree already ran `cambium recover` on what a failed add left, and anything
+ * still on disk is named in the failure reason (retirement releases it, `strandedTrees`).
  */
 function releases(s: State): Effect[] {
   const finished = s.run.t === 'finished';
-  return Object.values(s.worktrees).flatMap((w): Effect[] =>
-    due(w, attemptOf(s, w.attemptId), finished)
-      ? [{ t: 'release_worktree', attemptId: w.attemptId, keepCommits: !finished }]
-      : []
+  const stage: ReleaseStage = finished ? 'finished' : 'running';
+  return Object.values(s.trees).flatMap((t): Effect[] =>
+    due(s, t, finished) ? [{ t: 'release_tree', tree: t.id, stage }] : []
   );
 }
 
-function due(w: Worktree, attempt: Attempt, finished: boolean): boolean {
-  switch (w.status.t) {
+function due(s: State, tree: Tree, finished: boolean): boolean {
+  switch (tree.status.t) {
     case 'creating':
     case 'ready':
-      return settled(attempt) || (finished && attempt.phase.t === 'admitted');
+      return byTree(VACATED, tree.id, s, finished);
     case 'kept':
       return finished;
     case 'failed':
@@ -295,6 +230,25 @@ function due(w: Worktree, attempt: Attempt, finished: boolean): boolean {
       return false;
   }
 }
+
+/** Whether no one works in a held tree any more. The integration tree serves until finish; the
+ * manager's until no manager decision runs in it; an attempt's until the attempt settled (or the
+ * run finished before it was briefed); a validation's until every check is recorded or the run
+ * finished (the host never removes a tree its own check job still runs in, host.ts). */
+const VACATED: ByTree<[State, boolean], boolean> = {
+  integration: (_id, _s, finished) => finished,
+  manager: (_id, s, finished) =>
+    finished &&
+    !s.attempts.some(
+      (a) => a.spec.kind === 'manager' && (a.phase.t === 'posting' || a.phase.t === 'posted')
+    ),
+  attempt: ({ attemptId }, s, finished) => {
+    const attempt = attemptOf(s, attemptId);
+    return settled(attempt) || (finished && attempt.phase.t === 'admitted');
+  },
+  validation: ({ validationId }, s, finished) =>
+    finished || validationComplete(validationOf(s, validationId)),
+};
 
 // ---------- Retirement (plan A6) ----------
 
@@ -309,9 +263,11 @@ const RETIRE_CHATS: readonly RetireChat[] = ['crew_chat', 'attempts'];
  */
 function retireEffects(s: State): Effect[] {
   if (s.retirement.t !== 'retiring' || s.retirement.refused.length > 0) return [];
-  if (s.run.t !== 'finished' || live(s).length > 0 || heldTrees(s)) return [];
-  const trees = strandedTrees(s);
-  if (trees.length > 0) return trees.map((tree): Effect => ({ t: 'retire_tree', tree }));
+  const trees = Object.values(s.trees);
+  if (s.run.t !== 'finished' || live(s).length > 0 || trees.some((t) => held(t.status))) return [];
+  const stranded = trees.filter((t) => strandedStatus(t.status));
+  if (stranded.length > 0)
+    return stranded.map((t): Effect => ({ t: 'release_tree', tree: t.id, stage: 'retiring' }));
   if (s.archive.branches.t === 'pending') return [{ t: 'archive_branches' }];
   const chats = RETIRE_CHATS.filter((c) => !s.archive.chats.includes(c));
   // Statuses go out while the chat is open: an archived channel refuses every post.
@@ -333,45 +289,16 @@ function unpostedStatuses(s: State) {
 }
 
 /** A tree the finish still releases itself (a live tree, or one being made). */
-function heldTrees(s: State): boolean {
-  const held = (status: WorktreeStatus) => status.t === 'creating' || status.t === 'ready';
-  return (
-    Object.values(s.worktrees).some((w) => held(w.status)) ||
-    s.validations.some((v) => v.phase.t === 'started' && held(v.phase.treeStatus)) ||
-    s.integrationTree.status.t === 'ready' ||
-    s.managerTree.t === 'ready'
-  );
-}
+const held = (status: TreeStatus) => status.t === 'creating' || status.t === 'ready';
 
 /**
- * Trees finishing left behind (effects.ts used to stop at `left`, a terminal dead end): each
- * worker, validation and integration tree that was refused or kept, the integration tree a stop
- * before setup never made (its create may have left a partial), and a manager tree left.
+ * A tree finishing left behind (effects.ts used to stop at `left`, a terminal dead end): refused
+ * (`left`), kept for its commits, or `failed`: a failed add can leave a registration or directory
+ * on disk (git.ts ensureWorktree names it "still on disk"), and archive_branches would then delete
+ * the branch it is checked out on, stranding the tree after retirement. Releasing a tree that is
+ * not there is `absent` (release.ts goneTree), so a clean failure costs one lookup.
  */
-function strandedTrees(s: State): RetireTree[] {
-  return [
-    ...Object.values(s.worktrees).flatMap((w): RetireTree[] =>
-      stranded(w.status) ? [{ t: 'attempt', attemptId: w.attemptId }] : []
-    ),
-    ...s.validations.flatMap((v): RetireTree[] =>
-      v.phase.t === 'started' && stranded(v.phase.treeStatus)
-        ? [{ t: 'validation', validationId: v.id }]
-        : []
-    ),
-    ...(stranded(s.integrationTree.status) || s.integrationTree.status.t === 'creating'
-      ? [{ t: 'integration' } as const]
-      : []),
-    ...(s.managerTree.t === 'released' && stranded(s.managerTree.release)
-      ? [{ t: 'manager' } as const]
-      : []),
-  ];
-}
-
-/** `failed` too: a failed add can leave a registration or directory on disk (git.ts
- * ensureWorktree names it "still on disk"), and archive_branches would then delete the branch it
- * is checked out on, stranding the tree after retirement. Releasing a tree that is not there is
- * `absent` (release.ts goneTree), so a clean failure costs one lookup. */
-function stranded(status: WorktreeStatus): boolean {
+function strandedStatus(status: TreeStatus): boolean {
   switch (status.t) {
     case 'left':
     case 'kept':
