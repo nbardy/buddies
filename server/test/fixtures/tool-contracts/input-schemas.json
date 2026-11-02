@@ -546,6 +546,21 @@
               },
               "required": ["do", "id", "feedback"],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "retire"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["do", "id"],
+              "additionalProperties": false
             }
           ]
         }
@@ -2097,6 +2112,21 @@
                 }
               },
               "required": ["do", "id", "feedback"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "retire"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["do", "id"],
               "additionalProperties": false
             }
           ]

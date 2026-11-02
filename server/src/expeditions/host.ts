@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { BuddiesCore } from '@unleashd/buddies-core';
 import {
   type BuddyContext,
+  type ExpeditionRetiredView,
   type ExpeditionSummary,
   type ExpeditionView,
   type Provider,
@@ -20,11 +21,13 @@ import { CREW_ROLE, briefOf, chatFeedback, parseOutcome, repairBrief, statusText
 import { killCheck, pidfileOf, runCommand } from './command';
 import { type DraftInput, type LaunchOutcome, createDraftStore, placementOf } from './drafts';
 import {
+  archiveBranch,
   attemptCommits,
   branchHead,
   claimHeld,
   ensureDetachedTree,
   ensureWorktree,
+  expeditionRefs,
   mergeCandidate,
   preflight,
   syncDetachedTree,
@@ -43,6 +46,9 @@ import {
   type Feedback,
   type Origin,
   type Outcome,
+  type Release,
+  type RetireChat,
+  type RetireTree,
   type State,
   type ValidationBasis,
   type ValidationReport,
@@ -56,7 +62,6 @@ import {
   claimOf,
   commandChecks,
   configOf,
-  costTotals,
   custodyOf,
   decide,
   fold,
@@ -81,8 +86,16 @@ import {
   releaseIntegrationTree,
   releaseWorktree,
 } from './release';
+import {
+  RETIRED_DIR,
+  type RetiredSnapshot,
+  fileRetired,
+  readRetired,
+  retiredView,
+  snapshotOf,
+} from './retired';
 import { appendBatch, createLedger, readLedgerFile } from './store';
-import { countsOf, expeditionView } from './view';
+import { expeditionSummary, expeditionView } from './view';
 
 // Pattern: wake-on-write (docs/patterns.md#wake-on-write) — ticks on the Buddy change bus
 // (debounced) plus one slow backstop; no per-expedition timers.
@@ -127,6 +140,11 @@ export interface ExpeditionHostOptions {
    * installed-agent PATH walk). A seat on a missing harness is a launch issue, never a spawn
    * ENOENT mid-expedition. */
   installed: (provider: Provider) => boolean;
+  /** A retirement archived the crew Buddy (server.ts: the same as the owner's Archive, which
+   * stops its conversations). */
+  onBuddyArchived: (buddyId: string) => void;
+  /** A retirement archived one of the crew's chats (server.ts: refreshes channel views). */
+  onChannelArchived: (channelId: string) => void;
   now?: () => Date;
 }
 
@@ -173,8 +191,26 @@ function seatIssues(charter: Charter, installed: (provider: Provider) => boolean
 }
 
 /** What the host knows of an expedition id: a ledger it folds, one it set aside because it does
- * not fold (named, with the reason; the other expeditions keep running), or none. */
-export type Lookup = { t: 'present' } | { t: 'quarantined'; reason: string } | { t: 'missing' };
+ * not fold (named, with the reason; the other expeditions keep running), a retired snapshot
+ * (retired.ts: never folded), or none. */
+export type Lookup =
+  | { t: 'present' }
+  | { t: 'quarantined'; reason: string }
+  | { t: 'retired' }
+  | { t: 'missing' };
+
+/** How the owner asks to retire: a finished expedition, or an open one stopped first. */
+export type RetireMode = 'retire' | 'stop_and_retire';
+
+/** What a retire request did (routes.ts answers each). `retiring`: recorded, the steps run in
+ * the background (a request while retiring asks the refused steps again). */
+export type Retire =
+  | { t: 'retiring' }
+  | { t: 'not_finished' }
+  | { t: 'already_retired' }
+  | { t: 'missing' }
+  | { t: 'quarantined'; reason: string }
+  | { t: 'disabled'; reason: string };
 
 /** A launch with this (conversation, name) key is still open: the retried call gets it back. */
 export type Launched = { t: 'launched'; state: State } | { t: 'already_running'; state: State };
@@ -205,7 +241,8 @@ interface Streak {
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function createExpeditionHost(options: ExpeditionHostOptions) {
-  const { core, events, root, gate, meter, installed } = options;
+  const { core, events, root, gate, meter, installed, onBuddyArchived, onChannelArchived } =
+    options;
   const now = () => (options.now ?? (() => new Date()))().toISOString();
   /**
    * Each expedition's folded state, kept current by applying every appended batch (audit
@@ -263,9 +300,22 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
    * applied once, by `append`. */
   const forDecide = (id: string): State => structuredClone(stateOf(id));
 
+  /** Retired expeditions, by id: frozen snapshots, never folded (retired.ts). */
+  const retired = new Map<string, RetiredSnapshot>();
+  for (const [id, read] of readRetired(root))
+    switch (read.t) {
+      case 'read':
+        retired.set(id, read.snapshot);
+        break;
+      case 'corrupt':
+        quarantine(id, read.reason);
+    }
+
   // Boot: read every ledger once; ticks resume what they explain. A ledger that cannot be read
   // or folded is quarantined, so one bad file never stops the server or the other expeditions.
+  // `.retired` holds retired folders: never folded again.
   for (const id of fs.readdirSync(root)) {
+    if (id === RETIRED_DIR) continue;
     const file = path.join(root, id, 'ledger.jsonl');
     if (!fs.existsSync(file)) continue;
     const read = readLedgerFile(file);
@@ -493,6 +543,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     post_status: (s, e) => postStatus(s, e.seq, e.text),
     post_badge: (s) => postBadge(s),
     cancel_attempt: (s, e) => cancelAttempt(s, e.attemptId),
+    retire_tree: (s, e) => retireTree(s, e.tree),
+    archive_branches: (s) => archiveBranches(s),
+    archive_chats: (s, e) => archiveChats(s, e.chats),
+    archive_crew: (s) => archiveCrew(s),
+    record_retired: async () => [{ t: 'retired', at: now() }],
+    file_retired: (s) => fileAway(s),
   };
   function run<E extends Effect>(s: State, effect: E): Promise<Entry[]> {
     const handler = handlers[effect.t] as (s: State, e: E) => Promise<Entry[]>;
@@ -525,6 +581,151 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   });
   const preservedEntries = (treeOf: string, released: Released): Entry[] =>
     released.preserved.map((preserved) => ({ t: 'preserved', at: now(), treeOf, preserved }));
+
+  // ---------- Retirement (plan A6): one handler per step ----------
+
+  /** A tree retirement could not remove is a refusal: retirement waits for the owner. */
+  const refusedTree = (branch: string, release: Release): Entry[] =>
+    release.t === 'left'
+      ? [{ t: 'archive_refused', at: now(), branch, reason: `tree left: ${release.reason}` }]
+      : [];
+
+  type TreeHandlers = {
+    [K in RetireTree['t']]: (s: State, tree: Extract<RetireTree, { t: K }>) => Promise<Entry[]>;
+  };
+  const retireTrees: TreeHandlers = {
+    attempt: async (s, { attemptId }) => {
+      const tree = worktreeOf(s, attemptId);
+      const released = await releaseWorktree(
+        s.repo.root,
+        tree,
+        false,
+        s.repo.branch,
+        keepOf(s, attemptId),
+        { t: 'retire' }
+      );
+      return [
+        ...preservedEntries(attemptId, released),
+        { t: 'worktree_released', at: now(), attemptId, release: released.release },
+        ...refusedTree(tree.branch, released.release),
+      ];
+    },
+    validation: async (s, { validationId }) => {
+      const { tree } = startedOf(s, validationId);
+      const released = await discardWorktree(s.repo.root, tree, keepOf(s, validationId));
+      return [
+        ...preservedEntries(validationId, released),
+        { t: 'validation_released', at: now(), validationId, release: released.release },
+        ...refusedTree(tree.branch, released.release),
+      ];
+    },
+    integration: async (s) => {
+      const released = await releaseIntegrationTree(
+        s.repo.root,
+        s.integrationTree,
+        keepOf(s, 'integration'),
+        { t: 'retire' }
+      );
+      return [
+        ...preservedEntries('integration', released),
+        { t: 'integration_tree_released', at: now(), release: released.release },
+        ...refusedTree(s.repo.branch, released.release),
+      ];
+    },
+    manager: async (s) => {
+      const dir = path.join(root, s.id, 'manager');
+      const released = await releaseDetachedTree(s.repo.root, dir, keepOf(s, 'manager'));
+      return [
+        ...preservedEntries('manager', released),
+        { t: 'manager_tree_released', at: now(), release: released.release },
+        ...refusedTree(`(manager tree ${dir})`, released.release),
+      ];
+    },
+  };
+  function retireTree<T extends RetireTree>(s: State, tree: T): Promise<Entry[]> {
+    const handler = retireTrees[tree.t] as (s: State, tree: T) => Promise<Entry[]>;
+    return handler(s, tree);
+  }
+
+  /**
+   * Every expedition ref (attempt branches, the expedition branch, salvage pins; older code's
+   * too) archived as `archive/expeditions/<id>/…` on origin and only then deleted (git.ts
+   * archiveBranch). A ref origin does not confirm is refused and kept: never deleted while its
+   * only copy is local.
+   */
+  async function archiveBranches(s: State): Promise<Entry[]> {
+    const out: Entry[] = [];
+    for (const ref of await expeditionRefs(s.repo.root, s.id)) {
+      const archived = await archiveBranch(s.repo.root, ref, archiveTag(s.id, ref));
+      switch (archived.t) {
+        case 'archived':
+          out.push({
+            t: 'branch_archived',
+            at: now(),
+            branch: ref,
+            sha: archived.sha,
+            tag: archived.tag,
+          });
+          break;
+        case 'refused':
+          out.push({ t: 'archive_refused', at: now(), branch: ref, reason: archived.reason });
+      }
+    }
+    return out.some((e) => e.t === 'archive_refused')
+      ? out
+      : [...out, { t: 'branches_archived', at: now() }];
+  }
+
+  /** The crew's own chats, by kind: never a DM it has with another Buddy. */
+  type ChatOf = (crewId: string, crewChat: string) => Promise<string>;
+  const chatOf: Record<RetireChat, ChatOf> = {
+    crew_chat: async (_crewId, crewChat) => crewChat,
+    // The note-to-self DM the attempts are posted in (postAttempt); opening it is idempotent.
+    attempts: async (crewId) =>
+      (
+        await core.openChannel(buddyActor(crewId), {
+          kind: 'direct',
+          members: [buddyActor(crewId)],
+        })
+      ).id,
+  };
+
+  /** Before the crew is archived: its own DM is opened as the crew, which must still be active. */
+  async function archiveChats(s: State, chats: RetireChat[]): Promise<Entry[]> {
+    if (s.crew.t !== 'ready') throw new Error('chats archived before the crew exists');
+    const out: Entry[] = [];
+    for (const chat of chats) {
+      const channelId = await chatOf[chat](s.crew.buddyId, s.crew.chatChannelId);
+      await core.setChannelArchived(OWNER, channelId, true, `exp:${s.id}:retire:chat:${chat}`);
+      onChannelArchived(channelId);
+      out.push({ t: 'chat_archived', at: now(), chat, channelId });
+    }
+    return out;
+  }
+
+  async function archiveCrew(s: State): Promise<Entry[]> {
+    if (s.crew.t !== 'ready') throw new Error('crew archived before it exists');
+    const buddyId = s.crew.buddyId;
+    await core.updateBuddy(OWNER, {
+      buddyId,
+      changes: { status: 'archived' },
+      key: `exp:${s.id}:retire:crew`,
+    });
+    onBuddyArchived(buddyId);
+    return [{ t: 'crew_archived', at: now(), buddyId }];
+  }
+
+  /** The ledger's last line is `retired`: frozen, moved, and from now on served as a snapshot. */
+  async function fileAway(s: State): Promise<Entry[]> {
+    const snapshot = snapshotOf(s, statusText(s, badge(s, now())));
+    await fileRetired(root, s.id, snapshot);
+    states.delete(s.id);
+    counts.delete(s.id);
+    streaks.delete(s.id);
+    retired.set(s.id, snapshot);
+    console.log(`[expeditions] ${s.id} retired`);
+    return [];
+  }
 
   async function createCrew(s: State): Promise<Entry[]> {
     const crew = await core.createBuddy(OWNER, {
@@ -1085,6 +1286,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     let wrote = false;
     const failures: string[] = [];
     for (let round = 0; round < ROUNDS_PER_TICK; round += 1) {
+      // A retirement filed it away (fileAway): nothing of it is left to tick.
+      if (!states.has(id)) break;
       const before = counts.get(id) ?? 0;
       const observed = await observe(stateOf(id));
       failures.push(...observed.failures);
@@ -1348,6 +1551,60 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     const checked = await preflightOf(workspaceId, charter);
     return checked.t === 'refused' ? checked.reasons : [];
   }
+  function lookup(id: string): Lookup {
+    const reason = quarantined.get(id);
+    if (reason) return { t: 'quarantined', reason };
+    // A retired ledger is served live until its folder is moved (fileAway), then as a snapshot.
+    if (states.has(id)) return { t: 'present' };
+    return retired.has(id) ? { t: 'retired' } : { t: 'missing' };
+  }
+
+  /** The entries a retire request records, per mode; `not_finished` when it may not retire. */
+  const RETIRE_ENTRIES: Record<RetireMode, (s: State, by: string) => Entry[] | 'not_finished'> = {
+    retire: (s, by) =>
+      s.run.t === 'finished'
+        ? [{ t: 'retire_requested', at: now(), by, stop: false }]
+        : 'not_finished',
+    // The owner's stop rides with the request, so owner_stop finishes it first (decide.ts).
+    stop_and_retire: (s, by) =>
+      s.run.t === 'finished'
+        ? [{ t: 'retire_requested', at: now(), by, stop: false }]
+        : [
+            { t: 'retire_requested', at: now(), by, stop: true },
+            { t: 'feedback', at: now(), from: by, via: { t: 'tool' }, feedback: { t: 'stop' } },
+          ],
+  };
+
+  /** Through the expedition's chain, like a steer; the steps then run on its ticks. */
+  async function requestRetire(id: string, by: string, mode: RetireMode): Promise<Retire> {
+    const s = stateOf(id);
+    if (s.retirement.t === 'retired') return { t: 'already_retired' };
+    const entries = RETIRE_ENTRIES[mode](s, by);
+    if (entries === 'not_finished') return { t: 'not_finished' };
+    await append(id, entries);
+    return { t: 'retiring' };
+  }
+
+  async function retire(id: string, by: string, mode: RetireMode): Promise<Retire> {
+    if (gate.t === 'disabled') return { t: 'disabled', reason: gateIssues(gate).join('; ') };
+    const found = lookup(id);
+    switch (found.t) {
+      case 'missing':
+      case 'quarantined':
+        return found;
+      case 'retired':
+        return { t: 'already_retired' };
+      case 'present': {
+        const recorded = await serialized(id, () => requestRetire(id, by, mode));
+        // The owner's word runs at once, whatever a failing streak's backoff says; the steps may
+        // take minutes (a forced remove), so the request does not wait for them.
+        streaks.delete(id);
+        void tick(id);
+        return recorded;
+      }
+    }
+  }
+
   /** Serialized: two concurrent launches with one key cannot both pass the lookup. */
   const launch = (input: LaunchInput): Promise<Launched> =>
     serialized(LAUNCH_CHAIN, () => launchOnce(input));
@@ -1390,16 +1647,22 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       await tick(id);
       return stateOf(id);
     },
-    lookup(id: string): Lookup {
-      const reason = quarantined.get(id);
-      if (reason) return { t: 'quarantined', reason };
-      return states.has(id) ? { t: 'present' } : { t: 'missing' };
+    lookup,
+    retire,
+    /** A retired expedition's frozen record (lookup said `retired`). */
+    retiredView(id: string): ExpeditionRetiredView {
+      const snapshot = retired.get(id);
+      if (!snapshot) throw new Error(`expedition ${id} is not retired`);
+      return retiredView(snapshot);
     },
     view(id: string): ExpeditionView {
       const s = stateOf(id);
       return expeditionView(s, badge(s, now()), now());
     },
+    /** The status report; a retired expedition's is its frozen one. */
     status(id: string): string {
+      const frozen = states.has(id) ? undefined : retired.get(id);
+      if (frozen) return frozen.report;
       const s = stateOf(id);
       return statusText(s, badge(s, now()));
     },
@@ -1409,19 +1672,13 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         .filter((s) => s.workspaceId === workspaceId)
         .map((s) => ({ id: s.id, badge: badge(s, now()) }));
     },
-    /** Every foldable expedition, newest launch first (quarantined ledgers are not in `states`). */
+    /** Every foldable expedition and every retired one, newest launch first (quarantined
+     * ledgers are in neither). */
     summaries(): ExpeditionSummary[] {
-      return [...states.values()]
-        .sort((a, b) => b.launchedAt.localeCompare(a.launchedAt))
-        .map((s) => ({
-          id: s.id,
-          name: s.charter.name,
-          run: s.run,
-          workspaceId: s.workspaceId,
-          launchedAt: s.launchedAt,
-          counts: countsOf(s),
-          cost: costTotals(s),
-        }));
+      return [
+        ...[...states.values()].map(expeditionSummary),
+        ...[...retired.values()].filter((r) => !states.has(r.summary.id)).map((r) => r.summary),
+      ].sort((a, b) => b.launchedAt.localeCompare(a.launchedAt));
     },
     /** The expedition a crew Buddy belongs to, so a mentioned crew can answer about itself. */
     ofCrew: crewOf,
@@ -1433,7 +1690,10 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     /** Starts ticking (server.ts: after `interruptBootLive` and execution adoption). */
     start,
     turnDirectory,
-    workspaceOf: (id: string) => stateOf(id).workspaceId,
+    workspaceOf: (id: string) =>
+      states.get(id)?.workspaceId ??
+      retired.get(id)?.summary.workspaceId ??
+      stateOf(id).workspaceId,
     /** Tests drive ticks directly. */
     tick,
     /** Tests: resolves once no validation check job runs and the ticks they woke have settled. */
@@ -1460,6 +1720,25 @@ function requestKey(id: string, attemptId: string, round: 'brief' | 'repair'): s
     case 'repair':
       return `exp:${id}:attempt:${attemptId}:repair`;
   }
+}
+
+/**
+ * The origin tag an expedition ref is archived at: `archive/expeditions/<id>/` plus the attempt
+ * (or validation) id for `refs/heads/exp/<id>/<x>`, `expedition` for the expedition branch, and
+ * `salvage/<tree>` for a salvage pin. Each ref has its own tag, so no tag can be another's prefix
+ * directory (attempt ids are never `salvage` or `expedition`). A ref of no known shape keeps its
+ * full name under `other/`, never silently mapped onto another's tag.
+ */
+export function archiveTag(id: string, ref: string): string {
+  const base = `archive/expeditions/${id}`;
+  const prefixes: [string, string][] = [
+    [`refs/heads/exp/${id}/`, ''],
+    [`refs/salvage/expeditions/${id}/`, 'salvage/'],
+  ];
+  if (ref === `refs/heads/expedition/${id}`) return `${base}/expedition`;
+  for (const [prefix, into] of prefixes)
+    if (ref.startsWith(prefix)) return `${base}/${into}${ref.slice(prefix.length)}`;
+  return `${base}/other/${ref.replace(/^refs\//, '')}`;
 }
 
 /** A posted attempt's phase (the observer reads only posted attempts). */

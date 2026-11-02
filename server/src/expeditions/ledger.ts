@@ -325,6 +325,33 @@ export interface Integration {
   status: IntegrationStatus;
 }
 
+// ---------- Retirement ----------
+
+/**
+ * Where an expedition is in its retirement (plan A6): `active` until the owner asks; `retiring`
+ * while its trees, refs, chats and crew are put away (`refused` names each step the host would
+ * not take, cleared by the owner's next request); `retired` once it is frozen as a snapshot
+ * (retired.ts), never folded again.
+ */
+export type Retirement =
+  | { t: 'active' }
+  | { t: 'retiring'; at: string; by: string; refused: { branch: string; reason: string }[] }
+  | { t: 'retired'; at: string };
+
+/** The chats a retirement archives: the owner↔crew chat and the crew's note-to-self DM, which
+ * holds the attempt requests. Never a DM the crew has with another Buddy. */
+export type RetireChat = 'crew_chat' | 'attempts';
+
+/** What a retirement has put away so far (each step recorded once, in order). */
+export interface Archive {
+  /** Each ref archived as a tag on origin, then deleted locally. */
+  tags: { branch: string; sha: string; tag: string }[];
+  /** `archived`: every expedition ref was archived (git.ts expeditionRefs listed none left). */
+  branches: { t: 'pending' } | { t: 'archived' };
+  chats: RetireChat[];
+  crew: { t: 'active' } | { t: 'archived' };
+}
+
 // ---------- Ledger ----------
 
 export type Entry =
@@ -472,7 +499,22 @@ export type Entry =
   | { t: 'needs_owner'; at: string; question: string }
   | { t: 'status'; at: string; seq: number; text: string }
   | { t: 'status_posted'; at: string; seq: number; postId: string }
-  | { t: 'finished'; at: string; reason: FinishReason; summary: string };
+  | { t: 'finished'; at: string; reason: FinishReason; summary: string }
+  /** The owner asked to retire it (plan A6). `stop`: the owner's stop was recorded with it (the
+   * expedition was still open), so owner_stop finishes it before anything is put away. A second
+   * request while retiring clears the refusals, so the steps run again (retire is idempotent). */
+  | { t: 'retire_requested'; at: string; by: string; stop: boolean }
+  /** `branch` (a full ref name) is archived at `tag` on origin, and deleted locally. */
+  | { t: 'branch_archived'; at: string; branch: string; sha: string; tag: string }
+  /** A step retire would not take: a ref origin does not hold, or a tree it could not remove
+   * (`branch` names its branch). Retirement waits here until the owner asks again. */
+  | { t: 'archive_refused'; at: string; branch: string; reason: string }
+  /** No expedition ref is left in the owner's repository but as a tag on origin. */
+  | { t: 'branches_archived'; at: string }
+  | { t: 'chat_archived'; at: string; chat: RetireChat; channelId: string }
+  | { t: 'crew_archived'; at: string; buddyId: string }
+  /** The last ledger line: the expedition is frozen (retired.ts) and its folder moved away. */
+  | { t: 'retired'; at: string };
 
 // ---------- Derived state ----------
 
@@ -579,6 +621,8 @@ export interface State {
   appliedManagers: Set<string>;
   /** Each interrupted worker attempt's replan, by the interrupted attempt's id. */
   retries: Record<string, string>;
+  retirement: Retirement;
+  archive: Archive;
 }
 
 // ---------- Stored entries (κ for the ledger file) ----------
@@ -683,6 +727,8 @@ export function fold(stored: readonly StoredEntry[]): State {
     statuses: [],
     appliedManagers: new Set(),
     retries: {},
+    retirement: { t: 'active' },
+    archive: { tags: [], branches: { t: 'pending' }, chats: [], crew: { t: 'active' } },
   };
   for (const entry of entries) apply(state, entry);
   return state;
@@ -995,7 +1041,40 @@ export function apply(s: State, e: Entry): void {
       s.run = { t: 'finished', at: e.at, reason: e.reason, summary: e.summary };
       s.doneRequest = { t: 'none' };
       return;
+    case 'retire_requested':
+      if (s.retirement.t === 'retired') throw new Error('retire requested of a retired expedition');
+      s.retirement = { t: 'retiring', at: e.at, by: e.by, refused: [] };
+      return;
+    case 'branch_archived':
+      retiringOf(s);
+      s.archive.tags.push({ branch: e.branch, sha: e.sha, tag: e.tag });
+      return;
+    case 'archive_refused':
+      retiringOf(s).refused.push({ branch: e.branch, reason: e.reason });
+      return;
+    case 'branches_archived':
+      retiringOf(s);
+      s.archive.branches = { t: 'archived' };
+      return;
+    case 'chat_archived':
+      retiringOf(s);
+      s.archive.chats.push(e.chat);
+      return;
+    case 'crew_archived':
+      retiringOf(s);
+      s.archive.crew = { t: 'archived' };
+      return;
+    case 'retired':
+      retiringOf(s);
+      s.retirement = { t: 'retired', at: e.at };
+      return;
   }
+}
+
+/** A retirement step recorded outside `retiring` is a corrupt ledger. */
+function retiringOf(s: State): Extract<Retirement, { t: 'retiring' }> {
+  if (s.retirement.t !== 'retiring') throw new Error(`retirement step while ${s.retirement.t}`);
+  return s.retirement;
 }
 
 function cursorAfter(cursor: ChatCursor, via: FeedbackVia): ChatCursor {

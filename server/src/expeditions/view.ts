@@ -4,6 +4,7 @@ import type {
   ExpeditionCharterView,
   ExpeditionDone,
   ExpeditionIntegration,
+  ExpeditionSummary,
   ExpeditionValidation,
   ExpeditionView,
   ExpeditionWorktree,
@@ -91,6 +92,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       s.crew.t === 'ready'
         ? { t: 'ready' as const, buddyId: s.crew.buddyId, chatChannelId: s.crew.chatChannelId }
         : { t: 'pending' as const },
+    retirement: s.retirement,
     counts: countsOf(s),
     questions: s.questions.map((q) => ({
       ...q,
@@ -117,6 +119,20 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     verifications: verifications(s),
     reflections: s.reflections,
     lessons: s.lessons,
+  };
+}
+
+/** One row of the expedition list; a retired expedition's snapshot keeps it (retired.ts). */
+export function expeditionSummary(s: State): ExpeditionSummary {
+  return {
+    id: s.id,
+    name: s.charter.name,
+    run: s.run,
+    workspaceId: s.workspaceId,
+    launchedAt: s.launchedAt,
+    counts: countsOf(s),
+    cost: costTotals(s),
+    retirement: s.retirement,
   };
 }
 

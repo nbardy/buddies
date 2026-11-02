@@ -60,6 +60,7 @@ const view: ExpeditionView = {
   id: 'widget-abc123',
   badge: '⛺ widget · needs you',
   run: { t: 'waiting_owner', question: 'Should the website be in scope?' },
+  retirement: { t: 'active' },
   charter: {
     name: 'widget',
     // Markdown, as the Buddy writes it (2026-11-01 screenshot: shown as raw text before).
@@ -390,6 +391,7 @@ const summary = (
   launchedAt: '2026-11-01T00:00:00.000Z',
   counts: view.counts,
   cost: view.cost,
+  retirement: { t: 'active' },
 });
 
 async function railHtml(): Promise<string> {

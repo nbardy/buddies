@@ -1,4 +1,12 @@
-import type { Attempt, Round, State, Validation, Worktree, WorktreeStatus } from './ledger';
+import type {
+  Attempt,
+  RetireChat,
+  Round,
+  State,
+  Validation,
+  Worktree,
+  WorktreeStatus,
+} from './ledger';
 import { attemptOf, validationComplete, worktreeOf } from './ledger';
 import {
   type WorkerSpec,
@@ -6,6 +14,7 @@ import {
   custodyOf,
   custodyOverlaps,
   isWorker,
+  live,
   queued,
   settled,
   waitsOn,
@@ -54,10 +63,44 @@ export type Effect =
   | { t: 'post_status'; seq: number; text: string }
   | { t: 'post_badge' }
   /** A finished expedition's live attempt: ask its runs to stop (audit 2026-11-01 #2). */
-  | { t: 'cancel_attempt'; attemptId: string };
+  | { t: 'cancel_attempt'; attemptId: string }
+  // ---------- Retirement (plan A6), in this order, each once the one before it is done ----------
+  /** A tree finish left (`left`, `kept`, or an integration tree never made): released again under
+   * the retire policy (release.ts), which snapshots uncommitted changes instead of refusing. */
+  | { t: 'retire_tree'; tree: RetireTree }
+  /** Every expedition ref archived as a tag on origin, then deleted (git.ts archiveBranch). */
+  | { t: 'archive_branches' }
+  /** The crew chat and the crew's attempts DM archived (never a DM with another Buddy). */
+  | { t: 'archive_chats'; chats: RetireChat[] }
+  /** The crew Buddy archived (its conversations stop). */
+  | { t: 'archive_crew' }
+  /** Everything is put away: the last ledger line, `retired`. */
+  | { t: 'record_retired' }
+  /** The retired ledger frozen as a snapshot and its folder moved to `.retired` (retired.ts). */
+  | { t: 'file_retired' };
 
+/** A tree a retirement removes, one handler each in the host. */
+export type RetireTree =
+  | { t: 'attempt'; attemptId: string }
+  | { t: 'validation'; validationId: string }
+  | { t: 'integration' }
+  | { t: 'manager' };
+
+/** δ over the retirement: an active expedition owes its run's effects, a retiring one those and
+ * then its retirement steps, a retired one only its filing. */
 export function pendingEffects(s: State): Effect[] {
   if (s.crew.t === 'pending') return [{ t: 'create_crew' }];
+  switch (s.retirement.t) {
+    case 'active':
+      return runEffects(s);
+    case 'retiring':
+      return [...runEffects(s), ...retireEffects(s)];
+    case 'retired':
+      return [{ t: 'file_retired' }];
+  }
+}
+
+function runEffects(s: State): Effect[] {
   const finished = s.run.t === 'finished';
   const effects: Effect[] = [
     // Finished: nothing a live attempt does can matter any more, so its runs are asked to stop
@@ -252,6 +295,78 @@ function due(w: Worktree, attempt: Attempt, finished: boolean): boolean {
     case 'removed':
     case 'absent':
     case 'left':
+      return false;
+  }
+}
+
+// ---------- Retirement (plan A6) ----------
+
+const RETIRE_CHATS: readonly RetireChat[] = ['crew_chat', 'attempts'];
+
+/**
+ * The next retirement step, one at a time and only once finishing is over: the run finished, no
+ * attempt is live (a stop's cancel ends them, or the grace abandons them) and no tree is still
+ * held for the finish's own release. A refusal stops the steps until the owner asks again (the
+ * reason is on the page). The last line waits for every finish effect, metering included, so the
+ * snapshot holds the final cost.
+ */
+function retireEffects(s: State): Effect[] {
+  if (s.retirement.t !== 'retiring' || s.retirement.refused.length > 0) return [];
+  if (s.run.t !== 'finished' || live(s).length > 0 || heldTrees(s)) return [];
+  const trees = strandedTrees(s);
+  if (trees.length > 0) return trees.map((tree): Effect => ({ t: 'retire_tree', tree }));
+  if (s.archive.branches.t === 'pending') return [{ t: 'archive_branches' }];
+  const chats = RETIRE_CHATS.filter((c) => !s.archive.chats.includes(c));
+  if (chats.length > 0) return [{ t: 'archive_chats', chats }];
+  if (s.archive.crew.t === 'active') return [{ t: 'archive_crew' }];
+  return runEffects(s).length === 0 ? [{ t: 'record_retired' }] : [];
+}
+
+/** A tree the finish still releases itself (a live tree, or one being made). */
+function heldTrees(s: State): boolean {
+  const held = (status: WorktreeStatus) => status.t === 'creating' || status.t === 'ready';
+  return (
+    Object.values(s.worktrees).some((w) => held(w.status)) ||
+    s.validations.some((v) => v.phase.t === 'started' && held(v.phase.treeStatus)) ||
+    s.integrationTree.status.t === 'ready' ||
+    s.managerTree.t === 'ready'
+  );
+}
+
+/**
+ * Trees finishing left behind (effects.ts used to stop at `left`, a terminal dead end): each
+ * worker, validation and integration tree that was refused or kept, the integration tree a stop
+ * before setup never made (its create may have left a partial), and a manager tree left.
+ */
+function strandedTrees(s: State): RetireTree[] {
+  return [
+    ...Object.values(s.worktrees).flatMap((w): RetireTree[] =>
+      stranded(w.status) ? [{ t: 'attempt', attemptId: w.attemptId }] : []
+    ),
+    ...s.validations.flatMap((v): RetireTree[] =>
+      v.phase.t === 'started' && stranded(v.phase.treeStatus)
+        ? [{ t: 'validation', validationId: v.id }]
+        : []
+    ),
+    ...(stranded(s.integrationTree.status) || s.integrationTree.status.t === 'creating'
+      ? [{ t: 'integration' } as const]
+      : []),
+    ...(s.managerTree.t === 'released' && stranded(s.managerTree.release)
+      ? [{ t: 'manager' } as const]
+      : []),
+  ];
+}
+
+function stranded(status: WorktreeStatus): boolean {
+  switch (status.t) {
+    case 'left':
+    case 'kept':
+      return true;
+    case 'creating':
+    case 'ready':
+    case 'failed':
+    case 'removed':
+    case 'absent':
       return false;
   }
 }

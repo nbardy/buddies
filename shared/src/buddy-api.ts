@@ -359,12 +359,23 @@ export const buddyMutations = {
     status: 200,
     body: z.object({ workspaceId: z.string().min(1) }).strict(),
   },
+  // Retire (server/src/expeditions/routes.ts): `retire` a finished expedition, or
+  // `stop_and_retire` an open one (the owner's stop first). 202: the steps run in the background.
+  'expedition.retire': {
+    method: 'POST',
+    path: '/api/buddies/expeditions/:id/retire',
+    status: 202,
+    body: z.object({ mode: z.enum(['retire', 'stop_and_retire']) }).strict(),
+  },
 } as const;
 
 export type BuddyMutation = keyof typeof buddyMutations;
 /** The mutations server/src/buddies/routes.ts serves; the rest have their own route owners
  * (server/src/upstream, server/src/expeditions). */
-export type BuddyRouteMutation = Exclude<BuddyMutation, 'upstream.update' | 'expedition.launch'>;
+export type BuddyRouteMutation = Exclude<
+  BuddyMutation,
+  'upstream.update' | 'expedition.launch' | 'expedition.retire'
+>;
 type Contract<K extends BuddyMutation> = (typeof buddyMutations)[K];
 export type BuddyMutationBody<K extends BuddyMutation> = z.input<Contract<K>['body']>;
 type WithOptionalKey<T> = T extends { key: string } ? Omit<T, 'key'> & { key?: string } : T;
@@ -421,6 +432,7 @@ export interface BuddyMutationResults {
   read: { ok: boolean };
   'upstream.update': UpstreamUpdateResult;
   'expedition.launch': { expeditionId: string };
+  'expedition.retire': { expeditionId: string };
 }
 export type BuddyMutationRoute<K extends BuddyMutation> =
   `${Contract<K>['method']} ${Contract<K>['status']} ${Contract<K>['path']}`;

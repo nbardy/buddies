@@ -49,6 +49,17 @@ export function expeditionRunLabel(run: ExpeditionRun): string {
   }
 }
 
+/**
+ * Where an expedition is in its retirement (server/src/expeditions/ledger.ts Retirement):
+ * `retiring` while its trees, refs, chats and crew are put away, with each step the host refused
+ * (an archive origin did not confirm, a tree it could not remove) until the owner asks again;
+ * `retired` once it is frozen (GET serves an ExpeditionRetiredView).
+ */
+export type ExpeditionRetirement =
+  | { t: 'active' }
+  | { t: 'retiring'; at: string; by: string; refused: { branch: string; reason: string }[] }
+  | { t: 'retired'; at: string };
+
 /** Where a question stands, derived from the ledger (design.md R5): its furthest stage.
  * `waiting`: its work is queued until the questions in `after` are verified (held, not failed). */
 export type ExpeditionStage =
@@ -178,6 +189,7 @@ export interface ExpeditionView {
   deadline: string;
   now: string;
   crew: { t: 'pending' } | { t: 'ready'; buddyId: string; chatChannelId: string };
+  retirement: ExpeditionRetirement;
   counts: {
     /** Work and check attempts: what the owner's budget counts (design.md R9). */
     attempts: number;
@@ -256,5 +268,13 @@ export interface ExpeditionCrews {
  * channel rail, the expedition index pane and Home show without fetching every full view. */
 export type ExpeditionSummary = Pick<
   ExpeditionView,
-  'id' | 'run' | 'workspaceId' | 'launchedAt' | 'counts' | 'cost'
+  'id' | 'run' | 'workspaceId' | 'launchedAt' | 'counts' | 'cost' | 'retirement'
 > & { name: ExpeditionCharterView['name'] };
+
+/** A retired expedition (GET /api/buddies/expeditions/:id): its frozen summary and its last
+ * status report, read-only. Its ledger is never folded again. */
+export interface ExpeditionRetiredView {
+  t: 'retired';
+  summary: ExpeditionSummary;
+  report: string;
+}

@@ -1,7 +1,7 @@
 import { type ExpeditionCrews, buddyMutations } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import type { DraftLaunch } from './drafts';
-import type { ExpeditionHost } from './host';
+import type { ExpeditionHost, Retire } from './host';
 
 // Owner HTTP for the expedition modal, badge and draft card. Registered after the auth gate (every
 // /api route acts as the owner, like server/src/buddies/routes.ts) and BEFORE the Buddy routes
@@ -72,10 +72,49 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
         // Its ledger does not fold (host.ts quarantine); the reason is the owner's to read.
         res.status(409).json({ error: `expedition ${id} is quarantined: ${found.reason}` });
         return;
+      case 'retired':
+        // Frozen (retired.ts): its summary and last report, read-only.
+        res.json(expeditions.retiredView(id));
+        return;
       case 'present':
         res.json(expeditions.view(id));
     }
   });
+
+  const retire = buddyMutations['expedition.retire'];
+  app.post(retire.path, async (req: Request, res: Response) => {
+    const expeditions = ready(res);
+    if (!expeditions) return;
+    const parsed = retire.body.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const id = String(req.params.id);
+    retireReply(res, id, await expeditions.retire(id, 'owner', parsed.data.mode));
+  });
+}
+
+/** δ: one HTTP answer per retire outcome. A retired expedition answers as a fresh request does:
+ * retire is idempotent (the runbook re-POSTs after fixing a refusal). */
+function retireReply(res: Response, id: string, retired: Retire): void {
+  switch (retired.t) {
+    case 'retiring':
+    case 'already_retired':
+      res.status(retire202).json({ expeditionId: id });
+      return;
+    case 'not_finished':
+      res.status(409).json({ error: `expedition ${id} is still open: stop it and retire` });
+      return;
+    case 'missing':
+      res.status(404).json({ error: `no expedition ${id}` });
+      return;
+    case 'quarantined':
+      res.status(409).json({ error: `expedition ${id} is quarantined: ${retired.reason}` });
+      return;
+    case 'disabled':
+      res.status(409).json({ error: retired.reason });
+  }
 }
 
 /** δ: one HTTP answer per launch outcome; every refusal is the card's inline error text. */
@@ -101,3 +140,4 @@ function launchReply(res: Response, id: string, launched: DraftLaunch): void {
 }
 
 const launch200 = buddyMutations['expedition.launch'].status;
+const retire202 = buddyMutations['expedition.retire'].status;

@@ -719,6 +719,17 @@ buddyEvents.on((event) => {
   if (event.kind === 'changed') buddiesChanged();
 });
 
+/** An archived Buddy's conversations stop: the owner's Archive and an expedition's retire. */
+const onBuddyArchived = (buddyId: string) => {
+  applicationContext.broadcast({ type: 'buddy_archived', buddyId });
+  for (const conversation of conversations.values()) {
+    if (conversation.buddyContext?.buddyId === buddyId) {
+      conversation.clearQueue();
+      conversation.stop();
+    }
+  }
+};
+
 registerExpeditionRoutes(app, () => expeditionHost);
 registerBuddyRoutes(app, {
   core: buddiesCore,
@@ -727,15 +738,7 @@ registerBuddyRoutes(app, {
   channels: buddyChannels,
   uploadsRoot: () => UPLOADS_DIR,
   channelChanged,
-  onBuddyArchived: (buddyId) => {
-    applicationContext.broadcast({ type: 'buddy_archived', buddyId });
-    for (const conversation of conversations.values()) {
-      if (conversation.buddyContext?.buddyId === buddyId) {
-        conversation.clearQueue();
-        conversation.stop();
-      }
-    }
-  },
+  onBuddyArchived,
   createBuilderConversation: async (workingDirectory) => {
     const conversation = await buddyCreationService.createBuddyBuilderConversation({
       commandId: `buddy-builder-${uuidv4()}`,
@@ -957,6 +960,8 @@ void runServerStartup(
             sessionsOf: async (id) => boundSessions(await conversationConfigService.getRecord(id)),
           },
           installed: (provider) => onPath(getHarness(provider).binary, process.env),
+          onBuddyArchived,
+          onChannelArchived: (channelId) => channelChanged(channelId, 'all'),
         })
       );
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).

@@ -89,6 +89,8 @@ export async function fixture() {
       root: at,
       gate,
       installed,
+      onBuddyArchived: () => undefined,
+      onChannelArchived: () => undefined,
       meter: {
         ingest: () => meter.slot,
         sessionsOf: async (id) => {

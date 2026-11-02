@@ -784,8 +784,12 @@ impl Store {
         self.write(|tx| {
             let channel = get_channel(tx, channel_id)?;
             require(tx, actor, Op::ArchiveChannel, &Subject::Channel { id: channel.id.clone() })?;
-            if !matches!(channel.kind, ChannelKind::Public { .. }) {
-                return Err(CoreError::Invalid("only public channels may be archived".into()));
+            // The owner may also archive a direct channel: an expedition's retire archives its
+            // crew's own DMs (server expeditions/host.ts archiveChats). The inbox already skips
+            // any archived channel; `archived_channels` still lists public ones only.
+            match (&channel.kind, actor) {
+                (ChannelKind::Public { .. }, _) | (ChannelKind::Direct { .. }, Actor::Owner) => {}
+                _ => return Err(CoreError::Invalid("only public channels (and, for the owner, direct channels) may be archived".into())),
             }
             let m = Mutation { actor, workspace_id: &channel.workspace_id, buddy_id: actor.buddy_id(), task_id: None,
                 op: "channel.archive", payload: json!({"channel": channel_id, "archived": archived}), key: Some(key) };

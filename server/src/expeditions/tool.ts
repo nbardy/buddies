@@ -4,7 +4,7 @@ import type { BuddyGrant } from '../buddies/grants';
 import type { ToolDeps } from '../buddies/mcp';
 import { createProviderCatalog } from '../providers/catalog-service';
 import { EXTEND_MAX_HOURS } from './briefs';
-import type { ExpeditionHost, Launched } from './host';
+import type { ExpeditionHost, Launched, Retire } from './host';
 import {
   type CharterDefault,
   CharterRequest,
@@ -33,6 +33,7 @@ export const ExpeditionAction = z.discriminatedUnion('do', [
   z.object({ do: z.literal('status'), id: z.string().min(1) }).strict(),
   z.object({ do: z.literal('list') }).strict(),
   z.object({ do: z.literal('steer'), id: z.string().min(1), feedback: Steer }).strict(),
+  z.object({ do: z.literal('retire'), id: z.string().min(1) }).strict(),
 ]);
 export type ExpeditionAction = z.infer<typeof ExpeditionAction>;
 
@@ -169,10 +170,34 @@ export async function expeditionHandler(
       await host.steer(id, grant.buddyId, action.feedback);
       return host.status(id);
     }
+    case 'retire': {
+      notCrew(host, grant, 'retire');
+      const id = ownedBy(host, grant, action.id);
+      return retireAnswer(id, await host.retire(id, grant.buddyId, 'retire'));
+    }
   }
 }
 
-/** The tool row `mcp.ts` registers (kept here: server/src/buddies is at its line ceiling). */
+/** δ: what the Buddy is told per retire outcome; a refusal is an error it can relay. Only a
+ * finished expedition retires through the tool (stop it with steer first). */
+function retireAnswer(id: string, retired: Retire): string {
+  switch (retired.t) {
+    case 'retiring':
+      return `Retiring ${id}: its trees, branches (archived as tags on origin), chats and crew are put away in the background; its page shows the progress.`;
+    case 'already_retired':
+      return `${id} is already retired.`;
+    case 'not_finished':
+      throw new Error(`expedition ${id} is still open: steer it to stop first, then retire it`);
+    case 'missing':
+      throw new Error(`no expedition ${id} here`);
+    case 'quarantined':
+      throw new Error(`expedition ${id} is quarantined: ${retired.reason}`);
+    case 'disabled':
+      throw new Error(retired.reason);
+  }
+}
+
+/** The tool row `mcp.ts` registers (kept beside its handler, with the rest of expeditions). */
 export const EXPEDITION_TOOL = {
   description: EXPEDITION_DESCRIPTION,
   writes: true,
