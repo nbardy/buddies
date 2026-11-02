@@ -13,7 +13,6 @@ import {
   type ExpeditionSummary,
   type ExpeditionValidation,
   type ExpeditionView,
-  type ExpeditionWorktree,
   expeditionRunLabel,
 } from '@unleashd/shared';
 
@@ -129,21 +128,15 @@ export function ownerActions(e: Pick<ExpeditionSummary, 'run' | 'retirement'>): 
   }
 }
 
-/** A worker's dot: queued, live, never started, or ended. */
-export function attemptTone(a: ExpeditionAttempt): Tone {
-  switch (a.phase.t) {
-    case 'planned':
-    case 'admitted':
-      return 'muted';
-    case 'posting':
-    case 'posted':
-      return 'ok';
-    case 'dropped':
-      return 'bad';
-    case 'ended':
-      return 'info';
-  }
-}
+/** How each attempt phase looks, in one place: the dot's tone and the state word on its card. */
+export const PHASE_LOOK: Record<ExpeditionAttempt['phase']['t'], { tone: Tone; state: string }> = {
+  planned: { tone: 'muted', state: 'queued' },
+  admitted: { tone: 'muted', state: 'starting' },
+  posting: { tone: 'ok', state: 'running' },
+  posted: { tone: 'ok', state: 'running' },
+  dropped: { tone: 'bad', state: 'not started' },
+  ended: { tone: 'info', state: 'finished' },
+};
 
 export const STAGE_TONE: Record<ExpeditionStage, Tone> = {
   planned: 'muted',
@@ -201,39 +194,6 @@ export function expeditionGroups(all: readonly ExpeditionSummary[]) {
 
 /** The pill, badge and list label: one definition with the server's badge (shared). */
 export const runLabel = expeditionRunLabel;
-
-export function attemptState(a: ExpeditionAttempt): string {
-  switch (a.phase.t) {
-    case 'planned':
-      return 'queued';
-    case 'admitted':
-      return 'starting';
-    case 'dropped':
-      return 'not started';
-    case 'posting':
-    case 'posted':
-      return 'running';
-    case 'ended':
-      return 'finished';
-  }
-}
-
-/** A worker card's outcome block: what it produced, or why it never started. */
-export type AttemptOutcome = { t: 'none' } | { t: 'outcome'; verdict: string; summary: string };
-
-export function attemptOutcome(a: ExpeditionAttempt): AttemptOutcome {
-  switch (a.phase.t) {
-    case 'planned':
-    case 'admitted':
-    case 'posting':
-    case 'posted':
-      return { t: 'none' };
-    case 'dropped':
-      return { t: 'outcome', verdict: 'Not started', summary: a.phase.reason };
-    case 'ended':
-      return { t: 'outcome', verdict: a.phase.verdict, summary: a.phase.summary };
-  }
-}
 
 /** The header's time: elapsed and left while it runs; how long it took once finished
  * (2026-11-01 review: a finished expedition showed "7h 56m left"). */
@@ -313,25 +273,9 @@ export function attemptCostLine(
   }
 }
 
-/** The header's "now" tile: every attempt running (manager decisions and checks included, as the
- * Workers tab lists them), queued work, verified claims. 2026-11-01 visual pass: the tile read
- * "0 live" while the Workers tab listed the running manager. */
-export function nowLine(v: ExpeditionView): string {
-  return `${v.counts.running} running · ${v.counts.queued} queued · ${v.counts.verified} verified`;
-}
-
 /** The host validations of one attempt's claimed commit, oldest first. */
 export const validationsOf = (all: ExpeditionValidation[], attemptId: string) =>
   all.filter((x) => x.subject.t === 'candidate' && x.subject.claimAttemptId === attemptId);
-
-export function worktreeLine(tree: ExpeditionWorktree): string | null {
-  switch (tree.t) {
-    case 'none':
-      return null;
-    case 'tree':
-      return `branch ${tree.branch}`;
-  }
-}
 
 export const QUESTION_GLYPH: Record<ExpeditionQuestion['status'], string> = {
   open: '○',

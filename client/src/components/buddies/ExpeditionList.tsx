@@ -36,20 +36,40 @@ export function useWorkspaceExpeditions(workspaceId: string) {
 const RAIL_ROWS = 6;
 
 /** The class names of one shell's rail rows: the desktop channel rail or the phone's list. */
-export type RailRowClasses = { row: string; hash: string; name: string };
+export type RailRowClasses = {
+  shell: 'desktop' | 'mobile';
+  row: string;
+  hash: string;
+  name: string;
+};
 
 const DESKTOP_ROW: RailRowClasses = {
+  shell: 'desktop',
   row: '',
   hash: 'channel-browser-hash',
   name: 'channel-browser-channel-name ui-truncate',
 };
 
-/** One expedition as a rail row, shared by both shells so the dot, the emphasis and the
- * needs-you flag cannot drift apart. */
-export function ExpeditionRailRow({
-  expedition: e,
-  classes,
-}: { expedition: ExpeditionSummary; classes: RailRowClasses }) {
+/** Where an expedition is listed: the channel rail (either shell), the index pane or Home. */
+export type RowVariant = { t: 'rail'; classes: RailRowClasses } | { t: 'index' } | { t: 'home' };
+
+/** One expedition as a row, whichever list shows it, so the dot, the pill, the line and the
+ * needs-you flag cannot drift apart. δ over the variant; each handler is one layout. */
+export function ExpeditionRow({
+  expedition,
+  variant,
+}: { expedition: ExpeditionSummary; variant: RowVariant }) {
+  switch (variant.t) {
+    case 'rail':
+      return <RailRow e={expedition} classes={variant.classes} />;
+    case 'index':
+      return <IndexRow e={expedition} />;
+    case 'home':
+      return <HomeRow e={expedition} />;
+  }
+}
+
+function RailRow({ e, classes }: { e: ExpeditionSummary; classes: RailRowClasses }) {
   const open = useOpenExpedition();
   return (
     <li>
@@ -70,9 +90,94 @@ export function ExpeditionRailRow({
   );
 }
 
-/** The rail's last row: the count of every expedition, opening the index pane. */
-export function allExpeditionsLabel(count: number): string {
-  return `All expeditions (${count})`;
+function IndexRow({ e }: { e: ExpeditionSummary }) {
+  const open = useOpenExpedition();
+  const pill = expeditionPill(e);
+  return (
+    <li>
+      <button
+        type="button"
+        className="expedition-index-row"
+        data-needs-you={RUN_LOOK[e.run.t].needsYou || undefined}
+        onClick={() => open(e.id)}
+      >
+        <span className="conversation-row__dot" data-status={RUN_LOOK[e.run.t].dot} />
+        <span className="expedition-index-text ui-stack">
+          <strong className="ui-truncate">{e.name}</strong>
+          <span className="ui-muted ui-truncate">
+            launched {formatRelativeAge(Date.parse(e.launchedAt))} · {e.line}
+          </span>
+        </span>
+        <span className={`expedition-pill expedition-tone-${pill.tone}`}>{pill.label}</span>
+      </button>
+    </li>
+  );
+}
+
+function HomeRow({ e }: { e: ExpeditionSummary }) {
+  const open = useOpenExpedition();
+  return (
+    <li>
+      <button
+        type="button"
+        className="landing-request expedition-home-row"
+        onClick={() => open(e.id)}
+      >
+        {/* data-own-dot: the run-state dot replaces the landing row's accent dot
+            (ChannelLanding.css owns that rule). */}
+        <span className="landing-request-from ui-row" data-own-dot="">
+          <span className="conversation-row__dot" data-status={RUN_LOOK[e.run.t].dot} />
+          {e.name}
+        </span>
+        <span className="landing-request-body">
+          {expeditionPill(e).label} · {e.line}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+/** The rail's last row: the count of every expedition, opening the index pane. Desktop's is a
+ * button, the phone's a link; both read the same label. */
+export function AllExpeditionsRow({
+  workspaceId,
+  count,
+  classes,
+  current,
+}: { workspaceId: string; count: number; classes: RailRowClasses; current: boolean }) {
+  const navigate = useNavigate();
+  const index = channelsHref(workspaceId, { kind: 'expeditions' });
+  const label = (
+    <>
+      <span className={`${classes.hash} ui-muted`} aria-hidden="true">
+        ⋯
+      </span>
+      <span className={classes.name}>{`All expeditions (${count})`}</span>
+    </>
+  );
+  switch (classes.shell) {
+    case 'desktop':
+      return (
+        <li>
+          <button
+            type="button"
+            data-unread="read"
+            aria-current={current ? 'page' : undefined}
+            onClick={() => navigate(index)}
+          >
+            {label}
+          </button>
+        </li>
+      );
+    case 'mobile':
+      return (
+        <li>
+          <Link className={classes.row} data-unread="read" to={index}>
+            {label}
+          </Link>
+        </li>
+      );
+  }
 }
 
 /** The desktop rail's section, between Channels and Buddies, in the rail's own row styling.
@@ -82,7 +187,6 @@ export function RailExpeditions({
   current,
 }: { workspaceId: string; current: boolean }) {
   const { loaded, all, active } = useWorkspaceExpeditions(workspaceId);
-  const navigate = useNavigate();
   if (!loaded || all.length === 0) return null;
   const index = channelsHref(workspaceId, { kind: 'expeditions' });
   return (
@@ -99,23 +203,14 @@ export function RailExpeditions({
       </div>
       <ul className="channel-browser-channels" aria-label="Expeditions">
         {active.slice(0, RAIL_ROWS).map((e) => (
-          <ExpeditionRailRow key={e.id} expedition={e} classes={DESKTOP_ROW} />
+          <ExpeditionRow key={e.id} expedition={e} variant={{ t: 'rail', classes: DESKTOP_ROW }} />
         ))}
-        <li>
-          <button
-            type="button"
-            data-unread="read"
-            aria-current={current ? 'page' : undefined}
-            onClick={() => navigate(index)}
-          >
-            <span className="channel-browser-hash ui-muted" aria-hidden="true">
-              ⋯
-            </span>
-            <span className="channel-browser-channel-name ui-truncate">
-              {allExpeditionsLabel(all.length)}
-            </span>
-          </button>
-        </li>
+        <AllExpeditionsRow
+          workspaceId={workspaceId}
+          count={all.length}
+          classes={DESKTOP_ROW}
+          current={current}
+        />
       </ul>
     </>
   );
@@ -136,17 +231,17 @@ export function ExpeditionList({ workspaceId }: { workspaceId: string }) {
   const retirable = finished.filter((e) => ownerActions(e).t === 'retire');
   return (
     <div className="expedition-index ui-stack">
-      {active.length > 0 && <ExpeditionGroup title="Active" rows={active} />}
+      {active.length > 0 && <ListSection title="Active" rows={active} />}
       {finished.length > 0 && (
-        <ExpeditionGroup title="Finished" rows={finished}>
+        <ListSection title="Finished" rows={finished}>
           {retirable.length > 0 && <RetireAll ids={retirable.map((e) => e.id)} />}
-        </ExpeditionGroup>
+        </ListSection>
       )}
       {retired.length > 0 && (
         // Collapsed: retired expeditions are history, a click away.
         <details className="expedition-index-retired">
           <summary className="expedition-link">{`Retired (${retired.length})`}</summary>
-          <ExpeditionGroup title="Retired" rows={retired} />
+          <ListSection title="Retired" rows={retired} />
         </details>
       )}
     </div>
@@ -179,37 +274,18 @@ function RetireAll({ ids }: { ids: readonly string[] }) {
   );
 }
 
-function ExpeditionGroup({
+function ListSection({
   title,
   rows,
   children,
 }: { title: string; rows: readonly ExpeditionSummary[]; children?: ReactNode }) {
-  const open = useOpenExpedition();
   return (
     <section className="ui-stack" aria-label={title}>
       <h3 className="expedition-index-group ui-muted">{title}</h3>
       {children}
       <ul className="expedition-index-rows">
         {rows.map((e) => (
-          <li key={e.id}>
-            <button
-              type="button"
-              className="expedition-index-row"
-              data-needs-you={RUN_LOOK[e.run.t].needsYou || undefined}
-              onClick={() => open(e.id)}
-            >
-              <span className="conversation-row__dot" data-status={RUN_LOOK[e.run.t].dot} />
-              <span className="expedition-index-text ui-stack">
-                <strong className="ui-truncate">{e.name}</strong>
-                <span className="ui-muted ui-truncate">
-                  launched {formatRelativeAge(Date.parse(e.launchedAt))} · {e.line}
-                </span>
-              </span>
-              <span className={`expedition-pill expedition-tone-${expeditionPill(e).tone}`}>
-                {expeditionPill(e).label}
-              </span>
-            </button>
-          </li>
+          <ExpeditionRow key={e.id} expedition={e} variant={{ t: 'index' }} />
         ))}
       </ul>
     </section>
@@ -236,7 +312,6 @@ export function ExpeditionsPane({ workspaceId }: { workspaceId: string }) {
  * Nothing when none run. */
 export function HomeExpeditions({ workspaceId }: { workspaceId: string }) {
   const { active } = useWorkspaceExpeditions(workspaceId);
-  const open = useOpenExpedition();
   if (active.length === 0) return null;
   const waiting = active.filter((e) => RUN_LOOK[e.run.t].needsYou).length;
   return (
@@ -250,23 +325,7 @@ export function HomeExpeditions({ workspaceId }: { workspaceId: string }) {
       </div>
       <ul className="landing-requests">
         {active.map((e) => (
-          <li key={e.id}>
-            <button
-              type="button"
-              className="landing-request expedition-home-row"
-              onClick={() => open(e.id)}
-            >
-              {/* data-own-dot: the run-state dot replaces the landing row's accent dot
-                  (ChannelLanding.css owns that rule). */}
-              <span className="landing-request-from ui-row" data-own-dot="">
-                <span className="conversation-row__dot" data-status={RUN_LOOK[e.run.t].dot} />
-                {e.name}
-              </span>
-              <span className="landing-request-body">
-                {expeditionPill(e).label} · {e.line}
-              </span>
-            </button>
-          </li>
+          <ExpeditionRow key={e.id} expedition={e} variant={{ t: 'home' }} />
         ))}
       </ul>
     </section>

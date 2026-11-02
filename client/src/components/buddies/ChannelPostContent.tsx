@@ -5,8 +5,7 @@ import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelMarkdown } from './ChannelMarkdown';
 import { EmojiPicker } from './EmojiPicker';
-import { ExpeditionBadge } from './ExpeditionBadge';
-import { ExpeditionDraftCard } from './ExpeditionDraftCard';
+import { ExpeditionBadge, ExpeditionDraftCard } from './ExpeditionCards';
 import { buddyWrite, errorText } from './api';
 import {
   type ExpeditionCard,
