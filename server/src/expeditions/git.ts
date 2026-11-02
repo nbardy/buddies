@@ -28,7 +28,7 @@ const MERGE_TIMEOUT_MS = 15 * 60_000;
 /** A dirty snapshot's `add -A` hashes every changed file of a tree: bounded like an add. */
 const SNAPSHOT_TIMEOUT_MS = 15 * 60_000;
 
-export type GitRun = { t: 'ok'; stdout: string } | { t: 'failed'; message: string };
+export type GitRun<T = string> = { t: 'ok'; stdout: T } | { t: 'failed'; message: string };
 
 /**
  * The only server environment the host's git and Cambium see (audit 2026-11-01 #7): git ran with
@@ -56,45 +56,75 @@ export const gitEnv = (): NodeJS.ProcessEnv => ({
   GIT_TERMINAL_PROMPT: '0',
 });
 
-/** Push and ls-remote reach the owner's remote, so they also get the ssh agent socket: the only
- * calls that do (gitEnv strips it; no local git or Cambium call needs it). */
-const pushEnv = (): NodeJS.ProcessEnv => {
-  const sock = process.env.SSH_AUTH_SOCK;
-  return { ...gitEnv(), ...(sock === undefined ? {} : { SSH_AUTH_SOCK: sock }) };
-};
+/** How a run's stdout is read: trimmed text (a query), or raw bytes (a blob whose bytes are hashed). */
+type Decode<T> = (stdout: Buffer) => T;
+const text: Decode<string> = (stdout) => stdout.toString().trim();
+const bytes: Decode<Buffer> = (stdout) => stdout;
 
-async function run(
+/** The one process call every host git and Cambium invocation goes through (pins.ts included). */
+async function run<T>(
   bin: 'git' | 'git-cambium',
   cwd: string,
   args: string[],
-  opts: { timeout: number; env: NodeJS.ProcessEnv }
-): Promise<GitRun> {
+  opts: { timeout: number; env: NodeJS.ProcessEnv; decode: Decode<T> }
+): Promise<GitRun<T>> {
   try {
     const { stdout } = await exec(bin, args, {
       cwd,
       env: opts.env,
       timeout: opts.timeout,
-      maxBuffer: 16 * 1024 * 1024,
+      encoding: 'buffer',
+      maxBuffer: 64 * 1024 * 1024,
     });
-    return { t: 'ok', stdout: stdout.trim() };
+    return { t: 'ok', stdout: opts.decode(stdout) };
   } catch (error) {
-    const e = error as { stderr?: string; message: string };
-    return { t: 'failed', message: (e.stderr || e.message).trim().slice(-600) };
+    const e = error as { stderr?: Buffer; message: string };
+    return { t: 'failed', message: (e.stderr?.toString() || e.message).trim().slice(-600) };
   }
 }
 
 export const git = (cwd: string, args: string[], timeout = GIT_TIMEOUT_MS) =>
-  run('git', cwd, args, { timeout, env: gitEnv() });
+  run('git', cwd, args, { timeout, env: gitEnv(), decode: text });
 /** Cambium runs as `git-cambium` itself, not through `git cambium`: a timeout must kill the process
  * doing the work, not a `git` wrapper whose child would finish the add after we recorded failure. */
 export const cambium = (cwd: string, args: string[], timeout = GIT_TIMEOUT_MS) =>
-  run('git-cambium', cwd, args, { timeout, env: gitEnv() });
+  run('git-cambium', cwd, args, { timeout, env: gitEnv(), decode: text });
+/** Push and ls-remote reach `origin`, so they alone also get the ssh agent socket (gitEnv strips
+ * it; no local git or Cambium call needs it). */
+const remoteGit = (cwd: string, args: string[]) => {
+  const sock = process.env.SSH_AUTH_SOCK;
+  const env = { ...gitEnv(), ...(sock === undefined ? {} : { SSH_AUTH_SOCK: sock }) };
+  return run('git', cwd, args, { timeout: GIT_TIMEOUT_MS, env, decode: text });
+};
 
-async function must(ran: Promise<GitRun>, what: string): Promise<string> {
+async function must<T>(ran: Promise<GitRun<T>>, what: string): Promise<T> {
   const done = await ran;
   if (done.t === 'failed') throw new Error(`${what} failed: ${done.message}`);
   return done.stdout;
 }
+
+/** A git query read as bytes (a blob, pins.ts): a failure (a timeout, a broken repository) throws. */
+export const gitBytes = (cwd: string, args: string[]) =>
+  must(
+    run('git', cwd, args, { timeout: GIT_TIMEOUT_MS, env: gitEnv(), decode: bytes }),
+    `git ${args[0]}`
+  );
+
+/** The commit a ref or revision names, or nothing there. A git failure reads as `missing`, as
+ * every caller did before this was shared: each then refuses or skips, never invents a commit. */
+export type Tip = { t: 'missing' } | { t: 'at'; sha: string };
+
+export async function tipOf(cwd: string, rev: string): Promise<Tip> {
+  const read = await git(cwd, ['rev-parse', '--verify', '--quiet', `${rev}^{commit}`]);
+  return read.t === 'ok' ? { t: 'at', sha: read.stdout } : { t: 'missing' };
+}
+
+/** Whether anything is at `file` (a file, a directory, a dangling symlink). */
+export const pathExists = (file: string) =>
+  fsp.lstat(file).then(
+    () => true,
+    () => false
+  );
 
 /** Launch preflight (κ at the boundary, design.md R4): a refusal names every reason. */
 export type Preflight =
@@ -112,7 +142,7 @@ export type Preflight =
 export async function preflight(workspaceRoot: string, bins: string[]): Promise<Preflight> {
   const [top, head, tool] = await Promise.all([
     git(workspaceRoot, ['rev-parse', '--show-toplevel']),
-    git(workspaceRoot, ['rev-parse', '--verify', 'HEAD^{commit}']),
+    tipOf(workspaceRoot, 'HEAD'),
     cambium(workspaceRoot, ['version']),
   ]);
   const repoRoot = top.t === 'ok' ? top.stdout : workspaceRoot;
@@ -123,11 +153,11 @@ export async function preflight(workspaceRoot: string, bins: string[]): Promise<
   const missing = (
     await Promise.all([...new Set(bins)].map(async (bin) => ((await resolves(bin)) ? [] : [bin])))
   ).flat();
-  if (top.t === 'ok' && head.t === 'ok' && tool.t === 'ok' && missing.length === 0)
-    return { t: 'ready', root: top.stdout, baseSha: head.stdout };
+  if (top.t === 'ok' && head.t === 'at' && tool.t === 'ok' && missing.length === 0)
+    return { t: 'ready', root: top.stdout, baseSha: head.sha };
   const reasons = [
     top.t === 'failed' ? `workspace root ${workspaceRoot} is not a git repository` : '',
-    head.t === 'failed' ? 'the base commit (HEAD) does not resolve' : '',
+    head.t === 'missing' ? 'the base commit (HEAD) does not resolve' : '',
     tool.t === 'failed' ? '`git cambium` is not available' : '',
     ...missing.map(
       (bin) =>
@@ -157,12 +187,13 @@ const CambiumWorkspace = z.object({
   base_commit: z.string(),
 });
 
-export async function cambiumWorkspace(root: string, name: string) {
-  const listed = z
+const cambiumList = async (root: string) =>
+  z
     .array(CambiumWorkspace.passthrough())
     .parse(JSON.parse(await must(cambium(root, ['list', '--json']), 'cambium list')));
-  return listed.find((w) => w.name === name);
-}
+
+const cambiumWorkspace = async (root: string, name: string) =>
+  (await cambiumList(root)).find((w) => w.name === name);
 
 /** What an interrupted `cambium add` can leave with no registry entry: its branch, its path. */
 export interface Leftovers {
@@ -177,13 +208,10 @@ export const describe = (l: Leftovers, at: WorktreeAt) =>
 
 async function leftovers(root: string, at: WorktreeAt): Promise<Leftovers> {
   const [branch, dir] = await Promise.all([
-    git(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${at.branch}`]),
-    fsp.lstat(at.path).then(
-      () => true,
-      () => false
-    ),
+    tipOf(root, `refs/heads/${at.branch}`),
+    pathExists(at.path),
   ]);
-  return { branch: branch.t === 'ok', dir };
+  return { branch: branch.t === 'at', dir };
 }
 
 /**
@@ -230,16 +258,16 @@ export async function ensureWorktree(
   plan: WorktreeAt,
   lifetime: Lifetime = 'ephemeral'
 ): Promise<MadeWorktree> {
-  const base = await git(root, ['rev-parse', '--verify', `${plan.baseSha}^{commit}`]);
-  if (base.t === 'failed') return { t: 'failed', reason: `commit ${plan.baseSha} does not exist` };
+  const base = await tipOf(root, plan.baseSha);
+  if (base.t === 'missing') return { t: 'failed', reason: `commit ${plan.baseSha} does not exist` };
   const prior = await cambiumWorkspace(root, name);
-  if (prior) return adopted(prior, { ...plan, baseSha: base.stdout });
+  if (prior) return adopted(prior, { ...plan, baseSha: base.sha });
   const stuck = await recoverLeftovers(root, plan);
   if (!nothingLeft(stuck))
     return { t: 'failed', reason: `cambium recover left ${describe(stuck, plan)}` };
   const add = await cambium(
     root,
-    ['add', '-b', plan.branch, '-name', name, ...lifetimeFlags(lifetime), plan.path, base.stdout],
+    ['add', '-b', plan.branch, '-name', name, ...lifetimeFlags(lifetime), plan.path, base.sha],
     ADD_TIMEOUT_MS
   );
   if (add.t === 'failed') {
@@ -249,7 +277,7 @@ export async function ensureWorktree(
   }
   const made = await cambiumWorkspace(root, name);
   if (!made) return { t: 'failed', reason: `cambium add ${name} left no workspace` };
-  return adopted(made, { ...plan, baseSha: base.stdout });
+  return adopted(made, { ...plan, baseSha: base.sha });
 }
 
 function adopted(w: z.infer<typeof CambiumWorkspace>, plan: WorktreeAt): MadeWorktree {
@@ -268,28 +296,12 @@ export type BranchState = { t: 'missing' } | { t: 'present'; shas: string[] };
 
 export async function branchState(root: string, at: WorktreeAt): Promise<BranchState> {
   const ref = `refs/heads/${at.branch}`;
-  const exists = await git(root, ['rev-parse', '--verify', '--quiet', ref]);
-  if (exists.t === 'failed') return { t: 'missing' };
+  if ((await tipOf(root, ref)).t === 'missing') return { t: 'missing' };
   const listed = await must(
     git(root, ['rev-list', '--reverse', `${at.baseSha}..${ref}`]),
     `listing ${at.branch} commits`
   );
   return { t: 'present', shas: listed.split('\n').filter(Boolean) };
-}
-
-/**
- * The commits an attempt made beyond its base, oldest first (design.md R11): what an answer that
- * reported no valid result left on its branch. A missing branch made none (it is never created
- * without the worktree, so nothing was committed on it).
- */
-export async function attemptCommits(root: string, at: WorktreeAt): Promise<string[]> {
-  const branch = await branchState(root, at);
-  switch (branch.t) {
-    case 'missing':
-      return [];
-    case 'present':
-      return branch.shas;
-  }
 }
 
 /** Whether a work claim's `change` is what its attempt branch holds (design.md R2). */
@@ -414,19 +426,19 @@ export async function mergeCandidate(
   message: string,
   expectedHead: string
 ): Promise<Merged> {
-  const interrupted = await git(tree.path, ['rev-parse', '--quiet', '--verify', 'MERGE_HEAD']);
-  if (interrupted.t === 'ok') await must(git(tree.path, ['merge', '--abort']), 'git merge --abort');
+  if ((await tipOf(tree.path, 'MERGE_HEAD')).t === 'at')
+    await must(git(tree.path, ['merge', '--abort']), 'git merge --abort');
   const prior = await priorMerge(tree, sha);
   if (prior) return { t: 'integrated', mergeSha: prior };
   // The branch must be where the ledger left it (audit 2026-11-01 #6): anything else moved it, and
   // merging on top would hand the owner commits no validation ever saw.
-  const head = await git(tree.path, ['rev-parse', '--verify', 'HEAD^{commit}']);
-  if (head.t === 'failed' || head.stdout !== expectedHead)
+  const head = await tipOf(tree.path, 'HEAD');
+  if (head.t === 'missing' || head.sha !== expectedHead)
     return {
       t: 'refused',
       refusal: {
         phase: 'tree',
-        reason: `the expedition branch head is ${head.t === 'ok' ? head.stdout : 'unreadable'}, not ${expectedHead} as the ledger records: it moved outside the host`,
+        reason: `the expedition branch head is ${head.t === 'at' ? head.sha : 'unreadable'}, not ${expectedHead} as the ledger records: it moved outside the host`,
       },
     };
   const blockers = await treeBlockers(tree);
@@ -449,8 +461,7 @@ export async function mergeCandidate(
     };
   const conflicted = await git(tree.path, ['diff', '--name-only', '--diff-filter=U']);
   const paths = conflicted.t === 'ok' ? conflicted.stdout.split('\n').filter(Boolean) : [];
-  const stillMerging = await git(tree.path, ['rev-parse', '--quiet', '--verify', 'MERGE_HEAD']);
-  if (stillMerging.t === 'ok')
+  if ((await tipOf(tree.path, 'MERGE_HEAD')).t === 'at')
     await must(git(tree.path, ['merge', '--abort']), 'git merge --abort');
   return paths.length > 0
     ? { t: 'refused', refusal: { phase: 'merge', paths } }
@@ -486,12 +497,6 @@ async function worktreePaths(root: string): Promise<string[]> {
   );
 }
 
-/** Whether `dir` is a linked worktree of the repository (compared by real path). */
-async function registeredWorktree(root: string, dir: string): Promise<boolean> {
-  const [trees, want] = await Promise.all([worktreePaths(root), canonicalPath(dir)]);
-  return trees.includes(want);
-}
-
 /**
  * Moves a detached tree to `sha`, discarding anything a turn left there: the manager's tree is
  * read-only by contract and host-owned, so every decision starts from the current head.
@@ -512,13 +517,10 @@ export async function ensureDetachedTree(
   sha: string
 ): Promise<MadeWorktree> {
   try {
-    if (!(await registeredWorktree(root, dir))) {
+    if ((await registrationOf(root, dir)).t === 'gone') {
       await git(root, ['worktree', 'prune']);
-      const left = await fsp.lstat(dir).then(
-        () => true,
-        () => false
-      );
-      if (left) return { t: 'failed', reason: `${dir} exists and is not a worktree` };
+      if (await pathExists(dir))
+        return { t: 'failed', reason: `${dir} exists and is not a worktree` };
       const add = await git(
         root,
         ['worktree', 'add', '--quiet', '--detach', dir, sha],
@@ -547,10 +549,7 @@ export type Registration =
   | { t: 'gone' };
 
 export async function registrationOf(root: string, dir: string): Promise<Registration> {
-  const want = await canonicalPath(dir);
-  const listed = z
-    .array(CambiumWorkspace.passthrough())
-    .parse(JSON.parse(await must(cambium(root, ['list', '--json']), 'cambium list')));
+  const [want, listed] = await Promise.all([canonicalPath(dir), cambiumList(root)]);
   const paths = await Promise.all(listed.map((w) => canonicalPath(w.path)));
   const held = listed.find((_, i) => paths[i] === want);
   if (held) return { t: 'cambium', name: held.name };
@@ -585,17 +584,20 @@ export async function snapshotDirty(tree: string, ref: string, message: string):
     await fsp.copyFile(index, temp);
     const env = { ...gitEnv(), GIT_INDEX_FILE: temp };
     const step = (args: string[]) =>
-      must(run('git', tree, args, { timeout: SNAPSHOT_TIMEOUT_MS, env }), `git ${args[0]}`);
+      must(
+        run('git', tree, args, { timeout: SNAPSHOT_TIMEOUT_MS, env, decode: text }),
+        `git ${args[0]}`
+      );
     await step(['add', '-A']);
     const treeSha = await step(['write-tree']);
     // A snapshot already pinned at `ref` (a retire whose forced remove was killed partway, then
     // asked again) is kept as a second parent, never overwritten: the half-deleted tree's new
     // snapshot records deletions, and the first one is the only copy of the uncommitted edits
     // (refs/salvage has no reflog). The update is compare-and-swap against the pin read.
-    const prior = await git(tree, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
-    const parents = prior.t === 'ok' ? ['-p', 'HEAD', '-p', prior.stdout] : ['-p', 'HEAD'];
+    const prior = await tipOf(tree, ref);
+    const parents = prior.t === 'at' ? ['-p', 'HEAD', '-p', prior.sha] : ['-p', 'HEAD'];
     const commit = await step(['commit-tree', treeSha, ...parents, '-m', message]);
-    const old = prior.t === 'ok' ? prior.stdout : '';
+    const old = prior.t === 'at' ? prior.sha : '';
     await must(git(tree, ['update-ref', ref, commit, old]), `pinning ${ref}`);
     return commit;
   } finally {
@@ -633,27 +635,20 @@ export type Archived =
  * the ref where it was: a branch is never deleted while its only copy is local.
  */
 export async function archiveBranch(root: string, ref: string, tag: string): Promise<Archived> {
-  const tip = await git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
-  if (tip.t === 'failed') return { t: 'refused', reason: `${ref} does not resolve to a commit` };
-  const sha = tip.stdout;
+  const tip = await tipOf(root, ref);
+  if (tip.t === 'missing') return { t: 'refused', reason: `${ref} does not resolve to a commit` };
+  const sha = tip.sha;
   const tagRef = `refs/tags/${tag}`;
-  const existing = await git(root, ['rev-parse', '--verify', '--quiet', tagRef]);
-  if (existing.t === 'ok' && existing.stdout !== sha)
-    return { t: 'refused', reason: `tag ${tag} exists at ${existing.stdout}, not at ${sha}` };
-  if (existing.t === 'failed') {
+  const existing = await tipOf(root, tagRef);
+  if (existing.t === 'at' && existing.sha !== sha)
+    return { t: 'refused', reason: `tag ${tag} exists at ${existing.sha}, not at ${sha}` };
+  if (existing.t === 'missing') {
     const made = await git(root, ['update-ref', tagRef, sha, '']);
     if (made.t === 'failed') return { t: 'refused', reason: `creating ${tag}: ${made.message}` };
   }
-  const env = pushEnv();
-  const pushed = await run('git', root, ['push', '--quiet', 'origin', `${tagRef}:${tagRef}`], {
-    timeout: GIT_TIMEOUT_MS,
-    env,
-  });
+  const pushed = await remoteGit(root, ['push', '--quiet', 'origin', `${tagRef}:${tagRef}`]);
   if (pushed.t === 'failed') return { t: 'refused', reason: `pushing ${tag}: ${pushed.message}` };
-  const remote = await run('git', root, ['ls-remote', 'origin', tagRef], {
-    timeout: GIT_TIMEOUT_MS,
-    env,
-  });
+  const remote = await remoteGit(root, ['ls-remote', 'origin', tagRef]);
   if (remote.t === 'failed')
     return { t: 'refused', reason: `reading ${tag} on origin: ${remote.message}` };
   if (remote.stdout !== `${sha}\t${tagRef}`)

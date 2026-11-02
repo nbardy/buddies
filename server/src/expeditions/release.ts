@@ -7,9 +7,11 @@ import {
   branchState,
   cambium,
   git,
+  pathExists,
   registrationOf,
   removeGitOnly,
   snapshotDirty,
+  tipOf,
 } from './git';
 import type { Preserved, Release, WorktreeAt } from './ledger';
 
@@ -63,44 +65,42 @@ const OPERATIONS = [
   'REVERT_HEAD',
 ];
 
-/** Deletes a scratch branch at whatever tip it has (compare-and-delete at the tip read). */
+/** Compare-and-delete: `ref` goes only while it still points at `sha`, so a ref that moved stays. */
+const dropAt = async (root: string, ref: string, sha: string) =>
+  (await git(root, ['update-ref', '-d', ref, sha])).t === 'ok';
+
+const mergedInto = async (root: string, sha: string, into: string) =>
+  (await git(root, ['merge-base', '--is-ancestor', sha, `refs/heads/${into}`])).t === 'ok';
+
+/** Deletes a scratch branch at whatever tip it has. */
 async function dropScratchBranch(root: string, at: WorktreeAt): Promise<boolean> {
   const ref = `refs/heads/${at.branch}`;
-  const tip = await git(root, ['rev-parse', '--verify', '--quiet', ref]);
-  return tip.t === 'ok' && (await git(root, ['update-ref', '-d', ref, tip.stdout])).t === 'ok';
+  const tip = await tipOf(root, ref);
+  return tip.t === 'at' && dropAt(root, ref, tip.sha);
 }
 
 /**
- * Deletes a branch only while it still points at its base: `update-ref -d <ref> <old>` is an
- * atomic compare-and-delete, so a branch with commits is never deleted. Not `cambium remove
- * --delete-branch`: that runs `git branch -d`, which refuses a branch whose base is not merged
- * into the owner's HEAD (every check tree's base is an unmerged candidate commit).
+ * Deletes a branch only while it still points at its base, so a branch with commits is never
+ * deleted. Not `cambium remove --delete-branch`: that runs `git branch -d`, which refuses a branch
+ * whose base is not merged into the owner's HEAD (every check tree's base is an unmerged candidate).
  */
-async function dropEmptyBranch(root: string, at: WorktreeAt): Promise<boolean> {
-  const dropped = await git(root, ['update-ref', '-d', `refs/heads/${at.branch}`, at.baseSha]);
-  return dropped.t === 'ok';
-}
+const dropEmptyBranch = (root: string, at: WorktreeAt) =>
+  dropAt(root, `refs/heads/${at.branch}`, at.baseSha);
 
 /** The branch tip when it holds commits `into` (the expedition branch) does not: unintegrated. */
 async function unintegratedTip(root: string, at: WorktreeAt, into: string) {
-  const tip = await git(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${at.branch}`]);
-  if (tip.t === 'failed' || tip.stdout === at.baseSha) return undefined;
-  const merged = await git(root, ['merge-base', '--is-ancestor', tip.stdout, `refs/heads/${into}`]);
-  return merged.t === 'ok' ? undefined : tip.stdout;
+  const tip = await tipOf(root, `refs/heads/${at.branch}`);
+  if (tip.t === 'missing' || tip.sha === at.baseSha || (await mergedInto(root, tip.sha, into)))
+    return undefined;
+  return tip.sha;
 }
 
-/**
- * Deletes a branch whose tip is already in `into` (the expedition branch): its commits are kept
- * there, so the per-attempt branch is only clutter in the owner's repository. Compare-and-delete
- * at the tip just read, so a branch that moved is never deleted.
- */
+/** Deletes a branch whose tip `into` (the expedition branch) already holds: its commits are kept
+ * there, so the per-attempt branch is only clutter in the owner's repository. */
 async function dropMergedBranch(root: string, at: WorktreeAt, into: string): Promise<boolean> {
   const ref = `refs/heads/${at.branch}`;
-  const tip = await git(root, ['rev-parse', '--verify', '--quiet', ref]);
-  if (tip.t === 'failed') return false;
-  const merged = await git(root, ['merge-base', '--is-ancestor', tip.stdout, `refs/heads/${into}`]);
-  if (merged.t === 'failed') return false;
-  return (await git(root, ['update-ref', '-d', ref, tip.stdout])).t === 'ok';
+  const tip = await tipOf(root, ref);
+  return tip.t === 'at' && (await mergedInto(root, tip.sha, into)) && dropAt(root, ref, tip.sha);
 }
 
 /** Pins `sha` at the salvage ref before anything that names it is deleted. */
@@ -110,17 +110,11 @@ async function salvage(root: string, ref: string, sha: string): Promise<Preserve
   return { t: 'salvaged', ref, sha };
 }
 
-const exists = (file: string) =>
-  fsp.lstat(file).then(
-    () => true,
-    () => false
-  );
-
 async function operationLeft(tree: string, marker: string): Promise<string | undefined> {
   const where = await git(tree, ['rev-parse', '--git-path', marker]);
   if (where.t === 'failed') return marker;
   const file = path.isAbsolute(where.stdout) ? where.stdout : path.join(tree, where.stdout);
-  return (await exists(file)) ? marker : undefined;
+  return (await pathExists(file)) ? marker : undefined;
 }
 
 /**
@@ -159,13 +153,13 @@ async function inspect(tree: TreePath): Promise<Inspection> {
   const [status, on, branch] = await Promise.all([
     git(tree.path, ['status', '--porcelain=v2']),
     git(tree.path, ['symbolic-ref', '--quiet', 'HEAD']),
-    git(tree.path, ['rev-parse', '--verify', '--quiet', `refs/heads/${tree.branch}`]),
+    tipOf(tree.path, `refs/heads/${tree.branch}`),
   ]);
   if (status.t === 'failed')
     return { t: 'unreadable', reason: `git status failed: ${status.message}` };
   const operations = await Promise.all(OPERATIONS.map((m) => operationLeft(tree.path, m)));
   const offBranch =
-    branch.t === 'ok' && (on.t !== 'ok' || on.stdout !== `refs/heads/${tree.branch}`);
+    branch.t === 'at' && (on.t !== 'ok' || on.stdout !== `refs/heads/${tree.branch}`);
   return {
     t: 'readable',
     dirty: dirtyKind(status.stdout),
@@ -332,7 +326,7 @@ async function removeHeld(
 ): Promise<Removal> {
   // A registration whose directory a killed remove already deleted: nothing on disk to guard or
   // harvest, so only the registration goes (its branch commits are still pinned first).
-  if (!(await exists(tree.path))) {
+  if (!(await pathExists(tree.path))) {
     const pinned = await pinFirst();
     return removed(await remove(), pinned);
   }
@@ -359,9 +353,9 @@ const removed = (ran: GitRun, preserved: Preserved[]): Removal =>
  * there is not a worktree, and the host never deletes a directory git does not vouch for.
  */
 async function goneTree(root: string, tree: TreePath): Promise<Removal> {
-  if (!(await exists(tree.path))) return { t: 'gone' };
+  if (!(await pathExists(tree.path))) return { t: 'gone' };
   await cambium(root, ['recover', '--json']);
-  return (await exists(tree.path))
+  return (await pathExists(tree.path))
     ? { t: 'left', reason: `${tree.path} remains but is not a registered worktree`, preserved: [] }
     : { t: 'gone' };
 }

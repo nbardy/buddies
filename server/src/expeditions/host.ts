@@ -22,8 +22,8 @@ import { killCheck, pidfileOf, runCommand } from './command';
 import { type DraftInput, type LaunchOutcome, createDraftStore, placementOf } from './drafts';
 import {
   archiveBranch,
-  attemptCommits,
   branchHead,
+  branchState,
   claimHeld,
   ensureDetachedTree,
   ensureWorktree,
@@ -452,8 +452,16 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
    */
   async function unreported(s: State, attempt: Attempt, outcome: EndOutcome): Promise<Outcome> {
     if (attempt.spec.kind !== 'work' || reportsCommit(outcome)) return outcome;
-    const shas = await attemptCommits(s.repo.root, worktreeOf(s, attempt.id));
-    return shas.length === 0 ? outcome : { t: 'unreported_commits', shas, ended: outcome };
+    // A missing branch made no commits: it is never created without the worktree.
+    const branch = await branchState(s.repo.root, worktreeOf(s, attempt.id));
+    switch (branch.t) {
+      case 'missing':
+        return outcome;
+      case 'present':
+        return branch.shas.length === 0
+          ? outcome
+          : { t: 'unreported_commits', shas: branch.shas, ended: outcome };
+    }
   }
 
   /**
