@@ -23,7 +23,11 @@ function buddyTurn(conversationId: string, attemptId: string): FoundExecution {
       provider: 'claude',
       policy: {
         t: 'buddy',
-        run: { runId: `run-${attemptId}`, leaseToken: `lease-${attemptId}` },
+        run: {
+          runId: `run-${attemptId}`,
+          leaseToken: `lease-${attemptId}`,
+          context: { buddyId: `buddy-${conversationId}` },
+        },
       },
     },
   } as unknown as FoundExecution;
@@ -54,6 +58,7 @@ test('different conversations adopt concurrently; one conversation adopts in sca
     attach: () => ({}) as ExecutionHandle,
     discard: () => undefined,
     attemptInterrupted: () => undefined,
+    crews: { crewBuddyIds: () => new Set() },
     logger: { log: () => undefined, warn: () => undefined, error: () => undefined },
   };
   const adopted = await adoptExecutions(journals, ports);

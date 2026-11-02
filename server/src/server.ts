@@ -64,7 +64,7 @@ import { type BootedIngest, bootIngest } from './ingest/boot';
 import { type ConversationList, forEachConcurrently } from './ingest/conversation-list';
 import { currentIngest } from './ingest/instance';
 import { createRuntimeBuilder } from './ingest/runtimes';
-import { adoptExecutions, liveGrants } from './lifecycle/adopt-executions';
+import { adoptExecutions, crewExecutions, liveGrants } from './lifecycle/adopt-executions';
 import { type ShutdownController, registerShutdownHandlers } from './lifecycle/shutdown';
 import { runServerStartup } from './lifecycle/startup';
 import { registerStaticClient } from './lifecycle/static-client';
@@ -118,7 +118,7 @@ import { admitExecution, decideExecutionGate } from './buddies/execution-gate';
 import { createGrants } from './buddies/grants';
 import { type McpEndpoint, startMcpEndpoint } from './buddies/mcp';
 import { createMemoryReviewer } from './buddies/memory-review';
-import { createBuddyPolicyPort } from './buddies/policy-port';
+import { type CrewRegistry, createBuddyPolicyPort } from './buddies/policy-port';
 import { registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
@@ -359,6 +359,10 @@ const buddyBriefings = createBriefings(
 );
 let buddyMcp: McpEndpoint | null = null;
 let expeditionHost: ExpeditionHost | null = null;
+// The expedition crews: adoption, session scope and shutdown ask it (policy-port.ts CrewRegistry).
+// No crews until slice A5 makes the expedition host implement `crewBuddyIds()` and wires it here.
+const NO_CREWS: ReadonlySet<string> = new Set();
+const crewRegistry: CrewRegistry = { crewBuddyIds: () => NO_CREWS };
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {
   if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
   return buddyMcp.spec(grant);
@@ -515,6 +519,7 @@ const buddyPolicyPort = createBuddyPolicyPort({
     if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
     return { hookUrl: buddyMcp.hookUrl };
   },
+  crews: crewRegistry,
 });
 const Conversation = createConversationRuntime({
   // Chat and Builder owner messages are rows of the records store (turns/intake.ts).
@@ -854,6 +859,10 @@ shutdownController = registerShutdownHandlers(
         await ingest.stop();
       }
     },
+    discardCrewTurns: () => {
+      for (const found of crewExecutions(executionJournals.scan(), crewRegistry.crewBuddyIds()))
+        executionJournals.discard(found);
+    },
     exit: (code = 0) => process.exit(code),
     kill: () => process.kill(process.pid, 'SIGKILL'),
   }
@@ -1059,6 +1068,7 @@ void runServerStartup(
             state: 'interrupted',
             terminalCause: 'server_restart',
           }),
+        crews: crewRegistry,
         logger: console,
       });
       bootPhase('adoption', performance.now() - adoptionStarted);

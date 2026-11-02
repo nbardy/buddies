@@ -61,6 +61,7 @@ export function fakeBuddyPort(
       execution: { kind: 'run', provider: 'codex', model: undefined, reasoningEffort: undefined },
       ...(options.briefing?.(context) ?? { briefing: 'FIXTURE_BRIEFING', memoryGeneration: '1' }),
     }),
+    sessionScope: () => ({ t: 'durable' }),
     queueChat:
       options.queueChat ??
       ((_context, conversationId, turnId, body) =>

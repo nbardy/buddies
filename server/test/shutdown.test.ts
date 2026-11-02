@@ -55,6 +55,7 @@ function createFixture(activeInitially: boolean) {
     exit: () => {
       exits += 1;
     },
+    discardCrewTurns: () => undefined,
     kill: () => {
       kills += 1;
     },
@@ -223,6 +224,7 @@ test('reload resumes the scheduler when pausing reveals newly active work', asyn
     exit: () => {
       exits += 1;
     },
+    discardCrewTurns: () => undefined,
     kill: () => undefined,
   });
   assert.equal(controller.completeStartup(), true);
@@ -273,6 +275,7 @@ for (const exit of ['reload', 'SIGTERM'] as const) {
       exit: () => {
         exited += 1;
       },
+      discardCrewTurns: () => undefined,
       kill: () => undefined,
     });
     t.after(() => {
@@ -320,7 +323,7 @@ test('a backend exits when its dev runner goes away', async (t) => {
        const controller = registerShutdownHandlers({ forceExitGraceMs: 1000, flushGraceMs: 1000 }, {
          activeSchedulerRuns: () => 0, pauseScheduler() {},
          resumeScheduler() {}, stopScheduler() {}, flushState() {},
-         exit: (code) => process.exit(code), kill() {},
+         discardCrewTurns() {}, exit: (code) => process.exit(code), kill() {},
        });
        controller.completeStartup();
        setInterval(() => {}, 1000);
