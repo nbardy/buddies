@@ -1,49 +1,7 @@
-import type {
-  Attempt,
-  AttemptSpec,
-  Charter,
-  CheckSpec,
-  Claim,
-  Question,
-  ShownEntry,
-  State,
-  Verification,
-  WorkSpec,
-} from './model';
-import {
-  acceptanceLabel,
-  allAttempts,
-  attemptsOn,
-  changeLabel,
-  claimOf,
-  costTotals,
-  doneCheckLabel,
-  exploreCap,
-  feedbackText,
-  integrationLabel,
-  integrationOf,
-  liveWorkers,
-  managerCap,
-  managerDirectory,
-  managerTurns,
-  outcomeDetail,
-  questionOf,
-  questionStage,
-  queued,
-  seatLabel,
-  treeKey,
-  validationLabel,
-  validationOf,
-  verifications,
-  waitsOn,
-  workerAttempts,
-  worktreeOf,
-} from './model';
+import * as m from './model';
 
-// What each attempt is told. Every brief is rebuilt from the ledger, so lessons and verified
-// results reach every later attempt (expeditions/design.md "Knowledge flows through the Ledger").
+// What each attempt is told, rebuilt from the ledger so lessons reach every later attempt.
 
-/** The crew Buddy's role: short, because it rides every turn's briefing. */
 export const CREW_ROLE = [
   'Expedition crew. Each request you receive is one attempt of an expedition: a manager decision,',
   'a work attempt, or an independent check. Do exactly that one attempt, then answer the request.',
@@ -56,58 +14,49 @@ export const CREW_ROLE = [
 
 const JSON_RULE = 'End your final message with exactly one fenced ```json block, nothing after it.';
 
-function doneText(done: Charter['done']): string {
-  switch (done.t) {
-    case 'checks':
-      return done.checks.map((x, i) => `- [${i}] ${doneCheckLabel(x)}`).join('\n');
-    case 'owner':
-      return '- The owner judges completion (no mechanical check).';
-  }
-}
+const sections = (parts: string[]) => parts.filter(Boolean).join('\n\n');
+const bullets = (items: string[], none: string) => items.map((x) => `- ${x}`).join('\n') || none;
 
-function charterText(c: Charter): string {
+function charterText(c: m.Charter): string {
+  const done =
+    c.done.t === 'checks'
+      ? c.done.checks.map((x, i) => `- [${i}] ${m.doneCheckLabel(x)}`).join('\n')
+      : '- The owner judges completion (no mechanical check).';
   return [
     `GOAL: ${c.goal}`,
-    `DONE WHEN:\n${doneText(c.done)}`,
-    `IN SCOPE:\n${c.inScope.map((x) => `- ${x}`).join('\n') || '- (not listed)'}`,
-    `OUT OF SCOPE:\n${c.outOfScope.map((x) => `- ${x}`).join('\n') || '- (not listed)'}`,
+    `DONE WHEN:\n${done}`,
+    `IN SCOPE:\n${bullets(c.inScope, '- (not listed)')}`,
+    `OUT OF SCOPE:\n${bullets(c.outOfScope, '- (not listed)')}`,
   ].join('\n\n');
 }
 
-function lessonsText(s: State): string {
-  return s.lessons.length
-    ? `OWNER LESSONS (binding):\n${s.lessons.map((x) => `- ${x}`).join('\n')}`
-    : '';
-}
+const lessonsText = (s: m.State) =>
+  s.lessons.length ? `OWNER LESSONS (binding):\n${bullets(s.lessons, '')}` : '';
 
-function questionLine(s: State, q: Question): string {
+function questionLine(s: m.State, q: m.Question): string {
   const after = q.after.length > 0 ? ` (after: ${q.after.join(', ')})` : '';
-  return `- ${q.id} [${q.scope}/${q.status}, stage ${questionStage(s, q)}] ${q.title} (paths: ${q.paths.join(', ')})${after}; accepted by ${acceptanceLabel(q.acceptance.rule)} — ${attemptsOn(s, q.id).length} attempts`;
+  return `- ${q.id} [${q.scope}/${q.status}, stage ${m.questionStage(s, q)}] ${q.title} (paths: ${q.paths.join(', ')})${after}; accepted by ${m.acceptanceLabel(q.acceptance.rule)} — ${m.attemptsOn(s, q.id).length} attempts`;
 }
 
-/** Questions counted by stage (design.md R5): waiting is held work, never a failure. */
-function stagesText(s: State): string {
-  const counts = new Map<string, number>();
-  for (const q of s.questions) {
-    const stage = questionStage(s, q);
-    counts.set(stage, (counts.get(stage) ?? 0) + 1);
-  }
-  return counts.size === 0
-    ? ''
-    : `STAGES: ${[...counts].map(([stage, n]) => `${n} ${stage}`).join(', ')}`;
-}
+const questionsText = (s: m.State, none: string) =>
+  `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || none}`;
 
-/** Every validation so far, newest last: what the host ran and how each check ended. */
-function validationsText(s: State): string {
-  return `VALIDATIONS (host-run commands: a question's command acceptance on a candidate, the DONE WHEN commands on the head at done):\n${s.validations.map((v) => `- ${validationLabel(s, v)}`).join('\n') || '- none yet'}`;
-}
+const attemptsText = (s: m.State, attempts: m.Attempt[]) =>
+  `ATTEMPTS:\n${attempts.map((a) => `- ${a.id} ${specLine(a.spec)}: ${phaseDetail(s, a)}`).join('\n') || '- none'}`;
 
-/** Every merge into the expedition branch so far, in order. */
-function integrationsText(s: State): string {
-  return `INTEGRATION (the host merges validated claims into ${s.repo.branch}, one at a time; new work starts at its head):\n${s.integrations.map((i) => `- ${integrationLabel(s, i)}`).join('\n') || '- nothing merged yet'}`;
-}
+const validationsText = (s: m.State) =>
+  `VALIDATIONS (host-run commands: a question's command acceptance on a candidate, the DONE WHEN commands on the head at done):\n${bullets(
+    s.validations.map((v) => m.validationLabel(s, v)),
+    '- none yet'
+  )}`;
 
-function specLine(spec: AttemptSpec): string {
+const integrationsText = (s: m.State) =>
+  `INTEGRATION (the host merges validated claims into ${s.repo.branch}, one at a time; new work starts at its head):\n${bullets(
+    s.integrations.map((i) => m.integrationLabel(s, i)),
+    '- nothing merged yet'
+  )}`;
+
+function specLine(spec: m.AttemptSpec): string {
   switch (spec.kind) {
     case 'manager':
       return 'manager';
@@ -118,18 +67,14 @@ function specLine(spec: AttemptSpec): string {
   }
 }
 
-function attemptLine(s: State, a: Attempt): string {
-  return `- ${a.id} ${specLine(a.spec)}: ${phaseDetail(s, a)}`;
-}
-
-function phaseDetail(s: State, a: Attempt): string {
+function phaseDetail(s: m.State, a: m.Attempt): string {
   switch (a.phase.t) {
     case 'ended':
-      return outcomeDetail(a.phase.outcome);
+      return m.outcomeDetail(a.phase.outcome);
     case 'dropped':
       return `NOT STARTED (no worktree): ${a.phase.reason}`;
     case 'planned': {
-      const deps = waitsOn(s, a);
+      const deps = m.waitsOn(s, a);
       return deps.length > 0 ? `waiting for ${deps.join(', ')} to be verified` : 'planned';
     }
     case 'admitted':
@@ -139,49 +84,47 @@ function phaseDetail(s: State, a: Attempt): string {
   }
 }
 
-/** One line of a manager's "new since" (ledger.ts ENTRY names which kinds it may be shown). */
-function shownLine(s: State, e: ShownEntry): string {
+function shownLine(s: m.State, e: m.ShownEntry): string {
   switch (e.t) {
     case 'validation':
-      return `- ${validationLabel(s, validationOf(s, e.validationId))}`;
+    case 'validation_failed':
+      return `- ${m.validationLabel(s, m.validationOf(s, e.validationId))}`;
     case 'done_refused':
       return `- DONE REFUSED: ${e.reason}`;
     case 'integrated':
     case 'integration_refused':
-      return `- ${integrationLabel(s, integrationOf(s, e.integrationId))}`;
+      return `- ${m.integrationLabel(s, m.integrationOf(s, e.integrationId))}`;
     case 'attempt_ended':
-      return `- ${e.attemptId} ended: ${outcomeDetail(e.outcome)}`;
+      return `- ${e.attemptId} ended: ${m.outcomeDetail(e.outcome)}`;
     case 'tree_failed':
-      return `- ${treeKey(e.tree)} NOT STARTED, its worktree could not be made: ${e.reason}`;
+      return `- ${m.treeKey(e.tree)} NOT STARTED, its worktree could not be made: ${e.reason}`;
     case 'rejected':
       return `- REJECTED ${e.action.do}: ${e.reason}`;
     case 'feedback':
-      return `- OWNER ${feedbackText(e.feedback, (text) => text)}`;
+      return `- OWNER ${m.feedbackText(e.feedback, (text) => text)}`;
     case 'question_added':
-      return `- QUESTION ADDED ${e.questionId} [${e.scope}] ${e.title} (paths: ${e.paths.join(', ')}; accepted by ${acceptanceLabel(e.acceptance)}): start work on it by this id`;
-    case 'validation_failed':
-      return `- ${validationLabel(s, validationOf(s, e.validationId))}`;
+      return `- QUESTION ADDED ${e.questionId} [${e.scope}] ${e.title} (paths: ${e.paths.join(', ')}; accepted by ${m.acceptanceLabel(e.acceptance)}): start work on it by this id`;
     case 'claim_adopted':
       return `- CLAIM ADOPTED for ${e.attemptId}: its commit is now its claim (validated or checked as its question's acceptance says)`;
     case 'claim_refused':
       return `- CLAIM REFUSED for ${e.attemptId}: ${e.reason}`;
     case 'acceptance_set':
-      return `- ACCEPTANCE SET for ${e.questionId}: ${acceptanceLabel(e.acceptance)} (its unmerged claims are validated again under it)`;
+      return `- ACCEPTANCE SET for ${e.questionId}: ${m.acceptanceLabel(e.acceptance)} (its unmerged claims are validated again under it)`;
   }
 }
 
-function managerBrief(s: State, id: string): string {
+function managerBrief(s: m.State, id: string): string {
   const c = s.charter;
-  return [
+  return sections([
     `[expedition ${s.id} · ${c.name} · MANAGER]`,
     'You manage this expedition for one decision. Read the state, decide the next actions, answer.',
     charterText(c),
     lessonsText(s),
-    `YOUR DIRECTORY: ${managerDirectory(s)} (your own detached checkout of the expedition branch head, reset before every decision). Read only: never edit or commit there; the host merges in its own tree.`,
-    `LIMITS: ${workerAttempts(s)}/${c.maxAttempts} work and check attempts used, ${liveWorkers(s).length} live, ${queued(s).length} queued, max ${c.maxLive} live. Explore questions may use at most ${exploreCap(c)} work attempts. This is decision ${managerTurns(s)} of at most ${managerCap(c)}; you are woken only when there is something to act on, never to wait for the host.`,
-    `CREW: work seats ${c.crew.work.map((w, i) => `${i}=${seatLabel(w)}`).join(', ')}. Checks run on ${c.crew.check.map(seatLabel).join(', ')}, never on the claim's own model; a panel of n checks verifies by majority. Spread competing approaches across seats.`,
-    `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet: plan first'}`,
-    `ATTEMPTS:\n${s.workers.map((a) => attemptLine(s, a)).join('\n') || '- none'}`,
+    `YOUR DIRECTORY: ${m.managerDirectory(s)} (your own detached checkout of the expedition branch head, reset before every decision). Read only: never edit or commit there; the host merges in its own tree.`,
+    `LIMITS: ${m.workerAttempts(s)}/${c.maxAttempts} work and check attempts used, ${m.liveWorkers(s).length} live, ${m.queued(s).length} queued, max ${c.maxLive} live. Explore questions may use at most ${m.exploreCap(c)} work attempts. This is decision ${m.managerTurns(s)} of at most ${m.managerCap(c)}; you are woken only when there is something to act on, never to wait for the host.`,
+    `CREW: work seats ${c.crew.work.map((w, i) => `${i}=${m.seatLabel(w)}`).join(', ')}. Checks run on ${c.crew.check.map(m.seatLabel).join(', ')}, never on the claim's own model; a panel of n checks verifies by majority. Spread competing approaches across seats.`,
+    questionsText(s, '- none yet: plan first'),
+    attemptsText(s, s.workers),
     validationsText(s),
     integrationsText(s),
     `NEW SINCE YOUR LAST DECISION:\n${s.shown[id].map((e) => shownLine(s, e)).join('\n') || '- nothing'}`,
@@ -202,77 +145,63 @@ function managerBrief(s: State, id: string): string {
       '- "done" needs the latest goal check verified (when there are judged items); the host then runs every command check on the head, and refuses done unless all pass. "ask_owner" only for a decision only the owner can make.',
       '- Work and check attempts are run by other agents with fresh context: write each work brief self-contained.',
     ].join('\n'),
-    answerFormat('manager'),
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+    ANSWER_FORMAT.manager,
+  ]);
 }
 
-/** What each attempt kind must answer: its brief's last section, and the repair request's. */
-function answerFormat(kind: AttemptSpec['kind']): string {
-  switch (kind) {
-    case 'manager':
-      return [
-        'ANSWER: a JSON object {"actions":[...]} where each action is one of:',
-        '{"do":"add_question","title":"…","detail":"…","scope":"in"|"explore"|"parked","paths":["<repo-relative prefix the work may edit>"],"after":["<existing question id>"] (optional),"acceptance":{"t":"command","argv":["<exe>","<arg>"],"timeoutSeconds":<n>}|{"t":"panel"}}',
-        '{"do":"set_acceptance","question":"<question id>","acceptance":{"t":"command","argv":[…],"timeoutSeconds":<n>}|{"t":"panel"}}',
-        '{"do":"work","question":"<question id>","seat":<work seat index>,"brief":"<self-contained instructions and the approach to try>"}',
-        '{"do":"check","claimAttempt":"<work attempt id>","goal":true|false,"panel":1|2|3}',
-        '{"do":"claim","attempt":"<work attempt id that ended malformed or with unreported commits>","claim":{"statement":"…","sha":"<full sha on its branch>","evidence":["…"],"howToCheck":"…"}}',
-        '{"do":"integrate","claimAttempt":"<work attempt id whose claim passed>"}',
-        '{"do":"close_question","question":"<id>","status":"verified"|"dead","why":"…"}',
-        '{"do":"ask_owner","question":"…"}',
-        '{"do":"done","summary":"<for the owner: what is true now, tasks by title, no attempt or validation ids>"}',
-        '{"do":"note","text":"<your reflection: what is working, what is not>"}',
-        'Question ids for new questions are assigned by the host: the next decision is shown them and starts work on them.',
-        JSON_RULE,
-      ].join('\n');
-    case 'work':
-      return [
-        'ANSWER: one of',
-        '{"result":"claim","statement":"<what is now true>","change":{"t":"commit","sha":"<full sha of your commit in YOUR WORKTREE>"} or {"t":"no_code"},"evidence":["<commit/file/test/number>"],"howToCheck":"<how an independent agent can verify it>"}',
-        '{"result":"finding","statement":"<negative or partial result>","evidence":["…"]}',
-        '{"result":"blocked","need":"<what is missing>"}',
-        JSON_RULE,
-      ].join('\n');
-    case 'check':
-      return ['ANSWER: {"verdict":"verified"|"refuted"|"unclear","why":"…"}', JSON_RULE].join('\n');
-  }
-}
+const ANSWER_FORMAT: Record<m.AttemptSpec['kind'], string> = {
+  manager: [
+    'ANSWER: a JSON object {"actions":[...]} where each action is one of:',
+    '{"do":"add_question","title":"…","detail":"…","scope":"in"|"explore"|"parked","paths":["<repo-relative prefix the work may edit>"],"after":["<existing question id>"] (optional),"acceptance":{"t":"command","argv":["<exe>","<arg>"],"timeoutSeconds":<n>}|{"t":"panel"}}',
+    '{"do":"set_acceptance","question":"<question id>","acceptance":{"t":"command","argv":[…],"timeoutSeconds":<n>}|{"t":"panel"}}',
+    '{"do":"work","question":"<question id>","seat":<work seat index>,"brief":"<self-contained instructions and the approach to try>"}',
+    '{"do":"check","claimAttempt":"<work attempt id>","goal":true|false,"panel":1|2|3}',
+    '{"do":"claim","attempt":"<work attempt id that ended malformed or with unreported commits>","claim":{"statement":"…","sha":"<full sha on its branch>","evidence":["…"],"howToCheck":"…"}}',
+    '{"do":"integrate","claimAttempt":"<work attempt id whose claim passed>"}',
+    '{"do":"close_question","question":"<id>","status":"verified"|"dead","why":"…"}',
+    '{"do":"ask_owner","question":"…"}',
+    '{"do":"done","summary":"<for the owner: what is true now, tasks by title, no attempt or validation ids>"}',
+    '{"do":"note","text":"<your reflection: what is working, what is not>"}',
+    'Question ids for new questions are assigned by the host: the next decision is shown them and starts work on them.',
+    JSON_RULE,
+  ].join('\n'),
+  work: [
+    'ANSWER: one of',
+    '{"result":"claim","statement":"<what is now true>","change":{"t":"commit","sha":"<full sha of your commit in YOUR WORKTREE>"} or {"t":"no_code"},"evidence":["<commit/file/test/number>"],"howToCheck":"<how an independent agent can verify it>"}',
+    '{"result":"finding","statement":"<negative or partial result>","evidence":["…"]}',
+    '{"result":"blocked","need":"<what is missing>"}',
+    JSON_RULE,
+  ].join('\n'),
+  check: ['ANSWER: {"verdict":"verified"|"refuted"|"unclear","why":"…"}', JSON_RULE].join('\n'),
+};
 
-/** Longest part of a malformed answer quoted back in its repair request. */
 const REPAIR_QUOTE = 6000;
 
-/**
- * The one repair request a malformed answer gets (design.md R11), on the same seat and, for a
- * worker, in the same worktree (host.ts matches its run by these bytes). 2026-11-01 incident: a
- * manager answered a bare JSON object and a worker a prose summary of its commit; both were
- * dropped as malformed with no second chance.
- */
-export function repairBrief(s: State, attempt: Attempt, error: string, raw: string): string {
+/** The one repair request a malformed answer gets (R11), on the same seat and worktree
+ * (2026-11-01: a bare JSON object and a prose answer were dropped unrepaired). */
+export function repairBrief(s: m.State, attempt: m.Attempt, error: string, raw: string): string {
   const quoted = raw.length > REPAIR_QUOTE ? `…${raw.slice(-REPAIR_QUOTE)}` : raw;
   return [
     `[expedition ${s.id} · ${s.charter.name} · REPAIR ${attempt.id}]`,
     `Your answer to attempt ${attempt.id} could not be read (${error}). Do not redo the work: reply with the same result in the required format. Your answer must end with the json block.`,
-    answerFormat(attempt.spec.kind),
+    ANSWER_FORMAT[attempt.spec.kind],
     `YOUR PREVIOUS ANSWER:\n${quoted}`,
   ].join('\n\n');
 }
 
-function workBrief(s: State, id: string, spec: WorkSpec): string {
-  const q = questionOf(s, spec.questionId);
-  const tree = worktreeOf(s, id);
-  // The derived verifications (queries.ts derive), so a claim a later panel refuted is not
-  // listed: before, every check that answered `verified` was, by its check id alone.
-  const verified = verifications(s).map((v) => `- ${verificationLine(v)}`);
+function workBrief(s: m.State, id: string, spec: m.WorkSpec): string {
+  const q = m.questionOf(s, spec.questionId);
+  const tree = m.worktreeOf(s, id);
+  // The derived verifications: a claim a later panel refuted is not listed.
+  const verified = m.verifications(s).map((v) => `- ${verificationLine(v)}`);
   const findings = s.workers.flatMap((x) =>
     x.phase.t === 'ended' &&
     x.phase.outcome.t === 'work' &&
     x.phase.outcome.result.result !== 'blocked'
-      ? [`- ${x.id}: ${outcomeDetail(x.phase.outcome)}`]
+      ? [`- ${x.id}: ${m.outcomeDetail(x.phase.outcome)}`]
       : []
   );
-  return [
+  return sections([
     `[expedition ${s.id} · ${s.charter.name} · WORK ${id}]`,
     charterText(s.charter),
     lessonsText(s),
@@ -282,7 +211,7 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
       `YOUR WORKTREE: ${tree.path} (branch ${tree.branch}, based on ${tree.baseSha}).`,
       'Your turn starts there. Work and commit ONLY in that directory, on that branch. Never edit any other',
       `checkout. Your files: ${q.paths.join(', ')}. A code claim must name its commit's full sha.`,
-      `Your claim is accepted by ${acceptanceLabel(q.acceptance.rule)}.`,
+      `Your claim is accepted by ${m.acceptanceLabel(q.acceptance.rule)}.`,
     ].join(' '),
     `WHAT OTHERS FOUND:\n${findings.join('\n') || '- nothing yet'}${verified.length ? `\n${verified.join('\n')}` : ''}`,
     [
@@ -290,30 +219,21 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
       'evidence. Before you start, state your',
       'approach and what result you predict; report honestly if the prediction failed.',
     ].join(' '),
-    answerFormat('work'),
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+    ANSWER_FORMAT.work,
+  ]);
 }
 
-function verificationLine(v: Verification): string {
-  switch (v.t) {
-    case 'panel':
-      return `${v.claimAttemptId}'s claim on ${v.questionId} verified by check panel ${v.panelId}`;
-    case 'host':
-      return `${v.claimAttemptId}'s claim on ${v.questionId} verified by the host (its command passed) and merged`;
-  }
-}
+const verificationLine = (v: m.Verification) =>
+  `${v.claimAttemptId}'s claim on ${v.questionId} verified by ${v.t === 'panel' ? `check panel ${v.panelId}` : 'the host (its command passed) and merged'}`;
 
-/** Blind check: the claim and its evidence, never the author's reasoning. */
-function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): string {
-  const tree = worktreeOf(s, id);
-  return [
+function checkBrief(s: m.State, id: string, spec: m.CheckSpec, statement: m.Claim): string {
+  const tree = m.worktreeOf(s, id);
+  return sections([
     `[expedition ${s.id} · ${s.charter.name} · CHECK ${id}]`,
     'You are an independent verifier. Do not trust the claim; reproduce it yourself.',
     `CLAIM: ${statement.statement}`,
     [
-      `YOUR WORKTREE: ${tree.path}, checked out at ${tree.baseSha} (the claim names ${changeLabel(statement.change)}; branch ${tree.branch}).`,
+      `YOUR WORKTREE: ${tree.path}, checked out at ${tree.baseSha} (the claim names ${m.changeLabel(statement.change)}; branch ${tree.branch}).`,
       'Your turn starts there. Reproduce the claim there only: never create other worktrees, never edit any',
       'other checkout, and do not commit.',
     ].join(' '),
@@ -324,14 +244,11 @@ function checkBrief(s: State, id: string, spec: CheckSpec, statement: Claim): st
       ? 'This is a GOAL check: verify the claim AND that every judged DONE WHEN item now holds. Command checks ($ …) are run by the host, not by you.'
       : '',
     'Verified only if you reproduced it. Refuted if it is false. Unclear if you could not decide; say why.',
-    answerFormat('check'),
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+    ANSWER_FORMAT.check,
+  ]);
 }
 
-/** The brief for one attempt, built from the ledger as it stands. */
-export function briefOf(s: State, attempt: Attempt): string {
+export function briefOf(s: m.State, attempt: m.Attempt): string {
   const { spec } = attempt;
   switch (spec.kind) {
     case 'manager':
@@ -339,33 +256,38 @@ export function briefOf(s: State, attempt: Attempt): string {
     case 'work':
       return workBrief(s, attempt.id, spec);
     case 'check':
-      return checkBrief(s, attempt.id, spec, claimOf(s, spec));
+      return checkBrief(s, attempt.id, spec, m.claimOf(s, spec));
   }
 }
 
-/** The status view the `expedition` tool returns (and the crew answers @mentions from). */
-export function statusText(s: State, badgeLine: string): string {
-  return [
+export function statusText(s: m.State, badgeLine: string): string {
+  const { run, tickFailure: fail } = s;
+  return sections([
     badgeLine,
-    s.run.t === 'waiting_owner' ? `NEEDS YOU: ${s.run.question}` : '',
-    s.run.t === 'finished' ? `FINISHED: ${s.run.summary}` : '',
-    s.tickFailure.t === 'failing'
-      ? `HOST TROUBLE: ${s.tickFailure.failures} ticks failed in a row (last at ${s.tickFailure.at}): ${s.tickFailure.reason}`
+    run.t === 'waiting_owner' ? `NEEDS YOU: ${run.question}` : '',
+    run.t === 'finished' ? `FINISHED: ${run.summary}` : '',
+    fail.t === 'failing'
+      ? `HOST TROUBLE: ${fail.failures} ticks failed in a row (last at ${fail.at}): ${fail.reason}`
       : '',
     charterText(s.charter),
     lessonsText(s),
-    `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet'}`,
+    questionsText(s, '- none yet'),
     stagesText(s),
-    `ATTEMPTS:\n${
-      allAttempts(s)
-        .map((a) => attemptLine(s, a))
-        .join('\n') || '- none'
-    }`,
+    attemptsText(s, m.allAttempts(s)),
     validationsText(s),
     integrationsText(s),
-    costTotals(s).line,
+    m.costTotals(s).line,
     s.crew.t === 'ready' ? `Crew Buddy: ${s.crew.buddyId} (its DM holds every attempt).` : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  ]);
+}
+
+function stagesText(s: m.State): string {
+  const counts = new Map<string, number>();
+  for (const q of s.questions) {
+    const stage = m.questionStage(s, q);
+    counts.set(stage, (counts.get(stage) ?? 0) + 1);
+  }
+  return counts.size === 0
+    ? ''
+    : `STAGES: ${[...counts].map(([stage, n]) => `${n} ${stage}`).join(', ')}`;
 }
