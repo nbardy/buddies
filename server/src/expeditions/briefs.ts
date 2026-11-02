@@ -1,9 +1,7 @@
 import * as m from './model';
 
-// What each attempt is told. Every brief is rebuilt from the ledger, so lessons and verified
-// results reach every later attempt (expeditions/design.md "Knowledge flows through the Ledger").
+// What each attempt is told, rebuilt from the ledger so lessons reach every later attempt.
 
-/** The crew Buddy's role: short, because it rides every turn's briefing. */
 export const CREW_ROLE = [
   'Expedition crew. Each request you receive is one attempt of an expedition: a manager decision,',
   'a work attempt, or an independent check. Do exactly that one attempt, then answer the request.',
@@ -16,7 +14,6 @@ export const CREW_ROLE = [
 
 const JSON_RULE = 'End your final message with exactly one fenced ```json block, nothing after it.';
 
-/** Sections joined by blank lines; an empty section is left out. */
 const sections = (parts: string[]) => parts.filter(Boolean).join('\n\n');
 const bullets = (items: string[], none: string) => items.map((x) => `- ${x}`).join('\n') || none;
 
@@ -47,14 +44,12 @@ const questionsText = (s: m.State, none: string) =>
 const attemptsText = (s: m.State, attempts: m.Attempt[]) =>
   `ATTEMPTS:\n${attempts.map((a) => `- ${a.id} ${specLine(a.spec)}: ${phaseDetail(s, a)}`).join('\n') || '- none'}`;
 
-/** Every validation so far, newest last: what the host ran and how each check ended. */
 const validationsText = (s: m.State) =>
   `VALIDATIONS (host-run commands: a question's command acceptance on a candidate, the DONE WHEN commands on the head at done):\n${bullets(
     s.validations.map((v) => m.validationLabel(s, v)),
     '- none yet'
   )}`;
 
-/** Every merge into the expedition branch so far, in order. */
 const integrationsText = (s: m.State) =>
   `INTEGRATION (the host merges validated claims into ${s.repo.branch}, one at a time; new work starts at its head):\n${bullets(
     s.integrations.map((i) => m.integrationLabel(s, i)),
@@ -89,7 +84,6 @@ function phaseDetail(s: m.State, a: m.Attempt): string {
   }
 }
 
-/** One line of a manager's "new since" (ledger.ts ENTRY names which kinds it may be shown). */
 function shownLine(s: m.State, e: m.ShownEntry): string {
   switch (e.t) {
     case 'validation':
@@ -155,7 +149,6 @@ function managerBrief(s: m.State, id: string): string {
   ]);
 }
 
-/** What each attempt kind must answer: its brief's last section, and the repair request's. */
 const ANSWER_FORMAT: Record<m.AttemptSpec['kind'], string> = {
   manager: [
     'ANSWER: a JSON object {"actions":[...]} where each action is one of:',
@@ -182,14 +175,10 @@ const ANSWER_FORMAT: Record<m.AttemptSpec['kind'], string> = {
   check: ['ANSWER: {"verdict":"verified"|"refuted"|"unclear","why":"…"}', JSON_RULE].join('\n'),
 };
 
-/** Longest part of a malformed answer quoted back in its repair request. */
 const REPAIR_QUOTE = 6000;
 
-/**
- * The one repair request a malformed answer gets (design.md R11), on the same seat and worktree
- * (host.ts matches its run by these bytes). 2026-11-01 incident: a bare JSON object and a prose
- * summary were dropped as malformed with no second chance.
- */
+/** The one repair request a malformed answer gets (R11), on the same seat and worktree
+ * (2026-11-01: a bare JSON object and a prose answer were dropped unrepaired). */
 export function repairBrief(s: m.State, attempt: m.Attempt, error: string, raw: string): string {
   const quoted = raw.length > REPAIR_QUOTE ? `…${raw.slice(-REPAIR_QUOTE)}` : raw;
   return [
@@ -237,7 +226,6 @@ function workBrief(s: m.State, id: string, spec: m.WorkSpec): string {
 const verificationLine = (v: m.Verification) =>
   `${v.claimAttemptId}'s claim on ${v.questionId} verified by ${v.t === 'panel' ? `check panel ${v.panelId}` : 'the host (its command passed) and merged'}`;
 
-/** Blind check: the claim and its evidence, never the author's reasoning. */
 function checkBrief(s: m.State, id: string, spec: m.CheckSpec, statement: m.Claim): string {
   const tree = m.worktreeOf(s, id);
   return sections([
@@ -260,7 +248,6 @@ function checkBrief(s: m.State, id: string, spec: m.CheckSpec, statement: m.Clai
   ]);
 }
 
-/** The brief for one attempt, built from the ledger as it stands. */
 export function briefOf(s: m.State, attempt: m.Attempt): string {
   const { spec } = attempt;
   switch (spec.kind) {
@@ -273,7 +260,6 @@ export function briefOf(s: m.State, attempt: m.Attempt): string {
   }
 }
 
-/** The status view the `expedition` tool returns (and the crew answers @mentions from). */
 export function statusText(s: m.State, badgeLine: string): string {
   const { run, tickFailure: fail } = s;
   return sections([
@@ -295,7 +281,6 @@ export function statusText(s: m.State, badgeLine: string): string {
   ]);
 }
 
-/** Questions counted by stage (design.md R5): waiting is held work, never a failure. */
 function stagesText(s: m.State): string {
   const counts = new Map<string, number>();
   for (const q of s.questions) {

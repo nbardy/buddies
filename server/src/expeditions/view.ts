@@ -1,11 +1,9 @@
 import type * as W from '@unleashd/shared';
 import * as m from './model';
 
-// The expedition modal's data: one pure projection of the folded ledger (no I/O), served by
-// GET /api/buddies/expeditions/:id. `charterView` is shared with drafts (one Charter tab).
+// The expedition modal's data: one pure projection of the folded ledger (no I/O).
 
-/** A seat as the owner reads it: provider, model (`default model` when the provider picks it),
- * effort. 2026-11-01 visual pass: a card read only "claude". */
+/** A seat as the owner reads it (2026-11-01 visual pass: a card read only "claude"). */
 const seatName = (w: m.WorkerConfig) =>
   [w.provider, w.model.t === 'named' ? w.model.id : 'default model', w.reasoningEffort]
     .filter(Boolean)
@@ -59,7 +57,6 @@ export function expeditionView(s: m.State, badgeLine: string, now: string): W.Ex
   };
 }
 
-/** One row of the expedition list; a retired expedition's snapshot keeps it (retired.ts). */
 export function expeditionSummary(s: m.State): W.ExpeditionSummary {
   const counts = countsOf(s);
   const cost = m.costTotals(s);
@@ -68,7 +65,6 @@ export function expeditionSummary(s: m.State): W.ExpeditionSummary {
   return { id, name: s.charter.name, run, workspaceId, launchedAt, counts, cost, line, retirement };
 }
 
-/** The list's one progress line (the header's counts, shorter). */
 export const summaryLine = (counts: W.ExpeditionView['counts'], cost: W.ExpeditionView['cost']) =>
   `${counts.liveWorkers} live · ${counts.verified} verified · ${counts.attempts}/${counts.maxAttempts} attempts · ${cost.short}`;
 
@@ -97,7 +93,6 @@ function roleView(spec: m.AttemptSpec): W.ExpeditionAttemptRole {
   }
 }
 
-/** Its instructions follow its phase: recorded at `posting`, posted from then on. */
 function briefingView(s: m.State, a: m.Attempt): W.ExpeditionBriefing {
   switch (a.phase.t) {
     case 'planned':
@@ -112,7 +107,6 @@ function briefingView(s: m.State, a: m.Attempt): W.ExpeditionBriefing {
   }
 }
 
-/** An ended attempt's metered cost; `settling` until the host read it (meter.ts). */
 function attemptCost(s: m.State, id: string, phase: m.AttemptPhase): W.ExpeditionAttemptCost {
   const cost = s.costs[id];
   if (!cost) return phase.t === 'ended' ? { t: 'settling' } : { t: 'none' };
@@ -121,7 +115,6 @@ function attemptCost(s: m.State, id: string, phase: m.AttemptPhase): W.Expeditio
     : cost;
 }
 
-/** An attempt's worktree, once admission recorded one (managers never have one). */
 function worktreeView(s: m.State, attemptId: string): W.ExpeditionWorktree {
   if (!(m.treeKey({ t: 'attempt', attemptId }) in s.trees)) return { t: 'none' };
   const { branch, path } = m.worktreeOf(s, attemptId);
@@ -161,7 +154,6 @@ function validationView(s: m.State, v: m.Validation): W.ExpeditionValidation {
   };
 }
 
-/** The page's phase: an ended attempt carries its one-line result, a dropped one its reason. */
 function phaseView(phase: m.AttemptPhase): W.ExpeditionAttemptPhase {
   switch (phase.t) {
     case 'ended':
@@ -176,7 +168,6 @@ function phaseView(phase: m.AttemptPhase): W.ExpeditionAttemptPhase {
   }
 }
 
-/** The header's and the expedition list's counts (budget, decisions, live, verified). */
 function countsOf(s: m.State): W.ExpeditionView['counts'] {
   const c = s.charter;
   return {

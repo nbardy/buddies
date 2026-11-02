@@ -4,11 +4,8 @@ import type { DraftLaunch } from './drafts';
 import type { ExpeditionHost } from './host';
 import type { Retire } from './launch';
 
-// Owner HTTP for the expedition modal, badge and draft card. Registered after the auth gate (every
-// /api caller is the owner) and BEFORE the Buddy routes (`/api/buddies/:buddyId` would capture
-// these); under `/api/buddies` so `buddies_changed` refreshes mounted views. A draft's workspace
-// check is consistency, NOT an access boundary: a forged card can only point at a real draft,
-// whose launch still runs the tool's preflight.
+// Owner HTTP, after the auth gate and BEFORE `/api/buddies/:buddyId`. A draft's workspace check
+// is consistency, not access: a launch still runs the tool's preflight.
 
 type Reply = { status: number; body: unknown };
 const error = (status: number, message: string): Reply => ({ status, body: { error: message } });
@@ -21,14 +18,18 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
     (handle: (h: ExpeditionHost, req: Request) => Reply | Promise<Reply>) =>
     (req: Request, res: Response, next: NextFunction) => {
       const expeditions = host();
-      Promise.resolve(expeditions ? handle(expeditions, req) : error(503, 'expeditions are starting'))
+      Promise.resolve(
+        expeditions ? handle(expeditions, req) : error(503, 'expeditions are starting')
+      )
         .then((reply) => res.status(reply.status).json(reply.body))
         .catch(next);
     };
   const ok = (body: unknown): Reply => ({ status: 200, body });
 
-  // Every expedition, newest launch first: the channel rail's section and the index pane.
-  app.get('/api/buddies/expeditions', route((h) => ok(h.summaries())));
+  app.get(
+    '/api/buddies/expeditions',
+    route((h) => ok(h.summaries()))
+  );
   app.get(
     '/api/buddies/expeditions/crews',
     route((h) => ok({ buddyIds: h.crews() } satisfies ExpeditionCrews))
@@ -38,7 +39,9 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
     route(async (h, req) => {
       const id = String(req.params.draftId);
       const found = await h.drafts.view(id, String(req.query.workspaceId ?? ''));
-      return found.t === 'present' ? ok(found.view) : error(404, `no draft ${id} in this workspace`);
+      return found.t === 'present'
+        ? ok(found.view)
+        : error(404, `no draft ${id} in this workspace`);
     })
   );
   app.post(
@@ -80,8 +83,6 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
   );
 }
 
-/** δ per retire outcome. Retire is idempotent: a retired expedition answers as a fresh request
- * (the runbook re-POSTs after fixing a refusal). */
 function retireReply(id: string, retired: Retire): Reply {
   switch (retired.t) {
     case 'retiring':
@@ -98,7 +99,6 @@ function retireReply(id: string, retired: Retire): Reply {
   }
 }
 
-/** δ per launch outcome; every refusal is the card's inline error text. */
 function launchReply(id: string, launched: DraftLaunch): Reply {
   switch (launched.t) {
     case 'launched':

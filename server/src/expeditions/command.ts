@@ -8,24 +8,16 @@ import { labelled } from '../observability/event-loop-stall';
 import type { CommandCheck } from './charter';
 import type { CheckOutcome } from './ledger';
 
-// Runs one `command` done check (design.md R2) for the host: never an agent, never a shell, as
-// an async spawn the server loop never waits on (async-liveness).
+// Runs one `command` done check (R2) for the host: never an agent, never a shell, async.
 
-/** The output kept per check: the end is where a failing test or compiler says why. */
 export const TAIL_CHARS = 4000;
 /** How long a straggler that escaped the process group (`setsid`) may hold the pipes after exit. */
 const PIPE_GRACE_MS = 2000;
 
-/**
- * A check runs agent-written code, so it sees no provider keys: only what a build needs, with a
- * throwaway HOME and TMPDIR beside (never in) its tree (audit 2026-11-01 #3: HOME was the owner's,
- * so a check could read `~/.ssh`). Known limit (design.md R11): no sandbox, so a check that names
- * the owner's home by path still reads it.
- */
+/** Audit 2026-11-01 #3: a check (agent code) could read the owner's `~/.ssh`; it now gets no keys
+ * and a throwaway HOME. Known limit (R11): no sandbox, a literal home path still reads. */
 const CHECK_ENV = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TZ'];
 
-/** Whether a bare or absolute `argv[0]` is an executable file as `spawn` will find it (preflight;
- * nothing runs). A relative path with a slash is git.ts preflight's: committed at the base. */
 export async function resolvesOnPath(bin: string): Promise<boolean> {
   const candidates = path.isAbsolute(bin)
     ? [bin]
@@ -47,12 +39,8 @@ export async function resolvesOnPath(bin: string): Promise<boolean> {
   return found.some(Boolean);
 }
 
-/**
- * Runs `argv` in `cwd` with a timeout, keeping a bounded tail of stdout and stderr. The process
- * leads its own group, so a timeout kills everything it started; it also outlives a server crash,
- * so a pidfile (pid and `ps` start time) in the scratch dir lets `killCheck` kill the orphan.
- * On replay the unrecorded checks run again in a FRESH tree (run.ts `interrupted`, audit #10).
- */
+/** Runs `argv` as its own process group (a timeout kills all it started); a pidfile lets
+ * `killCheck` kill an orphan a crash left, and a replay reruns in a fresh tree (audit #10). */
 export async function runCommand(
   check: Pick<CommandCheck, 'argv' | 'timeoutSeconds'>,
   cwd: string,
@@ -64,7 +52,9 @@ export async function runCommand(
   await fsp.mkdir(home, { recursive: true, mode: 0o700 });
   await fsp.mkdir(tmp, { recursive: true, mode: 0o700 });
   const env = {
-    ...Object.fromEntries(CHECK_ENV.flatMap((k) => (k in process.env ? [[k, process.env[k]]] : []))),
+    ...Object.fromEntries(
+      CHECK_ENV.flatMap((k) => (k in process.env ? [[k, process.env[k]]] : []))
+    ),
     HOME: home,
     TMPDIR: tmp,
   };
@@ -99,12 +89,9 @@ function spawnCheck(
     const killGroup = () => {
       try {
         if (child.pid) process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // ESRCH: the group is already gone.
-      }
+      } catch {}
     };
-    // A setsid child survives killGroup and holds the pipes, and 'close' waits for every pipe:
-    // without closing our ends the check never settles and the validation stalls.
+    // A setsid child holds the pipes and 'close' waits for all: close ours or the check stalls.
     let grace: NodeJS.Timeout | undefined;
     const closePipesSoon = () => {
       grace ??= setTimeout(
@@ -128,7 +115,9 @@ function spawnCheck(
       clearTimeout(grace);
       recorded.then(() => resolve(outcome()), reject);
     };
-    child.on('error', (error) => settle(() => ({ t: 'error', message: `${bin}: ${error.message}` })));
+    child.on('error', (error) =>
+      settle(() => ({ t: 'error', message: `${bin}: ${error.message}` }))
+    );
     child.on('exit', (code, signal) => {
       exit = { code, signal };
       killGroup();
@@ -150,11 +139,8 @@ function outcomeOf(timedOut: boolean, exit: Exit, tail: string): CheckOutcome {
   };
 }
 
-// ---------- The orphan a crash leaves (design.md R11, Restart) ----------
-
 const execAsync = promisify(execFile);
 
-/** The pidfile inside a check's scratch dir (the dir runCommand is given). */
 export const pidfileOf = (scratchDir: string) => path.join(scratchDir, 'check.pid.json');
 
 const PidRecord = z.object({ pid: z.number().int().positive(), lstart: z.string().min(1) });
@@ -167,7 +153,6 @@ async function startTimeOf(pid: number): Promise<string | undefined> {
   return stdout.trim() || undefined;
 }
 
-/** Writes the pid record atomically; a check that already exited has nothing left to kill. */
 async function recordPid(scratchDir: string, pid: number): Promise<void> {
   const lstart = await startTimeOf(pid);
   if (lstart === undefined) return;
@@ -178,8 +163,7 @@ async function recordPid(scratchDir: string, pid: number): Promise<void> {
 
 type CheckKill = { t: 'no_record' } | { t: 'not_running' } | { t: 'killed'; pid: number };
 
-/** Kills the group of a check an earlier server process left running (only a crash leaves the
- * pidfile), only while `ps` still shows the recorded start time for that pid. */
+/** Kills an orphaned check's group, only while `ps` shows its recorded start time. */
 export async function killCheck(pidfile: string): Promise<CheckKill> {
   const text = await fsp.readFile(pidfile, 'utf8').catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined;

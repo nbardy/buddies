@@ -16,8 +16,7 @@ import {
   defaultedLines,
 } from './model';
 
-// The one `expedition` Buddy tool. Its description is paid on every worker turn
-// (tool-contract.test.ts budget), so usage detail lives in BUDDY_TOOL_GUIDE and expeditions/mcp.md.
+// The one `expedition` Buddy tool; its description is paid every turn (tool-contract budget).
 
 const ExpeditionAction = z.discriminatedUnion('do', [
   z.object({ do: z.literal('draft'), charter: CharterRequest }).strict(),
@@ -29,7 +28,6 @@ const ExpeditionAction = z.discriminatedUnion('do', [
 ]);
 type ExpeditionAction = z.infer<typeof ExpeditionAction>;
 
-/** The thread this turn answers, when it was started by a post (else the owner DM). */
 async function originOf(core: BuddiesCore, grant: BuddyGrant): Promise<Origin> {
   if (!grant.runId || grant.subscribes !== 'self') return { t: 'direct' };
   const run = await core.getRun(grant.runId);
@@ -38,16 +36,14 @@ async function originOf(core: BuddiesCore, grant: BuddyGrant): Promise<Origin> {
   return { t: 'thread', channelId: trigger.channelId, rootId: trigger.rootId ?? trigger.id };
 }
 
-/** The installed catalog's models (none for an unknown provider: the seat check refuses it). */
 const catalogModels: ModelsOf = (provider) => {
   const entry = createProviderCatalog().providers.find((p) => p.id === provider);
   if (!entry) return { t: 'closed', models: [] };
   return entry.supportsDynamicModels ? { t: 'open' } : { t: 'closed', models: entry.models };
 };
 
-// The page path is plain data, never a link to post: 2026-11-01 smoke, the Buddy posted
-// `[⛺ name](/expeditions/<id>)` and the post tool refused it as a missing media attachment. And
-// "tell the owner in one line" made a Buddy answer without a post, which fails a delivery turn.
+// 2026-11-01 smoke: a posted page link was refused as a media attachment, and a reply without a
+// post failed the delivery turn.
 const NEXT =
   'The badge (it opens the page) is already in this chat, posted by the host: do not post the page path or a link. Reply with the post tool in this thread, one line saying what launched; updates post on their own, and the owner steers by replying in the expedition chat.';
 // 2026-11-01 owner request: a draft is a card (Info, Launch), never a pasted charter.
@@ -62,8 +58,7 @@ async function expeditionHandler(
   grant: BuddyGrant,
   action: ExpeditionAction
 ): Promise<unknown> {
-  // A crew Buddy runs its own expedition's attempts: it may read, never launch or steer (a worker
-  // could otherwise resume a run the owner paused).
+  // A crew Buddy may read, never launch or steer (it could resume a run the owner paused).
   const notCrew = (what: string) => {
     if (host.ofCrew(grant.buddyId))
       throw new Error(`an expedition crew cannot ${what} expeditions`);
@@ -72,7 +67,6 @@ async function expeditionHandler(
     if (host.workspaceOf(id) !== grant.workspaceId) throw new Error(`no expedition ${id} here`);
     return id;
   };
-  /** One open expedition, and one open draft, per (conversation, name). */
   const keyOf = (charter: { name: string }) => `${grant.conversationId}:${charter.name}`;
   const launchInput = async (charter: ReturnType<typeof charterOf>['charter']) => ({
     key: keyOf(charter),
@@ -144,8 +138,6 @@ async function expeditionHandler(
   }
 }
 
-/** δ per retire outcome; a refusal is an error the Buddy relays. Only a finished expedition
- * retires through the tool (stop it with steer first). */
 function retireAnswer(id: string, retired: Retire): string {
   switch (retired.t) {
     case 'retiring':
@@ -163,7 +155,6 @@ function retireAnswer(id: string, retired: Retire): string {
   }
 }
 
-/** The tool row `mcp.ts` registers. */
 export const EXPEDITION_TOOL = {
   description:
     'Self-running expedition to a fuzzy goal; only verified results count. draft (posts a card), launch, status, list, steer.',

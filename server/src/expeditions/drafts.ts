@@ -12,23 +12,18 @@ import type { LaunchInput, Launched } from './launch';
 import { CHARTER_DEFAULT_KEYS, Charter, type CharterDefault, Origin } from './model';
 import { charterView } from './view';
 
-// Expedition drafts (design.md R10): `draft` persists a validated charter and posts ONE card
-// (key `exp-draft:<draftId>`, so a replay is a no-op) in its chat; the owner launches from the
-// card (routes.ts) through the tool's own launch path. A draft is open, launched or superseded.
+// Expedition drafts (R10): a persisted charter and ONE card (key `exp-draft:<id>`) to launch it.
 
 const DRAFT_ID = /^draft-[0-9a-f]{8}$/;
 const Strings = z.array(z.string());
 
-/** A draft at `<appData>/expeditions/drafts/<draftId>.json`; also κ for boot, so a malformed
- * draft is named in the log then, never met later inside a view or a launch. */
+/** A draft file; also boot's κ, so a malformed one is logged then, never met in a launch. */
 const DraftRecord = z
   .object({
     id: z.string().regex(DRAFT_ID),
     createdAt: z.string(),
-    /** `<conversation>:<name>`: the launch key, and what a newer draft supersedes by. */
     key: z.string().min(1),
     charter: Charter,
-    /** As checked when drafted; an open draft's view re-checks them on every read. */
     issues: Strings,
     advice: Strings,
     defaulted: z.array(z.enum(CHARTER_DEFAULT_KEYS as [CharterDefault, ...CharterDefault[]])),
@@ -47,11 +42,9 @@ type DraftRecord = z.infer<typeof DraftRecord>;
 
 export type DraftInput = Omit<DraftRecord, 'id' | 'createdAt' | 'state'>;
 
-/** A launch through the host: its result, or every reason the preflight refused it. */
 export type LaunchOutcome = Launched | { t: 'refused'; reasons: string[] };
 
-/** What a Launch click got. `already_running`: an earlier launch of this name from the same
- * conversation is still open; `missing` covers another workspace's draft. */
+/** What a Launch click got (`missing` also covers another workspace's draft). */
 export type DraftLaunch =
   | { t: 'launched'; expeditionId: string }
   | { t: 'already_running'; expeditionId: string; name: string }
@@ -67,16 +60,12 @@ interface DraftStoreOptions {
   dir: string;
   launch(input: LaunchInput): Promise<LaunchOutcome>;
   issues(workspaceId: string, charter: Charter): Promise<string[]>;
-  /** Every expedition launched so far: its launch key and when (each ledger's `launched` entry). */
   launches(): LaunchRow[];
   now(): string;
 }
 
-/**
- * An open draft whose key launched at or after it was made is launched (2026-11-01 review: a
- * crash between the launch and the draft's save left it open, and a later click launched a
- * second expedition). Recomputed on every boot, so it holds without a write.
- */
+/** 2026-11-01 review: a crash before the draft's save left it open, and a later click launched
+ * twice; a launch of its key since it was made marks it launched, on every boot. */
 function reconciled(draft: DraftRecord, launches: LaunchRow[]): DraftRecord {
   if (draft.state.t !== 'open') return draft;
   const launch = launches
@@ -85,7 +74,6 @@ function reconciled(draft: DraftRecord, launches: LaunchRow[]): DraftRecord {
   return launch ? { ...draft, state: { t: 'launched', expeditionId: launch.id } } : draft;
 }
 
-/** Where a post for this origin goes: the launch thread, or the owner↔launcher DM. */
 export function placementOf(
   origin: Origin,
   launcherId: string
@@ -98,8 +86,7 @@ export function placementOf(
 export function createDraftStore(options: DraftStoreOptions) {
   const { core, events, dir } = options;
   const drafts = new Map<string, DraftRecord>();
-  // Boot reads every draft once; an unreadable one is logged and left (its card reads 404). A
-  // leftover `.tmp` is skipped, and nothing is written here: a copied store must write nothing.
+  // Boot: a bad draft is logged and left (404); nothing is written (a copied store writes nothing).
   for (const file of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
     const id = file.replace(/\.json$/, '');
     if (!DRAFT_ID.test(id) || !file.endsWith('.json')) continue;
@@ -112,7 +99,6 @@ export function createDraftStore(options: DraftStoreOptions) {
     }
   }
 
-  /** Atomic: a whole new file renamed over the old. */
   async function save(draft: DraftRecord): Promise<void> {
     const file = path.join(dir, `${draft.id}.json`);
     const tmp = `${file}.${randomUUID().slice(0, 8)}.tmp`;
@@ -132,7 +118,6 @@ export function createDraftStore(options: DraftStoreOptions) {
     return next;
   }
 
-  /** The draft, only from the workspace it was drafted in. */
   const draftIn = (id: string, workspaceId: string) => {
     const draft = drafts.get(id);
     return draft?.workspaceId === workspaceId ? draft : undefined;
@@ -156,7 +141,6 @@ export function createDraftStore(options: DraftStoreOptions) {
   }
 
   return {
-    /** Persists a draft, supersedes the open one under its key, and posts its one card. */
     draft: (input: DraftInput): Promise<DraftRecord> =>
       serialized(async () => {
         const draft: DraftRecord = {
@@ -193,8 +177,7 @@ export function createDraftStore(options: DraftStoreOptions) {
     ): Promise<{ t: 'present'; view: ExpeditionDraftView } | { t: 'missing' }> {
       const draft = draftIn(id, workspaceId);
       if (!draft) return { t: 'missing' };
-      // An open draft's issues are re-checked (an installed binary clears one); a closed one's
-      // are history.
+      // An open draft's issues are re-checked (an installed binary clears one).
       const issues =
         draft.state.t === 'open'
           ? await options.issues(draft.workspaceId, draft.charter)
@@ -203,11 +186,20 @@ export function createDraftStore(options: DraftStoreOptions) {
       const charter = charterView(draft.charter);
       return {
         t: 'present',
-        view: { id, workspaceId: ws, createdAt, state, charter, issues, advice, defaulted, resolved },
+        view: {
+          id,
+          workspaceId: ws,
+          createdAt,
+          state,
+          charter,
+          issues,
+          advice,
+          defaulted,
+          resolved,
+        },
       };
     },
 
-    /** The card's Launch: idempotent (a launched draft answers its expedition again). */
     launch: (id: string, workspaceId: string): Promise<DraftLaunch> =>
       serialized(async () => {
         const draft = draftIn(id, workspaceId);
@@ -222,7 +214,6 @@ export function createDraftStore(options: DraftStoreOptions) {
         }
       }),
 
-    /** The tool launched this key: its open draft (if any) now shows "Launched". */
     launchedByTool: (key: string, expeditionId: string): Promise<void> =>
       serialized(async () => {
         for (const draft of drafts.values()) {
