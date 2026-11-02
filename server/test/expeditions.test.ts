@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import test, { mock } from 'node:test';
+import { mock } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
@@ -39,6 +39,7 @@ import { createLedger } from '../src/expeditions/store';
 import { expeditionView } from '../src/expeditions/view';
 import type { IngestSlot } from '../src/ingest/instance';
 import { BackgroundWork } from '../src/turns/background-work';
+import test from './fixtures/shard';
 import { tempDir } from './fixtures/temp';
 
 // End to end through the real crate and the real MCP endpoint. The Buddy runner is not started:

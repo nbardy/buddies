@@ -16,7 +16,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { type McpServerSpec, createParser, executeCommand } from '@nbardy/agent-cli';
@@ -87,6 +86,7 @@ import { BackgroundWork } from '../src/turns/background-work';
 import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
 import { testExecutions } from './fixtures/fake-turn';
 import { recordStore } from './fixtures/records';
+import test from './fixtures/shard';
 import { tempDir } from './fixtures/temp';
 
 // One per test backend, as in server.ts: the hook route and the channel status read it.

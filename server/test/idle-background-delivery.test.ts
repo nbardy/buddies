@@ -3,8 +3,9 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, test } from 'node:test';
+import { after, before } from 'node:test';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
+import { test } from './fixtures/shard';
 import { freePortSync } from './free-port';
 
 /**
@@ -238,7 +239,8 @@ after(async () => {
     try {
       process.kill(-Number(readFake('pgid')), 'SIGKILL');
     } catch {}
-  fs.rmSync(root, { recursive: true, force: true });
+  // Retried: a killed group's last writes can land mid-removal (ENOTEMPTY under a loaded run).
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
 });
 
 test(

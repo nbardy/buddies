@@ -5,11 +5,12 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, test } from 'node:test';
+import { after, before } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
-import { freePortSync } from './free-port';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
+import { test } from './fixtures/shard';
+import { freePortSync } from './free-port';
 
 /**
  * The owner's requirement (2026-09-30, #case-studies post_01a0f2bc): a web-server restart must not
@@ -323,7 +324,7 @@ after(async () => {
       process.kill(-Number(readFake(`${scenario}.pgid`)), 'SIGKILL');
     } catch {}
   }
-  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
 });
 
 test(
@@ -741,7 +742,11 @@ test(
     await killBackend();
     await startBackend('Q2');
     assert.equal(await pending(), 1, 'the queued message came back from its row');
-    assert.equal(spawns().filter((l) => l.startsWith('second ')).length, 0, 'it waits for the turn');
+    assert.equal(
+      spawns().filter((l) => l.startsWith('second ')).length,
+      0,
+      'it waits for the turn'
+    );
 
     fs.writeFileSync(path.join(fakeDir, 'holder.go'), '');
     await eventually(() => exists('second.exited'), Boolean, 'the queued message ran');

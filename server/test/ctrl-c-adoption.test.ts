@@ -4,10 +4,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, afterEach, test } from 'node:test';
+import { after, afterEach } from 'node:test';
 import { WS_PATH, createDefaultConversationConfig } from '@unleashd/shared';
 import { WebSocket } from 'ws';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
+import { test } from './fixtures/shard';
 import { freePortSync } from './free-port';
 
 /**

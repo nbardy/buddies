@@ -3,10 +3,11 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, afterEach, before, test } from 'node:test';
+import { after, afterEach, before } from 'node:test';
 import { type ConversationRow, EncodedRowsSchema, WS_PATH, decodeRows } from '@unleashd/shared';
 import { WebSocket } from 'ws';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
+import { test } from './fixtures/shard';
 import { freePortSync } from './free-port';
 
 /**
@@ -259,7 +260,7 @@ afterEach(async () => {
     killGroup(scenario);
 });
 
-after(() => fs.rmSync(root, { recursive: true, force: true }));
+after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 }));
 
 test(
   'a holder that dies while the backend stays up is cleared within the lease time',
