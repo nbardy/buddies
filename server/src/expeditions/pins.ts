@@ -1,9 +1,7 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
-import { gitEnv } from './git';
+import { gitBytes } from './git';
 import type { CheckOutcome, PinCheck, SourcePin, ValidationReport } from './ledger';
 
 // Validator source pins (design.md R11, ported from oompa's `oompa.task-validation/v1`): the
@@ -20,8 +18,6 @@ import type { CheckOutcome, PinCheck, SourcePin, ValidationReport } from './ledg
 //   rewrites its own validator while it runs cannot pass (its outcome becomes an `error`).
 // The pins are recorded with every check result (the typed report below).
 
-const exec = promisify(execFile);
-
 /** An argv element that may name a repository file: relative, inside the tree, not a flag. */
 const fileLike = (arg: string) =>
   arg !== '' &&
@@ -35,23 +31,17 @@ const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex
 /** A path in a commit: a regular file (or symlink) with its bytes, or nothing there. */
 type Blob = { t: 'file'; bytes: Buffer } | { t: 'none' };
 
-const git = (tree: string, args: string[]) =>
-  exec('git', args, {
-    cwd: tree,
-    env: gitEnv(),
-    encoding: 'buffer',
-    maxBuffer: 64 * 1024 * 1024,
-  }).then((r) => r.stdout);
-
 /** What `<sha>:<file>` is. A git failure (a timeout, an oversized blob, a broken repository)
  * throws: the check job then ends `validation_failed` with the reason, never runs unpinned.
  * 2026-11-01 review: a catch-all here counted every failure as "not a file" and skipped the pin. */
 async function blobAt(tree: string, sha: string, file: string): Promise<Blob> {
-  const listed = (await git(tree, ['ls-tree', '-z', sha, '--', path.normalize(file)])).toString();
+  const listed = (
+    await gitBytes(tree, ['ls-tree', '-z', sha, '--', path.normalize(file)])
+  ).toString();
   const [meta] = listed.split('\t');
   const [, type, oid] = (meta ?? '').split(' ');
   if (type !== 'blob' || !oid) return { t: 'none' };
-  return { t: 'file', bytes: await git(tree, ['cat-file', 'blob', oid]) };
+  return { t: 'file', bytes: await gitBytes(tree, ['cat-file', 'blob', oid]) };
 }
 
 /** Before the run: the pins, or why the candidate may not run. */
