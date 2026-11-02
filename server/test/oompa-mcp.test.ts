@@ -3,7 +3,6 @@ import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
@@ -13,10 +12,36 @@ import { createBuddyEvents } from '../src/buddies/events';
 import { type BuddyGrant, createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint } from '../src/buddies/mcp';
 import { BackgroundWork } from '../src/turns/background-work';
+import test from './fixtures/shard';
 import { tempDir } from './fixtures/temp';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-async function until<T>(f: () => Promise<T | false>, ms = 10_000): Promise<T> {
+const STOP_GRACE_MS = 500;
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** Every wrapper pid journaled under an execution root (runs, validations, continuations). */
+function wrapperPids(dir: string): number[] {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) =>
+      entry.isDirectory()
+        ? wrapperPids(path.join(dir, entry.name))
+        : entry.name === 'pid'
+          ? [Number(fs.readFileSync(path.join(dir, entry.name), 'utf8'))]
+          : []
+    );
+}
+// A liveness budget, never a measurement: it is spent only when the awaited event never comes.
+// 10 s failed every shard of a parallel run on a loaded machine (2026-11-02) while each test
+// passed alone; the success path returns as soon as the event lands.
+async function until<T>(f: () => Promise<T | false>, ms = 30_000): Promise<T> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     const x = await f();
@@ -147,41 +172,9 @@ child.kill();
       },
     })
   );
-  const executable = path.join(scratch, 'oompa-stub');
+  // A checked-in executable, never one written per fixture (see the file for why).
+  const executable = path.join(__dirname, 'fixtures', 'oompa-stub.cjs');
   const stubMode = path.join(scratch, 'stub-mode');
-  fs.writeFileSync(
-    executable,
-    `#!/usr/bin/env node
-const fs = require('node:fs'), path = require('node:path'), {spawn} = require('node:child_process');
-const sleeper = spawn('sleep', ['90']);
-console.log(process.pid); console.log(sleeper.pid);
-const config=JSON.parse(fs.readFileSync(process.argv[4],'utf8'));
-const swarmId=config.resume_swarm_id?'renewed-swarm':'test-swarm';
-const root=path.join(process.cwd(), 'runs', swarmId);
-fs.mkdirSync(path.join(root,'workers'),{recursive:true});
-let initialMode='';try{initialMode=fs.readFileSync(${JSON.stringify(stubMode)},'utf8')}catch{}
-fs.writeFileSync(path.join(root,'started.json'),JSON.stringify({'swarm-id':swarmId,'config-file':process.argv[4],pid:process.pid,workers:initialMode.startsWith('terminal')?[{id:'w0'},{id:'w1'}]:[{id:'w0'}],'continuation-control-dir':process.env.OOMPA_CONTINUATION_CONTROL_DIR}));
-console.log('Started event written to runs/'+swarmId+'/started.json');
-fs.writeFileSync(path.join(root,'owner-window.json'),JSON.stringify({window:config.task_execution?.owner_window,id:process.env.OOMPA_OWNER_WINDOW_AUTHORIZATION_ID,expires:process.env.OOMPA_OWNER_WINDOW_EXPIRES_AT_MS}));
-const update=()=>{
-let request; try{request=JSON.parse(fs.readFileSync(path.join(process.env.OOMPA_CONTINUATION_CONTROL_DIR,'continuation-request.json'),'utf8'));}catch{}
-let mode='';try{mode=fs.readFileSync(${JSON.stringify(stubMode)},'utf8')}catch{}
-if(mode==='exit') process.exit(0);
-const state={'worker-id':'w0',status:mode==='active'?'running':'waiting',reason:request&&mode!=='noack'?'host-continuation':'awaiting-buddy-acceptance','updated-at':new Date().toISOString(),execution:mode==='active'?{task_id:'active'}:request&&mode!=='noack'?{host_continuation_id:request.id}:{}};
-if(mode.startsWith('terminal')) {
-  state.status=mode==='terminal-waiting-stale'?'waiting':'stopped';
-  state.reason='needs-reconciliation';
-  state['updated-at']=mode==='terminal-bad-date'?'invalid':'2020-01-01T00:00:00Z';
-  state.execution={queue_audit:{state:mode==='terminal-bad-audit'?'accepted':'needs-reconciliation'}};
-  if(mode==='terminal-active') state.execution.task_id='active';
-  const peer={'worker-id':'w1',status:'waiting',reason:mode==='terminal-peer-noack'?'awaiting-buddy-acceptance':'host-continuation','updated-at':new Date().toISOString(),execution:mode==='terminal-peer-noack'?{}:{host_continuation_id:request?.id}};
-  const peerFile=path.join(root,'workers','w1.json');fs.writeFileSync(peerFile+'.tmp',JSON.stringify(peer));fs.renameSync(peerFile+'.tmp',peerFile);
-}
-const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON.stringify(state));fs.renameSync(file+'.tmp',file);
-};update();setInterval(update,30);
-`,
-    { mode: 0o755 }
-  );
   let grants = createGrants({ ttlMs: 60_000 });
   const worker = (buddyId = buddy.id, workspaceId = ws.id) =>
     grants.issueBuddy({
@@ -208,7 +201,9 @@ const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON
       openBranch: async () => 'unused',
       uploadsRoot: () => scratch,
       portFile: path.join(scratch, 'buddy-mcp.json'),
-      oompaOptions: { executable },
+      // A short wrapper stop grace: every fake child here dies on the group SIGTERM at once, and
+      // the production 3 s grace cost every launch, validation and close a fixed 3 s.
+      oompaOptions: { executable, stopGraceMs: STOP_GRACE_MS },
     });
   let endpoint = await start();
   const launch = async (
@@ -283,12 +278,15 @@ const file=path.join(root,'workers','w0.json');fs.writeFileSync(file+'.tmp',JSON
     async close() {
       const root = path.join(scratch, 'oompa-executions');
       if (fs.existsSync(root)) for (const id of fs.readdirSync(root)) await stop(id);
-      await sleep(3300);
       await endpoint.close();
       const relay = JSON.parse(fs.readFileSync(path.join(scratch, 'buddy-mcp.json'), 'utf8'));
       try {
         process.kill(relay.pid, 'SIGTERM');
       } catch {}
+      // Await every wrapper's exit (it ends its own group after the stop grace), not a fixed
+      // sleep. Last, so a wrapper that outlives the wait never leaves the endpoint open (an open
+      // endpoint kept a failed test's process alive and its shard never ended).
+      await until(async () => wrapperPids(root).every((pid) => !alive(pid)));
     },
   };
 }
@@ -594,7 +592,9 @@ test('bounded continuation requires owner, exact scope/revision/source and idle 
       sourceCommit: w.commit,
       command: [process.execPath, 'diagnostic.mjs', '1000'],
       sourceFiles: { 'diagnostic.mjs': w.diagnosticHash },
-      maxSeconds: 10,
+      // As in the overnight test: the window opens before the handshake, so 10 s could close
+      // before a loaded machine started the diagnostic. Inside the run's 60 s either way.
+      maxSeconds: 30,
     };
     const call = (patch = {}, key = 'diagnostic', grant = w.owner()) =>
       rpc(w.endpoint.spec(grant), 'oompa', { action: { ...action, ...patch }, key });
@@ -818,7 +818,10 @@ test('overnight delegation lets scheduled same-Buddy turns continue and renew ex
       sourceCommit: w.commit,
       command: [process.execPath, 'diagnostic.mjs'],
       sourceFiles: { 'diagnostic.mjs': w.diagnosticHash },
-      maxSeconds: 5,
+      // The deadline starts before the handshake, so under load a 5 s window could end before
+      // the diagnostic's node even started (it then never counted); the wrapper's old 3 s stop
+      // grace used to hide that. Well inside the 60 s delegation either way.
+      maxSeconds: 20,
     };
     const call = (patch = {}, grant = manager, key = `next-${Math.random()}`) =>
       rpc(w.endpoint.spec(grant), 'oompa', { action: { ...action, ...patch }, key });
@@ -2091,6 +2094,9 @@ test('only a new owner launch grants an explicit resumed window after expiry wit
         held_executions: {},
       },
     };
+    // The 1 s run can expire before a loaded machine even starts the stub that makes this
+    // directory; the test writes the prior state itself, so it makes the directory too.
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
     fs.writeFileSync(statePath, JSON.stringify(oldState));
     const saved = fs.readFileSync(statePath, 'utf8');
     const action = {
