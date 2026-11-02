@@ -252,7 +252,7 @@ specified packet can be executed mechanically and judged by an executable check.
 - Before a work attempt is briefed, the host creates its worktree:
   `git cambium add -b exp/<id>/<attemptId> -name exp-<id>-<attemptId> -ephemeral <worktree path>`
   from the expedition's integration branch head, in the workspace's repository. Intent is in the
-  ledger (`worktree_ready {attemptId, path, branch, baseSha}`) before the brief is posted; the brief
+  ledger (`tree_planned {tree:{t:'attempt', attemptId}, place}`, then `tree_ready`) before the brief is posted; the brief
   names the path and says to work and commit only there. The shared checkout is never edited.
 - Questions declare file custody (`paths: string[]`, repo-relative prefixes). The host never runs
   two work attempts with overlapping custody at once; overlapping ones wait (queued, not refused).
@@ -264,26 +264,26 @@ created by the integration tree's `cambium add`).
 Every worker attempt (work and check) runs in a host-made tree: a work attempt's starts at the
 expedition branch head, a check's at the candidate commit its claim names (a check never makes
 its own worktree in the owner's repository). An attempt is admitted (phase `admitted`) by writing
-`worktree_creating {name, path, branch, baseSha}` BEFORE `git cambium add`, so it holds its slot
+`tree_planned {tree, place:{name, path, branch, baseSha}}` BEFORE `git cambium add`, so it holds its slot
 and custody at once. Replay is idempotent in both crash windows: a registered workspace is
 adopted by name only if it is `ready` at the intended branch and base; an add interrupted partway
 (SIGKILL or timeout: the branch and directory exist but `cambium list` has no entry — reproduced
 on a 20k-file repository) is rolled back with `cambium recover` and added again. Anything Cambium
 cannot make or roll back (a commit that does not exist, a mismatched registry entry) is a typed
-`worktree_failed {reason}`: the attempt is `dropped`, the next manager is shown it, and a panel
+`tree_failed {reason}`: the attempt is `dropped`, the next manager is shown it, and a panel
 counts a dropped check as settled without a vote — never a tick that throws on every retry. Then
-`worktree_ready`, then the brief.
+`tree_ready`, then the brief.
 Release waits until no worker can be in the tree: its attempt settled (ended or dropped), or the
 expedition finished before the attempt was briefed. A live worker's tree is never removed, even at
 finish; the host keeps observing a finished expedition while attempts are live and releases each
 tree when its attempt ends (nothing cancels running Buddy requests yet). An ended attempt's tree is
-removed with its branch when it has no commits beyond its base, kept (`worktree_released {kept}`)
+removed with its branch when it has no commits beyond its base, kept (`tree_released {kept}`)
 when it has; at finish every idle tree is removed and only empty branches are deleted, with an
 atomic `git update-ref -d <branch> <base>` (not `cambium remove --delete-branch`, whose
 `git branch -d` refuses a branch at an unmerged candidate commit). A release with no Cambium
 workspace and nothing on disk is `absent`; a partial create's leftovers that recovery cannot
 remove are `left {reason}`. A guard-ladder refusal (uncommitted changes) becomes
-`worktree_released {left, reason}`; past the ladder removal is forced (Audit #9, with the
+`tree_released {left, reason}`; past the ladder removal is forced (Audit #9, with the
 15-minute `REMOVE_TIMEOUT_MS`), and retire re-releases `left` trees under its own policy. Cambium runs as `git-cambium` directly (a timeout kills the
 process doing the add, not a `git` wrapper), with a 15-minute limit for `add`. Custody paths are
 normalized once (`./a/` → `a`, whole repo = `.`). Cambium keeps its registry in `.git/cambium`, so
@@ -298,13 +298,24 @@ directory. The crate half landed in B4 (2026-11-03): `RunConfig.cwd` is a named 
 `{kind:'default'} | {kind:'path', path}` persisted in the run row's config (a row written before it
 reads as `default`), an absolute path is checked at the write, a retry onto another model keeps the
 run's cwd, and the Buddy runner warms a `path` run's briefing with that directory
-(`briefing.ts` `warmRun`). `postAttempt` still sends `default`; B5 sets it to the attempt's tree
-and deletes the host's `turnDirectory` attempt lookup.
+(`briefing.ts` `warmRun`). Since B5 `postAttempt` sends `{kind:'path'}` with the attempt's tree (a
+worker's worktree, a manager's detached tree), so the run carries its directory and the host's
+`turnDirectory` answers only runs that name none (a crew's own directory, else the workspace root).
 What IS structural now: claims are checked against their own branch and custody (git.ts
 `claimHeld`), and only host-validated commits merge, so a stray edit in the shared checkout can
 never reach the expedition branch. Also repository-wide: `cambium recover` (used only when an
 attempt's own add left a branch or directory behind) rolls back every dead incomplete Cambium
 create in the owner's repository, other agents' included; Cambium has no per-workspace recover.
+
+One tree model (B5, 2026-11-03, audit S4): every tree an expedition makes is one ledger record
+keyed by a `TreeId` sum, `integration | manager | attempt{attemptId} | validation{validationId,
+restart}`, in `State.trees`. Four entries carry its life (`tree_planned {tree, place}` before
+anything is made, `tree_ready`, `tree_failed`, `tree_released {release, preserved}`) where fifteen
+per-kind entries did, and three effects (`plan_tree`, `create_tree`, `release_tree {stage}`) where
+eleven did; the host picks each kind's place and release (`ReleaseStage` running | finished |
+retiring → keep commits / guard policy) through one thin table per concern. This changed the
+ledger format: a pre-B5 ledger does not fold (it is quarantined, never misread). It shipped only
+after every live expedition was retired, and a retired one is served from its `.retired` snapshot.
 
 ### R2. Checks are typed: executable or judged
 ```
@@ -326,9 +337,9 @@ acceptance, never the done commands): a claim's `change` is a sum, `{t:'commit',
 check of a no-code claim starts at the branch head). Decide plans `validation_planned {target}` for
 every ended code claim (target `candidate`, its sha) when the charter has command checks, and for
 the head when the manager asks done (with `done_requested`). The host resolves the sha and records
-`validation_started` (the tree's name, path, branch and base = the sha) BEFORE `cambium add`; a tree
-that cannot be made records `validation_tree_failed` and an `error` outcome per check, never a
-throwing tick. Checks run one validation at a time per expedition, outside the tick chain (a check
+`tree_planned {tree:{t:'validation', validationId, restart}}` (the tree's name, path, branch and
+base = the sha) BEFORE `cambium add`; a tree that cannot be made records `tree_failed` with a
+terminal `validation_failed`, never a throwing tick. Checks run one validation at a time per expedition, outside the tick chain (a check
 may run for hours; a steer must not wait on it), each appended through the chain as
 `validation {validationId, targetSha, checkIndex, outcome}`; a restart resumes at the first
 unrecorded check (a check interrupted by the crash runs again). `runCommand` spawns argv (no shell)
@@ -366,12 +377,13 @@ a running check, and a crash before the tree or between checks resumes at the fi
   to a log that does not exist.
 - The owner's main is never written. At done, the owner is told the branch to merge.
 
-Built (2026-11-01, `git.ts` `mergeCandidate`, decide `integrate`, effects `integrate`): `launched`
-names the integration tree (`exp-<id>-integration`, `<expeditions root>/<id>/integration`), so the
-launch entry is its intent; `create_integration_tree` runs `cambium add -b expedition/<id>` at the
-base (not `-ephemeral`: it holds the branch for the whole run), adopting the workspace by name on
-replay, and records `integration_tree_ready` (or `integration_tree_failed`, which finishes the
-expedition `setup_failed` with the reason; decide waits for the tree, managers included). The
+Built (2026-11-01, `git.ts` `mergeCandidate`, decide `integrate`, effects `integrate`): the launch
+batch holds the integration tree's `tree_planned` (`exp-<id>-integration`,
+`<expeditions root>/<id>/integration`), so the launch is its intent; `create_tree` runs
+`cambium add -b expedition/<id>` at the base (not `-ephemeral`: it holds the branch for the whole
+run), adopting the workspace by name on replay, and records `tree_ready` (or `tree_failed`, which
+finishes the expedition `setup_failed` with the reason; decide waits for the tree, managers
+included). The
 crew is created first so the badge and launch status never wait on a large-repository add.
 `{do:'integrate', claimAttempt}` is refused (typed `rejected`) unless the claim names a commit,
 its candidate validation passed (when there are command checks), and its latest check panel
@@ -536,7 +548,8 @@ guard is broken (mutation-checked). Tests: `server/test/expeditions.test.ts`, cr
   (posting/posted) attempt by the exact brief bytes (recorded before the post, so a run claimed
   before `attempt_posted` still matches): a work or check attempt starts in its worktree, a manager
   in the integration tree (read only, its brief says so; the repository root before that tree
-  exists; SUPERSEDED by R11: its own detached tree). Every other crew turn (a mention, the owner's chat with the crew, a worker the crew
+  exists; SUPERSEDED by R11: its own detached tree; the brief-bytes match itself SUPERSEDED by B5:
+  the attempt's run carries its tree as `RunConfig.cwd`). Every other crew turn (a mention, the owner's chat with the crew, a worker the crew
   spawned, a boot or creation warm with no run) starts in the crew's own fixed directory,
   `<expeditions root>/<id>/crew`, which is no git checkout: not the owner's checkout (the manager
   directory before setup and after finish) and not the integration tree the host merges into, and
@@ -797,10 +810,10 @@ salvaged and harvested too.
 **Audit #10 — checks across a restart: typed interruption, re-run on the same sha.** The host
 appends `validation_running` before it starts a check job. A process that finds a validation
 `running` that it never started itself (it keeps the keys of jobs it started) knows the job died
-with an earlier process: it discards that tree (salvage and harvest first) and appends
-`validation_interrupted {release}`; the validation goes back to `planned` with `interruptions + 1`,
-and its next tree has a fresh name (`<validation>-r<n>`), so it never adopts the tree an orphaned
-check may still be writing into. Checks already recorded are kept; the unrecorded ones run again
+with an earlier process: it discards that tree (salvage and harvest first) and appends its
+`tree_released`; a validation whose newest tree is released before its checks are all recorded
+gets a NEW tree (`{t:'validation', validationId, restart: n}`, named `<validation>-r<n>`), so it
+never adopts the tree an orphaned check may still be writing into. Checks already recorded are kept; the unrecorded ones run again
 on the same immutable sha. Chosen over adoption because adoption needs a detached wrapper with
 pid and exit files that outlives the server, and a pid from another boot cannot be trusted; a
 re-run on an immutable commit is correct by contract and costs only its time. Known limit: the

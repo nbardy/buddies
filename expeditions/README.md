@@ -157,8 +157,8 @@ answer (a quoted example followed by the real verdict, or prose after it, is not
 Host-run checks (design.md R11): each runs with a throwaway HOME and TMPDIR beside its tree, never
 the owner's. The repository files its argv names are hashed at the target commit before the run and
 re-read after; a check that changed its own validator is an `error`, and every check result carries
-its `expedition.validation/v1` report. A check job interrupted by a server restart is recorded
-`validation_interrupted` and re-run on the same commit in a fresh tree. Host git never runs
+its `expedition.validation/v1` report. A check job interrupted by a server restart is
+re-run on the same commit in a fresh tree (a new validation tree, `restart` + 1). Host git never runs
 repository hooks.
 
 Stop and release: when an expedition finishes, its live attempts' runs are cancelled the way the

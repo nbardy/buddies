@@ -97,15 +97,6 @@ export type Adoption =
   | { t: 'adopted' }
   | { t: 'refused'; reason: string };
 
-/** The manager's own detached, read-only worktree (design.md R11, audit #6): a manager turn
- * never starts in the owner's checkout nor in the integration tree the host merges into.
- * `missing`: not made yet. */
-export type ManagerTree =
-  | { t: 'missing' }
-  | { t: 'ready'; path: string }
-  | { t: 'failed'; reason: string }
-  | { t: 'released'; release: Release };
-
 /**
  * What an ended attempt cost (design.md R6), read once its Buddy run(s) settled (host meter.ts).
  * `measured`: the provider-counted tokens of every session the attempt's run conversations bound,
@@ -156,16 +147,8 @@ export interface Repo {
   branch: string;
 }
 
-/** The expedition's own integration worktree (design.md R3): one Cambium workspace on
- * `repo.branch`, created at `repo.baseSha`. Its name and path are written in `launched`, so the
- * launch entry is the intent the create replays from. */
-export interface IntegrationTreeAt {
-  name: string;
-  path: string;
-}
-
-/** Where a worker attempt's worktree is (design.md R1): a work attempt's starts at the expedition
- * branch head, a check's at the commit its claim names. */
+/** Where a branch tree's worktree is (design.md R1): a work attempt's starts at the expedition
+ * branch head, a check's at the commit its claim names, the integration tree at the launch base. */
 export interface WorktreeAt {
   path: string;
   branch: string;
@@ -182,23 +165,73 @@ export type Release =
   | { t: 'absent' }
   | { t: 'left'; reason: string };
 
-/** `failed`: the worktree could not be made (its attempt is dropped, never briefed). */
-export type WorktreeStatus =
+/** `failed`: the tree could not be made (an attempt is dropped, never briefed; the integration
+ * or manager tree finishes the expedition `setup_failed`; a validation fails). */
+export type TreeStatus =
   | { t: 'creating' }
   | { t: 'ready' }
   | { t: 'failed'; reason: string }
   | Release;
 
-export interface Worktree extends WorktreeAt {
-  attemptId: string;
-  /** The Cambium workspace name, the key that makes create and remove replayable. */
-  name: string;
-  status: WorktreeStatus;
+/**
+ * Every tree an expedition makes, one model (audit S4): the integration tree its merges land in
+ * (design.md R3), the manager's detached read-only tree (R11), a worker attempt's (R1), and one
+ * run of a validation (R2). A validation whose check job died with a host process restarts in a
+ * NEW tree (`restart` + 1), never the one an orphaned check may still be writing into.
+ */
+export type TreeId =
+  | { t: 'integration' }
+  | { t: 'manager' }
+  | { t: 'attempt'; attemptId: string }
+  | { t: 'validation'; validationId: string; restart: number };
+
+export const INTEGRATION_TREE = { t: 'integration' } as const satisfies TreeId;
+export const MANAGER_TREE = { t: 'manager' } as const satisfies TreeId;
+
+/** A tree's key in `State.trees`, its salvage ref and its harvest folder (host.ts keepOf). Ids
+ * are `<prefix><hex>`, so no attempt or validation key is `integration` or `manager`. */
+export function treeKey(id: TreeId): string {
+  switch (id.t) {
+    case 'integration':
+    case 'manager':
+      return id.t;
+    case 'attempt':
+      return id.attemptId;
+    case 'validation':
+      return id.restart === 0 ? id.validationId : `${id.validationId}-r${id.restart}`;
+  }
 }
 
-/** The Cambium name of a worker attempt's or a validation's worktree. */
-export const worktreeName = (expeditionId: string, attemptId: string) =>
-  `exp-${expeditionId}-${attemptId}`;
+/** One handler per tree kind; `byTree` only selects it. */
+export type ByTree<A extends unknown[], R> = {
+  [K in TreeId['t']]: (id: Extract<TreeId, { t: K }>, ...args: A) => R;
+};
+export const byTree = <A extends unknown[], R>(table: ByTree<A, R>, id: TreeId, ...args: A): R =>
+  (table[id.t] as (id: TreeId, ...args: A) => R)(id, ...args);
+
+/** `ephemeral`: a worker's or a validation's scratch tree, disposable by cleanup tools. `owned`:
+ * the expedition's integration tree, which holds its branch checked out for the whole run. */
+export type Lifetime = 'ephemeral' | 'owned';
+
+/** Where a tree is, recorded before it is made (the create replays from it): a Cambium workspace
+ * on its own branch, or the manager's plain detached worktree (no branch: it never commits). */
+export type Place =
+  | ({ t: 'workspace'; name: string; lifetime: Lifetime } & WorktreeAt)
+  | { t: 'detached'; path: string };
+
+export interface Tree {
+  id: TreeId;
+  place: Place;
+  status: TreeStatus;
+  /** What its releases kept (release.ts): salvage refs, harvested output. */
+  preserved: Preserved[];
+}
+
+/** A branch tree (every tree but the manager's) as one flat record with its status. */
+export type Workspace = Extract<Place, { t: 'workspace' }> & {
+  status: TreeStatus;
+  preserved: Preserved[];
+};
 
 // ---------- Validations (design.md R2) ----------
 
@@ -258,20 +291,6 @@ export interface ValidationCheck {
   timeoutSeconds: number;
 }
 
-export type ValidationPhase =
-  | { t: 'planned' }
-  /** The host resolved the target and recorded its fresh worktree before creating it. */
-  | {
-      t: 'started';
-      targetSha: string;
-      tree: WorktreeAt & { name: string };
-      treeStatus: WorktreeStatus;
-      /** `running`: a host process started its check job (`validation_running`). A process that
-       * finds `running` without having started the job itself knows the job died with an earlier
-       * process (audit 2026-11-01 #10). */
-      job: { t: 'idle' } | { t: 'running' };
-    };
-
 /** What a validation answers for (derived when it is planned): the charter's done checks at the
  * head, or one revision of a question's acceptance for a candidate (design.md R11). */
 export type ValidationBasis =
@@ -283,18 +302,16 @@ export interface Validation {
   target: ValidationTarget;
   basis: ValidationBasis;
   checks: ValidationCheck[];
-  phase: ValidationPhase;
+  /** Its trees' keys, oldest first: the last is the one its checks run in. */
+  trees: string[];
+  /** `running`: a host process started its check job in its current tree (`validation_running`).
+   * A process that finds `running` without having started the job itself knows the job died with
+   * an earlier process (audit 2026-11-01 #10). */
+  job: { t: 'idle' } | { t: 'running' };
   runs: CheckRun[];
   /** `failed`: the host could not run its checks at all (a terminal `validation_failed`). */
   failure: { t: 'none' } | { t: 'failed'; reason: string };
-  /** Times its check job died with a host process; each restart gets a fresh tree. */
-  interruptions: number;
 }
-
-/** The id a validation's tree is named by: a fresh name per restart after an interruption, so the
- * new tree never adopts the one an orphaned check may still be writing into. */
-export const validationTreeId = (v: Validation) =>
-  v.interruptions === 0 ? v.id : `${v.id}-r${v.interruptions}`;
 
 // ---------- Integration (design.md R3) ----------
 
@@ -360,14 +377,16 @@ export type Entry =
       launcherId: string;
       workspaceId: string;
       repo: Repo;
-      integrationTree: IntegrationTreeAt;
     }
-  /** The integration worktree exists on `expedition/<id>` (made after `launched` named it). */
-  | { t: 'integration_tree_ready'; at: string }
-  /** It could not be made: the expedition finishes `setup_failed` with the reason. */
-  | { t: 'integration_tree_failed'; at: string; reason: string }
-  /** Removed at finish; the branch always stays (it is what the owner merges). */
-  | { t: 'integration_tree_released'; at: string; release: Release }
+  /** Host intent, before the tree is made: a crash leaves a name and path the replay adopts. The
+   * integration tree's is written with `launched`, in the launch batch. */
+  | { t: 'tree_planned'; at: string; tree: TreeId; place: Place }
+  | { t: 'tree_ready'; at: string; tree: TreeId }
+  /** It could not be made (git.ts rolled back what it could). */
+  | { t: 'tree_failed'; at: string; tree: TreeId; reason: string }
+  /** Removed, kept or left (release.ts), with what the release preserved first. The integration
+   * tree's branch always stays (it is what the owner merges). */
+  | { t: 'tree_released'; at: string; tree: TreeId; release: Release; preserved: Preserved[] }
   /** Decide's intent, before the merge: integrate this claim's validated commit. */
   | {
       t: 'integration_planned';
@@ -384,13 +403,6 @@ export type Entry =
       sha: string;
       refusal: IntegrationRefusal;
     }
-  /** Intent, written before `git cambium add`: a crash leaves a name the replay adopts. */
-  | ({ t: 'worktree_creating'; at: string; attemptId: string; name: string } & WorktreeAt)
-  /** Written before the work brief is posted: the brief names this path. */
-  | ({ t: 'worktree_ready'; at: string; attemptId: string } & WorktreeAt)
-  /** `cambium add` failed (git.ts rolled back what it could): the attempt is dropped. */
-  | { t: 'worktree_failed'; at: string; attemptId: string; reason: string }
-  | { t: 'worktree_released'; at: string; attemptId: string; release: Release }
   /** Decide's intent: validate a target (a claim's commit as soon as it ends; the head at done). */
   | {
       t: 'validation_planned';
@@ -402,11 +414,6 @@ export type Entry =
   /** The host could not run the checks at all (the job threw): terminal, never re-run (audit #5:
    * a rejected job was re-run on every tick, a hot loop). */
   | { t: 'validation_failed'; at: string; validationId: string; reason: string }
-  /** Host intent, before `cambium add`: the resolved sha (the tree's base) and the tree's name. */
-  | ({ t: 'validation_started'; at: string; validationId: string; name: string } & WorktreeAt)
-  | { t: 'validation_tree_ready'; at: string; validationId: string }
-  /** No tree: every command check is recorded as `error` in the same append. */
-  | { t: 'validation_tree_failed'; at: string; validationId: string; reason: string }
   /** One command check ran (host only; never an agent's report). */
   | {
       t: 'validation';
@@ -417,15 +424,10 @@ export type Entry =
       outcome: CheckOutcome;
       report: ValidationReport;
     }
-  | { t: 'validation_released'; at: string; validationId: string; release: Release }
-  /** Intent, before the host starts the check job in this process (audit #10). */
+  /** Intent, before the host starts the check job in this process (audit #10). A job that died
+   * with an earlier process has its tree released; the unrecorded checks run again in a fresh
+   * tree at the same immutable sha. */
   | { t: 'validation_running'; at: string; validationId: string }
-  /** The job died with an earlier host process: its tree was discarded (`release`) and the
-   * unrecorded checks run again in a fresh tree at the same immutable sha. */
-  | { t: 'validation_interrupted'; at: string; validationId: string; release: Release }
-  /** What a tree's release kept (release.ts), recorded with the release; `treeOf` is the attempt
-   * or validation id. */
-  | { t: 'preserved'; at: string; treeOf: string; preserved: Preserved }
   /** The host asked an attempt's live runs to stop (owner stop or deadline, audit #2). */
   | { t: 'attempt_cancel_requested'; at: string; attemptId: string; runIds: string[] }
   /** A manager's done awaiting the head validation (written with its `validation_planned`). */
@@ -458,9 +460,6 @@ export type Entry =
   /** The branch holds the claimed commit inside custody: the attempt's outcome is now the claim. */
   | { t: 'claim_adopted'; at: string; attemptId: string }
   | { t: 'claim_refused'; at: string; attemptId: string; reason: string }
-  | { t: 'manager_tree_ready'; at: string; path: string }
-  | { t: 'manager_tree_failed'; at: string; reason: string }
-  | { t: 'manager_tree_released'; at: string; release: Release }
   /** Ticks kept failing (audit #1): recorded once per backoff step, with the last reason. */
   | { t: 'tick_failed'; at: string; failures: number; reason: string }
   | { t: 'attempt_ended'; at: string; attemptId: string; outcome: Outcome }
@@ -514,9 +513,9 @@ export type Entry =
 
 export type AttemptPhase =
   | { t: 'planned' }
-  /** A worker attempt whose worktree intent is recorded: it holds a slot and its custody. */
+  /** A worker attempt whose tree intent is recorded: it holds a slot and its custody. */
   | { t: 'admitted' }
-  /** Never started: its worktree could not be made (`worktree_failed`). */
+  /** Never started: its tree could not be made (`tree_failed`). */
   | { t: 'dropped'; reason: string }
   | { t: 'posting'; body: string; round: Round }
   | { t: 'posted'; requestId: string; round: Round }
@@ -565,12 +564,10 @@ export interface State {
   launcherId: string;
   workspaceId: string;
   repo: Repo;
-  /** The integration worktree on `repo.branch` (its base is `repo.baseSha`). */
-  integrationTree: WorktreeAt & IntegrationTreeAt & { status: WorktreeStatus };
+  /** Every tree the host planned, by treeKey (the integration tree's from launch). */
+  trees: Record<string, Tree>;
   /** Candidate merges into `repo.branch`, in plan order (run one at a time). */
   integrations: Integration[];
-  /** Worker (work and check) attempts' worktrees, by attempt id. */
-  worktrees: Record<string, Worktree>;
   /** Host-run command-check validations, in plan order (run one at a time). */
   validations: Validation[];
   /** A manager's done waits on its head validation; `finished` or `done_refused` settles it. */
@@ -588,7 +585,6 @@ export interface State {
   requests: Record<string, string[]>;
   /** Manager claims of unreported commits, by attempt id (R11). */
   adoptions: Record<string, Adoption>;
-  managerTree: ManagerTree;
   /** Hours the owner added to the deadline (`extend` feedback). */
   extendedHours: number;
   /** The last recorded run of failed ticks (audit #1), for the page and status. */
@@ -597,8 +593,6 @@ export interface State {
   costs: Record<string, AttemptCost>;
   /** Live attempts the host asked to stop, by attempt id, with when (audit #2). */
   cancels: Record<string, { at: string; runIds: string[] }>;
-  /** What tree releases kept (salvage refs, harvested output), in order. */
-  preserved: { treeOf: string; preserved: Preserved }[];
   /** Notable entries since the last chat status post. */
   news: Entry[];
   attempts: Attempt[];
@@ -638,15 +632,8 @@ export function fold(entries: readonly Entry[]): State {
     launcherId: first.launcherId,
     workspaceId: first.workspaceId,
     repo: first.repo,
-    integrationTree: {
-      name: first.integrationTree.name,
-      path: first.integrationTree.path,
-      branch: first.repo.branch,
-      baseSha: first.repo.baseSha,
-      status: { t: 'creating' },
-    },
+    trees: {},
     integrations: [],
-    worktrees: {},
     validations: [],
     doneRequest: { t: 'none' },
     launchedAt: first.at,
@@ -657,12 +644,10 @@ export function fold(entries: readonly Entry[]): State {
     repairs: {},
     requests: {},
     adoptions: {},
-    managerTree: { t: 'missing' },
     extendedHours: 0,
     tickFailure: { t: 'none' },
     costs: {},
     cancels: {},
-    preserved: [],
     news: [],
     attempts: [],
     questions: [],
@@ -686,7 +671,6 @@ const NEWS: ReadonlySet<Entry['t']> = new Set([
   'attempt_planned',
   'attempt_retry_planned',
   'attempt_posted',
-  'worktree_failed',
   'attempt_ended',
   'question_added',
   'question_closed',
@@ -712,15 +696,26 @@ export function apply(s: State, e: Entry): void {
   switch (e.t) {
     case 'launched':
       throw new Error('launched may only open a ledger');
-    case 'integration_tree_ready':
-      s.integrationTree.status = { t: 'ready' };
+    case 'tree_planned': {
+      const key = treeKey(e.tree);
+      if (key in s.trees) throw new Error(`tree ${key} planned twice`);
+      s.trees[key] = { id: e.tree, place: e.place, status: { t: 'creating' }, preserved: [] };
+      byTree(PLANNED, e.tree, s, key);
       return;
-    case 'integration_tree_failed':
-      s.integrationTree.status = { t: 'failed', reason: e.reason };
+    }
+    case 'tree_ready':
+      treeOf(s, e.tree).status = { t: 'ready' };
       return;
-    case 'integration_tree_released':
-      s.integrationTree.status = e.release;
+    case 'tree_failed':
+      treeOf(s, e.tree).status = { t: 'failed', reason: e.reason };
+      byTree(FAILED, e.tree, s, e);
       return;
+    case 'tree_released': {
+      const tree = treeOf(s, e.tree);
+      tree.status = e.release;
+      tree.preserved.push(...e.preserved);
+      return;
+    }
     case 'integration_planned':
       s.integrations.push({
         id: e.integrationId,
@@ -737,44 +732,16 @@ export function apply(s: State, e: Entry): void {
       integrationOf(s, e.integrationId).status = { t: 'refused', refusal: e.refusal };
       s.unseen.push(e);
       return;
-    case 'worktree_creating':
-      s.worktrees[e.attemptId] = {
-        attemptId: e.attemptId,
-        name: e.name,
-        path: e.path,
-        branch: e.branch,
-        baseSha: e.baseSha,
-        status: { t: 'creating' },
-      };
-      attemptOf(s, e.attemptId).phase = { t: 'admitted' };
-      return;
-    case 'worktree_ready':
-      Object.assign(worktreeOf(s, e.attemptId), {
-        path: e.path,
-        branch: e.branch,
-        baseSha: e.baseSha,
-        status: { t: 'ready' },
-      });
-      return;
-    case 'worktree_failed':
-      worktreeOf(s, e.attemptId).status = { t: 'failed', reason: e.reason };
-      attemptOf(s, e.attemptId).phase = { t: 'dropped', reason: e.reason };
-      // Shown to the next manager, which may plan the work again.
-      s.unseen.push(e);
-      return;
-    case 'worktree_released':
-      worktreeOf(s, e.attemptId).status = e.release;
-      return;
     case 'validation_planned':
       s.validations.push({
         id: e.validationId,
         target: e.target,
         basis: basisOf(s, e.target),
         checks: e.checks,
-        phase: { t: 'planned' },
+        trees: [],
+        job: { t: 'idle' },
         runs: [],
         failure: { t: 'none' },
-        interruptions: 0,
       });
       return;
     case 'validation_failed': {
@@ -783,21 +750,6 @@ export function apply(s: State, e: Entry): void {
       if (reportsToManager(v.target)) s.unseen.push(e);
       return;
     }
-    case 'validation_started':
-      validationOf(s, e.validationId).phase = {
-        t: 'started',
-        targetSha: e.baseSha,
-        tree: { name: e.name, path: e.path, branch: e.branch, baseSha: e.baseSha },
-        treeStatus: { t: 'creating' },
-        job: { t: 'idle' },
-      };
-      return;
-    case 'validation_tree_ready':
-      startedOf(s, e.validationId).treeStatus = { t: 'ready' };
-      return;
-    case 'validation_tree_failed':
-      startedOf(s, e.validationId).treeStatus = { t: 'failed', reason: e.reason };
-      return;
     case 'validation': {
       const v = validationOf(s, e.validationId);
       v.runs.push({ checkIndex: e.checkIndex, outcome: e.outcome, report: e.report });
@@ -806,21 +758,9 @@ export function apply(s: State, e: Entry): void {
       if (validationComplete(v) && reportsToManager(v.target)) s.unseen.push(e);
       return;
     }
-    case 'validation_released':
-      startedOf(s, e.validationId).treeStatus = e.release;
-      return;
     case 'validation_running':
-      startedOf(s, e.validationId).job = { t: 'running' };
-      return;
-    case 'validation_interrupted': {
-      startedOf(s, e.validationId);
-      const v = validationOf(s, e.validationId);
-      v.phase = { t: 'planned' };
-      v.interruptions += 1;
-      return;
-    }
-    case 'preserved':
-      s.preserved.push({ treeOf: e.treeOf, preserved: e.preserved });
+      currentTree(s, validationOf(s, e.validationId));
+      validationOf(s, e.validationId).job = { t: 'running' };
       return;
     case 'attempt_cancel_requested':
       s.cancels[e.attemptId] = { at: e.at, runIds: e.runIds };
@@ -910,15 +850,6 @@ export function apply(s: State, e: Entry): void {
     case 'claim_refused':
       s.adoptions[e.attemptId] = { t: 'refused', reason: e.reason };
       s.unseen.push(e);
-      return;
-    case 'manager_tree_ready':
-      s.managerTree = { t: 'ready', path: e.path };
-      return;
-    case 'manager_tree_failed':
-      s.managerTree = { t: 'failed', reason: e.reason };
-      return;
-    case 'manager_tree_released':
-      s.managerTree = { t: 'released', release: e.release };
       return;
     case 'tick_failed':
       s.tickFailure = { t: 'failing', at: e.at, failures: e.failures, reason: e.reason };
@@ -1012,7 +943,41 @@ export function apply(s: State, e: Entry): void {
       s.retirement = { t: 'retired', at: e.at };
       return;
   }
+  // A stored line is parsed unchecked (store.ts), so an entry of no known kind ends up here: a
+  // ledger written by an older format (the per-kind tree entries before B5) must not fold with its
+  // lines silently skipped, which left no integration tree and failed every tick. It is a corrupt
+  // ledger: boot quarantines it, the file stays for the owner.
+  const unknown: never = e;
+  throw new Error(`unknown ledger entry ${(unknown as { t: string }).t}`);
 }
+
+/** What planning a tree does to its owner: an attempt is admitted (it holds a slot and its
+ * custody from now on); a validation runs its checks in it, with no job started there yet. */
+const PLANNED: ByTree<[State, string], void> = {
+  integration: () => undefined,
+  manager: () => undefined,
+  attempt: ({ attemptId }, s) => {
+    attemptOf(s, attemptId).phase = { t: 'admitted' };
+  },
+  validation: ({ validationId }, s, key) => {
+    const v = validationOf(s, validationId);
+    v.trees.push(key);
+    v.job = { t: 'idle' };
+  },
+};
+
+/** What a tree that could not be made does to its owner. An attempt is dropped and shown to the
+ * next manager (which may plan the work again). The integration or manager tree finishes the
+ * expedition (decide.ts setupOf); a validation's failure is recorded with it (`validation_failed`). */
+const FAILED: ByTree<[State, Extract<Entry, { t: 'tree_failed' }>], void> = {
+  integration: () => undefined,
+  manager: () => undefined,
+  attempt: ({ attemptId }, s, e) => {
+    attemptOf(s, attemptId).phase = { t: 'dropped', reason: e.reason };
+    s.unseen.push(e);
+  },
+  validation: () => undefined,
+};
 
 /** A retirement step recorded outside `retiring` is a corrupt ledger. */
 function retiringOf(s: State): Extract<Retirement, { t: 'retiring' }> {
@@ -1113,21 +1078,38 @@ export function attemptOf(s: State, id: string): Attempt {
   if (!attempt) throw new Error(`unknown attempt ${id}`);
   return attempt;
 }
-export function worktreeOf(s: State, attemptId: string): Worktree {
-  const worktree = s.worktrees[attemptId];
-  if (!worktree) throw new Error(`attempt ${attemptId} has no worktree`);
-  return worktree;
+/** A tree the ledger planned; a missing one is a corrupt ledger. */
+export function treeOf(s: State, id: TreeId): Tree {
+  const tree = s.trees[treeKey(id)];
+  if (!tree) throw new Error(`no tree ${treeKey(id)}`);
+  return tree;
+}
+/** A planned branch tree, flat (every tree but the manager's is one). */
+export function workspaceOf(s: State, id: TreeId): Workspace {
+  const { place, status, preserved } = treeOf(s, id);
+  if (place.t !== 'workspace') throw new Error(`tree ${treeKey(id)} is ${place.t}`);
+  return { ...place, status, preserved };
+}
+/** The commit a validation runs on, once its first tree is planned (its base). */
+export type TargetSha = { t: 'unresolved' } | { t: 'at'; sha: string };
+export function targetShaOf(s: State, v: Validation): TargetSha {
+  const key = v.trees.at(-1);
+  return key === undefined
+    ? { t: 'unresolved' }
+    : { t: 'at', sha: workspaceOf(s, s.trees[key].id).baseSha };
+}
+export const worktreeOf = (s: State, attemptId: string): Workspace =>
+  workspaceOf(s, { t: 'attempt', attemptId });
+/** The tree a validation's checks run in: its newest. */
+export function currentTree(s: State, v: Validation): Tree {
+  const key = v.trees.at(-1);
+  if (key === undefined) throw new Error(`validation ${v.id} has no tree`);
+  return s.trees[key];
 }
 export function validationOf(s: State, id: string): Validation {
   const validation = byId(s.validations, id);
   if (!validation) throw new Error(`unknown validation ${id}`);
   return validation;
-}
-/** A validation the ledger says started (its tree recorded); otherwise a corrupt ledger. */
-export function startedOf(s: State, id: string): Extract<ValidationPhase, { t: 'started' }> {
-  const { phase } = validationOf(s, id);
-  if (phase.t !== 'started') throw new Error(`validation ${id} is ${phase.t}`);
-  return phase;
 }
 export function integrationOf(s: State, id: string): Integration {
   const integration = byId(s.integrations, id);

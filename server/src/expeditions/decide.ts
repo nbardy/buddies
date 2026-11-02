@@ -1,11 +1,14 @@
 import type { ManagerAction } from './charter';
-import type { Entry, Integration, Outcome, State, Validation } from './ledger';
+import type { Entry, Integration, Outcome, State, TreeStatus, Validation } from './ledger';
 import {
+  INTEGRATION_TREE,
+  MANAGER_TREE,
   apply,
   byId,
   doneValidationChecks,
   judgedChecks,
-  startedOf,
+  treeKey,
+  treeOf,
   validationComplete,
   validationOf,
   validationPassed,
@@ -260,32 +263,27 @@ function setupOf(s: State): Setup {
 }
 
 function integrationSetup(s: State): Setup {
-  const tree = s.integrationTree.status;
-  switch (tree.t) {
+  return treeSetup(treeOf(s, INTEGRATION_TREE).status, 'integration');
+}
+
+/** The manager's tree is planned once the integration tree is ready (effects.ts). */
+function managerSetup(s: State): Setup {
+  return treeKey(MANAGER_TREE) in s.trees
+    ? treeSetup(treeOf(s, MANAGER_TREE).status, "manager's")
+    : { t: 'waiting' };
+}
+
+function treeSetup(status: TreeStatus, which: string): Setup {
+  switch (status.t) {
     case 'creating':
       return { t: 'waiting' };
     case 'failed':
-      return { t: 'failed', reason: `The integration worktree could not be made: ${tree.reason}` };
+      return { t: 'failed', reason: `The ${which} worktree could not be made: ${status.reason}` };
     case 'ready':
     case 'kept':
     case 'removed':
     case 'absent':
     case 'left':
-      return { t: 'ready' };
-  }
-}
-
-function managerSetup(s: State): Setup {
-  switch (s.managerTree.t) {
-    case 'missing':
-      return { t: 'waiting' };
-    case 'failed':
-      return {
-        t: 'failed',
-        reason: `The manager's worktree could not be made: ${s.managerTree.reason}`,
-      };
-    case 'ready':
-    case 'released':
       return { t: 'ready' };
   }
 }
@@ -408,10 +406,9 @@ function settleDoneRequest(s: State, push: (e: Entry) => void, at: string): void
   if (s.doneRequest.t !== 'validating' || s.run.t === 'finished') return;
   const v = validationOf(s, s.doneRequest.validationId);
   if (!validationComplete(v)) return;
-  const sha = startedOf(s, v.id).targetSha;
   const failed = v.runs
     .filter((r) => r.outcome.t !== 'passed')
-    .map((r) => `command check ${r.checkIndex} ${r.outcome.t} on the head ${sha}`);
+    .map((r) => `command check ${r.checkIndex} ${r.outcome.t} on the head ${r.report.targetSha}`);
   const unrun = v.failure.t === 'failed' ? [`the checks could not run: ${v.failure.reason}`] : [];
   const blockers = [...unrun, ...failed, ...judgedBlocker(s, 'merged')];
   if (blockers.length > 0) {

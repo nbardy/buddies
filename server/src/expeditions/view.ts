@@ -35,12 +35,14 @@ import {
   questionOf,
   questionStage,
   queued,
+  treeKey,
   validationComplete,
   validationHeadline,
   validationPassed,
   verifications,
   verifiedClaims,
   workerAttempts,
+  worktreeOf,
 } from './model';
 
 // The expedition modal's data: one pure projection of the folded ledger (no I/O), served by
@@ -152,8 +154,9 @@ function attemptCost(s: State, attemptId: string, phase: AttemptPhase): Expediti
 
 /** An attempt's worktree, once admission recorded one (managers never have one). */
 function worktreeView(s: State, attemptId: string): ExpeditionWorktree {
-  const tree = s.worktrees[attemptId];
-  return tree ? { t: 'tree', branch: tree.branch, path: tree.path } : { t: 'none' };
+  if (!(treeKey({ t: 'attempt', attemptId }) in s.trees)) return { t: 'none' };
+  const tree = worktreeOf(s, attemptId);
+  return { t: 'tree', branch: tree.branch, path: tree.path };
 }
 
 function integrationView(s: State): ExpeditionIntegration {

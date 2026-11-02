@@ -22,8 +22,8 @@ import type {
   Outcome,
   Run,
   State,
+  TargetSha,
   Validation,
-  ValidationPhase,
 } from './ledger';
 import {
   apply,
@@ -31,6 +31,7 @@ import {
   headOf,
   integrationOf,
   questionOf,
+  targetShaOf,
   validationComplete,
   validationOf,
   validationPassed,
@@ -481,7 +482,7 @@ export function checkOutcomeLabel(o: CheckOutcome): string {
 }
 
 /** What a validation ran on and how far it got, one line. */
-export function validationLabel(v: Validation): string {
+export function validationLabel(s: State, v: Validation): string {
   const runs = [
     ...v.runs.map((r) => `check ${r.checkIndex} ${checkOutcomeLabel(r.outcome)}`),
     ...(v.failure.t === 'failed' ? [`could not run: ${clip(v.failure.reason, 300)}`] : []),
@@ -491,7 +492,7 @@ export function validationLabel(v: Validation): string {
     : validationPassed(v)
       ? 'PASSED'
       : 'FAILED';
-  return `validation ${v.id} of ${subjectOf(v)}: ${state}${runs.length ? ` — ${runs.join('; ')}` : ''}`;
+  return `validation ${v.id} of ${subjectOf(s, v)}: ${state}${runs.length ? ` — ${runs.join('; ')}` : ''}`;
 }
 
 /**
@@ -504,7 +505,7 @@ export function validationHeadline(s: State, v: Validation): string {
   const on =
     v.target.t === 'candidate'
       ? `\`${v.target.sha.slice(0, 7)}\` from ${attemptTitle(s, attemptOf(s, v.target.claimAttemptId))}`
-      : headOn(v.phase);
+      : headOn(targetShaOf(s, v));
   const total = v.checks.length;
   const problems = [
     ...v.runs
@@ -519,29 +520,29 @@ export function validationHeadline(s: State, v: Validation): string {
     : `Checks failed on ${on}${detail}`;
 }
 
-function headOn(phase: ValidationPhase): string {
-  switch (phase.t) {
-    case 'planned':
+function headOn(sha: TargetSha): string {
+  switch (sha.t) {
+    case 'unresolved':
       return 'the expedition branch head';
-    case 'started':
-      return `the expedition branch head \`${phase.targetSha.slice(0, 7)}\``;
+    case 'at':
+      return `the expedition branch head \`${sha.sha.slice(0, 7)}\``;
   }
 }
 
-function subjectOf(v: Validation): string {
+function subjectOf(s: State, v: Validation): string {
   switch (v.target.t) {
     case 'candidate':
       return `candidate ${v.target.sha.slice(0, 10)} of ${v.target.claimAttemptId}`;
     case 'head':
-      return `the head ${shaOf(v.phase)}`;
+      return `the head ${shaOf(targetShaOf(s, v))}`;
   }
 }
 
-function shaOf(phase: ValidationPhase): string {
-  switch (phase.t) {
-    case 'planned':
+function shaOf(sha: TargetSha): string {
+  switch (sha.t) {
+    case 'unresolved':
       return '(not yet resolved)';
-    case 'started':
-      return phase.targetSha.slice(0, 10);
+    case 'at':
+      return sha.sha.slice(0, 10);
   }
 }

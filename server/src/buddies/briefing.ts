@@ -16,7 +16,7 @@ export interface ResolvedBuddyConversation {
 }
 
 /** A turn's cwd: workspace root, a crew's fixed directory, or one run's own (its crate
- * `RunConfig.cwd`, or an expedition attempt's from host.ts turnDirectory). 2026-11-01 smoke
+ * `RunConfig.cwd`: an expedition attempt's run names its tree, host.ts postAttempt). 2026-11-01 smoke
  * incident: crew turns ran in the owner's checkout, isolated only by a brief, and a Codex sandbox
  * rooted there could not write the attempt worktree. */
 export type TurnDirectory =

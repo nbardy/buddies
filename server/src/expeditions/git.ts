@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { ClaimChange } from './charter';
 import { resolvesOnPath } from './command';
-import type { IntegrationRefusal, Repo, WorktreeAt } from './ledger';
+import type { IntegrationRefusal, Lifetime, Repo, WorktreeAt } from './ledger';
 import { withinCustody } from './queries';
 
 // The expedition's git I/O: preflight, the expedition branch, one Cambium worktree per work attempt.
@@ -229,9 +229,6 @@ export async function recoverLeftovers(root: string, at: WorktreeAt): Promise<Le
   return leftovers(root, at);
 }
 
-/** `ephemeral`: a worker's or a validation's scratch tree, disposable by cleanup tools. `owned`:
- * the expedition's integration tree, which holds its branch checked out for the whole run. */
-export type Lifetime = 'ephemeral' | 'owned';
 const lifetimeFlags = (l: Lifetime): string[] => {
   switch (l) {
     case 'ephemeral':
@@ -241,8 +238,9 @@ const lifetimeFlags = (l: Lifetime): string[] => {
   }
 };
 
-/** The worktree `ensureWorktree` produced: ready, or a typed failure the ledger records. */
-export type MadeWorktree = { t: 'ready'; at: WorktreeAt } | { t: 'failed'; reason: string };
+/** Whether a planned tree now exists where its intent says (`tree_ready`), or a typed failure
+ * the ledger records (`tree_failed`). The ledger's planned place is the tree's place. */
+export type MadeWorktree = { t: 'ready' } | { t: 'failed'; reason: string };
 
 /**
  * The attempt's worktree, created at `plan.baseSha` or adopted by its Cambium name after a crash
@@ -256,7 +254,7 @@ export async function ensureWorktree(
   root: string,
   name: string,
   plan: WorktreeAt,
-  lifetime: Lifetime = 'ephemeral'
+  lifetime: Lifetime
 ): Promise<MadeWorktree> {
   const base = await tipOf(root, plan.baseSha);
   if (base.t === 'missing') return { t: 'failed', reason: `commit ${plan.baseSha} does not exist` };
@@ -287,7 +285,7 @@ function adopted(w: z.infer<typeof CambiumWorkspace>, plan: WorktreeAt): MadeWor
     w.base_commit === plan.baseSha ? '' : `base ${w.base_commit} (expected ${plan.baseSha})`,
   ].filter(Boolean);
   return mismatch.length === 0
-    ? { t: 'ready', at: { path: w.path, branch: w.branch, baseSha: w.base_commit } }
+    ? { t: 'ready' }
     : { t: 'failed', reason: `Cambium workspace ${w.name} does not match: ${mismatch.join(', ')}` };
 }
 
@@ -529,7 +527,7 @@ export async function ensureDetachedTree(
       if (add.t === 'failed') return { t: 'failed', reason: `git worktree add: ${add.message}` };
     }
     await syncDetachedTree(dir, sha);
-    return { t: 'ready', at: { path: dir, branch: '(detached)', baseSha: sha } };
+    return { t: 'ready' };
   } catch (error) {
     return { t: 'failed', reason: (error as Error).message };
   }

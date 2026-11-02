@@ -32,6 +32,7 @@ import {
   questionStage,
   queued,
   seatLabel,
+  treeKey,
   validationLabel,
   validationOf,
   waitsOn,
@@ -117,7 +118,7 @@ function stagesText(s: State): string {
 
 /** Every validation so far, newest last: what the host ran and how each check ended. */
 function validationsText(s: State): string {
-  return `VALIDATIONS (host-run commands: a question's command acceptance on a candidate, the DONE WHEN commands on the head at done):\n${s.validations.map((v) => `- ${validationLabel(v)}`).join('\n') || '- none yet'}`;
+  return `VALIDATIONS (host-run commands: a question's command acceptance on a candidate, the DONE WHEN commands on the head at done):\n${s.validations.map((v) => `- ${validationLabel(s, v)}`).join('\n') || '- none yet'}`;
 }
 
 /** Every merge into the expedition branch so far, in order. */
@@ -155,7 +156,7 @@ function phaseDetail(s: State, a: Attempt): string {
 function unseenLine(s: State, e: Entry): string {
   switch (e.t) {
     case 'validation':
-      return `- ${validationLabel(validationOf(s, e.validationId))}`;
+      return `- ${validationLabel(s, validationOf(s, e.validationId))}`;
     case 'done_refused':
       return `- DONE REFUSED: ${e.reason}`;
     case 'integrated':
@@ -163,8 +164,8 @@ function unseenLine(s: State, e: Entry): string {
       return `- ${integrationLabel(s, integrationOf(s, e.integrationId))}`;
     case 'attempt_ended':
       return `- ${e.attemptId} ended: ${outcomeDetail(e.outcome)}`;
-    case 'worktree_failed':
-      return `- ${e.attemptId} NOT STARTED, its worktree could not be made: ${e.reason}`;
+    case 'tree_failed':
+      return `- ${treeKey(e.tree)} NOT STARTED, its worktree could not be made: ${e.reason}`;
     case 'rejected':
       return `- REJECTED ${e.action.do}: ${e.reason}`;
     case 'feedback':
@@ -172,7 +173,7 @@ function unseenLine(s: State, e: Entry): string {
     case 'question_added':
       return `- QUESTION ADDED ${e.questionId} [${e.scope}] ${e.title} (paths: ${e.paths.join(', ')}; accepted by ${acceptanceLabel(e.acceptance)}): start work on it by this id`;
     case 'validation_failed':
-      return `- ${validationLabel(validationOf(s, e.validationId))}`;
+      return `- ${validationLabel(s, validationOf(s, e.validationId))}`;
     case 'claim_adopted':
       return `- CLAIM ADOPTED for ${e.attemptId}: its commit is now its claim (validated or checked as its question's acceptance says)`;
     case 'claim_refused':
