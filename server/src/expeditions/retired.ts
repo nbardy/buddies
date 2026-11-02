@@ -3,108 +3,68 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { ExpeditionRetiredView, ExpeditionSummary } from '@unleashd/shared';
 import { z } from 'zod';
-import type { State } from './ledger';
+import { FINISH_REASONS, type State } from './ledger';
 import { expeditionSummary, summaryLine } from './view';
 
-// A retired expedition (plan A6) is frozen: `<root>/.retired/<id>.json` holds its summary and its
-// last status report, and its folder (ledger, harvest) moves to `<root>/.retired/<id>/`. Boot
-// reads the snapshots and never folds a retired ledger again, so code that changes the ledger
-// format owes nothing to a retired expedition. The snapshot file is persisted data with its own
-// frozen shape (`expedition.retired/v1`): the served ExpeditionSummary is derived from it on read,
-// so a change to the wire summary never strands a snapshot already on disk.
+// A retired expedition (plan A6) is frozen: `<root>/.retired/<id>.json` holds its summary and last
+// status report, and its folder moves to `<root>/.retired/<id>/`. A retired ledger is never folded
+// again. The snapshot has its own frozen shape (`expedition.retired/v1`); the served summary is
+// derived on read, so a wire change never strands a snapshot on disk.
 
 export const RETIRED_DIR = '.retired';
 
-/** v1 counts: `live` is the live work and check attempts (none once retired: retirement waits
- * until nothing is live, plan.ts retireEffects). */
-const Counts = z.object({
-  attempts: z.number(),
-  maxAttempts: z.number(),
-  decisions: z.number(),
-  maxDecisions: z.number(),
-  live: z.number(),
-  maxLive: z.number(),
-  queued: z.number(),
-  verified: z.number(),
-  exploreCap: z.number(),
+const n = z.number();
+/** `live`: none once retired (retirement waits until nothing is live). */
+const Counts = z.strictObject({
+  ...{ attempts: n, maxAttempts: n, decisions: n, maxDecisions: n, live: n, maxLive: n },
+  ...{ queued: n, verified: n, exploreCap: n },
 });
 
-const FinishReason = z.enum([
-  'done',
-  'attempts_spent',
-  'decisions_spent',
-  'deadline',
-  'owner_stop',
-  'setup_failed',
-]);
-
-/** κ for a snapshot file: the summary as the list serves it (a retired run is always finished). */
-const Snapshot = z
-  .object({
-    t: z.literal('expedition.retired/v1'),
-    summary: z
-      .object({
-        id: z.string(),
-        name: z.string(),
-        workspaceId: z.string(),
-        launchedAt: z.string(),
-        run: z
-          .object({
-            t: z.literal('finished'),
-            at: z.string(),
-            reason: FinishReason,
-            summary: z.string(),
-          })
-          .strict(),
-        counts: Counts.strict(),
-        cost: z.object({ short: z.string(), line: z.string() }).strict(),
-        retirement: z.object({ t: z.literal('retired'), at: z.string() }).strict(),
-      })
-      .strict(),
-    report: z.string(),
-  })
-  .strict();
+const Snapshot = z.strictObject({
+  t: z.literal('expedition.retired/v1'),
+  summary: z.strictObject({
+    id: z.string(),
+    name: z.string(),
+    workspaceId: z.string(),
+    launchedAt: z.string(),
+    run: z.strictObject({
+      t: z.literal('finished'),
+      at: z.string(),
+      reason: z.enum(FINISH_REASONS),
+      summary: z.string(),
+    }),
+    counts: Counts,
+    cost: z.strictObject({ short: z.string(), line: z.string() }),
+    retirement: z.strictObject({ t: z.literal('retired'), at: z.string() }),
+  }),
+  report: z.string(),
+});
 export type RetiredSnapshot = z.infer<typeof Snapshot>;
 
 export function retiredView(snapshot: RetiredSnapshot): ExpeditionRetiredView {
   const { live, ...counts } = snapshot.summary.counts;
   const served: ExpeditionSummary['counts'] = { ...counts, running: live, liveWorkers: live };
-  return {
-    t: 'retired',
-    summary: {
-      ...snapshot.summary,
-      counts: served,
-      line: summaryLine(served, snapshot.summary.cost),
-    },
-    report: snapshot.report,
-  };
+  const line = summaryLine(served, snapshot.summary.cost);
+  const summary = { ...snapshot.summary, counts: served, line };
+  return { t: 'retired', summary, report: snapshot.report };
 }
 
-/** What boot reads in `.retired`: each snapshot, or why one does not read (set aside, named). */
-export type RetiredFile =
-  | { t: 'read'; snapshot: RetiredSnapshot }
-  | { t: 'corrupt'; reason: string };
+type RetiredFile = { t: 'read'; snapshot: RetiredSnapshot } | { t: 'corrupt'; reason: string };
 
-/** Sync fs at boot only (createExpeditionHost runs once, before any tick). */
+function readSnapshot(file: string): RetiredFile {
+  try {
+    return { t: 'read', snapshot: Snapshot.parse(JSON.parse(fs.readFileSync(file, 'utf8'))) };
+  } catch (error) {
+    return { t: 'corrupt', reason: `retired snapshot: ${(error as Error).message}` };
+  }
+}
+
+/** Boot only (sync fs): each snapshot in `.retired`, or why it does not read. */
 export function readRetired(root: string): Map<string, RetiredFile> {
   const dir = path.join(root, RETIRED_DIR);
-  const out = new Map<string, RetiredFile>();
-  if (!fs.existsSync(dir)) return out;
-  for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.json'))) {
-    const id = name.slice(0, -'.json'.length);
-    try {
-      const parsed = Snapshot.safeParse(JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')));
-      out.set(
-        id,
-        parsed.success
-          ? { t: 'read', snapshot: parsed.data }
-          : { t: 'corrupt', reason: `retired snapshot: ${parsed.error.message}` }
-      );
-    } catch (error) {
-      out.set(id, { t: 'corrupt', reason: `retired snapshot: ${(error as Error).message}` });
-    }
-  }
-  return out;
+  if (!fs.existsSync(dir)) return new Map();
+  const names = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  return new Map(names.map((n) => [n.slice(0, -'.json'.length), readSnapshot(path.join(dir, n))]));
 }
 
 /** The frozen record of a state whose last line is `retired`; `report` is its status text. */
@@ -119,17 +79,13 @@ export function snapshotOf(s: State, report: string): RetiredSnapshot {
   });
 }
 
-/**
- * Writes the snapshot (a temp file renamed into place: whole or absent), then moves the
- * expedition's folder under `.retired`. A crash between the two is replayed from the ledger,
- * whose last line is already `retired`; the rename is atomic, so the folder is in one place.
- */
+/** Snapshot first (temp + rename: whole or absent), then the folder; a crash between replays
+ * from the ledger, whose last line is already `retired`. */
 export async function fileRetired(root: string, id: string, snapshot: RetiredSnapshot) {
   const dir = path.join(root, RETIRED_DIR);
   await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
   const file = path.join(dir, `${id}.json`);
-  const temp = `${file}.tmp`;
-  await fsp.writeFile(temp, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600 });
-  await fsp.rename(temp, file);
+  await fsp.writeFile(`${file}.tmp`, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600 });
+  await fsp.rename(`${file}.tmp`, file);
   await fsp.rename(path.join(root, id), path.join(dir, id));
 }
