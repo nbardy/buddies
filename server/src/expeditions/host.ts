@@ -49,6 +49,7 @@ import {
   type Release,
   type RetireChat,
   type RetireTree,
+  type Round,
   type State,
   type ValidationBasis,
   type ValidationReport,
@@ -70,6 +71,7 @@ import {
   integrationOf,
   launchNews,
   live,
+  managerDirectory,
   pendingEffects,
   startedOf,
   validationOf,
@@ -1165,7 +1167,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     s: State,
     attemptId: string,
     body: string,
-    round: 'brief' | 'repair'
+    round: Round
   ): Promise<Entry[]> {
     if (s.crew.t !== 'ready') throw new Error('attempt posted before the crew exists');
     const attempt = attemptOf(s, attemptId);
@@ -1189,44 +1191,31 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   }
 
   /** Where an attempt's run starts (design.md R9, R11): a worker in its own worktree, a manager
-   * in its own detached tree. A manager live before that tree existed (a ledger written before
-   * R11) runs in the crew's own directory: never a git checkout of the owner's. */
-  function attemptDirectory(s: State, attempt: Attempt, runId: string): Promise<TurnDirectory> {
+   * in its own detached tree. A live attempt holds its tree (effects.ts releases it only once the
+   * attempt settled, and briefs a manager only once its tree is ready), so any other tree state
+   * is a broken invariant: thrown, never a run started somewhere else. */
+  function attemptDirectory(s: State, attempt: Attempt, runId: string): TurnDirectory {
     switch (attempt.spec.kind) {
       case 'work':
       case 'check':
-        return workerTurnDirectory(s, attempt.id, runId);
+        return { t: 'attempt', runId, path: workerTreePath(s, attempt.id) };
       case 'manager':
-        return managerTurnDirectory(s, runId);
+        return { t: 'attempt', runId, path: managerDirectory(s) };
     }
   }
 
-  /** A worker runs in its own worktree while the tree exists. A legacy check repaired after its
-   * tree was released (decide.ts repairLegacyChecks) only restates its verdict: it runs in the
-   * crew's directory, never in a path that is gone. */
-  function workerTurnDirectory(s: State, attemptId: string, runId: string): Promise<TurnDirectory> {
+  function workerTreePath(s: State, attemptId: string): string {
     const tree = worktreeOf(s, attemptId);
     switch (tree.status.t) {
-      case 'creating':
       case 'ready':
-        return Promise.resolve({ t: 'attempt', runId, path: tree.path });
+        return tree.path;
+      case 'creating':
       case 'failed':
       case 'kept':
       case 'removed':
       case 'absent':
       case 'left':
-        return crewDirectory(s.id);
-    }
-  }
-
-  function managerTurnDirectory(s: State, runId: string): Promise<TurnDirectory> {
-    switch (s.managerTree.t) {
-      case 'ready':
-        return Promise.resolve({ t: 'attempt', runId, path: s.managerTree.path });
-      case 'missing':
-      case 'failed':
-      case 'released':
-        return crewDirectory(s.id);
+        throw new Error(`live attempt ${attemptId} has a ${tree.status.t} worktree`);
     }
   }
 
@@ -1711,16 +1700,9 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   };
 }
 
-/** Attempt request keys: the brief's is unchanged since R1, so a replay of an older ledger finds
- * its earlier post; the repair has its own. */
-function requestKey(id: string, attemptId: string, round: 'brief' | 'repair'): string {
-  switch (round) {
-    case 'brief':
-      return `exp:${id}:attempt:${attemptId}`;
-    case 'repair':
-      return `exp:${id}:attempt:${attemptId}:repair`;
-  }
-}
+/** An attempt request's key, one per round, so a replay finds the post it already made. */
+const requestKey = (id: string, attemptId: string, round: Round): string =>
+  `exp:${id}:attempt:${attemptId}:${round}`;
 
 /**
  * The origin tag an expedition ref is archived at: `archive/expeditions/<id>/` plus the attempt

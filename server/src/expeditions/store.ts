@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import type { Entry, StoredEntry } from './ledger';
+import type { Entry } from './ledger';
 
 // The ledger file: one line per append batch (a decide batch with its `manager_applied`, an
 // intent, an effect's result), so a batch lands whole or not at all.
@@ -15,7 +15,7 @@ const line = (entries: readonly Entry[]) => `${JSON.stringify(entries)}\n`;
  * batch that never landed: its effect had not run, or replays idempotently.
  */
 export type LedgerFile =
-  | { t: 'read'; entries: StoredEntry[]; torn: number }
+  | { t: 'read'; entries: Entry[]; torn: number }
   | { t: 'corrupt'; reason: string };
 
 export function readLedgerFile(file: string): LedgerFile {
@@ -28,7 +28,7 @@ export function readLedgerFile(file: string): LedgerFile {
   try {
     return {
       t: 'read',
-      entries: lines.flatMap((l) => JSON.parse(l) as StoredEntry[]),
+      entries: lines.flatMap((l) => JSON.parse(l) as Entry[]),
       torn,
     };
   } catch (error) {
