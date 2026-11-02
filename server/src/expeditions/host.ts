@@ -27,8 +27,6 @@ import {
   ensureWorktree,
   mergeCandidate,
   preflight,
-  releaseDetachedTree,
-  releaseIntegrationTree,
   syncDetachedTree,
 } from './git';
 import { type MeterPorts, RUN_SCAN_LIMIT, SETTLED, meterRequest } from './meter';
@@ -75,7 +73,14 @@ import {
   worktreeOf,
 } from './model';
 import { pinSources, pinnedOutcome, report, verifyPins } from './pins';
-import { type Keep, type Released, discardWorktree, releaseWorktree } from './release';
+import {
+  type Keep,
+  type Released,
+  discardWorktree,
+  releaseDetachedTree,
+  releaseIntegrationTree,
+  releaseWorktree,
+} from './release';
 import { appendBatch, createLedger, readLedgerFile } from './store';
 import { countsOf, expeditionView } from './view';
 
@@ -542,8 +547,16 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   }
 
   async function releaseIntegration(s: State): Promise<Entry[]> {
-    const release = await releaseIntegrationTree(s.repo.root, s.integrationTree.name);
-    return [{ t: 'integration_tree_released', at: now(), release }];
+    const released = await releaseIntegrationTree(
+      s.repo.root,
+      s.integrationTree,
+      keepOf(s, 'integration'),
+      { t: 'finish' }
+    );
+    return [
+      ...preservedEntries('integration', released),
+      { t: 'integration_tree_released', at: now(), release: released.release },
+    ];
   }
 
   /** The manager's own tree (design.md R11) is a fixed path in the expedition's folder, made at
@@ -563,8 +576,15 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   }
 
   async function releaseManagerTree(s: State): Promise<Entry[]> {
-    const release = await releaseDetachedTree(s.repo.root, path.join(root, s.id, 'manager'));
-    return [{ t: 'manager_tree_released', at: now(), release }];
+    const released = await releaseDetachedTree(
+      s.repo.root,
+      path.join(root, s.id, 'manager'),
+      keepOf(s, 'manager')
+    );
+    return [
+      ...preservedEntries('manager', released),
+      { t: 'manager_tree_released', at: now(), release: released.release },
+    ];
   }
 
   /** A manager's claim of an attempt's unreported commits holds only when the attempt's own
@@ -607,11 +627,11 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     const tree = worktreeOf(s, attemptId);
     const released = await releaseWorktree(
       s.repo.root,
-      tree.name,
       tree,
       keepCommits,
       s.repo.branch,
-      keepOf(s, attemptId)
+      keepOf(s, attemptId),
+      { t: 'finish' }
     );
     return [
       ...preservedEntries(attemptId, released),
@@ -682,7 +702,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
    */
   async function interrupted(s: State, validationId: string): Promise<Entry[]> {
     const { tree } = startedOf(s, validationId);
-    const released = await discardWorktree(s.repo.root, tree.name, tree, keepOf(s, validationId));
+    const released = await discardWorktree(s.repo.root, tree, keepOf(s, validationId));
     return [
       ...preservedEntries(validationId, released),
       { t: 'validation_interrupted', at: now(), validationId, release: released.release },
@@ -693,7 +713,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   async function releaseValidation(s: State, validationId: string): Promise<Entry[]> {
     if (jobs.has(jobKey(s.id, validationId))) return [];
     const { tree } = startedOf(s, validationId);
-    const released = await discardWorktree(s.repo.root, tree.name, tree, keepOf(s, validationId));
+    const released = await discardWorktree(s.repo.root, tree, keepOf(s, validationId));
     return [
       ...preservedEntries(validationId, released),
       { t: 'validation_released', at: now(), validationId, release: released.release },
