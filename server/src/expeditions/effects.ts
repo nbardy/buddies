@@ -114,9 +114,7 @@ function runEffects(s: State): Effect[] {
         )
       : []),
     ...(s.badgePost.t === 'pending' ? [{ t: 'post_badge' } as const] : []),
-    ...s.statuses
-      .filter((x) => x.post.t === 'pending')
-      .map((x): Effect => ({ t: 'post_status', seq: x.seq, text: x.text })),
+    ...unpostedStatuses(s).map((x): Effect => ({ t: 'post_status', seq: x.seq, text: x.text })),
     ...releases(s),
     ...validationReleases(s),
     ...(finished && s.integrationTree.status.t === 'ready'
@@ -317,9 +315,22 @@ function retireEffects(s: State): Effect[] {
   if (trees.length > 0) return trees.map((tree): Effect => ({ t: 'retire_tree', tree }));
   if (s.archive.branches.t === 'pending') return [{ t: 'archive_branches' }];
   const chats = RETIRE_CHATS.filter((c) => !s.archive.chats.includes(c));
-  if (chats.length > 0) return [{ t: 'archive_chats', chats }];
+  // Statuses go out while the chat is open: an archived channel refuses every post.
+  if (chats.length > 0)
+    return unpostedStatuses(s).length > 0 ? [] : [{ t: 'archive_chats', chats }];
   if (s.archive.crew.t === 'active') return [{ t: 'archive_crew' }];
   return runEffects(s).length === 0 ? [{ t: 'record_retired' }] : [];
+}
+
+/**
+ * Statuses still to post to the crew chat. None once a retirement archived that chat: core
+ * refuses a post to an archived channel, so a status written after (a `tick_failed` from a
+ * failing retire step, a tool steer) stayed pending, failed every tick, and kept `record_retired`
+ * waiting forever (review of plan A6). Such a status is on the page only.
+ */
+function unpostedStatuses(s: State) {
+  if (s.archive.chats.includes('crew_chat')) return [];
+  return s.statuses.filter((x) => x.post.t === 'pending');
 }
 
 /** A tree the finish still releases itself (a live tree, or one being made). */
@@ -357,14 +368,18 @@ function strandedTrees(s: State): RetireTree[] {
   ];
 }
 
+/** `failed` too: a failed add can leave a registration or directory on disk (git.ts
+ * ensureWorktree names it "still on disk"), and archive_branches would then delete the branch it
+ * is checked out on, stranding the tree after retirement. Releasing a tree that is not there is
+ * `absent` (release.ts goneTree), so a clean failure costs one lookup. */
 function stranded(status: WorktreeStatus): boolean {
   switch (status.t) {
     case 'left':
     case 'kept':
+    case 'failed':
       return true;
     case 'creating':
     case 'ready':
-    case 'failed':
     case 'removed':
     case 'absent':
       return false;
