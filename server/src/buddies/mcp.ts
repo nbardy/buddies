@@ -1354,7 +1354,7 @@ export async function startMcpEndpoint(
   deps: ToolDeps & {
     grants: Grants;
     portFile: string;
-    oompaOptions?: { executable?: string; wrapper?: string };
+    oompaOptions?: { executable?: string; wrapper?: string; stopGraceMs?: number };
   }
 ): Promise<McpEndpoint> {
   let relayPort = 0;

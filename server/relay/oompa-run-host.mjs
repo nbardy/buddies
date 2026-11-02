@@ -7,7 +7,9 @@ import path from 'node:path';
 
 const [dir, deadlineText, bin, ...args] = process.argv.slice(2);
 const deadline = Number(deadlineText);
-if (!dir || !bin || !Number.isFinite(deadline)) process.exit(125);
+// From the host (oompa.ts stopGraceMs). Unset: 3 s, for a pre-upgrade backend spawning this file.
+const stopGraceMs = Number(process.env.UNLEASHD_OOMPA_STOP_GRACE_MS ?? 3000);
+if (!dir || !bin || !Number.isFinite(deadline) || !(stopGraceMs >= 0)) process.exit(125);
 let stopping = false;
 let ended = false;
 const finish = (observedStatus) => {
@@ -69,7 +71,7 @@ const stop = (status) => {
       process.kill(-process.pid, 'SIGKILL');
     } catch {}
     process.exit(status);
-  }, 3000);
+  }, stopGraceMs);
 };
 process.on('SIGTERM', () => stop(143));
 process.on('SIGINT', () => stop(130));

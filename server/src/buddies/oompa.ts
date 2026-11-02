@@ -245,6 +245,7 @@ export function createOompaHost(options: {
   executable?: string;
   wrapper?: string;
   now?: () => number;
+  stopGraceMs?: number; // the wrapper's SIGTERM→exit.json→SIGKILL grace; tests inject a short one
 }) {
   const root = options.root ?? path.join(appDataDirectory(), 'oompa-executions');
   const journals = createExecutionJournals(root);
@@ -252,7 +253,7 @@ export function createOompaHost(options: {
   const accepts = new Map<string, Promise<unknown>>();
   const registering = new Set<string>();
   const draining = new Set<string>();
-  const now = options.now ?? Date.now;
+  const { now = Date.now, stopGraceMs = 3000 } = options;
   const wrapper = options.wrapper ?? path.resolve(__dirname, '../../relay/oompa-run-host.mjs');
   const executable =
     options.executable ??
@@ -261,10 +262,9 @@ export function createOompaHost(options: {
 
   function signal(dir: string) {
     const process = executionProcess(dir);
-    // Grace must outlast relay/oompa-run-host.mjs's own 3 s stop timer (it writes exit.json then).
-    // At the default 3 s the SIGKILL raced it and won once liveness stopped paying a sync `ps`
-    // (2026-10-23; oompa-mcp drain tests never saw exit.json).
-    if (process.t === 'live') killExecution(process.pid, dir, 6000);
+    // Must outlast the wrapper's own stop grace (it writes exit.json then): at equal grace the
+    // SIGKILL won once liveness stopped paying a sync `ps` (2026-10-23, drain tests lost exit.json).
+    if (process.t === 'live') killExecution(process.pid, dir, 2 * stopGraceMs);
   }
   function continuations(run: Run) {
     const root = path.join(run.execution.dir, 'continuations');
@@ -494,7 +494,7 @@ export function createOompaHost(options: {
     try {
       const child = spawn(process.execPath, [wrapper, dir, String(deadline), ...argv], {
         cwd,
-        env,
+        env: { ...env, UNLEASHD_OOMPA_STOP_GRACE_MS: String(stopGraceMs) },
         detached: true,
         stdio: ['ignore', out, err],
       });
