@@ -624,3 +624,28 @@ test('a finished expedition offers Retire, an open one Stop and retire, behind a
   assert.match(html, /Retiring…/);
   assert.doesNotMatch(html, />Stop and retire<|>Retire</);
 });
+
+// The badge sits in every chat that launched an expedition. It used to poll the full view per
+// badge (N chats = N 15 s polls); it now reads its row from the one cached list the rail and
+// index share. Guard: the badge renders from the list row and never asks for /expeditions/:id.
+test('a launch badge renders its row from the shared expedition list, not a per-id view fetch', async () => {
+  await loadResource({
+    key: EXPEDITIONS_URL,
+    load: async () => [summary('badge-list-only', { t: 'running' })],
+  });
+  const html = inChat(
+    postFixture({
+      id: 'p-badge-list',
+      purpose: 'expedition_badge',
+      evidence: ['expedition:badge-list-only'],
+      body: '⛺ Expedition launched.',
+    })
+  );
+  assert.match(html, /Open expedition badge-list-only/);
+  assert.match(html, /1 live · 0 verified · 3\/20 · 2k tokens/);
+  const { resourceAtomFamily } = await import('../src/atoms/resources');
+  assert.equal(
+    jotaiStore.get(resourceAtomFamily(expeditionUrl('badge-list-only'))).kind,
+    'loading'
+  );
+});

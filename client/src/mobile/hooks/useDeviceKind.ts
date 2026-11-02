@@ -4,6 +4,9 @@
  * A boolean isMobile leaks `if(isMobile)` downstream and loses exhaustiveness.
  */
 
+/** The one phone breakpoint: the shell's sticky choice and the expedition modal's live one. */
+export const MOBILE_QUERY = '(max-width: 768px)';
+
 /** Sum type for shell dispatch. No 'unknown' variant — every target browser has matchMedia (T4). */
 export type DeviceKind = 'mobile' | 'desktop';
 
@@ -24,7 +27,7 @@ function classifyDeviceKind(): DeviceKind {
         'This environment does not support matchMedia; refusing silent fallback per T4.'
     );
   }
-  return window.matchMedia('(max-width: 768px)').matches ? 'mobile' : 'desktop';
+  return window.matchMedia(MOBILE_QUERY).matches ? 'mobile' : 'desktop';
 }
 
 // Evaluated ONCE per page load at module import — sticky for the session.
