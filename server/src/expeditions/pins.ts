@@ -4,19 +4,10 @@ import path from 'node:path';
 import { gitBytes } from './git';
 import type { CheckOutcome, PinCheck, SourcePin, ValidationReport } from './ledger';
 
-// Validator source pins (design.md R11, ported from oompa's `oompa.task-validation/v1`): the
-// SHA-256 of every repository file a check's argv names. Two guards:
-// - Declared trust: a candidate validation trusts a validator file's bytes as they were on the
-//   expedition branch when the manager declared the question's acceptance (`trustedSha`,
-//   ledger.ts DeclaredAcceptance). A candidate whose bytes differ is refused before it runs, so a
-//   worker cannot loosen the oracle that accepts its own work by committing `exit 0` to it.
-//   (2026-11-01 review: pins taken at the candidate sha only recorded the cheat's own hash.) A
-//   file the trusted commit does not have (a validator the candidate itself adds) is pinned at the
-//   candidate: the manager trusted it by naming a file that did not exist yet. Re-declaring the
-//   acceptance moves the trust to the head of that moment.
-// - Run integrity: the pinned bytes are re-read from the tree after the run; a check that
-//   rewrites its own validator while it runs cannot pass (its outcome becomes an `error`).
-// The pins are recorded with every check result (the typed report below).
+// Validator source pins (R11, from oompa's task-validation/v1): SHA-256 of each file a check's argv
+// names. Trust: bytes must equal those at `trustedSha`, so a worker cannot commit `exit 0` to its
+// own oracle (2026-11-01 review); a file absent there is pinned at the candidate. Integrity: the
+// pins are re-read after the run, so a check that rewrites its validator cannot pass.
 
 /** An argv element that may name a repository file: relative, inside the tree, not a flag. */
 const fileLike = (arg: string) =>
@@ -28,23 +19,22 @@ const fileLike = (arg: string) =>
 
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
-/** A path in a commit: a regular file (or symlink) with its bytes, or nothing there. */
 type Blob = { t: 'file'; bytes: Buffer } | { t: 'none' };
 
-/** What `<sha>:<file>` is. A git failure (a timeout, an oversized blob, a broken repository)
- * throws: the check job then ends `validation_failed` with the reason, never runs unpinned.
- * 2026-11-01 review: a catch-all here counted every failure as "not a file" and skipped the pin. */
+/** A git failure throws, so the job ends `validation_failed`, never runs unpinned (2026-11-01
+ * review: a catch-all counted every failure as "not a file"). */
 async function blobAt(tree: string, sha: string, file: string): Promise<Blob> {
-  const listed = (
-    await gitBytes(tree, ['ls-tree', '-z', sha, '--', path.normalize(file)])
-  ).toString();
-  const [meta] = listed.split('\t');
-  const [, type, oid] = (meta ?? '').split(' ');
+  const listed = String(await gitBytes(tree, ['ls-tree', '-z', sha, '--', path.normalize(file)]));
+  const [, type, oid] = (listed.split('\t')[0] ?? '').split(' ');
   if (type !== 'blob' || !oid) return { t: 'none' };
   return { t: 'file', bytes: await gitBytes(tree, ['cat-file', 'blob', oid]) };
 }
 
-/** Before the run: the pins, or why the candidate may not run. */
+const diskHolds = async (tree: string, pin: SourcePin) => {
+  const disk = await fsp.readFile(path.join(tree, pin.path)).catch(() => undefined);
+  return disk !== undefined && sha256(disk) === pin.sha256;
+};
+
 export type Pinned = { t: 'pinned'; pins: SourcePin[] } | { t: 'mismatch'; reason: string };
 
 export async function pinSources(
@@ -64,9 +54,8 @@ export async function pinSources(
         reason: `the candidate changed the validator ${file} (trusted as committed at ${trustedSha.slice(0, 10)} when the acceptance was declared): re-declare the acceptance to trust new bytes`,
       };
     if (blob.t === 'none') continue; // not a file of the commit: a word, a module name, a URL
-    const disk = await fsp.readFile(path.join(tree, file)).catch(() => undefined);
     const pin = { path: file, sha256: sha256(blob.bytes) };
-    if (!disk || sha256(disk) !== pin.sha256)
+    if (!(await diskHolds(tree, pin)))
       return {
         t: 'mismatch',
         reason: `${file} in the validation tree is not the bytes committed at ${sha}`,
@@ -76,29 +65,20 @@ export async function pinSources(
   return { t: 'pinned', pins };
 }
 
-/** After the run: each pinned file re-read from the tree. */
 export async function verifyPins(tree: string, pins: SourcePin[]): Promise<PinCheck> {
   const changed: string[] = [];
-  for (const pin of pins) {
-    const disk = await fsp.readFile(path.join(tree, pin.path)).catch(() => undefined);
-    if (!disk || sha256(disk) !== pin.sha256) changed.push(pin.path);
-  }
+  for (const pin of pins) if (!(await diskHolds(tree, pin))) changed.push(pin.path);
   return changed.length === 0 ? { t: 'held' } : { t: 'changed', paths: changed };
 }
 
-/** The check's outcome as recorded: a changed validator never passes, whatever it exited. */
-export function pinnedOutcome(outcome: CheckOutcome, check: PinCheck): CheckOutcome {
-  switch (check.t) {
-    case 'held':
-    case 'unpinned':
-      return outcome;
-    case 'changed':
-      return {
+/** A changed validator never passes, whatever it exited. */
+export const pinnedOutcome = (outcome: CheckOutcome, check: PinCheck): CheckOutcome =>
+  check.t === 'changed'
+    ? {
         t: 'error',
         message: `the check changed its own validator source during the run: ${check.paths.join(', ')}`,
-      };
-  }
-}
+      }
+    : outcome;
 
 export const report = (
   targetSha: string,
