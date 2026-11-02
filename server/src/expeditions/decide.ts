@@ -206,15 +206,8 @@ const managerEcho = (e: Entry) =>
 
 /** A code claim (ended, or adopted from unreported commits) whose question is accepted by a
  * command and whose candidate validation has not finished. */
-function claimAwaitingValidation(s: State, e: Entry): boolean {
-  switch (e.t) {
-    case 'attempt_ended':
-    case 'claim_adopted':
-      return awaitsValidation(s, e.attemptId);
-    default:
-      return false;
-  }
-}
+const claimAwaitingValidation = (s: State, e: Entry): boolean =>
+  (e.t === 'attempt_ended' || e.t === 'claim_adopted') && awaitsValidation(s, e.attemptId);
 
 function awaitsValidation(s: State, attemptId: string): boolean {
   // A manager or check end is never a claim awaiting validation.
@@ -262,16 +255,9 @@ const quiescent = (s: State) =>
  * expedition with the reason. */
 type Setup = { t: 'waiting' } | { t: 'ready' } | { t: 'failed'; reason: string };
 function setupOf(s: State): Setup {
-  const integration = integrationSetup(s);
-  return integration.t === 'ready' ? managerSetup(s) : integration;
-}
-
-function integrationSetup(s: State): Setup {
-  return treeSetup(treeOf(s, INTEGRATION_TREE).status, 'integration');
-}
-
-/** The manager's tree is planned once the integration tree is ready (effects.ts). */
-function managerSetup(s: State): Setup {
+  const integration = treeSetup(treeOf(s, INTEGRATION_TREE).status, 'integration');
+  if (integration.t !== 'ready') return integration;
+  // The manager's tree is planned once the integration tree is ready (effects.ts).
   return treeKey(MANAGER_TREE) in s.trees
     ? treeSetup(treeOf(s, MANAGER_TREE).status, "manager's")
     : { t: 'waiting' };
@@ -430,101 +416,125 @@ function pendingManager(s: State): { attemptId: string; actions: ManagerAction[]
   return { attemptId: last.id, actions: last.phase.outcome.actions };
 }
 
-function applyAction(
+/** What the guardrails make of one manager action: the entries it writes, or why it is refused
+ * (a refusal becomes a `rejected` entry the next manager turn sees). */
+type Decision = { t: 'accept'; entries: Entry[] } | { t: 'reject'; reason: string };
+const accept = (...entries: Entry[]): Decision => ({ t: 'accept', entries });
+const reject = (reason: string): Decision => ({ t: 'reject', reason });
+
+type Do = ManagerAction['do'];
+type Handler<K extends Do> = (
   s: State,
-  action: ManagerAction,
-  clock: Clock,
-  push: (e: Entry) => void
-): undefined {
-  const at = clock.now;
-  // Returns `undefined` so a guard reads `return reject(...)` (lint forbids returning a void call).
-  const reject = (reason: string): undefined => {
-    push({ t: 'rejected', at, action, reason });
-    return undefined;
-  };
-  switch (action.do) {
-    case 'add_question': {
-      const unknown = action.after.filter((q) => !byId(s.questions, q));
-      if (unknown.length > 0) return reject(`after names no question ${unknown.join(', ')}`);
-      push({
-        t: 'question_added',
-        at,
-        questionId: clock.nextId('q'),
-        title: action.title,
-        detail: action.detail,
-        scope: action.scope,
-        paths: action.paths,
-        after: action.after,
-        acceptance: action.acceptance,
-      });
+  action: Extract<ManagerAction, { do: K }>,
+  clock: Clock
+) => Decision;
+
+/** δ: one handler per manager action, then one write path for its decision. Entries are pushed
+ * (and applied) only after the handler decided, so a handler reads the state its action met. */
+function applyAction(s: State, action: ManagerAction, clock: Clock, push: (e: Entry) => void) {
+  // TS cannot correlate ACTIONS[action.do] with action's own variant; the mapped type keeps
+  // each handler's declaration exact.
+  const handler = ACTIONS[action.do] as Handler<Do>;
+  const decision = handler(s, action, clock);
+  switch (decision.t) {
+    case 'accept':
+      for (const e of decision.entries) push(e);
       return;
-    }
-    case 'set_acceptance': {
-      const question = byId(s.questions, action.question);
-      if (!question) return reject(`no question ${action.question}`);
-      if (question.status !== 'open')
-        return reject(`question ${question.id} is ${question.status}`);
-      push({ t: 'acceptance_set', at, questionId: question.id, acceptance: action.acceptance });
+    case 'reject':
+      push({ t: 'rejected', at: clock.now, action, reason: decision.reason });
       return;
-    }
-    case 'claim': {
-      const attempt = byId(worksOf(s), action.attempt);
-      if (!attempt) return reject(`no work attempt ${action.attempt}`);
-      if (attempt.phase.t !== 'ended' || !claimable(attempt.phase.outcome))
-        return reject(
-          `only a work attempt that ended with unreported commits is claimed; ${attempt.id} is ${attempt.phase.t === 'ended' ? attempt.phase.outcome.t : attempt.phase.t}`
-        );
-      const prior = s.adoptions[attempt.id];
-      if (prior && prior.t !== 'refused')
-        return reject(`${attempt.id} is already claimed (${prior.t})`);
-      push({
-        t: 'claim_planned',
-        at,
-        attemptId: attempt.id,
-        claim: {
-          result: 'claim',
-          statement: action.claim.statement,
-          change: { t: 'commit', sha: action.claim.sha },
-          evidence: action.claim.evidence,
-          howToCheck: action.claim.howToCheck,
-        },
-      });
-      return;
-    }
-    case 'work': {
-      const question = byId(s.questions, action.question);
-      if (!question) return reject(`no question ${action.question}`);
-      if (question.status !== 'open')
-        return reject(`question ${question.id} is ${question.status}`);
-      if (question.scope === 'parked') return reject('parked questions need owner funding');
-      if (question.scope === 'explore' && exploreAttempts(s) >= exploreCap(s.charter))
-        return reject(`explore share spent (${exploreCap(s.charter)} attempts)`);
-      if (workerAttempts(s) >= s.charter.maxAttempts) return reject('attempt budget spent');
-      if (action.seat >= s.charter.crew.work.length)
-        return reject(`no work seat ${action.seat} (0..${s.charter.crew.work.length - 1})`);
-      push({
-        t: 'attempt_planned',
-        at,
-        attemptId: clock.nextId('w'),
-        spec: { kind: 'work', questionId: question.id, brief: action.brief, seat: action.seat },
-      });
-      return;
-    }
-    case 'check': {
-      const claim = byId(worksOf(s), action.claimAttempt);
-      if (!claim) return reject(`no work attempt ${action.claimAttempt}`);
-      if (attemptClaim(claim).t === 'none')
-        return reject('only claims are checked: that attempt ended with no parsed claim');
-      if (workerAttempts(s) + action.panel > s.charter.maxAttempts)
-        return reject('attempt budget spent');
-      // Independence: a check never runs on the model that made the claim.
-      const seats = independentCheckSeats(s.charter, configOf(s.charter, claim.spec));
-      if (seats.length === 0) return reject('every check seat uses the claim author model');
-      const panelId = clock.nextId('p');
-      for (let n = 0; n < action.panel; n += 1)
-        push({
+  }
+}
+
+// Pattern: table-driven (docs/patterns.md#table-driven) — one exhaustive handler per action.
+const ACTIONS: { [K in Do]: Handler<K> } = {
+  add_question: (s, action, clock) => {
+    const unknown = action.after.filter((q) => !byId(s.questions, q));
+    if (unknown.length > 0) return reject(`after names no question ${unknown.join(', ')}`);
+    return accept({
+      t: 'question_added',
+      at: clock.now,
+      questionId: clock.nextId('q'),
+      title: action.title,
+      detail: action.detail,
+      scope: action.scope,
+      paths: action.paths,
+      after: action.after,
+      acceptance: action.acceptance,
+    });
+  },
+
+  set_acceptance: (s, action, clock) => {
+    const question = byId(s.questions, action.question);
+    if (!question) return reject(`no question ${action.question}`);
+    if (question.status !== 'open') return reject(`question ${question.id} is ${question.status}`);
+    return accept({
+      t: 'acceptance_set',
+      at: clock.now,
+      questionId: question.id,
+      acceptance: action.acceptance,
+    });
+  },
+
+  claim: (s, action, clock) => {
+    const attempt = byId(worksOf(s), action.attempt);
+    if (!attempt) return reject(`no work attempt ${action.attempt}`);
+    if (attempt.phase.t !== 'ended' || !claimable(attempt.phase.outcome))
+      return reject(
+        `only a work attempt that ended with unreported commits is claimed; ${attempt.id} is ${attempt.phase.t === 'ended' ? attempt.phase.outcome.t : attempt.phase.t}`
+      );
+    const prior = s.adoptions[attempt.id];
+    if (prior && prior.t !== 'refused')
+      return reject(`${attempt.id} is already claimed (${prior.t})`);
+    return accept({
+      t: 'claim_planned',
+      at: clock.now,
+      attemptId: attempt.id,
+      claim: {
+        result: 'claim',
+        statement: action.claim.statement,
+        change: { t: 'commit', sha: action.claim.sha },
+        evidence: action.claim.evidence,
+        howToCheck: action.claim.howToCheck,
+      },
+    });
+  },
+
+  work: (s, action, clock) => {
+    const question = byId(s.questions, action.question);
+    if (!question) return reject(`no question ${action.question}`);
+    if (question.status !== 'open') return reject(`question ${question.id} is ${question.status}`);
+    if (question.scope === 'parked') return reject('parked questions need owner funding');
+    if (question.scope === 'explore' && exploreAttempts(s) >= exploreCap(s.charter))
+      return reject(`explore share spent (${exploreCap(s.charter)} attempts)`);
+    if (workerAttempts(s) >= s.charter.maxAttempts) return reject('attempt budget spent');
+    if (action.seat >= s.charter.crew.work.length)
+      return reject(`no work seat ${action.seat} (0..${s.charter.crew.work.length - 1})`);
+    return accept({
+      t: 'attempt_planned',
+      at: clock.now,
+      attemptId: clock.nextId('w'),
+      spec: { kind: 'work', questionId: question.id, brief: action.brief, seat: action.seat },
+    });
+  },
+
+  check: (s, action, clock) => {
+    const claim = byId(worksOf(s), action.claimAttempt);
+    if (!claim) return reject(`no work attempt ${action.claimAttempt}`);
+    if (attemptClaim(claim).t === 'none')
+      return reject('only claims are checked: that attempt ended with no parsed claim');
+    if (workerAttempts(s) + action.panel > s.charter.maxAttempts)
+      return reject('attempt budget spent');
+    // Independence: a check never runs on the model that made the claim.
+    const seats = independentCheckSeats(s.charter, configOf(s.charter, claim.spec));
+    if (seats.length === 0) return reject('every check seat uses the claim author model');
+    const panelId = clock.nextId('p');
+    return accept(
+      ...Array.from(
+        { length: action.panel },
+        (_, n): Entry => ({
           t: 'attempt_planned',
-          at,
+          at: clock.now,
           attemptId: clock.nextId('c'),
           spec: {
             kind: 'check',
@@ -534,81 +544,67 @@ function applyAction(
             panelId,
             seat: seats[n % seats.length].seat,
           },
-        });
-      return;
-    }
-    case 'integrate': {
-      const claim = byId(worksOf(s), action.claimAttempt);
-      if (!claim) return reject(`no work attempt ${action.claimAttempt}`);
-      const claimed = attemptClaim(claim);
-      if (claimed.t !== 'commit') return reject('only a claim with a commit is integrated');
-      // The head a done validates stays fixed until that done settles.
-      if (s.doneRequest.t === 'validating')
-        return reject('done is being validated on the current head');
-      if (s.integrations.some((i) => i.claimAttemptId === claim.id && i.status.t !== 'refused'))
-        return reject(`${claim.id} is already integrated or being integrated`);
-      const blockers = integrationBlockers(s, claim);
-      if (blockers.length > 0) return reject(blockers.join('; '));
-      push({
-        t: 'integration_planned',
-        at,
-        integrationId: clock.nextId('i'),
-        claimAttemptId: claim.id,
-        sha: claimed.sha,
-      });
-      return;
-    }
-    case 'close_question': {
-      const question = byId(s.questions, action.question);
-      if (!question) return reject(`no question ${action.question}`);
-      if (action.status === 'verified' && !questionVerified(s, question.id))
-        return reject(
-          'a question closes verified only after a check panel verified it, or its claim passed every command check and was integrated'
-        );
-      push({
-        t: 'question_closed',
-        at,
-        questionId: question.id,
-        status: action.status,
-        why: action.why,
-      });
-      return;
-    }
-    case 'ask_owner':
-      push({ t: 'needs_owner', at, question: action.question });
-      return;
-    case 'done':
-      return proposeDone(s, action.summary, clock, push, reject);
-    case 'note':
-      push({ t: 'reflection', at, text: action.text });
-      return;
-  }
-}
+        })
+      )
+    );
+  },
 
-/** δ over how the charter decides completion: the owner judges it, or the typed checks do. */
-function proposeDone(
-  s: State,
-  summary: string,
-  clock: Clock,
-  push: (e: Entry) => void,
-  reject: (reason: string) => undefined
-): undefined {
-  switch (s.charter.done.t) {
-    case 'owner':
-      push({ t: 'needs_owner', at: clock.now, question: `Proposes done: ${summary}` });
-      return;
-    case 'checks':
-      return doneByChecks(s, summary, clock, push, reject);
-  }
-}
+  integrate: (s, action, clock) => {
+    const claim = byId(worksOf(s), action.claimAttempt);
+    if (!claim) return reject(`no work attempt ${action.claimAttempt}`);
+    const claimed = attemptClaim(claim);
+    if (claimed.t !== 'commit') return reject('only a claim with a commit is integrated');
+    // The head a done validates stays fixed until that done settles.
+    if (s.doneRequest.t === 'validating')
+      return reject('done is being validated on the current head');
+    if (s.integrations.some((i) => i.claimAttemptId === claim.id && i.status.t !== 'refused'))
+      return reject(`${claim.id} is already integrated or being integrated`);
+    const blockers = integrationBlockers(s, claim);
+    if (blockers.length > 0) return reject(blockers.join('; '));
+    return accept({
+      t: 'integration_planned',
+      at: clock.now,
+      integrationId: clock.nextId('i'),
+      claimAttemptId: claim.id,
+      sha: claimed.sha,
+    });
+  },
 
-function doneByChecks(
-  s: State,
-  summary: string,
-  clock: Clock,
-  push: (e: Entry) => void,
-  reject: (reason: string) => undefined
-): undefined {
+  close_question: (s, action, clock) => {
+    const question = byId(s.questions, action.question);
+    if (!question) return reject(`no question ${action.question}`);
+    if (action.status === 'verified' && !questionVerified(s, question.id))
+      return reject(
+        'a question closes verified only after a check panel verified it, or its claim passed every command check and was integrated'
+      );
+    return accept({
+      t: 'question_closed',
+      at: clock.now,
+      questionId: question.id,
+      status: action.status,
+      why: action.why,
+    });
+  },
+
+  ask_owner: (_s, action, clock) =>
+    accept({ t: 'needs_owner', at: clock.now, question: action.question }),
+
+  // δ over how the charter decides completion: the owner judges it, or the typed checks do.
+  done: (s, action, clock) => DONE_BY[s.charter.done.t](s, action.summary, clock),
+
+  note: (_s, action, clock) => accept({ t: 'reflection', at: clock.now, text: action.text }),
+};
+
+const DONE_BY: Record<
+  State['charter']['done']['t'],
+  (s: State, summary: string, clock: Clock) => Decision
+> = {
+  owner: (_s, summary, clock) =>
+    accept({ t: 'needs_owner', at: clock.now, question: `Proposes done: ${summary}` }),
+  checks: doneByChecks,
+};
+
+function doneByChecks(s: State, summary: string, clock: Clock): Decision {
   const at = clock.now;
   // The guardrails (design.md R2): the goal panel verified the judged items, and every
   // command check passed on the expedition branch head, run by the host, never an agent.
@@ -620,12 +616,13 @@ function doneByChecks(
   if (!hasCommands) {
     // Nothing validates the head, so done never finishes over a merge still to run.
     if (integrating(s)) return reject('an integration is still running');
-    push({ t: 'finished', at, reason: 'done', summary });
-    return;
+    return accept({ t: 'finished', at, reason: 'done', summary });
   }
   // The head validation starts only after every merge planned before it (effects.ts), and no
   // merge is accepted while it runs, so it validates the head the owner is told to merge.
   const validationId = clock.nextId('v');
-  push({ t: 'validation_planned', at, validationId, target: { t: 'head' }, checks });
-  push({ t: 'done_requested', at, validationId, summary });
+  return accept(
+    { t: 'validation_planned', at, validationId, target: { t: 'head' }, checks },
+    { t: 'done_requested', at, validationId, summary }
+  );
 }

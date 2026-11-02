@@ -646,6 +646,9 @@ export interface State {
   retries: Record<string, string>;
   retirement: Retirement;
   archive: Archive;
+  /** Entries applied since launch. `apply` is the only writer of a State, so this stamps every
+   * change: queries.ts `derive` caches its views per revision (the state mutates in place). */
+  revision: number;
 }
 
 /** The charter's command checks as a head validation runs them (their charter index). */
@@ -697,6 +700,7 @@ export function fold(entries: readonly Entry[]): State {
     retries: {},
     retirement: { t: 'active' },
     archive: { tags: [], branches: { t: 'pending' }, chats: [], crew: { t: 'active' } },
+    revision: 0,
   };
   for (const entry of rest) apply(state, entry);
   return state;
@@ -728,6 +732,7 @@ const NEWS: ReadonlySet<Entry['t']> = new Set([
 
 /** Folds one entry into the state (decide applies its own intents as it writes them). */
 export function apply(s: State, e: Entry): void {
+  s.revision += 1;
   if (NEWS.has(e.t)) s.news.push(e);
   switch (e.t) {
     case 'launched':

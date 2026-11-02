@@ -116,7 +116,7 @@ export interface Panel {
 }
 
 /** A panel is verified when a strict majority of its checks verified the claim. */
-export function panels(s: State): Panel[] {
+function panelsOf(s: State): Panel[] {
   const out = new Map<string, Attempt<CheckSpec>[]>();
   // An interrupted check never voted: its replan (same panel, new id) takes its seat.
   for (const c of checks(s).filter((c) => !interrupted(c)))
@@ -140,13 +140,7 @@ export function panels(s: State): Panel[] {
     };
   });
 }
-export const verifiedPanels = (s: State) => panels(s).filter((p) => p.verdict === 'verified');
 
-/** The newest goal panel (absent: no goal check was ever asked). */
-export const latestGoalPanel = (s: State): Panel | undefined =>
-  panels(s)
-    .filter((p) => p.goal)
-    .at(-1);
 /**
  * Why a claim counts as verified (design.md R9), as data: a check panel's majority, or, when the
  * charter has command checks, the host's own proof: every command check passed on the claim's
@@ -163,15 +157,101 @@ export type Verification =
       validationId: string;
       mergeSha: string;
     };
+type HostVerification = Extract<Verification, { t: 'host' }>;
 
-/** The newest settled panel on a claim refuted it: that withdraws the claim's earlier panel
- * verification and its host proof alike, so every reader (the host's question close, the badge,
- * dependants) agrees. 2026-11-01 review: only questionVerified applied it, so a refuted
- * integrated claim was still closed verified and counted on the badge. */
-const refuted = (s: State, claimAttemptId: string) =>
+/** The panel and verification views every reader shares, computed once per state revision. */
+interface Derived {
+  revision: number;
+  panels: Panel[];
+  /** Host-verified claims a later panel has not refuted. */
+  host: HostVerification[];
+  verifications: Verification[];
+  /** Questions whose newest settled panel verified them, or with a host-verified claim. */
+  verifiedQuestions: ReadonlySet<string>;
+}
+
+// panels were rebuilt for every claim (refuted), question (questionVerified, STAGES) and reader:
+// O(claims x checks) per tick. The cache is per revision because decide mutates the state it
+// reads (ledger.ts apply), and a stale panel would let an integrate pass a check panel that the
+// same decision just planned.
+const DERIVED = new WeakMap<State, Derived>();
+
+export function derive(s: State): Derived {
+  const cached = DERIVED.get(s);
+  if (cached?.revision === s.revision) return cached;
+  const fresh = deriveAt(s);
+  DERIVED.set(s, fresh);
+  return fresh;
+}
+
+/** The newest SETTLED panel decides, by key: a later panel that refuted a claim withdraws an
+ * earlier verification (a stale one must not unlock dependants, R5). */
+const latestSettled = (panels: Panel[], key: (p: Panel) => string) =>
+  new Map(panels.filter((p) => p.verdict !== 'pending').map((p) => [key(p), p.verdict]));
+
+function deriveAt(s: State): Derived {
+  const panels = panelsOf(s);
+  // A refutation withdraws the claim's earlier panel verification and its host proof alike, so
+  // every reader (the host's question close, the badge, dependants) agrees. 2026-11-01 review:
+  // only questionVerified applied it, so a refuted integrated claim was still closed verified.
+  const byClaim = latestSettled(panels, (p) => p.claimAttemptId);
+  const refuted = (claimAttemptId: string) => byClaim.get(claimAttemptId) === 'not_verified';
+  const host = s.integrations.flatMap((i): HostVerification[] => {
+    const claim = workOf(s, i.claimAttemptId);
+    const validation = candidateValidation(s, claim);
+    if (i.status.t !== 'integrated' || !validation || !validationPassed(validation)) return [];
+    if (refuted(claim.id)) return [];
+    return [
+      {
+        t: 'host',
+        questionId: claim.spec.questionId,
+        claimAttemptId: claim.id,
+        validationId: validation.id,
+        mergeSha: i.status.mergeSha,
+      },
+    ];
+  });
+  const byQuestion = latestSettled(panels, (p) => p.questionId);
+  return {
+    revision: s.revision,
+    panels,
+    host,
+    verifications: [
+      ...panels
+        .filter((p) => p.verdict === 'verified' && !refuted(p.claimAttemptId))
+        .map(
+          (p): Verification => ({
+            t: 'panel',
+            questionId: p.questionId,
+            claimAttemptId: p.claimAttemptId,
+            panelId: p.id,
+          })
+        ),
+      ...host,
+    ],
+    verifiedQuestions: new Set([
+      ...[...byQuestion].filter(([, verdict]) => verdict === 'verified').map(([q]) => q),
+      ...host.map((h) => h.questionId),
+    ]),
+  };
+}
+
+export const panels = (s: State) => derive(s).panels;
+export const hostVerifications = (s: State) => derive(s).host;
+export const verifications = (s: State) => derive(s).verifications;
+/** Distinct verified claims: the badge's and the page's "verified" count. */
+export const verifiedClaims = (s: State) =>
+  new Set(verifications(s).map((v) => v.claimAttemptId)).size;
+/** A question is verified while its newest settled panel verified it, or a claim on it is
+ * host-verified and no panel refuted that claim. */
+export const questionVerified = (s: State, questionId: string) =>
+  derive(s).verifiedQuestions.has(questionId);
+
+/** The newest goal panel (absent: no goal check was ever asked). */
+export const latestGoalPanel = (s: State): Panel | undefined =>
   panels(s)
-    .filter((p) => p.claimAttemptId === claimAttemptId && p.verdict !== 'pending')
-    .at(-1)?.verdict === 'not_verified';
+    .filter((p) => p.goal)
+    .at(-1);
 
 /**
  * The host validation of a claim's candidate commit under its question's CURRENT acceptance
@@ -193,53 +273,6 @@ export function candidateValidation(s: State, claim: Attempt<WorkSpec>): Validat
     )
     .at(-1);
 }
-
-/** Host-verified claims a later panel has not refuted: the claim's candidate validation (its
- * question's command acceptance) passed, and its commit was merged into the expedition branch. */
-export function hostVerifications(s: State): Extract<Verification, { t: 'host' }>[] {
-  return s.integrations.flatMap((i) => {
-    const claim = workOf(s, i.claimAttemptId);
-    const validation = candidateValidation(s, claim);
-    const passed = validation && validationPassed(validation) ? validation : undefined;
-    if (i.status.t !== 'integrated' || !passed) return [];
-    if (refuted(s, claim.id)) return [];
-    return [
-      {
-        t: 'host' as const,
-        questionId: claim.spec.questionId,
-        claimAttemptId: claim.id,
-        validationId: passed.id,
-        mergeSha: i.status.mergeSha,
-      },
-    ];
-  });
-}
-
-export const verifications = (s: State): Verification[] => [
-  ...verifiedPanels(s)
-    .filter((p) => !refuted(s, p.claimAttemptId))
-    .map(
-      (p): Verification => ({
-        t: 'panel',
-        questionId: p.questionId,
-        claimAttemptId: p.claimAttemptId,
-        panelId: p.id,
-      })
-    ),
-  ...hostVerifications(s),
-];
-/** Distinct verified claims: the badge's and the page's "verified" count. */
-export const verifiedClaims = (s: State) =>
-  new Set(verifications(s).map((v) => v.claimAttemptId)).size;
-
-/** A question is verified while its newest SETTLED panel verified it (a later panel that refuted
- * the claim withdraws an earlier verification: a stale one must not unlock dependants, R5), or a
- * claim on it is host-verified and no panel refuted that claim. */
-export const questionVerified = (s: State, questionId: string) =>
-  panels(s)
-    .filter((p) => p.questionId === questionId && p.verdict !== 'pending')
-    .at(-1)?.verdict === 'verified' ||
-  hostVerifications(s).some((h) => h.questionId === questionId);
 
 /** Where a manager decision turn starts (design.md R11): its own detached read-only worktree.
  * Never the owner's checkout nor the integration tree the host merges into (audit 2026-11-01 #6:
