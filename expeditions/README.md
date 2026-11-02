@@ -102,7 +102,8 @@ All engine code is under `server/src/expeditions/`. The pure core (no I/O) is re
 | Host-run command checks (curated env, throwaway HOME/TMPDIR, process group, timeout) | `command.ts` |
 | Validator source pins and the `expedition.validation/v1` report | `pins.ts` |
 | Measured attempt cost (tokens from the run's sessions) | `meter.ts` |
-| The `expedition` Buddy tool (draft, launch, status, list, steer) | `tool.ts` |
+| The `expedition` Buddy tool (draft, launch, status, list, steer, retire) | `tool.ts` |
+| Retire: snapshot of a retired expedition (`.retired/<id>.json`), read-only serving | `retired.ts`; see design.md "Retire" and "Restart" |
 | Page data `GET /api/buddies/expeditions/:id` | `view.ts`, `routes.ts`; type `shared/src/expedition.ts` |
 | Badge chip in any post list (thread, DM, channel) | `client/src/components/buddies/ExpeditionBadge.tsx`, branch in `ChannelPostContent.tsx` |
 | Modal `/expeditions/:id` over the current view (tabs + chat; draft mode too) | `client/src/components/buddies/ExpeditionModal.tsx`, `expedition-overlay.ts` |
