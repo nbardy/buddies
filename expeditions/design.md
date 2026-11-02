@@ -645,9 +645,9 @@ post was cut mid-word ("…Engin"); the crew Buddy was listed as a team member.
   the browser pass checks it.
 
 ### R11. Robustness and per-question acceptance (2026-11-01)
-Sources: the live incident on expedition `own-engine-geometry-opti-1b837b` (2026-11-01, ledger
-replayed from `server/test/fixtures/expeditions-live/`, with the three other expeditions stuck
-that day) and the
+Sources: the live incident on expedition `own-engine-geometry-opti-1b837b` (2026-11-01, with
+the three other expeditions stuck that day; all four are retired, and their pre-R11 ledgers and
+the legacy readers that folded them were deleted in Phase B1, 2026-11-03) and the
 oompa audit's expedition robustness list (sections 4 and 5). Each fix names its incident at the
 code site and has an integration test in `server/test/expeditions.test.ts` that fails with the
 guard broken (each mutation-checked once).
@@ -656,7 +656,7 @@ guard broken (each mutation-checked once).
 (`verify.py`, fail-closed until G1–G9 all pass) ran on every claimed candidate before integration,
 so no preparation commit could ever integrate, and the manager ended asking for a "host
 maintainer". Now the goal's done checks run on the expedition branch head at done ONLY. Every
-question carries `acceptance: {rule, provenance}` with
+question carries `acceptance: rule` with
 `rule = {t:'command', argv, timeoutSeconds} | {t:'panel'}`, required on `add_question` and
 changeable on an open question with `set_acceptance`. A `command` acceptance is host-run on the
 claim's immutable candidate in a fresh tree, exactly as before (a validation now freezes its
@@ -673,10 +673,7 @@ integrated: the same deadlock at the level of one claim). `acceptance_set` is sh
 manager like `question_added`, so a turn that only fixes an acceptance is followed by one that
 acts on it instead of a quiescent "needs you". Host
 verification (R9 P4) follows: a claim is host-verified when its candidate validation passed and it
-was integrated. Ledgers written before R11 fold through one κ (`ledger.ts canonical`): a
-`question_added` without acceptance becomes `{rule:{t:'panel'}, provenance:'legacy'}` (explicit
-data; the goal command never becomes a candidate gate by default), and a `validation_planned`
-without `checks` gets the charter's commands, which is what it ran. Trust note: the manager (an
+was integrated. Trust note: the manager (an
 agent) now names commands the host runs. They run with the same curated environment as done
 commands (and, since #3, a throwaway HOME and TMPDIR), on agent-written code that a done
 command would run anyway.
@@ -688,7 +685,7 @@ last fenced json block (or with no fence), else that last fenced block (strict s
 The bare final object wins so an answer that quotes a fenced snippet and ends with its own result
 is not read as the snippet. A first answer that does not parse is not final: the host
 records `attempt_repair_posting {error, body}` and posts ONE repair request on the same seat
-(keyed `exp:<id>:attempt:<a>:repair`; it quotes the answer and the schema; a worker's repair run
+(keyed `exp:<id>:attempt:<a>:<round>`; it quotes the answer and the schema; a worker's repair run
 starts in the same worktree, matched by its bytes). Phases carry the round
 (`posting|posted {round: brief|repair}`); a malformed repair answer ends the attempt. No repair
 is posted once the expedition is finished: the answer ends the attempt as it is (2026-11-01
@@ -697,20 +694,14 @@ that ends with anything but a code claim (a finding, blocked, malformed, failed,
 abandoned; a claim its branch does not hold is malformed) while its branch holds commits beyond
 its base ends `unreported_commits {shas, ended}` (`ended` is how it ended by itself). The
 live run had two such commits: `w64130b` (malformed) and `w475a3b` (a `finding` whose tree was
-kept with ACCEPTANCE_ROUTE.md). The manager may `claim` a commit of such an attempt (or of a
-legacy `malformed`, `finding`, `blocked` or failed one): `claim_planned`, then
+kept with ACCEPTANCE_ROUTE.md). The manager may `claim` a commit of such an attempt (only an
+`unreported_commits` end is claimable): `claim_planned`, then
 the host checks the claim against that attempt's branch and custody (`claimHeld`, as for any
 claim) and records `claim_adopted` (the attempt's outcome becomes the claim, validated or checked
 per its question's acceptance) or `claim_refused {reason}`. A pending adoption counts as host
 work (else the deciding turn looked quiescent and asked the owner). Metering counts every request
 of an attempt.
-A check that ended `malformed` before R11 never had its repair (live `actual-game-daily-local`:
-three reviewers wrote "VERIFIED." in prose, all three panels read not_verified, and the manager
-asked the owner for a "host repair"). While the run is `running` (after the owner's resume; never
-from "needs you" by itself) decide reopens each such check with the same `attempt_repair_posting`
-(`repairLegacyChecks`): its panel is pending again, the verdict is read under the strict schema,
-the attempt is metered again over both requests, and its run starts in the crew directory when
-its tree was already released. A host parse failure therefore never asks the owner by itself:
+A host parse failure therefore never asks the owner by itself:
 one repair, then a typed `malformed` end the next manager is shown.
 
 **L3 — recovery after an upgrade.** Nothing resumes by itself at boot: a ledger in `needs_owner`
@@ -743,7 +734,7 @@ with surrounding whitespace at ingestion.
 
 **Audit #6 — the manager's tree, and the head before a merge.** A manager decision runs in its own
 detached worktree (`git worktree add --detach`, `<root>/<id>/manager`), made once the integration
-tree exists (a pre-R11 ledger gets one on its first tick), reset to the branch head before every
+tree exists, reset to the branch head before every
 manager brief, released at finish once no manager runs in it. It is never the owner's checkout and
 never the integration tree; decide waits for it like the integration tree, and its failure
 finishes `setup_failed`. Before each merge `mergeCandidate` requires the integration tree's HEAD to
@@ -829,8 +820,7 @@ orphan is not killed (its tree is pulled away, so it fails fast).
   bytes differ, and re-reads them after the run: a check that changed its own validator is
   recorded `error` whatever it exited. A git failure while pinning ends the job
   `validation_failed {reason}`; it never runs unpinned. Every `validation` entry carries its report
-  `{t:'expedition.validation/v1', targetSha, pins, pinCheck: held|changed|unpinned}`; entries
-  written before this fold as `unpinned` with reason `legacy`.
+  `{t:'expedition.validation/v1', targetSha, pins, pinCheck: held|changed|unpinned}`.
 - *Salvage ref.* Before a tree whose branch holds commits the expedition branch does not is
   removed, the tip is pinned at `refs/salvage/expeditions/<id>/<attempt-or-validation>` and
   recorded `preserved {salvaged}`. Unmerged attempt branches also stay, as before.

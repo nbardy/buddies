@@ -77,22 +77,16 @@ export type Outcome = EndOutcome | { t: 'unreported_commits'; shas: string[]; en
  * gets (design.md R11: one format repair turn on the same seat before the answer is final). */
 export type Round = 'brief' | 'repair';
 
-/** A question's acceptance (charter.ts Acceptance) and where it came from: declared by the
- * manager, or `legacy` for a question added before per-question acceptance existed (R11). A
- * legacy question folds with an explicit panel, never with the goal's done command. */
-export interface QuestionAcceptance {
-  rule: Acceptance;
-  provenance: 'manager' | 'legacy';
-}
-
 /**
- * A question's acceptance as the fold knows it: `rev` counts its declarations (0 when the
+ * A question's acceptance (charter.ts Acceptance, declared by the manager) as the fold knows it:
+ * `rev` counts its declarations (0 when the
  * question was added, +1 per `acceptance_set`), and `trustedSha` is the expedition branch head
  * (headOf) when it was declared. A candidate validation is judged only under the revision it was
  * planned for (a changed acceptance plans a new one), and the validator files its command names
  * are trusted at `trustedSha`: a candidate that changed them is refused (pins.ts).
  */
-export interface DeclaredAcceptance extends QuestionAcceptance {
+export interface DeclaredAcceptance {
+  rule: Acceptance;
   rev: number;
   trustedSha: string;
 }
@@ -105,7 +99,7 @@ export type Adoption =
 
 /** The manager's own detached, read-only worktree (design.md R11, audit #6): a manager turn
  * never starts in the owner's checkout nor in the integration tree the host merges into.
- * `missing`: not made yet (every ledger written before R11 starts here). */
+ * `missing`: not made yet. */
 export type ManagerTree =
   | { t: 'missing' }
   | { t: 'ready'; path: string }
@@ -221,7 +215,7 @@ export interface SourcePin {
 }
 
 /** The pinned files re-read after the run: unchanged, changed by the run (the outcome is then an
- * error), or never pinned (no tree, the tree did not match the commit, or a legacy record). */
+ * error), or never pinned (no tree, or the tree did not match the commit). */
 export type PinCheck =
   | { t: 'held' }
   | { t: 'changed'; paths: string[] }
@@ -483,7 +477,7 @@ export type Entry =
       paths: string[];
       /** Question ids whose verified close this question's work waits for (design.md R5). */
       after: string[];
-      acceptance: QuestionAcceptance;
+      acceptance: Acceptance;
     }
   | { t: 'acceptance_set'; at: string; questionId: string; acceptance: Acceptance }
   | {
@@ -625,16 +619,6 @@ export interface State {
   archive: Archive;
 }
 
-// ---------- Stored entries (κ for the ledger file) ----------
-
-/** Entry shapes written before R11 (2026-11-01). Ledgers in the wild hold them; `canonical`
- * upgrades each into the current Entry with explicit legacy data, never a silent default. */
-type LegacyEntry =
-  | Omit<Extract<Entry, { t: 'question_added' }>, 'acceptance'>
-  | Omit<Extract<Entry, { t: 'validation_planned' }>, 'checks'>
-  | Omit<Extract<Entry, { t: 'validation' }>, 'report'>;
-export type StoredEntry = Entry | LegacyEntry;
-
 /** The charter's command checks as a head validation runs them (their charter index). */
 export const doneValidationChecks = (c: Charter): ValidationCheck[] =>
   commandChecks(c).map(({ index, check }) => ({
@@ -643,46 +627,9 @@ export const doneValidationChecks = (c: Charter): ValidationCheck[] =>
     timeoutSeconds: check.timeoutSeconds,
   }));
 
-/**
- * One stored entry as the current Entry. A legacy question gets an explicit `panel` acceptance
- * with provenance `legacy` (R11: the goal's done command never becomes a candidate gate by
- * default); a legacy validation ran the charter's command checks, so it is recorded with them.
- */
-function canonical(e: StoredEntry, c: Charter): Entry {
-  if (e.t === 'attempt_ended' && e.outcome.t === 'manager')
-    return { ...e, outcome: { t: 'manager', actions: e.outcome.actions.map(legacyAction) } };
-  if (e.t === 'question_added' && !('acceptance' in e))
-    return { ...e, acceptance: { rule: { t: 'panel' }, provenance: 'legacy' } };
-  if (e.t === 'validation_planned' && !('checks' in e))
-    return { ...e, checks: doneValidationChecks(c) };
-  // A check recorded before source pins (part 2 of R11) ran unpinned: said so, never implied.
-  if (e.t === 'validation' && !('report' in e))
-    return {
-      ...e,
-      report: {
-        t: 'expedition.validation/v1',
-        targetSha: e.targetSha,
-        pins: [],
-        pinCheck: { t: 'unpinned', reason: 'recorded before source pins (legacy)' },
-      },
-    };
-  return e as Entry;
-}
-
-/** A pre-R11 manager's add_question carries no acceptance. Decided after an upgrade (the host
- * stopped between observing the answer and applying it) it would add a question without one, and
- * every later tick would throw on it; it gets the legacy panel instead. The question then reads
- * as manager-declared: the manager did name it, the acceptance it named is the legacy default. */
-function legacyAction(a: ManagerAction): ManagerAction {
-  return a.do === 'add_question' && !('acceptance' in a)
-    ? ({ ...(a as object), acceptance: { t: 'panel' } } as ManagerAction)
-    : a;
-}
-
-export function fold(stored: readonly StoredEntry[]): State {
-  const [first, ...rest] = stored;
+export function fold(entries: readonly Entry[]): State {
+  const [first, ...rest] = entries;
   if (!first || first.t !== 'launched') throw new Error('ledger must start with launched');
-  const entries = rest.map((e) => canonical(e, first.charter));
   const state: State = {
     id: first.id,
     key: first.key,
@@ -730,7 +677,7 @@ export function fold(stored: readonly StoredEntry[]): State {
     retirement: { t: 'active' },
     archive: { tags: [], branches: { t: 'pending' }, chats: [], crew: { t: 'active' } },
   };
-  for (const entry of entries) apply(state, entry);
+  for (const entry of rest) apply(state, entry);
   return state;
 }
 
@@ -914,13 +861,10 @@ export function apply(s: State, e: Entry): void {
       return;
     case 'attempt_repair_posting': {
       const attempt = attemptOf(s, e.attemptId);
-      if (!repairable(s, attempt))
+      if (attempt.phase.t !== 'posted' || attempt.phase.round !== 'brief')
         throw new Error(`attempt ${e.attemptId} repaired outside its brief round`);
       attempt.phase = { t: 'posting', body: e.body, round: 'repair' };
       s.repairs[e.attemptId] = e.body;
-      // A reopened legacy check (decide.ts repairLegacyChecks) is metered again over both its
-      // requests once it ends: its earlier cost covered only the first.
-      delete s.costs[e.attemptId];
       return;
     }
     case 'attempt_posted': {
@@ -993,7 +937,7 @@ export function apply(s: State, e: Entry): void {
         scope: e.scope,
         paths: e.paths,
         after: e.after,
-        acceptance: { ...e.acceptance, rev: 0, trustedSha: headOf(s) },
+        acceptance: { rule: e.acceptance, rev: 0, trustedSha: headOf(s) },
         status: 'open',
       });
       // Shown to the next manager: the host assigns question ids, so a turn that only decomposes
@@ -1004,7 +948,6 @@ export function apply(s: State, e: Entry): void {
       const question = questionOf(s, e.questionId);
       question.acceptance = {
         rule: e.acceptance,
-        provenance: 'manager',
         rev: question.acceptance.rev + 1,
         trustedSha: headOf(s),
       };
@@ -1160,15 +1103,6 @@ function applyFeedback(s: State, e: Extract<Entry, { t: 'feedback' }>): void {
       return;
   }
 }
-
-/** A repair is posted for an answer in its brief round, or for a check that ended malformed
- * before R11 gave it one (decide.ts repairLegacyChecks). */
-const repairable = (s: State, a: Attempt) =>
-  (a.phase.t === 'posted' && a.phase.round === 'brief') ||
-  (a.spec.kind === 'check' &&
-    a.phase.t === 'ended' &&
-    a.phase.outcome.t === 'malformed' &&
-    !(a.id in s.repairs));
 
 export const byId = <T extends { id: string }>(rows: T[], id: string) =>
   rows.find((r) => r.id === id);

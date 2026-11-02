@@ -1,4 +1,3 @@
-import { repairBrief } from './briefs';
 import type { ManagerAction } from './charter';
 import type { Entry, Integration, Outcome, State, Validation } from './ledger';
 import {
@@ -93,10 +92,7 @@ export function decide(s: State, clock: Clock): Entry[] {
   const now = runOf(s);
   if (now === 'finished' || now === 'paused') return withStatus(s, out, at);
 
-  if (s.run.t === 'running') {
-    repairLegacyChecks(s, push, at);
-    retryInterrupted(s, clock, push);
-  }
+  if (s.run.t === 'running') retryInterrupted(s, clock, push);
 
   // Manager decisions are not budgeted attempts (design.md R9); they stop at their own cap.
   const managerLive = s.attempts.some((a) => a.spec.kind === 'manager' && a.phase.t !== 'ended');
@@ -146,33 +142,6 @@ export function decide(s: State, clock: Clock): Entry[] {
 const runOf = (s: State): State['run']['t'] => s.run.t;
 
 /**
- * A check that ended `malformed` with no repair on record never had the one repair turn every
- * malformed answer gets (design.md R11): it ended before R11. 2026-11-01 incident
- * actual-game-daily-local--e3153c: reviewers c71c918, c2babbc and cee2896 each reproduced the
- * claim and wrote "VERIFIED." in prose with no json block, so all three panels read
- * not_verified and the manager could only ask the owner for a "host repair". While the run is
- * running (after the owner's resume, never by itself from "needs you") it gets that repair now:
- * its panel reopens and the verdict is read under the strict schema, never inferred from prose.
- * Since R11 a malformed check is repaired as it answers, so only a legacy end matches.
- */
-function repairLegacyChecks(s: State, push: (e: Entry) => void, at: string): void {
-  for (const a of s.attempts)
-    if (
-      a.spec.kind === 'check' &&
-      a.phase.t === 'ended' &&
-      a.phase.outcome.t === 'malformed' &&
-      !(a.id in s.repairs)
-    )
-      push({
-        t: 'attempt_repair_posting',
-        at,
-        attemptId: a.id,
-        error: a.phase.outcome.error,
-        body: repairBrief(s, a, a.phase.outcome.error, a.phase.outcome.raw),
-      });
-}
-
-/**
  * Each work or check attempt a server restart interrupted is planned again, once, with the same
  * spec under a new id: the work was never answered, so it is owed, and the restart is not the
  * manager's decision to spend. Its unreported commits (if any) stay claimable on the old attempt.
@@ -193,24 +162,9 @@ function retryInterrupted(s: State, clock: Clock, push: (e: Entry) => void): voi
       });
 }
 
-/** A work attempt's end whose commits a manager may claim (R11): anything but a code claim. A
- * legacy end (a pre-R11 `malformed` or `finding` whose branch kept a commit, 2026-11-01 incident:
- * w64130b and w475a3b) is claimable too; the host then checks its branch holds the commit. */
-function claimable(o: Outcome): boolean {
-  switch (o.t) {
-    case 'work':
-      return o.result.result !== 'claim' || o.result.change.t !== 'commit';
-    case 'malformed':
-    case 'unreported_commits':
-    case 'failed':
-    case 'abandoned':
-    case 'interrupted':
-      return true;
-    case 'manager':
-    case 'check':
-      return false;
-  }
-}
+/** A work attempt's end whose commits a manager may claim (R11): the host records every end
+ * that left unclaimed commits on its branch as `unreported_commits` (host.ts unreported). */
+const claimable = (o: Outcome): boolean => o.t === 'unreported_commits';
 
 /**
  * A manager turn is due when it has something to act on. While the host validates or merges, a
@@ -500,7 +454,7 @@ function applyAction(
         scope: action.scope,
         paths: action.paths,
         after: action.after,
-        acceptance: { rule: action.acceptance, provenance: 'manager' },
+        acceptance: action.acceptance,
       });
       return;
     }
@@ -518,7 +472,7 @@ function applyAction(
         return reject(`no work attempt ${action.attempt}`);
       if (attempt.phase.t !== 'ended' || !claimable(attempt.phase.outcome))
         return reject(
-          `only a work attempt that ended without a code claim (unreported commits, malformed, a finding, blocked, failed) is claimed; ${attempt.id} is ${attempt.phase.t === 'ended' ? 'a code claim' : attempt.phase.t}`
+          `only a work attempt that ended with unreported commits is claimed; ${attempt.id} is ${attempt.phase.t === 'ended' ? attempt.phase.outcome.t : attempt.phase.t}`
         );
       const prior = s.adoptions[attempt.id];
       if (prior && prior.t !== 'refused')

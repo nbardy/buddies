@@ -1,5 +1,6 @@
 import { expeditionRunLabel } from '@unleashd/shared';
 import {
+  type Acceptance,
   type Charter,
   type CheckResult,
   type ClaimChange,
@@ -19,7 +20,6 @@ import type {
   Integration,
   IntegrationRefusal,
   Outcome,
-  QuestionAcceptance,
   Run,
   State,
   Validation,
@@ -294,13 +294,12 @@ function feedbackLabel(f: Feedback): string {
 }
 
 /** How a question's claims are accepted (design.md R11), one line. */
-export function acceptanceLabel(a: QuestionAcceptance): string {
-  const legacy = a.provenance === 'legacy' ? ' (legacy question: set by default)' : '';
-  switch (a.rule.t) {
+export function acceptanceLabel(a: Acceptance): string {
+  switch (a.t) {
     case 'command':
-      return `$ ${a.rule.argv.join(' ')} on its commit (host-run, ${a.rule.timeoutSeconds}s)${legacy}`;
+      return `$ ${a.argv.join(' ')} on its commit (host-run, ${a.timeoutSeconds}s)`;
     case 'panel':
-      return `an independent check panel${legacy}`;
+      return 'an independent check panel';
   }
 }
 

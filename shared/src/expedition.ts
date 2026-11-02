@@ -84,10 +84,9 @@ export interface ExpeditionQuestion {
   /** The questions this question's work waits for (each must be closed verified). */
   after: { id: string; title: string }[];
   /** How its claims are accepted (design.md R11): a host-run command on the candidate commit,
-   * or an independent check panel; `legacy` marks a question added before acceptance existed. */
+   * or an independent check panel. */
   acceptance: {
     rule: { t: 'command'; argv: string[]; timeoutSeconds: number } | { t: 'panel' };
-    provenance: 'manager' | 'legacy';
   };
   attempts: string[];
 }

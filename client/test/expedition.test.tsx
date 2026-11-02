@@ -131,7 +131,7 @@ const view: ExpeditionView = {
       stage: 'implementing',
       paths: ['widget'],
       after: [],
-      acceptance: { rule: { t: 'panel' }, provenance: 'manager' },
+      acceptance: { rule: { t: 'panel' } },
       attempts: ['w0', 'w1'],
     },
   ],

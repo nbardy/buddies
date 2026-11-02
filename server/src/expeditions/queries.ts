@@ -183,8 +183,7 @@ export function candidateValidation(s: State, claimAttemptId: string): Validatio
 }
 
 /** Host-verified claims a later panel has not refuted: the claim's candidate validation (its
- * question's command acceptance, or a legacy validation of the charter's checks) passed, and its
- * commit was merged into the expedition branch. */
+ * question's command acceptance) passed, and its commit was merged into the expedition branch. */
 export function hostVerifications(s: State): Extract<Verification, { t: 'host' }>[] {
   return s.integrations.flatMap((i) => {
     const claim = attemptOf(s, i.claimAttemptId);

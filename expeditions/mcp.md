@@ -145,8 +145,7 @@ manager adds names its own acceptance, `{t:'command', argv, timeoutSeconds}` (ho
 claim's immutable candidate commit, exactly like a done command) or `{t:'panel'}` (an independent
 check panel on another model). The done commands never run on a candidate unless the manager names
 one as a question's acceptance, so a fail-closed final verifier does not block the preparation
-steps that build toward it (2026-11-01 incident `own-engine-geometry-opti-1b837b`). Questions added
-before R11 fold with `{t:'panel'}`, provenance `legacy`; the manager may change any open
+steps that build toward it (2026-11-01 incident `own-engine-geometry-opti-1b837b`). The manager may change any open
 question's acceptance with `set_acceptance`, which re-validates the question's unmerged claims
 (only the current acceptance decides). A command acceptance trusts its validator files at the
 expedition head when it was declared; a candidate that changes them is refused.

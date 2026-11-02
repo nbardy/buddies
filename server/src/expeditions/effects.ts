@@ -188,8 +188,7 @@ function runEffects(s: State): Effect[] {
   return effects;
 }
 
-/** The manager's tree is made once the integration tree is ready (a ledger written before R11
- * gets one on its first tick), and released at finish once no manager decision runs in it. */
+/** The manager's tree is made once the integration tree is ready, and released at finish once no manager decision runs in it. */
 function managerTreeEffects(s: State): Effect[] {
   const finished = s.run.t === 'finished';
   const managerLive = s.attempts.some(

@@ -100,7 +100,7 @@ function lessonsText(s: State): string {
 
 function questionLine(s: State, q: Question): string {
   const after = q.after.length > 0 ? ` (after: ${q.after.join(', ')})` : '';
-  return `- ${q.id} [${q.scope}/${q.status}, stage ${questionStage(s, q)}] ${q.title} (paths: ${q.paths.join(', ')})${after}; accepted by ${acceptanceLabel(q.acceptance)} — ${attemptsOn(s, q.id).length} attempts`;
+  return `- ${q.id} [${q.scope}/${q.status}, stage ${questionStage(s, q)}] ${q.title} (paths: ${q.paths.join(', ')})${after}; accepted by ${acceptanceLabel(q.acceptance.rule)} — ${attemptsOn(s, q.id).length} attempts`;
 }
 
 /** Questions counted by stage (design.md R5): waiting is held work, never a failure. */
@@ -209,10 +209,10 @@ function managerBrief(s: State, id: string): string {
       '- Start parallel work: one "work" action per question attempt; the host queues beyond the live limit.',
       '- Each question owns file paths (repo-relative prefixes, "." = whole repo). Work on overlapping paths runs one at a time, so split questions by the files they touch to run them in parallel.',
       '- "after" lists question ids a question depends on: work on it waits (stage waiting, not refused) until each is closed verified. Integrate a dependency\'s claim before closing it when the dependent work builds on its code.',
-      '- ACCEPTANCE: every question names how its claims are accepted. {"t":"command","argv":[…],"timeoutSeconds":n}: the host runs that argv on the claim\'s exact commit in a fresh tree (exit 0 passes); use a command that can pass for THIS step (its own tests, a build), never the final goal verifier for a preparation step. {"t":"panel"}: an independent check panel on another model must verify it ("check" action). Change it with "set_acceptance": that re-validates the question\'s unmerged claims, and only the current acceptance decides. The validator files a command names are trusted as they are on the expedition branch when you declare it: a candidate that changes them is refused (re-declare to trust new bytes). Legacy questions are accepted by a panel.',
+      '- ACCEPTANCE: every question names how its claims are accepted. {"t":"command","argv":[…],"timeoutSeconds":n}: the host runs that argv on the claim\'s exact commit in a fresh tree (exit 0 passes); use a command that can pass for THIS step (its own tests, a build), never the final goal verifier for a preparation step. {"t":"panel"}: an independent check panel on another model must verify it ("check" action). Change it with "set_acceptance": that re-validates the question\'s unmerged claims, and only the current acceptance decides. The validator files a command names are trusted as they are on the expedition branch when you declare it: a candidate that changes them is refused (re-declare to trust new bytes).',
       "- The DONE WHEN commands ($ …) run on the expedition branch head at done only, never on a candidate unless you name one as a question's acceptance. No agent runs or reports host commands.",
       '- A claim counts as verified after a "check" panel verifies it, or (host-verified) when its command acceptance PASSED on its commit and you integrated it: the host then closes its question verified, which unlocks the questions after it. Ask a check with goal:true when a claim should satisfy the judged DONE WHEN items: those always need a panel. A claim whose validation FAILED is not done: send work to fix it.',
-      '- A work attempt that ended with UNREPORTED COMMITS (or a legacy MALFORMED or FINDING whose branch kept a commit) made commits it did not claim: "claim" names one of its commits (full sha) as its claim, and the host checks it is on that attempt\'s branch and inside its paths before accepting it.',
+      '- A work attempt that ended with UNREPORTED COMMITS made commits it did not claim: "claim" names one of its commits (full sha) as its claim, and the host checks it is on that attempt\'s branch and inside its paths before accepting it.',
       '- When different approaches fail the same way, the problem is probably upstream: add a question about measurement or setup.',
       '- Kill (close dead) what a check refuted twice or a prediction falsified. Do not repeat work already in ATTEMPTS.',
       '- "integrate" merges a claim\'s commit into the expedition branch. It is accepted only once its question\'s acceptance holds (its command PASSED on the commit, or a panel verified it) and no later panel refuted it. A merge conflict is refused with the conflicting paths: send work to redo it on the current head. Integrate before "done": done runs the DONE WHEN commands on the branch head, which holds only integrated work.',
@@ -303,7 +303,7 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
       `YOUR WORKTREE: ${tree.path} (branch ${tree.branch}, based on ${tree.baseSha}).`,
       'Your turn starts there. Work and commit ONLY in that directory, on that branch. Never edit any other',
       `checkout. Your files: ${q.paths.join(', ')}. A code claim must name its commit's full sha.`,
-      `Your claim is accepted by ${acceptanceLabel(q.acceptance)}.`,
+      `Your claim is accepted by ${acceptanceLabel(q.acceptance.rule)}.`,
     ].join(' '),
     `WHAT OTHERS FOUND:\n${findings.join('\n') || '- nothing yet'}${verified.length ? `\n${verified.join('\n')}` : ''}`,
     [
