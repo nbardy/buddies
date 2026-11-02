@@ -1,14 +1,5 @@
 import { type Charter, type Claim, type WorkerConfig, sameModel } from './charter';
-import type {
-  Attempt,
-  AttemptSpec,
-  CheckSpec,
-  ClaimState,
-  Question,
-  State,
-  Validation,
-  WorkSpec,
-} from './ledger';
+import type { Attempt, AttemptSpec, CheckSpec, ClaimState, Question, State, Validation, WorkSpec } from './ledger';
 import {
   MANAGER_TREE,
   allAttempts,
@@ -40,16 +31,13 @@ export const queued = (s: State) => allAttempts(s).filter(isQueued);
 export const settled = (a: Attempt) => a.phase.t === 'ended' || a.phase.t === 'dropped';
 export const exploreAttempts = (s: State) =>
   worksOf(s).filter((a) => questionOf(s, a.spec.questionId).scope === 'explore').length;
-/** What the owner's attempt budget counts: work and check attempts, never manager decisions
- * (design.md R9: "Budget 6 attempts" allowed one work attempt while decisions counted), nor an
- * attempt a server restart interrupted: its replan (`attempt_retry_planned`) is the one counted. */
+/** The owner's budget counts work and check attempts, never manager decisions (design.md R9), nor
+ * an attempt a restart interrupted (its `attempt_retry_planned` replan is the one counted). */
 export const workerAttempts = (s: State) => s.workers.filter((a) => !interrupted(a)).length;
-/** Ended by a server restart (ledger.ts interruptedEnd): superseded by its replan. */
 export const interrupted = (a: Attempt) => a.phase.t === 'ended' && interruptedEnd(a.phase.outcome);
 export const managerTurns = (s: State) => s.managers.length;
-/** Manager decisions are bounded apart from the budget, so a manager that keeps deciding nothing
- * cannot spin: two per budgeted attempt (one to start it, one to act on its result) plus two
- * (the first plan and the done). */
+/** Decisions are bounded apart from the budget so a manager deciding nothing cannot spin: two per
+ * budgeted attempt (start it, act on it) plus the first plan and the done. */
 export const managerCap = (c: Charter) => 2 * c.maxAttempts + 2;
 export const exploreCap = (c: Charter) => Math.floor(c.exploreShare * c.maxAttempts);
 export const deadlineMs = (s: State) =>
@@ -64,48 +52,31 @@ export const custodyOverlaps = (a: readonly string[], b: readonly string[]) =>
 export const withinCustody = (file: string, custody: readonly string[]) =>
   custody.some((p) => p === '.' || file === p || file.startsWith(`${p}/`));
 
-/** A worker attempt's file custody: its question's paths for work, nothing for a check. */
-export function custodyOf(s: State, a: Attempt): readonly string[] {
-  switch (a.spec.kind) {
-    case 'work':
-      return questionOf(s, a.spec.questionId).paths;
-    case 'manager':
-    case 'check':
-      return [];
-  }
-}
+/** A worker attempt's file custody: its question's paths for work, nothing otherwise. */
+export const custodyOf = (s: State, a: Attempt): readonly string[] =>
+  a.spec.kind === 'work' ? questionOf(s, a.spec.questionId).paths : [];
 
-/** Worker attempts holding a live slot and their custody: admitted (worktree intent recorded,
- * about to be briefed), posting or posted. */
-export const admitted = (s: State) =>
-  s.workers.filter(
-    (a) => a.phase.t === 'admitted' || a.phase.t === 'posting' || a.phase.t === 'posted'
-  );
+/** Holding a live slot and its custody: admitted (about to be briefed), posting or posted. */
+const running = (a: Attempt) =>
+  a.phase.t === 'admitted' || a.phase.t === 'posting' || a.phase.t === 'posted';
+export const admitted = (s: State) => s.workers.filter(running);
 
+/** What an attempt claims: none until it ended. */
+export const attemptClaim = (a: Attempt): ClaimState =>
+  a.phase.t === 'ended' ? claimState(a.phase.outcome) : { t: 'none' };
 /** The claim an attempt ended with; checks and integrations are planned only for ended claims
  * (decide.ts), so a missing one is a corrupt ledger. */
 export function claimAt(s: State, attemptId: string): Claim {
   const claimed = attemptClaim(attemptOf(s, attemptId));
-  switch (claimed.t) {
-    case 'commit':
-    case 'no_code':
-      return claimed.claim;
-    case 'none':
-      throw new Error(`attempt ${attemptId} has no claim`);
-  }
+  if (claimed.t === 'none') throw new Error(`attempt ${attemptId} has no claim`);
+  return claimed.claim;
 }
-/** What an attempt claims: none until it ended. */
-export const attemptClaim = (a: Attempt): ClaimState =>
-  a.phase.t === 'ended' ? claimState(a.phase.outcome) : { t: 'none' };
 /** The claim a check verifies. */
 export const claimOf = (s: State, spec: CheckSpec): Claim => claimAt(s, spec.claimAttemptId);
 
 /** The work and check attempts on one question (managers belong to no question). */
 export const attemptsOn = (s: State, questionId: string) =>
   s.workers.filter((a) => a.spec.questionId === questionId);
-
-const checks = (s: State): Attempt<CheckSpec>[] =>
-  s.workers.filter((a): a is Attempt<CheckSpec> => a.spec.kind === 'check');
 
 export interface Panel {
   id: string;
@@ -119,34 +90,31 @@ export interface Panel {
 function panelsOf(s: State): Panel[] {
   const out = new Map<string, Attempt<CheckSpec>[]>();
   // An interrupted check never voted: its replan (same panel, new id) takes its seat.
-  for (const c of checks(s).filter((c) => !interrupted(c)))
-    out.set(c.spec.panelId, [...(out.get(c.spec.panelId) ?? []), c]);
+  for (const c of s.workers)
+    if (c.spec.kind === 'check' && !interrupted(c))
+      out.set(c.spec.panelId, [...(out.get(c.spec.panelId) ?? []), c as Attempt<CheckSpec>]);
   return [...out.entries()].map(([id, members]) => {
-    const first = members[0].spec;
+    const { questionId, claimAttemptId, goal } = members[0].spec;
     // A dropped check (its worktree could not be made) settles the panel without a vote.
-    const ended = members.every(settled);
     const yes = members.filter(
       (m) =>
         m.phase.t === 'ended' &&
         m.phase.outcome.t === 'check' &&
         m.phase.outcome.result.verdict === 'verified'
     ).length;
-    return {
-      id,
-      questionId: first.questionId,
-      claimAttemptId: first.claimAttemptId,
-      goal: first.goal,
-      verdict: !ended ? 'pending' : yes * 2 > members.length ? 'verified' : 'not_verified',
-    };
+    const verdict = !members.every(settled)
+      ? 'pending'
+      : yes * 2 > members.length
+        ? 'verified'
+        : 'not_verified';
+    return { id, questionId, claimAttemptId, goal, verdict };
   });
 }
 
 /**
- * Why a claim counts as verified (design.md R9), as data: a check panel's majority, or, when the
- * charter has command checks, the host's own proof: every command check passed on the claim's
- * commit and that commit was merged into the expedition branch. Judged done items still need a
- * goal panel (decide.ts judgedBlocker). 2026-11-01 smoke incident: a done reached on host checks
- * alone left its question open, the badge at "0 verified", and refused close_question verified.
+ * Why a claim counts as verified (design.md R9): a panel majority, or the host's own proof (its
+ * command acceptance passed on the commit and the commit was merged). 2026-11-01 smoke incident:
+ * a done on host checks alone left its question open and the badge at "0 verified".
  */
 export type Verification =
   | { t: 'panel'; questionId: string; claimAttemptId: string; panelId: string }
@@ -170,10 +138,9 @@ interface Derived {
   verifiedQuestions: ReadonlySet<string>;
 }
 
-// panels were rebuilt for every claim (refuted), question (questionVerified, STAGES) and reader:
-// O(claims x checks) per tick. The cache is per revision because decide mutates the state it
-// reads (ledger.ts apply), and a stale panel would let an integrate pass a check panel that the
-// same decision just planned.
+// Rebuilding panels per reader was O(claims x checks) per tick. Cached per revision, not per
+// object: decide mutates the state it reads (ledger.ts apply), and a stale panel would let an
+// integrate pass a check panel the same decision just planned.
 const DERIVED = new WeakMap<State, Derived>();
 
 export function derive(s: State): Derived {
@@ -184,16 +151,15 @@ export function derive(s: State): Derived {
   return fresh;
 }
 
-/** The newest SETTLED panel decides, by key: a later panel that refuted a claim withdraws an
- * earlier verification (a stale one must not unlock dependants, R5). */
+/** The newest SETTLED panel decides, by key: a later refutation withdraws an earlier verification
+ * (a stale one must not unlock dependants, R5). */
 const latestSettled = (panels: Panel[], key: (p: Panel) => string) =>
   new Map(panels.filter((p) => p.verdict !== 'pending').map((p) => [key(p), p.verdict]));
 
 function deriveAt(s: State): Derived {
   const panels = panelsOf(s);
-  // A refutation withdraws the claim's earlier panel verification and its host proof alike, so
-  // every reader (the host's question close, the badge, dependants) agrees. 2026-11-01 review:
-  // only questionVerified applied it, so a refuted integrated claim was still closed verified.
+  // A refutation withdraws panel and host verification alike, so every reader agrees (2026-11-01
+  // review: only questionVerified applied it, so a refuted integrated claim closed verified).
   const byClaim = latestSettled(panels, (p) => p.claimAttemptId);
   const refuted = (claimAttemptId: string) => byClaim.get(claimAttemptId) === 'not_verified';
   const host = s.integrations.flatMap((i): HostVerification[] => {
@@ -201,34 +167,21 @@ function deriveAt(s: State): Derived {
     const validation = candidateValidation(s, claim);
     if (i.status.t !== 'integrated' || !validation || !validationPassed(validation)) return [];
     if (refuted(claim.id)) return [];
-    return [
-      {
-        t: 'host',
-        questionId: claim.spec.questionId,
-        claimAttemptId: claim.id,
-        validationId: validation.id,
-        mergeSha: i.status.mergeSha,
-      },
-    ];
+    const { questionId } = claim.spec;
+    const { mergeSha } = i.status;
+    return [{ t: 'host', questionId, claimAttemptId: claim.id, validationId: validation.id, mergeSha }];
   });
+  const panelVerified = panels.flatMap((p): Verification[] =>
+    p.verdict === 'verified' && !refuted(p.claimAttemptId)
+      ? [{ t: 'panel', questionId: p.questionId, claimAttemptId: p.claimAttemptId, panelId: p.id }]
+      : []
+  );
   const byQuestion = latestSettled(panels, (p) => p.questionId);
   return {
     revision: s.revision,
     panels,
     host,
-    verifications: [
-      ...panels
-        .filter((p) => p.verdict === 'verified' && !refuted(p.claimAttemptId))
-        .map(
-          (p): Verification => ({
-            t: 'panel',
-            questionId: p.questionId,
-            claimAttemptId: p.claimAttemptId,
-            panelId: p.id,
-          })
-        ),
-      ...host,
-    ],
+    verifications: [...panelVerified, ...host],
     verifiedQuestions: new Set([
       ...[...byQuestion].filter(([, verdict]) => verdict === 'verified').map(([q]) => q),
       ...host.map((h) => h.questionId),
@@ -242,8 +195,6 @@ export const verifications = (s: State) => derive(s).verifications;
 /** Distinct verified claims: the badge's and the page's "verified" count. */
 export const verifiedClaims = (s: State) =>
   new Set(verifications(s).map((v) => v.claimAttemptId)).size;
-/** A question is verified while its newest settled panel verified it, or a claim on it is
- * host-verified and no panel refuted that claim. */
 export const questionVerified = (s: State, questionId: string) =>
   derive(s).verifiedQuestions.has(questionId);
 
@@ -254,12 +205,9 @@ export const latestGoalPanel = (s: State): Panel | undefined =>
     .at(-1);
 
 /**
- * The host validation of a claim's candidate commit under its question's CURRENT acceptance
- * (absent: none was planned for that revision). One per claim and acceptance revision (design.md
- * R11): a validation planned under an earlier acceptance never decides the claim any more.
- * 2026-11-01 review: one validation per claim, kept whatever the acceptance became, meant a claim
- * first validated by a command that could not pass (the goal verifier, or a pre-R11 validation of
- * the charter's checks) could never integrate, the geometry deadlock at the level of one claim.
+ * The validation of a claim's commit under its question's CURRENT acceptance revision (design.md
+ * R11; absent: none planned). 2026-11-01 review: one validation per claim, kept whatever the
+ * acceptance became, meant a claim first validated by a command that could not pass never integrated.
  */
 export function candidateValidation(s: State, claim: Attempt<WorkSpec>): Validation | undefined {
   const { rev } = questionOf(s, claim.spec.questionId).acceptance;
@@ -274,11 +222,8 @@ export function candidateValidation(s: State, claim: Attempt<WorkSpec>): Validat
     .at(-1);
 }
 
-/** Where a manager decision turn starts (design.md R11): its own detached read-only worktree.
- * Never the owner's checkout nor the integration tree the host merges into (audit 2026-11-01 #6:
- * before the integration tree existed a manager started in the owner's repository root). A
- * manager is briefed only once that tree is ready (plan.ts), so any other state here is a
- * broken invariant. */
+/** Where a manager turn starts (design.md R11): its own detached read-only tree, never the owner's
+ * checkout (audit 2026-11-01 #6). A manager is briefed only once it is ready (plan.ts). */
 export function managerDirectory(s: State): string {
   const tree = treeOf(s, MANAGER_TREE);
   if (tree.status.t !== 'ready')
@@ -291,16 +236,8 @@ export const acceptanceOf = (s: State, questionId: string) =>
   questionOf(s, questionId).acceptance.rule;
 
 /** The roster seat an attempt runs on. */
-export function configOf(c: Charter, spec: AttemptSpec): WorkerConfig {
-  switch (spec.kind) {
-    case 'manager':
-      return c.crew.manager;
-    case 'work':
-      return c.crew.work[spec.seat];
-    case 'check':
-      return c.crew.check[spec.seat];
-  }
-}
+export const configOf = (c: Charter, spec: AttemptSpec): WorkerConfig =>
+  spec.kind === 'manager' ? c.crew.manager : c.crew[spec.kind][spec.seat];
 
 /** Check seats independent of a claim's author: never the model that made the claim. */
 export const independentCheckSeats = (c: Charter, author: WorkerConfig) =>
@@ -310,25 +247,15 @@ export const independentCheckSeats = (c: Charter, author: WorkerConfig) =>
 
 // ---------- Dependencies and stages (design.md R5) ----------
 
-/** A question's dependencies not yet closed verified. */
-export const unmetDeps = (s: State, q: Question): string[] =>
-  q.after.filter((id) => questionOf(s, id).status !== 'verified');
-
-/** The dependencies a queued attempt waits for: a work attempt on a question whose dependencies
- * are not all verified stays queued (holding no slot or custody), never refused or run. */
-export function waitsOn(s: State, a: Attempt): string[] {
-  if (a.phase.t !== 'planned') return [];
-  switch (a.spec.kind) {
-    case 'work':
-      return unmetDeps(s, questionOf(s, a.spec.questionId));
-    case 'manager':
-    case 'check':
-      return [];
-  }
-}
+/** The dependencies a queued work attempt waits for (not yet closed verified): it stays queued,
+ * holding no slot or custody, never refused or run. */
+export const waitsOn = (s: State, a: Attempt): string[] =>
+  a.phase.t === 'planned' && a.spec.kind === 'work'
+    ? questionOf(s, a.spec.questionId).after.filter((id) => questionOf(s, id).status !== 'verified')
+    : [];
 
 /** Where a question honestly stands: its furthest stage (waiting is held, never failed). */
-export type QuestionStage =
+type QuestionStage =
   | 'planned'
   | 'waiting'
   | 'implementing'
@@ -340,12 +267,8 @@ export type QuestionStage =
 
 const workOn = (s: State, questionId: string): Attempt<WorkSpec>[] =>
   worksOf(s).filter((a) => a.spec.questionId === questionId);
-const hasClaim = (a: Attempt) => attemptClaim(a).t !== 'none';
-const running = (a: Attempt) =>
-  a.phase.t === 'admitted' || a.phase.t === 'posting' || a.phase.t === 'posted';
 
-/** Pattern: table-driven — the first stage (furthest first) whose test holds; `planned` when
- * none does (the question has no work, or its work is queued for a slot or its custody). */
+/** Table-driven: the first stage (furthest first) whose test holds; `planned` when none does. */
 const STAGES: [QuestionStage, (s: State, q: Question, ids: Set<string>) => boolean][] = [
   ['dead', (_s, q) => q.status === 'dead'],
   [
@@ -361,7 +284,7 @@ const STAGES: [QuestionStage, (s: State, q: Question, ids: Set<string>) => boole
       ),
   ],
   ['checked', (s, q) => questionVerified(s, q.id)],
-  ['claimed', (s, q) => workOn(s, q.id).some(hasClaim)],
+  ['claimed', (s, q) => workOn(s, q.id).some((a) => attemptClaim(a).t !== 'none')],
   ['implementing', (s, q) => workOn(s, q.id).some(running)],
   ['waiting', (s, q) => workOn(s, q.id).some((a) => waitsOn(s, a).length > 0)],
 ];

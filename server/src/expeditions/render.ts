@@ -1,27 +1,24 @@
 import { expeditionRunLabel } from '@unleashd/shared';
-import {
-  type Acceptance,
-  type Charter,
-  type CheckResult,
-  type ClaimChange,
-  type DoneCheck,
-  type Feedback,
-  type QuestionScope,
-  type WorkResult,
-  crewLine,
-  seatLabel,
+import type {
+  Acceptance,
+  Charter,
+  CheckResult,
+  ClaimChange,
+  DoneCheck,
+  Feedback,
+  QuestionScope,
+  WorkResult,
 } from './charter';
+import { crewLine, seatLabel } from './charter';
 import type {
   Attempt,
   AttemptCost,
   CheckOutcome,
   Entry,
-  FinishReason,
   Integration,
   IntegrationRefusal,
   NewsEntry,
   Outcome,
-  Run,
   State,
   TargetSha,
   Validation,
@@ -40,54 +37,33 @@ import {
 } from './ledger';
 import { configOf, liveWorkers, verifiedClaims, waitsOn, workerAttempts } from './queries';
 
-// Every human-readable rendering of expedition state, one renderer per domain type: the badge
-// line, the chat news posted once per decision round, attempt/outcome labels for the page, and
-// the full text briefs show a manager. The manager's renderers (`…Label`, `…Detail`) name ids it
-// acts on; the owner's (`…Headline`, `…Parts`, news) name titles and short shas.
+// Every human-readable rendering of expedition state. The manager's renderers (`…Label`,
+// `…Detail`) name ids it acts on; the owner's (`…Headline`, `…Parts`, news) name titles and shas.
 
 export function badge(s: State, now: string): string {
-  const mins = Math.round((Date.parse(clockEnd(s.run, now)) - Date.parse(s.launchedAt)) / 60_000);
+  const end = s.run.t === 'finished' ? s.run.at : now;
+  const mins = Math.round((Date.parse(end) - Date.parse(s.launchedAt)) / 60_000);
   const elapsed = mins >= 60 ? `${Math.floor(mins / 60)}h${mins % 60}m` : `${mins}m`;
   return `⛺ ${s.charter.name} · ${expeditionRunLabel(s.run)} · ${liveWorkers(s).length} live · ${verifiedClaims(s)} verified · ${workerAttempts(s)}/${s.charter.maxAttempts} attempts · ${elapsed} · ${costTotals(s).short}`;
-}
-
-/** Where the badge's elapsed time stops: at the finish, else now. */
-function clockEnd(run: Run, now: string): string {
-  switch (run.t) {
-    case 'finished':
-      return run.at;
-    case 'running':
-    case 'paused':
-    case 'waiting_owner':
-      return now;
-  }
 }
 
 // ---------- Cost (design.md R6): measured tokens only, never an estimate ----------
 
 /** Compact token count: 950, 41k, 1.3M. */
-export const tokens = (n: number) =>
+const tokens = (n: number) =>
   n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
 
 /** One measured attempt's cost on its card: one token figure (the detail is its title). */
 export const costShort = (c: Extract<AttemptCost, { t: 'measured' }>) =>
   `${tokens(c.inputTokens + c.outputTokens)} tokens`;
 
-/** One attempt's cost in full: input, output and cache. */
-export function costLabel(c: AttemptCost): string {
-  switch (c.t) {
-    case 'measured':
-      return `${tokens(c.inputTokens)} in · ${tokens(c.outputTokens)} out · cache ${tokens(c.cacheReadTokens)} read, ${tokens(c.cacheWriteTokens)} written`;
-    case 'unmeasured':
-      return `not measured: ${c.reason}`;
-  }
-}
+export const costLabel = (c: AttemptCost): string =>
+  c.t === 'measured'
+    ? `${tokens(c.inputTokens)} in · ${tokens(c.outputTokens)} out · cache ${tokens(c.cacheReadTokens)} read, ${tokens(c.cacheWriteTokens)} written`
+    : `not measured: ${c.reason}`;
 
-/**
- * The expedition's measured spend: token sums over the measured attempts, and how many ended
- * attempts are not measured (with their reasons) or still settling. `short` is the badge's part,
- * `line` the page header's and the status's.
- */
+/** Token sums over the measured ended attempts, with the unmeasured (and why) and settling ones:
+ * `short` for the badge, `line` for the page header and status. */
 export function costTotals(s: State): { short: string; line: string } {
   const ended = allAttempts(s).filter((a) => a.phase.t === 'ended');
   const costs = ended.flatMap((a) => (a.id in s.costs ? [s.costs[a.id]] : []));
@@ -115,26 +91,20 @@ export function costTotals(s: State): { short: string; line: string } {
   };
 }
 
-/** One chat post per decision round: everything notable since the last post, in order. */
+/** One chat post per decision round: everything notable since the last post, in order. The badge
+ * lives on the page header and launch badge; chat posts carry only news. */
 export function withStatus(s: State, out: Entry[], at: string): Entry[] {
-  const lines = s.news.flatMap((e) => newsLine(s, e));
+  const lines = s.news.map((e) => newsLine(s, e)).filter(Boolean);
   if (lines.length === 0) return out;
-  const status: Entry = {
-    t: 'status',
-    at,
-    seq: s.statuses.length,
-    // The badge line lives on the page header and the launch badge; chat posts carry only news.
-    text: lines.join('\n').trim(),
-  };
+  const status: Entry = { t: 'status', at, seq: s.statuses.length, text: lines.join('\n').trim() };
   apply(s, status);
   return [...out, status];
 }
 
 /**
- * One line of at most `n` characters, cut at a word boundary with `…` when cut. Every chat line is
- * one line, so its markdown cannot open a list or code block that swallows the lines after it.
- * 2026-11-01 owner screenshot: the launch post read "…Engin" (a raw `slice` cut a word mid-way).
- * Only a single word longer than `n` (a URL, a hash) is cut inside, since it has no boundary.
+ * One line of at most `n` characters, cut at a word boundary with `…`, so its markdown cannot open
+ * a list or code block that swallows later lines. 2026-11-01 owner screenshot: a raw `slice` read
+ * "…Engin". Only a single word longer than `n` (a URL, a hash) is cut inside.
  */
 export function clip(text: string, n = 300): string {
   const flat = text.replace(/\s+/g, ' ').trim();
@@ -144,11 +114,7 @@ export function clip(text: string, n = 300): string {
   return `${(space > 0 ? head.slice(0, space) : flat.slice(0, n)).replace(/[\s,;:.]+$/, '')}…`;
 }
 
-/**
- * A markdown block (an owner question, a finish summary) kept as written, lists and code blocks
- * included, cut at a word boundary with `…` past `n` characters. Its own paragraph in the post
- * (blank lines around it), so it neither runs into the lines around it nor swallows them.
- */
+/** A markdown block kept as written, cut at a word boundary past `n`, as its own paragraph. */
 export function clipBlock(label: string, text: string, n = 2000): string {
   const body = text.trim();
   const head = body.slice(0, n + 1);
@@ -158,15 +124,11 @@ export function clipBlock(label: string, text: string, n = 2000): string {
 }
 
 /** Markdown punctuation in a plain name (a charter name is any 1–60 characters) shown literally. */
-export const literal = (text: string): string => text.replace(/[\\`*_[\]<>#|~]/g, '\\$&');
+const literal = (text: string): string => text.replace(/[\\`*_[\]<>#|~]/g, '\\$&');
 
-/**
- * The goal's first sentence as plain prose, for a one-line mention (the launch post, the badge's
- * fallback text): headings dropped, quote and list markers stripped,
- * cut at a word boundary. The full goal renders as markdown in the modal.
- */
+/** The goal's first sentence as plain prose (headings dropped, quote and list markers stripped),
+ * cut at a word boundary, for one-line mentions; the modal renders the full goal. */
 export function goalSummary(goal: string, n = 160): string {
-  // A heading is a title ("## Goal"), not prose: it is dropped, not folded into the sentence.
   const prose = goal
     .split('\n')
     .filter((line) => !/^\s*#{1,6}\s/.test(line))
@@ -180,119 +142,83 @@ export function goalSummary(goal: string, n = 160): string {
 
 /** The tool result's one-paragraph account of what a launch started. */
 export function charterSummary(c: Charter): string {
-  return `${c.name}: ${clip(c.goal, 200)} | done when ${doneSummary(c.done)} | budget ${c.maxAttempts} attempts, ${c.maxLive} live, ${c.hours}h, explore ${c.exploreShare} | crew ${crewLine(c.crew)}`;
-}
-
-function doneSummary(done: Charter['done']): string {
-  switch (done.t) {
-    case 'checks':
-      return done.checks
-        .map((x) => (x.kind === 'command' ? `$ ${x.argv.join(' ')}` : `judged: ${x.text}`))
-        .join('; ');
-    case 'owner':
-      return 'the owner judges it';
-  }
+  const done =
+    c.done.t === 'owner'
+      ? 'the owner judges it'
+      : c.done.checks
+          .map((x) => (x.kind === 'command' ? `$ ${x.argv.join(' ')}` : `judged: ${x.text}`))
+          .join('; ');
+  return `${c.name}: ${clip(c.goal, 200)} | done when ${done} | budget ${c.maxAttempts} attempts, ${c.maxLive} live, ${c.hours}h, explore ${c.exploreShare} | crew ${crewLine(c.crew)}`;
 }
 
 /** The first status of every expedition: what launched, then the planning line on its own. */
 export const launchNews = (c: { name: string; goal: string }) =>
   `⛺ Launched **${literal(c.name)}**: ${goalSummary(c.goal)}\n\nPlanning…`;
 
-/** The chat lines for one notable entry (ledger.ts ENTRY names which kinds are news). */
-function newsLine(s: State, e: NewsEntry): string[] {
+/** The chat text for one notable entry ('' when it is not news). Titles, never ids: the owner
+ * reads the chat (2026-11-01 review: raw ids read as debug). */
+function newsLine(s: State, e: NewsEntry): string {
+  const title = (attemptId: string) => attemptTitle(s, attemptOf(s, attemptId));
   switch (e.t) {
     case 'attempt_planned': {
       // Only work held by its question's dependencies (design.md R5); it starts once they verify.
       const deps = waitsOn(s, attemptOf(s, e.attemptId));
-      // Titles, not ids: the chat is read by the owner (2026-11-01 review: raw ids read as debug).
-      return deps.length > 0
-        ? [
-            `⏸ ${attemptTitle(s, attemptOf(s, e.attemptId))} waits until ${deps.map((q) => quoted(questionOf(s, q).title)).join(', ')} is verified`,
-          ]
-        : [];
+      const titles = deps.map((q) => quoted(questionOf(s, q).title)).join(', ');
+      return deps.length > 0 ? `⏸ ${title(e.attemptId)} waits until ${titles} is verified` : '';
     }
     case 'attempt_retry_planned':
-      return [
-        `↻ ${attemptTitle(s, attemptOf(s, e.retryOf))} runs again: the server restarted while it ran`,
-      ];
-    case 'attempt_posted':
-      return startedLine(s, attemptOf(s, e.attemptId));
-    case 'attempt_ended': {
+      return `↻ ${title(e.retryOf)} runs again: the server restarted while it ran`;
+    case 'attempt_posted': {
+      // A worker's start is news; a manager decision's is not (its actions are).
       const a = attemptOf(s, e.attemptId);
-      return [`${attemptTitle(s, a)} → ${outcomeLabel(e.outcome)}`];
+      const seat = seatLabel(configOf(s.charter, a.spec));
+      return a.spec.kind === 'manager' ? '' : `▶ Started: ${attemptTitle(s, a)} (${seat})`;
     }
+    case 'attempt_ended':
+      return `${title(e.attemptId)} → ${outcomeLabel(e.outcome)}`;
     case 'question_added':
       // Never a leading `+ `: markdown reads it as a list that swallows the lines after it.
-      return [`➕ New ${SCOPE_WORD[e.scope]}: ${clip(e.title)}`];
+      return `➕ New ${SCOPE_WORD[e.scope]}: ${clip(e.title)}`;
     case 'question_closed':
-      return [
-        `${e.status === 'verified' ? '✓ verified' : '✗ dropped'} ${questionOf(s, e.questionId).title}: ${clip(e.why)}`,
-      ];
+      return `${e.status === 'verified' ? '✓ verified' : '✗ dropped'} ${questionOf(s, e.questionId).title}: ${clip(e.why)}`;
     case 'rejected':
-      return [`⛔ refused ${e.action.do}: ${e.reason}`];
+      return `⛔ refused ${e.action.do}: ${e.reason}`;
     case 'reflection':
-      return [`Reflection: ${clip(e.text, 600)}`];
+      return `Reflection: ${clip(e.text, 600)}`;
     case 'feedback':
-      return [`Owner ${feedbackText(e.feedback, clip)}`];
+      return `Owner ${feedbackText(e.feedback, clip)}`;
     case 'validation_failed':
-      return [`✗ ${validationHeadline(s, validationOf(s, e.validationId))}`];
+      return `✗ ${validationHeadline(s, validationOf(s, e.validationId))}`;
     case 'claim_adopted':
-      return [
-        `${attemptTitle(s, attemptOf(s, e.attemptId))}: its unreported commit was claimed by the manager`,
-      ];
+      return `${title(e.attemptId)}: its unreported commit was claimed by the manager`;
     case 'claim_refused':
-      return [
-        `⛔ claim of ${attemptTitle(s, attemptOf(s, e.attemptId))} refused: ${clip(e.reason)}`,
-      ];
+      return `⛔ claim of ${title(e.attemptId)} refused: ${clip(e.reason)}`;
     case 'tick_failed':
-      return [`⚠ the host failed ${e.failures} ticks in a row, backing off: ${clip(e.reason)}`];
+      return `⚠ the host failed ${e.failures} ticks in a row, backing off: ${clip(e.reason)}`;
     case 'needs_owner':
-      return [clipBlock('**Needs you:**', e.question)];
+      return clipBlock('**Needs you:**', e.question);
     case 'validation': {
       // One line per validation, when its last command check is recorded.
       const v = validationOf(s, e.validationId);
       return validationComplete(v)
-        ? [`${validationPassed(v) ? '✓' : '✗'} ${validationHeadline(s, v)}`]
-        : [];
+        ? `${validationPassed(v) ? '✓' : '✗'} ${validationHeadline(s, v)}`
+        : '';
     }
     case 'done_requested':
-      return ['Done proposed: running the command checks on the expedition branch head.'];
+      return 'Done proposed: running the command checks on the expedition branch head.';
     case 'done_refused':
-      return [`⛔ Done refused: ${clip(e.reason)}`];
+      return `⛔ Done refused: ${clip(e.reason)}`;
     case 'integrated':
-      return [`⤵ ${integrationHeadline(s, integrationOf(s, e.integrationId))}`];
+      return `⤵ ${integrationHeadline(s, integrationOf(s, e.integrationId))}`;
     case 'integration_refused':
-      return [`⛔ ${integrationHeadline(s, integrationOf(s, e.integrationId))}`];
-    case 'finished':
-      return [clipBlock(`**${expeditionRunLabel(s.run)}:**`, e.summary), ...mergeLine(s, e.reason)];
-  }
-}
-
-/** A worker's start is news; a manager decision's is not (its actions are). */
-function startedLine(s: State, a: Attempt): string[] {
-  switch (a.spec.kind) {
-    case 'manager':
-      return [];
-    case 'work':
-    case 'check':
-      return [`▶ Started: ${attemptTitle(s, a)} (${seatLabel(configOf(s.charter, a.spec))})`];
-  }
-}
-
-/** At done the owner is told what to merge; the host never writes the owner's branches. */
-function mergeLine(s: State, reason: FinishReason): string[] {
-  const merged = s.integrations.filter((i) => i.status.t === 'integrated').length;
-  switch (reason) {
-    case 'done':
-      return [
-        `To take the result, merge branch ${s.repo.branch} (head \`${headOf(s).slice(0, 7)}\`, ${merged} merged ${merged === 1 ? 'claim' : 'claims'}); nothing was written to your checkout.`,
-      ];
-    case 'attempts_spent':
-    case 'decisions_spent':
-    case 'deadline':
-    case 'owner_stop':
-    case 'setup_failed':
-      return [];
+      return `⛔ ${integrationHeadline(s, integrationOf(s, e.integrationId))}`;
+    case 'finished': {
+      // At done the owner is told what to merge; the host never writes the owner's branches.
+      const merged = s.integrations.filter((i) => i.status.t === 'integrated').length;
+      const take = `To take the result, merge branch ${s.repo.branch} (head \`${headOf(s).slice(0, 7)}\`, ${merged} merged ${merged === 1 ? 'claim' : 'claims'}); nothing was written to your checkout.`;
+      const summary = clipBlock(`**${expeditionRunLabel(s.run)}:**`, e.summary);
+      return e.reason === 'done' ? `${summary}\n${take}` : summary;
+    }
   }
 }
 
@@ -312,39 +238,48 @@ export function feedbackText(f: Feedback, fit: (text: string) => string): string
 }
 
 /** How a question's claims are accepted (design.md R11), one line. */
-export function acceptanceLabel(a: Acceptance): string {
-  switch (a.t) {
-    case 'command':
-      return `$ ${a.argv.join(' ')} on its commit (host-run, ${a.timeoutSeconds}s)`;
-    case 'panel':
-      return 'an independent check panel';
+export const acceptanceLabel = (a: Acceptance): string =>
+  a.t === 'command'
+    ? `$ ${a.argv.join(' ')} on its commit (host-run, ${a.timeoutSeconds}s)`
+    : 'an independent check panel';
+
+/** δ over an integration's status: one text per status. */
+function byStatus(
+  i: Integration,
+  pending: string,
+  merged: (sha: string) => string,
+  refused: (why: string) => string
+) {
+  switch (i.status.t) {
+    case 'pending':
+      return pending;
+    case 'integrated':
+      return merged(i.status.mergeSha);
+    case 'refused':
+      return refused(refusalLabel(i.status.refusal));
   }
 }
 
-/** One integration: what was merged into the expedition branch, or why it was not. */
+/** One integration for the manager: what was merged into the expedition branch, or why not. */
 export function integrationLabel(s: State, i: Integration): string {
   const what = `integration ${i.id} of ${i.claimAttemptId} (${i.sha.slice(0, 10)}) into ${s.repo.branch}`;
-  switch (i.status.t) {
-    case 'pending':
-      return `${what}: queued`;
-    case 'integrated':
-      return `${what}: MERGED as ${i.status.mergeSha.slice(0, 10)}`;
-    case 'refused':
-      return `${what}: REFUSED — ${refusalLabel(i.status.refusal)}`;
-  }
+  return byStatus(
+    i,
+    `${what}: queued`,
+    (sha) => `${what}: MERGED as ${sha.slice(0, 10)}`,
+    (why) => `${what}: REFUSED — ${why}`
+  );
 }
 
 /** An integration for the owner (chat, page): the claim by its title, its sha as code, no ids. */
 export function integrationHeadline(s: State, i: Integration): string {
   const what = `\`${i.sha.slice(0, 7)}\` from ${attemptTitle(s, attemptOf(s, i.claimAttemptId))}`;
-  switch (i.status.t) {
-    case 'pending':
-      return `Merging ${what} into ${s.repo.branch}`;
-    case 'integrated':
-      return `Merged ${what} into ${s.repo.branch}`;
-    case 'refused':
-      return `Could not merge ${what}: ${refusalLabel(i.status.refusal)}`;
-  }
+  return byStatus(
+    i,
+    `Merging ${what} into ${s.repo.branch}`,
+    () => `Merged ${what} into ${s.repo.branch}`,
+    (why) => `Could not merge ${what}: ${why}`
+  );
 }
 
 function refusalLabel(r: IntegrationRefusal): string {
@@ -379,6 +314,13 @@ export function attemptTitle(s: State, a: Attempt): string {
   }
 }
 
+const WORK_VERDICT = { claim: 'Claim', finding: 'Finding' } as const;
+const CHECK_VERDICT: Record<CheckResult['verdict'], string> = {
+  verified: 'Verified',
+  refuted: 'Refuted',
+  unclear: 'Unclear',
+};
+
 /** An outcome as a verdict word and its clipped one-line summary: the page's outcome block. */
 export function outcomeParts(o: Outcome): { verdict: string; summary: string } {
   switch (o.t) {
@@ -409,15 +351,8 @@ export function outcomeParts(o: Outcome): { verdict: string; summary: string } {
   }
 }
 
-const WORK_VERDICT = { claim: 'Claim', finding: 'Finding' } as const;
-const CHECK_VERDICT: Record<CheckResult['verdict'], string> = {
-  verified: 'Verified',
-  refuted: 'Refuted',
-  unclear: 'Unclear',
-};
-
 /** One clipped line per outcome: the chat news. */
-export function outcomeLabel(o: Outcome): string {
+function outcomeLabel(o: Outcome): string {
   const { verdict, summary } = outcomeParts(o);
   return `${verdict}: ${summary}`;
 }
@@ -455,24 +390,14 @@ function workDetail(r: WorkResult): string {
   }
 }
 
-export function changeLabel(change: ClaimChange): string {
-  switch (change.t) {
-    case 'commit':
-      return `commit ${change.sha}`;
-    case 'no_code':
-      return 'no code change';
-  }
-}
+export const changeLabel = (change: ClaimChange): string =>
+  change.t === 'commit' ? `commit ${change.sha}` : 'no code change';
 
 /** A done check as the owner wrote it: a command shows its argv, a judged item its text. */
-export function doneCheckLabel(check: DoneCheck): string {
-  switch (check.kind) {
-    case 'command':
-      return `$ ${check.argv.join(' ')} (host-run, ${check.timeoutSeconds}s timeout, exit 0 passes)`;
-    case 'judged':
-      return `${check.text} (judged by a blind goal-check panel)`;
-  }
-}
+export const doneCheckLabel = (check: DoneCheck): string =>
+  check.kind === 'command'
+    ? `$ ${check.argv.join(' ')} (host-run, ${check.timeoutSeconds}s timeout, exit 0 passes)`
+    : `${check.text} (judged by a blind goal-check panel)`;
 
 export function checkOutcomeLabel(o: CheckOutcome): string {
   switch (o.t) {
@@ -487,68 +412,49 @@ export function checkOutcomeLabel(o: CheckOutcome): string {
   }
 }
 
-/** What a validation ran on and how far it got, one line. */
+const couldNotRun = (v: Validation) =>
+  v.failure.t === 'failed' ? [`could not run: ${clip(v.failure.reason, 300)}`] : [];
+
+/** What a validation ran on and how far it got, one line (the manager's, with ids). */
 export function validationLabel(s: State, v: Validation): string {
   const runs = [
     ...v.runs.map((r) => `check ${r.checkIndex} ${checkOutcomeLabel(r.outcome)}`),
-    ...(v.failure.t === 'failed' ? [`could not run: ${clip(v.failure.reason, 300)}`] : []),
+    ...couldNotRun(v),
   ];
   const state = !validationComplete(v)
     ? `running (${v.runs.length}/${v.checks.length})`
     : validationPassed(v)
       ? 'PASSED'
       : 'FAILED';
-  return `validation ${v.id} of ${subjectOf(s, v)}: ${state}${runs.length ? ` — ${runs.join('; ')}` : ''}`;
+  const sha = (t: TargetSha) => (t.t === 'at' ? t.sha.slice(0, 10) : '(not yet resolved)');
+  const subject =
+    v.target.t === 'candidate'
+      ? `candidate ${v.target.sha.slice(0, 10)} of ${v.target.claimAttemptId}`
+      : `the head ${sha(targetShaOf(s, v))}`;
+  return `validation ${v.id} of ${subject}: ${state}${runs.length ? ` — ${runs.join('; ')}` : ''}`;
 }
 
 /**
- * A validation for the owner (chat, the Charter's list): what it ran on by title and short sha,
- * and only the checks that did not pass. 2026-11-01 visual pass: "validation v37789f of candidate
- * dd142c7227 of wef7487: PASSED — check 0 passed" in the chat read as debug output. The manager's
- * brief keeps validationLabel, whose ids it acts on.
+ * A validation for the owner: its target by title and short sha, and only the checks that did not
+ * pass. 2026-11-01 visual pass: "validation v37789f of candidate dd142c7227 of wef7487: PASSED —
+ * check 0 passed" read as debug output in the chat.
  */
 export function validationHeadline(s: State, v: Validation): string {
+  const head = (t: TargetSha) => (t.t === 'at' ? ` \`${t.sha.slice(0, 7)}\`` : '');
   const on =
     v.target.t === 'candidate'
       ? `\`${v.target.sha.slice(0, 7)}\` from ${attemptTitle(s, attemptOf(s, v.target.claimAttemptId))}`
-      : headOn(targetShaOf(s, v));
+      : `the expedition branch head${head(targetShaOf(s, v))}`;
   const total = v.checks.length;
   const problems = [
     ...v.runs
       .filter((r) => r.outcome.t !== 'passed')
       .map((r) => `check ${r.checkIndex + 1}: ${checkOutcomeLabel(r.outcome)}`),
-    ...(v.failure.t === 'failed' ? [`could not run: ${clip(v.failure.reason, 300)}`] : []),
+    ...couldNotRun(v),
   ];
   const detail = problems.length > 0 ? ` — ${problems.join('; ')}` : '';
   if (!validationComplete(v)) return `Checks running on ${on} (${v.runs.length}/${total})`;
   return validationPassed(v)
     ? `${total === 1 ? 'Check' : `All ${total} checks`} passed on ${on}`
     : `Checks failed on ${on}${detail}`;
-}
-
-function headOn(sha: TargetSha): string {
-  switch (sha.t) {
-    case 'unresolved':
-      return 'the expedition branch head';
-    case 'at':
-      return `the expedition branch head \`${sha.sha.slice(0, 7)}\``;
-  }
-}
-
-function subjectOf(s: State, v: Validation): string {
-  switch (v.target.t) {
-    case 'candidate':
-      return `candidate ${v.target.sha.slice(0, 10)} of ${v.target.claimAttemptId}`;
-    case 'head':
-      return `the head ${shaOf(targetShaOf(s, v))}`;
-  }
-}
-
-function shaOf(sha: TargetSha): string {
-  switch (sha.t) {
-    case 'unresolved':
-      return '(not yet resolved)';
-    case 'at':
-      return sha.sha.slice(0, 10);
-  }
 }
