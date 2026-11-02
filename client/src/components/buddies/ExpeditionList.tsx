@@ -1,19 +1,24 @@
 import type { ExpeditionSummary } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
+import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { expeditionRailFamily } from '../../atoms/channel-rail';
+import { invalidateBuddyResources } from '../../atoms/resources';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { formatRelativeAge } from '../../utils/turn-diagnostics';
+import { buddyWrite } from './api';
 import { channelsHref } from './channels-view';
+import { useHostAction } from './expedition-action';
 import { useOpenExpedition } from './expedition-overlay';
 import {
   EXPEDITIONS_POLL_MS,
   EXPEDITIONS_URL,
+  expeditionGroups,
+  expeditionPill,
   needsYou,
+  ownerActions,
   railEmphasis,
   runDot,
-  runLabel,
-  runTone,
   summaryLine,
 } from './expedition-view';
 import '../../views/conversation-row/ConversationRow.css';
@@ -56,7 +61,7 @@ export function ExpeditionRailRow({
         className={classes.row || undefined}
         data-unread={railEmphasis(e.run)}
         onClick={() => open(e.id)}
-        title={`${e.name} — ${runLabel(e.run)}\n${summaryLine(e)}`}
+        title={`${e.name} — ${expeditionPill(e).label}\n${summaryLine(e)}`}
       >
         <span className={`${classes.hash} expedition-rail-dot`} aria-hidden="true">
           <span className="conversation-row__dot" data-status={runDot(e.run)} />
@@ -130,20 +135,63 @@ export function ExpeditionList({ workspaceId }: { workspaceId: string }) {
         checkable done.
       </p>
     );
-  const finished = all.filter((e) => e.run.t === 'finished');
+  const { finished, retired } = expeditionGroups(all);
+  const retirable = finished.filter((e) => ownerActions(e).t === 'retire');
   return (
     <div className="expedition-index ui-stack">
       {active.length > 0 && <ExpeditionGroup title="Active" rows={active} />}
-      {finished.length > 0 && <ExpeditionGroup title="Finished" rows={finished} />}
+      {finished.length > 0 && (
+        <ExpeditionGroup title="Finished" rows={finished}>
+          {retirable.length > 0 && <RetireAll ids={retirable.map((e) => e.id)} />}
+        </ExpeditionGroup>
+      )}
+      {retired.length > 0 && (
+        // Collapsed: retired expeditions are history, a click away.
+        <details className="expedition-index-retired">
+          <summary className="expedition-link">{`Retired (${retired.length})`}</summary>
+          <ExpeditionGroup title="Retired" rows={retired} />
+        </details>
+      )}
     </div>
   );
 }
 
-function ExpeditionGroup({ title, rows }: { title: string; rows: readonly ExpeditionSummary[] }) {
+/** "Retire all finished (N)": one retire mutation per expedition; the list refetches after. */
+function RetireAll({ ids }: { ids: readonly string[] }) {
+  const { state, run } = useHostAction(
+    () => Promise.all(ids.map((id) => buddyWrite('expedition.retire', { id }, { mode: 'retire' }))),
+    async () => invalidateBuddyResources()
+  );
+  return (
+    <span className="ui-row expedition-launch">
+      <button
+        type="button"
+        className="expedition-button"
+        disabled={state.t === 'pending'}
+        aria-busy={state.t === 'pending'}
+        onClick={run}
+      >
+        {state.t === 'pending' ? 'Retiring…' : `Retire all finished (${ids.length})`}
+      </button>
+      {state.t === 'failed' && (
+        <span role="alert" className="expedition-error">
+          {state.error}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function ExpeditionGroup({
+  title,
+  rows,
+  children,
+}: { title: string; rows: readonly ExpeditionSummary[]; children?: ReactNode }) {
   const open = useOpenExpedition();
   return (
     <section className="ui-stack" aria-label={title}>
       <h3 className="expedition-index-group ui-muted">{title}</h3>
+      {children}
       <ul className="expedition-index-rows">
         {rows.map((e) => (
           <li key={e.id}>
@@ -160,8 +208,8 @@ function ExpeditionGroup({ title, rows }: { title: string; rows: readonly Expedi
                   launched {formatRelativeAge(Date.parse(e.launchedAt))} · {summaryLine(e)}
                 </span>
               </span>
-              <span className={`expedition-pill expedition-tone-${runTone(e.run)}`}>
-                {runLabel(e.run)}
+              <span className={`expedition-pill expedition-tone-${expeditionPill(e).tone}`}>
+                {expeditionPill(e).label}
               </span>
             </button>
           </li>
@@ -218,7 +266,7 @@ export function HomeExpeditions({ workspaceId }: { workspaceId: string }) {
                 {e.name}
               </span>
               <span className="landing-request-body">
-                {runLabel(e.run)} · {summaryLine(e)}
+                {expeditionPill(e).label} · {summaryLine(e)}
               </span>
             </button>
           </li>

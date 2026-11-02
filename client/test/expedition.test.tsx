@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
-import type { ExpeditionDraftView, ExpeditionSummary, ExpeditionView } from '@unleashd/shared';
+import type {
+  ExpeditionDraftView,
+  ExpeditionRetiredView,
+  ExpeditionSummary,
+  ExpeditionView,
+} from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { CODEX_INSTALLED } from './fixtures/buddy-roster';
 import { postFixture } from './fixtures/channel-posts';
@@ -547,4 +552,75 @@ test('the old conversations sidebar has no expedition section', async () => {
   );
   assert.match(html, /Buddies/, 'the sidebar rendered');
   assert.doesNotMatch(html, /Expeditions|exp-running|\/expeditions/);
+});
+
+// Retire (A7): a retired expedition must leave Finished for the collapsed Retired group, take the
+// Retire-all button's count with it, and its modal must be the frozen report (a live-view crash
+// here would blank the page the moment the server froze an expedition).
+test('retiring a finished expedition moves it from Finished to Retired, and its modal shows the frozen report', async () => {
+  const { ExpeditionList } = await import('../src/components/buddies/ExpeditionList');
+  const done = (id: string, retirement: ExpeditionSummary['retirement']): ExpeditionSummary => ({
+    ...summary(id, { t: 'finished', reason: 'done' } as ExpeditionView['run'], 'ws-retire'),
+    retirement,
+  });
+  const list = () =>
+    renderToStaticMarkup(
+      <Provider store={jotaiStore}>
+        <MemoryRouter>
+          <ExpeditionList workspaceId="ws-retire" />
+        </MemoryRouter>
+      </Provider>
+    );
+  const group = (html: string, title: string) =>
+    html.slice(
+      html.indexOf(`aria-label="${title}"`),
+      html.indexOf('</section>', html.indexOf(`aria-label="${title}"`))
+    );
+
+  await loadResource({
+    key: EXPEDITIONS_URL,
+    load: async () => [done('exp-old', { t: 'active' })],
+  });
+  const before = list();
+  assert.match(group(before, 'Finished'), />exp-old</);
+  assert.match(before, /Retire all finished \(1\)/);
+  assert.doesNotMatch(before, /Retired \(/);
+
+  await loadResource({
+    key: EXPEDITIONS_URL,
+    load: async () => [done('exp-old', { t: 'retired', at: '2026-11-03T00:00:00.000Z' })],
+  });
+  const after = list();
+  assert.doesNotMatch(after, /aria-label="Finished"/);
+  assert.match(after, /Retired \(1\)/);
+  assert.match(group(after, 'Retired'), />exp-old</);
+  assert.match(group(after, 'Retired'), />Retired</, 'a muted Retired pill');
+  assert.doesNotMatch(after, /Retire all finished/);
+
+  const retired: ExpeditionRetiredView = {
+    t: 'retired',
+    summary: done('exp-old', { t: 'retired', at: '2026-11-03T00:00:00.000Z' }),
+    report: 'Final report: **widget** shipped.',
+  };
+  await loadResource({ key: expeditionUrl('exp-old'), load: async () => retired });
+  const html = inModal(<ExpeditionModal target={{ t: 'live', id: 'exp-old' }} onClose={close} />);
+  assert.match(html, /Final report: <strong>widget<\/strong> shipped\./);
+  assert.doesNotMatch(html, /Retire<|Stop and retire/);
+});
+
+test('a finished expedition offers Retire, an open one Stop and retire, behind a confirm', async () => {
+  const open = { ...view, id: 'widget-open00' };
+  await loadResource({ key: expeditionUrl(open.id), load: async () => open });
+  const openHtml = inModal(<ExpeditionModal target={{ t: 'live', id: open.id }} onClose={close} />);
+  assert.match(openHtml, />Stop and retire</);
+  assert.doesNotMatch(openHtml, /Yes, /, 'one click asks, it does not retire');
+  const retiring = {
+    ...view,
+    id: 'widget-ret000',
+    retirement: { t: 'retiring', at: 'x', by: 'owner', refused: [] },
+  };
+  await loadResource({ key: expeditionUrl(retiring.id), load: async () => retiring });
+  const html = inModal(<ExpeditionModal target={{ t: 'live', id: retiring.id }} onClose={close} />);
+  assert.match(html, /Retiring…/);
+  assert.doesNotMatch(html, />Stop and retire<|>Retire</);
 });

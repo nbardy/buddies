@@ -6,6 +6,8 @@ import {
   type ExpeditionDraftState,
   type ExpeditionDraftView,
   type ExpeditionQuestion,
+  type ExpeditionRetiredView,
+  type ExpeditionRetirement,
   type ExpeditionRun,
   type ExpeditionStage,
   type ExpeditionSummary,
@@ -25,13 +27,55 @@ export const draftUrl = (draftId: string, workspaceId: string) =>
 /** Crew Buddies: kept off the Buddies roster (atoms/buddy-visibility.ts). */
 export const EXPEDITION_CREWS_URL = '/api/buddies/expeditions/crews';
 
+/** What GET /api/buddies/expeditions/:id answered: the live view, or a retired expedition's
+ * frozen summary and report (server expeditions/retired.ts). Classified once, here. */
+export type ExpeditionRead =
+  | { t: 'live'; view: ExpeditionView }
+  | { t: 'retired'; view: ExpeditionRetiredView };
+
+export const expeditionRead = (data: ExpeditionView | ExpeditionRetiredView): ExpeditionRead =>
+  't' in data ? { t: 'retired', view: data } : { t: 'live', view: data };
+
+/** The summary row a read answers with: the badge's and the modal header's one source. */
+export const summaryOf = (read: ExpeditionRead): ExpeditionSummary => {
+  switch (read.t) {
+    case 'retired':
+      return read.view.summary;
+    case 'live': {
+      const v = read.view;
+      return {
+        id: v.id,
+        name: v.charter.name,
+        run: v.run,
+        workspaceId: v.workspaceId,
+        launchedAt: v.launchedAt,
+        counts: v.counts,
+        cost: v.cost,
+        retirement: v.retirement,
+      };
+    }
+  }
+};
+
 /**
- * How often a live expedition view polls: never once it finished with nothing live (audit
- * 2026-11-01 #8: every open badge and modal kept polling a finished expedition forever). A
- * finished expedition still refreshes on `buddies_changed` pushes (its key is under /api/buddies).
+ * How often an expedition view polls: never once it finished with nothing live (audit
+ * 2026-11-01 #8: every open badge and modal kept polling a finished expedition forever), and
+ * never once retired (frozen). A finished expedition still refreshes on `buddies_changed` pushes
+ * (its key is under /api/buddies); one being retired keeps polling until it is frozen.
  */
-export const expeditionPollMs = (view: ExpeditionView | null, liveMs: number) =>
-  view !== null && view.run.t === 'finished' && view.counts.live === 0 ? 0 : liveMs;
+export function expeditionPollMs(read: ExpeditionRead | null, liveMs: number): number {
+  if (read === null) return liveMs;
+  switch (read.t) {
+    case 'retired':
+      return 0;
+    case 'live': {
+      const v = read.view;
+      return v.run.t === 'finished' && v.counts.live === 0 && v.retirement.t === 'active'
+        ? 0
+        : liveMs;
+    }
+  }
+}
 
 /** The colour family of a pill, dot or chip (Expedition.css `.expedition-tone-*`). */
 export type Tone = 'ok' | 'warn' | 'info' | 'bad' | 'muted';
@@ -46,6 +90,36 @@ export function runTone(run: ExpeditionRun): Tone {
       return 'muted';
     case 'finished':
       return 'info';
+  }
+}
+
+/** The status pill of a summary: a retired expedition reads Retired (muted), one being put away
+ * Retiring, else its run state. */
+export function expeditionPill(e: Pick<ExpeditionSummary, 'run' | 'retirement'>): {
+  label: string;
+  tone: Tone;
+} {
+  switch (e.retirement.t) {
+    case 'retired':
+      return { label: 'Retired', tone: 'muted' };
+    case 'retiring':
+      return { label: 'Retiring…', tone: 'muted' };
+    case 'active':
+      return { label: expeditionRunLabel(e.run), tone: runTone(e.run) };
+  }
+}
+
+/** What the owner can do to an expedition now: put away a finished one, stop and put away an
+ * open one, or nothing (it is already being retired, or is). */
+export type OwnerAction = { t: 'retire' } | { t: 'stop_and_retire' } | { t: 'none' };
+
+export function ownerActions(e: Pick<ExpeditionSummary, 'run' | 'retirement'>): OwnerAction {
+  switch (e.retirement.t) {
+    case 'retiring':
+    case 'retired':
+      return { t: 'none' };
+    case 'active':
+      return e.run.t === 'finished' ? { t: 'retire' } : { t: 'stop_and_retire' };
   }
 }
 
@@ -139,9 +213,22 @@ export const activeExpeditions = (
   list: readonly ExpeditionSummary[],
   workspaceId: string
 ): ExpeditionSummary[] => {
-  const mine = list.filter((e) => e.workspaceId === workspaceId && e.run.t !== 'finished');
+  const mine = list.filter(
+    (e) => e.workspaceId === workspaceId && e.run.t !== 'finished' && !isRetired(e.retirement)
+  );
   return [...mine.filter((e) => needsYou(e.run)), ...mine.filter((e) => !needsYou(e.run))];
 };
+
+const isRetired = (r: ExpeditionRetirement) => r.t === 'retired';
+
+/** The index pane's groups: unfinished, finished (retired ones leave it), and retired. */
+export function expeditionGroups(all: readonly ExpeditionSummary[]) {
+  return {
+    active: all.filter((e) => e.run.t !== 'finished' && !isRetired(e.retirement)),
+    finished: all.filter((e) => e.run.t === 'finished' && !isRetired(e.retirement)),
+    retired: all.filter((e) => isRetired(e.retirement)),
+  };
+}
 
 /** The list's one progress line (the header's counts, shorter). */
 export const summaryLine = (e: ExpeditionSummary) =>
