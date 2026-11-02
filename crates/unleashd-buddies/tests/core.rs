@@ -1360,7 +1360,9 @@ fn channel_archive_preserves_history_and_restores_posting() {
     assert!(s.archived_channels(&Actor::Owner, WS).unwrap().is_empty());
     s.post(&Actor::Owner, channel_ref(), PostInput { kind: PostKind::Inform, ..request("yes", "yes") }).unwrap();
     let direct = s.open_channel(&Actor::Owner, dm("mid", "ic")).unwrap();
-    assert!(s.set_channel_archived(&Actor::Owner, &direct.id, true, "no-dm").is_err());
+    // The owner may archive a direct channel (expedition retire archives crew DMs); a Buddy may not.
+    assert!(s.set_channel_archived(&buddy("mid"), &direct.id, true, "no-dm").is_err());
+    assert!(s.set_channel_archived(&Actor::Owner, &direct.id, true, "owner-dm").unwrap().archived_at.is_some());
 }
 
 #[test]
