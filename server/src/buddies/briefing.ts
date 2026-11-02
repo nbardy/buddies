@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Buddy, Doc } from '@unleashd/buddies-core';
+import type { Buddy, Doc, RunCwd } from '@unleashd/buddies-core';
 import type { BuddyContext, BuddyExecution, InstalledAgent } from '@unleashd/shared';
 import { buddyExecutionPreferences } from '@unleashd/shared';
 import { type BuddiesCore, buddyActor } from './core';
@@ -15,13 +15,14 @@ export interface ResolvedBuddyConversation {
   execution: BuddyExecution;
 }
 
-/** A turn's cwd (expeditions host.ts turnDirectory): workspace root, a crew's fixed directory, or
- * one attempt run's. 2026-11-01 smoke incident: crew turns ran in the owner's checkout, isolated
- * only by a brief, and a Codex sandbox rooted there could not write the attempt worktree. */
+/** A turn's cwd: workspace root, a crew's fixed directory, or one run's own (its crate
+ * `RunConfig.cwd`, or an expedition attempt's from host.ts turnDirectory). 2026-11-01 smoke
+ * incident: crew turns ran in the owner's checkout, isolated only by a brief, and a Codex sandbox
+ * rooted there could not write the attempt worktree. */
 export type TurnDirectory =
   | { t: 'workspace' }
   | { t: 'crew'; path: string }
-  | { t: 'attempt'; runId: string; path: string };
+  | { t: 'run'; runId: string; path: string };
 export const WORKSPACE_DIRECTORY: TurnDirectory = { t: 'workspace' };
 
 const MAX = { soul: 10_000, memory: 6_000, tasks: 4_000 } as const;
@@ -178,14 +179,26 @@ export function createBriefings(
 ) {
   const cache = new Map<string, ResolvedBuddyConversation>();
   const runs = new Map<string, ResolvedBuddyConversation>();
+  async function compose(context: BuddyContext, directory: TurnDirectory) {
+    const resolved = await composeBriefing(core, context, installed(), directory);
+    if (directory.t === 'run') runs.set(directory.runId, resolved);
+    else cache.set(keyOf(context), resolved);
+    return resolved;
+  }
+  /** δ over the run's cwd: a named path is the turn's directory; the default is its Buddy's. */
+  const runDirectory = (context: BuddyContext, runId: string, cwd: RunCwd) => {
+    switch (cwd.kind) {
+      case 'default':
+        return directoryOf(context);
+      case 'path':
+        return Promise.resolve<TurnDirectory>({ t: 'run', runId, path: cwd.path });
+    }
+  };
   return {
-    async warm(context: BuddyContext): Promise<ResolvedBuddyConversation> {
-      const directory = await directoryOf(context);
-      const resolved = await composeBriefing(core, context, installed(), directory);
-      if (directory.t === 'attempt') runs.set(directory.runId, resolved);
-      else cache.set(keyOf(context), resolved);
-      return resolved;
-    },
+    warm: async (context: BuddyContext) => compose(context, await directoryOf(context)),
+    /** A run's turn: the runner warms it with the run's own cwd (crate `RunConfig.cwd`). */
+    warmRun: async (context: BuddyContext, runId: string, cwd: RunCwd) =>
+      compose(context, await runDirectory(context, runId, cwd)),
     forget: (runId: string) => runs.delete(runId),
     current(context: BuddyContext): ResolvedBuddyConversation {
       const own = context.coordinationRunId ? runs.get(context.coordinationRunId) : undefined;

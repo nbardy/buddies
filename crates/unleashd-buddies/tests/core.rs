@@ -610,7 +610,7 @@ fn posting_never_marks_read_a_post_its_author_was_not_shown() {
 fn a_worker_request_runs_on_its_own_config_and_returns_to_the_spawner() {
     let mut f = fixture();
     let s = &mut f.store;
-    let sol = RunConfig { provider: "codex".into(), model: Some("gpt-6-sol".into()), reasoning_effort: Some("high".into()) };
+    let sol = RunConfig { provider: "codex".into(), model: Some("gpt-6-sol".into()), reasoning_effort: Some("high".into()), cwd: RunCwd::Default };
     let work = |body: &str, key: &str| PostInput { run_config: Some(sol.clone()), ..request(body, key) };
     let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
 
@@ -960,7 +960,7 @@ fn a_request_whose_holder_died_resumes_once_in_its_conversation_then_fails() {
 fn a_model_less_run_records_the_model_it_resolved_once() {
     let mut f = fixture();
     let s = &mut f.store;
-    let codex = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    let codex = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None, cwd: RunCwd::Default };
     s.post(&buddy("mid"), dm("mid", "ic"), PostInput { run_config: Some(codex), ..request("go", "w") }).unwrap();
     let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
     assert_eq!(claim.run.config.as_ref().unwrap().model, None);
@@ -1771,6 +1771,43 @@ fn claim_run_works_on_a_database_missing_run_active_buddy() {
     assert!(s.claim_run(lease(60_000), &[]).unwrap().is_some());
 }
 
+// 2026-11-03 (expeditions audit S12): an attempt run's directory was re-derived on every turn by
+// matching its request body against the expedition ledger. The run carries it now. A retry moves
+// the model only: an attempt retried on another model must still start in its worktree, and a
+// row written before `cwd` existed must read as the default directory, not as corrupt.
+#[test]
+fn a_worker_runs_in_its_cwd_and_a_retry_on_another_model_keeps_it() {
+    let mut f = fixture();
+    let path = f.path.clone();
+    let s = &mut f.store;
+    let tree = RunCwd::Path { path: "/tmp/exp/attempt-1".into() };
+    let luna = RunConfig { provider: "codex".into(), model: Some("gpt-5.6-luna".into()), reasoning_effort: None, cwd: tree.clone() };
+    let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
+    let relative = RunConfig { cwd: RunCwd::Path { path: "exp/attempt-1".into() }, ..luna.clone() };
+    let refused = s.post(&buddy("mid"), me_only(), PostInput { run_config: Some(relative), ..request("work", "w0") });
+    assert!(matches!(refused, Err(CoreError::Invalid(_))), "a relative cwd is refused at the write: {refused:?}");
+
+    s.post(&buddy("mid"), me_only(), PostInput { run_config: Some(luna.clone()), ..request("work", "w1") }).unwrap();
+    let claim = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    assert_eq!(claim.run.config.as_ref().map(|c| &c.cwd), Some(&tree));
+    let failed = s
+        .settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() })
+        .unwrap();
+    let sol = RunConfig { provider: "claude".into(), model: Some("opus".into()), reasoning_effort: None, cwd: RunCwd::Default };
+    let retry = s.retry_run(&buddy("mid"), &failed.id, Some(sol), "k1").unwrap();
+    let moved = retry.config.unwrap();
+    assert_eq!((moved.provider.as_str(), &moved.cwd), ("claude", &tree), "the retry moved model, not directory");
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute(
+        "UPDATE run SET config = '{\"provider\":\"codex\",\"model\":\"gpt-5.6-luna\"}' WHERE id = ?1",
+        [&retry.id],
+    )
+    .unwrap();
+    drop(conn);
+    assert_eq!(s.get_run(&retry.id).unwrap().config.unwrap().cwd, RunCwd::Default, "a pre-cwd row ran in the default directory");
+}
+
 // 2026-10-06: the lean rewrite (0fef9d4) dropped `buddy.retry_run` (17 uses); a Buddy whose worker
 // failed could only re-ask from scratch. A retry is the next attempt on the same input key, the
 // request goes back to awaiting, and the answer reaches the asker's subscribed conversation. Rule 5:
@@ -1794,7 +1831,7 @@ fn retrying_a_failed_run_makes_attempt_two_and_reopens_the_request() {
     assert_eq!(s.get_post(&buddy("mid"), &asked.id).unwrap().request, RequestState::Failed);
     read_notice(s);
 
-    let sol = RunConfig { provider: "codex".into(), model: Some("gpt-6-sol".into()), reasoning_effort: None };
+    let sol = RunConfig { provider: "codex".into(), model: Some("gpt-6-sol".into()), reasoning_effort: None, cwd: RunCwd::Default };
     let retry = s.retry_run(&buddy("mid"), &first.id, Some(sol.clone()), "k1").unwrap();
     assert_eq!((retry.attempt, retry.status, &retry.input, &retry.config), (2, RunStatus::Queued, &first.input, &Some(sol.clone())));
     assert_eq!((retry.input_key.as_str(), retry.conversation_id.as_deref()), (first.input_key.as_str(), None), "a profile run moved to a worker model starts fresh");
@@ -1832,7 +1869,7 @@ fn retry_authority_is_the_requester_a_manager_or_the_owner_and_only_managers_pic
         .settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "provider_error".into(), error: "boom".into() })
         .unwrap();
     assert_eq!(asked.request, RequestState::Awaiting);
-    let sol = RunConfig { provider: "codex".into(), model: Some("gpt-6-sol".into()), reasoning_effort: None };
+    let sol = RunConfig { provider: "codex".into(), model: Some("gpt-6-sol".into()), reasoning_effort: None, cwd: RunCwd::Default };
 
     let stranger = s.retry_run(&buddy("gone"), &failed.id, None, "k0");
     assert!(matches!(stranger, Err(CoreError::Denied(_))), "{stranger:?}");
@@ -1906,7 +1943,7 @@ fn a_mention_is_a_delivery_with_no_conversation_until_the_buddy_has_one_in_the_t
     let s = &mut f.store;
     let (root, reply) = follow_fixture(s);
     let channel = ChannelRef::Id { id: root.channel_id.clone() };
-    let pick = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    let pick = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None, cwd: RunCwd::Default };
     let mention = |config: Option<RunConfig>| PostInput { mentions: vec![Mention { buddy_id: "peer".into(), config }], ..reply("peer, look", "m1") };
     s.post(&Actor::Owner, channel.clone(), mention(Some(pick.clone()))).unwrap();
     let claim = s.claim_run(lease(60_000), &[]).unwrap().expect("the mention woke peer");
@@ -1935,7 +1972,7 @@ fn a_retried_delivery_shows_its_trigger_and_a_second_click_starts_nothing() {
     s.deliver_posts(&claim.run.id).unwrap();
     s.mark_executing(&claim.run.id, &claim.lease_token).unwrap();
     s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Failed { code: "execution_failed".into(), error: "out of tokens".into() }).unwrap();
-    let to = |model: &str| RunConfig { provider: "claude".into(), model: Some(model.into()), reasoning_effort: None };
+    let to = |model: &str| RunConfig { provider: "claude".into(), model: Some(model.into()), reasoning_effort: None, cwd: RunCwd::Default };
     let retry = s.retry_delivery(&Actor::Owner, &trigger.id, "peer", to("opus")).unwrap();
     assert_eq!(retry.attempt, 2);
     assert_eq!(s.retry_delivery(&Actor::Owner, &trigger.id, "peer", to("sonnet")).unwrap().id, retry.id, "a queued retry is not doubled");
@@ -2212,7 +2249,7 @@ fn a_request_message_reaches_only_its_other_endpoint_and_never_revives_closed_wo
     let mut f = fixture();
     let path = f.path.to_str().unwrap().to_string();
     let s = &mut f.store;
-    let sol = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    let sol = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None, cwd: RunCwd::Default };
     let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
     let work = |body: &str, key: &str| PostInput { run_config: Some(sol.clone()), ..request(body, key) };
     let (a, b) = (s.post(&buddy("mid"), me_only(), work("sweep A", "wa")).unwrap(), s.post(&buddy("mid"), me_only(), work("sweep B", "wb")).unwrap());
@@ -2313,7 +2350,7 @@ fn a_request_message_reaches_only_its_other_endpoint_and_never_revives_closed_wo
 fn a_request_message_sent_inside_a_boundary_window_is_never_lost() {
     let mut f = fixture();
     let s = &mut f.store;
-    let sol = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    let sol = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None, cwd: RunCwd::Default };
     let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
     let a = s.post(&buddy("mid"), me_only(), PostInput { run_config: Some(sol), ..request("sweep A", "wa") }).unwrap();
     let ca = s.claim_run(lease(60_000), &[]).unwrap().unwrap();

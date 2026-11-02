@@ -2609,7 +2609,11 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
       return run?.status === 'complete' && run;
     }, 'worker A complete');
     for (const run of [doneA, cancelledB]) {
-      assert.deepEqual(run.config, worker, 'the run records the model it was spawned on');
+      assert.deepEqual(
+        run.config,
+        { ...worker, cwd: { kind: 'default' } },
+        'the run records the model it was spawned on'
+      );
       const turn = w.turns.find((t) =>
         t.request.prompt.includes(`Request ${run.input.kind === 'post' && run.input.postId}`)
       )!;
@@ -2755,7 +2759,11 @@ test('runs retry re-runs a failed worker as attempt 2 on another model and wakes
       const run = (await w.runs(w.lead.id)).find((r) => r.input.kind === 'post' && r.attempt === 2);
       return run?.status === 'complete' && run;
     }, 'attempt 2 complete');
-    assert.deepEqual(retried.config, sol, 'the retry runs on the model it was moved to');
+    assert.deepEqual(
+      retried.config,
+      { ...sol, cwd: { kind: 'default' } },
+      'the retry runs on the model it was moved to'
+    );
     const returned = await until(
       () =>
         w.turns.find(
@@ -6590,7 +6598,7 @@ test(
           mentions: [],
           broadcast: false,
           fromConversationId: 'real-parent',
-          runConfig: { provider: 'codex', model: 'gpt-5.6-luna' },
+          runConfig: { provider: 'codex', model: 'gpt-5.6-luna', cwd: { kind: 'default' } },
           key: 'real-spawn',
         }
       );
@@ -6788,5 +6796,45 @@ test('owner routes: the task directory and inbox requests ship previews, full te
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await w.close();
+  }
+});
+
+// 2026-11-03 (expeditions audit S12, crate half): the server re-derived an expedition attempt run's
+// directory on every turn by matching the request body against the expedition ledger. The run now
+// carries its cwd (crate RunConfig.cwd) and the runner starts the turn there; a run that names none
+// starts in its Buddy's directory. Two concurrent runs of one Buddy must not share a directory.
+test('a run whose config names a cwd starts its turn there; a sibling run starts in the workspace root', async () => {
+  const w = await world();
+  const tree = tempDir('run-cwd-');
+  try {
+    const lead = buddyActor(w.lead.id);
+    const ask = (body: string, cwd: { kind: 'default' } | { kind: 'path'; path: string }) =>
+      w.core.post(
+        lead,
+        { kind: 'direct', members: [lead] },
+        {
+          kind: 'request',
+          body,
+          evidence: [],
+          mentions: [],
+          broadcast: false,
+          runConfig: { provider: 'codex', cwd },
+          key: body,
+        }
+      );
+    await ask('in its tree', { kind: 'path', path: tree });
+    await ask('in the root', { kind: 'default' });
+    w.emit({ kind: 'changed' });
+    await until(() => w.turns.length === 2, 'both runs took a turn');
+    const cwdOf = (body: string) =>
+      w.turns.find((t) => t.request.prompt.includes(body))?.request.cwd;
+    assert.deepEqual(
+      [cwdOf('in its tree'), cwdOf('in the root')],
+      [tree, w.scratch],
+      'each run starts in its own cwd'
+    );
+  } finally {
+    await w.close();
+    rmSync(tree, { recursive: true, force: true });
   }
 });

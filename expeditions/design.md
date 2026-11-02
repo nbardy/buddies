@@ -294,10 +294,12 @@ its worktree under `APP_DATA_DIR/expeditions/<id>/worktrees`, outside that root.
 the shared checkout" is still a prompt for the agent's edits, and a provider sandbox limited to
 its start directory (Codex `workspace-write`) can write the shared checkout but not the worktree,
 which pushes a sandboxed worker toward the wrong tree. The structural fix is a run-level working
-directory: an optional `cwd` on the crate's `RunConfig` (persisted on the run row), threaded by
-the Buddy runner into the run conversation's turn directory, and set by `postAttempt` to the
-attempt's worktree. It is not in this branch because it changes the Buddies crate and runner,
-outside `server/src/expeditions`; it is the B4 follow-up (the Buddies crate-size gate was removed).
+directory. The crate half landed in B4 (2026-11-03): `RunConfig.cwd` is a named sum
+`{kind:'default'} | {kind:'path', path}` persisted in the run row's config (a row written before it
+reads as `default`), an absolute path is checked at the write, a retry onto another model keeps the
+run's cwd, and the Buddy runner warms a `path` run's briefing with that directory
+(`briefing.ts` `warmRun`). `postAttempt` still sends `default`; B5 sets it to the attempt's tree
+and deletes the host's `turnDirectory` attempt lookup.
 What IS structural now: claims are checked against their own branch and custody (git.ts
 `claimHeld`), and only host-validated commits merge, so a stray edit in the shared checkout can
 never reach the expedition branch. Also repository-wide: `cambium recover` (used only when an

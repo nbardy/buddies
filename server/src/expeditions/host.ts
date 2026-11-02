@@ -15,7 +15,7 @@ import { type TurnDirectory, WORKSPACE_DIRECTORY } from '../buddies/briefing';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
-import { checkedRunConfig } from '../buddies/worker-config';
+import { DEFAULT_CWD, checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
 import { CREW_ROLE, briefOf, chatFeedback, parseOutcome, repairBrief, statusText } from './briefs';
 import { killCheck, pidfileOf, runCommand } from './command';
@@ -1180,7 +1180,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         purpose: 'expedition_attempt',
         evidence: [`expedition:${s.id}`],
         mentions: [],
-        runConfig: configOf(s.charter, attempt.spec),
+        runConfig: { ...configOf(s.charter, attempt.spec), cwd: DEFAULT_CWD },
         broadcast: false,
         key: requestKey(s.id, attemptId, round),
       }
@@ -1209,7 +1209,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     switch (tree.status.t) {
       case 'creating':
       case 'ready':
-        return Promise.resolve({ t: 'attempt', runId, path: tree.path });
+        return Promise.resolve({ t: 'run', runId, path: tree.path });
       case 'failed':
       case 'kept':
       case 'removed':
@@ -1222,7 +1222,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   function managerTurnDirectory(s: State, runId: string): Promise<TurnDirectory> {
     switch (s.managerTree.t) {
       case 'ready':
-        return Promise.resolve({ t: 'attempt', runId, path: s.managerTree.path });
+        return Promise.resolve({ t: 'run', runId, path: s.managerTree.path });
       case 'missing':
       case 'failed':
       case 'released':

@@ -1,5 +1,5 @@
 import { harnessMcpCapability } from '@nbardy/agent-cli';
-import type { RunConfig } from '@unleashd/buddies-core';
+import type { RunConfig, RunCwd } from '@unleashd/buddies-core';
 import { type ConversationConfig, ProviderSchema } from '@unleashd/shared';
 import { configFromProviderPreferences } from '@unleashd/shared';
 import { z } from 'zod';
@@ -17,8 +17,17 @@ export const WorkerSchema = z
   })
   .strict();
 
-/** A worker run's conversation config: exactly its RunConfig, never its Buddy's profile. */
-export function workerConversationConfig(config: RunConfig): ConversationConfig {
+/** What a run executes on: its RunConfig minus where it starts (`cwd`). */
+export type ModelChoice = Omit<RunConfig, 'cwd'>;
+
+/** A run that names no directory starts in its Buddy's own (crate `RunCwd::Default`). */
+export const DEFAULT_CWD: RunCwd = { kind: 'default' };
+
+/** Where a run starts. A run with no config executes on its Buddy's profile, in its directory. */
+export const cwdOf = (config: RunConfig | undefined): RunCwd => (config ? config.cwd : DEFAULT_CWD);
+
+/** A worker run's conversation config: exactly its model choice, never its Buddy's profile. */
+export function workerConversationConfig(config: ModelChoice): ConversationConfig {
   return configFromProviderPreferences({
     provider: ProviderSchema.parse(config.provider),
     model: config.model ?? undefined,
@@ -36,6 +45,7 @@ export function runConfigOfPick(pick: ConversationConfig): RunConfig {
     provider: pick.provider,
     model: pick.model.mode === 'explicit' ? pick.model.modelId : undefined,
     reasoningEffort: pick.reasoning.mode === 'explicit' ? pick.reasoning.effort : undefined,
+    cwd: DEFAULT_CWD,
   };
 }
 
@@ -75,5 +85,5 @@ export function checkedRunConfig(input: z.infer<typeof WorkerSchema>): RunConfig
       `worker config: ${resolution.error.message}${valid ? ` (valid: ${valid})` : ''}`
     );
   }
-  return input;
+  return { ...input, cwd: DEFAULT_CWD };
 }

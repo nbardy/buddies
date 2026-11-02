@@ -572,7 +572,23 @@ export interface RunConfig {
   model?: string
   /** Absent: the provider's default effort. */
   reasoningEffort?: string
+  /**
+   * Where the run's turn starts. A row written before this field has none: it ran in the
+   * default directory, which is what `serde(default)` reads it as.
+   */
+  cwd: RunCwd
 }
+
+/**
+ * Where a run's turn starts. `Default`: its Buddy's directory (the workspace root). `Path`: an
+ * absolute directory the poster chose, e.g. an expedition attempt's worktree. It belongs to the
+ * run's work, not its model, so a retry keeps it (`runs.rs` `next_attempt`). Before 2026-11-03
+ * the server re-derived an attempt run's directory by matching its request body against the
+ * expedition ledger (expeditions host.ts `turnDirectory`).
+ */
+export type RunCwd =
+  | { kind: 'default' }
+  | { kind: 'path'; path: string }
 
 /** A run the caller's live turn executes; the claim gate renews it before expiring leases. */
 export interface RunHold {

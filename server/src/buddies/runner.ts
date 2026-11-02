@@ -15,6 +15,7 @@ import type { GateVerdict } from './channel-reply-gate';
 import { type BuddiesCore, OWNER, SENDER, buddyActor, coreError } from './core';
 import { type BuddyEvents, announcePost } from './events';
 import type { Grants, OwnerChat } from './grants';
+import { cwdOf } from './worker-config';
 
 /** One executor over the crate's durable queue: wake on writes and settle, then claim to idle.
  * The backstop also enqueues schedules. Dead holders expire at the lease gate, never at boot.
@@ -650,7 +651,8 @@ export function createRunner(options: {
           return settle(run, claim.leaseToken, { kind: 'cancelled', reason: job.reason });
         case 'turn': {
           const context = contextFor(run);
-          const conversationId = await job.place(await resolvedConfig(claim));
+          const config = await resolvedConfig(claim);
+          const conversationId = await job.place(config);
           // Pattern: thread-seat-busy (docs/patterns.md#thread-seat-busy). The seat can be mid-turn
           // on another root's delivery, which the gate could not see: wait for it by name, never fail.
           try {
@@ -660,7 +662,7 @@ export function createRunner(options: {
             await core.deferRun(run.id, claim.leaseToken, conversationId);
             return;
           }
-          await briefings.warm(context);
+          await briefings.warmRun(context, run.id, cwdOf(config));
           // Pattern: durable-intake (docs/patterns.md#durable-intake). The last await before the
           // spawn: until here a dead backend's run goes back to the queue (nothing ran); from
           // here it is adopted from its journal or ends visibly, never replayed. A delivery reads

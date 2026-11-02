@@ -250,6 +250,25 @@ pub struct RunConfig {
     pub model: Option<String>,
     /// Absent: the provider's default effort.
     pub reasoning_effort: Option<String>,
+    /// Where the run's turn starts. A row written before this field has none: it ran in the
+    /// default directory, which is what `serde(default)` reads it as.
+    #[serde(default)]
+    pub cwd: RunCwd,
+}
+
+/// Where a run's turn starts. `Default`: its Buddy's directory (the workspace root). `Path`: an
+/// absolute directory the poster chose, e.g. an expedition attempt's worktree. It belongs to the
+/// run's work, not its model, so a retry keeps it (`runs.rs` `next_attempt`). Before 2026-11-03
+/// the server re-derived an attempt run's directory by matching its request body against the
+/// expedition ledger (expeditions host.ts `turnDirectory`).
+// Pattern: sum-types (docs/patterns.md#sum-types)
+#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum RunCwd {
+    #[default]
+    Default,
+    Path { path: String },
 }
 
 /// Doc audience. Columns (scope_kind, scope_id); Buddy scope's id is the buddy, Workspace's the workspace.
