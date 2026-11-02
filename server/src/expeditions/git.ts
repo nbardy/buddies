@@ -588,8 +588,15 @@ export async function snapshotDirty(tree: string, ref: string, message: string):
       must(run('git', tree, args, { timeout: SNAPSHOT_TIMEOUT_MS, env }), `git ${args[0]}`);
     await step(['add', '-A']);
     const treeSha = await step(['write-tree']);
-    const commit = await step(['commit-tree', treeSha, '-p', 'HEAD', '-m', message]);
-    await must(git(tree, ['update-ref', ref, commit]), `pinning ${ref}`);
+    // A snapshot already pinned at `ref` (a retire whose forced remove was killed partway, then
+    // asked again) is kept as a second parent, never overwritten: the half-deleted tree's new
+    // snapshot records deletions, and the first one is the only copy of the uncommitted edits
+    // (refs/salvage has no reflog). The update is compare-and-swap against the pin read.
+    const prior = await git(tree, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+    const parents = prior.t === 'ok' ? ['-p', 'HEAD', '-p', prior.stdout] : ['-p', 'HEAD'];
+    const commit = await step(['commit-tree', treeSha, ...parents, '-m', message]);
+    const old = prior.t === 'ok' ? prior.stdout : '';
+    await must(git(tree, ['update-ref', ref, commit, old]), `pinning ${ref}`);
     return commit;
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });

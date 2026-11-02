@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { killCheck, pidfileOf, runCommand } from '../src/expeditions/command';
-import { archiveBranch, expeditionRefs } from '../src/expeditions/git';
+import { archiveBranch, expeditionRefs, snapshotDirty } from '../src/expeditions/git';
 import {
   dirtyRefOf,
   releaseDetachedTree,
@@ -110,6 +110,24 @@ test('retire removes a deletions-only tree and snapshots a modified one; finish 
   assert.equal(git(repo, 'show', `${sha}:a.txt`), 'edited by a worker');
   assert.equal(git(repo, 'show', `${sha}:new.txt`), 'untracked');
   assert.equal(git(repo, 'rev-parse', `${sha}^`), base, 'the snapshot sits on the tree HEAD');
+});
+
+// Regression (review of plan A3): a retire whose forced remove was killed partway is asked
+// again; the half-deleted tree then snapshots again at the same `-dirty` ref. Overwriting the pin
+// lost the first snapshot, the only copy of the edits (refs/salvage keeps no reflog).
+test('a second dirty snapshot at the same ref keeps the first as a parent', async () => {
+  const scratch = tempDir('exp-git-retire-');
+  const { repo, base } = repoWithSubmodule(scratch);
+  const dir = path.join(scratch, 'a3');
+  git(repo, 'worktree', 'add', '-q', '-b', 'exp/e1/a3', dir, base);
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'only copy of this edit\n');
+  const ref = 'refs/salvage/expeditions/e1/a3-dirty';
+  const first = await snapshotDirty(dir, ref, 'first');
+  fs.rmSync(path.join(dir, 'a.txt')); // the killed remove deleted it
+  const second = await snapshotDirty(dir, ref, 'second');
+  assert.equal(git(repo, 'rev-parse', ref), second);
+  assert.equal(git(repo, 'rev-parse', `${second}^2`), first, 'the first snapshot stays reachable');
+  assert.equal(git(repo, 'show', `${ref}^2:a.txt`), 'only copy of this edit');
 });
 
 test('a plain git registration (no Cambium entry) is removed and pruned', async () => {
