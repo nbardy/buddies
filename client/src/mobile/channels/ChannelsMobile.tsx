@@ -16,10 +16,10 @@ import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { BuddyStar, ChannelStar } from '../../components/buddies/ChannelStar';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import {
+  AllExpeditionsRow,
   ExpeditionList,
-  ExpeditionRailRow,
+  ExpeditionRow,
   type RailRowClasses,
-  allExpeditionsLabel,
   useWorkspaceExpeditions,
 } from '../../components/buddies/ExpeditionList';
 import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
@@ -405,6 +405,7 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
 // Desktop's rail Expeditions section as touch rows: the unfinished ones (needing you first) open
 // the expedition sheet over Home; "All expeditions" opens the index screen.
 const MOBILE_ROW: RailRowClasses = {
+  shell: 'mobile',
   row: 'mobile-channels-row ui-row',
   hash: 'mobile-channels-row__hash',
   name: 'mobile-channels-row__name ui-truncate',
@@ -417,22 +418,14 @@ function ExpeditionSection({ workspaceId }: { workspaceId: string }) {
     <MobileSection title="Expeditions">
       <ul className="mobile-channels-list" aria-label="Expeditions">
         {active.map((e) => (
-          <ExpeditionRailRow key={e.id} expedition={e} classes={MOBILE_ROW} />
+          <ExpeditionRow key={e.id} expedition={e} variant={{ t: 'rail', classes: MOBILE_ROW }} />
         ))}
-        <li>
-          <Link
-            className="mobile-channels-row ui-row"
-            data-unread="read"
-            to={channelsHref(workspaceId, { kind: 'expeditions' })}
-          >
-            <span className="mobile-channels-row__hash" aria-hidden="true">
-              ⋯
-            </span>
-            <span className="mobile-channels-row__name ui-truncate">
-              {allExpeditionsLabel(all.length)}
-            </span>
-          </Link>
-        </li>
+        <AllExpeditionsRow
+          workspaceId={workspaceId}
+          count={all.length}
+          classes={MOBILE_ROW}
+          current={false}
+        />
       </ul>
     </MobileSection>
   );

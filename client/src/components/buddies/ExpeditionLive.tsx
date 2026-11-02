@@ -25,24 +25,20 @@ import { useHostAction } from './expedition-action';
 import {
   FOCI,
   type Focus,
+  PHASE_LOOK,
   QUESTION_GLYPH,
   SCOPE_LABEL,
   STAGE_TONE,
   attemptCostLine,
-  attemptOutcome,
-  attemptState,
-  attemptTone,
   expeditionPill,
   expeditionRead,
   expeditionUrl,
-  nowLine,
   ownerActions,
   pollMsOf,
   shortTime,
   summaryOf,
   timeLine,
   validationsOf,
-  worktreeLine,
 } from './expedition-view';
 import './Expedition.css';
 
@@ -364,7 +360,10 @@ function LiveBody({
       <div className="expedition-meters">
         <Meter label="Attempts" value={v.counts.attempts} max={v.counts.maxAttempts} />
         <Meter label="Decisions" value={v.counts.decisions} max={v.counts.maxDecisions} />
-        <Stat label="Now" value={nowLine(v)} />
+        <Stat
+          label="Now"
+          value={`${v.counts.running} running · ${v.counts.queued} queued · ${v.counts.verified} verified`}
+        />
         <Stat
           label="Time"
           value={timeLine(v)}
@@ -446,17 +445,48 @@ function RunCallout({ v, onReply }: { v: ExpeditionView; onReply(): void }) {
 /** A live expedition's charter is as launched: nothing is marked as a draft default. */
 const NO_DEFAULTS: ReadonlySet<ExpeditionDefault> = new Set();
 
+/** A worker card's outcome block: what it produced, or why it never started. */
+function PhaseOutcome({ phase }: { phase: ExpeditionAttempt['phase'] }) {
+  switch (phase.t) {
+    case 'planned':
+    case 'admitted':
+    case 'posting':
+    case 'posted':
+      return null;
+    case 'dropped':
+      return (
+        <p className="expedition-outcome">
+          <span className="expedition-outcome-verdict">Not started</span> {phase.reason}
+        </p>
+      );
+    case 'ended':
+      return (
+        <p className="expedition-outcome">
+          <span className="expedition-outcome-verdict">{phase.verdict}</span> {phase.summary}
+        </p>
+      );
+  }
+}
+
+function TreeBranch({ tree }: { tree: ExpeditionAttempt['worktree'] }) {
+  switch (tree.t) {
+    case 'none':
+      return null;
+    case 'tree':
+      return <code>branch {tree.branch}</code>;
+  }
+}
+
 function WorkerCard({
   a,
   validations,
 }: { a: ExpeditionAttempt; validations: ExpeditionValidation[] }) {
-  const tree = worktreeLine(a.worktree);
   const cost = attemptCostLine(a.cost);
-  const outcome = attemptOutcome(a);
+  const look = PHASE_LOOK[a.phase.t];
   return (
     <article className="expedition-card ui-stack">
       <div className="ui-row expedition-card-head">
-        <span className={`expedition-dot expedition-tone-${attemptTone(a)}`} aria-hidden="true" />
+        <span className={`expedition-dot expedition-tone-${look.tone}`} aria-hidden="true" />
         <strong
           className="ui-truncate expedition-card-title"
           title={`${a.label} (attempt ${a.id})`}
@@ -465,11 +495,7 @@ function WorkerCard({
         </strong>
         <span className="expedition-chip expedition-chip--small">{a.kind}</span>
       </div>
-      {outcome.t === 'outcome' && (
-        <p className="expedition-outcome">
-          <span className="expedition-outcome-verdict">{outcome.verdict}</span> {outcome.summary}
-        </p>
-      )}
+      <PhaseOutcome phase={a.phase} />
       {validations.map((x) => (
         <div key={x.id} className="expedition-validation">
           <span className="expedition-chip expedition-chip--small">checks {x.verdict}</span>
@@ -482,8 +508,8 @@ function WorkerCard({
       ))}
       <div className="expedition-card-meta ui-muted">
         <span>{a.seat}</span>
-        <span>{attemptState(a)}</span>
-        {tree && <code>{tree}</code>}
+        <span>{look.state}</span>
+        <TreeBranch tree={a.worktree} />
         {cost && <span title={cost.title}>{cost.text}</span>}
       </div>
       {/* Collapsed by default (2026-11-01 review: the open crew prompt read as debug output). */}
