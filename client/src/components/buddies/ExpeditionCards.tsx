@@ -4,8 +4,7 @@ import { Suspense, lazy, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { type SummaryRead, expeditionSummaryFamily } from '../../atoms/channel-rail';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
-import { buddyWrite } from './api';
-import { type ActionState, useHostAction } from './expedition-action';
+import { buddyWrite, errorText } from './api';
 import { backgroundOf, useOpenExpedition } from './expedition-overlay';
 import {
   DRAFT_PILL,
@@ -16,33 +15,25 @@ import {
   draftUrl,
   expeditionHref,
   expeditionPill,
+  issueCount,
   pollMsOf,
 } from './expedition-view';
 import './BuddyWorkerThreadBadge.css';
 import './Expedition.css';
 
-// The cards a launch leaves in a chat (thread, DM or channel): the live badge, the draft card,
-// and the one Launch control they and the modal footer share.
+// The cards a launch leaves in a chat: the live badge, the draft card and the shared Launch.
 
-/** The settled list stops polling; every other read keeps the list fresh. */
-const listPollMs = (read: SummaryRead) =>
-  read.t === 'found' ? pollMsOf(read.summary, EXPEDITIONS_POLL_MS) : EXPEDITIONS_POLL_MS;
-
-function BadgeCounts({ s }: { s: ExpeditionSummary }) {
-  const pill = expeditionPill(s);
-  return (
-    <>
-      <span className={`expedition-pill expedition-tone-${pill.tone}`}>{pill.label}</span>
-      <span className="ui-truncate expedition-badge-counts">{s.line}</span>
-    </>
-  );
-}
-
-/** δ over what the cached list says about this expedition. */
 function BadgeBody({ read }: { read: SummaryRead }) {
   switch (read.t) {
-    case 'found':
-      return <BadgeCounts s={read.summary} />;
+    case 'found': {
+      const pill = expeditionPill(read.summary);
+      return (
+        <>
+          <span className={`expedition-pill expedition-tone-${pill.tone}`}>{pill.label}</span>
+          <span className="ui-truncate expedition-badge-counts">{read.summary.line}</span>
+        </>
+      );
+    }
     case 'unavailable':
     case 'missing':
       return <span>unavailable</span>;
@@ -51,43 +42,36 @@ function BadgeBody({ read }: { read: SummaryRead }) {
   }
 }
 
-const nameOf = (read: SummaryRead) => (read.t === 'found' ? read.summary.name : 'Expedition');
-
-// The live badge a launch leaves in its chat (thread, DM or channel): one line, opens the
-// expedition modal over the chat (the URL is /expeditions/:id, so the link also travels). It reads
-// the one cached list (GET /api/buddies/expeditions, shared with the rail and index), so N badges
-// are one request, not N full-view polls; the modal fetches the full view when opened.
+// Reads the one cached list (N badges, one request); the modal fetches the full view.
 export function ExpeditionBadge({ id }: { id: string }) {
   const read = useAtomValue(expeditionSummaryFamily(id));
-  usePolledFetch<ExpeditionSummary[]>(EXPEDITIONS_URL, listPollMs(read));
+  usePolledFetch<ExpeditionSummary[]>(
+    EXPEDITIONS_URL,
+    read.t === 'found' ? pollMsOf(read.summary, EXPEDITIONS_POLL_MS) : EXPEDITIONS_POLL_MS
+  );
   const location = useLocation();
+  const name = read.t === 'found' ? read.summary.name : null;
   return (
     <Link
       className="buddy-worker-thread-badge ui-inline-row ui-card expedition-badge"
       to={expeditionHref(id)}
       state={{ background: backgroundOf(location) }}
-      aria-label={`Open expedition ${read.t === 'found' ? read.summary.name : id}`}
+      aria-label={`Open expedition ${name ?? id}`}
     >
-      ⛺ <strong className="ui-truncate expedition-badge-name">{nameOf(read)}</strong>
+      ⛺ <strong className="ui-truncate expedition-badge-name">{name ?? 'Expedition'}</strong>
       <BadgeBody read={read} /> ↗
     </Link>
   );
 }
-
-// The draft card the host posts when a Buddy drafts an expedition (server expeditions/drafts.ts):
-// a sibling of the live badge. Info opens the expedition modal on the draft (charter, issues,
-// defaults); Launch starts it through the same host launch as the tool.
 
 // The modal (and its markdown renderer) loads on the first Info click, not with every chat.
 const ExpeditionModal = lazy(() =>
   import('./ExpeditionModal').then((m) => ({ default: m.ExpeditionModal }))
 );
 
-export function ExpeditionDraftCard({
-  draftId,
-  workspaceId,
-}: { draftId: string; workspaceId: string }) {
-  const view = usePolledFetch<ExpeditionDraftView>(draftUrl(draftId, workspaceId), 0);
+/** The card the host posts for a draft (server expeditions/drafts.ts). */
+export function ExpeditionDraftCard(p: { draftId: string; workspaceId: string }) {
+  const view = usePolledFetch<ExpeditionDraftView>(draftUrl(p.draftId, p.workspaceId), 0);
   const [info, setInfo] = useState(false);
   if (!view.data)
     return (
@@ -111,7 +95,7 @@ export function ExpeditionDraftCard({
       <span className="ui-truncate">{d.charter.goalLine}</span>
       <span className="ui-muted">
         {budgetLine(d.charter.limits)}
-        {issues > 0 && ` · ${issues} ${issues === 1 ? 'issue' : 'issues'}`}
+        {issues > 0 && ` · ${issueCount(issues)}`}
       </span>
       <div className="ui-row expedition-draft-card-actions">
         <button type="button" className="expedition-button" onClick={() => setInfo(true)}>
@@ -120,38 +104,21 @@ export function ExpeditionDraftCard({
         <DraftLaunchButton d={d} refetch={view.refetch} onOpen={() => setInfo(false)} />
       </div>
       {info && (
-        <DraftInfo draftId={draftId} workspaceId={workspaceId} onClose={() => setInfo(false)} />
+        <Suspense fallback={null}>
+          <ExpeditionModal
+            target={{ t: 'draft', draftId: p.draftId, workspaceId: p.workspaceId }}
+            onClose={() => setInfo(false)}
+          />
+        </Suspense>
       )}
     </section>
   );
 }
 
-/** Info: the expedition modal on this draft (a sheet at phone width). */
-function DraftInfo({
-  draftId,
-  workspaceId,
-  onClose,
-}: { draftId: string; workspaceId: string; onClose(): void }) {
-  return (
-    <Suspense fallback={null}>
-      <ExpeditionModal target={{ t: 'draft', draftId, workspaceId }} onClose={onClose} />
-    </Suspense>
-  );
-}
-
 // Pattern: one-definition (docs/patterns.md#one-definition)
-/** Launch, its blocked reason, or "Launched →": one control for the card and the modal.
- * `onOpen` runs before "Launched →" opens the live modal: the draft modal closes first, so the
- * live one never stacks over it (closing it would show the stale draft again). */
-export function DraftLaunchButton({
-  d,
-  refetch,
-  onOpen,
-}: { d: ExpeditionDraftView; refetch(): Promise<void>; onOpen(): void }) {
-  const { state, run: launch } = useHostAction(
-    () => buddyWrite('expedition.launch', { draftId: d.id }, { workspaceId: d.workspaceId }),
-    refetch
-  );
+/** `onOpen` closes the draft modal first, so the live one never stacks over a stale draft. */
+type LaunchProps = { d: ExpeditionDraftView; refetch(): Promise<void>; onOpen(): void };
+export function DraftLaunchButton({ d, refetch, onOpen }: LaunchProps) {
   const openExpedition = useOpenExpedition();
   const action = draftAction(d);
   switch (action.t) {
@@ -169,8 +136,7 @@ export function DraftLaunchButton({
         </button>
       );
     case 'blocked':
-      // A quiet disabled button, never the accent: a replaced draft's dimmed accent Launch still
-      // read as the card's action (2026-11-02 visual pass).
+      // Never the accent: a replaced draft's dimmed accent Launch read as live (2026-11-02).
       return (
         <span className="ui-row expedition-launch">
           <button type="button" className="expedition-button" disabled>
@@ -180,21 +146,49 @@ export function DraftLaunchButton({
         </span>
       );
     case 'launch':
-      return <LaunchControl state={state} launch={launch} />;
+      return (
+        <ActionButton
+          act={() =>
+            buddyWrite('expedition.launch', { draftId: d.id }, { workspaceId: d.workspaceId })
+          }
+          refetch={refetch}
+          label="Launch"
+          busy="Launching…"
+          primary
+        />
+      );
   }
 }
 
-function LaunchControl({ state, launch }: { state: ActionState; launch(): void }) {
+type ActionState = { t: 'idle' } | { t: 'pending' } | { t: 'failed'; error: string };
+
+/** A host action's button (Launch, Retire): runs `act`, then `refetch`; busy while pending, and
+ * the server's refusal (it re-checks at click time) shows inline. */
+type ActionProps = {
+  act(): Promise<unknown>;
+  refetch(): Promise<void>;
+  label: string;
+  busy: string;
+};
+export function ActionButton(p: ActionProps & { primary?: boolean }) {
+  const [state, setState] = useState<ActionState>({ t: 'idle' });
+  const run = () => {
+    setState({ t: 'pending' });
+    p.act()
+      .then(p.refetch)
+      .then(() => setState({ t: 'idle' }))
+      .catch((cause: unknown) => setState({ t: 'failed', error: errorText(cause) }));
+  };
   return (
     <span className="ui-row expedition-launch">
       <button
         type="button"
-        className="expedition-button expedition-button--primary"
+        className={`expedition-button${p.primary ? ' expedition-button--primary' : ''}`}
         disabled={state.t === 'pending'}
         aria-busy={state.t === 'pending'}
-        onClick={launch}
+        onClick={run}
       >
-        {state.t === 'pending' ? 'Launching…' : 'Launch'}
+        {state.t === 'pending' ? p.busy : p.label}
       </button>
       {state.t === 'failed' && (
         <span role="alert" className="expedition-error">
