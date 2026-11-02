@@ -607,7 +607,17 @@ type KindsFor<R extends keyof Readers> = {
 export type NewsEntry = Extract<Entry, { t: KindsFor<'news'> }>;
 /** An entry a manager may be shown (apply decides when). */
 export type ShownEntry = Extract<Entry, { t: KindsFor<'manager'> }>;
-const isNews = (e: Entry): e is NewsEntry => ENTRY[e.t].news;
+const isNews = (e: Entry): e is NewsEntry => readersOf(e).news;
+
+/** A stored line is parsed unchecked (store.ts), so its kind may be one this code does not know
+ * (a ledger in the per-kind tree format before B5). The table is read before `apply`'s switch, so
+ * the unknown kind is named here: indexing the table blindly threw "reading 'news'" instead, and
+ * the quarantine reason no longer said which entry did not fold. */
+function readersOf(e: Entry): Readers {
+  const readers: Readers | undefined = (ENTRY as Record<string, Readers>)[e.t];
+  if (readers === undefined) throw new Error(`unknown ledger entry ${e.t}`);
+  return readers;
+}
 
 // ---------- Derived state ----------
 
