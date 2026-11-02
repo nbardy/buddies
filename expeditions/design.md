@@ -282,8 +282,9 @@ when it has; at finish every idle tree is removed and only empty branches are de
 atomic `git update-ref -d <branch> <base>` (not `cambium remove --delete-branch`, whose
 `git branch -d` refuses a branch at an unmerged candidate commit). A release with no Cambium
 workspace and nothing on disk is `absent`; a partial create's leftovers that recovery cannot
-remove are `left {reason}`. Removal never forces: uncommitted changes become
-`worktree_released {left, reason}`. Cambium runs as `git-cambium` directly (a timeout kills the
+remove are `left {reason}`. A guard-ladder refusal (uncommitted changes) becomes
+`worktree_released {left, reason}`; past the ladder removal is forced (Audit #9, with the
+15-minute `REMOVE_TIMEOUT_MS`), and retire re-releases `left` trees under its own policy. Cambium runs as `git-cambium` directly (a timeout kills the
 process doing the add, not a `git` wrapper), with a 15-minute limit for `add`. Custody paths are
 normalized once (`./a/` → `a`, whole repo = `.`). Cambium keeps its registry in `.git/cambium`, so
 tests use the real tool on a temporary repository. Gap, CLOSED by R9 (a host-provided turn
@@ -296,7 +297,7 @@ which pushes a sandboxed worker toward the wrong tree. The structural fix is a r
 directory: an optional `cwd` on the crate's `RunConfig` (persisted on the run row), threaded by
 the Buddy runner into the run conversation's turn directory, and set by `postAttempt` to the
 attempt's worktree. It is not in this branch because it changes the Buddies crate and runner,
-which are at their line ceiling (tools/buddies-line-ceiling) and outside `server/src/expeditions`.
+outside `server/src/expeditions`; it is the B4 follow-up (the Buddies crate-size gate was removed).
 What IS structural now: claims are checked against their own branch and custody (git.ts
 `claimHeld`), and only host-validated commits merge, so a stray edit in the shared checkout can
 never reach the expedition branch. Also repository-wide: `cambium recover` (used only when an
@@ -537,7 +538,9 @@ guard is broken (mutation-checked). Tests: `server/test/expeditions.test.ts`, cr
   spawned, a boot or creation warm with no run) starts in the crew's own fixed directory,
   `<expeditions root>/<id>/crew`, which is no git checkout: not the owner's checkout (the manager
   directory before setup and after finish) and not the integration tree the host merges into, and
-  it never moves, so a resumed seat finds its session. Every other Buddy turn starts in its
+  it never moves within a boot, so a resumed seat finds its session. The seat session is per
+  boot: a crew's session is reset on its first turn after a server start (owner 2026-11-03:
+  crews restart on new sessions; see Restart). Every other Buddy turn starts in its
   workspace root. An attempt briefing is cached by run id, never under the Buddy's key (two
   concurrent attempts of one crew would otherwise get whichever worktree warmed last), and the
   runner forgets it at settle; a crew's Buddy-key entry always holds the crew directory, which is
@@ -892,3 +895,59 @@ only the lesson shaped an existing design; "Kept" means expeditions already had 
 | Only the oompa host survived a restart (detached wrapper with pid and exit files) | Process adoption | Idea only: a typed `validation_interrupted` and a re-run on the same sha in a fresh tree (#10); adoption needs a wrapper that outlives the server |
 | Its harness adapters are a thin pipe to `agent-cli` | A catalogue of provider quirks | Idea only: crew turns run through the Buddy runner, which owns the harness |
 | Its worker loop is one ~420-line loop/recur | Bounded resumes, wrap-up nudge, salvage on death | Idea only: attempts stay single-shot (one request, one immutable commit); retries are typed outcomes, never a second loop |
+
+## Restart (2026-11-03)
+
+Crew CLIs and check processes die with the server, so a crew never resumes a harness across a
+boot (owner 2026-11-03: crews restart on new sessions). The pieces, in boot order:
+
+- **Adoption discards crew turns.** `adoptExecutions` classifies each journal owner: chat and
+  builder turns are adopted; a Buddy that is in the host's `crewBuddyIds()` is `fresh`, and its
+  process group is killed and the journal removed. The graceful shutdown drain discards crew
+  journals the same way; other turns stay adoptable.
+- **Seat sessions are per boot.** The session audience key carries `{durable}` or `{boot, bootId}`;
+  a crew's scope is boot, so the first crew turn after a boot resets the process.
+- **Interrupted attempts.** `host.interruptBootLive()` runs before adoption and before the runner
+  starts: it cancels every unsettled crew run (so a leased run is never resumed) and ends each
+  posted attempt as `interrupted {cause: server_restart, runIds}`. The manager sees it like a
+  failure; `workerAttempts` does not count it against the budget; commits it left stay claimable;
+  `decide` replans the work/check spec once under a new attempt id with `retryOf`. The new manager
+  run has no conversation, so it starts a fresh `buddy-run-<id>`.
+- **Checks.** A validation that was running is killed through the pidfile in its scratch dir
+  (`killCheck`: SIGKILL to the group only while `ps lstart` still matches) and recorded as
+  interrupted.
+- **Order in server.ts:** `interruptBootLive()`, then `adoptExecutions`, then the runner, then
+  `host.start()` (ticks begin only after adoption).
+
+The global MCP relay keeps its hold-through-outage lifetime (`docs/patterns.md`): ordinary Buddy
+adoption needs it, and no crew call goes through an old relay because no crew CLI survives a boot.
+
+## Retire (2026-11-03)
+
+A finished expedition is retired to release everything it still holds. State carries
+`retirement: active | retiring {at, by, refused} | retired {at}`; `POST
+/api/buddies/expeditions/:id/retire {mode: retire | stop_and_retire}` answers 202, and the Buddy tool
+has `{do:'retire', id}` for finished expeditions only. `stop_and_retire` records the owner's stop
+with the request, so `owner_stop` finishes the expedition first. Steps run one at a time, only once
+the run is finished and nothing is live:
+
+1. **Trees.** Every `left`/`kept` tree (and an integration tree never made) is re-released under
+   the retire policy: tracked-deletions-only trees are force-removed; modified trees are first
+   snapshotted from a temp index and pinned at `refs/salvage/expeditions/<id>/<tree>/dirty`; a
+   submodule-bearing tree is removed with `cambium remove -force`. This closes the old dead end
+   where `left` was terminal.
+2. **Branches.** `archiveBranch` tags the tip (`archive/expeditions/<id>/...`), pushes the tag to
+   origin, requires `ls-remote` to return exactly that sha, and only then deletes the local ref
+   with a compare-and-delete. No remote or a failed push is `archive_refused`: the expedition stays
+   `retiring` with the reason on the page and no branch is deleted. Retire is idempotent; fix the
+   cause (usually the SSH agent socket) and ask again.
+3. **Crew and chats.** The crew Buddy is archived, and so are only its `crew_ready` chat and
+   self-DM, never DMs with other Buddies.
+4. **Freeze.** `<root>/.retired/<id>.json = {summary, report}` is written, `retired` is appended as
+   the last ledger line, and the folder moves to `<root>/.retired/<id>/`. Boot skips `.retired`; a
+   retired expedition is served read-only from its snapshot and never folded again.
+
+**Incident (emergent-beach, 2026-11).** Plain `git`/`cambium remove` on the integration tree, whose
+submodule was initialized, was killed by the 120 s default roughly 15 minutes of retries at a time,
+with 2582 tracked ` D` entries making each attempt slow, and the leftover tree was `left` forever.
+That is why removal now has one forced path with a 15-minute timeout and a ` D`-only fast path.

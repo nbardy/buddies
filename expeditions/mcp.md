@@ -18,6 +18,7 @@ expedition({ action })
   { do:'status', id }                       → status text (badge, charter, questions, stages, attempts, validations, integration, cost)
   { do:'list' }                             → [{ id, badge }]
   { do:'steer', id, feedback }              // feedback: {t:'lesson'|'note', text} | {t:'pause'|'resume'|'stop'} | {t:'extend', hours}
+  { do:'retire', id }                       // finished expeditions only (stop first): archive branches as origin tags, release trees, archive the crew and its chats, freeze a snapshot
 ```
 
 `CharterRequest` requires only the WHAT: `name`, `goal`, `done`, `maxAttempts`. The rest take
@@ -106,6 +107,7 @@ chat that launched it.
 | Action | Buddy | Owner |
 |---|---|---|
 | draft, list, status, ledger, ask | yes | yes |
+| retire (finished expeditions only; a crew cannot retire) | yes | yes |
 | launch | only within the owner's pre-approved budget envelope | yes |
 | steer: Approve, Redirect, Fund (within explore share), Kill, Lesson, Pause, Resume, Stop | yes | yes |
 | steer: AmendGoal, RaiseBudget | proposes; owner confirms with one click | yes |
