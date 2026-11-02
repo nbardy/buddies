@@ -7,7 +7,6 @@ import {
   type ExpeditionDraftView,
   type ExpeditionQuestion,
   type ExpeditionRetiredView,
-  type ExpeditionRetirement,
   type ExpeditionRun,
   type ExpeditionStage,
   type ExpeditionSummary,
@@ -16,7 +15,7 @@ import {
   expeditionRunLabel,
 } from '@unleashd/shared';
 
-// Pure view helpers for the expedition badge, draft card and modal (no React).
+// Pure view helpers for the expedition badge, draft card, lists and modal (no React).
 
 export const expeditionUrl = (id: string) => `/api/buddies/expeditions/${encodeURIComponent(id)}`;
 export const expeditionHref = (id: string) => `/expeditions/${encodeURIComponent(id)}`;
@@ -25,9 +24,11 @@ export const draftUrl = (draftId: string, workspaceId: string) =>
   `/api/buddies/expeditions/drafts/${encodeURIComponent(draftId)}?workspaceId=${encodeURIComponent(workspaceId)}`;
 /** Crew Buddies: kept off the Buddies roster (atoms/buddy-visibility.ts). */
 export const EXPEDITION_CREWS_URL = '/api/buddies/expeditions/crews';
+/** Every expedition, newest launch first; under `/api/buddies`, so `buddies_changed` refreshes it. */
+export const EXPEDITIONS_URL = '/api/buddies/expeditions';
+export const EXPEDITIONS_POLL_MS = 10_000;
 
-/** What GET /api/buddies/expeditions/:id answered: the live view, or a retired expedition's
- * frozen summary and report (server expeditions/retired.ts). Classified once, here. */
+/** What GET /api/buddies/expeditions/:id answered: the live view or a retired one's frozen view. */
 export type ExpeditionRead =
   | { t: 'live'; view: ExpeditionView }
   | { t: 'retired'; view: ExpeditionRetiredView };
@@ -35,38 +36,24 @@ export type ExpeditionRead =
 export const expeditionRead = (data: ExpeditionView | ExpeditionRetiredView): ExpeditionRead =>
   't' in data ? { t: 'retired', view: data } : { t: 'live', view: data };
 
-/** The summary row a read answers with: the badge's and the modal header's one source. */
 export const summaryOf = (read: ExpeditionRead): ExpeditionSummary => {
   switch (read.t) {
     case 'retired':
       return read.view.summary;
-    case 'live': {
-      const v = read.view;
-      return {
-        id: v.id,
-        name: v.charter.name,
-        run: v.run,
-        workspaceId: v.workspaceId,
-        launchedAt: v.launchedAt,
-        counts: v.counts,
-        cost: v.cost,
-        line: v.line,
-        retirement: v.retirement,
-      };
-    }
+    case 'live':
+      return liveSummary(read.view);
   }
 };
 
-/**
- * How often an expedition view polls: never once it finished with nothing live (audit
- * 2026-11-01 #8: every open badge and modal kept polling a finished expedition forever), and
- * never once retired (frozen). A finished expedition still refreshes on `buddies_changed` pushes
- * (its key is under /api/buddies); one being retired keeps polling until it is frozen.
- */
-export function pollMsOf(
-  s: Pick<ExpeditionSummary, 'run' | 'counts' | 'retirement'>,
-  liveMs: number
-): number {
+const liveSummary = (v: ExpeditionView): ExpeditionSummary => {
+  const { id, run, workspaceId, launchedAt, counts, cost, line, retirement } = v;
+  return { id, name: v.charter.name, run, workspaceId, launchedAt, counts, cost, line, retirement };
+};
+
+/** Poll interval: 0 once finished with nothing live (audit 2026-11-01 #8: finished expeditions
+ * polled forever) or retired; `buddies_changed` pushes still refresh a finished one. */
+type PollFacts = Pick<ExpeditionSummary, 'run' | 'counts' | 'retirement'>;
+export function pollMsOf(s: PollFacts, liveMs: number): number {
   switch (s.retirement.t) {
     case 'retired':
       return 0;
@@ -77,33 +64,20 @@ export function pollMsOf(
   }
 }
 
-/** The colour family of a pill, dot or chip (Expedition.css `.expedition-tone-*`). */
 export type Tone = 'ok' | 'warn' | 'info' | 'bad' | 'muted';
+type RunLook = { tone: Tone; dot: 'running' | 'queued' | 'idle'; emphasis?: 'new' | 'read' };
 
-/** How each run state looks, in one place: pill/chip tone, rail dot, rail row weight (the channel
- * rows' unread vocabulary, ChannelBrowser.css: bold when it needs the owner, dimmed while paused)
- * and whether the owner's attention is asked (Home lists those first). */
-export const RUN_LOOK: Record<
-  ExpeditionRun['t'],
-  {
-    tone: Tone;
-    dot: 'running' | 'queued' | 'idle';
-    emphasis: 'new' | 'read' | undefined;
-    needsYou: boolean;
-  }
-> = {
-  running: { tone: 'ok', dot: 'running', emphasis: undefined, needsYou: false },
-  waiting_owner: { tone: 'warn', dot: 'queued', emphasis: 'new', needsYou: true },
-  paused: { tone: 'muted', dot: 'idle', emphasis: 'read', needsYou: false },
-  finished: { tone: 'info', dot: 'idle', emphasis: undefined, needsYou: false },
+/** Run state looks; `emphasis` is the rail's unread vocabulary (ChannelBrowser.css). */
+export const RUN_LOOK: Record<ExpeditionRun['t'], RunLook> = {
+  running: { tone: 'ok', dot: 'running' },
+  waiting_owner: { tone: 'warn', dot: 'queued', emphasis: 'new' },
+  paused: { tone: 'muted', dot: 'idle', emphasis: 'read' },
+  finished: { tone: 'info', dot: 'idle' },
 };
+export const needsYou = (e: Pick<ExpeditionSummary, 'run'>) => e.run.t === 'waiting_owner';
 
-/** The status pill of a summary: a retired expedition reads Retired (muted), one being put away
- * Retiring, else its run state. */
-export function expeditionPill(e: Pick<ExpeditionSummary, 'run' | 'retirement'>): {
-  label: string;
-  tone: Tone;
-} {
+export type Pill = { label: string; tone: Tone };
+export function expeditionPill(e: Pick<ExpeditionSummary, 'run' | 'retirement'>): Pill {
   switch (e.retirement.t) {
     case 'retired':
       return { label: 'Retired', tone: 'muted' };
@@ -114,10 +88,7 @@ export function expeditionPill(e: Pick<ExpeditionSummary, 'run' | 'retirement'>)
   }
 }
 
-/** What the owner can do to an expedition now: put away a finished one, stop and put away an
- * open one, or nothing (it is already being retired, or is). */
-export type OwnerAction = { t: 'retire' } | { t: 'stop_and_retire' } | { t: 'none' };
-
+type OwnerAction = { t: 'retire' } | { t: 'stop_and_retire' } | { t: 'none' };
 export function ownerActions(e: Pick<ExpeditionSummary, 'run' | 'retirement'>): OwnerAction {
   switch (e.retirement.t) {
     case 'retiring':
@@ -128,7 +99,6 @@ export function ownerActions(e: Pick<ExpeditionSummary, 'run' | 'retirement'>): 
   }
 }
 
-/** How each attempt phase looks, in one place: the dot's tone and the state word on its card. */
 export const PHASE_LOOK: Record<ExpeditionAttempt['phase']['t'], { tone: Tone; state: string }> = {
   planned: { tone: 'muted', state: 'queued' },
   admitted: { tone: 'muted', state: 'starting' },
@@ -149,51 +119,30 @@ export const STAGE_TONE: Record<ExpeditionStage, Tone> = {
   dead: 'bad',
 };
 
-/** The card's budget line, e.g. `6 attempts · 3 at once · 12 h`. */
-export const budgetLine = (limits: ExpeditionCharterView['limits']) =>
+type Limits = ExpeditionCharterView['limits'];
+export const budgetLine = (limits: Limits) =>
   `${limits.maxAttempts} attempts · ${limits.maxLive} at once · ${limits.hours} h`;
 
-/** `2h 05m` / `14m`: a duration between two instants, for the header. */
-export function durationLabel(fromIso: string, toIso: string): string {
+function durationLabel(fromIso: string, toIso: string): string {
   const minutes = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 60_000));
   const hours = Math.floor(minutes / 60);
   return hours > 0 ? `${hours}h ${String(minutes % 60).padStart(2, '0')}m` : `${minutes}m`;
 }
 
-/** Every expedition, newest launch first (server expeditions/routes.ts). Under `/api/buddies`, so
- * `buddies_changed` refreshes it like the modal. */
-export const EXPEDITIONS_URL = '/api/buddies/expeditions';
-/** How often the rail, the index and Home re-read the list (pushes refresh it sooner). */
-export const EXPEDITIONS_POLL_MS = 10_000;
-
-/** What the channel rail and Home list: this workspace's unfinished expeditions, the ones waiting
- * on the owner first, each group newest launch first (the list arrives newest first). */
-export const activeExpeditions = (
-  list: readonly ExpeditionSummary[],
-  workspaceId: string
-): ExpeditionSummary[] => {
-  const mine = list.filter(
-    (e) => e.workspaceId === workspaceId && e.run.t !== 'finished' && !isRetired(e.retirement)
-  );
-  return [
-    ...mine.filter((e) => RUN_LOOK[e.run.t].needsYou),
-    ...mine.filter((e) => !RUN_LOOK[e.run.t].needsYou),
-  ];
-};
-
-const isRetired = (r: ExpeditionRetirement) => r.t === 'retired';
-
-/** The index pane's groups: unfinished, finished (retired ones leave it), and retired. */
 export function expeditionGroups(all: readonly ExpeditionSummary[]) {
+  const live = all.filter((e) => e.retirement.t !== 'retired');
   return {
-    active: all.filter((e) => e.run.t !== 'finished' && !isRetired(e.retirement)),
-    finished: all.filter((e) => e.run.t === 'finished' && !isRetired(e.retirement)),
-    retired: all.filter((e) => isRetired(e.retirement)),
+    active: live.filter((e) => e.run.t !== 'finished'),
+    finished: live.filter((e) => e.run.t === 'finished'),
+    retired: all.filter((e) => e.retirement.t === 'retired'),
   };
 }
 
-/** The pill, badge and list label: one definition with the server's badge (shared). */
-export const runLabel = expeditionRunLabel;
+/** The rail's and Home's list: unfinished, needing the owner first, else newest first. */
+export const activeExpeditions = (list: readonly ExpeditionSummary[], workspaceId: string) => {
+  const { active } = expeditionGroups(list.filter((e) => e.workspaceId === workspaceId));
+  return [...active.filter(needsYou), ...active.filter((e) => !needsYou(e))];
+};
 
 /** The header's time: elapsed and left while it runs; how long it took once finished
  * (2026-11-01 review: a finished expedition showed "7h 56m left"). */
@@ -208,7 +157,6 @@ export function timeLine(v: ExpeditionView): string {
   }
 }
 
-/** A short time for a caption: `1:42 PM` today, `Nov 1, 1:42 PM` on another day. */
 export function shortTime(iso: string, nowIso: string): string {
   const at = new Date(iso);
   const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -223,25 +171,20 @@ export const SCOPE_LABEL: Record<ExpeditionQuestion['scope'], string> = {
   parked: 'parked',
 };
 
-/** A draft's pill on the card and in the modal header. */
-export const DRAFT_PILL: Record<ExpeditionDraftState['t'], { label: string; tone: Tone }> = {
+export const QUESTION_GLYPH: Record<ExpeditionQuestion['status'], string> = {
+  open: '○',
+  verified: '✓',
+  dead: '✗',
+};
+
+export const DRAFT_PILL: Record<ExpeditionDraftState['t'], Pill> = {
   open: { label: 'draft', tone: 'info' },
   launched: { label: 'launched', tone: 'ok' },
   superseded: { label: 'replaced', tone: 'muted' },
 };
 
-/** One limit as the Charter shows it, marked when the host filled it in. */
-export interface LimitItem {
-  text: string;
-  defaulted: boolean;
-}
-
-/** The Charter's limits in words (`2 at once`, `8 h limit`, `up to 20% of attempts exploring`), each marked
- * when defaulted. 2026-11-01 review: the draft listed raw `maxLive: 2` keys as a second list. */
-export function limitItems(
-  limits: ExpeditionCharterView['limits'],
-  defaults: ReadonlySet<ExpeditionDefault>
-): LimitItem[] {
+/** Limits in words (2026-11-01 review: the draft listed raw `maxLive: 2` keys). */
+export function limitItems(limits: Limits, defaults: ReadonlySet<ExpeditionDefault>) {
   return [
     { text: `${limits.maxAttempts} attempts`, defaulted: false },
     { text: `${limits.maxLive} at once`, defaulted: defaults.has('maxLive') },
@@ -253,8 +196,7 @@ export function limitItems(
   ];
 }
 
-/** An attempt's measured cost (design.md R6) as one figure and its breakdown (the title); null
- * before it ended. Never an estimate. */
+/** An attempt's measured cost (design.md R6), never an estimate; null before it ended. */
 export function attemptCostLine(
   cost: ExpeditionAttemptCost
 ): { text: string; title: string } | null {
@@ -273,28 +215,19 @@ export function attemptCostLine(
   }
 }
 
-/** The host validations of one attempt's claimed commit, oldest first. */
 export const validationsOf = (all: ExpeditionValidation[], attemptId: string) =>
   all.filter((x) => x.subject.t === 'candidate' && x.subject.claimAttemptId === attemptId);
 
-export const QUESTION_GLYPH: Record<ExpeditionQuestion['status'], string> = {
-  open: '○',
-  verified: '✓',
-  dead: '✗',
-};
-
-/** The modal's tabs. The dialog shows the chat as its own column; the sheet makes it a tab. */
-export type Pane = 'workers' | 'tasks' | 'reflections' | 'charter';
-export type Focus = Pane | 'chat';
-export const FOCI: { focus: Focus; label: string }[] = [
-  { focus: 'workers', label: 'Workers' },
-  { focus: 'tasks', label: 'Tasks' },
-  { focus: 'reflections', label: 'Reflections' },
+export type Focus = 'workers' | 'tasks' | 'reflections' | 'charter' | 'chat';
+/** `count`: the tab's total (2026-11-01 review: "Workers 0" beside four finished read as broken). */
+export const FOCI: { focus: Focus; label: string; count?(v: ExpeditionView): number }[] = [
+  { focus: 'workers', label: 'Workers', count: (v) => v.attempts.length },
+  { focus: 'tasks', label: 'Tasks', count: (v) => v.questions.length },
+  { focus: 'reflections', label: 'Reflections', count: (v) => v.reflections.length },
   { focus: 'charter', label: 'Charter' },
   { focus: 'chat', label: 'Chat' },
 ];
 
-/** What a draft offers right now: one variant per button the card and modal footer show. */
 export type DraftAction =
   | { t: 'launch' }
   | { t: 'blocked'; reason: string }
@@ -309,9 +242,8 @@ export function draftAction(d: ExpeditionDraftView): DraftAction {
     case 'open':
       return d.issues.length === 0
         ? { t: 'launch' }
-        : {
-            t: 'blocked',
-            reason: `${d.issues.length} ${d.issues.length === 1 ? 'issue' : 'issues'} to fix first (Info)`,
-          };
+        : { t: 'blocked', reason: `${issueCount(d.issues.length)} to fix first (Info)` };
   }
 }
+
+export const issueCount = (n: number) => `${n} ${n === 1 ? 'issue' : 'issues'}`;

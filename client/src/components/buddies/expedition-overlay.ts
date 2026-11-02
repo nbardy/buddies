@@ -7,15 +7,11 @@ import { channelsHref } from './channels-view';
 import { expeditionHref, expeditionRead, expeditionUrl, summaryOf } from './expedition-view';
 import { buddyWorkspaceActivityAtom, overviewWorkspaces } from './workspace-order';
 
-// The expedition modal is route-addressable (/expeditions/:id) and opens OVER the view it was
-// opened from: the opener pushes the URL with `state.background`, and App.tsx renders its routes
-// at that background location with the modal on top. A direct load or reload has no background,
-// so the modal opens over its workspace's expedition index in the channels view (owner,
-// 2026-11-01: expeditions belong to the channels view, never the old conversations shell).
+// /expeditions/:id opens OVER its opener (`state.background`; App.tsx renders routes there). A
+// direct load has none: it opens over its workspace's channels-view expedition index (owner, 2026-11-01).
 
 const EXPEDITION_PATH = /^\/expeditions\/([^/]+)\/?$/;
 
-/** What the router shows for a location: no modal, the modal over its opener, or over home. */
 export type ExpeditionOverlay =
   | { t: 'none' }
   | { t: 'over'; id: string; background: Location }
@@ -38,50 +34,36 @@ export function expeditionOverlay(location: Location): ExpeditionOverlay {
   return background ? { t: 'over', id, background } : { t: 'direct', id };
 }
 
-/** The background to keep when opening a modal: a modal opened from inside another keeps the
- * original view underneath, never the first modal's URL. */
+/** A modal opened from inside another keeps the original view underneath, never the first modal. */
 export function backgroundOf(location: Location): Location {
   return backgroundIn(location.state) ?? location;
 }
 
-/** Opens the live expedition modal over the current view. */
 export function useOpenExpedition(): (id: string) => void {
   const navigate = useNavigate();
   const location = useLocation();
   return (id) => navigate(expeditionHref(id), { state: { background: backgroundOf(location) } });
 }
 
-/** Where the routes render under the modal, and where closing it goes. */
 export type OverlayBase = { t: 'page'; routes: Location } | ModalBase;
 
-/** The bases that carry a modal (every overlay but 'none'), with the expedition it shows. */
+/** `unresolved` lands on a workspace index, never /expeditions while one exists: its redirect
+ * REPLACES the URL and dropped the modal (2026-11-02, /expeditions/nope). */
 export type ModalBase =
   | { t: 'over'; id: string; routes: Location }
-  /** A direct load whose workspace is known: the channels view's expedition index. */
   | { t: 'landed'; id: string; routes: string }
-  /** A direct load still reading its expedition: nothing under the modal yet (App.tsx renders an
-   * empty route at this path), so the old shell never flashes behind it. */
   | { t: 'pending'; id: string; routes: Location }
-  /** A direct load whose expedition could not be read (unknown/deleted id, HTTP error): the
-   * modal shows the error over the channels expedition index of the workspace /expeditions would
-   * pick (or /expeditions itself when there is none), and closing lands there instead of on an
-   * empty page. Never /expeditions while a workspace exists: its redirect REPLACES the URL, which
-   * dropped the modal and its not-found message (2026-11-02 visual pass: /expeditions/nope
-   * showed the bare index). */
   | { t: 'unresolved'; id: string; routes: string };
 
-/** The workspace an unreadable expedition lands in: still loading, the one /expeditions picks,
- * or none at all. */
-type Landing = { t: 'loading' } | { t: 'workspace'; id: string } | { t: 'none' };
+/** Where an unreadable expedition lands: unknown until the overview loads. */
+type Landing = { t: 'loading' } | { t: 'known'; routes: string };
 
-/** The channels-view expedition index for an unknown workspace (App.tsx routes it). */
 export const EXPEDITIONS_INDEX_PATH = '/expeditions';
+const indexOf = (workspaceId: string) => channelsHref(workspaceId, { kind: 'expeditions' });
 
 export function useOverlayBase(location: Location, overlay: ExpeditionOverlay): OverlayBase {
-  // The modal reads the same key, so a direct load fetches the expedition once.
-  // The answer is either view (a retired expedition is its frozen summary): typed as the union,
-  // as ExpeditionLive reads it. Typed as the live view alone, a retired deep link read
-  // `workspaceId` off the wrong shape and landed on an empty rail (2026-11-03 e2e).
+  // Same key as the modal (one fetch). Typed as the union: as the live view alone, a retired deep
+  // link read `workspaceId` off the wrong shape and landed on an empty rail (2026-11-03 e2e).
   const direct = usePolledFetch<ExpeditionView | ExpeditionRetiredView>(
     overlay.t === 'direct' ? expeditionUrl(overlay.id) : null,
     0
@@ -91,9 +73,7 @@ export function useOverlayBase(location: Location, overlay: ExpeditionOverlay): 
   const landing: Landing =
     overview.data === null
       ? { t: 'loading' }
-      : first
-        ? { t: 'workspace', id: first.id }
-        : { t: 'none' };
+      : { t: 'known', routes: first ? indexOf(first.id) : EXPEDITIONS_INDEX_PATH };
   switch (overlay.t) {
     case 'none':
       return { t: 'page', routes: location };
@@ -104,7 +84,6 @@ export function useOverlayBase(location: Location, overlay: ExpeditionOverlay): 
   }
 }
 
-/** δ over the direct load's fetch state: one base per cache variant. */
 function directBase(
   id: string,
   direct: PolledState<ExpeditionView | ExpeditionRetiredView>,
@@ -120,23 +99,11 @@ function directBase(
       return {
         t: 'landed',
         id,
-        routes: channelsHref(summaryOf(expeditionRead(direct.data)).workspaceId, {
-          kind: 'expeditions',
-        }),
+        routes: indexOf(summaryOf(expeditionRead(direct.data)).workspaceId),
       };
     case 'failed':
-      return unresolvedBase(id, landing, location);
-  }
-}
-
-/** δ over where an unreadable expedition lands: nothing under it until the workspace is known. */
-function unresolvedBase(id: string, landing: Landing, location: Location): ModalBase {
-  switch (landing.t) {
-    case 'loading':
-      return { t: 'pending', id, routes: location };
-    case 'workspace':
-      return { t: 'unresolved', id, routes: channelsHref(landing.id, { kind: 'expeditions' }) };
-    case 'none':
-      return { t: 'unresolved', id, routes: EXPEDITIONS_INDEX_PATH };
+      return landing.t === 'known'
+        ? { t: 'unresolved', id, routes: landing.routes }
+        : { t: 'pending', id, routes: location };
   }
 }
