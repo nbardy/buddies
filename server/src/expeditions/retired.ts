@@ -16,7 +16,7 @@ import { expeditionSummary, summaryLine } from './view';
 export const RETIRED_DIR = '.retired';
 
 /** v1 counts: `live` is the live work and check attempts (none once retired: retirement waits
- * until nothing is live, effects.ts retireEffects). */
+ * until nothing is live, plan.ts retireEffects). */
 const Counts = z.object({
   attempts: z.number(),
   maxAttempts: z.number(),

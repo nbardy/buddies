@@ -84,20 +84,24 @@ primitives, using the history only as evidence.
 ## As built (2026-11-01, branch feat/expeditions)
 
 All engine code is under `server/src/expeditions/`. The pure core (no I/O) is re-exported by
-`model.ts`; `host.ts` is the only I/O shell.
+`model.ts`; `host.ts` composes the only I/O shell from the pieces below.
 
 | Piece | Where |
 |---|---|
 | Ledger: the `Entry` sum type and who reads each kind (`ENTRY`), folded `State`, `fold`/`apply` | `ledger.ts` |
 | Decide: state → intent entries, every manager-action guardrail | `decide.ts` |
-| Effects: the idempotent writes a state licenses (admission, releases) | `effects.ts` |
+| Plan: the idempotent writes a state licenses, by run phase (admission, releases) | `plan.ts` |
 | Read-only queries (live, panels, custody, stages, seats) | `queries.ts` |
 | Badge, chat news lines, outcome/validation/integration labels, cost totals | `render.ts` |
 | Charter schema, launch defaults, draft issues/advice, answer schemas | `charter.ts` |
 | Briefs (manager / work / blind check / repair) and the status view | `briefs.ts` |
 | Answer parsing (attempt results) and owner chat words, once at observation | `answers.ts` |
-| Host: ticks (typed observation, failure backoff), one handler per effect, launch/steer | `host.ts` |
-| Ledger file: durable append (fsync, cut back on failure), exclusive create, boot read | `store.ts` |
+| Host: composes the pieces below; steer, views, crew directories | `host.ts` |
+| Store: ledger file (fsync append, cut back on failure, exclusive create), boot fold, quarantine, retired snapshots, write chains | `store.ts` |
+| Observation: settled requests and owner chat messages as entries | `observe.ts` |
+| Effect runner: one handler per effect, validation check jobs | `run.ts` |
+| Ticks (failure backoff, wake-on-write) and the boot interruption of crew runs | `tick.ts` |
+| Launch preflight and launch, the owner's retire request | `launch.ts` |
 | Git: preflight, Cambium worktrees, claim checks, merges (hooks off, scrubbed env) | `git.ts` |
 | Tree release: guard ladder, salvage refs, ignored-output harvest, forced remove | `release.ts` |
 | Host-run command checks (curated env, throwaway HOME/TMPDIR, process group, timeout) | `command.ts` |

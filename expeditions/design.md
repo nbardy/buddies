@@ -258,7 +258,7 @@ specified packet can be executed mechanically and judged by an executable check.
   two work attempts with overlapping custody at once; overlapping ones wait (queued, not refused).
 - All git/process calls are async (`execFile`/`spawn`), never sync on the server loop.
 
-Built (2026-11-01, `server/src/expeditions/git.ts`, `effects.ts`): launch preflight records
+Built (2026-11-01, `server/src/expeditions/git.ts`, `effects.ts`, now `plan.ts`): launch preflight records
 `repo {root, baseSha, branch}` in the `launched` entry (R3 replaced `branch_ready`: the branch is
 created by the integration tree's `cambium add`).
 Every worker attempt (work and check) runs in a host-made tree: a work attempt's starts at the

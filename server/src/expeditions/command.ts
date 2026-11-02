@@ -88,7 +88,7 @@ async function executableFile(file: string): Promise<boolean> {
  * pid and its `ps` start time), removed with the scratch dir when the check ends, so only a
  * crash leaves it, and `killCheck` kills the orphan's group only while that same process (same
  * pid AND start time) still runs. On replay the interrupted validation's tree is
- * discarded and its unrecorded checks run again in a FRESH tree at the same sha (host.ts
+ * discarded and its unrecorded checks run again in a FRESH tree at the same sha (run.ts
  * `interrupted`, audit #10), so the two never share build outputs; the recorded outcome is the
  * replayed run's.
  * Known limit: the throwaway HOME hides `$HOME`, not the owner's files. There is no sandbox, and

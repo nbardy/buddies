@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import { announcePost } from '../buddies/events';
-import type { LaunchInput, Launched } from './host';
+import type { LaunchInput, Launched } from './launch';
 import { CHARTER_DEFAULT_KEYS, Charter, type CharterDefault, Origin } from './model';
 import { charterView } from './view';
 

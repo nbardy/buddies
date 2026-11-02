@@ -177,7 +177,7 @@ function retryInterrupted(s: State, clock: Clock, push: (e: Entry) => void): voi
 }
 
 /** A work attempt's end whose commits a manager may claim (R11): the host records every end
- * that left unclaimed commits on its branch as `unreported_commits` (host.ts unreported). */
+ * that left unclaimed commits on its branch as `unreported_commits` (observe.ts unreported). */
 const claimable = (o: Outcome): boolean => o.t === 'unreported_commits';
 
 /**
@@ -257,7 +257,7 @@ type Setup = { t: 'waiting' } | { t: 'ready' } | { t: 'failed'; reason: string }
 function setupOf(s: State): Setup {
   const integration = treeSetup(treeOf(s, INTEGRATION_TREE).status, 'integration');
   if (integration.t !== 'ready') return integration;
-  // The manager's tree is planned once the integration tree is ready (effects.ts).
+  // The manager's tree is planned once the integration tree is ready (plan.ts).
   return treeKey(MANAGER_TREE) in s.trees
     ? treeSetup(treeOf(s, MANAGER_TREE).status, "manager's")
     : { t: 'waiting' };
@@ -367,7 +367,7 @@ function judgedBlocker(s: State, merge: GoalMerge): string[] {
 }
 
 /** `merged`: the goal claim's merge has landed. `queued`: it is planned or landed — enough to
- * start a head validation, which runs only after every planned merge (effects.ts); the done then
+ * start a head validation, which runs only after every planned merge (plan.ts); the done then
  * settles against `merged`, so a refused merge still refuses it. */
 type GoalMerge = 'merged' | 'queued';
 const MERGE_OK: Record<GoalMerge, ReadonlySet<Integration['status']['t']>> = {
@@ -618,7 +618,7 @@ function doneByChecks(s: State, summary: string, clock: Clock): Decision {
     if (integrating(s)) return reject('an integration is still running');
     return accept({ t: 'finished', at, reason: 'done', summary });
   }
-  // The head validation starts only after every merge planned before it (effects.ts), and no
+  // The head validation starts only after every merge planned before it (plan.ts), and no
   // merge is accepted while it runs, so it validates the head the owner is told to merge.
   const validationId = clock.nextId('v');
   return accept(

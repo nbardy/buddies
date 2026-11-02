@@ -1,7 +1,7 @@
 import type { AttemptSpec, EndOutcome, Feedback } from './model';
 import { CheckResult, EXTEND_MAX_HOURS, ManagerResult, WorkResult } from './model';
 
-// κ for what the crew and the owner write back, once, at observation (host.ts): an attempt's
+// κ for what the crew and the owner write back, once, at observation (observe.ts): an attempt's
 // answer becomes its EndOutcome (design.md R11), an owner chat message becomes Feedback. Nothing
 // downstream re-parses either.
 
@@ -9,7 +9,7 @@ import { CheckResult, EXTEND_MAX_HOURS, ManagerResult, WorkResult } from './mode
 const CHAT_TEXT_MAX = 2000;
 
 /**
- * An owner chat message as steering (κ, once, at observation; host.ts observeChat): the word
+ * An owner chat message as steering (κ, once, at observation; observe.ts observeChat): the word
  * pause, resume or stop alone (resume re-plans, R11); `extend 3h` moves the deadline; `lesson: …`
  * a binding lesson every later brief carries; anything else a note the next manager reads (it
  * also answers a pending "needs you"). An `extend` outside 0–72 hours is kept as a note, so the

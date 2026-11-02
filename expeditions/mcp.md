@@ -63,7 +63,7 @@ the newer one) or a same-name expedition still open, 422 with every refusal, 404
 workspace's draft. A tool `launch` of the same name from the same conversation also marks that
 open draft launched.
 
-`issues` (draft) and launch refusals are the same list, built in one place (host.ts
+`issues` (draft) and launch refusals are the same list, built in one place (launch.ts
 `preflightOf`): the server may run expeditions (its execution gate is enabled, so never a copied
 store), the workspace is a git repository with a base commit, `git cambium` is available, every
 command check's `argv[0]` resolves (a relative path with a slash must be an executable file

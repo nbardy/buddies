@@ -277,7 +277,7 @@ export function candidateValidation(s: State, claim: Attempt<WorkSpec>): Validat
 /** Where a manager decision turn starts (design.md R11): its own detached read-only worktree.
  * Never the owner's checkout nor the integration tree the host merges into (audit 2026-11-01 #6:
  * before the integration tree existed a manager started in the owner's repository root). A
- * manager is briefed only once that tree is ready (effects.ts), so any other state here is a
+ * manager is briefed only once that tree is ready (plan.ts), so any other state here is a
  * broken invariant. */
 export function managerDirectory(s: State): string {
   const tree = treeOf(s, MANAGER_TREE);

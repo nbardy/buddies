@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { BuddyGrant } from '../buddies/grants';
 import type { ToolDeps } from '../buddies/mcp';
 import { createProviderCatalog } from '../providers/catalog-service';
-import type { ExpeditionHost, Launched, Retire } from './host';
+import type { ExpeditionHost } from './host';
+import type { Launched, Retire } from './launch';
 import {
   type CharterDefault,
   CharterRequest,

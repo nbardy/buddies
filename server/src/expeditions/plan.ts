@@ -6,6 +6,7 @@ import {
   allAttempts,
   attemptOf,
   byTree,
+  requestsOf,
   treeKey,
   treeOf,
   validationComplete,
@@ -24,7 +25,7 @@ import {
 } from './queries';
 
 // The idempotent writes a folded state licenses (pure). The host runs them in order; each carries
-// an idempotency key derived from the expedition and the attempt/status id (host.ts), or adopts
+// an idempotency key derived from the expedition and the attempt/status id (run.ts), or adopts
 // its own earlier git result by name (git.ts).
 
 export type Effect =
@@ -38,7 +39,7 @@ export type Effect =
   | { t: 'plan_tree'; tree: TreeId }
   /** Make or adopt a planned tree: the replay path after a crash between intent and ready. */
   | { t: 'create_tree'; tree: TreeId }
-  /** End a tree no one works in any more, under the release its stage asks for (host.ts). */
+  /** End a tree no one works in any more, under the release its stage asks for (run.ts). */
   | { t: 'release_tree'; tree: TreeId; stage: ReleaseStage }
   /** Run the command checks not yet recorded, in the host, in the background. */
   | { t: 'run_validation'; validationId: string }
@@ -89,19 +90,42 @@ export function pendingEffects(s: State): Effect[] {
   }
 }
 
-function runEffects(s: State): Effect[] {
-  const finished = s.run.t === 'finished';
-  const effects: Effect[] = [
-    // Finished: nothing a live attempt does can matter any more, so its runs are asked to stop
-    // (once); its end, or the host's `abandoned` after the grace, then releases its tree. First,
-    // so stopping paid runs never waits behind a status post or a tree release.
-    ...(finished
-      ? allAttempts(s).flatMap((a): Effect[] =>
-          a.phase.t === 'posted' && !(a.id in s.cancels)
-            ? [{ t: 'cancel_attempt', attemptId: a.id }]
-            : []
-        )
-      : []),
+/**
+ * Where the run is, for what it owes: `setup` until the integration tree is ready (nothing new
+ * starts before it; a failed one finishes the run), `running` (an owner question does not hold
+ * the crew: it is running too), `paused`, `finished`.
+ */
+type Phase = 'setup' | 'running' | 'paused' | 'finished';
+
+function phaseOf(s: State): Phase {
+  switch (s.run.t) {
+    case 'running':
+    case 'waiting_owner':
+      return ready(s, INTEGRATION_TREE) ? 'running' : 'setup';
+    case 'paused':
+      return 'paused';
+    case 'finished':
+      return 'finished';
+  }
+}
+
+const runEffects = (s: State): Effect[] => PHASE_EFFECTS[phaseOf(s)](s);
+
+/** δ over the phase: each phase's effects in order, around the ones every phase owes. */
+const PHASE_EFFECTS: Record<Phase, (s: State) => Effect[]> = {
+  setup: (s) => [...always(s), ...creates(s)],
+  paused: (s) => [...always(s), ...creates(s)],
+  running: (s) => [...always(s), ...creates(s), ...starts(s)],
+  // Nothing a live attempt does can matter any more, so its runs are asked to stop (once); its
+  // end, or the host's `abandoned` after the grace, then releases its tree. First, so stopping
+  // paid runs never waits behind a status post or a tree release. A tree a stop caught still
+  // being made is released instead, never made (decide finishes first, audit #1).
+  finished: (s) => [...cancels(s), ...always(s)],
+};
+
+/** What every phase owes: the badge, statuses, due releases, recorded posts and metering. */
+function always(s: State): Effect[] {
+  return [
     ...(s.badgePost.t === 'pending' ? [{ t: 'post_badge' } as const] : []),
     ...unpostedStatuses(s).map((x): Effect => ({ t: 'post_status', seq: x.seq, text: x.text })),
     ...releases(s),
@@ -119,22 +143,31 @@ function runEffects(s: State): Effect[] {
             {
               t: 'meter_attempt',
               attemptId: a.id,
-              requestIds: s.requests[a.id] ?? [a.phase.requestId],
+              requestIds: requestsOf(s, a.id),
               endedAt: a.phase.endedAt,
             },
           ]
         : []
     ),
-    // A planned tree is made (or adopted) until the expedition finishes; one a stop caught still
-    // being made is released instead, never made (decide finishes first, audit #1).
-    ...(finished
-      ? []
-      : Object.values(s.trees).flatMap((t): Effect[] =>
-          t.status.t === 'creating' ? [{ t: 'create_tree', tree: t.id }] : []
-        )),
   ];
-  // Nothing new starts before the integration tree is ready (a failed one finishes the run).
-  if (finished || s.run.t === 'paused' || !ready(s, INTEGRATION_TREE)) return effects;
+}
+
+/** A finished expedition's live attempts, each asked to stop once. */
+const cancels = (s: State): Effect[] =>
+  allAttempts(s).flatMap((a): Effect[] =>
+    a.phase.t === 'posted' && !(a.id in s.cancels) ? [{ t: 'cancel_attempt', attemptId: a.id }] : []
+  );
+
+/** A planned tree is made (or adopted) until the expedition finishes. */
+const creates = (s: State): Effect[] =>
+  Object.values(s.trees).flatMap((t): Effect[] =>
+    t.status.t === 'creating' ? [{ t: 'create_tree', tree: t.id }] : []
+  );
+
+/** What a running expedition starts: the manager's tree, merges, validations, claim checks,
+ * briefs and admissions. */
+function starts(s: State): Effect[] {
+  const effects: Effect[] = [];
   // The manager's own tree (design.md R11), made once, after the integration tree.
   if (!(treeKey(MANAGER_TREE) in s.trees)) effects.push({ t: 'plan_tree', tree: MANAGER_TREE });
   // Merges first, one at a time in plan order; validations wait for them, so a head validation
@@ -235,7 +268,7 @@ function due(s: State, tree: Tree, finished: boolean): boolean {
 /** Whether no one works in a held tree any more. The integration tree serves until finish; the
  * manager's until no manager decision runs in it; an attempt's until the attempt settled (or the
  * run finished before it was briefed); a validation's until every check is recorded or the run
- * finished (the host never removes a tree its own check job still runs in, host.ts). */
+ * finished (the host never removes a tree its own check job still runs in, run.ts). */
 const VACATED: ByTree<[State, boolean], boolean> = {
   integration: (_id, _s, finished) => finished,
   manager: (_id, s, finished) => finished && !managerRunning(s),
@@ -289,7 +322,7 @@ function unpostedStatuses(s: State) {
 const held = (status: TreeStatus) => status.t === 'creating' || status.t === 'ready';
 
 /**
- * A tree finishing left behind (effects.ts used to stop at `left`, a terminal dead end): refused
+ * A tree finishing left behind (this planner used to stop at `left`, a terminal dead end): refused
  * (`left`), kept for its commits, or `failed`: a failed add can leave a registration or directory
  * on disk (git.ts ensureWorktree names it "still on disk"), and archive_branches would then delete
  * the branch it is checked out on, stranding the tree after retirement. Releasing a tree that is

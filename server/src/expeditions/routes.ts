@@ -1,7 +1,8 @@
 import { type ExpeditionCrews, buddyMutations } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import type { DraftLaunch } from './drafts';
-import type { ExpeditionHost, Retire } from './host';
+import type { ExpeditionHost } from './host';
+import type { Retire } from './launch';
 
 // Owner HTTP for the expedition modal, badge and draft card. Registered after the auth gate (every
 // /api route acts as the owner, like server/src/buddies/routes.ts) and BEFORE the Buddy routes
@@ -69,7 +70,7 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
         res.status(404).json({ error: `no expedition ${id}` });
         return;
       case 'quarantined':
-        // Its ledger does not fold (host.ts quarantine); the reason is the owner's to read.
+        // Its ledger does not fold (store.ts quarantine); the reason is the owner's to read.
         res.status(409).json({ error: `expedition ${id} is quarantined: ${found.reason}` });
         return;
       case 'retired':

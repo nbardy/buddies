@@ -1061,7 +1061,7 @@ void runServerStartup(
       await timeBootPhaseAsync('recovery', () => runtimeBuilder.recover());
       // Crews restart on new sessions (owner 2026-11-03): every unsettled crew run is cancelled
       // and its attempt ends interrupted BEFORE adoption refuses the crew's turns and before the
-      // runner starts, so no crew run resumes in its old conversation (expeditions/host.ts).
+      // runner starts, so no crew run resumes in its old conversation (expeditions/tick.ts interruptBootLive).
       await timeBootPhaseAsync('expeditions_interrupt', async () => {
         await buddiesReady;
         await expeditionHost?.interruptBootLive();

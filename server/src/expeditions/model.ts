@@ -4,11 +4,11 @@
 //   ledger.ts   the ledger Entry sum type, the folded State, fold/apply
 //   queries.ts  read-only views over State (live, queued, panels, seats)
 //   decide.ts   state → intent entries, with the manager-action guardrails
-//   effects.ts  the idempotent writes a state licenses
+//   plan.ts     the idempotent writes a state licenses, per run phase
 //   render.ts   badge, chat news lines, attempt/outcome labels and manager text
 export * from './charter';
 export * from './decide';
-export * from './effects';
+export * from './plan';
 export * from './ledger';
 export * from './render';
 export * from './queries';

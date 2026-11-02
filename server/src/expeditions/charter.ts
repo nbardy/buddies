@@ -203,7 +203,7 @@ const nameTokens = (name: string) =>
  * A seat's model as the catalog names it (design.md R9). Owners say "claude haiku" or "sonnet";
  * the catalog takes `claude-haiku-5-5`. A name that is not a catalog id resolves when its words
  * pick exactly one of the provider's models (by id or display name); anything else is left as
- * written, and the seat check refuses it listing the valid ids (host.ts seatIssues). Never an
+ * written, and the seat check refuses it listing the valid ids (launch.ts seatIssues). Never an
  * invented id. 2026-11-01 smoke incident: "claude haiku" failed the launch; an alias kept as
  * written would also defeat the check-independence rule, which compares model strings.
  */

@@ -15,7 +15,7 @@ import { doneChecks } from './charter';
 // Pattern: pure-core (docs/patterns.md#pure-core)
 // Pattern: persisted-state-machine (docs/patterns.md#persisted-state-machine)
 // An expedition's ONE persisted state is its append-only ledger. `fold` derives everything else;
-// decide.ts turns a state into the intent entries to append next; effects.ts names the idempotent
+// decide.ts turns a state into the intent entries to append next; plan.ts names the idempotent
 // writes those intents license. The host appends intents BEFORE running effects, so a crash at
 // any point resumes from a ledger that explains it (expeditions/design.md).
 
@@ -42,9 +42,9 @@ export type EndOutcome =
   | { t: 'malformed'; error: string; raw: string }
   | { t: 'failed'; status: 'failed' | 'cancelled' }
   /** The host asked its runs to stop (owner stop, deadline) and they did not end within the grace
-   * (host.ts CANCEL_GRACE_MS): the attempt is ended by the host so its tree can be released. */
+   * (observe.ts CANCEL_GRACE_MS): the attempt is ended by the host so its tree can be released. */
   | { t: 'abandoned'; reason: string }
-  /** The server restarted while it was live (host.ts interruptBootLive): its crew runs `runIds`
+  /** The server restarted while it was live (tick.ts interruptBootLive): its crew runs `runIds`
    * were cancelled at boot, so a crew turn never resumes on the harness of the backend that
    * started it. Regression: owner 2026-11-03: crews restart on new sessions. Shown to the
    * manager like `failed`; a work or check attempt is replanned once under a new id
@@ -154,7 +154,7 @@ export type AttemptCost =
 
 /** Where owner feedback came from: the `expedition` tool's steer, or an owner message in the
  * expedition chat (the owner↔crew DM). A chat message carries its post id and ordered id, so the
- * host records each one once and reads only newer ones (host.ts observeChat). */
+ * host records each one once and reads only newer ones (observe.ts observeChat). */
 export type FeedbackVia = { t: 'tool' } | { t: 'chat'; postId: string; ord: string };
 
 /** The newest owner chat message already recorded as feedback. */
@@ -218,7 +218,7 @@ export type TreeId =
 export const INTEGRATION_TREE = { t: 'integration' } as const satisfies TreeId;
 export const MANAGER_TREE = { t: 'manager' } as const satisfies TreeId;
 
-/** A tree's key in `State.trees`, its salvage ref and its harvest folder (host.ts keepOf). Ids
+/** A tree's key in `State.trees`, its salvage ref and its harvest folder (run.ts keepOf). Ids
  * are `<prefix><hex>`, so no attempt or validation key is `integration` or `manager`. */
 export function treeKey(id: TreeId): string {
   switch (id.t) {
@@ -1186,6 +1186,14 @@ export function attemptOf(s: State, id: string): Attempt {
   const attempt = byId<Attempt>(s.workers, id) ?? byId<Attempt>(s.managers, id);
   if (!attempt) throw new Error(`unknown attempt ${id}`);
   return attempt;
+}
+
+/** Every request a posted attempt made (its brief, then a repair): set by its `attempt_posted`,
+ * so an attempt that ran has them; asking for an unposted one's is a broken invariant. */
+export function requestsOf(s: State, attemptId: string): string[] {
+  const requests = s.requests[attemptId];
+  if (!requests) throw new Error(`attempt ${attemptId} posted no request`);
+  return requests;
 }
 
 /** The work attempts (claims are made only by work). */

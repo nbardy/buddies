@@ -13,7 +13,7 @@ import { announcePost } from '../src/buddies/events';
 import { cwdOf } from '../src/buddies/worker-config';
 import { parseOutcome } from '../src/expeditions/answers';
 import { runCommand } from '../src/expeditions/command';
-import { CANCEL_GRACE_MS, type ExpeditionHost } from '../src/expeditions/host';
+import type { ExpeditionHost } from '../src/expeditions/host';
 import {
   CharterRequest,
   type Entry,
@@ -21,6 +21,7 @@ import {
   attemptOf,
   worksOf,
 } from '../src/expeditions/model';
+import { CANCEL_GRACE_MS } from '../src/expeditions/observe';
 import { clip, clipBlock, goalSummary, launchNews } from '../src/expeditions/render';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import { createLedger } from '../src/expeditions/store';
