@@ -29,7 +29,9 @@ The ledger always stores the full charter. Seat models may be the owner's words:
 not a catalog id resolves once, at ingestion, when its words pick exactly one of that provider's
 catalog models by id or display name (`haiku` or `claude haiku` → `claude-haiku-5-5`, `sonnet` →
 `claude-sonnet-5-5`, `fable`), and `resolved` lists each one; a name that picks none or several
-(`codex sol`) is left as written and refused with the valid ids. Never an invented id.
+(`codex sol`) is left as written and refused with the valid ids. Never an invented id. A seat's
+model is stored tagged: `{t:'default'}` (the provider picks it at run time) or
+`{t:'named', id}`; the tool input stays the plain optional `model` word.
 
 `page` is the expedition page's path as plain data, not a link to post: the host has already
 posted the clickable badge in the launch chat, and `next` tells the Buddy so. (2026-11-01 smoke:
@@ -133,7 +135,7 @@ with typed checks, not a prose skill:
    the result lists.
 
 Built shape (2026-11-01, design.md R2): `done` is `{ checks: DoneCheck[] }` or
-`{ ownerJudgment: true }`, with
+`{ ownerJudgment: true }` (the ledger stores it tagged, `{t:'checks', checks}` or `{t:'owner'}`), with
 `DoneCheck = { kind: 'command', argv: string[], timeoutSeconds } | { kind: 'judged', text }`.
 Prefer a `command` check whenever completion can be tested (`["pnpm","test","widget"]`): the
 host runs it on the expedition branch head at done, and no agent can report it passed. `judged`

@@ -3,32 +3,71 @@ import { z } from 'zod';
 // The owner's WHAT (reflection never edits it) and the attempt answer shapes, parsed once at the
 // boundary: the charter by the `expedition` tool, results by briefs.ts `parseOutcome` (κ).
 
-export const WorkerConfig = z
+/** A seat's model: the provider's default (picked at run time), or a catalog id the launch named
+ * (resolved once by charterOf). Never an absent field read as "default" downstream. */
+export const SeatModel = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('default') }).strict(),
+  z.object({ t: z.literal('named'), id: z.string().min(1) }).strict(),
+]);
+export type SeatModel = z.infer<typeof SeatModel>;
+const DEFAULT_MODEL: SeatModel = { t: 'default' };
+
+/** A seat as a launch names it (the tool's input): the model may be left out or be an owner word. */
+const SeatRequest = z
   .object({
     provider: z.string().min(1),
     model: z.string().min(1).optional(),
     reasoningEffort: z.string().min(1).optional(),
   })
   .strict();
+type SeatRequest = z.infer<typeof SeatRequest>;
+
+/** A chartered seat (canonical: what the ledger and drafts hold). */
+export const WorkerConfig = z
+  .object({
+    provider: z.string().min(1),
+    model: SeatModel,
+    reasoningEffort: z.string().min(1).optional(),
+  })
+  .strict();
 
 export type WorkerConfig = z.infer<typeof WorkerConfig>;
 
+const modelName = (m: SeatModel): string[] => {
+  switch (m.t) {
+    case 'default':
+      return [];
+    case 'named':
+      return [m.id];
+  }
+};
 /** A seat's display name, e.g. `codex/gpt-5/high`. */
 export const seatLabel = (w: WorkerConfig) =>
-  [w.provider, w.model, w.reasoningEffort].filter(Boolean).join('/');
+  [w.provider, ...modelName(w.model), w.reasoningEffort].filter(Boolean).join('/');
 /** Same provider and model (effort aside): the independence rule for checks. */
 export const sameModel = (a: WorkerConfig, b: WorkerConfig) =>
-  a.provider === b.provider && (a.model ?? '') === (b.model ?? '');
+  a.provider === b.provider && modelName(a.model).join() === modelName(b.model).join();
+/** The run config a seat's Buddy run takes (the crate's shape: an absent model is its default). */
+export const seatRunConfig = (w: WorkerConfig) => ({
+  provider: w.provider,
+  model: modelName(w.model).at(0),
+  reasoningEffort: w.reasoningEffort,
+});
 
 /** Who runs each attempt kind. Work and check seats are rosters: the manager picks a work seat;
  * the engine seats every check on a model other than the claim's author (blind and independent). */
-export const Crew = z
-  .object({
-    manager: WorkerConfig,
-    work: z.array(WorkerConfig).min(1).max(4),
-    check: z.array(WorkerConfig).min(1).max(4),
-  })
-  .strict();
+const rosterOf = <S extends z.ZodTypeAny>(seat: S) =>
+  z
+    .object({
+      manager: seat,
+      work: z.array(seat).min(1).max(4),
+      check: z.array(seat).min(1).max(4),
+    })
+    .strict();
+export const Crew = rosterOf(WorkerConfig);
+export type Crew = z.infer<typeof Crew>;
+const CrewRequest = rosterOf(SeatRequest);
+type CrewRequest = z.infer<typeof CrewRequest>;
 
 /**
  * One done check (design.md R2). `command`: an argv the HOST runs (never an agent, never edited by
@@ -70,11 +109,23 @@ export const DoneCheck = z.discriminatedUnion('kind', [
 export type DoneCheck = z.infer<typeof DoneCheck>;
 export type CommandCheck = Extract<DoneCheck, { kind: 'command' }>;
 
-export const Done = z.union([
+/** How completion is decided: typed checks, or the owner's judgment (declared, never defaulted). */
+export const Done = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('checks'), checks: z.array(DoneCheck).min(1).max(10) }).strict(),
+  z.object({ t: z.literal('owner') }).strict(),
+]);
+export type Done = z.infer<typeof Done>;
+
+/** `done` as a launch names it (the tool's input, unchanged since R2 so adopted turns keep
+ * working): typed checks, or the owner's judgment declared explicitly. κ: charterOf. */
+const DoneRequest = z.union([
   z.object({ checks: z.array(DoneCheck).min(1).max(10) }).strict(),
   z.object({ ownerJudgment: z.literal(true) }).strict(),
 ]);
-export type Done = z.infer<typeof Done>;
+type DoneRequest = z.infer<typeof DoneRequest>;
+
+const doneOf = (request: DoneRequest): Done =>
+  'checks' in request ? { t: 'checks', checks: request.checks } : { t: 'owner' };
 
 export const Charter = z
   .object({
@@ -100,7 +151,7 @@ export type Charter = z.infer<typeof Charter>;
  * default applied (provenance as data, never a silent fill). The ledger always holds the full
  * `Charter`.
  */
-export const CharterRequest = Charter.partial({
+export const CharterRequest = Charter.extend({ done: DoneRequest, crew: CrewRequest }).partial({
   inScope: true,
   outOfScope: true,
   maxLive: true,
@@ -112,10 +163,16 @@ export type CharterRequest = z.infer<typeof CharterRequest>;
 
 /** The default crew: a Claude manager, work and checks on Claude and Codex (so every claim has a
  * check seat on the other model), each on its provider's default model. */
-export const DEFAULT_CREW: z.infer<typeof Crew> = {
-  manager: { provider: 'claude' },
-  work: [{ provider: 'claude' }, { provider: 'codex' }],
-  check: [{ provider: 'codex' }, { provider: 'claude' }],
+export const DEFAULT_CREW: Crew = {
+  manager: { provider: 'claude', model: DEFAULT_MODEL },
+  work: [
+    { provider: 'claude', model: DEFAULT_MODEL },
+    { provider: 'codex', model: DEFAULT_MODEL },
+  ],
+  check: [
+    { provider: 'codex', model: DEFAULT_MODEL },
+    { provider: 'claude', model: DEFAULT_MODEL },
+  ],
 };
 export const CHARTER_DEFAULTS = {
   inScope: [] as string[],
@@ -126,7 +183,7 @@ export const CHARTER_DEFAULTS = {
   crew: DEFAULT_CREW,
 };
 
-export const crewLine = (crew: z.infer<typeof Crew>) =>
+export const crewLine = (crew: Crew) =>
   `manager ${seatLabel(crew.manager)}; work ${crew.work.map(seatLabel).join(', ')}; check ${crew.check.map(seatLabel).join(', ')}`;
 
 /** A provider's models (host: the installed provider catalog the seat check reads): a closed
@@ -151,39 +208,41 @@ const nameTokens = (name: string) =>
  * written would also defeat the check-independence rule, which compares model strings.
  */
 function seatOf(
-  seat: WorkerConfig,
+  seat: SeatRequest,
   where: string,
   models: ModelsOf
 ): { seat: WorkerConfig; resolved: string[] } {
+  const named = (model: string): WorkerConfig => ({ ...seat, model: { t: 'named', id: model } });
+  if (seat.model === undefined) return { seat: { ...seat, model: DEFAULT_MODEL }, resolved: [] };
   const catalog = models(seat.provider);
   switch (catalog.t) {
     // An open provider's id outside its list may be valid as written: matching words would
     // rewrite `opencode/gpt-5` to `opencode/gpt-5-nano`, another model (2026-11-01 review).
     case 'open':
-      return { seat, resolved: [] };
-    case 'closed':
-      return closedSeatOf(seat, where, catalog.models);
+      return { seat: named(seat.model), resolved: [] };
+    case 'closed': {
+      const id = catalogId(seat.model, catalog.models);
+      return {
+        seat: named(id),
+        resolved: id === seat.model ? [] : [`${where}: "${seat.model}" → ${id}`],
+      };
+    }
   }
 }
 
-function closedSeatOf(
-  seat: WorkerConfig,
-  where: string,
-  catalog: readonly { id: string; displayName: string }[]
-): { seat: WorkerConfig; resolved: string[] } {
-  const model = seat.model;
-  if (model === undefined || catalog.some((m) => m.id === model)) return { seat, resolved: [] };
+/** The catalog id an owner's model word names: itself when it is an id or picks no single
+ * model (the seat check then refuses it by name), else the one model its words pick. */
+function catalogId(model: string, catalog: readonly { id: string; displayName: string }[]): string {
+  if (catalog.some((m) => m.id === model)) return model;
   const want = nameTokens(model);
   const matches = catalog.filter((m) => {
     const have = new Set([...nameTokens(m.id), ...nameTokens(m.displayName)]);
     return want.every((t) => have.has(t));
   });
-  if (matches.length !== 1) return { seat, resolved: [] };
-  const id = matches[0].id;
-  return { seat: { ...seat, model: id }, resolved: [`${where}: "${model}" → ${id}`] };
+  return matches.length === 1 ? matches[0].id : model;
 }
 
-function crewOf(crew: z.infer<typeof Crew>, models: ModelsOf) {
+function crewOf(crew: CrewRequest, models: ModelsOf) {
   const manager = seatOf(crew.manager, 'manager', models);
   const work = crew.work.map((w, i) => seatOf(w, `work seat ${i}`, models));
   const check = crew.check.map((w, i) => seatOf(w, `check seat ${i}`, models));
@@ -203,9 +262,13 @@ export function charterOf(
   request: CharterRequest,
   models: ModelsOf
 ): { charter: Charter; defaulted: CharterDefault[]; resolved: string[] } {
-  const seats = crewOf(request.crew ?? CHARTER_DEFAULTS.crew, models);
+  const seats =
+    request.crew === undefined
+      ? { crew: CHARTER_DEFAULTS.crew, resolved: [] }
+      : crewOf(request.crew, models);
   const charter: Charter = {
     ...request,
+    done: doneOf(request.done),
     inScope: request.inScope ?? CHARTER_DEFAULTS.inScope,
     outOfScope: request.outOfScope ?? CHARTER_DEFAULTS.outOfScope,
     maxLive: request.maxLive ?? CHARTER_DEFAULTS.maxLive,
@@ -246,9 +309,19 @@ export function charterIssues(c: Charter): string[] {
   );
 }
 
+/** The charter's typed done checks (none when the owner judges completion). */
+export function doneChecks(done: Done): DoneCheck[] {
+  switch (done.t) {
+    case 'checks':
+      return done.checks;
+    case 'owner':
+      return [];
+  }
+}
+
 /** Non-blocking: what would make the charter checkable by the host rather than by judgment. */
 export function charterAdvice(c: Charter): string[] {
-  const checks = 'checks' in c.done ? c.done.checks : [];
+  const checks = doneChecks(c.done);
   return [
     ...(checks.some((x) => x.kind === 'command')
       ? []
@@ -262,7 +335,28 @@ export function charterAdvice(c: Charter): string[] {
 }
 
 /** Where status posts go: the thread the launch came from, or the owner↔launcher DM. */
-export type Origin = { t: 'thread'; channelId: string; rootId: string } | { t: 'direct' };
+export const Origin = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('thread'), channelId: z.string(), rootId: z.string() }).strict(),
+  z.object({ t: z.literal('direct') }).strict(),
+]);
+export type Origin = z.infer<typeof Origin>;
+
+/** The most hours one `extend` adds (the charter's own `hours` limit). */
+export const EXTEND_MAX_HOURS = 72;
+const FeedbackText = z.string().trim().min(1).max(2000);
+
+/**
+ * Owner steering, one type for every way it arrives (the tool's `steer`, a chat message parsed
+ * by briefs.ts chatFeedback) and as the ledger records it. Grouped as the tool's input always
+ * was (tool-contract.test.ts: an input schema changes only additively). `resume` re-plans (design.md R11);
+ * `extend` moves the deadline (the charter itself is never edited).
+ */
+export const Feedback = z.union([
+  z.object({ t: z.enum(['lesson', 'note']), text: FeedbackText }).strict(),
+  z.object({ t: z.enum(['pause', 'resume', 'stop']) }).strict(),
+  z.object({ t: z.literal('extend'), hours: z.number().positive().max(EXTEND_MAX_HOURS) }).strict(),
+]);
+export type Feedback = z.infer<typeof Feedback>;
 
 // ---------- Attempt results ----------
 

@@ -1,8 +1,10 @@
 import type {
+  ExpeditionAttempt,
   ExpeditionAttemptCost,
   ExpeditionAttemptPhase,
+  ExpeditionAttemptRole,
+  ExpeditionBriefing,
   ExpeditionCharterView,
-  ExpeditionDone,
   ExpeditionIntegration,
   ExpeditionSummary,
   ExpeditionValidation,
@@ -10,11 +12,14 @@ import type {
   ExpeditionWorktree,
 } from '@unleashd/shared';
 import {
+  type Attempt,
   type AttemptPhase,
+  type AttemptSpec,
   type Charter,
   type State,
   type Validation,
   type WorkerConfig,
+  allAttempts,
   attemptTitle,
   attemptsOn,
   checkOutcomeLabel,
@@ -24,6 +29,7 @@ import {
   costTotals,
   deadlineMs,
   exploreCap,
+  goalSummary,
   headOf,
   integrationHeadline,
   live,
@@ -53,13 +59,23 @@ import {
  * none (the provider picks it at run time), and the effort when set. 2026-11-01 visual pass: a
  * card read only "claude". */
 const seatName = (w: WorkerConfig) =>
-  [w.provider, w.model ?? 'default model', w.reasoningEffort].filter(Boolean).join(' · ');
+  [w.provider, modelWord(w.model), w.reasoningEffort].filter(Boolean).join(' · ');
+
+function modelWord(m: WorkerConfig['model']): string {
+  switch (m.t) {
+    case 'default':
+      return 'default model';
+    case 'named':
+      return m.id;
+  }
+}
 
 export function charterView(c: Charter): ExpeditionCharterView {
   return {
     name: c.name,
     goal: c.goal,
-    done: doneView(c.done),
+    goalLine: goalSummary(c.goal),
+    done: c.done,
     inScope: c.inScope,
     outOfScope: c.outOfScope,
     roster: {
@@ -78,6 +94,8 @@ export function charterView(c: Charter): ExpeditionCharterView {
 
 export function expeditionView(s: State, badgeLine: string, now: string): ExpeditionView {
   const c = s.charter;
+  const counts = countsOf(s);
+  const cost = costTotals(s);
   return {
     id: s.id,
     badge: badgeLine,
@@ -85,7 +103,8 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
     charter: charterView(c),
     validations: s.validations.map((v) => validationView(s, v)),
     integration: integrationView(s),
-    cost: costTotals(s),
+    cost,
+    line: summaryLine(counts, cost),
     workspaceId: s.workspaceId,
     launchedAt: s.launchedAt,
     deadline: new Date(deadlineMs(s)).toISOString(),
@@ -95,7 +114,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
         ? { t: 'ready' as const, buddyId: s.crew.buddyId, chatChannelId: s.crew.chatChannelId }
         : { t: 'pending' as const },
     retirement: s.retirement,
-    counts: countsOf(s),
+    counts,
     questions: s.questions.map((q) => ({
       ...q,
       // By title: the owner reads them (the manager's `after` names only questions it added).
@@ -103,20 +122,7 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
       stage: questionStage(s, q),
       attempts: attemptsOn(s, q.id).map((a) => a.id),
     })),
-    attempts: s.attempts.map((a) => ({
-      id: a.id,
-      kind: a.spec.kind,
-      label: attemptTitle(s, a),
-      ask: a.spec.kind === 'work' ? a.spec.brief : null,
-      seat: seatName(configOf(c, a.spec)),
-      questionId: a.spec.kind === 'manager' ? null : a.spec.questionId,
-      phase: phaseView(a.phase),
-      live: live(s).some((x) => x.id === a.id),
-      brief: s.briefs[a.id] ?? null,
-      requestId: a.phase.t === 'posted' || a.phase.t === 'ended' ? a.phase.requestId : null,
-      worktree: worktreeView(s, a.id),
-      cost: attemptCost(s, a.id, a.phase),
-    })),
+    attempts: allAttempts(s).map((a) => attemptView(s, a)),
     panels: panels(s),
     verifications: verifications(s),
     reflections: s.reflections,
@@ -126,20 +132,63 @@ export function expeditionView(s: State, badgeLine: string, now: string): Expedi
 
 /** One row of the expedition list; a retired expedition's snapshot keeps it (retired.ts). */
 export function expeditionSummary(s: State): ExpeditionSummary {
+  const counts = countsOf(s);
+  const cost = costTotals(s);
   return {
     id: s.id,
     name: s.charter.name,
     run: s.run,
     workspaceId: s.workspaceId,
     launchedAt: s.launchedAt,
-    counts: countsOf(s),
-    cost: costTotals(s),
+    counts,
+    cost,
+    line: summaryLine(counts, cost),
     retirement: s.retirement,
   };
 }
 
-function doneView(done: Charter['done']): ExpeditionDone {
-  return 'checks' in done ? { t: 'checks', checks: done.checks } : { t: 'owner' };
+/** The list's one progress line (the header's counts, shorter). */
+export const summaryLine = (counts: ExpeditionView['counts'], cost: ExpeditionView['cost']) =>
+  `${counts.liveWorkers} live · ${counts.verified} verified · ${counts.attempts}/${counts.maxAttempts} attempts · ${cost.short}`;
+
+function attemptView(s: State, a: Attempt): ExpeditionAttempt {
+  return {
+    ...roleView(a.spec),
+    id: a.id,
+    label: attemptTitle(s, a),
+    seat: seatName(configOf(s.charter, a.spec)),
+    phase: phaseView(a.phase),
+    live: live(s).some((x) => x.id === a.id),
+    briefing: briefingView(s, a),
+    worktree: worktreeView(s, a.id),
+    cost: attemptCost(s, a.id, a.phase),
+  };
+}
+
+function roleView(spec: AttemptSpec): ExpeditionAttemptRole {
+  switch (spec.kind) {
+    case 'manager':
+      return { kind: 'manager' };
+    case 'work':
+      return { kind: 'work', questionId: spec.questionId, ask: spec.brief };
+    case 'check':
+      return { kind: 'check', questionId: spec.questionId, goal: spec.goal };
+  }
+}
+
+/** Its instructions follow its phase: recorded at `posting`, posted from then on. */
+function briefingView(s: State, a: Attempt): ExpeditionBriefing {
+  switch (a.phase.t) {
+    case 'planned':
+    case 'admitted':
+    case 'dropped':
+      return { t: 'unbriefed' };
+    case 'posting':
+      return { t: 'briefed', brief: s.briefs[a.id] };
+    case 'posted':
+    case 'ended':
+      return { t: 'posted', brief: s.briefs[a.id], requestId: a.phase.requestId };
+  }
 }
 
 /** An ended attempt's metered cost; `settling` until the host read it (meter.ts). */
@@ -210,7 +259,8 @@ export function countsOf(s: State): ExpeditionView['counts'] {
     maxAttempts: c.maxAttempts,
     decisions: managerTurns(s),
     maxDecisions: managerCap(c),
-    live: liveWorkers(s).length,
+    running: live(s).length,
+    liveWorkers: liveWorkers(s).length,
     maxLive: c.maxLive,
     queued: queued(s).length,
     verified: verifiedClaims(s),

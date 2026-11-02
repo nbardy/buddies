@@ -3,11 +3,11 @@ import { z } from 'zod';
 import type { BuddyGrant } from '../buddies/grants';
 import type { ToolDeps } from '../buddies/mcp';
 import { createProviderCatalog } from '../providers/catalog-service';
-import { EXTEND_MAX_HOURS } from './briefs';
 import type { ExpeditionHost, Launched, Retire } from './host';
 import {
   type CharterDefault,
   CharterRequest,
+  Feedback,
   type ModelsOf,
   type Origin,
   type State,
@@ -20,19 +20,12 @@ import {
 // The one `expedition` Buddy tool. Its description is paid on every worker turn
 // (tool-contract.test.ts budget), so usage detail lives in BUDDY_TOOL_GUIDE and expeditions/mcp.md.
 
-/** `resume` re-plans (design.md R11); `extend` moves the deadline by up to 72 hours. */
-const Steer = z.union([
-  z.object({ t: z.enum(['lesson', 'note']), text: z.string().trim().min(1).max(2000) }).strict(),
-  z.object({ t: z.enum(['pause', 'resume', 'stop']) }).strict(),
-  z.object({ t: z.literal('extend'), hours: z.number().positive().max(EXTEND_MAX_HOURS) }).strict(),
-]);
-
 export const ExpeditionAction = z.discriminatedUnion('do', [
   z.object({ do: z.literal('draft'), charter: CharterRequest }).strict(),
   z.object({ do: z.literal('launch'), charter: CharterRequest }).strict(),
   z.object({ do: z.literal('status'), id: z.string().min(1) }).strict(),
   z.object({ do: z.literal('list') }).strict(),
-  z.object({ do: z.literal('steer'), id: z.string().min(1), feedback: Steer }).strict(),
+  z.object({ do: z.literal('steer'), id: z.string().min(1), feedback: Feedback }).strict(),
   z.object({ do: z.literal('retire'), id: z.string().min(1) }).strict(),
 ]);
 export type ExpeditionAction = z.infer<typeof ExpeditionAction>;

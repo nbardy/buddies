@@ -4,15 +4,19 @@ import path from 'node:path';
 import type { ExpeditionRetiredView, ExpeditionSummary } from '@unleashd/shared';
 import { z } from 'zod';
 import type { State } from './ledger';
-import { expeditionSummary } from './view';
+import { expeditionSummary, summaryLine } from './view';
 
 // A retired expedition (plan A6) is frozen: `<root>/.retired/<id>.json` holds its summary and its
 // last status report, and its folder (ledger, harvest) moves to `<root>/.retired/<id>/`. Boot
 // reads the snapshots and never folds a retired ledger again, so code that changes the ledger
-// format owes nothing to a retired expedition.
+// format owes nothing to a retired expedition. The snapshot file is persisted data with its own
+// frozen shape (`expedition.retired/v1`): the served ExpeditionSummary is derived from it on read,
+// so a change to the wire summary never strands a snapshot already on disk.
 
 export const RETIRED_DIR = '.retired';
 
+/** v1 counts: `live` is the live work and check attempts (none once retired: retirement waits
+ * until nothing is live, effects.ts retireEffects). */
 const Counts = z.object({
   attempts: z.number(),
   maxAttempts: z.number(),
@@ -62,11 +66,19 @@ const Snapshot = z
   .strict();
 export type RetiredSnapshot = z.infer<typeof Snapshot>;
 
-export const retiredView = (snapshot: RetiredSnapshot): ExpeditionRetiredView => ({
-  t: 'retired',
-  summary: snapshot.summary satisfies ExpeditionSummary,
-  report: snapshot.report,
-});
+export function retiredView(snapshot: RetiredSnapshot): ExpeditionRetiredView {
+  const { live, ...counts } = snapshot.summary.counts;
+  const served: ExpeditionSummary['counts'] = { ...counts, running: live, liveWorkers: live };
+  return {
+    t: 'retired',
+    summary: {
+      ...snapshot.summary,
+      counts: served,
+      line: summaryLine(served, snapshot.summary.cost),
+    },
+    report: snapshot.report,
+  };
+}
 
 /** What boot reads in `.retired`: each snapshot, or why one does not read (set aside, named). */
 export type RetiredFile =
@@ -98,9 +110,11 @@ export function readRetired(root: string): Map<string, RetiredFile> {
 /** The frozen record of a state whose last line is `retired`; `report` is its status text. */
 export function snapshotOf(s: State, report: string): RetiredSnapshot {
   const tags = s.archive.tags.map((t) => `- ${t.branch} → tag ${t.tag} at ${t.sha.slice(0, 10)}`);
+  const { line: _line, counts, ...summary } = expeditionSummary(s);
+  const { running: _running, liveWorkers, ...rest } = counts;
   return Snapshot.parse({
     t: 'expedition.retired/v1',
-    summary: expeditionSummary(s),
+    summary: { ...summary, counts: { ...rest, live: liveWorkers } },
     report: tags.length > 0 ? `${report}\n\nArchived on origin:\n${tags.join('\n')}` : report,
   });
 }

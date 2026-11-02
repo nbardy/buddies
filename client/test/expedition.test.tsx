@@ -70,6 +70,7 @@ const view: ExpeditionView = {
     name: 'widget',
     // Markdown, as the Buddy writes it (2026-11-01 screenshot: shown as raw text before).
     goal: 'Make the **widget** pass its test.\n\n1. Find the failure\n2. Fix it',
+    goalLine: 'Make the widget pass its test.',
     done: {
       t: 'checks',
       checks: [
@@ -110,12 +111,14 @@ const view: ExpeditionView = {
   deadline: '2026-11-01T04:00:00.000Z',
   now: '2026-11-01T00:10:00.000Z',
   crew: { t: 'pending' },
+  line: '1 live · 0 verified · 3/20 attempts · 2k tokens',
   counts: {
     attempts: 3,
     maxAttempts: 20,
     decisions: 2,
     maxDecisions: 42,
-    live: 1,
+    running: 1,
+    liveWorkers: 1,
     maxLive: 2,
     queued: 0,
     verified: 0,
@@ -145,8 +148,7 @@ const view: ExpeditionView = {
       questionId: 'q1',
       phase: { t: 'ended', verdict: 'Claim', summary: 'fixed' },
       live: false,
-      brief: 'Patch the widget.',
-      requestId: 'post-0',
+      briefing: { t: 'posted', brief: 'Patch the widget.', requestId: 'post-0' },
       worktree: { t: 'tree', branch: 'exp/widget-abc123/w0', path: '/x/w0' },
       cost: { t: 'unmeasured', reason: 'muse records no token usage (session s1)' },
     },
@@ -159,8 +161,11 @@ const view: ExpeditionView = {
       questionId: 'q1',
       phase: { t: 'posted' },
       live: true,
-      brief: 'Bisect the last ten commits.\nStart at @lead.',
-      requestId: 'post-1',
+      briefing: {
+        t: 'posted',
+        brief: 'Bisect the last ten commits.\nStart at @lead.',
+        requestId: 'post-1',
+      },
       worktree: { t: 'tree', branch: 'exp/widget-abc123/w1', path: '/x/w1' },
       cost: { t: 'none' },
     },
@@ -396,6 +401,7 @@ const summary = (
   launchedAt: '2026-11-01T00:00:00.000Z',
   counts: view.counts,
   cost: view.cost,
+  line: view.line,
   retirement: { t: 'active' },
 });
 
@@ -642,7 +648,7 @@ test('a launch badge renders its row from the shared expedition list, not a per-
     })
   );
   assert.match(html, /Open expedition badge-list-only/);
-  assert.match(html, /1 live · 0 verified · 3\/20 · 2k tokens/);
+  assert.match(html, /1 live · 0 verified · 3\/20 attempts · 2k tokens/);
   const { resourceAtomFamily } = await import('../src/atoms/resources');
   assert.equal(
     jotaiStore.get(resourceAtomFamily(expeditionUrl('badge-list-only'))).kind,

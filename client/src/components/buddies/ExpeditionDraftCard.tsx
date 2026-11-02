@@ -2,7 +2,7 @@ import type { ExpeditionDraftView } from '@unleashd/shared';
 import { Suspense, lazy, useState } from 'react';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { DraftLaunchButton } from './ExpeditionDraftLaunch';
-import { DRAFT_PILL, budgetLine, draftUrl, goalLine } from './expedition-view';
+import { DRAFT_PILL, budgetLine, draftUrl } from './expedition-view';
 import './BuddyWorkerThreadBadge.css';
 import './Expedition.css';
 
@@ -40,7 +40,7 @@ export function ExpeditionDraftCard({
         ⛺ <strong className="ui-truncate">{d.charter.name}</strong>
         <span className={`expedition-pill expedition-tone-${pill.tone}`}>{pill.label}</span>
       </div>
-      <span className="ui-truncate">{goalLine(d.charter.goal)}</span>
+      <span className="ui-truncate">{d.charter.goalLine}</span>
       <span className="ui-muted">
         {budgetLine(d.charter.limits)}
         {issues > 0 && ` · ${issues} ${issues === 1 ? 'issue' : 'issues'}`}

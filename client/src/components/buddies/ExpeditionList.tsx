@@ -17,7 +17,6 @@ import {
   expeditionGroups,
   expeditionPill,
   ownerActions,
-  summaryLine,
 } from './expedition-view';
 import '../../views/conversation-row/ConversationRow.css';
 import './Expedition.css';
@@ -59,7 +58,7 @@ export function ExpeditionRailRow({
         className={classes.row || undefined}
         data-unread={RUN_LOOK[e.run.t].emphasis}
         onClick={() => open(e.id)}
-        title={`${e.name} — ${expeditionPill(e).label}\n${summaryLine(e)}`}
+        title={`${e.name} — ${expeditionPill(e).label}\n${e.line}`}
       >
         <span className={`${classes.hash} expedition-rail-dot`} aria-hidden="true">
           <span className="conversation-row__dot" data-status={RUN_LOOK[e.run.t].dot} />
@@ -203,7 +202,7 @@ function ExpeditionGroup({
               <span className="expedition-index-text ui-stack">
                 <strong className="ui-truncate">{e.name}</strong>
                 <span className="ui-muted ui-truncate">
-                  launched {formatRelativeAge(Date.parse(e.launchedAt))} · {summaryLine(e)}
+                  launched {formatRelativeAge(Date.parse(e.launchedAt))} · {e.line}
                 </span>
               </span>
               <span className={`expedition-pill expedition-tone-${expeditionPill(e).tone}`}>
@@ -264,7 +263,7 @@ export function HomeExpeditions({ workspaceId }: { workspaceId: string }) {
                 {e.name}
               </span>
               <span className="landing-request-body">
-                {expeditionPill(e).label} · {summaryLine(e)}
+                {expeditionPill(e).label} · {e.line}
               </span>
             </button>
           </li>

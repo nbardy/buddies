@@ -57,6 +57,7 @@ import {
   type ValidationBasis,
   type ValidationReport,
   type ValidationTarget,
+  allAttempts,
   apply,
   attemptOf,
   badge,
@@ -77,6 +78,7 @@ import {
   live,
   managerDirectory,
   pendingEffects,
+  seatRunConfig,
   treeKey,
   treeOf,
   validationOf,
@@ -186,7 +188,7 @@ function seatIssues(charter: Charter, installed: (provider: Provider) => boolean
   ];
   return seats.flatMap(({ where, seat }) => {
     try {
-      checkedRunConfig(seat);
+      checkedRunConfig(seatRunConfig(seat));
     } catch (error) {
       return [(error as Error).message];
     }
@@ -354,7 +356,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   async function observe(s: State): Promise<Observed> {
     const parts: [string, () => Promise<Entry[]>][] = [
       ['the expedition chat', () => observeChat(s)],
-      ...s.attempts.flatMap((attempt): [string, () => Promise<Entry[]>][] =>
+      ...allAttempts(s).flatMap((attempt): [string, () => Promise<Entry[]>][] =>
         attempt.phase.t === 'posted'
           ? [[`attempt ${attempt.id}`, () => observeAttempt(s, attempt)]]
           : []
@@ -824,9 +826,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       name: `⛺ ${s.charter.name}`,
       role: `${CREW_ROLE} Your expedition id: ${s.id}.`,
       manager: { kind: 'buddy', id: s.launcherId },
-      provider: s.charter.crew.manager.provider,
-      model: s.charter.crew.manager.model,
-      reasoningEffort: s.charter.crew.manager.reasoningEffort,
+      ...seatRunConfig(s.charter.crew.manager),
       key: `exp:${s.id}:crew`,
     });
     // The owner↔crew DM is the expedition's chat (opening it is idempotent).
@@ -1123,7 +1123,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
         // The run starts in the attempt's own tree (crate RunConfig.cwd, plan B5): the run
         // carries it, so no turn re-derives it from the ledger.
         runConfig: {
-          ...configOf(s.charter, attempt.spec),
+          ...seatRunConfig(configOf(s.charter, attempt.spec)),
           cwd: { kind: 'path', path: attemptDirectory(s, attempt) },
         },
         broadcast: false,
@@ -1349,14 +1349,14 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
   async function interruptCrew(id: string): Promise<void> {
     // An attempt whose brief is recorded but not its post is posted first (same key: a post a
     // crash left is found, not made twice), so every live attempt names its request.
-    for (const a of stateOf(id).attempts)
+    for (const a of allAttempts(stateOf(id)))
       if (a.phase.t === 'posting')
         await append(id, await postAttempt(stateOf(id), a.id, a.phase.body, a.phase.round));
     const s = stateOf(id);
     if (s.crew.t !== 'ready') throw new Error(`expedition ${id} interrupted before its crew`);
     // Before the cancel: an attempt whose request already settled is the observer's, not ours.
     const waiting: Attempt[] = [];
-    for (const a of s.attempts) {
+    for (const a of allAttempts(s)) {
       if (a.phase.t !== 'posted') continue;
       const request = await core.getPost(OWNER, a.phase.requestId);
       if (request.request.state === 'awaiting' || request.request.state === 'none') waiting.push(a);
@@ -1574,7 +1574,9 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     summaries(): ExpeditionSummary[] {
       return [
         ...[...states.values()].map(expeditionSummary),
-        ...[...retired.values()].filter((r) => !states.has(r.summary.id)).map((r) => r.summary),
+        ...[...retired.values()]
+          .filter((r) => !states.has(r.summary.id))
+          .map((r) => retiredView(r).summary),
       ].sort((a, b) => b.launchedAt.localeCompare(a.launchedAt));
     },
     /** The expedition a crew Buddy belongs to, so a mentioned crew can answer about itself. */

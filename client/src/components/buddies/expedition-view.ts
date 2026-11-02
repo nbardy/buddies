@@ -51,6 +51,7 @@ export const summaryOf = (read: ExpeditionRead): ExpeditionSummary => {
         launchedAt: v.launchedAt,
         counts: v.counts,
         cost: v.cost,
+        line: v.line,
         retirement: v.retirement,
       };
     }
@@ -73,7 +74,7 @@ export function pollMsOf(
     case 'retiring':
       return liveMs;
     case 'active':
-      return s.run.t === 'finished' && s.counts.live === 0 ? 0 : liveMs;
+      return s.run.t === 'finished' && s.counts.running === 0 ? 0 : liveMs;
   }
 }
 
@@ -166,15 +167,6 @@ export function durationLabel(fromIso: string, toIso: string): string {
   return hours > 0 ? `${hours}h ${String(minutes % 60).padStart(2, '0')}m` : `${minutes}m`;
 }
 
-/** The goal's first prose line as plain text, for the draft card (headings are titles, skipped;
- * the same rule as the server's goalSummary in expeditions/news.ts). */
-export const goalLine = (goal: string) =>
-  goal
-    .split('\n')
-    .filter((line) => !/^\s*#{1,6}\s/.test(line))
-    .map((line) => line.replace(/^\s*(>\s*|[-*+]\s+|\d+[.)]\s+)/, '').trim())
-    .find(Boolean) ?? '';
-
 /** Every expedition, newest launch first (server expeditions/routes.ts). Under `/api/buddies`, so
  * `buddies_changed` refreshes it like the modal. */
 export const EXPEDITIONS_URL = '/api/buddies/expeditions';
@@ -206,10 +198,6 @@ export function expeditionGroups(all: readonly ExpeditionSummary[]) {
     retired: all.filter((e) => isRetired(e.retirement)),
   };
 }
-
-/** The list's one progress line (the header's counts, shorter). */
-export const summaryLine = (e: ExpeditionSummary) =>
-  `${e.counts.live} live · ${e.counts.verified} verified · ${e.counts.attempts}/${e.counts.maxAttempts} attempts · ${e.cost.short}`;
 
 /** The pill, badge and list label: one definition with the server's badge (shared). */
 export const runLabel = expeditionRunLabel;
@@ -329,8 +317,7 @@ export function attemptCostLine(
  * Workers tab lists them), queued work, verified claims. 2026-11-01 visual pass: the tile read
  * "0 live" while the Workers tab listed the running manager. */
 export function nowLine(v: ExpeditionView): string {
-  const running = v.attempts.filter((a) => a.live).length;
-  return `${running} running · ${v.counts.queued} queued · ${v.counts.verified} verified`;
+  return `${v.counts.running} running · ${v.counts.queued} queued · ${v.counts.verified} verified`;
 }
 
 /** The host validations of one attempt's claimed commit, oldest first. */

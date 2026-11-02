@@ -23,10 +23,7 @@ function BadgeCounts({ s }: { s: ExpeditionSummary }) {
   return (
     <>
       <span className={`expedition-pill expedition-tone-${pill.tone}`}>{pill.label}</span>
-      <span className="ui-truncate expedition-badge-counts">
-        {s.counts.live} live · {s.counts.verified} verified · {s.counts.attempts}/
-        {s.counts.maxAttempts} · {s.cost.short}
-      </span>
+      <span className="ui-truncate expedition-badge-counts">{s.line}</span>
     </>
   );
 }

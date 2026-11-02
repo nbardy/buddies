@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { OWNER, buddyActor } from '../src/buddies/core';
 import type { ExpeditionHost } from '../src/expeditions/host';
+import { allAttempts } from '../src/expeditions/model';
 import { fixture, git, json, rpcLaunch } from './fixtures/expedition-fixture';
 import test from './fixtures/shard';
 
@@ -170,7 +171,9 @@ test('stop_and_retire stops an open expedition first; a ref origin cannot confir
     assert.deepEqual(await f.host.retire(id, 'owner', 'stop_and_retire'), { t: 'retiring' });
     await f.host.tick(id);
     assert.ok(
-      f.stateOf(id).attempts.every((a) => a.id in f.stateOf(id).cancels || a.phase.t === 'ended')
+      allAttempts(f.stateOf(id)).every(
+        (a) => a.id in f.stateOf(id).cancels || a.phase.t === 'ended'
+      )
     );
     // The live manager's queued run was cancelled; its request stays open until the grace ends
     // it `abandoned`. Then metering's settle window.

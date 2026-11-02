@@ -488,16 +488,16 @@ function WorkerCard({
       </div>
       {/* Collapsed by default (2026-11-01 review: the open crew prompt read as debug output). */}
       <div className="ui-row expedition-disclosures">
-        {a.ask !== null && (
+        {a.kind === 'work' && (
           <details>
             <summary className="expedition-link">Brief</summary>
             <ExpeditionMarkdown text={a.ask} />
           </details>
         )}
-        {a.brief !== null && (
+        {a.briefing.t !== 'unbriefed' && (
           <details>
             <summary className="expedition-link">Full instructions</summary>
-            <ExpeditionMarkdown text={a.brief} />
+            <ExpeditionMarkdown text={a.briefing.brief} />
           </details>
         )}
       </div>

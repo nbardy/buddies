@@ -1,5 +1,6 @@
 import type {
   Attempt,
+  AttemptSpec,
   Charter,
   CheckSpec,
   Claim,
@@ -12,9 +13,11 @@ import type {
 } from './model';
 import {
   CheckResult,
+  EXTEND_MAX_HOURS,
   ManagerResult,
   WorkResult,
   acceptanceLabel,
+  allAttempts,
   attemptsOn,
   changeLabel,
   claimOf,
@@ -57,9 +60,6 @@ export const CREW_ROLE = [
 /** Longest owner text kept per chat message (the steer tool's own limit). */
 const CHAT_TEXT_MAX = 2000;
 
-/** The most hours one `extend` adds (the charter's own `hours` limit). */
-export const EXTEND_MAX_HOURS = 72;
-
 /**
  * An owner chat message as steering (κ, once, at observation; host.ts observeChat): the word
  * pause, resume or stop alone (resume re-plans, R11); `extend 3h` moves the deadline; `lesson: …`
@@ -80,14 +80,19 @@ export function chatFeedback(body: string): Feedback {
 
 const JSON_RULE = 'End your final message with exactly one fenced ```json block, nothing after it.';
 
+function doneText(done: Charter['done']): string {
+  switch (done.t) {
+    case 'checks':
+      return done.checks.map((x, i) => `- [${i}] ${doneCheckLabel(x)}`).join('\n');
+    case 'owner':
+      return '- The owner judges completion (no mechanical check).';
+  }
+}
+
 function charterText(c: Charter): string {
-  const done =
-    'checks' in c.done
-      ? c.done.checks.map((x, i) => `- [${i}] ${doneCheckLabel(x)}`).join('\n')
-      : '- The owner judges completion (no mechanical check).';
   return [
     `GOAL: ${c.goal}`,
-    `DONE WHEN:\n${done}`,
+    `DONE WHEN:\n${doneText(c.done)}`,
     `IN SCOPE:\n${c.inScope.map((x) => `- ${x}`).join('\n') || '- (not listed)'}`,
     `OUT OF SCOPE:\n${c.outOfScope.map((x) => `- ${x}`).join('\n') || '- (not listed)'}`,
   ].join('\n\n');
@@ -126,14 +131,19 @@ function integrationsText(s: State): string {
   return `INTEGRATION (the host merges validated claims into ${s.repo.branch}, one at a time; new work starts at its head):\n${s.integrations.map((i) => `- ${integrationLabel(s, i)}`).join('\n') || '- nothing merged yet'}`;
 }
 
+function specLine(spec: AttemptSpec): string {
+  switch (spec.kind) {
+    case 'manager':
+      return 'manager';
+    case 'work':
+      return `work on ${spec.questionId} (seat ${spec.seat})`;
+    case 'check':
+      return `check of ${spec.claimAttemptId} in panel ${spec.panelId}${spec.goal ? ' (GOAL)' : ''}`;
+  }
+}
+
 function attemptLine(s: State, a: Attempt): string {
-  const what =
-    a.spec.kind === 'manager'
-      ? 'manager'
-      : a.spec.kind === 'work'
-        ? `work on ${a.spec.questionId} (seat ${a.spec.seat})`
-        : `check of ${a.spec.claimAttemptId} in panel ${a.spec.panelId}${a.spec.goal ? ' (GOAL)' : ''}`;
-  return `- ${a.id} ${what}: ${phaseDetail(s, a)}`;
+  return `- ${a.id} ${specLine(a.spec)}: ${phaseDetail(s, a)}`;
 }
 
 function phaseDetail(s: State, a: Attempt): string {
@@ -169,7 +179,7 @@ function unseenLine(s: State, e: Entry): string {
     case 'rejected':
       return `- REJECTED ${e.action.do}: ${e.reason}`;
     case 'feedback':
-      return `- OWNER ${e.feedback.t}: ${'text' in e.feedback ? e.feedback.text : ''}`;
+      return `- OWNER ${feedbackDetail(e.feedback)}`;
     case 'question_added':
       return `- QUESTION ADDED ${e.questionId} [${e.scope}] ${e.title} (paths: ${e.paths.join(', ')}; accepted by ${acceptanceLabel(e.acceptance)}): start work on it by this id`;
     case 'validation_failed':
@@ -180,6 +190,21 @@ function unseenLine(s: State, e: Entry): string {
       return `- CLAIM REFUSED for ${e.attemptId}: ${e.reason}`;
     default:
       return `- ${e.t}`;
+  }
+}
+
+/** Owner feedback in full, as the next manager reads it. */
+function feedbackDetail(f: Feedback): string {
+  switch (f.t) {
+    case 'lesson':
+    case 'note':
+      return `${f.t}: ${f.text}`;
+    case 'extend':
+      return `extend: the deadline moved by ${f.hours}h`;
+    case 'pause':
+    case 'resume':
+    case 'stop':
+      return f.t;
   }
 }
 
@@ -194,12 +219,7 @@ function managerBrief(s: State, id: string): string {
     `LIMITS: ${workerAttempts(s)}/${c.maxAttempts} work and check attempts used, ${liveWorkers(s).length} live, ${queued(s).length} queued, max ${c.maxLive} live. Explore questions may use at most ${exploreCap(c)} work attempts. This is decision ${managerTurns(s)} of at most ${managerCap(c)}; you are woken only when there is something to act on, never to wait for the host.`,
     `CREW: work seats ${c.crew.work.map((w, i) => `${i}=${seatLabel(w)}`).join(', ')}. Checks run on ${c.crew.check.map(seatLabel).join(', ')}, never on the claim's own model; a panel of n checks verifies by majority. Spread competing approaches across seats.`,
     `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet: plan first'}`,
-    `ATTEMPTS:\n${
-      s.attempts
-        .filter((a) => a.spec.kind !== 'manager')
-        .map((a) => attemptLine(s, a))
-        .join('\n') || '- none'
-    }`,
+    `ATTEMPTS:\n${s.workers.map((a) => attemptLine(s, a)).join('\n') || '- none'}`,
     validationsText(s),
     integrationsText(s),
     `NEW SINCE YOUR LAST DECISION:\n${s.shown[id].map((e) => unseenLine(s, e)).join('\n') || '- nothing'}`,
@@ -227,7 +247,7 @@ function managerBrief(s: State, id: string): string {
 }
 
 /** What each attempt kind must answer: its brief's last section, and the repair request's. */
-function answerFormat(kind: Attempt['spec']['kind']): string {
+function answerFormat(kind: AttemptSpec['kind']): string {
   switch (kind) {
     case 'manager':
       return [
@@ -280,14 +300,14 @@ export function repairBrief(s: State, attempt: Attempt, error: string, raw: stri
 function workBrief(s: State, id: string, spec: WorkSpec): string {
   const q = questionOf(s, spec.questionId);
   const tree = worktreeOf(s, id);
-  const verified = s.attempts.flatMap((x) =>
+  const verified = s.workers.flatMap((x) =>
     x.phase.t === 'ended' &&
     x.phase.outcome.t === 'check' &&
     x.phase.outcome.result.verdict === 'verified'
       ? [`- verified by ${x.id}`]
       : []
   );
-  const findings = s.attempts.flatMap((x) =>
+  const findings = s.workers.flatMap((x) =>
     x.phase.t === 'ended' &&
     x.phase.outcome.t === 'work' &&
     x.phase.outcome.result.result !== 'blocked'
@@ -412,7 +432,7 @@ function trailingObject(text: string): Json | undefined {
   return undefined;
 }
 
-export function parseOutcome(kind: Attempt['spec']['kind'], body: string): EndOutcome {
+export function parseOutcome(kind: AttemptSpec['kind'], body: string): EndOutcome {
   const found = findJson(body);
   const malformed = (error: string): EndOutcome => ({ t: 'malformed', error, raw: body });
   if (found.t === 'none') return malformed(found.error);
@@ -468,7 +488,11 @@ export function statusText(s: State, badgeLine: string): string {
     lessonsText(s),
     `QUESTIONS:\n${s.questions.map((q) => questionLine(s, q)).join('\n') || '- none yet'}`,
     stagesText(s),
-    `ATTEMPTS:\n${s.attempts.map((a) => attemptLine(s, a)).join('\n') || '- none'}`,
+    `ATTEMPTS:\n${
+      allAttempts(s)
+        .map((a) => attemptLine(s, a))
+        .join('\n') || '- none'
+    }`,
     validationsText(s),
     integrationsText(s),
     costTotals(s).line,

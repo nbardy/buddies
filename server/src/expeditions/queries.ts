@@ -3,6 +3,7 @@ import type {
   Attempt,
   AttemptSpec,
   CheckSpec,
+  ClaimState,
   Question,
   State,
   Validation,
@@ -10,36 +11,42 @@ import type {
 } from './ledger';
 import {
   MANAGER_TREE,
+  allAttempts,
   attemptOf,
-  byId,
+  claimState,
   interruptedEnd,
   questionOf,
   treeOf,
   validationPassed,
+  workOf,
+  worksOf,
 } from './ledger';
 
 // Pure read-only views over a folded State, shared by decide, effects, briefs, news and the page.
 
-export const live = (s: State) =>
-  s.attempts.filter((a) => a.phase.t === 'posted' || a.phase.t === 'posting');
-export const liveWorkers = (s: State) => live(s).filter((a) => a.spec.kind !== 'manager');
+/** Its request is being posted or is out: a run is (about to be) working on it. */
+const isLive = (a: Attempt) => a.phase.t === 'posted' || a.phase.t === 'posting';
+export const live = (s: State) => allAttempts(s).filter(isLive);
+export const liveWorkers = (s: State) => s.workers.filter(isLive);
+/** A manager decision runs in the manager's tree (its request is out). */
+export const managerRunning = (s: State) => s.managers.some(isLive);
+/** A manager decision is planned or running: decide plans no other until it ends. */
+export const managerOpen = (s: State) => s.managers.some((a) => a.phase.t !== 'ended');
 /** A merge into the expedition branch is planned and not yet run (design.md R3). */
 export const integrating = (s: State) => s.integrations.some((i) => i.status.t === 'pending');
-export const queued = (s: State) => s.attempts.filter((a) => a.phase.t === 'planned');
+export const isQueued = (a: Attempt) => a.phase.t === 'planned';
+export const queued = (s: State) => allAttempts(s).filter(isQueued);
 /** Settled: nothing will run for it any more (it ended, or was dropped before it started). */
 export const settled = (a: Attempt) => a.phase.t === 'ended' || a.phase.t === 'dropped';
 export const exploreAttempts = (s: State) =>
-  s.attempts.filter(
-    (a) => a.spec.kind === 'work' && byId(s.questions, a.spec.questionId)?.scope === 'explore'
-  ).length;
+  worksOf(s).filter((a) => questionOf(s, a.spec.questionId).scope === 'explore').length;
 /** What the owner's attempt budget counts: work and check attempts, never manager decisions
  * (design.md R9: "Budget 6 attempts" allowed one work attempt while decisions counted), nor an
  * attempt a server restart interrupted: its replan (`attempt_retry_planned`) is the one counted. */
-export const workerAttempts = (s: State) =>
-  s.attempts.filter((a) => isWorker(a) && !interrupted(a)).length;
+export const workerAttempts = (s: State) => s.workers.filter((a) => !interrupted(a)).length;
 /** Ended by a server restart (ledger.ts interruptedEnd): superseded by its replan. */
 export const interrupted = (a: Attempt) => a.phase.t === 'ended' && interruptedEnd(a.phase.outcome);
-export const managerTurns = (s: State) => s.attempts.filter((a) => !isWorker(a)).length;
+export const managerTurns = (s: State) => s.managers.length;
 /** Manager decisions are bounded apart from the budget, so a manager that keeps deciding nothing
  * cannot spin: two per budgeted attempt (one to start it, one to act on its result) plus two
  * (the first plan and the done). */
@@ -68,38 +75,37 @@ export function custodyOf(s: State, a: Attempt): readonly string[] {
   }
 }
 
-/** The attempts that run in a worktree of their own (design.md R1): every one but a manager. */
-export type WorkerSpec = WorkSpec | CheckSpec;
-export const isWorker = (a: Attempt): a is Attempt<WorkerSpec> => a.spec.kind !== 'manager';
-
 /** Worker attempts holding a live slot and their custody: admitted (worktree intent recorded,
  * about to be briefed), posting or posted. */
 export const admitted = (s: State) =>
-  s.attempts
-    .filter(isWorker)
-    .filter((a) => a.phase.t === 'admitted' || a.phase.t === 'posting' || a.phase.t === 'posted');
+  s.workers.filter(
+    (a) => a.phase.t === 'admitted' || a.phase.t === 'posting' || a.phase.t === 'posted'
+  );
 
 /** The claim an attempt ended with; checks and integrations are planned only for ended claims
  * (decide.ts), so a missing one is a corrupt ledger. */
 export function claimAt(s: State, attemptId: string): Claim {
-  const claim = attemptOf(s, attemptId);
-  if (
-    claim.phase.t !== 'ended' ||
-    claim.phase.outcome.t !== 'work' ||
-    claim.phase.outcome.result.result !== 'claim'
-  )
-    throw new Error(`attempt ${attemptId} has no claim`);
-  return claim.phase.outcome.result;
+  const claimed = attemptClaim(attemptOf(s, attemptId));
+  switch (claimed.t) {
+    case 'commit':
+    case 'no_code':
+      return claimed.claim;
+    case 'none':
+      throw new Error(`attempt ${attemptId} has no claim`);
+  }
 }
+/** What an attempt claims: none until it ended. */
+export const attemptClaim = (a: Attempt): ClaimState =>
+  a.phase.t === 'ended' ? claimState(a.phase.outcome) : { t: 'none' };
 /** The claim a check verifies. */
 export const claimOf = (s: State, spec: CheckSpec): Claim => claimAt(s, spec.claimAttemptId);
 
 /** The work and check attempts on one question (managers belong to no question). */
 export const attemptsOn = (s: State, questionId: string) =>
-  s.attempts.filter((a) => a.spec.kind !== 'manager' && a.spec.questionId === questionId);
+  s.workers.filter((a) => a.spec.questionId === questionId);
 
 const checks = (s: State): Attempt<CheckSpec>[] =>
-  s.attempts.filter((a): a is Attempt<CheckSpec> => a.spec.kind === 'check');
+  s.workers.filter((a): a is Attempt<CheckSpec> => a.spec.kind === 'check');
 
 export interface Panel {
   id: string;
@@ -175,15 +181,13 @@ const refuted = (s: State, claimAttemptId: string) =>
  * first validated by a command that could not pass (the goal verifier, or a pre-R11 validation of
  * the charter's checks) could never integrate, the geometry deadlock at the level of one claim.
  */
-export function candidateValidation(s: State, claimAttemptId: string): Validation | undefined {
-  const claim = attemptOf(s, claimAttemptId);
-  if (claim.spec.kind !== 'work') return undefined;
+export function candidateValidation(s: State, claim: Attempt<WorkSpec>): Validation | undefined {
   const { rev } = questionOf(s, claim.spec.questionId).acceptance;
   return s.validations
     .filter(
       (v) =>
         v.target.t === 'candidate' &&
-        v.target.claimAttemptId === claimAttemptId &&
+        v.target.claimAttemptId === claim.id &&
         v.basis.t === 'acceptance' &&
         v.basis.rev === rev
     )
@@ -194,10 +198,10 @@ export function candidateValidation(s: State, claimAttemptId: string): Validatio
  * question's command acceptance) passed, and its commit was merged into the expedition branch. */
 export function hostVerifications(s: State): Extract<Verification, { t: 'host' }>[] {
   return s.integrations.flatMap((i) => {
-    const claim = attemptOf(s, i.claimAttemptId);
-    const validation = candidateValidation(s, i.claimAttemptId);
+    const claim = workOf(s, i.claimAttemptId);
+    const validation = candidateValidation(s, claim);
     const passed = validation && validationPassed(validation) ? validation : undefined;
-    if (i.status.t !== 'integrated' || !passed || claim.spec.kind !== 'work') return [];
+    if (i.status.t !== 'integrated' || !passed) return [];
     if (refuted(s, claim.id)) return [];
     return [
       {
@@ -302,13 +306,8 @@ export type QuestionStage =
   | 'dead';
 
 const workOn = (s: State, questionId: string): Attempt<WorkSpec>[] =>
-  s.attempts.filter(
-    (a): a is Attempt<WorkSpec> => a.spec.kind === 'work' && a.spec.questionId === questionId
-  );
-const hasClaim = (a: Attempt) =>
-  a.phase.t === 'ended' &&
-  a.phase.outcome.t === 'work' &&
-  a.phase.outcome.result.result === 'claim';
+  worksOf(s).filter((a) => a.spec.questionId === questionId);
+const hasClaim = (a: Attempt) => attemptClaim(a).t !== 'none';
 const running = (a: Attempt) =>
   a.phase.t === 'admitted' || a.phase.t === 'posting' || a.phase.t === 'posted';
 

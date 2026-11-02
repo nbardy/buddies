@@ -4,11 +4,13 @@ import type {
   CheckResult,
   Claim,
   CommandCheck,
+  Feedback,
   ManagerAction,
   Origin,
   QuestionScope,
   WorkResult,
 } from './charter';
+import { doneChecks } from './charter';
 
 // Pattern: pure-core (docs/patterns.md#pure-core)
 // Pattern: persisted-state-machine (docs/patterns.md#persisted-state-machine)
@@ -27,7 +29,10 @@ export type CheckSpec = {
   panelId: string;
   seat: number;
 };
-export type AttemptSpec = { kind: 'manager' } | WorkSpec | CheckSpec;
+export type ManagerSpec = { kind: 'manager' };
+/** The attempts that run in a worktree of their own (design.md R1): every one but a manager. */
+export type WorkerSpec = WorkSpec | CheckSpec;
+export type AttemptSpec = ManagerSpec | WorkerSpec;
 
 /** How an attempt ended by itself. `malformed` and `failed` are data, never silently dropped. */
 export type EndOutcome =
@@ -73,6 +78,40 @@ export function interruptedEnd(o: Outcome): boolean {
  */
 export type Outcome = EndOutcome | { t: 'unreported_commits'; shas: string[]; ended: EndOutcome };
 
+/** What an outcome claims: a code claim and its candidate commit, a claim about something other
+ * than code, or no claim at all (a finding, a check, a failure...). */
+export type ClaimState =
+  | { t: 'commit'; claim: Claim; sha: string }
+  | { t: 'no_code'; claim: Claim }
+  | { t: 'none' };
+
+export function claimState(o: Outcome): ClaimState {
+  switch (o.t) {
+    case 'work':
+      return workClaim(o.result);
+    case 'manager':
+    case 'check':
+    case 'malformed':
+    case 'failed':
+    case 'abandoned':
+    case 'interrupted':
+    case 'unreported_commits':
+      return { t: 'none' };
+  }
+}
+
+function workClaim(r: WorkResult): ClaimState {
+  switch (r.result) {
+    case 'claim':
+      return r.change.t === 'commit'
+        ? { t: 'commit', claim: r, sha: r.change.sha }
+        : { t: 'no_code', claim: r };
+    case 'finding':
+    case 'blocked':
+      return { t: 'none' };
+  }
+}
+
 /** Which request of an attempt is out: its brief, or the one repair request a malformed answer
  * gets (design.md R11: one format repair turn on the same seat before the answer is final). */
 export type Round = 'brief' | 'repair';
@@ -112,15 +151,6 @@ export type AttemptCost =
       cacheWriteTokens: number;
     }
   | { t: 'unmeasured'; reason: string };
-
-export type Feedback =
-  | { t: 'lesson'; text: string }
-  | { t: 'note'; text: string }
-  | { t: 'pause' }
-  | { t: 'resume' }
-  | { t: 'stop' }
-  /** Moves the deadline by `hours` (the owner's call; the charter itself is never edited). */
-  | { t: 'extend'; hours: number };
 
 /** Where owner feedback came from: the `expedition` tool's steer, or an owner message in the
  * expedition chat (the owner↔crew DM). A chat message carries its post id and ordered id, so the
@@ -525,6 +555,8 @@ export interface Attempt<S extends AttemptSpec = AttemptSpec> {
   id: string;
   spec: S;
   phase: AttemptPhase;
+  /** When it was planned: managers and workers are listed together in this order. */
+  plannedAt: string;
 }
 
 export interface Question {
@@ -595,7 +627,10 @@ export interface State {
   cancels: Record<string, { at: string; runIds: string[] }>;
   /** Notable entries since the last chat status post. */
   news: Entry[];
-  attempts: Attempt[];
+  /** Manager decisions, in plan order. */
+  managers: Attempt<ManagerSpec>[];
+  /** Work and check attempts, in plan order. */
+  workers: Attempt<WorkerSpec>[];
   questions: Question[];
   lessons: string[];
   chatCursor: ChatCursor;
@@ -649,7 +684,8 @@ export function fold(entries: readonly Entry[]): State {
     costs: {},
     cancels: {},
     news: [],
-    attempts: [],
+    managers: [],
+    workers: [],
     questions: [],
     lessons: [],
     chatCursor: { t: 'start' },
@@ -782,17 +818,12 @@ export function apply(s: State, e: Entry): void {
       s.reflections.push({ at: e.at, text: e.text });
       return;
     case 'attempt_planned':
-      s.attempts.push({ id: e.attemptId, spec: e.spec, phase: { t: 'planned' } });
-      // A manager is shown what was unseen when it was planned (its brief is built after this).
-      if (e.spec.kind === 'manager') {
-        s.shown[e.attemptId] = s.unseen;
-        s.unseen = [];
-      }
+      planAttempt(s, e.attemptId, e.spec, e.at);
       return;
     case 'attempt_retry_planned':
       if (attemptOf(s, e.retryOf).phase.t !== 'ended' || e.retryOf in s.retries)
         throw new Error(`attempt ${e.retryOf} retried unended or twice`);
-      s.attempts.push({ id: e.attemptId, spec: e.spec, phase: { t: 'planned' } });
+      s.workers.push({ id: e.attemptId, spec: e.spec, phase: { t: 'planned' }, plannedAt: e.at });
       s.retries[e.retryOf] = e.attemptId;
       return;
     case 'attempt_posting':
@@ -823,15 +854,7 @@ export function apply(s: State, e: Entry): void {
         outcome: e.outcome,
         endedAt: e.at,
       };
-      // A manager's actions are applied, not shown back; its malformed, failed or interrupted
-      // end is shown, so the next manager turn retries instead of the expedition going quiet.
-      if (
-        attempt.spec.kind !== 'manager' ||
-        e.outcome.t === 'malformed' ||
-        e.outcome.t === 'failed' ||
-        e.outcome.t === 'interrupted'
-      )
-        s.unseen.push(e);
+      if (shownOnEnd(attempt.spec, e.outcome)) s.unseen.push(e);
       return;
     }
     case 'claim_planned':
@@ -951,6 +974,39 @@ export function apply(s: State, e: Entry): void {
   throw new Error(`unknown ledger entry ${(unknown as { t: string }).t}`);
 }
 
+/** A manager is shown what was unseen when it was planned (its brief is built after this). */
+function planAttempt(s: State, attemptId: string, spec: AttemptSpec, at: string): void {
+  switch (spec.kind) {
+    case 'manager':
+      s.managers.push({ id: attemptId, spec, phase: { t: 'planned' }, plannedAt: at });
+      s.shown[attemptId] = s.unseen;
+      s.unseen = [];
+      return;
+    case 'work':
+    case 'check':
+      s.workers.push({ id: attemptId, spec, phase: { t: 'planned' }, plannedAt: at });
+      return;
+  }
+}
+
+/** A worker's end is shown to the next manager. A manager's actions are applied, not shown
+ * back; its malformed, failed or interrupted end is, so the next manager turn retries instead of
+ * the expedition going quiet. */
+const MANAGER_END_SHOWN: ReadonlySet<Outcome['t']> = new Set([
+  'malformed',
+  'failed',
+  'interrupted',
+]);
+function shownOnEnd(spec: AttemptSpec, outcome: Outcome): boolean {
+  switch (spec.kind) {
+    case 'manager':
+      return MANAGER_END_SHOWN.has(outcome.t);
+    case 'work':
+    case 'check':
+      return true;
+  }
+}
+
 /** What planning a tree does to its owner: an attempt is admitted (it holds a slot and its
  * custody from now on); a validation runs its checks in it, with no job started there yet. */
 const PLANNED: ByTree<[State, string], void> = {
@@ -1000,9 +1056,7 @@ function basisOf(s: State, target: ValidationTarget): ValidationBasis {
     case 'head':
       return { t: 'done' };
     case 'candidate': {
-      const claim = attemptOf(s, target.claimAttemptId);
-      if (claim.spec.kind !== 'work')
-        throw new Error(`validation of ${claim.id}, which is not a work attempt`);
+      const claim = workOf(s, target.claimAttemptId);
       const { rev, trustedSha } = questionOf(s, claim.spec.questionId).acceptance;
       return { t: 'acceptance', questionId: claim.spec.questionId, rev, trustedSha };
     }
@@ -1020,13 +1074,13 @@ function reportsToManager(target: ValidationTarget): boolean {
 
 /** The charter's command checks with their indexes (none for owner judgment). */
 export function commandChecks(c: Charter): { index: number; check: CommandCheck }[] {
-  const checks = 'checks' in c.done ? c.done.checks : [];
-  return checks.flatMap((check, index) => (check.kind === 'command' ? [{ index, check }] : []));
+  return doneChecks(c.done).flatMap((check, index) =>
+    check.kind === 'command' ? [{ index, check }] : []
+  );
 }
 /** The charter's judged done items (the goal panel verifies them). */
 export function judgedChecks(c: Charter): string[] {
-  const checks = 'checks' in c.done ? c.done.checks : [];
-  return checks.flatMap((check) => (check.kind === 'judged' ? [check.text] : []));
+  return doneChecks(c.done).flatMap((check) => (check.kind === 'judged' ? [check.text] : []));
 }
 
 /** Every check has a recorded outcome (a failed tree records `error` for each), or the host
@@ -1072,10 +1126,24 @@ function applyFeedback(s: State, e: Extract<Entry, { t: 'feedback' }>): void {
 export const byId = <T extends { id: string }>(rows: T[], id: string) =>
   rows.find((r) => r.id === id);
 
+/** Every attempt, managers and workers together, in plan order. */
+export const allAttempts = (s: State): Attempt[] =>
+  [...s.managers, ...s.workers].sort((a, b) => a.plannedAt.localeCompare(b.plannedAt));
+
 /** An attempt the ledger names; a missing one is a corrupt ledger, never a skipped entry. */
 export function attemptOf(s: State, id: string): Attempt {
-  const attempt = byId(s.attempts, id);
+  const attempt = byId<Attempt>(s.workers, id) ?? byId<Attempt>(s.managers, id);
   if (!attempt) throw new Error(`unknown attempt ${id}`);
+  return attempt;
+}
+
+/** The work attempts (claims are made only by work). */
+export const worksOf = (s: State): Attempt<WorkSpec>[] =>
+  s.workers.filter((a): a is Attempt<WorkSpec> => a.spec.kind === 'work');
+/** A work attempt the ledger names as one (a claim's author); anything else is corrupt. */
+export function workOf(s: State, id: string): Attempt<WorkSpec> {
+  const attempt = byId(worksOf(s), id);
+  if (!attempt) throw new Error(`${id} is not a work attempt`);
   return attempt;
 }
 /** A tree the ledger planned; a missing one is a corrupt ledger. */

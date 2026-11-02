@@ -1,8 +1,18 @@
 import type { ManagerAction } from './charter';
-import type { Entry, Integration, Outcome, State, TreeStatus, Validation } from './ledger';
+import type {
+  Attempt,
+  Entry,
+  Integration,
+  Outcome,
+  State,
+  TreeStatus,
+  Validation,
+  WorkSpec,
+} from './ledger';
 import {
   INTEGRATION_TREE,
   MANAGER_TREE,
+  allAttempts,
   apply,
   byId,
   doneValidationChecks,
@@ -12,11 +22,13 @@ import {
   validationComplete,
   validationOf,
   validationPassed,
+  worksOf,
 } from './ledger';
 import { withStatus } from './news';
 import {
   type Panel,
   acceptanceOf,
+  attemptClaim,
   candidateValidation,
   claimAt,
   configOf,
@@ -27,9 +39,9 @@ import {
   independentCheckSeats,
   integrating,
   interrupted,
-  isWorker,
   latestGoalPanel,
   managerCap,
+  managerOpen,
   managerTurns,
   panels,
   questionVerified,
@@ -98,10 +110,9 @@ export function decide(s: State, clock: Clock): Entry[] {
   if (s.run.t === 'running') retryInterrupted(s, clock, push);
 
   // Manager decisions are not budgeted attempts (design.md R9); they stop at their own cap.
-  const managerLive = s.attempts.some((a) => a.spec.kind === 'manager' && a.phase.t !== 'ended');
   const neverPlanned = managerTurns(s) === 0;
   const decisionsLeft = managerTurns(s) < managerCap(s.charter);
-  if (s.run.t === 'running' && !managerLive && decisionsLeft && (neverPlanned || managerDue(s)))
+  if (s.run.t === 'running' && !managerOpen(s) && decisionsLeft && (neverPlanned || managerDue(s)))
     push({ t: 'attempt_planned', at, attemptId: clock.nextId('m'), spec: { kind: 'manager' } });
 
   // Spent only once nothing can still run: an attempt planned (by this very decision too, a
@@ -128,7 +139,7 @@ export function decide(s: State, clock: Clock): Entry[] {
   // Host validations and merges in flight are work too: their results reach the next manager.
   // Work waiting on unverified dependencies (design.md R5) cannot start by itself, so it does not
   // count as running: an expedition holding only waiting work asks, it never goes quiet.
-  const waiting = s.attempts.filter((a) => waitsOn(s, a).length > 0);
+  const waiting = s.workers.filter((a) => waitsOn(s, a).length > 0);
   if (s.run.t === 'running' && quiescent(s))
     push({
       t: 'needs_owner',
@@ -154,7 +165,7 @@ const runOf = (s: State): State['run']['t'] => s.run.t;
 const ID_PREFIX = { work: 'w', check: 'c' } as const;
 
 function retryInterrupted(s: State, clock: Clock, push: (e: Entry) => void): void {
-  for (const a of s.attempts.filter(isWorker))
+  for (const a of s.workers)
     if (interrupted(a) && !(a.id in s.retries))
       push({
         t: 'attempt_retry_planned',
@@ -206,19 +217,12 @@ function claimAwaitingValidation(s: State, e: Entry): boolean {
 }
 
 function awaitsValidation(s: State, attemptId: string): boolean {
-  const attempt = byId(s.attempts, attemptId);
-  if (attempt?.spec.kind !== 'work' || attempt.phase.t !== 'ended') return false;
-  if (codeClaim(attempt.phase.outcome) === undefined) return false;
+  // A manager or check end is never a claim awaiting validation.
+  const attempt = byId(worksOf(s), attemptId);
+  if (attempt === undefined || attemptClaim(attempt).t !== 'commit') return false;
   if (acceptanceOf(s, attempt.spec.questionId).t !== 'command') return false;
-  const validation = candidateValidation(s, attemptId);
+  const validation = candidateValidation(s, attempt);
   return !validation || !validationComplete(validation);
-}
-
-/** The candidate commit an outcome claims (absent: not a code claim). */
-function codeClaim(o: Outcome): string | undefined {
-  if (o.t !== 'work' || o.result.result !== 'claim' || o.result.change.t !== 'commit')
-    return undefined;
-  return o.result.change.sha;
 }
 
 /** A host-verified claim (queries.ts Verification) closes its open question verified, which
@@ -251,7 +255,7 @@ const hostBusy = (s: State) =>
 /** Nothing will run by itself any more: every attempt settled or waits on unverified
  * dependencies (R5), and no host validation or merge is in flight. */
 const quiescent = (s: State) =>
-  s.attempts.every((a) => settled(a) || waitsOn(s, a).length > 0) && !hostBusy(s);
+  allAttempts(s).every((a) => settled(a) || waitsOn(s, a).length > 0) && !hostBusy(s);
 
 /** Decide runs once the integration worktree exists (the expedition's branch is checked out in
  * it) and the manager's own tree does (R11); a tree that could not be made finishes the
@@ -295,15 +299,16 @@ function treeSetup(status: TreeStatus, which: string): Setup {
  * that ran on it refuted it; `panel` needs its latest check panel verified. Nothing reaches the
  * branch on a worker's word alone.
  */
-function integrationBlockers(s: State, claimAttemptId: string, questionId: string): string[] {
+function integrationBlockers(s: State, claim: Attempt<WorkSpec>): string[] {
+  const questionId = claim.spec.questionId;
   const latest = panels(s)
-    .filter((p) => p.claimAttemptId === claimAttemptId)
+    .filter((p) => p.claimAttemptId === claim.id)
     .at(-1);
   const rule = acceptanceOf(s, questionId);
   switch (rule.t) {
     case 'command':
       return [
-        ...commandBlocker(candidateValidation(s, claimAttemptId), questionId, rule.argv),
+        ...commandBlocker(candidateValidation(s, claim), questionId, rule.argv),
         ...(latest?.verdict === 'not_verified' ? ['its latest check panel refuted it'] : []),
         ...(latest?.verdict === 'pending' ? ['a check panel on it is still running'] : []),
       ];
@@ -346,17 +351,16 @@ function panelBlocker(latest: Panel | undefined, questionId: string): string[] {
  * it. The goal's done checks never run here (they run on the head at done).
  */
 function planCandidateValidations(s: State, clock: Clock, push: (e: Entry) => void): void {
-  for (const a of s.attempts) {
-    if (a.spec.kind !== 'work' || a.phase.t !== 'ended') continue;
-    const sha = codeClaim(a.phase.outcome);
+  for (const a of worksOf(s)) {
+    const claimed = attemptClaim(a);
     const rule = acceptanceOf(s, a.spec.questionId);
-    if (sha === undefined || rule.t !== 'command' || candidateValidation(s, a.id)) continue;
+    if (claimed.t !== 'commit' || rule.t !== 'command' || candidateValidation(s, a)) continue;
     if (s.integrations.some((i) => i.claimAttemptId === a.id && i.status.t !== 'refused')) continue;
     push({
       t: 'validation_planned',
       at: clock.now,
       validationId: clock.nextId('v'),
-      target: { t: 'candidate', claimAttemptId: a.id, sha },
+      target: { t: 'candidate', claimAttemptId: a.id, sha: claimed.sha },
       checks: [{ index: 0, argv: rule.argv, timeoutSeconds: rule.timeoutSeconds }],
     });
   }
@@ -420,7 +424,7 @@ function settleDoneRequest(s: State, push: (e: Entry) => void, at: string): void
 
 /** The newest ended manager attempt whose actions are not yet applied (absent: none pending). */
 function pendingManager(s: State): { attemptId: string; actions: ManagerAction[] } | undefined {
-  const last = s.attempts.filter((a) => a.spec.kind === 'manager').at(-1);
+  const last = s.managers.at(-1);
   if (!last || last.phase.t !== 'ended' || last.phase.outcome.t !== 'manager') return undefined;
   if (s.appliedManagers.has(last.id)) return undefined;
   return { attemptId: last.id, actions: last.phase.outcome.actions };
@@ -464,9 +468,8 @@ function applyAction(
       return;
     }
     case 'claim': {
-      const attempt = byId(s.attempts, action.attempt);
-      if (!attempt || attempt.spec.kind !== 'work')
-        return reject(`no work attempt ${action.attempt}`);
+      const attempt = byId(worksOf(s), action.attempt);
+      if (!attempt) return reject(`no work attempt ${action.attempt}`);
       if (attempt.phase.t !== 'ended' || !claimable(attempt.phase.outcome))
         return reject(
           `only a work attempt that ended with unreported commits is claimed; ${attempt.id} is ${attempt.phase.t === 'ended' ? attempt.phase.outcome.t : attempt.phase.t}`
@@ -508,12 +511,10 @@ function applyAction(
       return;
     }
     case 'check': {
-      const claim = byId(s.attempts, action.claimAttempt);
-      if (!claim || claim.spec.kind !== 'work')
-        return reject(`no work attempt ${action.claimAttempt}`);
-      if (claim.phase.t !== 'ended' || claim.phase.outcome.t !== 'work')
-        return reject('that attempt has no parsed result');
-      if (claim.phase.outcome.result.result !== 'claim') return reject('only claims are checked');
+      const claim = byId(worksOf(s), action.claimAttempt);
+      if (!claim) return reject(`no work attempt ${action.claimAttempt}`);
+      if (attemptClaim(claim).t === 'none')
+        return reject('only claims are checked: that attempt ended with no parsed claim');
       if (workerAttempts(s) + action.panel > s.charter.maxAttempts)
         return reject('attempt budget spent');
       // Independence: a check never runs on the model that made the claim.
@@ -537,29 +538,23 @@ function applyAction(
       return;
     }
     case 'integrate': {
-      const claim = byId(s.attempts, action.claimAttempt);
-      if (!claim || claim.spec.kind !== 'work')
-        return reject(`no work attempt ${action.claimAttempt}`);
-      if (
-        claim.phase.t !== 'ended' ||
-        claim.phase.outcome.t !== 'work' ||
-        claim.phase.outcome.result.result !== 'claim' ||
-        claim.phase.outcome.result.change.t !== 'commit'
-      )
-        return reject('only a claim with a commit is integrated');
+      const claim = byId(worksOf(s), action.claimAttempt);
+      if (!claim) return reject(`no work attempt ${action.claimAttempt}`);
+      const claimed = attemptClaim(claim);
+      if (claimed.t !== 'commit') return reject('only a claim with a commit is integrated');
       // The head a done validates stays fixed until that done settles.
       if (s.doneRequest.t === 'validating')
         return reject('done is being validated on the current head');
       if (s.integrations.some((i) => i.claimAttemptId === claim.id && i.status.t !== 'refused'))
         return reject(`${claim.id} is already integrated or being integrated`);
-      const blockers = integrationBlockers(s, claim.id, claim.spec.questionId);
+      const blockers = integrationBlockers(s, claim);
       if (blockers.length > 0) return reject(blockers.join('; '));
       push({
         t: 'integration_planned',
         at,
         integrationId: clock.nextId('i'),
         claimAttemptId: claim.id,
-        sha: claim.phase.outcome.result.change.sha,
+        sha: claimed.sha,
       });
       return;
     }
@@ -582,33 +577,55 @@ function applyAction(
     case 'ask_owner':
       push({ t: 'needs_owner', at, question: action.question });
       return;
-    case 'done': {
-      if ('ownerJudgment' in s.charter.done) {
-        push({ t: 'needs_owner', at, question: `Proposes done: ${action.summary}` });
-        return;
-      }
-      // The guardrails (design.md R2): the goal panel verified the judged items, and every
-      // command check passed on the expedition branch head, run by the host, never an agent.
-      if (s.doneRequest.t === 'validating') return reject('done is already being validated');
-      const checks = doneValidationChecks(s.charter);
-      const hasCommands = checks.length > 0;
-      const judged = judgedBlocker(s, hasCommands ? 'queued' : 'merged');
-      if (judged.length > 0) return reject(judged.join('; '));
-      if (!hasCommands) {
-        // Nothing validates the head, so done never finishes over a merge still to run.
-        if (integrating(s)) return reject('an integration is still running');
-        push({ t: 'finished', at, reason: 'done', summary: action.summary });
-        return;
-      }
-      // The head validation starts only after every merge planned before it (effects.ts), and no
-      // merge is accepted while it runs, so it validates the head the owner is told to merge.
-      const validationId = clock.nextId('v');
-      push({ t: 'validation_planned', at, validationId, target: { t: 'head' }, checks });
-      push({ t: 'done_requested', at, validationId, summary: action.summary });
-      return;
-    }
+    case 'done':
+      return proposeDone(s, action.summary, clock, push, reject);
     case 'note':
       push({ t: 'reflection', at, text: action.text });
       return;
   }
+}
+
+/** δ over how the charter decides completion: the owner judges it, or the typed checks do. */
+function proposeDone(
+  s: State,
+  summary: string,
+  clock: Clock,
+  push: (e: Entry) => void,
+  reject: (reason: string) => undefined
+): undefined {
+  switch (s.charter.done.t) {
+    case 'owner':
+      push({ t: 'needs_owner', at: clock.now, question: `Proposes done: ${summary}` });
+      return;
+    case 'checks':
+      return doneByChecks(s, summary, clock, push, reject);
+  }
+}
+
+function doneByChecks(
+  s: State,
+  summary: string,
+  clock: Clock,
+  push: (e: Entry) => void,
+  reject: (reason: string) => undefined
+): undefined {
+  const at = clock.now;
+  // The guardrails (design.md R2): the goal panel verified the judged items, and every
+  // command check passed on the expedition branch head, run by the host, never an agent.
+  if (s.doneRequest.t === 'validating') return reject('done is already being validated');
+  const checks = doneValidationChecks(s.charter);
+  const hasCommands = checks.length > 0;
+  const judged = judgedBlocker(s, hasCommands ? 'queued' : 'merged');
+  if (judged.length > 0) return reject(judged.join('; '));
+  if (!hasCommands) {
+    // Nothing validates the head, so done never finishes over a merge still to run.
+    if (integrating(s)) return reject('an integration is still running');
+    push({ t: 'finished', at, reason: 'done', summary });
+    return;
+  }
+  // The head validation starts only after every merge planned before it (effects.ts), and no
+  // merge is accepted while it runs, so it validates the head the owner is told to merge.
+  const validationId = clock.nextId('v');
+  push({ t: 'validation_planned', at, validationId, target: { t: 'head' }, checks });
+  push({ t: 'done_requested', at, validationId, summary });
 }

@@ -5,6 +5,7 @@ import {
   type CheckResult,
   type ClaimChange,
   type DoneCheck,
+  type Feedback,
   type QuestionScope,
   type WorkResult,
   crewLine,
@@ -15,7 +16,6 @@ import type {
   AttemptCost,
   CheckOutcome,
   Entry,
-  Feedback,
   FinishReason,
   Integration,
   IntegrationRefusal,
@@ -26,6 +26,7 @@ import type {
   Validation,
 } from './ledger';
 import {
+  allAttempts,
   apply,
   attemptOf,
   headOf,
@@ -85,7 +86,7 @@ export function costLabel(c: AttemptCost): string {
  * `line` the page header's and the status's.
  */
 export function costTotals(s: State): { short: string; line: string } {
-  const ended = s.attempts.filter((a) => a.phase.t === 'ended');
+  const ended = allAttempts(s).filter((a) => a.phase.t === 'ended');
   const costs = ended.flatMap((a) => (a.id in s.costs ? [s.costs[a.id]] : []));
   const measured = costs.flatMap((c) => (c.t === 'measured' ? [c] : []));
   const reasons = [...new Set(costs.flatMap((c) => (c.t === 'unmeasured' ? [c.reason] : [])))];
@@ -176,13 +177,18 @@ export function goalSummary(goal: string, n = 160): string {
 
 /** The tool result's one-paragraph account of what a launch started. */
 export function charterSummary(c: Charter): string {
-  const done =
-    'checks' in c.done
-      ? c.done.checks
-          .map((x) => (x.kind === 'command' ? `$ ${x.argv.join(' ')}` : `judged: ${x.text}`))
-          .join('; ')
-      : 'the owner judges it';
-  return `${c.name}: ${clip(c.goal, 200)} | done when ${done} | budget ${c.maxAttempts} attempts, ${c.maxLive} live, ${c.hours}h, explore ${c.exploreShare} | crew ${crewLine(c.crew)}`;
+  return `${c.name}: ${clip(c.goal, 200)} | done when ${doneSummary(c.done)} | budget ${c.maxAttempts} attempts, ${c.maxLive} live, ${c.hours}h, explore ${c.exploreShare} | crew ${crewLine(c.crew)}`;
+}
+
+function doneSummary(done: Charter['done']): string {
+  switch (done.t) {
+    case 'checks':
+      return done.checks
+        .map((x) => (x.kind === 'command' ? `$ ${x.argv.join(' ')}` : `judged: ${x.text}`))
+        .join('; ');
+    case 'owner':
+      return 'the owner judges it';
+  }
 }
 
 /** The first status of every expedition: what launched, then the planning line on its own. */
@@ -206,10 +212,8 @@ function newsLine(s: State, e: Entry): string[] {
       return [
         `↻ ${attemptTitle(s, attemptOf(s, e.retryOf))} runs again: the server restarted while it ran`,
       ];
-    case 'attempt_posted': {
-      const a = attemptOf(s, e.attemptId);
-      return a.spec.kind === 'manager' ? [] : [`▶ Started: ${attemptLabel(s, a)}`];
-    }
+    case 'attempt_posted':
+      return startedLine(s, attemptOf(s, e.attemptId));
     case 'attempt_ended': {
       const a = attemptOf(s, e.attemptId);
       return [`${attemptTitle(s, a)} → ${outcomeLabel(e.outcome)}`];
@@ -260,6 +264,17 @@ function newsLine(s: State, e: Entry): string[] {
       return [clipBlock(`**${expeditionRunLabel(s.run)}:**`, e.summary), ...mergeLine(s, e.reason)];
     default:
       return [];
+  }
+}
+
+/** A worker's start is news; a manager decision's is not (its actions are). */
+function startedLine(s: State, a: Attempt): string[] {
+  switch (a.spec.kind) {
+    case 'manager':
+      return [];
+    case 'work':
+    case 'check':
+      return [`▶ Started: ${attemptLabel(s, a)}`];
   }
 }
 

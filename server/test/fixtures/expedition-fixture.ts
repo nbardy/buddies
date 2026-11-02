@@ -14,10 +14,14 @@ import { createGrants } from '../../src/buddies/grants';
 import { startMcpEndpoint } from '../../src/buddies/mcp';
 import { type ExpeditionHost, createExpeditionHost } from '../../src/expeditions/host';
 import {
+  Charter,
+  type CharterRequest,
   type Entry,
   INTEGRATION_TREE,
   type State,
   type Validation,
+  allAttempts,
+  charterOf,
   currentTree,
   fold,
   workspaceOf,
@@ -154,12 +158,12 @@ export async function fixture() {
   const stateOf = (id: string): State => fold(ledgerOf(id));
   /** The live attempt's request and its kind, by attempt id prefix (m/w/c). */
   const liveAttempts = (id: string) =>
-    stateOf(id).attempts.flatMap((a) =>
+    allAttempts(stateOf(id)).flatMap((a) =>
       a.phase.t === 'posted' ? [{ id: a.id, kind: a.spec.kind, requestId: a.phase.requestId }] : []
     );
   const answer = async (id: string, attemptId: string, body: string) => {
     const s = stateOf(id);
-    const attempt = s.attempts.find((a) => a.id === attemptId);
+    const attempt = allAttempts(s).find((a) => a.id === attemptId);
     if (!attempt || attempt.phase.t !== 'posted' || s.crew.t !== 'ready')
       throw new Error(`attempt ${attemptId} is not live`);
     await core.answer(buddyActor(s.crew.buddyId), {
@@ -268,6 +272,13 @@ export const charter = (name: string, maxLive = 2, done: unknown = judged) => ({
     check: [{ provider: 'codex' }, { provider: 'claude' }],
   },
 });
+
+/** A request charter as the launch's κ makes it canonical (every provider open: model words
+ * kept as written), without the schema check: a test may store what the schema now refuses. */
+export const unchecked = (request: unknown): Charter =>
+  charterOf(request as CharterRequest, () => ({ t: 'open' })).charter;
+/** A request charter made canonical and schema-checked, as the tool's launch makes it. */
+export const canonical = (request: unknown): Charter => Charter.parse(unchecked(request));
 
 export const BUDGETS = { leaseMs: 60_000, chatDeadlineMs: 60_000, turnDeadlineMs: 60_000 };
 

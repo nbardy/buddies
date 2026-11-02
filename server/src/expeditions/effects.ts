@@ -3,6 +3,7 @@ import {
   type ByTree,
   INTEGRATION_TREE,
   MANAGER_TREE,
+  allAttempts,
   attemptOf,
   byTree,
   treeKey,
@@ -15,9 +16,9 @@ import {
   admitted,
   custodyOf,
   custodyOverlaps,
-  isWorker,
+  isQueued,
   live,
-  queued,
+  managerRunning,
   settled,
   waitsOn,
 } from './queries';
@@ -95,7 +96,7 @@ function runEffects(s: State): Effect[] {
     // (once); its end, or the host's `abandoned` after the grace, then releases its tree. First,
     // so stopping paid runs never waits behind a status post or a tree release.
     ...(finished
-      ? s.attempts.flatMap((a): Effect[] =>
+      ? allAttempts(s).flatMap((a): Effect[] =>
           a.phase.t === 'posted' && !(a.id in s.cancels)
             ? [{ t: 'cancel_attempt', attemptId: a.id }]
             : []
@@ -106,13 +107,13 @@ function runEffects(s: State): Effect[] {
     ...releases(s),
     // A recorded brief is a committed intent: it is completed whatever the run state, because
     // the post may already exist (keyed, so the replay returns it) and its worker may be running.
-    ...s.attempts.flatMap((a): Effect[] =>
+    ...allAttempts(s).flatMap((a): Effect[] =>
       a.phase.t === 'posting'
         ? [{ t: 'post_attempt', attemptId: a.id, body: a.phase.body, round: a.phase.round }]
         : []
     ),
     // Metering is a read: it runs whatever the run state, finished and paused included.
-    ...s.attempts.flatMap((a): Effect[] =>
+    ...allAttempts(s).flatMap((a): Effect[] =>
       a.phase.t === 'ended' && !(a.id in s.costs)
         ? [
             {
@@ -146,12 +147,12 @@ function runEffects(s: State): Effect[] {
   for (const attemptId of Object.keys(s.adoptions))
     if (s.adoptions[attemptId].t === 'pending') effects.push({ t: 'adopt_claim', attemptId });
   // An admitted attempt is briefed once its tree is ready.
-  for (const attempt of s.attempts.filter((a) => a.phase.t === 'admitted'))
+  for (const attempt of s.workers.filter((a) => a.phase.t === 'admitted'))
     if (worktreeOf(s, attempt.id).status.t === 'ready')
       effects.push({ t: 'brief_attempt', attempt });
   // A manager is briefed only in its own tree (R11); decide plans none before it is ready.
   if (ready(s, MANAGER_TREE))
-    for (const attempt of queued(s).filter((a) => !isWorker(a)))
+    for (const attempt of s.managers.filter(isQueued))
       effects.push({ t: 'brief_attempt', attempt });
   // Admission (design.md R1): at most maxLive workers, and never two with overlapping custody;
   // a blocked attempt stays queued (in order) until a slot and its paths free up. Work whose
@@ -159,7 +160,7 @@ function runEffects(s: State): Effect[] {
   const holding = admitted(s);
   const custody = holding.map((a) => custodyOf(s, a));
   let capacity = s.charter.maxLive - holding.length;
-  for (const attempt of queued(s).filter(isWorker)) {
+  for (const attempt of s.workers.filter(isQueued)) {
     if (waitsOn(s, attempt).length > 0) continue;
     const paths = custodyOf(s, attempt);
     if (capacity <= 0 || custody.some((c) => custodyOverlaps(c, paths))) continue;
@@ -237,11 +238,7 @@ function due(s: State, tree: Tree, finished: boolean): boolean {
  * finished (the host never removes a tree its own check job still runs in, host.ts). */
 const VACATED: ByTree<[State, boolean], boolean> = {
   integration: (_id, _s, finished) => finished,
-  manager: (_id, s, finished) =>
-    finished &&
-    !s.attempts.some(
-      (a) => a.spec.kind === 'manager' && (a.phase.t === 'posting' || a.phase.t === 'posted')
-    ),
+  manager: (_id, s, finished) => finished && !managerRunning(s),
   attempt: ({ attemptId }, s, finished) => {
     const attempt = attemptOf(s, attemptId);
     return settled(attempt) || (finished && attempt.phase.t === 'admitted');

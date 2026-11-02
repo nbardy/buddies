@@ -14,13 +14,20 @@ import { cwdOf } from '../src/buddies/worker-config';
 import { parseOutcome } from '../src/expeditions/briefs';
 import { runCommand } from '../src/expeditions/command';
 import { CANCEL_GRACE_MS, type ExpeditionHost } from '../src/expeditions/host';
-import { Charter, type Entry } from '../src/expeditions/model';
+import {
+  CharterRequest,
+  type Entry,
+  allAttempts,
+  attemptOf,
+  worksOf,
+} from '../src/expeditions/model';
 import { clip, clipBlock, goalSummary, launchNews } from '../src/expeditions/news';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import { createLedger } from '../src/expeditions/store';
 import { expeditionView } from '../src/expeditions/view';
 import {
   BUDGETS,
+  canonical,
   charter,
   executeRequestRun,
   fixture,
@@ -29,6 +36,7 @@ import {
   judged,
   rpc,
   rpcLaunch,
+  unchecked,
 } from './fixtures/expedition-fixture';
 import test from './fixtures/shard';
 import { tempDir } from './fixtures/temp';
@@ -118,7 +126,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     );
     let work = f.liveAttempts(id).filter((a) => a.kind === 'work');
     assert.equal(work.length, 2, 'maxLive bounds parallel work');
-    assert.equal(f.stateOf(id).attempts.filter((a) => a.phase.t === 'planned').length, 1);
+    assert.equal(allAttempts(f.stateOf(id)).filter((a) => a.phase.t === 'planned').length, 1);
 
     // Isolation is structural: each live work attempt has its own worktree at the expedition
     // branch's base, and its brief names that path; the shared checkout is untouched.
@@ -151,7 +159,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     // only a second unreadable answer ends the attempt malformed (2026-11-01 incident: a manager's
     // bare JSON and a worker's prose summary were dropped with no second chance).
     await f.answer(id, work[1].id, 'I forgot the JSON block.');
-    const repairing = f.stateOf(id).attempts.find((a) => a.id === work[1].id)!;
+    const repairing = attemptOf(f.stateOf(id), work[1].id);
     assert.equal(repairing.phase.t === 'posted' && repairing.phase.round, 'repair');
     const repair = await f.core.getPost(
       OWNER,
@@ -163,7 +171,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     );
     await f.answer(id, work[1].id, 'Still no JSON.');
     s = f.stateOf(id);
-    const malformed = s.attempts.find((a) => a.id === work[1].id);
+    const malformed = allAttempts(s).find((a) => a.id === work[1].id);
     assert.equal(malformed?.phase.t === 'ended' && malformed.phase.outcome.t, 'malformed');
     // The claim's worktree has a commit: kept for integration. The malformed one made none: its
     // worktree and branch are removed.
@@ -177,7 +185,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     assert.equal(work.length, 1, 'the queued attempt took the freed slot');
 
     // Manager 3 asks a goal check and tries to close the question early: the close is refused.
-    const claimId = s.attempts.find(
+    const claimId = allAttempts(s).find(
       (a) => a.phase.t === 'ended' && a.phase.outcome.t === 'work'
     )!.id;
     await f.answer(
@@ -293,7 +301,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
     // merged into the expedition branch (per-attempt branches do not pile up in the owner's repo).
     // The still-running work attempt keeps its tree: its worker may be in it.
     const running = work[0].id;
-    for (const a of s.attempts.filter((x) => x.spec.kind !== 'manager' && x.id !== running)) {
+    for (const a of s.workers.filter((x) => x.id !== running)) {
       const tree = f.treeOf(id, a.id);
       assert.equal(tree.status.t, 'removed', `${a.id}: ${JSON.stringify(tree.status)}`);
       assert.equal(fs.existsSync(tree.path), false);
@@ -329,7 +337,7 @@ test('an expedition runs plan → parallel work → blind check → done, and re
       ['Start narrow; one question first.']
     );
     assert.ok(s.statuses.some((x) => x.text.includes('Reflection: Start narrow')));
-    for (const attempt of s.attempts) {
+    for (const attempt of allAttempts(s)) {
       if (attempt.phase.t !== 'ended') continue;
       const request = await f.core.getPost(OWNER, attempt.phase.requestId);
       assert.notEqual(request.channelId, crew.chatChannelId, `${attempt.id} cluttered the chat`);
@@ -375,7 +383,7 @@ test('a crash after posting a request but before recording it re-posts the same 
   try {
     const { id } = await rpcLaunch(f, 'crash');
     const m1 = f.manager(id);
-    const before = f.stateOf(id).attempts.find((a) => a.id === m1)!;
+    const before = attemptOf(f.stateOf(id), m1);
     assert.equal(before.phase.t, 'posted');
     const requestId = before.phase.t === 'posted' ? before.phase.requestId : '';
 
@@ -388,7 +396,7 @@ test('a crash after posting a request but before recording it re-posts the same 
 
     f.restart();
     await f.host.tick(id);
-    const after = f.stateOf(id).attempts.find((a) => a.id === m1)!;
+    const after = attemptOf(f.stateOf(id), m1);
     assert.deepEqual(
       after.phase,
       { t: 'posted', requestId, round: 'brief' },
@@ -492,12 +500,12 @@ test('work on overlapping custody waits for the holder even with free slots; dis
       f
         .liveAttempts(id)
         .flatMap((a) => {
-          const spec = f.stateOf(id).attempts.find((x) => x.id === a.id)!.spec;
+          const spec = attemptOf(f.stateOf(id), a.id).spec;
           return spec.kind === 'work' ? [spec.questionId] : [];
         })
         .sort();
     assert.deepEqual(questionOfLive(), [outer, docs].sort(), 'widget/core waits; docs runs');
-    const waiting = f.stateOf(id).attempts.find((a) => a.phase.t === 'planned')!;
+    const waiting = allAttempts(f.stateOf(id)).find((a) => a.phase.t === 'planned')!;
     assert.equal(waiting.id in f.stateOf(id).trees, false, 'a waiting attempt has no worktree');
 
     // The expedition branch moves past its launch base: a commit in its integration tree (where
@@ -718,10 +726,10 @@ test('a claim its own attempt branch does not hold is recorded malformed, and ca
       json({ actions: [{ do: 'check', claimAttempt: borrowed, goal: false, panel: 1 }] })
     );
     assert.ok(
-      f.ledgerOf(id).some((e) => e.t === 'rejected' && /no parsed result/.test(e.reason)),
+      f.ledgerOf(id).some((e) => e.t === 'rejected' && /only claims are checked/.test(e.reason)),
       'a check of a claim the branch does not hold is refused'
     );
-    assert.equal(f.stateOf(id).attempts.filter((a) => a.spec.kind === 'check').length, 0);
+    assert.equal(f.stateOf(id).workers.filter((a) => a.spec.kind === 'check').length, 0);
 
     // "No code" on a branch deleted under the attempt is not "zero commits" (audit 2026-11-01:
     // a missing branch counted as 0 commits, so this claim was held and passed on).
@@ -760,7 +768,7 @@ test('launch preflight refuses with every reason (no repository, a check executa
     const launch = (key: string, workspaceId: string, done: unknown) =>
       f.host.launch({
         key,
-        charter: Charter.parse(charter(key, 2, done)),
+        charter: canonical(charter(key, 2, done)),
         origin: { t: 'direct' },
         launcherId: f.lead.id,
         workspaceId,
@@ -1002,8 +1010,7 @@ test('work on a question waits (stage waiting, no worktree) until its dependency
       })
     );
     const stage = (q: string) => f.host.view(id).questions.find((x) => x.id === q)!.stage;
-    const workOn = (q: string) =>
-      f.stateOf(id).attempts.find((a) => a.spec.kind === 'work' && a.spec.questionId === q)!;
+    const workOn = (q: string) => worksOf(f.stateOf(id)).find((a) => a.spec.questionId === q)!;
     // Free slots and disjoint custody, yet q2's work is held: queued, no worktree, not refused.
     assert.equal(workOn(q2).phase.t, 'planned');
     assert.equal(workOn(q2).id in f.stateOf(id).trees, false);
@@ -1244,7 +1251,7 @@ test('integration merges validated candidates one at a time onto the expedition 
     /** A live work attempt on `q` writes `file`, commits, and claims that commit. */
     const claimOn = async (q: string, file: string, content: string) => {
       const w = f.liveAttempts(id).find((x) => {
-        const spec = f.stateOf(id).attempts.find((y) => y.id === x.id)!.spec;
+        const spec = attemptOf(f.stateOf(id), x.id).spec;
         return spec.kind === 'work' && spec.questionId === q;
       })!;
       const tree = f.treeOf(id, w.id);
@@ -1963,7 +1970,7 @@ test('a thread draft posts its card in that thread; an open draft re-checks its 
     );
     const input = (name: string, done: unknown, issues: string[]) => ({
       key: `thread:${name}`,
-      charter: Charter.parse(charter(name, 2, done)),
+      charter: canonical(charter(name, 2, done)),
       issues,
       advice: [],
       defaulted: [],
@@ -2208,9 +2215,9 @@ test('an attempt run starts in its own worktree (two concurrent runs of one crew
       [],
       'no delivery wakes the crew'
     );
-    const posted = f
-      .stateOf(id)
-      .attempts.filter((a) => a.phase.t === 'posted' || a.phase.t === 'ended');
+    const posted = allAttempts(f.stateOf(id)).filter(
+      (a) => a.phase.t === 'posted' || a.phase.t === 'ended'
+    );
     assert.equal(crewRuns.length, posted.length, 'one crew run per attempt, no extra');
   } finally {
     await f.close();
@@ -2240,9 +2247,12 @@ test('owner model words resolve to the catalog id once, at ingestion; a name tha
     const persisted = (r: { value: { draftId: string } }) =>
       JSON.parse(fs.readFileSync(path.join(f.root, 'drafts', `${r.value.draftId}.json`), 'utf8'))
         .charter;
-    assert.equal(persisted(drafted).crew.work[0].model, 'claude-haiku-5-5');
+    assert.deepEqual(persisted(drafted).crew.work[0].model, { t: 'named', id: 'claude-haiku-5-5' });
     // An alias kept as written would defeat the independence rule (it compares model strings).
-    assert.equal(persisted(drafted).crew.manager.model, 'claude-sonnet-5-5');
+    assert.deepEqual(persisted(drafted).crew.manager.model, {
+      t: 'named',
+      id: 'claude-sonnet-5-5',
+    });
     assert.deepEqual(drafted.value.resolved, [
       'manager: "sonnet" → claude-sonnet-5-5',
       'work seat 0: "claude haiku" → claude-haiku-5-5',
@@ -2262,7 +2272,11 @@ test('owner model words resolve to the catalog id once, at ingestion; a name tha
         },
       },
     });
-    assert.equal(persisted(open).crew.work[0].model, 'opencode/gpt-5', open.text);
+    assert.deepEqual(
+      persisted(open).crew.work[0].model,
+      { t: 'named', id: 'opencode/gpt-5' },
+      open.text
+    );
     assert.deepEqual(open.value.resolved, []);
     // "sol" names three codex models: refused, listing the valid ids, never a guess.
     const refused = await rpc(f.spec(), 'expedition', {
@@ -2400,7 +2414,7 @@ test('a crew seat on a harness this host has not installed is a draft issue and 
       (p) => p !== 'codex'
     );
     try {
-      const c = Charter.parse(charter('no-codex'));
+      const c = canonical(charter('no-codex'));
       assert.deepEqual(
         (await noCodex.issues(f.workspaceId, c)).filter((i) => /not installed/.test(i)),
         [
@@ -2418,7 +2432,7 @@ test('a crew seat on a harness this host has not installed is a draft issue and 
         }),
         /work seat 1: codex is not installed/
       );
-      const claudeOnly = Charter.parse({
+      const claudeOnly = canonical({
         ...charter('claude-only'),
         crew: {
           manager: { provider: 'claude' },
@@ -2452,20 +2466,17 @@ test('a host whose execution gate is disabled (a copied store) refuses launch an
       await assert.rejects(
         disabled.launch({
           key: 'copy:launch',
-          charter: Charter.parse(charter('copy-launch')),
+          charter: canonical(charter('copy-launch')),
           origin: { t: 'direct' },
           launcherId: f.lead.id,
           workspaceId: f.workspaceId,
         }),
         reason
       );
-      assert.match(
-        (await disabled.issues(f.workspaceId, Charter.parse(charter('d')))).join(),
-        reason
-      );
+      assert.match((await disabled.issues(f.workspaceId, canonical(charter('d')))).join(), reason);
       await assert.rejects(disabled.steer(id, f.lead.id, { t: 'resume' }), reason);
       // A draft would write its file and post a card with a Launch that can never work.
-      const c = Charter.parse(charter('copy-draft'));
+      const c = canonical(charter('copy-draft'));
       await assert.rejects(
         disabled.drafts.draft({
           key: 'copy:draft',
@@ -2526,7 +2537,7 @@ test('a host-side parse failure never by itself asks the owner: one repair, then
     const w = f.liveAttempts(id).find((a) => a.kind === 'work')!.id;
     await f.answer(id, w, 'Looked around, nothing to report, no json.');
     await f.answer(id, w, 'Still no json.');
-    const ended = f.stateOf(id).attempts.find((a) => a.id === w)!;
+    const ended = attemptOf(f.stateOf(id), w);
     assert.ok(ended.phase.t === 'ended' && ended.phase.outcome.t === 'malformed');
     f.manager(id);
     const s = f.stateOf(id);
@@ -2562,7 +2573,7 @@ test('a work answer still unreadable after its one repair, whose branch holds co
     assert.match(repairPost.body, /"result":"claim"/, 'the repair names the answer schema');
     assert.match(repairPost.body, new RegExp(`I fixed it in ${sha}`), 'it quotes the answer');
     await f.answer(id, w, 'Really, it is fixed.');
-    const ended = f.stateOf(id).attempts.find((a) => a.id === w)!;
+    const ended = attemptOf(f.stateOf(id), w);
     if (ended.phase.t !== 'ended') throw new Error('not ended');
     assert.deepEqual(ended.phase.outcome.t === 'unreported_commits' && ended.phase.outcome.shas, [
       sha,
@@ -2672,7 +2683,7 @@ test('a changed acceptance re-validates an unmerged claim and only the current o
     await f.host.steer(id, f.lead.id, { t: 'stop' });
     await f.answer(id, w2, 'Done, no json.');
     s = f.stateOf(id);
-    const ended = s.attempts.find((a) => a.id === w2)!;
+    const ended = attemptOf(s, w2);
     assert.equal(ended.phase.t === 'ended' && ended.phase.outcome.t, 'malformed');
     assert.equal(s.requests[w2].length, 1, 'no repair request after finish');
   } finally {
@@ -2796,7 +2807,7 @@ test(
     // Audit 2026-11-01 #5: a rejected check job was only logged and re-run on every tick; a NUL
     // byte in argv (which passed the charter schema) makes spawn throw every time.
     const nul = { kind: 'command', argv: [process.execPath, '-e', 'a\0b'], timeoutSeconds: 30 };
-    const parsed = Charter.safeParse(charter('nul', 2, { checks: [nul] }));
+    const parsed = CharterRequest.safeParse(charter('nul', 2, { checks: [nul] }));
     assert.equal(parsed.success, false);
     assert.match(JSON.stringify(parsed.error?.issues), /NUL byte/);
     const f = await fixture();
@@ -2804,7 +2815,7 @@ test(
       // A ledger written before the schema refused it (host.launch takes a charter as stored).
       const { state } = await f.host.launch({
         key: 'nul-key',
-        charter: charter('nul', 2, { checks: [nul] }) as Charter,
+        charter: unchecked(charter('nul', 2, { checks: [nul] })),
         origin: { t: 'direct' },
         launcherId: f.lead.id,
         workspaceId: f.workspaceId,
@@ -3079,7 +3090,7 @@ test('stop cancels live attempts and releases every tree safely: a submodule tre
     await f.answer(id, w1, finding);
     // A finding whose branch holds a commit is claimable data, never a dropped commit
     // (2026-11-01 review: live w475a3b answered `finding` with ACCEPTANCE_ROUTE.md committed).
-    const w1End = f.stateOf(id).attempts.find((a) => a.id === w1)!.phase;
+    const w1End = attemptOf(f.stateOf(id), w1).phase;
     assert.deepEqual(
       w1End.t === 'ended' && w1End.outcome.t === 'unreported_commits' && w1End.outcome.shas,
       [sha]
@@ -3117,7 +3128,7 @@ test('stop cancels live attempts and releases every tree safely: a submodule tre
     f.setClock(Date.parse(cancel.at) + CANCEL_GRACE_MS + 60_000);
     await f.host.tick(id);
     s = f.stateOf(id);
-    const ended = s.attempts.find((a) => a.id === w3)!;
+    const ended = attemptOf(s, w3);
     assert.equal(ended.phase.t === 'ended' && ended.phase.outcome.t, 'abandoned');
     assert.deepEqual(f.treeOf(id, w3).status, { t: 'removed', branchDeleted: true });
   } finally {

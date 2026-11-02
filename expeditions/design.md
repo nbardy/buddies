@@ -321,7 +321,8 @@ after every live expedition was retired, and a retired one is served from its `.
 ```
 DoneCheck = { kind: 'command', argv: string[], timeoutSeconds: number }   // host-run
           | { kind: 'judged', text: string }                               // blind LLM panel
-Done      = { checks: DoneCheck[] } | { ownerJudgment: true }
+Done      = { t: 'checks', checks: DoneCheck[] } | { t: 'owner' }   // as stored; the tool
+                                                                   // takes { checks } | { ownerJudgment: true }
 ```
 - A code claim must name its candidate commit (`commit: sha`). The host validates that immutable
   commit in a fresh clean worktree (never the worker's tree, never the shared checkout): it runs

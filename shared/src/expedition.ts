@@ -114,24 +114,32 @@ export type ExpeditionAttemptPhase =
   | { t: 'posted' }
   | { t: 'ended'; verdict: string; summary: string };
 
-export interface ExpeditionAttempt {
+/** What an attempt is for. A work attempt carries `ask`, the manager's brief for it (markdown);
+ * a manager or a check has no assignment of its own beyond its instructions. Managers belong to
+ * no question. */
+export type ExpeditionAttemptRole =
+  | { kind: 'manager' }
+  | { kind: 'work'; questionId: string; ask: string }
+  | { kind: 'check'; questionId: string; goal: boolean };
+
+/** The exact instructions the worker received: none until briefed; then recorded (`brief`),
+ * and once posted, the request that carries them. */
+export type ExpeditionBriefing =
+  | { t: 'unbriefed' }
+  | { t: 'briefed'; brief: string }
+  | { t: 'posted'; brief: string; requestId: string };
+
+export type ExpeditionAttempt = ExpeditionAttemptRole & {
   id: string;
-  kind: 'manager' | 'work' | 'check';
   /** By question title, never a raw id, e.g. `Work on “Add mul()”`. */
   label: string;
-  /** The manager's brief for a work attempt (markdown); absent for a manager or a check, which
-   * have no assignment of their own beyond `brief`. */
-  ask: string | null;
   seat: string;
-  questionId: string | null;
   phase: ExpeditionAttemptPhase;
   live: boolean;
-  /** The exact instructions the worker received; null until briefed. */
-  brief: string | null;
-  requestId: string | null;
+  briefing: ExpeditionBriefing;
   worktree: ExpeditionWorktree;
   cost: ExpeditionAttemptCost;
-}
+};
 
 /** A done check as chartered (design.md R2): a command the host runs, or a judged statement. */
 export type ExpeditionDoneCheck =
@@ -166,6 +174,8 @@ export interface ExpeditionCharterView {
   name: string;
   /** Markdown, as the Buddy wrote it. */
   goal: string;
+  /** The goal's first sentence as plain prose, for a one-line mention (cards, rows). */
+  goalLine: string;
   done: ExpeditionDone;
   inScope: string[];
   outOfScope: string[];
@@ -183,6 +193,8 @@ export interface ExpeditionView {
   integration: ExpeditionIntegration;
   /** Measured spend: `short` for the badge, `line` for the header (sums, unmeasured, settling). */
   cost: { short: string; line: string };
+  /** The one progress line, e.g. `1 live · 2 verified · 3/8 attempts · 41k tokens`. */
+  line: string;
   workspaceId: string;
   launchedAt: string;
   deadline: string;
@@ -196,7 +208,10 @@ export interface ExpeditionView {
     /** Manager decisions, bounded apart from the budget. */
     decisions: number;
     maxDecisions: number;
-    live: number;
+    /** Every attempt whose request is out, manager decisions included. */
+    running: number;
+    /** Work and check attempts running: what `maxLive` bounds. */
+    liveWorkers: number;
     maxLive: number;
     queued: number;
     verified: number;
@@ -267,7 +282,7 @@ export interface ExpeditionCrews {
  * channel rail, the expedition index pane and Home show without fetching every full view. */
 export type ExpeditionSummary = Pick<
   ExpeditionView,
-  'id' | 'run' | 'workspaceId' | 'launchedAt' | 'counts' | 'cost' | 'retirement'
+  'id' | 'run' | 'workspaceId' | 'launchedAt' | 'counts' | 'cost' | 'line' | 'retirement'
 > & { name: ExpeditionCharterView['name'] };
 
 /** A retired expedition (GET /api/buddies/expeditions/:id): its frozen summary and its last

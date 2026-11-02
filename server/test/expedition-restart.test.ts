@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { type Entry, workerAttempts } from '../src/expeditions/model';
+import { type Entry, attemptOf, workerAttempts } from '../src/expeditions/model';
 import { executeRequestRun, fixture, json, rpcLaunch } from './fixtures/expedition-fixture';
 import test from './fixtures/shard';
 
@@ -109,8 +109,8 @@ test('an interrupted work attempt runs again once under a new id, without spendi
     assert.equal(ended(f.ledgerOf(id), w1.id)?.outcome.t, 'interrupted');
     const retry = s.retries[w1.id];
     assert.ok(retry, 'the interrupted work is replanned');
-    const old = s.attempts.find((a) => a.id === w1.id)!;
-    const fresh = s.attempts.find((a) => a.id === retry)!;
+    const old = attemptOf(s, w1.id);
+    const fresh = attemptOf(s, retry);
     assert.deepEqual(fresh.spec, old.spec, 'the same work, seat and brief');
     assert.equal(fresh.phase.t, 'posted');
     assert.equal(workerAttempts(s), budget, 'a restart spends no attempt');
