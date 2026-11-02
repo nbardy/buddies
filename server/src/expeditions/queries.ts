@@ -8,7 +8,7 @@ import type {
   Validation,
   WorkSpec,
 } from './ledger';
-import { attemptOf, byId, questionOf, validationPassed } from './ledger';
+import { attemptOf, byId, interruptedEnd, questionOf, validationPassed } from './ledger';
 
 // Pure read-only views over a folded State, shared by decide, effects, briefs, news and the page.
 
@@ -25,8 +25,12 @@ export const exploreAttempts = (s: State) =>
     (a) => a.spec.kind === 'work' && byId(s.questions, a.spec.questionId)?.scope === 'explore'
   ).length;
 /** What the owner's attempt budget counts: work and check attempts, never manager decisions
- * (design.md R9: "Budget 6 attempts" allowed one work attempt while decisions counted). */
-export const workerAttempts = (s: State) => s.attempts.filter(isWorker).length;
+ * (design.md R9: "Budget 6 attempts" allowed one work attempt while decisions counted), nor an
+ * attempt a server restart interrupted: its replan (`attempt_retry_planned`) is the one counted. */
+export const workerAttempts = (s: State) =>
+  s.attempts.filter((a) => isWorker(a) && !interrupted(a)).length;
+/** Ended by a server restart (ledger.ts interruptedEnd): superseded by its replan. */
+export const interrupted = (a: Attempt) => a.phase.t === 'ended' && interruptedEnd(a.phase.outcome);
 export const managerTurns = (s: State) => s.attempts.filter((a) => !isWorker(a)).length;
 /** Manager decisions are bounded apart from the budget, so a manager that keeps deciding nothing
  * cannot spin: two per budgeted attempt (one to start it, one to act on its result) plus two
@@ -100,7 +104,9 @@ export interface Panel {
 /** A panel is verified when a strict majority of its checks verified the claim. */
 export function panels(s: State): Panel[] {
   const out = new Map<string, Attempt<CheckSpec>[]>();
-  for (const c of checks(s)) out.set(c.spec.panelId, [...(out.get(c.spec.panelId) ?? []), c]);
+  // An interrupted check never voted: its replan (same panel, new id) takes its seat.
+  for (const c of checks(s).filter((c) => !interrupted(c)))
+    out.set(c.spec.panelId, [...(out.get(c.spec.panelId) ?? []), c]);
   return [...out.entries()].map(([id, members]) => {
     const first = members[0].spec;
     // A dropped check (its worktree could not be made) settles the panel without a vote.

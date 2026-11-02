@@ -360,9 +360,11 @@ const buddyBriefings = createBriefings(
 let buddyMcp: McpEndpoint | null = null;
 let expeditionHost: ExpeditionHost | null = null;
 // The expedition crews: adoption, session scope and shutdown ask it (policy-port.ts CrewRegistry).
-// No crews until slice A5 makes the expedition host implement `crewBuddyIds()` and wires it here.
+// The host answers once `initialize` made it; before that no ledger is read, so no Buddy crews.
 const NO_CREWS: ReadonlySet<string> = new Set();
-const crewRegistry: CrewRegistry = { crewBuddyIds: () => NO_CREWS };
+const crewRegistry: CrewRegistry = {
+  crewBuddyIds: () => expeditionHost?.crewBuddyIds() ?? NO_CREWS,
+};
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {
   if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
   return buddyMcp.spec(grant);
@@ -1050,6 +1052,15 @@ void runServerStartup(
       // `ingest_start` (initialize) is the work; this phase is only the wait left over after the rest.
       await timeBootPhaseAsync('conversation_list_wait', () => ingestStarting);
       await timeBootPhaseAsync('recovery', () => runtimeBuilder.recover());
+      // Crews restart on new sessions (owner 2026-11-03): every unsettled crew run is cancelled
+      // and its attempt ends interrupted BEFORE adoption refuses the crew's turns and before the
+      // runner starts, so no crew run resumes in its old conversation (expeditions/host.ts).
+      await timeBootPhaseAsync('expeditions_interrupt', async () => {
+        await buddiesReady;
+        await expeditionHost?.interruptBootLive();
+      }).catch((error) =>
+        console.error('[expeditions] Crew runs were not interrupted at boot:', error)
+      );
       // Before the Buddy runner recovers or claims anything (lifecycle/adopt-executions.ts).
       const adoptionStarted = performance.now();
       adoptedRuns = await adoptExecutions(foundExecutions, {
@@ -1072,6 +1083,8 @@ void runServerStartup(
         logger: console,
       });
       bootPhase('adoption', performance.now() - adoptionStarted);
+      // Expedition ticks start only now: none observes a crew run the boot cancelled.
+      expeditionHost?.start();
       // Ordinary chats and Builders: queue the owner messages that were sent and never started.
       // AFTER adoption: queueing starts the head at once, and a turn started before its predecessor
       // is adopted makes adoption fail ("already running") and discards the live turn's journal, so

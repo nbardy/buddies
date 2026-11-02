@@ -24,6 +24,8 @@ import {
   hostVerifications,
   independentCheckSeats,
   integrating,
+  interrupted,
+  isWorker,
   latestGoalPanel,
   managerCap,
   managerTurns,
@@ -91,7 +93,10 @@ export function decide(s: State, clock: Clock): Entry[] {
   const now = runOf(s);
   if (now === 'finished' || now === 'paused') return withStatus(s, out, at);
 
-  if (s.run.t === 'running') repairLegacyChecks(s, push, at);
+  if (s.run.t === 'running') {
+    repairLegacyChecks(s, push, at);
+    retryInterrupted(s, clock, push);
+  }
 
   // Manager decisions are not budgeted attempts (design.md R9); they stop at their own cap.
   const managerLive = s.attempts.some((a) => a.spec.kind === 'manager' && a.phase.t !== 'ended');
@@ -167,6 +172,27 @@ function repairLegacyChecks(s: State, push: (e: Entry) => void, at: string): voi
       });
 }
 
+/**
+ * Each work or check attempt a server restart interrupted is planned again, once, with the same
+ * spec under a new id: the work was never answered, so it is owed, and the restart is not the
+ * manager's decision to spend. Its unreported commits (if any) stay claimable on the old attempt.
+ * A manager is not replanned here: its interrupted end is unseen, so managerDue plans one.
+ * Regression: owner 2026-11-03: crews restart on new sessions.
+ */
+const ID_PREFIX = { work: 'w', check: 'c' } as const;
+
+function retryInterrupted(s: State, clock: Clock, push: (e: Entry) => void): void {
+  for (const a of s.attempts.filter(isWorker))
+    if (interrupted(a) && !(a.id in s.retries))
+      push({
+        t: 'attempt_retry_planned',
+        at: clock.now,
+        attemptId: clock.nextId(ID_PREFIX[a.spec.kind]),
+        retryOf: a.id,
+        spec: a.spec,
+      });
+}
+
 /** A work attempt's end whose commits a manager may claim (R11): anything but a code claim. A
  * legacy end (a pre-R11 `malformed` or `finding` whose branch kept a commit, 2026-11-01 incident:
  * w64130b and w475a3b) is claimable too; the host then checks its branch holds the commit. */
@@ -178,6 +204,7 @@ function claimable(o: Outcome): boolean {
     case 'unreported_commits':
     case 'failed':
     case 'abandoned':
+    case 'interrupted':
       return true;
     case 'manager':
     case 'check':

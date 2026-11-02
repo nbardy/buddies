@@ -38,7 +38,30 @@ export type EndOutcome =
   | { t: 'failed'; status: 'failed' | 'cancelled' }
   /** The host asked its runs to stop (owner stop, deadline) and they did not end within the grace
    * (host.ts CANCEL_GRACE_MS): the attempt is ended by the host so its tree can be released. */
-  | { t: 'abandoned'; reason: string };
+  | { t: 'abandoned'; reason: string }
+  /** The server restarted while it was live (host.ts interruptBootLive): its crew runs `runIds`
+   * were cancelled at boot, so a crew turn never resumes on the harness of the backend that
+   * started it. Regression: owner 2026-11-03: crews restart on new sessions. Shown to the
+   * manager like `failed`; a work or check attempt is replanned once under a new id
+   * (`attempt_retry_planned`), a manager is replanned through managerDue. Never budgeted. */
+  | { t: 'interrupted'; cause: 'server_restart'; runIds: string[] };
+
+/** An attempt ended by a server restart, alone or under the unreported commits it left. */
+export function interruptedEnd(o: Outcome): boolean {
+  switch (o.t) {
+    case 'interrupted':
+      return true;
+    case 'unreported_commits':
+      return o.ended.t === 'interrupted';
+    case 'manager':
+    case 'work':
+    case 'check':
+    case 'malformed':
+    case 'failed':
+    case 'abandoned':
+      return false;
+  }
+}
 
 /**
  * What an ended attempt produced. `unreported_commits`: a work attempt that ended with anything
@@ -395,6 +418,15 @@ export type Entry =
   /** A manager's reflection (its `note` action), kept for the page and the chat. */
   | { t: 'reflection'; at: string; text: string }
   | { t: 'attempt_planned'; at: string; attemptId: string; spec: AttemptSpec }
+  /** Decide's replan of a worker attempt a server restart interrupted: the same spec under a new
+   * attempt id, planned once per interrupted attempt (`retries`). */
+  | {
+      t: 'attempt_retry_planned';
+      at: string;
+      attemptId: string;
+      retryOf: string;
+      spec: WorkSpec | CheckSpec;
+    }
   /** The exact brief, written before the request post so a replay sends identical bytes. */
   | { t: 'attempt_posting'; at: string; attemptId: string; body: string }
   | { t: 'attempt_posted'; at: string; attemptId: string; requestId: string }
@@ -545,6 +577,8 @@ export interface State {
   statuses: Status[];
   /** Manager attempts whose actions were applied (`manager_applied` entries). */
   appliedManagers: Set<string>;
+  /** Each interrupted worker attempt's replan, by the interrupted attempt's id. */
+  retries: Record<string, string>;
 }
 
 // ---------- Stored entries (κ for the ledger file) ----------
@@ -648,6 +682,7 @@ export function fold(stored: readonly StoredEntry[]): State {
     run: { t: 'running' },
     statuses: [],
     appliedManagers: new Set(),
+    retries: {},
   };
   for (const entry of entries) apply(state, entry);
   return state;
@@ -656,6 +691,7 @@ export function fold(stored: readonly StoredEntry[]): State {
 // Pattern: table-driven (docs/patterns.md#table-driven) — one exhaustive handler per entry kind.
 const NEWS: ReadonlySet<Entry['t']> = new Set([
   'attempt_planned',
+  'attempt_retry_planned',
   'attempt_posted',
   'worktree_failed',
   'attempt_ended',
@@ -820,6 +856,12 @@ export function apply(s: State, e: Entry): void {
         s.unseen = [];
       }
       return;
+    case 'attempt_retry_planned':
+      if (attemptOf(s, e.retryOf).phase.t !== 'ended' || e.retryOf in s.retries)
+        throw new Error(`attempt ${e.retryOf} retried unended or twice`);
+      s.attempts.push({ id: e.attemptId, spec: e.spec, phase: { t: 'planned' } });
+      s.retries[e.retryOf] = e.attemptId;
+      return;
     case 'attempt_posting':
       attemptOf(s, e.attemptId).phase = { t: 'posting', body: e.body, round: 'brief' };
       s.briefs[e.attemptId] = e.body;
@@ -851,12 +893,13 @@ export function apply(s: State, e: Entry): void {
         outcome: e.outcome,
         endedAt: e.at,
       };
-      // A manager's actions are applied, not shown back; its malformed or failed end is shown,
-      // so the next manager turn retries instead of the expedition going quiet.
+      // A manager's actions are applied, not shown back; its malformed, failed or interrupted
+      // end is shown, so the next manager turn retries instead of the expedition going quiet.
       if (
         attempt.spec.kind !== 'manager' ||
         e.outcome.t === 'malformed' ||
-        e.outcome.t === 'failed'
+        e.outcome.t === 'failed' ||
+        e.outcome.t === 'interrupted'
       )
         s.unseen.push(e);
       return;

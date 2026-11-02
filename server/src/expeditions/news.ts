@@ -201,6 +201,10 @@ function newsLine(s: State, e: Entry): string[] {
           ]
         : [];
     }
+    case 'attempt_retry_planned':
+      return [
+        `↻ ${attemptTitle(s, attemptOf(s, e.retryOf))} runs again: the server restarted while it ran`,
+      ];
     case 'attempt_posted': {
       const a = attemptOf(s, e.attemptId);
       return a.spec.kind === 'manager' ? [] : [`▶ Started: ${attemptLabel(s, a)}`];
@@ -391,6 +395,11 @@ export function outcomeParts(o: Outcome): { verdict: string; summary: string } {
       return { verdict: 'Run failed', summary: `the run ended ${o.status}` };
     case 'abandoned':
       return { verdict: 'Abandoned', summary: `after the host's stop (${clip(o.reason, 120)})` };
+    case 'interrupted':
+      return {
+        verdict: 'Interrupted',
+        summary: 'the server restarted; it runs again on a new session',
+      };
   }
 }
 
@@ -424,6 +433,8 @@ export function outcomeDetail(o: Outcome): string {
       return `RUN ${o.status.toUpperCase()}`;
     case 'abandoned':
       return `ABANDONED: ${o.reason}`;
+    case 'interrupted':
+      return `INTERRUPTED: the server restarted and cancelled its runs (${o.runIds.join(', ') || 'none found'}); a work or check attempt is replanned on a new session`;
   }
 }
 

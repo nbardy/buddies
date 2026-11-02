@@ -101,7 +101,13 @@ export async function fixture() {
         return new Date(clock);
       },
     });
-  let expeditions = host();
+  /** A booted host: ticking, as server.ts starts it after adoption (`hostWith` stays unstarted). */
+  const started = (): ExpeditionHost => {
+    const booted = host();
+    booted.start();
+    return booted;
+  };
+  let expeditions = started();
   const grants = createGrants({ ttlMs: 60_000 });
   const endpoint = await startMcpEndpoint({
     core,
@@ -211,7 +217,14 @@ export async function fixture() {
     },
     restart() {
       expeditions.close();
+      expeditions = started();
+    },
+    /** A restart as server.ts boots: the new host is returned unstarted, so a test runs
+     * `interruptBootLive` (and adoption) before it calls `start`. */
+    reboot(): ExpeditionHost {
+      expeditions.close();
       expeditions = host();
+      return expeditions;
     },
     async close() {
       expeditions.close();

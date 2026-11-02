@@ -17,7 +17,7 @@ import type { ExecutionGate } from '../buddies/execution-gate';
 import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
 import { CREW_ROLE, briefOf, chatFeedback, parseOutcome, repairBrief, statusText } from './briefs';
-import { runCommand } from './command';
+import { killCheck, pidfileOf, runCommand } from './command';
 import { type DraftInput, type LaunchOutcome, createDraftStore, placementOf } from './drafts';
 import {
   attemptCommits,
@@ -702,6 +702,13 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
    */
   async function interrupted(s: State, validationId: string): Promise<Entry[]> {
     const { tree } = startedOf(s, validationId);
+    // The orphaned check, while it still runs (its pidfile survives only a crash): killed before
+    // its tree is pulled, so the replay never races it.
+    const killed = await killCheck(pidfileOf(`${tree.path}.scratch`));
+    if (killed.t === 'killed')
+      console.log(
+        `[expeditions] ${s.id}: killed the orphaned check ${killed.pid} of ${validationId}`
+      );
     const released = await discardWorktree(s.repo.root, tree, keepOf(s, validationId));
     return [
       ...preservedEntries(validationId, released),
@@ -1063,6 +1070,10 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     return attempt ? attemptDirectory(s, attempt, runId) : crewDirectory(id);
   }
 
+  /** Every ready crew's Buddy id. */
+  const crews = (): string[] =>
+    [...states.values()].flatMap((s) => (s.crew.t === 'ready' ? [s.crew.buddyId] : []));
+
   /** The expedition a Buddy crews (from the cached states: no fold per Buddy turn). */
   function crewOf(buddyId: string): string | undefined {
     return [...states].find(([, s]) => s.crew.t === 'ready' && s.crew.buddyId === buddyId)?.[0];
@@ -1181,26 +1192,98 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     debounce = null;
     void tickAll();
   });
+  /** Wake-on-write and the backstop, started by `start` (after boot adoption), never at
+   * construction: a tick before `interruptBootLive` could observe a crew run the restart is
+   * about to cancel. Returns how to stop them. */
+  function startTicking(): () => void {
+    const unsubscribe = events.on((event) => {
+      if (event.kind !== 'changed' && event.kind !== 'posted') return;
+      if (event.kind === 'posted' && event.post.author.kind === 'owner')
+        ownerPosted(event.channel.id);
+      if (debounce || active().length === 0) return;
+      debounce = setTimeout(wake, DEBOUNCE_MS);
+      debounce.unref();
+    });
+    const backstop = setInterval(
+      labelled('timer expeditions-backstop', () => void tickAll()),
+      BACKSTOP_MS
+    );
+    backstop.unref();
+    void tickAll();
+    return () => {
+      unsubscribe();
+      clearInterval(backstop);
+    };
+  }
   // A disabled gate (a copied store, execution-gate.ts) never ticks; launch and steer refuse.
-  const enabled = gate.t === 'enabled';
-  const unsubscribe = enabled
-    ? events.on((event) => {
-        if (event.kind !== 'changed' && event.kind !== 'posted') return;
-        if (event.kind === 'posted' && event.post.author.kind === 'owner')
-          ownerPosted(event.channel.id);
-        if (debounce || active().length === 0) return;
-        debounce = setTimeout(wake, DEBOUNCE_MS);
-        debounce.unref();
-      })
-    : () => undefined;
-  const backstop = enabled
-    ? setInterval(
-        labelled('timer expeditions-backstop', () => void tickAll()),
-        BACKSTOP_MS
-      )
-    : null;
-  backstop?.unref();
-  if (enabled) void tickAll();
+  const TICKING: Record<ExecutionGate['t'], () => () => void> = {
+    enabled: startTicking,
+    disabled: () => () => undefined,
+  };
+  type Ticking = { t: 'stopped' } | { t: 'started'; stop: () => void };
+  let ticking: Ticking = { t: 'stopped' };
+  function start(): void {
+    if (ticking.t === 'started') throw new Error('the expedition host is already started');
+    ticking = { t: 'started', stop: TICKING[gate.t]() };
+  }
+
+  // ---------- Restart: no crew turn outlives the backend that started it ----------
+
+  /**
+   * Boot, before execution adoption and before the runner starts (server.ts). Every unsettled
+   * run of every ready crew is cancelled, and every attempt still waiting on one ends
+   * `interrupted` (decide replans it on a new session). Regression: owner 2026-11-03: crews
+   * restart on new sessions. Cancelling is what keeps a crew's run from resuming: adoption
+   * refuses the crew's turn (adopt-executions.ts restartOf), and a run left `running` would end
+   * `lease_expired`, which decision G (runs.rs `resume`) continues ONCE in the SAME
+   * conversation, on the dead backend's session. A cancelled run ends `cancelled`, never resumed.
+   * A copied store (gate disabled) runs nothing, so it cancels and writes nothing.
+   */
+  async function interruptBootLive(): Promise<void> {
+    if (gate.t === 'disabled') return;
+    for (const [id, s] of [...states])
+      if (s.crew.t === 'ready')
+        await serialized(id, () => interruptCrew(id)).catch((error: unknown) =>
+          console.error(`[expeditions] ${id}: the crew's runs could not be interrupted:`, error)
+        );
+  }
+
+  async function interruptCrew(id: string): Promise<void> {
+    // An attempt whose brief is recorded but not its post is posted first (same key: a post a
+    // crash left is found, not made twice), so every live attempt names its request.
+    for (const a of stateOf(id).attempts)
+      if (a.phase.t === 'posting')
+        await append(id, await postAttempt(stateOf(id), a.id, a.phase.body, a.phase.round));
+    const s = stateOf(id);
+    if (s.crew.t !== 'ready') throw new Error(`expedition ${id} interrupted before its crew`);
+    // Before the cancel: an attempt whose request already settled is the observer's, not ours.
+    const waiting: Attempt[] = [];
+    for (const a of s.attempts) {
+      if (a.phase.t !== 'posted') continue;
+      const request = await core.getPost(OWNER, a.phase.requestId);
+      if (request.request.state === 'awaiting' || request.request.state === 'none') waiting.push(a);
+    }
+    const unsettled = (
+      await core.listRuns({ kind: 'buddy', buddyId: s.crew.buddyId }, RUN_SCAN_LIMIT)
+    ).filter((r) => !SETTLED.has(r.status));
+    for (const r of unsettled) {
+      const run = await core.cancelRun(OWNER, r.id);
+      events.emit({ kind: 'cancelled', run });
+    }
+    for (const a of waiting) {
+      const posts = new Set(s.requests[a.id]);
+      const runIds = unsettled
+        .filter((r) => r.input.kind === 'post' && posts.has(r.input.postId))
+        .map((r) => r.id);
+      await append(id, [
+        await ended(stateOf(id), a, { t: 'interrupted', cause: 'server_restart', runIds }),
+      ]);
+    }
+    if (unsettled.length > 0 || waiting.length > 0)
+      console.log(
+        `[expeditions] ${id}: restart cancelled ${unsettled.length} crew runs, interrupted ${waiting.length} attempts`
+      );
+  }
 
   /**
    * Every reason a launch of this charter is refused, in one list (draft and launch share it):
@@ -1343,8 +1426,12 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
     /** The expedition a crew Buddy belongs to, so a mentioned crew can answer about itself. */
     ofCrew: crewOf,
     /** Every crew Buddy (the client keeps them off the Buddies roster). */
-    crews: (): string[] =>
-      [...states.values()].flatMap((s) => (s.crew.t === 'ready' ? [s.crew.buddyId] : [])),
+    crews,
+    /** policy-port.ts CrewRegistry: adoption, session scope and shutdown ask it. */
+    crewBuddyIds: (): ReadonlySet<string> => new Set(crews()),
+    interruptBootLive,
+    /** Starts ticking (server.ts: after `interruptBootLive` and execution adoption). */
+    start,
     turnDirectory,
     workspaceOf: (id: string) => stateOf(id).workspaceId,
     /** Tests drive ticks directly. */
@@ -1357,8 +1444,8 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
       } while (jobs.size > 0);
     },
     close(): void {
-      unsubscribe();
-      if (backstop) clearInterval(backstop);
+      if (ticking.t === 'started') ticking.stop();
+      ticking = { t: 'stopped' };
       if (debounce) clearTimeout(debounce);
     },
   };
