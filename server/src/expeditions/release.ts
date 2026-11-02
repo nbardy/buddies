@@ -2,17 +2,18 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import {
   type BranchState,
+  type GitRun,
+  type Registration,
   branchState,
   cambium,
-  cambiumWorkspace,
-  describe,
   git,
-  nothingLeft,
-  recoverLeftovers,
+  registrationOf,
+  removeGitOnly,
+  snapshotDirty,
 } from './git';
 import type { Preserved, Release, WorktreeAt } from './ledger';
 
-// Ending a worker's or a validation's tree (design.md R1, R2, R11). Ported from oompa's Cambium
+// Ending every expedition tree (design.md R1, R2, R11): one remove path, removeTree. Ported from oompa's Cambium
 // `remove!` (lessons, design.md "Lessons from oompa"): a guard ladder decides whether a tree may
 // go; once it passes, nothing a worker made can be lost, so removal is forced (a tree holding a
 // submodule is refused by a plain `git worktree remove`, audit 2026-11-01 #9). Before removal:
@@ -21,6 +22,8 @@ import type { Preserved, Release, WorktreeAt } from './ledger';
 //   - harvest: ignored run output (HARVEST_DIRS) is copied into the expedition's folder, because
 //     `git status` omits ignored files, so a tree whose only new files were ignored output looked
 //     clean and its removal deleted them (oompa swarm 455987ea lost a paid GPU run's raw gauges).
+//   - under the retire policy, uncommitted changes are committed from a temporary index and pinned
+//     at the tree's `-dirty` salvage ref (git.ts snapshotDirty), so retire never strands a tree.
 // Each preservation is returned as data and recorded in the same batch as the release.
 
 /** Where an ending tree's leftovers go: its salvage ref and its harvest folder. */
@@ -35,6 +38,16 @@ export interface Released {
 }
 
 const only = (release: Release): Released => ({ release, preserved: [] });
+
+/** How a guarded tree (an attempt's, the integration tree) is ended: `finish` refuses one with
+ * uncommitted changes; `retire` ends it whatever it holds, snapshotting those changes first. */
+export type ReleasePolicy = { t: 'finish' } | { t: 'retire' };
+/** A scratch tree (a validation's, the manager's) skips the ladder: it is discarded forced. */
+export type Guard = ReleasePolicy | { t: 'scratch' };
+
+/** A forced remove deletes the whole tree: 124k files took ~15 min on the owner's machine, and
+ * the 120 s query timeout killed removes partway (the emergent-beach incident, 2582 ` D`). */
+export const REMOVE_TIMEOUT_MS = 15 * 60_000;
 
 /** Ignored output worth keeping, repo-relative (the wave_sim convention oompa harvests too). */
 export const HARVEST_DIRS = ['output'];
@@ -97,28 +110,11 @@ async function salvage(root: string, ref: string, sha: string): Promise<Preserve
   return { t: 'salvaged', ref, sha };
 }
 
-/**
- * Why a worker's tree may not be removed (empty: it may), oompa's ladder in its order: git cannot
- * read it, it has uncommitted or untracked changes, it is no longer on its own branch (when that
- * branch exists), or a merge/rebase/cherry-pick/revert is half-done in it.
- */
-async function removalBlockers(at: WorktreeAt, branch: BranchState): Promise<string[]> {
-  const [status, on] = await Promise.all([
-    git(at.path, ['status', '--porcelain']),
-    git(at.path, ['symbolic-ref', '--quiet', 'HEAD']),
-  ]);
-  if (status.t === 'failed') return [`git status failed: ${status.message}`];
-  const operations = await Promise.all(OPERATIONS.map((m) => operationLeft(at.path, m)));
-  const offBranch =
-    branch.t === 'present' && (on.t !== 'ok' || on.stdout !== `refs/heads/${at.branch}`);
-  return [
-    status.stdout === ''
-      ? ''
-      : `uncommitted changes: ${status.stdout.split('\n').slice(0, 5).join('; ')}`,
-    offBranch ? `the tree is no longer on ${at.branch}` : '',
-    ...operations.flatMap((m) => (m ? [`a git operation is half-done (${m})`] : [])),
-  ].filter(Boolean);
-}
+const exists = (file: string) =>
+  fsp.lstat(file).then(
+    () => true,
+    () => false
+  );
 
 async function operationLeft(tree: string, marker: string): Promise<string | undefined> {
   const where = await git(tree, ['rev-parse', '--git-path', marker]);
@@ -127,11 +123,122 @@ async function operationLeft(tree: string, marker: string): Promise<string | und
   return (await exists(file)) ? marker : undefined;
 }
 
-const exists = (file: string) =>
-  fsp.lstat(file).then(
-    () => true,
-    () => false
-  );
+/**
+ * What `git status --porcelain=v2` shows in a tree. `tracked_deletions_only`: every line is a
+ * deletion of a tracked file, which HEAD still holds, so removing the tree loses nothing (the
+ * emergent-beach trees held 2582 ` D` lines after a killed remove had deleted half their files).
+ * v2, not v1: git.ts trims stdout, which eats v1's leading space (` D a.txt` became `D a.txt`, a
+ * staged deletion); v2 lines start with their kind (`1 .D …`, `? path`).
+ */
+export type DirtyKind =
+  | { t: 'clean' }
+  | { t: 'tracked_deletions_only'; lines: string[] }
+  | { t: 'modified'; lines: string[] };
+
+const DELETION = /^1 [.D][.D] /;
+
+export function dirtyKind(porcelainV2: string): DirtyKind {
+  const lines = porcelainV2.split('\n').filter(Boolean);
+  if (lines.length === 0) return { t: 'clean' };
+  return lines.every((line) => DELETION.test(line))
+    ? { t: 'tracked_deletions_only', lines }
+    : { t: 'modified', lines };
+}
+
+/** What the guard ladder reads in a tree before anything is removed. */
+type Inspection =
+  | { t: 'readable'; dirty: DirtyKind; blockers: string[] }
+  | { t: 'unreadable'; reason: string };
+
+/**
+ * oompa's ladder in its order: git cannot read the tree, it is no longer on its own branch (when
+ * that branch exists), or a merge/rebase/cherry-pick/revert is half-done in it. Uncommitted
+ * changes are returned as a DirtyKind: what they block is the release policy's decision.
+ */
+async function inspect(tree: TreePath): Promise<Inspection> {
+  const [status, on, branch] = await Promise.all([
+    git(tree.path, ['status', '--porcelain=v2']),
+    git(tree.path, ['symbolic-ref', '--quiet', 'HEAD']),
+    git(tree.path, ['rev-parse', '--verify', '--quiet', `refs/heads/${tree.branch}`]),
+  ]);
+  if (status.t === 'failed')
+    return { t: 'unreadable', reason: `git status failed: ${status.message}` };
+  const operations = await Promise.all(OPERATIONS.map((m) => operationLeft(tree.path, m)));
+  const offBranch =
+    branch.t === 'ok' && (on.t !== 'ok' || on.stdout !== `refs/heads/${tree.branch}`);
+  return {
+    t: 'readable',
+    dirty: dirtyKind(status.stdout),
+    blockers: [
+      offBranch ? `the tree is no longer on ${tree.branch}` : '',
+      ...operations.flatMap((m) => (m ? [`a git operation is half-done (${m})`] : [])),
+    ].filter(Boolean),
+  };
+}
+
+const uncommitted = (lines: string[]) => `uncommitted changes: ${lines.slice(0, 5).join('; ')}`;
+
+/** Whether the ladder lets a tree go, and what was pinned so it could. */
+type Clearance = { t: 'clear'; preserved: Preserved[] } | { t: 'blocked'; reason: string };
+
+/** Finish never removes uncommitted work: any change, a deletion included, leaves the tree. */
+function finishDirty(dirty: DirtyKind): string[] {
+  switch (dirty.t) {
+    case 'clean':
+      return [];
+    case 'tracked_deletions_only':
+    case 'modified':
+      return [uncommitted(dirty.lines)];
+  }
+}
+
+/** Retire ends the tree whatever it holds: deletions only lose nothing; anything else is first
+ * committed from a temporary index and pinned at the tree's dirty salvage ref. */
+async function retireDirty(tree: TreePath, dirty: DirtyKind, keep: Keep): Promise<Preserved[]> {
+  switch (dirty.t) {
+    case 'clean':
+    case 'tracked_deletions_only':
+      return [];
+    case 'modified': {
+      const ref = dirtyRefOf(keep);
+      const sha = await snapshotDirty(
+        tree.path,
+        ref,
+        `expedition retire: uncommitted changes in ${tree.path}`
+      );
+      return [{ t: 'salvaged', ref, sha }];
+    }
+  }
+}
+
+/**
+ * Where a retired tree's uncommitted changes are pinned. A sibling of the salvage ref, not under
+ * it (plan: `<tree>/dirty`): git cannot hold both `…/<tree>` and `…/<tree>/dirty`, and a tree with
+ * unintegrated commits already has `…/<tree>`.
+ */
+export const dirtyRefOf = (keep: Keep) => `${keep.salvageRef}-dirty`;
+
+/** The thin dispatcher over the guard: one handler per policy. */
+async function clearance(tree: TreePath, guard: Guard, keep: Keep): Promise<Clearance> {
+  switch (guard.t) {
+    case 'scratch':
+      return { t: 'clear', preserved: [] };
+    case 'finish': {
+      const seen = await inspect(tree);
+      if (seen.t === 'unreadable') return { t: 'blocked', reason: seen.reason };
+      const blockers = [...finishDirty(seen.dirty), ...seen.blockers];
+      return blockers.length === 0
+        ? { t: 'clear', preserved: [] }
+        : { t: 'blocked', reason: blockers.join('; ') };
+    }
+    case 'retire': {
+      const seen = await inspect(tree);
+      if (seen.t === 'unreadable') return { t: 'blocked', reason: seen.reason };
+      if (seen.blockers.length > 0) return { t: 'blocked', reason: seen.blockers.join('; ') };
+      return { t: 'clear', preserved: await retireDirty(tree, seen.dirty, keep) };
+    }
+  }
+}
 
 type Harvest =
   | { t: 'none' }
@@ -175,31 +282,119 @@ async function harvest(tree: string, dest: string): Promise<Harvest> {
   return { t: 'copied', preserved: { t: 'harvested', dir: dest, files: files.length, bytes } };
 }
 
-/** Harvests, then force-removes a registered tree whose guards passed. */
-async function harvestAndRemove(
+/** What removing one tree did. Its branch is the caller's: only the files and registration go. */
+export type Removal =
+  | { t: 'removed'; preserved: Preserved[] }
+  | { t: 'gone' }
+  | { t: 'left'; reason: string; preserved: Preserved[] };
+
+/** The tree being removed: its directory and the branch it should be on (the guard ladder's). */
+export type TreePath = Pick<WorktreeAt, 'path' | 'branch'>;
+
+/** Pins the caller's commits once the ladder has cleared the tree (salvage before removal). */
+type PinFirst = () => Promise<Preserved[]>;
+const pinNothing: PinFirst = async () => [];
+
+/**
+ * The one remove path (audit 2026-11-01 #9 and the emergent-beach incident: a plain remove with
+ * the 120 s query timeout refused submodules and was killed mid-delete on a 124k-file tree).
+ * Dispatches on who holds the tree; each holder is removed forced, with REMOVE_TIMEOUT_MS, after
+ * the guard ladder, the salvage pins and the harvest.
+ */
+export async function removeTree(
   root: string,
-  name: string,
-  at: WorktreeAt,
+  tree: TreePath,
+  held: Registration,
+  guard: Guard,
   keep: Keep,
-  preserved: Preserved[]
-): Promise<{ t: 'removed'; preserved: Preserved[] } | { t: 'left'; released: Released }> {
-  const harvested = await harvest(at.path, keep.harvestDir);
+  pinFirst: PinFirst
+): Promise<Removal> {
+  switch (held.t) {
+    case 'cambium':
+      return removeHeld(tree, guard, keep, pinFirst, () =>
+        cambium(root, ['remove', '-force', held.name], REMOVE_TIMEOUT_MS)
+      );
+    case 'git_only':
+      return removeHeld(tree, guard, keep, pinFirst, () =>
+        removeGitOnly(root, held.path, REMOVE_TIMEOUT_MS)
+      );
+    case 'gone':
+      return goneTree(root, tree);
+  }
+}
+
+async function removeHeld(
+  tree: TreePath,
+  guard: Guard,
+  keep: Keep,
+  pinFirst: PinFirst,
+  remove: () => Promise<GitRun>
+): Promise<Removal> {
+  // A registration whose directory a killed remove already deleted: nothing on disk to guard or
+  // harvest, so only the registration goes (its branch commits are still pinned first).
+  if (!(await exists(tree.path))) {
+    const pinned = await pinFirst();
+    return removed(await remove(), pinned);
+  }
+  const cleared = await clearance(tree, guard, keep);
+  if (cleared.t === 'blocked') return { t: 'left', reason: cleared.reason, preserved: [] };
+  const preserved = [...cleared.preserved, ...(await pinFirst())];
+  const harvested = await harvest(tree.path, keep.harvestDir);
   switch (harvested.t) {
     case 'refused':
-      return {
-        t: 'left',
-        released: { release: { t: 'left', reason: harvested.reason }, preserved },
-      };
+      return { t: 'left', reason: harvested.reason, preserved };
     case 'copied':
-      preserved.push(harvested.preserved);
-      break;
+      return removed(await remove(), [...preserved, harvested.preserved]);
     case 'none':
-      break;
+      return removed(await remove(), preserved);
   }
-  const removed = await cambium(root, ['remove', '-force', name]);
-  return removed.t === 'failed'
-    ? { t: 'left', released: { release: { t: 'left', reason: removed.message }, preserved } }
-    : { t: 'removed', preserved };
+}
+
+const removed = (ran: GitRun, preserved: Preserved[]): Removal =>
+  ran.t === 'failed' ? { t: 'left', reason: ran.message, preserved } : { t: 'removed', preserved };
+
+/**
+ * No registration holds the path. Nothing there: `gone`. A directory there may be a create
+ * interrupted before it registered: `cambium recover` rolls that back. A directory that is still
+ * there is not a worktree, and the host never deletes a directory git does not vouch for.
+ */
+async function goneTree(root: string, tree: TreePath): Promise<Removal> {
+  if (!(await exists(tree.path))) return { t: 'gone' };
+  await cambium(root, ['recover', '--json']);
+  return (await exists(tree.path))
+    ? { t: 'left', reason: `${tree.path} remains but is not a registered worktree`, preserved: [] }
+    : { t: 'gone' };
+}
+
+/** A removal's release for a tree whose branch stays as it is (the integration tree, whose
+ * branch is the expedition's result, and the manager's detached tree, which has none). */
+function treeOnly(removal: Removal): Released {
+  switch (removal.t) {
+    case 'removed':
+      return { release: { t: 'removed', branchDeleted: false }, preserved: removal.preserved };
+    case 'gone':
+      return only({ t: 'absent' });
+    case 'left':
+      return { release: { t: 'left', reason: removal.reason }, preserved: removal.preserved };
+  }
+}
+
+/**
+ * No registration and no directory: `absent` when the branch is gone too (never made, or a
+ * replayed release); a branch alone is a removal interrupted before its branch was dropped,
+ * dropped now if it is empty.
+ */
+async function goneRelease(root: string, at: WorktreeAt): Promise<Released> {
+  const branch = await branchState(root, at);
+  switch (branch.t) {
+    case 'missing':
+      return only({ t: 'absent' });
+    case 'present':
+      return only({
+        t: 'removed',
+        branchDeleted: branch.shas.length === 0 && (await dropEmptyBranch(root, at)),
+      });
+  }
 }
 
 /**
@@ -207,67 +402,79 @@ async function harvestAndRemove(
  * `keepCommits`: keep it (integration may need it). Commits at the end: remove the tree (salvage
  * pinned first when the expedition branch does not hold them), and its branch only when the
  * expedition branch `into` already holds its tip; unmerged commits keep their branch for the
- * owner. A tree the guard ladder refuses (uncommitted changes, off its branch, an operation
- * half-done, unharvestable output) is recorded `left`, never forced.
+ * owner. Under `finish` a tree the guard ladder refuses (uncommitted changes, off its branch, an
+ * operation half-done, unharvestable output) is recorded `left`, never forced; under `retire`
+ * uncommitted changes are snapshotted and the tree goes.
  */
 export async function releaseWorktree(
   root: string,
-  name: string,
   at: WorktreeAt,
   keepCommits: boolean,
   into: string,
-  keep: Keep
+  keep: Keep,
+  policy: ReleasePolicy
 ): Promise<Released> {
-  if (!(await cambiumWorkspace(root, name))) return only(await releaseUnregistered(root, at));
-  const branch = await branchState(root, at);
-  const kept = keptRelease(branch, keepCommits);
+  const [held, branch] = await Promise.all([registrationOf(root, at.path), branchState(root, at)]);
+  const kept = keptRelease(held, branch, keepCommits);
   if (kept) return only(kept);
-  const blockers = await removalBlockers(at, branch);
-  if (blockers.length > 0) return only({ t: 'left', reason: blockers.join('; ') });
-  const tip = await unintegratedTip(root, at, into);
-  const preserved = tip ? [await salvage(root, keep.salvageRef, tip)] : [];
-  const removed = await harvestAndRemove(root, name, at, keep, preserved);
-  if (removed.t === 'left') return removed.released;
-  switch (branch.t) {
-    case 'missing':
-      return { release: { t: 'removed', branchDeleted: false }, preserved: removed.preserved };
-    case 'present': {
-      const branchDeleted =
-        branch.shas.length === 0
-          ? await dropEmptyBranch(root, at)
-          : await dropMergedBranch(root, at, into);
-      return { release: { t: 'removed', branchDeleted }, preserved: removed.preserved };
-    }
+  const pinUnintegrated = async () => {
+    const tip = await unintegratedTip(root, at, into);
+    return tip ? [await salvage(root, keep.salvageRef, tip)] : [];
+  };
+  const removal = await removeTree(root, at, held, policy, keep, pinUnintegrated);
+  switch (removal.t) {
+    case 'gone':
+      return goneRelease(root, at);
+    case 'left':
+      return { release: { t: 'left', reason: removal.reason }, preserved: removal.preserved };
+    case 'removed':
+      return {
+        release: { t: 'removed', branchDeleted: await dropAttemptBranch(root, at, branch, into) },
+        preserved: removal.preserved,
+      };
   }
 }
 
-/** A tree kept for its commits (absent: it is not kept). A missing branch has no commits to
- * keep: the guard ladder decides that tree like any other (2026-11-01 review: it counted as a
- * branch with 0 commits, a silent default). */
-function keptRelease(branch: BranchState, keepCommits: boolean): Release | undefined {
+/** After removal: an empty branch goes; one whose tip `into` holds goes; unmerged commits stay. */
+async function dropAttemptBranch(
+  root: string,
+  at: WorktreeAt,
+  branch: BranchState,
+  into: string
+): Promise<boolean> {
   switch (branch.t) {
+    case 'missing':
+      return false;
     case 'present':
-      return keepCommits && branch.shas.length > 0
-        ? { t: 'kept', commits: branch.shas.length }
-        : undefined;
-    case 'missing':
-      return undefined;
+      return branch.shas.length === 0
+        ? dropEmptyBranch(root, at)
+        : dropMergedBranch(root, at, into);
   }
 }
 
-/**
- * No Cambium workspace by that name. Nothing on disk: `absent` (never made, or a replayed
- * release). A partial create's branch and directory are rolled back by `cambium recover`. A branch
- * alone is a removal interrupted before its branch was dropped: dropped now if it is empty.
- */
-async function releaseUnregistered(root: string, at: WorktreeAt): Promise<Release> {
-  const left = await recoverLeftovers(root, at);
-  if (nothingLeft(left)) return { t: 'absent' };
-  if (left.dir)
-    return { t: 'left', reason: `no Cambium workspace, but ${describe(left, at)} remain` };
-  const branch = await branchState(root, at);
-  const empty = branch.t === 'present' && branch.shas.length === 0;
-  return { t: 'removed', branchDeleted: empty && (await dropEmptyBranch(root, at)) };
+/** A registered tree kept for its commits (absent: it is not kept). A missing branch has no
+ * commits to keep: the guard ladder decides that tree like any other (2026-11-01 review: it
+ * counted as a branch with 0 commits, a silent default). A tree no registration holds is not kept
+ * either: there is nothing left to keep but its branch. */
+function keptRelease(
+  held: Registration,
+  branch: BranchState,
+  keepCommits: boolean
+): Release | undefined {
+  switch (held.t) {
+    case 'gone':
+      return undefined;
+    case 'cambium':
+    case 'git_only':
+      switch (branch.t) {
+        case 'present':
+          return keepCommits && branch.shas.length > 0
+            ? { t: 'kept', commits: branch.shas.length }
+            : undefined;
+        case 'missing':
+          return undefined;
+      }
+  }
 }
 
 /**
@@ -276,20 +483,48 @@ async function releaseUnregistered(root: string, at: WorktreeAt): Promise<Releas
  * never work, but they are salvaged before the branch goes (deleting is never the only copy), and
  * the check's ignored output is harvested first (a paid run's outputs outlive its tree).
  */
-export async function discardWorktree(
+export async function discardWorktree(root: string, at: WorktreeAt, keep: Keep): Promise<Released> {
+  const [held, branch] = await Promise.all([registrationOf(root, at.path), branchState(root, at)]);
+  const pinTip = async () => {
+    const tip = branch.t === 'present' ? branch.shas.at(-1) : undefined;
+    return tip ? [await salvage(root, keep.salvageRef, tip)] : [];
+  };
+  const removal = await removeTree(root, at, held, { t: 'scratch' }, keep, pinTip);
+  switch (removal.t) {
+    case 'gone':
+      return goneRelease(root, at);
+    case 'left':
+      return { release: { t: 'left', reason: removal.reason }, preserved: removal.preserved };
+    case 'removed':
+      return {
+        release: { t: 'removed', branchDeleted: await dropScratchBranch(root, at) },
+        preserved: removal.preserved,
+      };
+  }
+}
+
+/**
+ * Removes the integration tree and keeps its branch: the branch is the expedition's result,
+ * which the owner merges. Under `finish` a tree with uncommitted changes is `left`; the remove is
+ * forced once the ladder passes (a plain remove refused a tree holding a submodule).
+ */
+export async function releaseIntegrationTree(
   root: string,
-  name: string,
-  at: WorktreeAt,
+  tree: TreePath,
+  keep: Keep,
+  policy: ReleasePolicy
+): Promise<Released> {
+  const held = await registrationOf(root, tree.path);
+  return treeOnly(await removeTree(root, tree, held, policy, keep, pinNothing));
+}
+
+/** Removes the manager's detached tree (design.md R11): scratch, read-only by contract. */
+export async function releaseDetachedTree(
+  root: string,
+  dir: string,
   keep: Keep
 ): Promise<Released> {
-  if (!(await cambiumWorkspace(root, name))) return only(await releaseUnregistered(root, at));
-  const branch = await branchState(root, at);
-  const tip = branch.t === 'present' ? branch.shas.at(-1) : undefined;
-  const preserved = tip ? [await salvage(root, keep.salvageRef, tip)] : [];
-  const removed = await harvestAndRemove(root, name, at, keep, preserved);
-  if (removed.t === 'left') return removed.released;
-  return {
-    release: { t: 'removed', branchDeleted: await dropScratchBranch(root, at) },
-    preserved: removed.preserved,
-  };
+  const tree = { path: dir, branch: '(detached)' };
+  const held = await registrationOf(root, dir);
+  return treeOnly(await removeTree(root, tree, held, { t: 'scratch' }, keep, pinNothing));
 }

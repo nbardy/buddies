@@ -1,7 +1,9 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import { constants } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import { z } from 'zod';
 import { labelled } from '../observability/event-loop-stall';
 import type { CommandCheck } from './charter';
 import type { CheckOutcome } from './ledger';
@@ -81,9 +83,11 @@ async function executableFile(file: string): Promise<boolean> {
  * a background child holding the pipes cannot stall the result. Output (stdout and stderr,
  * interleaved) is kept as a bounded tail.
  *
- * Known limit: leading its own group also means a check outlives a server crash. The ledger holds
- * no pid (one could not be trusted across a reboot), so the orphan is never killed (it ends at
- * its own pace, unbounded by the timeout). On replay the interrupted validation's tree is
+ * Leading its own group also means a check outlives a server crash. The ledger holds no pid (one
+ * could not be trusted across a reboot); instead the scratch dir holds a pidfile (PIDFILE: the
+ * pid and its `ps` start time), removed with the scratch dir when the check ends, so only a
+ * crash leaves it, and `killCheck` kills the orphan's group only while that same process (same
+ * pid AND start time) still runs. On replay the interrupted validation's tree is
  * discarded and its unrecorded checks run again in a FRESH tree at the same sha (host.ts
  * `interrupted`, audit #10), so the two never share build outputs; the recorded outcome is the
  * replayed run's.
@@ -110,7 +114,7 @@ function spawnCheck(
   scratch: CheckScratch
 ): Promise<CheckOutcome> {
   const [bin, ...args] = check.argv;
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let tail = '';
     let timedOut = false;
     let exit: { code: number | null; signal: NodeJS.Signals | null } = {
@@ -123,6 +127,10 @@ function spawnCheck(
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    // Awaited before the outcome is returned, so runCommand never removes the scratch dir under
+    // a write still in flight. A write that fails rejects the run like a scratch dir that cannot
+    // be made.
+    const recorded = child.pid === undefined ? Promise.resolve() : recordPid(scratch, child.pid);
     const keep = (chunk: Buffer) => {
       tail = (tail + chunk.toString('utf8')).slice(-TAIL_CHARS);
     };
@@ -159,7 +167,7 @@ function spawnCheck(
     child.on('error', (error) => {
       clearTimeout(timer);
       clearTimeout(grace);
-      resolve({ t: 'error', message: `${bin}: ${error.message}` });
+      recorded.then(() => resolve({ t: 'error', message: `${bin}: ${error.message}` }), reject);
     });
     child.on('exit', (code, signal) => {
       exit = { code, signal };
@@ -169,7 +177,7 @@ function spawnCheck(
     child.on('close', () => {
       clearTimeout(timer);
       clearTimeout(grace);
-      resolve(outcomeOf(timedOut, exit, tail));
+      recorded.then(() => resolve(outcomeOf(timedOut, exit, tail)), reject);
     });
   });
 }
@@ -189,4 +197,61 @@ function outcomeOf(
       tail: `${tail}\n[killed by ${exit.signal ?? 'an unknown signal'}]`.slice(-TAIL_CHARS),
     };
   return { t: 'failed', exitCode: exit.code, tail };
+}
+
+// ---------- The orphan a crash leaves (design.md R11, Restart) ----------
+
+const execAsync = promisify(execFile);
+
+/** The pidfile inside a check's scratch dir (the dir runCommand is given). */
+export const pidfileOf = (scratchDir: string) => path.join(scratchDir, 'check.pid.json');
+
+const PidRecord = z.object({ pid: z.number().int().positive(), lstart: z.string().min(1) });
+
+/** `ps`'s start time for `pid`: a pid is reused, a (pid, start time) pair is not. Absent when
+ * no such process runs. */
+async function startTimeOf(pid: number): Promise<string | undefined> {
+  try {
+    const { stdout } = await execAsync('ps', ['-o', 'lstart=', '-p', String(pid)]);
+    const lstart = stdout.trim();
+    return lstart === '' ? undefined : lstart;
+  } catch {
+    return undefined; // ps exits 1 when no process has that pid.
+  }
+}
+
+/** Writes the check's pid and start time (renamed into place, so a crash never leaves half a
+ * record). A check that already exited has no start time: nothing is left to kill, so nothing is
+ * written. */
+async function recordPid(scratch: CheckScratch, pid: number): Promise<void> {
+  const lstart = await startTimeOf(pid);
+  if (lstart === undefined) return;
+  const file = pidfileOf(scratch.dir);
+  await fsp.writeFile(`${file}.tmp`, JSON.stringify({ pid, lstart }), { mode: 0o600 });
+  await fsp.rename(`${file}.tmp`, file);
+}
+
+/** What `killCheck` found: no pidfile (the check ended, or never started), a pid now held by
+ * another process or none, or the orphan's group, killed. */
+export type CheckKill = { t: 'no_record' } | { t: 'not_running' } | { t: 'killed'; pid: number };
+
+/**
+ * Kills a check an earlier server process left running (the pidfile survives only a crash), so a
+ * replayed validation never races an orphan on the same candidate. SIGKILL goes to the whole
+ * group (-pid), and only while `ps` still shows the recorded start time for that pid.
+ */
+export async function killCheck(pidfile: string): Promise<CheckKill> {
+  const text = await fsp.readFile(pidfile, 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (text === undefined) return { t: 'no_record' };
+  const { pid, lstart } = PidRecord.parse(JSON.parse(text));
+  if ((await startTimeOf(pid)) !== lstart) return { t: 'not_running' };
+  try {
+    process.kill(-pid, 'SIGKILL');
+    return { t: 'killed', pid };
+  } catch {
+    return { t: 'not_running' }; // ESRCH: the group ended between the check and the kill.
+  }
 }
