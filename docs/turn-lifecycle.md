@@ -227,6 +227,4 @@ admission says “at the run limit (n/max)”. Older backend responses without r
 Full waiting-path table and restart recommendation: `agent_notes/2026-10-08_waiting-paths.md`.
 Guards: `idle-background-delivery.test.ts` (real temp backend, idle hold plus fan-out/adoption),
 crate `a_sub_agent_notice_shows_an_owner_post_once_without_fencing_its_delivery`, and rendered
-`channel-response-status.test.tsx`. Line ceiling grows 97 lines after removing the superseded
-WeakMap and merging hook handlers; the growth records durable capability/cursor state and honest
-status projection, with no new controller.
+`channel-response-status.test.tsx`.

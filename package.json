@@ -9,7 +9,7 @@
   "scripts": {
     "preinstall": "node tools/preflight.mjs",
     "prepack": "pnpm build",
-    "bootstrap": "pnpm install --frozen-lockfile --offline && pnpm --dir vendor/agent-cli-tool run build && pnpm --dir shared run build && node tools/ensure-addons.mjs && bash tools/install-git-hooks.sh",
+    "bootstrap": "pnpm install --frozen-lockfile --offline && pnpm --dir vendor/agent-cli-tool run build && pnpm --dir shared run build && node tools/ensure-addons.mjs",
     "addons": "node tools/ensure-addons.mjs",
     "dev": "node tools/dev-supervisor.mjs",
     "dev:replace": "node tools/dev-supervisor.mjs --replace",
