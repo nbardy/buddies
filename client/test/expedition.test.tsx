@@ -499,6 +499,29 @@ test('a deep link to an expedition opens its modal over the channels view of its
   assert.doesNotMatch(html, /class="sidebar/, 'never the old conversations shell');
 });
 
+// GET /expeditions/:id answers a retired expedition with its frozen summary, which has no
+// top-level workspaceId. The direct-load base read it as the live view, so a reload of a retired
+// expedition's URL landed on `/channels/undefined`: an empty rail, "No Buddies yet" (2026-11-03 e2e).
+test('a deep link to a retired expedition lands in its workspace, under the frozen report', async () => {
+  const retired: ExpeditionRetiredView = {
+    t: 'retired',
+    summary: {
+      ...summary('exp-frozen', { t: 'finished', reason: 'done' } as ExpeditionView['run'], 'ws-1'),
+      retirement: { t: 'retired', at: '2026-11-03T00:00:00.000Z' },
+    },
+    report: 'Frozen report for exp-frozen.',
+  };
+  await loadResource({ key: expeditionUrl('exp-frozen'), load: async () => retired });
+  await loadResource({
+    key: '/api/buddies/workspaces/ws-1/inbox',
+    load: async () => inboxFixture([{ channel: publicChannel('ch_1', 'general'), unread: 0 }]),
+  });
+  const html = await appAt('/expeditions/exp-frozen');
+  assert.match(html, /Frozen report for exp-frozen\./, 'the retired modal is open');
+  assert.match(html, /<section class="channel-browser-pane ui-stack" aria-label="Expeditions">/);
+  assert.match(html, />general</, "the workspace's channels are in the rail");
+});
+
 // The phone shell takes the same route: the sheet over ChannelsMobile, never the old shell.
 test('on the phone, a deep link opens the expedition sheet over the channels view', async () => {
   await loadResource({ key: expeditionUrl(view.id), load: async () => view });

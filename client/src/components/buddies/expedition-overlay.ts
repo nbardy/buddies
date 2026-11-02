@@ -1,10 +1,10 @@
-import type { ExpeditionView } from '@unleashd/shared';
+import type { ExpeditionRetiredView, ExpeditionView } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type Location, useLocation, useNavigate } from 'react-router-dom';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { type PolledState, usePolledFetch } from '../../hooks/usePolledFetch';
 import { channelsHref } from './channels-view';
-import { expeditionHref, expeditionUrl } from './expedition-view';
+import { expeditionHref, expeditionRead, expeditionUrl, summaryOf } from './expedition-view';
 import { buddyWorkspaceActivityAtom, overviewWorkspaces } from './workspace-order';
 
 // The expedition modal is route-addressable (/expeditions/:id) and opens OVER the view it was
@@ -79,7 +79,10 @@ export const EXPEDITIONS_INDEX_PATH = '/expeditions';
 
 export function useOverlayBase(location: Location, overlay: ExpeditionOverlay): OverlayBase {
   // The modal reads the same key, so a direct load fetches the expedition once.
-  const direct = usePolledFetch<ExpeditionView>(
+  // The answer is either view (a retired expedition is its frozen summary): typed as the union,
+  // as ExpeditionLive reads it. Typed as the live view alone, a retired deep link read
+  // `workspaceId` off the wrong shape and landed on an empty rail (2026-11-03 e2e).
+  const direct = usePolledFetch<ExpeditionView | ExpeditionRetiredView>(
     overlay.t === 'direct' ? expeditionUrl(overlay.id) : null,
     0
   );
@@ -104,7 +107,7 @@ export function useOverlayBase(location: Location, overlay: ExpeditionOverlay): 
 /** δ over the direct load's fetch state: one base per cache variant. */
 function directBase(
   id: string,
-  direct: PolledState<ExpeditionView>,
+  direct: PolledState<ExpeditionView | ExpeditionRetiredView>,
   landing: Landing,
   location: Location
 ): ModalBase {
@@ -117,7 +120,9 @@ function directBase(
       return {
         t: 'landed',
         id,
-        routes: channelsHref(direct.data.workspaceId, { kind: 'expeditions' }),
+        routes: channelsHref(summaryOf(expeditionRead(direct.data)).workspaceId, {
+          kind: 'expeditions',
+        }),
       };
     case 'failed':
       return unresolvedBase(id, landing, location);

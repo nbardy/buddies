@@ -125,8 +125,9 @@
 }
 
 /* The full-bleed variant (the expedition modal on a phone): edge to edge, as tall as the visible
-   viewport so the keyboard does not cover its bottom (useVisibleViewport sets the variable). */
-.ui-sheet--full {
+   viewport so the keyboard does not cover its bottom (useVisibleViewport sets the variable). Two
+   classes: one tied with the later .channel-task-overlay and lost (a centred 80vh box, 2026-11-03). */
+.ui-sheet.ui-sheet--full {
   width: 100vw;
   max-width: none;
   height: var(--picker-visible-height, 100dvh);

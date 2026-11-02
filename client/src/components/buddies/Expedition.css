@@ -28,6 +28,8 @@
   font-size: var(--fs-5);
   overflow-y: auto;
 }
+/* The sheet scrolls; shrunk rows overflowed under the Retire footer (2026-11-03 e2e, 390x844). */
+.expedition-modal--sheet > * { flex: none; }
 
 .expedition-modal-header { align-items: center; flex-wrap: nowrap; min-width: 0; }
 .expedition-modal-title { min-width: 0; color: var(--text-bright); font-size: var(--fs-7); }
