@@ -80,8 +80,21 @@ If you want exactly three tests:
 
 - `pnpm test:server:fast`: seven explicit protocol/configuration/creation/startup/crash-checker
   files (29 tests). Development feedback only; real backend crash/lease/socket proofs are in full.
-- `pnpm test:server`: all server test files, four concurrent files by default.
-  `UNLEASHD_TEST_CONCURRENCY=N` selects 1–32; increasing it can slow feedback on a busy machine.
+- `pnpm test:server`: every server test file as its own process, from a pool of
+  `os.availableParallelism()` slots (`UNLEASHD_TEST_CONCURRENCY=N`, 1–64). The long integration
+  files run as shards (`SHARDS` in `tools/test-server.mjs`; `server/test/fixtures/shard.ts`
+  registers every N-th top-level test under `UNLEASHD_TEST_SHARD=i/N`), each with a cap on how
+  many run at once. Each process gets a private `TMPDIR` (linked to the shared tsx cache, or
+  every process compiles the server cold) removed when it exits; a unit still running after
+  `UNLEASHD_TEST_UNIT_TIMEOUT_MS` (10 min) is killed and reported. Bare names pick files:
+  `node tools/test-server.mjs oompa-mcp run-lease`. A test in a sharded file must build its own
+  fixture and never depend on an earlier top-level test. `--slow` adds opt-in files (none today).
+- Load lessons (2026-11-02, a shared machine at load 20–90): wall time there is dominated by
+  process start-up and subprocess latency, not CPU. More concurrent shards of one file made it
+  slower and flaky (nine oompa-mcp shards failed together; three passed), hence the `live` caps.
+  Never write an executable per fixture: macOS assesses each new executable on first exec,
+  serially machine-wide (the oompa stub is `server/test/fixtures/oompa-stub.cjs`). Liveness waits
+  are budgets, not measurements; size them for a loaded machine.
 - `pnpm test:server:stress`: the same full coverage with the relay's actual 55 s default and a
   10 s outage. Normal mode uses a 1.5 s hold only in the no-backend timeout case; successful
   outage/restart cases retain their 55 s hold. Lease tests use injected lease/heartbeat/idle
