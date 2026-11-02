@@ -539,6 +539,76 @@ export type Entry =
   /** The last ledger line: the expedition is frozen (retired.ts) and its folder moved away. */
   | { t: 'retired'; at: string };
 
+/** Who reads an entry kind besides the fold: the chat (one status post per decision round,
+ * render.ts newsLine) and the next manager (its brief's "new since", briefs.ts shownLine). */
+type Readers = { news: boolean; manager: boolean };
+const FOLD = { news: false, manager: false } as const;
+const NEWS = { news: true, manager: false } as const;
+const MANAGER = { news: false, manager: true } as const;
+const BOTH = { news: true, manager: true } as const;
+
+// Pattern: table-driven (docs/patterns.md#table-driven). Exhaustive: a new entry kind decides who
+// reads it here. Its readers type `s.news` and `s.unseen`, so each renderer is an exhaustive
+// switch over exactly its kinds. Before: two `default:` arms, and an `acceptance_set` shown to
+// the manager rendered as the bare kind name ("- acceptance_set").
+const ENTRY = {
+  launched: FOLD,
+  tree_planned: FOLD,
+  tree_ready: FOLD,
+  tree_failed: MANAGER,
+  tree_released: FOLD,
+  integration_planned: FOLD,
+  integrated: BOTH,
+  integration_refused: BOTH,
+  validation_planned: FOLD,
+  validation_failed: BOTH,
+  validation: BOTH,
+  validation_running: FOLD,
+  attempt_cancel_requested: FOLD,
+  done_requested: NEWS,
+  done_refused: BOTH,
+  crew_ready: FOLD,
+  badge_posted: FOLD,
+  reflection: NEWS,
+  attempt_planned: NEWS,
+  attempt_retry_planned: NEWS,
+  attempt_posting: FOLD,
+  attempt_posted: NEWS,
+  attempt_repair_posting: FOLD,
+  claim_planned: FOLD,
+  claim_adopted: BOTH,
+  claim_refused: BOTH,
+  tick_failed: NEWS,
+  attempt_ended: BOTH,
+  attempt_metered: FOLD,
+  question_added: BOTH,
+  acceptance_set: MANAGER,
+  question_closed: NEWS,
+  manager_applied: FOLD,
+  rejected: BOTH,
+  feedback: BOTH,
+  needs_owner: NEWS,
+  status: FOLD,
+  status_posted: FOLD,
+  finished: NEWS,
+  retire_requested: FOLD,
+  branch_archived: FOLD,
+  archive_refused: FOLD,
+  branches_archived: FOLD,
+  chat_archived: FOLD,
+  crew_archived: FOLD,
+  retired: FOLD,
+} as const satisfies Record<Entry['t'], Readers>;
+
+type KindsFor<R extends keyof Readers> = {
+  [K in Entry['t']]: (typeof ENTRY)[K][R] extends true ? K : never;
+}[Entry['t']];
+/** An entry the chat reports. */
+export type NewsEntry = Extract<Entry, { t: KindsFor<'news'> }>;
+/** An entry a manager may be shown (apply decides when). */
+export type ShownEntry = Extract<Entry, { t: KindsFor<'manager'> }>;
+const isNews = (e: Entry): e is NewsEntry => ENTRY[e.t].news;
+
 // ---------- Derived state ----------
 
 export type AttemptPhase =
@@ -626,7 +696,7 @@ export interface State {
   /** Live attempts the host asked to stop, by attempt id, with when (audit #2). */
   cancels: Record<string, { at: string; runIds: string[] }>;
   /** Notable entries since the last chat status post. */
-  news: Entry[];
+  news: NewsEntry[];
   /** Manager decisions, in plan order. */
   managers: Attempt<ManagerSpec>[];
   /** Work and check attempts, in plan order. */
@@ -635,9 +705,9 @@ export interface State {
   lessons: string[];
   chatCursor: ChatCursor;
   /** Ledger entries a manager has not yet been shown (results, feedback, rejections). */
-  unseen: Entry[];
+  unseen: ShownEntry[];
   /** What each manager attempt is shown: the unseen entries at the moment it was planned. */
-  shown: Record<string, Entry[]>;
+  shown: Record<string, ShownEntry[]>;
   run: Run;
   statuses: Status[];
   /** Manager attempts whose actions were applied (`manager_applied` entries). */
@@ -706,34 +776,10 @@ export function fold(entries: readonly Entry[]): State {
   return state;
 }
 
-// Pattern: table-driven (docs/patterns.md#table-driven) — one exhaustive handler per entry kind.
-const NEWS: ReadonlySet<Entry['t']> = new Set([
-  'attempt_planned',
-  'attempt_retry_planned',
-  'attempt_posted',
-  'attempt_ended',
-  'question_added',
-  'question_closed',
-  'rejected',
-  'reflection',
-  'feedback',
-  'needs_owner',
-  'validation',
-  'done_requested',
-  'done_refused',
-  'integrated',
-  'integration_refused',
-  'validation_failed',
-  'claim_adopted',
-  'claim_refused',
-  'tick_failed',
-  'finished',
-] satisfies Entry['t'][]);
-
 /** Folds one entry into the state (decide applies its own intents as it writes them). */
 export function apply(s: State, e: Entry): void {
   s.revision += 1;
-  if (NEWS.has(e.t)) s.news.push(e);
+  if (isNews(e)) s.news.push(e);
   switch (e.t) {
     case 'launched':
       throw new Error('launched may only open a ledger');

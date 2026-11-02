@@ -88,13 +88,14 @@ All engine code is under `server/src/expeditions/`. The pure core (no I/O) is re
 
 | Piece | Where |
 |---|---|
-| Ledger: the `Entry` sum type, folded `State`, `fold`/`apply` | `ledger.ts` |
+| Ledger: the `Entry` sum type and who reads each kind (`ENTRY`), folded `State`, `fold`/`apply` | `ledger.ts` |
 | Decide: state → intent entries, every manager-action guardrail | `decide.ts` |
 | Effects: the idempotent writes a state licenses (admission, releases) | `effects.ts` |
 | Read-only queries (live, panels, custody, stages, seats) | `queries.ts` |
-| Badge, chat news lines, outcome/validation/integration labels, cost totals | `news.ts` |
+| Badge, chat news lines, outcome/validation/integration labels, cost totals | `render.ts` |
 | Charter schema, launch defaults, draft issues/advice, answer schemas | `charter.ts` |
-| Briefs (manager / work / blind check / repair), answer parsing, owner chat words | `briefs.ts` |
+| Briefs (manager / work / blind check / repair) and the status view | `briefs.ts` |
+| Answer parsing (attempt results) and owner chat words, once at observation | `answers.ts` |
 | Host: ticks (typed observation, failure backoff), one handler per effect, launch/steer | `host.ts` |
 | Ledger file: durable append (fsync, cut back on failure), exclusive create, boot read | `store.ts` |
 | Git: preflight, Cambium worktrees, claim checks, merges (hooks off, scrubbed env) | `git.ts` |

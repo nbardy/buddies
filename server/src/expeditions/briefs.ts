@@ -4,18 +4,13 @@ import type {
   Charter,
   CheckSpec,
   Claim,
-  EndOutcome,
-  Entry,
-  Feedback,
   Question,
+  ShownEntry,
   State,
+  Verification,
   WorkSpec,
 } from './model';
 import {
-  CheckResult,
-  EXTEND_MAX_HOURS,
-  ManagerResult,
-  WorkResult,
   acceptanceLabel,
   allAttempts,
   attemptsOn,
@@ -24,6 +19,7 @@ import {
   costTotals,
   doneCheckLabel,
   exploreCap,
+  feedbackText,
   integrationLabel,
   integrationOf,
   liveWorkers,
@@ -38,6 +34,7 @@ import {
   treeKey,
   validationLabel,
   validationOf,
+  verifications,
   waitsOn,
   workerAttempts,
   worktreeOf,
@@ -56,27 +53,6 @@ export const CREW_ROLE = [
   '(status) to answer questions about your expedition. The host records each owner message in your chat with the owner as',
   'steering by itself (pause, resume, stop, "lesson: …", anything else a note for the manager): just acknowledge it briefly.',
 ].join(' ');
-
-/** Longest owner text kept per chat message (the steer tool's own limit). */
-const CHAT_TEXT_MAX = 2000;
-
-/**
- * An owner chat message as steering (κ, once, at observation; host.ts observeChat): the word
- * pause, resume or stop alone (resume re-plans, R11); `extend 3h` moves the deadline; `lesson: …`
- * a binding lesson every later brief carries; anything else a note the next manager reads (it
- * also answers a pending "needs you"). An `extend` outside 0–72 hours is kept as a note, so the
- * manager and the page show it, never silently clamped.
- */
-export function chatFeedback(body: string): Feedback {
-  const text = body.trim().slice(0, CHAT_TEXT_MAX);
-  const word = text.toLowerCase().replace(/[.!]+$/, '');
-  if (word === 'pause' || word === 'resume' || word === 'stop') return { t: word };
-  const extend = /^extend:?\s*(\d+(?:\.\d+)?)\s*(h|hours?)?$/i.exec(word);
-  const hours = extend ? Number(extend[1]) : 0;
-  if (extend && hours > 0 && hours <= EXTEND_MAX_HOURS) return { t: 'extend', hours };
-  const lesson = /^lesson:\s*(\S[\s\S]*)$/i.exec(text);
-  return lesson ? { t: 'lesson', text: lesson[1] } : { t: 'note', text };
-}
 
 const JSON_RULE = 'End your final message with exactly one fenced ```json block, nothing after it.';
 
@@ -163,7 +139,8 @@ function phaseDetail(s: State, a: Attempt): string {
   }
 }
 
-function unseenLine(s: State, e: Entry): string {
+/** One line of a manager's "new since" (ledger.ts ENTRY names which kinds it may be shown). */
+function shownLine(s: State, e: ShownEntry): string {
   switch (e.t) {
     case 'validation':
       return `- ${validationLabel(s, validationOf(s, e.validationId))}`;
@@ -179,7 +156,7 @@ function unseenLine(s: State, e: Entry): string {
     case 'rejected':
       return `- REJECTED ${e.action.do}: ${e.reason}`;
     case 'feedback':
-      return `- OWNER ${feedbackDetail(e.feedback)}`;
+      return `- OWNER ${feedbackText(e.feedback, (text) => text)}`;
     case 'question_added':
       return `- QUESTION ADDED ${e.questionId} [${e.scope}] ${e.title} (paths: ${e.paths.join(', ')}; accepted by ${acceptanceLabel(e.acceptance)}): start work on it by this id`;
     case 'validation_failed':
@@ -188,23 +165,8 @@ function unseenLine(s: State, e: Entry): string {
       return `- CLAIM ADOPTED for ${e.attemptId}: its commit is now its claim (validated or checked as its question's acceptance says)`;
     case 'claim_refused':
       return `- CLAIM REFUSED for ${e.attemptId}: ${e.reason}`;
-    default:
-      return `- ${e.t}`;
-  }
-}
-
-/** Owner feedback in full, as the next manager reads it. */
-function feedbackDetail(f: Feedback): string {
-  switch (f.t) {
-    case 'lesson':
-    case 'note':
-      return `${f.t}: ${f.text}`;
-    case 'extend':
-      return `extend: the deadline moved by ${f.hours}h`;
-    case 'pause':
-    case 'resume':
-    case 'stop':
-      return f.t;
+    case 'acceptance_set':
+      return `- ACCEPTANCE SET for ${e.questionId}: ${acceptanceLabel(e.acceptance)} (its unmerged claims are validated again under it)`;
   }
 }
 
@@ -222,7 +184,7 @@ function managerBrief(s: State, id: string): string {
     `ATTEMPTS:\n${s.workers.map((a) => attemptLine(s, a)).join('\n') || '- none'}`,
     validationsText(s),
     integrationsText(s),
-    `NEW SINCE YOUR LAST DECISION:\n${s.shown[id].map((e) => unseenLine(s, e)).join('\n') || '- nothing'}`,
+    `NEW SINCE YOUR LAST DECISION:\n${s.shown[id].map((e) => shownLine(s, e)).join('\n') || '- nothing'}`,
     [
       'HOW TO DECIDE:',
       '- Break the goal into questions (unknowns or subgoals). Keep at least two genuinely different approaches alive until one is verified.',
@@ -300,13 +262,9 @@ export function repairBrief(s: State, attempt: Attempt, error: string, raw: stri
 function workBrief(s: State, id: string, spec: WorkSpec): string {
   const q = questionOf(s, spec.questionId);
   const tree = worktreeOf(s, id);
-  const verified = s.workers.flatMap((x) =>
-    x.phase.t === 'ended' &&
-    x.phase.outcome.t === 'check' &&
-    x.phase.outcome.result.verdict === 'verified'
-      ? [`- verified by ${x.id}`]
-      : []
-  );
+  // The derived verifications (queries.ts derive), so a claim a later panel refuted is not
+  // listed: before, every check that answered `verified` was, by its check id alone.
+  const verified = verifications(s).map((v) => `- ${verificationLine(v)}`);
   const findings = s.workers.flatMap((x) =>
     x.phase.t === 'ended' &&
     x.phase.outcome.t === 'work' &&
@@ -336,6 +294,15 @@ function workBrief(s: State, id: string, spec: WorkSpec): string {
   ]
     .filter(Boolean)
     .join('\n\n');
+}
+
+function verificationLine(v: Verification): string {
+  switch (v.t) {
+    case 'panel':
+      return `${v.claimAttemptId}'s claim on ${v.questionId} verified by check panel ${v.panelId}`;
+    case 'host':
+      return `${v.claimAttemptId}'s claim on ${v.questionId} verified by the host (its command passed) and merged`;
+  }
 }
 
 /** Blind check: the claim and its evidence, never the author's reasoning. */
@@ -374,105 +341,6 @@ export function briefOf(s: State, attempt: Attempt): string {
     case 'check':
       return checkBrief(s, attempt.id, spec, claimOf(s, spec));
   }
-}
-
-// ---------- Parsing answers (κ: once, at observation) ----------
-
-const FENCE = /```json\s*([\s\S]*?)```/g;
-
-type Json = { ok: true; value: unknown } | { ok: false; error: string };
-
-/** Where an answer's result was read from: its last fenced block (with any text after it), or a
- * bare object that ends the answer. */
-type Found =
-  | { t: 'fence'; json: Json; after: string }
-  | { t: 'bare'; json: Json }
-  | { t: 'none'; error: string };
-
-/**
- * The answer's result (design.md R11): a bare top-level JSON object that ends the answer after
- * the last fenced ```json block (or with no fence at all), else that last fenced block. A bare
- * final object wins over an earlier fence: 2026-11-01 review, an answer quoting a fenced snippet
- * (a config it edited, a worker's result) and ending with its own bare result parsed the snippet,
- * and lost the repair turn on it. 2026-11-01 incident: a manager answered `{"actions":[…]}` with
- * no fence and the decision was dropped. The schema check after this is unchanged and strict.
- */
-function findJson(body: string): Found {
-  const last = [...body.matchAll(FENCE)].at(-1);
-  const tailStart = last ? (last.index ?? 0) + last[0].length : 0;
-  const bare = trailingObject(body.slice(tailStart));
-  if (bare) return { t: 'bare', json: bare };
-  if (last) return { t: 'fence', json: parsed(last[1] ?? ''), after: body.slice(tailStart) };
-  return { t: 'none', error: 'no ```json block or final JSON object' };
-}
-
-function parsed(text: string): Json {
-  try {
-    return { ok: true, value: JSON.parse(text) };
-  } catch (error) {
-    return { ok: false, error: `invalid JSON: ${error instanceof Error ? error.message : error}` };
-  }
-}
-
-const isObject = (j: Json) => j.ok && typeof j.value === 'object' && j.value !== null;
-
-/**
- * The bare JSON object that ends `text` (absent: none). It starts at a `{` that opens a line; the
- * first such line whose suffix parses as one object wins, so the object is the longest one. Line
- * starts only: trying every `{` re-parsed the suffix from each brace, quadratic on a large
- * brace-heavy answer (2026-11-01 review).
- */
-function trailingObject(text: string): Json | undefined {
-  const trimmed = text.trimEnd();
-  if (!trimmed.endsWith('}')) return undefined;
-  for (const m of trimmed.matchAll(/^[ \t]*\{/gm)) {
-    const tried = parsed(trimmed.slice((m.index ?? 0) + m[0].length - 1));
-    if (isObject(tried)) return tried;
-  }
-  return undefined;
-}
-
-export function parseOutcome(kind: AttemptSpec['kind'], body: string): EndOutcome {
-  const found = findJson(body);
-  const malformed = (error: string): EndOutcome => ({ t: 'malformed', error, raw: body });
-  if (found.t === 'none') return malformed(found.error);
-  if (!found.json.ok) return malformed(found.json.error);
-  const value = found.json.value;
-  switch (kind) {
-    case 'manager': {
-      const parsed = ManagerResult.safeParse(value);
-      return parsed.success
-        ? { t: 'manager', actions: parsed.data.actions }
-        : malformed(parsed.error.message);
-    }
-    case 'work': {
-      const parsed = WorkResult.safeParse(value);
-      return parsed.success ? { t: 'work', result: parsed.data } : malformed(parsed.error.message);
-    }
-    case 'check': {
-      const ambiguous = verdictAmbiguity(body, found);
-      if (ambiguous) return malformed(ambiguous);
-      const parsed = CheckResult.safeParse(value);
-      return parsed.success ? { t: 'check', result: parsed.data } : malformed(parsed.error.message);
-    }
-  }
-}
-
-/**
- * A check's verdict must be explicit (ported from oompa's `explicit-approval?`): exactly one
- * verdict in the answer, and it ends the answer. Oompa incident (audit 2026-11-01): its queue
- * reviewer approved on any `\bAPPROVED\b`, so "NOT APPROVED" passed; its strict parse also
- * refuses a quoted example verdict followed by the real one, and prose after the verdict. Here
- * the enum already refuses "not verified" and plain prose; this refuses the other two shapes, in
- * fences and bare objects alike (every `"verdict":` key in the answer counts), so a panel vote
- * counts only an unambiguous final verdict. Returns why it is ambiguous (none: it is not).
- */
-function verdictAmbiguity(body: string, found: Found): string | undefined {
-  const verdicts = body.match(/"verdict"\s*:/g)?.length ?? 0;
-  if (verdicts > 1) return `${verdicts} verdicts in the answer: give exactly one verdict`;
-  if (found.t === 'fence' && found.after.trim() !== '')
-    return 'text follows the verdict block: the verdict must end the answer';
-  return undefined;
 }
 
 /** The status view the `expedition` tool returns (and the crew answers @mentions from). */

@@ -19,6 +19,7 @@ import type {
   FinishReason,
   Integration,
   IntegrationRefusal,
+  NewsEntry,
   Outcome,
   Run,
   State,
@@ -39,8 +40,10 @@ import {
 } from './ledger';
 import { configOf, liveWorkers, verifiedClaims, waitsOn, workerAttempts } from './queries';
 
-// Every human-readable rendering of expedition state: the badge line, the chat news posted once
-// per decision round, attempt/outcome labels for the page, and full outcome text for briefs.
+// Every human-readable rendering of expedition state, one renderer per domain type: the badge
+// line, the chat news posted once per decision round, attempt/outcome labels for the page, and
+// the full text briefs show a manager. The manager's renderers (`…Label`, `…Detail`) name ids it
+// acts on; the owner's (`…Headline`, `…Parts`, news) name titles and short shas.
 
 export function badge(s: State, now: string): string {
   const mins = Math.round((Date.parse(clockEnd(s.run, now)) - Date.parse(s.launchedAt)) / 60_000);
@@ -195,8 +198,8 @@ function doneSummary(done: Charter['done']): string {
 export const launchNews = (c: { name: string; goal: string }) =>
   `⛺ Launched **${literal(c.name)}**: ${goalSummary(c.goal)}\n\nPlanning…`;
 
-/** The chat line for one notable entry (none for an uninteresting one). */
-function newsLine(s: State, e: Entry): string[] {
+/** The chat lines for one notable entry (ledger.ts ENTRY names which kinds are news). */
+function newsLine(s: State, e: NewsEntry): string[] {
   switch (e.t) {
     case 'attempt_planned': {
       // Only work held by its question's dependencies (design.md R5); it starts once they verify.
@@ -230,7 +233,7 @@ function newsLine(s: State, e: Entry): string[] {
     case 'reflection':
       return [`Reflection: ${clip(e.text, 600)}`];
     case 'feedback':
-      return [`Owner ${feedbackLabel(e.feedback)}`];
+      return [`Owner ${feedbackText(e.feedback, clip)}`];
     case 'validation_failed':
       return [`✗ ${validationHeadline(s, validationOf(s, e.validationId))}`];
     case 'claim_adopted':
@@ -262,8 +265,6 @@ function newsLine(s: State, e: Entry): string[] {
       return [`⛔ ${integrationHeadline(s, integrationOf(s, e.integrationId))}`];
     case 'finished':
       return [clipBlock(`**${expeditionRunLabel(s.run)}:**`, e.summary), ...mergeLine(s, e.reason)];
-    default:
-      return [];
   }
 }
 
@@ -274,7 +275,7 @@ function startedLine(s: State, a: Attempt): string[] {
       return [];
     case 'work':
     case 'check':
-      return [`▶ Started: ${attemptLabel(s, a)}`];
+      return [`▶ Started: ${attemptTitle(s, a)} (${seatLabel(configOf(s.charter, a.spec))})`];
   }
 }
 
@@ -295,11 +296,12 @@ function mergeLine(s: State, reason: FinishReason): string[] {
   }
 }
 
-function feedbackLabel(f: Feedback): string {
+/** Owner feedback: the chat clips its text (`fit`), a manager's brief keeps it whole. */
+export function feedbackText(f: Feedback, fit: (text: string) => string): string {
   switch (f.t) {
     case 'lesson':
     case 'note':
-      return `${f.t}: ${clip(f.text)}`;
+      return `${f.t}: ${fit(f.text)}`;
     case 'extend':
       return `extended the deadline by ${f.hours}h`;
     case 'pause':
@@ -374,17 +376,6 @@ export function attemptTitle(s: State, a: Attempt): string {
       return `Work on ${quoted(questionOf(s, a.spec.questionId).title)}`;
     case 'check':
       return `${a.spec.goal ? 'Goal check' : 'Check'} of the claim on ${quoted(questionOf(s, a.spec.questionId).title)}`;
-  }
-}
-
-/** The title with the seat it runs on, for the chat's "started" line. */
-export function attemptLabel(s: State, a: Attempt): string {
-  switch (a.spec.kind) {
-    case 'manager':
-      return attemptTitle(s, a);
-    case 'work':
-    case 'check':
-      return `${attemptTitle(s, a)} (${seatLabel(configOf(s.charter, a.spec))})`;
   }
 }
 

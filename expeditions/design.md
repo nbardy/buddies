@@ -459,7 +459,7 @@ cacheWriteTokens}`. Until then the effect writes nothing and is retried (a finis
 stays active until every ended attempt is metered). `unmeasured {reason}`: no run executed the
 request, a provider that records no usage (Claude, Codex and OpenCode do), a session not in the
 store, a conversation without a record. No `usd`: the crate keeps tokens, and pricing them would
-be the usage panel's estimate. Totals (`news.ts costTotals`) show on the page header, the badge and
+be the usage panel's estimate. Totals (`render.ts costTotals`) show on the page header, the badge and
 `status`, with the not-measured count and reasons. Known limit: a run that starts after metering
 (its request was already answered) is not counted. R11: the wait is bounded (`SETTLE_WINDOW_MS`,
 one hour after the attempt ended, then `unmeasured`), and a repaired attempt meters both requests.
@@ -640,7 +640,7 @@ post was cut mid-word ("…Engin"); the crew Buddy was listed as a team member.
   result still lists them as lines (`defaultedLines`). Chat news uses titles, never ids (`▶ Started:
   Work on “…” (seat)`, `➕ New question: …`, `**Result** (done):`), and the host's expedition
   posts carry no purpose tag (`postPurposeLabel`).
-- **Chat lines never cut a word** (`news.ts clip`): one flattened line, cut at a word boundary
+- **Chat lines never cut a word** (`render.ts clip`): one flattened line, cut at a word boundary
   with `…`. The launch post is `⛺ Launched **<name>**: <goal's first sentence>` with `Planning…`
   as its own paragraph (`goalSummary` drops headings and list markers). Status posts were plain
   markdown all along; they broke because a raw slice of the goal carried cut list and emphasis

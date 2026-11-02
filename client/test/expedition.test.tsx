@@ -320,7 +320,7 @@ test('the draft modal shows the charter with its issues and defaults, and a Laun
   assert.match(html, />Close<\/button>/);
 });
 
-// The status post's body is markdown (server expeditions/news.ts launchNews): the name in bold,
+// The status post's body is markdown (server expeditions/render.ts launchNews): the name in bold,
 // "Planning…" its own paragraph. 2026-11-01 screenshot: it read as one raw line cut mid-word.
 test('an expedition status post renders as markdown in the chat', () => {
   const html = inChat(

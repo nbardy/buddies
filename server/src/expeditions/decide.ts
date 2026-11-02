@@ -24,7 +24,6 @@ import {
   validationPassed,
   worksOf,
 } from './ledger';
-import { withStatus } from './news';
 import {
   type Panel,
   acceptanceOf,
@@ -50,6 +49,7 @@ import {
   waitsOn,
   workerAttempts,
 } from './queries';
+import { withStatus } from './render';
 
 // decide: state → intent entries (pure). The guardrails live here: every manager action is
 // checked against the charter and the ledger, and a refused one becomes a `rejected` entry the

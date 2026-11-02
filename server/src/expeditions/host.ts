@@ -17,7 +17,8 @@ import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
 import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
-import { CREW_ROLE, briefOf, chatFeedback, parseOutcome, repairBrief, statusText } from './briefs';
+import { chatFeedback, parseOutcome } from './answers';
+import { CREW_ROLE, briefOf, repairBrief, statusText } from './briefs';
 import { killCheck, pidfileOf, runCommand } from './command';
 import { type DraftInput, type LaunchOutcome, createDraftStore, placementOf } from './drafts';
 import {
@@ -473,7 +474,7 @@ export function createExpeditionHost(options: ExpeditionHostOptions) {
 
   /**
    * The owner's messages in the expedition chat (the owner↔crew DM) since the last one recorded,
-   * oldest first, each as a `feedback` entry (briefs.ts chatFeedback): answering "needs you" in
+   * oldest first, each as a `feedback` entry (answers.ts chatFeedback): answering "needs you" in
    * the chat resumes the run, and pause/resume/stop work there, without the steer tool. Keyed by
    * the post's ordered id (the ledger's chat cursor), so a replay never records one twice.
    */

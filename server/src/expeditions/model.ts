@@ -5,10 +5,10 @@
 //   queries.ts  read-only views over State (live, queued, panels, seats)
 //   decide.ts   state → intent entries, with the manager-action guardrails
 //   effects.ts  the idempotent writes a state licenses
-//   news.ts     badge, chat news lines and attempt/outcome labels
+//   render.ts   badge, chat news lines, attempt/outcome labels and manager text
 export * from './charter';
 export * from './decide';
 export * from './effects';
 export * from './ledger';
-export * from './news';
+export * from './render';
 export * from './queries';

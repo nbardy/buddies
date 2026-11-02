@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // The owner's WHAT (reflection never edits it) and the attempt answer shapes, parsed once at the
-// boundary: the charter by the `expedition` tool, results by briefs.ts `parseOutcome` (κ).
+// boundary: the charter by the `expedition` tool, results by answers.ts `parseOutcome` (κ).
 
 /** A seat's model: the provider's default (picked at run time), or a catalog id the launch named
  * (resolved once by charterOf). Never an absent field read as "default" downstream. */
@@ -347,7 +347,7 @@ const FeedbackText = z.string().trim().min(1).max(2000);
 
 /**
  * Owner steering, one type for every way it arrives (the tool's `steer`, a chat message parsed
- * by briefs.ts chatFeedback) and as the ledger records it. Grouped as the tool's input always
+ * by answers.ts chatFeedback) and as the ledger records it. Grouped as the tool's input always
  * was (tool-contract.test.ts: an input schema changes only additively). `resume` re-plans (design.md R11);
  * `extend` moves the deadline (the charter itself is never edited).
  */

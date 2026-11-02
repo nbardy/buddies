@@ -11,7 +11,7 @@ import { createBriefings } from '../src/buddies/briefing';
 import { OWNER } from '../src/buddies/core';
 import { announcePost } from '../src/buddies/events';
 import { cwdOf } from '../src/buddies/worker-config';
-import { parseOutcome } from '../src/expeditions/briefs';
+import { parseOutcome } from '../src/expeditions/answers';
 import { runCommand } from '../src/expeditions/command';
 import { CANCEL_GRACE_MS, type ExpeditionHost } from '../src/expeditions/host';
 import {
@@ -21,7 +21,7 @@ import {
   attemptOf,
   worksOf,
 } from '../src/expeditions/model';
-import { clip, clipBlock, goalSummary, launchNews } from '../src/expeditions/news';
+import { clip, clipBlock, goalSummary, launchNews } from '../src/expeditions/render';
 import { registerExpeditionRoutes } from '../src/expeditions/routes';
 import { createLedger } from '../src/expeditions/store';
 import { expeditionView } from '../src/expeditions/view';
