@@ -146,6 +146,11 @@ pub(crate) fn insert_run(conn: &Connection, run: NewRun) -> Result<Run> {
     let now = now_iso();
     let id = new_id("run");
     let admission = admission_of(conn, &input)?;
+    if let Some(RunConfig { cwd: RunCwd::Path { path }, .. }) = &input.config {
+        if !std::path::Path::new(path).is_absolute() {
+            return Err(CoreError::Invalid(format!("a run's cwd must be an absolute path; got {path:?}")));
+        }
+    }
     conn.prepare_cached(
         "INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, task_epoch,
            status, ready_at, created_at, config, body, admission, delivery_scope)
@@ -366,8 +371,8 @@ impl Store {
         self.write(|tx| {
             let run = leased(tx, run_id, lease_token)?;
             let config = match run.config {
-                Some(RunConfig { model: None, provider, reasoning_effort }) => {
-                    RunConfig { provider, model: Some(model.to_string()), reasoning_effort }
+                Some(RunConfig { model: None, provider, reasoning_effort, cwd }) => {
+                    RunConfig { provider, model: Some(model.to_string()), reasoning_effort, cwd }
                 }
                 Some(RunConfig { model: Some(named), .. }) => {
                     return Err(CoreError::Invalid(format!("run {run_id} already names model {named}")));
@@ -551,7 +556,7 @@ impl Store {
                 if let RunInput::Post { post_id } = &run.input {
                     tx.execute("UPDATE post SET request = 'awaiting' WHERE id = ?1 AND request IN ('failed','cancelled')", [post_id])?;
                 }
-                next_attempt(tx, &run, conversation_id, config.as_ref().or(run.config.as_ref()))
+                next_attempt(tx, &run, conversation_id, config.clone())
             })?;
             get_run(tx, &id)
         })
@@ -794,8 +799,14 @@ fn end_run(tx: &Transaction, run: &Run, outcome: &Outcome, now: &str) -> Result<
 }
 
 /// The next attempt of `run`'s input: a new queued row on the same key, the failed one kept as
-/// history. Shared by a manual retry and the one automatic resume (decision G).
-pub(crate) fn next_attempt(tx: &Transaction, run: &Run, conversation_id: Option<String>, config: Option<&RunConfig>) -> Result<String> {
+/// history. Shared by a manual retry and the one automatic resume (decision G). `moved_to`: the
+/// model a retry moves to; None keeps the failed run's config. Only the model moves: the attempt
+/// starts where its run did (`RunCwd` belongs to the work), whatever cwd the retry's caller built.
+pub(crate) fn next_attempt(tx: &Transaction, run: &Run, conversation_id: Option<String>, moved_to: Option<RunConfig>) -> Result<String> {
+    let config = match (moved_to, &run.config) {
+        (None, old) => old.clone(),
+        (Some(new), old) => Some(RunConfig { cwd: old.as_ref().map_or(RunCwd::Default, |c| c.cwd.clone()), ..new }),
+    };
     let task_epoch = run.task_id.as_deref().map(|t| get_task(tx, t).map(|t| t.epoch)).transpose()?;
     let now = now_iso();
     let id = new_id("run");
@@ -811,7 +822,7 @@ pub(crate) fn next_attempt(tx: &Transaction, run: &Run, conversation_id: Option<
             conversation_id,
             task_epoch,
             now,
-            config.map(|c| serde_json::to_string(c).expect("run config serializes")),
+            config.map(|c| serde_json::to_string(&c).expect("run config serializes")),
             run.id
         ],
     )?;
@@ -910,7 +921,7 @@ fn resumed_before(tx: &Transaction, run: &Run) -> Result<bool> {
 /// `a_request_whose_holder_died_resumes_once_in_its_conversation_then_fails`.
 fn resume(tx: &Transaction, run: &Run, post_id: &str) -> Result<()> {
     match get_post(tx, post_id)?.request {
-        RequestState::Awaiting => next_attempt(tx, run, run.conversation_id.clone(), run.config.as_ref()).map(|_| ()),
+        RequestState::Awaiting => next_attempt(tx, run, run.conversation_id.clone(), None).map(|_| ()),
         // Answered (or closed) before the holder died: nothing is owed.
         RequestState::None | RequestState::Answered { .. } | RequestState::Cancelled | RequestState::Failed => Ok(()),
     }

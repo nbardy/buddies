@@ -242,7 +242,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
         s.settle_run(&claim.run.id, &claim.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
     }
     s.follow_thread(&mid, &top.id, None, 20).unwrap();
-    let codex = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None };
+    let codex = RunConfig { provider: "codex".into(), model: None, reasoning_effort: None, cwd: RunCwd::Default };
     s.post(&mid, ChannelRef::Direct { members: vec![mid.clone()] }, PostInput { run_config: Some(codex), from_conversation_id: Some("c-mid".into()), ..input(PostKind::Request, "w", "pw") })
         .unwrap();
     let worker = s.claim_run_at("2998-01-01T00:00:00.000Z", lease(60_000), &[]).unwrap().unwrap();

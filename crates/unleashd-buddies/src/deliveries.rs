@@ -584,7 +584,7 @@ impl Store {
                 Some(run) => {
                     let same_provider = run.config.as_ref().is_some_and(|old| old.provider == config.provider);
                     let conversation = if same_provider { run.conversation_id.clone() } else { None };
-                    crate::runs::next_attempt(tx, &run, conversation, Some(&config))?
+                    crate::runs::next_attempt(tx, &run, conversation, Some(config))?
                 }
             };
             crate::runs::get_run(tx, &id)
