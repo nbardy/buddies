@@ -272,10 +272,7 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   (log event `journal_quarantined`); salvage with `sqlite3 <file> .recover`. Guard:
   `corrupt_store_is_quarantined_and_replaced` in `crates/unleashd-ingest/src/attempts.rs`.
   Authoritative stores (records, buddies) are never auto-replaced.
-- Line ceilings (Buddies `tools/buddies-line-ceiling`, client CSS G8) are judged on the COMMIT by a
-  pre-commit hook (`tools/check-line-ceilings-commit.sh`, installed by `pnpm run bootstrap` via
-  `tools/install-git-hooks.sh`). The typecheck copies read the dirty tree, so until 2026-10-23
-  HEAD sat ~2k lines over the Buddies ceiling while every commit passed. Bump only with a reason.
+- Client CSS G8 ratchet runs in `tools/check-client-invariants.sh` (CI).
 - Performance: run `pnpm perf:audit` before hunting a regression. It summarizes `~/.agent-viewer/observability/perf/` (`boot.jsonl` phases per bootId from supervisor + backend, `stalls.jsonl` with auto CPU profiles in `profiles/` for stalls >=500ms, `routes.jsonl` per-minute p50/p90/max) plus data growth and machine load, into `output/perf-audit/<ts>.md`. Check machine load and swap first: 2026-09-25 and 2026-10-23 were both mostly an oversubscribed machine. Capture a profile with `pnpm perf:profile` (gated `POST /api/debug/profile`) or `UNLEASHD_CPU_PROF=1 pnpm dev`. Never add boot work without a boot phase, never spawn synchronously (`execFileSync`/`spawnSync`) on the event loop (2026-10-23: a per-second `ps` per execution held 74% of the main thread; guard `vendor/agent-cli-tool/test/journal-no-sync-spawn.test.ts`), and never label-less timers (the stall monitor blames the last labelled activity; wrap with `labelled(name, fn)` from `server/src/observability/event-loop-stall.ts`). Details: `docs/error-journal.md`.
 - Inspect unresolved operational failures with `pnpm errors:list`; do not read or
   mutate the JSONL journal directly. Its configured location and capture policy
