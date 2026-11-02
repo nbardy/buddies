@@ -80,18 +80,23 @@ export function expeditionPollMs(read: ExpeditionRead | null, liveMs: number): n
 /** The colour family of a pill, dot or chip (Expedition.css `.expedition-tone-*`). */
 export type Tone = 'ok' | 'warn' | 'info' | 'bad' | 'muted';
 
-export function runTone(run: ExpeditionRun): Tone {
-  switch (run.t) {
-    case 'running':
-      return 'ok';
-    case 'waiting_owner':
-      return 'warn';
-    case 'paused':
-      return 'muted';
-    case 'finished':
-      return 'info';
+/** How each run state looks, in one place: pill/chip tone, rail dot, rail row weight (the channel
+ * rows' unread vocabulary, ChannelBrowser.css: bold when it needs the owner, dimmed while paused)
+ * and whether the owner's attention is asked (Home lists those first). */
+export const RUN_LOOK: Record<
+  ExpeditionRun['t'],
+  {
+    tone: Tone;
+    dot: 'running' | 'queued' | 'idle';
+    emphasis: 'new' | 'read' | undefined;
+    needsYou: boolean;
   }
-}
+> = {
+  running: { tone: 'ok', dot: 'running', emphasis: undefined, needsYou: false },
+  waiting_owner: { tone: 'warn', dot: 'queued', emphasis: 'new', needsYou: true },
+  paused: { tone: 'muted', dot: 'idle', emphasis: 'read', needsYou: false },
+  finished: { tone: 'info', dot: 'idle', emphasis: undefined, needsYou: false },
+};
 
 /** The status pill of a summary: a retired expedition reads Retired (muted), one being put away
  * Retiring, else its run state. */
@@ -105,7 +110,7 @@ export function expeditionPill(e: Pick<ExpeditionSummary, 'run' | 'retirement'>)
     case 'retiring':
       return { label: 'Retiring…', tone: 'muted' };
     case 'active':
-      return { label: expeditionRunLabel(e.run), tone: runTone(e.run) };
+      return { label: expeditionRunLabel(e.run), tone: RUN_LOOK[e.run.t].tone };
   }
 }
 
@@ -176,37 +181,6 @@ export const EXPEDITIONS_URL = '/api/buddies/expeditions';
 /** How often the rail, the index and Home re-read the list (pushes refresh it sooner). */
 export const EXPEDITIONS_POLL_MS = 10_000;
 
-/** The rail dot (ConversationRow.css statuses): green while it runs, amber while it waits on
- * the owner, grey once paused or finished. */
-export function runDot(run: ExpeditionRun): 'running' | 'queued' | 'idle' {
-  switch (run.t) {
-    case 'running':
-      return 'running';
-    case 'waiting_owner':
-      return 'queued';
-    case 'paused':
-    case 'finished':
-      return 'idle';
-  }
-}
-
-/** Whether the owner's attention is asked: the rail row goes bold, Home lists it first. */
-export const needsYou = (run: ExpeditionRun): boolean => run.t === 'waiting_owner';
-
-/** The rail row's weight, in the channel rows' unread vocabulary (ChannelBrowser.css): bold when
- * it needs the owner, dimmed while paused, plain while it runs. */
-export function railEmphasis(run: ExpeditionRun): 'new' | 'read' | undefined {
-  switch (run.t) {
-    case 'waiting_owner':
-      return 'new';
-    case 'paused':
-      return 'read';
-    case 'running':
-    case 'finished':
-      return undefined;
-  }
-}
-
 /** What the channel rail and Home list: this workspace's unfinished expeditions, the ones waiting
  * on the owner first, each group newest launch first (the list arrives newest first). */
 export const activeExpeditions = (
@@ -216,7 +190,10 @@ export const activeExpeditions = (
   const mine = list.filter(
     (e) => e.workspaceId === workspaceId && e.run.t !== 'finished' && !isRetired(e.retirement)
   );
-  return [...mine.filter((e) => needsYou(e.run)), ...mine.filter((e) => !needsYou(e.run))];
+  return [
+    ...mine.filter((e) => RUN_LOOK[e.run.t].needsYou),
+    ...mine.filter((e) => !RUN_LOOK[e.run.t].needsYou),
+  ];
 };
 
 const isRetired = (r: ExpeditionRetirement) => r.t === 'retired';

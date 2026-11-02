@@ -13,12 +13,10 @@ import { useOpenExpedition } from './expedition-overlay';
 import {
   EXPEDITIONS_POLL_MS,
   EXPEDITIONS_URL,
+  RUN_LOOK,
   expeditionGroups,
   expeditionPill,
-  needsYou,
   ownerActions,
-  railEmphasis,
-  runDot,
   summaryLine,
 } from './expedition-view';
 import '../../views/conversation-row/ConversationRow.css';
@@ -59,15 +57,15 @@ export function ExpeditionRailRow({
       <button
         type="button"
         className={classes.row || undefined}
-        data-unread={railEmphasis(e.run)}
+        data-unread={RUN_LOOK[e.run.t].emphasis}
         onClick={() => open(e.id)}
         title={`${e.name} — ${expeditionPill(e).label}\n${summaryLine(e)}`}
       >
         <span className={`${classes.hash} expedition-rail-dot`} aria-hidden="true">
-          <span className="conversation-row__dot" data-status={runDot(e.run)} />
+          <span className="conversation-row__dot" data-status={RUN_LOOK[e.run.t].dot} />
         </span>
         <span className={classes.name}>{e.name}</span>
-        {needsYou(e.run) && <span className="expedition-rail-flag">needs you</span>}
+        {RUN_LOOK[e.run.t].needsYou && <span className="expedition-rail-flag">needs you</span>}
       </button>
     </li>
   );
@@ -198,10 +196,10 @@ function ExpeditionGroup({
             <button
               type="button"
               className="expedition-index-row"
-              data-needs-you={needsYou(e.run) || undefined}
+              data-needs-you={RUN_LOOK[e.run.t].needsYou || undefined}
               onClick={() => open(e.id)}
             >
-              <span className="conversation-row__dot" data-status={runDot(e.run)} />
+              <span className="conversation-row__dot" data-status={RUN_LOOK[e.run.t].dot} />
               <span className="expedition-index-text ui-stack">
                 <strong className="ui-truncate">{e.name}</strong>
                 <span className="ui-muted ui-truncate">
@@ -241,7 +239,7 @@ export function HomeExpeditions({ workspaceId }: { workspaceId: string }) {
   const { active } = useWorkspaceExpeditions(workspaceId);
   const open = useOpenExpedition();
   if (active.length === 0) return null;
-  const waiting = active.filter((e) => needsYou(e.run)).length;
+  const waiting = active.filter((e) => RUN_LOOK[e.run.t].needsYou).length;
   return (
     <section className="landing-section ui-stack" aria-label="Expeditions">
       <div className="landing-section-head ui-row">
@@ -262,7 +260,7 @@ export function HomeExpeditions({ workspaceId }: { workspaceId: string }) {
               {/* data-own-dot: the run-state dot replaces the landing row's accent dot
                   (ChannelLanding.css owns that rule). */}
               <span className="landing-request-from ui-row" data-own-dot="">
-                <span className="conversation-row__dot" data-status={runDot(e.run)} />
+                <span className="conversation-row__dot" data-status={RUN_LOOK[e.run.t].dot} />
                 {e.name}
               </span>
               <span className="landing-request-body">

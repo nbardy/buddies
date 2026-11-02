@@ -16,9 +16,10 @@ import { ArchivedChannels, ChannelHeaderControls, useArchivedChannels } from './
 import type { OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelDm } from './ChannelDm';
+import { ChannelFeed, useChannelTimeline } from './ChannelFeed';
 import { ChannelLanding } from './ChannelLanding';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
-import { LeadRow, Replying, type RowContext, renderRow, renderRows } from './ChannelRows';
+import { LeadRow, Replying, type RowContext, renderRow } from './ChannelRows';
 import { ChannelSearch } from './ChannelSearch';
 import { ChannelStar } from './ChannelStar';
 import { ChannelWorkers } from './ChannelWorkers';
@@ -36,25 +37,16 @@ import {
   type ChannelHeading,
   type WorkspaceDirectory,
   arrivalOf,
-  channelFeed,
   channelHeading,
   channelRequestCount,
-  channelRows,
   channelUnreadAttr,
   createChannel,
-  feedPhase,
   firstUnreadPostId,
   isGroupDm,
-  newestServedId,
-  renderFeed,
   unreadThreadIds,
-  useChannelFeed,
   useChannelResponding,
-  useFollowBottom,
-  useMarkRead,
   useThreadView,
   useWarmChannelPosts,
-  useWithOutbox,
   useWorkspaceDirectory,
   useWorkspaceInbox,
 } from './channel-data';
@@ -256,16 +248,12 @@ function ChannelPane({
 }) {
   const channelId = entry.channel.id;
   const heading = channelHeading(entry.channel.kind, directory.buddyNames);
-  const feed = useChannelFeed(channelFeed(channelId));
+  const timeline = useChannelTimeline(channelId, entry.unread);
+  const { feed, follow } = timeline;
   const respondingByRoot = useChannelResponding(channelId, directory.buddyNames);
-  const posts = useWithOutbox(channelId, null, feed.posts);
-  const rows = useMemo(() => channelRows(posts ?? []), [posts]);
-  const follow = useFollowBottom(rows.length, posts, null);
-  const scrollActivity = useScrollActivity();
   // What was unread when the owner arrived; this visit's read marks never move it.
   const [arrival] = useState(() => arrivalOf(entry));
   const [opened, setOpened] = useState<ReadonlySet<string>>(NO_THREADS);
-  useMarkRead({ kind: 'channel', channelId }, entry.unread > 0, newestServedId(feed.posts));
   const unreadThreads = useMemo(() => {
     const unread = new Set(unreadThreadIds(feed.threads, arrival));
     for (const rootId of opened) unread.delete(rootId);
@@ -328,46 +316,13 @@ function ChannelPane({
           </div>
         </header>
         {taskFilter === null ? (
-          <div
-            className="channel-browser-scroll ui-stack ui-scroll-quiet"
-            data-scrolling={scrollActivity['data-scrolling']}
-            ref={follow.scrollRef}
-            onScroll={(event) => {
-              follow.onScroll(event);
-              scrollActivity.onScroll();
-            }}
-          >
-            {(feed.latest.kind === 'failed' || feed.latest.kind === 'stale') && (
-              <p className="channel-browser-error" role="alert">
-                Posts could not refresh: {feed.latest.error.message}
-              </p>
-            )}
-            {renderFeed(feedPhase(feed.latest.kind, posts), {
-              loading: () => <ChannelLoader label={`Loading ${heading.mark}${heading.name}…`} />,
-              failed: () => null,
-              empty: () => (
-                <div className="channel-browser-empty ui-muted ui-row">
-                  <strong>
-                    {heading.mark}
-                    {heading.name}
-                  </strong>
-                  <span>No posts yet. Say hello, or @mention a Buddy to ask it something.</span>
-                </div>
-              ),
-              posts: () => (
-                <>
-                  <ChannelHistory
-                    edge={feed.edge}
-                    scrollRef={follow.scrollRef}
-                    onReach={() => void feed.loadOlder(follow.hold)}
-                  />
-                  <ol className="channel-browser-messages">
-                    {renderRows(rows, channelContext, firstUnread)}
-                  </ol>
-                </>
-              ),
-            })}
-          </div>
+          <ChannelFeed
+            timeline={timeline}
+            context={channelContext}
+            firstUnread={firstUnread}
+            label={`${heading.mark}${heading.name}`}
+            density="pane"
+          />
         ) : (
           <TaskPage
             key={taskFilter}
