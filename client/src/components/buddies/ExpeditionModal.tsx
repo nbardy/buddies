@@ -13,7 +13,6 @@ import {
   type ReactNode,
   createContext,
   useContext,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -25,19 +24,13 @@ import { invalidateBuddyResources, invalidateChannelResources } from '../../atom
 import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
 import { type PolledState, usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChannelComposer } from './ChannelComposer';
+import { ChannelFeed, useChannelTimeline } from './ChannelFeed';
 import { ChannelMarkdown } from './ChannelMarkdown';
-import { type RowContext, renderRows } from './ChannelRows';
+import type { RowContext } from './ChannelRows';
 import { DraftLaunchButton } from './ExpeditionDraftLaunch';
 import { ModalDialog } from './ModalDialog';
 import { buddyWrite } from './api';
-import {
-  type WorkspaceDirectory,
-  channelFeed,
-  channelRows,
-  useChannelFeed,
-  useWithOutbox,
-  useWorkspaceDirectory,
-} from './channel-data';
+import { type WorkspaceDirectory, useWorkspaceDirectory, useWorkspaceInbox } from './channel-data';
 import { channelsHref } from './channels-view';
 import { useHostAction } from './expedition-action';
 import {
@@ -974,15 +967,10 @@ function ExpeditionChat({
 }: { channelId: string; workspaceId: string; writable: boolean }) {
   const navigate = useNavigate();
   const directory = useWorkspaceDirectory(workspaceId);
-  const feed = useChannelFeed(channelFeed(channelId));
-  const posts = useWithOutbox(channelId, null, feed.posts);
+  const inbox = useWorkspaceInbox(workspaceId);
+  const unread = inbox.data?.channels.find((entry) => entry.channel.id === channelId)?.unread ?? 0;
+  const timeline = useChannelTimeline(channelId, unread);
   const availableConversationIds = useAtomValue(listField('idSet'));
-  const listRef = useRef<HTMLOListElement>(null);
-  const count = posts?.length ?? 0;
-  // Newest at the bottom, in view: on open and whenever a post arrives.
-  useEffect(() => {
-    if (count > 0 && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [count]);
   const context: RowContext = {
     workspaceId,
     directory,
@@ -1003,13 +991,13 @@ function ExpeditionChat({
           Open as DM ↗
         </Link>
       </div>
-      {posts === null ? (
-        <p className="buddy-panel__empty">Loading chat…</p>
-      ) : (
-        <ol ref={listRef} className="channel-browser-messages expedition-chat-messages">
-          {renderRows(channelRows(posts), context, null)}
-        </ol>
-      )}
+      <ChannelFeed
+        timeline={timeline}
+        context={context}
+        firstUnread={null}
+        label="chat"
+        density="column"
+      />
       {writable && (
         <ChannelComposer
           channelId={channelId}
@@ -1017,7 +1005,10 @@ function ExpeditionChat({
           placeholder="Ask the expedition, or give it a lesson…"
           references={directory.references}
           submit="enter"
-          onPosted={() => invalidateChannelResources(channelId, [])}
+          onPosted={() => {
+            timeline.follow.pin();
+            invalidateChannelResources(channelId, []);
+          }}
         />
       )}
     </section>
