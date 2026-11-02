@@ -21,17 +21,10 @@
 .expedition-modal--sheet .expedition-columns { grid-template-columns: minmax(0, 1fr); }
 .expedition-modal--draft .expedition-pane { min-height: 0; overflow-y: auto; }
 
-/* The phone's full-height sheet. */
+/* The phone's full-height sheet: the frame is .ui-sheet--full (ui/primitives.css). */
 .expedition-modal--sheet {
-  width: 100vw;
-  max-width: none;
-  height: 100dvh;
-  max-height: none;
-  margin: 0;
   padding: max(var(--sp-5), env(safe-area-inset-top)) var(--sp-5)
     max(var(--sp-5), env(safe-area-inset-bottom));
-  border: 0;
-  border-radius: 0;
   font-size: var(--fs-5);
   overflow-y: auto;
 }

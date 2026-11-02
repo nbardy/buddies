@@ -63,17 +63,17 @@ export const summaryOf = (read: ExpeditionRead): ExpeditionSummary => {
  * never once retired (frozen). A finished expedition still refreshes on `buddies_changed` pushes
  * (its key is under /api/buddies); one being retired keeps polling until it is frozen.
  */
-export function expeditionPollMs(read: ExpeditionRead | null, liveMs: number): number {
-  if (read === null) return liveMs;
-  switch (read.t) {
+export function pollMsOf(
+  s: Pick<ExpeditionSummary, 'run' | 'counts' | 'retirement'>,
+  liveMs: number
+): number {
+  switch (s.retirement.t) {
     case 'retired':
       return 0;
-    case 'live': {
-      const v = read.view;
-      return v.run.t === 'finished' && v.counts.live === 0 && v.retirement.t === 'active'
-        ? 0
-        : liveMs;
-    }
+    case 'retiring':
+      return liveMs;
+    case 'active':
+      return s.run.t === 'finished' && s.counts.live === 0 ? 0 : liveMs;
   }
 }
 

@@ -124,6 +124,18 @@
   background: rgb(0 0 0 / 55%);
 }
 
+/* The full-bleed variant (the expedition modal on a phone): edge to edge, as tall as the visible
+   viewport so the keyboard does not cover its bottom (useVisibleViewport sets the variable). */
+.ui-sheet--full {
+  width: 100vw;
+  max-width: none;
+  height: var(--picker-visible-height, 100dvh);
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
 .ui-sheet__inner {
   gap: var(--sp-5);
   padding: var(--sp-5) var(--sp-7) calc(var(--sp-8) + env(safe-area-inset-bottom));

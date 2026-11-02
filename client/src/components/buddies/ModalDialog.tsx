@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef } from 'react';
+import { useVisibleViewport } from '../../hooks/useVisibleViewport';
 
 // Pattern: one-definition (docs/patterns.md#one-definition)
 // The one modal for Buddy surfaces: the Task overlay, the file viewer and the expedition modal.
@@ -17,6 +18,9 @@ export function ModalDialog({
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // On a phone the keyboard covers the layout viewport's bottom; a `.ui-sheet--full` follows the
+  // visible one. Inert for a dialog that does not read the variable.
+  useVisibleViewport(dialogRef);
   // Read through a ref: an inline onClose from a parent that re-renders (a polled view) must not
   // close and re-open the dialog, which would move focus back to the opener on every poll.
   const closeRef = useRef(onClose);

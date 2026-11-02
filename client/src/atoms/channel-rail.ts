@@ -59,3 +59,30 @@ export const expeditionRailFamily = atomFamily((workspaceId: string) =>
     };
   })
 );
+
+/** One expedition's row from the one cached list: what the chat badge shows, so N badges cost one
+ * list request, not N full-view polls. `pending`: the list is not here yet; `unavailable`: it
+ * failed with nothing cached; `missing`: the list is here and has no such expedition. */
+export type SummaryRead =
+  | { t: 'pending' }
+  | { t: 'unavailable' }
+  | { t: 'missing' }
+  | { t: 'found'; summary: ExpeditionSummary };
+
+export const expeditionSummaryFamily = atomFamily((id: string) =>
+  atom((get): SummaryRead => {
+    const entry = get(resourceAtomFamily(EXPEDITIONS_URL)) as ResourceEntry<ExpeditionSummary[]>;
+    switch (entry.kind) {
+      case 'idle':
+      case 'loading':
+        return { t: 'pending' };
+      case 'failed':
+        return { t: 'unavailable' };
+      case 'ready':
+      case 'stale': {
+        const summary = entry.value.find((e) => e.id === id);
+        return summary ? { t: 'found', summary } : { t: 'missing' };
+      }
+    }
+  })
+);
