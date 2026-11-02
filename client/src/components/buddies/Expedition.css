@@ -226,3 +226,4 @@
 .expedition-chat-head { justify-content: space-between; align-items: baseline; }
 .expedition-chat-open { font-size: var(--fs-3); text-decoration: none; }
 .expedition-chat-open:hover { color: var(--text-emphasis); }
+.expedition-index-retired > summary { cursor: pointer; margin-bottom: var(--sp-3); }

@@ -4,6 +4,7 @@ import type {
   ExpeditionDefault,
   ExpeditionDraftView,
   ExpeditionQuestion,
+  ExpeditionRetiredView,
   ExpeditionValidation,
   ExpeditionView,
 } from '@unleashd/shared';
@@ -20,7 +21,7 @@ import {
 } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listField } from '../../atoms/conversations';
-import { invalidateChannelResources } from '../../atoms/resources';
+import { invalidateBuddyResources, invalidateChannelResources } from '../../atoms/resources';
 import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
 import { type PolledState, usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChannelComposer } from './ChannelComposer';
@@ -28,6 +29,7 @@ import { ChannelMarkdown } from './ChannelMarkdown';
 import { type RowContext, renderRows } from './ChannelRows';
 import { DraftLaunchButton } from './ExpeditionDraftLaunch';
 import { ModalDialog } from './ModalDialog';
+import { buddyWrite } from './api';
 import {
   type WorkspaceDirectory,
   channelFeed,
@@ -37,6 +39,7 @@ import {
   useWorkspaceDirectory,
 } from './channel-data';
 import { channelsHref } from './channels-view';
+import { useHostAction } from './expedition-action';
 import {
   DRAFT_PILL,
   FOCI,
@@ -50,13 +53,15 @@ import {
   attemptState,
   attemptTone,
   draftUrl,
+  expeditionPill,
   expeditionPollMs,
+  expeditionRead,
   expeditionUrl,
   limitItems,
   nowLine,
-  runLabel,
-  runTone,
+  ownerActions,
   shortTime,
+  summaryOf,
   timeLine,
   validationsOf,
   worktreeLine,
@@ -335,11 +340,13 @@ function LiveModal({
   onClose,
 }: { id: string; presentation: Presentation; onClose(): void }) {
   const [pollMs, setPollMs] = useState(POLL_MS);
-  const view = usePolledFetch<ExpeditionView>(expeditionUrl(id), pollMs);
-  // A finished expedition stops polling (audit #8); derived from the last response.
-  const nextPollMs = expeditionPollMs(view.data, POLL_MS);
+  const view = usePolledFetch<ExpeditionView | ExpeditionRetiredView>(expeditionUrl(id), pollMs);
+  const read = view.data ? expeditionRead(view.data) : null;
+  // A finished expedition stops polling (audit #8), a retired one is frozen; derived from the
+  // last response.
+  const nextPollMs = expeditionPollMs(read, POLL_MS);
   if (nextPollMs !== pollMs) setPollMs(nextPollMs);
-  if (!view.data)
+  if (!read)
     return (
       <Pending
         label="expedition"
@@ -349,30 +356,127 @@ function LiveModal({
         read={firstRead(view)}
       />
     );
-  const v = view.data;
+  const summary = summaryOf(read);
+  const pill = expeditionPill(summary);
+  const refetch = async () => {
+    // The list's rows (rail, index, Home) move with the modal's footer action.
+    invalidateBuddyResources();
+    await view.refetch();
+  };
   return (
     <Shell
-      label={`Expedition ${v.charter.name}`}
+      label={`Expedition ${summary.name}`}
       kind="live"
       presentation={presentation}
       onClose={onClose}
       title={
         <>
-          <strong className="expedition-modal-title ui-truncate">⛺ {v.charter.name}</strong>
-          <span className={`expedition-pill expedition-tone-${runTone(v.run)}`}>
-            {runLabel(v.run)}
-          </span>
+          <strong className="expedition-modal-title ui-truncate">⛺ {summary.name}</strong>
+          <span className={`expedition-pill expedition-tone-${pill.tone}`}>{pill.label}</span>
         </>
       }
     >
-      <WithDirectory workspaceId={v.workspaceId}>
-        <LiveBody
-          v={v}
-          presentation={presentation}
-          stale={view.kind === 'stale' ? view.error : null}
-        />
+      <WithDirectory workspaceId={summary.workspaceId}>
+        {read.t === 'live' ? (
+          <LiveBody
+            v={read.view}
+            presentation={presentation}
+            stale={view.kind === 'stale' ? view.error : null}
+          />
+        ) : (
+          <RetiredBody r={read.view} />
+        )}
       </WithDirectory>
+      {read.t === 'live' && <OwnerFooter v={read.view} refetch={refetch} />}
     </Shell>
+  );
+}
+
+/** A retired expedition: its frozen last report and counts, read-only (no chat, no tabs). */
+function RetiredBody({ r }: { r: ExpeditionRetiredView }) {
+  const s = r.summary;
+  return (
+    <div className="expedition-pane ui-stack">
+      <div className="expedition-meters">
+        <Stat label="Attempts" value={`${s.counts.attempts}/${s.counts.maxAttempts}`} />
+        <Stat label="Verified" value={String(s.counts.verified)} />
+        <Stat label="Cost" value={s.cost.short} />
+      </div>
+      <Section title="Last status report">
+        <ExpeditionMarkdown text={r.report} />
+      </Section>
+    </div>
+  );
+}
+
+/** The owner's footer action, by `ownerActions`: Retire (finished) or Stop and retire (open),
+ * each behind a two-step inline confirm so a stray click cannot put a crew away. */
+function OwnerFooter({ v, refetch }: { v: ExpeditionView; refetch(): Promise<void> }) {
+  const action = ownerActions(v);
+  switch (action.t) {
+    case 'none':
+      return null;
+    case 'retire':
+    case 'stop_and_retire':
+      return (
+        <footer className="expedition-footer ui-row">
+          <RetireControl id={v.id} mode={action.t} refetch={refetch} />
+        </footer>
+      );
+  }
+}
+
+const RETIRE_COPY = {
+  retire: {
+    ask: 'Retire',
+    confirm: 'Archive its branches to tags, remove its worktrees and archive the crew and chats?',
+  },
+  stop_and_retire: {
+    ask: 'Stop and retire',
+    confirm: 'Stop it now, then archive its branches to tags, remove its worktrees and the crew?',
+  },
+} as const;
+
+function RetireControl({
+  id,
+  mode,
+  refetch,
+}: { id: string; mode: 'retire' | 'stop_and_retire'; refetch(): Promise<void> }) {
+  const [asked, setAsked] = useState(false);
+  const { state, run } = useHostAction(
+    () => buddyWrite('expedition.retire', { id }, { mode }),
+    refetch
+  );
+  const copy = RETIRE_COPY[mode];
+  return (
+    <span className="ui-row expedition-launch">
+      {state.t === 'failed' && (
+        <span role="alert" className="expedition-error">
+          {state.error}
+        </span>
+      )}
+      {asked ? (
+        <>
+          <span className="ui-muted">{copy.confirm}</span>
+          <button
+            type="button"
+            className="expedition-button expedition-button--primary"
+            disabled={state.t === 'pending'}
+            aria-busy={state.t === 'pending'}
+            onClick={run}
+          >
+            {state.t === 'pending' ? 'Retiring…' : `Yes, ${copy.ask.toLowerCase()}`}
+          </button>
+          <button type="button" className="expedition-button" onClick={() => setAsked(false)}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <button type="button" className="expedition-button" onClick={() => setAsked(true)}>
+          {copy.ask}
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -849,14 +953,25 @@ function CharterPane({
 function ChatPane({ v }: { v: ExpeditionView }) {
   switch (v.crew.t) {
     case 'ready':
-      return <ExpeditionChat channelId={v.crew.chatChannelId} workspaceId={v.workspaceId} />;
+      return (
+        <ExpeditionChat
+          channelId={v.crew.chatChannelId}
+          workspaceId={v.workspaceId}
+          // A retiring expedition's crew is being archived: its chat is history.
+          writable={v.retirement.t === 'active'}
+        />
+      );
     case 'pending':
       return <p className="buddy-panel__empty">Starting the crew… its chat opens here.</p>;
   }
 }
 
 /** The owner↔crew DM: every update lands here; a post wakes the crew to answer or steer. */
-function ExpeditionChat({ channelId, workspaceId }: { channelId: string; workspaceId: string }) {
+function ExpeditionChat({
+  channelId,
+  workspaceId,
+  writable,
+}: { channelId: string; workspaceId: string; writable: boolean }) {
   const navigate = useNavigate();
   const directory = useWorkspaceDirectory(workspaceId);
   const feed = useChannelFeed(channelFeed(channelId));
@@ -895,14 +1010,16 @@ function ExpeditionChat({ channelId, workspaceId }: { channelId: string; workspa
           {renderRows(channelRows(posts), context, null)}
         </ol>
       )}
-      <ChannelComposer
-        channelId={channelId}
-        rootId={null}
-        placeholder="Ask the expedition, or give it a lesson…"
-        references={directory.references}
-        submit="enter"
-        onPosted={() => invalidateChannelResources(channelId, [])}
-      />
+      {writable && (
+        <ChannelComposer
+          channelId={channelId}
+          rootId={null}
+          placeholder="Ask the expedition, or give it a lesson…"
+          references={directory.references}
+          submit="enter"
+          onPosted={() => invalidateChannelResources(channelId, [])}
+        />
+      )}
     </section>
   );
 }

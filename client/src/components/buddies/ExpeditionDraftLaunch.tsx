@@ -1,5 +1,6 @@
 import type { ExpeditionDraftView } from '@unleashd/shared';
-import { type LaunchState, useDraftLaunch } from './expedition-launch';
+import { buddyWrite } from './api';
+import { type ActionState, useHostAction } from './expedition-action';
 import { useOpenExpedition } from './expedition-overlay';
 import { draftAction } from './expedition-view';
 import './Expedition.css';
@@ -13,7 +14,10 @@ export function DraftLaunchButton({
   refetch,
   onOpen,
 }: { d: ExpeditionDraftView; refetch(): Promise<void>; onOpen(): void }) {
-  const { state, launch } = useDraftLaunch(d, refetch);
+  const { state, run: launch } = useHostAction(
+    () => buddyWrite('expedition.launch', { draftId: d.id }, { workspaceId: d.workspaceId }),
+    refetch
+  );
   const openExpedition = useOpenExpedition();
   const action = draftAction(d);
   switch (action.t) {
@@ -46,7 +50,7 @@ export function DraftLaunchButton({
   }
 }
 
-function LaunchControl({ state, launch }: { state: LaunchState; launch(): void }) {
+function LaunchControl({ state, launch }: { state: ActionState; launch(): void }) {
   return (
     <span className="ui-row expedition-launch">
       <button
