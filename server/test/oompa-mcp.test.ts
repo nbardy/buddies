@@ -165,7 +165,8 @@ child.kill();
         validators: {
           [task.id]: {
             command: [process.execPath, 'oracle.mjs'],
-            timeout_seconds: 10,
+            // 10 s timed the oracle out (exit 124) before node started on a loaded machine.
+            timeout_seconds: 30,
             source_files: { 'oracle.mjs': createHash('sha256').update(oracle).digest('hex') },
           },
         },
