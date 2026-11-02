@@ -54,6 +54,7 @@ test(
         stopScheduler: () => undefined,
         flushState: () => undefined,
         exit: () => order.push('exit'),
+        discardCrewTurns: () => undefined,
         kill: () => undefined,
       }
     );

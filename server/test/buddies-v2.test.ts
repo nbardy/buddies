@@ -422,6 +422,7 @@ async function world(reopen?: string, realProvider = false) {
     reviewer,
     spec: endpoint.spec,
     steering: () => endpoint,
+    crews: { crewBuddyIds: () => new Set() },
   });
   const Conversation = createConversationRuntime({
     executions: testExecutions(),
