@@ -164,6 +164,22 @@ export function createExecutionJournals(root: string) {
     fs.rmSync(found.dir, { recursive: true, force: true });
   }
 
+  /**
+   * Shutdown's discard: SIGKILL the group NOW, then remove the journal. `discard`'s SIGKILL rides
+   * an unref'd grace timer that a backend about to `process.exit` never fires, so a CLI that
+   * outlived SIGTERM survived with its journal (the only record of it) already deleted. Only for
+   * a turn that must die with its backend (an expedition crew's, lifecycle/shutdown.ts). `live`
+   * was verified as our wrapper by the scan just before (agent-cli executionProcess).
+   */
+  function discardNow(found: Pick<FoundExecution, 'dir' | 'process'>): void {
+    if (found.process.t === 'live') {
+      try {
+        process.kill(-found.process.pid, 'SIGKILL');
+      } catch {} // ESRCH: the group already ended.
+    }
+    fs.rmSync(found.dir, { recursive: true, force: true });
+  }
+
   return {
     root,
 
@@ -207,6 +223,7 @@ export function createExecutionJournals(root: string) {
 
     /** Kill a journal's process group (if it runs) and remove it: nothing untracked survives. */
     discard,
+    discardNow,
 
     /**
      * A spawn threw: the turn already failed, so whatever it started must not outlive it. The

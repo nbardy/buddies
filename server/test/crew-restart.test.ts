@@ -32,6 +32,7 @@ const KILL_GRACE_MS = 3_000 + 5_000;
 function journals() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-restart-'));
   const executions = createExecutionJournals(root);
+  const markers = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-restart-ready-'));
   const pids: number[] = [];
   test.after(() => {
     for (const pid of pids) {
@@ -40,9 +41,14 @@ function journals() {
       } catch {}
     }
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(markers, { recursive: true, force: true });
   });
-  /** A running Buddy turn of `buddyId` whose provider is a live, detached process group. */
-  function liveTurn(buddyId: string): { dir: string; pid: number; attemptId: string } {
+  /** A running Buddy turn of `buddyId` whose provider is a live, detached process group;
+   * `ignoresTerm`: the group ignores SIGTERM (a CLI busy in a tool call), so only SIGKILL ends it. */
+  function liveTurn(
+    buddyId: string,
+    ignoresTerm = false
+  ): { dir: string; pid: number; attemptId: string } {
     const attemptId = `attempt-${buddyId}`;
     const owner: Omit<TurnOwner, 'version' | 'kind'> = {
       conversationId: `conversation-${buddyId}`,
@@ -65,12 +71,17 @@ function journals() {
     };
     const { dir } = executions.forTurn(owner);
     // `; :` keeps the shell (the group leader) alive instead of exec-ing sleep.
-    const child = spawn('/bin/sh', ['-c', 'sleep 60; :', 'crew-restart', dir], {
+    // The shell touches `$2` once its trap is set, so a signal never lands before it.
+    const ready = path.join(markers, `${buddyId}.ready`);
+    const script = `${ignoresTerm ? "trap '' TERM; " : ''}: > "$2"; sleep 60; :`;
+    const child = spawn('/bin/sh', ['-c', script, 'crew-restart', dir, ready], {
       detached: true,
       stdio: 'ignore',
     });
     child.unref();
     const pid = child.pid as number;
+    for (const until = Date.now() + 10_000; !fs.existsSync(ready); )
+      if (Date.now() > until) throw new Error(`${buddyId}'s process never started`);
     pids.push(pid);
     fs.writeFileSync(path.join(dir, 'pid'), String(pid));
     trustSpawnedWrapper(dir, pid);
@@ -129,7 +140,7 @@ test('boot adoption discards a crew turn (group killed, journal removed) and ado
 
 test('graceful shutdown selects only crew journals; discarding them kills the crew group', async () => {
   const { executions, liveTurn } = journals();
-  const crew = liveTurn(CREW);
+  const crew = liveTurn(CREW, true);
   const other = liveTurn(OTHER);
 
   const doomed = crewExecutions(executions.scan(), new Set([CREW]));
@@ -137,9 +148,13 @@ test('graceful shutdown selects only crew journals; discarding them kills the cr
     doomed.map((found) => found.dir),
     [crew.dir]
   );
-  for (const found of doomed) executions.discard(found);
+  // discardNow: shutdown exits right after, so a SIGTERM-then-grace kill never reaches SIGKILL.
+  // The group must be gone with no event-loop turn for a grace timer (regression: a crew CLI that
+  // ignored SIGTERM outlived a graceful shutdown with its journal already deleted).
+  for (const found of doomed) executions.discardNow(found);
 
-  assert.ok(await groupGoneWithin(crew.pid, KILL_GRACE_MS), 'the crew process group is gone');
+  // Well inside discard's 3 s SIGTERM grace: only an immediate SIGKILL passes.
+  assert.ok(await groupGoneWithin(crew.pid, 1_500), 'the SIGTERM-proof crew group is gone');
   assert.ok(groupAlive(other.pid), 'a non-crew turn stays for the next backend to adopt');
 });
 

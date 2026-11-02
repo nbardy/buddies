@@ -865,8 +865,9 @@ shutdownController = registerShutdownHandlers(
       }
     },
     discardCrewTurns: () => {
+      // discardNow, not discard: process.exit follows at once, so a grace timer never fires.
       for (const found of crewExecutions(executionJournals.scan(), crewRegistry.crewBuddyIds()))
-        executionJournals.discard(found);
+        executionJournals.discardNow(found);
     },
     exit: (code = 0) => process.exit(code),
     kill: () => process.kill(process.pid, 'SIGKILL'),
