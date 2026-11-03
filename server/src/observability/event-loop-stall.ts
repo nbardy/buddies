@@ -29,6 +29,10 @@ import { appendPerf } from './perf-log';
  * noted activity is reported with how long before detection it started. It is
  * the prime suspect, not proof: a stall inside an async continuation of an
  * older activity is attributed to whatever was noted last.
+ *
+ * Kind: the histogram counts WALL time, so a process that is not running at all (the machine
+ * asleep, or a CPU so oversubscribed the thread is not scheduled) reads as a stall too. The CPU
+ * time spent in the window tells them apart: a busy stall burns about its own length.
  */
 
 export const STALL_THRESHOLD_MS = 100;
@@ -85,6 +89,22 @@ export function labelled<Args extends unknown[], R>(
   };
 }
 
+// Fix-guard (2026-10-29): macOS DarkWake cycles (~16 min apart) recorded 11-17 MINUTE "stalls"
+// at loop p99 12 ms, each blamed on `timer oompa-poll` (it fires every second, so it is nearly
+// always the last label) and each spending the 10-minute profile budget on an idle profile. 129
+// of the 145 1-60 s stalls of 2026-10-24..29 had that signature, and the real ~860 ms bursts of
+// 10-27 got no profile at all. Guard: "a stopped process records a descheduled stall" test.
+type StallKind = 'busy' | 'descheduled';
+/**
+ * Below this share of the stall spent on CPU, the process did not run. Measured 2026-11-03 at load
+ * 32 on 10 cores: a 612 ms busy loop got 141-379 ms of CPU (23-60%); a SIGSTOPped process 0-2 ms.
+ */
+const DESCHEDULED_CPU_SHARE = 0.1;
+/** Checks run every CHECK_INTERVAL_MS; a few back is enough to reach before any stall's start. */
+const CPU_SNAPSHOTS = 8;
+const stallKind = (stallMs: number, cpuMs: number): StallKind =>
+  cpuMs < stallMs * DESCHEDULED_CPU_SHARE ? 'descheduled' : 'busy';
+
 /** The `route` of a stall record: the label when it is an HTTP request ("GET /api/x"), else absent. */
 const HTTP_LABEL = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) \//;
 
@@ -103,16 +123,28 @@ export function startEventLoopStallMonitor(journal: Pick<ErrorJournal, 'capture'
 
   let lastProfileAt = Number.NEGATIVE_INFINITY;
 
-  const recordStall = (stallMs: number, detectedAt: number, loopP99Ms: number) => {
+  const recordStall = (
+    stallMs: number,
+    detectedAt: number,
+    loopP99Ms: number,
+    kind: StallKind,
+    cpuMs: number
+  ) => {
     const label = suspect(stallMs, detectedAt);
     void appendPerf('stalls.jsonl', {
       at: new Date().toISOString(),
       ms: Math.round(stallMs),
+      kind,
+      cpuMs: Math.round(cpuMs),
       label,
       route: HTTP_LABEL.test(label) ? label : null,
       sinceActivityMs: Math.round(detectedAt - activityAt),
       loopP99Ms: Math.round(loopP99Ms),
     });
+  };
+
+  const profileStall = (stallMs: number, detectedAt: number) => {
+    const label = suspect(stallMs, detectedAt);
     if (
       stallMs >= profileThresholdMs() &&
       detectedAt - lastProfileAt >= PROFILE_MIN_GAP_MS &&
@@ -151,14 +183,34 @@ export function startEventLoopStallMonitor(journal: Pick<ErrorJournal, 'capture'
       });
   };
 
+  // CPU snapshots of recent checks. The histogram's native timer can record a stall after this
+  // check ran in the same loop turn, so a stall is often seen one check late; the CPU window must
+  // start at the newest snapshot from before the stall began, not at the previous check.
+  const snapshots: { at: number; cpu: NodeJS.CpuUsage }[] = [];
   const timer = setInterval(() => {
+    const now = performance.now();
+    const cpu = process.cpuUsage();
+    snapshots.push({ at: now, cpu });
+    if (snapshots.length > CPU_SNAPSHOTS) snapshots.shift();
     const stallMs = delay.max / 1e6;
     if (stallMs < STALL_THRESHOLD_MS) return;
     const loopP99Ms = delay.percentile(99) / 1e6;
     delay.reset();
-    const detectedAt = performance.now();
-    recordStall(stallMs, detectedAt, loopP99Ms);
-    report(stallMs, detectedAt);
+    const detectedAt = now;
+    let start = snapshots[0];
+    for (const snapshot of snapshots) if (snapshot.at <= now - stallMs) start = snapshot;
+    const cpuMs = (cpu.user - start.cpu.user + cpu.system - start.cpu.system) / 1000;
+    const kind = stallKind(stallMs, cpuMs);
+    recordStall(stallMs, detectedAt, loopP99Ms, kind, cpuMs);
+    switch (kind) {
+      case 'busy':
+        profileStall(stallMs, detectedAt);
+        report(stallMs, detectedAt);
+        return;
+      // The machine's, not this code's: kept in stalls.jsonl, never profiled or journaled.
+      case 'descheduled':
+        return;
+    }
   }, CHECK_INTERVAL_MS);
   timer.unref();
   return () => {

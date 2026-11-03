@@ -147,6 +147,7 @@ test('perf:audit report: latest boot vs median, top stall label, slowest route, 
     { at: at(4), ms: 300, label: 'GET /api/buddies/posts/post_0123456789abcdef/thread' },
     { at: at(3), ms: 200, label: 'GET /api/buddies/posts/post_fedcba9876543210/thread' },
     { at: at(2), ms: 70_000, label: 'startup' },
+    { at: at(1), ms: 900, kind: 'descheduled', cpuMs: 0, label: 'timer oompa-poll' },
   ]);
   const minute = (route: string, p90: number, count: number) => ({
     at: at(5),
@@ -177,6 +178,12 @@ test('perf:audit report: latest boot vs median, top stall label, slowest route, 
     'ids fold into one label'
   );
   assert.doesNotMatch(report, /\| startup \|/, 'a 70 s stall is a laptop suspend, not a stall');
+  assert.doesNotMatch(
+    report,
+    /oompa-poll/,
+    'a descheduled stall is the machine, not the last label'
+  );
+  assert.match(report, /Excluded: 1 descheduled/);
   const slow = report.indexOf('GET /api/slow');
   assert.ok(slow > 0 && slow < report.indexOf('GET /api/fast'), 'ranked by p90, not by volume');
   assert.match(report, /\| GET \/api\/slow \| 3 \| 5 \| 800 \| 800 \| 1600 \|/);

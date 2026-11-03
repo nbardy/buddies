@@ -79,7 +79,10 @@ function* jsonLines(base: string): Generator<Record<string, any>> {
   }
 }
 
-/** Stall durations over this are laptop sleep / SIGSTOP, not slowness (as the 2026-10-22 scripts also dropped). */
+/**
+ * Rows from before the monitor classified stalls (2026-11-03) carry no `kind`: for those, durations
+ * over this are laptop sleep / SIGSTOP, not slowness (as the 2026-10-22 scripts also dropped).
+ */
 const SUSPEND_ARTIFACT_MS = 60_000;
 
 const ERROR_STALL = /stalled (\d+)ms; last activity: (.*?) \(started/;
@@ -93,9 +96,19 @@ export function normalizeLabel(label: string): string {
     .split('?')[0];
 }
 
-export function readStalls(observabilityDir: string): { rows: StallRow[]; source: string } {
+export function readStalls(observabilityDir: string): {
+  rows: StallRow[];
+  source: string;
+  /** Times of stalls the monitor classified `descheduled` (the process did not run). */
+  descheduledAtMs: number[];
+} {
   const perf: StallRow[] = [];
+  const descheduledAtMs: number[] = [];
   for (const e of jsonLines(path.join(observabilityDir, 'perf', 'stalls.jsonl'))) {
+    if (e.kind === 'descheduled') {
+      descheduledAtMs.push(Date.parse(e.at));
+      continue;
+    }
     if (typeof e.ms !== 'number' || e.ms > SUSPEND_ARTIFACT_MS) continue;
     perf.push({
       atMs: Date.parse(e.at),
@@ -104,7 +117,8 @@ export function readStalls(observabilityDir: string): { rows: StallRow[]; source
       count: 1,
     });
   }
-  if (perf.length > 0) return { rows: perf, source: 'perf/stalls.jsonl (every stall)' };
+  if (perf.length > 0 || descheduledAtMs.length > 0)
+    return { rows: perf, source: 'perf/stalls.jsonl (every stall)', descheduledAtMs };
   const fallback: StallRow[] = [];
   for (const e of jsonLines(path.join(observabilityDir, 'errors.jsonl'))) {
     if (e.component !== 'event-loop') continue;
@@ -120,7 +134,11 @@ export function readStalls(observabilityDir: string): { rows: StallRow[]; source
       count: 1 + (r ? Number(r[1]) : 0),
     });
   }
-  return { rows: fallback, source: 'errors.jsonl (fallback: one report per label per minute)' };
+  return {
+    rows: fallback,
+    source: 'errors.jsonl (fallback: one report per label per minute)',
+    descheduledAtMs,
+  };
 }
 
 export function readBoots(observabilityDir: string): BootRow[] {
@@ -413,12 +431,14 @@ export function buildReport(input: ReportInput): string {
   out.push('');
 
   // stalls
-  const { rows: allStalls, source } = readStalls(obs);
+  const { rows: allStalls, source, descheduledAtMs } = readStalls(obs);
   const stalls = allStalls.filter((s) => s.atMs >= sinceMs);
+  const descheduled = descheduledAtMs.filter((at) => at >= sinceMs).length;
   out.push(
     '## Event-loop stalls',
     '',
     `Source: ${source}. ${stalls.reduce((n, s) => n + s.count, 0)} stalls of 100 ms or more in the window.`,
+    `Excluded: ${descheduled} descheduled (the process got <10% CPU: machine sleep or starvation).`,
     ''
   );
   const bucket = (rows: StallRow[], slice: number) => {
