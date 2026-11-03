@@ -394,10 +394,12 @@ a.mobile-channels-wake-done {
   max-width: 100%;
 }
 .mobile-channel-post__footer {
+  display: none;
   flex-wrap: wrap;
   gap: var(--sp-2) var(--sp-6);
   margin-top: 2px;
 }
+.mobile-channel-post:focus-within .mobile-channel-post__footer, .mobile-channel-post__footer:has(.mobile-channel-post__replying) { display: flex; } /* Thread link only on tap (focusable post) or while replying: one under every post was noise (2026-11-03) */
 /* Slim tap target under each post: a taller one made every message a third larger (2026-11-03). */
 .mobile-channel-post__reply {
   min-height: 26px;
