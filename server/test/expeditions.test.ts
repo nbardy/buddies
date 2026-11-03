@@ -153,9 +153,7 @@ test('owner-judged expeditions follow the chat, and stop and the deadline finish
     const id = await launched(f, { done: { t: 'owner' } });
     await f.crewAnswer(id, 1, 'Done.\nLesson: try harder');
     assert.equal(phase(f, id, 1).t, 'judging');
-    const chat = f.launch(id).chatChannelId;
-    const posts = (await f.core.listPosts(OWNER, { kind: 'channel', channelId: chat }, null, 50))
-      .posts;
+    const posts = await f.chat(id);
     assert.ok(posts.some((p) => p.purpose === 'expedition_status' && /pass or fail/.test(p.body)));
 
     const deadline = Date.parse(f.launch(id).deadline);
@@ -169,17 +167,12 @@ test('owner-judged expeditions follow the chat, and stop and the deadline finish
     assert.equal(phase(f, id, 2).t, 'running');
     await f.crewAnswer(id, 2, 'Done again.');
     // Review 2026-11-03: the channel feed leaves thread replies out, so a verdict given in the
-    // thread of the ask line was never read.
-    const feed = await f.core.listPosts(OWNER, { kind: 'channel', channelId: chat }, null, 50);
-    const ask = feed.posts.find((p) => /^a2 .*pass or fail/.test(p.body));
-    assert.ok(ask, 'a2 asks for a verdict');
-    const reply = { kind: 'inform' as const, body: 'pass', evidence: [], mentions: [] };
-    await f.core.post(
-      OWNER,
-      { kind: 'id', id: chat },
-      { ...reply, replyToId: ask.id, broadcast: false, key: 'owner:thread-pass' }
+    // thread of the ask line was never read. The whole chat is that thread now.
+    assert.ok(
+      (await f.chat(id)).some((p) => /^a2 .*pass or fail/.test(p.body)),
+      'a2 asks'
     );
-    await f.settle(id);
+    await f.ownerSays(id, 'pass');
     const passed = f.record(id).state;
     assert.deepEqual(passed.t === 'finished' && passed.reason, { t: 'passed', n: 2 });
 

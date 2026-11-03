@@ -424,10 +424,24 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       events.emit({ kind: 'cancelled', run: await core.cancelRun(OWNER, r.id) });
   }
 
-  /** Crew-authored, in the owner↔crew chat; the key makes a repeat a no-op. */
+  /** The chat is ONE thread in the owner↔crew DM, rooted at this crew post. Owner 2026-11-03
+   * wanted to converse with the manager: a DM post opens a new thread seat (a fresh conversation)
+   * each time, while replies in one thread reach one seat that remembers the talk (runner.ts
+   * deliverJob → seatTurn on the root). The key makes it idempotent, so it is also how the root
+   * is found again; an expedition launched before the thread gets its root on first use. */
+  async function chatRoot(x: Launched): Promise<string> {
+    const { crewBuddyId, chatChannelId } = x.state.launch;
+    const body = `⛺ ${x.charter.name}: talk to the manager here, in this thread.`;
+    const p = { body, purpose: 'expedition_chat', key: `exp:${x.id}:chat` };
+    return inform(buddyActor(crewBuddyId), { channel: { kind: 'id', id: chatChannelId } }, p, x.id);
+  }
+  /** Crew-authored, in the chat thread; the key makes a repeat a no-op. */
   async function postStatus(x: Launched, key: string, body: string): Promise<void> {
     const { crewBuddyId, chatChannelId } = x.state.launch;
-    const place = { channel: { kind: 'id' as const, id: chatChannelId } };
+    const place = {
+      channel: { kind: 'id' as const, id: chatChannelId },
+      replyToId: await chatRoot(x),
+    };
     await inform(buddyActor(crewBuddyId), place, { body, purpose: 'expedition_status', key }, x.id);
   }
   async function inform(
@@ -435,7 +449,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     at: Place,
     p: { body: string; purpose: string; key: string },
     id: string
-  ) {
+  ): Promise<string> {
     const input = { ...p, kind: 'inform' as const, evidence: [`expedition:${id}`], mentions: [] };
     const write = await core.post(by, at.channel, {
       ...input,
@@ -443,6 +457,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       broadcast: false,
     });
     if (write.created) await announcePost({ core, events }, OWNER, write.post);
+    return write.post.id;
   }
 
   type Handler = (x: never, a: never, by: string) => Promise<Acted>;
@@ -523,7 +538,9 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       chatChannelId: chat.id,
       chatSeenOrd: '',
     };
-    return ok({ ...x, state: { t: 'running', launch } });
+    const running = await commit({ ...x, state: { t: 'running' as const, launch } });
+    await chatRoot(running);
+    return { t: 'ok', x: running };
   }
 
   /** Inside a record's chain: the caller made the ALLOWED check; no step follows. */
@@ -671,6 +688,8 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     backstop.unref();
     stops.push(() => clearInterval(backstop));
     stops.push(() => debounce && clearTimeout(debounce));
+    for (const l of records.values())
+      if (l.t === 'ok' && 'launch' in l.x.state) chatRoot(l.x as Launched).catch(logError);
     void stepAll();
   }
 

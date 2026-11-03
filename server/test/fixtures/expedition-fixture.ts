@@ -135,6 +135,18 @@ export async function fixture() {
     if (p.t !== 'running') throw new Error(`a${n} is ${p.t}`);
     return p.requestId;
   };
+  const chatRootOf = async (id: string) => {
+    const feed = { kind: 'channel' as const, channelId: launch(id).chatChannelId };
+    const roots = (await core.listPosts(OWNER, feed, undefined, 50)).posts;
+    const root = roots.find((p) => p.purpose === 'expedition_chat');
+    if (!root) throw new Error(`${id} has no chat thread`);
+    return root;
+  };
+  const chat = async (id: string) => {
+    const root = await chatRootOf(id);
+    const page = await core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, undefined, 200);
+    return [...page.posts].sort((a, b) => (a.ord < b.ord ? -1 : 1));
+  };
   const settle = async (id: string) => {
     await expeditions.step(id);
     await expeditions.drain();
@@ -186,11 +198,15 @@ export async function fixture() {
       await settle(id);
       await settle(id);
     },
+    /** The chat thread's posts, oldest first (the host's root, then statuses and talk). */
+    chat,
+    /** The owner replies in the chat thread, as the expedition view's composer does. */
     async ownerSays(id: string, text: string) {
       const channel = { kind: 'id' as const, id: launch(id).chatChannelId };
       const input = { kind: 'inform' as const, body: text, evidence: [], mentions: [] };
       await core.post(OWNER, channel, {
         ...input,
+        replyToId: (await chatRootOf(id)).id,
         broadcast: false,
         key: `owner:${Math.random()}`,
       });
