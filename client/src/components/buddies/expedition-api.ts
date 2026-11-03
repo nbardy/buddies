@@ -1,4 +1,10 @@
-import type { Act, Expedition, ExpeditionRow, RetiredExpedition } from '@unleashd/shared';
+import type {
+  Act,
+  Expedition,
+  ExpeditionChat,
+  ExpeditionRow,
+  RetiredExpedition,
+} from '@unleashd/shared';
 import { useState } from 'react';
 import { invalidateBuddyResources } from '../../atoms/resources';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
@@ -32,6 +38,10 @@ export function useRetired(workspaceId: string): RetiredExpedition[] | null {
 
 export const useExpedition = (id: string, pollMs: number) =>
   usePolledFetch<Expedition>(expeditionUrl(id), pollMs);
+
+/** The manager chat thread (server host.ts `chat`): fixed once launched, so a slow poll. */
+export const useExpeditionChat = (id: string) =>
+  usePolledFetch<ExpeditionChat>(`${expeditionUrl(id)}/chat`, 30_000);
 
 export type ActState = { t: 'idle' } | { t: 'pending' } | { t: 'failed'; error: string };
 

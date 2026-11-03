@@ -87,10 +87,14 @@ test('the view renders every state in both frames; stop and retire take a confir
     }
   }
   assert.match(render('x-draft'), /claude is not installed/);
-  assert.match(render('x-draft'), /chat opens when you launch/);
+  // Review 2026-11-03: a draft's chat was an empty 440px column; the overview takes the pane.
+  assert.doesNotMatch(render('x-draft'), /aria-label="Chat"/);
   assert.match(render('x-running'), />Pass<.*>Fail</s);
+  // ...and the pill said "Running" in green while an attempt waited on the owner.
+  assert.match(render('x-running'), /data-state="needs-you">Needs your verdict</);
+  assert.match(render('x-running', 'mobile'), /data-alert="">Chat</);
   // Owner 2026-11-03: relaunch is offered once an expedition is over, never while it runs.
-  assert.match(render('x-finished'), />Relaunch</);
+  assert.match(render('x-finished'), /data-tone="primary"[^>]*>Relaunch</);
   assert.doesNotMatch(render('x-running'), />Relaunch</);
   assert.match(render('x-finished'), />Retire</);
   assert.match(render('x-running', 'mobile'), /role="tablist"/);

@@ -550,6 +550,7 @@ const UNLABELLED_PURPOSES: ReadonlySet<string> = new Set([
   'expedition_status',
   'expedition_badge',
   'expedition_draft',
+  'host_command',
 ]);
 
 // ── The workspace directory ─────────────────────────────────────────────────

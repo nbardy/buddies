@@ -222,9 +222,12 @@ export const ALLOWED: Record<Act['do'], readonly State['t'][]> = {
   retire: ['draft', 'finished'],
   relaunch: ['finished'],
 };
-/** An attempt waits on the owner's verdict (an owner-judged charter, an attempt judging). */
+/** An attempt waits on the owner's verdict: an owner-judged charter, a state that takes one, an
+ * attempt judging. */
 export const needsOwner = (x: Expedition) =>
-  x.charter.done.t === 'owner' && x.attempts.some((a) => a.phase.t === 'judging');
+  x.charter.done.t === 'owner' &&
+  ALLOWED.verdict.includes(x.state.t) &&
+  x.attempts.some((a) => a.phase.t === 'judging');
 /** Attempts the budget counts (everything but interrupted). */
 export const counted = (x: Expedition) =>
   x.attempts.filter((a) => a.phase.t !== 'interrupted').length;

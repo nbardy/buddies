@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'rea
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { buddyRailFamily, channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
-import { openSetupAt, setThreadWidth, threadWidthAtom } from '../../atoms/ui';
+import { openSetupAt } from '../../atoms/ui';
 import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
 import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { rowBuddy } from '../../utils/conversation-row';
@@ -29,6 +29,7 @@ import { GroupDmNotice } from './GroupDmNotice';
 import { HighlightRow } from './HighlightRow';
 import { TaskFilter } from './TaskFilter';
 import { TaskPage } from './TaskPage';
+import { ThreadResize, useThreadPaneStyle } from './ThreadResize';
 import { ThreadsPane } from './ThreadsPane';
 import { WorkspaceTeamDialog } from './WorkspaceTeamForm';
 import { errorText } from './api';
@@ -83,11 +84,9 @@ function ThreadPane({
   onClose(): void;
 }) {
   const channelId = entry.channel.id;
-  const width = useAtomValue(threadWidthAtom);
+  const style = useThreadPaneStyle();
   const paneId = useId();
   const paneRef = useRef<HTMLElement>(null);
-  const drag = useRef<{ x: number; width: number } | null>(null);
-  const [resizing, setResizing] = useState(false);
   const scrollActivity = useScrollActivity();
   const { thread, root, replying, replyRows, follow, onPosted } = useThreadView(
     channelId,
@@ -101,58 +100,9 @@ function ThreadPane({
       ref={paneRef}
       className="channel-thread ui-stack"
       aria-label="Thread"
-      style={{ width: `min(${width}px, calc(100% - min(320px, 45%)))` }}
+      style={style}
     >
-      {/* Keep the channel readable when a saved width exceeds the current window.
-          Hover/focus left a full-height purple stripe after release; only active drag glows.
-          Guard: thread-resize.test.mjs checks release, scrolling, reload and narrow windows. */}
-      <div
-        className="channel-thread-resize"
-        role="separator"
-        tabIndex={0}
-        aria-label="Resize thread"
-        data-resizing={resizing || undefined}
-        aria-orientation="vertical"
-        aria-controls={paneId}
-        aria-valuemin={320}
-        aria-valuemax={960}
-        aria-valuenow={width}
-        title="Drag to resize thread. Arrow keys adjust; double-click resets."
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          event.currentTarget.focus();
-          event.currentTarget.setPointerCapture(event.pointerId);
-          setResizing(true);
-          drag.current = {
-            x: event.clientX,
-            width: paneRef.current?.getBoundingClientRect().width ?? width,
-          };
-        }}
-        onPointerMove={(event) => {
-          if (drag.current) setThreadWidth(drag.current.width + drag.current.x - event.clientX);
-        }}
-        onPointerUp={(event) => {
-          drag.current = null;
-          setResizing(false);
-          event.currentTarget.blur();
-          if (event.currentTarget.hasPointerCapture(event.pointerId))
-            event.currentTarget.releasePointerCapture(event.pointerId);
-        }}
-        onLostPointerCapture={() => {
-          drag.current = null;
-          setResizing(false);
-        }}
-        onDoubleClick={() => setThreadWidth(420)}
-        onKeyDown={(event) => {
-          const next = { ArrowLeft: width + 24, ArrowRight: width - 24, Home: 320, End: 960 }[
-            event.key
-          ];
-          if (next === undefined) return;
-          event.preventDefault();
-          setThreadWidth(next);
-        }}
-      />
+      <ThreadResize paneId={paneId} paneRef={paneRef} label="Resize thread" />
       <header className="channel-thread-header ui-row">
         <div>
           <h2>Thread</h2>

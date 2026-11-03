@@ -1,3 +1,4 @@
+import type { ExpeditionRow } from '@unleashd/shared';
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { type ChannelsView, channelsHref, channelsView } from './channels-view';
@@ -15,7 +16,19 @@ export const DESKTOP_ROW: RailRowClasses = {
   hash: 'channel-browser-hash',
   name: 'channel-browser-channel-name ui-truncate',
 };
-const DOT = { draft: 'queued', running: 'running', paused: 'idle', finished: 'idle' } as const;
+/** The dot shares the header pill's colour (Expedition.css), and a flag names every state but
+ * running (review 2026-11-03: a relaunch left two identical rows told apart by dot colour). */
+const DOT = { draft: 'draft', running: 'running', paused: 'paused', finished: 'idle' } as const;
+const FLAG = { draft: 'draft', running: null, paused: 'paused', finished: 'ended' } as const;
+
+function Flag({ row }: { row: Extract<ExpeditionRow, { t: 'ok' }> }) {
+  const text = row.needsOwner ? 'needs you' : FLAG[row.state];
+  return text === null ? null : (
+    <span className="expedition-rail-flag" data-alert={row.needsOwner || undefined}>
+      {text}
+    </span>
+  );
+}
 
 /** The Expeditions section, for both shells; absent until the workspace has one. A row opens
  * the expedition in the main pane (`?expedition=`), like a channel; retired ones fold under one
@@ -54,9 +67,7 @@ export function RailExpeditions({
                 />
               </span>
               <span className={classes.name}>{r.t === 'ok' ? r.name : `${r.id} (unreadable)`}</span>
-              {r.t === 'ok' && r.needsOwner && (
-                <span className="expedition-rail-flag">needs you</span>
-              )}
+              {r.t === 'ok' && <Flag row={r} />}
             </button>
           </li>
         ))}

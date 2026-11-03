@@ -31,7 +31,8 @@
 .expedition-pill[data-state="running"] {
   --tone: var(--theme-success);
 }
-.expedition-pill[data-state="paused"] {
+.expedition-pill[data-state="paused"],
+.expedition-pill[data-state="needs-you"] {
   --tone: var(--theme-warning);
 }
 
@@ -85,43 +86,54 @@
   display: grid;
   place-items: center;
 }
+/* The dot takes the header pill's colour (ExpeditionRail.tsx DOT). */
+.expedition-rail-dot .conversation-row__dot[data-status="draft"] {
+  background: var(--accent-primary);
+}
+.expedition-rail-dot .conversation-row__dot[data-status="paused"] {
+  background: var(--theme-warning);
+}
 .expedition-rail-flag {
   flex: none;
-  color: var(--warning);
+  color: var(--text-muted);
   font: 600 var(--fs-1) / 1 var(--font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+.expedition-rail-flag[data-alert] {
+  color: var(--warning);
+}
 
 /* ── The view ── */
+/* One line, exactly the channel header's height (review 2026-11-03: a two-line 64px header sat
+   4px below the chat pane's 60px border). */
 .expedition-head {
-  gap: var(--sp-7);
-}
-.expedition-head-text {
-  flex: 1;
-  gap: var(--sp-1);
-  min-width: 0;
-}
-.expedition-head-title {
   gap: var(--sp-5);
-  min-width: 0;
+  height: var(--channel-header-height);
+  box-sizing: border-box;
+  padding-block: 0;
 }
-.expedition-head-title h2 {
-  min-width: 0;
+.expedition-head h2 {
+  flex: 0 1 auto;
+  min-width: 8em;
   margin: 0;
   color: var(--text-bright);
   font-size: var(--fs-6);
   font-weight: 700;
-  line-height: 1.3;
+  line-height: 1.25;
 }
+/* Name and meta give way in proportion to their length; the controls sit at the end. */
 .expedition-head-meta {
-  margin: 0;
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: var(--fs-3);
+  line-height: 1.25;
 }
 .expedition-controls {
   flex: none;
   gap: var(--sp-4);
   max-width: 60%;
+  margin-left: auto;
 }
 
 .expedition-overview {
@@ -130,16 +142,21 @@
 .expedition-section {
   max-width: 720px;
 }
+.expedition-section .ui-section__header {
+  margin-inline: 0;
+}
 .expedition-section + .expedition-section,
 .expedition-issues + .expedition-section {
   margin-top: var(--sp-10);
 }
+/* About four lines of the markdown's own size (review 2026-11-03: 6.4em of the wrapper's 13px
+   showed ~2.5 lines of 15px text, and the 55% fade hid the third). */
 .expedition-goal-text {
-  max-height: 6.4em;
+  max-height: calc(4lh + var(--sp-3));
   overflow: hidden;
-  font-size: var(--fs-4);
-  line-height: 1.6;
-  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  font-size: var(--fs-post);
+  line-height: 1.55;
+  mask-image: linear-gradient(to bottom, #000 75%, transparent);
 }
 .expedition-goal-text[data-open="true"] {
   max-height: none;
@@ -155,6 +172,9 @@
   font: inherit;
   font-size: var(--fs-3);
   cursor: pointer;
+}
+.ui-section__header .expedition-more {
+  margin-top: 0;
 }
 .expedition-plain {
   margin: 0;
@@ -205,9 +225,13 @@
   min-width: 0;
 }
 .expedition-attempt-line {
-  gap: var(--sp-5);
+  flex-wrap: wrap;
+  gap: 0 var(--sp-5);
   font-size: var(--fs-3);
   line-height: 1.6;
+}
+.expedition-attempt-time {
+  white-space: nowrap;
 }
 .expedition-attempt-result {
   --tone: var(--text-muted);
@@ -255,15 +279,17 @@
   line-height: 1.6;
 }
 
-.expedition-chat {
-  width: min(440px, 42%);
-}
-/* A crew is named after its expedition: one line, never a centred wrap. */
+/* The chat's width is the thread pane's (ThreadResize.tsx). */
+/* The crew shows as "Manager" (ExpeditionChat.tsx); one line, never a centred wrap. */
 .expedition-chat .channel-browser-author {
   overflow: hidden;
   text-align: start;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* A post's "conv 0c82af69" chip is debug detail for this audience. */
+.expedition-chat .channel-browser-instance {
+  display: none;
 }
 .expedition-chat-empty {
   max-width: 300px;
@@ -282,25 +308,35 @@
   flex: 1;
   min-height: 0;
 }
-.expedition[data-frame="mobile"] .expedition-head {
-  flex-wrap: wrap;
-  gap: var(--sp-4) var(--sp-5);
-  padding: var(--sp-5) var(--sp-7);
+.expedition-phone-title {
+  flex: 1;
+}
+.expedition[data-frame="mobile"] .expedition-pill {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.expedition-phone-top {
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-9);
+  font-size: var(--fs-3);
 }
 .expedition[data-frame="mobile"] .expedition-controls {
   flex-wrap: wrap;
   max-width: none;
-  width: 100%;
+  margin-left: 0;
 }
 .expedition[data-frame="mobile"] .expedition-overview {
   padding: var(--sp-8) var(--sp-7) var(--sp-11);
 }
-.expedition-back {
-  flex: none;
-  color: var(--text-muted);
-  font-size: var(--fs-8);
-  line-height: 1;
-  text-decoration: none;
+/* Pass/Fail under the lesson: in column 3 they squeezed the body to two-line wraps at 390px. */
+.expedition[data-frame="mobile"] .expedition-verdict {
+  grid-column: 2 / -1;
+}
+/* No hover title on touch: a long Done-when command wraps instead of ending in an ellipsis. */
+.expedition[data-frame="mobile"] .expedition-checks code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .expedition-tabs {
   flex: none;
@@ -321,15 +357,21 @@
 .expedition-tabs button:focus:not(:focus-visible) {
   outline: none;
 }
+.expedition-tabs button[data-alert]::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--sp-3);
+  border-radius: 50%;
+  background: var(--theme-warning);
+  vertical-align: middle;
+}
 .expedition-tabs button[aria-selected="true"] {
   border-bottom-color: var(--accent);
   color: var(--text-bright);
 }
 .expedition-chat[data-frame="mobile"] {
   flex: 1;
-  width: auto;
-  border-left: 0;
-}
-.expedition-chat[data-frame="mobile"] .channel-thread-header {
-  display: none;
+  min-height: 0;
 }

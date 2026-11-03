@@ -868,5 +868,11 @@ Client: §8 deleted files plus the §6 client edits.
     The view no longer searches the DM's first feed page, which spun forever when the root was
     missing or more than 50 posts old. Boot makes roots only for live records, quietly (no
     announcement per finished expedition).
+  - View (client): `ExpeditionView.tsx` (frames, one-line 60px header, controls),
+    `ExpeditionOverview.tsx`, `ExpeditionChat.tsx` (the chat shares the thread pane's width and
+    drag handle, `ThreadResize.tsx`; the crew is labelled Manager; the composer hint names the
+    commands). The pill reads "Needs your verdict" while an owner verdict is awaited (shared
+    `needsOwner`); a draft has no chat pane; the phone uses the mobile channel header with the
+    meta and controls at the top of Overview; rail rows carry draft/paused/ended flags.
   - Relaunch is idempotent: an unlaunched draft with the same charter in the workspace is the
     answer. Relaunch of a retired record passes the gate and started checks like every act.
