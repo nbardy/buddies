@@ -784,7 +784,10 @@ Client: §8 deleted files plus the §6 client edits.
   the group kill. The same holds today.
 - **Repo config filters** (`filter.<x>.smudge`) can still run code during host git checkouts. The
   same holds today; hooks and fsmonitor are off.
-- **Salvage refs stay local** at retire (§3.6).
+- **Salvage refs**: retire pushes each `refs/salvage/expeditions/<id>/a<n>` to origin as the tag
+  `archive/expeditions/<id>/salvage/a<n>` (`cambium archive` takes branches only), checks it with
+  `ls-remote`, then deletes the local ref compare-and-delete. A push or verification failure refuses
+  the retire and keeps the ref.
 - **Interrupted attempts**: when an attempt is interrupted before its `cambium add` finished, a
   half-made workspace may need `git cambium recover` by hand. `release` reports `absent` when the
   registry has no entry, and `left` when Cambium refuses.
@@ -792,8 +795,15 @@ Client: §8 deleted files plus the §6 client edits.
   expedition aborts its own queued and running checks.
 - **Retire needs an `origin` remote**: `git cambium archive` refuses `push-unverified` without
   one, so a finished expedition in a repo with no origin cannot retire (the refusal is shown).
-- **Archived crew run**: a crew run cancelled at boot stays `cancel_requested` until its lease
-  ends (about 5 min); a retire in that window shows the archived crew as working until then.
+- **Archived crew run**: retire finishes any crew run still `cancel_requested` at once
+  (`finish_cancel`, runs.rs), so Home no longer shows the archived crew as working until the lease
+  ends. A live holder's later settle finds the lease gone (`lease_lost`), which the runner logs.
+- **Launch preflight runs the done-checks** (`launchPreflight`, checks.ts): once each on the launch
+  base in a throwaway checkout, through the host-wide check queue and the check timeout. A check that
+  cannot RUN (spawn error, exit 126/127, python "can't open file", `-m` module not found) refuses the
+  launch, shown in the draft's issues; a check that runs and fails launches. Owner-judged
+  expeditions skip it. Limit: a check whose own script fails with some other missing-file text on the
+  base is judged "ran". A draft does not run checks (checks may be paid), only launch and relaunch's launch.
 
 ## 12. As built: deviations
 

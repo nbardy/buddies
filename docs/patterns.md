@@ -527,3 +527,17 @@ connections). Nothing per-record crosses napi at boot.
 `ingest_scan`, `ingest_list_build`. Guards: `reading_every_stamp_never_touches_the_checkpoint_pages`,
 `merged_count_counts_an_inherited_prefix_once`, `indexed_latest_and_same_timestamp_retention`, and the TS parity test
 in `server/test/ingest-history.test.ts`.
+
+## fix-the-core
+**Smell:** a subsystem that gets a new guard for every incident. The event-sourced expeditions ledger reached 8.5k lines
+of server code, each incident adding a state, a reconciler or a "just in case" check (a stuck lease, a lost branch, a
+half-made crew), until no one could say what a record meant. Every fix was right and the whole was wrong (2026-11-01).
+**Pattern:** ask what single model makes the incident impossible, and rewrite to it. The lean rewrite is about 1.6k
+lines: one record per expedition, a serialized `step`, typed results for every git/Cambium call, one thin dispatcher per
+variant. Shared workspace and branch safety is not re-implemented per feature: it lives in Cambium 0.6 (`remove --safe`
+snapshots dirty work to a salvage ref, `archive` tags and verifies before it deletes), and oompa and Buddies both call it.
+A later incident is then one more typed refusal in the owner of the rule (launch preflight, retire archiving), not a
+branch added to the loop.
+**Here:** `docs/expeditions-lean-design.md` (§11 known limits, §12 deviations), `server/src/expeditions/` (`cambium.ts`,
+`checks.ts` `launchPreflight`, `retire.ts`). Guards: `launch refuses a done-check that cannot run`, `retire archives
+every branch, or refuses whole`, `retire ends a crew run whose stop was only requested` in `server/test/expeditions.test.ts`.

@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises';
 import type { BuddiesCore } from '@unleashd/buddies-core';
 import type { Attempt, Expedition, Tree } from '@unleashd/shared';
 import { OWNER, buddyActor } from '../buddies/core';
-import { archive, branches } from './cambium';
+import { archive, archiveSalvage, branches } from './cambium';
 import { type Launched, fileRetired, paths, retiredTaken, withAttempt } from './record';
 
 // Retire (docs/expeditions-lean-design.md §3.6): every refusal comes before an irreversible step,
@@ -14,6 +14,7 @@ export interface RetireDeps {
   now: () => string;
   release: (x: Launched, a: Attempt) => Promise<Tree>;
   commit: (x: Launched) => Promise<Launched>;
+  settleCrewRuns: (x: Launched) => Promise<void>;
   onBuddyArchived: (id: string) => void;
   onChannelArchived: (id: string) => void;
 }
@@ -57,8 +58,11 @@ async function retireFinished(d: RetireDeps, start: Launched): Promise<Retired> 
     if (r.t === 'refused') failures.push(r.reason);
     if (r.t === 'failed') failures.push(r.message);
   }
+  const salvage = await archiveSalvage(repoRoot, x.id);
+  if (salvage.t === 'failed') failures.push(...salvage.messages);
   if (failures.length > 0) return refused(failures);
 
+  await d.settleCrewRuns(x);
   // The crew is archived last of all, after its channels: an archived crew means a retire that
   // stopped later (review 2026-11-03: the self-DM open as the archived crew threw on every retry).
   const status = (await d.core.getBuddy(crewBuddyId)).status;

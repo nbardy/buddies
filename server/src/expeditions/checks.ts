@@ -20,7 +20,8 @@ export type Preflight =
   | { t: 'ready'; repoRoot: string; baseSha: string }
   | { t: 'refused'; issues: string[] };
 
-/** Every reason a launch would be refused. It never runs a check: checks may be paid GPU runs. */
+/** Every reason a launch would be refused. It never runs a check (`launchPreflight` does, at
+ * launch only: a draft is cheap, a launch is the commitment). */
 export async function preflight(p: {
   gate: ExecutionGate;
   workspace: Workspace | undefined;
@@ -81,7 +82,15 @@ async function executable(repo: string, bin: string): Promise<boolean> {
  * finished) kills a running check and skips the rest. */
 export async function runChecks(
   repo: string,
-  j: { dir: string; sha: string; base: string; checks: string[][] },
+  j: {
+    dir: string;
+    sha: string;
+    base: string;
+    checks: string[][];
+    /** `first_failure`: a judged attempt stops at the first check that does not pass. `all`: the
+     * launch preflight runs every check once, to learn whether each CAN run. */
+    through: 'first_failure' | 'all';
+  },
   stop: AbortSignal
 ): Promise<CheckRun[]> {
   const runs: CheckRun[] = [];
@@ -96,7 +105,7 @@ export async function runChecks(
       if (stop.aborted) break;
       const outcome = await runOne(argv, j.dir, `${j.dir}.scratch`, stop);
       runs.push({ argv, outcome });
-      if (outcome.t !== 'passed') break;
+      if (outcome.t !== 'passed' && j.through === 'first_failure') break;
     }
   } catch (error) {
     runs.push({ argv: j.checks[0], outcome: { t: 'error', message: (error as Error).message } });
@@ -194,3 +203,50 @@ const pick = (keys: string[]) =>
   Object.fromEntries(
     keys.flatMap((k) => (process.env[k] === undefined ? [] : [[k, process.env[k]]]))
   );
+
+/** Incident 2026-11-01: a DualSPHysics expedition burned 3 attempts on a done-check that failed
+ * with FileNotFound in the environment. A check that RUNS and fails is the goal (the attempt must
+ * make it pass); one that cannot run can never pass, whatever the crew does. */
+export type Ran = { t: 'ran' } | { t: 'cannot_run'; why: string };
+export function ranOrNot({ argv, outcome }: CheckRun): Ran {
+  const cannot = (why: string): Ran => ({
+    t: 'cannot_run',
+    why: `check \`${argv.join(' ')}\` cannot run: ${why}`,
+  });
+  switch (outcome.t) {
+    case 'passed':
+    case 'timed_out':
+      return { t: 'ran' };
+    case 'error':
+      return cannot(outcome.message);
+    case 'failed': {
+      if (outcome.exitCode === 126 || outcome.exitCode === 127)
+        return cannot(`exit ${outcome.exitCode}`);
+      const script = /can't open file '([^']+)': \[Errno 2\] No such file or directory/.exec(
+        outcome.tail
+      );
+      if (script) return cannot(`python found no script ${script[1]}`);
+      const module = argv[argv.indexOf('-m') + 1];
+      if (argv.includes('-m') && new RegExp(`No module named '?${module}\\b`).test(outcome.tail))
+        return cannot(`python found no module ${module}`);
+      return { t: 'ran' };
+    }
+  }
+}
+
+export type LaunchPreflight = { t: 'ready' } | { t: 'refused'; issues: string[] };
+/** Runs every done check once on the launch base, in a throwaway detached checkout, and refuses
+ * the launch for each check that could not run. Bounded by the check timeout. */
+export async function launchPreflight(
+  repo: string,
+  j: { dir: string; baseSha: string; checks: string[][] },
+  run: typeof runChecks = runChecks
+): Promise<LaunchPreflight> {
+  const runs = await run(
+    repo,
+    { dir: j.dir, sha: j.baseSha, base: j.baseSha, checks: j.checks, through: 'all' },
+    new AbortController().signal
+  );
+  const issues = runs.map(ranOrNot).flatMap((r) => (r.t === 'cannot_run' ? [r.why] : []));
+  return issues.length > 0 ? { t: 'refused', issues } : { t: 'ready' };
+}
