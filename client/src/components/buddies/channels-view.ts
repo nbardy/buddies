@@ -12,8 +12,9 @@
  *   D = Home (channel list + Buddies) ⊕ Landing (the workspace Home) ⊕ Threads ⊕ Channel ⊕ Thread ⊕ Task ⊕ DM ⊕ Workers
  *       ⊕ Expedition ⊕ Retired expedition
  *
- * `expedition` is one expedition in the main pane: its overview beside its manager chat (owner
- * 2026-11-03: the modal was "ugly" and had "no chat log"). `retired` reads a retired record.
+ * `expedition` is one expedition in the main pane: the manager chat with Attempts, Goal and
+ * Details tabs (owner 2026-11-03); its `tab` param is read by ExpeditionView.tsx, so it rides
+ * along untouched here. `retired` reads a retired record.
  *
  * `dm` is a Buddy DM conversation drawn as a thread (493c1c7). It wins over the other params,
  * which stay in the URL so Back (dropping `dm`) returns to the screen the DM was opened from.

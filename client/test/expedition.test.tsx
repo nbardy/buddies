@@ -59,16 +59,19 @@ const record = (id: string, state: State): Expedition => ({
   ],
   notes: [],
 });
-const render = (id: string, frame: 'desktop' | 'mobile' = 'desktop') =>
+const render = (id: string, frame: 'desktop' | 'mobile' = 'desktop', tab?: string) =>
   renderToStaticMarkup(
     <Provider store={jotaiStore}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/?expedition=${id}${tab ? `&tab=${tab}` : ''}`]}>
         <ExpeditionView id={id} workspaceId="ws-1" frame={frame} />
       </MemoryRouter>
     </Provider>
   );
+const selected = (html: string) => /aria-selected="true"[^>]*>([A-Za-z]+)/.exec(html)?.[1];
 
-test('the view renders every state in both frames; stop and retire take a confirm step', async () => {
+// One smoke test of the tabbed view over every state and both frames: the URL picks the tab, the
+// verdict badge and pill follow the record, and the controls that cannot be undone take two clicks.
+test('the URL picks the tab; a needed verdict badges Attempts; stop and retire confirm', async () => {
   const states: State[] = [
     { t: 'draft', issues: ['claude is not installed on this host'] },
     { t: 'running', launch: live },
@@ -79,25 +82,35 @@ test('the view renders every state in both frames; stop and retire take a confir
     const x = record(`x-${state.t}`, state);
     await loadResource({ key: expeditionUrl(x.id), load: async () => x });
     for (const frame of ['desktop', 'mobile'] as const) {
-      const html = render(x.id, frame);
-      assert.match(html, /<strong>widget<\/strong>/, `${state.t} ${frame}`);
-      assert.match(html, /grep is literal/, `${state.t} ${frame}`);
+      const at = `${state.t} ${frame}`;
+      assert.match(render(x.id, frame, 'goal'), /<strong>widget<\/strong>/, at);
+      assert.match(render(x.id, frame, 'attempts'), /grep is literal/, at);
+      // Only the open tab's panel renders: the goal is not on the Attempts tab.
+      assert.doesNotMatch(render(x.id, frame, 'attempts'), /<strong>widget<\/strong>/, at);
       // Never one click: the first button only arms the confirm.
-      assert.doesNotMatch(html, /Confirm retire|Stop for good/, `${state.t} ${frame}`);
+      for (const tab of ['chat', 'attempts', 'goal', 'details'])
+        assert.doesNotMatch(render(x.id, frame, tab), /Confirm retire|Stop for good/, at);
     }
   }
+  // With no tab (or an unknown one) a draft opens on its goal, with the blocked-launch issue; a
+  // launched record opens on the chat.
+  assert.equal(selected(render('x-draft')), 'Goal');
   assert.match(render('x-draft'), /claude is not installed/);
-  // Review 2026-11-03: a draft's chat was an empty 440px column; the overview takes the pane.
-  assert.doesNotMatch(render('x-draft'), /aria-label="Chat"/);
-  assert.match(render('x-running'), />Pass<.*>Fail</s);
-  // ...and the pill said "Running" in green while an attempt waited on the owner.
-  assert.match(render('x-running'), /data-state="needs-you">Needs your verdict</);
-  assert.match(render('x-running', 'mobile'), /data-alert="">Chat</);
+  assert.equal(selected(render('x-running', 'desktop', 'nonsense')), 'Chat');
+  assert.match(render('x-draft', 'desktop', 'chat'), /starts at launch.*>Launch</s);
+  assert.equal(selected(render('x-paused', 'mobile', 'details')), 'Details');
+  // Review 2026-11-03: the pill said "Running" in green while an attempt waited on the owner.
+  // Now the pill says so and Attempts carries the count, on any tab; Pass/Fail sit on Attempts.
+  const waiting = render('x-running', 'mobile', 'goal');
+  assert.match(waiting, /data-state="needs-you">Needs your verdict</);
+  assert.match(waiting, />Attempts<span class="expedition-tab-count"[^>]*>1</);
+  assert.match(render('x-running', 'desktop', 'attempts'), />Pass<.*>Fail</s);
+  // Finished: no verdict is awaited, so no badge and no Pass/Fail.
+  assert.doesNotMatch(render('x-finished', 'desktop', 'attempts'), /expedition-tab-count|>Pass</);
   // Owner 2026-11-03: relaunch is offered once an expedition is over, never while it runs.
   assert.match(render('x-finished'), /data-tone="primary"[^>]*>Relaunch</);
   assert.doesNotMatch(render('x-running'), />Relaunch</);
-  assert.match(render('x-finished'), />Retire</);
-  assert.match(render('x-running', 'mobile'), /role="tablist"/);
+  assert.match(render('x-finished', 'desktop', 'details'), />Retire</);
   await loadResource({
     key: expeditionUrl('bad'),
     load: async () => Promise.reject(new Error('unreadable: bad json')),

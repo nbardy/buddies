@@ -1,7 +1,7 @@
-/* Expedition card, rail rows and the expedition view (ExpeditionView.tsx). The view is the channel
-   pane and the thread pane: the overview sits where a channel does, the manager chat where a thread
-   does, so spacing, header height and composer come from ChannelBrowser.css. A phone gets the same
-   parts as Overview | Chat tabs ([data-frame="mobile"]; no width @media, gate G9). */
+/* Expedition card, rail rows and the expedition view (ExpeditionView.tsx). The view is a channel
+   pane: header, then Chat | Attempts | Goal | Details, so spacing, header height, feed and composer
+   come from ChannelBrowser.css. A phone differs only in its header ([data-frame="mobile"]; no
+   width @media, gate G9). */
 
 .expedition-card {
   flex-wrap: wrap;
@@ -105,10 +105,16 @@
 }
 
 /* ── The view ── */
+.expedition {
+  flex: 1;
+  min-height: 0;
+}
 /* One line, exactly the channel header's height (review 2026-11-03: a two-line 64px header sat
    4px below the chat pane's 60px border). */
 .expedition-head {
   gap: var(--sp-5);
+}
+.expedition[data-frame="desktop"] .expedition-head {
   height: var(--channel-header-height);
   box-sizing: border-box;
   padding-block: 0;
@@ -129,52 +135,96 @@
   font-size: var(--fs-3);
   line-height: 1.25;
 }
-.expedition-controls {
+.expedition-controls,
+.expedition-manage {
   flex: none;
   gap: var(--sp-4);
-  max-width: 60%;
+}
+.expedition-controls {
   margin-left: auto;
 }
+.expedition-manage {
+  flex-wrap: wrap;
+}
 
-.expedition-overview {
+/* The tab strip sits on the header's border line, its text aligned with the feed's gutter. */
+.expedition-tabs {
+  flex: none;
+  gap: var(--sp-8);
+  padding: 0 var(--sp-9);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.expedition-tabs [role="tab"] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: -1px;
+  padding: var(--sp-5) 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-4);
+  font-weight: 600;
+  cursor: pointer;
+}
+.expedition-tabs [role="tab"]:hover {
+  color: var(--text-primary);
+}
+.expedition-tabs [role="tab"][aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--text-bright);
+}
+.expedition-tabs [role="tab"]:focus:not(:focus-visible) {
+  outline: none;
+}
+.expedition-tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.expedition-tab-count {
+  min-width: 18px;
+  padding: 0 var(--sp-2);
+  border-radius: 999px;
+  background: var(--theme-warning);
+  color: var(--bg-base);
+  font-size: var(--fs-1);
+  line-height: 18px;
+  text-align: center;
+}
+.expedition-panel {
+  flex: 1;
+  min-height: 0;
+}
+.expedition-chat {
+  flex: 1;
+  min-height: 0;
+}
+/* The channel composer's own margin (ChannelBrowser.css `.channel-browser-pane > .channel-composer`). */
+.expedition-chat > .channel-composer {
+  margin: 0 24px 18px;
+}
+
+.expedition-scroll {
   padding: var(--sp-9) var(--sp-9) var(--sp-11);
 }
 .expedition-section {
+  gap: var(--sp-5);
   max-width: 720px;
 }
-.expedition-section .ui-section__header {
-  margin-inline: 0;
+.expedition-section > .ui-section__title {
+  margin: 0;
 }
 .expedition-section + .expedition-section,
 .expedition-issues + .expedition-section {
   margin-top: var(--sp-10);
 }
-/* About four lines of the markdown's own size (review 2026-11-03: 6.4em of the wrapper's 13px
-   showed ~2.5 lines of 15px text, and the 55% fade hid the third). */
-.expedition-goal-text {
-  max-height: calc(4lh + var(--sp-3));
-  overflow: hidden;
+.expedition-goal {
   font-size: var(--fs-post);
   line-height: 1.55;
-  mask-image: linear-gradient(to bottom, #000 75%, transparent);
-}
-.expedition-goal-text[data-open="true"] {
-  max-height: none;
-  mask-image: none;
-}
-.expedition-more {
-  align-self: flex-start;
-  margin-top: var(--sp-3);
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  font-size: var(--fs-3);
-  cursor: pointer;
-}
-.ui-section__header .expedition-more {
-  margin-top: 0;
 }
 .expedition-plain {
   margin: 0;
@@ -193,14 +243,13 @@
 .expedition-checks code {
   display: block;
   max-width: 100%;
-  overflow: hidden;
   padding: var(--sp-1) var(--sp-4);
   border: 1px solid var(--border-subtle);
   border-radius: var(--ui-radius);
   background: var(--bg-raised-1);
   font: var(--fs-3) / 1.6 var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .expedition-attempts {
@@ -259,6 +308,7 @@
 .expedition-attempt-branch {
   color: var(--text-muted);
   font: var(--fs-2) / 1.5 var(--font-mono);
+  overflow-wrap: anywhere;
 }
 .expedition-verdict {
   gap: var(--sp-3);
@@ -278,8 +328,23 @@
   font-size: var(--fs-4);
   line-height: 1.6;
 }
+.expedition-fact {
+  display: grid;
+  grid-template-columns: 8em minmax(0, 1fr);
+  gap: var(--sp-6);
+  padding: var(--sp-3) 0;
+  font-size: var(--fs-4);
+  line-height: 1.5;
+}
+.expedition-fact dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.expedition-fact code {
+  font: var(--fs-3) / 1.5 var(--font-mono);
+}
 
-/* The chat's width is the thread pane's (ThreadResize.tsx). */
 /* The crew shows as "Manager" (ExpeditionChat.tsx); one line, never a centred wrap. */
 .expedition-chat .channel-browser-author {
   overflow: hidden;
@@ -292,21 +357,30 @@
   display: none;
 }
 .expedition-chat-empty {
-  max-width: 300px;
+  align-items: center;
+  gap: var(--sp-6);
+  max-width: 360px;
   margin: auto;
   padding: var(--sp-9);
   font-size: var(--fs-4);
   line-height: 1.6;
   text-align: center;
 }
+.expedition-chat-empty p {
+  margin: 0;
+}
+.expedition-chat-empty .expedition-controls {
+  margin-left: 0;
+}
 .expedition-gone {
   align-items: center;
 }
 
-/* ── Phone: header, Overview | Chat ── */
-.expedition[data-frame="mobile"] {
-  flex: 1;
-  min-height: 0;
+/* ── Phone: the mobile channel header; the controls wrap onto its second line ── */
+.expedition[data-frame="mobile"] .expedition-head {
+  flex-wrap: wrap;
+  row-gap: 0;
+  padding-bottom: var(--sp-4);
 }
 .expedition-phone-title {
   flex: 1;
@@ -316,62 +390,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.expedition-phone-top {
+/* The second header line: attempts and time left, then the run's controls. */
+.expedition-phone-line {
+  flex: 1 0 100%;
   gap: var(--sp-4);
-  margin-bottom: var(--sp-9);
+  min-width: 0;
+  /* Under the title, past the 44px back button. */
+  padding-left: calc(44px + var(--sp-2));
   font-size: var(--fs-3);
 }
-.expedition[data-frame="mobile"] .expedition-controls {
-  flex-wrap: wrap;
-  max-width: none;
-  margin-left: 0;
+.expedition[data-frame="mobile"] .expedition-tabs {
+  justify-content: space-between;
+  gap: 0;
+  padding: 0 var(--sp-7);
 }
-.expedition[data-frame="mobile"] .expedition-overview {
+.expedition[data-frame="mobile"] .expedition-scroll {
   padding: var(--sp-8) var(--sp-7) var(--sp-11);
+}
+.expedition[data-frame="mobile"] .expedition-chat > .channel-composer {
+  margin: 0 var(--sp-5) var(--sp-5);
 }
 /* Pass/Fail under the lesson: in column 3 they squeezed the body to two-line wraps at 390px. */
 .expedition[data-frame="mobile"] .expedition-verdict {
   grid-column: 2 / -1;
-}
-/* No hover title on touch: a long Done-when command wraps instead of ending in an ellipsis. */
-.expedition[data-frame="mobile"] .expedition-checks code {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.expedition-tabs {
-  flex: none;
-  padding: 0 var(--sp-7);
-  border-bottom: 1px solid var(--border-subtle);
-}
-.expedition-tabs button {
-  flex: 1;
-  padding: var(--sp-5) 0;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: var(--fs-5);
-  font-weight: 600;
-}
-.expedition-tabs button:focus:not(:focus-visible) {
-  outline: none;
-}
-.expedition-tabs button[data-alert]::after {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-left: var(--sp-3);
-  border-radius: 50%;
-  background: var(--theme-warning);
-  vertical-align: middle;
-}
-.expedition-tabs button[aria-selected="true"] {
-  border-bottom-color: var(--accent);
-  color: var(--text-bright);
-}
-.expedition-chat[data-frame="mobile"] {
-  flex: 1;
-  min-height: 0;
 }

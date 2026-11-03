@@ -876,3 +876,15 @@ Client: §8 deleted files plus the §6 client edits.
     meta and controls at the top of Overview; rail rows carry draft/paused/ended flags.
   - Relaunch is idempotent: an unlaunched draft with the same charter in the workspace is the
     answer. Relaunch of a retired record passes the gate and started checks like every act.
+- **Expedition view as a chat with tabs (owner 2026-11-03: "it should be a full chat thread and
+  maybe some tabs for other info").** The overview|chat split, its drag handle and the phone-only
+  Overview|Chat tabs are gone. One 60px header (the mobile channel header on a phone, with the
+  meta and controls on its second line) carries name, pill, attempts n/max, time left and the run
+  controls (launch, pause/resume, stop, relaunch). Under it, `Chat | Attempts | Goal | Details`
+  on both frames (`ExpeditionView.tsx`, panels in `ExpeditionPanels.tsx`): Chat is the manager
+  thread drawn like a channel feed (same rows, 960px content cap, composer pinned); Goal is the
+  full markdown (no clamp), Done-when and notes; Details holds limits, launch facts, Extend and
+  Retire. The tab is the URL's `&tab=` (pushed, so Back returns to the previous tab); with none,
+  a draft opens on Goal and the rest on Chat. Attempts shows a count while a verdict is awaited;
+  Chat shows a dot when the thread's newest post changed since the Chat tab was last open
+  (component state, `useChatUnread`).

@@ -1,28 +1,30 @@
 import type { ExpeditionChat as Chat } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
-import { type ReactNode, useId, useMemo, useRef } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listField } from '../../atoms/conversations';
+import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { ChannelComposer, type ComposerSubmit } from './ChannelComposer';
 import { ChannelLoader } from './ChannelLoader';
 import { Replying, type RowContext, renderRow } from './ChannelRows';
 import type { Frame } from './ExpeditionView';
-import { ThreadResize, useThreadPaneStyle } from './ThreadResize';
-import { type WorkspaceDirectory, useThreadView } from './channel-data';
+import {
+  CHANNEL_BACKSTOP_MS,
+  type WorkspaceDirectory,
+  threadPageResource,
+  useThreadView,
+} from './channel-data';
 import { channelsHref } from './channels-view';
 import { useExpeditionChat } from './expedition-api';
 
 // The manager chat: the expedition's one thread in the owner<->crew DM (server host.ts chatRoot),
-// where a channel's thread pane sits, the same width and drag handle. The crew answers there as
-// manager (brief.ts CREW_ROLE); bare commands are the host's (it applies and answers them).
+// drawn as the Chat tab the way a channel's feed is drawn (rows, then the composer pinned at the
+// bottom). The crew answers there as manager (brief.ts CREW_ROLE); bare commands are the host's
+// (it applies and answers them).
 
 /** A live record's chat takes posts; a retired one's is history. */
 export type ChatMode = 'live' | 'retired';
-const SUBTITLE: Record<ChatMode, string> = {
-  live: 'Ask about attempts, or steer the run',
-  retired: 'Read-only history',
-};
 const SUBMIT: Record<Frame, ComposerSubmit> = { desktop: 'enter', mobile: 'button' };
 const COMMANDS = 'Commands: pause · stop · extend 2h · pass · fail · note: …';
 
@@ -33,50 +35,26 @@ export function ExpeditionChat({
   directory,
 }: { id: string; mode: ChatMode; frame: Frame; directory: WorkspaceDirectory }) {
   const chat = useExpeditionChat(id);
-  const body: ReactNode =
-    chat.data !== null ? (
-      BODY[chat.data.t](chat.data as never, mode, frame, directory)
-    ) : chat.kind === 'failed' ? (
-      <p className="expedition-chat-empty ui-muted">
-        The chat could not load: {chat.error.message}
-      </p>
-    ) : (
-      <ChannelLoader label="Opening the chat…" />
-    );
-  return FRAME[frame](mode, body);
+  if (chat.data !== null) return BODY[chat.data.t](chat.data as never, mode, frame, directory);
+  return chat.kind === 'failed' ? (
+    <p className="expedition-chat-empty ui-muted">The chat could not load: {chat.error.message}</p>
+  ) : (
+    <ChannelLoader label="Opening the chat…" />
+  );
 }
 
-const FRAME: Record<Frame, (mode: ChatMode, body: ReactNode) => ReactNode> = {
-  desktop: (mode, body) => <DesktopPane mode={mode}>{body}</DesktopPane>,
-  mobile: (_mode, body) => (
-    <section className="expedition-chat ui-stack" data-frame="mobile" aria-label="Chat">
-      {body}
-    </section>
-  ),
-};
-
-function DesktopPane({ mode, children }: { mode: ChatMode; children: ReactNode }) {
-  const style = useThreadPaneStyle();
-  const paneId = useId();
-  const paneRef = useRef<HTMLElement>(null);
-  return (
-    <aside
-      id={paneId}
-      ref={paneRef}
-      className="channel-thread ui-stack expedition-chat"
-      aria-label="Chat"
-      style={style}
-    >
-      <ThreadResize paneId={paneId} paneRef={paneRef} label="Resize chat" />
-      <header className="channel-thread-header ui-row">
-        <div>
-          <h2>Manager</h2>
-          <p>{SUBTITLE[mode]}</p>
-        </div>
-      </header>
-      {children}
-    </aside>
-  );
+/** True while the Chat tab is closed and the thread has a post newer than the newest one seen
+ * while it was open (or, before it was ever open, when the view first read the thread). */
+export function useChatUnread(id: string, open: boolean): boolean {
+  const chat = useExpeditionChat(id);
+  const root = chat.data?.t === 'thread' ? chat.data.rootId : null;
+  const page = usePolledFetch(root === null ? null : threadPageResource(root), CHANNEL_BACKSTOP_MS);
+  const newest = page.data === null ? null : (page.data.posts[0]?.id ?? page.data.root.id);
+  const [seen, setSeen] = useState<string | null>(null);
+  useEffect(() => {
+    if (open || seen === null) setSeen(newest);
+  }, [open, newest, seen]);
+  return !open && seen !== null && newest !== seen;
 }
 
 const BODY: {
@@ -124,7 +102,7 @@ function ChatThread({
     place: { kind: 'thread' },
   };
   return (
-    <>
+    <section className="expedition-chat ui-stack" aria-label="Chat with the manager">
       <div
         className="channel-browser-scroll ui-stack ui-scroll-quiet"
         data-scrolling={scroll['data-scrolling']}
@@ -160,6 +138,6 @@ function ChatThread({
           onPosted={view.onPosted}
         />
       )}
-    </>
+    </section>
   );
 }
