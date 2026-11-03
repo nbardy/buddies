@@ -28,7 +28,6 @@ const fast = [
  * once passed), and sixteen expeditions shards at once took 4x the CPU-seconds of eight.
  */
 const SHARDS = {
-  expeditions: { shards: 12, live: 6 },
   'oompa-mcp': { shards: 6, live: 3 },
   'buddies-v2': { shards: 4, live: 4 },
   'execution-adoption': { shards: 6, live: 6 },

@@ -123,7 +123,6 @@ import { registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
 import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
-import { boundSessions } from './expeditions/meter';
 import { registerExpeditionRoutes } from './expeditions/routes';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 
@@ -949,17 +948,13 @@ void runServerStartup(
         foundExecutions = execution.scan();
         for (const grant of liveGrants(foundExecutions)) buddyGrants.adopt(grant);
       });
-      // Expeditions (expeditions/README.md): ledgers resume here; inert on a copied store.
+      // Expeditions (docs/expeditions-lean-design.md): records load here; inert on a copied store.
       expeditionHost = timeBootPhase('expeditions', () =>
         createExpeditionHost({
           core: buddiesCore,
           events: buddyEvents,
           root: path.join(APP_DATA_DIR, 'expeditions'),
           gate: decideExecutionGate(),
-          meter: {
-            ingest: currentIngest,
-            sessionsOf: async (id) => boundSessions(await conversationConfigService.getRecord(id)),
-          },
           installed: (provider) => onPath(getHarness(provider).binary, process.env),
           onBuddyArchived,
           onChannelArchived: (channelId) => channelChanged(channelId, 'all'),
