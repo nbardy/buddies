@@ -4,10 +4,10 @@
  *   pnpm perf:audit                  # last 7 days -> output/perf-audit/<ts>.md
  *   pnpm perf:audit --days 2 --data-dir /path/to/.agent-viewer
  *
- * Reads (never writes, never opens SQLite): <data-dir>/observability/perf/{boot,stalls,routes}.jsonl,
+ * Reads (never writes, never opens SQLite): <data-dir>/observability/perf/{boot,stalls,routes,profiles}.jsonl,
  * perf/profiles/, errors.jsonl (fallback for boots and stalls from before perf telemetry existed),
  * file sizes under the data dir and ~/.buddies, and machine load via os / vm_stat / sysctl / ps.
- * Writers: server/src/observability/perf.ts, event-loop-stall.ts and the dev supervisor.
+ * Writers: server/src/observability/perf.ts, event-loop-stall.ts, cpu-profiler.ts, dev supervisor.
  * Built 2026-10-23 after a slow-boot investigation had to be reconstructed by hand from errors.jsonl.
  */
 
@@ -290,6 +290,101 @@ export function estimateBootsFromErrors(observabilityDir: string) {
   return [...boots.entries()].sort((a, b) => a[1].startedAtMs - b[1].startedAtMs).slice(-10);
 }
 
+// ---------- CPU profiles ----------
+
+/** One saved stall window from perf/profiles.jsonl (written by server/src/observability/cpu-profiler.ts). */
+export interface ProfileRow {
+  atMs: number;
+  file: string;
+  windowStart: string;
+  rotateMs: number;
+  samples: number;
+  stalls: { at: string; ms: number; label: string }[];
+}
+
+export function readProfileIndex(observabilityDir: string): ProfileRow[] {
+  const rows: ProfileRow[] = [];
+  for (const e of jsonLines(path.join(observabilityDir, 'perf', 'profiles.jsonl'))) {
+    if (typeof e.file !== 'string' || !Array.isArray(e.stalls)) continue;
+    rows.push({
+      atMs: Date.parse(e.at),
+      file: e.file,
+      windowStart: String(e.windowStart),
+      rotateMs: Number(e.rotateMs),
+      samples: Number(e.samples),
+      stalls: e.stalls,
+    });
+  }
+  return rows;
+}
+
+export interface FunctionTime {
+  /** `name dir/file:line` (line 1-based). */
+  frame: string;
+  selfMs: number;
+  totalMs: number;
+}
+
+interface ProfileNode {
+  id: number;
+  callFrame: { functionName: string; url: string; lineNumber: number };
+  children?: number[];
+}
+
+/** Frames that are not code: the thread idle, inside the VM itself, or collecting garbage. */
+const NOT_CODE = new Set(['(root)', '(idle)', '(program)', '(garbage collector)']);
+
+/**
+ * Self and inclusive time per function (name + url:line) of a .cpuprofile, most self time first.
+ * Sample i lasts until sample i+1 (the DevTools convention). Inclusive time counts a frame once
+ * per sample even when it recurses.
+ */
+export function summarizeProfile(profile: {
+  nodes: ProfileNode[];
+  samples: number[];
+  timeDeltas: number[];
+}): FunctionTime[] {
+  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+  const parent = new Map<number, number>();
+  for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+  const frameOf = (n: ProfileNode) =>
+    `${n.callFrame.functionName || '(anonymous)'} ${n.callFrame.url.split('/').slice(-2).join('/')}:${n.callFrame.lineNumber + 1}`;
+  const times = new Map<string, FunctionTime>();
+  const entry = (frame: string) => {
+    const existing = times.get(frame) ?? { frame, selfMs: 0, totalMs: 0 };
+    times.set(frame, existing);
+    return existing;
+  };
+  for (let i = 0; i < profile.samples.length; i += 1) {
+    const ms = (profile.timeDeltas[i + 1] ?? 0) / 1000;
+    const leaf = byId.get(profile.samples[i]);
+    if (!leaf || NOT_CODE.has(leaf.callFrame.functionName)) continue;
+    entry(frameOf(leaf)).selfMs += ms;
+    const seen = new Set<string>();
+    for (let id: number | undefined = leaf.id; id !== undefined; id = parent.get(id)) {
+      const node = byId.get(id);
+      if (!node || NOT_CODE.has(node.callFrame.functionName)) continue;
+      const frame = frameOf(node);
+      if (seen.has(frame)) continue;
+      seen.add(frame);
+      entry(frame).totalMs += ms;
+    }
+  }
+  return [...times.values()].sort((a, b) => b.selfMs - a.selfMs || b.totalMs - a.totalMs);
+}
+
+function topFunctions(file: string, count: number): string[] {
+  let profile: Parameters<typeof summarizeProfile>[0];
+  try {
+    profile = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return ['  - (file pruned or unreadable)'];
+  }
+  return summarizeProfile(profile)
+    .slice(0, count)
+    .map((f) => `  - \`${f.frame}\` self ${ms0(f.selfMs)} ms, total ${ms0(f.totalMs)} ms`);
+}
+
 // ---------- machine + disk ----------
 
 const run = (cmd: string, args: string[]): string => {
@@ -500,20 +595,37 @@ export function buildReport(input: ReportInput): string {
 
   // profiles
   const profilesDir = path.join(obs, 'perf', 'profiles');
-  out.push('## Recent CPU profiles', '');
-  const profiles = (fs.existsSync(profilesDir) ? fs.readdirSync(profilesDir) : [])
-    .filter((f) => f.endsWith('.cpuprofile'))
+  const indexed = readProfileIndex(obs).filter((p) => p.atMs >= sinceMs);
+  out.push(
+    '## Stall profiles',
+    '',
+    'Continuous-profiler windows that held a busy stall of 500 ms or more, newest first, with',
+    'their top self-time functions (idle, VM and GC excluded). `rotation` is what rotating cost the main thread.',
+    ''
+  );
+  if (indexed.length === 0) out.push('None in the window.');
+  for (const p of indexed.slice(-10).reverse()) {
+    const stalls = p.stalls.map((s) => `${s.ms} ms \`${normalizeLabel(s.label)}\``).join(', ');
+    out.push(
+      `- \`${path.join(profilesDir, p.file)}\` (window from ${p.windowStart}, ${p.samples} samples, rotation ${p.rotateMs} ms): ${stalls}`,
+      ...topFunctions(path.join(profilesDir, p.file), 5)
+    );
+  }
+  out.push('');
+  const indexedFiles = new Set(indexed.map((p) => p.file));
+  const others = (fs.existsSync(profilesDir) ? fs.readdirSync(profilesDir) : [])
+    .filter((f) => f.endsWith('.cpuprofile') && !indexedFiles.has(f))
     .map((f) => ({ f, stat: fs.statSync(path.join(profilesDir, f)) }))
     .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs)
     .slice(0, 10);
   out.push(
-    ...(profiles.length
-      ? profiles.map(
+    '## Other CPU profiles',
+    '',
+    ...(others.length
+      ? others.map(
           (p) => `- \`${path.join(profilesDir, p.f)}\` (${fmtKb(Math.ceil(p.stat.size / 1024))})`
         )
-      : [
-          'None. `pnpm perf:profile` captures one; stalls of 500 ms or more capture one automatically.',
-        ]),
+      : ['None. `pnpm perf:profile` captures one on demand.']),
     ''
   );
 

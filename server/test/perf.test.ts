@@ -5,7 +5,8 @@
  * What would re-break: wrong percentile math (off-by-one nearest rank), volatile
  * ids leaking into route keys (every request a new row), the audit ranking by
  * volume instead of the stall label/route that is actually worst, or the profile
- * route being callable twice at once (the inspector allows one profile).
+ * route being callable twice at once (the inspector allows one profile), or a stall profile
+ * no longer mapped to its stalls and hottest functions in the audit.
  */
 
 import assert from 'node:assert/strict';
@@ -17,10 +18,10 @@ import test from 'node:test';
 import express from 'express';
 import { type MachineSnapshot, buildReport } from '../../tools/perf-audit';
 import { registerDebugProfileRoutes } from '../src/http/debug-profile-routes';
+import { captureCpuProfile } from '../src/observability/cpu-profiler';
 import {
   RouteLatencyRecorder,
   bootPhase,
-  captureCpuProfile,
   normalizeRoute,
   timeBootPhaseAsync,
 } from '../src/observability/perf';
@@ -159,6 +160,45 @@ test('perf:audit report: latest boot vs median, top stall label, slowest route, 
     max: p90 * 2,
   });
   jsonl('routes.jsonl', [minute('/api/fast', 20, 500), minute('/api/slow', 800, 3)]);
+  // A stall window: root -> tick -> hot (3 ms self) plus 1 ms idle that must not count as code.
+  const frame = (id: number, functionName: string, children: number[] = []) => ({
+    id,
+    callFrame: {
+      functionName,
+      url: 'file:///app/server/src/tick.ts',
+      lineNumber: id,
+      columnNumber: 0,
+    },
+    children,
+  });
+  fs.mkdirSync(path.join(perf, 'profiles'));
+  fs.writeFileSync(
+    path.join(perf, 'profiles', 'stall-900ms-x.cpuprofile'),
+    JSON.stringify({
+      nodes: [
+        frame(1, '(root)', [2, 4]),
+        frame(2, 'tick', [3]),
+        frame(3, 'hot'),
+        frame(4, '(idle)'),
+      ],
+      startTime: 0,
+      endTime: 5000,
+      samples: [3, 3, 3, 4, 2],
+      timeDeltas: [0, 1000, 1000, 1000, 1000],
+    })
+  );
+  fs.writeFileSync(path.join(perf, 'profiles', 'manual-y.cpuprofile'), '{}');
+  jsonl('profiles.jsonl', [
+    {
+      at: at(5),
+      file: 'stall-900ms-x.cpuprofile',
+      windowStart: at(6),
+      windowMs: 30_000,
+      rotateMs: 0.42,
+      samples: 5,
+      stalls: [{ at: at(5), ms: 900, label: 'timer swarm-observer (async)' }],
+    },
+  ]);
 
   const report = buildReport({
     dataDir,
@@ -188,6 +228,18 @@ test('perf:audit report: latest boot vs median, top stall label, slowest route, 
   assert.ok(slow > 0 && slow < report.indexOf('GET /api/fast'), 'ranked by p90, not by volume');
   assert.match(report, /\| GET \/api\/slow \| 3 \| 5 \| 800 \| 800 \| 1600 \|/);
   assert.match(report, /Check first: the machine is overloaded/);
+  // Profiles map to their stalls, with the hottest code: sample i lasts until sample i+1, idle is
+  // not code, and a caller's inclusive time holds its callees'.
+  assert.match(
+    report,
+    /stall-900ms-x\.cpuprofile.*rotation 0\.42 ms\): 900 ms `timer swarm-observer \(async\)`/
+  );
+  assert.match(
+    report,
+    /- `hot src\/tick\.ts:4` self 3 ms, total 3 ms\n {2}- `tick [^`]+` self 0 ms, total 3 ms/
+  );
+  assert.doesNotMatch(report, /\(idle\)/);
+  assert.match(report, /## Other CPU profiles\n\n- `[^`]*manual-y\.cpuprofile`/);
 
   const calm = buildReport({ dataDir, buddiesDir: dataDir, nowMs, days: 7, machine: calmMachine });
   assert.doesNotMatch(calm, /Check first/);

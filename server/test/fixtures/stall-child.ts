@@ -11,7 +11,7 @@ import { flushPerf } from '../../src/observability/perf-log';
 async function main(): Promise<void> {
   const journal = new ErrorJournal({ directory: process.env.UNLEASHD_DATA_DIR as string });
   await journal.initialize();
-  const stop = startEventLoopStallMonitor(journal);
+  const stop = startEventLoopStallMonitor(journal, { kind: 'off' });
   await delay(200);
   process.stdout.write('ready\n');
   if (process.argv[2] === 'busy') {

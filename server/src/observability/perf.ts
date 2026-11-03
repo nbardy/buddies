@@ -1,12 +1,9 @@
-import fs from 'node:fs';
-import inspector from 'node:inspector';
-import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { NextFunction, Request, Response } from 'express';
-import { appendPerf, flushPerf, perfBootId, profilesDirectory } from './perf-log';
+import { appendPerf, flushPerf, perfBootId } from './perf-log';
 
 /**
- * Performance telemetry API (boot phases, route latency, CPU profiles).
+ * Performance telemetry API (boot phases, route latency). CPU profiles: cpu-profiler.ts.
  * Pattern: fix-guards (docs/patterns.md#fix-guards) -- slowdowns must leave measurements.
  * Storage and rotation: perf-log.ts. Reader: tools/perf-audit.ts (`pnpm perf:audit`).
  *
@@ -150,58 +147,4 @@ export function routeLatencyMiddleware() {
     });
     next();
   };
-}
-
-// ---------- CPU profiles ----------
-
-export class ProfilerBusyError extends Error {
-  constructor() {
-    super('A CPU profile is already being captured');
-  }
-}
-
-let profiling = false;
-
-export function profilerBusy(): boolean {
-  return profiling;
-}
-
-/**
- * Samples the main thread for `durationMs` and writes `<profiles>/<label>-<ts>.cpuprofile`.
- * The inspector profiler only sees what runs AFTER it starts, so for a stall it captures
- * the aftermath, not the stall itself; use it to find recurring hot code.
- */
-export async function captureCpuProfile(
-  durationMs: number,
-  label: string,
-  directory: string = profilesDirectory()
-): Promise<string> {
-  if (profiling) throw new ProfilerBusyError();
-  profiling = true;
-  const session = new inspector.Session();
-  try {
-    session.connect();
-    const post = <T>(method: string, params?: object) =>
-      new Promise<T>((resolve, reject) =>
-        session.post(method, params, (error, result) =>
-          error ? reject(error) : resolve(result as T)
-        )
-      );
-    await post('Profiler.enable');
-    await post('Profiler.start');
-    await new Promise((resolve) => setTimeout(resolve, durationMs));
-    const { profile } = await post<{ profile: unknown }>('Profiler.stop');
-    await post('Profiler.disable');
-    await fs.promises.mkdir(directory, { recursive: true });
-    const safeLabel = label.replace(/[^a-z0-9]+/gi, '-').slice(0, 40) || 'profile';
-    const file = path.join(
-      directory,
-      `${safeLabel}-${new Date().toISOString().replace(/[:.]/g, '-')}.cpuprofile`
-    );
-    await fs.promises.writeFile(file, JSON.stringify(profile), { mode: 0o600 });
-    return file;
-  } finally {
-    session.disconnect();
-    profiling = false;
-  }
 }

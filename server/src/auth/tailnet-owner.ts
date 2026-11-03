@@ -1,3 +1,4 @@
+import { labelled } from '../observability/event-loop-stall';
 import { TAILSCALE_CANDIDATES, findCli } from './mobile-access';
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
@@ -61,6 +62,6 @@ export function watchTailnetOwner(
     );
   };
   refresh();
-  setInterval(refresh, REFRESH_MS).unref();
+  setInterval(labelled('timer tailnet-owner', refresh), REFRESH_MS).unref();
   return { current: () => owner };
 }
