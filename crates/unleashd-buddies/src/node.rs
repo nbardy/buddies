@@ -319,6 +319,11 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn finish_cancel(&self, actor: Actor, run_id: String) -> napi::Result<Run> {
+        on_writer(&self.store, move |s| s.finish_cancel(&actor, &run_id)).await
+    }
+
+    #[napi]
     pub async fn retry_run(&self, actor: Actor, run_id: String, config: Option<RunConfig>, key: String) -> napi::Result<Run> {
         on_writer(&self.store, move |s| s.retry_run(&actor, &run_id, config, &key)).await
     }

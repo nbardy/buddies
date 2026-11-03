@@ -482,6 +482,21 @@ impl Store {
         })
     }
 
+    /// Ends a run whose stop was requested NOW, instead of when its lease runs out (about 5 min).
+    /// For the caller that knows no turn will ever settle it: retiring a crew (its archived buddy
+    /// showed as "working" on Home until the lease ended). Only `cancel_requested` ends; any other
+    /// status is returned unchanged. A live holder's later settle finds the lease gone (`lease_lost`).
+    pub fn finish_cancel(&mut self, actor: &Actor, run_id: &str) -> Result<Run> {
+        self.write(|tx| {
+            let run = get_run(tx, run_id)?;
+            require(tx, actor, Op::CancelRun, &Subject::Buddy { id: run.buddy_id.clone() })?;
+            if run.status == RunStatus::CancelRequested {
+                end_run(tx, &run, &Outcome::Cancelled { reason: "cancelled by request".into() }, &now_iso())?;
+            }
+            get_run(tx, run_id)
+        })
+    }
+
     // Pattern: one-write-path (docs/patterns.md#one-write-path) — retry is a run enqueue, not a revive.
     /// Re-enqueues a failed or cancelled run's input as a NEW run on the same input key.
     ///
