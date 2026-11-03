@@ -64,8 +64,6 @@ export function ShellMobile() {
   const activeSection = isPaneRoute
     ? resolveMobileConversationDestination(location.state, conversation).section
     : mobilePrimarySectionForPath(pathname);
-  // The expedition modal (/expeditions/:id) is a sheet over the view it opened from (App.tsx),
-  // not a pane of this shell.
   const fixedPane = isPaneRoute;
   const channelsUnread = anyUnread(ownerUnreadTotal(useOwnerUnread().data, null));
 

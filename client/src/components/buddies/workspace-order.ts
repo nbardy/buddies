@@ -1,9 +1,8 @@
 import { listField } from '../../atoms/conversations';
 import type { BuddyOverview } from './types';
 
-// Which workspace a URL with none lands in, for both shells: /channels and /expeditions
-// (ChannelsIndex), the phone's workspace switcher, and an unreadable expedition's modal
-// (expedition-overlay.ts), which must land where /expeditions would without navigating away.
+// Which workspace a URL with none lands in, for both shells: /channels (ChannelsIndex) and the
+// phone's workspace switcher.
 
 type OverviewWorkspace = { id: string; name: string; lastActiveMs: number };
 

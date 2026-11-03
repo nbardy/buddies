@@ -1,15 +1,8 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
-import type {
-  ExpeditionDraftView,
-  ExpeditionRetiredView,
-  ExpeditionSummary,
-  ExpeditionView,
-} from '@unleashd/shared';
+import type { Expedition, State } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { CODEX_INSTALLED } from './fixtures/buddy-roster';
-import { postFixture } from './fixtures/channel-posts';
 
 register(
   `data:text/javascript,${encodeURIComponent(`
@@ -20,607 +13,82 @@ register(
   `)}`,
   import.meta.url
 );
-const { ChannelPostContent } = await import('../src/components/buddies/ChannelPostContent');
 const { ExpeditionModal } = await import('../src/components/buddies/ExpeditionModal');
-const { postPurposeLabel, workspaceDirectory } = await import(
-  '../src/components/buddies/channel-data'
-);
-const { draftUrl, expeditionUrl, EXPEDITION_CREWS_URL } = await import(
-  '../src/components/buddies/expedition-view'
-);
-const { buddySidebarAtom, buddySidebarOverviewAtom } = await import('../src/atoms/buddy-sidebar');
-const { buddyRailFamily } = await import('../src/atoms/channel-rail');
-const { mobileBuddyDirectoryAtom } = await import('../src/mobile/atoms/buddies');
+const { expeditionUrl } = await import('../src/components/buddies/expedition-api');
 const { loadResource } = await import('../src/atoms/resources');
 const { jotaiStore } = await import('../src/atoms/store');
 const { Provider } = await import('jotai');
 const { MemoryRouter } = await import('react-router-dom');
 
-const directory = workspaceDirectory([], 'ws-1', [], CODEX_INSTALLED);
-const inChat = (post: ReturnType<typeof postFixture>) =>
-  renderToStaticMarkup(
-    <Provider store={jotaiStore}>
-      <MemoryRouter>
-        <ChannelPostContent post={post} directory={directory} />
-      </MemoryRouter>
-    </Provider>
-  );
-
-// The badge is the only way back to a launched expedition from the chat it started in (server
-// expeditions/host.ts posts it with this purpose and evidence). Losing the branch in the one shared
-// post renderer would silently strand every launch in both shells.
-test('a launch badge post renders a link to its expedition page; a plain post does not', () => {
-  const badge = postFixture({
-    id: 'p-badge',
-    purpose: 'expedition_badge',
-    evidence: ['expedition:widget-abc123'],
-    body: '⛺ Expedition launched: widget.',
-  });
-  assert.match(inChat(badge), /href="\/expeditions\/widget-abc123"/);
-  const plain = postFixture({ id: 'p-plain', evidence: ['expedition:widget-abc123'] });
-  assert.doesNotMatch(inChat(plain), /\/expeditions\//);
-});
-
-const view: ExpeditionView = {
-  id: 'widget-abc123',
-  badge: '⛺ widget · needs you',
-  run: { t: 'waiting_owner', question: 'Should the website be in scope?' },
-  retirement: { t: 'active' },
-  charter: {
-    name: 'widget',
-    // Markdown, as the Buddy writes it (2026-11-01 screenshot: shown as raw text before).
-    goal: 'Make the **widget** pass its test.\n\n1. Find the failure\n2. Fix it',
-    done: {
-      t: 'checks',
-      checks: [
-        { kind: 'command', argv: ['pnpm', 'test', 'widget'], timeoutSeconds: 600 },
-        { kind: 'judged', text: 'The widget docs describe the fix.' },
-      ],
-    },
-    inScope: ['widget'],
-    outOfScope: ['the website'],
-    roster: { manager: 'claude', work: ['claude', 'codex'], check: ['codex'] },
-    limits: { maxAttempts: 20, maxLive: 2, hours: 4, exploreShare: 0.2 },
-  },
-  validations: [
-    {
-      id: 'v1',
-      subject: { t: 'candidate', claimAttemptId: 'w0' },
-      label: 'validation v1 of candidate 1a2b3c4d5e of w0: FAILED',
-      verdict: 'failed',
-      checks: [{ checkIndex: 0, passed: false, outcome: 'FAILED (exit 3): widget still broken' }],
-    },
-  ],
-  integration: {
-    branch: 'expedition/widget-abc123',
-    head: '9f8e7d6c5b4a39281706',
-    integrated: 1,
-    queued: 0,
-    lastRefusal: {
-      t: 'refused',
-      label: 'integration i2 of w0 (1a2b3c4d5e): REFUSED — merge conflict in docs/README.md',
-    },
-  },
-  cost: {
-    short: '2k tokens',
-    line: 'Cost: 2k input + 300 output tokens (cache 5k read, 300 written) over 1 measured attempt(s); 1 not measured (muse records no token usage (session s1)). Tokens only: no price is estimated.',
-  },
+// One smoke test of the modal over every state, plus the one control that cannot be undone.
+const launch = { at: 'a', deadline: '2026-11-01T08:00:00Z', repoRoot: '/r', baseSha: 'b' };
+const live = { ...launch, crewBuddyId: 'c', chatChannelId: 'dm', chatSeenOrd: '' };
+const end = {
+  at: 'a',
+  turn: 'answered' as const,
+  sha: 'cd',
+  lesson: { t: 'lesson' as const, text: 'grep is literal' },
+};
+const record = (id: string, state: State): Expedition => ({
+  v: 1,
+  id,
   workspaceId: 'ws-1',
-  launchedAt: '2026-11-01T00:00:00.000Z',
-  deadline: '2026-11-01T04:00:00.000Z',
-  now: '2026-11-01T00:10:00.000Z',
-  crew: { t: 'pending' },
-  counts: {
-    attempts: 3,
-    maxAttempts: 20,
-    decisions: 2,
-    maxDecisions: 42,
-    live: 1,
-    maxLive: 2,
-    queued: 0,
-    verified: 0,
-    exploreCap: 4,
+  createdAt: 'a',
+  launcherId: 'lead',
+  origin: { t: 'direct' },
+  charter: {
+    name: id,
+    goal: 'Make the **widget** pass.',
+    done: { t: 'owner' },
+    maxAttempts: 5,
+    maxLive: 1,
+    hours: 8,
+    seat: { provider: 'claude' },
   },
-  questions: [
-    {
-      id: 'q1',
-      title: 'Why does the widget fail?',
-      detail: 'Find it.',
-      scope: 'in',
-      status: 'open',
-      stage: 'implementing',
-      paths: ['widget'],
-      after: [],
-      acceptance: { rule: { t: 'panel' }, provenance: 'manager' },
-      attempts: ['w0', 'w1'],
-    },
-  ],
+  state,
   attempts: [
     {
-      id: 'w0',
-      kind: 'work',
-      label: 'Work on “Why does the widget fail?”',
-      ask: 'Patch the widget at its root.',
-      seat: 'codex',
-      questionId: 'q1',
-      phase: { t: 'ended', verdict: 'Claim', summary: 'fixed' },
-      live: false,
-      brief: 'Patch the widget.',
-      requestId: 'post-0',
-      worktree: { t: 'tree', branch: 'exp/widget-abc123/w0', path: '/x/w0' },
-      cost: { t: 'unmeasured', reason: 'muse records no token usage (session s1)' },
-    },
-    {
-      id: 'w1',
-      kind: 'work',
-      label: 'Work on “Why does the widget fail?”',
-      ask: 'Bisect it.',
-      seat: 'claude',
-      questionId: 'q1',
-      phase: { t: 'posted' },
-      live: true,
-      brief: 'Bisect the last ten commits.\nStart at @lead.',
-      requestId: 'post-1',
-      worktree: { t: 'tree', branch: 'exp/widget-abc123/w1', path: '/x/w1' },
-      cost: { t: 'none' },
+      n: 1,
+      workspace: 'w',
+      branch: `expedition/${id}/a1`,
+      startedAt: 'a',
+      tree: { t: 'released', salvageRef: null },
+      phase: { t: 'judging', end },
     },
   ],
-  panels: [],
-  verifications: [],
-  reflections: [{ at: '2026-11-01T00:05:00.000Z', text: 'Two approaches fail the same way.' }],
-  lessons: [],
-};
-
-const inModal = (node: React.ReactNode) =>
+  notes: [],
+});
+const render = (id: string) =>
   renderToStaticMarkup(
     <Provider store={jotaiStore}>
-      <MemoryRouter>{node}</MemoryRouter>
-    </Provider>
-  );
-const close = () => {};
-
-// The modal's first screen must answer "what is it, is it stuck, what is running and on what
-// instructions" without a click: hiding the owner question or the live brief would leave the
-// owner unable to unblock it. The goal renders as markdown (it showed raw `1.` and `**`).
-test('the expedition modal leads with its state, the owner question, the goal as markdown, and live workers with their instructions', async () => {
-  await loadResource({ key: expeditionUrl(view.id), load: async () => view });
-  const html = inModal(<ExpeditionModal target={{ t: 'live', id: view.id }} onClose={close} />);
-  assert.match(html, /<dialog[^>]*aria-label="Expedition widget"/);
-  assert.match(html, /Needs you/);
-  assert.match(html, /Should the website be in scope\?/);
-  assert.match(html, /Make the <strong>widget<\/strong> pass its test\./);
-  assert.match(html, /<ol>\s*<li>Find the failure<\/li>/);
-  // Through the chat's own markdown (ChannelMarkdown): a single newline is a line break, as in
-  // chat (react-markdown alone ran the lines together).
-  assert.match(html, /Bisect the last ten commits\.<br\/?>\s*Start at/);
-  // Where work lands and why it did not: the worker's branch, its claim's host validation with
-  // the exit code, and the expedition branch's last refused merge.
-  assert.match(html, /branch exp\/widget-abc123\/w1/);
-  assert.match(html, /checks failed/);
-  assert.match(html, /check 1: FAILED \(exit 3\): widget still broken/);
-  assert.match(html, /expedition\/widget-abc123(<[^>]+>)*@ 9f8e7d6/);
-  assert.match(html, /last refusal: .*merge conflict in docs\/README\.md/);
-  // Spend is measured or says why not (design.md R6); nothing is priced.
-  assert.match(html, /title="Cost: 2k input \+ 300 output tokens .* 1 not measured/);
-  assert.match(html, /title="muse records no token usage \(session s1\)">not measured</);
-  assert.doesNotMatch(html, /\$\d/);
-  // Reflections are one tab away, not on the first screen.
-  assert.doesNotMatch(html, /Two approaches fail the same way\./);
-});
-
-// 2026-11-01 review: a finished expedition showed "7h 56m left" and its status three times.
-test('a finished expedition shows how long it took and one Result callout, not time left', async () => {
-  const done: ExpeditionView = {
-    ...view,
-    id: 'widget-done00',
-    run: {
-      t: 'finished',
-      reason: 'done',
-      summary: 'Widget fixed.',
-      at: '2026-11-01T00:04:00.000Z',
-    },
-    now: '2026-11-01T00:30:00.000Z',
-  };
-  await loadResource({ key: expeditionUrl(done.id), load: async () => done });
-  const html = inModal(<ExpeditionModal target={{ t: 'live', id: done.id }} onClose={close} />);
-  assert.match(html, /took 4m/);
-  assert.doesNotMatch(html, / left</);
-  assert.match(html, /<strong>Result<\/strong>/);
-  assert.equal(html.match(/>Done</g)?.length, 1, 'the status is the pill only');
-});
-
-// Before the crew Buddy exists there is no chat yet; the chat column must say what is happening.
-test('before the crew exists, the chat says the crew is starting instead of rendering nothing', async () => {
-  const starting: ExpeditionView = { ...view, id: 'widget-new000', crew: { t: 'pending' } };
-  await loadResource({ key: expeditionUrl(starting.id), load: async () => starting });
-  const html = inModal(<ExpeditionModal target={{ t: 'live', id: starting.id }} onClose={close} />);
-  assert.match(html, /Starting the crew/);
-});
-
-const draft = (id: string, patch: Partial<ExpeditionDraftView> = {}): ExpeditionDraftView => ({
-  id,
-  workspaceId: 'ws-1',
-  createdAt: '2026-11-01T00:00:00.000Z',
-  state: { t: 'open' },
-  charter: {
-    ...view.charter,
-    limits: { maxAttempts: 6, maxLive: 3, hours: 12, exploreShare: 0.2 },
-  },
-  issues: [],
-  advice: [],
-  defaulted: ['crew', 'maxLive'],
-  resolved: [],
-  ...patch,
-});
-const draftPost = (draftId: string) =>
-  postFixture({
-    id: `p-${draftId}`,
-    purpose: 'expedition_draft',
-    evidence: [`expedition-draft:${draftId}`],
-    body: '⛺ Draft expedition: widget',
-  });
-const cardOf = async (d: ExpeditionDraftView) => {
-  await loadResource({ key: draftUrl(d.id, 'ws-1'), load: async () => d });
-  return inChat(draftPost(d.id));
-};
-const launchButton = (html: string) => /<button[^>]*>Launch<\/button>/.exec(html)?.[0] ?? '';
-
-// 2026-11-01 owner request: a draft is a widget in the chat with Info and Launch. A Launch that
-// stayed enabled with issues would only fail on click; one hidden after launch strands the owner.
-test('a draft card shows Info and Launch; Launch is disabled with its reason while issues stand; a launched draft opens the expedition', async () => {
-  const open = await cardOf(draft('dopen'));
-  assert.match(
-    open,
-    /<strong[^>]*>widget<\/strong><span class="expedition-pill[^"]*">draft<\/span>/
-  );
-  assert.match(open, /6 attempts · 3 at once · 12 h/);
-  assert.match(open, />Info<\/button>/);
-  assert.doesNotMatch(launchButton(open), /disabled/);
-  assert.doesNotMatch(open, /⛺ Draft expedition: widget/, 'the card replaces the fallback text');
-
-  const blocked = await cardOf(draft('dissue', { issues: ['codex: no such model gpt-0'] }));
-  assert.match(launchButton(blocked), /disabled/);
-  assert.match(blocked, /1 issue to fix first/);
-
-  const replaced = await cardOf(draft('dold', { state: { t: 'superseded', by: 'dnew' } }));
-  assert.match(launchButton(replaced), /disabled/);
-  assert.match(replaced, /Replaced by a newer draft/);
-
-  const launched = await cardOf(
-    draft('dlaunched', { state: { t: 'launched', expeditionId: 'widget-abc123' } })
-  );
-  assert.match(launched, />Launched →<\/button>/);
-  assert.match(
-    launched,
-    /<span class="expedition-pill[^"]*">launched<\/span>/,
-    'the header says so'
-  );
-  assert.equal(launchButton(launched), '');
-});
-
-test('the draft modal shows the charter with its issues and defaults, and a Launch footer', async () => {
-  const d = draft('dmodal', { issues: ['codex: no such model gpt-0'] });
-  await loadResource({ key: draftUrl(d.id, 'ws-1'), load: async () => d });
-  const html = inModal(
-    <ExpeditionModal target={{ t: 'draft', draftId: d.id, workspaceId: 'ws-1' }} onClose={close} />
-  );
-  assert.match(html, /Make the <strong>widget<\/strong> pass/);
-  assert.match(html, /codex: no such model gpt-0/);
-  // Defaults are marked on their values, in words (2026-11-01 review: raw `maxLive: 2` keys).
-  assert.match(html, /3 at once<span class="expedition-default"[^>]*>default<\/span>/);
-  assert.doesNotMatch(html, /12 h limit<span class="expedition-default"/);
-  assert.doesNotMatch(html, /maxLive/);
-  assert.match(html, /<code>\$ pnpm test widget<\/code>/);
-  assert.match(launchButton(html), /disabled/);
-  assert.match(html, />Close<\/button>/);
-});
-
-// The status post's body is markdown (server expeditions/news.ts launchNews): the name in bold,
-// "Planning…" its own paragraph. 2026-11-01 screenshot: it read as one raw line cut mid-word.
-test('an expedition status post renders as markdown in the chat', () => {
-  const html = inChat(
-    postFixture({
-      id: 'p-status',
-      purpose: 'expedition_status',
-      evidence: ['expedition:widget-abc123'],
-      body: '⛺ Launched **widget**: Make the widget pass its test.\n\nPlanning…',
-    })
-  );
-  assert.match(html, /<strong>widget<\/strong>/);
-  assert.match(html, /<p>Planning…<\/p>/);
-});
-
-// 2026-11-01 review: green mono "expedition draft/badge/status" tags sat above every host post in
-// both shells (ChannelRows, ChannelRowsMobile read this one label); other purposes keep theirs.
-test('expedition host posts carry no purpose tag; other purposes still do', () => {
-  for (const purpose of ['expedition_badge', 'expedition_draft', 'expedition_status'])
-    assert.equal(postPurposeLabel(postFixture({ id: `p-${purpose}`, purpose })), null, purpose);
-  assert.equal(postPurposeLabel(postFixture({ id: 'p-standup', purpose: 'standup' })), 'standup');
-});
-
-// Crew Buddies are expedition machinery (2026-11-01 screenshot: "⛺ Emergent beach de…" listed as
-// a team member). Hidden by the server's explicit crew list, in the sidebar and the channel rail.
-test('expedition crew Buddies are absent from the Buddies roster and rail', async () => {
-  const lead = { id: 'lead', name: 'Lead', status: 'active' as const };
-  const crew = { id: 'crew-1', name: '⛺ widget crew', status: 'active' as const };
-  jotaiStore.set(buddySidebarOverviewAtom, [
-    { id: 'ws-1', name: 'Repo', rootPath: '/repo', buddies: [lead, crew] },
-  ]);
-  const listed = () =>
-    jotaiStore.get(buddySidebarAtom).projects.flatMap((p) => p.items.map((i) => i.buddyId));
-  assert.deepEqual(
-    listed().sort(),
-    ['crew-1', 'lead'],
-    'before the crew list loads, nothing is guessed'
-  );
-  await loadResource({ key: EXPEDITION_CREWS_URL, load: async () => ({ buddyIds: ['crew-1'] }) });
-  assert.deepEqual(listed(), ['lead']);
-  const members = [lead, crew] as unknown as Parameters<typeof buddyRailFamily>[0];
-  assert.deepEqual(
-    jotaiStore.get(buddyRailFamily(members)).map((b) => b.id),
-    ['lead']
-  );
-  // The phone's Buddies directory is its roster: crews are off it too.
-  const overview = [
-    { id: 'ws-1', name: 'Repo', rootPath: '/repo', buddies: [lead, crew], taskCounts: [] },
-  ] as unknown as Parameters<typeof mobileBuddyDirectoryAtom>[0];
-  const phone = jotaiStore.get(mobileBuddyDirectoryAtom(overview, ''));
-  assert.deepEqual(
-    phone.groups.flatMap((g) => g.entries.map((e) => e.buddy.id)),
-    ['lead']
-  );
-});
-
-// ---------- Expeditions in the channels view (owner, 2026-11-01) ----------
-// "we added the expeditions to the old conversation UI and not to the new slack UI". These pin the
-// place: the channel rail lists them, a deep link opens the modal over the channels view, and the
-// old conversations sidebar has no expedition section.
-
-const { ChannelBrowser } = await import('../src/components/buddies/ChannelBrowser');
-const { EXPEDITIONS_URL } = await import('../src/components/buddies/expedition-view');
-const { inboxFixture, publicChannel } = await import('./fixtures/channel-posts');
-const { rosterFixture } = await import('./fixtures/buddy-roster');
-const { AppRoutes } = await import('../src/App');
-const { Sidebar } = await import('../src/components/Sidebar');
-const { prerenderToNodeStream } = await import('react-dom/static');
-
-const summary = (
-  id: string,
-  run: ExpeditionView['run'],
-  workspaceId = 'ws-rail'
-): ExpeditionSummary => ({
-  id,
-  name: id,
-  run,
-  workspaceId,
-  launchedAt: '2026-11-01T00:00:00.000Z',
-  counts: view.counts,
-  cost: view.cost,
-  retirement: { t: 'active' },
-});
-
-async function railHtml(): Promise<string> {
-  await loadResource({
-    key: '/api/buddies/workspaces/ws-rail/inbox',
-    load: async () =>
-      inboxFixture([{ channel: publicChannel('ch_rail', 'general', 'ws-rail'), unread: 0 }]),
-  });
-  await loadResource({
-    key: EXPEDITIONS_URL,
-    load: async () => [
-      summary('exp-running', { t: 'running' }),
-      summary('exp-waiting', { t: 'waiting_owner', question: 'Which API?' }),
-      summary('exp-paused', { t: 'paused' }),
-      summary('exp-finished', { t: 'finished', reason: 'done' } as ExpeditionView['run']),
-      summary('exp-elsewhere', { t: 'running' }, 'ws-other'),
-    ],
-  });
-  const html = renderToStaticMarkup(
-    <MemoryRouter initialEntries={['/']}>
-      <Provider store={jotaiStore}>
-        <ChannelBrowser
-          workspaceId="ws-rail"
-          directory={workspaceDirectory(
-            [rosterFixture([], { id: 'ws-rail', name: 'rail' })],
-            'ws-rail',
-            [],
-            CODEX_INSTALLED
-          )}
-          availableConversationIds={new Set()}
-        />
-      </Provider>
-    </MemoryRouter>
-  );
-  return html.slice(html.indexOf('<nav'), html.indexOf('</nav>'));
-}
-
-/** The rail button whose name is `id` (its attributes and children). */
-const railRow = (rail: string, id: string) => {
-  const end = rail.indexOf(`>${id}</span>`);
-  assert.ok(end > 0, `${id} is in the rail`);
-  return rail.slice(rail.lastIndexOf('<button', end), rail.indexOf('</button>', end));
-};
-
-// A wrong dot or a lost emphasis hides an expedition that is stuck waiting on the owner.
-test('the channel rail lists this workspace’s unfinished expeditions between Channels and Buddies, with a status dot and needs-you emphasis', async () => {
-  const rail = await railHtml();
-  const section = rail.indexOf('>Expeditions</a>');
-  assert.ok(section > rail.indexOf('>general</span>'), 'after the channels');
-  assert.ok(section < rail.indexOf('>Buddies</h3>'), 'before the Buddies');
-  assert.match(railRow(rail, 'exp-running'), /data-status="running"/);
-  assert.doesNotMatch(railRow(rail, 'exp-running'), /data-unread/);
-  const waiting = railRow(rail, 'exp-waiting');
-  assert.match(waiting, /data-status="queued"/);
-  assert.match(waiting, /data-unread="new"/);
-  assert.match(waiting, /needs you/);
-  assert.match(railRow(rail, 'exp-paused'), /data-status="idle"/);
-  assert.match(railRow(rail, 'exp-paused'), /data-unread="read"/);
-  assert.ok(
-    rail.indexOf('>exp-waiting<') < rail.indexOf('>exp-running<'),
-    'needing you comes first'
-  );
-  assert.doesNotMatch(rail, /exp-finished|exp-elsewhere/);
-  // The count covers the finished ones too: 3 active + 1 finished used to read with no count.
-  assert.match(rail, /All expeditions \(4\)/);
-});
-
-/** Renders the app's real route table at `url`, waiting for its lazy chunks. */
-async function appAt(url: string, device: 'desktop' | 'mobile' = 'desktop'): Promise<string> {
-  const { prelude } = await prerenderToNodeStream(
-    <Provider store={jotaiStore}>
-      <MemoryRouter initialEntries={[url]}>
-        <AppRoutes device={device} />
-      </MemoryRouter>
-    </Provider>
-  );
-  let html = '';
-  for await (const chunk of prelude) html += chunk;
-  return html;
-}
-
-// A deep link (reload, pasted URL) must land in the channels view of the expedition's workspace with
-// the modal over it — it used to open over the old shell's home.
-test('a deep link to an expedition opens its modal over the channels view of its workspace', async () => {
-  await loadResource({ key: expeditionUrl(view.id), load: async () => view });
-  await loadResource({
-    key: '/api/buddies/workspaces/ws-1/inbox',
-    load: async () => inboxFixture([{ channel: publicChannel('ch_1', 'general'), unread: 0 }]),
-  });
-  const html = await appAt(`/expeditions/${view.id}`);
-  assert.match(html, /class="channel-browser"/, 'the channels view is underneath');
-  assert.match(html, /<section class="channel-browser-pane ui-stack" aria-label="Expeditions">/);
-  assert.match(html, /Should the website be in scope\?/, 'the modal is open');
-  assert.doesNotMatch(html, /class="sidebar/, 'never the old conversations shell');
-});
-
-// The phone shell takes the same route: the sheet over ChannelsMobile, never the old shell.
-test('on the phone, a deep link opens the expedition sheet over the channels view', async () => {
-  await loadResource({ key: expeditionUrl(view.id), load: async () => view });
-  const html = await appAt(`/expeditions/${view.id}`, 'mobile');
-  assert.match(html, /Should the website be in scope\?/, 'the sheet is open');
-  assert.match(
-    html,
-    /mobile-ui-page__title">Expeditions</,
-    'the channels expedition screen is underneath'
-  );
-  assert.match(html, /aria-label="Channels" class="[^"]*mobile-tab--active/, 'in the Channels tab');
-  assert.doesNotMatch(html, /class="sidebar/);
-});
-
-// A deleted or unknown id used to leave the base 'pending' forever: a blank page under the modal,
-// and closing went to the old home. It now lands on the channels expedition index with the error.
-test('a deep link to an unreadable expedition shows the error over the channels expedition index', async () => {
-  await loadResource({
-    key: expeditionUrl('exp-gone'),
-    load: async () => {
-      throw new Error('HTTP 404');
-    },
-  });
-  // With a workspace known, the base is that workspace's index itself, never /expeditions: its
-  // redirect replaces the URL and dropped the modal (2026-11-02 visual pass: /expeditions/nope
-  // showed the bare index with no not-found message).
-  await loadResource({
-    key: '/api/buddies/overview',
-    load: async () => [rosterFixture([], { id: 'ws-1', name: 'one' })],
-  });
-  await loadResource({
-    key: '/api/buddies/workspaces/ws-1/inbox',
-    load: async () => inboxFixture([{ channel: publicChannel('ch_1', 'general'), unread: 0 }]),
-  });
-  const html = await appAt('/expeditions/exp-gone');
-  assert.match(html, /This expedition could not be opened/, 'the modal says what happened');
-  assert.match(html, /HTTP 404/, 'and why');
-  assert.match(
-    html,
-    /<section class="channel-browser-pane ui-stack" aria-label="Expeditions">/,
-    'the workspace’s channels expedition index is underneath'
-  );
-  assert.doesNotMatch(html, /class="sidebar/);
-});
-
-test('the old conversations sidebar has no expedition section', async () => {
-  await loadResource({
-    key: EXPEDITIONS_URL,
-    load: async () => [summary('exp-running', { t: 'running' })],
-  });
-  const html = renderToStaticMarkup(
-    <Provider store={jotaiStore}>
       <MemoryRouter>
-        <Sidebar />
+        <ExpeditionModal id={id} onClose={() => undefined} />
       </MemoryRouter>
     </Provider>
   );
-  assert.match(html, /Buddies/, 'the sidebar rendered');
-  assert.doesNotMatch(html, /Expeditions|exp-running|\/expeditions/);
-});
 
-// Retire (A7): a retired expedition must leave Finished for the collapsed Retired group, take the
-// Retire-all button's count with it, and its modal must be the frozen report (a live-view crash
-// here would blank the page the moment the server froze an expedition).
-test('retiring a finished expedition moves it from Finished to Retired, and its modal shows the frozen report', async () => {
-  const { ExpeditionList } = await import('../src/components/buddies/ExpeditionList');
-  const done = (id: string, retirement: ExpeditionSummary['retirement']): ExpeditionSummary => ({
-    ...summary(id, { t: 'finished', reason: 'done' } as ExpeditionView['run'], 'ws-retire'),
-    retirement,
-  });
-  const list = () =>
-    renderToStaticMarkup(
-      <Provider store={jotaiStore}>
-        <MemoryRouter>
-          <ExpeditionList workspaceId="ws-retire" />
-        </MemoryRouter>
-      </Provider>
-    );
-  const group = (html: string, title: string) =>
-    html.slice(
-      html.indexOf(`aria-label="${title}"`),
-      html.indexOf('</section>', html.indexOf(`aria-label="${title}"`))
-    );
-
+test('the modal renders every state and an unreadable record; retire takes a confirm step', async () => {
+  const states: State[] = [
+    { t: 'draft', issues: ['claude is not installed on this host'] },
+    { t: 'running', launch: live },
+    { t: 'paused', launch: live },
+    { t: 'finished', launch: live, at: 'a', reason: { t: 'passed', n: 1 } },
+  ];
+  for (const state of states) {
+    const x = record(`x-${state.t}`, state);
+    await loadResource({ key: expeditionUrl(x.id), load: async () => x });
+    const html = render(x.id);
+    assert.match(html, /<strong>widget<\/strong>/, state.t);
+    assert.match(html, /grep is literal/, state.t);
+    // Retire is never one click: the first button only arms the confirm.
+    assert.doesNotMatch(html, /Confirm retire/, state.t);
+  }
+  assert.match(render('x-draft'), /claude is not installed/);
+  assert.match(render('x-running'), />Pass<.*>Fail</s);
+  assert.match(render('x-finished'), />Retire</);
   await loadResource({
-    key: EXPEDITIONS_URL,
-    load: async () => [done('exp-old', { t: 'active' })],
-  });
-  const before = list();
-  assert.match(group(before, 'Finished'), />exp-old</);
-  assert.match(before, /Retire all finished \(1\)/);
-  assert.doesNotMatch(before, /Retired \(/);
-
-  await loadResource({
-    key: EXPEDITIONS_URL,
-    load: async () => [done('exp-old', { t: 'retired', at: '2026-11-03T00:00:00.000Z' })],
-  });
-  const after = list();
-  assert.doesNotMatch(after, /aria-label="Finished"/);
-  assert.match(after, /Retired \(1\)/);
-  assert.match(group(after, 'Retired'), />exp-old</);
-  assert.match(group(after, 'Retired'), />Retired</, 'a muted Retired pill');
-  assert.doesNotMatch(after, /Retire all finished/);
-
-  const retired: ExpeditionRetiredView = {
-    t: 'retired',
-    summary: done('exp-old', { t: 'retired', at: '2026-11-03T00:00:00.000Z' }),
-    report: 'Final report: **widget** shipped.',
-  };
-  await loadResource({ key: expeditionUrl('exp-old'), load: async () => retired });
-  const html = inModal(<ExpeditionModal target={{ t: 'live', id: 'exp-old' }} onClose={close} />);
-  assert.match(html, /Final report: <strong>widget<\/strong> shipped\./);
-  assert.doesNotMatch(html, /Retire<|Stop and retire/);
-});
-
-test('a finished expedition offers Retire, an open one Stop and retire, behind a confirm', async () => {
-  const open = { ...view, id: 'widget-open00' };
-  await loadResource({ key: expeditionUrl(open.id), load: async () => open });
-  const openHtml = inModal(<ExpeditionModal target={{ t: 'live', id: open.id }} onClose={close} />);
-  assert.match(openHtml, />Stop and retire</);
-  assert.doesNotMatch(openHtml, /Yes, /, 'one click asks, it does not retire');
-  const retiring = {
-    ...view,
-    id: 'widget-ret000',
-    retirement: { t: 'retiring', at: 'x', by: 'owner', refused: [] },
-  };
-  await loadResource({ key: expeditionUrl(retiring.id), load: async () => retiring });
-  const html = inModal(<ExpeditionModal target={{ t: 'live', id: retiring.id }} onClose={close} />);
-  assert.match(html, /Retiring…/);
-  assert.doesNotMatch(html, />Stop and retire<|>Retire</);
+    key: expeditionUrl('bad'),
+    load: async () => Promise.reject(new Error('unreadable: bad json')),
+  }).catch(() => undefined);
+  assert.match(render('bad'), /unreadable: bad json/);
 });

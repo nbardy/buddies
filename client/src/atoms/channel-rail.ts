@@ -1,8 +1,6 @@
-import type { ExpeditionSummary } from '@unleashd/shared';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
 import { inboxUrl, railChannels } from '../components/buddies/channel-data';
-import { EXPEDITIONS_URL, activeExpeditions } from '../components/buddies/expedition-view';
 import type { Buddy, Inbox } from '../components/buddies/types';
 import { rosterHiddenBuddyIdsAtom } from './buddy-visibility';
 import { type ResourceEntry, resourceAtomFamily } from './resources';
@@ -32,30 +30,12 @@ export const channelRailFamily = atomFamily((workspaceId: string) =>
 export const buddyRailFamily = atomFamily((members: readonly Buddy[]) =>
   atom((get) => {
     const stars = new Set(get(starredBuddyIdsAtom));
-    // Expedition crews are reached through their badge and modal, not the Buddies rail.
+    // Expedition crews are reached through their card and modal, not the Buddies rail.
     const hidden = get(rosterHiddenBuddyIdsAtom);
     const team = members.filter((buddy) => !hidden.has(buddy.id));
     return [
       ...team.filter((buddy) => stars.has(buddy.id)),
       ...team.filter((buddy) => !stars.has(buddy.id)),
     ];
-  })
-);
-
-const NO_EXPEDITIONS: readonly ExpeditionSummary[] = [];
-
-// Pattern: one-store-one-index (docs/patterns.md#one-store-one-index)
-/** One workspace's expeditions from the one cached list (GET /api/buddies/expeditions): `all` for
- * the index pane, `active` (unfinished, needing the owner first) for the rail and Home. `loaded`
- * tells "none yet" from "not fetched yet". */
-export const expeditionRailFamily = atomFamily((workspaceId: string) =>
-  atom((get) => {
-    const entry = get(resourceAtomFamily(EXPEDITIONS_URL)) as ResourceEntry<ExpeditionSummary[]>;
-    const list = entry.kind === 'ready' || entry.kind === 'stale' ? entry.value : NO_EXPEDITIONS;
-    return {
-      loaded: entry.kind === 'ready' || entry.kind === 'stale',
-      all: list.filter((e) => e.workspaceId === workspaceId),
-      active: activeExpeditions(list, workspaceId),
-    };
   })
 );

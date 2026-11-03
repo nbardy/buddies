@@ -524,31 +524,14 @@ export function postPurposeTag(post: Post): string | undefined {
   return post.purpose;
 }
 
-/** The expedition card a host post carries: a live badge (server expeditions/host.ts
- * `post_badge`), a draft card (expeditions/drafts.ts), or none. Both are keyed by purpose AND
+/** The expedition card a draft posts (server expeditions/host.ts `draft`), keyed by purpose AND
  * evidence: a plain post that merely cites an expedition is no card. */
-export type ExpeditionCard =
-  | { t: 'none' }
-  | { t: 'badge'; id: string }
-  | { t: 'draft'; draftId: string };
-
-const evidenceOf = (post: Post, prefix: string) =>
-  post.evidence.find((item) => item.startsWith(prefix))?.slice(prefix.length);
+export type ExpeditionCard = { t: 'none' } | { t: 'card'; id: string };
 
 export function expeditionCardOf(post: Post): ExpeditionCard {
-  // κ: purpose is free text on the wire; every purpose but these two is no card.
-  switch (post.purpose) {
-    case 'expedition_badge': {
-      const id = evidenceOf(post, 'expedition:');
-      return id === undefined ? { t: 'none' } : { t: 'badge', id };
-    }
-    case 'expedition_draft': {
-      const draftId = evidenceOf(post, 'expedition-draft:');
-      return draftId === undefined ? { t: 'none' } : { t: 'draft', draftId };
-    }
-    default:
-      return { t: 'none' };
-  }
+  // κ: purpose is free text on the wire; only `expedition` with its evidence is a card.
+  const id = post.evidence.find((e) => e.startsWith('expedition:'))?.slice('expedition:'.length);
+  return post.purpose === 'expedition' && id !== undefined ? { t: 'card', id } : { t: 'none' };
 }
 
 export function postPurposeLabel(post: Post): string | null {
@@ -558,13 +541,15 @@ export function postPurposeLabel(post: Post): string | null {
 }
 
 /** Purposes shown without a tag: a reply is conversation; the expedition host's posts are their
- * own label (the card, the badge, the ⛺ status line). 2026-11-01 review: the green mono
- * "expedition draft/badge/status" tags read as debug output above every one of them. */
+ * own label (the card, the ⛺ status line). 2026-11-01 review: the green mono "expedition …"
+ * tags read as debug output. `expedition_badge`/`expedition_draft` are the old host's purposes:
+ * listed only so old posts render as their plain body text, untagged. */
 const UNLABELLED_PURPOSES: ReadonlySet<string> = new Set([
   'reply',
+  'expedition',
+  'expedition_status',
   'expedition_badge',
   'expedition_draft',
-  'expedition_status',
 ]);
 
 // ── The workspace directory ─────────────────────────────────────────────────

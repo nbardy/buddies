@@ -5,8 +5,7 @@ import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelMarkdown } from './ChannelMarkdown';
 import { EmojiPicker } from './EmojiPicker';
-import { ExpeditionBadge } from './ExpeditionBadge';
-import { ExpeditionDraftCard } from './ExpeditionDraftCard';
+import { ExpeditionCard as ExpeditionCardView } from './ExpeditionCard';
 import { buddyWrite, errorText } from './api';
 import {
   type ExpeditionCard,
@@ -206,9 +205,7 @@ function PostBody({ post, directory }: { post: ClippedPost; directory: Workspace
           tasks={directory.taskById}
         />
       );
-    case 'badge':
-      return <ExpeditionBadge id={card.id} />;
-    case 'draft':
-      return <ExpeditionDraftCard draftId={card.draftId} workspaceId={directory.workspaceId} />;
+    case 'card':
+      return <ExpeditionCardView id={card.id} />;
   }
 }

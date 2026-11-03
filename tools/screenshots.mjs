@@ -651,9 +651,6 @@ export function buildScreens(found, focus) {
       missing: dm ? null : 'no Buddy DM',
       views: onBoth(dm, clickThen('.buddy-about > summary', '.buddy-about-card')),
     },
-    // The expedition index pane in the channels view (owner, 2026-11-01); the rail section and
-    // Home's list sit in the 'channels' shot once the workspace has an expedition.
-    { name: 'expeditions', missing: null, views: onBoth(`${channels}?view=expeditions`) },
     { name: 'channel', missing: noChannel, views: onBoth(`${channels}?${channel}`) },
     {
       name: 'image-viewer',

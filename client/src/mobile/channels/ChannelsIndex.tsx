@@ -11,8 +11,7 @@ import { MobileEmptyPanel, MobilePage } from '../components/MobileUI';
 // Its own module because BOTH device trees route /channels here (App.tsx).
 // Living in ChannelsMobile.tsx made the desktop load the mobile channels chunk.
 
-/** /channels — the tab's entry: open the most recently active workspace's channels. Also
- * /expeditions (`screen` expeditions): the old index URL lands on that workspace's index pane. */
+/** /channels — the tab's entry: open the most recently active workspace's channels. */
 export function ChannelsIndex({ screen }: { screen: ChannelsView }) {
   const overview = useBuddyOverview();
   const [first] = overviewWorkspaces(overview.data, useAtomValue(buddyWorkspaceActivityAtom));
