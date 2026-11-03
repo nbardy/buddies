@@ -762,13 +762,11 @@ a.channel-browser-buddy-done {
 .channel-browser-message {
   position: relative;
 }
-/* Slack's hover toolbar: a bordered group of icon buttons pinned to the
-   message's top-right corner, straddling its top edge so it sits over the
-   gap between messages instead of over the text. */
+/* Slack's hover toolbar: icon buttons at the message's top-right, straddling its top edge over the gap. */
 .channel-browser-message-actions {
   position: absolute;
   z-index: 2;
-  top: -14px;
+  top: -22px; /* 30px tall: clears a continuation row's first-line glyphs */
   right: 20px;
   display: flex;
   gap: var(--sp-1);
@@ -785,7 +783,8 @@ a.channel-browser-buddy-done {
 }
 /* Edit/react are portaled into the hover toolbar (toolsHost): one toolbar, no box of their own. */
 .channel-browser-message-actions .channel-post-tools { position: static; display: contents; }
-.channel-browser-message-actions .channel-post-tools button { height: 28px; min-height: 28px; }
+.channel-browser-message-actions .channel-post-tools button { height: 24px; min-height: 24px; }
+.channel-browser-message-actions .channel-browser-message-action { width: 28px; height: 24px; }
 /* Host status lines (expedition progress) read as quiet log lines, not conversation. */
 .channel-browser-message[data-purpose="expedition_status"] .channel-markdown {
   color: var(--text-muted);
