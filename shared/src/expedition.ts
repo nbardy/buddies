@@ -112,12 +112,15 @@ const Origin = z.discriminatedUnion('t', [
   v('direct', {}),
 ]);
 export type Origin = z.infer<typeof Origin>;
-/** baseSha: main at launch, every attempt's base and the oracle source. chatSeenOrd '' = none. */
+/** baseSha: the launch base (origin's default branch, local main with no origin), every attempt's
+ * base and the oracle source; baseRef names the ref it was resolved from (records launched before
+ * it was recorded were all local main). chatSeenOrd '' = none. */
 const Launch = z.object({
   at: str,
   deadline: str,
   repoRoot: str,
   baseSha: str,
+  baseRef: str.default('refs/heads/main'),
   crewBuddyId: str,
   chatChannelId: str,
   chatSeenOrd: str,
