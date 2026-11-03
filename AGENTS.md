@@ -33,11 +33,10 @@ client/src/atoms/*                 → jotai atoms, derived views, WS actions
 client/src/components/{Sidebar,Chat,ConversationConfigPicker}.tsx → main desktop UI
 client/src/mobile/*                → mobile view tree (second shell, same core)
 client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen indexes
-server/src/expeditions/            → expedition engine (ledger, tick, crew, `expedition` tool,
-                                     GET /api/buddies/expeditions/:id); design: expeditions/
-client/src/components/buddies/ExpeditionList.tsx → expeditions live in the CHANNELS view (rail
-                                     section, ?view=expeditions index, Home); /expeditions/:id is a
-                                     modal over it (expedition-overlay.ts). Never the old Sidebar.tsx.
+server/src/expeditions/            → expeditions: one JSON record each, a serialized step per record,
+                                     the `expedition` tool, /api/buddies/expeditions; design:
+                                     docs/expeditions-lean-design.md
+client/src/components/buddies/Expedition*.tsx → chat card, rail section (both shells) and modal.
 {server,client}/src/swarm/          → QUARANTINED swarm/oompa viewer; outside code imports
                                      only swarm/index.ts (guard: swarm-quarantine.test.ts)
 ```
