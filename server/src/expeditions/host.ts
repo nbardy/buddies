@@ -1,5 +1,5 @@
 import fsp from 'node:fs/promises';
-import type { Actor, BuddiesCore, ChannelRef, Run } from '@unleashd/buddies-core';
+import type { Actor, BuddiesCore, ChannelRef, Post, PostQuery, Run } from '@unleashd/buddies-core';
 import {
   ALLOWED,
   type Act,
@@ -65,23 +65,38 @@ const TREE_OF: { [K in Released['t']]: (r: Extract<Released, { t: K }>) => Tree 
   refused: (r) => ({ t: 'left', reason: `${r.reason}: ${r.detail}` }),
   failed: (r) => ({ t: 'left', reason: r.message }),
 };
+const skipped = (end: TurnEnd): Attempt['phase'] => ({
+  t: 'judged',
+  end,
+  verdict: { t: 'skipped' },
+});
+/** Review 2026-11-03: a failed or cancelled turn went to judging, so the checks ran on whatever
+ * the branch held (base, when nothing was committed) and could pass the expedition. */
+const JUDGED_TURN: Record<TurnEnd['turn'], (end: TurnEnd) => Attempt['phase']> = {
+  answered: (end) => ({ t: 'judging', end }),
+  failed: skipped,
+  cancelled: skipped,
+  lost: skipped,
+};
 const SETTLE_INTO: Record<Launched['state']['t'], (end: TurnEnd) => Attempt['phase']> = {
-  running: (end) => ({ t: 'judging', end }),
-  paused: (end) => ({ t: 'judging', end }),
-  finished: (end) => ({ t: 'judged', end, verdict: { t: 'skipped' } }),
+  running: (end) => JUDGED_TURN[end.turn](end),
+  paused: (end) => JUDGED_TURN[end.turn](end),
+  finished: skipped,
 };
 const crewIdOf = (x: Expedition) => ('launch' in x.state ? x.state.launch.crewBuddyId : null);
 const postIdOf = (r: Run) => (r.input.kind === 'post' ? r.input.postId : null);
 const isPass = (a: Attempt) =>
   a.phase.t === 'judged' && a.phase.verdict.t !== 'skipped' && a.phase.verdict.pass;
-const note = (text: string): Act => ({ do: 'note', text: text.trim().slice(0, 2000) });
 
 export function createExpeditionHost(o: ExpeditionHostOptions) {
   const { core, events, root, gate } = o;
   const iso = () => (o.now ?? (() => new Date()))().toISOString();
   const records = loadAll(root);
   const chains = new Map<string, Promise<unknown>>();
-  const queued = new Set<string>();
+  /** Queued or running check jobs by `<id>/a<n>`; finishing an expedition aborts its own. */
+  const checking = new Map<string, AbortController>();
+  const checkKey = (id: string, n: number) => `${id}/a${n}`;
+  let started = false;
   let checkQueue: Promise<void> = Promise.resolve();
   const logError = (e: Error) => console.error(`[expeditions] ${e.message}`);
   const current = (id: string) => (records.get(id) as Extract<Loaded, { t: 'ok' }>).x as Launched;
@@ -121,36 +136,76 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     }).catch((e: Error) => console.error(`[expeditions] ${id} step failed: ${e.message}`));
   }
   async function proceed(start: Launched): Promise<void> {
-    let x = await settleAll(start);
+    const x = await settleAll(start);
     for (const a of x.attempts.filter((a) => a.phase.t === 'judging'))
       JUDGE[x.charter.done.t](x, a);
-    x = await finishIfDue(x);
-    await releasePending(await fill(x));
+    // Released before the next brief is written, so it names the salvage refs that exist.
+    await releasePending(await fill(await releasePending(await finishIfDue(x))));
   }
 
-  /** Owner posts in the crew chat after chatSeenOrd, oldest first. An act the state refuses is
-   * kept as a note with its text, so nothing the owner says is silently dropped. */
+  /** Owner posts in the crew chat after chatSeenOrd, oldest first. Each one's ord commits with
+   * its act, so a later failure never replays it (review 2026-11-03: `extend 2h` added 4 h). An
+   * act the state refuses is answered in the chat, not kept as a note. */
   async function readChat(start: Launched): Promise<Launched> {
     let x = start;
-    const { chatChannelId: channelId, chatSeenOrd } = x.state.launch;
-    const fresh: { ord: string; body: string; owner: boolean }[] = [];
+    const fresh = await freshPosts(x.state.launch.chatChannelId, x.state.launch.chatSeenOrd);
+    for (const p of fresh) {
+      const seen = seenTo(x, p.ord);
+      if (p.author.kind !== 'owner') {
+        x = seen;
+        continue;
+      }
+      const said = brief.chatAct(seen, p.body);
+      const acted: Acted = ALLOWED[said.do].includes(seen.state.t)
+        ? await apply(seen, said, 'owner')
+        : { t: 'refused', reasons: [`cannot ${said.do} a ${seen.state.t} expedition`] };
+      x = await CHAT_REPLY[acted.t](seen, acted as never, p);
+    }
+    return x.state.launch.chatSeenOrd === start.state.launch.chatSeenOrd ? x : commit(x);
+  }
+  const seenTo = (x: Launched, ord: string): Launched => ({
+    ...x,
+    state: { ...x.state, launch: { ...x.state.launch, chatSeenOrd: ord } },
+  });
+  const CHAT_REPLY: {
+    [K in Acted['t']]: (x: Launched, a: Extract<Acted, { t: K }>, p: Post) => Promise<Launched>;
+  } = {
+    ok: async (_x, a) => a.x as Launched,
+    refused: async (x, a, p) => {
+      const next = await commit(x);
+      const line = `"${p.body.trim().slice(0, 80)}": ${a.reasons.join('; ')}`;
+      await postStatus(next, `exp:${x.id}:refused:${p.id}`, line);
+      return next;
+    },
+    missing: async (x) => x,
+  };
+  /** The channel feed and every thread's replies after `seen`, oldest first. Review 2026-11-03:
+   * the channel feed leaves thread replies out, so a "pass" answered in the thread of the "Reply
+   * pass or fail" line was never read. */
+  async function freshPosts(channelId: string, seen: string): Promise<Post[]> {
+    const roots = await pageAfter({ kind: 'channel', channelId }, '');
+    const stats = await core.threadStats(
+      OWNER,
+      channelId,
+      roots.map((p) => p.id)
+    );
+    const threads = stats.filter((t) => t.lastReplyOrd > seen);
+    const replies = await Promise.all(
+      threads.map((t) => pageAfter({ kind: 'thread', rootId: t.rootId }, seen))
+    );
+    const all = new Map([...roots, ...replies.flat()].map((p) => [p.id, p]));
+    return [...all.values()].filter((p) => p.ord > seen).sort((a, b) => (a.ord < b.ord ? -1 : 1));
+  }
+  async function pageAfter(query: PostQuery, after: string): Promise<Post[]> {
+    const out: Post[] = [];
     let before: { ord: string } | undefined;
     for (;;) {
-      const page = await core.listPosts(OWNER, { kind: 'channel', channelId }, before, 50);
-      const newer = page.posts.filter((p) => p.ord > chatSeenOrd);
-      fresh.push(...newer.map((p) => ({ ...p, owner: p.author.kind === 'owner' })));
-      if (!page.next || newer.length < page.posts.length) break;
+      const page = await core.listPosts(OWNER, query, before, 100);
+      const newer = page.posts.filter((p) => p.ord > after);
+      out.push(...newer);
+      if (!page.next || newer.length < page.posts.length) return out;
       before = page.next;
     }
-    if (fresh.length === 0) return x;
-    for (const p of fresh.reverse().filter((p) => p.owner)) {
-      const said = brief.chatAct(x, p.body);
-      const tried = ALLOWED[said.do].includes(x.state.t) ? await apply(x, said, 'owner') : null;
-      const done = tried?.t === 'ok' ? tried : await apply(x, note(p.body), 'owner');
-      x = (done as Extract<Acted, { t: 'ok' }>).x as Launched;
-    }
-    const launch = { ...x.state.launch, chatSeenOrd: fresh[fresh.length - 1].ord };
-    return commit({ ...x, state: { ...x.state, launch } });
   }
 
   async function settleAll(start: Launched): Promise<Launched> {
@@ -163,8 +218,13 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
   async function settle(x: Launched, a: Attempt, requestId: string): Promise<Launched> {
     const ended = await turnOf(x, requestId);
     if (!ended) return x;
-    const sha = await tip(x.state.launch.repoRoot, a.branch);
-    const end: TurnEnd = { at: iso(), turn: ended.turn, sha, lesson: brief.lessonOf(ended.body) };
+    const { repoRoot, baseSha } = x.state.launch;
+    const t = await tip(repoRoot, a.branch, paths(root, x.id).tree(a.n));
+    const lesson = brief.lessonOf(ended.body);
+    const end: TurnEnd =
+      t.t === 'tip'
+        ? { at: iso(), turn: ended.turn, sha: t.sha, lesson }
+        : { at: iso(), turn: 'lost', sha: baseSha, lesson };
     return commit(withAttempt(x, { ...a, phase: SETTLE_INTO[x.state.t](end) }));
   }
   type Ended = { turn: TurnEnd['turn']; body: string } | null;
@@ -198,22 +258,28 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       postStatus(x, `exp:${x.id}:a${a.n}:ask`, ask).catch(logError);
     },
   };
-  /** One host-wide queue: checks run one at a time on the shared machine. */
+  /** One host-wide queue: checks run one at a time on the shared machine. A job whose
+   * expedition finished (or was retired) meanwhile is aborted and records nothing. */
   function enqueueCheck(x: Launched, a: Attempt, checks: string[][]): void {
-    const key = `${x.id}/a${a.n}`;
-    if (queued.has(key)) return;
-    queued.add(key);
+    const key = checkKey(x.id, a.n);
+    if (checking.has(key)) return;
+    const stop = new AbortController();
+    checking.set(key, stop);
     const { repoRoot, baseSha } = x.state.launch;
     const job = { dir: paths(root, x.id).check(a.n), sha: endOf(a).sha, base: baseSha, checks };
     checkQueue = checkQueue
       .then(async () => {
-        const runs = await runChecks(repoRoot, job);
+        if (stop.signal.aborted) return;
+        const runs = await runChecks(repoRoot, job, stop.signal);
         const pass = runs.length === checks.length && runs.every((r) => r.outcome.t === 'passed');
-        await serialized(x.id, () => verdictInto(current(x.id), a.n, { t: 'checks', pass, runs }));
+        const verdict = { t: 'checks' as const, pass, runs };
+        await serialized(x.id, async () => {
+          if (!stop.signal.aborted) await verdictInto(current(x.id), a.n, verdict);
+        });
       })
       .catch(logError)
       .finally(() => {
-        queued.delete(key);
+        checking.delete(key);
         void step(x.id);
       });
   }
@@ -244,6 +310,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       x.attempts.flatMap((a) => (a.phase.t === 'running' ? [a.phase.requestId] : []))
     );
     await cancelRuns(x, (r) => live.has(postIdOf(r) ?? ''));
+    for (const a of x.attempts) checking.get(checkKey(x.id, a.n))?.abort();
     const skip = (a: Attempt): Attempt =>
       a.phase.t === 'judging' ? { ...a, phase: SETTLE_INTO.finished(a.phase.end) } : a;
     const state = { t: 'finished' as const, launch: x.state.launch, at: iso(), reason };
@@ -435,6 +502,9 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       if (!l) return { t: 'missing' };
       if (l.t === 'unreadable') return { t: 'refused', reasons: [`unreadable: ${l.reason}`] };
       if (gate.t === 'disabled') return { t: 'refused', reasons: [gate.reason] };
+      // Review 2026-11-03: an act before boot's interrupt pass could start an attempt it then
+      // marked interrupted.
+      if (!started) return { t: 'refused', reasons: ['expeditions are starting'] };
       if (!ALLOWED[a.do].includes(l.x.state.t))
         return { t: 'refused', reasons: [`cannot ${a.do} a ${l.x.state.t} expedition`] };
       return apply(l.x, a, by);
@@ -484,7 +554,11 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       await cancelRuns(x, () => true);
       const interrupt = (a: Attempt): Attempt =>
         live(a) ? { ...a, phase: { t: 'interrupted', at: iso() } } : a;
-      await commit({ ...x, attempts: x.attempts.map(interrupt) });
+      const next = await commit({ ...x, attempts: x.attempts.map(interrupt) });
+      for (const a of x.attempts.filter(live))
+        await postStatus(next, `exp:${x.id}:a${a.n}:interrupted`, brief.interruptedLine(a)).catch(
+          logError
+        );
     }
   }
 
@@ -520,6 +594,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
   const stops: (() => void)[] = [];
   function start(): void {
     if (gate.t === 'disabled') return;
+    started = true;
     let debounce: NodeJS.Timeout | null = null;
     const wake = labelled('timer expeditions-wake', () => {
       debounce = null;
@@ -582,7 +657,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       do {
         await checkQueue;
         await Promise.all([...chains.values()]);
-      } while (queued.size > 0);
+      } while (checking.size > 0);
     },
   };
 }

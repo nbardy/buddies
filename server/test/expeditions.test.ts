@@ -3,7 +3,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { OWNER, buddyActor } from '../src/buddies/core';
-import { charter, executeRequestRun, fixture, git, rpc } from './fixtures/expedition-fixture';
+import { runChecks } from '../src/expeditions/checks';
+import {
+  charter,
+  executeRequestRun,
+  fixture,
+  git,
+  rpc,
+  tempRepo,
+} from './fixtures/expedition-fixture';
+import { tempDir } from './fixtures/temp';
 
 // docs/expeditions-lean-design.md §9: four integration tests on a real repo, store, core,
 // git-cambium, MCP endpoint and HTTP routes.
@@ -159,7 +168,18 @@ test('owner-judged expeditions follow the chat, and stop and the deadline finish
     await f.ownerSays(id, 'resume');
     assert.equal(phase(f, id, 2).t, 'running');
     await f.crewAnswer(id, 2, 'Done again.');
-    await f.ownerSays(id, 'pass');
+    // Review 2026-11-03: the channel feed leaves thread replies out, so a verdict given in the
+    // thread of the ask line was never read.
+    const feed = await f.core.listPosts(OWNER, { kind: 'channel', channelId: chat }, null, 50);
+    const ask = feed.posts.find((p) => /^a2 .*pass or fail/.test(p.body));
+    assert.ok(ask, 'a2 asks for a verdict');
+    const reply = { kind: 'inform' as const, body: 'pass', evidence: [], mentions: [] };
+    await f.core.post(
+      OWNER,
+      { kind: 'id', id: chat },
+      { ...reply, replyToId: ask.id, broadcast: false, key: 'owner:thread-pass' }
+    );
+    await f.settle(id);
     const passed = f.record(id).state;
     assert.deepEqual(passed.t === 'finished' && passed.reason, { t: 'passed', n: 2 });
 
@@ -236,4 +256,31 @@ test('retire archives every branch, or refuses whole', async () => {
   } finally {
     await f.close();
   }
+});
+
+// Review 2026-11-03: a check naming no tracked path, `.` or `*` made the restore list every root
+// entry and reset the attempt to base, so correct work failed every time.
+test('the oracle restore resets only the literal tracked paths a check names', async () => {
+  const scratch = tempDir('expedition-checks-');
+  const repo = tempRepo(scratch);
+  const base = git(repo, 'rev-parse', 'HEAD');
+  const commit = (file: string, text: string) => {
+    fs.writeFileSync(path.join(repo, file), text);
+    git(repo, 'commit', '-qam', `edit ${file}`);
+    return git(repo, 'rev-parse', 'HEAD');
+  };
+  const run = async (sha: string, checks: string[][]) => {
+    const job = { dir: path.join(scratch, 'check'), sha, base, checks };
+    const runs = await runChecks(repo, job, new AbortController().signal);
+    return runs.map((r) => r.outcome.t).join(',');
+  };
+  const edited = commit('check.sh', 'exit 0\n');
+  assert.equal(await run(edited, [['sh', 'check.sh']]), 'failed', 'the oracle edit is undone');
+
+  const fixed = commit('widget/widget.ts', 'export const broken = false;\n');
+  const script = path.join(scratch, 'fixed.sh');
+  fs.writeFileSync(script, "grep -q 'broken = false' widget/widget.ts\n");
+  const grep = ['sh', '-c', "grep -q 'broken = false' widget/widget.ts"];
+  for (const checks of [[[...grep, '.']], [[...grep, '*']], [['/bin/sh', script]]])
+    assert.equal(await run(fixed, checks), 'passed', JSON.stringify(checks));
 });

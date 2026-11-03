@@ -25,7 +25,10 @@ export const RETIRE: Record<
   (d: RetireDeps, x: Expedition) => Promise<Retired>
 > = {
   draft: async (d, x) => {
-    if (retiredTaken(d.root, x.id)) return refused([`.retired/${x.id}.json already exists`]);
+    if (retiredTaken(d.root, x)) return refused([`.retired/${x.id}.json holds another record`]);
+    // Review 2026-11-03: a launch that created the crew and then failed left it active.
+    const crew = (await d.core.listBuddies(x.workspaceId)).filter((b) => b.slug === `exp-${x.id}`);
+    for (const b of crew.filter((b) => b.status === 'active')) await archiveCrew(d, x.id, b.id);
     await fileRetired(d.root, x, d.now());
     return { t: 'retired' };
   },
@@ -33,7 +36,8 @@ export const RETIRE: Record<
 };
 
 async function retireFinished(d: RetireDeps, start: Launched): Promise<Retired> {
-  if (retiredTaken(d.root, start.id)) return refused([`.retired/${start.id}.json already exists`]);
+  if (retiredTaken(d.root, start))
+    return refused([`.retired/${start.id}.json holds another record`]);
   const busy = start.attempts.filter((a) => ['starting', 'running', 'judging'].includes(a.phase.t));
   if (busy.length > 0) return refused(busy.map((a) => `a${a.n} is still ${a.phase.t}`));
   let x = start;
@@ -55,17 +59,25 @@ async function retireFinished(d: RetireDeps, start: Launched): Promise<Retired> 
   }
   if (failures.length > 0) return refused(failures);
 
-  // The self-DM is opened as the crew, which must still be active.
-  const crew = buddyActor(crewBuddyId);
-  const selfDm = await d.core.openChannel(crew, { kind: 'direct', members: [crew] });
-  for (const channelId of [chatChannelId, selfDm.id]) {
-    await d.core.setChannelArchived(OWNER, channelId, true, `exp:${x.id}:retire:${channelId}`);
-    d.onChannelArchived(channelId);
+  // The crew is archived last of all, after its channels: an archived crew means a retire that
+  // stopped later (review 2026-11-03: the self-DM open as the archived crew threw on every retry).
+  const status = (await d.core.getBuddy(crewBuddyId)).status;
+  if (status === 'active') {
+    const crew = buddyActor(crewBuddyId);
+    const selfDm = await d.core.openChannel(crew, { kind: 'direct', members: [crew] });
+    for (const channelId of [chatChannelId, selfDm.id]) {
+      await d.core.setChannelArchived(OWNER, channelId, true, `exp:${x.id}:retire:${channelId}`);
+      d.onChannelArchived(channelId);
+    }
+    await archiveCrew(d, x.id, crewBuddyId);
   }
-  const key = `exp:${x.id}:retire:crew`;
-  await d.core.updateBuddy(OWNER, { buddyId: crewBuddyId, changes: { status: 'archived' }, key });
-  d.onBuddyArchived(crewBuddyId);
   await fsp.rm(paths(d.root, x.id).crewDir, { recursive: true, force: true });
   await fileRetired(d.root, x, d.now());
   return { t: 'retired' };
+}
+
+async function archiveCrew(d: RetireDeps, id: string, buddyId: string): Promise<void> {
+  const key = `exp:${id}:retire:crew`;
+  await d.core.updateBuddy(OWNER, { buddyId, changes: { status: 'archived' }, key });
+  d.onBuddyArchived(buddyId);
 }

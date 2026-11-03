@@ -1,6 +1,6 @@
 import type { BuddiesCore } from '@unleashd/buddies-core';
 import {
-  Act,
+  BuddyAct,
   CHARTER_DEFAULTS,
   type Charter,
   CharterInput,
@@ -16,13 +16,6 @@ import type { ExpeditionHost } from './host';
 // The `expedition` Buddy tool (docs/expeditions-lean-design.md §3.7). launch, verdict and retire
 // are the owner's (HTTP); a Buddy drafts, reads and relays the owner's steering.
 
-const BuddyAct = z.discriminatedUnion('do', [
-  Act.options[1],
-  Act.options[2],
-  Act.options[3],
-  Act.options[4],
-  Act.options[6],
-]);
 const Action = z.discriminatedUnion('do', [
   z.object({ do: z.literal('draft'), charter: CharterInput }).strict(),
   z.object({ do: z.literal('status'), id: z.string().min(1) }).strict(),

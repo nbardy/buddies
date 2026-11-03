@@ -5,6 +5,7 @@ import {
   type FinishReason,
   type Launch,
   type Lesson,
+  type Tree,
   attemptResult,
   stateLabel,
 } from '@unleashd/shared';
@@ -22,6 +23,17 @@ export const CREW_ROLE = [
 const sha8 = (sha: string) => sha.slice(0, 8);
 const lessonText = (l: Lesson) => (l.t === 'lesson' ? l.text : 'no lesson');
 
+/** Where an attempt's uncommitted work went. Review 2026-11-03: every interrupted attempt was
+ * said to be at its salvage ref, which a clean tree never gets; its commits are on its branch. */
+const KEPT: { [K in Tree['t']]: (t: Extract<Tree, { t: K }>) => string } = {
+  released: (t) => (t.salvageRef === null ? '' : ` · uncommitted work at ${t.salvageRef}`),
+  left: (t) => ` · tree left in place (${t.reason})`,
+  planned: () => '',
+  live: () => '',
+  absent: () => '',
+};
+const kept = (t: Tree) => (KEPT[t.t] as (t: Tree) => string)(t);
+
 /** One prior attempt's line: result, lesson, where its work is. */
 function priorLine(x: Expedition, a: Attempt): string {
   const p = a.phase;
@@ -29,13 +41,13 @@ function priorLine(x: Expedition, a: Attempt): string {
     case 'starting':
     case 'running':
     case 'interrupted':
-      return `a${a.n} ${p.t} · work kept at refs/salvage/expeditions/${x.id}/a${a.n}`;
+      return `a${a.n} ${p.t} · branch ${a.branch}${kept(a.tree)}`;
     case 'judging':
     case 'judged': {
       const failing = p.t === 'judged' && p.verdict.t === 'checks' ? p.verdict.runs.at(-1) : null;
       const tail = failing?.outcome.t === 'failed' ? `\n  ${failing.outcome.tail.slice(-600)}` : '';
       const head = `a${a.n} ${attemptResult(a, x.charter.done)} · ${lessonText(p.end.lesson)}`;
-      return `${head} · branch ${a.branch} @ ${sha8(p.end.sha)}${tail}`;
+      return `${head} · branch ${a.branch} @ ${sha8(p.end.sha)}${kept(a.tree)}${tail}`;
     }
   }
 }
@@ -93,6 +105,8 @@ export function chatAct(x: Expedition, body: string): Act {
 
 export const judgedLine = (x: Expedition, a: Attempt, lesson: Lesson) =>
   `a${a.n} ${attemptResult(a, x.charter.done)} · Lesson: ${lessonText(lesson)}`;
+export const interruptedLine = (a: Attempt) =>
+  `a${a.n} interrupted by a server restart; it does not count, and the next attempt is told.`;
 export const askVerdictLine = (a: Attempt, sha: string) =>
   `a${a.n} ended @${sha8(sha)} (branch ${a.branch}). Reply pass or fail.`;
 export const finishedLine = (x: Expedition, reason: FinishReason) =>

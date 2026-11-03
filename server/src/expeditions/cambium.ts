@@ -99,5 +99,15 @@ export async function branches(repo: string, id: string): Promise<string[]> {
   return out.split('\n').filter(Boolean);
 }
 
-export const tip = (repo: string, branch: string) =>
-  git(repo, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]);
+export type Tip = { t: 'tip'; sha: string } | { t: 'lost' };
+/** The attempt branch's tip at turn end. Review 2026-11-03: a crew that renamed or deleted its
+ * branch made this throw on every step, so the attempt never settled and retire was refused. The
+ * branch is put back at the tree's HEAD; with the tree gone too, the turn is `lost`. */
+export async function tip(repo: string, branch: string, tree: string): Promise<Tip> {
+  const ref = await exec('git', repo, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]);
+  if (ref.code === 0) return { t: 'tip', sha: ref.stdout };
+  const head = await exec('git', tree, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  if (head.code !== 0) return { t: 'lost' };
+  await git(repo, ['branch', branch, head.stdout]);
+  return { t: 'tip', sha: head.stdout };
+}

@@ -77,26 +77,24 @@ async function executable(repo: string, bin: string): Promise<boolean> {
 /** Runs the checks on `sha` in a fresh detached checkout, stopping at the first that does not
  * pass. Every argv element that names a file or directory tracked at `base` is first restored
  * from `base`, so the attempt cannot edit the oracle (files it ADDED in a named directory stay:
- * documented limit). A tree-setup error is one run with outcome `error`. */
+ * documented limit). A tree-setup error is one run with outcome `error`. `stop` (the expedition
+ * finished) kills a running check and skips the rest. */
 export async function runChecks(
   repo: string,
-  j: { dir: string; sha: string; base: string; checks: string[][] }
+  j: { dir: string; sha: string; base: string; checks: string[][] },
+  stop: AbortSignal
 ): Promise<CheckRun[]> {
   const runs: CheckRun[] = [];
   try {
     await fsp.rm(j.dir, { recursive: true, force: true });
     await git(repo, ['worktree', 'prune']);
     await git(repo, ['worktree', 'add', '--detach', j.dir, j.sha]);
-    const named = [...new Set(j.checks.flat())].filter(
-      (e) => !e.startsWith('-') && !path.isAbsolute(e) && !e.split('/').includes('..')
-    );
-    const tracked = (await git(repo, ['ls-tree', '--name-only', j.base, '--', ...named])).split(
-      '\n'
-    );
-    const restore = tracked.filter(Boolean);
-    if (restore.length > 0) await git(j.dir, ['checkout', j.base, '--', ...restore]);
+    const restore = await oracleFiles(repo, j.base, j.checks);
+    if (restore.length > 0)
+      await git(j.dir, ['--literal-pathspecs', 'checkout', j.base, '--', ...restore]);
     for (const argv of j.checks) {
-      const outcome = await runOne(argv, j.dir, `${j.dir}.scratch`);
+      if (stop.aborted) break;
+      const outcome = await runOne(argv, j.dir, `${j.dir}.scratch`, stop);
       runs.push({ argv, outcome });
       if (outcome.t !== 'passed') break;
     }
@@ -108,6 +106,19 @@ export async function runChecks(
   return runs;
 }
 
+/** The argv elements that are paths tracked at `base`, as literal names. Review 2026-11-03: an
+ * empty pathspec list (`["/usr/bin/pytest","-q"]`) or `.` made ls-tree list every root entry, and
+ * the restore reset the whole attempt to base; `*` or `:(exclude)x` were read as patterns. */
+async function oracleFiles(repo: string, base: string, checks: string[][]): Promise<string[]> {
+  const named = [...new Set(checks.flat().map((e) => path.posix.normalize(e).replace(/\/+$/, '')))];
+  const paths = named.filter(
+    (e) => !e.startsWith('-') && !path.isAbsolute(e) && e !== '.' && !e.split('/').includes('..')
+  );
+  if (paths.length === 0) return [];
+  const args = ['--literal-pathspecs', 'ls-tree', '-z', '--name-only', base, '--', ...paths];
+  return (await git(repo, args)).split('\0').filter(Boolean);
+}
+
 const CHECK_TIMEOUT_MS = 2 * 60 * 60_000;
 const TAIL = 4000;
 const CHECK_ENV = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TZ'];
@@ -115,7 +126,12 @@ const CHECK_ENV = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TZ'];
 /** Audit #3 (kept from command.ts): the check runs in its own process group with a scrubbed env
  * and a throwaway HOME/TMPDIR; on timeout and after exit the whole group is killed, and pipes a
  * `setsid` straggler holds are closed after 2 s so the check always settles. */
-async function runOne(argv: string[], cwd: string, scratch: string): Promise<CheckOutcome> {
+async function runOne(
+  argv: string[],
+  cwd: string,
+  scratch: string,
+  stop: AbortSignal
+): Promise<CheckOutcome> {
   await fsp.rm(scratch, { recursive: true, force: true });
   const home = path.join(scratch, 'home');
   const tmp = path.join(scratch, 'tmp');
@@ -142,14 +158,16 @@ async function runOne(argv: string[], cwd: string, scratch: string): Promise<Che
         child.stdout.destroy();
         child.stderr.destroy();
       });
+      const abandon = () => {
+        timedOut = true;
+        killGroup();
+        setTimeout(closePipes, 2000).unref();
+      };
       const timer = setTimeout(
-        labelled('timer expedition-check-timeout', () => {
-          timedOut = true;
-          killGroup();
-          setTimeout(closePipes, 2000).unref();
-        }),
+        labelled('timer expedition-check-timeout', abandon),
         CHECK_TIMEOUT_MS
       );
+      stop.addEventListener('abort', abandon, { once: true });
       child.on('error', (e) => {
         clearTimeout(timer);
         resolve({ t: 'error', message: `${argv[0]}: ${e.message}` });
@@ -162,6 +180,7 @@ async function runOne(argv: string[], cwd: string, scratch: string): Promise<Che
       });
       child.on('close', () => {
         clearTimeout(timer);
+        stop.removeEventListener('abort', abandon);
         const failed: CheckOutcome = { t: 'failed', exitCode: code ?? -1, tail: tail.slice(-TAIL) };
         resolve(timedOut ? { t: 'timed_out', tail } : code === 0 ? { t: 'passed' } : failed);
       });

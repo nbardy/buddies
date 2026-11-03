@@ -26,7 +26,13 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
     if (!h) return;
     const parsed = act.body.safeParse(req.body);
     if (!parsed.success) res.status(400).json({ error: parsed.error.message });
-    else reply(res, await h.act(req.params.id, parsed.data, 'owner'));
+    // Review 2026-11-03: an act that threw (a core write in launch or retire) left the request
+    // unanswered and the rejection unhandled, which Express 4 does not catch.
+    else
+      await h.act(req.params.id, parsed.data, 'owner').then(
+        (a) => reply(res, a),
+        (e: Error) => res.status(500).json({ error: e.message })
+      );
   });
 }
 

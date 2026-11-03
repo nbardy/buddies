@@ -57,21 +57,32 @@ export async function save(root: string, x: Expedition): Promise<void> {
   await fsp.rename(tmp, file);
 }
 
-export const retiredTaken = (root: string, id: string) => fs.existsSync(paths(root, id).retired);
+/** `.retired/<id>.json` holds another record: refuse rather than overwrite. Holding THIS record
+ * means an earlier retire stopped after filing it, and only the live unlink is left. */
+export function retiredTaken(root: string, x: Expedition): boolean {
+  const file = paths(root, x.id).retired;
+  if (!fs.existsSync(file)) return false;
+  const filed = JSON.parse(fs.readFileSync(file, 'utf8')) as { record?: { createdAt?: unknown } };
+  return filed.record?.createdAt !== x.createdAt;
+}
 
-/** The retired wrapper goes to `.retired/<id>.json` (never over an existing file), then the
- * live file is unlinked. Nothing parses `.retired/`: the loader skips directories. */
+/** The retired wrapper is written to a tmp file, then linked to `.retired/<id>.json` (never over
+ * an existing file), then the live file is unlinked. Review 2026-11-03: a copyFile could leave a
+ * torn wrapper that refused every later retire. Nothing parses `.retired/` at load. */
 export async function fileRetired(root: string, x: Expedition, at: string): Promise<void> {
   const p = paths(root, x.id);
   await fsp.mkdir(path.dirname(p.retired), { recursive: true, mode: 0o700 });
-  const tmp = `${p.file}.retired.tmp`;
+  const tmp = `${p.retired}.${randomBytes(4).toString('hex')}.tmp`;
   await fsp.writeFile(tmp, JSON.stringify({ v: 1, t: 'retired', at, record: x }), { mode: 0o600 });
   try {
-    await fsp.copyFile(tmp, p.retired, fs.constants.COPYFILE_EXCL);
+    await fsp.link(tmp, p.retired);
+  } catch (error) {
+    // EEXIST: an interrupted retire filed this record already (retiredTaken checked it is ours).
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
   } finally {
     await fsp.rm(tmp, { force: true });
   }
-  await fsp.unlink(p.file);
+  await fsp.rm(p.file, { force: true });
 }
 
 /** `<slug(name) ≤24>-<6 hex>`. */
