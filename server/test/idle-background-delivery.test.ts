@@ -210,8 +210,9 @@ function api(port: number) {
   };
 }
 
+// Child-process startup (node + ps + an MCP call) takes tens of seconds at load 50+ (2026-11-03: 'held mid-turn' timed out at 30 s); a wait returns the moment its condition holds, so the budget only matters when something is truly stuck.
 async function eventually<T>(read: () => Promise<T> | T, ok: (v: T) => boolean, what: string) {
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 90_000;
   let last: T | undefined;
   while (Date.now() < deadline) {
     last = await read();
@@ -245,7 +246,7 @@ after(async () => {
 
 test(
   'an owner post reaches a Buddy whose model is idle while its background job runs',
-  { timeout: 120_000 },
+  { timeout: 240_000 },
   async () => {
     const port = freePortSync();
     const http = api(port);
@@ -463,7 +464,7 @@ test(
 // if mcp.ts passes a tool-call boundary at the hold, or the crate re-delivers any held-Stop take.
 test(
   'a post taken at a held Stop that owes no reply is not delivered again',
-  { timeout: 120_000 },
+  { timeout: 240_000 },
   async () => {
     await stopBackend();
     for (const name of [

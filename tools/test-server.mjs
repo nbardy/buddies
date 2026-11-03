@@ -44,7 +44,14 @@ const mode = args.includes('--fast') ? 'fast' : args.includes('--slow') ? 'slow'
 // flags go to every `node --test` (e.g. --test-name-pattern).
 const picked = args.filter((arg) => !arg.startsWith('-'));
 const forwarded = args.filter((arg) => arg.startsWith('-') && arg !== '--fast' && arg !== '--slow');
-const concurrency = Number(process.env.UNLEASHD_TEST_CONCURRENCY ?? os.availableParallelism());
+// Pool size leaves room for whatever else the machine is running. Every unit boots real backends
+// and fake CLIs whose wall-clock deadlines (leases, idle and runtime timers) are scaled for an idle
+// core each; on 2026-11-03 a full run at load 50+ failed units that all pass alone, because ten
+// units on cores already taken by other work starved each other's child processes. The 1-minute
+// load average includes our own previous run, so it only ever shrinks the pool (never below 3).
+const cores = os.availableParallelism();
+const spare = Math.max(3, Math.round(cores - os.loadavg()[0]));
+const concurrency = Number(process.env.UNLEASHD_TEST_CONCURRENCY ?? Math.min(cores, spare));
 if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64) {
   throw new Error('UNLEASHD_TEST_CONCURRENCY must be an integer from 1 to 64');
 }

@@ -40,7 +40,7 @@ export function claudeLine(
   })}\n`;
 }
 
-export async function until<T>(read: () => T | undefined, ms = 10_000): Promise<T> {
+export async function until<T>(read: () => T | undefined, ms = 60_000): Promise<T> {
   const deadline = Date.now() + ms;
   for (;;) {
     const value = read();
