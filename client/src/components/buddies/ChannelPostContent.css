@@ -1,4 +1,4 @@
-/* Edit and react float in a pill over the post's bottom-right edge: shown on hover (desktop) and
+/* Edit and react float in a pill under the post's bottom-right corner: shown on hover (desktop) and
    when the post is focused or tapped (touch), never in flow. */
 .channel-post-content {
   position: relative;
@@ -24,11 +24,14 @@
   background: var(--bg-hover);
   color: var(--text-bright);
 }
+.channel-post-edited {
+  font-size: var(--fs-3); /* the time's size; the heading is body size */
+}
 .channel-post-tools {
   position: absolute;
   z-index: 2;
   right: 0;
-  bottom: -14px;
+  top: 100%; /* below the text: bottom:-14px covered a short post's last line on phone */
   display: flex;
   gap: var(--sp-1);
   padding: var(--sp-1);
