@@ -416,10 +416,9 @@ async function commit(x: Expedition): Promise<Expedition>;
  *  STEP: Record<State['t'], (x) => Promise<Expedition>> = { draft: id, running: live, paused: live,
  *  finished: settleOnly }. */
 async function step(id: string): Promise<void>;
-/** Owner posts in launch.chatChannelId with ord > chatSeenOrd, oldest first (pages of 50,
- *  newest-first, as the old observeChat). Each goes through chatAct, then applyAct. An act that
- *  ALLOWED refuses is recorded as a note with its text, so nothing is silently dropped. Advances
- *  chatSeenOrd. */
+/** Owner posts in launch.chatChannelId with ord > chatSeenOrd, oldest first: the channel feed
+ *  AND every thread's replies (as built, §12). Each goes through chatAct, then applyAct; its ord
+ *  commits with its act. An act the state refuses is answered with a status line in the chat. */
 async function readChat(x: Launched): Promise<Expedition>;
 /** request = core.getPost(OWNER, requestId).request.state:
  *  awaiting|none → unchanged; answered → TurnEnd{answered, lessonOf(answer.body)};
@@ -535,7 +534,7 @@ has to approve it first.
 ```ts
 /** The acts a Buddy may relay (launch, verdict, retire are the owner's). */
 const BuddyAct = z.discriminatedUnion('do', [
-  Act.options[1], Act.options[2], Act.options[3], Act.options[4], Act.options[6], // pause resume stop extend note
+  // as built: BuddyAct in shared, chosen by name: pause resume stop extend note
 ]);
 const Action = z.discriminatedUnion('do', [
   z.object({ do: z.literal('draft'), charter: CharterInput }).strict(),
@@ -789,7 +788,12 @@ Client: §8 deleted files plus the §6 client edits.
 - **Interrupted attempts**: when an attempt is interrupted before its `cambium add` finished, a
   half-made workspace may need `git cambium recover` by hand. `release` reports `absent` when the
   registry has no entry, and `left` when Cambium refuses.
-- **Checks run one at a time host-wide**, by design for the shared machine.
+- **Checks run one at a time host-wide**, by design for the shared machine. Finishing an
+  expedition aborts its own queued and running checks.
+- **Retire needs an `origin` remote**: `git cambium archive` refuses `push-unverified` without
+  one, so a finished expedition in a repo with no origin cannot retire (the refusal is shown).
+- **Archived crew run**: a crew run cancelled at boot stays `cancel_requested` until its lease
+  ends (about 5 min); a retire in that window shows the archived crew as working until then.
 
 ## 12. As built: deviations
 
@@ -812,3 +816,18 @@ Client: §8 deleted files plus the §6 client edits.
   `commit`), so a refusal leaves the record with its updated trees.
 - **Rail rows** carry `section`, `heading` and `list` class names too, so both shells render the one
   section header; the phone has no separate `MobileSection` wrapper.
+- **Review fixes (2026-11-03).**
+  - The oracle restore passes only literal, tracked, non-root paths (`--literal-pathspecs`, no
+    `.`); an argv with no such element restores nothing instead of the whole tree.
+  - Only an `answered` turn is judged; `failed`, `cancelled` and `lost` turns end `skipped`, and
+    the label names the turn. A crew that renamed or deleted its branch gets it back at its tree's
+    HEAD; with the tree gone too, the turn is `lost` (sha = base).
+  - The chat is read from the channel feed and every thread; each command's ord commits with it,
+    so a later failure never replays it; a refused act is answered in the chat, never a note.
+  - Trees are released before the next brief is written, and a prior line names the attempt
+    branch plus the salvage ref only when one exists. A restart posts an interrupted line.
+  - The owner act route answers 500 when an act throws; acts are refused until `start()`.
+  - Retire files through tmp + `link` (exclusive), resumes past an already archived crew, and
+    archives a crew left behind by a failed launch when a draft is retired.
+  - The modal links to the crew chat and posts notes and commands into it; the Buddy tool's acts
+    are chosen by name (`BuddyAct` in shared).
