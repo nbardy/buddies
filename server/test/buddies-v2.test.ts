@@ -607,7 +607,7 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     w.during.set(1, async (turn) => {
       // Owner-authored input: the grant is the owner's, so team_admin is listed.
       const names = await toolNames(turn.mcp);
-      assert.equal(names.length, 14);
+      assert.equal(names.length, 13);
       assert.ok(names.includes('team_admin'));
       assert.ok(names.includes('expedition'));
       assert.ok(names.includes('channel'));
