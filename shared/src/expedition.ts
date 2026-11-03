@@ -255,10 +255,24 @@ export function attemptResult(a: Attempt, done: Done): string {
         : `${verdictLabel(p.verdict)} (turn ${p.end.turn})`;
   }
 }
+/** The check that stopped the run: checks stop at the first that does not pass. */
+function failure(o: CheckOutcome | undefined): string {
+  if (!o) return 'no check ran';
+  switch (o.t) {
+    case 'passed':
+      return 'a check did not run';
+    case 'failed':
+      return `exit ${o.exitCode}`;
+    case 'timed_out':
+      return 'timed out';
+    case 'error':
+      return o.message.slice(0, 60);
+  }
+}
 function verdictLabel(v: Verdict): string {
   switch (v.t) {
     case 'checks':
-      return v.pass ? 'pass' : `fail (${v.runs.map((r) => r.outcome.t).join(', ')})`;
+      return v.pass ? 'pass' : `fail (${failure(v.runs.at(-1)?.outcome)})`;
     case 'owner':
       return v.pass ? 'pass' : 'fail';
     case 'skipped':
