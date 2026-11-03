@@ -1,280 +1,229 @@
-// The expedition modal's wire shapes: a live expedition (GET /api/buddies/expeditions/:id) and a
-// draft (GET /api/buddies/expeditions/drafts/:draftId). One type source: the server's projections
-// (server/src/expeditions/view.ts) return them; the client modal and cards read them.
+import { z } from 'zod';
 
-export type ExpeditionRun =
-  | { t: 'running' }
-  | { t: 'paused' }
-  | { t: 'waiting_owner'; question: string }
-  | {
-      t: 'finished';
-      /** When it finished: the header shows how long it took, and the badge's clock stops. */
-      at: string;
-      reason:
-        | 'done'
-        | 'attempts_spent'
-        | 'decisions_spent'
-        | 'deadline'
-        | 'owner_stop'
-        | 'setup_failed';
-      summary: string;
-    };
+// Expeditions (docs/expeditions-lean-design.md): one source for the record, its acts and labels.
+// The server parses records with these once, at load; the client reads the inferred types.
 
-/** Why a finished expedition stopped, in the owner's words (the pill and the result line). */
-const STOPPED: Record<
-  Exclude<Extract<ExpeditionRun, { t: 'finished' }>['reason'], 'done'>,
-  string
-> = {
-  attempts_spent: 'attempts used up',
-  decisions_spent: 'decisions used up',
-  deadline: 'deadline reached',
-  owner_stop: 'stopped by you',
-  setup_failed: 'setup failed',
+const str = z.string();
+const nonEmpty = z.string().min(1);
+/** One variant of a `t`-tagged union. */
+const v = <T extends string, S extends z.ZodRawShape>(t: T, shape: S) =>
+  z.object({ t: z.literal(t), ...shape });
+
+/** One host-run check: execFile argv, no shell; exit 0 passes. */
+export const Argv = z
+  .array(nonEmpty.refine((w) => !w.includes('\0'), 'no NUL bytes'))
+  .min(1)
+  .max(64);
+export const Done = z.discriminatedUnion('t', [
+  v('checks', { checks: z.array(Argv).min(1).max(10) }).strict(),
+  v('owner', {}).strict(),
+]);
+export type Done = z.infer<typeof Done>;
+/** The crew's one seat. model/effort absent = the provider's default (absence is the meaning). */
+const Seat = z
+  .object({ provider: nonEmpty, model: nonEmpty.optional(), reasoningEffort: nonEmpty.optional() })
+  .strict();
+export const Charter = z
+  .object({
+    name: str.trim().min(1).max(60),
+    goal: str.trim().min(1).max(8000),
+    done: Done,
+    maxAttempts: z.number().int().min(1).max(60),
+    maxLive: z.number().int().min(1).max(4),
+    hours: z.number().min(0.25).max(72),
+    seat: Seat,
+  })
+  .strict();
+export type Charter = z.infer<typeof Charter>;
+/** What the Buddy tool may leave out, and the named defaults it then takes (listed in the reply). */
+export const CHARTER_DEFAULTS = { maxLive: 1, hours: 8, seat: { provider: 'claude' } } as const;
+export const CharterInput = Charter.partial({ maxLive: true, hours: true, seat: true });
+
+const Lesson = z.discriminatedUnion('t', [v('lesson', { text: str }), v('none', {})]);
+export type Lesson = z.infer<typeof Lesson>;
+export const CheckOutcome = z.discriminatedUnion('t', [
+  v('passed', {}),
+  v('failed', { exitCode: z.number(), tail: str }),
+  v('timed_out', { tail: str }),
+  v('error', { message: str }),
+]);
+export type CheckOutcome = z.infer<typeof CheckOutcome>;
+const CheckRun = z.object({ argv: Argv, outcome: CheckOutcome });
+export type CheckRun = z.infer<typeof CheckRun>;
+/** `skipped`: the expedition finished before this attempt was judged. */
+const Verdict = z.discriminatedUnion('t', [
+  v('checks', { pass: z.boolean(), runs: z.array(CheckRun) }),
+  v('owner', { pass: z.boolean() }),
+  v('skipped', {}),
+]);
+export type Verdict = z.infer<typeof Verdict>;
+/** How the crew turn ended; sha = the attempt branch tip at turn end (= base if never committed). */
+const TurnEnd = z.object({
+  at: str,
+  turn: z.enum(['answered', 'failed', 'cancelled']),
+  sha: str,
+  lesson: Lesson,
+});
+export type TurnEnd = z.infer<typeof TurnEnd>;
+/** `interrupted` (a restart) is not counted against the budget. */
+const AttemptPhase = z.discriminatedUnion('t', [
+  v('starting', {}),
+  v('running', { requestId: str }),
+  v('interrupted', { at: str }),
+  v('judging', { end: TurnEnd }),
+  v('judged', { end: TurnEnd, verdict: Verdict }),
+]);
+/** released.salvageRef null: the tree was clean. absent: never created. left: Cambium refused. */
+const Tree = z.discriminatedUnion('t', [
+  v('planned', {}),
+  v('live', { path: str }),
+  v('released', { salvageRef: str.nullable() }),
+  v('absent', {}),
+  v('left', { reason: str }),
+]);
+export type Tree = z.infer<typeof Tree>;
+const Attempt = z.object({
+  n: z.number().int().min(1),
+  workspace: str,
+  branch: str,
+  startedAt: str,
+  tree: Tree,
+  phase: AttemptPhase,
+});
+export type Attempt = z.infer<typeof Attempt>;
+
+const Origin = z.discriminatedUnion('t', [
+  v('thread', { channelId: str, rootId: str }),
+  v('direct', {}),
+]);
+export type Origin = z.infer<typeof Origin>;
+/** baseSha: main at launch, every attempt's base and the oracle source. chatSeenOrd '' = none. */
+const Launch = z.object({
+  at: str,
+  deadline: str,
+  repoRoot: str,
+  baseSha: str,
+  crewBuddyId: str,
+  chatChannelId: str,
+  chatSeenOrd: str,
+});
+export type Launch = z.infer<typeof Launch>;
+const FinishReason = z.discriminatedUnion('t', [
+  v('passed', { n: z.number() }),
+  v('budget', {}),
+  v('deadline', {}),
+  v('stopped', { by: str }),
+  v('setup_failed', { detail: str }),
+]);
+export type FinishReason = z.infer<typeof FinishReason>;
+const State = z.discriminatedUnion('t', [
+  v('draft', { issues: z.array(str) }),
+  v('running', { launch: Launch }),
+  v('paused', { launch: Launch }),
+  v('finished', { launch: Launch, at: str, reason: FinishReason }),
+]);
+export type State = z.infer<typeof State>;
+export const Expedition = z
+  .object({
+    v: z.literal(1),
+    id: str,
+    workspaceId: str,
+    createdAt: str,
+    launcherId: str,
+    origin: Origin,
+    charter: Charter,
+    state: State,
+    attempts: z.array(Attempt),
+    notes: z.array(z.object({ at: str, by: str, text: str })),
+  })
+  .strict();
+export type Expedition = z.infer<typeof Expedition>;
+
+/** GET /api/buddies/expeditions. An unreadable file is a row too: it shows in every rail. */
+export type ExpeditionRow =
+  | ({ t: 'ok' } & ExpeditionSummary)
+  | { t: 'unreadable'; id: string; reason: string };
+/** needsOwner: an attempt waits on the owner's verdict. crewBuddyId null: not launched. */
+export type ExpeditionSummary = {
+  id: string;
+  name: string;
+  workspaceId: string;
+  state: State['t'];
+  label: string;
+  needsOwner: boolean;
+  crewBuddyId: string | null;
 };
 
-/**
- * The run state as the owner reads it: the pill, the badge, the list rows. One definition for the
- * server's badge and the client (2026-11-01 visual pass: "finished (done)" said it twice).
- */
-export function expeditionRunLabel(run: ExpeditionRun): string {
-  switch (run.t) {
+/** Owner/Buddy acts: one schema for HTTP, chat and tool. */
+export const Act = z.discriminatedUnion('do', [
+  z.object({ do: z.literal('launch') }).strict(),
+  z.object({ do: z.literal('pause') }).strict(),
+  z.object({ do: z.literal('resume') }).strict(),
+  z.object({ do: z.literal('stop') }).strict(),
+  z.object({ do: z.literal('extend'), hours: z.number().positive().max(72) }).strict(),
+  z.object({ do: z.literal('verdict'), n: z.number().int(), pass: z.boolean() }).strict(),
+  z.object({ do: z.literal('note'), text: str.trim().min(1).max(2000) }).strict(),
+  z.object({ do: z.literal('retire') }).strict(),
+]);
+export type Act = z.infer<typeof Act>;
+const LIVE = ['running', 'paused'] as const;
+/** The one guard table: which states accept which act (server refuses; client shows buttons). */
+export const ALLOWED: Record<Act['do'], readonly State['t'][]> = {
+  launch: ['draft'],
+  pause: ['running'],
+  resume: ['paused'],
+  stop: LIVE,
+  extend: LIVE,
+  verdict: LIVE,
+  note: LIVE,
+  retire: ['draft', 'finished'],
+};
+/** Attempts the budget counts (everything but interrupted). */
+export const counted = (x: Expedition) =>
+  x.attempts.filter((a) => a.phase.t !== 'interrupted').length;
+
+export function stateLabel(x: Expedition): string {
+  const s = x.state;
+  switch (s.t) {
+    case 'draft':
+      return 'Draft';
     case 'running':
-      return 'Running';
+      return `Running · ${counted(x)}/${x.charter.maxAttempts}`;
     case 'paused':
       return 'Paused';
-    case 'waiting_owner':
-      return 'Needs you';
     case 'finished':
-      return run.reason === 'done' ? 'Done' : `Stopped · ${STOPPED[run.reason]}`;
+      return finishedLabel(s.reason);
   }
 }
-
-/**
- * Where an expedition is in its retirement (server/src/expeditions/ledger.ts Retirement):
- * `retiring` while its trees, refs, chats and crew are put away, with each step the host refused
- * (an archive origin did not confirm, a tree it could not remove) until the owner asks again;
- * `retired` once it is frozen (GET serves an ExpeditionRetiredView).
- */
-export type ExpeditionRetirement =
-  | { t: 'active' }
-  | { t: 'retiring'; at: string; by: string; refused: { branch: string; reason: string }[] }
-  | { t: 'retired'; at: string };
-
-/** Where a question stands, derived from the ledger (design.md R5): its furthest stage.
- * `waiting`: its work is queued until the questions in `after` are verified (held, not failed). */
-export type ExpeditionStage =
-  | 'planned'
-  | 'waiting'
-  | 'implementing'
-  | 'claimed'
-  | 'checked'
-  | 'validated'
-  | 'integrated'
-  | 'dead';
-
-export interface ExpeditionQuestion {
-  id: string;
-  title: string;
-  detail: string;
-  scope: 'in' | 'explore' | 'parked';
-  status: 'open' | 'verified' | 'dead';
-  stage: ExpeditionStage;
-  /** File custody: repo-relative prefixes; work on overlapping paths runs one at a time. */
-  paths: string[];
-  /** The questions this question's work waits for (each must be closed verified). */
-  after: { id: string; title: string }[];
-  /** How its claims are accepted (design.md R11): a host-run command on the candidate commit,
-   * or an independent check panel; `legacy` marks a question added before acceptance existed. */
-  acceptance: {
-    rule: { t: 'command'; argv: string[]; timeoutSeconds: number } | { t: 'panel' };
-    provenance: 'manager' | 'legacy';
-  };
-  attempts: string[];
+const FINISHED: { [K in FinishReason['t']]: (r: Extract<FinishReason, { t: K }>) => string } = {
+  passed: (r) => `Passed (a${r.n})`,
+  budget: () => 'Stopped · budget spent',
+  deadline: () => 'Stopped · deadline',
+  stopped: () => 'Stopped by you',
+  setup_failed: (r) => `Setup failed: ${r.detail}`,
+};
+const finishedLabel = (r: FinishReason) => (FINISHED[r.t] as (r: FinishReason) => string)(r);
+/** "checking" or "needs your verdict" while judging, by the charter's done. */
+export function attemptResult(a: Attempt, done: Done): string {
+  const p = a.phase;
+  switch (p.t) {
+    case 'starting':
+    case 'running':
+    case 'interrupted':
+      return p.t;
+    case 'judging':
+      return done.t === 'checks' ? 'checking' : 'needs your verdict';
+    case 'judged':
+      return verdictLabel(p.verdict);
+  }
 }
-
-/** A worker attempt's own git worktree (design.md R1); none for a manager or before admission. */
-export type ExpeditionWorktree = { t: 'none' } | { t: 'tree'; branch: string; path: string };
-
-/** An attempt's measured cost (design.md R6): provider-counted tokens, never an estimate.
- * `none`: it has not ended (or never ran); `settling`: ended, its run's usage not read yet. */
-export type ExpeditionAttemptCost =
-  | { t: 'none' }
-  | { t: 'settling' }
-  /** `label`: one token figure for the card; `detail`: input, output and cache, for its title. */
-  | { t: 'measured'; label: string; detail: string }
-  | { t: 'unmeasured'; reason: string };
-
-/** Where an attempt is. admitted: its worktree is being made; dropped: it never started (no
- * worktree), with why; ended: its result as a verdict word (Claim, Blocked, Verified…) and a
- * one-line summary. */
-export type ExpeditionAttemptPhase =
-  | { t: 'planned' }
-  | { t: 'admitted' }
-  | { t: 'dropped'; reason: string }
-  | { t: 'posting' }
-  | { t: 'posted' }
-  | { t: 'ended'; verdict: string; summary: string };
-
-export interface ExpeditionAttempt {
-  id: string;
-  kind: 'manager' | 'work' | 'check';
-  /** By question title, never a raw id, e.g. `Work on “Add mul()”`. */
-  label: string;
-  /** The manager's brief for a work attempt (markdown); absent for a manager or a check, which
-   * have no assignment of their own beyond `brief`. */
-  ask: string | null;
-  seat: string;
-  questionId: string | null;
-  phase: ExpeditionAttemptPhase;
-  live: boolean;
-  /** The exact instructions the worker received; null until briefed. */
-  brief: string | null;
-  requestId: string | null;
-  worktree: ExpeditionWorktree;
-  cost: ExpeditionAttemptCost;
-}
-
-/** A done check as chartered (design.md R2): a command the host runs, or a judged statement. */
-export type ExpeditionDoneCheck =
-  | { kind: 'command'; argv: string[]; timeoutSeconds: number }
-  | { kind: 'judged'; text: string };
-
-export type ExpeditionDone = { t: 'checks'; checks: ExpeditionDoneCheck[] } | { t: 'owner' };
-
-/** One host validation: the command checks run on a claim's commit or on the branch head. */
-export interface ExpeditionValidation {
-  id: string;
-  /** What it ran on: a claim's candidate commit (shown with that attempt) or the branch head. */
-  subject: { t: 'candidate'; claimAttemptId: string } | { t: 'head' };
-  /** e.g. `candidate 1a2b3c4d5e of w12` or `the head 1a2b3c4d5e`, with its verdict. */
-  label: string;
-  verdict: 'running' | 'passed' | 'failed';
-  /** One per recorded command check; `outcome` is `passed` or names the exit code / error. */
-  checks: { checkIndex: number; passed: boolean; outcome: string }[];
-}
-
-/** The expedition's own branch (design.md R3): what was merged into it, and the last refusal. */
-export interface ExpeditionIntegration {
-  branch: string;
-  head: string;
-  integrated: number;
-  queued: number;
-  lastRefusal: { t: 'none' } | { t: 'refused'; label: string };
-}
-
-/** The owner's charter as shown in the Charter tab: the same for a draft and a live expedition. */
-export interface ExpeditionCharterView {
-  name: string;
-  /** Markdown, as the Buddy wrote it. */
-  goal: string;
-  done: ExpeditionDone;
-  inScope: string[];
-  outOfScope: string[];
-  /** Seat labels, e.g. `codex/gpt-5/high`. */
-  roster: { manager: string; work: string[]; check: string[] };
-  limits: { maxAttempts: number; maxLive: number; hours: number; exploreShare: number };
-}
-
-export interface ExpeditionView {
-  id: string;
-  badge: string;
-  run: ExpeditionRun;
-  charter: ExpeditionCharterView;
-  validations: ExpeditionValidation[];
-  integration: ExpeditionIntegration;
-  /** Measured spend: `short` for the badge, `line` for the header (sums, unmeasured, settling). */
-  cost: { short: string; line: string };
-  workspaceId: string;
-  launchedAt: string;
-  deadline: string;
-  now: string;
-  crew: { t: 'pending' } | { t: 'ready'; buddyId: string; chatChannelId: string };
-  retirement: ExpeditionRetirement;
-  counts: {
-    /** Work and check attempts: what the owner's budget counts (design.md R9). */
-    attempts: number;
-    maxAttempts: number;
-    /** Manager decisions, bounded apart from the budget. */
-    decisions: number;
-    maxDecisions: number;
-    live: number;
-    maxLive: number;
-    queued: number;
-    verified: number;
-    exploreCap: number;
-  };
-  questions: ExpeditionQuestion[];
-  attempts: ExpeditionAttempt[];
-  panels: {
-    id: string;
-    questionId: string;
-    claimAttemptId: string;
-    goal: boolean;
-    verdict: 'pending' | 'verified' | 'not_verified';
-  }[];
-  /** Each verified claim and why: a panel's majority, or the host's passed command checks plus
-   * its merge into the expedition branch (design.md R9). */
-  verifications: (
-    | { t: 'panel'; questionId: string; claimAttemptId: string; panelId: string }
-    | {
-        t: 'host';
-        questionId: string;
-        claimAttemptId: string;
-        validationId: string;
-        mergeSha: string;
-      }
-  )[];
-  reflections: { at: string; text: string }[];
-  lessons: string[];
-}
-
-// ---------- Drafts (design.md R10) ----------
-
-/** Where a draft stands: launchable, launched (once), or replaced by a newer draft of the same
- * name in the same conversation. */
-export type ExpeditionDraftState =
-  | { t: 'open' }
-  | { t: 'launched'; expeditionId: string }
-  | { t: 'superseded'; by: string };
-
-/** A charter field the request left out and the host defaulted (the modal marks its value). */
-export type ExpeditionDefault =
-  | 'inScope'
-  | 'outOfScope'
-  | 'maxLive'
-  | 'hours'
-  | 'exploreShare'
-  | 'crew';
-
-export interface ExpeditionDraftView {
-  id: string;
-  workspaceId: string;
-  createdAt: string;
-  state: ExpeditionDraftState;
-  charter: ExpeditionCharterView;
-  /** What refuses its launch, re-checked on every read of an open draft (empty: launchable). */
-  issues: string[];
-  /** Non-blocking suggestions, the defaults the charter took, and owner model words resolved. */
-  advice: string[];
-  defaulted: ExpeditionDefault[];
-  resolved: string[];
-}
-
-/** Crew Buddies (one per expedition): reached through badges and the modal, never the roster. */
-export interface ExpeditionCrews {
-  buddyIds: string[];
-}
-/** One row of the expedition list (GET /api/buddies/expeditions), newest launch first: what the
- * channel rail, the expedition index pane and Home show without fetching every full view. */
-export type ExpeditionSummary = Pick<
-  ExpeditionView,
-  'id' | 'run' | 'workspaceId' | 'launchedAt' | 'counts' | 'cost' | 'retirement'
-> & { name: ExpeditionCharterView['name'] };
-
-/** A retired expedition (GET /api/buddies/expeditions/:id): its frozen summary and its last
- * status report, read-only. Its ledger is never folded again. */
-export interface ExpeditionRetiredView {
-  t: 'retired';
-  summary: ExpeditionSummary;
-  report: string;
+function verdictLabel(v: Verdict): string {
+  switch (v.t) {
+    case 'checks':
+      return v.pass ? 'pass' : `fail (${v.runs.map((r) => r.outcome.t).join(', ')})`;
+    case 'owner':
+      return v.pass ? 'pass' : 'fail';
+    case 'skipped':
+      return 'skipped';
+  }
 }

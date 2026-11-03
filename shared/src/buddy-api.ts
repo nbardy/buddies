@@ -12,6 +12,7 @@ import type {
 import { z } from 'zod';
 import { OwnerPostMentionConfigSchema } from './buddy-channel-posts.js';
 import { type ConversationConfig, ConversationConfigSchema } from './conversation-config.js';
+import { Act, type Expedition } from './expedition.js';
 import type { UpstreamUpdateResult } from './upstream.js';
 
 // Pattern: one-type-source (docs/patterns.md#one-type-source)
@@ -352,30 +353,19 @@ export const buddyMutations = {
     status: 201,
     body: NoBodySchema,
   },
-  // A draft card's Launch (server/src/expeditions/routes.ts): the workspace the card is shown in.
-  'expedition.launch': {
+  // Every owner act on an expedition (server/src/expeditions/routes.ts); refusals are 409.
+  'expedition.act': {
     method: 'POST',
-    path: '/api/buddies/expeditions/drafts/:draftId/launch',
+    path: '/api/buddies/expeditions/:id/act',
     status: 200,
-    body: z.object({ workspaceId: z.string().min(1) }).strict(),
-  },
-  // Retire (server/src/expeditions/routes.ts): `retire` a finished expedition, or
-  // `stop_and_retire` an open one (the owner's stop first). 202: the steps run in the background.
-  'expedition.retire': {
-    method: 'POST',
-    path: '/api/buddies/expeditions/:id/retire',
-    status: 202,
-    body: z.object({ mode: z.enum(['retire', 'stop_and_retire']) }).strict(),
+    body: Act,
   },
 } as const;
 
 export type BuddyMutation = keyof typeof buddyMutations;
 /** The mutations server/src/buddies/routes.ts serves; the rest have their own route owners
  * (server/src/upstream, server/src/expeditions). */
-export type BuddyRouteMutation = Exclude<
-  BuddyMutation,
-  'upstream.update' | 'expedition.launch' | 'expedition.retire'
->;
+export type BuddyRouteMutation = Exclude<BuddyMutation, 'upstream.update' | 'expedition.act'>;
 type Contract<K extends BuddyMutation> = (typeof buddyMutations)[K];
 export type BuddyMutationBody<K extends BuddyMutation> = z.input<Contract<K>['body']>;
 type WithOptionalKey<T> = T extends { key: string } ? Omit<T, 'key'> & { key?: string } : T;
@@ -431,8 +421,7 @@ export interface BuddyMutationResults {
   'reply.retry': ReplyRetryResult;
   read: { ok: boolean };
   'upstream.update': UpstreamUpdateResult;
-  'expedition.launch': { expeditionId: string };
-  'expedition.retire': { expeditionId: string };
+  'expedition.act': Expedition;
 }
 export type BuddyMutationRoute<K extends BuddyMutation> =
   `${Contract<K>['method']} ${Contract<K>['status']} ${Contract<K>['path']}`;
