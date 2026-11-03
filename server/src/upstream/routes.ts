@@ -11,6 +11,7 @@ import type { Express, Request, Response } from 'express';
 import { type BuddiesCore, OWNER, coreError } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import { type HostCommands, publishOwnerPost } from '../buddies/routes';
+import { labelled } from '../observability/event-loop-stall';
 import { type Checkout, UPSTREAM_BRANCH, checkUpstream, resolveCheckout } from './git-upstream';
 import { bootstrapUnleashdHome } from './unleashd-home';
 
@@ -151,7 +152,10 @@ export function createUpstreamService(dependencies: UpstreamServiceDependencies)
     start(): void {
       void bootstrap();
       void refresh();
-      timer = setInterval(() => void refresh(), CHECK_INTERVAL_MS);
+      timer = setInterval(
+        labelled('timer upstream-check', () => void refresh()),
+        CHECK_INTERVAL_MS
+      );
       timer.unref();
     },
     stop(): void {
