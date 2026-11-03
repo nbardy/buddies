@@ -73,7 +73,12 @@ export function GoalPanel({ x, directory }: { x: Expedition; directory: Workspac
           />
         </div>
       </Section>
-      <Section title="Done when">{DONE[x.charter.done.t](x.charter.done as never)}</Section>
+      <Section title="Done when">
+        {DONE[x.charter.done.t](x.charter.done as never)}
+        {x.charter.oracle.length > 0 && (
+          <p className="expedition-plain">Protected: {x.charter.oracle.join(', ')}</p>
+        )}
+      </Section>
       {x.notes.length > 0 && (
         <Section title="Notes for the crew">
           <ul className="expedition-notes">

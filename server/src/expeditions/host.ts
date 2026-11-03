@@ -315,6 +315,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       sha: endOf(a).sha,
       base: baseSha,
       checks,
+      oracle: x.charter.oracle,
       through: 'first_failure' as const,
     };
     checkQueue = checkQueue
@@ -577,7 +578,12 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     owner: async () => ({ t: 'ready' }),
     checks: (x, pre) => {
       const checks = (x.charter.done as Extract<Done, { t: 'checks' }>).checks;
-      const job = { dir: paths(root, x.id).check(0), baseSha: pre.baseSha, checks };
+      const job = {
+        dir: paths(root, x.id).check(0),
+        baseSha: pre.baseSha,
+        checks,
+        oracle: x.charter.oracle,
+      };
       const ran = checkQueue.then(() => launchPreflight(pre.repoRoot, job));
       checkQueue = ran.then(
         () => undefined,
