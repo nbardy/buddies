@@ -28,7 +28,7 @@ try {
     const selector = '[data-reaction-layout-probe]';
     await session.evaluate(`(() => {
       const posts = [...document.querySelectorAll('.channel-post-content')];
-      const post = posts.find(p => p.querySelector('.channel-post-add-reaction')?.parentElement.children.length === 1);
+      const post = posts.find(p => !p.querySelector('.channel-post-chips'));
       if (!post) throw new Error('No real post without existing actions to verify');
       post.setAttribute('data-reaction-layout-probe', '');
     })()`);
@@ -56,7 +56,10 @@ try {
     console.log(JSON.stringify({ device: mobile ? 'phone' : 'desktop', before }));
     await capture('before');
     if (mobile) {
-      assert.equal(before.opacity, '1', 'Touch must expose the emoji action');
+      // Touch: the actions appear when the post is tapped (focused), not before.
+      assert.equal(before.opacity, '0', 'Touch actions stay out of the transcript until a tap');
+      await session.evaluate(`document.querySelector('${selector}').focus()`);
+      assert.equal((await measure()).opacity, '1', 'Tapping a post must expose the emoji action');
       assert.equal(
         await session.evaluate(`(() => {
         const button = document.querySelector('${selector} .channel-post-add-reaction');
@@ -87,8 +90,7 @@ try {
         'Add emoji reaction'
       );
     }
-    assert.ok(before.buttonWidth > 0, 'Button must reserve its layout space');
-    console.log(JSON.stringify({ device: mobile ? 'phone' : 'desktop', before, passed: true }));
+        console.log(JSON.stringify({ device: mobile ? 'phone' : 'desktop', before, passed: true }));
   }
   console.log(JSON.stringify({ blockedWrites: await session.blockedWrites() }));
 } finally {

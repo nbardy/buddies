@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { BuddySigil } from '../../components/buddies/BuddySigil';
+import { AuthorAvatar } from '../../components/buddies/BuddySigil';
 import { ChannelHeaderControls } from '../../components/buddies/ChannelArchive';
 import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
@@ -137,7 +137,8 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
           data-linked={row.post.id === context.linkedPostId ? 'true' : undefined}
           data-unread={rowUnread(row.post, context)}
         >
-          <BuddySigil
+          <AuthorAvatar
+            author={row.post.author}
             className="mobile-channel-post__avatar"
             name={authorName(row.post.author, context.directory.buddyNames)}
           />

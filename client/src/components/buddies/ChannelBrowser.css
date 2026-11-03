@@ -517,6 +517,10 @@
   padding-top: var(--sp-2);
   padding-bottom: var(--sp-2);
 }
+.channel-browser-inline-meta:empty {
+  /* An empty inline-flex still opened a ~22px line above every continuation's text. */
+  display: none;
+}
 .channel-browser-inline-meta {
   display: inline-flex;
   gap: var(--sp-3);
@@ -776,6 +780,24 @@ a.channel-browser-buddy-done {
 .channel-browser-message:hover .channel-browser-message-actions,
 .channel-browser-message-actions:focus-within {
   visibility: visible;
+}
+/* Edit/react pill (ChannelPostContent.css): desktop joins the hover toolbar, just left of it. */
+.channel-browser-message .channel-post-content {
+  position: static;
+}
+.channel-browser-message .channel-post-tools {
+  top: -14px;
+  right: 132px;
+  bottom: auto;
+}
+.channel-browser-message:hover .channel-post-tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Host status lines (expedition progress) read as quiet log lines, not conversation. */
+.channel-browser-message[data-purpose="expedition_status"] .channel-markdown {
+  color: var(--text-muted);
+  font-size: var(--fs-4);
 }
 .channel-browser-message-action,
 .channel-browser-header-action {

@@ -115,6 +115,19 @@
   font: 500 10.5px / 1.5 var(--font-mono);
 }
 
+/* A long hint (the expedition chat's commands) wraps on a phone instead of ending in an ellipsis. */
+[data-device="mobile"] .channel-composer .channel-composer-hint {
+  line-height: 1.35;
+  white-space: normal;
+}
+
+/* Touch keyboards have no Shift-Enter: the phone hint is just the @ mention, and fits one line. */
+@media (pointer: coarse) {
+  .channel-composer-keys {
+    display: none;
+  }
+}
+
 .channel-composer-problem {
   color: var(--theme-warning);
 }

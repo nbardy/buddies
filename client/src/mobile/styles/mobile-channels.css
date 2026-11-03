@@ -378,6 +378,10 @@ a.mobile-channels-wake-done {
   background: color-mix(in srgb, var(--theme-warning) 16%, transparent);
   color: var(--theme-warning);
 }
+.mobile-channel-post[data-purpose="expedition_status"] .channel-markdown {
+  color: var(--text-muted);
+  font-size: var(--fs-4);
+}
 .mobile-channel-post[data-purpose="reply_failed"] .channel-markdown {
   color: var(--text-muted);
 }
@@ -392,10 +396,10 @@ a.mobile-channels-wake-done {
   gap: var(--sp-2) var(--sp-6);
   margin-top: 2px;
 }
-/* 44px-tall tap areas that sit on one text line visually. */
+/* Slim tap target under each post: a taller one made every message a third larger (2026-11-03). */
 .mobile-channel-post__reply {
-  min-height: 32px;
-  font-size: var(--fs-4);
+  min-height: 26px;
+  font-size: var(--fs-3);
   text-decoration: none;
 }
 .mobile-channel-post__replying,

@@ -722,7 +722,11 @@ function SubmitHint({ submit }: { submit: ComposerSubmit }) {
     case 'enter':
       return (
         <>
-          <kbd>@</kbd> mention a Buddy · <kbd>⇧⏎</kbd> new line
+          <kbd>@</kbd> mention a Buddy
+          <span className="channel-composer-keys">
+            {' '}
+            · <kbd>⇧⏎</kbd> new line
+          </span>
         </>
       );
     case 'button':

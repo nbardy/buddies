@@ -1,7 +1,77 @@
-.channel-post-add-reaction {
-  opacity: 0;
+/* Edit and react float in a pill over the post's bottom-right edge: shown on hover (desktop) and
+   when the post is focused or tapped (touch), never in flow. */
+.channel-post-content {
+  position: relative;
 }
-.channel-post-content:is(:hover, :focus-within) .channel-post-add-reaction,
-[data-device="mobile"] .channel-post-add-reaction {
+.channel-post-chips {
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  font-size: var(--fs-3);
+}
+.channel-post-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+}
+.channel-post-chip[aria-pressed="true"] {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+.channel-post-tools {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: -14px;
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 1px 3px color-mix(in srgb, black 25%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+.channel-post-tools button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-3);
+}
+.channel-post-tools button:hover {
+  background: color-mix(in srgb, var(--text-emphasis) 7%, transparent);
+  color: var(--text-bright);
+}
+.channel-post-content:focus-within .channel-post-tools,
+.channel-post-content[data-picking] .channel-post-tools {
   opacity: 1;
+  pointer-events: auto;
+}
+@media (pointer: coarse) {
+  .channel-post-tools button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}
+/* The initial avatar (BuddySigil.tsx Initial; here because a .css import in a .tsx breaks the node test runner): a letter tinted from one theme accent (--tone). */
+.avatar-initial {
+  background: color-mix(in oklch, var(--tone) 26%, var(--theme-bg-canvas));
+  fill: color-mix(in oklch, var(--tone) 72%, white);
+  font-family: inherit;
+  font-weight: 700;
 }

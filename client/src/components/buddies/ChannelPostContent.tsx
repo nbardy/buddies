@@ -1,4 +1,4 @@
-import { type CSSProperties, useState } from 'react';
+import { useState } from 'react';
 import { recordEmojiUse } from '../../atoms/emoji-usage';
 import { invalidateChannelResources } from '../../atoms/resources';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
@@ -19,20 +19,10 @@ import type { ClippedPost, ThreadPage } from './types';
 import './ChannelPostContent.css';
 
 // Pattern: fix-guards (docs/patterns.md#fix-guards)
-// Keep the emoji action in layout: display:none resized posts on hover.
+// Edit and the emoji picker live in a floating tool pill (ChannelPostContent.css) that is out of
+// flow: an in-flow action row under every post doubled the gap between messages, and
+// display:none resized posts on hover. Reaction chips and "edited" stay in flow.
 // Guard: tools/check-reaction-layout.mjs checks hover/focus dimensions and touch access.
-const actionStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 'var(--sp-1)',
-  padding: 'var(--sp-1) var(--sp-3)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: '10px',
-  background: 'transparent',
-  color: 'var(--text-muted)',
-  font: 'inherit',
-};
-
 // Pattern: one-definition (docs/patterns.md#one-definition)
 // Both shells edit/react to the same post; the edit snapshot pins its revision until Save.
 export function ChannelPostContent({
@@ -77,6 +67,7 @@ export function ChannelPostContent({
   return (
     <div
       className="channel-post-content"
+      data-picking={picking || undefined}
       aria-label="Message content and actions"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: Focus reveals message actions for keyboard and touch users.
       tabIndex={0}
@@ -113,28 +104,13 @@ export function ChannelPostContent({
               : `Show full message (${post.clippedFrom} characters)`}
         </button>
       )}
-      {!editing && (
-        <div
-          className="ui-row"
-          style={{
-            gap: 'var(--sp-2)',
-            flexWrap: 'wrap',
-            marginTop:
-              reactions.size > 0 || post.author.kind === 'owner' || post.editedAt
-                ? 'var(--sp-2)'
-                : 0,
-            fontSize: 'var(--fs-3)',
-          }}
-        >
+      {!editing && (reactions.size > 0 || post.editedAt) && (
+        <div className="channel-post-chips ui-row">
           {[...reactions].map(([emoji, value]) => (
             <button
               type="button"
               key={emoji}
-              style={{
-                ...actionStyle,
-                color: value.active ? 'var(--text-bright)' : actionStyle.color,
-                background: value.active ? 'var(--bg-hover)' : 'transparent',
-              }}
+              className="channel-post-chip"
               aria-label={`${value.active ? 'Remove' : 'Add'} ${emoji} reaction`}
               aria-pressed={value.active}
               disabled={busy}
@@ -143,20 +119,23 @@ export function ChannelPostContent({
               {emoji} {value.count}
             </button>
           ))}
+          {post.editedAt && (
+            <span className="ui-muted" title={new Date(post.editedAt).toLocaleString()}>
+              edited
+            </span>
+          )}
+        </div>
+      )}
+      {!editing && (
+        <div className="channel-post-tools" role="toolbar" aria-label="Edit or react">
           {post.author.kind === 'owner' && !clipped && (
-            <button
-              type="button"
-              style={{ ...actionStyle, border: 0 }}
-              aria-label="Edit message"
-              onClick={() => setEditing(post)}
-            >
+            <button type="button" aria-label="Edit message" onClick={() => setEditing(post)}>
               Edit
             </button>
           )}
           <button
             type="button"
             className="channel-post-add-reaction"
-            style={actionStyle}
             aria-label="Add emoji reaction"
             title="Add emoji reaction"
             disabled={busy}
@@ -174,14 +153,8 @@ export function ChannelPostContent({
               <path d="M5 9.5Q8 12 11 9.5" />
               <circle cx="6" cy="6" r=".5" />
               <circle cx="10" cy="6" r=".5" />
-            </svg>{' '}
-            +
+            </svg>
           </button>
-          {post.editedAt && (
-            <span className="ui-muted" title={new Date(post.editedAt).toLocaleString()}>
-              edited
-            </span>
-          )}
         </div>
       )}
       {problem && <span role="alert">{problem}</span>}

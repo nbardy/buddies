@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { BuddySigil } from './BuddySigil';
+import { AuthorAvatar } from './BuddySigil';
 import { ChannelAuthor, type OpenDm } from './ChannelAuthor';
 import { TypingDots } from './ChannelMarkdown';
 import { ChannelPostContent } from './ChannelPostContent';
@@ -274,7 +274,8 @@ export function LeadRow({
       data-linked={post.id === context.linkedPostId ? 'true' : undefined}
       data-unread={rowUnread(post, context)}
     >
-      <BuddySigil
+      <AuthorAvatar
+        author={post.author}
         className="channel-browser-avatar"
         name={authorName(post.author, context.directory.buddyNames)}
       />
