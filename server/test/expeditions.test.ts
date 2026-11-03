@@ -74,7 +74,7 @@ test('the loop runs to a pass, and the oracle cannot be edited', async () => {
       true,
       JSON.stringify(a1)
     );
-    await f.ownerSays(id, 'Mind the exact string.');
+    await f.ownerSays(id, 'note: Mind the exact string.');
     await f.settle(id);
 
     const brief2 = (await f.core.getPost(OWNER, f.requestOf(id, 2))).body;
@@ -203,6 +203,61 @@ test('owner-judged expeditions follow the chat, and stop and the deadline finish
     await f.settle(late);
     const s = f.record(late).state;
     assert.deepEqual(s.t === 'finished' && s.reason, { t: 'deadline' });
+  } finally {
+    await f.close();
+  }
+});
+
+// Catches: owner talk silently turned into notes for the crew (it is the manager's to answer), an
+// attempt turn steering (stopping or passing) its own expedition, relaunch reusing the id, and
+// pre-lean retired files showing up in the Retired list (no legacy reader, owner 2026-11-03).
+test('the crew chat seat manages; attempt turns cannot steer; relaunch drafts afresh', async () => {
+  const f = await fixture();
+  try {
+    const id = await launched(f);
+    await f.ownerSays(id, 'Pause and tell me what a1 learned');
+    assert.equal(f.record(id).state.t, 'running', 'talk is not a command');
+    assert.deepEqual(f.record(id).notes, [], 'talk is not a note');
+    await f.ownerSays(id, 'note: try the exact string');
+    assert.deepEqual(
+      f.record(id).notes.map((n) => n.text),
+      ['try the exact string']
+    );
+
+    const crew = f.launch(id).crewBuddyId;
+    const claim = await executeRequestRun(f, f.requestOf(id, 1));
+    const steer = (runId: string | null, act: Record<string, unknown>) =>
+      rpc(f.specAs(crew, runId), 'expedition', { action: { do: 'act', id, act } });
+    const fromAttempt = await steer(claim.run.id, { do: 'stop' });
+    assert.equal(fromAttempt.error, true);
+    assert.match(fromAttempt.text, /attempt turn cannot steer/);
+    assert.equal(f.record(id).state.t, 'running');
+    const paused = await steer(null, { do: 'pause' });
+    assert.equal(paused.error, false, paused.text);
+    assert.equal(f.record(id).state.t, 'paused');
+    const status = await rpc(f.specAs(crew, null), 'expedition', { action: { do: 'status', id } });
+    assert.deepEqual((status.value as { notes: string[] }).notes, ['try the exact string']);
+
+    assert.equal((await steer(null, { do: 'stop' })).error, false);
+    const again = await steer(null, { do: 'relaunch' });
+    assert.equal(again.error, false, again.text);
+    const fresh = (again.value as { id: string }).id;
+    assert.notEqual(fresh, id);
+    assert.equal(f.record(fresh).state.t, 'draft');
+    assert.deepEqual(f.record(fresh).charter, f.record(id).charter);
+
+    fs.mkdirSync(path.join(f.root, '.retired'), { recursive: true });
+    const old = { t: 'expedition.retired/v1', summary: {}, report: '' };
+    fs.writeFileSync(path.join(f.root, '.retired', 'old-one.json'), JSON.stringify(old));
+    assert.equal((await f.act(fresh, { do: 'retire' })).status, 200);
+    assert.deepEqual(
+      f.host.retired().map((r) => r.record.id),
+      [fresh]
+    );
+    const revived = await f.act(fresh, { do: 'relaunch' });
+    assert.equal(revived.status, 200, JSON.stringify(revived.body));
+    const revivedId = (revived.body as { id: string }).id;
+    assert.equal(f.record(revivedId).state.t, 'draft');
   } finally {
     await f.close();
   }

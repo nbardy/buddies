@@ -2,7 +2,13 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { type Attempt, Expedition, type Launch, type State } from '@unleashd/shared';
+import {
+  type Attempt,
+  Expedition,
+  type Launch,
+  RetiredExpedition,
+  type State,
+} from '@unleashd/shared';
 
 // One file per expedition, `<root>/<id>.json` (docs/expeditions-lean-design.md §3.1). Parsed once
 // at boot (κ); written whole through tmp + rename, so a torn write cannot happen.
@@ -40,6 +46,28 @@ function loadOne(file: string, id: string): Loaded {
     return { t: 'unreadable', id, reason: (error as Error).message };
   }
 }
+
+/** Every lean retired record, newest first; read per request (retire adds them at run time).
+ * Decision 2026-11-03: a file that does not parse as one (the four pre-lean `expedition.retired/v1`
+ * files, a tmp) is not listed. There is no legacy reader, and nothing here rewrites them. */
+export function loadRetired(root: string): RetiredExpedition[] {
+  const dir = path.join(root, '.retired');
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : [];
+  return files
+    .filter((e) => e.isFile() && e.name.endsWith('.json'))
+    .flatMap((e) => {
+      const parsed = RetiredExpedition.safeParse(readJson(path.join(dir, e.name)));
+      return parsed.success ? [parsed.data] : [];
+    })
+    .sort((a, b) => b.at.localeCompare(a.at));
+}
+const readJson = (file: string): unknown => {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    return { unreadable: (error as Error).message };
+  }
+};
 
 export const paths = (root: string, id: string) => ({
   file: path.join(root, `${id}.json`),

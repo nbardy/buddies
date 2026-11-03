@@ -140,6 +140,15 @@ export const Expedition = z
   })
   .strict();
 export type Expedition = z.infer<typeof Expedition>;
+/** `<store>/expeditions/.retired/<id>.json`, written by retire. Files of the pre-lean format
+ * (`t: 'expedition.retired/v1'`) do not parse and are never listed: there is no legacy reader. */
+export const RetiredExpedition = z.object({
+  v: z.literal(1),
+  t: z.literal('retired'),
+  at: str,
+  record: Expedition,
+});
+export type RetiredExpedition = z.infer<typeof RetiredExpedition>;
 
 /** GET /api/buddies/expeditions. An unreadable file is a row too: it shows in every rail. */
 export type ExpeditionRow =
@@ -165,6 +174,8 @@ const ACT = {
   verdict: z.object({ do: z.literal('verdict'), n: z.number().int(), pass: z.boolean() }).strict(),
   note: z.object({ do: z.literal('note'), text: str.trim().min(1).max(2000) }).strict(),
   retire: z.object({ do: z.literal('retire') }).strict(),
+  /** A new draft with the same charter (fresh id); answers with that draft. */
+  relaunch: z.object({ do: z.literal('relaunch') }).strict(),
 };
 /** Owner/Buddy acts: one schema for HTTP, chat and tool. */
 export const Act = z.discriminatedUnion('do', [
@@ -176,15 +187,19 @@ export const Act = z.discriminatedUnion('do', [
   ACT.verdict,
   ACT.note,
   ACT.retire,
+  ACT.relaunch,
 ]);
 export type Act = z.infer<typeof Act>;
-/** The Buddy tool's acts, chosen by name (launch, verdict and retire are the owner's). */
+/** The Buddy tool's acts, chosen by name (launch and retire are the owner's). verdict and
+ * relaunch relay what the owner said to the expedition's manager (its crew's chat seat). */
 export const BuddyAct = z.discriminatedUnion('do', [
   ACT.pause,
   ACT.resume,
   ACT.stop,
   ACT.extend,
   ACT.note,
+  ACT.verdict,
+  ACT.relaunch,
 ]);
 const LIVE = ['running', 'paused'] as const;
 /** The one guard table: which states accept which act (server refuses; client shows buttons). */
@@ -197,6 +212,7 @@ export const ALLOWED: Record<Act['do'], readonly State['t'][]> = {
   verdict: LIVE,
   note: LIVE,
   retire: ['draft', 'finished'],
+  relaunch: ['finished'],
 };
 /** Attempts the budget counts (everything but interrupted). */
 export const counted = (x: Expedition) =>

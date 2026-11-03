@@ -28,7 +28,16 @@ import { labelled } from '../observability/event-loop-stall';
 import * as brief from './brief';
 import { type Released, add, release, tip } from './cambium';
 import { preflight, runChecks } from './checks';
-import { type Launched, type Loaded, loadAll, newId, paths, save, withAttempt } from './record';
+import {
+  type Launched,
+  type Loaded,
+  loadAll,
+  loadRetired,
+  newId,
+  paths,
+  save,
+  withAttempt,
+} from './record';
 import { RETIRE } from './retire';
 
 // The expedition host (docs/expeditions-lean-design.md §3.5): one serialized `step` per record,
@@ -156,13 +165,26 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
         continue;
       }
       const said = brief.chatAct(seen, p.body);
-      const acted: Acted = ALLOWED[said.do].includes(seen.state.t)
-        ? await apply(seen, said, 'owner')
-        : { t: 'refused', reasons: [`cannot ${said.do} a ${seen.state.t} expedition`] };
-      x = await CHAT_REPLY[acted.t](seen, acted as never, p);
+      x = await HEARD[said.t](seen, said as never, p);
     }
     return x.state.launch.chatSeenOrd === start.state.launch.chatSeenOrd ? x : commit(x);
   }
+  /** A bare command the host applies; talk is the manager seat's (the crew's chat turn). */
+  const HEARD: {
+    [K in brief.Said['t']]: (
+      x: Launched,
+      s: Extract<brief.Said, { t: K }>,
+      p: Post
+    ) => Promise<Launched>;
+  } = {
+    talk: async (x) => x,
+    act: async (x, { act: said }, p) => {
+      const acted: Acted = ALLOWED[said.do].includes(x.state.t)
+        ? await apply(x, said, 'owner')
+        : { t: 'refused', reasons: [`cannot ${said.do} a ${x.state.t} expedition`] };
+      return CHAT_REPLY[acted.t](x, acted as never, p);
+    },
+  };
   const seenTo = (x: Launched, ord: string): Launched => ({
     ...x,
     state: { ...x.state, launch: { ...x.state.launch, chatSeenOrd: ord } },
@@ -452,7 +474,18 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       events.emit({ kind: 'changed' });
       return { t: 'ok', x };
     },
+    relaunch: (x: Expedition) => relaunch(x),
   };
+  /** Same charter, origin and launcher, fresh id; the card posts where the first one did. */
+  const relaunch = async (x: Expedition): Promise<Acted> => ({
+    t: 'ok',
+    x: await draft({
+      charter: x.charter,
+      origin: x.origin,
+      launcherId: x.launcherId,
+      workspaceId: x.workspaceId,
+    }),
+  });
   const retireDeps = {
     core,
     root,
@@ -499,7 +532,8 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
   async function act(id: string, a: Act, by: string): Promise<Acted> {
     const acted = await serialized(id, async (): Promise<Acted> => {
       const l = records.get(id);
-      if (!l) return { t: 'missing' };
+      // A retired record is out of `records`; relaunch is the one act it takes (its card shows).
+      if (!l) return a.do === 'relaunch' ? relaunchRetired(id) : { t: 'missing' };
       if (l.t === 'unreadable') return { t: 'refused', reasons: [`unreadable: ${l.reason}`] };
       if (gate.t === 'disabled') return { t: 'refused', reasons: [gate.reason] };
       // Review 2026-11-03: an act before boot's interrupt pass could start an attempt it then
@@ -512,6 +546,11 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     await step(id);
     return acted;
   }
+
+  const relaunchRetired = (id: string): Promise<Acted> => {
+    const filed = loadRetired(root).find((r) => r.record.id === id);
+    return filed ? relaunch(filed.record) : Promise.resolve({ t: 'missing' });
+  };
 
   const check = async (charter: Charter, workspaceId: string) => {
     const workspace = (await core.listWorkspaces()).find((w) => w.id === workspaceId);
@@ -567,20 +606,38 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     return undefined;
   }
 
-  /** A crew run answering one of its attempt requests starts in that attempt's live tree; any
-   * other crew turn in the crew's own directory; any other Buddy's in its workspace root. */
-  async function turnDirectory(context: BuddyContext): Promise<TurnDirectory> {
-    const id = crewOf(context.buddyId);
-    if (!id) return WORKSPACE_DIRECTORY;
-    const runId = context.coordinationRunId;
+  /** Which seat a Buddy turn sits in: an attempt (a crew run answering one of its attempt
+   * requests), the manager (any other crew turn: its chat with the owner), or no expedition's. */
+  async function seatOf(buddyId: string, runId: string | null): Promise<Seat> {
+    const id = crewOf(buddyId);
+    if (!id) return { t: 'none' };
     const postId = runId ? postIdOf(await core.getRun(runId)) : null;
     const evidence = postId ? (await core.getPost(OWNER, postId)).evidence : [];
     const tag = evidence.find((e) => e.startsWith(`expedition-attempt:${id}/`));
-    const tree = tag ? current(id).attempts[Number(tag.split('/').at(-1)) - 1]?.tree : null;
-    if (runId && tree?.t === 'live') return { t: 'attempt', runId, path: tree.path };
+    return runId && tag
+      ? { t: 'attempt', id, runId, n: Number(tag.split('/').at(-1)) }
+      : { t: 'manager', id };
+  }
+  const crewDir = async (id: string): Promise<TurnDirectory> => {
     const dir = paths(root, id).crewDir;
     await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
     return { t: 'crew', path: dir };
+  };
+  /** An attempt turn starts in its live tree; a manager turn in the crew's own directory; any
+   * other Buddy's in its workspace root. */
+  const DIRECTORY: { [K in Seat['t']]: (s: Extract<Seat, { t: K }>) => Promise<TurnDirectory> } = {
+    none: async () => WORKSPACE_DIRECTORY,
+    manager: (s) => crewDir(s.id),
+    attempt: (s) => {
+      const tree = current(s.id).attempts[s.n - 1]?.tree;
+      return tree?.t === 'live'
+        ? Promise.resolve({ t: 'attempt', runId: s.runId, path: tree.path })
+        : crewDir(s.id);
+    },
+  };
+  async function turnDirectory(context: BuddyContext): Promise<TurnDirectory> {
+    const seat = await seatOf(context.buddyId, context.coordinationRunId ?? null);
+    return (DIRECTORY[seat.t] as (s: Seat) => Promise<TurnDirectory>)(seat);
   }
 
   const active = (x: Expedition) =>
@@ -648,6 +705,8 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     crewBuddyIds: (): ReadonlySet<string> =>
       new Set(rows().flatMap((r) => (r.t === 'ok' && r.crewBuddyId ? [r.crewBuddyId] : []))),
     turnDirectory,
+    seatOf,
+    retired: () => loadRetired(root),
     interruptBootLive,
     start,
     close: () => stops.splice(0).forEach((stop) => stop()),
@@ -667,3 +726,7 @@ const PLACE: { [K in Origin['t']]: (o: Extract<Origin, { t: K }>, launcher: Acto
   direct: (_o, launcher) => ({ channel: { kind: 'direct', members: [OWNER, launcher] } }),
 };
 type Place = { channel: ChannelRef; replyToId?: string };
+export type Seat =
+  | { t: 'none' }
+  | { t: 'manager'; id: string }
+  | { t: 'attempt'; id: string; runId: string; n: number };

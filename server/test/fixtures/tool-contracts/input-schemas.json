@@ -554,6 +554,40 @@
                         "text"
                       ],
                       "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "do": {
+                          "type": "string",
+                          "const": "verdict"
+                        },
+                        "n": {
+                          "type": "integer"
+                        },
+                        "pass": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "do",
+                        "n",
+                        "pass"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "do": {
+                          "type": "string",
+                          "const": "relaunch"
+                        }
+                      },
+                      "required": [
+                        "do"
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 }
@@ -2260,6 +2294,40 @@
                       "required": [
                         "do",
                         "text"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "do": {
+                          "type": "string",
+                          "const": "verdict"
+                        },
+                        "n": {
+                          "type": "integer"
+                        },
+                        "pass": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "do",
+                        "n",
+                        "pass"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "do": {
+                          "type": "string",
+                          "const": "relaunch"
+                        }
+                      },
+                      "required": [
+                        "do"
                       ],
                       "additionalProperties": false
                     }

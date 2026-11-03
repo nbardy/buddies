@@ -17,6 +17,11 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
     const h = ready(res);
     if (h) res.json(h.rows());
   });
+  // Before `/:id`, which would read `retired` as an id.
+  app.get('/api/buddies/expeditions/retired', (_req, res) => {
+    const h = ready(res);
+    if (h) res.json(h.retired());
+  });
   app.get('/api/buddies/expeditions/:id', (req, res) => {
     const h = ready(res);
     if (h) read(res, h.get(req.params.id));

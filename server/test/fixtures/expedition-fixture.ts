@@ -150,6 +150,19 @@ export async function fixture() {
       clock = ms;
     },
     spec: () => endpoint.spec(grant),
+    /** The MCP endpoint as another Buddy's turn (a crew's chat seat: runId null; an attempt). */
+    specAs: (buddyId: string, runId: string | null) =>
+      endpoint.spec(
+        grants.issueBuddy({
+          role: 'worker',
+          buddyId,
+          workspaceId: ws.id,
+          conversationId: `turn-${buddyId}-${runId}`,
+          runId,
+          subscribes: 'self',
+          hooks: { t: 'unrecorded' },
+        })
+      ),
     get host() {
       return expeditions;
     },
