@@ -3,8 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { type ExecutionProcess, executionProcess, killExecution } from '@nbardy/agent-cli';
 import type { Provider } from '@unleashd/shared';
-import type { BuddyGrant } from '../buddies/grants';
-import type { ScaleEnvelopePolicy } from '../buddies/oompa-portfolio';
 import {
   type Execution,
   type ExecutionEvent,
@@ -46,53 +44,21 @@ export interface EphemeralOwner {
 }
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
-export interface OompaOwner {
+/**
+ * A journal of a retired execution kind. The Buddy Oompa host (retired 2026-11-03) journaled under
+ * its own `oompa-executions/` root, which nothing reads any more; this variant only keeps a stray
+ * `kind: 'oompa'` owner under this root from being read as unknown. Such a journal is reported and
+ * left on disk untouched: it is the owner's data, and its process (if any) was never ours to kill
+ * here. Guard: retired-oompa-boot.test.ts.
+ */
+export interface RetiredOwner {
   readonly version: 1;
   readonly kind: 'oompa';
-  readonly id: string;
-  readonly key: string;
-  readonly launchHash: string;
-  readonly workspacePath: string;
-  readonly configPath: string;
-  /** Original owner-requested chunk deadline; automation never changes task configuration. */
-  readonly originalExpiresAt?: number;
-  readonly priorRunId?: string;
-  readonly resumeRunId?: string;
-  readonly configSha256?: string;
-  readonly taskOwners?: Readonly<Record<string, string>>;
-  /** Immutable owner delegation; renewal copies this scope and its fixed horizon verbatim. */
-  readonly automation?: {
-    readonly rootRunId: string;
-    readonly buddyId: string;
-    readonly workspaceId: string;
-    readonly workspacePath: string;
-    readonly configSha256: string;
-    readonly portfolio?: {
-      readonly rootTaskIds: string[];
-      readonly ownerIds: string[];
-      readonly reviewerIds: string[];
-    };
-    readonly scaleEnvelope?: ScaleEnvelopePolicy;
-    readonly taskOwners: Readonly<Record<string, string>>;
-    readonly expiresAt: number;
-  };
-  readonly grant: Omit<BuddyGrant, 'observe'>;
-  readonly validators: Record<string, OompaValidator>;
-  /** Config `task_execution.default_validator`: the oracle for tasks without an entry above.
-   * Absent = none pinned (explicit-only configs and journals written before it existed). */
-  readonly defaultValidator?: OompaValidator;
 }
-export interface OompaValidator {
-  command: string[];
-  timeout_seconds: number;
-  reconcile_on_rejection?: boolean;
-  source_files: Record<string, string>;
-}
-export type ExecutionOwner = TurnOwner | EphemeralOwner | OompaOwner;
+export type ExecutionOwner = TurnOwner | EphemeralOwner | RetiredOwner;
 
 /** One journal found at boot, classified once (the κ of this boundary). */
 export type FoundExecution =
-  | { t: 'oompa'; dir: string; owner: OompaOwner; phase: Phase; process: ExecutionProcess }
   | {
       t: 'turn';
       dir: string;
@@ -103,6 +69,8 @@ export type FoundExecution =
   /** The owner was written but the provider never spawned. */
   | { t: 'unstarted'; dir: string; owner: TurnOwner; process: ExecutionProcess }
   | { t: 'ephemeral'; dir: string; process: ExecutionProcess }
+  /** A journal of a retired kind (`RetiredOwner`): reported, never adopted, killed or removed. */
+  | { t: 'retired'; dir: string; kind: RetiredOwner['kind']; process: ExecutionProcess }
   | { t: 'unreadable'; dir: string; process: ExecutionProcess; error: string };
 
 const OWNER_FILE = 'owner.json';
@@ -155,7 +123,7 @@ export function createExecutionJournals(root: string) {
       case 'ephemeral':
         return { t: 'ephemeral', dir, process };
       case 'oompa':
-        return { t: 'oompa', dir, owner, phase, process };
+        return { t: 'retired', dir, kind: owner.kind, process };
     }
   }
 
@@ -200,14 +168,6 @@ export function createExecutionJournals(root: string) {
     /** A journal the next backend kills rather than adopts. */
     ephemeral(label: string): string {
       return create(`ephemeral-${crypto.randomUUID()}`, { version: 1, kind: 'ephemeral', label });
-    },
-
-    /** A bounded host execution: its task-scoped grant is restored only while running. */
-    forOompa(owner: Omit<OompaOwner, 'version' | 'kind'>): Execution {
-      return {
-        dir: create(owner.id, { version: 1, kind: 'oompa', ...owner }),
-        phase: { t: 'running' },
-      };
     },
 
     /** Every journal under the root, classified. Missing root = none. */

@@ -87,13 +87,13 @@ If you want exactly three tests:
   many run at once. Each process gets a private `TMPDIR` (linked to the shared tsx cache, or
   every process compiles the server cold) removed when it exits; a unit still running after
   `UNLEASHD_TEST_UNIT_TIMEOUT_MS` (10 min) is killed and reported. Bare names pick files:
-  `node tools/test-server.mjs oompa-mcp run-lease`. A test in a sharded file must build its own
+  `node tools/test-server.mjs expeditions run-lease`. A test in a sharded file must build its own
   fixture and never depend on an earlier top-level test. `--slow` adds opt-in files (none today).
 - Load lessons (2026-11-02, a shared machine at load 20–90): wall time there is dominated by
   process start-up and subprocess latency, not CPU. More concurrent shards of one file made it
-  slower and flaky (nine oompa-mcp shards failed together; three passed), hence the `live` caps.
+  slower and flaky (nine shards of the since-retired oompa-mcp file failed together; three passed), hence the `live` caps.
   Never write an executable per fixture: macOS assesses each new executable on first exec,
-  serially machine-wide (the oompa stub is `server/test/fixtures/oompa-stub.cjs`). Liveness waits
+  serially machine-wide (the retired oompa-mcp file learned this with its stub CLI). Liveness waits
   are budgets, not measurements; size them for a loaded machine.
 - `pnpm test:server:stress`: the same full coverage with the relay's actual 55 s default and a
   10 s outage. Normal mode uses a 1.5 s hold only in the no-backend timeout case; successful

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import type { Role } from '../src/buddies/grants';
-import { toolsFor } from '../src/buddies/mcp';
+import { RETIRED_TOOLS, toolsFor } from '../src/buddies/mcp';
 
 // Fix-guard: the Buddy MCP tool contract. Agent CLIs cache `tools/list` for a whole turn and an
 // adopted turn outlives the backend that started it, so a turn keeps sending the inputs it was
@@ -106,13 +106,22 @@ function breakages(old: Json | undefined, next: Json | undefined, path: string):
   return out;
 }
 
+// The one exception to "additive only": a tool deliberately RETIRED (mcp.ts RETIRED_TOOLS) may
+// leave the snapshot, because the endpoint still answers its calls from adopted turns with a
+// `[retired]` error (retired-tools.test.ts). Narrowing a live tool still fails here.
+// 2026-11-03: `oompa` retired with the Buddy Oompa host.
+const retiredNow = (tool: string, after: Snapshot, role: Role) =>
+  tool in RETIRED_TOOLS && after[role]?.[tool] === undefined;
+
 function contractProblems(before: Snapshot, after: Snapshot): string[] {
   return ROLES.flatMap((role) =>
-    Object.keys(before[role] ?? {}).flatMap((tool) =>
-      breakages(before[role][tool], after[role]?.[tool], tool).map(
-        (problem) => `${role}: ${problem}`
+    Object.keys(before[role] ?? {})
+      .filter((tool) => !retiredNow(tool, after, role))
+      .flatMap((tool) =>
+        breakages(before[role][tool], after[role]?.[tool], tool).map(
+          (problem) => `${role}: ${problem}`
+        )
       )
-    )
   );
 }
 
@@ -152,7 +161,9 @@ test('tool input schemas change only additively; reshaped forms need a legacy ca
 // 2026-11-01: 3870 -> 3990. The `expedition` tool, so a Buddy can draft an expedition from any
 // thread. 2026-11-03: 3990 -> 3960. The lean rewrite's description is 87 chars (was 120); usage
 // lives in BUDDY_TOOL_GUIDE and docs/expeditions-lean-design.md.
-const WORKER_DESCRIPTION_BUDGET = 3960;
+// 2026-11-03: 3960 -> 3084 (measured). The Buddy Oompa host and its `oompa` tool were retired;
+// what remains over 3000 is the `expedition` tool (its 87-char description plus nested text).
+const WORKER_DESCRIPTION_BUDGET = 3084;
 
 function describedChars(role: Role): number {
   const nested = (node: Json): number => {

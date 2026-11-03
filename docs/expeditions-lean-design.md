@@ -684,7 +684,7 @@ It adds two helpers:
 - `ownerSays(id, text)`: an owner post in the crew chat, then `host.step`.
 
 The fixture asserts on startup that `git-cambium remove --help` lists `--safe`, and fails loudly
-otherwise; it never skips. `oompa-stub.cjs` is unrelated (Oompa MCP) and is not used.
+otherwise; it never skips.
 
 1. **Loop to a pass; the oracle cannot be edited.**
    - Draft via the tool. Assert the card post exists (purpose `expedition`) and the record is
