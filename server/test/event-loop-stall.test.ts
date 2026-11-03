@@ -45,10 +45,12 @@ test('a blocked event loop is journaled once per activity; an idle loop is not',
 
     noteActivity('GET /api/usage');
     blockEventLoop(250);
-    await delay(120);
+    // 400 ms, not 120: at load ~250 the 100 ms check ran late and both stalls merged into one
+    // detection (2026-11-03). Two checks must fit between them for two stalls.jsonl rows.
+    await delay(400);
     noteActivity('GET /api/usage');
     blockEventLoop(180);
-    await delay(120);
+    await delay(400);
     await journal.flush();
 
     const groups = await journal.queryGroups({ status: 'all' });
