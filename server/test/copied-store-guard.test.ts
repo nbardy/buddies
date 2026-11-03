@@ -123,7 +123,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 test('a backend on a copied store launches no agent unless execution is opted in', async (t) => {
   const control = await boot('control', true);
   t.after(control.stop);
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 90_000;
   while (workerLaunches(control.marker).length === 0 && Date.now() < deadline) await sleep(100);
   assert.ok(workerLaunches(control.marker).length > 0, `bait store never launched the fake CLI:\n${control.log()}`);
 

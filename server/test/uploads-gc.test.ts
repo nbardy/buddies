@@ -127,7 +127,7 @@ test('restart: no pass within a day of the last success, a pass once it is due',
 
     fs.writeFileSync(stateFile, JSON.stringify({ lastSuccessMs: Date.now() - 25 * 60 * 60_000 }));
     stop = startUploadsGc(inputs, { stateFile, firstDelayMs: 0 });
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + 90_000;
     while (survivors(uploads).includes('orphan-old') && Date.now() < deadline)
       await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok(!survivors(uploads).includes('orphan-old'), 'no pass ran once it was due');

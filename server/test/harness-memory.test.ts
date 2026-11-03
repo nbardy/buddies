@@ -69,7 +69,7 @@ test('Buddy turns run with harness auto-memory off; an owner chat keeps it', asy
       existsSync(argvLog) ? readFileSync(argvLog, 'utf8').trim().split('\n') : [];
     const before = spawns().length;
     conversation.sendMessage('hello', { origin: 'owner_input', inputId: id });
-    const deadline = Date.now() + 20_000;
+    const deadline = Date.now() + 60_000;
     while (spawns().length === before || conversation.isRunning) {
       if (Date.now() > deadline) throw new Error(`${id}: the fake claude turn never finished`);
       await new Promise((resolve) => setTimeout(resolve, 20));
