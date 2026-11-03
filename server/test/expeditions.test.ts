@@ -222,6 +222,37 @@ test('owner-judged expeditions follow the chat, and stop and the deadline finish
   }
 });
 
+// Catches the 2026-11-03 geometry G0 card: an owner-judged attempt that answered in time was
+// recorded `skipped` when the deadline passed while it waited for the owner, and a finished
+// expedition refuses every verdict, so nothing could correct it. The deadline bounds work only.
+test('the deadline waits for a verdict on an attempt that answered in time', async () => {
+  const f = await fixture();
+  try {
+    const id = await launched(f, { done: { t: 'owner' }, maxAttempts: 1 });
+    await f.crewAnswer(id, 1, 'Done.\nLesson: measured it');
+    assert.equal(phase(f, id, 1).t, 'judging');
+    f.setClock(Date.parse(f.launch(id).deadline) + 60_000);
+    await f.settle(id);
+    assert.equal(phase(f, id, 1).t, 'judging', 'the deadline does not skip a waiting attempt');
+    assert.equal(f.record(id).state.t, 'running');
+    assert.equal(f.record(id).attempts.length, 1, 'no attempt starts past the deadline');
+    await f.ownerSays(id, 'pass');
+    const s = f.record(id).state;
+    assert.deepEqual(s.t === 'finished' && s.reason, { t: 'passed', n: 1 });
+
+    const failed = await launched(f, { done: { t: 'owner' } }, 'Late fail');
+    await f.crewAnswer(failed, 1, 'Done.');
+    f.setClock(Date.parse(f.launch(failed).deadline) + 60_000);
+    await f.settle(failed);
+    await f.ownerSays(failed, 'fail');
+    const t = f.record(failed).state;
+    assert.deepEqual(t.t === 'finished' && t.reason, { t: 'deadline' }, 'a fail then finishes');
+    assert.equal(f.record(failed).attempts.length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
 // Catches: owner talk silently turned into notes for the crew (it is the manager's to answer), an
 // attempt turn or another Buddy's post steering the expedition, a Buddy recording the owner's
 // verdict, relaunch reusing the id or drafting twice, and pre-lean retired files showing up in

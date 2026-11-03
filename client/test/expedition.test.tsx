@@ -22,7 +22,13 @@ const { MemoryRouter } = await import('react-router-dom');
 
 // One smoke test of the expedition view over every state and both frames, plus the controls that
 // cannot be undone.
-const launch = { at: 'a', deadline: '2026-11-01T08:00:00Z', repoRoot: '/r', baseSha: 'b' };
+const launch = {
+  at: 'a',
+  deadline: '2026-11-01T08:00:00Z',
+  repoRoot: '/r',
+  baseSha: 'b',
+  baseRef: 'refs/heads/main',
+};
 const live = { ...launch, crewBuddyId: 'c', chatChannelId: 'dm', chatSeenOrd: '' };
 const end = {
   at: 'a',

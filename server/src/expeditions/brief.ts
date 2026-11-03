@@ -26,6 +26,10 @@ export const CREW_ROLE = [
   'resume, stop, extend, note (guidance for later attempts), verdict, relaunch. A bare',
   "pause/resume/stop/extend Nh/pass/fail/note: … is the host's: it applies it and answers in the",
   'chat without waking you, so never repeat one you see there. Reply briefly.',
+  // Owner 2026-11-03: after "complete all work" a manager merged an attempt into the repo's local
+  // main and closed a task; the role said nothing about what the manager seat may change.
+  "Merging an attempt branch, moving the repo's main or closing a task is the owner's call: do it",
+  'only when the owner asks for it in this chat, never push, and say exactly what you moved.',
 ].join('\n');
 
 const sha8 = (sha: string) => sha.slice(0, 8);

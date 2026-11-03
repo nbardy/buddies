@@ -4,6 +4,7 @@ import {
   CHARTER_DEFAULTS,
   type Charter,
   CharterInput,
+  type Done,
   type Lesson,
   type Origin,
   attemptResult,
@@ -34,6 +35,16 @@ async function originOf(core: BuddiesCore, grant: BuddyGrant): Promise<Origin> {
   const trigger = await core.getPost(grant.author, run.input.postId);
   return { t: 'thread', channelId: trigger.channelId, rootId: trigger.rootId ?? trigger.id };
 }
+
+/** What the drafted `done` asks of the owner, echoed in the draft reply. Owner 2026-11-03: an
+ * owner-judged draft waited on a pass/fail the owner did not want to give ("you need to be able
+ * to review own work"), when a command could have decided it. */
+const DONE_HINT: Record<Done['t'], string> = {
+  checks: 'Judged by the checks: the host passes an attempt when they all exit 0.',
+  owner:
+    "Judged by the owner: every attempt waits for the owner's pass or fail. If a command can " +
+    'decide the result, redraft with done: {t: "checks"} instead.',
+};
 
 function here(host: ExpeditionHost, grant: BuddyGrant, id: string) {
   const l = host.get(id);
@@ -72,6 +83,7 @@ const HANDLE: {
       id: x.id,
       issues,
       defaulted: defaulted.map((k) => `${k}: ${JSON.stringify(full[k])}`),
+      done: DONE_HINT[full.done.t],
       next,
     };
   },

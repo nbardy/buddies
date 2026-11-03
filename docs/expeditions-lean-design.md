@@ -216,12 +216,17 @@ draft ──launch (preflight clean)──────────────�
   │                                              │  └────pause──────▶  │
   │                                              ├─ stop ───────────────┤──▶ finished{stopped}
   │                                              ├─ attempt verdict pass ─▶ finished{passed n}
-  │                                              ├─ now ≥ deadline ───────▶ finished{deadline}   (paused too)
+  │                                              ├─ now ≥ deadline ∧ none judging ─▶ finished{deadline}   (paused too)
   │                                              ├─ counted ≥ max ∧ none starting/running/judging ─▶ finished{budget}
   │                                              └─ cambium add / request post fails ─▶ finished{setup_failed}
   └─retire─▶ moved to .retired/            finished ──retire (every archive ok)──▶ moved to .retired/
 extend <h>: running|paused, deadline += h      note: running|paused, appended to notes
 ```
+
+Past the deadline no attempt starts and live turns are cancelled, but an attempt already
+`judging` keeps its verdict (owner's or checks'): the expedition finishes `deadline` once none is
+judging, or `passed` if that verdict passes. Owner 2026-11-03: an answered owner-judged a2 that
+waited 1 h 51 m was recorded `skipped` at the deadline, and a finished expedition takes no verdict.
 
 When the expedition enters `finished`, `finish()` does three things:
 - it asks every `running` attempt's crew runs to stop (cancelRun);
@@ -436,7 +441,7 @@ const JUDGE: Record<Done['t'], (x: Launched, a: Attempt) => Promise<void>>;
  *  Posts judgedLine (key exp:<id>:a<n>:judged). */
 function verdictInto(x: Expedition, n: number, v: Verdict): Promise<Expedition>;
 /** For running|paused only. Checks in this order: any judged pass → passed{n}; now ≥ deadline →
- *  deadline; counted ≥ maxAttempts with none starting/running/judging → budget. */
+ *  deadline once none is judging (until then cancel running turns only); counted ≥ maxAttempts with none starting/running/judging → budget. */
 function finishIfDue(x: Launched): Promise<Expedition>;
 /** cancelRuns(running attempts); judging → judged{skipped}; state finished; post finishedLine
  *  (key exp:<id>:finished). */

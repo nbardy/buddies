@@ -346,21 +346,34 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     return next;
   }
 
-  /** running|paused only: a pass, then the deadline, then the spent budget. */
+  /** running|paused only: a pass, then the deadline, then the spent budget. The deadline bounds
+   * WORK, not judgment: past it no attempt starts (fill) and live turns are cancelled, but an
+   * attempt that answered in time keeps its verdict (owner's or checks'), and the expedition
+   * finishes once none is judging, as the budget rule already waited. Owner 2026-11-03: a 2 h
+   * owner-judged expedition turned an answered a2 into `skipped` after it waited 1 h 51 m for the
+   * owner, and a finished expedition takes no verdict, so the card could never be corrected.
+   * Guard: expeditions.test.ts "the deadline waits for a verdict". */
   async function finishIfDue(x: Launched): Promise<Launched> {
     const passed = x.attempts.find(isPass);
     if (passed) return finish(x, { t: 'passed', n: passed.n });
-    if (iso() >= x.state.launch.deadline) return finish(x, { t: 'deadline' });
+    const judging = x.attempts.some((a) => a.phase.t === 'judging');
+    if (iso() >= x.state.launch.deadline)
+      return judging ? cancelLive(x) : finish(x, { t: 'deadline' });
     const busy = x.attempts.some((a) => BUSY.includes(a.phase.t));
     if (counted(x) >= x.charter.maxAttempts && !busy) return finish(x, { t: 'budget' });
     return x;
   }
+  const liveRequests = (x: Launched) =>
+    new Set(x.attempts.flatMap((a) => (a.phase.t === 'running' ? [a.phase.requestId] : [])));
+  /** Cancelled turns settle as `skipped` (JUDGED_TURN) on a later step. */
+  async function cancelLive(x: Launched): Promise<Launched> {
+    const live = liveRequests(x);
+    await cancelRuns(x, (r) => live.has(postIdOf(r) ?? ''));
+    return x;
+  }
 
   async function finish(x: Launched, reason: FinishReason): Promise<Launched> {
-    const live = new Set(
-      x.attempts.flatMap((a) => (a.phase.t === 'running' ? [a.phase.requestId] : []))
-    );
-    await cancelRuns(x, (r) => live.has(postIdOf(r) ?? ''));
+    await cancelLive(x);
     for (const a of x.attempts) checking.get(checkKey(x.id, a.n))?.abort();
     const skip = (a: Attempt): Attempt =>
       a.phase.t === 'judging' ? { ...a, phase: SETTLE_INTO.finished(a.phase.end) } : a;
