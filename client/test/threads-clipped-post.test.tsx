@@ -22,7 +22,7 @@ const directory = workspaceDirectory([], 'ws-1', [], CODEX_INSTALLED);
 const render = (post: Parameters<typeof ChannelPostContent>[0]['post']) =>
   renderToStaticMarkup(
     <Provider>
-      <ChannelPostContent post={post} directory={directory} />
+      <ChannelPostContent post={post} directory={directory} toolsHost={null} />
     </Provider>
   );
 

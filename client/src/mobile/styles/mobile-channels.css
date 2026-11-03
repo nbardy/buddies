@@ -325,6 +325,7 @@ a.mobile-channels-wake-done {
   font-weight: 600;
 }
 .mobile-channel-post {
+  --sp-avatar: 36px;
   padding: var(--sp-2) var(--sp-7);
 }
 .mobile-channel-post--lead {
@@ -335,9 +336,10 @@ a.mobile-channels-wake-done {
 }
 /* Continuations line up with the lead's text column, as in Slack. */
 .mobile-channel-post--continuation {
-  /* 60px: avatar + column gap, kept exact rather than snapped to a token. */
-  padding-left: calc(var(--sp-11) + var(--sp-8));
+  /* Lead text column: gutter + 36px avatar + gap (62px). */
+  padding-left: calc(var(--sp-7) + var(--sp-avatar) + var(--sp-5));
 }
+.mobile-channel-post:focus-within { background: var(--bg-hover); } /* ties the tap pill to its post */
 .mobile-channel-post__avatar {
   display: block;
   width: 36px;

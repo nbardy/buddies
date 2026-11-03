@@ -1,9 +1,9 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AuthorAvatar } from './BuddySigil';
 import { ChannelAuthor, type OpenDm } from './ChannelAuthor';
 import { TypingDots } from './ChannelMarkdown';
-import { ChannelPostContent } from './ChannelPostContent';
+import { ChannelPostContent, EditedMark } from './ChannelPostContent';
 import { ConversationEye } from './ConversationEye';
 import { CopyLinkButton } from './CopyLinkButton';
 import { ReplyRetry } from './HarnessPicker';
@@ -232,9 +232,18 @@ function ReplyAction({ post, context }: { post: Post; context: RowContext }) {
 
 // Slack's hover toolbar: a small floating group pinned to the message's
 // top-right corner, straddling its top edge so it never covers the text.
-function MessageActions({ post, context }: { post: Post; context: RowContext }) {
+function MessageActions({
+  post,
+  context,
+  hostRef,
+}: { post: Post; context: RowContext; hostRef: (element: HTMLElement | null) => void }) {
   return (
-    <div className="channel-browser-message-actions" role="toolbar" aria-label="Message actions">
+    <div
+      className="channel-browser-message-actions"
+      role="toolbar"
+      aria-label="Message actions"
+      ref={hostRef}
+    >
       <ConversationEye post={post} className="channel-browser-message-action" linkState={null} />
       <ReplyAction post={post} context={context} />
       <CopyLinkButton
@@ -246,8 +255,12 @@ function MessageActions({ post, context }: { post: Post; context: RowContext }) 
   );
 }
 
-function PostBody({ post, context }: { post: Post; context: RowContext }) {
-  return <ChannelPostContent post={post} directory={context.directory} />;
+function PostBody({
+  post,
+  context,
+  toolsHost,
+}: { post: Post; context: RowContext; toolsHost: HTMLElement | null }) {
+  return <ChannelPostContent post={post} directory={context.directory} toolsHost={toolsHost} />;
 }
 
 function rowUnread(post: Post, context: RowContext): 'true' | undefined {
@@ -266,6 +279,7 @@ export function LeadRow({
   context,
   children,
 }: { post: Post; context: RowContext; children?: ReactNode }) {
+  const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   return (
     <li
       className="channel-browser-message channel-browser-message--lead"
@@ -290,19 +304,21 @@ export function LeadRow({
           <time dateTime={post.createdAt} title={new Date(post.createdAt).toLocaleString()}>
             {clockTime(post.createdAt)}
           </time>
+          <EditedMark post={post} />
           <PostMeta post={post} context={context} />
         </div>
-        <PostBody post={post} context={context} />
+        <PostBody post={post} context={context} toolsHost={toolsHost} />
         <ReplyRetry post={post} />
         <ThreadSummary post={post} context={context} />
         {children}
       </div>
-      <MessageActions post={post} context={context} />
+      <MessageActions post={post} context={context} hostRef={setToolsHost} />
     </li>
   );
 }
 
 function ContinuationRow({ post, context }: { post: Post; context: RowContext }) {
+  const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   return (
     <li
       className="channel-browser-message channel-browser-message--continuation"
@@ -320,13 +336,14 @@ function ContinuationRow({ post, context }: { post: Post; context: RowContext })
       </time>
       <div className="channel-browser-message-content">
         <span className="channel-browser-inline-meta">
+          <EditedMark post={post} />
           <PostMeta post={post} context={context} />
         </span>
-        <PostBody post={post} context={context} />
+        <PostBody post={post} context={context} toolsHost={toolsHost} />
         <ReplyRetry post={post} />
         <ThreadSummary post={post} context={context} />
       </div>
-      <MessageActions post={post} context={context} />
+      <MessageActions post={post} context={context} hostRef={setToolsHost} />
     </li>
   );
 }

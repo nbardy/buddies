@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { recordEmojiUse } from '../../atoms/emoji-usage';
 import { invalidateChannelResources } from '../../atoms/resources';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
@@ -25,10 +26,22 @@ import './ChannelPostContent.css';
 // Guard: tools/check-reaction-layout.mjs checks hover/focus dimensions and touch access.
 // Pattern: one-definition (docs/patterns.md#one-definition)
 // Both shells edit/react to the same post; the edit snapshot pins its revision until Save.
+/** "edited" lives in the post header beside the time, not on a row of its own. */
+export function EditedMark({ post }: { post: ClippedPost }) {
+  return post.editedAt ? (
+    <span className="channel-post-edited ui-muted" title={new Date(post.editedAt).toLocaleString()}>
+      · edited
+    </span>
+  ) : null;
+}
+
+// toolsHost: desktop passes the hover toolbar element, so Edit/react render inside it as one
+// toolbar (portal; state stays here). Null (phone) keeps the tap pill inside the post.
 export function ChannelPostContent({
   post: shown,
   directory,
-}: { post: ClippedPost; directory: WorkspaceDirectory }) {
+  toolsHost,
+}: { post: ClippedPost; directory: WorkspaceDirectory; toolsHost: HTMLElement | null }) {
   // A Threads card may hold only a preview (server routes.ts clipFollowedThreads). "Show full
   // message" swaps in the whole copy from the thread resource. Fix-guard: Edit is hidden on a
   // preview, or Save would overwrite the post with its clipped text.
@@ -64,6 +77,37 @@ export function ChannelPostContent({
       .catch((cause: unknown) => setProblem(errorText(cause)))
       .finally(() => setBusy(false));
   };
+  const tools: ReactNode = (
+        <div className="channel-post-tools" role="group" aria-label="Edit or react">
+          {post.author.kind === 'owner' && !clipped && (
+            <button type="button" aria-label="Edit message" onClick={() => setEditing(post)}>
+              Edit
+            </button>
+          )}
+          <button
+            type="button"
+            className="channel-post-add-reaction"
+            aria-label="Add emoji reaction"
+            title="Add emoji reaction"
+            disabled={busy}
+            onClick={() => setPicking(true)}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <circle cx="8" cy="8" r="6" />
+              <path d="M5 9.5Q8 12 11 9.5" />
+              <circle cx="6" cy="6" r=".5" />
+              <circle cx="10" cy="6" r=".5" />
+            </svg>
+          </button>
+        </div>
+  );
   return (
     <div
       className="channel-post-content"
@@ -104,7 +148,7 @@ export function ChannelPostContent({
               : `Show full message (${post.clippedFrom} characters)`}
         </button>
       )}
-      {!editing && (reactions.size > 0 || post.editedAt) && (
+      {!editing && reactions.size > 0 && (
         <div className="channel-post-chips ui-row">
           {[...reactions].map(([emoji, value]) => (
             <button
@@ -119,44 +163,9 @@ export function ChannelPostContent({
               {emoji} {value.count}
             </button>
           ))}
-          {post.editedAt && (
-            <span className="ui-muted" title={new Date(post.editedAt).toLocaleString()}>
-              edited
-            </span>
-          )}
         </div>
       )}
-      {!editing && (
-        <div className="channel-post-tools" role="toolbar" aria-label="Edit or react">
-          {post.author.kind === 'owner' && !clipped && (
-            <button type="button" aria-label="Edit message" onClick={() => setEditing(post)}>
-              Edit
-            </button>
-          )}
-          <button
-            type="button"
-            className="channel-post-add-reaction"
-            aria-label="Add emoji reaction"
-            title="Add emoji reaction"
-            disabled={busy}
-            onClick={() => setPicking(true)}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <circle cx="8" cy="8" r="6" />
-              <path d="M5 9.5Q8 12 11 9.5" />
-              <circle cx="6" cy="6" r=".5" />
-              <circle cx="10" cy="6" r=".5" />
-            </svg>
-          </button>
-        </div>
-      )}
+      {!editing && (toolsHost === null ? tools : createPortal(tools, toolsHost))}
       {problem && <span role="alert">{problem}</span>}
       {picking && (
         <EmojiPicker onPick={(emoji) => react(emoji, true)} onClose={() => setPicking(false)} />

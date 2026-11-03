@@ -418,6 +418,8 @@
   padding: var(--sp-6) 0 var(--sp-8);
   list-style: none;
 }
+/* The thread pane starts at the top; only a channel anchors to the bottom. */
+.channel-thread-root, .channel-thread-root ~ .channel-browser-messages { margin-top: 0; }
 
 .channel-browser-day {
   position: sticky;
@@ -781,19 +783,9 @@ a.channel-browser-buddy-done {
 .channel-browser-message-actions:focus-within {
   visibility: visible;
 }
-/* Edit/react pill (ChannelPostContent.css): desktop joins the hover toolbar, just left of it. */
-.channel-browser-message .channel-post-content {
-  position: static;
-}
-.channel-browser-message .channel-post-tools {
-  top: -14px;
-  right: 132px;
-  bottom: auto;
-}
-.channel-browser-message:hover .channel-post-tools {
-  opacity: 1;
-  pointer-events: auto;
-}
+/* Edit/react are portaled into the hover toolbar (toolsHost): one toolbar, no box of their own. */
+.channel-browser-message-actions .channel-post-tools { position: static; display: contents; }
+.channel-browser-message-actions .channel-post-tools button { height: 28px; min-height: 28px; }
 /* Host status lines (expedition progress) read as quiet log lines, not conversation. */
 .channel-browser-message[data-purpose="expedition_status"] .channel-markdown {
   color: var(--text-muted);

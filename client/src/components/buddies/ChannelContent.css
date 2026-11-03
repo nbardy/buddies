@@ -119,9 +119,11 @@
   background: var(--bg-panel);
 }
 
-.channel-markdown pre code {
+.channel-markdown pre code,
+.channel-markdown pre code.hljs { /* hljs themes pad `pre code.hljs` at equal specificity, later */
   padding: 0;
   background: transparent;
+  overflow-x: visible;
 }
 
 .channel-code-copy-btn {

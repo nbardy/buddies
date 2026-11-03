@@ -4,7 +4,7 @@ import { AuthorAvatar } from '../../components/buddies/BuddySigil';
 import { ChannelHeaderControls } from '../../components/buddies/ChannelArchive';
 import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
-import { ChannelPostContent } from '../../components/buddies/ChannelPostContent';
+import { ChannelPostContent, EditedMark } from '../../components/buddies/ChannelPostContent';
 import { ConversationEye } from '../../components/buddies/ConversationEye';
 import { CopyLinkButton } from '../../components/buddies/CopyLinkButton';
 import { ReplyRetry } from '../../components/buddies/HarnessPicker';
@@ -151,6 +151,7 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
                 openDm={openDm}
               />
               <time dateTime={row.post.createdAt}>{clockTime(row.post.createdAt)}</time>
+              <EditedMark post={row.post} />
               <PostPurpose post={row.post} />
               <ConversationEye
                 post={row.post}
@@ -158,7 +159,7 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
                 linkState={linkState}
               />
             </div>
-            <ChannelPostContent post={row.post} directory={context.directory} />
+            <ChannelPostContent post={row.post} directory={context.directory} toolsHost={null} />
             <ReplyRetry post={row.post} />
             <PostFooter post={row.post} context={context} />
           </div>
@@ -174,13 +175,14 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
           data-unread={rowUnread(row.post, context)}
         >
           <div className="mobile-channel-post__content">
+            <EditedMark post={row.post} />
             <PostPurpose post={row.post} />
             <ConversationEye
               post={row.post}
               className="mobile-channel-post__reply ui-inline-row ui-muted"
               linkState={linkState}
             />
-            <ChannelPostContent post={row.post} directory={context.directory} />
+            <ChannelPostContent post={row.post} directory={context.directory} toolsHost={null} />
             <ReplyRetry post={row.post} />
             <PostFooter post={row.post} context={context} />
           </div>
