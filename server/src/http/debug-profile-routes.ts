@@ -1,5 +1,5 @@
 import type { Application } from 'express';
-import { ProfilerBusyError, captureCpuProfile } from '../observability/perf';
+import { ProfilerBusyError, captureCpuProfile } from '../observability/cpu-profiler';
 
 const DEFAULT_MS = 10_000;
 const MIN_MS = 500;

@@ -74,8 +74,9 @@ import {
   TurnAttemptJournal,
   createJournalTurnAttemptObserver,
   installConsoleErrorCapture,
-  noteActivity,
+  labelled,
   reportBackendExits,
+  stallProfilingFromEnv,
   startEventLoopStallMonitor,
 } from './observability';
 import {
@@ -606,18 +607,20 @@ registerDebugProfileRoutes(app);
 // added it must call `res.flush()` after each write or compression buffers it.
 app.use(compression({ threshold: 1024 }));
 
-// Event-loop stall attribution (observability/event-loop-stall.ts): a label and
-// a timestamp per request, nothing else.
-app.use((request, _response, next) => {
-  noteActivity(`${request.method} ${request.path}`);
-  next();
-});
-
 // JSON body parser for API routes.
 // Default limit is 100kb which is far too small — queue-message and other
 // endpoints routinely carry pasted content, inline images, or full
 // conversation histories. Matches client uploads already sized in MB.
 app.use(express.json({ limit: '50mb' }));
+
+// Event-loop stall attribution (observability/event-loop-stall.ts): the rest of the chain, and the
+// async work it starts, runs under the request's label and is timed. AFTER the body parser: with a
+// body it calls next() from a stream callback, which the monitor does not time, so a label set
+// before it would carry into a POST handler but not time the handler's synchronous part.
+app.use((request, _response, next) =>
+  labelled(`${request.method} ${request.path}`, () => next())()
+);
+
 app.use((request, response, next) => {
   if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') {
     next();
@@ -938,7 +941,9 @@ void runServerStartup(
       await timeBootPhaseAsync('error_journal', () => errorJournal.initialize());
       await timeBootPhaseAsync('records_open', () => conversationConfigStore.opened());
       installConsoleErrorCapture(errorJournal);
-      timeBootPhase('stall_monitor', () => startEventLoopStallMonitor(errorJournal));
+      timeBootPhase('stall_monitor', () =>
+        startEventLoopStallMonitor(errorJournal, stallProfilingFromEnv())
+      );
       // Ingest.start (3.4 s, idle main thread waiting on Rust) needs only the records store, so it
       // overlaps the rest of initialize (scan, MCP, attempt journal, palette); loadConversations
       // awaits it. The no-op catch only keeps a failed initialize from leaving it unhandled.

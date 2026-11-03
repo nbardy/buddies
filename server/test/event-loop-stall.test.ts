@@ -6,6 +6,7 @@
  * What would re-break: computing drift from the wrong baseline (every tick then
  * reads as a stall, or none does), losing the activity label, or journaling
  * every repeat of the same stall instead of summarizing within the window.
+ * The continuous profiler's own test is continuous-profiler.test.ts.
  */
 
 import assert from 'node:assert/strict';
@@ -36,7 +37,7 @@ test('a blocked event loop is journaled once per activity; an idle loop is not',
   process.env.UNLEASHD_DATA_DIR = directory;
   const journal = new ErrorJournal({ directory });
   await journal.initialize();
-  const stop = startEventLoopStallMonitor(journal);
+  const stop = startEventLoopStallMonitor(journal, { kind: 'off' });
   try {
     await delay(300);
     await journal.flush();
@@ -82,7 +83,7 @@ test('labelled() names an otherwise anonymous timer, so its stall is not blamed 
   process.env.UNLEASHD_DATA_DIR = directory;
   const journal = new ErrorJournal({ directory });
   await journal.initialize();
-  const stop = startEventLoopStallMonitor(journal);
+  const stop = startEventLoopStallMonitor(journal, { kind: 'off' });
   try {
     noteActivity('GET /api/innocent');
     setTimeout(
@@ -105,32 +106,55 @@ test('labelled() names an otherwise anonymous timer, so its stall is not blamed 
   }
 });
 
-test('labelled() does not claim stalls that run after its synchronous body returns', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'unleashd-stall-after-'));
+/** Runs `scenario` under a fresh monitor and returns the labels of the stalls it recorded. */
+async function stallLabels(scenario: () => void): Promise<string[]> {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'unleashd-stall-async-'));
   process.env.UNLEASHD_DATA_DIR = directory;
   const journal = new ErrorJournal({ directory });
   await journal.initialize();
-  const stop = startEventLoopStallMonitor(journal);
+  const stop = startEventLoopStallMonitor(journal, { kind: 'off' });
   try {
-    setTimeout(
-      labelled('timer quick-poller', () => {
-        setTimeout(() => blockEventLoop(200), 50); // someone else's work, later
-      }),
-      10
-    );
-    await delay(400);
+    scenario();
+    await delay(500);
     await flushPerf();
-    const [record] = fs
+    return fs
       .readFileSync(path.join(directory, 'observability', 'perf', 'stalls.jsonl'), 'utf8')
       .trim()
       .split('\n')
-      .map((line) => JSON.parse(line));
-    assert.equal(record.label, 'unlabelled (after timer quick-poller)');
+      .map((line) => JSON.parse(line).label);
   } finally {
-    stop();
+    await stop();
     Reflect.deleteProperty(process.env, 'UNLEASHD_DATA_DIR');
     fs.rmSync(directory, { recursive: true, force: true });
   }
+}
+
+// Regression (2026-11-03): stall storms read "unlabelled (after timer oompa-poll)" because a label
+// was one global, so a stall in an awaited continuation of a tick named only the last timer. Would
+// re-break if the label stopped following async work (no AsyncLocalStorage, or continuations not
+// timed), or if an unrelated stall were again blamed on whichever labelled() body ran last.
+test('a stall in an async continuation carries the label of the work that started it', async () => {
+  const continued = await stallLabels(() => {
+    setTimeout(
+      labelled('timer oompa-like', () => {
+        void (async () => {
+          await delay(30); // the tick's own async work, after its synchronous body returned
+          blockEventLoop(200);
+        })();
+      }),
+      10
+    );
+  });
+  assert.deepEqual(continued, ['timer oompa-like (async)']);
+
+  const unrelated = await stallLabels(() => {
+    setTimeout(
+      labelled('timer quick-poller', () => {}),
+      10
+    );
+    setTimeout(() => blockEventLoop(200), 60); // started under no label
+  });
+  assert.deepEqual(unrelated, ['unlabelled']);
 });
 
 /** Runs fixtures/stall-child.ts; `stopped` SIGSTOPs it for 700 ms. Returns its stalls.jsonl rows. */

@@ -108,7 +108,14 @@ function run(unit) {
       process.execPath,
       [tsx, '--test', ...forwarded, `server/test/${unit.name}.test.ts`],
       {
-        env: { ...process.env, UNLEASHD_TEST_SHARD: unit.shard, TMPDIR: tmp },
+        // Backends a unit boots never profile continuously (a test opts in by calling the
+        // monitor with its own StallProfiling); stall profiles under a temp store are noise.
+        env: {
+          ...process.env,
+          UNLEASHD_TEST_SHARD: unit.shard,
+          TMPDIR: tmp,
+          UNLEASHD_CONTINUOUS_PROFILE: '0',
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
       }

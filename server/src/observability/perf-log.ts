@@ -5,7 +5,7 @@ import path from 'node:path';
 
 /**
  * Performance telemetry storage: small append-only JSONL files under
- * `<data-dir>/observability/perf/` (boot.jsonl, routes.jsonl, stalls.jsonl,
+ * `<data-dir>/observability/perf/` (boot.jsonl, routes.jsonl, stalls.jsonl, profiles.jsonl,
  * profiles/). Same data-dir resolution as the error journal
  * (`UNLEASHD_DATA_DIR`, else `~/.agent-viewer`) and the same rotation scheme
  * (5 MiB x 4 rotated files, mode 0600).
@@ -22,7 +22,7 @@ import path from 'node:path';
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROTATED_FILES = 4;
 
-export type PerfFile = 'boot.jsonl' | 'routes.jsonl' | 'stalls.jsonl';
+export type PerfFile = 'boot.jsonl' | 'routes.jsonl' | 'stalls.jsonl' | 'profiles.jsonl';
 
 export function dataDirectory(env: NodeJS.ProcessEnv = process.env): string {
   return path.resolve(env.UNLEASHD_DATA_DIR?.trim() || path.join(os.homedir(), '.agent-viewer'));
