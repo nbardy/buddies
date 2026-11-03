@@ -85,6 +85,11 @@ test('the modal renders every state and an unreadable record; retire takes a con
   }
   assert.match(render('x-draft'), /claude is not installed/);
   assert.match(render('x-running'), />Pass<.*>Fail</s);
+  // Review 2026-11-03: crews are off the Buddies rail, so the modal is the owner's way into the
+  // crew chat (status lines, commands) and the only place to leave a note.
+  assert.match(render('x-running'), /href="[^"]*channels\?channel=dm"/);
+  assert.match(render('x-running'), /aria-label="Note or command for the crew"/);
+  assert.doesNotMatch(render('x-finished'), /Note or command/);
   assert.match(render('x-finished'), />Retire</);
   await loadResource({
     key: expeditionUrl('bad'),

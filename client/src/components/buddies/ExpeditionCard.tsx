@@ -15,7 +15,11 @@ export function ExpeditionCard({ id }: { id: string }) {
   if (read.data === null)
     return (
       <div className="expedition-card ui-muted">
-        {read.kind === 'failed' ? 'Expedition no longer listed' : 'Loading expedition…'}
+        {read.kind === 'loading' || read.kind === 'idle'
+          ? 'Loading expedition…'
+          : read.error.message === 'HTTP 404'
+            ? 'Expedition no longer listed'
+            : `Expedition unavailable (${read.error.message})`}
       </div>
     );
   const x = read.data;

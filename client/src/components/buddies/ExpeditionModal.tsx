@@ -3,15 +3,20 @@ import {
   type Act,
   type Done,
   type Expedition,
+  type Launch,
   attemptResult,
   stateLabel,
 } from '@unleashd/shared';
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { invalidateBuddyResources } from '../../atoms/resources';
 import { ChannelMarkdown } from './ChannelMarkdown';
 import { ActButton as Button } from './ExpeditionCard';
 import { ModalDialog } from './ModalDialog';
+import { buddyWrite, errorText } from './api';
 import { useWorkspaceDirectory } from './channel-data';
-import { useAct, useExpedition } from './expedition-api';
+import { channelLinkPath } from './channel-link';
+import { type ActState, useAct, useExpedition } from './expedition-api';
 import './Expedition.css';
 
 /** The expedition modal: charter, attempts and the owner's controls, rendered from ALLOWED. */
@@ -32,7 +37,7 @@ export function ExpeditionModal({ id, onClose }: { id: string; onClose(): void }
       {read.data === null ? (
         <p className="ui-muted">{read.kind === 'failed' ? read.error.message : 'Loading…'}</p>
       ) : (
-        <Body x={read.data} />
+        <Body x={read.data} onClose={onClose} />
       )}
     </ModalDialog>
   );
@@ -43,7 +48,7 @@ const DONE: { [K in Done['t']]: (d: Extract<Done, { t: K }>) => string } = {
   owner: () => 'you judge',
 };
 
-function Body({ x }: { x: Expedition }) {
+function Body({ x, onClose }: { x: Expedition; onClose(): void }) {
   const directory = useWorkspaceDirectory(x.workspaceId);
   const goal = useMemo(() => ({ t: 'text' as const, text: x.charter.goal }), [x.charter.goal]);
   const done = x.charter.done;
@@ -65,6 +70,7 @@ function Body({ x }: { x: Expedition }) {
       </p>
       {x.state.t === 'draft' && <p className="expedition-issues">{x.state.issues.join(' · ')}</p>}
       <Attempts x={x} />
+      {'launch' in x.state && <CrewChat x={x} launch={x.state.launch} onClose={onClose} />}
       <Controls x={x} />
     </div>
   );
@@ -97,7 +103,71 @@ function Attempts({ x }: { x: Expedition }) {
           );
         })}
       </tbody>
+      {act.state.t === 'failed' && (
+        <caption className="expedition-error">{act.state.error}</caption>
+      )}
     </table>
+  );
+}
+
+/** The owner↔crew chat holds the status lines and reads the owner's notes and commands
+ * (review 2026-11-03: crews are off the Buddies rail, so the modal is the way in). */
+function CrewChat({ x, launch, onClose }: { x: Expedition; launch: Launch; onClose(): void }) {
+  const [text, setText] = useState('');
+  const [sent, setSent] = useState<ActState>({ t: 'idle' });
+  const send = () => {
+    setSent({ t: 'pending' });
+    buddyWrite('channel.post', { channelId: launch.chatChannelId }, { body: text })
+      .then(() => {
+        setText('');
+        setSent({ t: 'idle' });
+        invalidateBuddyResources();
+      })
+      .catch((cause: unknown) => setSent({ t: 'failed', error: errorText(cause) }));
+  };
+  const chat = channelLinkPath(x.workspaceId, { kind: 'channel', channelId: launch.chatChannelId });
+  return (
+    <section className="expedition-chat ui-stack" aria-label="Crew chat">
+      <p>
+        <Link to={chat} onClick={onClose}>
+          Open the crew chat
+        </Link>{' '}
+        <span className="ui-muted">
+          status lines, and pause, resume, stop, extend 2h, pass, fail
+        </span>
+      </p>
+      {x.notes.length > 0 && (
+        <ul className="expedition-notes">
+          {x.notes.map((n) => (
+            <li key={`${n.at}-${n.text}`}>{n.text}</li>
+          ))}
+        </ul>
+      )}
+      {ALLOWED.note.includes(x.state.t) && (
+        <form
+          className="ui-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send();
+          }}
+        >
+          <input
+            value={text}
+            aria-label="Note or command for the crew"
+            placeholder="A note for the next attempts, or a command"
+            onChange={(e) => setText(e.target.value)}
+          />
+          <button
+            type="submit"
+            className="expedition-button"
+            disabled={sent.t === 'pending' || text.trim() === ''}
+          >
+            Send
+          </button>
+        </form>
+      )}
+      {sent.t === 'failed' && <span className="expedition-error">{sent.error}</span>}
+    </section>
   );
 }
 
