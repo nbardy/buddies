@@ -159,11 +159,15 @@ test('owner-judged expeditions follow the chat, and stop and the deadline finish
     const deadline = Date.parse(f.launch(id).deadline);
     await f.ownerSays(id, 'extend 2h');
     assert.equal(Date.parse(f.launch(id).deadline) - deadline, 7_200_000);
+    // Review 2026-11-03: a bare command also woke the manager, which answered with a stale
+    // status (and could apply it again: extend twice is 4 h). The host acks; no crew turn starts.
+    assert.ok((await f.chat(id)).some((p) => /^Extended 2 h · new deadline /.test(p.body)));
     await f.ownerSays(id, 'Pause.');
     await f.ownerSays(id, 'fail');
     assert.equal(f.record(id).state.t, 'paused');
     assert.equal(f.record(id).attempts.length, 1, 'no attempt starts while paused');
     await f.ownerSays(id, 'resume');
+    assert.deepEqual(await f.deliveries(id), [], 'a bare command wakes no manager turn');
     assert.equal(phase(f, id, 2).t, 'running');
     await f.crewAnswer(id, 2, 'Done again.');
     // Review 2026-11-03: the channel feed leaves thread replies out, so a verdict given in the
@@ -202,8 +206,9 @@ test('owner-judged expeditions follow the chat, and stop and the deadline finish
 });
 
 // Catches: owner talk silently turned into notes for the crew (it is the manager's to answer), an
-// attempt turn steering (stopping or passing) its own expedition, relaunch reusing the id, and
-// pre-lean retired files showing up in the Retired list (no legacy reader, owner 2026-11-03).
+// attempt turn or another Buddy's post steering the expedition, a Buddy recording the owner's
+// verdict, relaunch reusing the id or drafting twice, and pre-lean retired files showing up in
+// the Retired list (no legacy reader, owner 2026-11-03).
 test('the crew chat seat manages; attempt turns cannot steer; relaunch drafts afresh', async () => {
   const f = await fixture();
   try {
@@ -211,6 +216,8 @@ test('the crew chat seat manages; attempt turns cannot steer; relaunch drafts af
     await f.ownerSays(id, 'Pause and tell me what a1 learned');
     assert.equal(f.record(id).state.t, 'running', 'talk is not a command');
     assert.deepEqual(f.record(id).notes, [], 'talk is not a note');
+    const [talk] = await f.deliveries(id);
+    assert.ok(talk, "the owner's talk wakes the manager");
     await f.ownerSays(id, 'note: try the exact string');
     assert.deepEqual(
       f.record(id).notes.map((n) => n.text),
@@ -219,25 +226,47 @@ test('the crew chat seat manages; attempt turns cannot steer; relaunch drafts af
 
     const crew = f.launch(id).crewBuddyId;
     const claim = await executeRequestRun(f, f.requestOf(id, 1));
-    const steer = (runId: string | null, act: Record<string, unknown>) =>
+    const steer = (runId: string, act: Record<string, unknown>) =>
       rpc(f.specAs(crew, runId), 'expedition', { action: { do: 'act', id, act } });
     const fromAttempt = await steer(claim.run.id, { do: 'stop' });
     assert.equal(fromAttempt.error, true);
     assert.match(fromAttempt.text, /attempt turn cannot steer/);
+    // Review 2026-11-03: every non-attempt crew turn was the manager, so a Buddy's post to the
+    // crew ("stop and relaunch", "pass a3") was obeyed as the owner's.
+    const lead = buddyActor(f.leadId);
+    const asked = await f.core.post(
+      lead,
+      { kind: 'direct', members: [lead, buddyActor(crew)] },
+      { kind: 'request', body: 'Stop.', evidence: [], mentions: [], broadcast: false, key: 'ask' }
+    );
+    const runs = await f.core.listRuns({ kind: 'buddy', buddyId: crew }, 200);
+    const leads = runs.find((r) => r.input.kind === 'post' && r.input.postId === asked.post.id);
+    assert.ok(leads, "the lead's request starts a crew turn");
+    const fromBuddy = await steer(leads.id, { do: 'stop' });
+    assert.match(fromBuddy.text, /only the owner's chat with the crew steers/);
+    // ...and any Buddy could record a verdict as the owner's.
+    const verdict = { do: 'verdict', n: 1, pass: true };
+    const relayed = await rpc(f.spec(), 'expedition', { action: { do: 'act', id, act: verdict } });
+    assert.match(relayed.text, /verdict is the owner's/);
     assert.equal(f.record(id).state.t, 'running');
-    const paused = await steer(null, { do: 'pause' });
+
+    const paused = await steer(talk.id, { do: 'pause' });
     assert.equal(paused.error, false, paused.text);
     assert.equal(f.record(id).state.t, 'paused');
-    const status = await rpc(f.specAs(crew, null), 'expedition', { action: { do: 'status', id } });
+    const status = await rpc(f.specAs(crew, talk.id), 'expedition', {
+      action: { do: 'status', id },
+    });
     assert.deepEqual((status.value as { notes: string[] }).notes, ['try the exact string']);
 
-    assert.equal((await steer(null, { do: 'stop' })).error, false);
-    const again = await steer(null, { do: 'relaunch' });
+    assert.equal((await steer(talk.id, { do: 'stop' })).error, false);
+    const again = await steer(talk.id, { do: 'relaunch' });
     assert.equal(again.error, false, again.text);
     const fresh = (again.value as { id: string }).id;
     assert.notEqual(fresh, id);
     assert.equal(f.record(fresh).state.t, 'draft');
     assert.deepEqual(f.record(fresh).charter, f.record(id).charter);
+    // A retried relaunch answers with the open draft, not a second one.
+    assert.equal(((await steer(talk.id, { do: 'relaunch' })).value as { id: string }).id, fresh);
 
     fs.mkdirSync(path.join(f.root, '.retired'), { recursive: true });
     const old = { t: 'expedition.retired/v1', summary: {}, report: '' };

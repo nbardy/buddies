@@ -154,6 +154,13 @@ export type RetiredExpedition = z.infer<typeof RetiredExpedition>;
 export type ExpeditionRow =
   | ({ t: 'ok' } & ExpeditionSummary)
   | { t: 'unreadable'; id: string; reason: string };
+/** GET /api/buddies/expeditions/:id/chat: the manager chat (one thread in the owner<->crew DM),
+ * or why there is none. Review 2026-11-03: the view searched the DM's first feed page for the
+ * root and spun forever when it was not there (never made, or pushed off the page). */
+export type ExpeditionChat =
+  | { t: 'thread'; channelId: string; rootId: string; crewBuddyId: string }
+  | { t: 'none'; reason: string };
+
 /** needsOwner: an attempt waits on the owner's verdict. crewBuddyId null: not launched. */
 export type ExpeditionSummary = {
   id: string;
@@ -191,7 +198,8 @@ export const Act = z.discriminatedUnion('do', [
 ]);
 export type Act = z.infer<typeof Act>;
 /** The Buddy tool's acts, chosen by name (launch and retire are the owner's). verdict and
- * relaunch relay what the owner said to the expedition's manager (its crew's chat seat). */
+ * relaunch are the owner's words: only the manager seat may relay them, in a turn the owner
+ * started (server tool.ts MAY_ACT). */
 export const BuddyAct = z.discriminatedUnion('do', [
   ACT.pause,
   ACT.resume,
@@ -214,6 +222,9 @@ export const ALLOWED: Record<Act['do'], readonly State['t'][]> = {
   retire: ['draft', 'finished'],
   relaunch: ['finished'],
 };
+/** An attempt waits on the owner's verdict (an owner-judged charter, an attempt judging). */
+export const needsOwner = (x: Expedition) =>
+  x.charter.done.t === 'owner' && x.attempts.some((a) => a.phase.t === 'judging');
 /** Attempts the budget counts (everything but interrupted). */
 export const counted = (x: Expedition) =>
   x.attempts.filter((a) => a.phase.t !== 'interrupted').length;

@@ -23,8 +23,9 @@ export const CREW_ROLE = [
   'Answer the request when done; its last line is "Lesson: <one sentence>".',
   "In your chat with the owner you are the expedition's manager. Read it with the expedition tool",
   '(status: attempts, lessons, branches, notes) and do what the owner asks with act: pause,',
-  'resume, stop, extend, note (guidance for later attempts), verdict, relaunch. The host already',
-  'applied a bare pause/resume/stop/extend Nh/pass/fail/note: …; then just confirm. Reply briefly.',
+  'resume, stop, extend, note (guidance for later attempts), verdict, relaunch. A bare',
+  "pause/resume/stop/extend Nh/pass/fail/note: … is the host's: it applies it and answers in the",
+  'chat without waking you, so never repeat one you see there. Reply briefly.',
 ].join('\n');
 
 const sha8 = (sha: string) => sha.slice(0, 8);
@@ -84,17 +85,22 @@ export function lessonOf(body: string): Lesson {
   return m ? { t: 'lesson', text: m[1] } : { t: 'none' };
 }
 
-const WORDS: Record<string, Act> = {
+const WORDS: Record<string, ChatCommand> = {
   pause: { do: 'pause' },
   resume: { do: 'resume' },
   stop: { do: 'stop' },
 };
 
-/** What an owner chat post means to the host: a bare command it applies, or talk for the
- * manager seat to answer (a note only when the manager records one). */
-export type Said = { t: 'act'; act: Act } | { t: 'talk' };
+/** The acts a bare chat command can name. */
+export type ChatCommand = Extract<
+  Act,
+  { do: 'pause' | 'resume' | 'stop' | 'extend' | 'note' | 'verdict' }
+>;
+/** What an owner chat post means to the host: a bare command it applies (and that wakes no
+ * manager turn, host.ts consumes), or talk for the manager seat to answer. */
+export type Said = { t: 'act'; act: ChatCommand } | { t: 'talk' };
 const TALK: Said = { t: 'talk' };
-const act = (a: Act): Said => ({ t: 'act', act: a });
+const act = (a: ChatCommand): Said => ({ t: 'act', act: a });
 
 /** κ for an owner chat message: pause, resume, stop, `extend 2h|30m`, pass, fail (the oldest
  * judging attempt, owner-judged only), `note: <text>`. Anything else is talk. */
@@ -117,6 +123,34 @@ export function chatAct(x: Expedition, body: string): Said {
   }
   return Object.hasOwn(WORDS, said) ? act(WORDS[said]) : TALK;
 }
+
+/** The host's answer to a command it applied: its own line, or none when the act already posts
+ * one (stop: the finished line; verdict: the judged line). Review 2026-11-03: a successful extend
+ * or pause was answered by nobody but a manager turn reading a stale status. */
+export type Ack = { t: 'line'; body: string } | { t: 'posted' };
+const at = (iso: string) =>
+  new Date(iso).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+const ACK: {
+  [K in ChatCommand['do']]: (c: Extract<ChatCommand, { do: K }>, launch: Launch) => Ack;
+} = {
+  pause: () => ({ t: 'line', body: 'Paused · no attempt starts until you resume' }),
+  resume: () => ({ t: 'line', body: 'Resumed' }),
+  stop: () => ({ t: 'posted' }),
+  extend: (c, launch) => ({
+    t: 'line',
+    body: `Extended ${c.hours} h · new deadline ${at(launch.deadline)}`,
+  }),
+  note: () => ({ t: 'line', body: 'Noted for the next attempts' }),
+  verdict: () => ({ t: 'posted' }),
+};
+/** `launch`: the record after the act applied. */
+export const ackOf = (c: ChatCommand, launch: Launch): Ack =>
+  (ACK[c.do] as (c: ChatCommand, l: Launch) => Ack)(c, launch);
 
 export const judgedLine = (x: Expedition, a: Attempt, lesson: Lesson) =>
   `a${a.n} ${attemptResult(a, x.charter.done)} · Lesson: ${lessonText(lesson)}`;

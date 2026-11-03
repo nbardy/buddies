@@ -91,7 +91,7 @@ const HANDLE: {
   act: async (host, _d, grant, { id, act }) => {
     here(host, grant, id);
     const seat = await host.seatOf(grant.buddyId, grant.runId);
-    MAY_ACT[seat.t](seat as never, id);
+    (MAY_ACT[seat.t] as (s: Seat, id: string, a: BuddyActT) => void)(seat, id, act);
     const acted = await host.act(id, act, grant.buddyId);
     if (acted.t !== 'ok')
       throw new Error(acted.t === 'refused' ? acted.reasons.join('; ') : `no expedition ${id}`);
@@ -100,12 +100,25 @@ const HANDLE: {
   },
 };
 
-/** Who may steer: any Buddy outside a crew (relaying the owner), and a crew's manager seat on its
- * own expedition. An attempt turn never steers (it could stop or pass its own work). */
-const MAY_ACT: { [K in Seat['t']]: (s: Extract<Seat, { t: K }>, id: string) => void } = {
-  none: () => undefined,
+/** Who may steer. A Buddy outside a crew relays pause, resume, stop, extend and note; verdict and
+ * relaunch are the owner's words, relayed only by the manager seat (a crew turn the owner
+ * started) on its own expedition. Review 2026-11-03: any Buddy could pass an owner-judged
+ * attempt, recorded as the owner's verdict, and a Buddy's post to the crew was obeyed as the
+ * owner's. A crew turn someone else started and an attempt turn never steer. */
+type BuddyActT = z.infer<typeof BuddyAct>;
+const OWNERS_WORDS: ReadonlySet<BuddyActT['do']> = new Set(['verdict', 'relaunch']);
+const MAY_ACT: {
+  [K in Seat['t']]: (s: Extract<Seat, { t: K }>, id: string, a: BuddyActT) => void;
+} = {
+  none: (_s, _id, a) => {
+    if (OWNERS_WORDS.has(a.do))
+      throw new Error(`${a.do} is the owner's: in the expedition's chat or view`);
+  },
   manager: (s, id) => {
     if (s.id !== id) throw new Error('an expedition manager steers only its own expedition');
+  },
+  crew: () => {
+    throw new Error("only the owner's chat with the crew steers its expedition");
   },
   attempt: () => {
     throw new Error('an attempt turn cannot steer its expedition; answer the request instead');

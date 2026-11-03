@@ -67,7 +67,7 @@ import { FOLLOW_GRACE_MS, startMcpEndpoint } from '../src/buddies/mcp';
 import { createMemoryReviewer } from '../src/buddies/memory-review';
 import { wakes } from '../src/buddies/mentions';
 import { createBuddyPolicyPort } from '../src/buddies/policy-port';
-import { registerBuddyRoutes } from '../src/buddies/routes';
+import { NO_HOST_COMMANDS, registerBuddyRoutes } from '../src/buddies/routes';
 import { ENVELOPE_CHARS, createRunner } from '../src/buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from '../src/buddies/worker-config';
 import { BUDDY_RUN_LEASE_MS, TURN_MAX_RUNTIME_MS } from '../src/constants/timeouts';
@@ -3778,6 +3778,7 @@ async function ownerHttp(w: Awaited<ReturnType<typeof world>>) {
     runner: w.runner,
     channels: w.channels,
     uploadsRoot: () => join(w.scratch, 'uploads'),
+    hostCommands: NO_HOST_COMMANDS,
     channelChanged: () => undefined,
     onBuddyArchived: () => undefined,
     createBuilderConversation: async (workingDirectory) => {

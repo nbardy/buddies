@@ -1,4 +1,5 @@
 import fsp from 'node:fs/promises';
+import { isDeepStrictEqual } from 'node:util';
 import type { Actor, BuddiesCore, ChannelRef, Post, PostQuery, Run } from '@unleashd/buddies-core';
 import {
   ALLOWED,
@@ -8,8 +9,10 @@ import {
   type Charter,
   type Done,
   type Expedition,
+  type ExpeditionChat,
   type ExpeditionRow,
   type FinishReason,
+  type Launch,
   type Origin,
   type Provider,
   type State,
@@ -17,6 +20,7 @@ import {
   type TurnEnd,
   type Verdict,
   counted,
+  needsOwner,
   stateLabel,
 } from '@unleashd/shared';
 import { type TurnDirectory, WORKSPACE_DIRECTORY } from '../buddies/briefing';
@@ -169,7 +173,8 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     }
     return x.state.launch.chatSeenOrd === start.state.launch.chatSeenOrd ? x : commit(x);
   }
-  /** A bare command the host applies; talk is the manager seat's (the crew's chat turn). */
+  /** A bare command the host applies and answers; talk is the manager seat's (the crew's chat
+   * turn), which a command never wakes (`consumes`). */
   const HEARD: {
     [K in brief.Said['t']]: (
       x: Launched,
@@ -182,17 +187,28 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       const acted: Acted = ALLOWED[said.do].includes(x.state.t)
         ? await apply(x, said, 'owner')
         : { t: 'refused', reasons: [`cannot ${said.do} a ${x.state.t} expedition`] };
-      return CHAT_REPLY[acted.t](x, acted as never, p);
+      return (CHAT_REPLY[acted.t] as ChatReply)(x, acted, p, said);
     },
   };
   const seenTo = (x: Launched, ord: string): Launched => ({
     ...x,
     state: { ...x.state, launch: { ...x.state.launch, chatSeenOrd: ord } },
   });
+  type ChatReply = (x: Launched, a: Acted, p: Post, c: brief.ChatCommand) => Promise<Launched>;
   const CHAT_REPLY: {
-    [K in Acted['t']]: (x: Launched, a: Extract<Acted, { t: K }>, p: Post) => Promise<Launched>;
+    [K in Acted['t']]: (
+      x: Launched,
+      a: Extract<Acted, { t: K }>,
+      p: Post,
+      c: brief.ChatCommand
+    ) => Promise<Launched>;
   } = {
-    ok: async (_x, a) => a.x as Launched,
+    ok: async (_x, a, p, c) => {
+      const next = a.x as Launched;
+      const ack = brief.ackOf(c, next.state.launch);
+      await (ACKED[ack.t] as (x: Launched, a: brief.Ack, p: Post) => Promise<void>)(next, ack, p);
+      return next;
+    },
     refused: async (x, a, p) => {
       const next = await commit(x);
       const line = `"${p.body.trim().slice(0, 80)}": ${a.reasons.join('; ')}`;
@@ -200,6 +216,12 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       return next;
     },
     missing: async (x) => x,
+  };
+  const ACKED: {
+    [K in brief.Ack['t']]: (x: Launched, a: Extract<brief.Ack, { t: K }>, p: Post) => Promise<void>;
+  } = {
+    line: (x, a, p) => postStatus(x, `exp:${x.id}:ack:${p.id}`, a.body),
+    posted: async () => undefined,
   };
   /** The channel feed and every thread's replies after `seen`, oldest first. Review 2026-11-03:
    * the channel feed leaves thread replies out, so a "pass" answered in the thread of the "Reply
@@ -433,7 +455,9 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     const { crewBuddyId, chatChannelId } = x.state.launch;
     const body = `⛺ ${x.charter.name}: talk to the manager here, in this thread.`;
     const p = { body, purpose: 'expedition_chat', key: `exp:${x.id}:chat` };
-    return inform(buddyActor(crewBuddyId), { channel: { kind: 'id', id: chatChannelId } }, p, x.id);
+    // Quiet: review 2026-11-03, boot announced one root per expedition, a notification each.
+    const at = { channel: { kind: 'id' as const, id: chatChannelId } };
+    return inform(buddyActor(crewBuddyId), at, p, x.id, 'quiet');
   }
   /** Crew-authored, in the chat thread; the key makes a repeat a no-op. */
   async function postStatus(x: Launched, key: string, body: string): Promise<void> {
@@ -442,13 +466,15 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       channel: { kind: 'id' as const, id: chatChannelId },
       replyToId: await chatRoot(x),
     };
-    await inform(buddyActor(crewBuddyId), place, { body, purpose: 'expedition_status', key }, x.id);
+    const p = { body, purpose: 'expedition_status', key };
+    await inform(buddyActor(crewBuddyId), place, p, x.id, 'announce');
   }
   async function inform(
     by: Actor,
     at: Place,
     p: { body: string; purpose: string; key: string },
-    id: string
+    id: string,
+    notice: Notice
   ): Promise<string> {
     const input = { ...p, kind: 'inform' as const, evidence: [`expedition:${id}`], mentions: [] };
     const write = await core.post(by, at.channel, {
@@ -456,9 +482,16 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       replyToId: at.replyToId,
       broadcast: false,
     });
-    if (write.created) await announcePost({ core, events }, OWNER, write.post);
+    if (write.created) await NOTICE[notice](write.post);
     return write.post.id;
   }
+  /** A new post is announced (notifications, live feeds), or only refreshes the clients. */
+  const NOTICE: Record<Notice, (post: Post) => Promise<void>> = {
+    announce: async (post) => {
+      await announcePost({ core, events }, OWNER, post);
+    },
+    quiet: async () => events.emit({ kind: 'changed' }),
+  };
 
   type Handler = (x: never, a: never, by: string) => Promise<Acted>;
   const ok = async (x: Expedition): Promise<Acted> => ({ t: 'ok', x: await commit(x) });
@@ -491,16 +524,26 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     },
     relaunch: (x: Expedition) => relaunch(x),
   };
-  /** Same charter, origin and launcher, fresh id; the card posts where the first one did. */
-  const relaunch = async (x: Expedition): Promise<Acted> => ({
-    t: 'ok',
-    x: await draft({
+  /** Same charter, origin and launcher, fresh id; the card posts where the first one did. An
+   * unlaunched draft of the same charter IS the relaunch: review 2026-11-03, a double submit or
+   * a manager's retried tool call made two drafts. */
+  const relaunch = async (x: Expedition): Promise<Acted> => {
+    const open = [...records.values()].find(
+      (l) =>
+        l.t === 'ok' &&
+        l.x.state.t === 'draft' &&
+        l.x.workspaceId === x.workspaceId &&
+        isDeepStrictEqual(l.x.charter, x.charter)
+    );
+    if (open?.t === 'ok') return { t: 'ok', x: open.x };
+    const input = {
       charter: x.charter,
       origin: x.origin,
       launcherId: x.launcherId,
       workspaceId: x.workspaceId,
-    }),
-  });
+    };
+    return { t: 'ok', x: await draft(input) };
+  };
   const retireDeps = {
     core,
     root,
@@ -548,14 +591,14 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     (ACTS[a.do] as Handler)(x as never, a as never, by);
   async function act(id: string, a: Act, by: string): Promise<Acted> {
     const acted = await serialized(id, async (): Promise<Acted> => {
+      // Review 2026-11-03: an act before boot's interrupt pass could start an attempt it then
+      // marked interrupted; and a retired relaunch skipped both checks.
+      if (gate.t === 'disabled') return { t: 'refused', reasons: [gate.reason] };
+      if (!started) return { t: 'refused', reasons: ['expeditions are starting'] };
       const l = records.get(id);
       // A retired record is out of `records`; relaunch is the one act it takes (its card shows).
       if (!l) return a.do === 'relaunch' ? relaunchRetired(id) : { t: 'missing' };
       if (l.t === 'unreadable') return { t: 'refused', reasons: [`unreadable: ${l.reason}`] };
-      if (gate.t === 'disabled') return { t: 'refused', reasons: [gate.reason] };
-      // Review 2026-11-03: an act before boot's interrupt pass could start an attempt it then
-      // marked interrupted.
-      if (!started) return { t: 'refused', reasons: ['expeditions are starting'] };
       if (!ALLOWED[a.do].includes(l.x.state.t))
         return { t: 'refused', reasons: [`cannot ${a.do} a ${l.x.state.t} expedition`] };
       return apply(l.x, a, by);
@@ -595,7 +638,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       purpose: 'expedition',
       key: `exp:${x.id}:card`,
     };
-    await inform(launcher, place, card, x.id);
+    await inform(launcher, place, card, x.id, 'announce');
     return x;
   }
 
@@ -624,17 +667,99 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
   }
 
   /** Which seat a Buddy turn sits in: an attempt (a crew run answering one of its attempt
-   * requests), the manager (any other crew turn: its chat with the owner), or no expedition's. */
+   * requests), the manager (a crew turn the owner started: a chat run, or a post of the
+   * owner's), another crew turn (someone else's post), or no expedition's. Review 2026-11-03:
+   * every non-attempt crew turn was the manager, so a Buddy's "@crew stop" was obeyed. */
   async function seatOf(buddyId: string, runId: string | null): Promise<Seat> {
     const id = crewOf(buddyId);
     if (!id) return { t: 'none' };
-    const postId = runId ? postIdOf(await core.getRun(runId)) : null;
-    const evidence = postId ? (await core.getPost(OWNER, postId)).evidence : [];
-    const tag = evidence.find((e) => e.startsWith(`expedition-attempt:${id}/`));
-    return runId && tag
-      ? { t: 'attempt', id, runId, n: Number(tag.split('/').at(-1)) }
-      : { t: 'manager', id };
+    if (!runId) return { t: 'crew', id };
+    const run = await core.getRun(runId);
+    return (TRIGGER[run.input.kind] as (i: Run['input'], id: string, r: string) => Promise<Seat>)(
+      run.input,
+      id,
+      runId
+    );
   }
+  /** What started a crew run decides its seat. */
+  const byPost = async (postId: string, id: string, runId: string): Promise<Seat> => {
+    const post = await core.getPost(OWNER, postId);
+    const tag = post.evidence.find((e) => e.startsWith(`expedition-attempt:${id}/`));
+    if (tag) return { t: 'attempt', id, runId, n: Number(tag.split('/').at(-1)) };
+    return post.author.kind === 'owner' ? { t: 'manager', id } : { t: 'crew', id };
+  };
+  const TRIGGER: {
+    [K in Run['input']['kind']]: (
+      i: Extract<Run['input'], { kind: K }>,
+      id: string,
+      runId: string
+    ) => Promise<Seat>;
+  } = {
+    chat: async (_i, id) => ({ t: 'manager', id }),
+    post: (i, id, runId) => byPost(i.postId, id, runId),
+    deliver: (i, id, runId) => byPost(i.postId, id, runId),
+    message: async (_i, id) => ({ t: 'crew', id }),
+    retired: async (_i, id) => ({ t: 'crew', id }),
+  };
+
+  /** An owner post the host will apply as a bare command (a live expedition's chat): it wakes
+   * no manager turn (buddies/routes.ts publishOwnerPost). Review 2026-11-03: "stop" got the
+   * manager's stale "Running · 3/8" answer, and a manager repeating "extend 2h" added 4 h. */
+  function consumes(channelId: string, body: string): boolean {
+    for (const l of records.values())
+      if (
+        l.t === 'ok' &&
+        (l.x.state.t === 'running' || l.x.state.t === 'paused') &&
+        l.x.state.launch.chatChannelId === channelId
+      )
+        return brief.chatAct(l.x, body).t === 'act';
+    return false;
+  }
+
+  /** The manager chat of a live, finished or retired record; made on first open for a launched
+   * one (boot makes only live ones', quietly). */
+  async function chat(id: string): Promise<ExpeditionChat | { t: 'missing' }> {
+    const l = records.get(id);
+    if (l?.t === 'unreadable') return { t: 'none', reason: `unreadable: ${l.reason}` };
+    if (l?.t === 'ok') return CHAT_OF[l.x.state.t](l.x);
+    const filed = loadRetired(root).find((r) => r.record.id === id);
+    return filed ? RETIRED_CHAT[filed.record.state.t](filed.record) : { t: 'missing' };
+  }
+  const thread = (launch: Launch, rootId: string): ExpeditionChat => ({
+    t: 'thread',
+    channelId: launch.chatChannelId,
+    rootId,
+    crewBuddyId: launch.crewBuddyId,
+  });
+  const launchedChat = async (x: Expedition) =>
+    thread((x as Launched).state.launch, await chatRoot(x as Launched));
+  const NEVER: ExpeditionChat = { t: 'none', reason: 'Never launched, so there is no chat.' };
+  const CHAT_OF: { [K in State['t']]: (x: Expedition) => Promise<ExpeditionChat> } = {
+    draft: async () => ({ t: 'none', reason: 'The chat opens at launch.' }),
+    running: launchedChat,
+    paused: launchedChat,
+    finished: launchedChat,
+  };
+  /** A retired chat is archived: it is found, never made. */
+  const retiredChat = async (x: Expedition): Promise<ExpeditionChat> => {
+    const { launch } = (x as Launched).state;
+    const posts = await pageAfter({ kind: 'channel', channelId: launch.chatChannelId }, '');
+    const root = posts.find(
+      (p) => p.purpose === 'expedition_chat' && p.evidence.includes(`expedition:${x.id}`)
+    );
+    return root
+      ? thread(launch, root.id)
+      : {
+          t: 'none',
+          reason: "This expedition ran before its chat was one thread; see the crew's DM.",
+        };
+  };
+  const RETIRED_CHAT: { [K in State['t']]: (x: Expedition) => Promise<ExpeditionChat> } = {
+    draft: async () => NEVER,
+    running: retiredChat,
+    paused: retiredChat,
+    finished: retiredChat,
+  };
   const crewDir = async (id: string): Promise<TurnDirectory> => {
     const dir = paths(root, id).crewDir;
     await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
@@ -645,6 +770,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
   const DIRECTORY: { [K in Seat['t']]: (s: Extract<Seat, { t: K }>) => Promise<TurnDirectory> } = {
     none: async () => WORKSPACE_DIRECTORY,
     manager: (s) => crewDir(s.id),
+    crew: (s) => crewDir(s.id),
     attempt: (s) => {
       const tree = current(s.id).attempts[s.n - 1]?.tree;
       return tree?.t === 'live'
@@ -689,7 +815,8 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     stops.push(() => clearInterval(backstop));
     stops.push(() => debounce && clearTimeout(debounce));
     for (const l of records.values())
-      if (l.t === 'ok' && 'launch' in l.x.state) chatRoot(l.x as Launched).catch(logError);
+      if (l.t === 'ok' && (l.x.state.t === 'running' || l.x.state.t === 'paused'))
+        chatRoot(l.x as Launched).catch(logError);
     void stepAll();
   }
 
@@ -708,8 +835,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
           workspaceId: x.workspaceId,
           state: x.state.t,
           label: stateLabel(x),
-          needsOwner:
-            x.charter.done.t === 'owner' && x.attempts.some((a) => a.phase.t === 'judging'),
+          needsOwner: needsOwner(x),
           crewBuddyId: crewIdOf(x),
         })),
     ];
@@ -725,6 +851,8 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       new Set(rows().flatMap((r) => (r.t === 'ok' && r.crewBuddyId ? [r.crewBuddyId] : []))),
     turnDirectory,
     seatOf,
+    consumes,
+    chat,
     retired: () => loadRetired(root),
     interruptBootLive,
     start,
@@ -745,7 +873,9 @@ const PLACE: { [K in Origin['t']]: (o: Extract<Origin, { t: K }>, launcher: Acto
   direct: (_o, launcher) => ({ channel: { kind: 'direct', members: [OWNER, launcher] } }),
 };
 type Place = { channel: ChannelRef; replyToId?: string };
+type Notice = 'announce' | 'quiet';
 export type Seat =
   | { t: 'none' }
   | { t: 'manager'; id: string }
+  | { t: 'crew'; id: string }
   | { t: 'attempt'; id: string; runId: string; n: number };

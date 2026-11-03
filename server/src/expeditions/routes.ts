@@ -22,6 +22,15 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
     const h = ready(res);
     if (h) res.json(h.retired());
   });
+  app.get('/api/buddies/expeditions/:id/chat', async (req, res) => {
+    const h = ready(res);
+    if (!h) return;
+    await h.chat(req.params.id).then(
+      (c) =>
+        c.t === 'missing' ? res.status(404).json({ error: 'no such expedition' }) : res.json(c),
+      (e: Error) => res.status(500).json({ error: e.message })
+    );
+  });
   app.get('/api/buddies/expeditions/:id', (req, res) => {
     const h = ready(res);
     if (h) read(res, h.get(req.params.id));

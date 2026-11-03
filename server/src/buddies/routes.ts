@@ -78,6 +78,7 @@ export interface BuddyRouteDeps {
   runner: Runner;
   channels: Channels;
   uploadsRoot(): string;
+  hostCommands: HostCommands;
   channelChanged(channelId: string, threads: ChannelThreads): void;
   onBuddyArchived(buddyId: string): void;
   /**
@@ -170,6 +171,13 @@ function mentionConfigsByBuddy(
   return byBuddy;
 }
 
+/** Owner posts a host applies itself (an expedition's bare chat command, expeditions/host.ts
+ * `consumes`): they wake no Buddy turn, so no manager answers or repeats them. */
+export interface HostCommands {
+  consumes(channelId: string, body: string): boolean;
+}
+export const NO_HOST_COMMANDS: HostCommands = { consumes: () => false };
+
 export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 'mentionConfigs'>;
 
 /**
@@ -182,7 +190,7 @@ export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 
  */
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 export async function publishOwnerPost(
-  deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot'>,
+  deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot' | 'hostCommands'>,
   author: Actor,
   ref: ChannelRef,
   input: OwnerPostInput,
@@ -202,12 +210,13 @@ export async function publishOwnerPost(
     resolved.mentioned.map((buddy) => buddy.id),
     chosen
   );
+  const consumed = author.kind === 'owner' && deps.hostCommands.consumes(target.id, body);
   const { post, created } = await deps.core.post(
     author,
     { kind: 'id', id: target.id },
     // The Buddies its @mentions (or, in a DM, the owner's plain post) wake, on the owner's chip
     // picks: one `deliver` run each, written with the post (mentions.ts `wakes`).
-    { ...input, body, mentions: wakes(target, author, input.kind, body, picks) }
+    { ...input, body, mentions: consumed ? [] : wakes(target, author, input.kind, body, picks) }
   );
   if (!created) return { post };
   deps.events.emit({ kind: 'changed' });

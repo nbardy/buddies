@@ -119,7 +119,7 @@ import { createGrants } from './buddies/grants';
 import { type McpEndpoint, startMcpEndpoint } from './buddies/mcp';
 import { createMemoryReviewer } from './buddies/memory-review';
 import { type CrewRegistry, createBuddyPolicyPort } from './buddies/policy-port';
-import { registerBuddyRoutes } from './buddies/routes';
+import { type HostCommands, registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
 import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
@@ -730,12 +730,17 @@ const onBuddyArchived = (buddyId: string) => {
 };
 
 registerExpeditionRoutes(app, () => expeditionHost);
+// Until the expedition host boots there is no expedition chat to consume a command from.
+const hostCommands: HostCommands = {
+  consumes: (channelId, body) => expeditionHost?.consumes(channelId, body) ?? false,
+};
 registerBuddyRoutes(app, {
   core: buddiesCore,
   events: buddyEvents,
   runner: buddyRunner,
   channels: buddyChannels,
   uploadsRoot: () => UPLOADS_DIR,
+  hostCommands,
   channelChanged,
   onBuddyArchived,
   createBuilderConversation: async (workingDirectory) => {
@@ -757,6 +762,7 @@ const upstream = createUpstreamService({
   core: buddiesCore,
   events: buddyEvents,
   uploadsRoot: () => UPLOADS_DIR,
+  hostCommands,
 });
 upstream.registerRoutes(app);
 

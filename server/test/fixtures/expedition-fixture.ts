@@ -13,6 +13,7 @@ import { OWNER, buddyActor } from '../../src/buddies/core';
 import { createBuddyEvents } from '../../src/buddies/events';
 import { createGrants } from '../../src/buddies/grants';
 import { startMcpEndpoint } from '../../src/buddies/mcp';
+import { publishOwnerPost } from '../../src/buddies/routes';
 import { type ExpeditionHost, createExpeditionHost } from '../../src/expeditions/host';
 import { registerExpeditionRoutes } from '../../src/expeditions/routes';
 import { BackgroundWork } from '../../src/turns/background-work';
@@ -135,18 +136,23 @@ export async function fixture() {
     if (p.t !== 'running') throw new Error(`a${n} is ${p.t}`);
     return p.requestId;
   };
+  /** The chat thread's root, as the view finds it (GET …/:id/chat). */
   const chatRootOf = async (id: string) => {
-    const feed = { kind: 'channel' as const, channelId: launch(id).chatChannelId };
-    const roots = (await core.listPosts(OWNER, feed, undefined, 50)).posts;
-    const root = roots.find((p) => p.purpose === 'expedition_chat');
-    if (!root) throw new Error(`${id} has no chat thread`);
-    return root;
+    const res = await fetch(`${base}/api/buddies/expeditions/${id}/chat`);
+    const chat = (await res.json()) as { t: string; rootId?: string };
+    if (chat.t !== 'thread' || !chat.rootId) throw new Error(`${id} has no chat thread`);
+    return chat.rootId;
   };
   const chat = async (id: string) => {
-    const root = await chatRootOf(id);
-    const page = await core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, undefined, 200);
+    const rootId = await chatRootOf(id);
+    const page = await core.listPosts(OWNER, { kind: 'thread', rootId }, undefined, 200);
     return [...page.posts].sort((a, b) => (a.ord < b.ord ? -1 : 1));
   };
+  /** The crew's runs a post woke (`deliver`), oldest first. */
+  const deliveries = async (id: string) =>
+    (await core.listRuns({ kind: 'buddy', buddyId: launch(id).crewBuddyId }, 200))
+      .filter((r) => r.input.kind === 'deliver')
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
   const settle = async (id: string) => {
     await expeditions.step(id);
     await expeditions.drain();
@@ -200,16 +206,21 @@ export async function fixture() {
     },
     /** The chat thread's posts, oldest first (the host's root, then statuses and talk). */
     chat,
-    /** The owner replies in the chat thread, as the expedition view's composer does. */
+    deliveries,
+    /** The owner replies in the chat thread through the owner post path the composer's route
+     * takes (publishOwnerPost: a bare command wakes no crew turn). */
     async ownerSays(id: string, text: string) {
       const channel = { kind: 'id' as const, id: launch(id).chatChannelId };
-      const input = { kind: 'inform' as const, body: text, evidence: [], mentions: [] };
-      await core.post(OWNER, channel, {
-        ...input,
-        replyToId: (await chatRootOf(id)).id,
-        broadcast: false,
-        key: `owner:${Math.random()}`,
-      });
+      const input = {
+        kind: 'inform' as const,
+        body: text,
+        evidence: [],
+        broadcast: false as const,
+      };
+      const deps = { core, events, uploadsRoot: () => scratch, hostCommands: expeditions };
+      const replyToId = await chatRootOf(id);
+      const key = `owner:${Math.random()}`;
+      await publishOwnerPost(deps, OWNER, channel, { ...input, replyToId, key }, []);
       await settle(id);
     },
     /** A restart as server.ts boots it: the new host is returned unstarted. */

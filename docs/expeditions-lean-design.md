@@ -850,3 +850,21 @@ Client: §8 deleted files plus the §6 client edits.
   - Act `relaunch` (finished, or a retired record): a new draft with the same charter, fresh id;
     the view opens it. `GET /api/buddies/expeditions/retired` lists lean retired records only;
     the four pre-lean `.retired` files stay unread.
+- **Review 2026-11-03 of the view and manager (authority and chat).**
+  - Seats: a crew turn is the manager only when the owner started it (a chat run, or a post or
+    request authored by the owner); a crew turn another Buddy started is seat `crew` and cannot
+    act. A Buddy outside a crew may relay pause/resume/stop/extend/note but never `verdict` or
+    `relaunch` (the owner's words). Before, any Buddy could pass an owner-judged attempt and it
+    was recorded as the owner's verdict, and "@crew stop" from a Buddy was obeyed.
+  - A bare chat command is the host's alone: `publishOwnerPost` asks `HostCommands.consumes`
+    (host.ts) and posts it with no wake, so no manager turn answers it with a stale status or
+    applies it a second time (extend twice = 4 h). The host answers each applied command in the
+    chat (`brief.ackOf`: "Extended 2 h · new deadline …", "Paused …"; stop and verdict already
+    post their own line).
+  - `GET /api/buddies/expeditions/:id/chat` names the chat thread (`ExpeditionChat`): made on
+    first open for a launched record, found (never made) for a retired one, else a typed reason.
+    The view no longer searches the DM's first feed page, which spun forever when the root was
+    missing or more than 50 posts old. Boot makes roots only for live records, quietly (no
+    announcement per finished expedition).
+  - Relaunch is idempotent: an unlaunched draft with the same charter in the workspace is the
+    answer. Relaunch of a retired record passes the gate and started checks like every act.
