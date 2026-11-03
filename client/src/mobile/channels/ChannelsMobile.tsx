@@ -16,6 +16,7 @@ import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { BuddyStar, ChannelStar } from '../../components/buddies/ChannelStar';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { RailExpeditions, type RailRowClasses } from '../../components/buddies/ExpeditionRail';
+import { ExpeditionView, RetiredExpeditionView } from '../../components/buddies/ExpeditionView';
 import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
 import { HighlightRow } from '../../components/buddies/HighlightRow';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
@@ -119,6 +120,24 @@ function renderScreen(screen: ChannelsView, context: ScreenContext) {
           buddyId={screen.buddyId}
           buddyName={context.directory.buddyNames[screen.buddyId] ?? 'Buddy'}
           workspaceId={context.workspaceId}
+        />
+      );
+    case 'expedition':
+      return (
+        <ExpeditionView
+          key={screen.id}
+          id={screen.id}
+          workspaceId={context.workspaceId}
+          frame="mobile"
+        />
+      );
+    case 'retired':
+      return (
+        <RetiredExpeditionView
+          key={screen.id}
+          id={screen.id}
+          workspaceId={context.workspaceId}
+          frame="mobile"
         />
       );
     case 'home':

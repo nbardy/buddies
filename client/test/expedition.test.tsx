@@ -13,14 +13,15 @@ register(
   `)}`,
   import.meta.url
 );
-const { ExpeditionModal } = await import('../src/components/buddies/ExpeditionModal');
+const { ExpeditionView } = await import('../src/components/buddies/ExpeditionView');
 const { expeditionUrl } = await import('../src/components/buddies/expedition-api');
 const { loadResource } = await import('../src/atoms/resources');
 const { jotaiStore } = await import('../src/atoms/store');
 const { Provider } = await import('jotai');
 const { MemoryRouter } = await import('react-router-dom');
 
-// One smoke test of the modal over every state, plus the one control that cannot be undone.
+// One smoke test of the expedition view over every state and both frames, plus the controls that
+// cannot be undone.
 const launch = { at: 'a', deadline: '2026-11-01T08:00:00Z', repoRoot: '/r', baseSha: 'b' };
 const live = { ...launch, crewBuddyId: 'c', chatChannelId: 'dm', chatSeenOrd: '' };
 const end = {
@@ -58,16 +59,16 @@ const record = (id: string, state: State): Expedition => ({
   ],
   notes: [],
 });
-const render = (id: string) =>
+const render = (id: string, frame: 'desktop' | 'mobile' = 'desktop') =>
   renderToStaticMarkup(
     <Provider store={jotaiStore}>
       <MemoryRouter>
-        <ExpeditionModal id={id} onClose={() => undefined} />
+        <ExpeditionView id={id} workspaceId="ws-1" frame={frame} />
       </MemoryRouter>
     </Provider>
   );
 
-test('the modal renders every state and an unreadable record; retire takes a confirm step', async () => {
+test('the view renders every state in both frames; stop and retire take a confirm step', async () => {
   const states: State[] = [
     { t: 'draft', issues: ['claude is not installed on this host'] },
     { t: 'running', launch: live },
@@ -77,20 +78,22 @@ test('the modal renders every state and an unreadable record; retire takes a con
   for (const state of states) {
     const x = record(`x-${state.t}`, state);
     await loadResource({ key: expeditionUrl(x.id), load: async () => x });
-    const html = render(x.id);
-    assert.match(html, /<strong>widget<\/strong>/, state.t);
-    assert.match(html, /grep is literal/, state.t);
-    // Retire is never one click: the first button only arms the confirm.
-    assert.doesNotMatch(html, /Confirm retire/, state.t);
+    for (const frame of ['desktop', 'mobile'] as const) {
+      const html = render(x.id, frame);
+      assert.match(html, /<strong>widget<\/strong>/, `${state.t} ${frame}`);
+      assert.match(html, /grep is literal/, `${state.t} ${frame}`);
+      // Never one click: the first button only arms the confirm.
+      assert.doesNotMatch(html, /Confirm retire|Stop for good/, `${state.t} ${frame}`);
+    }
   }
   assert.match(render('x-draft'), /claude is not installed/);
+  assert.match(render('x-draft'), /chat opens when you launch/);
   assert.match(render('x-running'), />Pass<.*>Fail</s);
-  // Review 2026-11-03: crews are off the Buddies rail, so the modal is the owner's way into the
-  // crew chat (status lines, commands) and the only place to leave a note.
-  assert.match(render('x-running'), /href="[^"]*channels\?channel=dm"/);
-  assert.match(render('x-running'), /aria-label="Note or command for the crew"/);
-  assert.doesNotMatch(render('x-finished'), /Note or command/);
+  // Owner 2026-11-03: relaunch is offered once an expedition is over, never while it runs.
+  assert.match(render('x-finished'), />Relaunch</);
+  assert.doesNotMatch(render('x-running'), />Relaunch</);
   assert.match(render('x-finished'), />Retire</);
+  assert.match(render('x-running', 'mobile'), /role="tablist"/);
   await loadResource({
     key: expeditionUrl('bad'),
     load: async () => Promise.reject(new Error('unreadable: bad json')),

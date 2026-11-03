@@ -1,15 +1,12 @@
 import { ALLOWED, type Act, counted, stateLabel } from '@unleashd/shared';
-import { Suspense, lazy, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { channelsHref } from './channels-view';
 import { useAct, useExpedition } from './expedition-api';
 import './Expedition.css';
 
-export const LazyExpeditionModal = lazy(() =>
-  import('./ExpeditionModal').then((m) => ({ default: m.ExpeditionModal }))
-);
-
-/** The chat card a draft posts (purpose `expedition`): Info opens the modal, Launch starts it. */
+/** The chat card a draft posts (purpose `expedition`): Open shows it in the main pane (the
+ * expedition view), Launch starts it. */
 export function ExpeditionCard({ id }: { id: string }) {
-  const [open, setOpen] = useState(false);
   const read = useExpedition(id, 10_000);
   const act = useAct(id);
   if (read.data === null)
@@ -34,18 +31,16 @@ export function ExpeditionCard({ id }: { id: string }) {
         {counted(x)}/{x.charter.maxAttempts}
         {issues > 0 && ` · ${issues} issues`}
       </span>
-      <button type="button" className="expedition-button" onClick={() => setOpen(true)}>
-        Info
-      </button>
+      <Link
+        className="expedition-button"
+        to={channelsHref(x.workspaceId, { kind: 'expedition', id })}
+      >
+        Open
+      </Link>
       {ALLOWED.launch.includes(x.state.t) && (
         <ActButton label="Launch" act={act} send={{ do: 'launch' }} />
       )}
       {act.state.t === 'failed' && <span className="expedition-error">{act.state.error}</span>}
-      {open && (
-        <Suspense fallback={null}>
-          <LazyExpeditionModal id={id} onClose={() => setOpen(false)} />
-        </Suspense>
-      )}
     </div>
   );
 }

@@ -831,3 +831,22 @@ Client: §8 deleted files plus the §6 client edits.
     archives a crew left behind by a failed launch when a draft is retired.
   - The modal links to the crew chat and posts notes and commands into it; the Buddy tool's acts
     are chosen by name (`BuddyAct` in shared).
+- **Expedition view and manager (owner 2026-11-03: the modal was "ugly bad no white space
+  balance", with "No chat log to discuss with the running manager").**
+  - The modal is gone. `?expedition=<id>` (and `?retired=<id>`) is a Channels view kind
+    (`channels-view.ts`): desktop shows the overview where a channel sits (header strip with
+    pill, attempts used, time left and controls from `ALLOWED`; goal markdown clamped with Show
+    more; Done-when argv chips; attempts list) and the manager chat where a thread sits. The phone
+    shows Overview | Chat tabs. The rail and the chat card navigate there, so the URL, Back and
+    the rail highlight work like a channel's.
+  - The manager is the crew Buddy's chat seat. The chat is one thread in the owner<->crew DM
+    (root: crew post, purpose `expedition_chat`, key `exp:<id>:chat`; status lines are its
+    replies), so every owner message reaches one seat conversation that remembers the talk. It is
+    a separate conversation from the attempt turns and owner posts skip the run cap, so it answers
+    while an attempt runs. `host.seatOf` tells attempt turns from manager turns; the tool's `act`
+    is refused in an attempt turn and allowed in the manager seat for its own expedition.
+  - Chat grammar: bare `pause|resume|stop|extend Nh|pass|fail` and `note: <text>` are applied by
+    the host; anything else is talk for the manager (no longer filed as a note).
+  - Act `relaunch` (finished, or a retired record): a new draft with the same charter, fresh id;
+    the view opens it. `GET /api/buddies/expeditions/retired` lists lean retired records only;
+    the four pre-lean `.retired` files stay unread.

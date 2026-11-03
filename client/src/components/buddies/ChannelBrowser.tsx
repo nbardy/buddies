@@ -24,6 +24,7 @@ import { ChannelStar } from './ChannelStar';
 import { ChannelWorkers } from './ChannelWorkers';
 import { CopyLinkButton } from './CopyLinkButton';
 import { DESKTOP_ROW, RailExpeditions } from './ExpeditionRail';
+import { ExpeditionView, RetiredExpeditionView } from './ExpeditionView';
 import { GroupDmNotice } from './GroupDmNotice';
 import { HighlightRow } from './HighlightRow';
 import { TaskFilter } from './TaskFilter';
@@ -920,6 +921,12 @@ export function ChannelBrowser({
               onConversation={openDm}
             />
           ),
+          expedition: (id) => (
+            <ExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
+          ),
+          retired: (id) => (
+            <RetiredExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
+          ),
           threads: () => (
             <ThreadsPane
               key={workspaceId}
@@ -987,6 +994,8 @@ type MainPanes = {
   home(): ReactNode;
   workers(buddyId: string): ReactNode;
   dm(conversationId: string): ReactNode;
+  expedition(id: string): ReactNode;
+  retired(id: string): ReactNode;
   threads(): ReactNode;
   channel(): ReactNode;
   task(taskId: string, channelId: string): ReactNode;
@@ -1001,6 +1010,10 @@ function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
       return panes.workers(view.buddyId);
     case 'dm':
       return panes.dm(view.conversationId);
+    case 'expedition':
+      return panes.expedition(view.id);
+    case 'retired':
+      return panes.retired(view.id);
     case 'threads':
       return panes.threads();
     case 'task':
