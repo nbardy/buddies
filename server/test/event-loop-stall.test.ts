@@ -9,6 +9,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -130,4 +131,51 @@ test('labelled() does not claim stalls that run after its synchronous body retur
     Reflect.deleteProperty(process.env, 'UNLEASHD_DATA_DIR');
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+/** Runs fixtures/stall-child.ts; `stopped` SIGSTOPs it for 700 ms. Returns its stalls.jsonl rows. */
+async function childStalls(mode: 'busy' | 'stopped'): Promise<{ kind: string; ms: number }[]> {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), `unleashd-stall-${mode}-`));
+  try {
+    const child = spawn(
+      process.execPath,
+      ['--import', 'tsx', path.join(__dirname, 'fixtures', 'stall-child.ts'), mode],
+      { cwd: path.join(__dirname, '..'), env: { ...process.env, UNLEASHD_DATA_DIR: directory } }
+    );
+    const exited = new Promise((resolve) => child.once('exit', resolve));
+    await new Promise<void>((resolve) =>
+      child.stdout.on('data', (chunk: Buffer) => chunk.includes('ready') && resolve())
+    );
+    if (mode === 'stopped') {
+      child.kill('SIGSTOP');
+      await delay(700);
+      child.kill('SIGCONT');
+    }
+    await exited;
+    return fs
+      .readFileSync(path.join(directory, 'observability', 'perf', 'stalls.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+// Regression (2026-10-29): sleep read as 11-17 minute stalls, blamed on oompa-poll and profiled.
+test('a stopped process records a descheduled stall; a blocked loop records a busy one', async () => {
+  const stopped = await childStalls('stopped');
+  assert.ok(
+    stopped.some((s) => s.ms >= 500),
+    `no stall seen: ${JSON.stringify(stopped)}`
+  );
+  assert.deepEqual(
+    stopped.filter((s) => s.ms >= 500).map((s) => s.kind),
+    ['descheduled']
+  );
+  const busy = await childStalls('busy');
+  assert.deepEqual(
+    busy.filter((s) => s.ms >= 500).map((s) => s.kind),
+    ['busy']
+  );
 });

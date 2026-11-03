@@ -30,6 +30,7 @@ import {
   portfolioTask,
   stable,
 } from './oompa-portfolio';
+import { oompaAdmits } from './oompa-scope';
 
 const exec = promisify(execFile);
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -53,7 +54,9 @@ const Backend = z
     type: z.literal('buddies'),
     workspace_id: z.string().min(1),
     buddy_id: z.string().min(1),
-    task_ids: z.array(z.string().min(1)).min(1),
+    // Explicit IDs, roots, or both; at least one task must be named (refined below).
+    task_ids: z.array(z.string().min(1)).default([]),
+    root_task_ids: z.array(z.string().min(1)).min(1).optional(),
     url_env: z.literal('OOMPA_BUDDY_MCP_URL').optional(),
     token_env: z.literal('OOMPA_BUDDY_MCP_TOKEN').optional(),
     authorization_env: z.literal('AGENT_CLI_MCP_UNLEASHD_BUDDY__AUTHORIZATION').optional(),
@@ -66,9 +69,20 @@ const Config = z
     task_backend: Backend,
     // Required (audit 2026-11-01): without it oompa falls back to its queue worker, which counts
     // any "APPROVED" substring ("NOT APPROVED") as approval and merges in the primary checkout.
-    task_execution: z.object({ validators: z.record(Validator) }).passthrough(),
+    // `default_validator` pins the oracle for subtree tasks created after launch (root_task_ids).
+    task_execution: z
+      .object({ validators: z.record(Validator), default_validator: Validator.optional() })
+      .passthrough(),
   })
-  .passthrough();
+  .passthrough()
+  .refine((config) => config.task_backend.task_ids.length || config.task_backend.root_task_ids, {
+    message: 'Oompa config must name task_ids and/or root_task_ids',
+  })
+  // Subtree tasks appear after launch, so no validators map can cover them (Oompa refuses too).
+  .refine(
+    (config) => !config.task_backend.root_task_ids || config.task_execution.default_validator,
+    { message: 'task_backend.root_task_ids requires task_execution.default_validator' }
+  );
 // Persisted data keeps a reader: a run pinned before 961aaba may be queue mode (no task_execution).
 // Reading/adopting it stays legal; only a NEW launch or an amendment needs the Config above.
 const Pinned = z.union([
@@ -80,6 +94,10 @@ const Pinned = z.union([
 ]);
 const pinned = (run: Run) =>
   Pinned.parse(read<unknown>(path.join(run.execution.dir, 'config.json')));
+type OwnerValidators = Pick<OompaOwner, 'validators' | 'defaultValidator'>;
+/** The owner-pinned oracle for a task: its explicit entry, else the pinned default. */
+const validatorFor = (owner: OwnerValidators, taskId: string) =>
+  owner.validators[taskId] ?? owner.defaultValidator;
 
 export const OompaAction = z.discriminatedUnion('kind', [
   Amendment,
@@ -461,6 +479,7 @@ export function createOompaHost(options: {
         : undefined,
       workspacePath: run.owner.workspacePath,
       taskIds: run.owner.grant.oompa!.taskIds,
+      rootTaskIds: run.owner.grant.oompa!.rootTaskIds,
       configSha256: run.owner.configSha256 ?? run.owner.automation?.configSha256,
       queueAudit: graphAudit(run),
       logDirectory: run.execution.dir,
@@ -691,12 +710,17 @@ export function createOompaHost(options: {
         throw new Error('Oompa execution is no longer running');
       if (!fs.existsSync(path.join(run.execution.dir, 'continuation-control.json')))
         throw new Error('Oompa host needs restart with continuation handshake support');
-      if (!run.owner.grant.oompa!.taskIds.includes(request.taskId))
-        throw new Error('task is outside this Oompa execution');
       const { config } = pinned(run);
       const task = await options.core.getTask(request.taskId);
+      const scope = run.owner.grant.oompa!;
       if (
         task.workspaceId !== run.owner.grant.workspaceId ||
+        !(await oompaAdmits(options.core, scope, task))
+      )
+        throw new Error('task is outside this Oompa execution');
+      // Explicit tasks are pinned to their configured owner; subtree tasks carry their own owner.
+      if (
+        scope.taskIds.includes(task.id) &&
         task.ownerId !==
           (config.task_backend.owner_by_task?.[task.id] ?? config.task_backend.buddy_id)
       )
@@ -710,7 +734,7 @@ export function createOompaHost(options: {
       const workspacePath = await registered(run.owner.workspacePath, request.workspacePath);
       if ((await cleanCommit(workspacePath)) !== request.sourceCommit)
         throw new Error('diagnostic source commit does not match request');
-      const validator = run.owner.validators[request.taskId];
+      const validator = validatorFor(run.owner, request.taskId);
       if (validator) await pins(workspacePath, validator);
       await pins(workspacePath, {
         command: request.command,
@@ -1025,7 +1049,7 @@ export function createOompaHost(options: {
         )
           throw new Error('held task claim revision or original deadline changed');
         const candidate = await registered(run.owner.workspacePath, proof.workspace.path);
-        const validator = run.owner.validators[request.taskId];
+        const validator = validatorFor(run.owner, request.taskId);
         if (validator) await pins(candidate, validator);
         const task = await options.core.getTask(request.taskId);
         if (
@@ -1210,6 +1234,11 @@ export function createOompaHost(options: {
       if (backend.workspace_id !== workspace.id || backend.buddy_id !== buddy.id)
         throw new Error('Oompa config workspace/Buddy does not match launch');
       const taskIds = [...new Set(backend.task_ids)];
+      const rootTaskIds = [...new Set(backend.root_task_ids ?? [])];
+      // Only the roots are checked here: descendants are admitted by ancestry per request.
+      for (const id of rootTaskIds)
+        if ((await options.core.getTask(id)).workspaceId !== workspace.id)
+          throw new Error('Oompa root task is outside the launch workspace');
       const taskOwners: Record<string, string> = {};
       for (const id of taskIds) {
         const task = await options.core.getTask(id);
@@ -1275,7 +1304,7 @@ export function createOompaHost(options: {
           if (owner.workspaceId !== workspace.id || owner.status === 'archived')
             throw new Error('foreign portfolio owner');
         }
-        for (const taskId of taskIds)
+        for (const taskId of [...taskIds, ...rootTaskIds])
           await portfolioTask(options.core, action.portfolio, workspace.id, taskId);
       }
       if (previous) {
@@ -1352,6 +1381,7 @@ export function createOompaHost(options: {
         buddyId: buddy.id,
         workspaceId: workspace.id,
         taskIds,
+        rootTaskIds,
         principal: previous?.owner.grant.principal ?? grant.principal,
         expiresAt,
       });
@@ -1372,6 +1402,7 @@ export function createOompaHost(options: {
         automation,
         grant: record,
         validators: config.task_execution.validators,
+        defaultValidator: config.task_execution.default_validator,
       };
       const execution = journals.forOompa(owner);
       const run = { owner, execution };
@@ -1413,7 +1444,7 @@ export function createOompaHost(options: {
           }
         );
         console.log(
-          `[oompa] launched ${id}, ${taskIds.length} tasks, deadline ${new Date(record.expiresAt).toISOString()}`
+          `[oompa] launched ${id}, ${taskIds.length} tasks, ${rootTaskIds.length} roots, deadline ${new Date(record.expiresAt).toISOString()}`
         );
         return view(run);
       } catch (error) {
@@ -1438,13 +1469,13 @@ export function createOompaHost(options: {
         throw new Error('Oompa continuation is active');
       const perform = async () => {
         registering.add(run.owner.id);
-        if (!grant.oompa!.taskIds.includes(request.taskId))
-          throw new Error('task is outside this Oompa execution');
-        const validator = run.owner.validators[request.taskId];
+        const validator = validatorFor(run.owner, request.taskId);
         if (!validator) throw new Error('no owner-pinned validator for this task');
         const task = await options.core.getTask(request.taskId);
         if (task.workspaceId !== grant.workspaceId)
           throw new Error('task moved outside this execution');
+        if (!(await oompaAdmits(options.core, grant.oompa!, task)))
+          throw new Error('task is outside this Oompa execution');
         const name = sha(JSON.stringify(request));
         const dir = path.join(run.execution.dir, 'validations', name);
         const recordPath = path.join(dir, 'validation.json');
