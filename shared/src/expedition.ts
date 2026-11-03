@@ -50,17 +50,19 @@ export const CheckOutcome = z.discriminatedUnion('t', [
 export type CheckOutcome = z.infer<typeof CheckOutcome>;
 const CheckRun = z.object({ argv: Argv, outcome: CheckOutcome });
 export type CheckRun = z.infer<typeof CheckRun>;
-/** `skipped`: the expedition finished before this attempt was judged. */
+/** `skipped`: not judged, because the expedition finished first or the turn did not answer. */
 const Verdict = z.discriminatedUnion('t', [
   v('checks', { pass: z.boolean(), runs: z.array(CheckRun) }),
   v('owner', { pass: z.boolean() }),
   v('skipped', {}),
 ]);
 export type Verdict = z.infer<typeof Verdict>;
-/** How the crew turn ended; sha = the attempt branch tip at turn end (= base if never committed). */
+/** How the crew turn ended; sha = the attempt branch tip at turn end (= base if never committed).
+ * `lost`: neither the branch nor the attempt's tree resolved, so sha is the base. Only an
+ * `answered` turn is judged; the others end `skipped`. */
 const TurnEnd = z.object({
   at: str,
-  turn: z.enum(['answered', 'failed', 'cancelled']),
+  turn: z.enum(['answered', 'failed', 'cancelled', 'lost']),
   sha: str,
   lesson: Lesson,
 });
@@ -154,18 +156,36 @@ export type ExpeditionSummary = {
   crewBuddyId: string | null;
 };
 
+const ACT = {
+  launch: z.object({ do: z.literal('launch') }).strict(),
+  pause: z.object({ do: z.literal('pause') }).strict(),
+  resume: z.object({ do: z.literal('resume') }).strict(),
+  stop: z.object({ do: z.literal('stop') }).strict(),
+  extend: z.object({ do: z.literal('extend'), hours: z.number().positive().max(72) }).strict(),
+  verdict: z.object({ do: z.literal('verdict'), n: z.number().int(), pass: z.boolean() }).strict(),
+  note: z.object({ do: z.literal('note'), text: str.trim().min(1).max(2000) }).strict(),
+  retire: z.object({ do: z.literal('retire') }).strict(),
+};
 /** Owner/Buddy acts: one schema for HTTP, chat and tool. */
 export const Act = z.discriminatedUnion('do', [
-  z.object({ do: z.literal('launch') }).strict(),
-  z.object({ do: z.literal('pause') }).strict(),
-  z.object({ do: z.literal('resume') }).strict(),
-  z.object({ do: z.literal('stop') }).strict(),
-  z.object({ do: z.literal('extend'), hours: z.number().positive().max(72) }).strict(),
-  z.object({ do: z.literal('verdict'), n: z.number().int(), pass: z.boolean() }).strict(),
-  z.object({ do: z.literal('note'), text: str.trim().min(1).max(2000) }).strict(),
-  z.object({ do: z.literal('retire') }).strict(),
+  ACT.launch,
+  ACT.pause,
+  ACT.resume,
+  ACT.stop,
+  ACT.extend,
+  ACT.verdict,
+  ACT.note,
+  ACT.retire,
 ]);
 export type Act = z.infer<typeof Act>;
+/** The Buddy tool's acts, chosen by name (launch, verdict and retire are the owner's). */
+export const BuddyAct = z.discriminatedUnion('do', [
+  ACT.pause,
+  ACT.resume,
+  ACT.stop,
+  ACT.extend,
+  ACT.note,
+]);
 const LIVE = ['running', 'paused'] as const;
 /** The one guard table: which states accept which act (server refuses; client shows buttons). */
 export const ALLOWED: Record<Act['do'], readonly State['t'][]> = {
@@ -199,7 +219,7 @@ const FINISHED: { [K in FinishReason['t']]: (r: Extract<FinishReason, { t: K }>)
   passed: (r) => `Passed (a${r.n})`,
   budget: () => 'Stopped · budget spent',
   deadline: () => 'Stopped · deadline',
-  stopped: () => 'Stopped by you',
+  stopped: (r) => (r.by === 'owner' ? 'Stopped by you' : 'Stopped by a Buddy'),
   setup_failed: (r) => `Setup failed: ${r.detail}`,
 };
 const finishedLabel = (r: FinishReason) => (FINISHED[r.t] as (r: FinishReason) => string)(r);
@@ -214,7 +234,9 @@ export function attemptResult(a: Attempt, done: Done): string {
     case 'judging':
       return done.t === 'checks' ? 'checking' : 'needs your verdict';
     case 'judged':
-      return verdictLabel(p.verdict);
+      return p.end.turn === 'answered'
+        ? verdictLabel(p.verdict)
+        : `${verdictLabel(p.verdict)} (turn ${p.end.turn})`;
   }
 }
 function verdictLabel(v: Verdict): string {
