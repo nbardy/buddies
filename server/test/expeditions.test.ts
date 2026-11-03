@@ -5,6 +5,7 @@ import test from 'node:test';
 import { OWNER, buddyActor } from '../src/buddies/core';
 import { runChecks } from '../src/expeditions/checks';
 import {
+  BUDGETS,
   charter,
   executeRequestRun,
   fixture,
@@ -322,6 +323,10 @@ test('retire archives every branch, or refuses whole', async () => {
     const id = await finishedWithTwo(f, 'Retired one', 2);
     const tips = [1, 2].map((n) => git(f.repo, 'rev-parse', `expedition/${id}/a${n}`));
     const { crewBuddyId, chatChannelId } = f.launch(id);
+    // Dirty work a released tree left: local-only until retire pushes it (cambium archive takes
+    // branches only), and the local ref goes only after origin shows the tag.
+    const salvageRef = `refs/salvage/expeditions/${id}/a1`;
+    git(f.repo, 'update-ref', salvageRef, tips[0]);
     const res = await f.act(id, { do: 'retire' });
     assert.equal(res.status, 200, JSON.stringify(res.body));
     for (const n of [1, 2]) {
@@ -329,6 +334,11 @@ test('retire archives every branch, or refuses whole', async () => {
       assert.equal(remote, tips[n - 1]);
       assert.equal(git(f.repo, 'branch', '--list', `expedition/${id}/a${n}`), '');
     }
+    assert.equal(
+      git(origin, 'rev-parse', `refs/tags/archive/expeditions/${id}/salvage/a1`),
+      tips[0]
+    );
+    assert.equal(git(f.repo, 'for-each-ref', salvageRef), '');
     assert.equal((await f.core.getBuddy(crewBuddyId)).status, 'archived');
     const chat = await f.core.openChannel(OWNER, { kind: 'id', id: chatChannelId });
     assert.ok(chat.archivedAt);
@@ -363,7 +373,13 @@ test('the oracle restore resets only the literal tracked paths a check names', a
     return git(repo, 'rev-parse', 'HEAD');
   };
   const run = async (sha: string, checks: string[][]) => {
-    const job = { dir: path.join(scratch, 'check'), sha, base, checks };
+    const job = {
+      dir: path.join(scratch, 'check'),
+      sha,
+      base,
+      checks,
+      through: 'first_failure' as const,
+    };
     const runs = await runChecks(repo, job, new AbortController().signal);
     return runs.map((r) => r.outcome.t).join(',');
   };
@@ -376,4 +392,77 @@ test('the oracle restore resets only the literal tracked paths a check names', a
   const grep = ['sh', '-c', "grep -q 'broken = false' widget/widget.ts"];
   for (const checks of [[[...grep, '.']], [[...grep, '*']], [['/bin/sh', script]]])
     assert.equal(await run(fixed, checks), 'passed', JSON.stringify(checks));
+});
+
+// Incident 2026-11-01: an expedition burned 3 attempts on a done-check that could never run in
+// this environment (FileNotFound). Launch runs every check once on the base: a check that runs and
+// FAILS is the goal and launches; one that cannot run refuses the launch, shown in the draft.
+test('launch refuses a done-check that cannot run, and launches one that merely fails', async () => {
+  const f = await fixture();
+  try {
+    const broken = await drafted(
+      f,
+      {
+        done: {
+          t: 'checks',
+          checks: [
+            ['sh', 'check.sh'],
+            ['sh', 'no-such-check.sh'],
+          ],
+        },
+      },
+      'Dead check'
+    );
+    const refused = await f.act(broken.id, { do: 'launch' });
+    assert.notEqual(refused.status, 200);
+    const record = f.record(broken.id);
+    assert.equal(record.state.t, 'draft');
+    const issues = record.state.t === 'draft' ? record.state.issues : [];
+    assert.equal(issues.length, 1, 'only the dead check is named; check.sh ran and failed');
+    assert.match(issues[0], /no-such-check\.sh.*cannot run/);
+    assert.equal(record.attempts.length, 0);
+
+    const python = await drafted(
+      f,
+      { done: { t: 'checks', checks: [['python3', 'missing_oracle.py']] } },
+      'Dead python'
+    );
+    await f.act(python.id, { do: 'launch' });
+    const py = f.record(python.id).state;
+    assert.match(py.t === 'draft' ? py.issues.join() : 'launched', /python found no script/);
+
+    const id = await launched(f, {}, 'Failing check');
+    assert.equal(f.record(id).state.t, 'running');
+  } finally {
+    await f.close();
+  }
+});
+
+// 2026-11-03: retire archived the crew while a stop sat `cancel_requested` with no turn left to
+// settle it, so Home showed the archived crew as working until the ~5 min lease ended.
+test('retire ends a crew run whose stop was only requested', async () => {
+  const f = await fixture();
+  try {
+    const origin = path.join(f.scratch, 'origin.git');
+    git(f.scratch, 'init', '-q', '--bare', origin);
+    git(f.repo, 'remote', 'add', 'origin', `file://${origin}`);
+    const id = await finishedWithTwo(f, 'Stale stop', 1);
+    const { crewBuddyId } = f.launch(id);
+    await f.core.enqueueChat(OWNER, {
+      buddyId: crewBuddyId,
+      conversationId: 'c-stale',
+      turnId: 'turn-stale',
+      body: 'hello',
+    });
+    const claim = await f.core.claimRun(BUDGETS, []);
+    assert.ok(claim, 'the chat run was claimable');
+    await f.core.cancelRun(OWNER, claim.run.id);
+    assert.equal((await f.core.getRun(claim.run.id)).status, 'cancel_requested');
+
+    const res = await f.act(id, { do: 'retire' });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal((await f.core.getRun(claim.run.id)).status, 'cancelled');
+  } finally {
+    await f.close();
+  }
 });

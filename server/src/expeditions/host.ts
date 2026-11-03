@@ -31,7 +31,7 @@ import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
 import * as brief from './brief';
 import { type Released, add, release, tip } from './cambium';
-import { preflight, runChecks } from './checks';
+import { type LaunchPreflight, launchPreflight, preflight, runChecks } from './checks';
 import {
   type Launched,
   type Loaded,
@@ -310,7 +310,13 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     const stop = new AbortController();
     checking.set(key, stop);
     const { repoRoot, baseSha } = x.state.launch;
-    const job = { dir: paths(root, x.id).check(a.n), sha: endOf(a).sha, base: baseSha, checks };
+    const job = {
+      dir: paths(root, x.id).check(a.n),
+      sha: endOf(a).sha,
+      base: baseSha,
+      checks,
+      through: 'first_failure' as const,
+    };
     checkQueue = checkQueue
       .then(async () => {
         if (stop.signal.aborted) return;
@@ -445,6 +451,13 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     for (const r of await runsOf(x, (r) => !SETTLED.has(r.status) && which(r)))
       events.emit({ kind: 'cancelled', run: await core.cancelRun(OWNER, r.id) });
   }
+  /** Retire: no turn will ever settle the crew's runs, so a stop is finished now instead of at
+   * lease expiry (about 5 min of Home showing the archived crew as working). */
+  async function settleCrewRuns(x: Launched): Promise<void> {
+    await cancelRuns(x, () => true);
+    for (const r of await runsOf(x, (r) => r.status === 'cancel_requested'))
+      events.emit({ kind: 'cancelled', run: await core.finishCancel(OWNER, r.id) });
+  }
 
   /** The chat is ONE thread in the owner↔crew DM, rooted at this crew post. Owner 2026-11-03
    * wanted to converse with the manager: a DM post opens a new thread seat (a fresh conversation)
@@ -550,8 +563,28 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     now: iso,
     release: releaseTree,
     commit: (x: Launched) => commit(x),
+    settleCrewRuns,
     onBuddyArchived: o.onBuddyArchived,
     onChannelArchived: o.onChannelArchived,
+  };
+
+  /** Launch preflight: owner-judged expeditions have no check to run. The checks go through the
+   * one host-wide queue, like a judged attempt's. */
+  const DRY_RUN: Record<
+    Done['t'],
+    (x: Expedition, pre: { repoRoot: string; baseSha: string }) => Promise<LaunchPreflight>
+  > = {
+    owner: async () => ({ t: 'ready' }),
+    checks: (x, pre) => {
+      const checks = (x.charter.done as Extract<Done, { t: 'checks' }>).checks;
+      const job = { dir: paths(root, x.id).check(0), baseSha: pre.baseSha, checks };
+      const ran = checkQueue.then(() => launchPreflight(pre.repoRoot, job));
+      checkQueue = ran.then(
+        () => undefined,
+        () => undefined
+      );
+      return ran;
+    },
   };
 
   async function launch(x: Expedition): Promise<Acted> {
@@ -559,6 +592,11 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     if (pre.t === 'refused') {
       await commit({ ...x, state: { t: 'draft', issues: pre.issues } });
       return { t: 'refused', reasons: pre.issues };
+    }
+    const dry = await DRY_RUN[x.charter.done.t](x, pre);
+    if (dry.t === 'refused') {
+      await commit({ ...x, state: { t: 'draft', issues: dry.issues } });
+      return { t: 'refused', reasons: dry.issues };
     }
     const crew = await core.createBuddy(OWNER, {
       workspaceId: x.workspaceId,
