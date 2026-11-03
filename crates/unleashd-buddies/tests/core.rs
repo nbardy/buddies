@@ -2005,6 +2005,28 @@ fn failure_notice_wakes_no_subscriber_but_a_normal_post_still_does() {
     assert_eq!(queued(s, "mid"), 1, "a normal post by the same author still delivers");
 }
 
+// Review 2026-11-03: an expedition's bare chat command is the server's; the subscribed manager seat
+// woke on it, answered with a stale status and could apply it twice.
+#[test]
+fn a_host_command_wakes_no_subscriber() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let root = s.post(&buddy("mid"), dm("mid", "ic"), request("thread", "r1")).unwrap(); // subscribes mid
+    let worker = s.claim_run(lease(60_000), &[]).unwrap().unwrap();
+    s.settle_run(&worker.run.id, &worker.lease_token, Outcome::Complete { text: "ok".into() }).unwrap();
+    let inform = |body: &str, key: &str, purpose: Option<&str>| PostInput {
+        kind: PostKind::Inform,
+        reply_to_id: Some(root.id.clone()),
+        from_conversation_id: Some("conv-ic".into()),
+        purpose: purpose.map(Into::into),
+        ..request(body, key)
+    };
+    s.post(&buddy("ic"), dm("mid", "ic"), inform("stop", "c1", Some("host_command"))).unwrap();
+    assert_eq!(queued(s, "mid"), 0, "a host command wakes nobody");
+    s.post(&buddy("ic"), dm("mid", "ic"), inform("why?", "t1", None)).unwrap();
+    assert_eq!(queued(s, "mid"), 1, "talk still delivers");
+}
+
 // Owner decision 2026-10-07: a seat opened for an @mention is bound to its run but not subscribed.
 // A subscribed seat would be delivered every later post of the thread without the follow-up gate.
 #[test]

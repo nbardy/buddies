@@ -857,7 +857,9 @@ Client: §8 deleted files plus the §6 client edits.
     `relaunch` (the owner's words). Before, any Buddy could pass an owner-judged attempt and it
     was recorded as the owner's verdict, and "@crew stop" from a Buddy was obeyed.
   - A bare chat command is the host's alone: `publishOwnerPost` asks `HostCommands.consumes`
-    (host.ts) and posts it with no wake, so no manager turn answers it with a stale status or
+    (host.ts) and posts it with no mention and purpose `host_command`, which the crate's fan-out
+    skips (deliveries.rs `WAKES_NOBODY`; the manager seat follows the chat thread, so dropping the
+    mention alone still delivered it), so no manager turn answers it with a stale status or
     applies it a second time (extend twice = 4 h). The host answers each applied command in the
     chat (`brief.ackOf`: "Extended 2 h · new deadline …", "Paused …"; stop and verdict already
     post their own line).

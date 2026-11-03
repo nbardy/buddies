@@ -138,15 +138,22 @@ pub(crate) fn catch_up(tx: &Transaction, reader: &Actor, root_id: &str, ord: &st
     }
 }
 
+/// Purposes no subscriber is delivered.
+/// - `reply_failed` (fix-guard): two failing Buddies subscribed to one thread woke each other with
+///   failure notices (~170 failed turns in 4 min, 2026-10-07).
+/// - `host_command`: an owner post the server applies itself (an expedition's bare chat command,
+///   server expeditions/host.ts `consumes`). Review 2026-11-03: the manager seat, subscribed to the
+///   chat thread, answered "stop" with a stale status and could apply "extend 2h" a second time.
+/// Tests: failure_notice_wakes_no_subscriber_but_a_normal_post_still_does,
+/// a_host_command_wakes_no_subscriber (tests/core.rs).
+const WAKES_NOBODY: [&str; 2] = ["reply_failed", "host_command"];
+
 /// Rule 1: a post by someone else in a subscribed thread is delivered to the subscribed
 /// conversation, one `deliver` run per (post, Buddy). Called inside the post's transaction.
 /// `skip`: Buddies already woken another way for this post (a request's recipient gets its `post`
 /// run, a mention gets `wake`'s), so nobody is woken twice.
 pub(crate) fn fan_out(tx: &Transaction, post: &Post, skip: &[String]) -> Result<()> {
-    // Fix-guard: a failure notice wakes nobody. Without this, two failing Buddies subscribed to one
-    // thread woke each other with reply_failed notices (~170 failed turns in 4 min, 2026-10-07).
-    // Test: failure_notice_wakes_no_subscriber_but_a_normal_post_still_does (tests/core.rs).
-    if post.purpose.as_deref() == Some("reply_failed") {
+    if post.purpose.as_deref().is_some_and(|p| WAKES_NOBODY.contains(&p)) {
         return Ok(());
     }
     let subscribers = collect(

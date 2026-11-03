@@ -172,7 +172,9 @@ function mentionConfigsByBuddy(
 }
 
 /** Owner posts a host applies itself (an expedition's bare chat command, expeditions/host.ts
- * `consumes`): they wake no Buddy turn, so no manager answers or repeats them. */
+ * `consumes`): they wake no Buddy turn, so no manager answers or repeats them. Review
+ * 2026-11-03: dropping the mentions alone was not enough, the chat thread's subscribed manager
+ * seat still got a delivery of every owner post. */
 export interface HostCommands {
   consumes(channelId: string, body: string): boolean;
 }
@@ -216,7 +218,11 @@ export async function publishOwnerPost(
     { kind: 'id', id: target.id },
     // The Buddies its @mentions (or, in a DM, the owner's plain post) wake, on the owner's chip
     // picks: one `deliver` run each, written with the post (mentions.ts `wakes`).
-    { ...input, body, mentions: consumed ? [] : wakes(target, author, input.kind, body, picks) }
+    // A host command wakes nobody: no mention, and purpose `host_command`, which the crate's
+    // fan-out skips (deliveries.rs WAKES_NOBODY) so a subscribed manager seat is not woken either.
+    consumed
+      ? { ...input, body, purpose: 'host_command', mentions: [] }
+      : { ...input, body, mentions: wakes(target, author, input.kind, body, picks) }
   );
   if (!created) return { post };
   deps.events.emit({ kind: 'changed' });

@@ -156,6 +156,22 @@ test('owner-judged expeditions follow the chat, and stop and the deadline finish
     const posts = await f.chat(id);
     assert.ok(posts.some((p) => p.purpose === 'expedition_status' && /pass or fail/.test(p.body)));
 
+    // The manager seat has talked in the chat, so it follows the thread (crate fan-out).
+    const { crewBuddyId, chatChannelId } = f.launch(id);
+    await f.core.post(
+      buddyActor(crewBuddyId),
+      { kind: 'id', id: chatChannelId },
+      {
+        kind: 'inform',
+        body: 'a1 is waiting on you.',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        replyToId: posts[0].rootId ?? posts[0].id,
+        fromConversationId: 'manager-seat',
+        key: 'manager-says',
+      }
+    );
     const deadline = Date.parse(f.launch(id).deadline);
     await f.ownerSays(id, 'extend 2h');
     assert.equal(Date.parse(f.launch(id).deadline) - deadline, 7_200_000);
