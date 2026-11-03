@@ -1,6 +1,5 @@
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
@@ -34,8 +33,6 @@ import { type BuddyEvents, NO_PICKS, announcePost } from './events';
 import type { BuddyGrant, Grants, OwnerChat, Role, TurnGrant } from './grants';
 import { attachToRelay } from './mcp-relay';
 import { resolveForWorkspace, wakes } from './mentions';
-import { OompaAccept, OompaAction, type OompaHost, createOompaHost } from './oompa';
-import { oompaAdmits, oompaSelection } from './oompa-scope';
 import {
   TAIL_MAX,
   checkedEvidence,
@@ -43,7 +40,6 @@ import {
   runRowsView,
   runTail,
   taskDetailView,
-  taskRecordView,
 } from './tool-views';
 import { WorkerSchema, checkedRunConfig } from './worker-config';
 
@@ -67,7 +63,6 @@ export interface ToolDeps {
   openBranch(chat: OwnerChat): Promise<string>;
   /** Turns whose model is idle while their background jobs run (turns/background-work.ts). */
   backgroundWork: BackgroundWork;
-  oompa?: OompaHost;
   expeditions?: ExpeditionHost;
 }
 
@@ -802,156 +797,23 @@ const REVIEWER_TOOLS = {
   },
 };
 
-// Pattern: capability-grants (docs/patterns.md#capability-grants)
-// Scope is enforced before task reads too: the crate's task getters do not take an actor.
-// Never send a detached worker the general owner tool table. Guard: oompa-mcp.test.ts.
-async function oompaTask(deps: ToolDeps, grant: BuddyGrant, id: string) {
-  deps.oompa?.guard(grant);
-  // Explicit-only grants refuse before any read; subtree membership needs the task's ancestry.
-  if (!grant.oompa?.taskIds.includes(id) && !grant.oompa?.rootTaskIds)
-    throw new Error('task is outside this Oompa execution');
-  const task = await deps.core.getTask(id);
-  if (task.workspaceId !== grant.workspaceId)
-    throw new Error('task is outside this Oompa workspace');
-  if (!(await oompaAdmits(deps.core, grant.oompa, task)))
-    throw new Error('task is outside this Oompa execution');
-  return task;
-}
-const OOMPA_TOOLS = {
-  tasks: buddyTool({
-    description: 'Read only the owner-selected tasks of this Oompa execution.',
-    writes: false,
-    schema: TASKS_TOOL.schema,
-    async handler(deps, grant, raw) {
-      const { action } = TASKS_TOOL.schema.parse(raw);
-      if (action.kind === 'get') {
-        const task = await oompaTask(deps, grant, action.taskId);
-        const detail = await taskDetail(deps.core, grant.author, action.taskId, 20);
-        // Every child of a subtree member is itself one; otherwise only explicit IDs.
-        const subtree = await oompaAdmits(deps.core, { ...grant.oompa!, taskIds: [] }, task);
-        detail.children = detail.children.filter(
-          (child) => subtree || grant.oompa!.taskIds.includes(child.id)
-        );
-        return taskDetailView(detail);
-      }
-      if ('workspace' in action.scope && action.scope.workspace !== grant.workspaceId)
-        throw new Error('workspace is outside this Oompa execution');
-      if ('buddyId' in action.scope && action.scope.buddyId !== grant.buddyId)
-        throw new Error('Buddy is outside this Oompa execution');
-      if ('taskId' in action.scope) await oompaTask(deps, grant, action.scope.taskId);
-      // Full records (revision, criteria, nextAction), not summary rows: an Oompa worker scans its
-      // whole selection every loop, and summary rows forced one `get` per task — each also opening
-      // the task channel and reading 20 comments. Ten workers x forty tasks dropped connections
-      // (swarm 00733e4f, 2026-10-23). The selection is owner-bounded, so one list is one scan.
-      // Roots add their live subtree (with parentId): Oompa derives containers per scan.
-      deps.oompa?.guard(grant);
-      const tasks = await oompaSelection(deps.core, grant.oompa!, grant.workspaceId);
-      if (tasks.some((task) => task.workspaceId !== grant.workspaceId))
-        throw new Error('task is outside this Oompa workspace');
-      return tasks
-        .filter((task) => action.include === 'all' || isOpenTask(task))
-        .filter((task) => !('taskId' in action.scope) || task.parentId === action.scope.taskId)
-        .map(taskRecordView);
-    },
-  }),
-  task_write: buddyTool({
-    description:
-      'CAS progress for a selected task. Only host independent validation can accept done.',
-    writes: true,
-    schema: z
-      .object({
-        write: z
-          .object({
-            kind: z.literal('update'),
-            taskId: z.string().min(1),
-            baseRevision: z.number().int().positive(),
-            changes: z
-              .object({
-                status: z.enum(['open', 'in_progress', 'blocked', 'review']).optional(),
-                nextAction: z.string().optional(),
-                blockedReason: z.string().optional(),
-                evidence: z.array(z.string()).optional(),
-              })
-              .strict(),
-          })
-          .strict(),
-        key,
-      })
-      .strict(),
-    async handler(deps, grant, { write, key }) {
-      await oompaTask(deps, grant, write.taskId);
-      if (write.changes.evidence) checkedEvidence(write.changes.evidence);
-      return deps.core.upsertTask(grant.principal, { ...write, key });
-    },
-  }),
-  post: buddyTool({
-    description: 'Write a progress comment on a selected task, without starting workers.',
-    writes: true,
-    schema: z
-      .object({
-        channel: z.object({ task: z.string().min(1) }).strict(),
-        body: z.string().min(1).max(32_000),
-        evidence,
-        key,
-      })
-      .strict(),
-    async handler(deps, grant, { channel, body, evidence, key }) {
-      await oompaTask(deps, grant, channel.task);
-      return (
-        await deps.core.post(
-          grant.author,
-          { kind: 'task', taskId: channel.task },
-          { body, evidence, key, kind: 'inform', mentions: [], broadcast: false }
-        )
-      ).post;
-    },
-  }),
-  oompa: buddyTool({
-    description:
-      'Ask the host to run the owner-pinned independent validator once, integrate its exact commit, and accept. Repeat the same request to poll.',
-    writes: true,
-    schema: z.object({ action: OompaAccept }).strict(),
-    handler: (deps, grant, { action }) => {
-      if (!deps.oompa) throw new Error('Oompa host unavailable');
-      return deps.oompa.accept(grant, action);
-    },
-  }),
-};
-const OOMPA_CONTROL = teamTool({
-  description:
-    // Paid on every Buddy turn (tool-contract.test.ts budget): one clause per rule.
-    'Bounded Oompa host control. Owner launch may grant automationSeconds<=43200, portfolio {rootTaskIds,ownerIds,reviewerIds} and scaleEnvelope {maxWorkers,models,maxGpuWorkers}; paid GPU/Modal dispatch needs separate authorization. The launch Buddy may create scoped prerequisite tasks, request review by post DM (the reviewer writes its OWN review task; evidence: oompa.config-review/v1 BASE_CONFIG_SHA CONFIG_SHA SOURCE_COMMIT), then amend the latest drained host: worker count/model/task_ids/can_claim_gpu and reviewer model, within the envelope (none: frozen). Renew: launch.priorRunId+amendmentId+returned configPath. Owner launch.resumeRunId grants a new window; scheduled renewals never extend it. Drain waits for idle, keeps delegation; Stop revokes it. Requeue: only the missing-reviewer-prompt hold. No credentials returned.',
-  writes: true,
-  schema: z.object({ action: OompaAction, key }).strict(),
-  handler: (deps, grant, { action, key }) => {
-    if (!deps.oompa) throw new Error('Oompa host unavailable');
-    return deps.oompa.action(grant, action, key);
-  },
-});
-
 /** Which tools a role is shown. Presentation only: the crate's `authorize` decides every call. */
 export function toolsFor(role: Role): Record<string, Tool<TurnGrant>> {
   const { team_admin, team } = TEAM_TOOLS;
   const buddy = BUDDY_TOOLS as Record<string, Tool<TurnGrant>>;
   switch (role) {
     case 'worker':
-      return { ...buddy, team, oompa: OOMPA_CONTROL };
+      return { ...buddy, team };
     case 'owner':
-      return { ...buddy, team, team_admin, oompa: OOMPA_CONTROL };
+      return { ...buddy, team, team_admin };
     case 'reviewer':
       return REVIEWER_TOOLS as Record<string, Tool<TurnGrant>>;
     case 'builder':
-      return { ...TEAM_TOOLS, ...BUILDER_TOOLS, oompa: OOMPA_CONTROL } as Record<
-        string,
-        Tool<TurnGrant>
-      >;
+      return { ...TEAM_TOOLS, ...BUILDER_TOOLS } as Record<string, Tool<TurnGrant>>;
   }
 }
 
-const toolsForGrant = (grant: TurnGrant): Record<string, Tool<TurnGrant>> =>
-  grant.role !== 'builder' && grant.oompa
-    ? (OOMPA_TOOLS as unknown as Record<string, Tool<TurnGrant>>)
-    : toolsFor(grant.role);
+const toolsForGrant = (grant: TurnGrant): Record<string, Tool<TurnGrant>> => toolsFor(grant.role);
 
 /** The tool list a role's turn loads, as JSON (the context meter counts it). */
 export function toolManifest(role: Role): string {
@@ -1221,18 +1083,15 @@ export async function callTool(
       selected.handler(deps, grant, selected.schema.parse(input) as never)
     );
     if (selected.writes) deps.events.emit({ kind: 'changed' });
-    const boundary =
-      grant.role !== 'builder' && grant.oompa
-        ? null
-        : await Promise.all([
-            addressedMessages(deps, grant),
-            liveThreadPosts(deps, grant).then(taken),
-          ])
-            .then(joined)
-            .catch((error) => {
-              console.warn('[buddies-mcp] live delivery deferred:', error);
-              return null;
-            });
+    const boundary = await Promise.all([
+      addressedMessages(deps, grant),
+      liveThreadPosts(deps, grant).then(taken),
+    ])
+      .then(joined)
+      .catch((error) => {
+        console.warn('[buddies-mcp] live delivery deferred:', error);
+        return null;
+      });
     if (boundary) show(boundary);
     return {
       content: [
@@ -1334,6 +1193,36 @@ async function answerHook(
   }
 }
 
+// Fix-guard (2026-11-03): a retired tool answers why it is gone. Agent CLIs cache `tools/list`
+// for a whole turn and an adopted turn outlives the backend that started it (tool-contract.test.ts),
+// so a turn begun before a retirement may still call the tool. The SDK would only say "Tool oompa
+// not found", which reads as a bug to retry. Never reuse a retired name for a new tool: those turns
+// would send it the old input. Guard: retired-tools.test.ts.
+export const RETIRED_TOOLS = {
+  oompa:
+    'the Buddy Oompa host was retired on 2026-11-03; Buddies no longer launch, steer or accept ' +
+    'Oompa runs. Use the expedition tool for long-running goals, or ask the owner.',
+} as const;
+type RetiredTool = keyof typeof RETIRED_TOOLS;
+const RetiredCall = z.object({
+  jsonrpc: z.literal('2.0'),
+  id: z.union([z.string(), z.number()]),
+  method: z.literal('tools/call'),
+  params: z.object({ name: z.enum(Object.keys(RETIRED_TOOLS) as [RetiredTool]) }),
+});
+/** The JSON-RPC answer to a call of a retired tool; null: any other message, for the SDK. */
+function retiredToolAnswer(body: unknown): string | null {
+  const call = RetiredCall.safeParse(body);
+  if (!call.success) return null;
+  const { id, params } = call.data;
+  const text = `[retired] ${params.name}: ${RETIRED_TOOLS[params.name]}`;
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    id,
+    result: { isError: true, content: [{ type: 'text', text }] },
+  });
+}
+
 async function readJson(req: IncomingMessage): Promise<unknown> {
   let body = '';
   for await (const chunk of req) body += chunk;
@@ -1364,33 +1253,13 @@ function listen(http: Server): Promise<void> {
  * backend runs is held and delivered by the next one instead of meeting ECONNREFUSED.
  */
 export async function startMcpEndpoint(
-  deps: ToolDeps & {
-    grants: Grants;
-    portFile: string;
-    oompaOptions?: { executable?: string; wrapper?: string; stopGraceMs?: number };
-  }
+  deps: ToolDeps & { grants: Grants; portFile: string }
 ): Promise<McpEndpoint> {
-  let relayPort = 0;
-  const oompa = createOompaHost({
-    ...deps.oompaOptions,
-    core: deps.core,
-    grants: deps.grants,
-    root: path.join(path.dirname(deps.portFile), 'oompa-executions'),
-    url: () => `http://127.0.0.1:${relayPort}/mcp`,
-  });
-  const toolDeps = { ...deps, oompa };
+  const toolDeps: ToolDeps = deps;
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
     const grant = bearer ? deps.grants.lookup(bearer) : null;
     if (!grant) return void res.writeHead(401).end('unknown, expired or revoked turn grant');
-    if (grant.role !== 'builder' && grant.oompa) {
-      try {
-        oompa.guard(grant);
-      } catch {
-        return void res.writeHead(401).end('Oompa execution ended or was revoked');
-      }
-      if (req.url !== '/mcp') return void res.writeHead(403).end('Oompa grants have no turn hooks');
-    }
     // What this response shows the turn settles once it is written (`addressedMessages`); a part
     // shown after the client already left settles unwritten at once, or it would stay offered.
     const shown: Shown[] = [];
@@ -1420,6 +1289,11 @@ export async function startMcpEndpoint(
     }
     if (req.method !== 'POST' || req.url !== '/mcp') return void res.writeHead(405).end();
     const body = await readJson(req);
+    const retired = retiredToolAnswer(body);
+    if (retired !== null) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return void res.end(retired);
+    }
     const server = mcpServerFor(toolDeps, grant, show);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
@@ -1439,7 +1313,6 @@ export async function startMcpEndpoint(
   // Attach only now: the grants of adopted turns are restored before this (server.ts), so the
   // first call the relay forwards already finds them.
   const relay = await attachToRelay(deps.portFile, (http.address() as AddressInfo).port);
-  relayPort = relay.port;
   const url = () => `http://127.0.0.1:${relay.port}/mcp`;
   return {
     get url() {
@@ -1455,7 +1328,6 @@ export async function startMcpEndpoint(
       required: true,
     }),
     close: () => {
-      oompa.close();
       relay.close();
       return new Promise((resolve) => http.close(() => resolve()));
     },

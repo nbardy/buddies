@@ -60,11 +60,17 @@ function priorLine(x: Expedition, a: Attempt): string {
   }
 }
 
+/** What the host restores: files an argv names directly, plus the charter's declared `oracle`. */
+function protectedText(x: Expedition): string {
+  const o = x.charter.oracle;
+  return `files named in a check${o.length > 0 ? `, and ${o.join(', ')}` : ''}; a directory named in a check is not protected`;
+}
+
 export function briefOf(x: Expedition, launch: Launch, a: Attempt, path: string): string {
   const done = x.charter.done;
   const doneText =
     done.t === 'checks'
-      ? `${done.checks.map((c) => `- \`${c.join(' ')}\``).join('\n')}\nFiles these name are restored from the base before checking: editing them changes nothing.`
+      ? `${done.checks.map((c) => `- \`${c.join(' ')}\``).join('\n')}\nProtected (restored from the base before checking, so editing them changes nothing): ${protectedText(x)}.`
       : 'The owner judges the result.';
   const prior = x.attempts.filter((p) => p.n < a.n).map((p) => priorLine(x, p));
   return [

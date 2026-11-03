@@ -75,8 +75,8 @@ type TaskDetail = {
   comments: Post[];
 };
 
-/** One task record with evidence clipped: what `tasks get` and Oompa scans return. */
-export const taskRecordView = (task: Task) => ({
+/** One task record with evidence clipped: what `tasks get` returns. */
+const taskRecordView = (task: Task) => ({
   ...task,
   evidence: task.evidence.map((entry) => clip(entry, EVIDENCE_MAX_CHARS)),
 });

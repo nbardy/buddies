@@ -395,8 +395,8 @@
   flex: 1 0 100%;
   gap: var(--sp-4);
   min-width: 0;
-  /* Under the title, past the 44px back button (sp-10 + sp-6). */
-  padding-left: calc(var(--sp-10) + var(--sp-6) + var(--sp-2));
+  /* Under the title, past the 44px back button. */
+  padding-left: calc(var(--sp-11) + var(--sp-4));
   font-size: var(--fs-3);
 }
 .expedition[data-frame="mobile"] .expedition-tabs {

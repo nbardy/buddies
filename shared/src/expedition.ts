@@ -14,6 +14,14 @@ export const Argv = z
   .array(nonEmpty.refine((w) => !w.includes('\0'), 'no NUL bytes'))
   .min(1)
   .max(64);
+/** A repo-relative path the owner declares as the grader (file or directory): κ for `oracle`. */
+const OraclePath = nonEmpty
+  .refine((w) => !w.includes('\0'), 'no NUL bytes')
+  .refine((w) => !w.startsWith('/') && !/^[A-Za-z]:/.test(w), 'must be repo-relative')
+  .refine(
+    (w) => !w.split('/').includes('..') && w.split('/').some((seg) => seg !== '' && seg !== '.'),
+    'must name a path inside the repo (no "..", not ".")'
+  );
 export const Done = z.discriminatedUnion('t', [
   v('checks', { checks: z.array(Argv).min(1).max(10) }).strict(),
   v('owner', {}).strict(),
@@ -28,6 +36,11 @@ export const Charter = z
     name: str.trim().min(1).max(60),
     goal: str.trim().min(1).max(8000),
     done: Done,
+    /** Paths (files or directories) restored from the launch base before every check, so the
+     * attempt cannot edit the grader. Empty = no extra protected paths, which is a real meaning
+     * (a check names its own files in argv, and those are protected anyway); the default also
+     * lets records saved before this field existed parse. */
+    oracle: z.array(OraclePath).max(20).default([]),
     maxAttempts: z.number().int().min(1).max(60),
     maxLive: z.number().int().min(1).max(4),
     hours: z.number().min(0.25).max(72),

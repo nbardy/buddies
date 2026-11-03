@@ -9,6 +9,7 @@ import type {
   RunInput,
 } from '@unleashd/buddies-core';
 import { type BuddyContext, mentionedIds } from '@unleashd/shared';
+import { labelled } from '../observability/event-loop-stall';
 import type { ExecutionOutcome } from '../turns/execution-state';
 import type { Briefings } from './briefing';
 import type { GateVerdict } from './channel-reply-gate';
@@ -814,7 +815,7 @@ export function createRunner(options: {
         if (event.kind === 'cancelled') stopTurn(event.run);
         wake();
       });
-      timer = setInterval(wake, options.backstopMs);
+      timer = setInterval(labelled('timer buddies-runner-backstop', wake), options.backstopMs);
       timer.unref();
       paused = false;
       wake();

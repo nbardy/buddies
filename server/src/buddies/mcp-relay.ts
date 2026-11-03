@@ -21,8 +21,10 @@ const RELAY_VERSION = createHash('sha256')
   .digest('hex')
   .slice(0, 16);
 // The relay waits up to 5 s for a port a predecessor still holds, so it has written its state
-// file well before this.
-const RELAY_START_MS = 10_000;
+// file well before this. The wait ends the moment the state file names the new relay, so a long
+// budget costs nothing when it starts. 2026-11-03: a cold `node` boot took over 10 s on a
+// machine at load 50+, and the backend died at startup ("Buddy MCP relay did not start").
+const RELAY_START_MS = 45_000;
 const ATTACH_ATTEMPTS = 3;
 
 /** What a live relay wrote to the state file. */

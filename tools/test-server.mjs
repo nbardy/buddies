@@ -1,10 +1,10 @@
 // Pattern: fix-guards (docs/patterns.md#fix-guards)
 // The server suite: every test file (and every shard of a long file) is its own process, run from
-// a pool. 2026-11-02: files ran whole, four at a time, so expeditions (418 s) and oompa-mcp (184 s)
-// alone set the wall clock. Long files now split into shards (server/test/fixtures/shard.ts) that
-// run side by side; each unit gets its own TMPDIR, removed when it exits, so no two units share a
-// temp store. --fast is an explicitly smaller development gate, never the complete release proof.
-// --slow adds the opt-in end-to-end files (SLOW below); release checks run with it.
+// a pool. 2026-11-02: files ran whole, four at a time, so expeditions (418 s) and the retired
+// oompa-mcp (184 s) alone set the wall clock. Long files now split into shards
+// (server/test/fixtures/shard.ts) that run side by side; each unit gets its own TMPDIR, removed
+// when it exits, so no two units share a temp store. --fast is an explicitly smaller development
+// gate, never the complete release proof. --slow adds the opt-in end-to-end files (SLOW below); release checks run with it.
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -23,12 +23,11 @@ const fast = [
 ];
 /**
  * Files run as `shards` processes, at most `live` of them at once. Every test in them builds its
- * own fixture (the shard wrapper's contract). `live` is measured, not a guess: nine oompa-mcp
- * shards at once failed nearly every shard on a loaded machine (each test passed alone; three at
- * once passed), and sixteen expeditions shards at once took 4x the CPU-seconds of eight.
+ * own fixture (the shard wrapper's contract). `live` is measured, not a guess: nine shards of the
+ * retired oompa-mcp file at once failed nearly every shard on a loaded machine (each test passed
+ * alone; three at once passed), and sixteen expeditions shards at once took 4x the CPU-seconds of eight.
  */
 const SHARDS = {
-  'oompa-mcp': { shards: 6, live: 3 },
   'buddies-v2': { shards: 4, live: 4 },
   'execution-adoption': { shards: 6, live: 6 },
   'run-lease': { shards: 4, live: 4 },
@@ -45,7 +44,14 @@ const mode = args.includes('--fast') ? 'fast' : args.includes('--slow') ? 'slow'
 // flags go to every `node --test` (e.g. --test-name-pattern).
 const picked = args.filter((arg) => !arg.startsWith('-'));
 const forwarded = args.filter((arg) => arg.startsWith('-') && arg !== '--fast' && arg !== '--slow');
-const concurrency = Number(process.env.UNLEASHD_TEST_CONCURRENCY ?? os.availableParallelism());
+// Pool size leaves room for whatever else the machine is running. Every unit boots real backends
+// and fake CLIs whose wall-clock deadlines (leases, idle and runtime timers) are scaled for an idle
+// core each; on 2026-11-03 a full run at load 50+ failed units that all pass alone, because ten
+// units on cores already taken by other work starved each other's child processes. The 1-minute
+// load average includes our own previous run, so it only ever shrinks the pool (never below 3).
+const cores = os.availableParallelism();
+const spare = Math.max(3, Math.round(cores - os.loadavg()[0]));
+const concurrency = Number(process.env.UNLEASHD_TEST_CONCURRENCY ?? Math.min(cores, spare));
 if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64) {
   throw new Error('UNLEASHD_TEST_CONCURRENCY must be an integer from 1 to 64');
 }
@@ -108,7 +114,14 @@ function run(unit) {
       process.execPath,
       [tsx, '--test', ...forwarded, `server/test/${unit.name}.test.ts`],
       {
-        env: { ...process.env, UNLEASHD_TEST_SHARD: unit.shard, TMPDIR: tmp },
+        // Backends a unit boots never profile continuously (a test opts in by calling the
+        // monitor with its own StallProfiling); stall profiles under a temp store are noise.
+        env: {
+          ...process.env,
+          UNLEASHD_TEST_SHARD: unit.shard,
+          TMPDIR: tmp,
+          UNLEASHD_CONTINUOUS_PROFILE: '0',
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
       }

@@ -28,7 +28,12 @@ const TOKEN = 'b8e4d1fa03c25769b8e4d1fa03c25769';
 // Keep multiple real lease periods, without the old 16 s freeze wait.
 // Guard: SIGSTOP longer than the lease, then no failed/resumed run.
 const LEASE_MS = 1_000;
-const IDLE_MS = 6_000;
+// Load-tolerance (2026-11-03): the idle timer runs on the BACKEND's clock while the test's own
+// polling and a second backend's boot take seconds at load 25+. At 6 s a silent turn that was
+// supposed to be alive was ended by it first (`provider_idle_timeout` where the test expected
+// `lease_expired`, or a `silent` run failing before its release file). Only the one test that
+// waits for the timer pays this value.
+const IDLE_MS = 15_000;
 
 // Marker in the prompt picks the behaviour. Nothing on stdout after "one;": the only events the
 // backend sees are agent-cli heartbeats, exactly a model thinking silently.
@@ -154,11 +159,12 @@ function api(port: number) {
   };
 }
 
+// Child-process startup (node + ps + an MCP call) takes tens of seconds at load 50+ (2026-11-03: 'held mid-turn' timed out at 30 s); a wait returns the moment its condition holds, so the budget only matters when something is truly stuck.
 async function eventually<T>(
   read: () => Promise<T> | T,
   ok: (value: T) => boolean,
   what: string,
-  ms = 30_000
+  ms = 90_000
 ) {
   const deadline = Date.now() + ms;
   let last: T | undefined;
@@ -271,7 +277,9 @@ test(
     const portB = freePortSync();
     const httpA = api(portA);
     const httpB = api(portB);
-    await startBackend('A', portA, {});
+    // This case is about the LEASE; the idle timer must not end the held turn first while B boots.
+    const noIdle = { CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '600000' };
+    await startBackend('A', portA, noIdle);
     const ws = await workspace(httpA, 'lease');
     const held = await hire(httpA, ws, 'held');
     const request = await ask(httpA, held, 'held');
@@ -279,7 +287,7 @@ test(
 
     // A second backend on the same Buddy store boots while A still drives the turn. Before the
     // lease was a heartbeat, its startup sweep ended every held run, A's live one included.
-    await startBackend('B', portB, {});
+    await startBackend('B', portB, noIdle);
     await staysRunning(httpB, held, 2 * LEASE_MS, "A's live, renewing run survives B's boot");
 
     // A dies, provider and all, while B stays up: nobody renews A's lease and nobody restarts.
@@ -344,7 +352,7 @@ test(
       () => runOf(http, stuck),
       (r) => r?.status !== 'running',
       'stuck run ended by the idle timer',
-      IDLE_MS + 20_000
+      IDLE_MS + 60_000
     );
     assert.ok(Date.now() - startedAt >= IDLE_MS - 1_000, 'not before the idle budget');
     assert.equal(killed?.status, 'failed', JSON.stringify(killed));
@@ -355,7 +363,7 @@ test(
 
 test(
   'a live turn keeps its run across a freeze of its backend longer than the lease',
-  { timeout: 120_000 },
+  { timeout: 240_000 },
   async () => {
     // Incident 2026-10-06T16:53:14Z (agent_notes/2026-10-07_live-turn-lease-loss.md): the Mac
     // slept 306 s, longer than the 300 s lease, with the backend and its turns frozen together.
@@ -368,11 +376,11 @@ test(
     // shared store would correctly expire D's frozen lease and invalidate this scenario.
     const port = freePortSync();
     const http = api(port);
-    // This scenario spans five lease periods. Give the independent idle clock
-    // headroom so it cannot race the freeze assertion.
+    // This scenario is about the lease. The independent idle clock gets effectively no deadline
+    // so it cannot race the freeze assertion, however slow the machine.
     await startBackend('D', port, {
       CWV_BUDDY_RUNNER_BACKSTOP_MS: '100',
-      CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '15000',
+      CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '600000',
     });
     const ws = await workspace(http, 'freeze');
     const frozen = await hire(http, ws, 'frozen');
@@ -397,11 +405,14 @@ test(
 // silent provider. Child stream events must keep the same clock alive, with no absolute cap.
 test(
   'no-progress ends a silent background turn and frees its seat while child streams outlive N',
-  { timeout: 120_000 },
+  { timeout: 180_000 },
   async () => {
     const port = freePortSync();
     const http = api(port);
-    const idleMs = 4_000;
+    // Load-tolerance (2026-11-03): the child streams every 500 ms and must never look idle, so N
+    // is 16 ticks wide: on a machine at load 25+ a backend stall of seconds no longer reads as
+    // silence on the live child (staysRunning below is the assertion that catches that bug).
+    const idleMs = 8_000;
     await startBackend('liveness', port, {
       CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: String(idleMs),
       CWV_TURN_TIMEOUT_KILL_GRACE_MS: '200',
@@ -421,7 +432,8 @@ test(
       () => runOf(http, hung),
       (r) => r?.status === 'failed',
       'silent background run failed',
-      idleMs + 8_000
+      // The deadline only has to outlast a loaded machine; the run is read as soon as it fails.
+      idleMs + 40_000
     );
     assert.equal(ended?.errorCode, 'provider_idle_timeout', JSON.stringify(ended));
     assert.ok(ended?.conversationId);

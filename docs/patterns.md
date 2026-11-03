@@ -498,8 +498,8 @@ later invalidation refreshes only that id.
 **Pattern:** establish identity ONCE (pid + start time, cached), answer liveness with `process.kill(pid, 0)`, and
 re-verify cached identities with ONE async batched `ps` (`verifyExecutions`). Boot lookups use the async twin
 (`resolveBinaryAsync`) in parallel and never block startup. No `execFileSync` / `spawnSync` on the server loop.
-**Here:** `vendor/agent-cli-tool/src/journal.ts` (`verifyExecutions`, called from the 1 s Oompa poll in
-`server/src/buddies/oompa.ts`), `server/src/audit.ts`, `vendor/agent-cli-tool/src/resolve.ts`.
+**Here:** `vendor/agent-cli-tool/src/journal.ts` (`verifyExecutions`; its server caller, the 1 s Buddy Oompa
+poll, was retired 2026-11-03), `server/src/audit.ts`, `vendor/agent-cli-tool/src/resolve.ts`.
 Guards: `vendor/agent-cli-tool/test/journal-no-sync-spawn.test.ts`, journal.test.ts "liveness never spawns synchronously".
 
 ## background-integrity-check

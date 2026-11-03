@@ -80,7 +80,7 @@ function journals() {
     });
     child.unref();
     const pid = child.pid as number;
-    for (const until = Date.now() + 10_000; !fs.existsSync(ready); )
+    for (const until = Date.now() + 60_000; !fs.existsSync(ready); )
       if (Date.now() > until) throw new Error(`${buddyId}'s process never started`);
     pids.push(pid);
     fs.writeFileSync(path.join(dir, 'pid'), String(pid));

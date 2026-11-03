@@ -115,7 +115,7 @@ function laneOf(item: FoundExecution): string {
     case 'turn':
     case 'unstarted':
       return `conversation:${item.owner.conversationId}`;
-    case 'oompa':
+    case 'retired':
     case 'ephemeral':
     case 'unreadable':
       return `journal:${item.dir}`;
@@ -124,8 +124,10 @@ function laneOf(item: FoundExecution): string {
 
 async function adoptOne(item: FoundExecution, ports: AdoptionPorts): Promise<AdoptedRun[]> {
   switch (item.t) {
-    case 'oompa':
-      return []; // Oompa journals are not this pass's: it never touched them.
+    case 'retired':
+      // Reported once per journal per boot and left as it is (turns/executions.ts RetiredOwner).
+      console.warn(`[adopt] ignoring a retired ${item.kind} execution journal: ${item.dir}`);
+      return [];
     case 'ephemeral':
     case 'unreadable':
       ports.discard(item);

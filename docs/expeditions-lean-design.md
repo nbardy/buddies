@@ -336,8 +336,9 @@ export async function preflight(p: { gate: ExecutionGate; workspace: Workspace |
  *     `git worktree add --detach <dir> <sha>`.
  *  2. Oracle restore: collect every argv element of every check (deduped) that does not start
  *     with '-', is not absolute and has no '..' segment, and that `git ls-tree --name-only <base> -- <e>`
- *     lists. Then `git checkout <base> -- <those paths>` in dir. A named directory is restored
- *     whole. Files the attempt ADDED inside it remain (documented limit).
+ *     lists. Then `git checkout <base> -- <those paths>` in dir. Only regular files
+ *     (ls-tree type blob) named in argv are restored; a named directory is the code under test and
+ *     is not. The charter's `oracle` paths (files or directories) are restored whole.
  *  3. Each check: runOne.
  *  4. finally: `git worktree remove --force <dir>`. A tree-setup error becomes one run with
  *     outcome {t:'error', message}. */
@@ -684,7 +685,7 @@ It adds two helpers:
 - `ownerSays(id, text)`: an owner post in the crew chat, then `host.step`.
 
 The fixture asserts on startup that `git-cambium remove --help` lists `--safe`, and fails loudly
-otherwise; it never skips. `oompa-stub.cjs` is unrelated (Oompa MCP) and is not used.
+otherwise; it never skips.
 
 1. **Loop to a pass; the oracle cannot be edited.**
    - Draft via the tool. Assert the card post exists (purpose `expedition`) and the record is
@@ -777,9 +778,12 @@ Client: §8 deleted files plus the §6 client edits.
 
 ## 11. Known limits (deliberate)
 
-- **Oracle restore** brings back only files named by argv elements (directories are restored
-  whole). A check that reads an unnamed file through a named script reads the attempt's version
-  of that file. Name the test files in argv, or check through a named directory.
+- **Oracle restore** brings back regular files named by argv elements and the charter's declared
+  `oracle` paths (files or directories, restored whole; default `[]`, validated relative with no
+  `..`, must be tracked on main at launch). A directory named only in argv is NOT restored: it is
+  the code under test (`pytest src` must grade the attempt's `src`). A check that reads an unnamed
+  file through a named script reads the attempt's version of it: name the grader's directory in
+  `oracle`.
 - **There is no sandbox for checks**: only the env scrub, scratch HOME/TMPDIR, the 2 h timeout and
   the group kill. The same holds today.
 - **Repo config filters** (`filter.<x>.smudge`) can still run code during host git checkouts. The
@@ -827,6 +831,8 @@ Client: §8 deleted files plus the §6 client edits.
 - **Rail rows** carry `section`, `heading` and `list` class names too, so both shells render the one
   section header; the phone has no separate `MobileSection` wrapper.
 - **Review fixes (2026-11-03).**
+  - Audit follow-up: argv-inferred restore was files-only (`pytest src` used to check out base's
+    `src/` and grade base); directories are protected only via charter `oracle`.
   - The oracle restore passes only literal, tracked, non-root paths (`--literal-pathspecs`, no
     `.`); an argv with no such element restores nothing instead of the whole tree.
   - Only an `answered` turn is judged; `failed`, `cancelled` and `lost` turns end `skipped`, and

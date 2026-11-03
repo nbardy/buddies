@@ -372,12 +372,13 @@ test('the oracle restore resets only the literal tracked paths a check names', a
     git(repo, 'commit', '-qam', `edit ${file}`);
     return git(repo, 'rev-parse', 'HEAD');
   };
-  const run = async (sha: string, checks: string[][]) => {
+  const run = async (sha: string, checks: string[][], oracle: string[] = []) => {
     const job = {
       dir: path.join(scratch, 'check'),
       sha,
       base,
       checks,
+      oracle,
       through: 'first_failure' as const,
     };
     const runs = await runChecks(repo, job, new AbortController().signal);
@@ -392,6 +393,54 @@ test('the oracle restore resets only the literal tracked paths a check names', a
   const grep = ['sh', '-c', "grep -q 'broken = false' widget/widget.ts"];
   for (const checks of [[[...grep, '.']], [[...grep, '*']], [['/bin/sh', script]]])
     assert.equal(await run(fixed, checks), 'passed', JSON.stringify(checks));
+});
+
+// Audit 2026-11-03: `["sh","run.sh","src"]` restored the named directory src/ from base, so the
+// check graded base and the attempt's work in src/ never counted. Directories in argv are the
+// code under test; only the charter's `oracle` protects directories.
+test('a directory named in argv is graded as the attempt left it; oracle dirs are restored', async () => {
+  const scratch = tempDir('expedition-oracle-');
+  const repo = tempRepo(scratch);
+  fs.mkdirSync(path.join(repo, 'src'));
+  fs.mkdirSync(path.join(repo, 'tests'));
+  fs.writeFileSync(path.join(repo, 'src/keep.txt'), 'x\n');
+  fs.writeFileSync(path.join(repo, 'run.sh'), 'test -f "$1/new.txt"\n');
+  fs.writeFileSync(path.join(repo, 'tests/check.sh'), 'exit 1\n');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-qm', 'fixture');
+  const base = git(repo, 'rev-parse', 'HEAD');
+  const attempt = (file: string, text: string) => {
+    fs.writeFileSync(path.join(repo, file), text);
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-qm', `edit ${file}`);
+    return git(repo, 'rev-parse', 'HEAD');
+  };
+  const run = async (sha: string, checks: string[][], oracle: string[]) => {
+    const job = {
+      dir: path.join(scratch, 'check'),
+      sha,
+      base,
+      checks,
+      oracle,
+      through: 'first_failure' as const,
+    };
+    const runs = await runChecks(repo, job, new AbortController().signal);
+    return runs.map((r) => r.outcome.t).join(',');
+  };
+  const added = attempt('src/new.txt', 'work\n');
+  assert.equal(await run(added, [['sh', 'run.sh', 'src']], []), 'passed', 'src/ is not restored');
+  const cheated = attempt('tests/check.sh', 'exit 0\n');
+  assert.equal(await run(cheated, [['sh', 'tests/check.sh']], []), 'failed', 'named file restored');
+  assert.equal(
+    await run(cheated, [['sh', '-c', 'sh tests/check.sh']], []),
+    'passed',
+    'unnamed file: not protected without oracle'
+  );
+  assert.equal(
+    await run(cheated, [['sh', '-c', 'sh tests/check.sh']], ['tests']),
+    'failed',
+    'oracle dir restored from base'
+  );
 });
 
 // Incident 2026-11-01: an expedition burned 3 attempts on a done-check that could never run in

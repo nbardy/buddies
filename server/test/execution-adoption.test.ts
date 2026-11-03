@@ -204,8 +204,9 @@ async function http(method: string, route: string, body?: unknown) {
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
 
+// Child-process startup (node + ps + an MCP call) takes tens of seconds at load 50+ (2026-11-03: 'held mid-turn' timed out at 30 s); a wait returns the moment its condition holds, so the budget only matters when something is truly stuck.
 async function eventually<T>(read: () => Promise<T> | T, ok: (value: T) => boolean, what: string) {
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 90_000;
   let last: T | undefined;
   while (Date.now() < deadline) {
     last = await read();
@@ -483,9 +484,11 @@ test(
 // sealed as max_runtime_timeout mid-replay and its successful run settled failed.
 test(
   'a turn that finished during the gap is adopted as finished, even past its deadline',
-  { timeout: 120_000 },
+  { timeout: 240_000 },
   async () => {
-    const deadlineMs = 8_000;
+    // The fake CLI must start and finish inside this wall-clock deadline: 8 s was a race against
+    // node startup on a loaded machine. The deadline is only waited out, so slack costs time only.
+    const deadlineMs = 20_000;
     const env = { CWV_BUDDY_BACKGROUND_TURN_MS: String(deadlineMs) };
     await killBackend(); // the previous test's backend B still holds the port
     await startBackend('C', env);
@@ -629,8 +632,9 @@ test(
   'a timeout survives a backend crash inside the kill grace: failed as max_runtime_timeout',
   { timeout: 180_000 },
   async () => {
-    // The run's deadline: short, so it fires while the test watches.
-    const env = { CWV_BUDDY_BACKGROUND_TURN_MS: '6000' };
+    // The run's deadline fires while the test watches, but the fake CLI must reach mid-turn (node
+    // start, ps, an MCP post) before it: at 6 s the deadline beat it under load (2026-11-03).
+    const env = { CWV_BUDDY_BACKGROUND_TURN_MS: '20000' };
     const { run, attempt } = await crashInsideKillGrace('timeouter', env, async () => undefined);
     assert.equal(run.status, 'failed', JSON.stringify(run));
     assert.match(String(run.error), /maximum runtime/, JSON.stringify(run));
@@ -724,7 +728,7 @@ test(
 // exactly once after it. A replay (the row requeued although its turn ran) would spawn twice.
 test(
   'an owner message queued behind a running turn survives a backend SIGKILL and runs exactly once',
-  { timeout: 120_000 },
+  { timeout: 240_000 },
   async () => {
     await killBackend();
     await startBackend('Q1');

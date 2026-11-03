@@ -112,13 +112,27 @@ one queue, and a failed write goes to stderr (not `console.error`, which the jou
 - `perf.ts`: `bootPhase` / `timeBootPhase(Async)` (boot.jsonl, phase names are short and stable: `initialize`,
   `error_journal`, `ingest_start`, `mcp_endpoint`, `recovery`, `adoption`, `listen`, `mark_ready`, `runner_start`, ...),
   `routeLatencyMiddleware` (routes.jsonl: per-minute p50/p90/max per normalized route, mounted right after the auth
-  gate and flushed at shutdown), `captureCpuProfile`.
+  gate and flushed at shutdown).
 - `event-loop-stall.ts`: every stall of 100 ms or more also lands in `stalls.jsonl` (the journal keeps one per label
-  per minute); a stall of `UNLEASHD_STALL_PROFILE_MS` (default 500) or more captures a 2 s CPU profile into `profiles/`,
-  at most one per 10 minutes. `labelled(name, fn)` wraps every recurring timer so a stall is blamed on it; a stall that begins after the wrapped body returned reads `unlabelled (after <name>)` (async continuations or unlabelled work — label them).
+  per minute). Labels live in AsyncLocalStorage: `labelled(name, fn)` (every recurring timer, each HTTP request) and
+  `noteActivity(name)` (WS commands, watcher callbacks) name the work AND the async work it starts. Every labelled
+  synchronous slice of 100 ms or more is remembered (promise continuations are timed through `v8.promiseHooks`), and
+  the stall takes its label: `timer oompa-poll` for the tick's own body, `timer oompa-poll (async)` for an awaited
+  continuation of it, `unlabelled` for work started under no label or in an untimed non-promise callback (a stream
+  event, an fs callback). Name those with `labelled`.
   Each stall row has a `kind`: `busy` (the process burned at least 10% of the stall in CPU) or `descheduled` (it did not run: machine sleep or CPU starvation). Only busy stalls are profiled and journaled, and `perf:audit` counts descheduled ones separately; before 2026-11-03 macOS DarkWake cycles showed up as 15-minute stalls blamed on `timer oompa-poll`.
-- `server/src/http/debug-profile-routes.ts`: gated `POST /api/debug/profile?ms=` (`pnpm perf:profile`).
+- `cpu-profiler.ts`: the one owner of the V8 profiler. It samples continuously at 10 ms and rotates every 30 s; a
+  window that held a busy stall of `UNLEASHD_STALL_PROFILE_MS` (default 500) or more is saved into `profiles/` as
+  `stall-<ms>ms-<label>-<window start>.cpuprofile` and indexed in `profiles.jsonl` (its stalls, sample count and
+  `rotateMs`, what rotating cost the main thread); other windows are dropped. At most 50 files / 256 MiB, oldest deleted
+  first. `UNLEASHD_CONTINUOUS_PROFILE=0` turns it off (`tools/test-server.mjs` does, for every unit). Until 2026-11-03
+  profiles were captured after the stall ended and sampled only the idle aftermath. Rotation starts the next titled
+  profile (`inspector.console.profile`) before ending the last, so V8's profiler never stops: a stop + start rebuilds
+  its code map, which cost 55-594 ms per rotation in a real backend, against 0.75-3.2 ms now (330 ms once at boot).
+- `server/src/http/debug-profile-routes.ts`: gated `POST /api/debug/profile?ms=` (`pnpm perf:profile`): one more
+  titled profile in the same session, beside the continuous window (10 ms sampling, no handoff, no collision).
 
-Read them with `pnpm perf:audit` (`tools/perf-audit.ts`), which writes `output/perf-audit/<ts>.md`. Never add boot
+Read them with `pnpm perf:audit` (`tools/perf-audit.ts`), which writes `output/perf-audit/<ts>.md` and lists each
+stall profile with its stalls and top self-time functions. Never add boot
 work without a boot phase.
 

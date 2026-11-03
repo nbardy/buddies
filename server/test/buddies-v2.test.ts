@@ -113,7 +113,7 @@ async function settled(runs: () => Promise<readonly { status: string }[]>, what:
 async function until<T>(
   read: () => T | undefined | false | Promise<T | undefined | false>,
   what: string,
-  timeoutMs = 30_000
+  timeoutMs = 90_000
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -607,7 +607,7 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     w.during.set(1, async (turn) => {
       // Owner-authored input: the grant is the owner's, so team_admin is listed.
       const names = await toolNames(turn.mcp);
-      assert.equal(names.length, 14);
+      assert.equal(names.length, 13);
       assert.ok(names.includes('team_admin'));
       assert.ok(names.includes('expedition'));
       assert.ok(names.includes('channel'));
@@ -3209,7 +3209,10 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
     core,
     grants,
     spec: endpoint.spec,
-    timeoutMs: 200,
+    // Only rung one must outlive this; rung two makes a real MCP round trip inside the same
+    // per-rung budget. 200 ms timed rung two out as well on a loaded machine (Oct 2026), so the
+    // climb never completed. Rung one hangs until stopped, so the cost is this value once.
+    timeoutMs: 3_000,
     env: binPath(scratch, 'codex'),
     logger: { warn: () => undefined },
     execute: ((request: ProviderRequest) => {
@@ -5709,7 +5712,12 @@ test('a follow-up waiting on a busy seat is consumed when the busy turn reads it
       async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
       'the busy turn to end'
     );
-    const run = await runOf(w, s.followUp.id);
+    // The busy turn ending and the follow-up's cancel are two writes; a loaded machine read
+    // the follow-up between them as still `queued` (2026-11-03). Wait for it to leave `queued`.
+    const run = await until(async () => {
+      const r = await runOf(w, s.followUp.id);
+      return r.status !== 'queued' && r;
+    }, 'the follow-up to be settled');
     assert.equal(run.status, 'cancelled');
     assert.match(run.error ?? '', /already read/);
     assert.equal(w.turns.length, 2, 'no second turn for a post already read');
