@@ -31,7 +31,7 @@ import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
 import * as brief from './brief';
 import { type Released, add, release, tip } from './cambium';
-import { type LaunchPreflight, launchPreflight, preflight, runChecks } from './checks';
+import { type Base, type LaunchPreflight, launchPreflight, preflight, runChecks } from './checks';
 import {
   type Launched,
   type Loaded,
@@ -534,7 +534,11 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       if (retired.t === 'refused') return retired;
       records.delete(x.id);
       events.emit({ kind: 'changed' });
-      return { t: 'ok', x };
+      // Reply with the record as filed in .retired/ (attempt trees released), not the
+      // pre-retire `x` the caller passed in (review 2026-11-03: the reply still showed it live).
+      const filed = loadRetired(root).find((r) => r.record.id === x.id);
+      if (!filed) throw new Error(`retired ${x.id} but .retired/${x.id}.json does not parse`);
+      return { t: 'ok', x: filed.record };
     },
     relaunch: (x: Expedition) => relaunch(x),
   };
@@ -573,14 +577,14 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
    * one host-wide queue, like a judged attempt's. */
   const DRY_RUN: Record<
     Done['t'],
-    (x: Expedition, pre: { repoRoot: string; baseSha: string }) => Promise<LaunchPreflight>
+    (x: Expedition, pre: { repoRoot: string; base: Base }) => Promise<LaunchPreflight>
   > = {
     owner: async () => ({ t: 'ready' }),
     checks: (x, pre) => {
       const checks = (x.charter.done as Extract<Done, { t: 'checks' }>).checks;
       const job = {
         dir: paths(root, x.id).check(0),
-        baseSha: pre.baseSha,
+        baseSha: pre.base.sha,
         checks,
         oracle: x.charter.oracle,
       };
@@ -620,7 +624,8 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       at,
       deadline: new Date(Date.parse(at) + x.charter.hours * HOUR).toISOString(),
       repoRoot: pre.repoRoot,
-      baseSha: pre.baseSha,
+      baseSha: pre.base.sha,
+      baseRef: pre.base.ref,
       crewBuddyId: crew.id,
       chatChannelId: chat.id,
       chatSeenOrd: '',

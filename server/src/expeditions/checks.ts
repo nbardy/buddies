@@ -17,8 +17,46 @@ import { exec, git } from './cambium';
 // Launch preflight and the host-run checks (docs/expeditions-lean-design.md §3.3).
 
 export type Preflight =
-  | { t: 'ready'; repoRoot: string; baseSha: string }
+  | { t: 'ready'; repoRoot: string; base: Base }
   | { t: 'refused'; issues: string[] };
+
+/** The one commit a launch grades and forks from, with the ref it came from (recorded as data). */
+export type Base = { ref: string; sha: string };
+export type Resolved = { t: 'base'; base: Base } | { t: 'refused'; issue: string };
+
+/**
+ * The launch base rule (one typed rule, named here, not a fallback chain): with an `origin`
+ * remote, fetch it, then take `refs/remotes/origin/HEAD`, and `refs/remotes/origin/main` only when
+ * origin/HEAD is unset. Without an `origin` remote, local `refs/heads/main`. A fetch that fails,
+ * or an origin with neither ref, refuses the launch rather than grading a stale local main.
+ * Why: in the first trial the workspace's local main was 128 commits behind origin/main, so the
+ * preflight graded different code than the attempts ran on.
+ */
+export async function resolveBase(root: string): Promise<Resolved> {
+  const verify = (ref: string) => exec('git', root, ['rev-parse', '--verify', `${ref}^{commit}`]);
+  const remotes = await exec('git', root, ['remote']);
+  if (!remotes.stdout.split('\n').includes('origin')) {
+    const local = await verify('refs/heads/main');
+    return local.code === 0
+      ? { t: 'base', base: { ref: 'refs/heads/main', sha: local.stdout } }
+      : { t: 'refused', issue: 'refs/heads/main does not resolve' };
+  }
+  const fetched = await exec('git', root, ['fetch', '--quiet', 'origin'], true);
+  if (fetched.code !== 0)
+    return { t: 'refused', issue: `git fetch origin failed: ${fetched.stderr.slice(-300)}` };
+  const head = await verify('refs/remotes/origin/HEAD');
+  if (head.code === 0) {
+    const target = await exec('git', root, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']);
+    return {
+      t: 'base',
+      base: { ref: target.code === 0 ? target.stdout : 'refs/remotes/origin/HEAD', sha: head.stdout },
+    };
+  }
+  const main = await verify('refs/remotes/origin/main');
+  return main.code === 0
+    ? { t: 'base', base: { ref: 'refs/remotes/origin/main', sha: main.stdout } }
+    : { t: 'refused', issue: 'origin has neither refs/remotes/origin/HEAD nor origin/main' };
+}
 
 /** Every reason a launch would be refused. It never runs a check (`launchPreflight` does, at
  * launch only: a draft is cheap, a launch is the commitment). */
@@ -31,31 +69,34 @@ export async function preflight(p: {
   const issues = [...(p.gate.t === 'disabled' ? [p.gate.reason] : []), ...seatIssues(p)];
   if (!p.workspace) return { t: 'refused', issues: ['the workspace is missing', ...issues] };
   const root = p.workspace.rootPath;
-  const [top, main, tool] = await Promise.all([
+  const [top, tool] = await Promise.all([
     exec('git', root, ['rev-parse', '--show-toplevel']),
-    exec('git', root, ['rev-parse', '--verify', 'refs/heads/main^{commit}']),
     exec('git-cambium', root, ['version']),
   ]);
   if (top.code !== 0) issues.push(`${root} is not a git repository`);
-  if (main.code !== 0) issues.push('refs/heads/main does not resolve');
+  const resolved: Resolved =
+    top.code === 0 ? await resolveBase(root) : { t: 'refused', issue: 'no base: not a git repository' };
+  if (resolved.t === 'refused' && top.code === 0) issues.push(resolved.issue);
+  const baseSha = resolved.t === 'base' ? resolved.base.sha : '';
   if (tool.code !== 0) issues.push('`git cambium` is not available');
   for (const o of p.charter.oracle) {
     const at = await git(top.stdout || root, [
       '--literal-pathspecs',
       'ls-tree',
       '--name-only',
-      'main',
+      baseSha,
       '--',
       o.replace(/\/+$/, ''),
     ]);
-    if (at.trim() === '') issues.push(`oracle \`${o}\`: not tracked on main`);
+    if (at.trim() === '') issues.push(`oracle \`${o}\`: not tracked on the launch base`);
   }
   const bins = p.charter.done.t === 'checks' ? p.charter.done.checks.map((c) => c[0]) : [];
   for (const bin of new Set(bins))
-    if (!(await executable(top.stdout || root, bin)))
-      issues.push(`check \`${bin}\`: not an executable on PATH, nor mode 100755 on main`);
+    if (!(await executable(top.stdout || root, bin, baseSha)))
+      issues.push(`check \`${bin}\`: not an executable on PATH, nor mode 100755 on the launch base`);
   if (issues.length > 0) return { t: 'refused', issues };
-  return { t: 'ready', repoRoot: top.stdout, baseSha: main.stdout };
+  if (resolved.t === 'refused') return { t: 'refused', issues: [resolved.issue] };
+  return { t: 'ready', repoRoot: top.stdout, base: resolved.base };
 }
 
 function seatIssues(p: { charter: Charter; installed: (provider: Provider) => boolean }) {
@@ -68,10 +109,10 @@ function seatIssues(p: { charter: Charter; installed: (provider: Provider) => bo
   return p.installed(provider) ? [] : [`${provider} is not installed on this host`];
 }
 
-/** Bare or absolute: an executable on PATH. Relative with '/': mode 100755 in main's tree. */
-async function executable(repo: string, bin: string): Promise<boolean> {
+/** Bare or absolute: an executable on PATH. Relative with '/': mode 100755 in the base's tree. */
+async function executable(repo: string, bin: string, baseSha: string): Promise<boolean> {
   if (bin.includes('/') && !path.isAbsolute(bin)) {
-    const r = await exec('git', repo, ['ls-tree', 'main', '--', path.normalize(bin)]);
+    const r = await exec('git', repo, ['ls-tree', baseSha, '--', path.normalize(bin)]);
     return r.code === 0 && r.stdout.startsWith('100755 blob ');
   }
   const dirs = path.isAbsolute(bin) ? [''] : (process.env.PATH ?? '').split(path.delimiter);

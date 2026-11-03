@@ -319,6 +319,7 @@ test('retire archives every branch, or refuses whole', async () => {
     const origin = path.join(f.scratch, 'origin.git');
     git(f.scratch, 'init', '-q', '--bare', origin);
     git(f.repo, 'remote', 'add', 'origin', `file://${origin}`);
+    git(f.repo, 'push', '-q', 'origin', 'main');
 
     const id = await finishedWithTwo(f, 'Retired one', 2);
     const tips = [1, 2].map((n) => git(f.repo, 'rev-parse', `expedition/${id}/a${n}`));
@@ -495,6 +496,7 @@ test('retire ends a crew run whose stop was only requested', async () => {
     const origin = path.join(f.scratch, 'origin.git');
     git(f.scratch, 'init', '-q', '--bare', origin);
     git(f.repo, 'remote', 'add', 'origin', `file://${origin}`);
+    git(f.repo, 'push', '-q', 'origin', 'main');
     const id = await finishedWithTwo(f, 'Stale stop', 1);
     const { crewBuddyId } = f.launch(id);
     await f.core.enqueueChat(OWNER, {
@@ -511,6 +513,39 @@ test('retire ends a crew run whose stop was only requested', async () => {
     const res = await f.act(id, { do: 'retire' });
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal((await f.core.getRun(claim.run.id)).status, 'cancelled');
+  } finally {
+    await f.close();
+  }
+});
+
+// Catches: the first trial's bug, where launch recorded and graded LOCAL main (128 commits behind)
+// while the attempt workspace forked from origin/main. One base, from origin, for every consumer.
+test('launch takes origin/main as the base when local main is behind, and a1 starts there', async () => {
+  const f = await fixture();
+  try {
+    const origin = path.join(f.scratch, 'origin.git');
+    git(f.scratch, 'init', '-q', '--bare', origin);
+    git(f.repo, 'remote', 'add', 'origin', `file://${origin}`);
+    const stale = git(f.repo, 'rev-parse', 'main');
+    // origin moves ahead through a second clone; the workspace's local main stays at `stale`.
+    const other = path.join(f.scratch, 'other');
+    git(f.repo, 'push', '-q', 'origin', 'main');
+    git(f.scratch, 'clone', '-q', `file://${origin}`, other);
+    git(other, 'config', 'user.email', 'test@example.com');
+    git(other, 'config', 'user.name', 'Test');
+    commitIn(other, 'newer.txt', 'ahead\n');
+    git(other, 'push', '-q', 'origin', 'main');
+    const ahead = git(other, 'rev-parse', 'HEAD');
+    assert.notEqual(ahead, stale);
+
+    const id = await launched(f);
+    const launch = f.launch(id);
+    assert.equal(launch.baseSha, ahead);
+    assert.equal(launch.baseRef, 'refs/remotes/origin/main');
+    assert.equal(git(f.repo, 'rev-parse', 'main'), stale, 'local main was not moved');
+    assert.equal(git(treeOf(f, id, 1), 'rev-parse', 'HEAD'), ahead);
+    const brief = (await f.core.getPost(OWNER, f.requestOf(id, 1))).body;
+    assert.match(brief, new RegExp(`BASE ${ahead}`));
   } finally {
     await f.close();
   }
