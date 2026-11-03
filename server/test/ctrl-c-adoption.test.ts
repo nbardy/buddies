@@ -139,6 +139,18 @@ interface DevGroup {
 const cases: Case[] = [];
 const groups: DevGroup[] = [];
 
+/** The first executable `name` on this process's PATH (the one `pnpm addons` keyed the cache on). */
+function onParentPath(name: string): string {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    const candidate = path.join(dir, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  throw new Error(`${name} is not on PATH`);
+}
+
 function makeCase(name: string): Case {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `unleashd-ctrlc-${name}-`));
   const home = path.join(root, 'home');
@@ -153,6 +165,10 @@ function makeCase(name: string): Case {
     fs.writeFileSync(path.join(bin, other), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   // node's own directory also holds real agent CLIs (codex, gemini): link node alone.
   fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  // Fix-guard (2026-11-03): PATH named ~/.cargo/bin (rustup 1.93) while the owner's PATH resolves
+  // Homebrew's rustc 1.99, so ensure-addons keyed a cache miss, tried a rebuild with no pnpm, and
+  // every case failed before the server ran. Link the parent's own toolchain binaries alone.
+  for (const tool of ['rustc', 'cargo']) fs.symlinkSync(onParentPath(tool), path.join(bin, tool));
   const created: Case = {
     root,
     home,
@@ -171,15 +187,8 @@ function makeCase(name: string): Case {
       UNLEASHD_TEST_RELAY_HOLD_MS: name === 'longdown' && !REAL_TIME ? String(HOLD_MS) : '',
       ...NO_AUTO_INSTALL,
       // The dev task's first step (tools/ensure-addons.mjs) keys the shared addon cache on rustc's
-      // version, so the toolchain and that cache stay the real ones; no agent CLI lives there.
-      PATH: [
-        bin,
-        path.join(REAL_HOME, '.cargo', 'bin'),
-        '/usr/bin',
-        '/bin',
-        '/usr/sbin',
-        '/sbin',
-      ].join(path.delimiter),
+      // version, so the toolchain (linked into `bin`) and that cache stay the real ones.
+      PATH: [bin, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(path.delimiter),
       RUSTUP_HOME: process.env.RUSTUP_HOME ?? path.join(REAL_HOME, '.rustup'),
       CARGO_HOME: process.env.CARGO_HOME ?? path.join(REAL_HOME, '.cargo'),
       UNLEASHD_BUILD_ROOT:
