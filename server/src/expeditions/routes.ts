@@ -22,6 +22,7 @@ export function registerExpeditionRoutes(app: Express, host: () => ExpeditionHos
     const h = ready(res);
     if (h) res.json(h.retired());
   });
+  /** Returns only {channelId, rootId, crewBuddyId}; the messages come from the thread endpoint. */
   app.get('/api/buddies/expeditions/:id/chat', async (req, res) => {
     const h = ready(res);
     if (!h) return;
