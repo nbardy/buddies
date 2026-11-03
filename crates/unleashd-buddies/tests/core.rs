@@ -996,6 +996,23 @@ fn a_lease_longer_than_one_heartbeat_ends_one_heartbeat_later() {
     assert_eq!(s.get_run(&current.run.id).unwrap().status, RunStatus::Running, "a renewing holder keeps its run");
 }
 
+// 2026-11-03: retiring an expedition archived its crew while a stop was still `cancel_requested`
+// (no turn left to settle it), so Home showed the archived crew as working until the lease ended.
+// `finish_cancel` ends it now; a running or settled run is left as it is.
+#[test]
+fn finish_cancel_ends_a_requested_stop_now_and_touches_nothing_else() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    s.post(&buddy("mid"), dm("mid", "ic"), request("build it", "ask")).unwrap();
+    let claim = s.claim_run(lease(300_000), &[]).unwrap().unwrap();
+    let id = claim.run.id;
+    assert_eq!(s.finish_cancel(&Actor::Owner, &id).unwrap().status, RunStatus::Running, "no stop was asked");
+    s.cancel_run(&Actor::Owner, &id).unwrap();
+    assert_eq!(s.finish_cancel(&Actor::Owner, &id).unwrap().status, RunStatus::Cancelled);
+    let late = s.settle_run(&id, &claim.lease_token, Outcome::Cancelled { reason: "late".into() });
+    assert!(matches!(late, Err(CoreError::LeaseLost(_))), "a live holder's late settle is lease_lost: {late:?}");
+}
+
 // The holder's renewals keep a run alive past any number of lease terms; a chat run's deadline is
 // the explicit chat budget, never the lease (2026-09-10: a 600 s claim lease killed owner chats).
 #[test]

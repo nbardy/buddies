@@ -20,7 +20,8 @@ export type Preflight =
   | { t: 'ready'; repoRoot: string; baseSha: string }
   | { t: 'refused'; issues: string[] };
 
-/** Every reason a launch would be refused. It never runs a check: checks may be paid GPU runs. */
+/** Every reason a launch would be refused. It never runs a check (`launchPreflight` does, at
+ * launch only: a draft is cheap, a launch is the commitment). */
 export async function preflight(p: {
   gate: ExecutionGate;
   workspace: Workspace | undefined;
@@ -38,6 +39,17 @@ export async function preflight(p: {
   if (top.code !== 0) issues.push(`${root} is not a git repository`);
   if (main.code !== 0) issues.push('refs/heads/main does not resolve');
   if (tool.code !== 0) issues.push('`git cambium` is not available');
+  for (const o of p.charter.oracle) {
+    const at = await git(top.stdout || root, [
+      '--literal-pathspecs',
+      'ls-tree',
+      '--name-only',
+      'main',
+      '--',
+      o.replace(/\/+$/, ''),
+    ]);
+    if (at.trim() === '') issues.push(`oracle \`${o}\`: not tracked on main`);
+  }
   const bins = p.charter.done.t === 'checks' ? p.charter.done.checks.map((c) => c[0]) : [];
   for (const bin of new Set(bins))
     if (!(await executable(top.stdout || root, bin)))
@@ -75,13 +87,24 @@ async function executable(repo: string, bin: string): Promise<boolean> {
 }
 
 /** Runs the checks on `sha` in a fresh detached checkout, stopping at the first that does not
- * pass. Every argv element that names a file or directory tracked at `base` is first restored
- * from `base`, so the attempt cannot edit the oracle (files it ADDED in a named directory stay:
- * documented limit). A tree-setup error is one run with outcome `error`. `stop` (the expedition
+ * pass. The oracle is first restored from `base`, so the attempt cannot edit the grader: every
+ * regular FILE named directly in an argv, plus the charter's declared `oracle` paths (files or
+ * directories, restored whole). A directory named in argv is NOT restored: `["pytest","src"]`
+ * grades the attempt's `src`, not base's. A tree-setup error is one run with outcome `error`. `stop` (the expedition
  * finished) kills a running check and skips the rest. */
 export async function runChecks(
   repo: string,
-  j: { dir: string; sha: string; base: string; checks: string[][] },
+  j: {
+    dir: string;
+    sha: string;
+    base: string;
+    checks: string[][];
+    /** The charter's declared grader paths; [] = none beyond the files argv names. */
+    oracle: string[];
+    /** `first_failure`: a judged attempt stops at the first check that does not pass. `all`: the
+     * launch preflight runs every check once, to learn whether each CAN run. */
+    through: 'first_failure' | 'all';
+  },
   stop: AbortSignal
 ): Promise<CheckRun[]> {
   const runs: CheckRun[] = [];
@@ -89,14 +112,14 @@ export async function runChecks(
     await fsp.rm(j.dir, { recursive: true, force: true });
     await git(repo, ['worktree', 'prune']);
     await git(repo, ['worktree', 'add', '--detach', j.dir, j.sha]);
-    const restore = await oracleFiles(repo, j.base, j.checks);
+    const restore = await oracleFiles(repo, j.base, j.checks, j.oracle);
     if (restore.length > 0)
       await git(j.dir, ['--literal-pathspecs', 'checkout', j.base, '--', ...restore]);
     for (const argv of j.checks) {
       if (stop.aborted) break;
       const outcome = await runOne(argv, j.dir, `${j.dir}.scratch`, stop);
       runs.push({ argv, outcome });
-      if (outcome.t !== 'passed') break;
+      if (outcome.t !== 'passed' && j.through === 'first_failure') break;
     }
   } catch (error) {
     runs.push({ argv: j.checks[0], outcome: { t: 'error', message: (error as Error).message } });
@@ -106,17 +129,33 @@ export async function runChecks(
   return runs;
 }
 
-/** The argv elements that are paths tracked at `base`, as literal names. Review 2026-11-03: an
- * empty pathspec list (`["/usr/bin/pytest","-q"]`) or `.` made ls-tree list every root entry, and
- * the restore reset the whole attempt to base; `*` or `:(exclude)x` were read as patterns. */
-async function oracleFiles(repo: string, base: string, checks: string[][]): Promise<string[]> {
-  const named = [...new Set(checks.flat().map((e) => path.posix.normalize(e).replace(/\/+$/, '')))];
+/** What to restore from `base`, as literal names. Argv-inferred protection covers regular files
+ * only (ls-tree type blob): a directory in argv (`pytest src`, `make -C server test`) is the thing
+ * UNDER TEST, and restoring it graded base instead of the attempt (audit 2026-11-03). Directories
+ * are protected only when the charter declares them in `oracle`. Review 2026-11-03: an empty
+ * pathspec list or `.` made ls-tree list every root entry, and `*` or `:(exclude)x` were read as
+ * patterns; hence the filters and --literal-pathspecs. */
+async function oracleFiles(
+  repo: string,
+  base: string,
+  checks: string[][],
+  oracle: string[]
+): Promise<string[]> {
+  const clean = (e: string) => path.posix.normalize(e).replace(/\/+$/, '');
+  const named = [...new Set(checks.flat().map(clean))];
   const paths = named.filter(
     (e) => !e.startsWith('-') && !path.isAbsolute(e) && e !== '.' && !e.split('/').includes('..')
   );
-  if (paths.length === 0) return [];
-  const args = ['--literal-pathspecs', 'ls-tree', '-z', '--name-only', base, '--', ...paths];
-  return (await git(repo, args)).split('\0').filter(Boolean);
+  const files =
+    paths.length === 0
+      ? []
+      : (await git(repo, ['--literal-pathspecs', 'ls-tree', '-z', base, '--', ...paths]))
+          .split('\0')
+          .filter(Boolean)
+          .map((row) => row.split('\t'))
+          .filter(([meta]) => meta.split(' ')[1] === 'blob')
+          .map(([, name]) => name);
+  return [...new Set([...files, ...oracle.map(clean)])];
 }
 
 const CHECK_TIMEOUT_MS = 2 * 60 * 60_000;
@@ -194,3 +233,57 @@ const pick = (keys: string[]) =>
   Object.fromEntries(
     keys.flatMap((k) => (process.env[k] === undefined ? [] : [[k, process.env[k]]]))
   );
+
+/** Incident 2026-11-01: a DualSPHysics expedition burned 3 attempts on a done-check that failed
+ * with FileNotFound in the environment. A check that RUNS and fails is the goal (the attempt must
+ * make it pass); one that cannot run can never pass, whatever the crew does. */
+export type Ran = { t: 'ran' } | { t: 'cannot_run'; why: string };
+export function ranOrNot({ argv, outcome }: CheckRun): Ran {
+  const cannot = (why: string): Ran => ({
+    t: 'cannot_run',
+    why: `check \`${argv.join(' ')}\` cannot run: ${why}`,
+  });
+  switch (outcome.t) {
+    case 'passed':
+    case 'timed_out':
+      return { t: 'ran' };
+    case 'error':
+      return cannot(outcome.message);
+    case 'failed': {
+      if (outcome.exitCode === 126 || outcome.exitCode === 127)
+        return cannot(`exit ${outcome.exitCode}`);
+      const script = /can't open file '([^']+)': \[Errno 2\] No such file or directory/.exec(
+        outcome.tail
+      );
+      if (script) return cannot(`python found no script ${script[1]}`);
+      const module = argv[argv.indexOf('-m') + 1];
+      if (argv.includes('-m') && new RegExp(`No module named '?${module}\\b`).test(outcome.tail))
+        return cannot(`python found no module ${module}`);
+      return { t: 'ran' };
+    }
+  }
+}
+
+export type LaunchPreflight = { t: 'ready' } | { t: 'refused'; issues: string[] };
+/** Runs every done check once on the launch base, in a throwaway detached checkout, and refuses
+ * the launch for each check that could not run. Bounded by the check timeout. */
+export async function launchPreflight(
+  repo: string,
+  j: { dir: string; baseSha: string; checks: string[][]; oracle: string[] },
+  run: typeof runChecks = runChecks
+): Promise<LaunchPreflight> {
+  const runs = await run(
+    repo,
+    {
+      dir: j.dir,
+      sha: j.baseSha,
+      base: j.baseSha,
+      checks: j.checks,
+      oracle: j.oracle,
+      through: 'all',
+    },
+    new AbortController().signal
+  );
+  const issues = runs.map(ranOrNot).flatMap((r) => (r.t === 'cannot_run' ? [r.why] : []));
+  return issues.length > 0 ? { t: 'refused', issues } : { t: 'ready' };
+}

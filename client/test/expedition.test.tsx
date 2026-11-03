@@ -41,6 +41,7 @@ const record = (id: string, state: State): Expedition => ({
     name: id,
     goal: 'Make the **widget** pass.',
     done: { t: 'owner' },
+    oracle: [],
     maxAttempts: 5,
     maxLive: 1,
     hours: 8,

@@ -385,6 +385,14 @@
                         }
                       ]
                     },
+                    "oracle": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/action/anyOf/0/properties/charter/properties/done/anyOf/0/properties/checks/items/items"
+                      },
+                      "maxItems": 20,
+                      "default": []
+                    },
                     "maxAttempts": {
                       "type": "integer",
                       "minimum": 1,
@@ -1722,6 +1730,14 @@
                           "additionalProperties": false
                         }
                       ]
+                    },
+                    "oracle": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/action/anyOf/0/properties/charter/properties/done/anyOf/0/properties/checks/items/items"
+                      },
+                      "maxItems": 20,
+                      "default": []
                     },
                     "maxAttempts": {
                       "type": "integer",

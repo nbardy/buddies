@@ -336,8 +336,9 @@ export async function preflight(p: { gate: ExecutionGate; workspace: Workspace |
  *     `git worktree add --detach <dir> <sha>`.
  *  2. Oracle restore: collect every argv element of every check (deduped) that does not start
  *     with '-', is not absolute and has no '..' segment, and that `git ls-tree --name-only <base> -- <e>`
- *     lists. Then `git checkout <base> -- <those paths>` in dir. A named directory is restored
- *     whole. Files the attempt ADDED inside it remain (documented limit).
+ *     lists. Then `git checkout <base> -- <those paths>` in dir. Only regular files
+ *     (ls-tree type blob) named in argv are restored; a named directory is the code under test and
+ *     is not. The charter's `oracle` paths (files or directories) are restored whole.
  *  3. Each check: runOne.
  *  4. finally: `git worktree remove --force <dir>`. A tree-setup error becomes one run with
  *     outcome {t:'error', message}. */
@@ -777,14 +778,20 @@ Client: §8 deleted files plus the §6 client edits.
 
 ## 11. Known limits (deliberate)
 
-- **Oracle restore** brings back only files named by argv elements (directories are restored
-  whole). A check that reads an unnamed file through a named script reads the attempt's version
-  of that file. Name the test files in argv, or check through a named directory.
+- **Oracle restore** brings back regular files named by argv elements and the charter's declared
+  `oracle` paths (files or directories, restored whole; default `[]`, validated relative with no
+  `..`, must be tracked on main at launch). A directory named only in argv is NOT restored: it is
+  the code under test (`pytest src` must grade the attempt's `src`). A check that reads an unnamed
+  file through a named script reads the attempt's version of it: name the grader's directory in
+  `oracle`.
 - **There is no sandbox for checks**: only the env scrub, scratch HOME/TMPDIR, the 2 h timeout and
   the group kill. The same holds today.
 - **Repo config filters** (`filter.<x>.smudge`) can still run code during host git checkouts. The
   same holds today; hooks and fsmonitor are off.
-- **Salvage refs stay local** at retire (§3.6).
+- **Salvage refs**: retire pushes each `refs/salvage/expeditions/<id>/a<n>` to origin as the tag
+  `archive/expeditions/<id>/salvage/a<n>` (`cambium archive` takes branches only), checks it with
+  `ls-remote`, then deletes the local ref compare-and-delete. A push or verification failure refuses
+  the retire and keeps the ref.
 - **Interrupted attempts**: when an attempt is interrupted before its `cambium add` finished, a
   half-made workspace may need `git cambium recover` by hand. `release` reports `absent` when the
   registry has no entry, and `left` when Cambium refuses.
@@ -792,8 +799,15 @@ Client: §8 deleted files plus the §6 client edits.
   expedition aborts its own queued and running checks.
 - **Retire needs an `origin` remote**: `git cambium archive` refuses `push-unverified` without
   one, so a finished expedition in a repo with no origin cannot retire (the refusal is shown).
-- **Archived crew run**: a crew run cancelled at boot stays `cancel_requested` until its lease
-  ends (about 5 min); a retire in that window shows the archived crew as working until then.
+- **Archived crew run**: retire finishes any crew run still `cancel_requested` at once
+  (`finish_cancel`, runs.rs), so Home no longer shows the archived crew as working until the lease
+  ends. A live holder's later settle finds the lease gone (`lease_lost`), which the runner logs.
+- **Launch preflight runs the done-checks** (`launchPreflight`, checks.ts): once each on the launch
+  base in a throwaway checkout, through the host-wide check queue and the check timeout. A check that
+  cannot RUN (spawn error, exit 126/127, python "can't open file", `-m` module not found) refuses the
+  launch, shown in the draft's issues; a check that runs and fails launches. Owner-judged
+  expeditions skip it. Limit: a check whose own script fails with some other missing-file text on the
+  base is judged "ran". A draft does not run checks (checks may be paid), only launch and relaunch's launch.
 
 ## 12. As built: deviations
 
@@ -817,6 +831,8 @@ Client: §8 deleted files plus the §6 client edits.
 - **Rail rows** carry `section`, `heading` and `list` class names too, so both shells render the one
   section header; the phone has no separate `MobileSection` wrapper.
 - **Review fixes (2026-11-03).**
+  - Audit follow-up: argv-inferred restore was files-only (`pytest src` used to check out base's
+    `src/` and grade base); directories are protected only via charter `oracle`.
   - The oracle restore passes only literal, tracked, non-root paths (`--literal-pathspecs`, no
     `.`); an argv with no such element restores nothing instead of the whole tree.
   - Only an `answered` turn is judged; `failed`, `cancelled` and `lost` turns end `skipped`, and

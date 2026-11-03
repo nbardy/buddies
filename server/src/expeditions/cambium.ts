@@ -111,3 +111,35 @@ export async function tip(repo: string, branch: string, tree: string): Promise<T
   await git(repo, ['branch', branch, head.stdout]);
   return { t: 'tip', sha: head.stdout };
 }
+
+export type Salvaged = { t: 'archived'; tags: string[] } | { t: 'failed'; messages: string[] };
+/** Retire: the salvage refs (dirty work a released tree left) go to origin as tags
+ * archive/expeditions/<id>/salvage/<a#>, because `cambium archive` handles branches only. A ref is
+ * deleted locally (compare-and-delete at the sha that was pushed) only after `ls-remote` shows the
+ * tag at that sha, so recovered work is never local-only. A rerun finds the tag already there. */
+export async function archiveSalvage(repo: string, id: string): Promise<Salvaged> {
+  const listed = await git(repo, [
+    'for-each-ref',
+    '--format=%(objectname) %(refname)',
+    `refs/salvage/expeditions/${id}/`,
+  ]);
+  const tags: string[] = [];
+  const messages: string[] = [];
+  for (const line of listed.split('\n').filter(Boolean)) {
+    const [sha, ref] = line.split(' ');
+    const tag = `archive/expeditions/${id}/salvage/${ref.split('/').at(-1)}`;
+    const dest = `refs/tags/${tag}`;
+    const pushed = await exec('git', repo, ['push', 'origin', `${sha}:${dest}`], true);
+    const remote = await exec('git', repo, ['ls-remote', 'origin', dest], true);
+    if (remote.code !== 0 || !remote.stdout.startsWith(`${sha}\t`)) {
+      messages.push(
+        `${ref}: not on origin as ${tag} (${(pushed.stderr || remote.stderr).slice(-300)})`
+      );
+      continue;
+    }
+    const gone = await exec('git', repo, ['update-ref', '-d', ref, sha]);
+    if (gone.code !== 0) messages.push(`${ref}: ${gone.stderr.slice(-300)}`);
+    else tags.push(tag);
+  }
+  return messages.length > 0 ? { t: 'failed', messages } : { t: 'archived', tags };
+}
