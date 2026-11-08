@@ -142,6 +142,8 @@ requirements to rebuild omitted machinery.
 | Area | Doc |
 |---|---|
 | Code patterns: the structural patterns, tagging rule, where each is implemented | `docs/patterns.md` |
+| Writing a design spec: the Plumb dialect (```` ```plumb ```` blocks; every `goal` needs `by:`, every `inv` `guard:`), `pnpm check:plumb` | `docs/plumb.md` |
+| Expeditions v2 (design only): leader + revisable round graphs, user goal vs objective | `docs/expeditions-leader-design.md` |
 | Buddies: core model, motivating cases, rationale and scope | `product/buddies/CORE_DESIGN.md` |
 | Client state: subscriptions, mutations, perf, hook ordering | `docs/client-state.md` |
 | Mobile view tree, grep gates, DeviceKind, UI-state partition | `docs/mobile-view-tree.md` |
