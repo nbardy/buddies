@@ -3,7 +3,7 @@
 Status: **design only, nothing built.** Written 2026-11-08 from an owner design conversation. It
 proposes replacing the retry loop of today's expeditions (`docs/expeditions-lean-design.md`,
 `server/src/expeditions/host.ts`) with a leader that plans and revises rounds of workflow. The
-spec is in Plumb (`docs/plumb.md`), checked by `pnpm check:plumb`.
+spec follows `docs/design-specs.md`; the concurrent core is to be model-checked in Quint.
 
 ## 1. The motivating case, and why today's host cannot run it
 
@@ -83,125 +83,124 @@ graph. Scripts are good for authoring; graphs are what the host runs.
 
 ## 4. Spec
 
-```plumb
-role owner | leader | host | worker
+Types are TS so they can move into Zod in `shared/src/expedition.ts` unchanged. Goals,
+invariants and acts are tables, following `docs/design-specs.md`: every goal names the mechanism
+that delivers it, every invariant names its enforcement, and gaps are marked ❌. The concurrent
+core (node lifecycle, budget, patches, gates, finish) is to be model-checked in Quint (§8).
 
--- ---- The fixed part: owner-signed at launch ----
-struct Charter {
-  userGoal: md                 -- the owner's words, verbatim, never edited
-  budget: Budget               -- spend, wall clock; the leader's own wakes count against it
-  deadline: Time
-  limits: Limit[]
-  gates: GateSpec[]            -- points where the owner must decide; every plan keeps them
-}
-type Limit = Enforced{cap: Capability} | Advisory{text}
--- Enforced compiles to capability grants at worker launch (no push, no network to X, no paid
--- tools). Advisory goes into prompts and is labelled advisory. Only Enforced is claimed by G6.
+```ts
+// ---- The fixed part: owner-signed at launch ----
+type Charter = {
+  userGoal: Markdown;          // the owner's words, verbatim, never edited
+  budget: Budget;              // spend, wall clock; the leader's own wakes count against it
+  deadline: Time;
+  limits: Limit[];
+  gates: GateSpec[];           // points where the owner must decide; every plan keeps them
+};
+// Enforced compiles to capability grants at worker launch (no push, no network to X, no paid
+// tools). Advisory goes into prompts and is labelled advisory. Only Enforced is claimed by G6.
+type Limit = { t: 'enforced'; cap: Capability } | { t: 'advisory'; text: string };
 
--- ---- The leader's formalization: revisable ----
-struct Objective { version: n; criteria: Criterion[]; open: Question[]; rationale: text }
-type Criterion = Check{argv} | Judged{rubric} | Owner{q}
-type Revision = Clarify | Tighten | Weaken | Redirect
--- Clarify answers an open question; Tighten adds a criterion or raises a bar; Weaken removes or
--- edits one; Redirect changes the target under the same userGoal.
+// ---- The leader's formalization: revisable ----
+type Objective = { version: number; criteria: Criterion[]; open: Question[]; rationale: string };
+type Criterion =
+  | { t: 'check'; argv: string[] }
+  | { t: 'judged'; rubric: string }
+  | { t: 'owner'; question: string };
+// clarify answers an open question; tighten adds a criterion or raises a bar; weaken removes or
+// edits one; redirect changes the target under the same userGoal.
+type Revision = 'clarify' | 'tighten' | 'weaken' | 'redirect';
 
--- ---- Rounds ----
-struct MetaPlan { version: n; rounds: RoundIntent[]; reason: text }
-struct Round { intent: text; predicts: Claim; nodes: Node[]; reserve: Budget }
-type Node = Agent{prompt, inputs: Ref[], seat, out: Schema}
-  | Map{over: Ref, template, maxPar: n, out: Schema}   -- fan-out width = length of `over`
-  | Reduce{inputs: Ref[], prompt, out: Schema}         -- output carries provenance refs
-  | Duel{thesis: Ref, rounds: n}                       -- advocate and critic on separate seats
-  | Check{argv}
-  | Gate{q}
-state Node: pending -> running -> (done | cancelled)
--- Ref is global (r2.n3): a rewritten meta-plan can reuse finished work from any earlier round.
+// ---- Rounds ----
+type MetaPlan = { version: number; rounds: RoundIntent[]; reason: string };
+type Round = { intent: string; predicts: Claim; nodes: Node[]; reserve: Budget };
+type Node =
+  | { t: 'agent'; prompt: string; inputs: Ref[]; seat: Seat; out: Schema }
+  | { t: 'map'; over: Ref; template: string; maxPar: number; out: Schema } // width = length of `over`
+  | { t: 'reduce'; inputs: Ref[]; prompt: string; out: Schema }           // output carries provenance refs
+  | { t: 'duel'; thesis: Ref; rounds: number }                              // advocate, critic: separate seats
+  | { t: 'check'; argv: string[] }
+  | { t: 'gate'; question: string };
+// Node lifecycle, forward only: pending -> running -> (done | cancelled)
+type NodeState =
+  | { t: 'pending' }
+  | { t: 'running'; requestId: string }
+  | { t: 'done'; out: Artifact }
+  | { t: 'cancelled'; why: string };
+// Ref is global (r2.n3): a rewritten meta-plan can reuse finished work from any earlier round.
 
-struct Expedition {
-  charter: Charter
-  objectives: (Objective, Evidence, Ratified)[]    -- appended only
-  plans: MetaPlan[]                                -- appended only, each with its reason
-  rounds: Round[]
-  ledger: Ledger                                   -- spent + reserved
-}
-
--- ---- Goals ----
-goal G1 terminates: every expedition finishes by charter.deadline, with a result or a stated gap
-  by: budget and deadline only shrink, and the host enforces both; it does not depend on the objective
-goal G2 late-binding: round k's structure is chosen after rounds 1..k-1 ran
-  by: the leader writes each Round at its start (act plan_round)
-goal G3 outer-reflect: after each round the leader may continue, revise, rewrite, propose finish or ask
-  by: event roundDone wakes the leader with the round's outcome against its predicts
-goal G4 inner-control: a running round can be cancelled, steered or patched
-  by: acts cancel, steer, patch; steer reuses harness-steering.ts (claude delivers mid-turn after any tool use)
-goal G5 dynamic-width: fan-out width is decided by runtime data
-  by: Map.over is a Ref whose out Schema is a list, checked when the round is planned (I5)
-goal G6 owner-supreme: no leader action widens the charter, and the owner can always interrupt
-  by: valid() checks every act against budget, Enforced limits and gates; owner acts bypass the leader
-goal G7 durable: survives backend restart without losing or repeating work
-  by: today's execution journals and adoption (docs/turn-lifecycle.md#execution-adoption)
-goal G8 explainable: every structural change has a recorded reason
-  by: plans and objectives are appended with reason and evidence
-goal G9 fidelity: every objective version traces to userGoal; weakening and redirect are owner-ratified
-  by: act revise_objective requires ratification unless the change only adds
-goal G10 progress: reflection compares outcome to prediction rather than judging by feel
-  by: Round.predicts is required; repeated misses are the trigger for rewrite_meta
-
--- ---- Invariants ----
-inv I1 charter-fixed: the charter never changes after launch
-  guard: ❌ to build: the record write path refuses a changed charter
-inv I2 done-immutable: a done node and its output never change
-  guard: ❌ to build: test "patch on a done node is rejected"
-inv I3 budget-safe: spent + reserved <= budget at every instant, under parallel starts
-  guard: ❌ to build: a node reserves its estimate at start; fast-check model of concurrent starts
-inv I4 patch-cas: a patch applies to a node only if it is still pending when the patch commits
-  guard: ❌ to build: model test racing patch against start
-inv I5 typed-graph: a round whose Map.over is not list-typed never starts
-  guard: ❌ to build: test planning a mistyped round is rejected
-inv I6 gates-kept: every plan contains charter.gates
-  guard: ❌ to build: test rewrite_meta dropping a gate is rejected
-inv I7 no-self-finish: only the host or the owner finishes an expedition against the objective
-  guard: ❌ to build: test that the leader's finish is only a proposal
-
--- ---- Acts ----
-act plan_round(intent, predicts, nodes) @leader
-  requires: graph type-checks (I5); reserve fits budget (I3)
-  ensures: round starts
-  else: reject to the leader with the reason
-act patch(node, ops) @leader @owner
-  requires: node is pending at commit (I4)
-  else: reject; the leader may steer instead
-act steer(node, msg) @leader @owner
-  requires: node is running
-act cancel(node) @leader @owner
-act end_round(reason) @leader @owner
-act rewrite_meta(plan, reason) @leader
-  requires: gates kept (I6); reason cites outcomes
-act revise_objective(o, kind, evidence) @leader
-  requires: kind is Clarify or Tighten, or the owner ratifies
-  ensures: rounds keep running under the old objective until ratified
-act ratify(version) @owner
-act propose_finish(summary) @leader
-  ensures: owner sees userGoal, the latest objective and the drift between versions
-act finish(reason) @host @owner
-act pause(x) @owner
-act stop(x) @owner
-act extend(hours) @owner
-
--- ---- Events: what wakes the leader ----
-on roundDone => leader wakes; outer reflection
-on nodeFailed => leader wakes; inner reflection
-on stalled => leader wakes; inner reflection
-on budgetMark => leader wakes at 50% and 80% of the budget
-on ownerMsg => bare commands go to the host; anything else wakes the leader
-on tick => slow check-in, at most every 15 minutes
--- Events are batched: a finished node alone does not wake the leader (its wakes cost budget).
--- The leader sees summaries and artifact paths by default and may open any artifact on demand.
-
-? q1: plans as graph JSON only, or also a builder script that produces the graph?
-? q2: how does the host classify a revision when the leader's kind is wrong? (current answer: any removed or edited criterion counts as Weaken)
-? q3: can one Duel seat be another provider, so the critic does not share the advocate's biases?
+type Expedition = {
+  charter: Charter;
+  objectives: { objective: Objective; evidence: Evidence; ratified: Ratified }[]; // appended only
+  plans: MetaPlan[];                                                               // appended only
+  rounds: Round[];
+  ledger: { spent: Budget; reserved: Budget };
+};
 ```
+
+### Goals
+
+| ID | Goal | By (mechanism) |
+|---|---|---|
+| G1 terminates | every expedition finishes by the deadline, with a result or a stated gap | budget and deadline only shrink and the host enforces both; it does not depend on the objective |
+| G2 late binding | round k's structure is chosen after rounds 1..k-1 ran | the leader writes each round at its start (`plan_round`) |
+| G3 outer reflection | after each round the leader may continue, revise, rewrite, propose finish or ask | `roundDone` wakes the leader with the outcome against the round's `predicts` |
+| G4 inner control | a running round can be cancelled, steered or patched | `cancel`, `steer`, `patch`; steer reuses `server/src/buddies/harness-steering.ts` (claude delivers mid-turn after any tool use) |
+| G5 dynamic width | fan-out width is decided by runtime data | `map.over` is a `Ref` whose `out` schema is a list, checked when the round is planned (I5) |
+| G6 owner supreme | no leader action widens the charter; the owner can always interrupt | `valid()` checks every act against budget, Enforced limits and gates; owner acts bypass the leader |
+| G7 durable | survives backend restart without losing or repeating work | today's execution journals and adoption (`docs/turn-lifecycle.md#execution-adoption`) |
+| G8 explainable | every structural change has a recorded reason | plans and objectives are appended with reason and evidence |
+| G9 fidelity | every objective version traces to `userGoal`; weakening and redirect are owner-ratified | `revise_objective` requires ratification unless the change only adds |
+| G10 progress | reflection compares outcome to prediction, not judging by feel | `Round.predicts` is required; repeated misses trigger `rewrite_meta` |
+
+### Invariants
+
+| ID | Invariant | Guard |
+|---|---|---|
+| I1 charter fixed | the charter never changes after launch | ❌ record write path refuses a changed charter |
+| I2 done immutable | a done node and its output never change | ❌ Quint invariant + host test |
+| I3 budget safe | `spent + reserved <= budget` at every instant, under parallel starts | ❌ Quint invariant; nodes reserve their estimate at start |
+| I4 patch CAS | a patch applies only if the node is still pending when it commits | ❌ Quint invariant (patch racing start) |
+| I5 typed graph | a round whose `map.over` is not list-typed never starts | ❌ host test: a mistyped round is rejected at planning |
+| I6 gates kept | every plan contains `charter.gates` | ❌ Quint invariant |
+| I7 no self finish | only the host or the owner finishes, against the objective | ❌ Quint invariant |
+
+### Acts
+
+| Act | Who | Requires | Otherwise |
+|---|---|---|---|
+| `plan_round(intent, predicts, nodes)` | leader | graph type-checks (I5); reserve fits budget (I3) | rejected to the leader with the reason |
+| `patch(node, ops)` | leader, owner | node still pending at commit (I4) | rejected; the leader may steer instead |
+| `steer(node, msg)` | leader, owner | node running | — |
+| `cancel(node)`, `end_round(reason)` | leader, owner | — | — |
+| `rewrite_meta(plan, reason)` | leader | gates kept (I6); reason cites outcomes | rejected |
+| `revise_objective(o, kind, evidence)` | leader | `clarify`/`tighten`, or owner ratifies; rounds keep running under the old objective until then | waits for `ratify` |
+| `ratify(version)` | owner | — | — |
+| `propose_finish(summary)` | leader | owner sees `userGoal`, the latest objective and the drift between versions | — |
+| `finish(reason)` | host, owner | `charter`-level reason or objective met | — |
+| `pause`, `stop`, `extend(hours)` | owner | as today | — |
+
+### Events: what wakes the leader
+
+| Event | Effect |
+|---|---|
+| `roundDone` | outer reflection |
+| `nodeFailed`, `stalled` | inner reflection |
+| `budgetMark` | wake at 50% and 80% of the budget |
+| `ownerMsg` | bare commands go to the host; anything else wakes the leader |
+| `tick` | slow check-in, at most every 15 minutes |
+
+Events are batched: a finished node alone does not wake the leader, because its wakes cost
+budget. The leader sees summaries and artifact paths by default and may open any artifact on
+demand.
+
+### Open questions
+
+- **q1:** plans as graph JSON only, or also a builder script that produces the graph?
+- **q2:** how does the host classify a revision the leader labelled wrongly? Current answer: any
+  removed or edited criterion counts as `weaken`.
+- **q3:** can one duel seat be another provider, so the critic does not share the advocate's
+  biases?
 
 ## 5. User goal vs objective
 
@@ -229,7 +228,7 @@ The CEO's GTM draft is in effect Objective v0 with a first meta-plan, not a cont
 
 ## 6. Gaps the spec found that prose hid
 
-Writing the design half-formally turned up these, each now an invariant above:
+Writing the design half-formally (types, plus a named mechanism for every goal) turned up these, each now an invariant above:
 - parallel budget overshoot (I3)
 - a plan rewrite that could drop an owner gate (I6)
 - a leader certifying its own finish (I7)
@@ -260,8 +259,15 @@ Replaced:
 
 ## 8. Verification plan
 
-1. Promote the `plumb` types to Zod in `shared/src/expedition.ts` (one type source).
-2. Write a TS model of the concurrent core (node lifecycle, patch compare-and-swap, budget
-   reservation, wake batching, restart adoption), checked with fast-check against the real
-   scheduler. This turns the ❌ guards for I2–I4 into tests.
-3. Escalate to Quint only if sampled runs keep missing interleavings (see `docs/plumb.md`).
+1. **Quint model first** (`docs/specs/expedition-leader.qnt`): node lifecycle, rounds, budget
+   ledger with reservations, patches, gates and finish proposals as state and actions; I2–I4,
+   I6 and I7 as invariants. `quint run` (random simulation) needs no JVM; `quint verify`
+   (Apalache, bounded symbolic check of every interleaving) does. This checks the design before
+   code exists.
+2. **Types into Zod** in `shared/src/expedition.ts` (one type source).
+3. **Link model and code:** drive the real scheduler with the model's transitions (fast-check,
+   or replay Quint's ITF traces) so the implementation is checked against the design. Without
+   this link the model and the code drift apart.
+
+A proof covers the model, not the code (hence step 3), and it covers structure, never LLM
+judgment: "the leader can never drop a gate" is provable, "the leader reflects well" is not.
