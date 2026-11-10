@@ -175,9 +175,8 @@ function live(m: Extract<KeyedMode, { t: 'live' }>, d: KeyedExpeditionsDeps): Ke
   // took 140-410 ms to load under tsx (measured 2026-11-11), and a flag-off boot must cost what it
   // did before step 6. Guard: expeditions-v1-server.test.ts "read-only mode loads none of …".
   const { createKeyedHost } = require('./host') as typeof import('./host');
-  const { previewView } = require('../expedition-kernel/launch') as typeof import(
-    '../expedition-kernel/launch'
-  );
+  const { previewView } =
+    require('../expedition-kernel/launch') as typeof import('../expedition-kernel/launch');
   const host: KeyedHost = createKeyedHost(d);
   const baseOf = d.baseOf ?? resolveBase;
   const viewOf = (id: string): Mutated => {
