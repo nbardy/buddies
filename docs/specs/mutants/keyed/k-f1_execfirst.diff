@@ -1,0 +1,11 @@
+--- expedition-keyed.qnt
++++ k-f1_execfirst.qnt
+@@ -52,7 +52,7 @@
+ // Random simulation only (no JVM here, so no `quint verify`): bounded evidence, not proof.
+ module expedition_keyed {
+   // ---------------- flags: fixes (true = the rule is in) ----------------
+-  pure val LOG_FIRST = true            // `started` (with its reservation) is logged BEFORE executor.start
++  pure val LOG_FIRST = false            // `started` (with its reservation) is logged BEFORE executor.start
+   pure val ASK_SURVIVES = true         // an ask is never cancelled: dropped or reworded => draining
+   pure val BUDGET_QUEUE = true         // short only because of reservations => queue, not refuse
+   pure val JUDGE_AFTER_DEADLINE = true // a started call's judge is part of it and runs after the deadline

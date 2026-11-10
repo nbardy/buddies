@@ -1,0 +1,11 @@
+--- expedition-keyed.qnt
++++ k-m4_judgecancelled.qnt
+@@ -68,7 +68,7 @@
+   pure val RESERVE_COUNTS_OPEN = true  // affordability counts outstanding reservations
+   pure val SLOT_COUNTS_OPEN = true     // pool check counts slots held by running calls
+   pure val DRAIN_RELEASES = false      // (mutant when true) a draining call gives its reservation back
+-  pure val JUDGE_NEEDS_OK = true       // the judge starts only on a producer that answered ok
++  pure val JUDGE_NEEDS_OK = false       // the judge starts only on a producer that answered ok
+   pure val SETTLE_ONCE = true          // the host settles only an open call
+ 
+   pure val KEYS = 1.to(3)

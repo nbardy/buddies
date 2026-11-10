@@ -1,0 +1,11 @@
+--- expedition-keyed.qnt
++++ k-f3_notomb.qnt
+@@ -56,7 +56,7 @@
+   pure val ASK_SURVIVES = true         // an ask is never cancelled: dropped or reworded => draining
+   pure val BUDGET_QUEUE = true         // short only because of reservations => queue, not refuse
+   pure val JUDGE_AFTER_DEADLINE = true // a started call's judge is part of it and runs after the deadline
+-  pure val EXEC_TOMBSTONE = true       // settling a call closes its runKeys at the executor
++  pure val EXEC_TOMBSTONE = false       // settling a call closes its runKeys at the executor
+   pure val REWRITE_WAITS = false       // a rewrite applies only when no start RPC is in flight
+   pure val LIMBO = true                // a crashed process's start RPC may land later
+   // Simulation aid, not a rule: the deadline may pass only once the log has this many entries

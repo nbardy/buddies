@@ -1,0 +1,11 @@
+--- expedition-keyed.qnt
++++ k-m2_nonidempotent.qnt
+@@ -63,7 +63,7 @@
+   // (0 = any time). Random runs otherwise spend most traces with the deadline at step 2.
+   pure val DEADLINE_AFTER_LOG = 0
+   // ---------------- flags: mechanisms (false = mutant) ----------------
+-  pure val IDEMPOTENT = true           // executor.start is idempotent on runKey
++  pure val IDEMPOTENT = false           // executor.start is idempotent on runKey
+   pure val GATE_DISPOSITIONS = true    // rules gate: a cancel/finish for every running call dropped
+   pure val RESERVE_COUNTS_OPEN = true  // affordability counts outstanding reservations
+   pure val SLOT_COUNTS_OPEN = true     // pool check counts slots held by running calls

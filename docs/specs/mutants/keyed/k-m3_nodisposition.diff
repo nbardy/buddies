@@ -1,0 +1,11 @@
+--- expedition-keyed.qnt
++++ k-m3_nodisposition.qnt
+@@ -64,7 +64,7 @@
+   pure val DEADLINE_AFTER_LOG = 0
+   // ---------------- flags: mechanisms (false = mutant) ----------------
+   pure val IDEMPOTENT = true           // executor.start is idempotent on runKey
+-  pure val GATE_DISPOSITIONS = true    // rules gate: a cancel/finish for every running call dropped
++  pure val GATE_DISPOSITIONS = false    // rules gate: a cancel/finish for every running call dropped
+   pure val RESERVE_COUNTS_OPEN = true  // affordability counts outstanding reservations
+   pure val SLOT_COUNTS_OPEN = true     // pool check counts slots held by running calls
+   pure val DRAIN_RELEASES = false      // (mutant when true) a draining call gives its reservation back

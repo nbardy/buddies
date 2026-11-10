@@ -1,0 +1,11 @@
+--- expedition-keyed.qnt
++++ k-m5_resettle.qnt
+@@ -69,7 +69,7 @@
+   pure val SLOT_COUNTS_OPEN = true     // pool check counts slots held by running calls
+   pure val DRAIN_RELEASES = false      // (mutant when true) a draining call gives its reservation back
+   pure val JUDGE_NEEDS_OK = true       // the judge starts only on a producer that answered ok
+-  pure val SETTLE_ONCE = true          // the host settles only an open call
++  pure val SETTLE_ONCE = false          // the host settles only an open call
+ 
+   pure val KEYS = 1.to(3)
+   pure val HASHES = 1.to(2)
