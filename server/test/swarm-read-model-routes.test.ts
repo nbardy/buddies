@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
 import express from 'express';
 import { captureOompaCommand, executeGit } from '../src/swarm/commands';
 import {
@@ -11,6 +13,8 @@ import {
   registerSwarmReadModelRoutes,
   synthesizeSwarmRunSummary,
 } from '../src/swarm/read-model-routes';
+
+const execFileAsync = promisify(execFile);
 
 test('summary synthesis derives worker outcomes from cycles and reviews', async (context) => {
   const runDirectory = await mkdtemp(path.join(os.tmpdir(), 'swarm-read-model-'));
@@ -155,9 +159,13 @@ test('swarm context runs oompa without blocking the server and runs both command
   const oompaSleepSeconds = 1;
   await writeFile(
     path.join(binDirectory, 'oompa'),
-    `#!/bin/sh\nsleep ${oompaSleepSeconds}\necho "fake oompa $1 output"\n`,
+    `#!/bin/sh\n[ "$1" = warm ] && exit 0\nsleep ${oompaSleepSeconds}\necho "fake oompa $1 output"\n`,
     { mode: 0o755 }
   );
+  // macOS scans a freshly written executable on its first exec; measured 2026-11-10 at ~5 s
+  // for this script, which made the two overlapping 1 s runs read as sequential (2.0 s). One
+  // untimed run first keeps the timing about overlap, not about the scan.
+  await execFileAsync(path.join(binDirectory, 'oompa'), ['warm']);
   const originalPath = process.env.PATH;
   process.env.PATH = `${binDirectory}${path.delimiter}${originalPath}`;
   context.after(() => {
