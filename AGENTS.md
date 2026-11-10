@@ -428,10 +428,14 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   newest registered folder that exists. There is no workspace move/fold route or MCP tool.
   Guards: `server/test/workspace-registration.test.ts`; failed-spawn handling stays in agent-cli.
 - Add a dependency from the repo root with a filter (`pnpm add <pkg> --filter @unleashd/server`),
-  then run `pnpm install --frozen-lockfile` and `pnpm typecheck`. `pnpm --dir server add ...`
-  installed only the server's packages and pruned everyone else's from the shared virtual store:
-  on 2026-11-10 it left `client/node_modules/vite` a dangling symlink, and `tsc -b` in the client
-  failed with "Cannot find module 'vite'" eight hours later, after the commits were pushed.
+  then run `pnpm install --frozen-lockfile` and `pnpm typecheck`. On 2026-11-10 an install
+  during a `pnpm --dir server add ...` session left `client/node_modules/vite` a dangling symlink,
+  and `tsc -b` in the client failed with "Cannot find module 'vite'" eight hours later, after the
+  commits were pushed. The prune did NOT reproduce under this repo's pnpm 9.15.0: `--dir server
+  add`, `cd server && pnpm add` and root `add --filter` each ran a whole-workspace install and
+  left every package's links intact (throwaway `is-number`, checked for dangling links in all
+  five `node_modules`). So the root `--filter` form is the convention, not the proven fix: the
+  frozen install and typecheck after it are what catch a broken tree.
   Chain the push after the checks with `&&`, never `;`.
 - When source is broken, `server/dist/*.js` (and `shared/dist/`) is the oracle
   for what the code did before it broke — check it before git archaeology.
