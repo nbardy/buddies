@@ -15,13 +15,16 @@ export interface ResolvedBuddyConversation {
   execution: BuddyExecution;
 }
 
-/** A turn's cwd (expeditions host.ts turnDirectory): workspace root, a crew's fixed directory, or
- * one attempt run's. 2026-11-01 smoke incident: crew turns ran in the owner's checkout, isolated
- * only by a brief, and a Codex sandbox rooted there could not write the attempt worktree. */
+/** A turn's cwd (expeditions host.ts turnDirectory): workspace root, a crew's fixed directory, one
+ * attempt run's, or one expedition call's (expeditions-v1/call-directory.ts: a run whose request
+ * carries `expedition-run:` evidence; never the owner's checkout). 2026-11-01 smoke incident: crew
+ * turns ran in the owner's checkout, isolated only by a brief, and a Codex sandbox rooted there
+ * could not write the attempt worktree. */
 export type TurnDirectory =
   | { t: 'workspace' }
   | { t: 'crew'; path: string }
-  | { t: 'attempt'; runId: string; path: string };
+  | { t: 'attempt'; runId: string; path: string }
+  | { t: 'call'; runId: string; path: string };
 export const WORKSPACE_DIRECTORY: TurnDirectory = { t: 'workspace' };
 
 const MAX = { soul: 10_000, memory: 6_000, tasks: 4_000 } as const;
@@ -51,6 +54,20 @@ export const BUDDY_TOOL_GUIDE = [
   'Do not copy task status into memory; save shared work in files, linked from posts. Workers: post a one-line progress note on the Task at each milestone; the final answer carries evidence paths (commits, files, test names), not prose.',
   'Owner-needed action: request it in the owner DM ({direct:["owner"]}), naming the action and risk; act only after an explicit answer.',
 ].join('\n');
+
+// An expedition call's turn is shown no tools (grants.ts `call`), so it is told so instead of the
+// tool guide: its request names the answer format.
+export const CALL_TOOL_GUIDE = [
+  'EXPEDITION CALL: this turn has NO Buddy tools (no posts, workers, tasks or docs).',
+  'Do the work in your working directory with your own file and shell tools. Your final message is your answer, in the exact format the request names; nothing else you write is read.',
+].join('\n');
+/** The guide a turn's briefing carries, by its directory. */
+const GUIDE: { readonly [K in TurnDirectory['t']]: string } = {
+  workspace: BUDDY_TOOL_GUIDE,
+  crew: BUDDY_TOOL_GUIDE,
+  attempt: BUDDY_TOOL_GUIDE,
+  call: CALL_TOOL_GUIDE,
+};
 
 const memoryText = (doc: Doc | null, empty: string) =>
   doc ? `Revision: ${doc.revision}\n${bounded(doc.content, MAX.memory)}` : `Revision: 0\n${empty}`;
@@ -90,6 +107,7 @@ export async function composeBriefing(
   if (!workspace) throw new Error(`Buddy workspace ${context.workspaceId} not found`);
   const { soul, working, longTerm, tasks } = await readBuddyState(core, buddy.id);
   const open = tasks.filter((task) => task.status !== 'done' && task.status !== 'cancelled');
+  const guide = GUIDE[directory.t];
   const briefing = [
     `You are ${buddy.name}. This is your persistent Buddy identity.`,
     `Role: ${buddy.role}`,
@@ -118,7 +136,7 @@ export async function composeBriefing(
       MAX.tasks
     ),
     '',
-    BUDDY_TOOL_GUIDE,
+    guide,
   ].join('\n');
   if (briefing.length > BRIEFING_MAX_CHARACTERS)
     throw new Error(`Buddy briefing exceeds ${BRIEFING_MAX_CHARACTERS} characters`);
@@ -127,14 +145,7 @@ export async function composeBriefing(
   // Guard: buddies-v2.test.ts "briefing generation tracks its MCP guide and scope identity".
   const identity = createHash('sha256')
     .update(
-      JSON.stringify([
-        buddy.name,
-        buddy.role,
-        soul?.revision ?? 0,
-        buddy.id,
-        workspace.id,
-        BUDDY_TOOL_GUIDE,
-      ])
+      JSON.stringify([buddy.name, buddy.role, soul?.revision ?? 0, buddy.id, workspace.id, guide])
     )
     .digest('hex');
   return {
@@ -163,13 +174,30 @@ const keyOf = (context: BuddyContext) => JSON.stringify([context.buddyId, contex
 
 export type Briefings = ReturnType<typeof createBriefings>;
 
+/** What kind of turn a warmed briefing is for: an expedition call, or any other Buddy turn. It
+ * picks the turn's grant role (policy-port.ts). */
+export type TurnSeat = 'call' | 'buddy';
+type Kept = { readonly resolved: ResolvedBuddyConversation; readonly seat: TurnSeat };
+/** Where a warmed briefing is kept, by its directory: a per-run directory by run id, else by Buddy. */
+const KEEP: {
+  readonly [K in TurnDirectory['t']]: (
+    d: Extract<TurnDirectory, { t: K }>
+  ) => { t: 'run'; runId: string; seat: TurnSeat } | { t: 'buddy' };
+} = {
+  workspace: () => ({ t: 'buddy' }),
+  crew: () => ({ t: 'buddy' }),
+  attempt: (d) => ({ t: 'run', runId: d.runId, seat: 'buddy' }),
+  call: (d) => ({ t: 'run', runId: d.runId, seat: 'call' }),
+};
+
 /**
  * The runtime reads a briefing synchronously as it admits a turn, while the core is async. The
  * runner (and the conversation creator) warm the entry right before each turn, so `current` reads
- * what was just composed. A cold entry is an error, never an empty briefing. An attempt run is
- * kept by run id (concurrent attempts of one crew must not share a worktree), forgotten at settle.
- * Any other turn is kept by Buddy; a crew's entry is always its own directory, never the owner's
- * checkout, whatever warmed it (a chat reads it before its run is armed: 2026-11-01 review).
+ * what was just composed. A cold entry is an error, never an empty briefing. An attempt or call
+ * run is kept by run id (concurrent runs of one Buddy must not share a directory: two calls on the
+ * one seat Buddy run side by side), forgotten at settle. Any other turn is kept by Buddy; a crew's
+ * entry is always its own directory, never the owner's checkout, whatever warmed it (a chat reads
+ * it before its run is armed: 2026-11-01 review).
  */
 export function createBriefings(
   core: BuddiesCore,
@@ -177,22 +205,35 @@ export function createBriefings(
   directoryOf: (context: BuddyContext) => Promise<TurnDirectory>
 ) {
   const cache = new Map<string, ResolvedBuddyConversation>();
-  const runs = new Map<string, ResolvedBuddyConversation>();
+  const runs = new Map<string, Kept>();
+  const kept = (context: BuddyContext): Kept | undefined => {
+    const own = context.coordinationRunId ? runs.get(context.coordinationRunId) : undefined;
+    if (own) return own;
+    const resolved = cache.get(keyOf(context));
+    return resolved && { resolved, seat: 'buddy' };
+  };
   return {
     async warm(context: BuddyContext): Promise<ResolvedBuddyConversation> {
       const directory = await directoryOf(context);
       const resolved = await composeBriefing(core, context, installed(), directory);
-      if (directory.t === 'attempt') runs.set(directory.runId, resolved);
+      const where = (KEEP[directory.t] as (d: TurnDirectory) => ReturnType<(typeof KEEP)['call']>)(
+        directory
+      );
+      if (where.t === 'run') runs.set(where.runId, { resolved, seat: where.seat });
       else cache.set(keyOf(context), resolved);
       return resolved;
     },
     forget: (runId: string) => runs.delete(runId),
     current(context: BuddyContext): ResolvedBuddyConversation {
-      const own = context.coordinationRunId ? runs.get(context.coordinationRunId) : undefined;
-      const resolved = own ?? cache.get(keyOf(context));
-      if (!resolved)
-        throw new Error(`No briefing was composed for ${keyOf(context)} before its turn`);
-      return resolved;
+      const found = kept(context);
+      if (!found) throw new Error(`No briefing was composed for ${keyOf(context)} before its turn`);
+      return found.resolved;
+    },
+    /** The seat of the briefing `current` returns (same lookup, same error when cold). */
+    seat(context: BuddyContext): TurnSeat {
+      const found = kept(context);
+      if (!found) throw new Error(`No briefing was composed for ${keyOf(context)} before its turn`);
+      return found.seat;
     },
   };
 }

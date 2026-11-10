@@ -61,6 +61,7 @@ import {
   taskDetail,
 } from './core';
 import { type BuddyEvents, announcePost } from './events';
+import { refuseExpeditionCallRun } from './expedition-calls';
 import { resolveForWorkspace, wakes } from './mentions';
 import type { Runner } from './runner';
 import { channelsNamed } from './search-channels';
@@ -438,7 +439,11 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       return core.listRuns(found[1](q(req, found[0])!), 100);
     },
     'GET 200 /api/buddies/runs/:runId': (req) => core.getRun(p(req, 'runId')),
-    [buddyMutationRoute('run.cancel')]: (req) => runner.cancel(p(req, 'runId')),
+    // An expedition call's run is its expedition's to cancel (expedition-calls.ts).
+    [buddyMutationRoute('run.cancel')]: async (req) => {
+      await refuseExpeditionCallRun(core, p(req, 'runId'), 'cancel');
+      return runner.cancel(p(req, 'runId'));
+    },
     // ---- schedules ------------------------------------------------------------------------------
     'GET 200 /api/buddies/:buddyId/schedules': (req) =>
       core.listSchedules({ kind: 'buddy', buddyId: p(req, 'buddyId') }),

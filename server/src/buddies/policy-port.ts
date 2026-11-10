@@ -3,7 +3,7 @@ import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { BuddyContext } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
-import type { Briefings, ResolvedBuddyConversation } from './briefing';
+import type { Briefings, ResolvedBuddyConversation, TurnSeat } from './briefing';
 import type { GrantRecord, Grants, Subscribes, TurnGrant } from './grants';
 import type { HookSet, SteeringEndpoint } from './harness-steering';
 import { MCP_SERVER_NAME } from './mcp';
@@ -72,7 +72,8 @@ export interface BuddyPolicyPort {
    */
   finishRun(runId: string, leaseToken: string, outcome: ExecutionOutcome): Promise<void>;
   revoke(conversationId: string): void;
-  /** After a successful turn: memory review. */
+  /** After a successful turn: memory review (only for a role that has one: grants.ts
+   * REVIEWS_MEMORY; the turn policy asks only for those). */
   afterTurn(turn: CompletedBuddyTurn): void;
 }
 
@@ -86,6 +87,12 @@ export interface TurnTools {
 export interface BuddyTurnTools extends TurnTools {
   steering: SteeringEndpoint;
 }
+
+/** The grant role of a Buddy turn, by the seat its briefing was warmed for (briefing.ts). */
+const GRANT_ROLE: { readonly [S in TurnSeat]: 'worker' | 'call' } = {
+  buddy: 'worker',
+  call: 'call',
+};
 
 export function createBuddyPolicyPort(deps: {
   runner: Runner;
@@ -117,7 +124,8 @@ export function createBuddyPolicyPort(deps: {
       // A new turn's grant replaces whatever this conversation still held.
       grants.revokeConversation(conversationId);
       const grant = grants.issueBuddy({
-        role: 'worker',
+        // An expedition call's briefing (a call directory) gets the tool-less `call` role.
+        role: GRANT_ROLE[briefings.seat(context)],
         buddyId: context.buddyId,
         workspaceId: context.workspaceId,
         conversationId,

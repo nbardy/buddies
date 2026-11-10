@@ -178,5 +178,5 @@ const BASE: {
       : { t: 'missing', why: `no stored output at ${b.ref}, so no commit to run on` };
   },
 };
-const commitOf = (ctx: ExpeditionContext, b: keyed.Base): Promise<Commit> =>
+export const commitOf = (ctx: ExpeditionContext, b: keyed.Base): Promise<Commit> =>
   BASE[b.t](ctx, b as never);

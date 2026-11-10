@@ -16,12 +16,14 @@ export type LaunchResult =
 
 /** Gates (contract, typecheck, dry run + static), then the directory, `launched`, plan v0 and
  * the plan process. A failed gate writes nothing anywhere. `baseSha` is the repo commit the
- * calls' `{ t: 'launch' }` base names; the caller resolves it. */
+ * calls' `{ t: 'launch' }` base names; the caller resolves it. `workspace` is the Buddy workspace
+ * its agent calls run in (the executor's seat Buddy lives there). */
 export async function launch(
   deps: KernelDeps,
   root: string,
   folder: string,
-  baseSha: string
+  baseSha: string,
+  workspace: keyed.LaunchWorkspace
 ): Promise<LaunchResult> {
   const markdown = await readFile(path.join(folder, 'contract.md'), 'utf8');
   const contract = parseContract(markdown);
@@ -38,6 +40,7 @@ export async function launch(
     id,
     contract: contract.contract,
     baseSha,
+    workspace,
   });
   await store.append(launched);
   const e = Expedition.over(deps, store, [launched]);

@@ -10,19 +10,40 @@ import type {
 } from '../../expedition-kernel/ports';
 import { exec } from '../../expeditions/cambium';
 import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address';
+import {
+  type BuddyCallDeps,
+  BuddyCalls,
+  type Calls,
+  type ExecutorSide,
+  type Located,
+  NoCalls,
+} from './calls';
 import { ContextRegistry, type ExpeditionContext } from './context';
 import { type HostRun, runCheck, runCommand } from './host-run';
-import { type RunRecord, type Running, readRecord, writeRecord } from './records';
+import {
+  type Last,
+  type RunRecord,
+  type Running,
+  type Tree,
+  readRecord,
+  writeRecord,
+} from './records';
 
 // The kernel's Executor port over the host (CONNECT_PLAN §1). Every run has one durable record
 // (records.ts); every operation on one run id is serialized, reads that record first and acts on
 // what it says, so `start` is idempotent on the id, a closed id never starts, and `status`
-// answers from disk across restarts. What runs is chosen by one table over the run's kind; the
-// kinds that need a Buddy (agent, review) or the owner (ask) are later steps and settle as a
-// typed `errored("not implemented: <kind>")` meanwhile, never a silent no-op.
+// answers from disk across restarts. What runs is chosen by one table over the run's kind:
+// commands and checks run on the host (host-run.ts), agent calls and review judges are Buddy
+// requests (calls.ts), and asks (the owner's, a later step) settle as a typed
+// `errored("not implemented: ask")` meanwhile, never a silent no-op.
 // One HostExecutor per data root per process: a `running` record whose host pid is not this
 // process is a dead host's, and is settled `errored` (D6) with its process group killed.
 // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys): the run id is the key.
+
+/** Who runs the Buddy-backed kinds: the Buddy server's core, or nobody (a host-only test). */
+export type CallHost =
+  | { readonly t: 'buddies'; readonly deps: BuddyCallDeps }
+  | { readonly t: 'none'; readonly why: string };
 
 export type HostExecutorDeps = {
   /** The kernel's data root: each expedition is `<root>/<id>`. */
@@ -30,12 +51,15 @@ export type HostExecutorDeps = {
   /** For `~` in `contract.repo`. */
   readonly home: string;
   readonly clock: Clock;
+  readonly calls: CallHost;
 };
 
 type Listener = (runId: string, outcome: RawOutcome, spent: keyed.Usage) => void;
 /** A host run costs no dollars. */
 const FREE: keyed.Usage = { t: 'reported', usd: 0 };
 const RESTARTED: RawOutcome = { t: 'errored', why: 'host restarted during command' };
+/** A host run's record: its stop is its process's end, not a recorded `stop`. */
+const NOT_STOPPED = { t: 'none' } as const;
 
 /** One run, as a handler gets it. */
 type Begin<K extends RunSpec['t']> = {
@@ -45,9 +69,7 @@ type Begin<K extends RunSpec['t']> = {
   readonly spec: Extract<RunSpec, { t: K }>;
 };
 type Handler<K extends RunSpec['t']> = (ex: HostExecutor, run: Begin<K>) => Promise<void>;
-type Located = Omit<Begin<RunSpec['t']>, 'spec'>;
 type OnDisk = RunRecord | { readonly t: 'missing' };
-type Last = Extract<RunRecord, { t: 'closed' }>['last'];
 type Close<K extends OnDisk['t']> = (
   ex: HostExecutor,
   at: Located,
@@ -60,9 +82,19 @@ export class HostExecutor implements Executor {
   private readonly live = new Map<string, AbortController>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly contexts: ContextRegistry;
+  /** The agent and review kinds. */
+  readonly calls: Calls;
 
   constructor(private readonly deps: HostExecutorDeps) {
     this.contexts = new ContextRegistry(deps.root, deps.home);
+    const side: ExecutorSide = {
+      root: deps.root,
+      clock: deps.clock,
+      serial: (runId, task) => this.serial(runId, task),
+      emit: (runId, raw, spent) => this.emit(runId, raw, spent),
+      locate: (runId) => this.locate(runId),
+    };
+    this.calls = CALL_HOSTS[deps.calls.t](side, deps.calls as never);
   }
 
   // ---- the port ----
@@ -71,9 +103,11 @@ export class HostExecutor implements Executor {
     return this.serial(runId, async () => {
       const at = await this.locate(runId);
       const found = await readRecord(at.paths.record);
-      // Any record means this id was started or closed before: a repeat or a late start.
-      if (found.t === 'found') return;
-      await (HANDLERS[spec.t] as Handler<RunSpec['t']>)(this, { ...at, spec });
+      if (found.t === 'missing')
+        return (HANDLERS[spec.t] as Handler<RunSpec['t']>)(this, { ...at, spec });
+      // Any record means this id was started or closed before: a repeat or a late start. A call
+      // whose post a crash interrupted is finished now, under the same key.
+      if (found.value.t === 'posting') await this.calls.current(at, found.value);
     });
   }
 
@@ -81,8 +115,15 @@ export class HostExecutor implements Executor {
     return this.serial(runId, async () => {
       const at = await this.locate(runId);
       const found = await readRecord(at.paths.record);
-      if (found.t === 'found' && found.value.t === 'running') await this.stop(at, found.value);
+      if (found.t === 'missing') return;
+      await (CANCEL[found.value.t] as Cancel<RunRecord['t']>)(this, at, found.value);
     });
+  }
+
+  /** Observe the Buddy calls (CONNECT_PLAN §1 "Observing settlement"): every live one on disk,
+   * then events, a 60 s backstop and the usage poll. Returns the stop. */
+  watch(): Promise<() => void> {
+    return this.calls.watch();
   }
 
   close(runId: string): Promise<void> {
@@ -101,8 +142,11 @@ export class HostExecutor implements Executor {
       const at = await this.locate(runId);
       const found = await readRecord(at.paths.record);
       if (found.t === 'missing') return { t: 'unknown' };
-      const r = found.value;
-      const record = r.t === 'running' && this.isOrphan(r) ? await this.reap(at, r) : r;
+      const record = await (CURRENT[found.value.t] as Current<RunRecord['t']>)(
+        this,
+        at,
+        found.value
+      );
       return STATUS[record.t](record as never);
     });
   }
@@ -157,13 +201,14 @@ export class HostExecutor implements Executor {
       tree: { t: 'none' },
       raw,
       spent: FREE,
+      stop: NOT_STOPPED,
     });
     this.emit(run.address.runId, raw, FREE);
   }
 
   // ---- internals ----
 
-  private async locate(runId: string): Promise<Located> {
+  async locate(runId: string): Promise<Located> {
     const address = parseRunId(runId);
     const ctx = await this.contexts.get(address.expedition);
     return { address, ctx, paths: runPaths(ctx.dir, runId) };
@@ -176,7 +221,13 @@ export class HostExecutor implements Executor {
       // Closed meanwhile (the kernel settled the call): nothing may report under it.
       if (found.t === 'missing' || found.value.t !== 'running') return;
       const { host: _host, process: _process, ...kept } = found.value;
-      await writeRecord(paths.record, { ...kept, t: 'settled', raw, spent: FREE });
+      await writeRecord(paths.record, {
+        ...kept,
+        t: 'settled',
+        raw,
+        spent: FREE,
+        stop: NOT_STOPPED,
+      });
       this.emit(runId, raw, FREE);
     }).catch(() => {
       // The record could not be written: the run stays `running` on disk and the next boot
@@ -201,8 +252,8 @@ export class HostExecutor implements Executor {
   isOrphan(r: Running): boolean {
     return r.host.pid !== process.pid;
   }
-  /** Stop a running run: a dead host's is reaped, this host's is aborted (its settle then finds
-   * the tombstone and reports nothing). What it settled as, if it did. */
+  /** Stop a running host run: a dead host's is reaped, this host's is aborted (its settle then
+   * finds the tombstone and reports nothing). What it settled as, if it did. */
   async stop(at: Located, r: Running): Promise<Last> {
     if (!this.isOrphan(r)) {
       this.live.get(r.runId)?.abort();
@@ -214,21 +265,27 @@ export class HostExecutor implements Executor {
 
   /** A dead host's run (D6): kill its process group while the same leader runs, remove its tree,
    * settle it `errored`. A retry is the owner's or the leader's, explicitly. */
-  private async reap(at: Located, r: Running): Promise<Extract<RunRecord, { t: 'settled' }>> {
+  async reap(at: Located, r: Running): Promise<Extract<RunRecord, { t: 'settled' }>> {
     await killIfSameLeader(r.process);
     await removeTree(at.ctx.repo, r.tree);
     const { host: _host, process: _process, ...kept } = r;
-    const settled = { ...kept, t: 'settled', raw: RESTARTED, spent: FREE } as const;
+    const settled = {
+      ...kept,
+      t: 'settled',
+      raw: RESTARTED,
+      spent: FREE,
+      stop: NOT_STOPPED,
+    } as const;
     await writeRecord(at.paths.record, settled);
     return settled;
   }
 
-  private emit(runId: string, raw: RawOutcome, spent: keyed.Usage): void {
+  emit(runId: string, raw: RawOutcome, spent: keyed.Usage): void {
     for (const l of this.listeners) l(runId, raw, spent);
   }
 
   /** One operation per run id at a time, in call order. */
-  private serial<T>(runId: string, task: () => Promise<T>): Promise<T> {
+  serial<T>(runId: string, task: () => Promise<T>): Promise<T> {
     const previous = this.queues.get(runId) ?? Promise.resolve();
     const run = previous.then(task, task);
     const tail = run.catch(() => {});
@@ -247,26 +304,68 @@ const notImplemented =
   (ex, run) =>
     ex.notImplemented(run);
 
-/** What runs each kind. Agent runs, reviews and asks need a Buddy or the owner: later steps. */
+/** What runs each kind. Asks need the owner: a later step. */
 const HANDLERS: { [K in RunSpec['t']]: Handler<K> } = {
   command: (ex, run) =>
     ex.hostRun(run, run.spec.call.maxMinutes, (h) => runCommand(h, run.spec.call)),
   check: (ex, run) => ex.hostRun(run, run.spec.maxMinutes, (h) => runCheck(h, run.spec)),
-  agent: notImplemented(),
-  review: notImplemented(),
+  agent: (ex, run) => ex.calls.start(run, run.spec),
+  review: (ex, run) => ex.calls.start(run, run.spec),
   ask: notImplemented(),
+};
+
+const CALL_HOSTS: {
+  [K in CallHost['t']]: (side: ExecutorSide, host: Extract<CallHost, { t: K }>) => Calls;
+} = {
+  buddies: (side, host) => new BuddyCalls(side, host.deps),
+  none: (side, host) => new NoCalls(side, host.why),
+};
+
+/** A record as it stands now: a dead host's run is reaped, a call's post is finished. */
+type Current<K extends RunRecord['t']> = (
+  ex: HostExecutor,
+  at: Located,
+  r: Extract<RunRecord, { t: K }>
+) => Promise<RunRecord>;
+const CURRENT: { [K in RunRecord['t']]: Current<K> } = {
+  running: async (ex, at, r) => (ex.isOrphan(r) ? ex.reap(at, r) : r),
+  posting: (ex, at, r) => ex.calls.current(at, r),
+  posted: (ex, at, r) => ex.calls.current(at, r),
+  settled: async (_ex, _at, r) => r,
+  closed: async (_ex, _at, r) => r,
+};
+
+type Cancel<K extends RunRecord['t']> = (
+  ex: HostExecutor,
+  at: Located,
+  r: Extract<RunRecord, { t: K }>
+) => Promise<void>;
+const ended = async () => {};
+/** Cancelling a run, by its record. A settled or closed one has nothing left to stop. */
+const CANCEL: { [K in RunRecord['t']]: Cancel<K> } = {
+  running: async (ex, at, r) => {
+    await ex.stop(at, r);
+  },
+  posting: (ex, at, r) => ex.calls.cancel(at, r),
+  posted: (ex, at, r) => ex.calls.cancel(at, r),
+  settled: ended,
+  closed: ended,
 };
 
 /** Closing an id, by what its record says: afterwards nothing runs or reports under it. */
 const CLOSE: { [K in OnDisk['t']]: Close<K> } = {
   missing: async () => ({ t: 'never-settled' }),
   running: (ex, at, r) => ex.stop(at, r),
+  posting: (ex, at, r) => ex.calls.close(at, r),
+  posted: (ex, at, r) => ex.calls.close(at, r),
   settled: async (_ex, _at, r) => ({ t: 'settled', raw: r.raw, spent: r.spent }),
   closed: async () => ({ t: 'already-closed' }),
 };
 
 const STATUS: { [K in RunRecord['t']]: (r: Extract<RunRecord, { t: K }>) => RunStatus } = {
   running: () => ({ t: 'running' }),
+  posting: () => ({ t: 'running' }),
+  posted: () => ({ t: 'running' }),
   settled: (r) => ({ t: 'settled', outcome: r.raw, spent: r.spent }),
   // Only a settled call's ids are closed, so the kernel does not ask about one; if it does, the
   // truthful answer is the outcome it settled with, or that it was stopped before it could run.
@@ -303,9 +402,19 @@ async function killIfSameLeader(p: Running['process']): Promise<void> {
   } catch {} // ESRCH: the group ended between the check and the kill
 }
 
-async function removeTree(repo: string, tree: Running['tree']): Promise<void> {
-  if (tree.t === 'none') return;
-  await exec('git', repo, ['worktree', 'remove', '--force', tree.path]);
-  await rm(tree.path, { recursive: true, force: true });
-  await exec('git', repo, ['worktree', 'prune']);
-}
+/** A dead host run's tree. Only a host run (command, check) is reaped, and its tree is detached;
+ * a call's directory or checkout is the call's to end (calls.ts), so it is left as it is. */
+const REMOVE_TREE: {
+  [K in Tree['t']]: (repo: string, tree: Extract<Tree, { t: K }>) => Promise<void>;
+} = {
+  none: async () => {},
+  dir: async () => {},
+  checkout: async () => {},
+  detached: async (repo, tree) => {
+    await exec('git', repo, ['worktree', 'remove', '--force', tree.path]);
+    await rm(tree.path, { recursive: true, force: true });
+    await exec('git', repo, ['worktree', 'prune']);
+  },
+};
+const removeTree = (repo: string, tree: Tree): Promise<void> =>
+  REMOVE_TREE[tree.t](repo, tree as never);

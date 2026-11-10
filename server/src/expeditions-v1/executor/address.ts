@@ -47,6 +47,8 @@ export type RunPaths = {
   readonly tree: string;
   /** HOME and TMPDIR of the process. */
   readonly scratch: string;
+  /** A `tree: 'none'` call's working directory (kept after it ends). */
+  readonly work: string;
 };
 export function runPaths(expDir: string, runId: string): RunPaths {
   const name = fileNameOf(runId);
@@ -55,5 +57,6 @@ export function runPaths(expDir: string, runId: string): RunPaths {
     record: path.join(expDir, 'runs', `${name}.json`),
     tree: path.join(dir, 'tree'),
     scratch: path.join(dir, 'scratch'),
+    work: path.join(dir, 'work'),
   };
 }

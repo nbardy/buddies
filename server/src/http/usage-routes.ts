@@ -1,13 +1,15 @@
-import type { UsageGroup, UsageQuery } from '@unleashd/ingest';
+import type { UsageQuery } from '@unleashd/ingest';
 import type { Provider as ProviderName } from '@unleashd/shared';
 import type { Express } from 'express';
 import { z } from 'zod';
 import type { IngestAccessor, IngestReads } from '../ingest/instance';
+import { estimateUsd } from '../providers/pricing';
 
 // GET /api/usage?days=N (default 30). Pattern: one-write-path (docs/patterns.md#one-write-path)
 // A read model of the ingest store's per-request `usage_turn` rows: ~10 ms, where re-parsing
 // transcripts took 16.5 s (T13a). Windows count requests by their own time (UTC days), not a
 // session's mtime ($10,234 vs $8,570, 2026-09-25). Guard: usage-context-async-parity.test.ts.
+// Prices: providers/pricing.ts `estimateUsd` (the panel's per-provider estimate).
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -53,39 +55,6 @@ export interface UsageResponse {
   rateLimits: Record<ProviderName, RateLimit[]>;
 }
 
-// Approximate list prices per 1M tokens (early 2026). OpenAI bills cached input at a tenth of the
-// input rate; `input` is already the UNCACHED part for every provider (the crate splits Codex's
-// cached subset out). Gemini/Cursor/Muse record no usage; they carry the OpenAI-like row.
-interface Rates {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
-const OPENAI_LIKE: Rates = { input: 2.5, output: 10, cacheRead: 0.25, cacheWrite: 0 };
-const RATES: Record<ProviderName, Rates> = {
-  claude: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  codex: OPENAI_LIKE,
-  opencode: OPENAI_LIKE,
-  gemini: OPENAI_LIKE,
-  cursor: OPENAI_LIKE,
-  muse: OPENAI_LIKE,
-  pi: OPENAI_LIKE,
-};
-
-/** A provider-recorded cost (OpenCode) wins over the estimate; `reportedCostUsd` is 0 when none. */
-function costUsd(provider: ProviderName, g: UsageGroup): number {
-  if (g.reportedCostUsd > 0) return g.reportedCostUsd;
-  const r = RATES[provider];
-  return (
-    (g.input * r.input +
-      g.output * r.output +
-      g.cacheRead * r.cacheRead +
-      g.cacheWrite * r.cacheWrite) /
-    1_000_000
-  );
-}
-
 const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 async function sessionsIn(ingest: IngestReads, query: Omit<UsageQuery, 'groupBy'>) {
@@ -101,7 +70,7 @@ async function sessionsIn(ingest: IngestReads, query: Omit<UsageQuery, 'groupBy'
             outputTokens: g.output,
             cacheReadTokens: g.cacheRead,
             cacheWriteTokens: g.cacheWrite,
-            costUsd: costUsd(g.key.provider, g),
+            costUsd: estimateUsd(g.key.provider, g),
             date: utcDay(g.lastAt),
           },
         ]

@@ -243,6 +243,27 @@ carries `maxMinutes` (its call's `max.minutes`); a command runs in a detached `g
 (step 4 needs it and the launch line does not have it); record and ref file names are a slug plus
 24 hex of the id's sha256 (keys can be long and hold any character).
 
+Built (2026-11-11, uncommitted): **step 4.** Agent calls and review judges are Buddy requests in
+`server/src/expeditions-v1/executor/calls.ts` (records `posting` → `posted` → `settled`; key
+`xk:<runId>`; purpose `expedition_call`; evidence `expedition-run:<runId>`), with the typed answer in
+`answer.ts`, the request body in `request.ts`, the seat Buddy in `seat.ts`, usage in `usage.ts`
+over the shared price table `server/src/providers/pricing.ts`, the turn directory in
+`expeditions-v1/call-directory.ts` and named-Buddy providers in `expeditions-v1/providers.ts`. Live
+hooks, each inert unless the run's request carries purpose `expedition_call`: the `call` grant role
+(no tools; `tools/list` still answers), `TurnDirectory.call`, no memory review after a `call` grant
+(`grants.ts` `REVIEWS_MEMORY`), and the owner's / a Buddy's run cancel and retry refused
+(`buddies/expedition-calls.ts`). Tests: `expeditions-v1-agent-runs` and
+`expeditions-v1-agent-restarts`, on a real backend that runs the executor inside it
+(`test/fixtures/expedition-backend.ts`). Choices the plan left open: `launched` carries
+`workspace` (`{t:'none'}` by default for older logs, and an agent call there errors); a review run
+spec carries its call's `max`; status never settles (a settle can wait up to 60 s on ingest, and
+boot recovery reads every status in the kernel's queue), it schedules an observation; the settled
+record keeps its `stop`; a cancelled agent call stores a ref with `out: null` (its partial: base
+commit or branch tip, and the salvage ref); the seat's run cap only grows, to max(12, Σ pools).
+Known limits: the crate has no per-request deadline, so a capped call's crate run reads "cancelled
+by request" (the executor's record says `stop: minutes|usd`); no per-model price exists for any
+Codex model, so a Codex call reports `unreported`.
+
 | # | Change | Test through a real boundary | Risk |
 |---|---|---|---|
 | 1 | Kernel: `wake(runId, …)`; `labelled` timer at `runner.ts:143`; a real `Clock`; types and `timelineOf` move to `shared/src/expedition-keyed.ts`; the `KeyedView` projection | e2e suite unchanged; a projection JSON round trip | low |

@@ -15,7 +15,7 @@ import { keyedViewOf } from '../src/expedition-kernel/projection';
 import type { Authored } from '../src/expedition-kernel/protocol';
 import { HostExecutor } from '../src/expeditions-v1/executor';
 import { putRef } from '../src/expeditions-v1/executor/refs';
-import { hostDeps } from './fixtures/expedition-host';
+import { NO_CALLS, hostDeps } from './fixtures/expedition-host';
 import { tempDir } from './fixtures/temp';
 
 // The executor core (CONNECT_PLAN §8 step 2) through real boundaries: the REAL kernel over the
@@ -169,7 +169,7 @@ export default plan(async () => {
 });
 `
     );
-    const r = await launch(hostDeps(root).deps, root, folder, base);
+    const r = await launch(hostDeps(root).deps, root, folder, base, { t: 'none' });
     if (r.t !== 'launched') throw new Error(`rejected at ${r.gate}: ${r.issues.join('\n')}`);
     const e = r.expedition;
     opened.add(e);
@@ -314,7 +314,10 @@ async function seeded(repo: string, base: string): Promise<{ ex: HostExecutor; d
     })
   );
   await store.close();
-  return { ex: new HostExecutor({ root, home: os.homedir(), clock: systemClock }), dir };
+  return {
+    ex: new HostExecutor({ root, home: os.homedir(), clock: systemClock, calls: NO_CALLS }),
+    dir,
+  };
 }
 const commandSpec = (key: string, command: string, on: keyed.Base, output: unknown): RunSpec => ({
   t: 'command',

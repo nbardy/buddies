@@ -5,7 +5,9 @@ import type { BuddyPolicyPort } from '../../src/buddies/policy-port';
 import { TURN_MAX_RUNTIME_MS } from '../../src/constants/timeouts';
 import { Conversation } from '../../src/conversations/runtime';
 
-const FIXTURE_GRANT = { token: 'fixture-grant' } as GrantRecord;
+// A worker's grant, as data (only `token` and `role` are read through this port: the role decides
+// whether a memory review follows the turn, grants.ts REVIEWS_MEMORY).
+const FIXTURE_GRANT = { token: 'fixture-grant', role: 'worker' } as GrantRecord;
 
 // Fixture: the Buddy module as the conversation runtime's Buddy policy sees it. The real port
 // (policy-port.ts over the crate, grants and runner) is exercised end to end by

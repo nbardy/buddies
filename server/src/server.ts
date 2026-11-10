@@ -123,6 +123,7 @@ import { type CrewRegistry, createBuddyPolicyPort } from './buddies/policy-port'
 import { type HostCommands, registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
+import { callDirectory, expeditionsV1Root } from './expeditions-v1/call-directory';
 import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
 import { registerExpeditionRoutes } from './expeditions/routes';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
@@ -349,13 +350,18 @@ const buddyEvents = createBuddyEvents();
 const backgroundWork = new BackgroundWork();
 // A grant lives as long as its run's lease at most; settle and turn end revoke it sooner.
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
-// A turn's directory: an expedition attempt run starts in its own worktree (expeditions
-// host.ts `turnDirectory`); every other Buddy turn in its workspace root.
+// A turn's directory: an expedition call runs in its own directory (expeditions-v1/
+// call-directory.ts; inert for any run whose request is not an `expedition_call`), an expedition
+// attempt run in its own worktree (expeditions host.ts `turnDirectory`), every other Buddy turn in
+// its workspace root.
+const expeditionCallsRoot = expeditionsV1Root(APP_DATA_DIR);
 const buddyBriefings = createBriefings(
   buddiesCore,
   () => installedAgent(),
   (context) =>
-    expeditionHost ? expeditionHost.turnDirectory(context) : Promise.resolve(WORKSPACE_DIRECTORY)
+    callDirectory(buddiesCore, expeditionCallsRoot, context, () =>
+      expeditionHost ? expeditionHost.turnDirectory(context) : Promise.resolve(WORKSPACE_DIRECTORY)
+    )
 );
 let buddyMcp: McpEndpoint | null = null;
 let expeditionHost: ExpeditionHost | null = null;

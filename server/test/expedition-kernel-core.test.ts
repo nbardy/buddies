@@ -127,7 +127,7 @@ class Host {
     readonly ex: SimExecutor = new SimExecutor(() => true)
   ) {
     this.nowMs = nowMs;
-    this.append({ t: 'launched', id: 'exp', contract, baseSha: 'base0' });
+    this.append({ t: 'launched', id: 'exp', contract, baseSha: 'base0', workspace: { t: 'none' } });
     this.append({
       t: 'plan',
       version: 0,

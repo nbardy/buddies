@@ -24,7 +24,7 @@ import {
   commonToolResultParts,
 } from '../turns/policy';
 import { BUDDY_BUILDER_BRIEFING } from './builder';
-import { type GrantRecord, adoptedGrant } from './grants';
+import { type GrantRecord, REVIEWS_MEMORY, adoptedGrant } from './grants';
 import { HARNESS_TURN } from './harness-steering';
 import type { BuddyPolicyPort, SessionScope } from './policy-port';
 import type { OwnedChatRun } from './runner';
@@ -573,8 +573,14 @@ export class BuddyTurnPolicy implements TurnPolicy {
       .then(() => this.host.processQueue()); // the owner message `gate` held for this settle
   }
 
+  // A turn whose grant role has no memory review (an expedition call, D4) takes no ticket, so
+  // `reviewCompleted` enqueues nothing for it. Live and adopted turns alike: both set the grant
+  // before `spawned`. Guard: expeditions-v1-agent-runs.test.ts "no memory review after a call".
   spawned(review: { attemptId: string; messageStart: number }): void {
-    this.reviewTicket = { ...review, context: this.turnContext() };
+    this.reviewTicket =
+      this.grant && !REVIEWS_MEMORY[this.grant.role]
+        ? null
+        : { ...review, context: this.turnContext() };
   }
 
   adoptionRecord(): PolicyAdoption {

@@ -242,10 +242,25 @@ export type OwnerAct = z.infer<typeof OwnerAct>;
 export const ReviewDecision = z.enum(['continue', 'rewrite', 'retry', 'stop']);
 export type ReviewDecision = z.infer<typeof ReviewDecision>;
 
+/** The Buddy workspace an expedition's agent calls run in (its seat Buddy lives there). A log
+ * written before step 4 has none: `.default` keeps it readable, and an agent call in it settles
+ * `errored` with that reason instead of guessing a workspace (CONNECT_PLAN §8 step 4). */
+export const LaunchWorkspace = z.discriminatedUnion('t', [
+  v('workspace', { id: nonEmpty }),
+  v('none', {}),
+]);
+export type LaunchWorkspace = z.infer<typeof LaunchWorkspace>;
+
 const at = { at: str };
 export const Entry = z.discriminatedUnion('t', [
   /** `id` names the expedition; every run id is derived from it (core/tables.ts `runIdOf`). */
-  v('launched', { ...at, id: nonEmpty, contract: Contract, baseSha: nonEmpty }),
+  v('launched', {
+    ...at,
+    id: nonEmpty,
+    contract: Contract,
+    baseSha: nonEmpty,
+    workspace: LaunchWorkspace.default({ t: 'none' }),
+  }),
   /** Owner only: the new Contract, whole. */
   v('contract', { ...at, contract: Contract, change: str }),
   v('plan', {

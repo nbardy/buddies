@@ -140,7 +140,7 @@ function watch(w: World, e: Expedition): Expedition {
   return e;
 }
 async function launched(w: World, folder: string): Promise<Expedition> {
-  const r = await launch(w.deps, w.root, folder, 'base0');
+  const r = await launch(w.deps, w.root, folder, 'base0', { t: 'none' });
   if (r.t !== 'launched') throw new Error(`launch rejected at ${r.gate}: ${r.issues.join('\n')}`);
   return watch(w, r.expedition);
 }
@@ -672,7 +672,7 @@ describe('expedition kernel end to end', () => {
 
     // At launch, a failed gate writes nothing at all.
     const w2 = world(gtmPolicy(orgs), leaderFor({}));
-    const r = await launch(w2.deps, w2.root, bad[0] as string, 'base0');
+    const r = await launch(w2.deps, w2.root, bad[0] as string, 'base0', { t: 'none' });
     assert.equal(r.t === 'rejected' && r.gate, 'typecheck');
     assert.deepEqual(readdirSync(w2.root), []);
   });

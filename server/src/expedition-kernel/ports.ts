@@ -31,12 +31,14 @@ export type RunSpec =
       readonly of: keyed.RefId;
       readonly maxMinutes: number;
     }
-  /** `by` reviews the output at `of` against `brief` and says `ok` or `no`. */
+  /** `by` reviews the output at `of` against `brief` and says `ok` or `no`, within `max` (its
+   * call's: a judge shares its producer's bound). */
   | {
       readonly t: 'review';
       readonly by: keyed.Who;
       readonly brief: string;
       readonly of: keyed.RefId;
+      readonly max: keyed.Max;
     };
 
 export type RawOutcome =

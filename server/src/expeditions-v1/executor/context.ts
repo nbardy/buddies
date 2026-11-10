@@ -16,6 +16,11 @@ export type ExpeditionContext = {
   readonly repo: string;
   /** What a `{ t: 'launch' }` base names. */
   readonly baseSha: string;
+  /** The Buddy workspace its agent calls run in (its seat Buddy's). */
+  readonly workspace: keyed.LaunchWorkspace;
+  /** Σ of the contract's pool caps: the most calls it may run at once, so the least run slots
+   * its seat Buddy needs (seat.ts). */
+  readonly poolSlots: number;
 };
 
 export class ContextRegistry {
@@ -48,6 +53,8 @@ export class ContextRegistry {
       dir,
       repo: expandHome(entry.contract.repo, this.home),
       baseSha: entry.baseSha,
+      workspace: entry.workspace,
+      poolSlots: Object.values(entry.contract.pools).reduce((n, cap) => n + cap, 0),
     };
   }
 }

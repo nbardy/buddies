@@ -15,45 +15,43 @@ const PRODUCER: PerCall<ProducerRun> = {
   agent: (call) => ({ t: 'executor', spec: { t: 'agent', call } }),
   command: (call) => ({ t: 'executor', spec: { t: 'command', call } }),
   ask: (call) => ({ t: 'executor', spec: { t: 'ask', call } }),
-  verdict: (call) => ({
-    t: 'executor',
-    spec: verdictSpec(call.verdict, call.of, call.max.minutes),
-  }),
+  verdict: (call) => ({ t: 'executor', spec: verdictSpec(call.verdict, call.of, call.max) }),
   leader: (call) => ({ t: 'leader', call }),
 };
 export const producerRun = (call: keyed.Call): ProducerRun => PRODUCER[call.t](call as never);
 
-/** `minutes` bounds a host-run check: the call's `max.minutes` (a judge shares its call's bound;
- * a done criterion has the host's `doneReview` limit). A review's bound is its agent run's. */
+/** `max` is the call's (a judge shares its call's bound; a done criterion has the host's
+ * `doneReview` limit): its minutes bound a host-run check, and a review's agent run is capped at
+ * both (the executor's minutes timer and usage poll). */
 const VERDICT: {
   [K in keyed.Verdict['t']]: (
     v: Extract<keyed.Verdict, { t: K }>,
     of: keyed.RefId,
-    minutes: number
+    max: keyed.Max
   ) => RunSpec;
 } = {
-  check: (v, of, minutes) => ({ t: 'check', command: v.command, of, maxMinutes: minutes }),
-  review: (v, of) => ({ t: 'review', by: v.by, brief: v.brief, of }),
+  check: (v, of, max) => ({ t: 'check', command: v.command, of, maxMinutes: max.minutes }),
+  review: (v, of, max) => ({ t: 'review', by: v.by, brief: v.brief, of, max }),
 };
-const verdictSpec = (v: keyed.Verdict, of: keyed.RefId, minutes: number): RunSpec =>
-  VERDICT[v.t](v as never, of, minutes);
+const verdictSpec = (v: keyed.Verdict, of: keyed.RefId, max: keyed.Max): RunSpec =>
+  VERDICT[v.t](v as never, of, max);
 
 /** The judge run of a judged agent call, on what its producer stored at `of`. */
 export function judgeSpec(call: keyed.AgentCall, of: keyed.RefId): RunSpec {
-  return JUDGE_SPEC[call.judge.t](call.judge as never, of, call.max.minutes);
+  return JUDGE_SPEC[call.judge.t](call.judge as never, of, call.max);
 }
 const JUDGE_SPEC: {
   [K in keyed.CallJudge['t']]: (
     j: Extract<keyed.CallJudge, { t: K }>,
     of: keyed.RefId,
-    minutes: number
+    max: keyed.Max
   ) => RunSpec;
 } = {
   none: () => {
     throw new Error('an unjudged call has no judge run');
   },
-  check: (j, of, minutes) => verdictSpec(j, of, minutes),
-  review: (j, of, minutes) => verdictSpec(j, of, minutes),
+  check: (j, of, max) => verdictSpec(j, of, max),
+  review: (j, of, max) => verdictSpec(j, of, max),
 };
 
 /** The judge run of a call that produced: only a judged agent call does. */

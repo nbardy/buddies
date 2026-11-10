@@ -33,7 +33,8 @@ export const RefRecord = z
   .strict();
 export type RefRecord = z.infer<typeof RefRecord>;
 
-const paths = (expDir: string, ref: keyed.RefId) => {
+/** Where a ref's record and answer file are. */
+export const refFilesOf = (expDir: string, ref: keyed.RefId) => {
   const name = fileNameOf(ref);
   return {
     record: path.join(expDir, 'refs', `${name}.json`),
@@ -43,7 +44,7 @@ const paths = (expDir: string, ref: keyed.RefId) => {
 
 /** The answer file first, then the record: a record never points at a missing answer. */
 export async function putRef(expDir: string, r: Omit<RefRecord, 'answerPath'>): Promise<RefRecord> {
-  const at = paths(expDir, r.ref);
+  const at = refFilesOf(expDir, r.ref);
   await writeJsonAtomic(at.answer, r.out);
   const record = RefRecord.parse({ ...r, answerPath: at.answer });
   await writeJsonAtomic(at.record, record);
@@ -51,4 +52,4 @@ export async function putRef(expDir: string, r: Omit<RefRecord, 'answerPath'>): 
 }
 
 export const getRef = (expDir: string, ref: keyed.RefId): Promise<Read<RefRecord>> =>
-  readJson(paths(expDir, ref).record, RefRecord);
+  readJson(refFilesOf(expDir, ref).record, RefRecord);

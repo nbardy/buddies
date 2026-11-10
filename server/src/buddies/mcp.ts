@@ -2,6 +2,7 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import type { AddressInfo } from 'node:net';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { Actor, ChannelRef, DocRef, DocScope, ListScope, Post } from '@unleashd/buddies-core';
 import type { SteerBoundary, TaskQuery, ThreadUnread } from '@unleashd/buddies-core';
@@ -30,6 +31,7 @@ import {
   taskDetail,
 } from './core';
 import { type BuddyEvents, NO_PICKS, announcePost } from './events';
+import { refuseExpeditionCallRun } from './expedition-calls';
 import type { BuddyGrant, Grants, OwnerChat, Role, TurnGrant } from './grants';
 import { attachToRelay } from './mcp-relay';
 import { resolveForWorkspace, wakes } from './mentions';
@@ -634,11 +636,13 @@ const BUDDY_TOOLS = {
             : { ...run, tail: await runTail(deps.messages, run, tail) };
         }
         case 'cancel': {
+          await refuseExpeditionCallRun(deps.core, input.action.runId, 'cancel');
           const run = await deps.core.cancelRun(grant.principal, input.action.runId);
           deps.events.emit({ kind: 'cancelled', run });
           return run;
         }
         case 'retry':
+          await refuseExpeditionCallRun(deps.core, input.action.runId, 'retry');
           // Attempt numbering and the request re-open live in the crate (runs.rs `retry_run`);
           // authority too. Only the model choice is checked here, against the catalog.
           return deps.core.retryRun(
@@ -810,8 +814,12 @@ export function toolsFor(role: Role): Record<string, Tool<TurnGrant>> {
       return REVIEWER_TOOLS as Record<string, Tool<TurnGrant>>;
     case 'builder':
       return { ...TEAM_TOOLS, ...BUILDER_TOOLS } as Record<string, Tool<TurnGrant>>;
+    // An expedition call answers with its final text and nothing else (grants.ts `Role`).
+    case 'call':
+      return NO_TOOLS;
   }
 }
+const NO_TOOLS: Record<string, Tool<TurnGrant>> = {};
 
 const toolsForGrant = (grant: TurnGrant): Record<string, Tool<TurnGrant>> => toolsFor(grant.role);
 
@@ -835,6 +843,7 @@ async function steeredThread(deps: ToolDeps, grant: TurnGrant): Promise<SteeredT
   if (
     grant.role === 'builder' ||
     grant.role === 'reviewer' ||
+    grant.role === 'call' ||
     !grant.runId ||
     grant.subscribes !== 'self'
   )
@@ -1120,12 +1129,20 @@ function mcpServerFor(deps: ToolDeps, grant: TurnGrant, show: (part: Shown) => v
   const server = new McpServer({ name: MCP_SERVER_NAME, version: '3' });
   const registry = server as unknown as ToolRegistry;
   const run = (name: string) => (input: unknown) => callTool(deps, grant, name, input, show);
-  for (const [name, entry] of Object.entries(toolsForGrant(grant))) {
+  const tools = Object.entries(toolsForGrant(grant));
+  for (const [name, entry] of tools) {
     registry.registerTool(
       name,
       { description: entry.description, inputSchema: entry.schema },
       run(name)
     );
+  }
+  // A role shown no tools (an expedition call) must still answer `tools/list`: the SDK installs
+  // that handler only on the first registerTool, and a server answering "Method not found" made
+  // the harness fail the turn at MCP startup (2026-11-11, expeditions-v1-agent-runs.test.ts).
+  if (tools.length === 0) {
+    server.server.registerCapabilities({ tools: {} });
+    server.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [] }));
   }
   return server;
 }
