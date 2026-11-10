@@ -16,6 +16,7 @@ import {
   barEndMs,
   boxOf,
   canRetry,
+  costText,
   diffLine,
   durationLabel,
   groupLanes,
@@ -59,9 +60,16 @@ export function Timeline({ view, now, selection, select }: Props) {
       <div className="keyed-expedition-scroll ui-scroll-quiet">
         <div className="keyed-expedition-plot">
           <AxisRow axis={axis} />
+          {/* The markers' own row: their labels sit here, never over a lane's bars. */}
+          <div className="keyed-expedition-row" aria-hidden="true">
+            <span className="ui-muted">Plan</span>
+            <div className="keyed-expedition-track" style={{ background: 'none' }} />
+          </div>
           {groupLanes(view.lanes).map((group) => (
             <section key={group.phase} className="keyed-expedition-phase">
-              <h4 className="keyed-expedition-phase-name ui-muted">{group.phase}</h4>
+              {group.phase !== '' && (
+                <h4 className="keyed-expedition-phase-name ui-muted">{group.phase}</h4>
+              )}
               {group.lanes.map((lane) => (
                 <LaneRow
                   key={lane.key}
@@ -227,6 +235,7 @@ function BarDetail({
               : `v${bar.planVersion}`,
           ],
           ['Ran', `${when(bar.start)} · ${span}`],
+          ['Cost', costText(bar.cost)],
         ]}
       />
       {canRetry(lane, bar) && (

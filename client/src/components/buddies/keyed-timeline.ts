@@ -95,8 +95,11 @@ export const ticksOf = (axis: Axis): Tick[] =>
 
 // ---- Lanes, grouped by the key's first path segment (the phase) ----
 
-/** `phase/step/id`: the phase is the first segment; a key with no slash is its own phase. */
-export const phaseOf = (key: string): string => key.split('/')[0];
+/** `phase/step/id`: the phase is the first segment. A key with no slash (a step outside any
+ * `phase(...)`) has none: it goes in the unnamed phase '', drawn without a heading. Seen on the
+ * first real run (2026-11-11): each such key was its own phase, so every lane read "probe" over
+ * "probe". */
+export const phaseOf = (key: string): string => (key.includes('/') ? key.split('/')[0] : '');
 
 export type Phase = { phase: string; lanes: Lane[] };
 /** Phases in the order they first appear; lanes keep the server's order inside each. */
@@ -237,6 +240,15 @@ export const diffLine = (d: keyed.Diff): string =>
 // ---- Header ----
 
 export const usd = (x: number): string => `$${x.toFixed(2)}`;
+
+const COST_TEXT: { [K in keyed.BarCost['t']]: (c: Extract<keyed.BarCost, { t: K }>) => string } = {
+  holding: (c) => `${usd(c.reservedUsd)} reserved while it runs`,
+  spent: (c) => usd(c.usd),
+  charged: (c) => `${usd(c.usd)} (no usage reported: charged its whole reservation)`,
+  unknown: () => 'not reported by this backend',
+};
+/** What one bar cost, in words (the bar detail's Cost row). */
+export const costText = (c: keyed.BarCost): string => COST_TEXT[c.t](c as never);
 export const goalLine = (goal: string): string => goal.split('\n')[0];
 
 export type Budget = { spent: number; reserved: number; over: boolean };
@@ -287,9 +299,11 @@ export const ACTS: { [K in keyed.KeyedStatus['t']]: readonly OwnerAct[] } = {
   finished: [],
 };
 
-/** Rows that need a closer look first: the ones still going, then the ones that ended. */
+/** Rows that need a closer look first: the ones waiting on the owner, then the ones still going,
+ * then the ones that ended (a stable sort keeps the server's newest-first order inside each). */
+const rankOf = (r: keyed.KeyedRow): number => (r.needsYou ? 0 : r.status.t === 'finished' ? 2 : 1);
 export const rankRows = (rows: readonly keyed.KeyedRow[]): keyed.KeyedRow[] =>
-  [...rows].sort((a, b) => Number(a.status.t === 'finished') - Number(b.status.t === 'finished'));
+  [...rows].sort((a, b) => rankOf(a) - rankOf(b));
 
 export const PLAN_LABEL: {
   [K in keyed.KeyedPlan['t']]: (p: Extract<keyed.KeyedPlan, { t: K }>) => string;

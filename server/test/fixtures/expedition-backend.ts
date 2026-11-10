@@ -4,13 +4,14 @@ import Module from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-// The REAL backend (src/server.ts, unchanged) with the keyed expedition host running INSIDE it, as
-// step 6 will compose it, for expeditions-v1-*.test.ts. The host is not wired into server.ts yet
-// (CONNECT_PLAN §8: boot and routes are step 6), so this entry captures the three objects server.ts
-// builds that the host needs (its Buddy core, its in-process event bus and its conversation
-// records) as server.ts creates them, then builds the host beside it with `createKeyedHost`, and
-// puts the host's `consumes` in front of the Buddy routes' HostCommands (what step 6 does in
-// server.ts). Why in the same process: a cancel stops a running turn only through the bus the
+// The REAL backend (src/server.ts, unchanged) with a keyed expedition host running INSIDE it, for
+// the expeditions-v1-* executor, owner and leader tests that drive the host's ports directly. Since
+// step 6 server.ts composes its own keyed host, but only with UNLEASHD_EXPEDITIONS_V1=1; these
+// tests leave the flag off, so the server's own is read-only and inert, and this entry captures the
+// three objects server.ts builds that a host needs (its Buddy core, its in-process event bus and
+// its conversation records), builds a host beside it with `createKeyedHost`, and puts the host's
+// `consumes` in front of the Buddy routes' HostCommands (as server.ts does with its own). The
+// real composition, boot and routes are tested by expeditions-v1-server.test.ts. Why in the same process: a cancel stops a running turn only through the bus the
 // runner listens on, and a SIGKILL of "the backend" must kill the host with it, as in production.
 //
 // Run: node --import tsx test/fixtures/expedition-backend.ts (the backend's own env, plus
@@ -238,10 +239,13 @@ async function main(): Promise<void> {
     });
   });
   server.listen(Number(process.env.EXP_CONTROL_PORT), '127.0.0.1', () => {
-    void host.start().then((failed) => {
-      for (const f of failed) console.warn(`[expedition-backend] owner book: ${f}`);
-      console.log('[expedition-backend] control ready');
-    });
+    void host
+      .load()
+      .then(async (failed) => {
+        for (const f of failed) console.warn(`[expedition-backend] owner book: ${f}`);
+        await host.start();
+      })
+      .then(() => console.log('[expedition-backend] control ready'));
   });
 }
 

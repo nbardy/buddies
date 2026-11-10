@@ -12,10 +12,12 @@ import { freePortSync } from '../free-port';
 import { NO_AUTO_INSTALL } from './backend-env';
 import { tempDir } from './temp';
 
-// The harness of expeditions-v1-agent-*.test.ts: the REAL backend (server.ts) with the executor
-// inside it (expedition-backend.ts), on temp stores (non-default data dir, so Buddy execution is
-// opted in with UNLEASHD_BUDDY_EXECUTION=1), a temp git repo, and a fake `claude` on a PATH that
-// holds no real agent CLI. The agent CLI is the only fake.
+// The harness of expeditions-v1-*.test.ts: the REAL backend (server.ts) on temp stores (non-default
+// data dir, so Buddy execution is opted in with UNLEASHD_BUDDY_EXECUTION=1), a temp git repo, and a
+// fake `claude` on a PATH that holds no real agent CLI. The agent CLI is the only fake. The entry
+// is either server.ts with a second keyed host beside it and a control port for its ports
+// (`expedition-backend`, expedition-backend.ts), or server.ts alone (`server`: its own keyed
+// host, driven through its HTTP routes, expeditions-v1-server.test.ts).
 
 // One CLI for every scenario, chosen by markers in its prompt (the request body is in it):
 // TAG:<name> names the turn's files in FAKE_DIR; MODE:<mode> picks what it does; ANSWER_JSON:<json>
@@ -98,6 +100,7 @@ async function main() {
   fs.appendFileSync(path.join(dir, 'spawns.log'), tag + ' ' + process.pid + '\n');
   mark(tag + '.pgid', execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
   mark(tag + '.cwd', process.cwd());
+  mark(tag + '.prompt', prompt);
   const tools = mcp();
   if (tools) mark(tag + '.tools', JSON.stringify((await rpc(tools, 'tools/list', {})).result.tools.map((t) => t.name)));
   text('working;');
@@ -143,7 +146,19 @@ export type Settled = {
 
 export const TOKEN = 'c9f5e2ab14d36870c9f5e2ab14d36870';
 const SERVER_DIR = path.resolve(__dirname, '..', '..');
-const ENTRY = path.join(__dirname, 'expedition-backend.ts');
+/** What `boot` runs, and what on its stdout says it is ready (the scheduler line is the last step
+ * of startup; with execution disabled it reads "Buddy runner not started"). */
+const ENTRIES = {
+  'expedition-backend': {
+    file: path.join(__dirname, 'expedition-backend.ts'),
+    ready: (seen: string) =>
+      seen.includes('Buddy runner started') && seen.includes('[expedition-backend] control ready'),
+  },
+  server: {
+    file: path.join(SERVER_DIR, 'src', 'server.ts'),
+    ready: (seen: string) => /Buddy runner (not )?started/.test(seen),
+  },
+} as const;
 
 export const git = (cwd: string, ...args: string[]): string =>
   execFileSync(
@@ -154,7 +169,8 @@ export const git = (cwd: string, ...args: string[]): string =>
 
 export type Harness = ReturnType<typeof harness>;
 
-export function harness(name: string) {
+export function harness(name: string, entry: keyof typeof ENTRIES = 'expedition-backend') {
+  const ENTRY = ENTRIES[entry];
   const root = fs.realpathSync(tempDir(`unleashd-${name}-`));
   const home = path.join(root, 'home');
   const fakeDir = path.join(root, 'fake');
@@ -186,7 +202,10 @@ export function harness(name: string) {
   const cambium = path.dirname(execFileSync('which', ['git-cambium'], { encoding: 'utf8' }).trim());
 
   async function boot(label: string, extra: Record<string, string> = {}): Promise<void> {
-    const child = spawn(process.execPath, ['--import', 'tsx', ENTRY], {
+    // A backend still up (a test that failed before its stop) would hold the port and, orphaned,
+    // keep the test process alive until the runner's 10-minute kill.
+    await kill();
+    const child = spawn(process.execPath, ['--import', 'tsx', ENTRY.file], {
       cwd: SERVER_DIR,
       env: {
         ...process.env,
@@ -232,10 +251,7 @@ export function harness(name: string) {
       child.stdout?.on('data', (chunk: Buffer) => {
         record(chunk);
         seen += chunk.toString();
-        if (
-          seen.includes('Buddy runner started') &&
-          seen.includes('[expedition-backend] control ready')
-        ) {
+        if (ENTRY.ready(seen)) {
           clearTimeout(timer);
           resolve();
         }
@@ -253,6 +269,16 @@ export function harness(name: string) {
     const exited = new Promise((resolve) => child.once('exit', resolve));
     child.kill('SIGKILL');
     await exited;
+  }
+
+  /** A clean shutdown (what a reload or Ctrl-C does): SIGTERM, then wait for the exit. */
+  async function stop(): Promise<number | null> {
+    const child = backend;
+    backend = null;
+    if (!child || child.exitCode !== null) return child?.exitCode ?? null;
+    const exited = new Promise<number | null>((resolve) => child.once('exit', resolve));
+    child.kill('SIGTERM');
+    return exited;
   }
 
   async function http(method: string, route: string, body?: unknown) {
@@ -308,11 +334,13 @@ export function harness(name: string) {
     root,
     home,
     data,
+    port,
     repo,
     base,
     log,
     boot,
     kill,
+    stop,
     http,
     ex,
     eventually,

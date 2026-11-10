@@ -7,7 +7,8 @@ import type { ExpeditionView } from './ports';
 // here is plain JSON with every field present, grouped the way a client draws it (one lane per
 // key), so the client derives nothing.
 
-export function keyedRowOf(s: State): keyed.KeyedRow {
+/** `approval` is the Owner port's: the kernel does not hold a rewrite waiting for the owner. */
+export function keyedRowOf(s: State, approval: keyed.PendingApproval): keyed.KeyedRow {
   return {
     id: s.id,
     goal: s.contract.goal,
@@ -18,10 +19,16 @@ export function keyedRowOf(s: State): keyed.KeyedRow {
     budget: { ...s.contract.budget },
     launchedAt: new Date(s.launchedAtMs).toISOString(),
     deadline: new Date(s.deadlineMs).toISOString(),
+    needsYou: s.pendingAsks.size > 0 || APPROVAL_WAITS[approval.t],
+    workspace: s.workspace,
   };
 }
 
-/** `approval` is the Owner port's: the kernel does not hold a rewrite waiting for the owner. */
+const APPROVAL_WAITS: { readonly [K in keyed.PendingApproval['t']]: boolean } = {
+  none: false,
+  pending: true,
+};
+
 export function keyedViewOf(
   view: ExpeditionView,
   approval: keyed.PendingApproval
@@ -35,7 +42,7 @@ export function keyedViewOf(
     return { key, kind: newest.call.t, status: newest.status.t, bars: barsByKey.get(key) ?? [] };
   });
   return {
-    ...keyedRowOf(s),
+    ...keyedRowOf(s, approval),
     lanes,
     markers: [...view.timeline.markers],
     asks: pendingAsks(s, view.timeline),

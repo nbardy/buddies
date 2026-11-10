@@ -86,8 +86,13 @@ type Close<K extends OnDisk['t']> = (
 
 export class HostExecutor implements Executor {
   private readonly listeners = new Set<Listener>();
-  /** Runs this process started and has not settled: the means to stop each. */
-  private readonly live = new Map<string, AbortController>();
+  /** Host runs this process started and has not settled: the means to stop each, and its work. */
+  private readonly live = new Map<
+    string,
+    { readonly abort: AbortController; readonly work: Promise<void> }
+  >();
+  /** Set by `shutdown`: a host run that ends now is not settled (see `shutdown`). */
+  private closing = false;
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly contexts: ContextRegistry;
   /** Leader wakes waiting for their run to end, by run id. */
@@ -219,7 +224,6 @@ export class HostExecutor implements Executor {
       process: { t: 'starting' },
     });
     const abort = new AbortController();
-    this.live.set(runId, abort);
     const h: HostRun = {
       address: run.address,
       ctx: run.ctx,
@@ -227,9 +231,22 @@ export class HostExecutor implements Executor {
       signal: abort.signal,
       onSpawn: (pid) => void this.spawned(run.paths, runId, pid),
     };
-    void work(h)
+    const working = work(h)
       .catch((e: unknown): RawOutcome => ({ t: 'errored', why: (e as Error).message }))
       .then((raw) => this.settle(run.paths, runId, raw));
+    this.live.set(runId, { abort, work: working });
+  }
+
+  /** The server is shutting down (CONNECT_PLAN §3): kill every command and check this process
+   * runs, each process group, and wait until each has ended and its tree is gone. Their records
+   * stay `running` under this host's pid, so the next host reaps them `errored` (D6) exactly as
+   * after a crash: a shutdown never settles a run `cancelled` (the kernel would read that as the
+   * owner's cancel). Buddy calls and asks are untouched: their turns are adopted at the next boot. */
+  async shutdown(): Promise<void> {
+    this.closing = true;
+    const running = [...this.live.values()];
+    for (const r of running) r.abort.abort();
+    await Promise.all(running.map((r) => r.work));
   }
 
   // ---- internals ----
@@ -243,6 +260,8 @@ export class HostExecutor implements Executor {
   private settle(paths: RunPaths, runId: string, raw: RawOutcome): Promise<void> {
     return this.serial(runId, async () => {
       this.live.delete(runId);
+      // Killed by `shutdown`: the next host reaps the `running` record.
+      if (this.closing) return;
       const found = await readRecord(paths.record);
       // Closed meanwhile (the kernel settled the call): nothing may report under it.
       if (found.t === 'missing' || found.value.t !== 'running') return;
@@ -282,7 +301,7 @@ export class HostExecutor implements Executor {
    * finds the tombstone and reports nothing). What it settled as, if it did. */
   async stop(at: Located, r: Running): Promise<Last> {
     if (!this.isOrphan(r)) {
-      this.live.get(r.runId)?.abort();
+      this.live.get(r.runId)?.abort.abort();
       return { t: 'never-settled' };
     }
     const reaped = await this.reap(at, r);

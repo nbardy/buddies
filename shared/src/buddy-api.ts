@@ -12,7 +12,7 @@ import type {
 import { z } from 'zod';
 import { OwnerPostMentionConfigSchema } from './buddy-channel-posts.js';
 import { type ConversationConfig, ConversationConfigSchema } from './conversation-config.js';
-import type { KeyedView } from './expedition-keyed.js';
+import type { KeyedPreview, KeyedView } from './expedition-keyed.js';
 import { Act, type Expedition } from './expedition.js';
 import type { UpstreamUpdateResult } from './upstream.js';
 
@@ -224,6 +224,14 @@ const KeyedAnswerSchema = z.union([
   z.object({ confirm: z.boolean() }).strict(),
 ]);
 const KeyedApprovalSchema = z.object({ approve: z.boolean() }).strict();
+/** A plan folder on the server's disk (contract.md, plan.ts, briefs/): absolute, never relative to
+ * the server's cwd. */
+const PlanFolder = z
+  .string()
+  .min(1)
+  .refine((p) => p.startsWith('/'), 'must be an absolute path');
+const KeyedPreviewSchema = z.object({ folder: PlanFolder }).strict();
+const KeyedLaunchSchema = z.object({ workspaceId: z.string().min(1), folder: PlanFolder }).strict();
 export const BuddyDocKindSchema = z.enum(['soul', 'working', 'long_term', 'shared']);
 // Pattern: table-driven (docs/patterns.md#table-driven)
 // This table owns the wire: client paths, methods and bodies; server routes and success statuses.
@@ -396,6 +404,20 @@ export const buddyMutations = {
     status: 200,
     body: KeyedApprovalSchema,
   },
+  // The gates on a plan folder, run without writing anything (a rejected plan is a 200 too).
+  'keyed.preview': {
+    method: 'POST',
+    path: '/api/buddies/keyed-expeditions/preview',
+    status: 200,
+    body: KeyedPreviewSchema,
+  },
+  // Owner HTTP only (CONNECT_PLAN §7.2): no Buddy tool reaches it.
+  'keyed.launch': {
+    method: 'POST',
+    path: '/api/buddies/keyed-expeditions/launch',
+    status: 201,
+    body: KeyedLaunchSchema,
+  },
 } as const;
 
 export type BuddyMutation = keyof typeof buddyMutations;
@@ -403,7 +425,13 @@ export type BuddyMutation = keyof typeof buddyMutations;
  * (server/src/upstream, server/src/expeditions). */
 export type BuddyRouteMutation = Exclude<
   BuddyMutation,
-  'upstream.update' | 'expedition.act' | 'keyed.act' | 'keyed.answer' | 'keyed.approval'
+  | 'upstream.update'
+  | 'expedition.act'
+  | 'keyed.act'
+  | 'keyed.answer'
+  | 'keyed.approval'
+  | 'keyed.preview'
+  | 'keyed.launch'
 >;
 type Contract<K extends BuddyMutation> = (typeof buddyMutations)[K];
 export type BuddyMutationBody<K extends BuddyMutation> = z.input<Contract<K>['body']>;
@@ -464,6 +492,8 @@ export interface BuddyMutationResults {
   'keyed.act': KeyedView;
   'keyed.answer': KeyedView;
   'keyed.approval': KeyedView;
+  'keyed.preview': KeyedPreview;
+  'keyed.launch': KeyedView;
 }
 export type BuddyMutationRoute<K extends BuddyMutation> =
   `${Contract<K>['method']} ${Contract<K>['status']} ${Contract<K>['path']}`;

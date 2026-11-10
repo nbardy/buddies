@@ -61,6 +61,8 @@ export type State = {
   readonly id: string;
   readonly contract: keyed.Contract;
   readonly baseSha: string;
+  /** The Buddy workspace its agent calls run in (the `launched` entry's). */
+  readonly workspace: keyed.LaunchWorkspace;
   readonly launchedAtMs: number;
   /** Owner `extend` acts, summed. */
   readonly extendedHours: number;
@@ -192,6 +194,7 @@ function launch(e: keyed.Entry): State {
     id: e.id,
     contract: e.contract,
     baseSha: e.baseSha,
+    workspace: e.workspace,
     launchedAtMs,
     extendedHours: 0,
     deadlineMs: deadlineOf(launchedAtMs, e.contract, 0),

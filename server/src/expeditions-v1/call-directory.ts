@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { BuddyContext } from '@unleashd/shared';
 import type { TurnDirectory } from '../buddies/briefing';
 import { type BuddiesCore, OWNER, coreError } from '../buddies/core';
-import { EXPEDITION_CALL_PURPOSE, EXPEDITION_RUN_EVIDENCE } from '../buddies/expedition-calls';
+import { requestSeatOf } from '../buddies/expedition-calls';
 import { recordPathOf } from './executor/calls';
 import { readRecord } from './executor/records';
 
@@ -40,9 +40,9 @@ export async function callDirectory(
   });
   if (run === null || run.input.kind !== 'post') return otherwise();
   const post = await core.getPost(OWNER, run.input.postId);
-  const tag = post.evidence.find((e) => e.startsWith(EXPEDITION_RUN_EVIDENCE));
-  if (post.purpose !== EXPEDITION_CALL_PURPOSE || tag === undefined) return otherwise();
-  const kernelRunId = tag.slice(EXPEDITION_RUN_EVIDENCE.length);
+  const seat = requestSeatOf(post);
+  if (seat.t === 'buddy') return otherwise();
+  const { kernelRunId } = seat;
   const found = await readRecord(recordPathOf(root, kernelRunId));
   const refuse = (why: string): never => {
     throw new Error(`expedition call ${kernelRunId} (run ${runId}) may not run: ${why}`);

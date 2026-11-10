@@ -126,20 +126,41 @@ test('the rail shows nothing extra when the list route is missing', async () => 
   assert.equal(rail(), '');
 });
 
-test('the rail marks "needs you" only for an expedition with an ask or an approval pending', async () => {
+// The row says whether the owner is wanted (KeyedRow.needsYou): the rail reads no view per row,
+// so nothing is primed here. Before step 6 it polled every live row's view to learn it.
+test('the rail marks "needs you" from the row, and lists only its own workspace', async () => {
   await loadResource({ key: EXPEDITIONS_URL, load: async () => [] });
   await loadResource({ key: `${EXPEDITIONS_URL}/retired`, load: async () => [] });
-  const quiet = { ...runningWithAsks, id: 'ex-quiet', goal: 'Quiet one', asks: [] };
-  await prime(quiet);
-  await prime(awaitingApproval);
+  const quiet = {
+    ...runningWithAsks,
+    id: 'ex-quiet',
+    goal: 'Quiet one',
+    asks: [],
+    needsYou: false,
+  };
+  const elsewhere = {
+    ...awaitingApproval,
+    id: 'ex-elsewhere',
+    goal: 'Another workspace',
+    workspace: { t: 'workspace', id: 'ws-2' } as const,
+  };
+  const unplaced = {
+    ...quiet,
+    id: 'ex-old',
+    goal: 'Launched before workspaces',
+    workspace: { t: 'none' } as const,
+  };
   await loadResource({
     key: KEYED_URL,
-    load: async () => [rowOf(quiet), rowOf(awaitingApproval)],
+    load: async () => [rowOf(quiet), rowOf(awaitingApproval), rowOf(elsewhere), rowOf(unplaced)],
   });
-  const [, quietRow, approvalRow] = rail().split('<li>');
+  const html = rail();
+  assert.doesNotMatch(html, /Another workspace|Launched before workspaces/);
+  // Waiting on the owner ranks first.
+  const [, approvalRow, quietRow] = html.split('<li>');
+  assert.match(approvalRow, /Approve the rewrite/);
+  assert.match(approvalRow, />needs you</);
   assert.match(quietRow, /Quiet one/);
   assert.doesNotMatch(quietRow, /needs you/);
   assert.match(quietRow, />Running</);
-  assert.match(approvalRow, /Approve the rewrite/);
-  assert.match(approvalRow, />needs you</);
 });

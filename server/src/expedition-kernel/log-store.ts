@@ -77,24 +77,13 @@ export class LogStore {
 
   static async open(dir: string): Promise<Opened> {
     const file = path.join(dir, LOG);
-    const text = await readFile(file, 'utf8');
-    const end = text.lastIndexOf('\n') + 1;
-    const torn = text.slice(end);
-    const repair: Repair =
-      torn === ''
-        ? { t: 'clean' }
-        : { t: 'truncated-torn-line', bytes: Buffer.byteLength(torn), text: torn };
-    const entries = text
-      .slice(0, end)
-      .split('\n')
-      .slice(0, -1)
-      .map((line, i) => parseLine(file, i + 1, line));
+    const read = parseLog(file, await readFile(file, 'utf8'));
     const fh = await open(file, constants.O_WRONLY | constants.O_APPEND);
-    if (repair.t !== 'clean') {
-      await fh.truncate(Buffer.byteLength(text.slice(0, end)));
+    if (read.repair.t !== 'clean') {
+      await fh.truncate(read.wholeBytes);
       await fh.sync();
     }
-    return { store: new LogStore(dir, fh), entries, repair };
+    return { store: new LogStore(dir, fh), entries: read.entries, repair: read.repair };
   }
 
   /** Durable when it resolves: the line is written and fsync'd. */
@@ -147,6 +136,42 @@ export class LogStore {
     for (const v of stale) await this.removePlan(v);
     return stale;
   }
+}
+
+/** A log as it is on disk, for a reader that must not write: the keyed host's read-only mode
+ * (expeditions-v1/shelf.ts). It never opens the file for writing, so a torn last line stays on
+ * disk and is only reported (`LogStore.open` truncates it; a reader must not race a writer). */
+export type Tail =
+  | { readonly t: 'clean' }
+  /** The last line has no newline (an append in flight, or cut off by a crash): left out. */
+  | { readonly t: 'torn-last-line'; readonly bytes: number };
+export type ReadLog = { readonly entries: keyed.Entry[]; readonly tail: Tail };
+export async function readLog(dir: string): Promise<ReadLog> {
+  const file = path.join(dir, LOG);
+  const { entries, repair } = parseLog(file, await readFile(file, 'utf8'));
+  return {
+    entries,
+    tail: repair.t === 'clean' ? repair : { t: 'torn-last-line', bytes: repair.bytes },
+  };
+}
+
+/** Every complete line as an entry; a last line with no newline is torn (see LogCorrupt). */
+function parseLog(
+  file: string,
+  text: string
+): { entries: keyed.Entry[]; repair: Repair; wholeBytes: number } {
+  const end = text.lastIndexOf('\n') + 1;
+  const torn = text.slice(end);
+  const repair: Repair =
+    torn === ''
+      ? { t: 'clean' }
+      : { t: 'truncated-torn-line', bytes: Buffer.byteLength(torn), text: torn };
+  const entries = text
+    .slice(0, end)
+    .split('\n')
+    .slice(0, -1)
+    .map((line, i) => parseLine(file, i + 1, line));
+  return { entries, repair, wholeBytes: Buffer.byteLength(text.slice(0, end)) };
 }
 
 function parseLine(file: string, line: number, text: string): keyed.Entry {

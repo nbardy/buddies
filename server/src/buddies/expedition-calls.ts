@@ -1,3 +1,4 @@
+import type { Post } from '@unleashd/buddies-core';
 import { type BuddiesCore, CoreError, OWNER } from './core';
 
 // Expedition calls (expeditions-v1/executor/calls.ts) are Buddy requests whose runs only their
@@ -11,6 +12,19 @@ import { type BuddiesCore, CoreError, OWNER } from './core';
 export const EXPEDITION_CALL_PURPOSE = 'expedition_call';
 /** Evidence on that post naming the kernel's run id: `expedition-run:<runId>`. */
 export const EXPEDITION_RUN_EVIDENCE = 'expedition-run:';
+
+/** What a request post asks of the turn that answers it: an expedition call (both the purpose
+ * and the run evidence; the executor's record is checked where the turn's directory is chosen,
+ * expeditions-v1/call-directory.ts) or an ordinary Buddy request. */
+export type RequestSeat =
+  | { readonly t: 'call'; readonly kernelRunId: string }
+  | { readonly t: 'buddy' };
+export function requestSeatOf(post: Pick<Post, 'purpose' | 'evidence'>): RequestSeat {
+  const tag = post.evidence.find((e) => e.startsWith(EXPEDITION_RUN_EVIDENCE));
+  return post.purpose === EXPEDITION_CALL_PURPOSE && tag !== undefined
+    ? { t: 'call', kernelRunId: tag.slice(EXPEDITION_RUN_EVIDENCE.length) }
+    : { t: 'buddy' };
+}
 
 /** Throws `[denied]` (HTTP 403, a tool error over MCP) when `runId` is an expedition call's run. */
 export async function refuseExpeditionCallRun(

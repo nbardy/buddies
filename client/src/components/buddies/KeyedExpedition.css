@@ -32,6 +32,7 @@
   position: relative;
   min-width: 36rem;
   font-size: var(--fs-2);
+  white-space: nowrap;
 }
 .keyed-expedition-row {
   display: grid;
@@ -52,15 +53,17 @@
 }
 
 /* Bars take their colour from --tone (set inline from keyed-timeline.ts TONE_COLOR). */
-.keyed-expedition-bar {
+.keyed-expedition-bar,
+.keyed-expedition-marker {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  inset-block: 0;
   padding: 0;
   border: 0;
+  cursor: pointer;
+}
+.keyed-expedition-bar {
   border-radius: 3px;
   background: var(--tone);
-  cursor: pointer;
 }
 .keyed-expedition-bar[data-tone="refused"] {
   border: 1px dashed var(--tone);
@@ -74,26 +77,23 @@
   outline: 2px solid var(--text-bright);
 }
 
-/* Over every track, inset by the label column. A plan version and the finish are lines through
-   every lane; a review is a short tick. */
+/* Below the axis row (no line crosses a tick label); each label sits in the marker row on top.
+   A plan version and the finish are lines through every lane; a review is a short tick. */
 .keyed-expedition-markers {
   position: absolute;
-  inset: 0 0 0 calc(var(--label) + var(--sp-4));
+  inset: calc(var(--sp-8) + 2 * var(--sp-2)) 0 0 calc(var(--label) + var(--sp-4));
   pointer-events: none;
 }
 .keyed-expedition-marker {
-  position: absolute;
-  top: 0;
-  bottom: 0;
+  display: flex;
+  align-items: flex-start;
   width: var(--sp-4);
-  padding: 0;
-  border: 0;
+  padding: var(--sp-2) 0 0 var(--sp-2);
   border-left: 1px solid var(--accent);
   background: none;
   color: var(--accent);
   font-size: var(--fs-1);
   pointer-events: auto;
-  cursor: pointer;
 }
 .keyed-expedition-marker[data-kind="review"] {
   bottom: auto;

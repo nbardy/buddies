@@ -9,9 +9,10 @@ import type { HostCommands } from '../buddies/routes';
 import type { ConversationRecordStore } from '../conversations/config-records';
 import { systemClock } from '../expedition-kernel/clock';
 import { currentRunId, liveCalls } from '../expedition-kernel/core';
-import { type Expedition, type KernelDeps, launch, open } from '../expedition-kernel/kernel';
+import { type Expedition, type KernelDeps, open } from '../expedition-kernel/kernel';
+import { type Clean, type Previewed, launchClean, preview } from '../expedition-kernel/launch';
 import type { Clock } from '../expedition-kernel/ports';
-import { keyedViewOf } from '../expedition-kernel/projection';
+import { keyedRowOf, keyedViewOf } from '../expedition-kernel/projection';
 import type { IngestAccessor } from '../ingest/instance';
 import { HostExecutor } from './executor';
 import type { Answered, AskAnswer } from './executor/asks';
@@ -27,12 +28,12 @@ import { buddyProviders } from './providers';
 
 // The keyed expedition host, composed (CONNECT_PLAN §2, §8 step 5): the executor (commands,
 // checks, Buddy calls, owner asks), the real Leader and Owner ports, the owner's thread (`consumes`
-// and the inbox) and the open kernels, built from the dependencies the old host gets. Step 6
-// calls `createKeyedHost` at boot (behind the execution gate and `UNLEASHD_EXPEDITIONS_V1=1`),
-// `start()` after execution adoption, `open` for every unfinished expedition, wires `consumes`
-// into the Buddy routes' HostCommands, the routes to `launch`, `view`, `get(id)` (the kernel's
-// owner acts), `answerAsk` and `answerApproval`, and `close()` at shutdown. Nothing here registers
-// a route or boots anything.
+// and the inbox) and the open kernels, built from the dependencies the old host gets. The server
+// builds it only in live mode (service.ts: execution gate enabled AND `UNLEASHD_EXPEDITIONS_V1=1`)
+// and boots it in three steps: `load()` before the server listens (the owner books, so `consumes`
+// is right for the first request), `start()` after execution adoption, then `open` for every
+// unfinished expedition before the Buddy runner starts; `close()` at shutdown. Nothing here
+// registers a route.
 
 export type KeyedHostDeps = {
   readonly core: BuddiesCore;
@@ -174,6 +175,24 @@ export function createKeyedHost(d: KeyedHostDeps) {
 
   const stops: (() => void)[] = [];
 
+  /** The gates on a folder; writes nothing (the owner's `POST /preview`, and launch). */
+  const previewFolder = async (folder: string): Promise<Previewed> => {
+    await providers.refresh();
+    return preview(deps, folder);
+  };
+  /** Launch a folder that passed `preview` (the owner's HTTP route only, never a tool: §7.2). */
+  const launchPreviewed = (
+    clean: Clean,
+    baseSha: string,
+    workspace: keyed.LaunchWorkspace
+  ): Promise<Launched> =>
+    whenEnabled(async (): Promise<Launched> => {
+      const r = await launchClean(deps, d.root, clean, baseSha, workspace);
+      if (r.t === 'rejected') return r;
+      await adopt(r.expedition);
+      return { t: 'launched', expedition: r.expedition };
+    });
+
   return {
     executor,
     leader,
@@ -185,28 +204,36 @@ export function createKeyedHost(d: KeyedHostDeps) {
     consumes: ((channelId, _body, thread) =>
       book.consumes(channelId, thread)) satisfies HostCommands['consumes'],
 
-    /** Observe calls, asks and the owner's threads. Returns what could not be loaded. */
-    async start(): Promise<string[]> {
+    /** The owner books: every thread and ask root this host posted, so `consumes` knows them.
+     * Before the server listens (boot race, step 6): an owner reply is consumed from the first
+     * request on. Then the bus keeps the index current. Returns what could not be read. */
+    async load(): Promise<string[]> {
       const failed = await book.loadAll();
       stops.push(
         d.events.on((e) => {
           if (e.kind === 'posted') book.noticed(e.post);
         })
       );
-      stops.push(await executor.watch());
-      stops.push(observeBuddyEvents(d.events, timing, 'expedition-owner', readInbox));
       return failed;
     },
 
-    /** Launch a folder (the owner's HTTP route only, never a tool: §7.2). */
-    launch(folder: string, baseSha: string, workspace: keyed.LaunchWorkspace): Promise<Launched> {
-      return whenEnabled(async (): Promise<Launched> => {
-        await providers.refresh();
-        const r = await launch(deps, d.root, folder, baseSha, workspace);
-        if (r.t === 'rejected') return r;
-        await adopt(r.expedition);
-        return { t: 'launched', expedition: r.expedition };
-      });
+    /** Observe calls, asks and the owner's threads (after execution adoption). */
+    async start(): Promise<void> {
+      stops.push(await executor.watch());
+      stops.push(observeBuddyEvents(d.events, timing, 'expedition-owner', readInbox));
+    },
+
+    preview: previewFolder,
+    launchClean: launchPreviewed,
+
+    /** Preview, then launch at `baseSha`. */
+    async launch(
+      folder: string,
+      baseSha: string,
+      workspace: keyed.LaunchWorkspace
+    ): Promise<Launched> {
+      const p = await previewFolder(folder);
+      return p.t === 'rejected' ? p : launchPreviewed(p, baseSha, workspace);
     },
 
     /** Open one existing expedition (boot recovery re-issues its starts: §7.1, behind the gate). */
@@ -228,6 +255,14 @@ export function createKeyedHost(d: KeyedHostDeps) {
       const e = kernels.get(id);
       return e ? keyedViewOf(e.view(), approvals.pendingOf(id)) : undefined;
     },
+    /** The list row of an open expedition. */
+    row(e: Expedition): keyed.KeyedRow {
+      return keyedRowOf(e.state(), approvals.pendingOf(e.id));
+    },
+    /** Every expedition this host has open (launched or opened). */
+    opened(): readonly Expedition[] {
+      return [...kernels.values()];
+    },
 
     /** The owner answers a pending ask directly (the future `POST /:id/asks/:ref`). */
     async answerAsk(id: string, ref: keyed.RefId, answer: AskAnswer): Promise<AskAnswered> {
@@ -246,11 +281,14 @@ export function createKeyedHost(d: KeyedHostDeps) {
       return approvals.decide(id, approved);
     },
 
-    /** Stop observing and detach every kernel; running Buddy turns go on (§3 shutdown). */
+    /** Shutdown (§3): stop observing, detach every kernel (each kills its plan process) and
+     * kill every command and check process group (their runs are reaped `errored` at the next
+     * boot, D6). Running Buddy turns go on: the next backend adopts them. */
     async close(): Promise<void> {
       for (const stop of stops.splice(0)) stop();
-      for (const e of kernels.values()) await e.detach();
+      await Promise.all([...kernels.values()].map((e) => e.detach()));
       kernels.clear();
+      await executor.shutdown();
     },
   };
 }

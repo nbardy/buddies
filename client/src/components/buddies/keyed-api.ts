@@ -11,15 +11,38 @@ import { errorText } from './api';
 export const KEYED_URL = '/api/buddies/keyed-expeditions';
 export const keyedUrl = (id: string) => `${KEYED_URL}/${encodeURIComponent(id)}`;
 
-/** The list. Null until it loads, and null for good when the backend has no such route (404: not
- * reloaded yet; 503: the feature flag is off): the rail then shows nothing extra. */
-export function useKeyedRows(): keyed.KeyedRow[] | null {
-  return usePolledFetch<keyed.KeyedRow[]>(KEYED_URL, 10_000).data;
+/** One workspace's rows. Empty until the list loads, and for good when the backend has no such
+ * route (404: not reloaded yet): the rail then shows nothing extra. The list is every workspace's
+ * (one cached read); the filter is `rowsOf`. */
+export function useKeyedRows(workspaceId: string): keyed.KeyedRow[] {
+  return rowsOf(usePolledFetch<keyed.KeyedRow[]>(KEYED_URL, 10_000).data, workspaceId);
 }
 
-/** One expedition. `enabled` off (a finished row in the rail) reads the cache and never fetches. */
-export const useKeyedView = (id: string, pollMs: number, enabled = true) =>
-  usePolledFetch<keyed.KeyedView>(keyedUrl(id), pollMs, enabled);
+const NO_ROWS: keyed.KeyedRow[] = [];
+const IN_WORKSPACE: {
+  readonly [K in keyed.LaunchWorkspace['t']]: (
+    w: Extract<keyed.LaunchWorkspace, { t: K }>,
+    workspaceId: string
+  ) => boolean;
+} = {
+  workspace: (w, workspaceId) => w.id === workspaceId,
+  // Launched before expeditions named their workspace: no rail can claim it.
+  none: () => false,
+};
+/** The rows launched in `workspaceId`. */
+export const rowsOf = (rows: keyed.KeyedRow[] | null, workspaceId: string): keyed.KeyedRow[] =>
+  rows === null
+    ? NO_ROWS
+    : rows.filter((r) =>
+        (IN_WORKSPACE[r.workspace.t] as (w: keyed.LaunchWorkspace, id: string) => boolean)(
+          r.workspace,
+          workspaceId
+        )
+      );
+
+/** One expedition. */
+export const useKeyedView = (id: string, pollMs: number) =>
+  usePolledFetch<keyed.KeyedView>(keyedUrl(id), pollMs);
 
 /** What a failed read says. A 404 or 503 is "this backend does not serve it", not a fault. */
 export const unavailableText = (error: string): string =>

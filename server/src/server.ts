@@ -23,6 +23,7 @@ import {
   BUDDY_BACKGROUND_TURN_MS,
   BUDDY_RUNNER_BACKSTOP_MS,
   BUDDY_RUN_LEASE_MS,
+  EXPEDITION_CALL_USAGE_WAIT_MS,
   EXTERNAL_GRACE_MS,
   HOT_RELOAD_FORCE_EXIT_GRACE_MS,
   LOCAL_COMPLETION_SUPPRESS_MS,
@@ -124,6 +125,9 @@ import { type HostCommands, registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
 import { callDirectory, expeditionsV1Root } from './expeditions-v1/call-directory';
+import { CALL_TIMING } from './expeditions-v1/executor/calls';
+import { registerKeyedExpeditionRoutes } from './expeditions-v1/routes';
+import { createKeyedExpeditions, decideKeyedMode } from './expeditions-v1/service';
 import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
 import { registerExpeditionRoutes } from './expeditions/routes';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
@@ -133,6 +137,9 @@ let startupAuditResults: Awaited<ReturnType<typeof auditLocalAgents>> = [];
 const app = express();
 const server = http.createServer(app);
 const APP_DATA_DIR = appDataDirectory();
+// Whether this backend may start agents (copied-store guard): decided once, read by the Buddy
+// runner, both expedition hosts and the keyed expeditions' mode.
+const EXECUTION_GATE = decideExecutionGate();
 // Every provider execution is journaled here so the next backend can adopt it (turns/executions.ts).
 const executionJournals = createExecutionJournals(path.join(APP_DATA_DIR, 'executions'));
 /**
@@ -365,6 +372,20 @@ const buddyBriefings = createBriefings(
 );
 let buddyMcp: McpEndpoint | null = null;
 let expeditionHost: ExpeditionHost | null = null;
+// Keyed expeditions (expeditions-v1/service.ts): live only with the execution gate enabled AND
+// UNLEASHD_EXPEDITIONS_V1=1; otherwise read-only, and inert (no boot phase, timer or directory).
+const keyedExpeditions = createKeyedExpeditions(decideKeyedMode(process.env, EXECUTION_GATE), {
+  core: buddiesCore,
+  events: buddyEvents,
+  gate: EXECUTION_GATE,
+  root: expeditionCallsRoot,
+  home: os.homedir(),
+  records: conversationConfigStore,
+  ingest: currentIngest,
+  installed: () => installedAgent(),
+  logger: console,
+  timing: { ...CALL_TIMING, usageWaitMs: EXPEDITION_CALL_USAGE_WAIT_MS },
+});
 // The expedition crews: adoption, session scope and shutdown ask it (policy-port.ts CrewRegistry).
 // The host answers once `initialize` made it; before that no ledger is read, so no Buddy crews.
 const NO_CREWS: ReadonlySet<string> = new Set();
@@ -505,7 +526,7 @@ const memoryReviewer = createMemoryReviewer({
 });
 // Pattern: fix-guards (docs/patterns.md#fix-guards) — the ONE gate on Buddy execution (see
 // buddies/execution-gate.ts): scan/adopt, scheduler start, resume and the memory reviewer.
-const execution = admitExecution<FoundExecution, AdoptedRun>(decideExecutionGate(), {
+const execution = admitExecution<FoundExecution, AdoptedRun>(EXECUTION_GATE, {
   scan: () => executionJournals.scan(),
   start: async (adopted) => {
     await buddyRunner.start(adopted);
@@ -738,10 +759,15 @@ const onBuddyArchived = (buddyId: string) => {
   }
 };
 
+registerKeyedExpeditionRoutes(app, keyedExpeditions);
 registerExpeditionRoutes(app, () => expeditionHost);
-// Until the expedition host boots there is no expedition chat to consume a command from.
+// An owner post the expedition hosts read instead of waking a Buddy. The keyed host asks first:
+// it owns only replies under roots it posted (its books are loaded before the server listens).
+// Until the old host boots there is no expedition chat to consume a command from.
 const hostCommands: HostCommands = {
-  consumes: (channelId, body) => expeditionHost?.consumes(channelId, body) ?? false,
+  consumes: (channelId, body, thread) =>
+    keyedExpeditions.consumes(channelId, body, thread) ||
+    (expeditionHost?.consumes(channelId, body) ?? false),
 };
 registerBuddyRoutes(app, {
   core: buddiesCore,
@@ -871,6 +897,9 @@ shutdownController = registerShutdownHandlers(
       dependencyChecks.close();
       await Promise.all([turnAttemptJournal.flush(), errorJournal.flush(), flushRouteLatency()]);
       expeditionHost?.close();
+      // Detaches every keyed kernel (kills its plan process) and kills command process groups;
+      // Buddy turns go on and are adopted by the next backend.
+      await keyedExpeditions.close();
       await buddyMcp?.close();
       if (bootedIngest) {
         const { ingest, list } = await bootedIngest;
@@ -971,12 +1000,15 @@ void runServerStartup(
           core: buddiesCore,
           events: buddyEvents,
           root: path.join(APP_DATA_DIR, 'expeditions'),
-          gate: decideExecutionGate(),
+          gate: EXECUTION_GATE,
           installed: (provider) => onPath(getHarness(provider).binary, process.env),
           onBuddyArchived,
           onChannelArchived: (channelId) => channelChanged(channelId, 'all'),
         })
       );
+      // Keyed expeditions' owner books, before the server listens: an owner reply in one of their
+      // threads is consumed from the first request on (live mode only; read-only does nothing).
+      await keyedExpeditions.load(timeBootPhaseAsync);
       // The one Buddy tool endpoint, on its own loopback listener (never the gated app).
       buddyMcp = await timeBootPhaseAsync('mcp_endpoint', () =>
         startMcpEndpoint({
@@ -1103,6 +1135,13 @@ void runServerStartup(
       bootPhase('adoption', performance.now() - adoptionStarted);
       // Expedition ticks start only now: none observes a crew run the boot cancelled.
       expeditionHost?.start();
+      // Keyed expeditions: after adoption (their calls' turns were adopted, never re-run) and
+      // before the Buddy runner starts; recovery re-issues their starts (§7.1). Live mode only.
+      await keyedExpeditions
+        .boot(timeBootPhaseAsync)
+        .catch((error) =>
+          console.error('[expeditions-v1] Keyed expeditions did not open at boot:', error)
+        );
       // Ordinary chats and Builders: queue the owner messages that were sent and never started.
       // AFTER adoption: queueing starts the head at once, and a turn started before its predecessor
       // is adopted makes adoption fail ("already running") and discards the live turn's journal, so

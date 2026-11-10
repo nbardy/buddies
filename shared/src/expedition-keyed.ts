@@ -310,6 +310,18 @@ export const BarEnd = z.discriminatedUnion('t', [
   v('settled', { at: str, outcome: Outcome }),
 ]);
 export type BarEnd = z.infer<typeof BarEnd>;
+/** What one bar cost, as the kernel charges it (core/tables.ts `chargeOf`). */
+export const BarCost = z.discriminatedUnion('t', [
+  /** Running: it holds its reservation (`max.usd`; 0 for a command, a check or an ask). */
+  v('holding', { reservedUsd: z.number().nonnegative() }),
+  /** Settled with a reported spend. */
+  v('spent', { usd: z.number().nonnegative() }),
+  /** Settled with no usage reported: charged its whole reservation (DESIGN q2). */
+  v('charged', { usd: z.number().nonnegative() }),
+  /** A server older than the cost field sent none (the wire default). */
+  v('unknown', {}),
+]);
+export type BarCost = z.infer<typeof BarCost>;
 export const Bar = z
   .object({
     key: Key,
@@ -320,6 +332,7 @@ export const Bar = z
     planVersion: z.number().int(),
     start: str,
     end: BarEnd,
+    cost: BarCost.default({ t: 'unknown' }),
   })
   .strict();
 export type Bar = z.infer<typeof Bar>;
@@ -353,10 +366,17 @@ type Fold = {
   version: number;
   kinds: Map<string, CallKind>;
   attempts: Map<string, number>;
-  open: Map<string, number>;
+  /** Each open bar by ref: where it is, and the reservation an unreported settle is charged. */
+  open: Map<string, { index: number; reservedUsd: number }>;
   bars: Bar[];
   markers: Marker[];
 };
+
+const CHARGED: { [K in Usage['t']]: (u: Extract<Usage, { t: K }>, reserved: number) => BarCost } = {
+  reported: (u) => ({ t: 'spent', usd: u.usd }),
+  unreported: (_u, reserved) => ({ t: 'charged', usd: reserved }),
+};
+const chargedOf = (u: Usage, reserved: number): BarCost => CHARGED[u.t](u as never, reserved);
 
 export function timelineOf(entries: readonly Entry[]): Timeline {
   const f: Fold = {
@@ -398,7 +418,7 @@ const ON: { [K in Entry['t']]: (f: Fold, e: Extract<Entry, { t: K }>) => void } 
   },
   started: (f, e) => {
     const ref = refOf(e.key, e.hash);
-    f.open.set(ref, f.bars.length);
+    f.open.set(ref, { index: f.bars.length, reservedUsd: e.reserved.usd });
     f.bars.push({
       key: e.key,
       hash: e.hash,
@@ -407,14 +427,16 @@ const ON: { [K in Entry['t']]: (f: Fold, e: Extract<Entry, { t: K }>) => void } 
       planVersion: f.version,
       start: e.at,
       end: { t: 'open' },
+      cost: { t: 'holding', reservedUsd: e.reserved.usd },
     });
   },
   produced: () => {},
   settled: (f, e) => {
     const ref = refOf(e.key, e.hash);
     const end: BarEnd = { t: 'settled', at: e.at, outcome: e.outcome };
-    const index = f.open.get(ref);
-    if (index === undefined) {
+    const open = f.open.get(ref);
+    if (open === undefined) {
+      // Refused before it started: it held nothing.
       f.bars.push({
         key: e.key,
         hash: e.hash,
@@ -423,11 +445,16 @@ const ON: { [K in Entry['t']]: (f: Fold, e: Extract<Entry, { t: K }>) => void } 
         planVersion: f.version,
         start: e.at,
         end,
+        cost: chargedOf(e.spent, 0),
       });
       return;
     }
     f.open.delete(ref);
-    f.bars[index] = { ...(f.bars[index] as Bar), end };
+    f.bars[open.index] = {
+      ...(f.bars[open.index] as Bar),
+      end,
+      cost: chargedOf(e.spent, open.reservedUsd),
+    };
   },
   retried: (f, e) => {
     const ref = refOf(e.key, e.hash);
@@ -478,6 +505,10 @@ export const KeyedRow = z
     budget: Budget,
     launchedAt: str,
     deadline: str,
+    /** An ask is unanswered or a rewrite waits for the owner's approval. */
+    needsYou: z.boolean().default(false),
+    /** The Buddy workspace it was launched in (a rail lists a workspace's own). */
+    workspace: LaunchWorkspace.default({ t: 'none' }),
   })
   .strict();
 export type KeyedRow = z.infer<typeof KeyedRow>;
@@ -523,3 +554,25 @@ export const KeyedView = KeyedRow.extend({
   faults: z.array(Fault),
 }).strict();
 export type KeyedView = z.infer<typeof KeyedView>;
+
+// ---- Launching (owner HTTP only: `POST /api/buddies/keyed-expeditions/{preview,launch}`) ----
+
+/** A plan folder's gates, run without writing anything: what a launch of it would start first. */
+export const PreviewCall = z
+  .object({ key: Key, kind: CallKind, reservedUsd: z.number().nonnegative() })
+  .strict();
+export type PreviewCall = z.infer<typeof PreviewCall>;
+export const KeyedPreview = z.discriminatedUnion('t', [
+  v('clean', {
+    goal: str,
+    leader: nonEmpty,
+    repo: nonEmpty,
+    budget: Budget,
+    /** The calls a dry run of the plan asked for before it waited on any answer. */
+    firstWave: z.array(PreviewCall),
+    /** Σ of their reservations: what the first wave may spend. */
+    costUsd: z.number().nonnegative(),
+  }),
+  v('rejected', { gate: nonEmpty, issues: z.array(str) }),
+]);
+export type KeyedPreview = z.infer<typeof KeyedPreview>;

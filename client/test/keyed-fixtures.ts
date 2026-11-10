@@ -17,6 +17,8 @@ const row = {
   budget: { usd: 5, hours: 8 },
   launchedAt: at('10:00:00'),
   deadline: at('18:00:00'),
+  needsYou: false,
+  workspace: { t: 'workspace', id: 'ws-1' },
 };
 const diff = {
   reused: ['build/compile/1'],
@@ -129,6 +131,7 @@ const parse = (x: object): keyed.KeyedView => keyed.KeyedView.parse(x);
 /** Running, two plan versions, a failed and an errored bar, an unanswered text ask and a yes/no. */
 export const runningWithAsks = parse({
   ...base,
+  needsYou: true,
   lanes: [
     ...base.lanes,
     {
@@ -172,6 +175,7 @@ export const awaitingApproval = parse({
   ...base,
   id: 'ex-2',
   goal: 'Approve the rewrite',
+  needsYou: true,
   approval: {
     t: 'pending',
     diff,
@@ -192,4 +196,11 @@ export const finished = parse({
 });
 
 export const rowOf = (view: keyed.KeyedView): keyed.KeyedRow =>
-  keyed.KeyedRow.parse({ ...row, id: view.id, goal: view.goal, status: view.status });
+  keyed.KeyedRow.parse({
+    ...row,
+    id: view.id,
+    goal: view.goal,
+    status: view.status,
+    needsYou: view.needsYou,
+    workspace: view.workspace,
+  });

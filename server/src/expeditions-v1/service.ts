@@ -1,0 +1,277 @@
+import type { KeyedAct, keyed } from '@unleashd/shared';
+import type { ExecutionGate } from '../buddies/execution-gate';
+import type { HostCommands } from '../buddies/routes';
+import { expandHome } from '../expedition-kernel/contract';
+import type { Expedition, OwnerResult } from '../expedition-kernel/kernel';
+import { keyedRowOf, keyedViewOf } from '../expedition-kernel/projection';
+import { type Resolved, resolveBase } from '../expeditions/checks';
+import type { AskAnswer } from './executor/asks';
+import type { KeyedHost, KeyedHostDeps } from './host';
+import { isExpeditionId, needsOpening, shelfIds, shelved } from './shelf';
+
+// The keyed expeditions as the server sees them (CONNECT_PLAN §3, §4, §7; step 6): ONE value the
+// routes, boot and shutdown talk to, in one of two modes decided once at composition.
+//
+//   live       the execution gate is enabled AND UNLEASHD_EXPEDITIONS_V1=1: the keyed host
+//              (host.ts) runs, opens every unfinished expedition at boot, launches, takes acts.
+//   read-only  anything else: rows and views are folded from the logs on disk (shelf.ts) and
+//              nothing is opened for write, posted, started, cancelled or written; every
+//              mutation answers `unavailable` with the reason (the routes' 503); `consumes`
+//              consumes nothing; boot and shutdown do nothing (no boot phase, no timer, no
+//              directory), so with the flag off the server is what it was before step 6.
+//
+// Pattern: sum types (docs/patterns.md#sum-types): the mode is the type; each mode is one
+// implementation of KeyedExpeditions with no "if live" inside it.
+
+export const EXPEDITIONS_V1_ENV = 'UNLEASHD_EXPEDITIONS_V1';
+
+export type KeyedMode = { readonly t: 'live' } | { readonly t: 'read-only'; readonly why: string };
+
+const GATE_MODE: {
+  readonly [K in ExecutionGate['t']]: (g: Extract<ExecutionGate, { t: K }>) => KeyedMode;
+} = {
+  enabled: () => ({ t: 'live' }),
+  disabled: (g) => ({ t: 'read-only', why: `Buddy execution is disabled: ${g.reason}` }),
+};
+/** Live only when both say so (§3, §7.1). */
+export function decideKeyedMode(env: NodeJS.ProcessEnv, gate: ExecutionGate): KeyedMode {
+  if (env[EXPEDITIONS_V1_ENV] !== '1')
+    return {
+      t: 'read-only',
+      why: `keyed expeditions are switched off (${EXPEDITIONS_V1_ENV} is not 1)`,
+    };
+  return (GATE_MODE[gate.t] as (g: ExecutionGate) => KeyedMode)(gate);
+}
+
+/** What a mutation came to; the routes map each to one status (routes.ts). */
+export type Mutated =
+  | { readonly t: 'ok'; readonly view: keyed.KeyedView }
+  /** Read-only mode: the reason (flag off, or execution disabled). */
+  | { readonly t: 'unavailable'; readonly why: string }
+  | { readonly t: 'missing'; readonly why: string }
+  /** The kernel, the executor or the Owner port said no (finished, nothing pending, …). */
+  | { readonly t: 'refused'; readonly why: string }
+  /** A launch's gate failed (contract, typecheck, dry run, static, base). */
+  | { readonly t: 'rejected'; readonly gate: string; readonly issues: readonly string[] };
+export type Previewing =
+  | { readonly t: 'previewed'; readonly preview: keyed.KeyedPreview }
+  | { readonly t: 'unavailable'; readonly why: string };
+export type Viewed =
+  | { readonly t: 'ok'; readonly view: keyed.KeyedView }
+  | { readonly t: 'missing'; readonly why: string };
+
+export interface KeyedExpeditions {
+  readonly mode: KeyedMode;
+  /** Before the server listens: the owner books, so `consumes` is right from the first request. */
+  load(time: PhaseTimer): Promise<void>;
+  /** After execution adoption, before the Buddy runner starts: observe, then open every
+   * unfinished expedition. */
+  boot(time: PhaseTimer): Promise<void>;
+  rows(): Promise<keyed.KeyedRow[]>;
+  view(id: string): Promise<Viewed>;
+  act(id: string, act: KeyedAct): Promise<Mutated>;
+  answer(id: string, ref: string, answer: AskAnswer): Promise<Mutated>;
+  approval(id: string, approve: boolean): Promise<Mutated>;
+  preview(folder: string): Promise<Previewing>;
+  /** Owner HTTP only (§7.2); the base is the repo's launch base rule (`resolveBase`). */
+  launch(workspaceId: string, folder: string): Promise<Mutated>;
+  readonly consumes: HostCommands['consumes'];
+  /** Shutdown: detach every kernel, kill every command process group (host.ts `close`). */
+  close(): Promise<void>;
+}
+
+/** `timeBootPhaseAsync` (observability/perf.ts): each boot step is a named phase. */
+export type PhaseTimer = <T>(phase: string, work: () => Promise<T>) => Promise<T>;
+
+export type KeyedExpeditionsDeps = KeyedHostDeps & {
+  /** The launch base of a repo (tests may pin it; the server uses `resolveBase`). */
+  readonly baseOf?: (repo: string) => Promise<Resolved>;
+};
+
+// The thin dispatcher: the mode picks the implementation, once.
+export function createKeyedExpeditions(
+  mode: KeyedMode,
+  deps: KeyedExpeditionsDeps
+): KeyedExpeditions {
+  return (MODES[mode.t] as (m: KeyedMode, d: KeyedExpeditionsDeps) => KeyedExpeditions)(mode, deps);
+}
+const MODES: {
+  readonly [K in KeyedMode['t']]: (
+    m: Extract<KeyedMode, { t: K }>,
+    d: KeyedExpeditionsDeps
+  ) => KeyedExpeditions;
+} = {
+  'read-only': (m, d) => readOnly(m, d.root),
+  live: (m, d) => live(m, d),
+};
+
+// ---- read-only ----
+
+const NO_APPROVAL: keyed.PendingApproval = { t: 'none' };
+
+async function rowsOnDisk(root: string, skip: ReadonlySet<string>): Promise<keyed.KeyedRow[]> {
+  const rows: keyed.KeyedRow[] = [];
+  for (const id of await shelfIds(root)) {
+    if (skip.has(id)) continue;
+    const s = await shelved(root, id);
+    if (s.t === 'readable') rows.push(keyedRowOf(s.view.state, NO_APPROVAL));
+    else unreadableOnce(s.id, s.why);
+  }
+  return rows;
+}
+async function viewOnDisk(root: string, id: string): Promise<Viewed> {
+  if (!isExpeditionId(id)) return { t: 'missing', why: `no expedition ${id}` };
+  const s = await shelved(root, id);
+  return s.t === 'readable'
+    ? { t: 'ok', view: keyedViewOf(s.view, NO_APPROVAL) }
+    : { t: 'missing', why: `expedition ${id} is unreadable: ${s.why}` };
+}
+/** An unreadable directory is left out of the list (a row has no "unreadable" shape) and said
+ * once per reason in the log, not once per 10 s poll. */
+const SAID = new Set<string>();
+function unreadableOnce(id: string, why: string): void {
+  const said = `${id}\n${why}`;
+  if (SAID.has(said)) return;
+  SAID.add(said);
+  console.warn(`[expeditions-v1] ${id} is unreadable and not listed: ${why}`);
+}
+
+function readOnly(m: Extract<KeyedMode, { t: 'read-only' }>, root: string): KeyedExpeditions {
+  const unavailable = async () => ({ t: 'unavailable', why: m.why }) as const;
+  return {
+    mode: m,
+    load: async () => {},
+    boot: async () => {},
+    rows: () => rowsOnDisk(root, new Set()),
+    view: (id) => viewOnDisk(root, id),
+    act: unavailable,
+    answer: unavailable,
+    approval: unavailable,
+    preview: unavailable,
+    launch: unavailable,
+    consumes: () => false,
+    close: async () => {},
+  };
+}
+
+// ---- live ----
+
+/** An owner act on a kernel (kernel.ts `pause` … `retry`). */
+const ACT: {
+  readonly [K in KeyedAct['t']]: (
+    e: Expedition,
+    a: Extract<KeyedAct, { t: K }>
+  ) => Promise<OwnerResult>;
+} = {
+  pause: (e) => e.pause(),
+  resume: (e) => e.resume(),
+  stop: (e) => e.stop(),
+  extend: (e, a) => e.extend(a.hours),
+  retry: (e, a) => e.retry(a.key),
+};
+
+function live(m: Extract<KeyedMode, { t: 'live' }>, d: KeyedExpeditionsDeps): KeyedExpeditions {
+  // Loaded here, never at the top: the host's module graph (kernel, plan runner, leader, owner)
+  // took 140-410 ms to load under tsx (measured 2026-11-11), and a flag-off boot must cost what it
+  // did before step 6. Guard: expeditions-v1-server.test.ts "read-only mode loads none of …".
+  const { createKeyedHost } = require('./host') as typeof import('./host');
+  const { previewView } = require('../expedition-kernel/launch') as typeof import(
+    '../expedition-kernel/launch'
+  );
+  const host: KeyedHost = createKeyedHost(d);
+  const baseOf = d.baseOf ?? resolveBase;
+  const viewOf = (id: string): Mutated => {
+    const view = host.view(id);
+    return view ? { t: 'ok', view } : { t: 'missing', why: `no open expedition ${id}` };
+  };
+  /** The open kernel, or why there is none (unknown, or on disk but not open: finished). */
+  const kernelOf = async (
+    id: string
+  ): Promise<{ t: 'open'; e: Expedition } | Extract<Mutated, { t: 'missing' | 'refused' }>> => {
+    const e = host.get(id);
+    if (e) return { t: 'open', e };
+    const onDisk = await viewOnDisk(d.root, id);
+    return onDisk.t === 'ok'
+      ? { t: 'refused', why: `expedition ${id} is not open (it has finished)` }
+      : onDisk;
+  };
+  const afterOwnerAct = (id: string, r: OwnerResult): Mutated =>
+    r.t === 'done' ? viewOf(id) : { t: 'refused', why: r.why };
+
+  return {
+    mode: m,
+    async load(time) {
+      const failed = await time('expeditions_v1_books', () => host.load());
+      for (const f of failed) console.warn(`[expeditions-v1] owner book unreadable: ${f}`);
+    },
+    async boot(time) {
+      await time('expeditions_v1_open', async () => {
+        await host.start();
+        const opening = (await shelfIds(d.root)).map(async (id) => {
+          const s = await shelved(d.root, id);
+          if (s.t === 'unreadable')
+            return console.error(`[expeditions-v1] ${id} not opened: unreadable: ${s.why}`);
+          if (!needsOpening(s.view.state)) return;
+          const opened = await host.open(id).catch((e: Error) => ({
+            t: 'failed' as const,
+            why: e.message,
+          }));
+          if (opened.t !== 'opened')
+            console.error(`[expeditions-v1] ${id} not opened: ${opened.why}`);
+        });
+        await Promise.all(opening);
+      });
+    },
+    async rows() {
+      const open = host.opened();
+      const fromDisk = await rowsOnDisk(d.root, new Set(open.map((e) => e.id)));
+      return [...open.map((e) => host.row(e)), ...fromDisk].sort((a, b) =>
+        b.id.localeCompare(a.id)
+      );
+    },
+    async view(id) {
+      const view = host.view(id);
+      return view ? { t: 'ok', view } : viewOnDisk(d.root, id);
+    },
+    async act(id, act) {
+      const k = await kernelOf(id);
+      if (k.t !== 'open') return k;
+      const r = await (ACT[act.t] as (e: Expedition, a: KeyedAct) => Promise<OwnerResult>)(
+        k.e,
+        act
+      );
+      return afterOwnerAct(id, r);
+    },
+    async answer(id, ref, answer) {
+      const k = await kernelOf(id);
+      if (k.t !== 'open') return k;
+      const r = await host.answerAsk(id, ref, answer);
+      return r.t === 'answered' ? viewOf(id) : { t: 'refused', why: r.why };
+    },
+    async approval(id, approve) {
+      const k = await kernelOf(id);
+      if (k.t !== 'open') return k;
+      const r = await host.answerApproval(id, approve);
+      return r.t === 'decided'
+        ? viewOf(id)
+        : { t: 'refused', why: `no rewrite of ${id} is waiting for approval` };
+    },
+    async preview(folder) {
+      return { t: 'previewed', preview: previewView(await host.preview(folder)) };
+    },
+    async launch(workspaceId, folder) {
+      const workspaces = await d.core.listWorkspaces();
+      if (!workspaces.some((w) => w.id === workspaceId))
+        return { t: 'missing', why: `no workspace ${workspaceId}` };
+      const p = await host.preview(folder);
+      if (p.t === 'rejected') return p;
+      const base = await baseOf(expandHome(p.contract.repo, d.home));
+      if (base.t === 'refused') return { t: 'rejected', gate: 'base', issues: [base.issue] };
+      const r = await host.launchClean(p, base.base.sha, { t: 'workspace', id: workspaceId });
+      if (r.t === 'launched') return viewOf(r.expedition.id);
+      return r.t === 'refused' ? { t: 'unavailable', why: r.why } : r;
+    },
+    consumes: host.consumes,
+    close: () => host.close(),
+  };
+}

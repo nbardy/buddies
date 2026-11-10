@@ -30,6 +30,7 @@ const bar = (start: number, end: number | 'open'): keyed.Bar => ({
     end === 'open'
       ? { t: 'open' }
       : { t: 'settled', at: new Date(end).toISOString(), outcome: { t: 'errored', why: 'x' } },
+  cost: { t: 'unknown' },
 });
 
 // Regression guard: on a two-day axis a 3-second call is 0.0017% of the width. Drawn to scale it
@@ -90,13 +91,20 @@ test('a plan marker lands between the bars it separates', () => {
 
 test('lanes group by the first key segment and keep server order inside a phase', () => {
   const lane = (key: string) => ({ key, kind: 'command', status: 'settled', bars: [] }) as never;
-  const groups = groupLanes([lane('b/z/1'), lane('a/x/1'), lane('b/a/1'), lane('lone')]);
+  const groups = groupLanes([
+    lane('b/z/1'),
+    lane('a/x/1'),
+    lane('lone'),
+    lane('b/a/1'),
+    lane('other'),
+  ]);
+  // Keys with no phase share the unnamed one (no heading), instead of one heading per key.
   assert.deepEqual(
     groups.map((g) => [g.phase, g.lanes.map((l) => l.key)]),
     [
       ['b', ['b/z/1', 'b/a/1']],
       ['a', ['a/x/1']],
-      ['lone', ['lone']],
+      ['', ['lone', 'other']],
     ]
   );
 });

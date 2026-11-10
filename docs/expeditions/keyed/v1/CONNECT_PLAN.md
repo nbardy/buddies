@@ -297,6 +297,29 @@ this step); one in an expedition the host has not opened is consumed but read by
 `post({ answers })`" line to call and wake requests, which have no tools (the final message is the
 answer either way).
 
+Built (2026-11-11, uncommitted): **step 6.** `server/src/expeditions-v1/service.ts` is the one value
+server.ts talks to, in one of two modes decided once at composition: **live** (execution gate
+enabled AND `UNLEASHD_EXPEDITIONS_V1=1`) or **read-only** (anything else: rows and views folded
+from `log.jsonl` by `shelf.ts` through `log-store.ts` `readLog`, which never opens for write; every
+POST answers 503 with the reason; `consumes` is false; no boot phase, timer or directory). Live mode
+`require`s the host lazily (its module graph cost 140-410 ms under tsx; guard: the first test of
+`expeditions-v1-server`). Boot: the owner books load in `initialize` before the server listens
+(`expeditions_v1_books`), which closes the step-5 race (no request, POST or not, can arrive
+first); after adoption and before the runner, `expeditions_v1_open` starts observing and opens
+every expedition whose plan is open or which still has a live call. Shutdown (`flushState`):
+`close()` detaches every kernel (kills its plan process) and kills every command/check process
+group, leaving their records `running` so the next live boot reaps them `errored` (D6); Buddy turns
+go on. Routes: `expeditions-v1/routes.ts`, bodies and statuses from `buddyMutations['keyed.*']`
+(new: `keyed.preview`, `keyed.launch`); mutations answer the refreshed `KeyedView` (launch 201),
+409 refused, 404 missing, 422 a launch gate `{gate, issues}`, 400 a bad body naming the field.
+Wire: `Bar.cost` (`holding | spent | charged | unknown`), `KeyedRow.needsYou`, `KeyedRow.workspace`
+(the `LaunchWorkspace` sum, not a nullable id), each with a wire default. The call turn's prompt
+says its final message is the answer (`buddies/expedition-calls.ts` `requestSeatOf`, used by the
+runner and `call-directory.ts`). Test: `server/test/expeditions-v1-server.test.ts` (the real
+server.ts, HTTP only). Known limits: with the flag off, an owner reply in an old expedition's thread
+is ordinary DM talk again (it wakes the leader); the leader's approval lives in memory, so a
+read-only view never shows one.
+
 | # | Change | Test through a real boundary | Risk |
 |---|---|---|---|
 | 1 | Kernel: `wake(runId, …)`; `labelled` timer at `runner.ts:143`; a real `Clock`; types and `timelineOf` move to `shared/src/expedition-keyed.ts`; the `KeyedView` projection | e2e suite unchanged; a projection JSON round trip | low |
