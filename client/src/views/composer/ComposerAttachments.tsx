@@ -126,7 +126,8 @@ function AttachmentGallery({ files, onRemove }: AttachmentsProps) {
           </div>
         </section>
       )}
-      <div className="composer-attachments__strip" aria-label="Attached files">
+      {/* biome-ignore lint/a11y/useSemanticElements: a labelled group of content, not a form control set; <fieldset> brings form borders and padding. */}
+      <div className="composer-attachments__strip" role="group" aria-label="Attached files">
         {files.map((file, index) => (
           <button
             type="button"

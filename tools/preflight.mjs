@@ -107,7 +107,7 @@ export function checkDependencies({ env = process.env, log = console.warn } = {}
         fs.rmSync(dir, { recursive: true, force: true });
       }
     }
-    if (!result || result.status !== 0 || !available('rustc') || !available('cargo')) {
+    if (result?.status !== 0 || !available('rustc') || !available('cargo')) {
       throw new Error(
         'Rust installation did not complete. Run `brew install rust` or install from https://rustup.rs, then run pnpm install again. If using Claude, run `claude auth login` first.'
       );

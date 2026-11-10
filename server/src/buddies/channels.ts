@@ -15,6 +15,7 @@ import {
   configFromProviderPreferences,
   isHarnessRetryFailure,
   mentionedIds,
+  unreachable,
 } from '@unleashd/shared';
 import type { ConversationRuntime } from '../conversations/runtime';
 import type { BackgroundWork, TurnActivity } from '../turns/background-work';
@@ -358,6 +359,8 @@ export function createChannels(ports: ChannelsPorts) {
                   message: result.reason instanceof Error ? result.reason.message : 'unreadable',
                 },
               ];
+            default:
+              return unreachable(result);
           }
         })
       );

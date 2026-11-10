@@ -221,7 +221,12 @@ export const OverloadReveal: React.FC<{ t: number }> = ({ t }) => {
         >
           <Lines t={t} />
         </AbsoluteFill>
-        <svg width={1920} height={1080} style={{ position: 'absolute', inset: 0 }}>
+        <svg
+          aria-hidden="true"
+          width={1920}
+          height={1080}
+          style={{ position: 'absolute', inset: 0 }}
+        >
           <circle
             cx={markCx}
             cy={markCy}

@@ -27,6 +27,7 @@ export function ThreadResize({
   const drag = useRef<{ x: number; width: number } | null>(null);
   const [resizing, setResizing] = useState(false);
   return (
+    // biome-ignore lint/a11y/useSemanticElements: a focusable, draggable splitter; <hr> takes neither focus nor pointer capture.
     <div
       className="channel-thread-resize"
       role="separator"

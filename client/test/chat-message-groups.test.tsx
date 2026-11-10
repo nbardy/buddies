@@ -386,7 +386,7 @@ test('saved freeform input reaches desktop and mobile as literal code, with comp
     assert.ok(markup.includes(`<p>🔧 exec ${escapedPreview}</p>`));
     assert.doesNotMatch(markup, /ask-user-question|AskUserQuestion \(parse error\)/);
     assert.equal(
-      markup.match(/<pre aria-label="Tool input"><code>([\s\S]*?)<\/code><\/pre>/)?.[1],
+      markup.match(/<pre[^>]* aria-label="Tool input"><code>([\s\S]*?)<\/code><\/pre>/)?.[1],
       escapedInput
     );
   }

@@ -132,7 +132,7 @@ export function parseBuddyWorkerToolResult(output: unknown): BuddyWorkerThread[]
     }
     if (!value || typeof value !== 'object') return;
     if (Array.isArray(value)) {
-      value.forEach((item) => visit(item, depth + 1));
+      for (const item of value) visit(item, depth + 1);
       return;
     }
     const record = value as Record<string, unknown>;

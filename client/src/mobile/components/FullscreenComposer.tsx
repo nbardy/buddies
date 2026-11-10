@@ -83,6 +83,7 @@ export function FullscreenComposer({
   }, [expanded]);
 
   return (
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: role is 'dialog' whenever aria-modal and aria-label are set.
     <div
       ref={frameRef}
       className={

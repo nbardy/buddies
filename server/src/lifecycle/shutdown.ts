@@ -112,11 +112,12 @@ export function createShutdownController(
       console.error('Failed to discard crew turns during shutdown:', error);
     }
     step(`flushing state (${code === 0 ? 'exit' : `exit ${code}`})`);
-    let pendingFlush: void | Promise<void> = undefined;
+    let pendingFlush: void | Promise<void>;
     try {
       pendingFlush = ports.flushState();
     } catch (error: unknown) {
       console.error('Failed to flush state during shutdown:', error);
+      pendingFlush = undefined;
     }
     // `exiting` refuses every mutation, and clearTimers() above has just disarmed
     // the drain, so a flush that never settles strands the process forever with no

@@ -1,4 +1,5 @@
 import type { Message } from '@unleashd/shared';
+import { unreachable } from '@unleashd/shared';
 import { memo, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -109,7 +110,8 @@ const MessageContent = memo(
                     renderText(line, index)
                   )}
                   {input && (
-                    <pre aria-label="Tool input">
+                    // biome-ignore lint/a11y/useSemanticElements: a labelled group of content, not a form control set; <fieldset> brings form borders and padding.
+                    <pre role="group" aria-label="Tool input">
                       <code>{input}</code>
                     </pre>
                   )}
@@ -124,6 +126,8 @@ const MessageContent = memo(
               return null;
             case 'swarm_launch':
               return <InlineSwarmRunWidget key={index} workingDirectory={workingDirectory} />;
+            default:
+              return unreachable(part);
           }
         })}
       </div>

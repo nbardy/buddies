@@ -32,6 +32,7 @@ export * from './model-catalog.js';
 export * from './provider-catalog.js';
 export * from './tool-content.js';
 export * from './turn-attempt.js';
+export { unreachable } from './unreachable.js';
 
 // =============================================================================
 // Core Data Structures

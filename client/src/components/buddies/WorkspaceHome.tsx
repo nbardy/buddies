@@ -153,7 +153,7 @@ function Notifications({ row }: { row: WorkspaceHomeRow }) {
   if (requests > 0) {
     const label = `${requests} ${requests === 1 ? 'request' : 'requests'} waiting on you`;
     return (
-      <span className="workspace-home-badge" title={label} aria-label={label}>
+      <span className="workspace-home-badge" title={label} role="img" aria-label={label}>
         {requests}
       </span>
     );
@@ -167,7 +167,7 @@ function Notifications({ row }: { row: WorkspaceHomeRow }) {
     ]
       .filter(Boolean)
       .join(', ');
-    return <span className="workspace-home-dot" title={label} aria-label={label} />;
+    return <span className="workspace-home-dot" title={label} role="img" aria-label={label} />;
   }
   return null;
 }

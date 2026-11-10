@@ -249,7 +249,7 @@ export function registerUsageRoutes(
   ingest: IngestAccessor
 ): void {
   app.get('/api/usage', async (request, response) => {
-    const days = Math.min(Math.max(Number.parseInt(String(request.query.days)) || 30, 1), 365);
+    const days = Math.min(Math.max(Number.parseInt(String(request.query.days), 10) || 30, 1), 365);
     const slot = ingest();
     switch (slot.t) {
       case 'starting':

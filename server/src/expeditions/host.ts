@@ -867,7 +867,9 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     retired: () => loadRetired(root),
     interruptBootLive,
     start,
-    close: () => stops.splice(0).forEach((stop) => stop()),
+    close: () => {
+      for (const stop of stops.splice(0)) stop();
+    },
     step,
     /** Tests: resolves once no check job runs and the steps they woke have settled. */
     async drain(): Promise<void> {

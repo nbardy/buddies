@@ -73,7 +73,7 @@ try {
     if (!buddy)
       throw new Error(
         'Marketing Designer not found in real mention menu: ' +
-          document.querySelector('.channel-composer')?.innerText
+          document.querySelector('.channel-composer')?.textContent
       );
     buddy.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
   });

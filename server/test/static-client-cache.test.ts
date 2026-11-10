@@ -28,10 +28,11 @@ describe('static client caching', () => {
     fs.writeFileSync(path.join(directory, 'manifest.webmanifest'), '{}');
     const app = express();
     registerStaticClient(app, directory);
-    await new Promise<void>((resolve) => {
-      server = app.listen(0, '127.0.0.1', () => resolve());
+    const listening = await new Promise<NonNullable<typeof server>>((resolve) => {
+      const started = app.listen(0, '127.0.0.1', () => resolve(started));
     });
-    base = `http://127.0.0.1:${(server?.address() as AddressInfo).port}`;
+    server = listening;
+    base = `http://127.0.0.1:${(listening.address() as AddressInfo).port}`;
   });
 
   after(() => {

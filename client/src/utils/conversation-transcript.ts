@@ -1,5 +1,5 @@
 import type { ConversationDetail, ConversationRow, Message } from '@unleashd/shared';
-import { bodyText } from '@unleashd/shared';
+import { bodyText, unreachable } from '@unleashd/shared';
 import { shortenHomePath } from './directories';
 import { formatToolUse } from './tool-presentation';
 
@@ -37,6 +37,8 @@ export function messageTranscriptContent(message: Message): string {
           return `[Buddy worker thread] ${part.thread.label}`;
         case 'swarm_launch':
           return `[Swarm launch] ${part.command}`;
+        default:
+          return unreachable(part);
       }
     })
     .join('\n');

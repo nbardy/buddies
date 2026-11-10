@@ -143,9 +143,13 @@ function Frame({ p, frame, workspaceId }: { p: Parts; frame: Frame; workspaceId:
     });
   const waiting = p.tone === 'needs-you' ? p.x.attempts.filter((a) => a.phase.t === 'judging') : [];
   const badge: Record<Tab, ReactNode> = {
-    chat: unread && <span className="expedition-tab-dot" aria-label="new messages" />,
+    chat: unread && <span className="expedition-tab-dot" role="img" aria-label="new messages" />,
     attempts: waiting.length > 0 && (
-      <span className="expedition-tab-count" aria-label={`${waiting.length} need your verdict`}>
+      <span
+        className="expedition-tab-count"
+        role="img"
+        aria-label={`${waiting.length} need your verdict`}
+      >
         {waiting.length}
       </span>
     ),

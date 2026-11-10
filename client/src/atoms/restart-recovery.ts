@@ -72,7 +72,7 @@ export function captureRestartRecoveryQueue(
 ): void {
   if (queue.length === 0) return;
   const sendingIndex = queue.findIndex((message) => message.status === 'sending');
-  const currentIndex = sendingIndex >= 0 ? sendingIndex : 0;
+  const currentIndex = Math.max(sendingIndex, 0);
   const current = queue[currentIndex];
   saveRestartRecovery(conversationId, {
     version: 1,

@@ -48,6 +48,7 @@ type MarkProps = { u: number; size: number };
 
 const Svg: React.FC<{ size: number; children: React.ReactNode }> = ({ size, children }) => (
   <svg
+    aria-hidden="true"
     width={size}
     height={size}
     viewBox="0 0 100 100"

@@ -563,7 +563,11 @@ function NewChannelForm({
 // The red count is only what waits on the owner: requests in a DM.
 function RequestsBadge({ count }: { count: number }) {
   return count === 0 ? null : (
-    <span className="channel-browser-badge" aria-label={`${count} requests waiting on you`}>
+    <span
+      className="channel-browser-badge"
+      role="img"
+      aria-label={`${count} requests waiting on you`}
+    >
       {count}
     </span>
   );
@@ -712,7 +716,8 @@ export function ChannelBrowser({
     />
   );
   return (
-    <div className="channel-browser" aria-label="Channels">
+    // biome-ignore lint/a11y/useSemanticElements: a labelled group of content, not a form control set; <fieldset> brings form borders and padding.
+    <div className="channel-browser" role="group" aria-label="Channels">
       {teamCreator && (
         <WorkspaceTeamDialog workspaceId={workspaceId} onClose={() => setTeamCreator(false)} />
       )}

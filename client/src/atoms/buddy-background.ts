@@ -144,7 +144,7 @@ export function projectBuddyWorkers(
 const detailsKey = (scope: ReadScope) =>
   `buddy-workers:${JSON.stringify([scope.buddyId, scope.workspaceId, scope.includeHistory])}`;
 const detailKey = (id: string) => `buddy-worker-detail:${id}`;
-const valueOf = <T>(entry: ResourceEntry<T>): T | null =>
+const entryValue = <T>(entry: ResourceEntry<T>): T | null =>
   entry.kind === 'ready' || entry.kind === 'stale' ? entry.value : null;
 
 /** Details only, never transcript bodies. Quiet sessions reuse the keyed cache until activity changes. */
@@ -166,7 +166,7 @@ export function workerDetailsResource(scope: ReadScope): Resource<WorkerDetails>
             const cached = jotaiStore.get(
               resourceAtomFamily(key)
             ) as ResourceEntry<WorkerDetailSnapshot>;
-            const snapshot = valueOf(cached);
+            const snapshot = entryValue(cached);
             if (
               row.run !== 'idle' ||
               cached.kind !== 'ready' ||
@@ -188,7 +188,7 @@ export function workerDetailsResource(scope: ReadScope): Resource<WorkerDetails>
             const entry = jotaiStore.get(
               resourceAtomFamily(key)
             ) as ResourceEntry<WorkerDetailSnapshot>;
-            const detail = valueOf(entry)?.detail;
+            const detail = entryValue(entry)?.detail;
             if (detail) result.push(detail);
             if (entry.kind === 'failed' || entry.kind === 'stale') unavailableIds.push(row.id);
           }
@@ -205,7 +205,7 @@ export const buddyBackgroundWorkersAtomFamily = atomFamily(
       const rows = get(buddyWorkerRowsFamily(scope));
       // The mounted history result retains the complete screen if its individual snapshots
       // exceed the shared cache's 300 unmounted-key limit. Badges never request this history.
-      const history = valueOf(
+      const history = entryValue(
         get(
           resourceAtomFamily(detailsKey({ ...scope, includeHistory: true }))
         ) as ResourceEntry<WorkerDetails>
@@ -213,7 +213,7 @@ export const buddyBackgroundWorkersAtomFamily = atomFamily(
       const merged = new Map(history?.details.map((detail) => [detail.id, detail]));
       // An open conversation's WS-patched detail is newer than the polling backstop.
       for (const row of rows) {
-        const snapshot = valueOf(
+        const snapshot = entryValue(
           get(resourceAtomFamily(detailKey(row.id))) as ResourceEntry<WorkerDetailSnapshot>
         );
         if (snapshot) merged.set(row.id, snapshot.detail);

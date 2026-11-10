@@ -96,6 +96,7 @@ function StatusDot({ status }: { status: RowStatus }) {
     <span
       className="conversation-row__dot"
       data-status={status}
+      role="img"
       aria-label={STATUS_LABEL[status]}
     />
   );

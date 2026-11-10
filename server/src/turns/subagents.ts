@@ -72,7 +72,7 @@ function genericFold(provider: Provider): ToolFold {
     },
     taskFinished(host, event) {
       const agent = host.agents.find((a) => a.providerThreadId === event.toolUseId);
-      if (!agent || agent.status !== 'running') return;
+      if (agent?.status !== 'running') return;
       agent.status = event.status === 'completed' ? 'completed' : 'error';
       agent.rawStatus = event.status;
       agent.statusSource = 'native';

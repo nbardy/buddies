@@ -353,6 +353,7 @@ function gpu(kind: ProgramKind): {
   const { gl, palette, programs } = sharedGpu;
   const program = programs.get(kind) ?? link(gl, FRAGMENTS[kind]);
   programs.set(kind, program);
+  // biome-ignore lint/correctness/useHookAtTopLevel: WebGL's gl.useProgram, not a React hook.
   gl.useProgram(program.program);
   return { gl, palette, program };
 }

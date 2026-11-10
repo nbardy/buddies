@@ -28,7 +28,7 @@ export const searchMatchesFamily = atomFamily((folder: string) =>
     if (query.length === 0 && folder === '') return ids;
     return ids.filter((id) => {
       const row = get(rowFamily(id));
-      if (!row || !row.cwd.startsWith(folder)) return false;
+      if (!row?.cwd.startsWith(folder)) return false;
       return (
         fuzzyMatch(query, row.cwd) !== null ||
         fuzzyMatch(query, row.id) !== null ||

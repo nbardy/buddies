@@ -178,7 +178,11 @@ function ThreadSummary({ post, context }: { post: Post; context: RowContext }) {
               onClick={() => place.openThread(post.id)}
             >
               {unread && (
-                <span className="channel-browser-thread-unread" aria-label="New replies" />
+                <span
+                  className="channel-browser-thread-unread"
+                  role="img"
+                  aria-label="New replies"
+                />
               )}
               <strong>
                 {stat.replies} {stat.replies === 1 ? 'reply' : 'replies'}

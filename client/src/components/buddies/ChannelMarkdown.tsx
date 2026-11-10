@@ -1,4 +1,5 @@
 import type { ContentPart, MessageBody } from '@unleashd/shared';
+import { unreachable } from '@unleashd/shared';
 import {
   Fragment,
   type ReactNode,
@@ -573,6 +574,8 @@ export const ChannelMarkdown = memo(function ChannelMarkdown({
               return null;
             case 'swarm_launch':
               return markdown(part.command, index);
+            default:
+              return unreachable(part);
           }
         })}
       </div>

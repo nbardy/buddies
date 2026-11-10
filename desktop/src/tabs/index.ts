@@ -29,10 +29,10 @@ const buttons = tabs.map((tab, index) => {
 });
 
 function select(active: number) {
-  webviews.forEach((webview, index) => webview.toggleHidden(index !== active));
-  buttons.forEach((button, index) =>
-    button.setAttribute('aria-selected', String(index === active))
-  );
+  for (const [index, webview] of webviews.entries()) webview.toggleHidden(index !== active);
+  for (const [index, button] of buttons.entries()) {
+    button.setAttribute('aria-selected', String(index === active));
+  }
 }
 
 // Both tabs load (and open their sockets) before the second one goes to the background.

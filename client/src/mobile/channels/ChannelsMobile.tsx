@@ -293,6 +293,7 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
           {requests > 0 && (
             <span
               className="mobile-channels-row__badge"
+              role="img"
               aria-label={`${requests} requests waiting on you`}
             >
               {requests}

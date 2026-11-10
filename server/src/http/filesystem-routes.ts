@@ -122,7 +122,7 @@ export function registerFilesystemRoutes(
 
   app.get('/api/files', (req: Request, res: Response) => {
     const filePath = req.query.path as string;
-    if (!filePath || !filePath.startsWith('/')) {
+    if (!filePath?.startsWith('/')) {
       res.status(400).json({ error: 'Absolute path required' });
       return;
     }

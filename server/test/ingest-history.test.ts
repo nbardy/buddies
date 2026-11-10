@@ -326,13 +326,13 @@ test('a Builder first turn shows once after idle, with the text the owner typed'
     const sentAt = Date.now();
     conversation.process = {} as ExecutionHandle;
     const live = ['Kick off my Buddies', 'I will hire one engineer.', 'Hired Notes Engineer.'];
-    live.forEach((text, n) =>
+    live.forEach((text, n) => {
       conversation.appendMessage({
         role: n === 0 ? 'user' : 'assistant',
         body: { t: 'text', text },
         timestamp: new Date(sentAt + n * 10),
-      })
-    );
+      });
+    });
     fs.appendFileSync(
       file,
       claudeLine(

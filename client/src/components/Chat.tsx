@@ -604,7 +604,8 @@ export function Chat({ id }: { id: string }) {
                 good first outcome looks like. I’ll create each Buddy here with its own role and
                 working brief.
               </p>
-              <div className="buddy-helper-example" aria-label="Example team brief">
+              {/* biome-ignore lint/a11y/useSemanticElements: a labelled group of content, not a form control set; <fieldset> brings form borders and padding. */}
+              <div className="buddy-helper-example" role="group" aria-label="Example team brief">
                 “Create a researcher, a designer, and an engineer for unleashd to turn customer
                 feedback into shipped product improvements.”
               </div>

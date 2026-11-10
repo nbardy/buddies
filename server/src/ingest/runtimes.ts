@@ -163,7 +163,7 @@ export function createRuntimeBuilder(dependencies: RuntimeBuilderDependencies): 
     if (inFlight) return inFlight;
     const promise = (async () => {
       const record = await read();
-      if (!record || record.status !== 'active') return undefined;
+      if (record?.status !== 'active') return undefined;
       const conversation = await build(record);
       if (!conversation) return undefined;
       const raced = dependencies.registry.get(conversationId);

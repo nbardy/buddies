@@ -424,7 +424,7 @@ const Caption: React.FC = () => {
 const Clock: React.FC<{ t: number }> = ({ t }) => {
   const turn = 360 * easeOutCubic(clamp01(t / 0.9));
   return (
-    <svg width={38} height={38} viewBox="0 0 40 40">
+    <svg aria-hidden="true" width={38} height={38} viewBox="0 0 40 40">
       <circle cx={20} cy={20} r={17} fill="none" stroke={AURA.teal} strokeWidth={4} />
       <line
         x1={20}

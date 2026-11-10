@@ -82,6 +82,7 @@ export function ChannelPostContent({
       .finally(() => setBusy(false));
   };
   const tools: ReactNode = (
+    // biome-ignore lint/a11y/useSemanticElements: a row of action buttons, not a form; <fieldset> adds form borders and padding.
     <div className="channel-post-tools" role="group" aria-label="Edit or react">
       {post.author.kind === 'owner' && !clipped && (
         <button type="button" aria-label="Edit message" onClick={() => setEditing(post)}>
@@ -113,9 +114,11 @@ export function ChannelPostContent({
     </div>
   );
   return (
+    // biome-ignore lint/a11y/useSemanticElements: a labelled group of content, not a form control set; <fieldset> brings form borders and padding.
     <div
       className="channel-post-content"
       data-picking={picking || undefined}
+      role="group"
       aria-label="Message content and actions"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: Focus reveals message actions for keyboard and touch users.
       tabIndex={0}

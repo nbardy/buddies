@@ -602,7 +602,7 @@ export async function createConversationList(
   async function join(session: SessionRow): Promise<string | undefined> {
     const found = await dependencies.records.findBySession(session.provider, session.sessionId);
     const record = found ?? (await dependencies.discover(session));
-    if (!record || record.status !== 'active') return undefined;
+    if (record?.status !== 'active') return undefined;
     const summary = summaryOf(record);
     index(summary);
     return summary.conversationId;

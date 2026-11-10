@@ -207,7 +207,8 @@ export function Sidebar() {
   return (
     <div className="sidebar">
       <div className="sidebar-header ui-stack">
-        <div className="sidebar-actions" aria-label="Quick actions">
+        {/* biome-ignore lint/a11y/useSemanticElements: a labelled group of content, not a form control set; <fieldset> brings form borders and padding. */}
+        <div className="sidebar-actions" role="group" aria-label="Quick actions">
           <button
             type="button"
             className="sidebar-search-field ui-row ui-card"
@@ -351,6 +352,7 @@ export function Sidebar() {
                       {unread.requests > 0 && (
                         <span
                           className="sidebar-channels-badge"
+                          role="img"
                           aria-label={`${unread.requests} requests waiting on you`}
                         >
                           {unread.requests}
@@ -553,52 +555,51 @@ export function Sidebar() {
                               <BuddyRunningStatus item={item} />
                               <SidebarBuddyActions item={item} />
                             </div>
-                            <>
-                              {visibleConvs.length > 0 ? (
-                                visibleConvs.map((entry) => (
-                                  <ConversationRow
-                                    variant="sidebar"
-                                    key={entry.id}
-                                    id={entry.id}
-                                    active={entry.id === activeConversationId}
-                                    folder="hidden"
-                                    onDone={onDone}
-                                  />
-                                ))
-                              ) : item.pendingCreation ? (
-                                <div className="conversation-row conversation-row--sidebar ui-row pending-creation">
-                                  <div className="conversation-row__line ui-row">
-                                    <span className="conversation-row__title">
-                                      {item.pendingCreation.state.tag === 'rejected'
-                                        ? `Failed: ${item.pendingCreation.state.message}`
-                                        : `Starting ${item.pendingCreation.args.config.provider}…`}
-                                    </span>
-                                    <span className="conversation-row__dot" data-status="queued" />
-                                  </div>
+
+                            {visibleConvs.length > 0 ? (
+                              visibleConvs.map((entry) => (
+                                <ConversationRow
+                                  variant="sidebar"
+                                  key={entry.id}
+                                  id={entry.id}
+                                  active={entry.id === activeConversationId}
+                                  folder="hidden"
+                                  onDone={onDone}
+                                />
+                              ))
+                            ) : item.pendingCreation ? (
+                              <div className="conversation-row conversation-row--sidebar ui-row pending-creation">
+                                <div className="conversation-row__line ui-row">
+                                  <span className="conversation-row__title">
+                                    {item.pendingCreation.state.tag === 'rejected'
+                                      ? `Failed: ${item.pendingCreation.state.message}`
+                                      : `Starting ${item.pendingCreation.args.config.provider}…`}
+                                  </span>
+                                  <span className="conversation-row__dot" data-status="queued" />
                                 </div>
-                              ) : item.backgroundConversationCount === 0 ? (
-                                <div className="folder-group-all-done ui-muted">
-                                  No conversations yet
-                                </div>
-                              ) : null}
-                              {convs.length > 3 && (
-                                <button
-                                  type="button"
-                                  className="show-more-btn ui-muted"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setExpandedBuddies((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(buddyKey)) next.delete(buddyKey);
-                                      else next.add(buddyKey);
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  {isExpanded ? 'show less' : `show ${remaining} more`}
-                                </button>
-                              )}
-                            </>
+                              </div>
+                            ) : item.backgroundConversationCount === 0 ? (
+                              <div className="folder-group-all-done ui-muted">
+                                No conversations yet
+                              </div>
+                            ) : null}
+                            {convs.length > 3 && (
+                              <button
+                                type="button"
+                                className="show-more-btn ui-muted"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedBuddies((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(buddyKey)) next.delete(buddyKey);
+                                    else next.add(buddyKey);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                {isExpanded ? 'show less' : `show ${remaining} more`}
+                              </button>
+                            )}
                           </div>
                         );
                       })}
@@ -886,6 +887,7 @@ function FolderRunningStatus({ count }: { count: number }) {
   return (
     <span
       className="folder-group-running ui-inline-row"
+      role="img"
       aria-label={`${label} in this project`}
       title={label}
     >

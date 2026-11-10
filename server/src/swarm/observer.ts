@@ -163,7 +163,7 @@ function startSwarmAgent(host: SubAgentHost, run: NonNullable<OompaRuntimeSnapsh
 function completeSwarmAgent(host: SubAgentHost, runId: string): void {
   const agentId = `swarm-${runId}`;
   const agent = host.agents.find((candidate) => candidate.id === agentId);
-  if (!agent || agent.status !== 'running') return;
+  if (agent?.status !== 'running') return;
   const completedAt = new Date();
   agent.status = 'completed';
   agent.currentAction = 'Done';

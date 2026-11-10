@@ -241,6 +241,7 @@ export const HuddleMark: React.FC<{ count: Count; size: number; u: number }> = (
   const c = CAST[count];
   return (
     <svg
+      aria-hidden="true"
       width={size}
       height={size}
       viewBox="0 0 100 100"
@@ -325,7 +326,7 @@ export function BuddiesIntro({ count }: { count: Count }) {
           color={color}
         />
       ))}
-      <svg width={1920} height={1080} style={{ position: 'absolute', inset: 0 }}>
+      <svg aria-hidden="true" width={1920} height={1080} style={{ position: 'absolute', inset: 0 }}>
         {poses.map((p) => (
           <Antenna key={p.color} p={p} />
         ))}

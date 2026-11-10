@@ -43,6 +43,7 @@ export function TaskProgress({ progress }: { progress: ProjectProgress }) {
           <span
             className="task-progress-bar"
             role="progressbar"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: kept a tab stop so keyboard users reach its aria-valuetext, as before Biome 2 flagged it.
             tabIndex={0}
             aria-label="Todos done"
             aria-valuemin={0}

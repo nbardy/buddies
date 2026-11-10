@@ -99,6 +99,7 @@ const BrowserBar: React.FC<{ url: string }> = ({ url }) => (
 
 const Cursor: React.FC<{ x: number; y: number; press: number }> = ({ x, y, press }) => (
   <svg
+    aria-hidden="true"
     width={44}
     height={60}
     viewBox="0 0 22 30"
@@ -315,6 +316,7 @@ const Sparkles: React.FC<{ t: number }> = ({ t }) => (
       const on = since >= 0 ? Math.sin(p * Math.PI) ** 0.7 : 0;
       return (
         <svg
+          aria-hidden="true"
           key={`${s.x}-${s.y}`}
           viewBox="-6 -6 12 12"
           style={{

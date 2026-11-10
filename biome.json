@@ -1,10 +1,19 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
   "assist": {
     "actions": {
       "source": {
-        "organizeImports": { "level": "on", "options": { "identifierOrder": "lexicographic" } }
+        "organizeImports": {
+          "level": "on",
+          "options": {
+            "identifierOrder": "lexicographic"
+          }
+        }
       }
     }
   },
@@ -34,7 +43,8 @@
       "a11y": {
         "useKeyWithClickEvents": "off",
         "useButtonType": "warn",
-        "noAutofocus": "off"
+        "noAutofocus": "off",
+        "noStaticElementInteractions": "off"
       }
     }
   },
@@ -51,14 +61,38 @@
       "trailingCommas": "es5"
     }
   },
-  "css": { "formatter": { "enabled": false } },
-  "html": {
-    "formatter": { "enabled": false },
-    "linter": { "enabled": false },
-    "assist": { "enabled": false }
+  "css": {
+    "formatter": {
+      "enabled": false
+    }
   },
-  "markdown": { "formatter": { "enabled": false }, "linter": { "enabled": false } },
-  "yaml": { "formatter": { "enabled": false }, "linter": { "enabled": false } },
+  "html": {
+    "formatter": {
+      "enabled": false
+    },
+    "linter": {
+      "enabled": false
+    },
+    "assist": {
+      "enabled": false
+    }
+  },
+  "markdown": {
+    "formatter": {
+      "enabled": false
+    },
+    "linter": {
+      "enabled": false
+    }
+  },
+  "yaml": {
+    "formatter": {
+      "enabled": false
+    },
+    "linter": {
+      "enabled": false
+    }
+  },
   "json": {
     "parser": {
       "allowComments": true

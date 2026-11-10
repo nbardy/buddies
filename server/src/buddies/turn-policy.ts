@@ -673,7 +673,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
   // backend stays up is cleared within the lease time".
   bridgeAlive(): void {
     const { execution } = this;
-    if (!execution || execution.lease.t !== 'held') return;
+    if (execution?.lease.t !== 'held') return;
     if (Date.now() - execution.lease.renewedAt < BUDDY_RUN_LEASE_RENEW_MS) return;
     execution.lease = { t: 'renewing' };
     void this.buddies.renewLease(execution.runId, execution.leaseToken).then((renewal) => {
