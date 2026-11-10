@@ -115,22 +115,22 @@ export function taskPlan(task, env = process.env) {
 }
 
 // The compilers `pnpm dev` runs: the same configs as the packages' watch scripts.
-// `sentinel` is an output whose absence means dist/ was cleaned (dev-runtime.mjs).
+// `outDir` is where each one publishes; it compiles into its own stage (dev-runtime.mjs).
 const COMPILERS = [
   {
     name: 'shared-esm',
     configPath: path.join(repositoryRoot, 'shared', 'tsconfig.json'),
-    sentinel: path.join(repositoryRoot, 'shared', 'dist', 'index.js'),
+    outDir: path.join(repositoryRoot, 'shared', 'dist'),
   },
   {
     name: 'shared-cjs',
     configPath: path.join(repositoryRoot, 'shared', 'tsconfig.cjs.json'),
-    sentinel: path.join(repositoryRoot, 'shared', 'dist', 'cjs', 'index.js'),
+    outDir: path.join(repositoryRoot, 'shared', 'dist', 'cjs'),
   },
   {
     name: 'cli',
     configPath: path.join(repositoryRoot, 'vendor', 'agent-cli-tool', 'tsconfig.build.json'),
-    sentinel: path.join(repositoryRoot, 'vendor', 'agent-cli-tool', 'dist', 'index.js'),
+    outDir: path.join(repositoryRoot, 'vendor', 'agent-cli-tool', 'dist'),
   },
 ];
 const COMPILER_STATE = path.join(repositoryRoot, 'node_modules', '.cache', 'unleashd-dev');

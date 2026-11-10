@@ -3,17 +3,20 @@
 // Until 2026-09-25 `pnpm dev` ran them through concurrently plus a `pnpm
 // --filter …` wrapper per tool: 18 processes, ~7 of which only launched
 // another. Here the supervisor process itself runs
-//   - the three TypeScript watch compilers (shared ESM, shared CJS, agent-cli-tool),
 //   - the Vite dev server,
 //   - the backend runner (tools/watch-server.mjs),
-// through their JavaScript APIs. The backend stays a child process: it is the
+// through their JavaScript APIs, plus one native `tsc --watch` child per
+// TypeScript project (shared ESM, shared CJS, agent-cli-tool): TypeScript 7 has
+// no in-process compiler API. The backend stays a child process: it is the
 // unit that restarts, and it owns the provider pipes of running agent turns.
 //
 // Order matters: the backend and Vite start only after every compiler's first
 // pass. A watcher that starts beside the backend rewrites dist/ while the
 // backend loads it, which is what restarted a backend mid-startup on
 // 2026-09-25 (see tools/watch-server.mjs).
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -31,66 +34,155 @@ export function linePrefixer(prefix, write) {
   };
 }
 
+/** The `tsc` launcher of the TypeScript package that owns `configPath` (its manifest's `bin`). */
+export function tscLauncher(configPath) {
+  const manifest = createRequire(configPath).resolve('typescript/package.json');
+  return path.join(path.dirname(manifest), JSON.parse(readFileSync(manifest, 'utf8')).bin.tsc);
+}
+
+// The line native `tsc --watch` prints at the end of every pass, whatever its error count.
+const PASS_END = /Found \d+ errors?\. Watching for file changes\./;
+
 /**
- * One `tsc --watch` equivalent through the TypeScript API of the package that
- * owns `configPath`. Resolves `ready` after the first full pass, whatever its
- * error count: type errors are reported, not fatal, exactly as `tsc --watch`.
+ * One `tsc --watch` for `configPath`: a child process of the TypeScript package that owns the
+ * config. Resolves `ready` after the first full pass, whatever its error count: type errors are
+ * reported, not fatal, exactly as `tsc --watch`.
  *
- * Incremental: build state persists in `stateDirectory`, so a start with
- * unchanged sources re-checks instead of re-emitting everything. The first pass
- * gates the backend and Vite, and a full rebuild of all three projects took
- * 1m46s on a loaded machine (2026-09-25). Build state trusts its outputs
- * exist. A missing `sentinel` output discards the state: one full rebuild.
- * One-shot builds stage before publishing, and watch writes replace each file
- * atomically, so active consumers do not observe truncated modules.
+ * The compiler never writes `outDir` itself. It emits into a private stage
+ * (`stateDirectory/<name>/out`); after each pass every staged file whose bytes differ from the
+ * published one is written beside it and renamed into place. tsc's direct write truncates a
+ * live module before its replacement is complete, and readers then see syntax errors or
+ * missing exports mid-rebuild. Until TypeScript 7 a custom `writeFile` on the in-process watch
+ * host did the rename; the native compiler has no such hook, so the stage replaces it.
+ * Guard: tools/dev-runtime.test.mjs.
+ *
+ * Incremental: build state persists in `stateDirectory`, so a start with unchanged sources
+ * re-checks instead of re-emitting everything. The first pass gates the backend and Vite, and
+ * a full rebuild of all three projects took 1m46s on a loaded machine (2026-09-25, TS 5.9).
+ * Build state trusts its outputs exist, so a missing stage discards it (one full rebuild). A
+ * cleaned `outDir` costs no rebuild: the first pass publishes the whole stage into it.
  */
-export function startCompiler({ name, configPath, sentinel, stateDirectory, log }) {
-  const ts = createRequire(configPath)('typescript');
-  const host = ts.sys;
-  const format = {
-    getCanonicalFileName: (file) => file,
-    getCurrentDirectory: host.getCurrentDirectory,
-    getNewLine: () => '\n',
-  };
+export function startCompiler({ name, configPath, outDir, stateDirectory, log }) {
+  const state = path.join(stateDirectory, name);
+  const stage = path.join(state, 'out');
+  const tsBuildInfoFile = path.join(state, 'tsbuildinfo');
+  if (!existsSync(stage)) rmSync(tsBuildInfoFile, { force: true });
+  mkdirSync(stage, { recursive: true });
   let markReady;
   const ready = new Promise((resolve) => {
     markReady = resolve;
   });
-  const report = (diagnostic) =>
-    log(`[${name}] ${ts.formatDiagnostic(diagnostic, format).trimEnd()}`);
-  mkdirSync(stateDirectory, { recursive: true });
-  const tsBuildInfoFile = path.join(stateDirectory, `${name}.tsbuildinfo`);
-  if (!existsSync(sentinel)) rmSync(tsBuildInfoFile, { force: true });
-  const watchHost = ts.createWatchCompilerHost(
-    configPath,
-    { incremental: true, tsBuildInfoFile },
-    host,
-    ts.createEmitAndSemanticDiagnosticsBuilderProgram,
-    report,
-    (diagnostic, _newLine, _options, errorCount) => {
-      log(`[${name}] ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`);
-      // errorCount is passed only with the "Found N errors" status that ends a pass.
-      if (errorCount !== undefined) markReady();
-    }
+  // stage-relative path -> mtime of the staged file when it was last published
+  const published = new Map();
+  let publishing = Promise.resolve();
+  let closing = false;
+  const child = spawn(
+    process.execPath,
+    [
+      tscLauncher(configPath),
+      '-p',
+      configPath,
+      '--watch',
+      '--preserveWatchOutput',
+      '--pretty',
+      'false',
+      '--incremental',
+      '--tsBuildInfoFile',
+      tsBuildInfoFile,
+      '--outDir',
+      stage,
+    ],
+    { cwd: path.dirname(configPath), stdio: ['ignore', 'pipe', 'pipe'] }
   );
-  let writeNumber = 0;
-  watchHost.writeFile = (fileName, data, writeByteOrderMark, onError) => {
-    // tsc's direct write truncates a live module before its replacement is
-    // complete. Readers then see syntax errors or missing exports mid-rebuild.
-    // A same-directory rename makes each emitted file visible in one step.
-    mkdirSync(path.dirname(fileName), { recursive: true });
-    const temporary = `${fileName}.${process.pid}.${writeNumber++}.tmp`;
-    try {
-      writeFileSync(temporary, `${writeByteOrderMark ? '\uFEFF' : ''}${data}`, 'utf8');
-      renameSync(temporary, fileName);
-    } catch (error) {
-      rmSync(temporary, { force: true });
-      if (onError) onError(String(error));
-      else throw error;
-    }
+  const onLine = (line) => {
+    if (line.trim()) log(`[${name}] ${line.trim()}`);
+    if (!PASS_END.test(line)) return;
+    publishing = publishing
+      .then(() => publishStage(stage, outDir, published))
+      .catch((error) => log(`[${name}] publishing ${outDir} failed: ${error.message}`))
+      .then(markReady);
   };
-  const program = ts.createWatchProgram(watchHost);
-  return { ready, close: () => program.close() };
+  for (const stream of [child.stdout, child.stderr]) {
+    stream.setEncoding('utf8');
+    stream.on('data', linePrefixer('', onLine));
+  }
+  child.once('error', (error) => {
+    log(`[${name}] could not start tsc: ${error.message}`);
+    markReady();
+  });
+  child.once('exit', (code, signal) => {
+    if (!closing) log(`[${name}] tsc --watch exited (${signal ?? code})`);
+    markReady();
+  });
+  return {
+    ready,
+    /** Resolves once the compiler process has exited. */
+    close: () => {
+      closing = true;
+      const exited = new Promise((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) resolve();
+        else child.once('exit', () => resolve());
+      });
+      child.kill();
+      return exited;
+    },
+  };
+}
+
+/** Publish every staged file that changed since its last publish into `outDir`, one rename each. */
+async function publishStage(stage, outDir, published) {
+  const entries = await readdir(stage, { recursive: true, withFileTypes: true });
+  for (const entry of entries.filter((candidate) => candidate.isFile())) {
+    const from = path.join(entry.parentPath, entry.name);
+    const relative = path.relative(stage, from);
+    const { mtimeMs } = await stat(from);
+    if (published.get(relative) === mtimeMs) continue;
+    const to = path.join(outDir, relative);
+    const staged = await readFile(from, 'utf8');
+    const text = from.endsWith('.map') ? relocateSourceMap(staged, from, to) : staged;
+    if ((await readPublished(to)) !== text) await replaceFile(to, text);
+    published.set(relative, mtimeMs);
+  }
+}
+
+/**
+ * A map's `sources` are relative to the map's own directory, and the stage is not `outDir`, so
+ * each source is re-relativized onto the published location. JSON.stringify writes tsc's own
+ * compact form, so a published map is byte-identical to a direct emit (tested).
+ */
+function relocateSourceMap(text, from, to) {
+  const map = JSON.parse(text);
+  map.sources = map.sources.map((source) =>
+    path
+      .relative(path.dirname(to), path.resolve(path.dirname(from), source))
+      .split(path.sep)
+      .join('/')
+  );
+  return JSON.stringify(map);
+}
+
+/** The published bytes of an output; one never published reads as `null`. */
+async function readPublished(file) {
+  try {
+    return await readFile(file, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+let replacements = 0;
+/** A same-directory rename makes the new file visible in one step. */
+async function replaceFile(file, text) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${replacements++}.tmp`;
+  try {
+    await writeFile(temporary, text, 'utf8');
+    await rename(temporary, file);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
 }
 
 /** Vite's dev server, with the client's own vite.config.ts (`overrides` merge over it). */

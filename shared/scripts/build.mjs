@@ -21,7 +21,14 @@ const sharedRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const cacheRoot = path.join(sharedRoot, 'node_modules', '.cache');
 const distRoot = path.join(sharedRoot, 'dist');
 const lockPath = path.join(cacheRoot, 'build.lock');
-const tsc = createRequire(import.meta.url).resolve('typescript/bin/tsc');
+// TypeScript 7's `exports` map names no `bin/tsc` subpath, so resolving it threw
+// ERR_PACKAGE_PATH_NOT_EXPORTED. The package's own `bin` field is the stable way in;
+// that launcher execs the native compiler.
+const typescriptManifest = createRequire(import.meta.url).resolve('typescript/package.json');
+const tsc = path.join(
+  path.dirname(typescriptManifest),
+  JSON.parse(await readFile(typescriptManifest, 'utf8')).bin.tsc
+);
 
 async function acquireLock() {
   await mkdir(cacheRoot, { recursive: true });

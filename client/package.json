@@ -44,7 +44,7 @@
     "@unleashd/buddies-core": "workspace:*",
     "@vitejs/plugin-react": "^5.1.1",
     "compression": "^1.8.1",
-    "typescript": "~5.9.3",
+    "typescript": "7.0.2",
     "unified": "^11.0.5",
     "vite": "^7.2.4"
   }
