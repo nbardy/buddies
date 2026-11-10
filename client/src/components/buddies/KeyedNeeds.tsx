@@ -22,7 +22,12 @@ const Button = ({
   tone,
   disabled,
   onClick,
-}: { children: ReactNode; tone?: 'primary'; disabled: boolean; onClick(): void }) => (
+}: {
+  children: ReactNode;
+  tone?: 'primary';
+  disabled: boolean;
+  onClick(): void;
+}) => (
   <button
     type="button"
     className="expedition-button"
@@ -96,7 +101,10 @@ export function KeyedAsks({ id, asks }: { id: string; asks: readonly keyed.Pendi
 function Approval({
   id,
   approval,
-}: { id: string; approval: Extract<keyed.PendingApproval, { t: 'pending' }> }) {
+}: {
+  id: string;
+  approval: Extract<keyed.PendingApproval, { t: 'pending' }>;
+}) {
   const write = useKeyedWrite();
   const busy = write.state.t === 'pending';
   const send = (approve: boolean) =>

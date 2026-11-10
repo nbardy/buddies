@@ -1,3 +1,4 @@
+import { keyed } from '@unleashd/shared';
 import type { ProviderOf } from './canonical';
 import { Change } from './change';
 import {
@@ -25,13 +26,10 @@ import {
 } from './core';
 import type { LogStore } from './log-store';
 import { type Asker, type Delivery, type PlanHost, PlanProcess } from './plan-process';
-import type { Clock, Executor, Leader, Owner, RawOutcome, Woken } from './ports';
+import type { Clock, Executor, ExpeditionView, Leader, Owner, RawOutcome, Woken } from './ports';
 import { recover } from './recovery';
 import type { PlanEnd } from './runner';
 import { type Ending, endingOf, judgeRunOf, producerRun } from './runs';
-
-import { keyed } from '@unleashd/shared';
-import type { ExpeditionView } from './ports';
 
 // The kernel (docs/expeditions/keyed/v1/DESIGN.md): one expedition's log, its plan process and
 // its runs. Every decision and every log append happens inside ONE serialized queue per

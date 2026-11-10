@@ -100,161 +100,158 @@ export default plan(async (x) => {
 });
 `;
 
-test(
-  'asks post once across a restart and settle from thread replies; commands steer; talk is a note',
-  { timeout: 400_000 },
-  async () => {
-    const exp = await h.launch(
-      planFolder({
-        plan: STEER_PLAN,
-        briefs: { flaky: 'Answer badly. TAG:flaky MODE:malformed' },
-      }),
-      ws,
-      base
-    );
-    const asks = await h.eventually(
-      () => askPosts(exp),
-      (posts) => posts.length === 2,
-      'both questions posted in the leader DM'
-    );
-    const text = asks.find((p) => p.body.includes('Which color first?'));
-    const confirm = asks.find((p) => p.body.includes('Ship it?'));
-    assert.ok(text && confirm);
-    assert.equal(text.author.id, lead, 'an ask is the leader’s post');
-    const root = await threadRoot(exp);
+test('asks post once across a restart and settle from thread replies; commands steer; talk is a note', {
+  timeout: 400_000,
+}, async () => {
+  const exp = await h.launch(
+    planFolder({
+      plan: STEER_PLAN,
+      briefs: { flaky: 'Answer badly. TAG:flaky MODE:malformed' },
+    }),
+    ws,
+    base
+  );
+  const asks = await h.eventually(
+    () => askPosts(exp),
+    (posts) => posts.length === 2,
+    'both questions posted in the leader DM'
+  );
+  const text = asks.find((p) => p.body.includes('Which color first?'));
+  const confirm = asks.find((p) => p.body.includes('Ship it?'));
+  assert.ok(text && confirm);
+  assert.equal(text.author.id, lead, 'an ask is the leader’s post');
+  const root = await threadRoot(exp);
 
-    // ---- bare commands at the expedition thread's root ----
-    await h.eventually(
-      () => h.entries(exp),
-      (es) => settledOf(es, 'flaky').length === 1,
-      'flaky errored'
-    );
-    const say = (body: string, key: string) => h.reply(dm, root, body, key);
-    const acks = async () => (await h.thread(root)).filter((p) => p.author.id === lead);
-    const ackOf = async (start: string) =>
-      h.eventually(
-        acks,
-        (ps) => ps.some((p) => p.body.startsWith(start)),
-        `the "${start}" acknowledgement`
-      );
-
-    const pause = await say('pause', 'o-pause');
-    await ackOf('Paused');
-    assert.equal((await h.view(exp)).status.t, 'paused');
-    await say('Resume.', 'o-resume');
-    await ackOf('Resumed');
-    assert.equal((await h.view(exp)).status.t, 'running');
-    const before = Date.parse((await h.view(exp)).deadline);
-    await say('extend 2h', 'o-extend');
-    await ackOf('Extended 2 h');
-    assert.equal(Date.parse((await h.view(exp)).deadline) - before, 2 * 3_600_000);
-    await say('retry flaky', 'o-retry');
-    await ackOf('Retrying flaky');
-    await h.eventually(
-      () => h.entries(exp),
-      (es) => settledOf(es, 'flaky').length === 2,
-      'the retried attempt ran'
-    );
-    const entries = await h.entries(exp);
-    assert.ok(entries.some((e) => e.t === 'retried' && e.key === 'flaky' && e.by === 'owner'));
-    assert.equal(h.spawnsOf('flaky'), 2);
-    // A refused command is answered, not applied.
-    await say('retry nothing/here', 'o-retry-bad');
-    await ackOf('"retry nothing/here": not done');
-
-    // ---- talk: a note for the leader's next wake, which wakes nobody ----
-    await say('Please favour blue options.', 'o-note');
-    await ackOf('Noted');
-    const book = await h.ownerBook(exp);
-    assert.deepEqual(
-      book.notes.map((n) => n.text),
-      ['Please favour blue options.']
+  // ---- bare commands at the expedition thread's root ----
+  await h.eventually(
+    () => h.entries(exp),
+    (es) => settledOf(es, 'flaky').length === 1,
+    'flaky errored'
+  );
+  const say = (body: string, key: string) => h.reply(dm, root, body, key);
+  const acks = async () => (await h.thread(root)).filter((p) => p.author.id === lead);
+  const ackOf = async (start: string) =>
+    h.eventually(
+      acks,
+      (ps) => ps.some((p) => p.body.startsWith(start)),
+      `the "${start}" acknowledgement`
     );
 
-    // Each command was consumed (no Buddy turn, no delivery) and acknowledged exactly once, also
-    // after more observation passes.
-    assert.equal(pause.purpose, 'host_command');
-    await settle();
-    const lines = (await acks()).map((p) => p.body.split(' ')[0]);
-    for (const word of ['Paused', 'Resumed.', 'Extended', 'Retrying', 'Noted'])
-      assert.equal(lines.filter((l) => l === word).length, 1, `one ${word} line`);
-    assert.deepEqual(await leaderRuns(), [], 'no owner post in the thread started a leader run');
+  const pause = await say('pause', 'o-pause');
+  await ackOf('Paused');
+  assert.equal((await h.view(exp)).status.t, 'paused');
+  await say('Resume.', 'o-resume');
+  await ackOf('Resumed');
+  assert.equal((await h.view(exp)).status.t, 'running');
+  const before = Date.parse((await h.view(exp)).deadline);
+  await say('extend 2h', 'o-extend');
+  await ackOf('Extended 2 h');
+  assert.equal(Date.parse((await h.view(exp)).deadline) - before, 2 * 3_600_000);
+  await say('retry flaky', 'o-retry');
+  await ackOf('Retrying flaky');
+  await h.eventually(
+    () => h.entries(exp),
+    (es) => settledOf(es, 'flaky').length === 2,
+    'the retried attempt ran'
+  );
+  const entries = await h.entries(exp);
+  assert.ok(entries.some((e) => e.t === 'retried' && e.key === 'flaky' && e.by === 'owner'));
+  assert.equal(h.spawnsOf('flaky'), 2);
+  // A refused command is answered, not applied.
+  await say('retry nothing/here', 'o-retry-bad');
+  await ackOf('"retry nothing/here": not done');
 
-    // ---- the backend dies with both asks pending ----
-    await h.kill();
-    await h.boot('B', { EXP_USAGE_WAIT_MS: '500' });
-    assert.equal((await h.open(exp)).t, 'opened');
-    await settle();
-    assert.equal((await askPosts(exp)).length, 2, 'each question was posted once');
+  // ---- talk: a note for the leader's next wake, which wakes nobody ----
+  await say('Please favour blue options.', 'o-note');
+  await ackOf('Noted');
+  const book = await h.ownerBook(exp);
+  assert.deepEqual(
+    book.notes.map((n) => n.text),
+    ['Please favour blue options.']
+  );
 
-    // A text ask: the first owner reply is the answer.
-    const answer = await h.reply(dm, text.id, 'Blue, then green.', 'o-color');
-    assert.equal(answer.purpose, 'host_command', 'an answer wakes nobody');
-    await h.eventually(
-      () => h.entries(exp),
-      (es) => settledOf(es, 'ask/which-color-first').length === 1,
-      'the text ask settled'
-    );
-    const [color] = settledOf(await h.entries(exp), 'ask/which-color-first');
-    assert.equal(color?.outcome.t, 'passed');
-    assert.equal(color?.outcome.t === 'passed' && color.outcome.out, 'Blue, then green.');
+  // Each command was consumed (no Buddy turn, no delivery) and acknowledged exactly once, also
+  // after more observation passes.
+  assert.equal(pause.purpose, 'host_command');
+  await settle();
+  const lines = (await acks()).map((p) => p.body.split(' ')[0]);
+  for (const word of ['Paused', 'Resumed.', 'Extended', 'Retrying', 'Noted'])
+    assert.equal(lines.filter((l) => l === word).length, 1, `one ${word} line`);
+  assert.deepEqual(await leaderRuns(), [], 'no owner post in the thread started a leader run');
 
-    // A confirm ask: an unclear reply is answered once and the question stays open.
-    await h.reply(dm, confirm.id, 'maybe later', 'o-maybe');
-    const reAsks = () => h.thread(confirm.id).then((ps) => ps.filter((p) => p.author.id === lead));
-    await h.eventually(reAsks, (ps) => ps.length === 1, 'the host re-asks once');
-    await settle();
-    assert.equal((await reAsks()).length, 1, 'still once after more passes');
-    assert.equal(settledOf(await h.entries(exp), 'ask/ship-it').length, 0);
-    await h.reply(dm, confirm.id, 'Yes!', 'o-yes');
-    await h.eventually(
-      () => h.entries(exp),
-      (es) => settledOf(es, 'ask/ship-it').length === 1,
-      'the confirm ask settled'
-    );
-    const [ship] = settledOf(await h.entries(exp), 'ask/ship-it');
-    assert.equal(ship?.outcome.t === 'passed' && ship.outcome.out, true);
+  // ---- the backend dies with both asks pending ----
+  await h.kill();
+  await h.boot('B', { EXP_USAGE_WAIT_MS: '500' });
+  assert.equal((await h.open(exp)).t, 'opened');
+  await settle();
+  assert.equal((await askPosts(exp)).length, 2, 'each question was posted once');
 
-    // ---- the review wakes the leader: the owner's note is in its prompt ----
-    const name = h.leaderName(exp, 1);
-    await h.eventually(() => h.exists(`${name}.midturn`), Boolean, 'the review wake');
-    assert.match(h.read(`${name}.prompt`), /Please favour blue options\./);
-    h.leaderAnswers(exp, 1, { answer: fence({ t: 'continue' }) });
+  // A text ask: the first owner reply is the answer.
+  const answer = await h.reply(dm, text.id, 'Blue, then green.', 'o-color');
+  assert.equal(answer.purpose, 'host_command', 'an answer wakes nobody');
+  await h.eventually(
+    () => h.entries(exp),
+    (es) => settledOf(es, 'ask/which-color-first').length === 1,
+    'the text ask settled'
+  );
+  const [color] = settledOf(await h.entries(exp), 'ask/which-color-first');
+  assert.equal(color?.outcome.t, 'passed');
+  assert.equal(color?.outcome.t === 'passed' && color.outcome.out, 'Blue, then green.');
 
-    // The candidate's owner criterion is an ask too; answered here through the route.
-    const doneAsk = await h.eventually(
-      () => h.view(exp),
-      (v) => v.asks.some((a) => a.key === 'done/0'),
-      'the done question'
-    );
-    const ref = doneAsk.asks.find((a) => a.key === 'done/0')?.ref as string;
-    assert.equal(
-      (await h.answerAsk(exp, ref, { t: 'text', text: 'yes' })).t,
-      'refused',
-      'a confirm ask takes yes or no'
-    );
-    assert.equal((await h.answerAsk(exp, ref, { t: 'confirm', yes: true })).t, 'answered');
-    const done = await h.eventually(
-      () => h.view(exp),
-      (v) => v.status.t === 'finished',
-      'finished'
-    );
-    assert.deepEqual(done.status.t === 'finished' && done.status.reason.t, 'met');
-    // Only the review woke the leader: its one wake run, nothing from the owner's posts.
-    const runs = await leaderRuns();
-    assert.equal(runs.length, 1, JSON.stringify(runs));
-    assert.equal(runs[0]?.input.kind, 'post');
-  }
-);
+  // A confirm ask: an unclear reply is answered once and the question stays open.
+  await h.reply(dm, confirm.id, 'maybe later', 'o-maybe');
+  const reAsks = () => h.thread(confirm.id).then((ps) => ps.filter((p) => p.author.id === lead));
+  await h.eventually(reAsks, (ps) => ps.length === 1, 'the host re-asks once');
+  await settle();
+  assert.equal((await reAsks()).length, 1, 'still once after more passes');
+  assert.equal(settledOf(await h.entries(exp), 'ask/ship-it').length, 0);
+  await h.reply(dm, confirm.id, 'Yes!', 'o-yes');
+  await h.eventually(
+    () => h.entries(exp),
+    (es) => settledOf(es, 'ask/ship-it').length === 1,
+    'the confirm ask settled'
+  );
+  const [ship] = settledOf(await h.entries(exp), 'ask/ship-it');
+  assert.equal(ship?.outcome.t === 'passed' && ship.outcome.out, true);
 
-test(
-  'an ask stays answerable after the deadline; stop ends the expedition, acknowledged once',
-  { timeout: 240_000 },
-  async () => {
-    const exp = await h.launch(
-      planFolder({
-        hours: 0.003,
-        plan: `import { command, need, plan, steps } from 'expedition';
+  // ---- the review wakes the leader: the owner's note is in its prompt ----
+  const name = h.leaderName(exp, 1);
+  await h.eventually(() => h.exists(`${name}.midturn`), Boolean, 'the review wake');
+  assert.match(h.read(`${name}.prompt`), /Please favour blue options\./);
+  h.leaderAnswers(exp, 1, { answer: fence({ t: 'continue' }) });
+
+  // The candidate's owner criterion is an ask too; answered here through the route.
+  const doneAsk = await h.eventually(
+    () => h.view(exp),
+    (v) => v.asks.some((a) => a.key === 'done/0'),
+    'the done question'
+  );
+  const ref = doneAsk.asks.find((a) => a.key === 'done/0')?.ref as string;
+  assert.equal(
+    (await h.answerAsk(exp, ref, { t: 'text', text: 'yes' })).t,
+    'refused',
+    'a confirm ask takes yes or no'
+  );
+  assert.equal((await h.answerAsk(exp, ref, { t: 'confirm', yes: true })).t, 'answered');
+  const done = await h.eventually(
+    () => h.view(exp),
+    (v) => v.status.t === 'finished',
+    'finished'
+  );
+  assert.deepEqual(done.status.t === 'finished' && done.status.reason.t, 'met');
+  // Only the review woke the leader: its one wake run, nothing from the owner's posts.
+  const runs = await leaderRuns();
+  assert.equal(runs.length, 1, JSON.stringify(runs));
+  assert.equal(runs[0]?.input.kind, 'post');
+});
+
+test('an ask stays answerable after the deadline; stop ends the expedition, acknowledged once', {
+  timeout: 240_000,
+}, async () => {
+  const exp = await h.launch(
+    planFolder({
+      hours: 0.003,
+      plan: `import { command, need, plan, steps } from 'expedition';
 
 const { finish } = steps({ finish: command('node scripts/ok.js', { minutes: 1 }) });
 
@@ -263,42 +260,41 @@ export default plan(async (x) => {
   return need(await finish(), 'no finish');
 });
 `,
-      }),
-      ws,
-      base
-    );
-    const [ask] = await h.eventually(
-      () => askPosts(exp),
-      (posts) => posts.length === 1,
-      'the question'
-    );
-    const deadline = Date.parse((await h.view(exp)).deadline);
-    await h.eventually(
-      () => Date.now(),
-      (now) => now > deadline + 1_000,
-      'past the deadline',
-      30_000
-    );
-    assert.equal((await h.view(exp)).asks.length, 1, 'still pending past the deadline');
-    await h.reply(dm, ask?.id as string, 'Late, but yes.', 'o-late');
-    const late = await h.eventually(
-      () => h.entries(exp),
-      (es) => settledOf(es, 'ask/is-it-late').length === 1,
-      'answered after the deadline'
-    );
-    const [answered] = settledOf(late, 'ask/is-it-late');
-    assert.equal(answered?.outcome.t === 'passed' && answered.outcome.out, 'Late, but yes.');
-    assert.ok(Date.parse(answered?.at as string) > deadline);
+    }),
+    ws,
+    base
+  );
+  const [ask] = await h.eventually(
+    () => askPosts(exp),
+    (posts) => posts.length === 1,
+    'the question'
+  );
+  const deadline = Date.parse((await h.view(exp)).deadline);
+  await h.eventually(
+    () => Date.now(),
+    (now) => now > deadline + 1_000,
+    'past the deadline',
+    30_000
+  );
+  assert.equal((await h.view(exp)).asks.length, 1, 'still pending past the deadline');
+  await h.reply(dm, ask?.id as string, 'Late, but yes.', 'o-late');
+  const late = await h.eventually(
+    () => h.entries(exp),
+    (es) => settledOf(es, 'ask/is-it-late').length === 1,
+    'answered after the deadline'
+  );
+  const [answered] = settledOf(late, 'ask/is-it-late');
+  assert.equal(answered?.outcome.t === 'passed' && answered.outcome.out, 'Late, but yes.');
+  assert.ok(Date.parse(answered?.at as string) > deadline);
 
-    const root = await threadRoot(exp);
-    await h.reply(dm, root, 'stop', 'o-stop');
-    const acked = () =>
-      h
-        .thread(root)
-        .then((ps) => ps.filter((p) => p.author.id === lead && /^(Stopped|"stop")/.test(p.body)));
-    await h.eventually(acked, (ps) => ps.length === 1, 'the stop acknowledged');
-    await settle();
-    assert.equal((await acked()).length, 1);
-    assert.equal((await h.view(exp)).status.t, 'finished');
-  }
-);
+  const root = await threadRoot(exp);
+  await h.reply(dm, root, 'stop', 'o-stop');
+  const acked = () =>
+    h
+      .thread(root)
+      .then((ps) => ps.filter((p) => p.author.id === lead && /^(Stopped|"stop")/.test(p.body)));
+  await h.eventually(acked, (ps) => ps.length === 1, 'the stop acknowledged');
+  await settle();
+  assert.equal((await acked()).length, 1);
+  assert.equal((await h.view(exp)).status.t, 'finished');
+});

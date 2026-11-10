@@ -1,13 +1,13 @@
 import type { keyed } from '@unleashd/shared';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { buddyWrite } from './api';
 import { ChannelLoader } from './ChannelLoader';
+import { channelsHref } from './channels-view';
 import { Scroll, when } from './ExpeditionPanels';
 import { Confirm, type Frame, Gone, timeLeft, useNow } from './ExpeditionView';
 import { KeyedApproval, KeyedAsks } from './KeyedNeeds';
 import { Timeline } from './KeyedTimeline';
-import { buddyWrite } from './api';
-import { channelsHref } from './channels-view';
 import { unavailableText, useKeyedView, useKeyedWrite } from './keyed-api';
 import {
   ACTS,
@@ -50,7 +50,12 @@ function Loaded({
   workspaceId,
   frame,
   now,
-}: { view: keyed.KeyedView; workspaceId: string; frame: Frame; now: number }) {
+}: {
+  view: keyed.KeyedView;
+  workspaceId: string;
+  frame: Frame;
+  now: number;
+}) {
   const [selection, select] = useState<Selection>({ t: 'none' });
   const tone = pillToneOf(view);
   const split = budgetSplit(view);

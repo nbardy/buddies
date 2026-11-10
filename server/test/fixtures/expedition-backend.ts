@@ -82,41 +82,29 @@ require('../../src/server');
 
 async function main(): Promise<void> {
   // Required after server.ts: the same module instances it uses.
-  const { decideExecutionGate } = require('../../src/buddies/execution-gate') as typeof import(
-    '../../src/buddies/execution-gate'
-  );
+  const { decideExecutionGate } =
+    require('../../src/buddies/execution-gate') as typeof import('../../src/buddies/execution-gate');
   const { appDataDirectory } = require('../../src/app-data') as typeof import('../../src/app-data');
-  const { currentIngest } = require('../../src/ingest/instance') as typeof import(
-    '../../src/ingest/instance'
-  );
-  const { systemClock } = require('../../src/expedition-kernel/clock') as typeof import(
-    '../../src/expedition-kernel/clock'
-  );
-  const { createKeyedHost } = require('../../src/expeditions-v1/host') as typeof import(
-    '../../src/expeditions-v1/host'
-  );
+  const { currentIngest } =
+    require('../../src/ingest/instance') as typeof import('../../src/ingest/instance');
+  const { systemClock } =
+    require('../../src/expedition-kernel/clock') as typeof import('../../src/expedition-kernel/clock');
+  const { createKeyedHost } =
+    require('../../src/expeditions-v1/host') as typeof import('../../src/expeditions-v1/host');
   const { CALL_TIMING, recordPathOf } =
-    require('../../src/expeditions-v1/executor/calls') as typeof import(
-      '../../src/expeditions-v1/executor/calls'
-    );
-  const { refFilesOf } = require('../../src/expeditions-v1/executor/refs') as typeof import(
-    '../../src/expeditions-v1/executor/refs'
-  );
-  const { parseRunId } = require('../../src/expeditions-v1/executor/address') as typeof import(
-    '../../src/expeditions-v1/executor/address'
-  );
-  const { readRecord } = require('../../src/expeditions-v1/executor/records') as typeof import(
-    '../../src/expeditions-v1/executor/records'
-  );
-  const { expeditionsV1Root } = require('../../src/expeditions-v1/call-directory') as typeof import(
-    '../../src/expeditions-v1/call-directory'
-  );
-  const { buddyProviders } = require('../../src/expeditions-v1/providers') as typeof import(
-    '../../src/expeditions-v1/providers'
-  );
-  const { installedAgent } = require('../../src/providers/installed-agent') as typeof import(
-    '../../src/providers/installed-agent'
-  );
+    require('../../src/expeditions-v1/executor/calls') as typeof import('../../src/expeditions-v1/executor/calls');
+  const { refFilesOf } =
+    require('../../src/expeditions-v1/executor/refs') as typeof import('../../src/expeditions-v1/executor/refs');
+  const { parseRunId } =
+    require('../../src/expeditions-v1/executor/address') as typeof import('../../src/expeditions-v1/executor/address');
+  const { readRecord } =
+    require('../../src/expeditions-v1/executor/records') as typeof import('../../src/expeditions-v1/executor/records');
+  const { expeditionsV1Root } =
+    require('../../src/expeditions-v1/call-directory') as typeof import('../../src/expeditions-v1/call-directory');
+  const { buddyProviders } =
+    require('../../src/expeditions-v1/providers') as typeof import('../../src/expeditions-v1/providers');
+  const { installedAgent } =
+    require('../../src/providers/installed-agent') as typeof import('../../src/providers/installed-agent');
   type Core = import('../../src/buddies/core').BuddiesCore;
   type Events = import('../../src/buddies/events').BuddyEvents;
   type Records = import('../../src/conversations/config-records').ConversationRecordStore;

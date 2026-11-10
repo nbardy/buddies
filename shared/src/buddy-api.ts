@@ -12,8 +12,8 @@ import type {
 import { z } from 'zod';
 import { OwnerPostMentionConfigSchema } from './buddy-channel-posts.js';
 import { type ConversationConfig, ConversationConfigSchema } from './conversation-config.js';
-import type { KeyedPreview, KeyedView } from './expedition-keyed.js';
 import { Act, type Expedition } from './expedition.js';
+import type { KeyedPreview, KeyedView } from './expedition-keyed.js';
 import type { UpstreamUpdateResult } from './upstream.js';
 
 // Pattern: one-type-source (docs/patterns.md#one-type-source)

@@ -1,8 +1,8 @@
 import type { keyed } from '@unleashd/shared';
 import type { CSSProperties, ReactNode } from 'react';
+import { buddyWrite } from './api';
 import { when } from './ExpeditionPanels';
 import { Confirm } from './ExpeditionView';
-import { buddyWrite } from './api';
 import { useKeyedWrite } from './keyed-api';
 import {
   type Axis,
@@ -156,7 +156,11 @@ function Markers({
   axis,
   markers,
   select,
-}: { axis: Axis; markers: readonly keyed.Marker[]; select(next: Selection): void }) {
+}: {
+  axis: Axis;
+  markers: readonly keyed.Marker[];
+  select(next: Selection): void;
+}) {
   return (
     <div className="keyed-expedition-markers">
       {placeMarkers(axis, markers).map(({ marker, at }, index) => (

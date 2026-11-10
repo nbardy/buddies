@@ -434,7 +434,11 @@ export function Gone({
   frame,
   workspaceId,
   text,
-}: { frame: Frame; workspaceId: string; text: string }) {
+}: {
+  frame: Frame;
+  workspaceId: string;
+  text: string;
+}) {
   return (
     <div className="channel-browser-empty expedition-gone ui-muted ui-row" data-frame={frame}>
       <strong>Expedition</strong>

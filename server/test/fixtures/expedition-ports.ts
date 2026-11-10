@@ -1,8 +1,10 @@
+import type { keyed } from '@unleashd/shared';
 import type {
   Clock,
   Disposed,
   DroppedInfo,
   Executor,
+  ExpeditionView,
   Leader,
   Owner,
   RawOutcome,
@@ -12,9 +14,6 @@ import type {
   RunStatus,
   Woken,
 } from '../../src/expedition-kernel/ports';
-
-import type { keyed } from '@unleashd/shared';
-import type { ExpeditionView } from '../../src/expedition-kernel/ports';
 
 // Scripted ports for the expedition kernel's end-to-end tests. The agent CLIs are the hard
 // external boundary, so these are the only fakes; everything else (plan processes, log files,

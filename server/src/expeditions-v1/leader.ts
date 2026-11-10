@@ -8,10 +8,10 @@ import type {
   Disposed,
   ExpeditionView,
   Leader,
+  RawOutcome,
   RewriteAt,
   Woken,
 } from '../expedition-kernel/ports';
-import type { RawOutcome } from '../expedition-kernel/ports';
 import { parseRunId } from './executor/address';
 import type { LeaderSpec } from './executor/calls';
 import type { WakeEnd } from './executor/index';
