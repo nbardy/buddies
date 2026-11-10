@@ -38,7 +38,9 @@ export async function typecheckGate(
           noEmit: true,
           target: 'ES2022',
           module: 'commonjs',
-          moduleResolution: 'node',
+          // TypeScript 7 removed `node` (node10, error TS5108); bundler keeps CommonJS output and
+          // reads package exports.
+          moduleResolution: 'bundler',
           lib: ['ES2022'],
           skipLibCheck: true,
           noUncheckedIndexedAccess: true,
@@ -68,7 +70,7 @@ function runTsc(tscBin: string, config: string): Promise<TypecheckResult> {
         if (err === null) return resolve({ t: 'ok' });
         if (err.killed)
           return resolve({ t: 'failed', errors: [`tsc timed out after ${TSC_TIMEOUT_MS} ms`] });
-        // tsc exits 2 with diagnostics on stdout; anything else (ENOENT, signal) has none.
+        // tsc exits non-zero (5.x: 2, 7.0: 1) with diagnostics on stdout; ENOENT or a signal has none.
         const lines = `${stdout}${stderr}`
           .split(/\r?\n(?=\S)/)
           .map((l) => l.trim())

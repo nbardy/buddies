@@ -6,8 +6,11 @@ import { openSession, phases, session } from './session';
 
 // zod-to-json-schema's signature makes tsc 5.9 instantiate zod's whole type graph for a generic
 // schema: typechecking this one file ran out of a 4 GB heap after 42 s (2026-11-10), which crashed
-// `pnpm typecheck` for the whole server. The conversion is a runtime walk, so it is called through
-// an untyped signature. Guard: server/test/expedition-kernel-typecheck.test.ts.
+// `pnpm typecheck` for the whole server. The trigger was zod's declarations loaded twice (node10
+// resolution read both its .d.cts and .d.ts); TS 7's bundler resolution loads one copy and the typed
+// call is cheap again, but with two copies forced back TS 7 still blows up (10.5M instantiations,
+// 1.36 GB). The conversion is a runtime walk, so it stays called through an untyped signature.
+// Guard: server/test/expedition-kernel-typecheck.test.ts.
 const zodToJsonSchema = zodToJsonSchemaTyped as unknown as (schema: unknown) => unknown;
 
 // Expeditions v1: the authoring library, and the authoring API itself: the typecheck gate checks

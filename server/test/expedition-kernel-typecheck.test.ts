@@ -1,19 +1,48 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { tempDir } from './fixtures/temp';
 
 // Regression guard, 2026-11-10: `zodToJsonSchema(schema)` on a generic zod schema made tsc 5.9
 // instantiate zod's whole type graph. Typechecking authoring/index.ts alone ran out of a 4 GB heap
 // after 42 s, so `pnpm typecheck` crashed for the whole server and four parallel agents drove the
-// machine's load average past 50. With the converter called through an untyped signature the file
-// checks in about half a second. This runs tsc on that one file under a 1 GB heap: the bad pattern
-// cannot fit, the fixed one has room to spare.
-test('the authoring library typechecks inside a 1 GB heap', async () => {
+// machine's load average past 50.
+//
+// The cause was zod's declarations loaded TWICE: under `moduleResolution: node` (node10) this file's
+// `import 'zod'` read zod's .d.cts while zod-to-json-schema's `import 'zod/v3'` read the .d.ts copy,
+// and relating two identical-but-distinct type graphs explodes. With the TypeScript 7 configs
+// (bundler resolution, exports-aware) both read one copy, and the typed call checks in 0.1 s on
+// TS 7 (and in 1.6 s even on TS 5.9 under bundler). Forcing the two copies back under TS 7 with the
+// typed call: 10.5M instantiations, 1.36 GB, 21 s and TS2589. The shipped file stays on the untyped
+// call (authoring/index.ts), which held at 337k instantiations even with both copies loaded.
+//
+// TS 7 is a native binary, so a Node heap flag caps nothing. The guard reads tsc's own counters:
+// instantiations are deterministic, memory nearly so, neither depends on machine load.
+const MAX_INSTANTIATIONS = 2_000_000; // shipped: 336,601; the bad pattern: 10,471,531
+const MAX_MEMORY_KB = 600 * 1024; // shipped: ~123 MB; the bad pattern: ~1,355 MB
+
+async function compile(args: string[]): Promise<{ code: number; text: string }> {
+  const repositoryRoot = path.resolve(__dirname, '..', '..');
+  const { tscLauncher } = await import(
+    pathToFileURL(path.join(repositoryRoot, 'tools/lib/tsc.mjs')).href
+  );
+  const server = path.join(repositoryRoot, 'server');
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      [tscLauncher(path.join(server, 'tsconfig.json')), ...args],
+      { timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout, stderr) => resolve({ code: error ? 1 : 0, text: `${stdout}${stderr}` })
+    );
+  });
+}
+
+test('the authoring library typechecks alone within a bounded type graph', async () => {
   const server = path.resolve(__dirname, '..');
   const config = path.join(tempDir('kernel-typecheck-'), 'tsconfig.json');
-  const { writeFile } = await import('node:fs/promises');
   await writeFile(
     config,
     JSON.stringify({
@@ -24,15 +53,21 @@ test('the authoring library typechecks inside a 1 GB heap', async () => {
       files: [path.join(server, 'src/expedition-kernel/authoring/index.ts')],
     })
   );
-  const tsc = path.join(server, 'node_modules/typescript/lib/tsc.js');
-  const out = await new Promise<{ code: number; text: string }>((resolve) => {
-    execFile(
-      process.execPath,
-      ['--max-old-space-size=1024', tsc, '--noEmit', '-p', config],
-      { timeout: 120_000 },
-      (error, stdout, stderr) =>
-        resolve({ code: error ? 1 : 0, text: `${stdout}${stderr}`.slice(-2000) })
-    );
-  });
-  assert.equal(out.code, 0, out.text);
+
+  const checked = await compile(['--noEmit', '-p', config, '--extendedDiagnostics']);
+  assert.equal(checked.code, 0, checked.text.slice(-2000));
+  const counter = (name: string) => {
+    const match = checked.text.match(new RegExp(`^${name}:\\s+(\\d+)`, 'm'));
+    assert.ok(match, `tsc printed no "${name}" counter:\n${checked.text.slice(-2000)}`);
+    return Number(match[1]);
+  };
+  assert.ok(counter('Instantiations') < MAX_INSTANTIATIONS, checked.text);
+  assert.ok(counter('Memory used') < MAX_MEMORY_KB, checked.text);
+
+  // The precondition of the blow-up: one copy of zod's declarations, never both dialects.
+  const listed = await compile(['--noEmit', '-p', config, '--listFilesOnly']);
+  const zodTypes = listed.text
+    .split('\n')
+    .filter((file) => /[\\/]zod[\\/]v3[\\/]types\.d\.c?ts$/.test(file.trim()));
+  assert.equal(zodTypes.length, 1, `zod's type graph is loaded more than once:\n${zodTypes.join('\n')}`);
 });
