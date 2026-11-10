@@ -264,6 +264,39 @@ Known limits: the crate has no per-request deadline, so a capped call's crate ru
 by request" (the executor's record says `stop: minutes|usd`); no per-model price exists for any
 Codex model, so a Codex call reports `unreported`.
 
+Built (2026-11-11, uncommitted): **steps 3 and 5.** One composition, `createKeyedHost(deps)` in
+`server/src/expeditions-v1/host.ts`, builds the executor, the real Leader and Owner ports, the
+owner's thread and `consumes` from the old host's dependencies plus conversation records, ingest
+and the installed agent; step 6 calls `start()`, `open(id)`, `launch(...)`, `view(id)`,
+`answerAsk(id, ref, answer)`, `answerApproval(id, yes)`, `close()` and puts `consumes` in front of
+the Buddy routes' HostCommands. `launch` and `open` refuse while the execution gate is closed.
+Asks are `executor/asks.ts` (records `asking` → `asked` → `settled`; the answer is read from the
+ask's own thread on every observation); the expedition's thread, its asks' roots, the read mark and
+the owner's notes are `<expDir>/owner.json` (`owner/book.ts`, which also answers `consumes`
+synchronously); the owner's replies are read by `owner/inbox.ts`; one grammar for both hosts is
+`owner/words.ts` (the old `brief.ts` `chatAct` now reads it; its behaviour is unchanged). The
+leader is `leader.ts` + `leader-brief.ts`, a `leader`-kind Buddy call in `executor/calls.ts` whose
+end goes to the waiting wake, never to the kernel's `onSettled`. The Owner port is
+`owner/approvals.ts`. Kernel changes: `Woken` is a sum (`acted` | `errored`, both with `spent`),
+`Leader.dispose(at, diff, dropped)` gets the expedition and folder and returns `Disposed`
+(`decided` | `invalid`: an unreadable `dispositions.json` rejects the rewrite with its reason),
+`RewriteForOwner` names its expedition, `ExpeditionView` carries `entries`. Tests:
+`expeditions-v1-owner` and `expeditions-v1-leader`. Choices the plan left open: `consumes` takes
+every owner reply under a root this host posted (the thread, an ask, and any reply the bus announces
+under them), never a channel-root post (one leader DM can hold several expeditions); a command is
+applied at most once (the read mark moves first: a crash loses it, unacknowledged, rather than
+applying an `extend` twice), a note exactly once; every command, note and refusal gets one keyed
+status line; a `confirm` ask takes `yes y yeah yep ok okay confirm confirmed approve approved
+accept accepted pass true` / `no n nope nah decline declined reject rejected fail false`
+(case-insensitive, trailing `.`/`!` ignored) and answers each other reply once; a stored ask answer
+is a ref like any output; a rewrite must name its own draft folder (a relative path is read from
+it); approval requests get a fresh key each time (a re-submitted rewrite posts again); the default
+limits are $2 / 20 min for a wake and for a done review. Known limits: an owner reply that lands
+before `start()` has loaded the `owner.json` files is not consumed (it wakes the leader, as before
+this step); one in an expedition the host has not opened is consumed but read by no inbox; the Buddy briefing still appends its generic "Answer it with
+`post({ answers })`" line to call and wake requests, which have no tools (the final message is the
+answer either way).
+
 | # | Change | Test through a real boundary | Risk |
 |---|---|---|---|
 | 1 | Kernel: `wake(runId, …)`; `labelled` timer at `runner.ts:143`; a real `Clock`; types and `timelineOf` move to `shared/src/expedition-keyed.ts`; the `KeyedView` projection | e2e suite unchanged; a projection JSON round trip | low |

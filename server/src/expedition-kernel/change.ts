@@ -19,7 +19,7 @@ import {
 import { evaluateDone } from './done';
 import { staticGate, typecheckGate } from './gates';
 import type { Expedition, KernelDeps } from './kernel';
-import type { DroppedInfo } from './ports';
+import type { Disposed, DroppedInfo } from './ports';
 import type { Authored } from './protocol';
 import { dryRun } from './runner';
 
@@ -171,8 +171,16 @@ export class Change {
     if (checked.t === 'failed') return reject(checked.gate, checked.issues);
     const diff = diffOf(m.state(), checked.asked);
     const choose = diff.dropped.filter((k) => DISPOSAL[attached(m.state(), k).call.t] === 'choose');
-    const dispositions: Readonly<Record<keyed.Key, keyed.Disposition>> =
-      choose.length > 0 ? await m.deps.leader.dispose(diff, droppedInfo(m, choose)) : {};
+    const disposed: Disposed =
+      choose.length > 0
+        ? await m.deps.leader.dispose(
+            { expedition: m.id, folder: act.folder },
+            diff,
+            droppedInfo(m, choose)
+          )
+        : { t: 'decided', dispositions: {} };
+    if (disposed.t === 'invalid') return reject('dispositions', disposed.issues);
+    const { dispositions } = disposed;
     const proposal = { version, contract: parsed.contract, asked: checked.asked, dispositions };
     const verdict = judgeRewrite(m.state(), proposal);
     if (verdict.t === 'reject') return reject('rules', [describe(verdict.why)]);
@@ -182,7 +190,12 @@ export class Change {
           ? `new cost $${w.newCostUsd} is over the auto-apply limit $${w.limitUsd}`
           : 'no judged pass since the last rewrite'
       );
-      const approved = await m.deps.owner.approve({ diff: verdict.diff, why: act.why, reasons });
+      const approved = await m.deps.owner.approve({
+        expedition: m.id,
+        diff: verdict.diff,
+        why: act.why,
+        reasons,
+      });
       if (!approved) return reject('owner', [`the owner declined: ${reasons.join('; ')}`]);
     }
     // Judged again on the state at apply time: calls kept running while the gates ran.

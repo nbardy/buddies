@@ -1,3 +1,5 @@
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
 import { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import type { RawOutcome, RunSpec } from '../../expedition-kernel/ports';
@@ -5,9 +7,12 @@ import { type Read, readJson, writeJsonAtomic } from './durable';
 
 // One durable record per run (CONNECT_PLAN §1 "Durable state"), at `<expDir>/runs/<name>.json`.
 // It is what makes `start` idempotent and what `status` answers from, across restarts:
-//   host runs (command, check):   (none) → running → settled → closed
-//   Buddy calls (agent, review):  (none) → posting → posted → settled → closed
+//   host runs (command, check):           (none) → running → settled → closed
+//   Buddy calls (agent, review, leader):  (none) → posting → posted → settled → closed
+//   owner asks (ask):                     (none) → asking → asked → settled → closed
 // and (none) → closed for an id closed before it ever started (a late start is then a no-op).
+// A leader wake is not a kernel run kind (the Leader port runs it, leader.ts) but it is a Buddy
+// call like any other, so it has the same record under the run id the kernel logged for it.
 // A call's record holds everything its settle needs (the answer it expects, its tree, its caps),
 // because `status` after a restart has only the run id: the spec is not passed again.
 
@@ -26,8 +31,10 @@ export const RawOutcomeSchema = z.union([
 const _sameRaw: z.ZodType<RawOutcome, z.ZodTypeDef, unknown> = RawOutcomeSchema;
 void _sameRaw;
 
-const RunKind = z.enum(['agent', 'command', 'ask', 'check', 'review']);
-const _sameKind: z.ZodType<RunSpec['t']> = RunKind;
+/** What a record runs: a kernel run kind, or a leader wake. */
+export type RecordKind = RunSpec['t'] | 'leader';
+const RunKind = z.enum(['agent', 'command', 'ask', 'check', 'review', 'leader']);
+const _sameKind: z.ZodType<RecordKind> = RunKind;
 void _sameKind;
 
 /** The host process that started a host run. A record whose host is not this process belongs to
@@ -91,7 +98,8 @@ export type RunOn = z.infer<typeof RunOn>;
 const Typed = v('typed', { schema: z.unknown() }).transform(
   (a): { readonly t: 'typed'; readonly schema: unknown } => ({ t: 'typed', schema: a.schema })
 );
-const Expected = z.union([Typed, v('verdict', {})]);
+/** A leader wake's answer: one `LeaderAct`; a rewrite must name `folder`, the wake's own draft. */
+const Expected = z.union([Typed, v('verdict', {}), v('act', { folder: z.string().min(1) })]);
 export type Expected = z.infer<typeof Expected>;
 /** Why a call was stopped before it ended on its own: the kernel's cancel, or a cap (a cap is an
  * expiry, recorded as such: its outcome is `errored("exceeded …")`, never a user's cancel). */
@@ -126,6 +134,17 @@ const call = {
   maxUsd: z.number().positive(),
 };
 
+/** An owner ask: a root post in the owner↔leader DM (executor/asks.ts). It holds nothing and has
+ * no deadline; its answer is read from its thread whenever it is observed. */
+const ask = {
+  runId: z.string().min(1),
+  /** The contract's leader: the ask is its post, in its DM with the owner. */
+  buddyId: z.string().min(1),
+  /** The question post's body, exactly as posted (its key `xk:<runId>` replays only this body). */
+  body: z.string().min(1),
+  answer: z.enum(['text', 'confirm']),
+};
+
 export const RunRecord = z.discriminatedUnion('t', [
   v('running', { ...live, host: Host, process: Process }),
   /** Written BEFORE the request is posted: a crash before the post finishes it at the next
@@ -141,6 +160,14 @@ export const RunRecord = z.discriminatedUnion('t', [
     stop: Stop,
   }),
   Settled,
+  /** Written BEFORE the question is posted, so a crash between finishes the post under its key. */
+  v('asking', ask),
+  v('asked', {
+    ...ask,
+    channelId: z.string().min(1),
+    postId: z.string().min(1),
+    postedAt: z.string(),
+  }),
   /** Tombstone: nothing runs under this id again. `last` is what it settled as, if it did. */
   v('closed', { runId: z.string().min(1), last: Last }),
 ]);
@@ -149,7 +176,25 @@ export type Running = Extract<RunRecord, { t: 'running' }>;
 export type Posting = Extract<RunRecord, { t: 'posting' }>;
 export type Posted = Extract<RunRecord, { t: 'posted' }>;
 export type SettledRecord = Extract<RunRecord, { t: 'settled' }>;
+export type Asking = Extract<RunRecord, { t: 'asking' }>;
+export type Asked = Extract<RunRecord, { t: 'asked' }>;
 
 export const readRecord = (file: string): Promise<Read<RunRecord>> => readJson(file, RunRecord);
+
+/** Every record under a data root (`<root>/<expedition>/runs/*.json`): what a restarted host
+ * observes of what the dead one left. One that does not read is skipped here; the run's own
+ * operations read it again and fail loudly. */
+export async function recordsUnder(root: string): Promise<RunRecord[]> {
+  const out: RunRecord[] = [];
+  for (const exp of await readdir(root).catch(() => [] as string[])) {
+    const dir = path.join(root, exp, 'runs');
+    for (const name of await readdir(dir).catch(() => [] as string[])) {
+      if (!name.endsWith('.json')) continue;
+      const found = await readRecord(path.join(dir, name)).catch(() => ({ t: 'missing' }) as const);
+      if (found.t === 'found') out.push(found.value);
+    }
+  }
+  return out;
+}
 export const writeRecord = (file: string, record: RunRecord): Promise<void> =>
   writeJsonAtomic(file, RunRecord.parse(record));

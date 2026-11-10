@@ -1,10 +1,12 @@
 import type {
   Clock,
+  Disposed,
   DroppedInfo,
   Executor,
   Leader,
   Owner,
   RawOutcome,
+  RewriteAt,
   RewriteForOwner,
   RunSpec,
   RunStatus,
@@ -191,7 +193,10 @@ export const roleOfRun = (runId: string): 'producer' | 'judge' =>
   runId.endsWith(':judge') ? 'judge' : 'producer';
 export const attemptOfRun = (runId: string): number => Number(/#(\d+):/.exec(runId)?.[1]);
 
-export type WakeScript = (event: keyed.WakeEvent, view: ExpeditionView) => Woken | Promise<Woken>;
+/** What a scripted wake answers: always an act (a real leader can also answer something that is
+ * not one; the Leader port reports that as `errored`). */
+export type Acted = { readonly act: keyed.LeaderAct; readonly spent: keyed.Usage };
+export type WakeScript = (event: keyed.WakeEvent, view: ExpeditionView) => Acted | Promise<Acted>;
 export class ScriptedLeader implements Leader {
   readonly events: keyed.WakeEvent[] = [];
   /** The run id of each wake, in the order of `events`. */
@@ -210,20 +215,21 @@ export class ScriptedLeader implements Leader {
     this.runIds.push(runId);
     this.signal.poke();
     try {
-      return await this.script(event, view);
+      return { t: 'acted', ...(await this.script(event, view)) };
     } finally {
       this.signal.poke();
     }
   }
   async dispose(
+    _at: RewriteAt,
     diff: keyed.Diff,
     dropped: readonly DroppedInfo[]
-  ): Promise<Readonly<Record<keyed.Key, keyed.Disposition>>> {
+  ): Promise<Disposed> {
     this.disposeCalls.push({ diff, dropped });
-    return this.disposer(diff, dropped);
+    return { t: 'decided', dispositions: this.disposer(diff, dropped) };
   }
 }
-export const cont: Woken = { act: { t: 'continue' }, spent: reported(0.1) };
+export const cont: Acted = { act: { t: 'continue' }, spent: reported(0.1) };
 
 export class ScriptedOwner implements Owner {
   readonly asked: RewriteForOwner[] = [];

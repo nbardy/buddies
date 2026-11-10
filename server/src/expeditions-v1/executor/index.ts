@@ -10,11 +10,13 @@ import type {
 } from '../../expedition-kernel/ports';
 import { exec } from '../../expeditions/cambium';
 import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address';
+import { type Answered, type AskAnswer, type AskDeps, type Asks, NoAsks, OwnerAsks } from './asks';
 import {
   type BuddyCallDeps,
   BuddyCalls,
   type Calls,
   type ExecutorSide,
+  type LeaderSpec,
   type Located,
   NoCalls,
 } from './calls';
@@ -22,6 +24,7 @@ import { ContextRegistry, type ExpeditionContext } from './context';
 import { type HostRun, runCheck, runCommand } from './host-run';
 import {
   type Last,
+  type RecordKind,
   type RunRecord,
   type Running,
   type Tree,
@@ -34,15 +37,18 @@ import {
 // what it says, so `start` is idempotent on the id, a closed id never starts, and `status`
 // answers from disk across restarts. What runs is chosen by one table over the run's kind:
 // commands and checks run on the host (host-run.ts), agent calls and review judges are Buddy
-// requests (calls.ts), and asks (the owner's, a later step) settle as a typed
-// `errored("not implemented: ask")` meanwhile, never a silent no-op.
+// requests (calls.ts), and asks are owner posts (asks.ts). A leader wake is not a kernel run (the
+// Leader port asks for it, leader.ts) but runs as a Buddy call through the same records, under the
+// run id the kernel logged; its end is reported to the waiting wake, never to the kernel's
+// `onSettled` (the kernel would read a leader call's run ending as an executor run's, a fault).
 // One HostExecutor per data root per process: a `running` record whose host pid is not this
 // process is a dead host's, and is settled `errored` (D6) with its process group killed.
 // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys): the run id is the key.
 
-/** Who runs the Buddy-backed kinds: the Buddy server's core, or nobody (a host-only test). */
+/** Who runs the Buddy-backed kinds (agent, review, leader wake, ask): the Buddy server's core, or
+ * nobody (a host-only test). */
 export type CallHost =
-  | { readonly t: 'buddies'; readonly deps: BuddyCallDeps }
+  | { readonly t: 'buddies'; readonly deps: BuddyCallDeps & Pick<AskDeps, 'book'> }
   | { readonly t: 'none'; readonly why: string };
 
 export type HostExecutorDeps = {
@@ -55,6 +61,8 @@ export type HostExecutorDeps = {
 };
 
 type Listener = (runId: string, outcome: RawOutcome, spent: keyed.Usage) => void;
+/** A leader wake's end, as the Leader port gets it. */
+export type WakeEnd = { readonly raw: RawOutcome; readonly spent: keyed.Usage };
 /** A host run costs no dollars. */
 const FREE: keyed.Usage = { t: 'reported', usd: 0 };
 const RESTARTED: RawOutcome = { t: 'errored', why: 'host restarted during command' };
@@ -82,8 +90,11 @@ export class HostExecutor implements Executor {
   private readonly live = new Map<string, AbortController>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly contexts: ContextRegistry;
-  /** The agent and review kinds. */
+  /** Leader wakes waiting for their run to end, by run id. */
+  private readonly wakes = new Map<string, (end: WakeEnd) => void>();
+  /** The agent, review and leader kinds. */
   readonly calls: Calls;
+  readonly asks: Asks;
 
   constructor(private readonly deps: HostExecutorDeps) {
     this.contexts = new ContextRegistry(deps.root, deps.home);
@@ -91,10 +102,15 @@ export class HostExecutor implements Executor {
       root: deps.root,
       clock: deps.clock,
       serial: (runId, task) => this.serial(runId, task),
-      emit: (runId, raw, spent) => this.emit(runId, raw, spent),
+      report: (kind, runId, raw, spent) => REPORT[kind](this, runId, { raw, spent }),
       locate: (runId) => this.locate(runId),
     };
-    this.calls = CALL_HOSTS[deps.calls.t](side, deps.calls as never);
+    const host = (CALL_HOSTS[deps.calls.t] as (s: ExecutorSide, h: CallHost) => Kinds)(
+      side,
+      deps.calls
+    );
+    this.calls = host.calls;
+    this.asks = host.asks;
   }
 
   // ---- the port ----
@@ -121,9 +137,35 @@ export class HostExecutor implements Executor {
   }
 
   /** Observe the Buddy calls (CONNECT_PLAN §1 "Observing settlement"): every live one on disk,
-   * then events, a 60 s backstop and the usage poll. Returns the stop. */
-  watch(): Promise<() => void> {
-    return this.calls.watch();
+   * then events, a 60 s backstop and the usage poll; and the owner asks the same way. Returns the
+   * stop. */
+  async watch(): Promise<() => void> {
+    const stops = [await this.calls.watch(), await this.asks.watch()];
+    return () => {
+      for (const stop of stops) stop();
+    };
+  }
+
+  /** A leader wake under the run id the kernel logged for it: a Buddy call like any other, so one
+   * post and one crate run per id (a repeat attaches to it). Resolves when it ends. */
+  wake(runId: string, spec: LeaderSpec): Promise<WakeEnd> {
+    const ended = new Promise<WakeEnd>((resolve) => this.wakes.set(runId, resolve));
+    return this.serial(runId, async () => {
+      const at = await this.locate(runId);
+      const found = await readRecord(at.paths.record);
+      if (found.t === 'missing') return this.calls.start(at, spec);
+      await (WAKE[found.value.t] as Wake<RunRecord['t']>)(this, at, found.value);
+    }).then(() => ended);
+  }
+
+  /** The owner answers an ask directly (the future HTTP route), as a reply in its thread. */
+  answer(runId: string, a: AskAnswer): Promise<Answered> {
+    return this.serial(runId, async () => {
+      const at = await this.locate(runId);
+      const found = await readRecord(at.paths.record);
+      if (found.t === 'missing') return { t: 'refused', why: `no ask ${runId}` } as const;
+      return this.asks.answer(at, found.value, a);
+    });
   }
 
   close(runId: string): Promise<void> {
@@ -188,22 +230,6 @@ export class HostExecutor implements Executor {
     void work(h)
       .catch((e: unknown): RawOutcome => ({ t: 'errored', why: (e as Error).message }))
       .then((raw) => this.settle(run.paths, runId, raw));
-  }
-
-  /** A kind with no handler yet: settled at once, durably, so it is not re-run either. */
-  async notImplemented<K extends RunSpec['t']>(run: Begin<K>): Promise<void> {
-    const raw: RawOutcome = { t: 'errored', why: `not implemented: ${run.spec.t}` };
-    await writeRecord(run.paths.record, {
-      t: 'settled',
-      runId: run.address.runId,
-      kind: run.spec.t,
-      deadlineAt: this.deps.clock.now().toISOString(),
-      tree: { t: 'none' },
-      raw,
-      spent: FREE,
-      stop: NOT_STOPPED,
-    });
-    this.emit(run.address.runId, raw, FREE);
   }
 
   // ---- internals ----
@@ -284,6 +310,14 @@ export class HostExecutor implements Executor {
     for (const l of this.listeners) l(runId, raw, spent);
   }
 
+  /** A wake's run ended: to the wake waiting on it (none after a restart: the kernel settled the
+   * wake at boot and closes its id). */
+  wakeEnded(runId: string, end: WakeEnd): void {
+    const resolve = this.wakes.get(runId);
+    this.wakes.delete(runId);
+    resolve?.(end);
+  }
+
   /** One operation per run id at a time, in call order. */
   serial<T>(runId: string, task: () => Promise<T>): Promise<T> {
     const previous = this.queues.get(runId) ?? Promise.resolve();
@@ -299,26 +333,66 @@ export class HostExecutor implements Executor {
 
 // ---- tables ----
 
-const notImplemented =
-  <K extends RunSpec['t']>(): Handler<K> =>
-  (ex, run) =>
-    ex.notImplemented(run);
-
-/** What runs each kind. Asks need the owner: a later step. */
+/** What runs each kind. */
 const HANDLERS: { [K in RunSpec['t']]: Handler<K> } = {
   command: (ex, run) =>
     ex.hostRun(run, run.spec.call.maxMinutes, (h) => runCommand(h, run.spec.call)),
   check: (ex, run) => ex.hostRun(run, run.spec.maxMinutes, (h) => runCheck(h, run.spec)),
   agent: (ex, run) => ex.calls.start(run, run.spec),
   review: (ex, run) => ex.calls.start(run, run.spec),
-  ask: notImplemented(),
+  ask: (ex, run) => ex.asks.start(run, run.spec),
 };
 
-const CALL_HOSTS: {
-  [K in CallHost['t']]: (side: ExecutorSide, host: Extract<CallHost, { t: K }>) => Calls;
+/** Where a run's end goes: the kernel's listeners, or the leader wake waiting on it. */
+const toKernel = (ex: HostExecutor, runId: string, end: WakeEnd) =>
+  ex.emit(runId, end.raw, end.spent);
+const REPORT: {
+  readonly [K in RecordKind]: (ex: HostExecutor, runId: string, end: WakeEnd) => void;
 } = {
-  buddies: (side, host) => new BuddyCalls(side, host.deps),
-  none: (side, host) => new NoCalls(side, host.why),
+  agent: toKernel,
+  command: toKernel,
+  ask: toKernel,
+  check: toKernel,
+  review: toKernel,
+  leader: (ex, runId, end) => ex.wakeEnded(runId, end),
+};
+
+type Kinds = { readonly calls: Calls; readonly asks: Asks };
+const CALL_HOSTS: {
+  [K in CallHost['t']]: (side: ExecutorSide, host: Extract<CallHost, { t: K }>) => Kinds;
+} = {
+  buddies: (side, host) => ({
+    calls: new BuddyCalls(side, host.deps),
+    asks: new OwnerAsks(side, host.deps),
+  }),
+  none: (side, host) => ({ calls: new NoCalls(side, host.why), asks: new NoAsks(side, host.why) }),
+};
+
+/** A wake whose id already has a record: a repeat attaches, an ended one answers at once. */
+type Wake<K extends RunRecord['t']> = (
+  ex: HostExecutor,
+  at: Located,
+  r: Extract<RunRecord, { t: K }>
+) => Promise<void>;
+const notAWake = async (_ex: HostExecutor, at: Located, r: RunRecord) => {
+  throw new Error(`${at.address.runId} is a ${r.t} record, not a leader wake`);
+};
+const WAKE: { [K in RunRecord['t']]: Wake<K> } = {
+  posting: async (ex, at, r) => {
+    await ex.calls.current(at, r);
+  },
+  posted: async (ex, at, r) => {
+    await ex.calls.current(at, r);
+  },
+  settled: async (ex, at, r) => ex.wakeEnded(at.address.runId, { raw: r.raw, spent: r.spent }),
+  closed: async (ex, at) =>
+    ex.wakeEnded(at.address.runId, {
+      raw: { t: 'errored', why: 'the wake was closed before it ended' },
+      spent: FREE,
+    }),
+  running: notAWake,
+  asking: notAWake,
+  asked: notAWake,
 };
 
 /** A record as it stands now: a dead host's run is reaped, a call's post is finished. */
@@ -333,6 +407,8 @@ const CURRENT: { [K in RunRecord['t']]: Current<K> } = {
   posted: (ex, at, r) => ex.calls.current(at, r),
   settled: async (_ex, _at, r) => r,
   closed: async (_ex, _at, r) => r,
+  asking: (ex, at, r) => ex.asks.current(at, r),
+  asked: (ex, at, r) => ex.asks.current(at, r),
 };
 
 type Cancel<K extends RunRecord['t']> = (
@@ -350,6 +426,9 @@ const CANCEL: { [K in RunRecord['t']]: Cancel<K> } = {
   posted: (ex, at, r) => ex.calls.cancel(at, r),
   settled: ended,
   closed: ended,
+  // An ask is never cancelled (I6): it holds nothing, and only an answer ends it.
+  asking: ended,
+  asked: ended,
 };
 
 /** Closing an id, by what its record says: afterwards nothing runs or reports under it. */
@@ -360,12 +439,16 @@ const CLOSE: { [K in OnDisk['t']]: Close<K> } = {
   posted: (ex, at, r) => ex.calls.close(at, r),
   settled: async (_ex, _at, r) => ({ t: 'settled', raw: r.raw, spent: r.spent }),
   closed: async () => ({ t: 'already-closed' }),
+  asking: (ex, at, r) => ex.asks.close(at, r),
+  asked: (ex, at, r) => ex.asks.close(at, r),
 };
 
 const STATUS: { [K in RunRecord['t']]: (r: Extract<RunRecord, { t: K }>) => RunStatus } = {
   running: () => ({ t: 'running' }),
   posting: () => ({ t: 'running' }),
   posted: () => ({ t: 'running' }),
+  asking: () => ({ t: 'running' }),
+  asked: () => ({ t: 'running' }),
   settled: (r) => ({ t: 'settled', outcome: r.raw, spent: r.spent }),
   // Only a settled call's ids are closed, so the kernel does not ask about one; if it does, the
   // truthful answer is the outcome it settled with, or that it was stopped before it could run.

@@ -25,7 +25,7 @@ import {
 } from './core';
 import type { LogStore } from './log-store';
 import { type Asker, type Delivery, type PlanHost, PlanProcess } from './plan-process';
-import type { Clock, Executor, Leader, Owner, RawOutcome } from './ports';
+import type { Clock, Executor, Leader, Owner, RawOutcome, Woken } from './ports';
 import { recover } from './recovery';
 import type { PlanEnd } from './runner';
 import { type Ending, endingOf, judgeRunOf, producerRun } from './runs';
@@ -148,6 +148,7 @@ export class Expedition {
       state: this.current,
       timeline: this.timeline(),
       faults: [...this.faultList],
+      entries: this.log.slice(),
     };
   }
   /** Every append, after it is durable. */
@@ -372,7 +373,7 @@ export class Expedition {
       this.enqueue(() => this.settle(call.key, hash, outcome, spent));
     try {
       const woken = await this.deps.leader.wake(runId, call.event, this.view());
-      settle({ t: 'passed', ref: keyed.refOf(call.key, hash), out: woken.act }, woken.spent);
+      settle(WOKEN[woken.t](woken as never, keyed.refOf(call.key, hash)), woken.spent);
     } catch (e) {
       settle(
         { t: 'errored', why: `the leader's wake failed: ${(e as Error).message}` },
@@ -547,6 +548,14 @@ const DECIDED: { [K in Decision['t']]: Act<K> } = {
     );
   },
   closed: (_e, a, d) => a.asker.deliver({ t: 'closed', reason: d.reason }),
+};
+
+/** A wake's end as its `leader/<n>` call's outcome: the act is the call's `out`. */
+const WOKEN: {
+  [K in Woken['t']]: (w: Extract<Woken, { t: K }>, ref: keyed.RefId) => keyed.Outcome;
+} = {
+  acted: (w, ref) => ({ t: 'passed', ref, out: w.act }),
+  errored: (w) => ({ t: 'errored', why: w.why }),
 };
 
 const ENDED: {

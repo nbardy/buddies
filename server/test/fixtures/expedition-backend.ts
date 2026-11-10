@@ -4,16 +4,17 @@ import Module from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-// The REAL backend (src/server.ts, unchanged) with the expedition executor running INSIDE it, as
-// step 6 will compose it, for expeditions-v1-agent-*.test.ts. The executor is not wired into
-// server.ts yet (CONNECT_PLAN §8: boot and routes are step 6), so this entry captures the three
-// objects server.ts builds that the executor needs (its Buddy core, its in-process event bus and
-// its conversation records) as server.ts creates them, then builds the executor beside it. Why in
-// the same process: a cancel stops a running turn only through the bus the runner listens on, and a
-// SIGKILL of "the backend" must kill the executor with it, exactly as in production.
+// The REAL backend (src/server.ts, unchanged) with the keyed expedition host running INSIDE it, as
+// step 6 will compose it, for expeditions-v1-*.test.ts. The host is not wired into server.ts yet
+// (CONNECT_PLAN §8: boot and routes are step 6), so this entry captures the three objects server.ts
+// builds that the host needs (its Buddy core, its in-process event bus and its conversation
+// records) as server.ts creates them, then builds the host beside it with `createKeyedHost`, and
+// puts the host's `consumes` in front of the Buddy routes' HostCommands (what step 6 does in
+// server.ts). Why in the same process: a cancel stops a running turn only through the bus the
+// runner listens on, and a SIGKILL of "the backend" must kill the host with it, as in production.
 //
 // Run: node --import tsx test/fixtures/expedition-backend.ts (the backend's own env, plus
-// EXP_CONTROL_PORT). A loopback control server takes the executor's port calls as JSON.
+// EXP_CONTROL_PORT). A loopback control server takes the host's and the executor's calls as JSON.
 // EXP_HANG=post makes every expedition-call post hang (the host "dies" between writing the record
 // and sending the post; the test SIGKILLs it there).
 
@@ -24,7 +25,8 @@ const M = Module as unknown as {
 };
 const SRC = path.resolve(__dirname, '..', '..', 'src');
 const at = (rel: string) => path.join(SRC, rel);
-const captured: { events?: unknown; core?: unknown; records?: unknown } = {};
+type Consumes = import('../../src/buddies/routes').HostCommands['consumes'];
+const captured: { events?: unknown; core?: unknown; records?: unknown; consumes?: Consumes } = {};
 
 /** Wrap one export of one source module; every importer of it gets the wrapper. */
 const WRAP: Record<string, (m: Loaded) => Loaded> = {
@@ -42,6 +44,20 @@ const WRAP: Record<string, (m: Loaded) => Loaded> = {
       return captured.core;
     },
   }),
+  [at('buddies/routes.ts')]: (m) => {
+    type Register = typeof import('../../src/buddies/routes').registerBuddyRoutes;
+    const register = m.registerBuddyRoutes as Register;
+    const wrapped: Register = (app, deps) =>
+      register(app, {
+        ...deps,
+        hostCommands: {
+          consumes: (channelId, body, thread) =>
+            (captured.consumes?.(channelId, body, thread) ?? false) ||
+            deps.hostCommands.consumes(channelId, body, thread),
+        },
+      });
+    return { ...m, registerBuddyRoutes: wrapped };
+  },
   [at('conversations/config-records.ts')]: (m) => {
     const Store = m.ConversationRecordStore as new (...args: unknown[]) => object;
     class Captured extends Store {
@@ -75,16 +91,12 @@ async function main(): Promise<void> {
   const { systemClock } = require('../../src/expedition-kernel/clock') as typeof import(
     '../../src/expedition-kernel/clock'
   );
-  const { HostExecutor } = require('../../src/expeditions-v1/executor') as typeof import(
-    '../../src/expeditions-v1/executor'
+  const { createKeyedHost } = require('../../src/expeditions-v1/host') as typeof import(
+    '../../src/expeditions-v1/host'
   );
   const { CALL_TIMING, recordPathOf } =
     require('../../src/expeditions-v1/executor/calls') as typeof import(
       '../../src/expeditions-v1/executor/calls'
-    );
-  const { ingestMeter, recordsSessionOf } =
-    require('../../src/expeditions-v1/executor/usage') as typeof import(
-      '../../src/expeditions-v1/executor/usage'
     );
   const { refFilesOf } = require('../../src/expeditions-v1/executor/refs') as typeof import(
     '../../src/expeditions-v1/executor/refs'
@@ -108,6 +120,7 @@ async function main(): Promise<void> {
   type Events = import('../../src/buddies/events').BuddyEvents;
   type Records = import('../../src/conversations/config-records').ConversationRecordStore;
   type Spec = import('../../src/expedition-kernel/ports').RunSpec;
+  type Entry = import('@unleashd/shared').keyed.Entry;
 
   const real = captured.core as Core;
   const hang = process.env.EXP_HANG === 'post';
@@ -125,31 +138,31 @@ async function main(): Promise<void> {
   const env = (name: string, fallback: number) => Number(process.env[name] ?? fallback);
   const root = expeditionsV1Root(appDataDirectory());
   const settled: { runId: string; raw: unknown; spent: unknown; refAtReport: boolean }[] = [];
-  const executor = new HostExecutor({
+  const host = createKeyedHost({
+    core,
+    events: captured.events as Events,
+    gate: decideExecutionGate(),
     root,
     home: os.homedir(),
+    records: captured.records as Records,
+    ingest: currentIngest,
+    installed: () => installedAgent(),
+    logger: console,
     clock: systemClock,
-    calls: {
-      t: 'buddies',
-      deps: {
-        core,
-        events: captured.events as Events,
-        gate: decideExecutionGate(),
-        meter: ingestMeter({
-          sessionOf: recordsSessionOf(captured.records as Records),
-          ingest: currentIngest,
-        }),
-        timing: {
-          debounceMs: env('EXP_DEBOUNCE_MS', CALL_TIMING.debounceMs),
-          backstopMs: env('EXP_BACKSTOP_MS', CALL_TIMING.backstopMs),
-          usagePollMs: env('EXP_USAGE_POLL_MS', CALL_TIMING.usagePollMs),
-          usageWaitMs: env('EXP_USAGE_WAIT_MS', CALL_TIMING.usageWaitMs),
-          usageRetryMs: env('EXP_USAGE_RETRY_MS', CALL_TIMING.usageRetryMs),
-        },
-        logger: console,
-      },
+    limits: {
+      leaderWake: { usd: env('EXP_LEADER_USD', 1), minutes: 10 },
+      doneReview: { usd: 2, minutes: 10 },
+    },
+    timing: {
+      debounceMs: env('EXP_DEBOUNCE_MS', CALL_TIMING.debounceMs),
+      backstopMs: env('EXP_BACKSTOP_MS', CALL_TIMING.backstopMs),
+      usagePollMs: env('EXP_USAGE_POLL_MS', CALL_TIMING.usagePollMs),
+      usageWaitMs: env('EXP_USAGE_WAIT_MS', CALL_TIMING.usageWaitMs),
+      usageRetryMs: env('EXP_USAGE_RETRY_MS', CALL_TIMING.usageRetryMs),
     },
   });
+  captured.consumes = host.consumes;
+  const executor = host.executor;
   // Whether the run's ref (record AND answer file) existed at the moment `ok` was reported.
   executor.onSettled((runId, raw, spent) => {
     const a = parseRunId(runId);
@@ -159,7 +172,24 @@ async function main(): Promise<void> {
   });
   const providers = buddyProviders(real, () => installedAgent());
 
-  type Body = { runId: string; spec: Spec; buddyId: string; who: never };
+  type Body = {
+    runId: string;
+    spec: Spec;
+    buddyId: string;
+    who: never;
+    id: string;
+    folder: string;
+    baseSha: string;
+    workspace: never;
+    ref: string;
+    answer: never;
+    approved: boolean;
+  };
+  const kernel = (id: string) => {
+    const e = host.get(id);
+    if (!e) throw new Error(`no open expedition ${id}`);
+    return e;
+  };
   const ROUTES: Record<string, (b: Body) => Promise<unknown>> = {
     start: (b) => executor.start(b.runId, b.spec),
     cancel: (b) => executor.cancel(b.runId),
@@ -175,6 +205,20 @@ async function main(): Promise<void> {
       await providers.refresh();
       return providers.providerOf(b.who);
     },
+    // The keyed host: what step 6's boot and routes will call.
+    launch: async (b) => {
+      const r = await host.launch(b.folder, b.baseSha, b.workspace);
+      return r.t === 'launched' ? { t: 'launched', id: r.expedition.id } : r;
+    },
+    open: async (b) => {
+      const r = await host.open(b.id);
+      return r.t === 'opened' ? { t: 'opened', id: r.expedition.id } : r;
+    },
+    view: async (b) => host.view(b.id) ?? { t: 'missing' },
+    entries: async (b): Promise<Entry[]> => [...kernel(b.id).entries()],
+    answerAsk: (b) => host.answerAsk(b.id, b.ref, b.answer),
+    answerApproval: (b) => host.answerApproval(b.id, b.approved),
+    book: (b) => host.book.read(b.id),
   };
   const server = createServer((req, res) => {
     let raw = '';
@@ -194,7 +238,10 @@ async function main(): Promise<void> {
     });
   });
   server.listen(Number(process.env.EXP_CONTROL_PORT), '127.0.0.1', () => {
-    void executor.watch().then(() => console.log('[expedition-backend] control ready'));
+    void host.start().then((failed) => {
+      for (const f of failed) console.warn(`[expedition-backend] owner book: ${f}`);
+      console.log('[expedition-backend] control ready');
+    });
   });
 }
 

@@ -16,6 +16,9 @@ export type ExpeditionContext = {
   readonly repo: string;
   /** What a `{ t: 'launch' }` base names. */
   readonly baseSha: string;
+  /** The contract's leader Buddy: its wakes run as it, and its DM with the owner holds the
+   * expedition's thread and asks. */
+  readonly leader: string;
   /** The Buddy workspace its agent calls run in (its seat Buddy's). */
   readonly workspace: keyed.LaunchWorkspace;
   /** Σ of the contract's pool caps: the most calls it may run at once, so the least run slots
@@ -53,6 +56,7 @@ export class ContextRegistry {
       dir,
       repo: expandHome(entry.contract.repo, this.home),
       baseSha: entry.baseSha,
+      leader: entry.contract.leader,
       workspace: entry.workspace,
       poolSlots: Object.values(entry.contract.pools).reduce((n, cap) => n + cap, 0),
     };

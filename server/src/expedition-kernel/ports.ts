@@ -14,6 +14,8 @@ export type ExpeditionView = {
   readonly state: State;
   readonly timeline: keyed.Timeline;
   readonly faults: readonly keyed.Fault[];
+  /** The log itself, for what the state does not keep (each call's spend). */
+  readonly entries: readonly keyed.Entry[];
 };
 
 /** One raw run. The kernel composes judging: a judged agent call is two runs (its producer, then
@@ -86,7 +88,22 @@ export type DroppedInfo = {
   readonly stage: 'producing' | 'judging';
 };
 
-export type Woken = { readonly act: keyed.LeaderAct; readonly spent: keyed.Usage };
+/** How a wake ended. Either way it cost `spent`: an answer that is not an act is still a paid turn,
+ * and the kernel settles the wake `errored` and charges it. */
+export type Woken =
+  | { readonly t: 'acted'; readonly act: keyed.LeaderAct; readonly spent: keyed.Usage }
+  | { readonly t: 'errored'; readonly why: string; readonly spent: keyed.Usage };
+
+/** Which rewrite a disposition is asked for: its expedition and the folder the leader submitted. */
+export type RewriteAt = { readonly expedition: string; readonly folder: string };
+/** The leader's choice per dropped key, or why it could not be read (a rejection of the rewrite,
+ * shown at the next wake). */
+export type Disposed =
+  | {
+      readonly t: 'decided';
+      readonly dispositions: Readonly<Record<keyed.Key, keyed.Disposition>>;
+    }
+  | { readonly t: 'invalid'; readonly issues: readonly string[] };
 
 export interface Leader {
   /** One wake: the kernel has logged it as the call `leader/<n>`, started under `runId`, and
@@ -95,13 +112,11 @@ export interface Leader {
   wake(runId: string, event: keyed.WakeEvent, view: ExpeditionView): Promise<Woken>;
   /** Asked only when a submitted rewrite drops running calls: one disposition per dropped key.
    * Part of the rewrite act, so not charged separately. */
-  dispose(
-    diff: keyed.Diff,
-    dropped: readonly DroppedInfo[]
-  ): Promise<Readonly<Record<keyed.Key, keyed.Disposition>>>;
+  dispose(at: RewriteAt, diff: keyed.Diff, dropped: readonly DroppedInfo[]): Promise<Disposed>;
 }
 
 export type RewriteForOwner = {
+  readonly expedition: string;
   readonly diff: keyed.Diff;
   readonly why: string;
   readonly reasons: readonly string[];

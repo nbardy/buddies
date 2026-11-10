@@ -23,6 +23,11 @@ import { keyed } from '@unleashd/shared';
 const LOG = 'log.jsonl';
 const CONTRACT = 'contract.md';
 const PLANS = 'plans';
+/** Where an expedition directory keeps its contract and each plan version (readers outside the
+ * kernel, the leader's draft folder, read them by these). */
+export const contractFileOf = (dir: string): string => path.join(dir, CONTRACT);
+export const planDirOf = (dir: string, version: number): string =>
+  path.join(dir, PLANS, `v${version}`);
 
 /** A line of the log that is not an Entry. Only the LAST line can be torn by a crash (an append
  * that never finished, so nothing acted on it); any other bad line is a corrupt log and opening
@@ -103,11 +108,11 @@ export class LogStore {
   }
 
   get contractFile(): string {
-    return path.join(this.dir, CONTRACT);
+    return contractFileOf(this.dir);
   }
 
   planDir(version: number): string {
-    return path.join(this.dir, PLANS, `v${version}`);
+    return planDirOf(this.dir, version);
   }
 
   /** Copy a plan folder's `plan.ts` and `briefs/` as plan version `version`. Nothing else in the

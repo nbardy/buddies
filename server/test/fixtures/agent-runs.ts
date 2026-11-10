@@ -4,8 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { keyed } from '@unleashd/shared';
 import type { RawOutcome, RunSpec, RunStatus } from '../../src/expedition-kernel/ports';
+import type { AskAnswer } from '../../src/expeditions-v1/executor/asks';
 import type { Read } from '../../src/expeditions-v1/executor/durable';
 import type { RunRecord } from '../../src/expeditions-v1/executor/records';
+import type { OwnerFile } from '../../src/expeditions-v1/owner/book';
 import { freePortSync } from '../free-port';
 import { NO_AUTO_INSTALL } from './backend-env';
 import { tempDir } from './temp';
@@ -18,7 +20,10 @@ import { tempDir } from './temp';
 // One CLI for every scenario, chosen by markers in its prompt (the request body is in it):
 // TAG:<name> names the turn's files in FAKE_DIR; MODE:<mode> picks what it does; ANSWER_JSON:<json>
 // is what it answers. A prompt with no TAG (a memory reviewer would be one, but it runs on the fake
-// codex) answers at once.
+// codex) answers at once. A leader wake (its body starts "Leader wake leader/<n> of expedition
+// <id>") is named `leader-<id>-<n>`: it records its prompt, then waits for the test's script
+// `<name>.json` ({ files: {path: text}, answer: text }), writes the files into its working
+// directory (the draft folder) and answers `answer` verbatim.
 const FAKE_CLAUDE = String.raw`#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
@@ -64,7 +69,27 @@ function transcript(sessionId, tokens) {
     message: { role: 'assistant', id: 'msg-' + sessionId, model: 'claude-opus-5-5', usage: tokens, content: [{ type: 'text', text: 'working' }] } };
   fs.writeFileSync(path.join(projects, sessionId + '.jsonl'), JSON.stringify(line) + '\n');
 }
+async function leader(name) {
+  fs.appendFileSync(path.join(dir, 'spawns.log'), name + ' ' + process.pid + '\n');
+  mark(name + '.pgid', execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
+  mark(name + '.cwd', process.cwd());
+  mark(name + '.prompt', prompt);
+  const tools = mcp();
+  if (tools) mark(name + '.tools', JSON.stringify((await rpc(tools, 'tools/list', {})).result.tools.map((t) => t.name)));
+  text('reading;');
+  mark(name + '.midturn', process.pid);
+  await until(name + '.json');
+  const script = JSON.parse(fs.readFileSync(path.join(dir, name + '.json'), 'utf8'));
+  for (const [file, body] of Object.entries(script.files || {})) fs.writeFileSync(path.join(process.cwd(), file), body);
+  text(script.answer);
+  say({ type: 'result', subtype: 'success' });
+}
 async function main() {
+  const wake = /Leader wake leader\/(\d+) of expedition (\S+) /.exec(prompt);
+  if (wake) {
+    say({ type: 'system', subtype: 'init', session_id: 'fake-leader-' + process.pid });
+    return leader('leader-' + wake[2] + '-' + wake[1]);
+  }
   const tag = (/TAG:(\w+)/.exec(prompt) || [])[1];
   const mode = (/MODE:(\w+)/.exec(prompt) || [])[1];
   const session = 'fake-' + (tag || 'other') + '-' + process.pid;
@@ -387,8 +412,72 @@ export function harness(name: string) {
     reviews: (buddyId: string) =>
       ex<Array<{ conversationId: string; status: string }>>('reviews', { buddyId }),
     provider: (who: keyed.Who) => ex<unknown>('provider', { who }),
+
+    // ---- the keyed host (launch, open, views) and the owner's side of the DM ----
+    leaderName: (exp: string, n: number) => `leader-${exp}-${n}`,
+    /** What leader wake `n` of `exp` does: files it writes into its draft folder, its answer. */
+    leaderAnswers(
+      exp: string,
+      n: number,
+      script: { files?: Record<string, string>; answer: string }
+    ): void {
+      fs.writeFileSync(fake(`leader-${exp}-${n}.json`), JSON.stringify(script));
+    },
+    async launch(folder: string, workspaceId: string, baseSha: string = base): Promise<string> {
+      const r = await ex<{ t: string; id?: string; issues?: string[] }>('launch', {
+        folder,
+        baseSha,
+        workspace: { t: 'workspace', id: workspaceId },
+      });
+      assert.equal(r.t, 'launched', JSON.stringify(r));
+      return r.id as string;
+    },
+    open: (id: string) => ex<{ t: string }>('open', { id }),
+    view: (id: string) => ex<keyed.KeyedView>('view', { id }),
+    entries: (id: string) => ex<keyed.Entry[]>('entries', { id }),
+    ownerBook: (id: string) => ex<OwnerFile>('book', { id }),
+    answerAsk: (id: string, ref: string, answer: AskAnswer) =>
+      ex<{ t: string; why?: string }>('answerAsk', { id, ref, answer }),
+    answerApproval: (id: string, approved: boolean) =>
+      ex<{ t: string }>('answerApproval', { id, approved }),
+    /** The owner↔Buddy DM's channel id. */
+    async dm(buddyId: string): Promise<string> {
+      const opened = await http('POST', `/api/buddies/${buddyId}/direct`);
+      assert.equal(opened.status, 200, JSON.stringify(opened.body));
+      return opened.body.channelId as string;
+    },
+    async rootPosts(channelId: string): Promise<Post[]> {
+      const page = await http('GET', `/api/buddies/channels/${channelId}/posts?limit=200`);
+      return page.body.posts as Post[];
+    },
+    async thread(rootId: string): Promise<Post[]> {
+      const page = await http('GET', `/api/buddies/posts/${rootId}/thread?limit=200`);
+      return (page.body.posts as Post[]).filter((p) => p.id !== rootId);
+    },
+    /** The owner replies in a thread, through the owner post route (what the UI sends). */
+    async reply(channelId: string, rootId: string, body: string, key: string): Promise<Post> {
+      const posted = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+        kind: 'inform',
+        body,
+        replyToId: rootId,
+        key,
+      });
+      assert.equal(posted.status, 201, JSON.stringify(posted.body));
+      return posted.body.post as Post;
+    },
   };
 }
+
+/** A post as the Buddy routes return it (the fields these tests read). */
+export type Post = {
+  id: string;
+  ord: string;
+  body: string;
+  purpose?: string;
+  evidence: string[];
+  author: { kind: string; id?: string };
+  replyToId?: string;
+};
 
 // ---- specs ----
 

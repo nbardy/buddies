@@ -9,6 +9,7 @@ import {
   attemptResult,
   stateLabel,
 } from '@unleashd/shared';
+import { type OwnerWord, ownerWord } from '../expeditions-v1/owner/words';
 
 // What the crew is told, and what the owner's chat means (docs/expeditions-lean-design.md §3.4).
 
@@ -95,12 +96,6 @@ export function lessonOf(body: string): Lesson {
   return m ? { t: 'lesson', text: m[1] } : { t: 'none' };
 }
 
-const WORDS: Record<string, ChatCommand> = {
-  pause: { do: 'pause' },
-  resume: { do: 'resume' },
-  stop: { do: 'stop' },
-};
-
 /** The acts a bare chat command can name. */
 export type ChatCommand = Extract<
   Act,
@@ -112,26 +107,33 @@ export type Said = { t: 'act'; act: ChatCommand } | { t: 'talk' };
 const TALK: Said = { t: 'talk' };
 const act = (a: ChatCommand): Said => ({ t: 'act', act: a });
 
+/** pass / fail: the oldest judging attempt, owner-judged only; otherwise talk. */
+const verdict = (x: Expedition, pass: boolean): Said => {
+  const judging = x.attempts.find((a) => a.phase.t === 'judging');
+  if (x.charter.done.t !== 'owner' || !judging) return TALK;
+  return act({ do: 'verdict', n: judging.n, pass });
+};
+/** This host's reading of the shared grammar (expeditions-v1/owner/words.ts). Words only the keyed
+ * host knows (retry, approve, decline) are talk here, as they were before the grammar was shared. */
+const CHAT: { [K in OwnerWord['t']]: (x: Expedition, w: Extract<OwnerWord, { t: K }>) => Said } = {
+  pause: () => act({ do: 'pause' }),
+  resume: () => act({ do: 'resume' }),
+  stop: () => act({ do: 'stop' }),
+  extend: (_x, w) => act({ do: 'extend', hours: w.hours }),
+  note: (_x, w) => act({ do: 'note', text: w.text }),
+  pass: (x) => verdict(x, true),
+  fail: (x) => verdict(x, false),
+  retry: () => TALK,
+  approve: () => TALK,
+  decline: () => TALK,
+  talk: () => TALK,
+};
+
 /** κ for an owner chat message: pause, resume, stop, `extend 2h|30m`, pass, fail (the oldest
  * judging attempt, owner-judged only), `note: <text>`. Anything else is talk. */
 export function chatAct(x: Expedition, body: string): Said {
-  const said = body
-    .trim()
-    .toLowerCase()
-    .replace(/[.!]+$/, '');
-  const note = /^note:?\s+(\S[\s\S]*)$/i.exec(body.trim());
-  if (note) return act({ do: 'note', text: note[1].slice(0, 2000) });
-  const extend = /^extend:?\s*(\d+(?:\.\d+)?)\s*(h|m)$/.exec(said);
-  if (extend) {
-    const hours = Number(extend[1]) / (extend[2] === 'm' ? 60 : 1);
-    return hours > 0 && hours <= 72 ? act({ do: 'extend', hours }) : TALK;
-  }
-  if (said === 'pass' || said === 'fail') {
-    const judging = x.attempts.find((a) => a.phase.t === 'judging');
-    if (x.charter.done.t !== 'owner' || !judging) return TALK;
-    return act({ do: 'verdict', n: judging.n, pass: said === 'pass' });
-  }
-  return Object.hasOwn(WORDS, said) ? act(WORDS[said]) : TALK;
+  const w = ownerWord(body);
+  return (CHAT[w.t] as (x: Expedition, w: OwnerWord) => Said)(x, w);
 }
 
 /** The host's answer to a command it applied: its own line, or none when the act already posts

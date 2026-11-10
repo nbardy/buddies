@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, stat } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { Run, RunConfig } from '@unleashd/buddies-core';
 import type { keyed } from '@unleashd/shared';
@@ -11,6 +11,7 @@ import { checkedRunConfig } from '../../buddies/worker-config';
 import type { Clock, RawOutcome, RunSpec } from '../../expedition-kernel/ports';
 import { add, release, tip } from '../../expeditions/cambium';
 import { labelled } from '../../observability/event-loop-stall';
+import { observeBuddyEvents } from '../observe';
 import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address';
 import { outcomeOf } from './answer';
 import type { ExpeditionContext } from './context';
@@ -20,12 +21,14 @@ import {
   type Last,
   type Posted,
   type Posting,
+  type RecordKind,
   type RunOn,
   type RunRecord,
   type SettledRecord,
   type Stop,
   type Tree,
   readRecord,
+  recordsUnder,
   writeRecord,
 } from './records';
 import { type RefRecord, getRef, putRef } from './refs';
@@ -33,9 +36,10 @@ import { type NamedRef, agentBody, reviewBody } from './request';
 import { Seats } from './seat';
 import { NOTHING, type UsageMeter } from './usage';
 
-// Agent calls and review judges as Buddy requests (CONNECT_PLAN §1, step 4). One request post per
-// run id, keyed `xk:<runId>`, from a Buddy to itself (a self-DM): the named Buddy on its own
-// profile, or the workspace's seat Buddy on the call's config (seat.ts). The post carries purpose
+// Agent calls, review judges and leader wakes as Buddy requests (CONNECT_PLAN §1 step 4, §2). One
+// request post per run id, keyed `xk:<runId>`, from a Buddy to itself (a self-DM): the named Buddy
+// on its own profile, the workspace's seat Buddy on the call's config (seat.ts), or the contract's
+// leader on its profile (a wake: its body is the leader's brief, built by leader.ts). The post carries purpose
 // `expedition_call` and evidence `expedition-run:<runId>`, which is how the Buddy server knows the
 // turn is a call: it runs in the call's own directory (call-directory.ts) under the tool-less
 // `call` grant, and no memory review follows it.
@@ -92,7 +96,15 @@ export type Located = {
   readonly ctx: ExpeditionContext;
   readonly paths: RunPaths;
 };
-export type CallSpec = Extract<RunSpec, { t: 'agent' | 'review' }>;
+/** A leader wake (leader.ts): its body is the leader's brief, its directory the wake's draft
+ * folder, its answer one `LeaderAct`, its caps the kernel's `limits.leaderWake`. */
+export type LeaderSpec = {
+  readonly t: 'leader';
+  readonly body: string;
+  readonly draft: string;
+  readonly max: keyed.Max;
+};
+export type CallSpec = Extract<RunSpec, { t: 'agent' | 'review' }> | LeaderSpec;
 type Call = Posting | Posted;
 
 /** What the executor lends its calls: its per-run queue, its report, where a run lives. */
@@ -100,7 +112,8 @@ export interface ExecutorSide {
   readonly root: string;
   readonly clock: Clock;
   serial<T>(runId: string, task: () => Promise<T>): Promise<T>;
-  emit(runId: string, raw: RawOutcome, spent: keyed.Usage): void;
+  /** A run ended: a kernel run is reported to the kernel, a leader wake to its waiting wake. */
+  report(kind: RecordKind, runId: string, raw: RawOutcome, spent: keyed.Usage): void;
   locate(runId: string): Promise<Located>;
 }
 
@@ -121,7 +134,7 @@ const errored = (why: string): RawOutcome => ({ t: 'errored', why });
 export async function settleAtStart(
   side: ExecutorSide,
   at: Located,
-  kind: RunSpec['t'],
+  kind: RecordKind,
   raw: RawOutcome
 ): Promise<void> {
   await writeRecord(at.paths.record, {
@@ -134,7 +147,7 @@ export async function settleAtStart(
     spent: NOTHING,
     stop: { t: 'none' },
   });
-  side.emit(at.address.runId, raw, NOTHING);
+  side.report(kind, at.address.runId, raw, NOTHING);
 }
 
 /** A host with no Buddies (the step-2 executor tests): a call settles `errored(why)`. */
@@ -278,21 +291,7 @@ export class BuddyCalls implements Calls {
 
   async watch(): Promise<() => void> {
     const t = this.d.timing;
-    let debounce: ReturnType<typeof setTimeout> | null = null;
-    const pass = labelled('timer expedition-calls-wake', () => {
-      debounce = null;
-      this.pass();
-    });
-    const off = this.d.events.on((e) => {
-      if ((e.kind !== 'changed' && e.kind !== 'posted') || debounce) return;
-      debounce = setTimeout(pass, t.debounceMs);
-      debounce.unref();
-    });
-    const backstop = setInterval(
-      labelled('timer expedition-calls-backstop', () => this.pass()),
-      t.backstopMs
-    );
-    backstop.unref();
+    const stopEvents = observeBuddyEvents(this.d.events, t, 'expedition-calls', () => this.pass());
     const usage = setInterval(
       labelled('timer expedition-calls-usage', () => this.pollUsage()),
       t.usagePollMs
@@ -301,9 +300,7 @@ export class BuddyCalls implements Calls {
     for (const runId of await this.liveOnDisk()) this.watched.add(runId);
     this.pass();
     return () => {
-      off();
-      if (debounce) clearTimeout(debounce);
-      clearInterval(backstop);
+      stopEvents();
       clearInterval(usage);
       for (const timer of this.deadlines.values()) clearTimeout(timer);
       this.deadlines.clear();
@@ -412,7 +409,7 @@ export class BuddyCalls implements Calls {
     const settled = settledOf(r, errored(why), NOTHING);
     await writeRecord(at.paths.record, settled);
     this.untrack(r.runId);
-    this.side.emit(r.runId, settled.raw, settled.spent);
+    this.side.report(r.kind, r.runId, settled.raw, settled.spent);
     return settled;
   }
 
@@ -545,7 +542,7 @@ export class BuddyCalls implements Calls {
     const settled = settledOf(r, raw, spent);
     await writeRecord(at.paths.record, settled);
     this.untrack(r.runId);
-    this.side.emit(r.runId, raw, spent);
+    this.side.report(r.kind, r.runId, raw, spent);
   }
 
   private async outcome(r: Posted, s: Exclude<Standing, { t: 'running' }>): Promise<RawOutcome> {
@@ -584,19 +581,9 @@ export class BuddyCalls implements Calls {
 
   /** Every live call record under the root (a restarted host observes what the dead one left). */
   private async liveOnDisk(): Promise<string[]> {
-    const ids: string[] = [];
-    for (const exp of await readdir(this.side.root).catch(() => [] as string[])) {
-      const dir = path.join(this.side.root, exp, 'runs');
-      for (const name of await readdir(dir).catch(() => [] as string[])) {
-        if (!name.endsWith('.json')) continue;
-        const found = await readRecord(path.join(dir, name)).catch(
-          () => ({ t: 'missing' }) as const
-        );
-        if (found.t === 'found' && (found.value.t === 'posting' || found.value.t === 'posted'))
-          ids.push(found.value.runId);
-      }
-    }
-    return ids;
+    return (await recordsUnder(this.side.root)).flatMap((r) =>
+      r.t === 'posting' || r.t === 'posted' ? [r.runId] : []
+    );
   }
 }
 
@@ -694,6 +681,19 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
       }),
     };
   },
+  // The leader on its own profile, in its draft folder; it reads the repo's base, never changes it.
+  leader: async (c, at, spec) => ({
+    t: 'ready',
+    posting: c.posting(at, {
+      kind: 'leader',
+      seat: { buddyId: at.ctx.leader, runOn: { t: 'profile' } },
+      body: spec.body,
+      expected: { t: 'act', folder: spec.draft },
+      tree: { t: 'dir', path: spec.draft },
+      base: at.ctx.baseSha,
+      max: spec.max,
+    }),
+  }),
 };
 
 type Who<K extends keyed.Who['t']> = (
@@ -865,6 +865,8 @@ const AGENT_REF: { readonly [K in RawOutcome['t']]: StoreRef } = {
 const REF: { readonly [K in CallSpec['t']]: StoreRef } = {
   agent: (at, r, raw, end, runs) => AGENT_REF[raw.t](at, r, raw, end, runs),
   review: nothingStored,
+  // A wake's act is logged with its call; its edits are the draft folder itself.
+  leader: nothingStored,
 };
 
 const conversationsOf = (runs: Run[]): string[] => [
