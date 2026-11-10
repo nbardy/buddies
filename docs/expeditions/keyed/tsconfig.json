@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": { "zod": ["../../../server/node_modules/zod"] }
+  },
+  "include": ["api/expedition.d.ts", "examples/**/*.ts", "v1/**/*.ts"]
+}
