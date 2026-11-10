@@ -20,8 +20,10 @@ which boundaries need coverage and how client component tests run.
 
 `pnpm test` runs the full suite defined in [package.json](../package.json); its one
 build is the one `test:package` runs.
-`pnpm typecheck` and `pnpm build` take no lock and are safe while `pnpm dev`
-runs; only dev tasks claim the one-runtime lock. The client solution config
+`pnpm typecheck` and `pnpm build` take no dev-runtime lock and are safe while
+`pnpm dev` runs; only dev tasks claim the one-runtime lock. `pnpm typecheck` is
+single-flight machine-wide: a second run waits for the first and reuses its
+result when the tree is unchanged (`tools/typecheck.mjs`). The client solution config
 requires `tsc -b`; `tsc --noEmit` at the client root checks no source files.
 
 Use Biome for formatting and linting, scoped to the files you changed. The root

@@ -348,8 +348,34 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   `tsc --noEmit` checks ZERO files and exits 0 on a broken tree — it reported
   success on three `ReferenceError`-grade unresolved identifiers on 2026-08-20.
   `vite build` does not catch them either (esbuild strips types, no scope
-  analysis). `pnpm typecheck` runs `tsc -b` and takes no lock, so it is safe
-  while a dev runtime runs; never fall back to `--noEmit`.
+  analysis). `pnpm typecheck` runs `tsc -b`; never fall back to `--noEmit`.
+- TypeScript is 7.0.2 (the native compiler), one exact pin in server, client,
+  shared and the submodule. Per project it is 6-10x faster than 5.9 with ~30%
+  less memory (server test config: 5.0-9.5 s / 700 MB -> 0.9-1.4 s / 490 MB,
+  interleaved A/B at load 25-55, 2026-11-10). TS 7 removed
+  `moduleResolution: "node"` (node10, error TS5108): CommonJS configs use
+  `bundler`, which kept the emitted `server/dist` and `shared/dist` JS
+  identical. It defaults `types` to `[]`, so a config that needs Node globals
+  lists `"types": ["node"]`. It has NO JavaScript compiler API (`require
+  ('typescript')` exports only the version) and no `bin/tsc` export subpath:
+  find the launcher with `tscLauncher()` (`tools/lib/tsc.mjs`). The dev
+  compilers are native `tsc --watch` children that emit into a stage and
+  publish by rename, so a backend never loads a truncated module
+  (`tools/dev-runtime.mjs`, guard `tools/dev-runtime.test.mjs`). Editors need
+  TS 7 language support; the old `tsserver.js` is gone.
+- `pnpm typecheck` is single-flight across every process on the machine
+  (`tools/typecheck.mjs`): concurrent agents' typecheckers contended for the
+  machine (2026-11-10). One lock file in the temp dir holds the holder's pid;
+  a second run waits, then reuses that result when it finished after the
+  waiter started on the same checkout with no file's size or mtime changed,
+  or runs next. A dead holder's lock (or one older than 10 min) is reclaimed.
+  It takes no dev-runtime lock, so it is safe while a dev runtime runs. Every
+  project is checked even after one fails. Guard: `tools/typecheck.test.mjs`.
+  `pnpm typecheck:fast` is the same runner on tsrs (the Rust port), opt-in and
+  EXPERIMENTAL: its diagnostics matched tsc 7.0.2 byte for byte on every
+  project, clean and with four injected errors, at ~1/3 the memory (server
+  153 MB). Never pass tsrs's own `--fast`. Re-compare before trusting it on a
+  new tsrs or TypeScript version.
 - Recursive `rg` output is rewritten by rtk and is NOT safe to cite. The hook
   turns directory-target searches into `rtk rg`, which substitutes tokens
   silently (`compact_memory` reads back as `n_memory`, `compactProject` as
@@ -414,6 +440,16 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   `npx prettier --write` fetches prettier with ITS defaults and reformats
   whole files (single → double quotes), burying a 20-line change in a
   700-line diff. Never reach for prettier here.
+  Biome is 2.6.6 (2026-11-10, from 1.9.4). It honours `.gitignore`
+  (`vcs.useIgnoreFile`): without it Biome 2 walked gitignored trees and one
+  check ran past 120 s; with it 917 files take ~2 s. Kept as 1.9 had them:
+  ASCII order for imported names (`identifierOrder: lexicographic`), no CSS
+  formatting (2.x splits every comma list onto its own lines, 31 files, and
+  breaks the G8 ratchet), no HTML/Markdown/YAML. The CSS rules
+  `noDescendingSpecificity` (would reorder cascade-sensitive selectors) and
+  `noImportantStyles`, and `noStaticElementInteractions` (the same call as
+  `useKeyWithClickEvents`), are off. Generated JSON (`emoji-data.json`, the
+  tool-contract snapshot) is not formatted. `pnpm lint` is green; keep it so.
   `biome.json` ignores `vendor` wholesale. It previously ignored only
   `vendor/agent-cli-tool/manual_tests/runs`, so a root `pnpm format` reformatted
   the SUBMODULE's source — the submodule carries no formatter config of its own,
