@@ -228,6 +228,23 @@ test("an answer that violates the step's schema reaches plan code as errored, ne
   assert.deepEqual(await seen(3), { t: 'passed', n: 3 });
 });
 
+// 2026-11-11: nothing static catches a plan call left un-awaited (Biome cannot resolve the bare
+// `expedition` import; tsc does not report floating promises). Returning while a call or review is
+// still unanswered ends the plan as threw, naming what was pending. The phases test below proves
+// that calls awaited through parallel and Promise.all still end as a candidate.
+test('a plan that returns while calls it issued are unanswered ends with threw naming them', async () => {
+  const result = await dryRun({
+    folder: copyPlan('unawaited').folder,
+    known: (call) => (call.key === 'probe/kept' ? passedReport(call.key) : undefined),
+    reviewed: () => false,
+  });
+  assert.equal(result.end.t, 'threw');
+  assert.equal(
+    result.end.t === 'threw' ? result.end.message : '',
+    'The plan returned while 2 calls were still pending: probe/forgotten, review "Was the forgotten probe any good?" (a call was not awaited).'
+  );
+});
+
 test('concurrent calls inside parallel inside phases keep their own phase prefix', async () => {
   const result = await dryRun({
     folder: copyPlan('phases').folder,

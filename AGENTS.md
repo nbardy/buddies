@@ -483,7 +483,11 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   bugs; deliberate fire-and-forget is written `void call()`) and
   `useAwaitThenable`. They double lint time (~0.5 s -> ~1.1 s). Biome cannot
   resolve a plan folder's bare `expedition` import, so un-awaited plan calls
-  there are NOT caught, and tsc does not report a floating promise either.
+  are not caught statically, and tsc does not report a floating promise either.
+  The authoring library catches it at run time instead: a plan that returns while
+  a call or review it issued is unanswered ends as `threw`, naming the pending
+  keys (`authoring/session.ts`; guard `expedition-kernel-runner.test.ts`). An
+  un-awaited call already answered before the return is not caught.
   `noMisusedPromises` (presence-check noise, partial Express coverage) and
   `noUnnecessaryConditions` (mostly false) stay off.
   `biome.json` ignores `vendor` wholesale. It previously ignored only

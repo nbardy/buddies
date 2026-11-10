@@ -15,9 +15,14 @@ export class PlanEnded extends Error {
   }
 }
 
+/** `label` names the waiter in the not-awaited report: the call's key, or the review's question. */
 type Waiter =
-  | { readonly t: 'call'; readonly settle: (outcome: keyed.Outcome) => void }
-  | { readonly t: 'review'; readonly settle: () => void };
+  | {
+      readonly t: 'call';
+      readonly label: string;
+      readonly settle: (outcome: keyed.Outcome) => void;
+    }
+  | { readonly t: 'review'; readonly label: string; readonly settle: () => void };
 
 type Send = (message: FromPlan, done?: (error: Error | null) => void) => boolean;
 type Channel = { ref(): void; unref(): void };
@@ -68,7 +73,7 @@ export class Session {
     if (!checked.success) this.fail(`Call ${call.key} is malformed: ${checked.error.message}`);
     const seq = this.nextSeq++;
     return new Promise((settle) => {
-      this.waiters.set(seq, { t: 'call', settle });
+      this.waiters.set(seq, { t: 'call', label: call.key, settle });
       this.post({ t: 'call', seq, call });
     });
   }
@@ -76,7 +81,7 @@ export class Session {
   review(question: string): Promise<void> {
     const seq = this.nextSeq++;
     return new Promise((settle) => {
-      this.waiters.set(seq, { t: 'review', settle });
+      this.waiters.set(seq, { t: 'review', label: `review "${question}"`, settle });
       this.post({ t: 'review', seq, question });
     });
   }
@@ -85,8 +90,26 @@ export class Session {
     this.post({ t: 'phase', name, edge });
   }
 
+  /**
+   * The plan returned. A call or review it issued and never awaited is still outstanding here: the
+   * plan's result would not depend on it, and the kernel would cancel the work it started. That
+   * is always a missing `await` (nothing static catches it: Biome cannot resolve the bare
+   * `expedition` import, and tsc does not report floating promises), so it ends the plan as
+   * `threw`, naming what was pending, instead of as a candidate. Calls awaited through `parallel`
+   * or `Promise.all` have all settled by the time the plan can return.
+   * Guard: server/test/expedition-kernel-runner.test.ts.
+   */
   candidate(ref: string): void {
-    this.end({ t: 'candidate', ref });
+    const pending = [...this.waiters.values()].map((waiter) => waiter.label);
+    if (pending.length === 0) {
+      this.end({ t: 'candidate', ref });
+      return;
+    }
+    const noun = pending.length === 1 ? 'call was' : 'calls were';
+    this.end({
+      t: 'threw',
+      message: `The plan returned while ${pending.length} ${noun} still pending: ${pending.join(', ')} (a call was not awaited).`,
+    });
   }
 
   gap(why: string, evidence: keyed.Input[]): never {
