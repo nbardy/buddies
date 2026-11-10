@@ -40,6 +40,10 @@
         "noExplicitAny": "warn",
         "noArrayIndexKey": "off"
       },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "useAwaitThenable": "error"
+      },
       "a11y": {
         "useKeyWithClickEvents": "off",
         "useButtonType": "warn",
