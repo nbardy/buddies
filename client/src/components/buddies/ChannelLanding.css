@@ -394,18 +394,6 @@ a.landing-chip:hover {
   font-size: var(--fs-4);
 }
 
-.landing-thread-title {
-  overflow-wrap: anywhere;
-  font-size: var(--fs-5);
-  line-height: 1.35;
-  font-weight: 650;
-  color: var(--text-bright);
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
 /* Working now: one quiet line in the composer column, flush under the box. */
 .landing-working {
   flex-wrap: wrap;

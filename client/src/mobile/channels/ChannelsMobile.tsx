@@ -19,6 +19,7 @@ import { RailExpeditions, type RailRowClasses } from '../../components/buddies/E
 import { ExpeditionView, RetiredExpeditionView } from '../../components/buddies/ExpeditionView';
 import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
 import { HighlightRow } from '../../components/buddies/HighlightRow';
+import { KeyedExpeditionView } from '../../components/buddies/KeyedExpeditionView';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
 import { TaskPage } from '../../components/buddies/TaskPage';
 import { WakeIcon, WakeIndicator } from '../../components/buddies/WakeIndicator';
@@ -125,6 +126,15 @@ function renderScreen(screen: ChannelsView, context: ScreenContext) {
     case 'expedition':
       return (
         <ExpeditionView
+          key={screen.id}
+          id={screen.id}
+          workspaceId={context.workspaceId}
+          frame="mobile"
+        />
+      );
+    case 'keyed':
+      return (
+        <KeyedExpeditionView
           key={screen.id}
           id={screen.id}
           workspaceId={context.workspaceId}

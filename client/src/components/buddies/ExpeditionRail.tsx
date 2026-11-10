@@ -1,8 +1,10 @@
-import type { ExpeditionRow } from '@unleashd/shared';
+import type { ExpeditionRow, keyed } from '@unleashd/shared';
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { type ChannelsView, channelsHref, channelsView } from './channels-view';
 import { useExpeditionRows, useRetired } from './expedition-api';
+import { useKeyedRows, useKeyedView } from './keyed-api';
+import { goalLine, needsYou, rankRows, statusLabel } from './keyed-timeline';
 import '../../views/conversation-row/ConversationRow.css';
 
 /** One shell's class names: the desktop channel rail or the phone's channel list. */
@@ -30,6 +32,45 @@ function Flag({ row }: { row: Extract<ExpeditionRow, { t: 'ok' }> }) {
   );
 }
 
+/** One keyed expedition: its goal, its state, and "needs you" while an ask or an approval waits.
+ * The list row carries neither, so a live row reads its own view (the same cache entry the open
+ * view polls); a finished one cannot be waiting and fetches nothing. */
+function KeyedRailRow({
+  row,
+  classes,
+  current,
+  go,
+}: {
+  row: keyed.KeyedRow;
+  classes: RailRowClasses;
+  current: boolean;
+  go(): void;
+}) {
+  const detail = useKeyedView(row.id, 10_000, row.status.t !== 'finished');
+  const asking = detail.data !== null && needsYou(detail.data);
+  return (
+    <li>
+      <button
+        type="button"
+        className={classes.row || undefined}
+        aria-current={current ? 'page' : undefined}
+        data-unread={asking ? 'unread' : 'read'}
+        onClick={go}
+        title={row.goal}
+      >
+        <span className={`${classes.hash} expedition-rail-dot`} aria-hidden="true">
+          <span className="conversation-row__dot" data-status={KEYED_DOT[row.status.t]} />
+        </span>
+        <span className={classes.name}>{goalLine(row.goal)}</span>
+        <span className="expedition-rail-flag" data-alert={asking || undefined}>
+          {asking ? 'needs you' : statusLabel(row.status)}
+        </span>
+      </button>
+    </li>
+  );
+}
+const KEYED_DOT = { running: 'running', paused: 'paused', finished: 'idle' } as const;
+
 /** The Expeditions section, for both shells; absent until the workspace has one. A row opens
  * the expedition in the main pane (`?expedition=`), like a channel; retired ones fold under one
  * "Retired" row and open read-only (`?retired=`). */
@@ -37,14 +78,16 @@ export function RailExpeditions({
   workspaceId,
   classes,
 }: { workspaceId: string; classes: RailRowClasses }) {
-  const rows = useExpeditionRows(workspaceId);
+  const rows = useExpeditionRows(workspaceId) ?? [];
+  // Null when the backend has no keyed route (404/503) or it is still loading: nothing extra.
+  const keyedRows = useKeyedRows() ?? [];
   const retired = useRetired(workspaceId) ?? [];
   const view = channelsView(useLocation().search);
   const navigate = useNavigate();
   const [showRetired, setShowRetired] = useState(false);
-  if (rows === null || rows.length + retired.length === 0) return null;
+  if (rows.length + keyedRows.length + retired.length === 0) return null;
   const go = (to: ChannelsView) => navigate(channelsHref(workspaceId, to));
-  const current = (kind: 'expedition' | 'retired', id: string) =>
+  const current = (kind: 'expedition' | 'retired' | 'keyed', id: string) =>
     view.kind === kind && view.id === id ? 'page' : undefined;
   return (
     <section className={classes.section} aria-label="Expeditions">
@@ -70,6 +113,15 @@ export function RailExpeditions({
               {r.t === 'ok' && <Flag row={r} />}
             </button>
           </li>
+        ))}
+        {rankRows(keyedRows).map((r) => (
+          <KeyedRailRow
+            key={r.id}
+            row={r}
+            classes={classes}
+            current={current('keyed', r.id) === 'page'}
+            go={() => go({ kind: 'keyed', id: r.id })}
+          />
         ))}
         {retired.length > 0 && (
           <li>

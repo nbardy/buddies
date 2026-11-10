@@ -12,6 +12,7 @@ import type {
 import { z } from 'zod';
 import { OwnerPostMentionConfigSchema } from './buddy-channel-posts.js';
 import { type ConversationConfig, ConversationConfigSchema } from './conversation-config.js';
+import type { KeyedView } from './expedition-keyed.js';
 import { Act, type Expedition } from './expedition.js';
 import type { UpstreamUpdateResult } from './upstream.js';
 
@@ -209,6 +210,20 @@ export const WAKE_MESSAGE = [
 ].join('\n');
 
 const NoBodySchema = z.undefined();
+// Keyed expeditions: the owner's acts (CONNECT_PLAN §4). `t` names the act, as in expedition-keyed.
+const KeyedActSchema = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('pause') }).strict(),
+  z.object({ t: z.literal('resume') }).strict(),
+  z.object({ t: z.literal('stop') }).strict(),
+  z.object({ t: z.literal('extend'), hours: z.number().positive() }).strict(),
+  z.object({ t: z.literal('retry'), key: z.string().min(1) }).strict(),
+]);
+export type KeyedAct = z.infer<typeof KeyedActSchema>;
+const KeyedAnswerSchema = z.union([
+  z.object({ answer: z.string().min(1) }).strict(),
+  z.object({ confirm: z.boolean() }).strict(),
+]);
+const KeyedApprovalSchema = z.object({ approve: z.boolean() }).strict();
 export const BuddyDocKindSchema = z.enum(['soul', 'working', 'long_term', 'shared']);
 // Pattern: table-driven (docs/patterns.md#table-driven)
 // This table owns the wire: client paths, methods and bodies; server routes and success statuses.
@@ -360,12 +375,36 @@ export const buddyMutations = {
     status: 200,
     body: Act,
   },
+  // Keyed expeditions (docs/expeditions/keyed/v1/CONNECT_PLAN.md §4). Served by the keyed-expedition
+  // routes, not server/src/buddies/routes.ts; each answers with the refreshed view.
+  'keyed.act': {
+    method: 'POST',
+    path: '/api/buddies/keyed-expeditions/:id/act',
+    status: 200,
+    body: KeyedActSchema,
+  },
+  // A text ask takes `answer`, a confirm ask takes `confirm`; `:ref` is the ask's RefId.
+  'keyed.answer': {
+    method: 'POST',
+    path: '/api/buddies/keyed-expeditions/:id/asks/:ref',
+    status: 200,
+    body: KeyedAnswerSchema,
+  },
+  'keyed.approval': {
+    method: 'POST',
+    path: '/api/buddies/keyed-expeditions/:id/approval',
+    status: 200,
+    body: KeyedApprovalSchema,
+  },
 } as const;
 
 export type BuddyMutation = keyof typeof buddyMutations;
 /** The mutations server/src/buddies/routes.ts serves; the rest have their own route owners
  * (server/src/upstream, server/src/expeditions). */
-export type BuddyRouteMutation = Exclude<BuddyMutation, 'upstream.update' | 'expedition.act'>;
+export type BuddyRouteMutation = Exclude<
+  BuddyMutation,
+  'upstream.update' | 'expedition.act' | 'keyed.act' | 'keyed.answer' | 'keyed.approval'
+>;
 type Contract<K extends BuddyMutation> = (typeof buddyMutations)[K];
 export type BuddyMutationBody<K extends BuddyMutation> = z.input<Contract<K>['body']>;
 type WithOptionalKey<T> = T extends { key: string } ? Omit<T, 'key'> & { key?: string } : T;
@@ -422,6 +461,9 @@ export interface BuddyMutationResults {
   read: { ok: boolean };
   'upstream.update': UpstreamUpdateResult;
   'expedition.act': Expedition;
+  'keyed.act': KeyedView;
+  'keyed.answer': KeyedView;
+  'keyed.approval': KeyedView;
 }
 export type BuddyMutationRoute<K extends BuddyMutation> =
   `${Contract<K>['method']} ${Contract<K>['status']} ${Contract<K>['path']}`;

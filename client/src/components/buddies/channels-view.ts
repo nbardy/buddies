@@ -10,11 +10,12 @@
  * from its channel.
  *
  *   D = Home (channel list + Buddies) ⊕ Landing (the workspace Home) ⊕ Threads ⊕ Channel ⊕ Thread ⊕ Task ⊕ DM ⊕ Workers
- *       ⊕ Expedition ⊕ Retired expedition
+ *       ⊕ Expedition ⊕ Keyed expedition ⊕ Retired expedition
  *
  * `expedition` is one expedition in the main pane: the manager chat with Attempts, Goal and
  * Details tabs (owner 2026-11-03); its `tab` param is read by ExpeditionView.tsx, so it rides
- * along untouched here. `retired` reads a retired record.
+ * along untouched here. `retired` reads a retired record. `keyed` is one keyed expedition
+ * (`?keyed=`): the Timeline of KeyedExpeditionView.tsx.
  *
  * `dm` is a Buddy DM conversation drawn as a thread (493c1c7). It wins over the other params,
  * which stay in the URL so Back (dropping `dm`) returns to the screen the DM was opened from.
@@ -29,6 +30,7 @@ export type ChannelsView =
   | { kind: 'dm'; conversationId: string }
   | { kind: 'workers'; buddyId: string }
   | { kind: 'expedition'; id: string }
+  | { kind: 'keyed'; id: string }
   | { kind: 'retired'; id: string };
 
 export function channelsView(search: string): ChannelsView {
@@ -40,6 +42,8 @@ export function channelsView(search: string): ChannelsView {
   if (workers) return { kind: 'workers', buddyId: workers };
   const expedition = params.get('expedition');
   if (expedition) return { kind: 'expedition', id: expedition };
+  const keyed = params.get('keyed');
+  if (keyed) return { kind: 'keyed', id: keyed };
   const retired = params.get('retired');
   if (retired) return { kind: 'retired', id: retired };
   const dm = params.get('dm');
@@ -78,6 +82,8 @@ export function channelsHref(workspaceId: string, screen: ChannelsView): string 
       return `${base}?dm=${encodeURIComponent(screen.conversationId)}`;
     case 'expedition':
       return `${base}?expedition=${encodeURIComponent(screen.id)}`;
+    case 'keyed':
+      return `${base}?keyed=${encodeURIComponent(screen.id)}`;
     case 'retired':
       return `${base}?retired=${encodeURIComponent(screen.id)}`;
   }

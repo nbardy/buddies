@@ -1,0 +1,102 @@
+/* Keyed expedition view (KeyedExpeditionView.tsx, KeyedTimeline.tsx, KeyedNeeds.tsx). Header, pill,
+   buttons and facts are Expedition.css's. Bar and marker positions are fractions of one time axis,
+   set inline; the plot scrolls inside its own container, so a phone never scrolls the page. */
+.keyed-expedition-budget {
+  flex: 1 1 10em;
+  max-width: 20em;
+  height: var(--sp-4);
+  border-radius: 999px;
+}
+
+.keyed-expedition-need {
+  padding: var(--sp-6) var(--sp-7);
+  border-left: 3px solid var(--theme-warning);
+  background: color-mix(in srgb, var(--theme-warning) 8%, transparent);
+  font-size: var(--fs-4);
+}
+.keyed-expedition-answer {
+  flex: 1 1 14em;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-raised-1);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.keyed-expedition-scroll {
+  overflow-x: auto;
+}
+.keyed-expedition-plot {
+  --label: 9rem;
+  position: relative;
+  min-width: 36rem;
+  font-size: var(--fs-2);
+}
+.keyed-expedition-row {
+  display: grid;
+  grid-template-columns: var(--label) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-4);
+  margin-block: var(--sp-2);
+}
+.keyed-expedition-track {
+  position: relative;
+  height: var(--sp-8);
+  border-radius: 4px;
+  background: var(--bg-raised-2);
+}
+.keyed-expedition-tick {
+  position: absolute;
+  color: var(--text-muted);
+}
+
+/* Bars take their colour from --tone (set inline from keyed-timeline.ts TONE_COLOR). */
+.keyed-expedition-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: var(--tone);
+  cursor: pointer;
+}
+.keyed-expedition-bar[data-tone="refused"] {
+  border: 1px dashed var(--tone);
+  background: none;
+}
+/* Started under a plan the leader has since replaced: hatched. */
+.keyed-expedition-bar[data-stale] {
+  background-image: repeating-linear-gradient(135deg, transparent 0 3px, rgb(0 0 0 / 0.3) 3px 6px);
+}
+.keyed-expedition-bar[aria-pressed="true"] {
+  outline: 2px solid var(--text-bright);
+}
+
+/* Over every track, inset by the label column. A plan version and the finish are lines through
+   every lane; a review is a short tick. */
+.keyed-expedition-markers {
+  position: absolute;
+  inset: 0 0 0 calc(var(--label) + var(--sp-4));
+  pointer-events: none;
+}
+.keyed-expedition-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--sp-4);
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--accent);
+  background: none;
+  color: var(--accent);
+  font-size: var(--fs-1);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.keyed-expedition-marker[data-kind="review"] {
+  bottom: auto;
+  height: var(--sp-8);
+  border-left-style: dotted;
+}

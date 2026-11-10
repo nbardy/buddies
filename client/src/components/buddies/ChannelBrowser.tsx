@@ -27,6 +27,7 @@ import { DESKTOP_ROW, RailExpeditions } from './ExpeditionRail';
 import { ExpeditionView, RetiredExpeditionView } from './ExpeditionView';
 import { GroupDmNotice } from './GroupDmNotice';
 import { HighlightRow } from './HighlightRow';
+import { KeyedExpeditionView } from './KeyedExpeditionView';
 import { TaskFilter } from './TaskFilter';
 import { TaskPage } from './TaskPage';
 import { ThreadResize, useThreadPaneStyle } from './ThreadResize';
@@ -874,6 +875,9 @@ export function ChannelBrowser({
           expedition: (id) => (
             <ExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
           ),
+          keyed: (id) => (
+            <KeyedExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
+          ),
           retired: (id) => (
             <RetiredExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
           ),
@@ -945,6 +949,7 @@ type MainPanes = {
   workers(buddyId: string): ReactNode;
   dm(conversationId: string): ReactNode;
   expedition(id: string): ReactNode;
+  keyed(id: string): ReactNode;
   retired(id: string): ReactNode;
   threads(): ReactNode;
   channel(): ReactNode;
@@ -962,6 +967,8 @@ function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
       return panes.dm(view.conversationId);
     case 'expedition':
       return panes.expedition(view.id);
+    case 'keyed':
+      return panes.keyed(view.id);
     case 'retired':
       return panes.retired(view.id);
     case 'threads':

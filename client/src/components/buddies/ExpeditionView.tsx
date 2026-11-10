@@ -295,14 +295,14 @@ const META: {
   paused: (x, now) => `${tally(x)} · ${timeLeft(x.state.launch.deadline, now)}`,
   finished: (x) => `${tally(x)} · ended ${when(x.state.at)}`,
 };
-function timeLeft(deadline: string, now: number): string {
+export function timeLeft(deadline: string, now: number): string {
   const minutes = Math.round((Date.parse(deadline) - now) / 60_000);
   if (minutes <= 0) return 'deadline reached';
   const h = Math.floor(minutes / 60);
   return `${h > 0 ? `${h} h ` : ''}${minutes % 60} min left`;
 }
 /** Re-renders the time left every 30 s; the record polls only when it changes. */
-function useNow(): number {
+export function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
@@ -393,7 +393,7 @@ function Manage({ x, workspaceId }: { x: Expedition; workspaceId: string }) {
 }
 
 /** An act that cannot be undone takes two clicks. */
-function Confirm({ label, sure, run }: { label: string; sure: string; run(): void }) {
+export function Confirm({ label, sure, run }: { label: string; sure: string; run(): void }) {
   const [armed, setArmed] = useState(false);
   return (
     <button
@@ -422,7 +422,11 @@ function Relaunch({ x, workspaceId }: { x: Expedition; workspaceId: string }) {
   );
 }
 
-function Gone({ frame, workspaceId, text }: { frame: Frame; workspaceId: string; text: string }) {
+export function Gone({
+  frame,
+  workspaceId,
+  text,
+}: { frame: Frame; workspaceId: string; text: string }) {
   return (
     <div className="channel-browser-empty expedition-gone ui-muted ui-row" data-frame={frame}>
       <strong>Expedition</strong>

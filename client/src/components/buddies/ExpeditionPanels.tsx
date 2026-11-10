@@ -18,7 +18,7 @@ import { useAct } from './expedition-api';
 // (limits, launch facts, extend and retire).
 
 /** A tab's scroll column; its sections share the channel feed's reading width. */
-function Scroll({ children }: { children: ReactNode }) {
+export function Scroll({ children }: { children: ReactNode }) {
   const scroll = useScrollActivity();
   return (
     <div
@@ -31,7 +31,7 @@ function Scroll({ children }: { children: ReactNode }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="expedition-section ui-stack">
       <h3 className="ui-section__title">{title}</h3>
