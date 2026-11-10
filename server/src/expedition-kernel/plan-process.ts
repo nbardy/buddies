@@ -1,8 +1,8 @@
+import type { keyed } from '@unleashd/shared';
 import type { CanonCtx } from './canonical';
 import { canonicalise } from './canonical';
 import type { Authored } from './protocol';
 import { type PlanEnd, type PlanHandle, runPlan } from './runner';
-import type { Call, Finish, Outcome } from './types';
 
 // One run of one plan version in its child process (runner.ts), as the kernel sees it: every
 // call it authors is canonicalised and asked for through the kernel; every answer goes back by
@@ -10,14 +10,14 @@ import type { Call, Finish, Outcome } from './types';
 
 /** An answer for whoever asked for a call: the plan, or the host itself. */
 export type Delivery =
-  | { readonly t: 'outcome'; readonly outcome: Outcome }
-  | { readonly t: 'closed'; readonly reason: Finish };
+  | { readonly t: 'outcome'; readonly outcome: keyed.Outcome }
+  | { readonly t: 'closed'; readonly reason: keyed.Finish };
 export type Asker = { readonly deliver: (d: Delivery) => void; readonly alive: () => boolean };
 
 export interface PlanHost {
   /** Run `task` in the kernel's serialized queue. */
   enqueue(task: () => unknown): void;
-  request(call: Call, asker: Asker): Promise<void>;
+  request(call: keyed.Call, asker: Asker): Promise<void>;
   canonCtx(version: number): CanonCtx;
   fault(what: string): void;
   /** The leader already continued at `question` under `version`. */

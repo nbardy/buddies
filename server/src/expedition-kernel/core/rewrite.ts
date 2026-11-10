@@ -1,4 +1,4 @@
-import type { Call, Contract, Diff, Disposition, Hash, Key } from '../types';
+import type { keyed } from '@unleashd/shared';
 import { canonicalJson, hashOf } from './hash';
 import { dropped } from './reconcile';
 import { ATTACHED, type CallStatus, type PlanVersion, type State, lookup } from './state';
@@ -8,7 +8,7 @@ import { DISPOSAL, reservationOf, usd } from './tables';
 // a gate changes no state (I8) because judging it writes nothing; the host appends the `plan`
 // entry only on `apply` (or after the owner approves a `needs-owner`).
 
-export type Asked = { readonly call: Call; readonly hash: Hash };
+export type Asked = { readonly call: keyed.Call; readonly hash: keyed.Hash };
 
 type Bucket = 'reused' | 'attached' | 'started';
 const BUCKET: { readonly [K in CallStatus['t']]: Bucket } = {
@@ -23,8 +23,12 @@ const BUCKET: { readonly [K in CallStatus['t']]: Bucket } = {
 /** What running the new plan against the log would do. A new hash under a known key counts as
  * started (and the running old one, if any, is replaced). `newCostUsd` is the reservations the
  * started calls would hold: an upper bound, as the dry run shows it. */
-export function diffOf(state: State, asked: readonly Asked[]): Diff {
-  const diff = { reused: [] as Key[], attached: [] as Key[], started: [] as Key[] };
+export function diffOf(state: State, asked: readonly Asked[]): keyed.Diff {
+  const diff = {
+    reused: [] as keyed.Key[],
+    attached: [] as keyed.Key[],
+    started: [] as keyed.Key[],
+  };
   let newCostUsd = 0;
   for (const { call, hash } of asked) {
     const known = lookup(state, call.key, hash);
@@ -38,9 +42,9 @@ export function diffOf(state: State, asked: readonly Asked[]): Diff {
 export type Proposal = {
   readonly version: number;
   /** The contract as the rewritten folder carries it. */
-  readonly contract: Contract;
+  readonly contract: keyed.Contract;
   readonly asked: readonly Asked[];
-  readonly dispositions: Readonly<Record<Key, Disposition>>;
+  readonly dispositions: Readonly<Record<keyed.Key, keyed.Disposition>>;
 };
 
 export type Rejection =
@@ -50,14 +54,14 @@ export type Rejection =
   /** The Contract is the owner's; a change never arrives through a rewrite (I5). */
   | { readonly t: 'contract-changed' }
   | { readonly t: 'stale-version'; readonly current: number; readonly proposed: number }
-  | { readonly t: 'duplicate-key'; readonly key: Key }
-  | { readonly t: 'hash-mismatch'; readonly key: Key }
+  | { readonly t: 'duplicate-key'; readonly key: keyed.Key }
+  | { readonly t: 'hash-mismatch'; readonly key: keyed.Key }
   /** Running calls the new plan drops with no `cancel` or `finish`: there is no default. */
-  | { readonly t: 'undecided'; readonly keys: readonly Key[] }
+  | { readonly t: 'undecided'; readonly keys: readonly keyed.Key[] }
   /** Dispositions for calls the new plan does not drop. */
-  | { readonly t: 'stray-disposition'; readonly keys: readonly Key[] }
+  | { readonly t: 'stray-disposition'; readonly keys: readonly keyed.Key[] }
   /** An ask is never cancelled (I6): a dropped ask drains. */
-  | { readonly t: 'ask-cancelled'; readonly keys: readonly Key[] };
+  | { readonly t: 'ask-cancelled'; readonly keys: readonly keyed.Key[] };
 
 export type OwnerReason =
   | { readonly t: 'over-auto-apply'; readonly newCostUsd: number; readonly limitUsd: number }
@@ -67,8 +71,8 @@ export type OwnerReason =
 /** `dropped`: the dispositions the `plan` entry carries, one per dropped key: the leader's, plus
  * `finish` for every dropped ask. */
 export type Accepted = {
-  readonly diff: Diff;
-  readonly dropped: Readonly<Record<Key, Disposition>>;
+  readonly diff: keyed.Diff;
+  readonly dropped: Readonly<Record<keyed.Key, keyed.Disposition>>;
 };
 export type RewriteVerdict =
   | ({ readonly t: 'apply' } & Accepted)
@@ -83,7 +87,7 @@ export function judgeRewrite(state: State, p: Proposal): RewriteVerdict {
   const rejection = rejectionOf(state, p);
   if (rejection.t === 'rejected') return { t: 'reject', why: rejection.why };
   const diff = diffOf(state, p.asked);
-  const disposal = (key: Key) => DISPOSAL[attachedCall(state, key).t];
+  const disposal = (key: keyed.Key) => DISPOSAL[attachedCall(state, key).t];
   const asks = diff.dropped.filter((k) => disposal(k) === 'finish');
   const cancelledAsks = asks.filter((k) => p.dispositions[k] === 'cancel');
   if (cancelledAsks.length > 0)
@@ -97,7 +101,7 @@ export function judgeRewrite(state: State, p: Proposal): RewriteVerdict {
     .filter((k) => !droppedSet.has(k))
     .sort();
   if (stray.length > 0) return { t: 'reject', why: { t: 'stray-disposition', keys: stray } };
-  const dropped: Record<Key, Disposition> = { ...p.dispositions };
+  const dropped: Record<keyed.Key, keyed.Disposition> = { ...p.dispositions };
   for (const k of asks) dropped[k] = 'finish';
   const why: OwnerReason[] = [];
   if (diff.newCostUsd > state.contract.autoApply.usd)
@@ -114,7 +118,7 @@ export function judgeRewrite(state: State, p: Proposal): RewriteVerdict {
 }
 
 /** The one attached call of a key `dropped` returned. */
-function attachedCall(state: State, key: Key): Call {
+function attachedCall(state: State, key: keyed.Key): keyed.Call {
   for (const r of state.calls.get(key)?.values() ?? []) if (ATTACHED[r.status.t]) return r.call;
   throw new Error(`${key} has no attached call, but dropped() named it`);
 }
@@ -126,7 +130,7 @@ function rejectionOf(state: State, p: Proposal): Checked {
   if (version.t === 'rejected') return version;
   if (canonicalJson(p.contract) !== canonicalJson(state.contract))
     return { t: 'rejected', why: { t: 'contract-changed' } };
-  const seen = new Set<Key>();
+  const seen = new Set<keyed.Key>();
   for (const { call, hash } of p.asked) {
     if (seen.has(call.key)) return { t: 'rejected', why: { t: 'duplicate-key', key: call.key } };
     seen.add(call.key);

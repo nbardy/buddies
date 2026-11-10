@@ -1,7 +1,7 @@
+import type { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import { zodToJsonSchema as zodToJsonSchemaTyped } from 'zod-to-json-schema';
 import type { Authored } from '../protocol';
-import type { Base, Input, Judge as KernelJudge, Key, Outcome, RefId } from '../types';
 import { openSession, phases, session } from './session';
 
 // zod-to-json-schema's signature makes tsc 5.9 instantiate zod's whole type graph for a generic
@@ -10,9 +10,10 @@ import { openSession, phases, session } from './session';
 // an untyped signature. Guard: server/test/expedition-kernel-typecheck.test.ts.
 const zodToJsonSchema = zodToJsonSchemaTyped as unknown as (schema: unknown) => unknown;
 
-// Expeditions v1: the authoring library, the implementation of
-// docs/expeditions/keyed/v1/expedition.d.ts. A plan imports it as `expedition`; it runs inside the
-// plan's child process (runner.ts) and turns every step, ask and review into a message to the host.
+// Expeditions v1: the authoring library, and the authoring API itself: the typecheck gate checks
+// plans against this file (gates.ts), and docs/expeditions/keyed/v1/expedition.d.ts only re-exports
+// it. A plan imports it as `expedition`; it runs inside the plan's child process (runner.ts) and
+// turns every step, ask and review into a message to the host.
 
 // ---- who ----
 export type Who =
@@ -44,16 +45,16 @@ export type Ref = { readonly __ref: true };
 /** The plan's handle on a stored output: opaque to plan code, a `RefId` on the wire. */
 class PlanRef implements Ref {
   readonly __ref = true as const;
-  readonly #id: RefId;
-  constructor(id: RefId) {
+  readonly #id: keyed.RefId;
+  constructor(id: keyed.RefId) {
     this.#id = id;
     Object.freeze(this);
   }
-  get id(): RefId {
+  get id(): keyed.RefId {
     return this.#id;
   }
 }
-function refId(ref: Ref): RefId {
+function refId(ref: Ref): keyed.RefId {
   if (!(ref instanceof PlanRef))
     throw new TypeError('Not a Ref from this plan: refs come only from step results.');
   return ref.id;
@@ -102,7 +103,7 @@ const TAIL: Answer<{ readonly tail: string }> = new Answer(
 
 /** Outcome → Result, with `out` checked against the step's schema. An answer that does not parse is
  * `errored`: plan code never sees an unvalidated value, and never a ZodError. */
-function resultOf<Out>(answer: Answer<Out>, key: Key, outcome: Outcome): Result<Out> {
+function resultOf<Out>(answer: Answer<Out>, key: keyed.Key, outcome: keyed.Outcome): Result<Out> {
   switch (outcome.t) {
     case 'passed':
       return heldOf(answer, key, outcome.out, outcome.ref, (held) => ({ t: 'passed', ...held }));
@@ -122,9 +123,9 @@ function resultOf<Out>(answer: Answer<Out>, key: Key, outcome: Outcome): Result<
 }
 function heldOf<Out>(
   answer: Answer<Out>,
-  key: Key,
+  key: keyed.Key,
   out: unknown,
-  ref: RefId,
+  ref: keyed.RefId,
   wrap: (held: Held<Out>) => Result<Out>
 ): Result<Out> {
   const parsed = answer.schema.safeParse(out);
@@ -159,7 +160,7 @@ export type StepInput = {
 /** A spec the library made (`role` or `command`): it knows how to author its call. */
 abstract class StepSpec<Out> implements Spec<Out> {
   abstract readonly answer: Answer<Out>;
-  abstract author(step: string, key: Key, input: StepInput): Authored;
+  abstract author(step: string, key: keyed.Key, input: StepInput): Authored;
   abstract returns<T>(schema: z.ZodType<T>): Spec<T>;
   abstract judged(judge: Judge): Spec<Out>;
   abstract checkout(): Spec<Out>;
@@ -175,7 +176,7 @@ type AgentFields<Out> = {
   readonly by: Who;
   readonly max: { readonly usd: number; readonly minutes: number };
   readonly answer: Answer<Out>;
-  readonly judge: KernelJudge;
+  readonly judge: keyed.Judge;
   readonly tree: 'none' | 'checkout';
   readonly grantReads: readonly string[];
   readonly web: boolean;
@@ -210,7 +211,7 @@ class AgentSpec<Out> extends StepSpec<Out> {
   needs(...pools: string[]): Spec<Out> {
     return this.with({ answer: this.answer, needs: [...this.f.needs, ...pools] });
   }
-  author(step: string, key: Key, input: StepInput): Authored {
+  author(step: string, key: keyed.Key, input: StepInput): Authored {
     return {
       t: 'agent',
       key,
@@ -264,7 +265,7 @@ class CommandSpec<Out> extends StepSpec<Out> {
   web(): Spec<Out> {
     return unsupported('web()');
   }
-  author(step: string, key: Key, input: StepInput): Authored {
+  author(step: string, key: keyed.Key, input: StepInput): Authored {
     if (input.reads || input.continues)
       throw new TypeError(
         `Command step ${step} takes no \`reads\` or \`continues\`: a command reads only its checkout.`
@@ -310,10 +311,10 @@ export function command(cmd: string, limits: { minutes: number }): Spec<{ readon
 function itemOf(input: StepInput): Record<string, unknown> {
   return { ...(input.item ?? {}) };
 }
-function baseOf(input: StepInput): Base {
+function baseOf(input: StepInput): keyed.Base {
   return input.on ? { t: 'ref', ref: refId(input.on.ref) } : { t: 'launch' };
 }
-function inputOf(readable: Readable): Input {
+function inputOf(readable: Readable): keyed.Input {
   if (typeof readable === 'string') return { t: 'text', text: readable };
   if (readable instanceof PlanRef) return { t: 'ref', ref: readable.id };
   return { t: 'ref', ref: refId((readable as Held<unknown>).ref) };
@@ -330,7 +331,7 @@ function phasePrefix(): string {
   if (!path) throw new Error('Steps, asks and reviews run only inside plan(...).');
   return path.map((name) => `${name}/`).join('');
 }
-function stepKey(step: string, input: StepInput): Key {
+function stepKey(step: string, input: StepInput): keyed.Key {
   const id = idOf(input);
   return `${phasePrefix()}${step}${id === 'none' ? '' : `/${id}`}`;
 }
@@ -360,7 +361,7 @@ function stepOf<Out>(name: string, spec: StepSpec<Out>): Step<Out> {
 
 // ---- results ----
 /** What a result that did not pass can show for itself. */
-function evidenceOf(result: Exclude<Result<unknown>, { t: 'passed' }>): Input[] {
+function evidenceOf(result: Exclude<Result<unknown>, { t: 'passed' }>): keyed.Input[] {
   switch (result.t) {
     case 'failed':
       return [

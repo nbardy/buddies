@@ -2,24 +2,44 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type { keyed } from '@unleashd/shared';
+import { labelled } from '../observability/event-loop-stall';
 import { type Authored, FromPlan, type ToPlan } from './protocol';
-import type { Input, Key, Outcome, RefId } from './types';
 
 // The plan runner (docs/expeditions/keyed/v1/DESIGN.md §2, §5): runs a plan folder's `plan.ts` in
 // a child process and relays its calls. The child holds nothing that matters; the host answers
 // every call (from its log or by running it), and may kill the child and start a fresh one at any
 // time. A dry run is the same run where the host answers only what it already knows.
 
-const AUTHORING = path.join(__dirname, 'authoring', 'index.ts');
+/** The authoring library a plan imports as `expedition`: the runner loads it, and the typecheck
+ * gate checks plans against it (gates.ts). There is no second copy of the API to drift. */
+export const AUTHORING_ENTRY = path.join(__dirname, 'authoring', 'index.ts');
 const CHILD = path.join(__dirname, 'runner-child.mjs');
 const TSX_LOADER = require.resolve('tsx');
+/** The child's `exit` event says its leader is gone, not its whole process group: SIGKILL is
+ * delivered asynchronously, so a tsx worker can outlive the leader by a few milliseconds. Under
+ * load `kill()` resolved while the group still answered signal 0 (1 run in about 8 on 2026-11-10;
+ * guard: expedition-kernel-runner "kill leaves no child"). Wait, bounded, until the group is gone. */
+async function groupGone(pid: number): Promise<void> {
+  for (let tries = 0; tries < 400; tries++) {
+    try {
+      process.kill(-pid, 0);
+    } catch {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(labelled('timer expedition-plan-group-gone', resolve), 5);
+    });
+  }
+}
+
 /** After the child reports its end it exits by itself; past this it is killed. */
 const EXIT_GRACE_MS = 2_000;
 const STDERR_TAIL = 8_192;
 
 export type PlanEnd =
-  | { readonly t: 'candidate'; readonly ref: RefId }
-  | { readonly t: 'gap'; readonly why: string; readonly evidence: readonly Input[] }
+  | { readonly t: 'candidate'; readonly ref: keyed.RefId }
+  | { readonly t: 'gap'; readonly why: string; readonly evidence: readonly keyed.Input[] }
   | { readonly t: 'threw'; readonly message: string }
   /** `kill()` ended it. */
   | { readonly t: 'killed' }
@@ -43,7 +63,7 @@ export type RunPlanOptions = { readonly folder: string } & PlanEvents;
 export interface PlanHandle {
   readonly pid: number;
   /** Answer an outstanding call. After the run has ended this is a no-op: the process is gone. */
-  answer(seq: number, outcome: Outcome): void;
+  answer(seq: number, outcome: keyed.Outcome): void;
   /** The leader chose `continue` at an outstanding review. A no-op after the end, like `answer`. */
   reviewed(seq: number): void;
   /** Kill the child and wait until it has exited. Resolves at once if it already has. */
@@ -68,14 +88,20 @@ function sandboxFlags(folder: string): string[] {
   const kernel = realpathSync(__dirname);
   const server = path.resolve(kernel, '..', '..');
   const store = pnpmStore(realpathSync(TSX_LOADER));
+  // The wire schemas (protocol.ts) are built from the canonical types in @unleashd/shared, so the
+  // child loads that package's build. Its link resolves outside server/node_modules.
+  const shared = realpathSync(path.join(server, 'node_modules', '@unleashd', 'shared'));
   const readable = [
     folder,
     kernel,
     path.join(server, 'node_modules'),
     store,
+    path.join(shared, 'dist'),
+    path.join(shared, 'node_modules'),
     invertCase(folder),
     ...ancestorPackages(folder),
     ...ancestorPackages(kernel),
+    ...ancestorPackages(path.join(shared, 'dist')),
   ];
   return [
     '--permission',
@@ -108,7 +134,14 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
   const folder = realpathSync(opts.folder);
   const child: ChildProcess = spawn(
     process.execPath,
-    [...sandboxFlags(folder), '--import', pathToFileURL(TSX_LOADER).href, CHILD, folder, AUTHORING],
+    [
+      ...sandboxFlags(folder),
+      '--import',
+      pathToFileURL(TSX_LOADER).href,
+      CHILD,
+      folder,
+      AUTHORING_ENTRY,
+    ],
     {
       cwd: folder,
       // No inherited environment: a plan needs none, and the host's may hold secrets.
@@ -140,7 +173,8 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
   const decide = (end: PlanEnd): void => {
     if (decided !== 'running') return;
     decided = end;
-    if (!exited) setTimeout(killGroup, EXIT_GRACE_MS).unref();
+    if (!exited)
+      setTimeout(labelled('timer expedition-plan-exit-grace', killGroup), EXIT_GRACE_MS).unref();
   };
 
   const handlers: { [T in FromPlan['t']]: (message: Extract<FromPlan, { t: T }>) => void } = {
@@ -207,6 +241,7 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
         killGroup();
       }
       await ended;
+      await groupGone(pid);
     },
     ended,
   };
@@ -214,12 +249,16 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
 
 // ---- dry run ----
 export type DryRunEnd =
-  | { readonly t: 'candidate'; readonly ref: RefId }
-  | { readonly t: 'gap'; readonly why: string; readonly evidence: readonly Input[] }
+  | { readonly t: 'candidate'; readonly ref: keyed.RefId }
+  | { readonly t: 'gap'; readonly why: string; readonly evidence: readonly keyed.Input[] }
   | { readonly t: 'threw'; readonly message: string }
   /** It stopped at calls or reviews the host has no answer for. Empty lists: it awaits something
    * that is not the host's (a promise that never settles). */
-  | { readonly t: 'waiting'; readonly calls: readonly Key[]; readonly reviews: readonly string[] }
+  | {
+      readonly t: 'waiting';
+      readonly calls: readonly keyed.Key[];
+      readonly reviews: readonly string[];
+    }
   | { readonly t: 'crashed'; readonly exit: Exit; readonly stderr: string };
 
 export type DryRunResult = {
@@ -233,13 +272,13 @@ export type DryRunResult = {
 export type DryRunOptions = {
   readonly folder: string;
   /** The logged outcome for this call, or `undefined`: never answered in this run. */
-  known(call: Authored): Outcome | undefined;
+  known(call: Authored): keyed.Outcome | undefined;
   /** `true`: the leader continues at this review; `false`: never answered in this run. */
   reviewed(question: string): boolean;
 };
 
 type Declined =
-  | { readonly t: 'call'; readonly key: Key }
+  | { readonly t: 'call'; readonly key: keyed.Key }
   | { readonly t: 'review'; readonly question: string };
 
 /** Run the plan answering only what the host already knows; stop when it ends or waits on

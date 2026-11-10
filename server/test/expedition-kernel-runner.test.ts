@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { cpSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import { zodToJsonSchema as zodToJsonSchemaTyped } from 'zod-to-json-schema';
 import type { Authored } from '../src/expedition-kernel/protocol';
 import { type DryRunResult, dryRun, runPlan } from '../src/expedition-kernel/runner';
-import { type Outcome, refOf } from '../src/expedition-kernel/types';
 import { tempDir } from './fixtures/temp';
 
 // Untyped on purpose: the typed signature made tsc run out of memory (see authoring/index.ts).
@@ -23,9 +23,9 @@ function copyPlan(name: string): { folder: string; root: string } {
   return { folder, root };
 }
 
-const ref = (key: string) => refOf(key, 'h0');
+const ref = (key: string) => keyed.refOf(key, 'h0');
 const REPORT = { summary: 'done', files: [] };
-const passedReport = (key: string): Outcome => ({ t: 'passed', ref: ref(key), out: REPORT });
+const passedReport = (key: string): keyed.Outcome => ({ t: 'passed', ref: ref(key), out: REPORT });
 
 // ---- the GTM case (docs/expeditions/keyed/v1/gtm) ----
 const Org = z.object({
@@ -42,7 +42,7 @@ const ORGS = [
 ];
 /** The host's log for version 0: one collect fails its anchor check, and round 2's attack finds
  * no real counterexample, so round 2 has no revise. */
-function gtmLog(call: Authored): Outcome {
+function gtmLog(call: Authored): keyed.Outcome {
   if (call.key === 'scope/scope') return { t: 'passed', ref: ref(call.key), out: ORGS };
   if (call.key === 'collect/collect/labelbox')
     return { t: 'failed', ref: ref(call.key), out: REPORT, why: 'quotes not found in page' };

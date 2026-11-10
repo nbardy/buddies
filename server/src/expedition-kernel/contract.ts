@@ -1,12 +1,14 @@
+import { keyed } from '@unleashd/shared';
 import { parse as parseYaml } from 'yaml';
-import { Contract, type Criterion, Seat } from './types';
 
 // κ for the owner's contract.md: YAML frontmatter + the prose under `# Goal`, parsed once into the
 // canonical `Contract`. Every problem is collected with the field path it belongs to; nothing is
 // defaulted, so a typo (`dones:`) cannot silently drop a criterion.
 // Pattern: one parse at the boundary (docs/patterns.md#sum-types)
 
-export type ParsedContract = { t: 'ok'; contract: Contract } | { t: 'invalid'; issues: string[] };
+export type ParsedContract =
+  | { t: 'ok'; contract: keyed.Contract }
+  | { t: 'invalid'; issues: string[] };
 
 const KNOWN_KEYS = ['leader', 'repo', 'budget', 'autoApply', 'pools', 'rules', 'done'] as const;
 
@@ -47,7 +49,7 @@ export function parseContract(markdown: string): ParsedContract {
   if (done === undefined) reported.add('done');
 
   const candidate = { ...front, goal, done };
-  const canonical = Contract.safeParse(candidate);
+  const canonical = keyed.Contract.safeParse(candidate);
   if (!canonical.success) {
     for (const issue of canonical.error.issues) {
       const top = issue.path[0];
@@ -92,14 +94,14 @@ function parseGoal(body: string, issues: string[]): string | undefined {
 }
 
 /** The three done shapes, as written: `{check}`, `{review: {rubric, by}}`, `{owner}`. */
-function parseDone(raw: unknown, issues: string[]): Criterion[] | undefined {
+function parseDone(raw: unknown, issues: string[]): keyed.Criterion[] | undefined {
   if (!Array.isArray(raw)) {
     // A missing `done` is reported here, once: Zod would say the same under a different wording.
     issues.push('done: must be a list of {check}, {review} or {owner} items');
     return undefined;
   }
   const before = issues.length;
-  const out: Criterion[] = [];
+  const out: keyed.Criterion[] = [];
   raw.forEach((item, i) => {
     const c = parseCriterion(item, `done[${i}]`, issues);
     if (c !== undefined) out.push(c);
@@ -109,7 +111,7 @@ function parseDone(raw: unknown, issues: string[]): Criterion[] | undefined {
 
 const CRITERION_KINDS = ['check', 'review', 'owner'] as const;
 
-function parseCriterion(item: unknown, at: string, issues: string[]): Criterion | undefined {
+function parseCriterion(item: unknown, at: string, issues: string[]): keyed.Criterion | undefined {
   if (!isRecord(item)) {
     issues.push(`${at}: must be a mapping with exactly one of check, review, owner`);
     return undefined;
@@ -135,7 +137,7 @@ function parseCriterion(item: unknown, at: string, issues: string[]): Criterion 
   return kind === 'check' ? { t: 'check', command: value } : { t: 'owner', question: value };
 }
 
-function parseReview(value: unknown, at: string, issues: string[]): Criterion | undefined {
+function parseReview(value: unknown, at: string, issues: string[]): keyed.Criterion | undefined {
   if (!isRecord(value)) {
     issues.push(`${at}: must be { rubric, by }`);
     return undefined;
@@ -154,14 +156,14 @@ function parseReview(value: unknown, at: string, issues: string[]): Criterion | 
   return { t: 'review', rubric, by: seat };
 }
 
-function parseSeat(by: string, at: string, issues: string[]): Seat | undefined {
+function parseSeat(by: string, at: string, issues: string[]): keyed.Seat | undefined {
   const parts = by.split('/');
   if (parts.length !== 3 || parts.some((p) => p.trim() === '')) {
     issues.push(`${at}: '${by}' must be three non-empty parts 'provider/model/effort'`);
     return undefined;
   }
   const [provider, model, effort] = parts as [string, string, string];
-  return Seat.parse({ t: 'seat', provider, model, effort });
+  return keyed.Seat.parse({ t: 'seat', provider, model, effort });
 }
 
 function pathString(path: readonly (string | number)[]): string {

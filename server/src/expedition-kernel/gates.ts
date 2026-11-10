@@ -3,13 +3,19 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { keyed } from '@unleashd/shared';
+import { parseCommand } from './argv';
 import { briefPath, missingBriefIssue } from './brief';
 import { type ProviderOf, canonicalise, providerFor } from './canonical';
 import type { Authored } from './protocol';
-import type { Contract } from './types';
+import { AUTHORING_ENTRY } from './runner';
 
 // The first two rewrite gates (DESIGN.md §5): the plan typechecks against the authoring API, and
 // the calls a dry run collected are consistent with the contract and the folder.
+
+/** The server's @types: the authoring library itself runs on Node (its session talks IPC), so the
+ * plan is checked with the library's own source and the Node types that source needs. */
+const NODE_TYPES = path.resolve(__dirname, '..', '..', 'node_modules', '@types');
 
 export type TypecheckResult = { t: 'ok' } | { t: 'failed'; errors: string[] };
 export type StaticResult = { t: 'ok' } | { t: 'failed'; issues: string[] };
@@ -18,7 +24,7 @@ export const TSC_TIMEOUT_MS = 120_000;
 
 export async function typecheckGate(
   folder: string,
-  opts: { authoringEntry: string; zodEntry: string; tscBin: string }
+  opts: { zodEntry: string; tscBin: string }
 ): Promise<TypecheckResult> {
   // The generated tsconfig lives in a temp dir: the plan folder is the leader's, never written here.
   const dir = await mkdtemp(path.join(tmpdir(), 'expedition-typecheck-'));
@@ -36,7 +42,9 @@ export async function typecheckGate(
           lib: ['ES2022'],
           skipLibCheck: true,
           noUncheckedIndexedAccess: true,
-          paths: { expedition: [opts.authoringEntry], zod: [opts.zodEntry] },
+          typeRoots: [NODE_TYPES],
+          types: ['node'],
+          paths: { expedition: [AUTHORING_ENTRY], zod: [opts.zodEntry] },
         },
         files: [path.join(folder, 'plan.ts')],
       })
@@ -74,8 +82,27 @@ function runTsc(tscBin: string, config: string): Promise<TypecheckResult> {
   });
 }
 
+/** Every command line a call will have the host run, rendered (slots filled). */
+const COMMANDS_OF: {
+  [K in keyed.Call['t']]: (c: Extract<keyed.Call, { t: K }>) => readonly string[];
+} = {
+  agent: (c) => (c.judge.t === 'check' ? [c.judge.command] : []),
+  command: (c) => [c.command],
+  ask: () => [],
+  verdict: (c) => (c.verdict.t === 'check' ? [c.verdict.command] : []),
+  leader: () => [],
+};
+/** Commands run without a shell (argv.ts): `a && b`, a pipe or a glob would not mean what its
+ * author read, so the plan is refused here, naming the string, rather than failing at run time. */
+const unrunnable =
+  (where: string) =>
+  (command: string): string[] => {
+    const parsed = parseCommand(command);
+    return parsed.t === 'refused' ? [`${where}: ${parsed.why}`] : [];
+  };
+
 export function staticGate(input: {
-  contract: Contract;
+  contract: keyed.Contract;
   folder: string;
   calls: readonly Authored[];
   providerOf: ProviderOf;
@@ -119,11 +146,14 @@ export function staticGate(input: {
     }
     const canon = canonicalise(call, { contract, folder, providerOf });
     if (canon.t === 'invalid') issues.push(...canon.issues.map((i) => `${call.key}: ${i}`));
+    else
+      issues.push(...COMMANDS_OF[canon.call.t](canon.call as never).flatMap(unrunnable(call.key)));
   }
 
   for (const c of contract.done) {
     if (c.t === 'review' && !hasBrief(c.rubric))
       issues.push(`contract done: rubric ${missingBriefIssue(c.rubric)}`);
+    if (c.t === 'check') issues.push(...unrunnable('contract done')(c.command));
   }
   const unique = [...new Set(issues)];
   return unique.length === 0 ? { t: 'ok' } : { t: 'failed', issues: unique };

@@ -1,4 +1,4 @@
-import type { Call, Finish, Hash, Key, Outcome, Refusal, Reservation } from '../types';
+import type { keyed } from '@unleashd/shared';
 import {
   ATTACHED,
   type CallRecord,
@@ -31,25 +31,28 @@ export type Wait =
   | { readonly t: 'paused' };
 
 export type Decision =
-  | { readonly t: 'reuse'; readonly outcome: Outcome }
+  | { readonly t: 'reuse'; readonly outcome: keyed.Outcome }
   | { readonly t: 'attach'; readonly runId: string }
   /** Another hash of this key runs: cancel it, and ask again once it has settled. The new call
    * never starts beside it, so a key has at most one attached run. Never for an ask. */
-  | { readonly t: 'replace'; readonly cancel: { readonly hash: Hash; readonly runId: string } }
+  | {
+      readonly t: 'replace';
+      readonly cancel: { readonly hash: keyed.Hash; readonly runId: string };
+    }
   /** The host appends `started` (log first), then asks the executor to start the run. */
-  | { readonly t: 'start'; readonly reservation: Reservation }
+  | { readonly t: 'start'; readonly reservation: keyed.Reservation }
   | { readonly t: 'wait'; readonly why: Wait }
   /** Final: the host settles the call `refused`, and a replay reuses that answer. */
-  | { readonly t: 'refuse'; readonly reason: Refusal }
+  | { readonly t: 'refuse'; readonly reason: keyed.Refusal }
   /** The expedition has finished; nothing new starts. */
-  | { readonly t: 'closed'; readonly reason: Finish };
+  | { readonly t: 'closed'; readonly reason: keyed.Finish };
 
 /** A key has at most one attached run, and it is the one the plan asks for (I4). So another hash
  * of this key still attached is replaced first, whatever this hash's own state: asking again for
  * a settled k@h1 while k@h2 runs must stop k@h2, or it runs on unasked and is never offered for
  * a disposition (found by the random driver, seed 1). An ask is the exception: its rival drains
  * (the host's `declared` entry drains it), so it is never cancelled (I6). */
-export function decide(state: State, call: Call, hash: Hash, now: Date): Decision {
+export function decide(state: State, call: keyed.Call, hash: keyed.Hash, now: Date): Decision {
   const rival = rivalOf(state, call.key, hash);
   if (rival.t === 'rival' && REPLACES_RIVAL[call.t])
     return { t: 'replace', cancel: { hash: rival.hash, runId: rival.run.runId } };
@@ -85,7 +88,7 @@ const ADMIT: {
   [K in Progress['t']]: (
     s: State,
     p: Extract<Progress, { t: K }>,
-    call: Call,
+    call: keyed.Call,
     now: Date
   ) => Decision;
 } = {
@@ -98,7 +101,7 @@ const ADMIT: {
  * flight, a full pool). A pause waits rather than refuses because a refusal is final and replayed:
  * a pause would otherwise fail every call made during it, for good. An ask reserves nothing and
  * names no pool, so only the deadline and pause tables exempt it. */
-function admit(s: State, call: Call, now: Date): Decision {
+function admit(s: State, call: keyed.Call, now: Date): Decision {
   const reservation = reservationOf(call);
   const unknown = reservation.pools.find((p) => !Object.hasOwn(s.contract.pools, p));
   if (unknown !== undefined) return { t: 'refuse', reason: 'pool' };
@@ -119,8 +122,8 @@ function admit(s: State, call: Call, now: Date): Decision {
 /** The plan's running or judging calls the new plan did not ask for and that a rewrite has not
  * already let go. Each agent or command needs a disposition before the rewrite applies; an ask
  * always drains. The host's own calls (done verdicts, leader wakes) are never the plan's. */
-export function dropped(state: State, asked: ReadonlySet<Key>): Key[] {
-  const out: Key[] = [];
+export function dropped(state: State, asked: ReadonlySet<keyed.Key>): keyed.Key[] {
+  const out: keyed.Key[] = [];
   for (const [key, byHash] of state.calls)
     if (
       !asked.has(key) &&

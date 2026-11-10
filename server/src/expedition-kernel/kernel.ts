@@ -29,20 +29,9 @@ import type { Clock, Executor, Leader, Owner, RawOutcome } from './ports';
 import { recover } from './recovery';
 import type { PlanEnd } from './runner';
 import { type Ending, endingOf, judgeRunOf, producerRun } from './runs';
-import { type ExpeditionView, type Fault, type Timeline, timelineOf } from './timeline';
-import {
-  type BaseWake,
-  type Call,
-  Entry,
-  type Finish,
-  type Hash,
-  type Key,
-  type Max,
-  type Outcome,
-  type Reservation,
-  type Usage,
-  refOf,
-} from './types';
+
+import { keyed } from '@unleashd/shared';
+import type { ExpeditionView } from './ports';
 
 // The kernel (docs/expeditions/keyed/v1/DESIGN.md): one expedition's log, its plan process and
 // its runs. Every decision and every log append happens inside ONE serialized queue per
@@ -59,12 +48,11 @@ export type KernelDeps = {
   readonly providerOf: ProviderOf;
   /** For the typecheck gate (gates.ts `typecheckGate`). */
   readonly gates: {
-    readonly authoringEntry: string;
     readonly zodEntry: string;
     readonly tscBin: string;
   };
   /** What a leader wake and a done review may cost; neither is priced by the contract. */
-  readonly limits: { readonly leaderWake: Max; readonly doneReview: Max };
+  readonly limits: { readonly leaderWake: keyed.Max; readonly doneReview: keyed.Max };
 };
 
 type Deliver = Asker['deliver'];
@@ -73,7 +61,11 @@ export type { Delivery };
 export type OwnerResult = { readonly t: 'done' } | { readonly t: 'refused'; readonly why: string };
 
 /** An entry before the host stamps its time. */
-export type Body = Entry extends infer E ? (E extends Entry ? Omit<E, 'at'> : never) : never;
+export type Body = keyed.Entry extends infer E
+  ? E extends keyed.Entry
+    ? Omit<E, 'at'>
+    : never
+  : never;
 
 class Detached extends Error {
   constructor() {
@@ -89,22 +81,22 @@ export class Expedition {
   private tail: Promise<unknown> = Promise.resolve();
   private detached = false;
   private proc: Proc = { t: 'none' };
-  private waiting: { call: Call; asker: Asker }[] = [];
+  private waiting: { call: keyed.Call; asker: Asker }[] = [];
   private readonly waiters = new Map<string, Deliver[]>();
   private readonly cancelSent = new Set<string>();
-  private readonly faultList: Fault[] = [];
-  private readonly listeners = new Set<(entry: Entry, state: State) => void>();
+  private readonly faultList: keyed.Fault[] = [];
+  private readonly listeners = new Set<(entry: keyed.Entry, state: State) => void>();
   private readonly unsubscribe: () => void;
   private disarm: () => void = () => {};
-  private resolveFinished: (f: Finish) => void = () => {};
+  private resolveFinished: (f: keyed.Finish) => void = () => {};
   private readonly change: Change;
   /** Resolves when `finished` is in the log. */
-  readonly finished: Promise<Finish>;
+  readonly finished: Promise<keyed.Finish>;
 
   private constructor(
     readonly deps: KernelDeps,
     readonly store: LogStore,
-    private log: Entry[],
+    private log: keyed.Entry[],
     private current: State
   ) {
     this.finished = new Promise((resolve) => {
@@ -117,7 +109,7 @@ export class Expedition {
   }
 
   /** Kernel-internal: `launch.ts` builds one over a new or opened log, then boots it. */
-  static over(deps: KernelDeps, store: LogStore, entries: Entry[]): Expedition {
+  static over(deps: KernelDeps, store: LogStore, entries: keyed.Entry[]): Expedition {
     return new Expedition(deps, store, entries, fold(entries));
   }
 
@@ -143,11 +135,11 @@ export class Expedition {
   state(): State {
     return this.current;
   }
-  entries(): readonly Entry[] {
+  entries(): readonly keyed.Entry[] {
     return this.log;
   }
-  timeline(): Timeline {
-    return timelineOf(this.log);
+  timeline(): keyed.Timeline {
+    return keyed.timelineOf(this.log);
   }
   view(): ExpeditionView {
     return {
@@ -159,7 +151,7 @@ export class Expedition {
     };
   }
   /** Every append, after it is durable. */
-  subscribe(listener: (entry: Entry, state: State) => void): () => void {
+  subscribe(listener: (entry: keyed.Entry, state: State) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -183,7 +175,7 @@ export class Expedition {
   stop(): Promise<OwnerResult> {
     return this.ownerAct(() => this.finish({ t: 'stopped', by: 'owner' }));
   }
-  retry(key: Key): Promise<OwnerResult> {
+  retry(key: keyed.Key): Promise<OwnerResult> {
     return this.serial(() => this.retryKeys([key], 'owner'));
   }
   private ownerAct(act: () => Promise<void> | string): Promise<OwnerResult> {
@@ -229,7 +221,7 @@ export class Expedition {
   /** The one write path: validated by the fold first, durable before anything acts on it. */
   async append(body: Body): Promise<void> {
     if (this.detached) throw new Detached();
-    const entry = Entry.parse({ ...body, at: this.deps.clock.now().toISOString() });
+    const entry = keyed.Entry.parse({ ...body, at: this.deps.clock.now().toISOString() });
     const next = step(this.current, entry, this.log.length);
     await this.store.append(entry);
     this.log.push(entry);
@@ -253,13 +245,13 @@ export class Expedition {
   // ---- asking for a call: reconcile by key ----
 
   /** The host's own call (a leader wake, a done verdict): resolves when it settles. */
-  hostCall(build: (s: State) => Call): Promise<Delivery> {
+  hostCall(build: (s: State) => keyed.Call): Promise<Delivery> {
     return new Promise((deliver) => {
       this.enqueue(() => this.request(build(this.current), { deliver, alive: () => true }));
     });
   }
 
-  private async request(call: Call, asker: Asker): Promise<void> {
+  private async request(call: keyed.Call, asker: Asker): Promise<void> {
     for (const r of this.current.calls.get(call.key)?.values() ?? [])
       if (r.call.t !== call.t) {
         const why = `${call.key} has kind ${r.call.t}; a ${call.t} call cannot reuse its key`;
@@ -271,7 +263,7 @@ export class Expedition {
 
   /** Declare the call under the current plan if the log does not already (or it should re-attach
    * a draining run), then act on what `decide` says. */
-  private async consider(call: Call, asker: Asker): Promise<void> {
+  private async consider(call: keyed.Call, asker: Asker): Promise<void> {
     const hash = hashOf(call);
     const known = lookup(this.current, call.key, hash);
     const declare =
@@ -283,16 +275,21 @@ export class Expedition {
     await (DECIDED[d.t] as Act<Decision['t']>)(this, { call, hash, asker }, d);
   }
 
-  awaitSettle(key: Key, hash: Hash, deliver: Deliver): void {
-    const ref = refOf(key, hash);
+  awaitSettle(key: keyed.Key, hash: keyed.Hash, deliver: Deliver): void {
+    const ref = keyed.refOf(key, hash);
     this.waiters.set(ref, [...(this.waiters.get(ref) ?? []), deliver]);
   }
-  wait(call: Call, asker: Asker): void {
+  wait(call: keyed.Call, asker: Asker): void {
     this.waiting.push({ call, asker });
   }
 
   /** `started` is durable before the run is asked for (R1). */
-  async start(call: Call, hash: Hash, asker: Asker, reserved: Reservation): Promise<void> {
+  async start(
+    call: keyed.Call,
+    hash: keyed.Hash,
+    asker: Asker,
+    reserved: keyed.Reservation
+  ): Promise<void> {
     const found = lookup(this.current, call.key, hash);
     if (found.t === 'unknown') throw new Error(`${call.key} was decided before it was declared`);
     const runId = runIdOf(this.id, call.key, hash, found.record.attempt, 'producer');
@@ -300,10 +297,10 @@ export class Expedition {
     this.awaitSettle(call.key, hash, asker.deliver);
     this.launchRun(call, hash, runId);
   }
-  private launchRun(call: Call, hash: Hash, runId: string): void {
+  private launchRun(call: keyed.Call, hash: keyed.Hash, runId: string): void {
     const run = producerRun(call);
     if (run.t === 'executor') this.effect(this.deps.executor.start(runId, run.spec));
-    else void this.runWake(call, hash);
+    else void this.runWake(run.call, hash, runId);
   }
 
   /** Cancel a run, once per kernel life; a `cancelling` call's cancel is re-derived from the log
@@ -322,14 +319,19 @@ export class Expedition {
 
   /** Every settlement goes through here: append, close both run ids of the attempt, answer whoever
    * waits, and wake the leader once for a drained call. */
-  async settle(key: Key, hash: Hash, outcome: Outcome, spent: Usage): Promise<void> {
+  async settle(
+    key: keyed.Key,
+    hash: keyed.Hash,
+    outcome: keyed.Outcome,
+    spent: keyed.Usage
+  ): Promise<void> {
     const found = lookup(this.current, key, hash);
     if (found.t === 'unknown') throw new Error(`${key}@${hash} settled before it was declared`);
     const { attempt, status } = found.record;
     await this.append({ t: 'settled', key, hash, outcome, spent });
     for (const role of ['producer', 'judge'] as const)
       this.effect(this.deps.executor.close(runIdOf(this.id, key, hash, attempt, role)));
-    const ref = refOf(key, hash);
+    const ref = keyed.refOf(key, hash);
     const waiting = this.waiters.get(ref) ?? [];
     this.waiters.delete(ref);
     for (const deliver of waiting) deliver({ t: 'outcome', outcome });
@@ -338,12 +340,12 @@ export class Expedition {
 
   /** A raw run ended. Only the run a live call is waiting on counts; anything else is a late or
    * duplicate report (a closed attempt, a status already read at boot). */
-  async runEnded(runId: string, raw: RawOutcome, spent: Usage): Promise<void> {
+  async runEnded(runId: string, raw: RawOutcome, spent: keyed.Usage): Promise<void> {
     const live = liveCalls(this.current).find((c) => currentRunId(c.status) === runId);
     if (!live) return;
     const stage = stageOf(live.status);
     const ending = endingOf(profileOf(live.call), {
-      ref: refOf(live.key, live.hash),
+      ref: keyed.refOf(live.key, live.hash),
       raw,
       spent: stage.t === 'judging' ? addUsage(stage.spent, spent) : spent,
       cancelling: live.status.t === 'cancelling',
@@ -355,21 +357,22 @@ export class Expedition {
       ending
     );
   }
-  async produced(c: LiveCall, out: unknown, spent: Usage): Promise<void> {
-    const ref = refOf(c.key, c.hash);
+  async produced(c: LiveCall, out: unknown, spent: keyed.Usage): Promise<void> {
+    const ref = keyed.refOf(c.key, c.hash);
     const judgeRunId = runIdOf(this.id, c.key, c.hash, c.attempt, 'judge');
     await this.append({ t: 'produced', key: c.key, hash: c.hash, ref, out, judgeRunId, spent });
     this.effect(this.deps.executor.start(judgeRunId, judgeRunOf(c.call, ref)));
   }
 
-  /** A leader wake runs outside the queue; its answer settles its `leader/<n>` call. */
-  private async runWake(call: Call, hash: Hash): Promise<void> {
-    if (call.t !== 'leader') throw new Error(`${call.key} is not a leader wake`);
-    const settle = (outcome: Outcome, spent: Usage) =>
+  /** A leader wake runs outside the queue; its answer settles its `leader/<n>` call. `runId` is
+   * the one `started` logged, so a real leader turn is keyed by it (a restart re-derives the same
+   * id) and the settle below closes it like any run. */
+  private async runWake(call: keyed.LeaderCall, hash: keyed.Hash, runId: string): Promise<void> {
+    const settle = (outcome: keyed.Outcome, spent: keyed.Usage) =>
       this.enqueue(() => this.settle(call.key, hash, outcome, spent));
     try {
-      const woken = await this.deps.leader.wake(call.event, this.view());
-      settle({ t: 'passed', ref: refOf(call.key, hash), out: woken.act }, woken.spent);
+      const woken = await this.deps.leader.wake(runId, call.event, this.view());
+      settle({ t: 'passed', ref: keyed.refOf(call.key, hash), out: woken.act }, woken.spent);
     } catch (e) {
       settle(
         { t: 'errored', why: `the leader's wake failed: ${(e as Error).message}` },
@@ -400,7 +403,7 @@ export class Expedition {
         this.wakeOnce({ t: 'budget-mark', percent });
   }
   /** Wake the leader for `event` unless a wake for it is already in the log. */
-  private wakeOnce(event: BaseWake): void {
+  private wakeOnce(event: keyed.BaseWake): void {
     const seen = canonicalJson(event);
     for (const byHash of this.current.calls.values())
       for (const r of byHash.values())
@@ -422,7 +425,7 @@ export class Expedition {
 
   /** Only the host writes `finished` (I5). Producers still running are cancelled and wind down;
    * judges, verdicts and asks finish. */
-  async finish(reason: Finish): Promise<void> {
+  async finish(reason: keyed.Finish): Promise<void> {
     if (this.current.progress.t === 'finished') return;
     await this.append({ t: 'finished', reason });
     void this.stopPlan();
@@ -443,13 +446,13 @@ export class Expedition {
 
   /** Reopen the newest settled `errored`, `cancelled` or `refused` attempt of each key as its next
    * attempt, then re-run the plan so it asks again. All or nothing. */
-  async retryKeys(keys: readonly Key[], by: string): Promise<OwnerResult> {
+  async retryKeys(keys: readonly keyed.Key[], by: string): Promise<OwnerResult> {
     if (this.current.progress.t === 'finished')
       return { t: 'refused', why: 'the expedition has finished' };
-    type Found = { t: 'retriable'; key: Key; hash: Hash } | { t: 'not'; why: string };
+    type Found = { t: 'retriable'; key: keyed.Key; hash: keyed.Hash } | { t: 'not'; why: string };
     const found = keys.map((key): Found => {
       const records = [
-        ...(this.current.calls.get(key) ?? new Map<Hash, CallRecord>()).entries(),
+        ...(this.current.calls.get(key) ?? new Map<keyed.Hash, CallRecord>()).entries(),
       ].sort(([, a], [, b]) => b.declaredIn - a.declaredIn);
       const newest = records[0];
       if (!newest) return { t: 'not', why: `${key} was never asked for` };
@@ -518,7 +521,7 @@ export class Expedition {
 
 // ---- dispatch tables ----
 
-type Asking = { readonly call: Call; readonly hash: Hash; readonly asker: Asker };
+type Asking = { readonly call: keyed.Call; readonly hash: keyed.Hash; readonly asker: Asker };
 type Act<K extends Decision['t']> = (
   e: Expedition,
   a: Asking,

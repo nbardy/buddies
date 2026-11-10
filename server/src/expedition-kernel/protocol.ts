@@ -1,5 +1,5 @@
+import { keyed } from '@unleashd/shared';
 import { z } from 'zod';
-import { Base, Input, Judge, Key, Outcome, RefId, Who } from './types';
 
 // The wire between the plan process and the host (IPC, one JSON message per send).
 // The plan process holds no state that matters: the host may kill it and start a fresh one at any
@@ -16,34 +16,34 @@ const v = <T extends string, S extends z.ZodRawShape>(t: T, shape: S) =>
  * fills the launch base. */
 export const Authored = z.discriminatedUnion('t', [
   v('agent', {
-    key: Key,
+    key: keyed.Key,
     /** The cast-table name: the brief is `briefs/<step>.md`. */
     step: z.string().min(1),
     item: z.record(z.unknown()),
-    by: Who,
-    inputs: z.array(Input),
+    by: keyed.Who,
+    inputs: z.array(keyed.Input),
     output: z.unknown(),
     tree: z.enum(['none', 'checkout']),
-    base: Base,
+    base: keyed.Base,
     grant: z.object({ reads: z.array(z.string()), web: z.boolean() }).strict(),
-    context: z.discriminatedUnion('t', [v('cold', {}), v('continue', { of: RefId })]),
+    context: z.discriminatedUnion('t', [v('cold', {}), v('continue', { of: keyed.RefId })]),
     /** Extra pools from `.needs(...)`. */
     needs: z.array(z.string()),
     max: z.object({ usd: z.number().positive(), minutes: z.number().positive() }).strict(),
-    judge: Judge,
+    judge: keyed.Judge,
   }),
   v('command', {
-    key: Key,
+    key: keyed.Key,
     step: z.string().min(1),
     /** With `{{slots}}` still in it; the host fills them from `item`. */
     command: z.string().min(1),
     item: z.record(z.unknown()),
-    on: Base,
+    on: keyed.Base,
     output: z.unknown(),
     needs: z.array(z.string()),
     maxMinutes: z.number().positive(),
   }),
-  v('ask', { key: Key, question: z.string().min(1), answer: z.enum(['text', 'confirm']) }),
+  v('ask', { key: keyed.Key, question: z.string().min(1), answer: z.enum(['text', 'confirm']) }),
 ]);
 export type Authored = z.infer<typeof Authored>;
 
@@ -55,16 +55,16 @@ export const FromPlan = z.discriminatedUnion('t', [
   /** Nothing left to do but wait on these calls and reviews. */
   v('waiting', { on: z.array(z.number().int()) }),
   /** The plan returned its candidate. */
-  v('candidate', { ref: RefId }),
+  v('candidate', { ref: keyed.RefId }),
   /** `need(...)` ended the plan: no result, and this is why. */
-  v('gap', { why: z.string(), evidence: z.array(Input) }),
+  v('gap', { why: z.string(), evidence: z.array(keyed.Input) }),
   v('threw', { message: z.string() }),
 ]);
 export type FromPlan = z.infer<typeof FromPlan>;
 
 /** host → plan process */
 export const ToPlan = z.discriminatedUnion('t', [
-  v('outcome', { seq: z.number().int(), outcome: Outcome }),
+  v('outcome', { seq: z.number().int(), outcome: keyed.Outcome }),
   /** The leader chose `continue`. (A rewrite or a stop ends this process instead.) */
   v('reviewed', { seq: z.number().int() }),
 ]);

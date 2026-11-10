@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { keyed } from '@unleashd/shared';
 import { renderBrief, renderCommand } from '../src/expedition-kernel/brief';
 import { type ProviderOf, canonicalise } from '../src/expedition-kernel/canonical';
 import { expandHome, parseContract } from '../src/expedition-kernel/contract';
 import { staticGate, typecheckGate } from '../src/expedition-kernel/gates';
 import type { Authored } from '../src/expedition-kernel/protocol';
-import { Call, type Contract } from '../src/expedition-kernel/types';
 import { tempDir } from './fixtures/temp';
 
 const REPO = path.resolve(__dirname, '../..');
@@ -152,10 +152,10 @@ test('a slot value that looks like a slot is not expanded again', () => {
 });
 
 // ---- canonicalise ----
-const contract = (): Contract => {
+const contract = (): keyed.Contract => {
   const r = parseContract(GOOD);
   assert.equal(r.t, 'ok');
-  return (r as { contract: Contract }).contract;
+  return (r as { contract: keyed.Contract }).contract;
 };
 const providerOf: ProviderOf = (who) =>
   who.t === 'buddy' && who.id === 'lead'
@@ -192,7 +192,7 @@ test('canonicalise puts the provider pool before needs and yields a valid Call',
   assert.deepEqual(r.call.pools, ['claude', 'codex']);
   assert.deepEqual(r.call.judge, { t: 'check', command: 'chk a' });
   assert.ok(r.call.brief.includes('Do a') && r.call.brief.includes('be kind'));
-  assert.equal(Call.safeParse(r.call).success, true);
+  assert.equal(keyed.Call.safeParse(r.call).success, true);
 });
 
 test('a buddy whose provider is unknown is an issue', () => {
@@ -242,7 +242,6 @@ test('command and ask canonicalise', () => {
 // ---- typecheck gate ----
 const TSC = path.join(REPO, 'server/node_modules/.bin/tsc');
 const gateOpts = {
-  authoringEntry: path.join(V1, 'expedition.d.ts'),
   zodEntry: path.join(REPO, 'server/node_modules/zod'),
   tscBin: TSC,
 };
@@ -286,7 +285,7 @@ test('typecheckGate reports a missing tsc as a failure, not a throw', async () =
 
 // ---- static gate ----
 test('staticGate: clean calls pass; each defect is its own issue', () => {
-  const c: Contract = {
+  const c: keyed.Contract = {
     ...contract(),
     pools: { claude: 2, codex: 1, gemini: 1 },
     done: [
@@ -302,7 +301,7 @@ test('staticGate: clean calls pass; each defect is its own issue', () => {
   const clean = [agent({ judge: judged }), agent({ key: 'collect/b' })];
   assert.deepEqual(staticGate({ contract: c, folder, calls: clean, providerOf }), { t: 'ok' });
 
-  const run = (calls: Authored[], contract: Contract = c, dir = folder) => {
+  const run = (calls: Authored[], contract: keyed.Contract = c, dir = folder) => {
     const r = staticGate({ contract, folder: dir, calls, providerOf });
     assert.equal(r.t, 'failed');
     return r.t === 'failed' ? r.issues : [];

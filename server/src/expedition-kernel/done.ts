@@ -1,7 +1,7 @@
+import type { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import { renderBrief } from './brief';
 import type { Expedition } from './kernel';
-import type { Call, Criterion, Key, Outcome, RefId } from './types';
 
 // Only the host says "done" (DESIGN §1): it evaluates the contract's `done` on the plan's
 // candidate itself, each criterion as a host call `done/<i>` in the log. A check is a command run
@@ -10,7 +10,10 @@ import type { Call, Criterion, Key, Outcome, RefId } from './types';
 // candidate that passed them.
 
 /** The gaps left, or `closed` if the expedition finished meanwhile. */
-export async function evaluateDone(m: Expedition, candidate: RefId): Promise<string[] | 'closed'> {
+export async function evaluateDone(
+  m: Expedition,
+  candidate: keyed.RefId
+): Promise<string[] | 'closed'> {
   const done = m.state().contract.done.map((c, i) => ({ c, i }));
   const machine = await Promise.all(
     done.filter(({ c }) => c.t !== 'owner').map(({ c, i }) => criterion(m, c, i, candidate))
@@ -27,9 +30,9 @@ export async function evaluateDone(m: Expedition, candidate: RefId): Promise<str
 /** One criterion as a host call (`done/<i>`); the gaps it leaves. */
 async function criterion(
   m: Expedition,
-  c: Criterion,
+  c: keyed.Criterion,
   i: number,
-  candidate: RefId
+  candidate: keyed.RefId
 ): Promise<string[] | 'closed'> {
   const built = CRITERION[c.t](c as never, `done/${i}`, candidate, m);
   if (built.t === 'gap') return [built.why];
@@ -39,13 +42,13 @@ async function criterion(
 }
 
 type Built =
-  | { readonly t: 'call'; readonly call: Call }
+  | { readonly t: 'call'; readonly call: keyed.Call }
   | { readonly t: 'gap'; readonly why: string };
 const CRITERION: {
-  [K in Criterion['t']]: (
-    c: Extract<Criterion, { t: K }>,
-    key: Key,
-    of: RefId,
+  [K in keyed.Criterion['t']]: (
+    c: Extract<keyed.Criterion, { t: K }>,
+    key: keyed.Key,
+    of: keyed.RefId,
     m: Expedition
   ) => Built;
 } = {
@@ -83,13 +86,15 @@ const CRITERION: {
   }),
 };
 
-const nameOf = (c: Criterion): string =>
+const nameOf = (c: keyed.Criterion): string =>
   c.t === 'check'
     ? `check \`${c.command}\``
     : c.t === 'review'
       ? `review ${c.rubric}`
       : `owner: ${c.question}`;
-const GAPS: { [K in Outcome['t']]: (o: Extract<Outcome, { t: K }>, c: Criterion) => string[] } = {
+const GAPS: {
+  [K in keyed.Outcome['t']]: (o: Extract<keyed.Outcome, { t: K }>, c: keyed.Criterion) => string[];
+} = {
   passed: (o, c) => {
     if (c.t !== 'owner') return [];
     const yes = z.boolean().safeParse(o.out);

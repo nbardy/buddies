@@ -11,7 +11,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
-import { Entry } from './types';
+import { keyed } from '@unleashd/shared';
 
 // One expedition on disk: a directory holding
 //   log.jsonl      append-only, one Entry per line, fsync'd on every append
@@ -45,7 +45,7 @@ export type Repair =
 
 export type Opened = {
   readonly store: LogStore;
-  readonly entries: Entry[];
+  readonly entries: keyed.Entry[];
   readonly repair: Repair;
 };
 
@@ -93,7 +93,7 @@ export class LogStore {
   }
 
   /** Durable when it resolves: the line is written and fsync'd. */
-  async append(entry: Entry): Promise<void> {
+  async append(entry: keyed.Entry): Promise<void> {
     await this.fh.write(`${JSON.stringify(entry)}\n`);
     await this.fh.sync();
   }
@@ -144,14 +144,14 @@ export class LogStore {
   }
 }
 
-function parseLine(file: string, line: number, text: string): Entry {
+function parseLine(file: string, line: number, text: string): keyed.Entry {
   let json: unknown;
   try {
     json = JSON.parse(text);
   } catch (e) {
     throw new LogCorrupt(file, line, `not JSON (${(e as Error).message})`);
   }
-  const parsed = Entry.safeParse(json);
+  const parsed = keyed.Entry.safeParse(json);
   if (!parsed.success)
     throw new LogCorrupt(
       file,

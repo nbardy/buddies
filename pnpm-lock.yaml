@@ -182,6 +182,9 @@ importers:
       '@unleashd/shared':
         specifier: workspace:*
         version: link:../shared
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       compression:
         specifier: ^1.8.1
         version: 1.8.2
@@ -194,6 +197,9 @@ importers:
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       uuid:
         specifier: ^13.0.0
         version: 13.0.0
@@ -228,9 +234,6 @@ importers:
       '@types/ws':
         specifier: ^8.5.10
         version: 8.18.1
-      tsx:
-        specifier: ^4.7.0
-        version: 4.21.0
       typescript:
         specifier: ^5.3.3
         version: 5.9.3

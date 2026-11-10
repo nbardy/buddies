@@ -1,19 +1,19 @@
+import { keyed } from '@unleashd/shared';
 import { renderBrief, renderCommand } from './brief';
 import type { Authored } from './protocol';
-import { Call, type CallJudge, type Contract, type Judge, type Who } from './types';
 
 // Authored -> Call: the host's canonicalisation (DESIGN.md §4). One handler per variant behind a
 // thin table; each handler renders text, adds the provider's pool and hands the result to Call.
 
 export type ProviderOf = (
-  who: Who
+  who: keyed.Who
 ) => { t: 'known'; provider: string } | { t: 'unknown'; why: string };
-export type CanonCtx = { contract: Contract; folder: string; providerOf: ProviderOf };
-export type Canonical = { t: 'ok'; call: Call } | { t: 'invalid'; issues: string[] };
+export type CanonCtx = { contract: keyed.Contract; folder: string; providerOf: ProviderOf };
+export type Canonical = { t: 'ok'; call: keyed.Call } | { t: 'invalid'; issues: string[] };
 
 type Provider = { t: 'known'; provider: string } | { t: 'unknown'; why: string };
 /** A seat names its provider; only a Buddy needs the lookup. */
-export const providerFor = (who: Who, providerOf: ProviderOf): Provider =>
+export const providerFor = (who: keyed.Who, providerOf: ProviderOf): Provider =>
   who.t === 'seat' ? { t: 'known', provider: who.provider } : providerOf(who);
 
 type Handler<K extends Authored['t']> = (
@@ -25,18 +25,22 @@ const invalid = (issues: string[]): Canonical => ({ t: 'invalid', issues });
 const unique = (xs: readonly string[]): string[] => [...new Set(xs)];
 
 function finish(raw: unknown): Canonical {
-  const parsed = Call.safeParse(raw);
+  const parsed = keyed.Call.safeParse(raw);
   return parsed.success
     ? { t: 'ok', call: parsed.data }
     : invalid(parsed.error.issues.map((i) => `${i.path.join('.') || 'call'}: ${i.message}`));
 }
 
-type RenderedJudge = { t: 'ok'; judge: CallJudge } | { t: 'invalid'; issues: string[] };
+type RenderedJudge = { t: 'ok'; judge: keyed.CallJudge } | { t: 'invalid'; issues: string[] };
 type Item = Readonly<Record<string, unknown>>;
 /** A check judge's command carries the same `{{slots}}` as the step's; a review's rubric is
  * rendered like a brief, so the call's hash covers the rubric's words. */
 const JUDGE: {
-  [K in Judge['t']]: (j: Extract<Judge, { t: K }>, item: Item, ctx: CanonCtx) => RenderedJudge;
+  [K in keyed.Judge['t']]: (
+    j: Extract<keyed.Judge, { t: K }>,
+    item: Item,
+    ctx: CanonCtx
+  ) => RenderedJudge;
 } = {
   none: () => ({ t: 'ok', judge: { t: 'none' } }),
   check: (j, item) => {
@@ -52,7 +56,7 @@ const JUDGE: {
       : { t: 'invalid', issues: r.issues.map((i) => `rubric ${i}`) };
   },
 };
-const renderJudge = (judge: Judge, item: Item, ctx: CanonCtx): RenderedJudge =>
+const renderJudge = (judge: keyed.Judge, item: Item, ctx: CanonCtx): RenderedJudge =>
   JUDGE[judge.t](judge as never, item, ctx);
 
 const agent: Handler<'agent'> = (a, ctx) => {

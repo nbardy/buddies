@@ -8,7 +8,9 @@ cancel-or-finish, every gate failure, the deadline, retry). The concurrent core 
 `docs/specs/expedition-keyed.qnt`: random simulation over 200,000 traces, not a proof. No real
 agent has run on it yet: the executor over Buddy runs, the routes and the UI are not written.
 §10 lists what building it changed. The API
-([`expedition.d.ts`](expedition.d.ts), 107 lines) is exact, and both example plans typecheck
+is the authoring library itself
+([`server/src/expedition-kernel/authoring/index.ts`](../../../../server/src/expedition-kernel/authoring/index.ts);
+[`expedition.d.ts`](expedition.d.ts) re-exports it), and both example plans typecheck
 (`../../../../server/node_modules/.bin/tsc -p ../tsconfig.json`, from this folder).
 
 This is what to build first. [`../DESIGN.md`](../DESIGN.md) is the larger design it was cut from;
@@ -75,7 +77,9 @@ Each row on the right is designed in `../DESIGN.md`. None is needed to run GTM.
 
 ## 4. Types
 
-The authoring API is [`expedition.d.ts`](expedition.d.ts). The host turns each authored call into
+The authoring API is the library
+([`authoring/index.ts`](../../../../server/src/expedition-kernel/authoring/index.ts), re-exported
+by [`expedition.d.ts`](expedition.d.ts)). The host turns each authored call into
 one of these, with no optional fields:
 
 ```ts

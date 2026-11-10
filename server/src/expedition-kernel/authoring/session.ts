@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { keyed } from '@unleashd/shared';
 import { Authored, type FromPlan, ToPlan } from '../protocol';
-import type { Input, Key, Outcome } from '../types';
 
 // The plan process's half of the wire (protocol.ts). One Session per process, created when the
 // plan starts. Every call, ask and review is a message to the host and resolves only when the host
@@ -16,7 +16,7 @@ export class PlanEnded extends Error {
 }
 
 type Waiter =
-  | { readonly t: 'call'; readonly settle: (outcome: Outcome) => void }
+  | { readonly t: 'call'; readonly settle: (outcome: keyed.Outcome) => void }
   | { readonly t: 'review'; readonly settle: () => void };
 
 type Send = (message: FromPlan, done?: (error: Error | null) => void) => boolean;
@@ -29,7 +29,7 @@ export const phases = new AsyncLocalStorage<readonly string[]>();
 export class Session {
   private nextSeq = 0;
   private readonly waiters = new Map<number, Waiter>();
-  private readonly keys = new Set<Key>();
+  private readonly keys = new Set<keyed.Key>();
   private ended = false;
   /** Something was sent or received since the last `waiting`. */
   private exchanged = true;
@@ -54,7 +54,7 @@ export class Session {
 
   /** Reserve a key for this evaluation. A second call under one key is a plan bug: the host
    * could not tell the two apart in the log. */
-  claim(key: Key): Key {
+  claim(key: keyed.Key): keyed.Key {
     if (this.keys.has(key))
       this.fail(
         `Duplicate key "${key}": two calls in this plan would share one log entry. Give them distinct ids.`
@@ -63,7 +63,7 @@ export class Session {
     return key;
   }
 
-  call(call: Authored): Promise<Outcome> {
+  call(call: Authored): Promise<keyed.Outcome> {
     const checked = Authored.safeParse(call);
     if (!checked.success) this.fail(`Call ${call.key} is malformed: ${checked.error.message}`);
     const seq = this.nextSeq++;
@@ -89,7 +89,7 @@ export class Session {
     this.end({ t: 'candidate', ref });
   }
 
-  gap(why: string, evidence: Input[]): never {
+  gap(why: string, evidence: keyed.Input[]): never {
     this.end({ t: 'gap', why, evidence });
     throw new PlanEnded();
   }

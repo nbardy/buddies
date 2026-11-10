@@ -10,8 +10,9 @@ import type {
   RunStatus,
   Woken,
 } from '../../src/expedition-kernel/ports';
-import type { ExpeditionView } from '../../src/expedition-kernel/timeline';
-import type { Diff, Disposition, Key, Usage, WakeEvent } from '../../src/expedition-kernel/types';
+
+import type { keyed } from '@unleashd/shared';
+import type { ExpeditionView } from '../../src/expedition-kernel/ports';
 
 // Scripted ports for the expedition kernel's end-to-end tests. The agent CLIs are the hard
 // external boundary, so these are the only fakes; everything else (plan processes, log files,
@@ -50,12 +51,14 @@ export class Signal {
 export type Run = {
   readonly runId: string;
   readonly spec: RunSpec;
-  state: { t: 'running' } | { t: 'settled'; outcome: RawOutcome; spent: Usage };
+  state: { t: 'running' } | { t: 'settled'; outcome: RawOutcome; spent: keyed.Usage };
 };
 /** What the executor does with a run it just created: hold it for the test, or end it. */
-export type Policy = (run: Run) => 'hold' | { readonly raw: RawOutcome; readonly spent: Usage };
+export type Policy = (
+  run: Run
+) => 'hold' | { readonly raw: RawOutcome; readonly spent: keyed.Usage };
 
-export const reported = (usd: number): Usage => ({ t: 'reported', usd });
+export const reported = (usd: number): keyed.Usage => ({ t: 'reported', usd });
 
 export class ScriptedExecutor implements Executor {
   readonly runs = new Map<string, Run>();
@@ -68,7 +71,9 @@ export class ScriptedExecutor implements Executor {
   readonly limbo: { runId: string; spec: RunSpec }[] = [];
   /** The next N starts matching `pred` go to limbo instead of running. */
   private holds: { pred: (spec: RunSpec) => boolean; n: number }[] = [];
-  private readonly listeners = new Set<(runId: string, raw: RawOutcome, spent: Usage) => void>();
+  private readonly listeners = new Set<
+    (runId: string, raw: RawOutcome, spent: keyed.Usage) => void
+  >();
   closedNoops = 0;
   idempotentNoops = 0;
 
@@ -127,7 +132,7 @@ export class ScriptedExecutor implements Executor {
   }
 
   /** The run ends: asynchronously from the kernel's point of view, like a real harness. */
-  end(runId: string, raw: RawOutcome, spent: Usage): void {
+  end(runId: string, raw: RawOutcome, spent: keyed.Usage): void {
     const run = this.runs.get(runId);
     if (!run) throw new Error(`no run ${runId}`);
     if (run.state.t !== 'running') throw new Error(`${runId} already ended`);
@@ -156,7 +161,7 @@ export class ScriptedExecutor implements Executor {
       ? { t: 'running' }
       : { t: 'settled', outcome: run.state.outcome, spent: run.state.spent };
   }
-  onSettled(listener: (runId: string, raw: RawOutcome, spent: Usage) => void): () => void {
+  onSettled(listener: (runId: string, raw: RawOutcome, spent: keyed.Usage) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -186,20 +191,23 @@ export const roleOfRun = (runId: string): 'producer' | 'judge' =>
   runId.endsWith(':judge') ? 'judge' : 'producer';
 export const attemptOfRun = (runId: string): number => Number(/#(\d+):/.exec(runId)?.[1]);
 
-export type WakeScript = (event: WakeEvent, view: ExpeditionView) => Woken | Promise<Woken>;
+export type WakeScript = (event: keyed.WakeEvent, view: ExpeditionView) => Woken | Promise<Woken>;
 export class ScriptedLeader implements Leader {
-  readonly events: WakeEvent[] = [];
-  readonly disposeCalls: { diff: Diff; dropped: readonly DroppedInfo[] }[] = [];
+  readonly events: keyed.WakeEvent[] = [];
+  /** The run id of each wake, in the order of `events`. */
+  readonly runIds: string[] = [];
+  readonly disposeCalls: { diff: keyed.Diff; dropped: readonly DroppedInfo[] }[] = [];
   constructor(
     readonly signal: Signal,
     public script: WakeScript,
     public disposer: (
-      diff: Diff,
+      diff: keyed.Diff,
       dropped: readonly DroppedInfo[]
-    ) => Readonly<Record<Key, Disposition>> = () => ({})
+    ) => Readonly<Record<keyed.Key, keyed.Disposition>> = () => ({})
   ) {}
-  async wake(event: WakeEvent, view: ExpeditionView): Promise<Woken> {
+  async wake(runId: string, event: keyed.WakeEvent, view: ExpeditionView): Promise<Woken> {
     this.events.push(event);
+    this.runIds.push(runId);
     this.signal.poke();
     try {
       return await this.script(event, view);
@@ -208,9 +216,9 @@ export class ScriptedLeader implements Leader {
     }
   }
   async dispose(
-    diff: Diff,
+    diff: keyed.Diff,
     dropped: readonly DroppedInfo[]
-  ): Promise<Readonly<Record<Key, Disposition>>> {
+  ): Promise<Readonly<Record<keyed.Key, keyed.Disposition>>> {
     this.disposeCalls.push({ diff, dropped });
     return this.disposer(diff, dropped);
   }

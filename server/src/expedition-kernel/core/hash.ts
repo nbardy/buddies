@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Call, Hash } from '../types';
+import type { keyed } from '@unleashd/shared';
 
 // A call's identity (DESIGN §4: "Hash covers the whole call, brief text included"). Reconcile by
 // key trusts it completely: two encodings of one call that hashed differently would start the
@@ -27,6 +27,6 @@ function canonical(value: unknown): unknown {
   return sorted;
 }
 
-export function hashOf(call: Call): Hash {
+export function hashOf(call: keyed.Call): keyed.Hash {
   return createHash('sha256').update(canonicalJson(call)).digest('hex');
 }

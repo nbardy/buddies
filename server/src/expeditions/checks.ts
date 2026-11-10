@@ -49,7 +49,10 @@ export async function resolveBase(root: string): Promise<Resolved> {
     const target = await exec('git', root, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']);
     return {
       t: 'base',
-      base: { ref: target.code === 0 ? target.stdout : 'refs/remotes/origin/HEAD', sha: head.stdout },
+      base: {
+        ref: target.code === 0 ? target.stdout : 'refs/remotes/origin/HEAD',
+        sha: head.stdout,
+      },
     };
   }
   const main = await verify('refs/remotes/origin/main');
@@ -75,7 +78,9 @@ export async function preflight(p: {
   ]);
   if (top.code !== 0) issues.push(`${root} is not a git repository`);
   const resolved: Resolved =
-    top.code === 0 ? await resolveBase(root) : { t: 'refused', issue: 'no base: not a git repository' };
+    top.code === 0
+      ? await resolveBase(root)
+      : { t: 'refused', issue: 'no base: not a git repository' };
   if (resolved.t === 'refused' && top.code === 0) issues.push(resolved.issue);
   const baseSha = resolved.t === 'base' ? resolved.base.sha : '';
   if (tool.code !== 0) issues.push('`git cambium` is not available');
@@ -93,7 +98,9 @@ export async function preflight(p: {
   const bins = p.charter.done.t === 'checks' ? p.charter.done.checks.map((c) => c[0]) : [];
   for (const bin of new Set(bins))
     if (!(await executable(top.stdout || root, bin, baseSha)))
-      issues.push(`check \`${bin}\`: not an executable on PATH, nor mode 100755 on the launch base`);
+      issues.push(
+        `check \`${bin}\`: not an executable on PATH, nor mode 100755 on the launch base`
+      );
   if (issues.length > 0) return { t: 'refused', issues };
   if (resolved.t === 'refused') return { t: 'refused', issues: [resolved.issue] };
   return { t: 'ready', repoRoot: top.stdout, base: resolved.base };
@@ -150,24 +157,76 @@ export async function runChecks(
 ): Promise<CheckRun[]> {
   const runs: CheckRun[] = [];
   try {
-    await fsp.rm(j.dir, { recursive: true, force: true });
-    await git(repo, ['worktree', 'prune']);
-    await git(repo, ['worktree', 'add', '--detach', j.dir, j.sha]);
-    const restore = await oracleFiles(repo, j.base, j.checks, j.oracle);
-    if (restore.length > 0)
-      await git(j.dir, ['--literal-pathspecs', 'checkout', j.base, '--', ...restore]);
-    for (const argv of j.checks) {
-      if (stop.aborted) break;
-      const outcome = await runOne(argv, j.dir, `${j.dir}.scratch`, stop);
-      runs.push({ argv, outcome });
-      if (outcome.t !== 'passed' && j.through === 'first_failure') break;
-    }
+    await withDetachedTree(repo, j.dir, j.sha, async (dir) => {
+      await restoreOracle(repo, dir, j.base, j.checks, j.oracle);
+      for (const argv of j.checks) {
+        if (stop.aborted) break;
+        const outcome = await runOne(argv, dir, `${dir}.scratch`, stop);
+        runs.push({ argv, outcome });
+        if (outcome.t !== 'passed' && j.through === 'first_failure') break;
+      }
+    });
   } catch (error) {
     runs.push({ argv: j.checks[0], outcome: { t: 'error', message: (error as Error).message } });
-  } finally {
-    await exec('git', repo, ['worktree', 'remove', '--force', j.dir]);
   }
   return runs;
+}
+
+/** A detached worktree of `repo` at `sha` for the length of `use`, removed afterwards whatever
+ * `use` does. Its HEAD is checked against `sha` before `use` runs: a tree at the wrong commit
+ * would grade or run the wrong code and say nothing. Throws on any git failure. */
+export async function withDetachedTree<T>(
+  repo: string,
+  dir: string,
+  sha: string,
+  use: (dir: string) => Promise<T>
+): Promise<T> {
+  try {
+    await underRepoLock(repo, async () => {
+      await fsp.rm(dir, { recursive: true, force: true });
+      await git(repo, ['worktree', 'prune']);
+      const expected = await git(repo, ['rev-parse', '--verify', `${sha}^{commit}`]);
+      await git(repo, ['worktree', 'add', '--detach', dir, expected]);
+      const head = await git(dir, ['rev-parse', '--verify', 'HEAD^{commit}']);
+      if (head !== expected)
+        throw new Error(`the worktree at ${dir} is at ${head}, not ${expected} (${sha})`);
+    });
+    return await use(dir);
+  } finally {
+    await underRepoLock(repo, async () => {
+      await exec('git', repo, ['worktree', 'remove', '--force', dir]);
+      await fsp.rm(dir, { recursive: true, force: true });
+      await exec('git', repo, ['worktree', 'prune']);
+    });
+  }
+}
+
+/** Worktree setup and teardown, one at a time per repo (the work in the trees runs in parallel).
+ * `worktree prune` drops the admin entry of any tree whose directory it cannot see, and a
+ * concurrent `worktree add` is briefly in exactly that state, so a parallel prune could remove a
+ * tree being made. Keyed expeditions run commands in parallel; the old host queued its checks. */
+const repoLocks = new Map<string, Promise<void>>();
+function underRepoLock(repo: string, task: () => Promise<void>): Promise<void> {
+  const run = (repoLocks.get(repo) ?? Promise.resolve()).then(task);
+  const tail = run.catch(() => {});
+  repoLocks.set(repo, tail);
+  void tail.then(() => {
+    if (repoLocks.get(repo) === tail) repoLocks.delete(repo);
+  });
+  return run;
+}
+
+/** The oracle files (`oracleFiles`) put back as they are at `base`, in the tree at `dir`. */
+export async function restoreOracle(
+  repo: string,
+  dir: string,
+  base: string,
+  checks: string[][],
+  oracle: string[]
+): Promise<void> {
+  const restore = await oracleFiles(repo, base, checks, oracle);
+  if (restore.length > 0)
+    await git(dir, ['--literal-pathspecs', 'checkout', base, '--', ...restore]);
 }
 
 /** What to restore from `base`, as literal names. Argv-inferred protection covers regular files
@@ -203,31 +262,93 @@ const CHECK_TIMEOUT_MS = 2 * 60 * 60_000;
 const TAIL = 4000;
 const CHECK_ENV = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TZ'];
 
-/** Audit #3 (kept from command.ts): the check runs in its own process group with a scrubbed env
- * and a throwaway HOME/TMPDIR; on timeout and after exit the whole group is killed, and pipes a
- * `setsid` straggler holds are closed after 2 s so the check always settles. */
+/** A charter check: one host process with the 2 h check bound, no extra env, output kept as a
+ * tail. A stop (the expedition finished) reads as `timed_out`, as it always has. */
 async function runOne(
   argv: string[],
   cwd: string,
   scratch: string,
   stop: AbortSignal
 ): Promise<CheckOutcome> {
+  const [bin, ...args] = argv;
+  if (bin === undefined) return { t: 'error', message: 'the check has an empty argv' };
+  const end = await runProcess(
+    {
+      argv: [bin, ...args],
+      cwd,
+      scratch,
+      timeoutMs: CHECK_TIMEOUT_MS,
+      env: {},
+      capture: { t: 'tail' },
+      onSpawn: () => {},
+    },
+    stop
+  );
+  return CHECK_OUTCOME[end.t](end as never);
+}
+const CHECK_OUTCOME: {
+  [K in ProcessEnd['t']]: (e: Extract<ProcessEnd, { t: K }>) => CheckOutcome;
+} = {
+  exited: (e) => (e.code === 0 ? { t: 'passed' } : { t: 'failed', exitCode: e.code, tail: e.tail }),
+  timed_out: (e) => ({ t: 'timed_out', tail: e.tail }),
+  stopped: (e) => ({ t: 'timed_out', tail: e.tail }),
+  error: (e) => ({ t: 'error', message: e.message }),
+};
+
+/** Whether stdout is kept apart from the mixed tail (a command whose stdout is its JSON answer). */
+export type Capture =
+  | { readonly t: 'tail' }
+  | { readonly t: 'stdout'; readonly limitBytes: number };
+export type Stdout =
+  | { readonly t: 'not-captured' }
+  | { readonly t: 'captured'; readonly text: string }
+  | { readonly t: 'overflowed'; readonly limitBytes: number };
+export type ProcessSpec = {
+  readonly argv: readonly [string, ...string[]];
+  readonly cwd: string;
+  /** Removed and recreated: the process's HOME and TMPDIR live here, and it is removed after. */
+  readonly scratch: string;
+  readonly timeoutMs: number;
+  /** Added to the scrubbed env (HOME and TMPDIR stay the scratch ones). */
+  readonly env: Readonly<Record<string, string>>;
+  readonly capture: Capture;
+  /** The process group exists (its id is the child's pid). Called once, synchronously. */
+  readonly onSpawn: (pid: number) => void;
+};
+export type ProcessEnd =
+  /** It exited; `code` is 128 when a signal ended it. `tail` mixes stdout and stderr. */
+  | { readonly t: 'exited'; readonly code: number; readonly tail: string; readonly stdout: Stdout }
+  | { readonly t: 'timed_out'; readonly tail: string }
+  /** `stop` fired. */
+  | { readonly t: 'stopped'; readonly tail: string }
+  /** It never ran (spawn failed: ENOENT, EACCES). */
+  | { readonly t: 'error'; readonly message: string };
+
+/** Audit #3 (kept from command.ts): a host process runs in its own process group with a scrubbed
+ * env and a throwaway HOME/TMPDIR, with no shell; on timeout, on `stop` and after exit the whole
+ * group is killed, and pipes a `setsid` straggler holds are closed after 2 s so it always settles. */
+export async function runProcess(spec: ProcessSpec, stop: AbortSignal): Promise<ProcessEnd> {
+  const { argv, cwd, scratch } = spec;
   await fsp.rm(scratch, { recursive: true, force: true });
   const home = path.join(scratch, 'home');
   const tmp = path.join(scratch, 'tmp');
   await Promise.all([fsp.mkdir(home, { recursive: true }), fsp.mkdir(tmp, { recursive: true })]);
-  const env = { ...pick(CHECK_ENV), HOME: home, TMPDIR: tmp };
+  const env = { ...pick(CHECK_ENV), ...spec.env, HOME: home, TMPDIR: tmp };
   try {
-    return await new Promise<CheckOutcome>((resolve) => {
+    return await new Promise<ProcessEnd>((resolve) => {
       let tail = '';
-      let timedOut = false;
+      let ended: 'running' | 'timed_out' | 'stopped' = 'running';
       let code: number | null = null;
+      const out = stdoutOf(spec.capture);
       const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: 'pipe' });
       child.stdin.end();
       const keep = (b: Buffer) => {
         tail = (tail + b.toString('utf8')).slice(-TAIL);
       };
-      child.stdout.on('data', keep);
+      child.stdout.on('data', (b: Buffer) => {
+        keep(b);
+        out.add(b);
+      });
       child.stderr.on('data', keep);
       const killGroup = () => {
         try {
@@ -238,18 +359,22 @@ async function runOne(
         child.stdout.destroy();
         child.stderr.destroy();
       });
-      const abandon = () => {
-        timedOut = true;
+      const abandon = (why: 'timed_out' | 'stopped') => () => {
+        if (ended === 'running') ended = why;
         killGroup();
         setTimeout(closePipes, 2000).unref();
       };
+      const onStop = abandon('stopped');
       const timer = setTimeout(
-        labelled('timer expedition-check-timeout', abandon),
-        CHECK_TIMEOUT_MS
+        labelled('timer expedition-check-timeout', abandon('timed_out')),
+        Math.min(spec.timeoutMs, MAX_TIMER_MS)
       );
-      stop.addEventListener('abort', abandon, { once: true });
+      if (stop.aborted) onStop();
+      else stop.addEventListener('abort', onStop, { once: true });
+      child.on('spawn', () => spec.onSpawn(child.pid as number));
       child.on('error', (e) => {
         clearTimeout(timer);
+        stop.removeEventListener('abort', onStop);
         resolve({ t: 'error', message: `${argv[0]}: ${e.message}` });
       });
       child.on('exit', (c, signal) => {
@@ -260,14 +385,36 @@ async function runOne(
       });
       child.on('close', () => {
         clearTimeout(timer);
-        stop.removeEventListener('abort', abandon);
-        const failed: CheckOutcome = { t: 'failed', exitCode: code ?? -1, tail: tail.slice(-TAIL) };
-        resolve(timedOut ? { t: 'timed_out', tail } : code === 0 ? { t: 'passed' } : failed);
+        stop.removeEventListener('abort', onStop);
+        const last = tail.slice(-TAIL);
+        resolve(
+          ended === 'running'
+            ? { t: 'exited', code: code ?? -1, tail: last, stdout: out.result() }
+            : { t: ended, tail: last }
+        );
       });
     });
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
   }
+}
+/** setTimeout's ceiling: a longer delay is not clamped but fires after 1 ms. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+function stdoutOf(capture: Capture): { add(b: Buffer): void; result(): Stdout } {
+  if (capture.t === 'tail') return { add: () => {}, result: () => ({ t: 'not-captured' }) };
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  return {
+    add: (b) => {
+      bytes += b.length;
+      if (bytes <= capture.limitBytes) chunks.push(b);
+    },
+    result: () =>
+      bytes > capture.limitBytes
+        ? { t: 'overflowed', limitBytes: capture.limitBytes }
+        : { t: 'captured', text: Buffer.concat(chunks).toString('utf8') },
+  };
 }
 
 const pick = (keys: string[]) =>

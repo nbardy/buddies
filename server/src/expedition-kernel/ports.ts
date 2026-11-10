@@ -1,34 +1,43 @@
-import type { ExpeditionView } from './timeline';
-import type {
-  AgentCall,
-  AskCall,
-  CommandCall,
-  Diff,
-  Disposition,
-  Key,
-  LeaderAct,
-  RefId,
-  Reservation,
-  Usage,
-  WakeEvent,
-  Who,
-} from './types';
+import type { keyed } from '@unleashd/shared';
+import type { State } from './core';
 
 // What the kernel needs from the outside world. The real Executor runs agent calls as Buddy
 // worker runs through vendor/agent-cli-tool, commands through expeditions/checks.ts and asks as
 // owner posts; the real Leader is a turn of the contract's leader Buddy. Tests script all four.
 
+/** The kernel's read view: the folded state plus its timeline, both pure functions of the log.
+ * `state` holds Maps, so this is for the server's own ports; the wire gets `keyed.KeyedView`
+ * (projection.ts). */
+export type ExpeditionView = {
+  readonly id: string;
+  readonly dir: string;
+  readonly state: State;
+  readonly timeline: keyed.Timeline;
+  readonly faults: readonly keyed.Fault[];
+};
+
 /** One raw run. The kernel composes judging: a judged agent call is two runs (its producer, then
  * a `check` or `review` of what it produced), and so is a done criterion on a candidate. */
 export type RunSpec =
-  | { readonly t: 'agent'; readonly call: AgentCall }
-  | { readonly t: 'command'; readonly call: CommandCall }
+  | { readonly t: 'agent'; readonly call: keyed.AgentCall }
+  | { readonly t: 'command'; readonly call: keyed.CommandCall }
   /** The owner answers it. It holds nothing and is never cancelled. */
-  | { readonly t: 'ask'; readonly call: AskCall }
-  /** Run `command` on the output stored at `of`: exit 0 is `ok`, non-zero `no`. */
-  | { readonly t: 'check'; readonly command: string; readonly of: RefId }
+  | { readonly t: 'ask'; readonly call: keyed.AskCall }
+  /** Run `command` on the output stored at `of`: exit 0 is `ok`, non-zero `no`. Past
+   * `maxMinutes` it is killed and `errored`. */
+  | {
+      readonly t: 'check';
+      readonly command: string;
+      readonly of: keyed.RefId;
+      readonly maxMinutes: number;
+    }
   /** `by` reviews the output at `of` against `brief` and says `ok` or `no`. */
-  | { readonly t: 'review'; readonly by: Who; readonly brief: string; readonly of: RefId };
+  | {
+      readonly t: 'review';
+      readonly by: keyed.Who;
+      readonly brief: string;
+      readonly of: keyed.RefId;
+    };
 
 export type RawOutcome =
   /** An agent answered, a command or check exited 0, a review said yes, or the owner answered.
@@ -42,7 +51,7 @@ export type RawOutcome =
 
 export type RunStatus =
   | { readonly t: 'running' }
-  | { readonly t: 'settled'; readonly outcome: RawOutcome; readonly spent: Usage }
+  | { readonly t: 'settled'; readonly outcome: RawOutcome; readonly spent: keyed.Usage }
   /** The executor has no record of it: the start never arrived (or has not arrived yet). */
   | { readonly t: 'unknown' };
 
@@ -58,7 +67,7 @@ export interface Executor {
   close(runId: string): Promise<void>;
   /** Boot: what became of a run the log says was started. */
   status(runId: string): Promise<RunStatus>;
-  onSettled(listener: (runId: string, outcome: RawOutcome, spent: Usage) => void): () => void;
+  onSettled(listener: (runId: string, outcome: RawOutcome, spent: keyed.Usage) => void): () => void;
 }
 
 /** The host's time. `wakeAt` fires `fn` once when `now()` reaches `at` (at once if it has). */
@@ -69,24 +78,29 @@ export interface Clock {
 
 /** A dropped running call, as the leader sees it when it must choose cancel or finish. */
 export type DroppedInfo = {
-  readonly key: Key;
+  readonly key: keyed.Key;
   readonly startedAt: string;
-  readonly reserved: Reservation;
+  readonly reserved: keyed.Reservation;
   readonly stage: 'producing' | 'judging';
 };
 
-export type Woken = { readonly act: LeaderAct; readonly spent: Usage };
+export type Woken = { readonly act: keyed.LeaderAct; readonly spent: keyed.Usage };
 
 export interface Leader {
-  /** One wake: the kernel has logged it as the call `leader/<n>` and charges `spent` to it. */
-  wake(event: WakeEvent, view: ExpeditionView): Promise<Woken>;
+  /** One wake: the kernel has logged it as the call `leader/<n>`, started under `runId`, and
+   * charges `spent` to it. `runId` is derived from the log (start is keyed by it, so a wake
+   * re-issued after a restart is the same turn), and the kernel closes it when the wake settles. */
+  wake(runId: string, event: keyed.WakeEvent, view: ExpeditionView): Promise<Woken>;
   /** Asked only when a submitted rewrite drops running calls: one disposition per dropped key.
    * Part of the rewrite act, so not charged separately. */
-  dispose(diff: Diff, dropped: readonly DroppedInfo[]): Promise<Readonly<Record<Key, Disposition>>>;
+  dispose(
+    diff: keyed.Diff,
+    dropped: readonly DroppedInfo[]
+  ): Promise<Readonly<Record<keyed.Key, keyed.Disposition>>>;
 }
 
 export type RewriteForOwner = {
-  readonly diff: Diff;
+  readonly diff: keyed.Diff;
   readonly why: string;
   readonly reasons: readonly string[];
 };

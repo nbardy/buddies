@@ -11,10 +11,10 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, test } from 'node:test';
+import { keyed } from '@unleashd/shared';
 import { fold, liveCalls, step } from '../src/expedition-kernel/core';
 import { type Expedition, type KernelDeps, launch, open } from '../src/expedition-kernel/kernel';
 import type { RawOutcome } from '../src/expedition-kernel/ports';
-import { Entry, type Finish, type Usage, type WakeEvent } from '../src/expedition-kernel/types';
 import {
   type Policy,
   type Run,
@@ -40,7 +40,6 @@ import { tempDir } from './fixtures/temp';
 const REPO = path.resolve(__dirname, '../..');
 const FIXTURES = path.join(__dirname, 'fixtures', 'expedition-plans');
 const GATES = {
-  authoringEntry: path.join(REPO, 'docs/expeditions/keyed/v1/expedition.d.ts'),
   zodEntry: path.join(REPO, 'server/node_modules/zod'),
   tscBin: path.join(REPO, 'server/node_modules/.bin/tsc'),
 };
@@ -146,7 +145,7 @@ async function launched(w: World, folder: string): Promise<Expedition> {
   return watch(w, r.expedition);
 }
 /** The finish, or a timeout that says what the kernel was doing. */
-async function finishedOf(w: World, e: Expedition): Promise<Finish> {
+async function finishedOf(w: World, e: Expedition): Promise<keyed.Finish> {
   await w.signal.until(() => e.state().progress.t === 'finished', 'the expedition finishes');
   return e.finished;
 }
@@ -155,11 +154,11 @@ async function reopen(w: World, dir: string): Promise<Expedition> {
 }
 
 /** The durable log, parsed. */
-const logOf = (dir: string): Entry[] =>
+const logOf = (dir: string): keyed.Entry[] =>
   readFileSync(path.join(dir, 'log.jsonl'), 'utf8')
     .split('\n')
     .filter((l) => l !== '')
-    .map((l) => Entry.parse(JSON.parse(l)));
+    .map((l) => keyed.Entry.parse(JSON.parse(l)));
 /** I2 at every prefix of the durable log, folded the way a restart would. */
 function assertBudgetAtEveryAppend(dir: string): void {
   const log = logOf(dir);
@@ -185,7 +184,7 @@ const agentRunning = (ex: ScriptedExecutor, prefix: string) =>
 const settledOf = (e: Expedition, key: string) =>
   e
     .entries()
-    .filter((x): x is Extract<Entry, { t: 'settled' }> => x.t === 'settled' && x.key === key);
+    .filter((x): x is Extract<keyed.Entry, { t: 'settled' }> => x.t === 'settled' && x.key === key);
 const outcomeOf = (e: Expedition, key: string) => settledOf(e, key).at(-1)?.outcome.t;
 
 /** The GTM executor: the scope lists `orgs`; every other agent answers a report; judges pass. */
@@ -197,7 +196,7 @@ function gtmPolicy(
     const o = over(run);
     if (o !== 'default') return o;
     const s = run.spec;
-    const spend = (usd: number): Usage => reported(usd);
+    const spend = (usd: number): keyed.Usage => reported(usd);
     if (s.t === 'agent')
       return s.call.key === 'scope/scope'
         ? { raw: ok(orgs), spent: spend(s.call.max.usd) }
@@ -208,7 +207,7 @@ function gtmPolicy(
   };
 }
 const leaderFor =
-  (on: Partial<Record<WakeEvent['t'], WakeScript>>): WakeScript =>
+  (on: Partial<Record<keyed.WakeEvent['t'], WakeScript>>): WakeScript =>
   (event, view) => {
     const handler = on[event.t];
     if (!handler) throw new Error(`unexpected wake ${JSON.stringify(event)}`);
@@ -246,12 +245,20 @@ describe('expedition kernel end to end', () => {
       t: 'check',
       command: 'python tools/gtm/audit_ledger.py business/research/2026-11-10_gtm',
       of: ref,
+      maxMinutes: 20,
     });
     const review = doneRun('done/1');
     assert.equal(review?.t === 'review' && review.of, ref);
     assert.equal(e.state().progress.t, 'open', 'not finished before the owner answers');
     w.ex.end(askRun.runId, ok(true), reported(0));
     assert.deepEqual(await finishedOf(w, e), { t: 'met', candidate: ref });
+    // Each wake runs under the run id its `started` entry logged: that id is what a real leader
+    // turn is keyed and closed by, so a wake re-issued after a restart cannot start a second turn.
+    const wakeStarts = e
+      .entries()
+      .flatMap((x) => (x.t === 'started' && x.key.startsWith('leader/') ? [x.runId] : []));
+    assert.ok(wakeStarts.length > 0, 'the GTM run wakes the leader at its reviews');
+    assert.deepEqual(w.leader.runIds, wakeStarts);
 
     const declared = new Set(e.entries().flatMap((x) => (x.t === 'declared' ? [x.call.key] : [])));
     const barKeys = new Set(e.timeline().bars.map((b) => b.key));
@@ -474,7 +481,7 @@ describe('expedition kernel end to end', () => {
 
     const plan1 = e
       .entries()
-      .find((x): x is Extract<Entry, { t: 'plan' }> => x.t === 'plan' && x.version === 1);
+      .find((x): x is Extract<keyed.Entry, { t: 'plan' }> => x.t === 'plan' && x.version === 1);
     assert.ok(plan1);
     const sorted = (xs: readonly string[]) => [...xs].sort();
     assert.deepEqual(
@@ -692,7 +699,7 @@ describe('expedition kernel end to end', () => {
     w.ex.end(judge.runId, ok({}), reported(0));
     await w.signal.until(() => outcomeOf(e, 'probe') === 'passed', 'the judge completes');
     w.ex.end(question.runId, ok('rl-data'), reported(0));
-    const finish: Finish = await finishedOf(w, e);
+    const finish: keyed.Finish = await finishedOf(w, e);
     assert.deepEqual(finish, { t: 'not-met', gaps: ['No follow-up.'] });
     assert.deepEqual(settledOf(e, 'after')[0]?.outcome, { t: 'refused', reason: 'deadline' });
     for (const key of ['probe', 'ask/which-segment-first']) {
@@ -809,7 +816,7 @@ describe('expedition kernel end to end', () => {
     assert.match(JSON.stringify(rejected), /an ask is never cancelled: ask\/which-segment-first/);
     const plan1 = e
       .entries()
-      .find((x): x is Extract<Entry, { t: 'plan' }> => x.t === 'plan' && x.version === 1);
+      .find((x): x is Extract<keyed.Entry, { t: 'plan' }> => x.t === 'plan' && x.version === 1);
     assert.deepEqual(plan1?.dropped, { probe: 'cancel', 'ask/which-segment-first': 'finish' });
     assert.equal(w.owner.asked.length, 1, 'no judged pass yet: the owner approved it');
 

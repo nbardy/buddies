@@ -1,51 +1,70 @@
+import type { keyed } from '@unleashd/shared';
 import type { Judging, Profile, Stage } from './core';
 import type { RawOutcome, RunSpec } from './ports';
-import type { AgentCall, Call, CallJudge, Outcome, RefId, Usage, Verdict } from './types';
 
 // Calls ↔ raw runs, as tables. Pure: what the executor is asked to run for a call, and what a
 // raw run's end means for the call it belongs to. The kernel only dispatches on these.
 
-type PerCall<R> = { [K in Call['t']]: (c: Extract<Call, { t: K }>) => R };
+type PerCall<R> = { [K in keyed.Call['t']]: (c: Extract<keyed.Call, { t: K }>) => R };
 
 /** The producer run of a call. A leader wake is not an executor run (the Leader port runs it). */
 export type ProducerRun =
   | { readonly t: 'executor'; readonly spec: RunSpec }
-  | { readonly t: 'leader' };
+  | { readonly t: 'leader'; readonly call: keyed.LeaderCall };
 const PRODUCER: PerCall<ProducerRun> = {
   agent: (call) => ({ t: 'executor', spec: { t: 'agent', call } }),
   command: (call) => ({ t: 'executor', spec: { t: 'command', call } }),
   ask: (call) => ({ t: 'executor', spec: { t: 'ask', call } }),
-  verdict: (call) => ({ t: 'executor', spec: verdictSpec(call.verdict, call.of) }),
-  leader: () => ({ t: 'leader' }),
+  verdict: (call) => ({
+    t: 'executor',
+    spec: verdictSpec(call.verdict, call.of, call.max.minutes),
+  }),
+  leader: (call) => ({ t: 'leader', call }),
 };
-export const producerRun = (call: Call): ProducerRun => PRODUCER[call.t](call as never);
+export const producerRun = (call: keyed.Call): ProducerRun => PRODUCER[call.t](call as never);
 
-const VERDICT: { [K in Verdict['t']]: (v: Extract<Verdict, { t: K }>, of: RefId) => RunSpec } = {
-  check: (v, of) => ({ t: 'check', command: v.command, of }),
+/** `minutes` bounds a host-run check: the call's `max.minutes` (a judge shares its call's bound;
+ * a done criterion has the host's `doneReview` limit). A review's bound is its agent run's. */
+const VERDICT: {
+  [K in keyed.Verdict['t']]: (
+    v: Extract<keyed.Verdict, { t: K }>,
+    of: keyed.RefId,
+    minutes: number
+  ) => RunSpec;
+} = {
+  check: (v, of, minutes) => ({ t: 'check', command: v.command, of, maxMinutes: minutes }),
   review: (v, of) => ({ t: 'review', by: v.by, brief: v.brief, of }),
 };
-const verdictSpec = (v: Verdict, of: RefId): RunSpec => VERDICT[v.t](v as never, of);
+const verdictSpec = (v: keyed.Verdict, of: keyed.RefId, minutes: number): RunSpec =>
+  VERDICT[v.t](v as never, of, minutes);
 
 /** The judge run of a judged agent call, on what its producer stored at `of`. */
-export function judgeSpec(call: AgentCall, of: RefId): RunSpec {
-  return JUDGE_SPEC[call.judge.t](call.judge as never, of);
+export function judgeSpec(call: keyed.AgentCall, of: keyed.RefId): RunSpec {
+  return JUDGE_SPEC[call.judge.t](call.judge as never, of, call.max.minutes);
 }
 const JUDGE_SPEC: {
-  [K in CallJudge['t']]: (j: Extract<CallJudge, { t: K }>, of: RefId) => RunSpec;
+  [K in keyed.CallJudge['t']]: (
+    j: Extract<keyed.CallJudge, { t: K }>,
+    of: keyed.RefId,
+    minutes: number
+  ) => RunSpec;
 } = {
   none: () => {
     throw new Error('an unjudged call has no judge run');
   },
-  check: (j, of) => verdictSpec(j, of),
-  review: (j, of) => verdictSpec(j, of),
+  check: (j, of, minutes) => verdictSpec(j, of, minutes),
+  review: (j, of, minutes) => verdictSpec(j, of, minutes),
 };
 
 /** The judge run of a call that produced: only a judged agent call does. */
-export const judgeRunOf = (call: Call, of: RefId): RunSpec => JUDGE_OF[call.t](call as never, of);
-const notJudged = (c: Call): never => {
+export const judgeRunOf = (call: keyed.Call, of: keyed.RefId): RunSpec =>
+  JUDGE_OF[call.t](call as never, of);
+const notJudged = (c: keyed.Call): never => {
   throw new Error(`${c.key} is a ${c.t} call; only an agent call has a judge`);
 };
-const JUDGE_OF: { [K in Call['t']]: (c: Extract<Call, { t: K }>, of: RefId) => RunSpec } = {
+const JUDGE_OF: {
+  [K in keyed.Call['t']]: (c: Extract<keyed.Call, { t: K }>, of: keyed.RefId) => RunSpec;
+} = {
   agent: (c, of) => judgeSpec(c, of),
   command: notJudged,
   ask: notJudged,
@@ -57,23 +76,27 @@ const JUDGE_OF: { [K in Call['t']]: (c: Extract<Call, { t: K }>, of: RefId) => R
 
 export type Ending =
   /** The call settles. `spent` is the call's total (producer and judge). */
-  | { readonly t: 'settle'; readonly outcome: Outcome; readonly spent: Usage }
+  | { readonly t: 'settle'; readonly outcome: keyed.Outcome; readonly spent: keyed.Usage }
   /** A judged agent answered; its judge starts next. */
-  | { readonly t: 'produce'; readonly out: unknown; readonly spent: Usage }
+  | { readonly t: 'produce'; readonly out: unknown; readonly spent: keyed.Usage }
   /** The run ended in a way its kind cannot (an ask that did not get an answer): the call stays
    * as it is and the kernel reports a fault. */
   | { readonly t: 'fault'; readonly why: string };
 
 export type RawEnd = {
-  readonly ref: RefId;
+  readonly ref: keyed.RefId;
   readonly raw: RawOutcome;
-  readonly spent: Usage;
+  readonly spent: keyed.Usage;
   /** The call is being cancelled: an answer that lands now is not judged. */
   readonly cancelling: boolean;
   readonly stage: Stage;
 };
 
-const settle = (outcome: Outcome, spent: Usage): Ending => ({ t: 'settle', outcome, spent });
+const settle = (outcome: keyed.Outcome, spent: keyed.Usage): Ending => ({
+  t: 'settle',
+  outcome,
+  spent,
+});
 type RawTable = {
   readonly [R in RawOutcome['t']]: (raw: Extract<RawOutcome, { t: R }>, e: RawEnd) => Ending;
 };

@@ -1,12 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { keyed } from '@unleashd/shared';
 import { checkPlan } from './change';
 import { parseContract } from './contract';
 import { diffOf } from './core';
 import { Expedition, type KernelDeps } from './kernel';
 import { LogStore, type Repair } from './log-store';
-import { Entry } from './types';
 
 // Starting an expedition, and opening one that exists.
 
@@ -32,7 +32,7 @@ export async function launch(
   const id = `${now.toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomBytes(3).toString('hex')}`;
   const store = await LogStore.create(path.join(root, id), markdown);
   await store.copyPlan(folder, 0);
-  const launched = Entry.parse({
+  const launched = keyed.Entry.parse({
     t: 'launched',
     at: now.toISOString(),
     id,

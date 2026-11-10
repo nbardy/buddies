@@ -527,6 +527,8 @@ export * from './buddy-channel-posts.js';
 export * from './body-references.js';
 export * from './buddy-api.js';
 export * from './expedition.js';
+// A namespace: its names (Contract, Verdict, Outcome, ...) collide with the old expedition.ts.
+export * as keyed from './expedition-keyed.js';
 export * from './harness-retry.js';
 
 export * from './upstream.js';

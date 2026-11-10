@@ -1,16 +1,4 @@
-import {
-  type Call,
-  type Contract,
-  type Entry,
-  type Finish,
-  type Hash,
-  type Key,
-  type Outcome,
-  type RefId,
-  type Reservation,
-  type Usage,
-  refOf,
-} from '../types';
+import { keyed } from '@unleashd/shared';
 import { canonicalJson, hashOf } from './hash';
 import {
   DISPOSAL,
@@ -31,13 +19,13 @@ import {
 // the one its run key derives) is a typed error naming its index, never skipped. A skipped entry
 // would make I1-I3 unprovable from the log.
 
-export type Run = { readonly runId: string; readonly reserved: Reservation };
+export type Run = { readonly runId: string; readonly reserved: keyed.Reservation };
 /** An agent's answer exists and its judge is running. `spent` is the producer's usage. */
 export type Judging = {
-  readonly ref: RefId;
+  readonly ref: keyed.RefId;
   readonly out: unknown;
   readonly judgeRunId: string;
-  readonly spent: Usage;
+  readonly spent: keyed.Usage;
 };
 export type Stage = { readonly t: 'producing' } | ({ readonly t: 'judging' } & Judging);
 
@@ -51,13 +39,13 @@ export type CallStatus =
   | { readonly t: 'judging'; readonly run: Run; readonly judging: Judging }
   | { readonly t: 'draining'; readonly run: Run; readonly stage: Stage }
   | { readonly t: 'cancelling'; readonly run: Run; readonly stage: Stage }
-  | { readonly t: 'settled'; readonly outcome: Outcome };
+  | { readonly t: 'settled'; readonly outcome: keyed.Outcome };
 export type LiveStatus = Extract<CallStatus, { run: Run }>;
 
 /** `declaredIn`: the newest plan version that asked for this exact call. `attempt` counts from 1;
  * a run id names its attempt, so I1 is "a (key, hash, attempt) starts at most once". */
 export type CallRecord = {
-  readonly call: Call;
+  readonly call: keyed.Call;
   readonly declaredIn: number;
   readonly attempt: number;
   readonly status: CallStatus;
@@ -65,11 +53,13 @@ export type CallRecord = {
 export type PlanVersion =
   | { readonly t: 'unplanned' }
   | { readonly t: 'planned'; readonly version: number };
-export type Progress = { readonly t: 'open' } | { readonly t: 'finished'; readonly reason: Finish };
+export type Progress =
+  | { readonly t: 'open' }
+  | { readonly t: 'finished'; readonly reason: keyed.Finish };
 
 export type State = {
   readonly id: string;
-  readonly contract: Contract;
+  readonly contract: keyed.Contract;
   readonly baseSha: string;
   readonly launchedAtMs: number;
   /** Owner `extend` acts, summed. */
@@ -79,13 +69,13 @@ export type State = {
   readonly paused: boolean;
   readonly plan: PlanVersion;
   /** Every call ever declared, by key, then by hash: a key's history survives its replacements. */
-  readonly calls: ReadonlyMap<Key, ReadonlyMap<Hash, CallRecord>>;
+  readonly calls: ReadonlyMap<keyed.Key, ReadonlyMap<keyed.Hash, CallRecord>>;
   readonly spentUsd: number;
   readonly reservedUsd: number;
   /** Slots held per pool; a pool at zero is absent. */
   readonly poolsInUse: ReadonlyMap<string, number>;
   /** Asks started and not settled, as `key@hash`. */
-  readonly pendingAsks: ReadonlySet<RefId>;
+  readonly pendingAsks: ReadonlySet<keyed.RefId>;
   /** Passed verdicts of judged agent calls since the last applied `plan` entry (or launch). */
   readonly passesSinceRewrite: number;
   readonly progress: Progress;
@@ -94,7 +84,7 @@ export type State = {
 export class ImpossibleEntry extends Error {
   constructor(
     readonly index: number,
-    readonly entry: Entry['t'] | 'none',
+    readonly entry: keyed.Entry['t'] | 'none',
     readonly why: string
   ) {
     super(`log entry ${index} (${entry}): ${why}`);
@@ -107,15 +97,15 @@ export class ImpossibleEntry extends Error {
 export type Lookup =
   | { readonly t: 'known'; readonly record: CallRecord }
   | { readonly t: 'unknown' };
-export function lookup(s: State, key: Key, hash: Hash): Lookup {
+export function lookup(s: State, key: keyed.Key, hash: keyed.Hash): Lookup {
   const record = s.calls.get(key)?.get(hash);
   return record ? { t: 'known', record } : { t: 'unknown' };
 }
 
 export type LiveCall = {
-  readonly key: Key;
-  readonly hash: Hash;
-  readonly call: Call;
+  readonly key: keyed.Key;
+  readonly hash: keyed.Hash;
+  readonly call: keyed.Call;
   readonly attempt: number;
   readonly status: LiveStatus;
 };
@@ -154,10 +144,10 @@ export const ATTACHED: { readonly [K in CallStatus['t']]: boolean } = {
   settled: false,
 };
 
-export type Rival = { t: 'rival'; hash: Hash; record: CallRecord; run: Run } | { t: 'none' };
+export type Rival = { t: 'rival'; hash: keyed.Hash; record: CallRecord; run: Run } | { t: 'none' };
 /** The attached run of this key under another hash. Draining and cancelling runs are not
  * rivals: they were let go by a rewrite and finish on their own reservation. */
-export function rivalOf(s: State, key: Key, hash: Hash): Rival {
+export function rivalOf(s: State, key: keyed.Key, hash: keyed.Hash): Rival {
   for (const [h, r] of s.calls.get(key) ?? [])
     if (h !== hash && ATTACHED[r.status.t]) {
       const live = r.status as LiveStatus;
@@ -182,18 +172,18 @@ export const currentRunId = (s: LiveStatus): string => {
 
 // ---- The fold ----
 
-export function fold(entries: readonly Entry[]): State {
+export function fold(entries: readonly keyed.Entry[]): State {
   const first = entries[0];
   if (!first) throw new ImpossibleEntry(0, 'none', 'an empty log has no launch');
   return foldFrom(launch(first), entries.slice(1), 1);
 }
 
 /** Continue a fold: `foldFrom(fold(log.slice(0, n)), log.slice(n), n)` equals `fold(log)`. */
-export function foldFrom(start: State, entries: readonly Entry[], firstIndex: number): State {
+export function foldFrom(start: State, entries: readonly keyed.Entry[], firstIndex: number): State {
   return entries.reduce((s, e, i) => step(s, e, firstIndex + i), start);
 }
 
-function launch(e: Entry): State {
+function launch(e: keyed.Entry): State {
   if (e.t !== 'launched') throw new ImpossibleEntry(0, e.t, 'the log must open with `launched`');
   const launchedAtMs = timeOf(e.at, (why) => {
     throw new ImpossibleEntry(0, e.t, why);
@@ -218,7 +208,7 @@ function launch(e: Entry): State {
 }
 
 const HOUR_MS = 3_600_000;
-const deadlineOf = (launchedAtMs: number, c: Contract, extendedHours: number): number =>
+const deadlineOf = (launchedAtMs: number, c: keyed.Contract, extendedHours: number): number =>
   launchedAtMs + Math.round((c.budget.hours + extendedHours) * HOUR_MS);
 
 function timeOf(at: string, fail: Fail): number {
@@ -227,22 +217,26 @@ function timeOf(at: string, fail: Fail): number {
 }
 
 type Fail = (why: string) => never;
-type Step<K extends Entry['t']> = (s: State, e: Extract<Entry, { t: K }>, fail: Fail) => State;
+type Step<K extends keyed.Entry['t']> = (
+  s: State,
+  e: Extract<keyed.Entry, { t: K }>,
+  fail: Fail
+) => State;
 
 /** After `finished`, runs still wind down; nothing else may happen. */
-const WIND_DOWN: ReadonlySet<Entry['t']> = new Set(['produced', 'settled']);
+const WIND_DOWN: ReadonlySet<keyed.Entry['t']> = new Set(['produced', 'settled']);
 
-export function step(s: State, e: Entry, index: number): State {
+export function step(s: State, e: keyed.Entry, index: number): State {
   const fail: Fail = (why) => {
     throw new ImpossibleEntry(index, e.t, why);
   };
   if (s.progress.t === 'finished' && !WIND_DOWN.has(e.t)) fail('the expedition has finished');
-  return (STEP[e.t] as Step<Entry['t']>)(s, e, fail);
+  return (STEP[e.t] as Step<keyed.Entry['t']>)(s, e, fail);
 }
 
 const currentVersion = (s: State): number => (s.plan.t === 'planned' ? s.plan.version : -1);
 
-const STEP: { [K in Entry['t']]: Step<K> } = {
+const STEP: { [K in keyed.Entry['t']]: Step<K> } = {
   launched: (_s, _e, fail) => fail('launched twice'),
   contract: (s, e) => ({
     ...s,
@@ -256,7 +250,7 @@ const STEP: { [K in Entry['t']]: Step<K> } = {
       fail('the dispositions must name exactly the diff’s dropped keys');
     let calls = s.calls;
     for (const key of named) {
-      const attached = [...(calls.get(key) ?? new Map<Hash, CallRecord>())].filter(
+      const attached = [...(calls.get(key) ?? new Map<keyed.Hash, CallRecord>())].filter(
         ([, r]) => ATTACHED[r.status.t]
       );
       const only = attached[0];
@@ -325,7 +319,9 @@ const STEP: { [K in Entry['t']]: Step<K> } = {
       reservedUsd: usd(s.reservedUsd + e.reserved.usd),
       poolsInUse: shift(s.poolsInUse, e.reserved.pools, 1),
       pendingAsks:
-        r.call.t === 'ask' ? new Set([...s.pendingAsks, refOf(e.key, e.hash)]) : s.pendingAsks,
+        r.call.t === 'ask'
+          ? new Set([...s.pendingAsks, keyed.refOf(e.key, e.hash)])
+          : s.pendingAsks,
     };
   },
   produced: (s, e, fail) => {
@@ -389,7 +385,7 @@ const PLAN_NEXT: {
 const ALLOWED_DISPOSITION: {
   readonly [D in 'choose' | 'finish' | 'host']: (
     d: 'cancel' | 'finish',
-    key: Key,
+    key: keyed.Key,
     fail: Fail
   ) => void;
 } = {
@@ -405,10 +401,12 @@ const DROP: { [K in 'cancel' | 'finish']: (run: Run, stage: Stage) => LiveStatus
   cancel: (run, stage) => ({ t: 'cancelling', run, stage }),
 };
 
-type Calls = ReadonlyMap<Key, ReadonlyMap<Hash, CallRecord>>;
+type Calls = ReadonlyMap<keyed.Key, ReadonlyMap<keyed.Hash, CallRecord>>;
 /** A reworded ask (same key, new hash) never cancels the old one (I6): declaring the new one
  * drains it, so the owner can still answer it and the new one starts beside it. */
-const DECLARE_RIVAL: { readonly [K in Call['t']]: (s: State, key: Key, hash: Hash) => Calls } = {
+const DECLARE_RIVAL: {
+  readonly [K in keyed.Call['t']]: (s: State, key: keyed.Key, hash: keyed.Hash) => Calls;
+} = {
   agent: (s) => s.calls,
   command: (s) => s.calls,
   verdict: (s) => s.calls,
@@ -464,11 +462,11 @@ const judgingStage = (stage: Stage, j: Judging, fail: Fail): Stage =>
   stage.t === 'producing' ? { t: 'judging', ...j } : fail('produced twice');
 
 type Settling<K extends CallStatus['t']> = {
-  key: Key;
-  hash: Hash;
+  key: keyed.Key;
+  hash: keyed.Hash;
   record: CallRecord;
   status: Extract<CallStatus, { t: K }>;
-  e: Extract<Entry, { t: 'settled' }>;
+  e: Extract<keyed.Entry, { t: 'settled' }>;
 };
 const SETTLE: { [K in CallStatus['t']]: (s: State, x: Settling<K>, fail: Fail) => State } = {
   // A refusal settles a call that never started: it held nothing and costs nothing.
@@ -490,11 +488,11 @@ const SETTLE: { [K in CallStatus['t']]: (s: State, x: Settling<K>, fail: Fail) =
 /** Settling a live run gives back its slots and reservation and charges what it spent. */
 function release(
   s: State,
-  key: Key,
-  hash: Hash,
+  key: keyed.Key,
+  hash: keyed.Hash,
   record: CallRecord,
   live: LiveStatus,
-  e: Extract<Entry, { t: 'settled' }>,
+  e: Extract<keyed.Entry, { t: 'settled' }>,
   fail: Fail
 ): State {
   const profile = profileOf(record.call);
@@ -506,7 +504,7 @@ function release(
   if (e.outcome.t === 'refused' && chargeOf(e.spent, held.usd) !== 0)
     fail('a call refused after it was logged started never ran, so it spent nothing');
   const passes = profile === 'judged-agent' && e.outcome.t === 'passed' ? 1 : 0;
-  const ref = refOf(key, hash);
+  const ref = keyed.refOf(key, hash);
   return {
     ...s,
     calls: put(s.calls, key, hash, { ...record, status: { t: 'settled', outcome: e.outcome } }),
@@ -520,7 +518,7 @@ function release(
   };
 }
 
-type Act = Extract<Entry, { t: 'owner' }>['act'];
+type Act = Extract<keyed.Entry, { t: 'owner' }>['act'];
 const OWNER: { [K in Act['t']]: (s: State, a: Extract<Act, { t: K }>, fail: Fail) => State } = {
   pause: (s, _a, fail) => (s.paused ? fail('paused twice') : { ...s, paused: true }),
   resume: (s, _a, fail) => (s.paused ? { ...s, paused: false } : fail('resumed while not paused')),
@@ -534,12 +532,12 @@ const OWNER: { [K in Act['t']]: (s: State, a: Extract<Act, { t: K }>, fail: Fail
   },
 };
 
-function need(s: State, key: Key, hash: Hash, fail: Fail): CallRecord {
+function need(s: State, key: keyed.Key, hash: keyed.Hash, fail: Fail): CallRecord {
   const found = lookup(s, key, hash);
   return found.t === 'known' ? found.record : fail(`${key}@${hash} was never declared`);
 }
 
-function put(calls: Calls, key: Key, hash: Hash, record: CallRecord): Calls {
+function put(calls: Calls, key: keyed.Key, hash: keyed.Hash, record: CallRecord): Calls {
   const byHash = new Map(calls.get(key) ?? []);
   byHash.set(hash, record);
   const next = new Map(calls);

@@ -1,8 +1,8 @@
+import { keyed } from '@unleashd/shared';
 import { type LiveCall, STARTS_AFTER_DEADLINE, liveCalls, runIdOf, stageOf } from './core';
 import { currentRunId } from './core';
 import type { Expedition } from './kernel';
 import { judgeRunOf, producerRun } from './runs';
-import { refOf } from './types';
 
 // Boot (R1): the log says what was started; the executor says what became of it. Every logged
 // start is settled from the executor's report, left running, re-issued (start is idempotent on its
@@ -46,7 +46,7 @@ async function recoverCall(e: Expedition, c: LiveCall): Promise<void> {
     return e.settle(
       c.key,
       c.hash,
-      { t: 'cancelled', partial: refOf(c.key, c.hash) },
+      { t: 'cancelled', partial: keyed.refOf(c.key, c.hash) },
       stage.t === 'judging' ? stage.spent : NOTHING
     );
   const late =

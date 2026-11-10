@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { keyed } from '@unleashd/shared';
 import { canonicalise } from './canonical';
 import { parseContract } from './contract';
 import {
@@ -21,17 +22,6 @@ import type { Expedition, KernelDeps } from './kernel';
 import type { DroppedInfo } from './ports';
 import type { Authored } from './protocol';
 import { dryRun } from './runner';
-import {
-  type BaseWake,
-  type Call,
-  type Contract,
-  type Disposition,
-  type Key,
-  LeaderAct,
-  type Outcome,
-  type RefId,
-  type WakeEvent,
-} from './types';
 
 // How a plan changes (DESIGN §5) and how it ends: the leader's wakes, the rewrite gates, and the
 // host's own evaluation of `done`. Each wake is a `leader/<n>` call, logged and charged like any
@@ -53,8 +43,8 @@ export type Checked =
 export async function checkPlan(
   deps: KernelDeps,
   folder: string,
-  contract: Contract,
-  known: (call: Authored) => Outcome | undefined
+  contract: keyed.Contract,
+  known: (call: Authored) => keyed.Outcome | undefined
 ): Promise<Checked> {
   const typed = await typecheckGate(folder, deps.gates);
   if (typed.t === 'failed') return { t: 'failed', gate: 'typecheck', issues: typed.errors };
@@ -103,7 +93,7 @@ export class Change {
   constructor(private readonly m: Expedition) {}
 
   /** Wake the leader for `event` once it is its turn, unless the same event is already queued. */
-  wake(event: BaseWake): void {
+  wake(event: keyed.BaseWake): void {
     const id = `${this.m.version()}:${canonicalJson(event)}`;
     if (this.inFlight.has(id)) return;
     this.inFlight.add(id);
@@ -122,8 +112,8 @@ export class Change {
   }
 
   /** Wake the leader until it settles on something other than a rewrite or retry that failed. */
-  private async resolve(event: BaseWake): Promise<Resolution> {
-    let next: WakeEvent = event;
+  private async resolve(event: keyed.BaseWake): Promise<Resolution> {
+    let next: keyed.WakeEvent = event;
     for (;;) {
       const d = await this.m.hostCall((s) => leaderCall(s, next, this.m.deps));
       if (d.t === 'closed') return { t: 'closed' };
@@ -135,7 +125,7 @@ export class Change {
     }
   }
 
-  async retry(keys: readonly Key[]): Promise<Resolution | Rejected> {
+  async retry(keys: readonly keyed.Key[]): Promise<Resolution | Rejected> {
     const r = await this.m.serial(() => this.m.retryKeys(keys, this.m.state().contract.leader));
     return r.t === 'done' ? { t: 'retried' } : { t: 'rejected', issues: [r.why] };
   }
@@ -145,8 +135,8 @@ export class Change {
   /** Copy the folder as the next version, run the gates in order, and apply. A rejection changes
    * nothing: no entry is written and the copy is removed (I8). */
   async rewrite(
-    act: Extract<LeaderAct, { t: 'rewrite' }>,
-    event: BaseWake
+    act: Extract<keyed.LeaderAct, { t: 'rewrite' }>,
+    event: keyed.BaseWake
   ): Promise<Resolution | Rejected> {
     const version = this.m.version() + 1;
     // Anything but an applied rewrite removes the copy, a kernel fault included.
@@ -163,8 +153,8 @@ export class Change {
   }
 
   private async gated(
-    act: Extract<LeaderAct, { t: 'rewrite' }>,
-    event: BaseWake,
+    act: Extract<keyed.LeaderAct, { t: 'rewrite' }>,
+    event: keyed.BaseWake,
     version: number
   ): Promise<Applied> {
     const m = this.m;
@@ -181,7 +171,7 @@ export class Change {
     if (checked.t === 'failed') return reject(checked.gate, checked.issues);
     const diff = diffOf(m.state(), checked.asked);
     const choose = diff.dropped.filter((k) => DISPOSAL[attached(m.state(), k).call.t] === 'choose');
-    const dispositions: Readonly<Record<Key, Disposition>> =
+    const dispositions: Readonly<Record<keyed.Key, keyed.Disposition>> =
       choose.length > 0 ? await m.deps.leader.dispose(diff, droppedInfo(m, choose)) : {};
     const proposal = { version, contract: parsed.contract, asked: checked.asked, dispositions };
     const verdict = judgeRewrite(m.state(), proposal);
@@ -225,7 +215,7 @@ export class Change {
 
   /** The plan returned `candidate`. Checks and reviews first, together; the owner only on a
    * candidate that passed them. All met: `finished: met`. Otherwise the leader hears the gaps. */
-  evaluate(candidate: RefId): void {
+  evaluate(candidate: keyed.RefId): void {
     if (this.evaluating) return;
     this.evaluating = true;
     void evaluateDone(this.m, candidate)
@@ -249,12 +239,12 @@ const reject = (gate: string, issues: readonly string[]): Applied => ({
   issues: issues.map((i) => `${gate}: ${i}`),
 });
 
-type ActHandler<K extends LeaderAct['t']> = (
+type ActHandler<K extends keyed.LeaderAct['t']> = (
   c: Change,
-  act: Extract<LeaderAct, { t: K }>,
-  event: BaseWake
+  act: Extract<keyed.LeaderAct, { t: K }>,
+  event: keyed.BaseWake
 ) => Promise<Resolution | Rejected>;
-const ACT: { [K in LeaderAct['t']]: ActHandler<K> } = {
+const ACT: { [K in keyed.LeaderAct['t']]: ActHandler<K> } = {
   continue: async () => ({ t: 'continue' }),
   stop: async (_c, act) => ({ t: 'stop', why: act.why }),
   rewrite: (c, act, event) => c.rewrite(act, event),
@@ -262,13 +252,13 @@ const ACT: { [K in LeaderAct['t']]: ActHandler<K> } = {
 };
 
 type Woke =
-  | { readonly t: 'act'; readonly act: LeaderAct }
+  | { readonly t: 'act'; readonly act: keyed.LeaderAct }
   | { readonly t: 'done'; readonly resolution: Resolution };
 /** A leader call settles `passed` with its act as `out`, `errored`, or `refused` (no budget or no
  * time left to reflect). */
-function actOf(o: Outcome): Woke {
+function actOf(o: keyed.Outcome): Woke {
   if (o.t === 'passed') {
-    const act = LeaderAct.safeParse(o.out);
+    const act = keyed.LeaderAct.safeParse(o.out);
     return act.success
       ? { t: 'act', act: act.data }
       : {
@@ -285,24 +275,24 @@ function actOf(o: Outcome): Woke {
 }
 
 /** What each resolution means, per event. A stop is the run ending "with a gap" (DESIGN §5). */
-type Resolve<K extends BaseWake['t']> = (
+type Resolve<K extends keyed.BaseWake['t']> = (
   m: Expedition,
-  event: Extract<BaseWake, { t: K }>,
+  event: Extract<keyed.BaseWake, { t: K }>,
   r: Resolution
 ) => Promise<void>;
 const notMet = (m: Expedition, gaps: readonly string[]) =>
   m.finish({ t: 'not-met', gaps: [...gaps] });
-async function onlyStop(m: Expedition, _event: BaseWake, r: Resolution): Promise<void> {
+async function onlyStop(m: Expedition, _event: keyed.BaseWake, r: Resolution): Promise<void> {
   if (r.t === 'stop') await notMet(m, [r.why]);
 }
-const ENDS_THE_PLAN: { readonly [K in BaseWake['t']]: boolean } = {
+const ENDS_THE_PLAN: { readonly [K in keyed.BaseWake['t']]: boolean } = {
   review: false,
   'ended-unmet': true,
   stuck: false,
   'budget-mark': false,
   drained: false,
 };
-const RESOLVED: { [K in BaseWake['t']]: Resolve<K> } = {
+const RESOLVED: { [K in keyed.BaseWake['t']]: Resolve<K> } = {
   review: async (m, event, r) => {
     const review = (decision: 'continue' | 'retry' | 'stop', why: string) =>
       m.append({ t: 'review', planVersion: m.version(), question: event.question, decision, why });
@@ -326,7 +316,7 @@ const RESOLVED: { [K in BaseWake['t']]: Resolve<K> } = {
   drained: onlyStop,
 };
 
-function leaderCall(s: State, event: WakeEvent, deps: KernelDeps): Call {
+function leaderCall(s: State, event: keyed.WakeEvent, deps: KernelDeps): keyed.Call {
   let n = 0;
   for (const byHash of s.calls.values())
     for (const r of byHash.values()) if (r.call.t === 'leader') n++;
@@ -334,7 +324,7 @@ function leaderCall(s: State, event: WakeEvent, deps: KernelDeps): Call {
 }
 
 /** The dry run of a rewrite answers from the log: a settled call's logged outcome, else nothing. */
-function knownOutcome(m: Expedition, a: Authored, folder: string): Outcome | undefined {
+function knownOutcome(m: Expedition, a: Authored, folder: string): keyed.Outcome | undefined {
   const s = m.state();
   const canon = canonicalise(a, { contract: s.contract, folder, providerOf: m.deps.providerOf });
   if (canon.t === 'invalid') return undefined;
@@ -344,12 +334,12 @@ function knownOutcome(m: Expedition, a: Authored, folder: string): Outcome | und
     : undefined;
 }
 
-function attached(s: State, key: Key) {
+function attached(s: State, key: keyed.Key) {
   for (const [hash, r] of s.calls.get(key) ?? []) if (ATTACHED[r.status.t]) return { hash, ...r };
   throw new Error(`${key} has no attached call`);
 }
 
-function droppedInfo(m: Expedition, keys: readonly Key[]): DroppedInfo[] {
+function droppedInfo(m: Expedition, keys: readonly keyed.Key[]): DroppedInfo[] {
   return keys.map((key) => {
     const r = attached(m.state(), key);
     const started = [...m.entries()]

@@ -228,6 +228,21 @@ review suppression verified; the `'call'` role shows no tools.
 
 ## 8. Steps (the first real GTM run is reachable after step 7)
 
+Built (2026-11-10, uncommitted at the time of writing): **steps 1 and 2.** The canonical types,
+the timeline fold and the wire projection (`KeyedRow`, `KeyedView`) are
+`shared/src/expedition-keyed.ts`, exported as `keyed` (the server reads `shared/dist`: rebuild with
+`pnpm --dir shared run build`); the projection is `expedition-kernel/projection.ts`;
+`Leader.wake(runId, …)`; the real clock is `expedition-kernel/clock.ts`; the typecheck gate checks
+plans against `authoring/index.ts` itself (the docs `expedition.d.ts` re-exports it); commands are
+tokenised by `expedition-kernel/argv.ts` and the static gate refuses shell syntax. The executor core
+is `server/src/expeditions-v1/executor/` (records, refs, context, commands and check judges; agent,
+review and ask runs settle `errored("not implemented: <kind>")`), tested by
+`server/test/expeditions-v1-executor.test.ts`. Choices the plan left open: a `check` run spec now
+carries `maxMinutes` (its call's `max.minutes`); a command runs in a detached `git worktree`, not a
+`cambium add` (it keeps no commits, so it needs no branch); the context holds no `workspaceId` yet
+(step 4 needs it and the launch line does not have it); record and ref file names are a slug plus
+24 hex of the id's sha256 (keys can be long and hold any character).
+
 | # | Change | Test through a real boundary | Risk |
 |---|---|---|---|
 | 1 | Kernel: `wake(runId, …)`; `labelled` timer at `runner.ts:143`; a real `Clock`; types and `timelineOf` move to `shared/src/expedition-keyed.ts`; the `KeyedView` projection | e2e suite unchanged; a projection JSON round trip | low |

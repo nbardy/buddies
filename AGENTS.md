@@ -60,6 +60,11 @@ client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen in
 server/src/expeditions/            → expeditions: one JSON record each, a serialized step per record,
                                      the `expedition` tool, /api/buddies/expeditions; design:
                                      docs/expeditions-lean-design.md
+server/src/expedition-kernel/      → keyed expeditions (v1): log, reconcile, plan runner, gates;
+                                     types in shared/src/expedition-keyed.ts (`keyed`); not wired
+                                     into server.ts yet: docs/expeditions/keyed/v1/CONNECT_PLAN.md
+server/src/expeditions-v1/executor/ → the kernel's Executor over the host: run records, refs,
+                                     commands and check judges (agent runs: later steps)
 client/src/components/buddies/Expedition*.tsx → chat card, rail section (both shells) and modal.
 {server,client}/src/swarm/          → QUARANTINED swarm/oompa viewer; outside code imports
                                      only swarm/index.ts (guard: swarm-quarantine.test.ts)

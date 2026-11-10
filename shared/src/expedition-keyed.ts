@@ -1,9 +1,11 @@
 import { z } from 'zod';
 
-// Expeditions v1 kernel: the canonical types (docs/expeditions/keyed/v1/DESIGN.md §4).
-// One source for the Contract, a Call, its Outcome and the Log. Everything read from disk or from
-// the plan process is parsed with these once (κ); the core works on the parsed values only.
-// They live here until the client needs them; then they move to shared/src (one type source).
+// Keyed expeditions (docs/expeditions/keyed/v1/DESIGN.md §4): the canonical types. One source for
+// the Contract, a Call, its Outcome, the Log, the timeline fold over it, and the wire projection a
+// client reads (KeyedRow, KeyedView). Everything read from disk, from a plan process or off the
+// wire is parsed with these once (κ); the kernel works on the parsed values only.
+// Exported from index.ts as the namespace `keyed`: names collide with the old expedition.ts.
+// Pattern: one type source (docs/patterns.md#one-type-source)
 
 const str = z.string();
 const nonEmpty = z.string().min(1);
@@ -55,11 +57,15 @@ export const Criterion = z.discriminatedUnion('t', [
   v('owner', { question: nonEmpty }),
 ]);
 export type Criterion = z.infer<typeof Criterion>;
+export const Budget = z
+  .object({ usd: z.number().positive(), hours: z.number().positive() })
+  .strict();
+export type Budget = z.infer<typeof Budget>;
 export const Contract = z
   .object({
     goal: nonEmpty,
     done: z.array(Criterion).min(1),
-    budget: z.object({ usd: z.number().positive(), hours: z.number().positive() }).strict(),
+    budget: Budget,
     /** Concurrency caps by pool name. An agent call reserves the pool named for its provider. */
     pools: z.record(nonEmpty, z.number().int().positive()),
     /** Appended verbatim to every brief. */
@@ -107,6 +113,7 @@ export const AgentCall = v('agent', {
 });
 export const CommandCall = v('command', {
   key: Key,
+  /** Argv as one string, without a shell: tokenised by the host (quotes and escapes only). */
   command: nonEmpty,
   on: Base,
   /** JSON Schema of stdout parsed as JSON, or `null` when stdout is not read. */
@@ -121,7 +128,7 @@ export const AskCall = v('ask', {
 });
 /** Host-made, never authored: one done criterion of the contract evaluated on the plan's
  * candidate (`of`). Judgment, not work: it runs past the deadline, like a judge. `max` bounds a
- * review (a check reserves nothing). */
+ * review (a check reserves nothing; its minutes bound the check). */
 export const VerdictCall = v('verdict', {
   key: Key,
   of: RefId,
@@ -171,6 +178,8 @@ export type CommandCall = z.infer<typeof CommandCall>;
 export type AskCall = z.infer<typeof AskCall>;
 export type VerdictCall = z.infer<typeof VerdictCall>;
 export type LeaderCall = z.infer<typeof LeaderCall>;
+export const CallKind = z.enum(['agent', 'command', 'ask', 'verdict', 'leader']);
+export type CallKind = Call['t'];
 
 export const Refusal = z.enum(['budget', 'deadline', 'pool', 'needs-owner']);
 export type Refusal = z.infer<typeof Refusal>;
@@ -230,6 +239,8 @@ export const OwnerAct = z.discriminatedUnion('t', [
   v('extend', { hours: z.number().positive() }),
 ]);
 export type OwnerAct = z.infer<typeof OwnerAct>;
+export const ReviewDecision = z.enum(['continue', 'rewrite', 'retry', 'stop']);
+export type ReviewDecision = z.infer<typeof ReviewDecision>;
 
 const at = { at: str };
 export const Entry = z.discriminatedUnion('t', [
@@ -267,10 +278,233 @@ export const Entry = z.discriminatedUnion('t', [
     ...at,
     planVersion: z.number().int().nonnegative(),
     question: str,
-    decision: z.enum(['continue', 'rewrite', 'retry', 'stop']),
+    decision: ReviewDecision,
     why: str,
   }),
   v('owner', { ...at, act: OwnerAct }),
   v('finished', { ...at, reason: Finish }),
 ]);
 export type Entry = z.infer<typeof Entry>;
+
+// ---- The timeline: a pure fold over the log, for a UI ----
+// A bar is one attempt of one (key, hash): from `started` to `settled`. A call refused before it
+// started is a zero-length bar, so every key the plan asked for appears.
+
+export const BarEnd = z.discriminatedUnion('t', [
+  v('open', {}),
+  v('settled', { at: str, outcome: Outcome }),
+]);
+export type BarEnd = z.infer<typeof BarEnd>;
+export const Bar = z
+  .object({
+    key: Key,
+    hash: nonEmpty,
+    kind: CallKind,
+    attempt: z.number().int().positive(),
+    /** The plan version current when it started (or was refused). */
+    planVersion: z.number().int(),
+    start: str,
+    end: BarEnd,
+  })
+  .strict();
+export type Bar = z.infer<typeof Bar>;
+export const Marker = z.discriminatedUnion('t', [
+  v('plan', {
+    at: str,
+    version: z.number().int().nonnegative(),
+    by: str,
+    why: str,
+    diff: Diff,
+    dropped: z.record(Key, Disposition),
+  }),
+  v('review', {
+    at: str,
+    planVersion: z.number().int().nonnegative(),
+    question: str,
+    decision: ReviewDecision,
+    why: str,
+  }),
+  v('finished', { at: str, reason: Finish }),
+]);
+export type Marker = z.infer<typeof Marker>;
+export type Timeline = { readonly bars: readonly Bar[]; readonly markers: readonly Marker[] };
+
+/** What the kernel could not act on (an executor reporting what a run cannot do, a plan call
+ * that would not canonicalise). Never silent; never state. */
+export const Fault = z.object({ at: str, what: str }).strict();
+export type Fault = z.infer<typeof Fault>;
+
+type Fold = {
+  version: number;
+  kinds: Map<string, CallKind>;
+  attempts: Map<string, number>;
+  open: Map<string, number>;
+  bars: Bar[];
+  markers: Marker[];
+};
+
+export function timelineOf(entries: readonly Entry[]): Timeline {
+  const f: Fold = {
+    version: -1,
+    kinds: new Map(),
+    attempts: new Map(),
+    open: new Map(),
+    bars: [],
+    markers: [],
+  };
+  for (const e of entries) (ON[e.t] as (f: Fold, e: Entry) => void)(f, e);
+  return { bars: f.bars, markers: f.markers };
+}
+
+const attemptOf = (f: Fold, ref: string) => f.attempts.get(ref) ?? 1;
+const kindOf = (f: Fold, ref: string): CallKind => {
+  const kind = f.kinds.get(ref);
+  if (kind === undefined) throw new Error(`timeline: ${ref} was never declared`);
+  return kind;
+};
+
+const ON: { [K in Entry['t']]: (f: Fold, e: Extract<Entry, { t: K }>) => void } = {
+  launched: () => {},
+  contract: () => {},
+  plan: (f, e) => {
+    f.version = e.version;
+    f.markers.push({
+      t: 'plan',
+      at: e.at,
+      version: e.version,
+      by: e.by,
+      why: e.why,
+      diff: e.diff,
+      dropped: e.dropped,
+    });
+  },
+  declared: (f, e) => {
+    f.kinds.set(refOf(e.call.key, e.hash), e.call.t);
+  },
+  started: (f, e) => {
+    const ref = refOf(e.key, e.hash);
+    f.open.set(ref, f.bars.length);
+    f.bars.push({
+      key: e.key,
+      hash: e.hash,
+      kind: kindOf(f, ref),
+      attempt: attemptOf(f, ref),
+      planVersion: f.version,
+      start: e.at,
+      end: { t: 'open' },
+    });
+  },
+  produced: () => {},
+  settled: (f, e) => {
+    const ref = refOf(e.key, e.hash);
+    const end: BarEnd = { t: 'settled', at: e.at, outcome: e.outcome };
+    const index = f.open.get(ref);
+    if (index === undefined) {
+      f.bars.push({
+        key: e.key,
+        hash: e.hash,
+        kind: kindOf(f, ref),
+        attempt: attemptOf(f, ref),
+        planVersion: f.version,
+        start: e.at,
+        end,
+      });
+      return;
+    }
+    f.open.delete(ref);
+    f.bars[index] = { ...(f.bars[index] as Bar), end };
+  },
+  retried: (f, e) => {
+    const ref = refOf(e.key, e.hash);
+    f.attempts.set(ref, attemptOf(f, ref) + 1);
+  },
+  review: (f, e) => {
+    f.markers.push({
+      t: 'review',
+      at: e.at,
+      planVersion: e.planVersion,
+      question: e.question,
+      decision: e.decision,
+      why: e.why,
+    });
+  },
+  owner: () => {},
+  finished: (f, e) => {
+    f.markers.push({ t: 'finished', at: e.at, reason: e.reason });
+  },
+};
+
+// ---- The wire: plain JSON projections of one expedition (no Maps, no optional fields) ----
+// Built on the server by a pure function of the kernel's state and timeline
+// (server/src/expedition-kernel/projection.ts). A field added later needs `.default(...)` here,
+// or a client parsing an older server's frame rejects it (AGENTS.md, `Conversation.done`).
+
+export const KeyedStatus = z.discriminatedUnion('t', [
+  v('running', {}),
+  v('paused', {}),
+  v('finished', { reason: Finish }),
+]);
+export type KeyedStatus = z.infer<typeof KeyedStatus>;
+export const KeyedPlan = z.discriminatedUnion('t', [
+  v('unplanned', {}),
+  v('planned', { version: z.number().int().nonnegative() }),
+]);
+export type KeyedPlan = z.infer<typeof KeyedPlan>;
+
+/** One expedition in a list. */
+export const KeyedRow = z
+  .object({
+    id: nonEmpty,
+    goal: str,
+    status: KeyedStatus,
+    plan: KeyedPlan,
+    spentUsd: z.number().nonnegative(),
+    reservedUsd: z.number().nonnegative(),
+    budget: Budget,
+    launchedAt: str,
+    deadline: str,
+  })
+  .strict();
+export type KeyedRow = z.infer<typeof KeyedRow>;
+
+/** Where the newest call under a key stands (the kernel's CallStatus, by name). */
+export const LaneStatus = z.enum([
+  'declared',
+  'running',
+  'judging',
+  'draining',
+  'cancelling',
+  'settled',
+]);
+export type LaneStatus = z.infer<typeof LaneStatus>;
+/** One key's history: every attempt of every hash it was declared with, in start order. */
+export const Lane = z
+  .object({ key: Key, kind: CallKind, status: LaneStatus, bars: z.array(Bar) })
+  .strict();
+export type Lane = z.infer<typeof Lane>;
+export const PendingAsk = z
+  .object({
+    ref: RefId,
+    key: Key,
+    question: nonEmpty,
+    answer: z.enum(['text', 'confirm']),
+    askedAt: str,
+  })
+  .strict();
+export type PendingAsk = z.infer<typeof PendingAsk>;
+/** A rewrite the rules gate sent to the owner. The kernel does not hold it (the Owner port does),
+ * so the host passes it to the projection. */
+export const PendingApproval = z.discriminatedUnion('t', [
+  v('none', {}),
+  v('pending', { diff: Diff, why: str, reasons: z.array(str) }),
+]);
+export type PendingApproval = z.infer<typeof PendingApproval>;
+
+export const KeyedView = KeyedRow.extend({
+  lanes: z.array(Lane),
+  markers: z.array(Marker),
+  asks: z.array(PendingAsk),
+  approval: PendingApproval,
+  faults: z.array(Fault),
+}).strict();
+export type KeyedView = z.infer<typeof KeyedView>;

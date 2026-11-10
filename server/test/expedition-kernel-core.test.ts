@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { keyed } from '@unleashd/shared';
 import {
   type Asked,
   type Decision,
@@ -24,18 +25,6 @@ import {
   stageOf,
   step,
 } from '../src/expedition-kernel/core';
-import {
-  type AgentCall,
-  type Call,
-  type Contract,
-  type Disposition,
-  Entry,
-  type Hash,
-  type Key,
-  type Outcome,
-  type Usage,
-  refOf,
-} from '../src/expedition-kernel/types';
 
 // The kernel core (server/src/expedition-kernel/core): a seeded random host driven THROUGH
 // decide/fold, checking DESIGN §6's guarantees after every step, then directed cases for each
@@ -44,7 +33,7 @@ import {
 const T0 = Date.parse('2026-11-10T00:00:00.000Z');
 const MIN = 60_000;
 
-const contractOf = (over: Partial<Contract> = {}): Contract => ({
+const contractOf = (over: Partial<keyed.Contract> = {}): keyed.Contract => ({
   goal: 'find the buyers',
   done: [{ t: 'owner', question: 'is it done?' }],
   budget: { usd: 20, hours: 2 },
@@ -57,7 +46,7 @@ const contractOf = (over: Partial<Contract> = {}): Contract => ({
 });
 
 type AgentOpts = { usd: number; pools: string[]; judged: boolean; brief: string };
-const agent = (key: Key, o: Partial<AgentOpts> = {}): AgentCall => ({
+const agent = (key: keyed.Key, o: Partial<AgentOpts> = {}): keyed.AgentCall => ({
   t: 'agent',
   key,
   by: { t: 'seat', provider: 'claude', model: 'm', effort: 'high' },
@@ -72,7 +61,7 @@ const agent = (key: Key, o: Partial<AgentOpts> = {}): AgentCall => ({
   max: { usd: o.usd ?? 1, minutes: 30 },
   judge: o.judged ? { t: 'check', command: 'true' } : { t: 'none' },
 });
-const command = (key: Key, pools: string[] = ['p2'], cmd = 'pnpm test'): Call => ({
+const command = (key: keyed.Key, pools: string[] = ['p2'], cmd = 'pnpm test'): keyed.Call => ({
   t: 'command',
   key,
   command: cmd,
@@ -81,14 +70,14 @@ const command = (key: Key, pools: string[] = ['p2'], cmd = 'pnpm test'): Call =>
   pools,
   maxMinutes: 5,
 });
-const ask = (key: Key, question = 'which segment?'): Call => ({
+const ask = (key: keyed.Key, question = 'which segment?'): keyed.Call => ({
   t: 'ask',
   key,
   question,
   answer: 'text',
 });
 
-type Body = Entry extends infer E ? (E extends Entry ? Omit<E, 'at'> : never) : never;
+type Body = keyed.Entry extends infer E ? (E extends keyed.Entry ? Omit<E, 'at'> : never) : never;
 
 /** The executor as the log-first host sees it (ports.ts): runs by derived id, idempotent start, a
  * closed id never starts, and it outlives the host. A start the host sent may not have arrived
@@ -129,11 +118,11 @@ class SimExecutor {
 /** A scripted host: every decision becomes the entries the real host would append, and every
  * start goes to the executor AFTER its entry is in the log (R1). */
 class Host {
-  log: Entry[] = [];
+  log: keyed.Entry[] = [];
   state!: State;
   nowMs: number;
   constructor(
-    contract: Contract = contractOf(),
+    contract: keyed.Contract = contractOf(),
     nowMs = T0,
     readonly ex: SimExecutor = new SimExecutor(() => true)
   ) {
@@ -155,14 +144,14 @@ class Host {
     return this.state.plan.t === 'planned' ? this.state.plan.version : -1;
   }
   append(body: Body): void {
-    const e = Entry.parse({ ...body, at: new Date(this.nowMs).toISOString() });
+    const e = keyed.Entry.parse({ ...body, at: new Date(this.nowMs).toISOString() });
     this.state = this.log.length === 0 ? fold([e]) : step(this.state, e, this.log.length);
     this.log.push(e);
   }
   /** The plan asks for `call`: declare it under the current plan (again, while it drains: the
    * declaration that re-attaches it waits until no other hash of its key runs), then apply the
    * decision. */
-  request(call: Call): Decision {
+  request(call: keyed.Call): Decision {
     const hash = hashOf(call);
     const known = lookup(this.state, call.key, hash);
     if (
@@ -183,17 +172,17 @@ class Host {
       this.settle(
         call.key,
         d.cancel.hash,
-        { t: 'cancelled', partial: refOf(call.key, d.cancel.hash) },
+        { t: 'cancelled', partial: keyed.refOf(call.key, d.cancel.hash) },
         reported(0)
       );
     return d;
   }
-  runId(key: Key, hash: Hash, role: 'producer' | 'judge'): string {
+  runId(key: keyed.Key, hash: keyed.Hash, role: 'producer' | 'judge'): string {
     const found = lookup(this.state, key, hash);
     const attempt = found.t === 'known' ? found.record.attempt : 1;
     return runIdOf(this.state.id, key, hash, attempt, role);
   }
-  produce(key: Key, hash: Hash): void {
+  produce(key: keyed.Key, hash: keyed.Hash): void {
     const judgeRunId = this.runId(key, hash, 'judge');
     // The producer's run is over; its id stays open until the call settles.
     this.ex.runs.set(this.runId(key, hash, 'producer'), 'done');
@@ -201,24 +190,28 @@ class Host {
       t: 'produced',
       key,
       hash,
-      ref: refOf(key, hash),
+      ref: keyed.refOf(key, hash),
       out: { n: 1 },
       judgeRunId,
       spent: reported(0),
     });
     this.ex.start(judgeRunId);
   }
-  settle(key: Key, hash: Hash, outcome: Outcome, spent: Usage): void {
+  settle(key: keyed.Key, hash: keyed.Hash, outcome: keyed.Outcome, spent: keyed.Usage): void {
     const ids = [this.runId(key, hash, 'producer'), this.runId(key, hash, 'judge')];
     this.append({ t: 'settled', key, hash, outcome, spent });
     this.ex.settle(ids);
   }
-  retry(key: Key, hash: Hash): void {
+  retry(key: keyed.Key, hash: keyed.Hash): void {
     this.append({ t: 'retried', key, hash, by: 'owner' });
   }
   /** Through the rules gate, as the real host does: the entry carries the gate's dispositions
    * (the leader's plus `finish` for each dropped ask). */
-  rewrite(version: number, asked: readonly Asked[], dispositions: Record<Key, Disposition>): void {
+  rewrite(
+    version: number,
+    asked: readonly Asked[],
+    dispositions: Record<keyed.Key, keyed.Disposition>
+  ): void {
     const v = judgeRewrite(this.state, {
       version,
       contract: this.state.contract,
@@ -237,15 +230,15 @@ class Host {
   }
 }
 const emptyDiff = () => ({ reused: [], attached: [], dropped: [], started: [], newCostUsd: 0 });
-const reported = (usd: number): Usage => ({ t: 'reported', usd });
-const passed = (key: Key, hash: Hash): Outcome => ({
+const reported = (usd: number): keyed.Usage => ({ t: 'reported', usd });
+const passed = (key: keyed.Key, hash: keyed.Hash): keyed.Outcome => ({
   t: 'passed',
-  ref: refOf(key, hash),
+  ref: keyed.refOf(key, hash),
   out: { ok: true },
 });
-const askedOf = (calls: readonly Call[]): Asked[] =>
+const askedOf = (calls: readonly keyed.Call[]): Asked[] =>
   calls.map((call) => ({ call, hash: hashOf(call) }));
-const statusOf = (s: State, call: Call) => {
+const statusOf = (s: State, call: keyed.Call) => {
   const found = lookup(s, call.key, hashOf(call));
   assert.equal(found.t, 'known');
   return found.t === 'known' ? found.record.status : assert.fail('unknown');
@@ -286,7 +279,7 @@ type Stats = {
 };
 
 /** The one attached record of a key, if any. */
-function attachedOf(s: State, key: Key) {
+function attachedOf(s: State, key: keyed.Key) {
   for (const r of s.calls.get(key)?.values() ?? [])
     if (r.status.t === 'running' || r.status.t === 'judging') return r;
   return undefined;
@@ -299,11 +292,11 @@ function simulate(seed: number, steps: number, stats: Stats): void {
 
   // Each key has one kind and two versions of its call (a rewrite may swap one for the other: a
   // changed hash; for an ask, a reworded question).
-  const universe = new Map<Key, [Call, Call]>();
+  const universe = new Map<keyed.Key, [keyed.Call, keyed.Call]>();
   for (let i = 0; i < 12; i++) {
     const key = `ph${i % 3}/step/k${i}`;
     const kind = rnd();
-    const make = (v: number): Call => {
+    const make = (v: number): keyed.Call => {
       if (kind < 0.6)
         return agent(key, {
           usd: pick([0.5, 1, 1.5, 2, 3]),
@@ -316,11 +309,11 @@ function simulate(seed: number, steps: number, stats: Stats): void {
     };
     universe.set(key, [make(0), make(1)]);
   }
-  const randomPlan = (): Call[] =>
+  const randomPlan = (): keyed.Call[] =>
     [...universe.values()].filter(() => chance(0.65)).map((variants) => pick(variants));
 
   let host!: Host;
-  let plan!: Call[];
+  let plan!: keyed.Call[];
   // Independent bookkeeping, built from the log as it is appended: what the core must agree with.
   let loggedStarts: Set<string>;
   let firstOutcome: Map<string, string>;
@@ -344,13 +337,13 @@ function simulate(seed: number, steps: number, stats: Stats): void {
   const reconcile = () => {
     for (const call of plan) request(call);
   };
-  const request = (call: Call) => {
+  const request = (call: keyed.Call) => {
     const d = host.request(call);
     stats.decisions[d.t] = (stats.decisions[d.t] ?? 0) + 1;
     if (call.t === 'ask') assert.ok(!['refuse', 'wait', 'replace'].includes(d.t), `ask: ${d.t}`);
     if (d.t === 'reuse') {
       scan();
-      const first = firstOutcome.get(refOf(call.key, hashOf(call)));
+      const first = firstOutcome.get(keyed.refOf(call.key, hashOf(call)));
       assert.equal(JSON.stringify(d.outcome), first, 'reuse returned another outcome');
     }
   };
@@ -358,17 +351,17 @@ function simulate(seed: number, steps: number, stats: Stats): void {
   /** Read the entries appended since the last scan into the independent bookkeeping. */
   const scan = () => {
     for (; checked < host.log.length; checked++) {
-      const e = host.log[checked] as Entry;
+      const e = host.log[checked] as keyed.Entry;
       if (e.t === 'started') {
         // I1 in the log: one `started` per (key, hash, attempt), i.e. per derived run id.
         assert.ok(!loggedStarts.has(e.runId), `I1: ${e.runId} logged started twice`);
         loggedStarts.add(e.runId);
-        startedReserved.set(refOf(e.key, e.hash), JSON.stringify(e.reserved));
+        startedReserved.set(keyed.refOf(e.key, e.hash), JSON.stringify(e.reserved));
         stats.starts++;
       }
-      if (e.t === 'retried') firstOutcome.delete(refOf(e.key, e.hash));
+      if (e.t === 'retried') firstOutcome.delete(keyed.refOf(e.key, e.hash));
       if (e.t === 'settled') {
-        const ref = refOf(e.key, e.hash);
+        const ref = keyed.refOf(e.key, e.hash);
         assert.ok(!firstOutcome.has(ref), `I3: ${ref} settled twice`);
         firstOutcome.set(ref, JSON.stringify(e.outcome));
         const r = lookup(host.state, e.key, e.hash);
@@ -392,7 +385,7 @@ function simulate(seed: number, steps: number, stats: Stats): void {
         if (r.status.t === 'settled')
           assert.equal(
             JSON.stringify(r.status.outcome),
-            firstOutcome.get(refOf(key, hash)),
+            firstOutcome.get(keyed.refOf(key, hash)),
             'I3: outcome changed'
           );
     // Reservations and pool slots, recomputed from the live calls; a draining call still holds
@@ -403,7 +396,7 @@ function simulate(seed: number, steps: number, stats: Stats): void {
     for (const c of liveCalls(s)) {
       assert.equal(
         JSON.stringify(c.status.run.reserved),
-        startedReserved.get(refOf(c.key, c.hash))
+        startedReserved.get(keyed.refOf(c.key, c.hash))
       );
       if (c.call.t === 'ask') assert.notEqual(c.status.t, 'cancelling', 'I6: an ask cancelled');
       reserved += c.status.run.reserved.usd;
@@ -431,11 +424,11 @@ function simulate(seed: number, steps: number, stats: Stats): void {
 
   /** I4: after a reconcile, every attached run is asked for (with its hash) by the current plan. */
   const checkI4 = () => {
-    const asked = new Set(plan.map((c) => refOf(c.key, hashOf(c))));
+    const asked = new Set(plan.map((c) => keyed.refOf(c.key, hashOf(c))));
     for (const c of liveCalls(host.state))
       if (c.status.t === 'running' || c.status.t === 'judging')
         assert.ok(
-          asked.has(refOf(c.key, c.hash)),
+          asked.has(keyed.refOf(c.key, c.hash)),
           `I4: ${c.key} runs but the plan does not ask for it`
         );
   };
@@ -451,7 +444,7 @@ function simulate(seed: number, steps: number, stats: Stats): void {
     );
   };
 
-  const usage = (reservedUsd: number): Usage =>
+  const usage = (reservedUsd: number): keyed.Usage =>
     chance(0.2) ? { t: 'unreported' } : reported(Math.round(rnd() * reservedUsd * 100) / 100);
 
   /** A run the executor has running ends. A run whose start has not arrived cannot end. */
@@ -470,9 +463,9 @@ function simulate(seed: number, steps: number, stats: Stats): void {
       chance(0.85)
     )
       return host.produce(c.key, c.hash);
-    const ref = refOf(c.key, c.hash);
+    const ref = keyed.refOf(c.key, c.hash);
     const r = rnd();
-    const outcome: Outcome =
+    const outcome: keyed.Outcome =
       profile === 'ask'
         ? passed(c.key, c.hash)
         : c.status.t === 'cancelling' || (profile === 'judged-agent' && stage.t === 'producing')
@@ -514,21 +507,21 @@ function simulate(seed: number, steps: number, stats: Stats): void {
     const drops = dropped(host.state, new Set(next.map((c) => c.key)));
     const choose = drops.filter((k) => attachedOf(host.state, k)?.call.t !== 'ask');
     const asks = drops.filter((k) => attachedOf(host.state, k)?.call.t === 'ask');
-    const dispositions: Record<Key, Disposition> = Object.fromEntries(
+    const dispositions: Record<keyed.Key, keyed.Disposition> = Object.fromEntries(
       choose.map((k) => [k, pick(['cancel', 'finish'] as const)])
     );
     const mutation = rnd();
     const version = host.version + 1;
-    const judge = (d: Record<Key, Disposition>, contract = host.state.contract) =>
+    const judge = (d: Record<keyed.Key, keyed.Disposition>, contract = host.state.contract) =>
       judgeRewrite(host.state, { version, contract, asked, dispositions: d });
     if (mutation < 0.05 && choose.length > 0) {
-      const { [choose[0] as Key]: _, ...missing } = dispositions;
+      const { [choose[0] as keyed.Key]: _, ...missing } = dispositions;
       assert.deepEqual(judge(missing), { t: 'reject', why: { t: 'undecided', keys: [choose[0]] } });
       stats.rejects++;
       return;
     }
     if (mutation < 0.1 && asks.length > 0) {
-      const cancelled = { ...dispositions, [asks[0] as Key]: 'cancel' as const };
+      const cancelled = { ...dispositions, [asks[0] as keyed.Key]: 'cancel' as const };
       assert.deepEqual(judge(cancelled), {
         t: 'reject',
         why: { t: 'ask-cancelled', keys: [asks[0]] },
@@ -583,7 +576,12 @@ function simulate(seed: number, steps: number, stats: Stats): void {
       const late =
         producing && !STARTS_AFTER_DEADLINE[c.call.t] && host.nowMs >= host.state.deadlineMs;
       if (c.status.t === 'cancelling') {
-        host.settle(c.key, c.hash, { t: 'cancelled', partial: refOf(c.key, c.hash) }, reported(0));
+        host.settle(
+          c.key,
+          c.hash,
+          { t: 'cancelled', partial: keyed.refOf(c.key, c.hash) },
+          reported(0)
+        );
         stats.settledUnstarted++;
       } else if (late) {
         host.settle(c.key, c.hash, { t: 'refused', reason: 'deadline' }, reported(0));
@@ -611,7 +609,7 @@ function simulate(seed: number, steps: number, stats: Stats): void {
       host.settle(
         c.key,
         c.hash,
-        { t: 'cancelled', partial: refOf(c.key, c.hash) },
+        { t: 'cancelled', partial: keyed.refOf(c.key, c.hash) },
         usage(c.status.run.reserved.usd)
       );
     host.append({ t: 'finished', reason: { t: d.t } });
@@ -621,7 +619,7 @@ function simulate(seed: number, steps: number, stats: Stats): void {
       host.settle(
         c.key,
         c.hash,
-        { t: 'cancelled', partial: refOf(c.key, c.hash) },
+        { t: 'cancelled', partial: keyed.refOf(c.key, c.hash) },
         usage(c.status.run.reserved.usd)
       );
     // Starts still in flight or in limbo land on closed ids: no-ops.
@@ -828,9 +826,9 @@ describe('decide', () => {
     h.produce(c.key, hash);
     assert.equal(statusOf(h.state, c).t, 'judging');
     assert.equal(h.request(c).t, 'attach');
-    const failed: Outcome = {
+    const failed: keyed.Outcome = {
       t: 'failed',
-      ref: refOf(c.key, hash),
+      ref: keyed.refOf(c.key, hash),
       out: { n: 1 },
       why: 'quotes not on the page',
     };
@@ -1072,7 +1070,7 @@ describe('rewrite', () => {
     h.settle(
       c.key,
       hashOf(c),
-      { t: 'cancelled', partial: refOf(c.key, hashOf(c)) },
+      { t: 'cancelled', partial: keyed.refOf(c.key, hashOf(c)) },
       reported(0.08)
     );
     assert.equal(h.state.poolsInUse.get('p1'), 1);
@@ -1112,7 +1110,7 @@ describe('quint fixes', () => {
     h.request(work);
     h.produce(work.key, hashOf(work));
     h.settle(work.key, hashOf(work), passed(work.key, hashOf(work)), reported(0.5));
-    const v = (dispositions: Record<Key, Disposition>) =>
+    const v = (dispositions: Record<keyed.Key, keyed.Disposition>) =>
       judgeRewrite(h.state, {
         version: 1,
         contract: h.state.contract,
@@ -1148,7 +1146,7 @@ describe('quint fixes', () => {
         h.settle(
           q.key,
           hashOf(q),
-          { t: 'cancelled', partial: refOf(q.key, hashOf(q)) },
+          { t: 'cancelled', partial: keyed.refOf(q.key, hashOf(q)) },
           reported(0)
         ),
       /cannot settle cancelled/
@@ -1212,14 +1210,14 @@ describe('quint fixes', () => {
     h.settle(
       gone.key,
       hashOf(gone),
-      { t: 'cancelled', partial: refOf(gone.key, hashOf(gone)) },
+      { t: 'cancelled', partial: keyed.refOf(gone.key, hashOf(gone)) },
       reported(0.9)
     );
     assert.equal(h.state.spentUsd, 1);
   });
 
   test('the launch plan is version 0 and comes before any declaration; a key keeps its kind', () => {
-    const launched = Entry.parse({
+    const launched = keyed.Entry.parse({
       t: 'launched',
       at: new Date(T0).toISOString(),
       id: 'exp',
@@ -1227,7 +1225,7 @@ describe('quint fixes', () => {
       baseSha: 'b',
     });
     const c = agent('a/b');
-    const declared = Entry.parse({
+    const declared = keyed.Entry.parse({
       t: 'declared',
       at: new Date(T0).toISOString(),
       call: c,
@@ -1235,7 +1233,7 @@ describe('quint fixes', () => {
       planVersion: 0,
     });
     assert.throws(() => fold([launched, declared]), /current plan is -1/);
-    const plan1 = Entry.parse({
+    const plan1 = keyed.Entry.parse({
       t: 'plan',
       at: new Date(T0).toISOString(),
       version: 1,
@@ -1256,8 +1254,8 @@ describe('quint fixes', () => {
 describe('hashOf', () => {
   test('key order and undefined members do not change it; content does', () => {
     const c = agent('h/one');
-    const reordered = Object.fromEntries(Object.entries(c).reverse()) as Call;
-    const withUndefined = { ...c, extra: undefined } as unknown as Call;
+    const reordered = Object.fromEntries(Object.entries(c).reverse()) as keyed.Call;
+    const withUndefined = { ...c, extra: undefined } as unknown as keyed.Call;
     assert.equal(hashOf(reordered), hashOf(c));
     assert.equal(hashOf(withUndefined), hashOf(c));
     assert.notEqual(hashOf(agent('h/one', { brief: 'research h/one ' })), hashOf(c));
@@ -1268,7 +1266,7 @@ describe('hashOf', () => {
 describe('fold rejects impossible logs', () => {
   test('a `settled` for a call never declared names its index', () => {
     const h = new Host();
-    const bad = Entry.parse({
+    const bad = keyed.Entry.parse({
       t: 'settled',
       at: new Date(T0).toISOString(),
       key: 'ghost/k',
@@ -1287,10 +1285,10 @@ describe('fold rejects impossible logs', () => {
     const h = new Host();
     const c = agent('twice/k');
     h.request(c);
-    const started = h.log.at(-1) as Entry;
+    const started = h.log.at(-1) as keyed.Entry;
     assert.throws(() => fold([...h.log, started]), ImpossibleEntry);
     h.settle(c.key, hashOf(c), passed(c.key, hashOf(c)), reported(0.1));
-    const settled = h.log.at(-1) as Entry;
+    const settled = h.log.at(-1) as keyed.Entry;
     assert.throws(() => fold([...h.log, settled]), ImpossibleEntry);
   });
 
