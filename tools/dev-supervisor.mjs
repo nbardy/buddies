@@ -25,11 +25,15 @@ import { LOCAL_DOMAIN_ENV, detectLocalDomain } from './local-domain.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // `dev-server` honours PORT like the backend it runs (server.ts), so a test can drive the real
-// dev entry on a spare port beside the owner's live runtime. `dev` stays fixed: Vite proxies to 7499.
+// dev entry on a spare port beside the owner's live runtime. `dev` and `dev-client` move with
+// UNLEASHD_DEV_CLIENT_PORT / UNLEASHD_DEV_API_PORT, the same variables Vite and the backend read
+// (server/src/dev-ports.ts, which this mirrors: an .mjs cannot import TypeScript).
+const DEV_CLIENT_PORT = Number(process.env.UNLEASHD_DEV_CLIENT_PORT || 7489);
+const DEV_API_PORT = Number(process.env.UNLEASHD_DEV_API_PORT || 7499);
 const DEV_PORTS = {
-  dev: [7489, 7499],
-  'dev-server': [Number(process.env.PORT ?? 7499)],
-  'dev-client': [7489],
+  dev: [DEV_CLIENT_PORT, DEV_API_PORT],
+  'dev-server': [Number(process.env.PORT ?? DEV_API_PORT)],
+  'dev-client': [DEV_CLIENT_PORT],
 };
 // Covers the backend's shutdown drain grace plus its state-flush watchdog.
 const REPLACE_TIMEOUT_MS = 10_000;

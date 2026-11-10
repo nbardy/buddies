@@ -14,10 +14,10 @@ import {
 import { loginPageHtml } from '../server/src/auth/login-page';
 import { type AuthPolicy, describePolicy, resolveAuthPolicy } from '../server/src/auth/policy';
 import { type TailnetOwnerWatch, watchTailnetOwner } from '../server/src/auth/tailnet-owner';
+import { devPorts } from '../server/src/dev-ports';
 import { isViteClientModule, patchViteResumeReload } from './src/pwa/resume';
 
-const DEV_CLIENT_PORT = 7489;
-const API_SERVER_PORT = 7499;
+const { client: DEV_CLIENT_PORT, api: API_SERVER_PORT } = devPorts();
 const LOCAL_DOMAIN = 'unleashd.localhost';
 // Any tailnet's MagicDNS name: Setup's Connect mobile serves this port over
 // Tailscale, and the owner's own tailnet name here 403'd every other install.

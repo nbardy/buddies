@@ -73,6 +73,7 @@ import {
   overlayHistoryFields,
 } from './conversations/runtime';
 import { replaceRuntimeConfig } from './conversations/runtime-config';
+import { devPorts } from './dev-ports';
 import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
 import { registerExpeditionRoutes } from './expeditions/routes';
 import { callDirectory, expeditionsV1Root } from './expeditions-v1/call-directory';
@@ -161,8 +162,7 @@ const ephemeralExecute =
   };
 const LISTEN_HOST = resolveListenHost();
 
-const DEV_CLIENT_PORT = 7489;
-const DEV_API_PORT = 7499;
+const { client: DEV_CLIENT_PORT, api: DEV_API_PORT } = devPorts();
 const PORT =
   process.env.PORT || (process.env.NODE_ENV === 'development' ? DEV_API_PORT : DEV_CLIENT_PORT);
 const portNumber = typeof PORT === 'string' ? Number.parseInt(PORT, 10) : PORT;
