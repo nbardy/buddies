@@ -47,7 +47,7 @@
     "format": "biome format --write ."
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "2.6.6",
     "json-schema-to-typescript": "^15.0.4",
     "tsrs": "0.23.0-ts7.1.0-beta",
     "tsx": "^4.7.0"

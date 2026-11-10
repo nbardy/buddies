@@ -1,12 +1,17 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-  "organizeImports": {
-    "enabled": true
+  "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": { "level": "on", "options": { "identifierOrder": "lexicographic" } }
+      }
+    }
   },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "correctness": {
         "noUnusedVariables": "warn",
         "noUnusedImports": "warn",
@@ -14,11 +19,13 @@
       },
       "complexity": {
         "noForEach": "off",
-        "noStaticOnlyClass": "off"
+        "noStaticOnlyClass": "off",
+        "noImportantStyles": "off"
       },
       "style": {
         "noNonNullAssertion": "off",
-        "noParameterAssign": "warn"
+        "noParameterAssign": "warn",
+        "noDescendingSpecificity": "off"
       },
       "suspicious": {
         "noExplicitAny": "warn",
@@ -44,24 +51,35 @@
       "trailingCommas": "es5"
     }
   },
+  "css": { "formatter": { "enabled": false } },
+  "html": {
+    "formatter": { "enabled": false },
+    "linter": { "enabled": false },
+    "assist": { "enabled": false }
+  },
+  "markdown": { "formatter": { "enabled": false }, "linter": { "enabled": false } },
+  "yaml": { "formatter": { "enabled": false }, "linter": { "enabled": false } },
   "json": {
     "parser": {
       "allowComments": true
     }
   },
   "files": {
-    "ignore": [
-      "node_modules",
-      "dist",
-      ".git",
-      "*.min.js",
-      "public",
-      "runs",
-      "vendor",
-      "agent_notes",
-      "shared/src/generated",
-      "crates/target",
-      "crates/*/index.d.ts"
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/.git",
+      "!**/*.min.js",
+      "!**/public",
+      "!**/runs",
+      "!**/vendor",
+      "!**/agent_notes",
+      "!**/shared/src/generated",
+      "!**/crates/target",
+      "!**/crates/*/index.d.ts",
+      "!**/client/src/components/buddies/emoji-data.json",
+      "!**/server/test/fixtures/tool-contracts/input-schemas.json"
     ]
   }
 }
