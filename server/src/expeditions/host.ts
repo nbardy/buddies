@@ -1,6 +1,6 @@
 import fsp from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
-import type { Actor, BuddiesCore, ChannelRef, Post, PostQuery, Run } from '@unleashd/buddies-core';
+import type { Actor, BuddiesCore, Post, Run } from '@unleashd/buddies-core';
 import {
   ALLOWED,
   type Act,
@@ -25,8 +25,9 @@ import {
 } from '@unleashd/shared';
 import { type TurnDirectory, WORKSPACE_DIRECTORY } from '../buddies/briefing';
 import { OWNER, buddyActor } from '../buddies/core';
-import { type BuddyEvents, announcePost } from '../buddies/events';
+import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
+import { type Place, type Thread, createOwnerThread } from '../buddies/owner-thread';
 import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
 import * as brief from './brief';
@@ -103,6 +104,20 @@ const isPass = (a: Attempt) =>
 
 export function createExpeditionHost(o: ExpeditionHostOptions) {
   const { core, events, root, gate } = o;
+  const ownerThread = createOwnerThread({ core, events });
+  const { inform, freshPosts, pageAfter } = ownerThread;
+  /** The chat thread's parameters: crew-authored, rooted at the crew's `expedition_chat` post. */
+  const chatThread = (x: Launched): Thread => ({
+    author: buddyActor(x.state.launch.crewBuddyId),
+    channelId: x.state.launch.chatChannelId,
+    evidence: `expedition:${x.id}`,
+    root: {
+      body: `⛺ ${x.charter.name}: talk to the manager here, in this thread.`,
+      purpose: 'expedition_chat',
+      key: `exp:${x.id}:chat`,
+    },
+    statusPurpose: 'expedition_status',
+  });
   const iso = () => (o.now ?? (() => new Date()))().toISOString();
   const records = loadAll(root);
   const chains = new Map<string, Promise<unknown>>();
@@ -223,35 +238,6 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
     line: (x, a, p) => postStatus(x, `exp:${x.id}:ack:${p.id}`, a.body),
     posted: async () => undefined,
   };
-  /** The channel feed and every thread's replies after `seen`, oldest first. Review 2026-11-03:
-   * the channel feed leaves thread replies out, so a "pass" answered in the thread of the "Reply
-   * pass or fail" line was never read. */
-  async function freshPosts(channelId: string, seen: string): Promise<Post[]> {
-    const roots = await pageAfter({ kind: 'channel', channelId }, '');
-    const stats = await core.threadStats(
-      OWNER,
-      channelId,
-      roots.map((p) => p.id)
-    );
-    const threads = stats.filter((t) => t.lastReplyOrd > seen);
-    const replies = await Promise.all(
-      threads.map((t) => pageAfter({ kind: 'thread', rootId: t.rootId }, seen))
-    );
-    const all = new Map([...roots, ...replies.flat()].map((p) => [p.id, p]));
-    return [...all.values()].filter((p) => p.ord > seen).sort((a, b) => (a.ord < b.ord ? -1 : 1));
-  }
-  async function pageAfter(query: PostQuery, after: string): Promise<Post[]> {
-    const out: Post[] = [];
-    let before: { ord: string } | undefined;
-    for (;;) {
-      const page = await core.listPosts(OWNER, query, before, 100);
-      const newer = page.posts.filter((p) => p.ord > after);
-      out.push(...newer);
-      if (!page.next || newer.length < page.posts.length) return out;
-      before = page.next;
-    }
-  }
-
   async function settleAll(start: Launched): Promise<Launched> {
     let x = start;
     for (const a of x.attempts)
@@ -478,47 +464,10 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
    * each time, while replies in one thread reach one seat that remembers the talk (runner.ts
    * deliverJob → seatTurn on the root). The key makes it idempotent, so it is also how the root
    * is found again; an expedition launched before the thread gets its root on first use. */
-  async function chatRoot(x: Launched): Promise<string> {
-    const { crewBuddyId, chatChannelId } = x.state.launch;
-    const body = `⛺ ${x.charter.name}: talk to the manager here, in this thread.`;
-    const p = { body, purpose: 'expedition_chat', key: `exp:${x.id}:chat` };
-    // Quiet: review 2026-11-03, boot announced one root per expedition, a notification each.
-    const at = { channel: { kind: 'id' as const, id: chatChannelId } };
-    return inform(buddyActor(crewBuddyId), at, p, x.id, 'quiet');
-  }
+  const chatRoot = (x: Launched) => ownerThread.threadRoot(chatThread(x));
   /** Crew-authored, in the chat thread; the key makes a repeat a no-op. */
-  async function postStatus(x: Launched, key: string, body: string): Promise<void> {
-    const { crewBuddyId, chatChannelId } = x.state.launch;
-    const place = {
-      channel: { kind: 'id' as const, id: chatChannelId },
-      replyToId: await chatRoot(x),
-    };
-    const p = { body, purpose: 'expedition_status', key };
-    await inform(buddyActor(crewBuddyId), place, p, x.id, 'announce');
-  }
-  async function inform(
-    by: Actor,
-    at: Place,
-    p: { body: string; purpose: string; key: string },
-    id: string,
-    notice: Notice
-  ): Promise<string> {
-    const input = { ...p, kind: 'inform' as const, evidence: [`expedition:${id}`], mentions: [] };
-    const write = await core.post(by, at.channel, {
-      ...input,
-      replyToId: at.replyToId,
-      broadcast: false,
-    });
-    if (write.created) await NOTICE[notice](write.post);
-    return write.post.id;
-  }
-  /** A new post is announced (notifications, live feeds), or only refreshes the clients. */
-  const NOTICE: Record<Notice, (post: Post) => Promise<void>> = {
-    announce: async (post) => {
-      await announcePost({ core, events }, OWNER, post);
-    },
-    quiet: async () => events.emit({ kind: 'changed' }),
-  };
+  const postStatus = (x: Launched, key: string, body: string) =>
+    ownerThread.postStatus(chatThread(x), key, body);
 
   type Handler = (x: never, a: never, by: string) => Promise<Acted>;
   const ok = async (x: Expedition): Promise<Acted> => ({ t: 'ok', x: await commit(x) });
@@ -700,7 +649,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       purpose: 'expedition',
       key: `exp:${x.id}:card`,
     };
-    await inform(launcher, place, card, x.id, 'announce');
+    await inform(launcher, place, card, `expedition:${x.id}`, 'announce');
     return x;
   }
 
@@ -934,8 +883,6 @@ const PLACE: { [K in Origin['t']]: (o: Extract<Origin, { t: K }>, launcher: Acto
   thread: (o) => ({ channel: { kind: 'id', id: o.channelId }, replyToId: o.rootId }),
   direct: (_o, launcher) => ({ channel: { kind: 'direct', members: [OWNER, launcher] } }),
 };
-type Place = { channel: ChannelRef; replyToId?: string };
-type Notice = 'announce' | 'quiet';
 export type Seat =
   | { t: 'none' }
   | { t: 'manager'; id: string }

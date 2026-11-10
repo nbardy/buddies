@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { OWNER, buddyActor } from '../src/buddies/core';
+import { createBuddyEvents } from '../src/buddies/events';
+import { type ReplyTarget, publishOwnerPost } from '../src/buddies/routes';
 import { runChecks } from '../src/expeditions/checks';
 import {
   BUDGETS,
@@ -577,6 +579,49 @@ test('launch takes origin/main as the base when local main is behind, and a1 sta
     assert.equal(git(treeOf(f, id, 1), 'rev-parse', 'HEAD'), ahead);
     const brief = (await f.core.getPost(OWNER, f.requestOf(id, 1))).body;
     assert.match(brief, new RegExp(`BASE ${ahead}`));
+  } finally {
+    await f.close();
+  }
+});
+
+// Catches: publishOwnerPost not telling the host WHICH thread an owner post lands in. A kernel that
+// consumes owner replies inside an ask's thread needs the root id; without it an owner reply in the
+// leader's DM starts an unbudgeted leader turn.
+test('an owner post reaches consumes with the thread it replies into', async () => {
+  const f = await fixture();
+  try {
+    const id = await launched(f);
+    const channel = { kind: 'id' as const, id: f.launch(id).chatChannelId };
+    const feed = await f.core.listPosts(
+      OWNER,
+      { kind: 'channel', channelId: channel.id },
+      null,
+      50
+    );
+    const root = feed.posts.find((p) => p.purpose === 'expedition_chat');
+    assert.ok(root, 'the chat thread has a root');
+    const seen: ReplyTarget[] = [];
+    const deps = {
+      core: f.core,
+      events: createBuddyEvents(),
+      uploadsRoot: () => f.scratch,
+      hostCommands: {
+        consumes: (_c: string, _b: string, thread: ReplyTarget) => {
+          seen.push(thread);
+          return false;
+        },
+      },
+    };
+    const input = { kind: 'inform' as const, evidence: [], broadcast: false as const };
+    await publishOwnerPost(
+      deps,
+      OWNER,
+      channel,
+      { ...input, body: 'in thread', replyToId: root.id, key: 'k1' },
+      []
+    );
+    await publishOwnerPost(deps, OWNER, channel, { ...input, body: 'in channel', key: 'k2' }, []);
+    assert.deepEqual(seen, [{ t: 'reply', to: root.id }, { t: 'root' }]);
   } finally {
     await f.close();
   }

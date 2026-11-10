@@ -176,8 +176,13 @@ function mentionConfigsByBuddy(
  * 2026-11-03: dropping the mentions alone was not enough, the chat thread's subscribed manager
  * seat still got a delivery of every owner post. */
 export interface HostCommands {
-  consumes(channelId: string, body: string): boolean;
+  /** `thread` names where the post lands: a host that owns a thread (an ask) consumes the owner's
+   * replies inside it, and without the thread id an owner reply in the leader's DM starts an
+   * unbudgeted leader turn. */
+  consumes(channelId: string, body: string, thread: ReplyTarget): boolean;
 }
+/** Where an owner post lands: the channel feed, or a reply under the post `to`. */
+export type ReplyTarget = { t: 'root' } | { t: 'reply'; to: string };
 export const NO_HOST_COMMANDS: HostCommands = { consumes: () => false };
 
 export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 'mentionConfigs'>;
@@ -212,7 +217,8 @@ export async function publishOwnerPost(
     resolved.mentioned.map((buddy) => buddy.id),
     chosen
   );
-  const consumed = author.kind === 'owner' && deps.hostCommands.consumes(target.id, body);
+  const thread: ReplyTarget = input.replyToId ? { t: 'reply', to: input.replyToId } : { t: 'root' };
+  const consumed = author.kind === 'owner' && deps.hostCommands.consumes(target.id, body, thread);
   const { post, created } = await deps.core.post(
     author,
     { kind: 'id', id: target.id },
