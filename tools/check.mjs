@@ -41,9 +41,16 @@ async function timed(name, run) {
   return { name, code, seconds: (performance.now() - started) / 1000 };
 }
 
-/** Paths are relative to where `pnpm check` was typed (pnpm runs scripts from the root). */
-export function biomePaths(argv, invokedFrom = process.env.INIT_CWD ?? process.cwd()) {
-  return argv.length === 0 ? ['.'] : argv.map((file) => path.resolve(invokedFrom, file));
+/**
+ * Paths are relative to where `pnpm check` was typed (pnpm runs scripts from the root and records
+ * the typing directory as INIT_CWD). An INIT_CWD outside this checkout belongs to an outer pnpm
+ * that started this one (a test fixture under `pnpm test:tools`): Biome then aborted with "path is
+ * expected to be under the root" (2026-11-11), so only an INIT_CWD inside the checkout counts.
+ */
+export function biomePaths(argv, initCwd = process.env.INIT_CWD) {
+  const inside = initCwd !== undefined && !path.relative(repositoryRoot, initCwd).startsWith('..');
+  const base = inside ? initCwd : process.cwd();
+  return argv.length === 0 ? ['.'] : argv.map((file) => path.resolve(base, file));
 }
 
 export async function main(argv) {
