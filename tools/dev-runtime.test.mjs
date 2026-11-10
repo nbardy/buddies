@@ -15,7 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { startCompiler, tscLauncher } from './dev-runtime.mjs';
+import { startCompiler } from './dev-runtime.mjs';
+import { tscLauncher } from './lib/tsc.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 

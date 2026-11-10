@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Runs one named task: dev | dev-server | dev-client | build | typecheck.
+// Runs one named task: dev | dev-server | dev-client | build. (`pnpm typecheck` is
+// tools/typecheck.mjs, single-flight across processes.)
 //
 // Dev tasks host their long-lived tools in THIS process (tools/dev-runtime.mjs):
 // compilers, Vite and the backend runner; only the backend server itself is a
@@ -7,7 +8,7 @@
 //
 // Dev tasks claim one dev runtime per data directory (a lock file holding the
 // owner's PID) and refuse dev ports held by anything else. `--replace` stops the
-// recorded owner first. Build and typecheck take no dev-runtime lock. The shared
+// recorded owner first. Build takes no dev-runtime lock. The shared
 // package stages each one-shot build and atomically replaces its emitted files;
 // a restart that races a separate source change backs off and retries
 // (tools/watch-server.mjs).
@@ -78,19 +79,6 @@ export function taskPlan(task, env = process.env) {
         ],
         services: [],
       };
-    case 'typecheck':
-      return {
-        steps: [
-          buildShared,
-          pnpm('--filter', '@unleashd/server', 'typecheck'),
-          pnpm('--filter', '@unleashd/client', 'exec', 'tsc', '-b'),
-          // Tests are typechecked here, not in `tsc -b` (which `vite build` also
-          // runs): a test-only type error must fail typecheck, never the build.
-          pnpm('--filter', '@unleashd/client', 'exec', 'tsc', '-p', 'tsconfig.test.json'),
-          pnpm('--dir', 'vendor/agent-cli-tool', 'typecheck'),
-        ],
-        services: [],
-      };
     case 'dev-server':
       return {
         steps:
@@ -108,9 +96,7 @@ export function taskPlan(task, env = process.env) {
     case 'dev':
       return { steps: [ensureAddons], services: ['compilers', 'client-build', 'backend', 'vite'] };
     default:
-      throw new Error(
-        `Unknown task "${task}"; expected dev, dev-server, dev-client, build or typecheck`
-      );
+      throw new Error(`Unknown task "${task}"; expected dev, dev-server, dev-client or build`);
   }
 }
 

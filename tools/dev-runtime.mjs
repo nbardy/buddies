@@ -15,12 +15,13 @@
 // backend loads it, which is what restarted a backend mid-startup on
 // 2026-09-25 (see tools/watch-server.mjs).
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ensureAddonBuild } from './ensure-addons.mjs';
+import { tscLauncher } from './lib/tsc.mjs';
 import { createBackendRunner, esbuildCheck } from './watch-server.mjs';
 
 /** Prefix every line of a chunk, for tools that print through one stdout. */
@@ -32,12 +33,6 @@ export function linePrefixer(prefix, write) {
     partial = lines.pop();
     for (const line of lines) write(`${prefix} ${line}\n`);
   };
-}
-
-/** The `tsc` launcher of the TypeScript package that owns `configPath` (its manifest's `bin`). */
-export function tscLauncher(configPath) {
-  const manifest = createRequire(configPath).resolve('typescript/package.json');
-  return path.join(path.dirname(manifest), JSON.parse(readFileSync(manifest, 'utf8')).bin.tsc);
 }
 
 // The line native `tsc --watch` prints at the end of every pass, whatever its error count.
