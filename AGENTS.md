@@ -396,6 +396,12 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   their next registration; folders already missing before that cannot be inferred. Turns use the
   newest registered folder that exists. There is no workspace move/fold route or MCP tool.
   Guards: `server/test/workspace-registration.test.ts`; failed-spawn handling stays in agent-cli.
+- Add a dependency from the repo root with a filter (`pnpm add <pkg> --filter @unleashd/server`),
+  then run `pnpm install --frozen-lockfile` and `pnpm typecheck`. `pnpm --dir server add ...`
+  installed only the server's packages and pruned everyone else's from the shared virtual store:
+  on 2026-11-10 it left `client/node_modules/vite` a dangling symlink, and `tsc -b` in the client
+  failed with "Cannot find module 'vite'" eight hours later, after the commits were pushed.
+  Chain the push after the checks with `&&`, never `;`.
 - When source is broken, `server/dist/*.js` (and `shared/dist/`) is the oracle
   for what the code did before it broke — check it before git archaeology.
 - The formatter is **biome** (`pnpm format`, `pnpm lint:fix`; config in
