@@ -348,7 +348,8 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   `tsc --noEmit` checks ZERO files and exits 0 on a broken tree — it reported
   success on three `ReferenceError`-grade unresolved identifiers on 2026-08-20.
   `vite build` does not catch them either (esbuild strips types, no scope
-  analysis). `pnpm typecheck` runs `tsc -b`; never fall back to `--noEmit`.
+  analysis). `pnpm typecheck` checks the client's app and node configs with
+  `-p` each (the projects `tsc -b` covers); never fall back to `--noEmit`.
 - TypeScript is 7.0.2 (the native compiler), one exact pin in server, client,
   shared and the submodule. Per project it is 6-10x faster than 5.9 with ~30%
   less memory (server test config: 5.0-9.5 s / 700 MB -> 0.9-1.4 s / 490 MB,
@@ -361,8 +362,37 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   find the launcher with `tscLauncher()` (`tools/lib/tsc.mjs`). The dev
   compilers are native `tsc --watch` children that emit into a stage and
   publish by rename, so a backend never loads a truncated module
-  (`tools/dev-runtime.mjs`, guard `tools/dev-runtime.test.mjs`). Editors need
-  TS 7 language support; the old `tsserver.js` is gone.
+  (`tools/dev-runtime.mjs`, guard `tools/dev-runtime.test.mjs`). Each runs
+  through `tools/lib/bound-child.mjs`, which stops it when the supervisor's pipe
+  closes: a SIGKILLed or crashed supervisor left all three `tsc --watch` running
+  (2026-11-11; guard `tools/bound-child.test.mjs`).
+- Editors: use TypeScript 7's language server, the workspace's
+  `node_modules/typescript` (7.0.2; the native binary serves it with
+  `tsc --lsp`). tsrs has no language server. The old JS `tsserver.js` is gone in
+  TS 7; nothing in the repo pins an editor to it (no `.vscode`, no `tsdk`).
+- A second dev runtime runs beside the live one on other ports:
+  `UNLEASHD_DEV_CLIENT_PORT` / `UNLEASHD_DEV_API_PORT` (default 7489/7499,
+  `server/src/dev-ports.ts`). Prove a dev-runtime change with temp stores
+  (`UNLEASHD_DATA_DIR`, `UNLEASHD_BUDDIES_DB`, `BUDDIES_HOME`, which also disable
+  Buddy execution) and `UNLEASHD_CHECKOUT_ROOT` at a non-git temp dir, so the
+  upstream check never fetches in the main checkout.
+- While iterating, run `pnpm check [paths...]`: Biome (lint + format check) on
+  your paths, then the default typecheck on every project, under the typecheck
+  lock, with one summary line per part (whole repo ~15 s, two files ~10 s at
+  load 10-40, 2026-11-11). `pnpm lint` and `pnpm typecheck` still run alone.
+- `pnpm typecheck` runs **tsrs** (npm `tsrs`, pinned 0.23.0-ts7.1.0-beta, a Rust
+  port of TypeScript; EXPERIMENTAL) since 2026-11-11, at the owner's request:
+  2.7-3.6 s and 257 MB peak against 4.9-6.6 s and 551-581 MB for the same
+  projects on tsc 7.0.2 (back to back, load ~19). Its diagnostics matched tsc
+  7.0.2 byte for byte on every project, clean and with four injected errors.
+  `pnpm typecheck:reference` runs tsc 7 instead. A project tsrs cannot run
+  (not installed, crashed, unknown option) is checked by tsc, with a
+  `FALLBACK:` line giving the reason: never silent. CI runs
+  `pnpm typecheck:cross-check`: both checkers on every project, failing if
+  either fails or their diagnostics differ (order ignored). Never pass tsrs's own
+  `--fast`. Re-run the cross-check after bumping tsrs or TypeScript. Guards:
+  `tools/diagnostics.test.mjs` (the comparison), `tools/typecheck.test.mjs`
+  (the fallback).
 - `pnpm typecheck` is single-flight across every process on the machine
   (`tools/typecheck.mjs`): concurrent agents' typecheckers contended for the
   machine (2026-11-10). One lock file in the temp dir holds the holder's pid;
@@ -371,11 +401,6 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   or runs next. A dead holder's lock (or one older than 10 min) is reclaimed.
   It takes no dev-runtime lock, so it is safe while a dev runtime runs. Every
   project is checked even after one fails. Guard: `tools/typecheck.test.mjs`.
-  `pnpm typecheck:fast` is the same runner on tsrs (the Rust port), opt-in and
-  EXPERIMENTAL: its diagnostics matched tsc 7.0.2 byte for byte on every
-  project, clean and with four injected errors, at ~1/3 the memory (server
-  153 MB). Never pass tsrs's own `--fast`. Re-compare before trusting it on a
-  new tsrs or TypeScript version.
 - Recursive `rg` output is rewritten by rtk and is NOT safe to cite. The hook
   turns directory-target searches into `rtk rg`, which substitutes tokens
   silently (`compact_memory` reads back as `n_memory`, `compactProject` as
@@ -454,6 +479,13 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   `noImportantStyles`, and `noStaticElementInteractions` (the same call as
   `useKeyWithClickEvents`), are off. Generated JSON (`emoji-data.json`, the
   tool-contract snapshot) is not formatted. `pnpm lint` is green; keep it so.
+  Two type-aware rules are errors: `noFloatingPromises` (57 findings, 4 real
+  bugs; deliberate fire-and-forget is written `void call()`) and
+  `useAwaitThenable`. They double lint time (~0.5 s -> ~1.1 s). Biome cannot
+  resolve a plan folder's bare `expedition` import, so un-awaited plan calls
+  there are NOT caught, and tsc does not report a floating promise either.
+  `noMisusedPromises` (presence-check noise, partial Express coverage) and
+  `noUnnecessaryConditions` (mostly false) stay off.
   `biome.json` ignores `vendor` wholesale. It previously ignored only
   `vendor/agent-cli-tool/manual_tests/runs`, so a root `pnpm format` reformatted
   the SUBMODULE's source — the submodule carries no formatter config of its own,
