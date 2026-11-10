@@ -76,7 +76,16 @@ test('a backend without the Oompa host boots over old Oompa journals and leaves 
     backend.kill('SIGKILL');
     if (backend.exitCode === null && backend.signalCode === null)
       await new Promise((resolve) => backend.once('exit', resolve));
-    fs.rmSync(root, { recursive: true, force: true });
+    // The backend's Buddy MCP relay is detached by design and outlives the SIGKILL; it was still
+    // writing its state file under `data` while this removed the tree (ENOTEMPTY, 1 run in 3 at
+    // load ~40, 2026-11-11). Stop it, and retry the removal as the other backend tests do.
+    const relayState = path.join(data, 'buddy-mcp.json');
+    if (fs.existsSync(relayState)) {
+      try {
+        process.kill(JSON.parse(fs.readFileSync(relayState, 'utf8')).pid, 'SIGTERM');
+      } catch {}
+    }
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
   });
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(
