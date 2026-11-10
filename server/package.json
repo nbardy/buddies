@@ -20,7 +20,9 @@
     "qrcode": "^1.5.4",
     "uuid": "^13.0.0",
     "ws": "^8.14.2",
-    "zod": "^3.24.0"
+    "yaml": "^2.9.1",
+    "zod": "^3.24.0",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@types/compression": "^1.8.1",
