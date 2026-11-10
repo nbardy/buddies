@@ -50,7 +50,7 @@
     "@biomejs/biome": "2.6.6",
     "json-schema-to-typescript": "^15.0.4",
     "tsrs": "0.23.0-ts7.1.0-beta",
-    "tsx": "^4.7.0"
+    "tsx": "^4.23.15"
   },
   "bin": {
     "unleashd": "./bin/unleashd.js",
