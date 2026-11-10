@@ -25,6 +25,7 @@
     "desktop:build": "node tools/desktop-build.mjs",
     "start": "node server/dist/server.js",
     "typecheck": "node tools/typecheck.mjs",
+    "typecheck:fast": "node tools/typecheck.mjs --tsrs",
     "test": "pnpm typecheck && pnpm test:package && pnpm test:server && pnpm test:client && pnpm test:dev-supervisor && pnpm test:tools && pnpm test:cli && pnpm test:api",
     "test:server": "node tools/ensure-addons.mjs && node tools/test-server.mjs",
     "test:server:fast": "node tools/ensure-addons.mjs && node tools/test-server.mjs --fast",
@@ -48,14 +49,25 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "json-schema-to-typescript": "^15.0.4",
+    "tsrs": "0.23.0-ts7.1.0-beta",
     "tsx": "^4.7.0"
   },
   "bin": {
     "unleashd": "./bin/unleashd.js",
     "buddies": "./bin/unleashd.js"
   },
-  "files": ["bin", "tools/preflight.mjs", "server/dist", "server/relay", "client/dist"],
-  "bundledDependencies": ["@nbardy/agent-cli", "@unleashd/buddies-core", "@unleashd/shared"],
+  "files": [
+    "bin",
+    "tools/preflight.mjs",
+    "server/dist",
+    "server/relay",
+    "client/dist"
+  ],
+  "bundledDependencies": [
+    "@nbardy/agent-cli",
+    "@unleashd/buddies-core",
+    "@unleashd/shared"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@nbardy/agent-cli": "workspace:0.1.1",

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Pattern: fix-guards (docs/patterns.md#fix-guards)
-// `pnpm typecheck`, single-flight across every process on the machine.
+// `pnpm typecheck` (and the experimental `pnpm typecheck:fast`, `--tsrs`), single-flight across
+// every process on the machine.
 //
 // Why: concurrent agents each ran their own typecheck at once and the typecheckers contended
 // for the machine (owner, 2026-11-10); nothing serialized them. Now one lock file in the temp
@@ -23,6 +24,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,21 +41,35 @@ const STALE_LOCK_MS = 10 * 60_000;
 const UNREADABLE_GRACE_MS = 5_000;
 const POLL_MS = 200;
 
-const tsc = (configPath, ...args) => ({
-  label: `tsc ${path.relative(repositoryRoot, configPath)} ${args.join(' ')}`.trim(),
-  args: [tscLauncher(configPath), ...args],
+const at = (...parts) => path.join(repositoryRoot, ...parts);
+const relative = (file) => path.relative(repositoryRoot, file);
+
+/** `node <launcher> ...args`, labelled for failure reports. */
+const step = (name, launcher, args) => ({
+  label: `${name} ${args.map((arg) => (path.isAbsolute(arg) ? relative(arg) : arg)).join(' ')}`,
+  args: [launcher, ...args],
 });
 
-/** What `pnpm typecheck` runs. `shared` first: the others check against its emitted types. */
-function plan() {
-  const at = (...parts) => path.join(repositoryRoot, ...parts);
-  return {
-    prerequisite: {
-      label: 'shared build',
-      args: [at('shared', 'scripts', 'build.mjs')],
-    },
-    // Every check runs even after one fails, so one run reports every project's errors.
-    checks: [
+/** The tsrs launcher (root devDependency), through its manifest's `bin` like tsc's. */
+function tsrsLauncher() {
+  const manifest = createRequire(at('package.json')).resolve('tsrs/package.json');
+  return path.join(path.dirname(manifest), JSON.parse(readFileSync(manifest, 'utf8')).bin.tsrs);
+}
+
+/**
+ * Checker = Tsc ⊕ Tsrs: which compiler checks the projects.
+ *   tsc  - `pnpm typecheck`: each package's own TypeScript 7.
+ *   tsrs - `pnpm typecheck:fast`, EXPERIMENTAL: the Rust port (npm `tsrs`). On 2026-11-10 its
+ *          diagnostics were byte-identical to tsc 7.0.2's on every project, clean and with four
+ *          injected errors of different kinds, at about a third of the wall time and memory.
+ *          Never with tsrs's own `--fast` (modes that may differ from TypeScript). The client
+ *          projects are checked with `-p` each, the same set `tsc -b` checks.
+ * Every check runs even after one fails, so one run reports every project's errors.
+ */
+const CHECKERS = {
+  tsc: () => {
+    const tsc = (config, ...args) => step('tsc', tscLauncher(config), args);
+    return [
       tsc(at('server', 'tsconfig.test.json'), '-p', at('server', 'tsconfig.test.json')),
       tsc(at('client', 'tsconfig.json'), '-b', at('client', 'tsconfig.json')),
       // Tests are typechecked here, not in `tsc -b` (which `vite build` also runs): a test-only
@@ -62,11 +78,36 @@ function plan() {
       tsc(
         at('vendor', 'agent-cli-tool', 'tsconfig.json'),
         '-p',
-        at('vendor', 'agent-cli-tool', 'tsconfig.json'),
+        at('vendor', 'agent-cli-tool'),
         '--noEmit'
       ),
-    ],
+    ];
+  },
+  tsrs: () => {
+    const tsrs = (...args) => step('tsrs', tsrsLauncher(), args);
+    return [
+      tsrs('-p', at('server', 'tsconfig.test.json')),
+      tsrs('-p', at('client', 'tsconfig.app.json')),
+      tsrs('-p', at('client', 'tsconfig.node.json')),
+      tsrs('-p', at('client', 'tsconfig.test.json')),
+      tsrs('-p', at('vendor', 'agent-cli-tool', 'tsconfig.json'), '--noEmit'),
+    ];
+  },
+};
+
+/** What a typecheck runs. `shared` builds first: the others check against its emitted types. */
+function plan(checker) {
+  return {
+    prerequisite: { label: 'shared build', args: [at('shared', 'scripts', 'build.mjs')] },
+    checks: CHECKERS[checker](),
   };
+}
+
+/** `--tsrs` picks the experimental checker; anything else is a usage error. */
+export function parseArgs(argv) {
+  if (argv.length === 0) return { checker: 'tsc' };
+  if (argv.length === 1 && argv[0] === '--tsrs') return { checker: 'tsrs' };
+  throw new Error(`usage: node tools/typecheck.mjs [--tsrs]; got ${argv.join(' ')}`);
 }
 
 // --- the tree -----------------------------------------------------------------------------
@@ -236,7 +277,7 @@ function writeResult(result) {
   renameSync(temporary, RESULT_FILE);
 }
 
-export async function main() {
+export async function main({ checker }) {
   const log = (line) => process.stderr.write(`[typecheck] ${line}\n`);
   const startedAt = Date.now();
   const current = { child: null, interrupted: false };
@@ -250,9 +291,11 @@ export async function main() {
   try {
     const before = fingerprint();
     const previous = readResult();
-    // Reuse only a result that finished while this run waited for it, on this exact tree.
+    // Reuse only a result that finished while this run waited for it, on this exact tree, from
+    // the same checker.
     if (
       previous.kind === 'finished' &&
+      previous.checker === checker &&
       previous.finishedAt >= startedAt &&
       previous.fingerprint === before
     ) {
@@ -260,11 +303,12 @@ export async function main() {
       log(`reused the result of PID ${previous.pid}, which finished while this one waited`);
       return previous.code;
     }
-    const { code, output } = await runPlan(plan(), current);
+    const { code, output } = await runPlan(plan(checker), current);
     // A tree that changed mid-run makes the result describe no single tree: record nothing.
     if (code !== 130 && fingerprint() === before) {
       writeResult({
         kind: 'finished',
+        checker,
         pid: process.pid,
         finishedAt: Date.now(),
         fingerprint: before,
@@ -280,5 +324,5 @@ export async function main() {
 
 // realpath: import.meta.url is resolved through symlinks (macOS /var -> /private/var), argv is not.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exitCode = await main();
+  process.exitCode = await main(parseArgs(process.argv.slice(2)));
 }
