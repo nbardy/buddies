@@ -209,7 +209,7 @@ function DmScreen({ conversationId, context }: { conversationId: string; context
   const builder = row !== null && buddy === null;
   useEffect(() => {
     if (!builder) return;
-    navigate(`/chat/${encodeURIComponent(conversationId)}`, {
+    void navigate(`/chat/${encodeURIComponent(conversationId)}`, {
       replace: true,
       state: mobileConversationRouteState({ ...location, search: backSearch }),
     });
@@ -230,7 +230,7 @@ function DmScreen({ conversationId, context }: { conversationId: string; context
       backTo={`${location.pathname}${backSearch}`}
       onConversation={(next) => {
         back.set('dm', next);
-        navigate(`${location.pathname}?${back}`, { replace: true });
+        void navigate(`${location.pathname}?${back}`, { replace: true });
       }}
       composeShell={(composer) => (
         <MobileChannelComposeFrame title={name}>{composer}</MobileChannelComposeFrame>

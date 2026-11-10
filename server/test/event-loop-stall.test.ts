@@ -74,7 +74,7 @@ test('a blocked event loop is journaled once per activity; an idle loop is not',
     assert.equal(lines[0].route, 'GET /api/usage');
     assert.ok(lines[1].ms >= 150);
   } finally {
-    stop();
+    await stop();
     Reflect.deleteProperty(process.env, 'UNLEASHD_DATA_DIR');
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -102,7 +102,7 @@ test('labelled() names an otherwise anonymous timer, so its stall is not blamed 
     assert.equal(record.label, 'timer hot-poller');
     assert.equal(record.route, null);
   } finally {
-    stop();
+    await stop();
     Reflect.deleteProperty(process.env, 'UNLEASHD_DATA_DIR');
     fs.rmSync(directory, { recursive: true, force: true });
   }

@@ -35,7 +35,7 @@ export function BuddyBuilderResultCard({ event }: { event: BuddyBuilderEvent }) 
         context: { buddyId: buddy.id, workspaceId: result.homeWorkspace.id, buddyProjectId: null },
       },
     });
-    navigate(`/chat/${id}`);
+    void navigate(`/chat/${id}`);
   };
 
   if (archived.has(buddy.id)) return null;

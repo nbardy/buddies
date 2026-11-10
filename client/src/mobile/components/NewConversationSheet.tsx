@@ -69,7 +69,7 @@ export function NewConversationSheet({ kind, onClose }: { kind: CreateKind; onCl
           onBusyChange={setBusy}
           onCreated={(conversationId) => {
             onClose();
-            navigate(`/chat/${conversationId}`, { state: chatRouteState });
+            void navigate(`/chat/${conversationId}`, { state: chatRouteState });
           }}
         />
       </div>

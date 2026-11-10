@@ -174,7 +174,7 @@ await new Promise((done) => {
       }
       queue.splice(i, 1);
       running.set(unit.name, (running.get(unit.name) ?? 0) + 1);
-      run(unit).then(() => {
+      void run(unit).then(() => {
         running.set(unit.name, running.get(unit.name) - 1);
         fill();
       });

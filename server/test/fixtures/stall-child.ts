@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   await delay(1_500);
   await flushPerf();
   await journal.flush();
-  stop();
+  await stop();
 }
 
 void main();

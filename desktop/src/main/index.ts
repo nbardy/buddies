@@ -51,7 +51,7 @@ function sparePort(): Promise<number> {
 
 async function waitForServer(origin: string, token: string, server: { exited: Promise<number> }) {
   let exitCode: number | null = null;
-  server.exited.then((code) => {
+  void server.exited.then((code) => {
     exitCode = code;
   });
   for (let attempt = 0; attempt < 600; attempt++) {

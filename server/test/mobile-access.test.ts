@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { MobileAccessSchema } from '@unleashd/shared';
-import { readMobileAccess } from '../src/auth/mobile-access';
+import express from 'express';
+import { readMobileAccess, registerMobileAccessRoutes } from '../src/auth/mobile-access';
+import { PairingCodes } from '../src/auth/pairing';
 import { digestToken } from '../src/auth/policy';
 import { readTailnetOwner } from '../src/auth/tailnet-owner';
 import { tempDir } from './fixtures/temp';
@@ -158,4 +160,33 @@ test('an unreadable CLI is an error, never "no owner"', async () => {
     mode: 0o755,
   });
   await assert.rejects(readTailnetOwner([bin]), /GUI failed to start/);
+});
+
+// Regression (2026-11-11, found by Biome's noMisusedPromises): Express 4 does not catch a rejected
+// async handler, so a pairing that threw left the phone's request hanging and the rejection
+// unhandled, which ends the backend process. It must answer 500 instead.
+test('a pairing that throws answers 500, not a hung request', async (context) => {
+  const pairing = new PairingCodes();
+  pairing.issue = () => {
+    throw new Error('code store unavailable');
+  };
+  const app = express();
+  registerMobileAccessRoutes(app, {
+    tailscale: [await fakeTailscale(RUNNING, web({ [`${HOST}:443`]: 'http://127.0.0.1:7489' }))],
+    uiPort: 7489,
+    auth: required,
+    key,
+    pairing,
+  });
+  const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
+    const started = app.listen(0, '127.0.0.1', () => resolve(started));
+  });
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/mobile-access/pairing`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(response.status, 500);
 });

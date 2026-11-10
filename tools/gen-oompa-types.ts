@@ -58,4 +58,7 @@ async function main() {
   console.log(`Wrote ${schemaFiles.length} type(s) to ${OUT_FILE}`);
 }
 
-main();
+main().catch((error: unknown) => {
+  console.error(error);
+  process.exitCode = 1;
+});

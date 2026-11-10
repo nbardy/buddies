@@ -187,7 +187,7 @@ function ArchiveBuddy({ buddy }: { buddy: Buddy }) {
   const [confirming, setConfirming] = useState(false);
   const action = useBuddyAction(async () => {
     hideArchivedBuddy(buddy.id);
-    navigate('/buddies', { replace: true });
+    void navigate('/buddies', { replace: true });
   });
   const archive = () =>
     void action.run('archive', () => buddyWrite('buddy.archive', { buddyId: buddy.id }));

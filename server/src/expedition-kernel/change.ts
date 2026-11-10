@@ -219,7 +219,7 @@ export class Change {
         dropped: { ...fresh.dropped },
       });
       // The `cancel` ones are cancelling now; the kernel re-derives their cancels from the log.
-      await m.restartPlan(version);
+      m.restartPlan(version);
       return { t: 'applied' } as const;
     });
   }

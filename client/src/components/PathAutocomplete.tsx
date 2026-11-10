@@ -211,7 +211,7 @@ export function PathAutocomplete({
     }
 
     validationDebounceRef.current = setTimeout(() => {
-      validatePath(value);
+      void validatePath(value);
     }, 300);
 
     return () => {
@@ -240,7 +240,7 @@ export function PathAutocomplete({
     }
 
     debounceRef.current = setTimeout(() => {
-      fetchFsSuggestions(value);
+      void fetchFsSuggestions(value);
     }, 150);
 
     return () => {
@@ -290,7 +290,7 @@ export function PathAutocomplete({
     }
     // Fetch filesystem suggestions on focus if we don't have any
     if (fsSuggestions.length === 0 && looksLikePath) {
-      fetchFsSuggestions(value);
+      void fetchFsSuggestions(value);
     }
   };
 
@@ -300,7 +300,7 @@ export function PathAutocomplete({
     setShowSuggestions(false);
     inputRef.current?.focus();
     // Immediately fetch contents of the selected directory
-    fetchFsSuggestions(newValue);
+    void fetchFsSuggestions(newValue);
   };
 
   const handleCreateFolder = async () => {
@@ -378,7 +378,7 @@ export function PathAutocomplete({
         if (action.type === 'path') {
           handleSelectPath(action.path);
         } else {
-          handleCreateFolder();
+          void handleCreateFolder();
         }
         break;
       }
@@ -394,7 +394,7 @@ export function PathAutocomplete({
           handleSelectPath(action.path);
         } else {
           e.preventDefault();
-          handleCreateFolder();
+          void handleCreateFolder();
         }
         break;
       }

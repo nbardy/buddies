@@ -145,11 +145,18 @@ export function registerMobileAccessRoutes(app: Express, deps: MobileAccessDeps)
   // POST: it mints a code (the GET surface stays read-only). Only a caller
   // already past the gate reaches it, so only the owner can pair a phone.
   app.post('/api/mobile-access/pairing', async (_req, res) => {
-    const access = await readMobileAccess(deps);
-    if (access.kind !== 'ready') {
-      res.status(409).json({ error: 'not_ready', access });
-      return;
+    // Express 4 does not catch a rejected handler: a failed read or pairing left the request
+    // unanswered and the rejection unhandled (found by Biome's noMisusedPromises, 2026-11-11).
+    try {
+      const access = await readMobileAccess(deps);
+      if (access.kind !== 'ready') {
+        res.status(409).json({ error: 'not_ready', access });
+        return;
+      }
+      res.json(await pairingFor(access.url, deps.pairing));
+    } catch (error) {
+      console.error('[mobile-access] pairing failed:', error);
+      if (!res.headersSent) res.status(500).json({ error: 'pairing_failed' });
     }
-    res.json(await pairingFor(access.url, deps.pairing));
   });
 }

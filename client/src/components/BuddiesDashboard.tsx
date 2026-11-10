@@ -25,7 +25,7 @@ function Directory() {
     setError(null);
     try {
       const conversationId = await createBuddyViaBuilder();
-      navigate(`/chat/${conversationId}?helper=buddies`);
+      void navigate(`/chat/${conversationId}?helper=buddies`);
     } catch (cause) {
       setError(errorText(cause));
     } finally {

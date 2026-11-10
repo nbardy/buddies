@@ -699,7 +699,7 @@ export function ColorPalettePicker({ onClose }: Props) {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      handleAiGenerate();
+                      void handleAiGenerate();
                     }
                   }}
                   rows={3}

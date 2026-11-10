@@ -285,7 +285,7 @@ function Palette({ folder, onClose }: { folder: string; onClose: () => void }) {
       event.preventDefault();
       const item = items[Math.min(selected, items.length - 1)];
       if (item.kind === 'history' && !available.has(item.group.conversationId)) return;
-      navigate(hrefOf(item));
+      void navigate(hrefOf(item));
       onClose();
     }
   };

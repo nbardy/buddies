@@ -52,7 +52,7 @@ export function WorkspaceTeamForm({
       await sendMessageCommand(conversationId, description.trim(), 'queue');
       localStorage.removeItem(`${DRAFT_KEY_PREFIX}${conversationId}`);
       onStarted?.();
-      navigate(`${channelsPath(selected.id)}?dm=${conversationId}`);
+      void navigate(`${channelsPath(selected.id)}?dm=${conversationId}`);
     } catch (cause) {
       setError(errorText(cause));
     } finally {
@@ -66,7 +66,7 @@ export function WorkspaceTeamForm({
       // The server resolves the folder, reuses its workspace and names it after the folder.
       const selected = await selectWorkspace();
       onStarted?.();
-      navigate(channelsPath(selected.id));
+      void navigate(channelsPath(selected.id));
     } catch (cause) {
       setError(errorText(cause));
       setBusy(null);

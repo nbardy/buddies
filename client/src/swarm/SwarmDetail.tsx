@@ -190,7 +190,7 @@ export function SwarmDetail({ layout }: { layout: SwarmLayout }) {
       ),
       kind: { t: 'chat' },
     });
-    navigate(`/chat/${id}`, { state: routeState });
+    void navigate(`/chat/${id}`, { state: routeState });
   }, [projectRoot, runId, runtime, navigate, routeState]);
 
   const back = { to: '/workers', label: 'Swarms' };

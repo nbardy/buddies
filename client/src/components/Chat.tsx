@@ -230,7 +230,7 @@ export function Chat({ id }: { id: string }) {
   useEffect(() => {
     if (id && !conversation && !pendingCreation && hasConversations) {
       if (!conversationLoadComplete) return;
-      navigate('/chats');
+      void navigate('/chats');
     }
   }, [id, conversation, pendingCreation, hasConversations, conversationLoadComplete, navigate]);
 
@@ -310,7 +310,7 @@ export function Chat({ id }: { id: string }) {
   // or lineage.
   const handleForkThread = useCallback(() => {
     if (!conversation || !detail || !id) return;
-    navigate(`/chat/${forkConversation({ row: conversation, detail, messages })}`);
+    void navigate(`/chat/${forkConversation({ row: conversation, detail, messages })}`);
   }, [conversation, detail, messages, id, navigate]);
 
   if (!conversation) {
@@ -420,16 +420,16 @@ export function Chat({ id }: { id: string }) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Tab' && !e.shiftKey && hasContent && confirmed) {
       e.preventDefault();
-      handleQueue();
+      void handleQueue();
       return;
     }
 
     if (e.key === 'Enter' && !e.shiftKey && hasContent && confirmed) {
       e.preventDefault();
       if (hasActiveTurn) {
-        handleInterrupt();
+        void handleInterrupt();
       } else {
-        handleQueue();
+        void handleQueue();
       }
     }
   };
@@ -682,7 +682,7 @@ export function Chat({ id }: { id: string }) {
                 kind: { t: 'chat' },
                 initialMessage: outOfTokensRetry,
               });
-              navigate(`/chat/${encodeURIComponent(next)}`);
+              void navigate(`/chat/${encodeURIComponent(next)}`);
             }}
           />
         )}

@@ -216,7 +216,7 @@ export function DependenciesPrompt({ children }: { children?: ReactNode }) {
   };
   const finish = () => {
     setSetupDismissed(true);
-    navigate(NEW_WORKSPACE_PATH);
+    void navigate(NEW_WORKSPACE_PATH);
   };
   const checking =
     !status.data ||

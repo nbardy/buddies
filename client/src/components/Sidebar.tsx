@@ -116,7 +116,7 @@ export function Sidebar() {
     setBuddyBuilderError(null);
     try {
       const conversationId = await createBuddyViaBuilder();
-      navigate(`/chat/${conversationId}?helper=buddies`);
+      void navigate(`/chat/${conversationId}?helper=buddies`);
     } catch (cause) {
       setBuddyBuilderError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -152,7 +152,7 @@ export function Sidebar() {
           context: { buddyId: item.buddyId, workspaceId: item.workspaceId, buddyProjectId: null },
         },
       });
-      navigate(`/chat/${id}`);
+      void navigate(`/chat/${id}`);
     },
     [catalog, navigate]
   );
@@ -197,7 +197,7 @@ export function Sidebar() {
     (id: string) => {
       setConversationDone(id, true);
       if (pathname.includes(id)) {
-        navigate('/chats');
+        void navigate('/chats');
       }
     },
     [navigate, pathname]
@@ -266,7 +266,7 @@ export function Sidebar() {
                 onCreated={(conversationId) => {
                   setPicker(null);
                   setCreatingSwarm(false);
-                  navigate(`/chat/${conversationId}`);
+                  void navigate(`/chat/${conversationId}`);
                 }}
               />
             </div>
@@ -319,7 +319,7 @@ export function Sidebar() {
                   className="folder-group-name ui-truncate folder-group-name-button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    navigate(
+                    void navigate(
                       `/buddies/workspaces/${encodeURIComponent(channelsWorkspaces[0].workspaceId)}/channels`
                     );
                   }}
@@ -376,7 +376,7 @@ export function Sidebar() {
                 className="folder-group-name ui-truncate folder-group-name-button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  navigate('/buddies');
+                  void navigate('/buddies');
                 }}
               >
                 Buddies

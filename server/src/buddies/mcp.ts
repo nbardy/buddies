@@ -1297,7 +1297,7 @@ export async function startMcpEndpoint(
     const show = (part: Shown) => (closed ? void settle(part) : void shown.push(part));
     res.on('close', () => {
       closed = true;
-      for (const part of shown) settle(part);
+      for (const part of shown) void settle(part);
     });
     if (req.method === 'POST' && HOOK_PATHS.has(req.url ?? '')) {
       // The harness kills its hook with the turn (Stop, timeout, process exit): a hold ends.

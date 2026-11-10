@@ -15,7 +15,7 @@ export function InlineSwarmRunWidget({ workingDirectory }: InlineSwarmRunWidgetP
   const run = snapshot?.run;
 
   const handleClick = () => {
-    navigate(`/workers/detail?project=${encodeURIComponent(workingDirectory)}`);
+    void navigate(`/workers/detail?project=${encodeURIComponent(workingDirectory)}`);
   };
 
   if (!run) {

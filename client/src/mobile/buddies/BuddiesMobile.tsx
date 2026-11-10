@@ -30,7 +30,7 @@ export function BuddiesMobile() {
     setCreating(true);
     setCreateError(null);
     try {
-      navigate(`/chat/${await createBuddyViaBuilder()}`, { state: chatRouteState });
+      void navigate(`/chat/${await createBuddyViaBuilder()}`, { state: chatRouteState });
     } catch (cause) {
       setCreateError(cause instanceof Error ? cause.message : String(cause));
       setCreating(false);

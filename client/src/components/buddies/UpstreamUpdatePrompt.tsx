@@ -53,7 +53,7 @@ export function UpstreamUpdatePrompt({ device }: { device: DeviceKind }) {
       const result = UpstreamUpdateResultSchema.parse(await buddyWrite('upstream.update', {}));
       markUpstreamHandled(offer.sha);
       setPhase({ kind: 'idle' });
-      navigate(
+      void navigate(
         channelLinkPath(result.workspaceId, {
           kind: 'thread',
           channelId: result.channelId,

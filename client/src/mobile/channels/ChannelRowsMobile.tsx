@@ -30,7 +30,7 @@ export function useChannelsDm(): OpenDm {
   return (conversationId) => {
     const params = new URLSearchParams(location.search);
     params.set('dm', conversationId);
-    navigate(`${location.pathname}?${params}`);
+    void navigate(`${location.pathname}?${params}`);
   };
 }
 

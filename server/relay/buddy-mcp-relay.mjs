@@ -167,7 +167,14 @@ const server = http.createServer((req, res) => {
   req.on('data', (chunk) => chunks.push(chunk));
   req.on('end', () => {
     held++;
-    deliver(req, res, Buffer.concat(chunks)).finally(() => held--);
+    deliver(req, res, Buffer.concat(chunks))
+      .catch((error) => {
+        // An unhandled rejection would end this process and every call it holds.
+        console.error(`[buddy-mcp-relay] delivery failed: ${error?.message ?? error}`);
+        if (!res.headersSent) res.writeHead(502);
+        res.end();
+      })
+      .finally(() => held--);
   });
 });
 // A held tool call and an attach connection both outlive Node's default request timeouts.

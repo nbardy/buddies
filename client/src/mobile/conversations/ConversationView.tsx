@@ -95,7 +95,7 @@ function ForkButton({ conversation }: { conversation: OpenConversation }) {
       title="Fork into a new thread (soft handoff — carries the transcript as a draft)"
       onClick={() => {
         const forkedId = forkConversation(conversation);
-        navigate(`/chat/${forkedId}`, { state: mobileConversationRouteState(location) });
+        void navigate(`/chat/${forkedId}`, { state: mobileConversationRouteState(location) });
       }}
     >
       Fork
@@ -511,7 +511,7 @@ export function ChatMobile() {
     // A direct deep link (router key `default`) lets the anchor use the fallback path.
     if (location.key === 'default') return;
     event.preventDefault();
-    navigate(-1);
+    void navigate(-1);
   };
   return <ConversationView conversationId={id} backTo={destination.path} onBack={handleBack} />;
 }

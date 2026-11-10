@@ -211,7 +211,7 @@ function CardAction({
           // makes the card vanish from the Done view with no visible
           // destination, which reads as "Restore did nothing".
           setConversationDone(conv.id, false);
-          navigate(`/chat/${encodeURIComponent(conv.id)}`);
+          void navigate(`/chat/${encodeURIComponent(conv.id)}`);
         }}
       >
         Restore

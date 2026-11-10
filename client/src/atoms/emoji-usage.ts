@@ -25,7 +25,7 @@ export const emojiUsageAtom = atomWithStorage<EmojiUsage>(
     },
     setItem(key, value) {
       try {
-        storage.setItem(key, value);
+        void storage.setItem(key, value);
       } catch {
         /* Private mode: retain in-memory counts. */
       }
