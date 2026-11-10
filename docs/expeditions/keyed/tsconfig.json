@@ -6,7 +6,6 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
     "paths": { "zod": ["../../../server/node_modules/zod"] }
   },
   "include": ["api/expedition.d.ts", "examples/**/*.ts", "v1/**/*.ts"]
