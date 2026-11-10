@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Held, Readable } from '../../api/expedition';
 import {
   best,
   buddy,
@@ -14,7 +15,6 @@ import {
   steps,
   usd,
 } from '../../api/expedition';
-import type { Held, Readable } from '../../api/expedition';
 
 const PACKET = 'auto_research/experiments/pending/astra_wave_sim_restart_v1';
 const HANDOFF = 'theory/radical_wave_computation/astra_handoff/v1';

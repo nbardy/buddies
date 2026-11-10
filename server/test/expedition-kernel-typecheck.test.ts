@@ -69,5 +69,9 @@ test('the authoring library typechecks alone within a bounded type graph', async
   const zodTypes = listed.text
     .split('\n')
     .filter((file) => /[\\/]zod[\\/]v3[\\/]types\.d\.c?ts$/.test(file.trim()));
-  assert.equal(zodTypes.length, 1, `zod's type graph is loaded more than once:\n${zodTypes.join('\n')}`);
+  assert.equal(
+    zodTypes.length,
+    1,
+    `zod's type graph is loaded more than once:\n${zodTypes.join('\n')}`
+  );
 });

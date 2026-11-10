@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { checkout, command, gap, plan, review, role, seat, steps, usd } from '../../api/expedition';
 import type { Held, Readable } from '../../api/expedition';
+import { checkout, command, gap, plan, review, role, seat, steps, usd } from '../../api/expedition';
 
 const NG = 'studio/design_kernel/native_geometry';
 const NOTES = 'agent_notes/2026-10-30_own_geometry';

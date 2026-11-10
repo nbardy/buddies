@@ -1,43 +1,7 @@
 // The expedition kernel's pure core: values in, values out. No I/O, no clock, no randomness.
+
+export { type Due, cutOff, due } from './finish';
 export { canonicalJson, hashOf } from './hash';
-export {
-  type Profile,
-  type Role,
-  AWAITED_BY_FINISH,
-  CUT_AT_DEADLINE,
-  DISPOSAL,
-  RETRIABLE,
-  STARTS_AFTER_DEADLINE,
-  addUsage,
-  chargeOf,
-  profileOf,
-  reservationOf,
-  runIdOf,
-  usd,
-} from './tables';
-export {
-  type CallRecord,
-  type CallStatus,
-  type Judging,
-  type LiveCall,
-  type LiveStatus,
-  type Lookup,
-  type PlanVersion,
-  type Progress,
-  type Run,
-  type Stage,
-  type State,
-  ATTACHED,
-  ImpossibleEntry,
-  currentRunId,
-  fold,
-  foldFrom,
-  liveCalls,
-  lookup,
-  rivalOf,
-  stageOf,
-  step,
-} from './state';
 export { type Decision, type Wait, decide, dropped } from './reconcile';
 export {
   type Accepted,
@@ -49,4 +13,41 @@ export {
   diffOf,
   judgeRewrite,
 } from './rewrite';
-export { type Due, cutOff, due } from './finish';
+export {
+  ATTACHED,
+  type CallRecord,
+  type CallStatus,
+  ImpossibleEntry,
+  type Judging,
+  type LiveCall,
+  type LiveStatus,
+  type Lookup,
+  type PlanVersion,
+  type Progress,
+  type Run,
+  type Stage,
+  type State,
+  currentRunId,
+  fold,
+  foldFrom,
+  liveCalls,
+  lookup,
+  rivalOf,
+  stageOf,
+  step,
+} from './state';
+export {
+  AWAITED_BY_FINISH,
+  CUT_AT_DEADLINE,
+  DISPOSAL,
+  type Profile,
+  RETRIABLE,
+  type Role,
+  STARTS_AFTER_DEADLINE,
+  addUsage,
+  chargeOf,
+  profileOf,
+  reservationOf,
+  runIdOf,
+  usd,
+} from './tables';

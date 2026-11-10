@@ -56,6 +56,7 @@ export type KernelDeps = {
 };
 
 type Deliver = Asker['deliver'];
+
 export type { Delivery };
 
 export type OwnerResult = { readonly t: 'done' } | { readonly t: 'refused'; readonly why: string };

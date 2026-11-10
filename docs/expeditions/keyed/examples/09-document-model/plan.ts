@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Readable } from '../../api/expedition';
 import {
   buddy,
   checkout,
@@ -12,7 +13,6 @@ import {
   usd,
   wide,
 } from '../../api/expedition';
-import type { Readable } from '../../api/expedition';
 
 const OUT = 'agent_notes/2026-11-10_document_model';
 const PRIOR = [
