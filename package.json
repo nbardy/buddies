@@ -27,6 +27,7 @@
     "typecheck": "node tools/typecheck.mjs",
     "typecheck:reference": "node tools/typecheck.mjs --reference",
     "typecheck:cross-check": "node tools/typecheck.mjs --cross-check",
+    "check": "node tools/check.mjs",
     "test": "pnpm typecheck && pnpm test:package && pnpm test:server && pnpm test:client && pnpm test:dev-supervisor && pnpm test:tools && pnpm test:cli && pnpm test:api",
     "test:server": "node tools/ensure-addons.mjs && node tools/test-server.mjs",
     "test:server:fast": "node tools/ensure-addons.mjs && node tools/test-server.mjs --fast",

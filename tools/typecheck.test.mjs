@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const typescript = realpathSync(path.join(repositoryRoot, 'shared', 'node_modules', 'typescript'));
 const tsrs = realpathSync(path.join(repositoryRoot, 'node_modules', 'tsrs'));
+const biome = realpathSync(path.join(repositoryRoot, 'node_modules', '@biomejs', 'biome'));
 
 // A checkout shaped like this one: the real tools/typecheck.mjs, real TypeScript projects, and a
 // stand-in shared build that records when it ran and takes long enough for two runs to collide.
@@ -30,7 +31,13 @@ function checkout(t, { withTsrs = true } = {}) {
     writeFileSync(path.join(root, file), text);
   };
   mkdirSync(path.join(root, 'tools', 'lib'), { recursive: true });
-  for (const file of ['tools/typecheck.mjs', 'tools/lib/tsc.mjs', 'tools/lib/diagnostics.mjs']) {
+  for (const file of [
+    'tools/typecheck.mjs',
+    'tools/check.mjs',
+    'tools/lib/tsc.mjs',
+    'tools/lib/diagnostics.mjs',
+    'biome.json',
+  ]) {
     copyFileSync(path.join(repositoryRoot, file), path.join(root, file));
   }
   // Ignored like the real checkout's outputs: `tsc -b` writes build info beside its configs.
@@ -65,14 +72,17 @@ appendFileSync(log, \`end \${process.ppid} \${Date.now()}\\n\`);
   );
   write('node_modules/.modules.yaml', 'installed\n');
   if (withTsrs) symlinkSync(tsrs, path.join(root, 'node_modules', 'tsrs'), 'dir');
+  mkdirSync(path.join(root, 'node_modules', '@biomejs'));
+  symlinkSync(biome, path.join(root, 'node_modules', '@biomejs', 'biome'), 'dir');
   const git = (...args) => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
   assert.equal(git('init', '-q').status, 0);
   // Outside the tree, as the real lock is (the temp directory): a lock inside it changes it.
   return { root, lock: path.join(root, 'node_modules', 'typecheck.lock.json') };
 }
 
-function typecheck({ root, lock }) {
-  const child = spawn(process.execPath, [path.join(root, 'tools', 'typecheck.mjs')], {
+function typecheck({ root, lock }, script = ['tools/typecheck.mjs']) {
+  const [entry, ...args] = script;
+  const child = spawn(process.execPath, [path.join(root, entry), ...args], {
     cwd: root,
     env: { ...process.env, UNLEASHD_TYPECHECK_LOCK: lock },
   });
@@ -170,4 +180,21 @@ test('with tsrs installed the default typecheck runs tsrs, with no fallback', as
   assert.notEqual(result.code, 0);
   assert.match(result.output, /FAILED: tsrs -p client\/tsconfig\.app\.json/);
   assert.doesNotMatch(result.output, /FALLBACK/);
+});
+
+// `pnpm check` (Biome + the default typecheck) holds the same lock as `pnpm typecheck`, so an
+// agent's check and another's typecheck queue instead of stacking (2026-11-11).
+test('pnpm check and pnpm typecheck started at once never overlap', async (t) => {
+  const fixture = checkout(t);
+  const [checked, typechecked] = await Promise.all([
+    typecheck(fixture, ['tools/check.mjs', 'tools/typecheck.mjs']),
+    typecheck(fixture),
+  ]);
+  assert.equal(checked.code, 0, checked.output);
+  assert.equal(typechecked.code, 0, typechecked.output);
+  assert.match(checked.output, /\[check\] {3}biome +ok/);
+  const ran = runs(fixture.root).sort((a, b) => a.start - b.start);
+  for (let i = 1; i < ran.length; i++)
+    assert.ok(ran[i].start >= ran[i - 1].end, JSON.stringify(ran));
+  assert.match(`${checked.output}${typechecked.output}`, /waiting for the typecheck of PID \d+/);
 });
