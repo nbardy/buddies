@@ -38,8 +38,14 @@ jobs:
       - name: Check client invariants
         run: pnpm check:client-invariants
 
-      - name: Typecheck
-        run: pnpm typecheck
+      - name: Lint and format check
+        run: pnpm lint
+
+      # `pnpm typecheck` runs tsrs, an experimental Rust port of TypeScript. CI runs it AND the
+      # reference tsc 7 on every project and fails if either fails or their diagnostics differ
+      # (order ignored), so a tsrs regression cannot hide a type error (tools/typecheck.mjs).
+      - name: Typecheck (tsrs and tsc 7, cross-checked)
+        run: pnpm typecheck:cross-check
 
       - name: Test server, client, and provider harness boundaries
         run: pnpm test:server && pnpm test:client && pnpm test:cli
