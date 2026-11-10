@@ -72,8 +72,7 @@ function wakeOf(runId: string, view: ExpeditionView) {
   const at = ref.lastIndexOf('@');
   const key = ref.slice(0, at);
   const record = view.state.calls.get(key)?.get(ref.slice(at + 1));
-  if (!record || record.call.t !== 'leader')
-    throw new Error(`${runId} is not a leader call of ${view.id}`);
+  if (record?.call.t !== 'leader') throw new Error(`${runId} is not a leader call of ${view.id}`);
   const n = /^leader\/(\d+)$/.exec(key);
   if (!n) throw new Error(`${key} is not a leader wake's key (leader/<n>)`);
   return { key, n: Number(n[1]), call: record.call };
