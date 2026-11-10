@@ -11,7 +11,11 @@ export function ChatActivity({
   label,
   children,
   workerThreads,
-}: { label: string; children: ReactNode; workerThreads?: BuddyWorkerThread[] }) {
+}: {
+  label: string;
+  children: ReactNode;
+  workerThreads?: BuddyWorkerThread[];
+}) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="chat-activity">

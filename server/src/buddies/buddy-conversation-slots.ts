@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { BuddyContext, ConversationConfig } from '@unleashd/shared';
-import type { ConversationRecord } from '../conversations/config-records';
-import type { ConfigProvenance } from '../conversations/config-records';
+import type { ConfigProvenance, ConversationRecord } from '../conversations/config-records';
 import type { ConversationRuntime } from '../conversations/runtime';
 
 // A Buddy's STABLE conversations — its DM and its seat in each channel thread

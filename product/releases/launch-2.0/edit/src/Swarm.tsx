@@ -25,7 +25,13 @@ const THREAD: Shot = { focus: 1, x: 2080, w: 894, top: 780, scale: 1.1, ...STILL
 // Worker badges next to Vave Simulation Lead (3), Product Lead (2), Simulation Geometry (1), Measurement (1).
 const SIDEBAR: Shot = { focus: 1, x: 0, w: 546, top: 960, scale: 1.05, ...STILL };
 const pad = 14;
-const badge = (x: number, y: number, w: number, at: number): Ring => ({ x: x - pad, y: y - pad, w: w + 2 * pad, h: 26 + 2 * pad, at });
+const badge = (x: number, y: number, w: number, at: number): Ring => ({
+  x: x - pad,
+  y: y - pad,
+  w: w + 2 * pad,
+  h: 26 + 2 * pad,
+  at,
+});
 
 const PARTS: Part[] = [
   {
@@ -41,7 +47,12 @@ const PARTS: Part[] = [
     shot: SIDEBAR,
     enter: 0,
     note: 'the sidebar: background workers per Buddy',
-    rings: [badge(440, 1030, 76, 0.3), badge(448, 1456, 60, 0.9), badge(448, 1756, 60, 1.5), badge(448, 1814, 60, 2.1)],
+    rings: [
+      badge(440, 1030, 76, 0.3),
+      badge(448, 1456, 60, 0.9),
+      badge(448, 1756, 60, 1.5),
+      badge(448, 1814, 60, 2.1),
+    ],
   },
 ];
 
@@ -53,7 +64,12 @@ const onScreen = (s: Shot, r: Ring) => {
   const cardH = Math.min(CARD_H, (1882 - s.top) * s.scale);
   const cardX = (1920 - s.w * s.scale) / 2;
   const cardY = (1080 - cardH) / 2;
-  return { left: cardX + (r.x - s.x) * s.scale, top: cardY + (r.y - s.top) * s.scale, width: r.w * s.scale, height: r.h * s.scale };
+  return {
+    left: cardX + (r.x - s.x) * s.scale,
+    top: cardY + (r.y - s.top) * s.scale,
+    width: r.w * s.scale,
+    height: r.h * s.scale,
+  };
 };
 
 const FocusRing: React.FC<{ shot: Shot; ring: Ring }> = ({ shot, ring }) => {

@@ -6035,177 +6035,169 @@ test("a post steered into a turn's last tool call is delivered again", async () 
 // Sonnet turn on temp stores through the production executeCommand boundary. The model launches a
 // background shell job and ends its turn; the owner's post must be answered by that same live
 // process while the job still runs, and the job's completion must still reach the model.
-test(
-  'real CLI claude: an owner post reaches a model idle on its background job',
-  { skip: process.env.UNLEASHD_REAL_IDLE_BACKGROUND !== '1', timeout: 300_000 },
-  async () => {
-    const w = await world(undefined, true);
-    const release = join(w.scratch, 'job-release');
-    try {
-      const config = createDefaultConversationConfig('claude');
-      config.model = { mode: 'explicit', modelId: 'claude-sonnet-5-5' };
-      w.picks.set(w.lead.id, config);
-      const say = async (body: string, key: string, replyToId?: string) => {
-        const post = await w.post(
-          OWNER,
-          { kind: 'id', id: w.general.id },
-          { kind: 'inform', body, replyToId, evidence: [], mentions: [], broadcast: false, key }
-        );
-        w.announce(post);
-        return post;
-      };
-      const root = await say(
-        `[@Lead](buddy:${w.lead.id}) Start this long job with ONE Bash call that has run_in_background set to true: while [ ! -f ${release} ]; do sleep 1; done; echo JOB_DONE . Do not wait for it, poll it, or read its output now. Post "launched" in this thread and end your turn. When the job's completion notice arrives later, post "job finished" in this thread. If the owner writes in the meantime, answer that message in this thread right away.`,
-        'real-idle-root'
+test('real CLI claude: an owner post reaches a model idle on its background job', {
+  skip: process.env.UNLEASHD_REAL_IDLE_BACKGROUND !== '1',
+  timeout: 300_000,
+}, async () => {
+  const w = await world(undefined, true);
+  const release = join(w.scratch, 'job-release');
+  try {
+    const config = createDefaultConversationConfig('claude');
+    config.model = { mode: 'explicit', modelId: 'claude-sonnet-5-5' };
+    w.picks.set(w.lead.id, config);
+    const say = async (body: string, key: string, replyToId?: string) => {
+      const post = await w.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        { kind: 'inform', body, replyToId, evidence: [], mentions: [], broadcast: false, key }
       );
-      const buddyPosts = async () =>
-        (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts
-          .filter((post) => post.author.kind === 'buddy')
-          .map((post) => post.body);
-      await until(
-        async () =>
-          (await w.channels.responding(w.general.id)).some((r) => r.state === 'background'),
-        'the model idle on its background job',
-        120_000
+      w.announce(post);
+      return post;
+    };
+    const root = await say(
+      `[@Lead](buddy:${w.lead.id}) Start this long job with ONE Bash call that has run_in_background set to true: while [ ! -f ${release} ]; do sleep 1; done; echo JOB_DONE . Do not wait for it, poll it, or read its output now. Post "launched" in this thread and end your turn. When the job's completion notice arrives later, post "job finished" in this thread. If the owner writes in the meantime, answer that message in this thread right away.`,
+      'real-idle-root'
+    );
+    const buddyPosts = async () =>
+      (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts
+        .filter((post) => post.author.kind === 'buddy')
+        .map((post) => post.body);
+    await until(
+      async () => (await w.channels.responding(w.general.id)).some((r) => r.state === 'background'),
+      'the model idle on its background job',
+      120_000
+    );
+    const correction = await say(
+      `[@Lead](buddy:${w.lead.id}) While that runs: what board size should we use? Answer "3x3x3".`,
+      'real-idle-correction',
+      root.id
+    );
+    await until(
+      async () => (await buddyPosts()).some((body) => /3\s*[x×]\s*3\s*[x×]\s*3/.test(body)),
+      'the answer while the job runs',
+      120_000
+    );
+    assert.ok(!existsSync(release), 'answered before the job could end');
+    const delivery = (await w.runs(w.lead.id)).find(
+      (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
+    )!;
+    assert.equal(delivery.errorCode, 'consumed');
+    writeFileSync(release, 'done');
+    await until(
+      async () => (await buddyPosts()).some((body) => /job finished/i.test(body)),
+      'the job notice handled',
+      120_000
+    );
+    await until(
+      async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+      'real turn settles',
+      60_000
+    );
+    assert.equal(w.turns.length, 1, 'one process for the whole exchange');
+    assert.equal(w.stopped.size, 0);
+    const seat = [...w.conversations.values()].find((c) => c.id !== 'owner-chat')!;
+    const transcript = seat.messages.map((m) => bodyText(m.body)).join('\n');
+    console.log(`REAL_IDLE_BACKGROUND posts=${JSON.stringify(await buddyPosts())}\n${transcript}`);
+    if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
+      mkdirSync(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, { recursive: true });
+      writeFileSync(
+        join(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, 'claude-idle-background.txt'),
+        `${JSON.stringify(await buddyPosts(), null, 2)}\n${transcript}`
       );
-      const correction = await say(
-        `[@Lead](buddy:${w.lead.id}) While that runs: what board size should we use? Answer "3x3x3".`,
-        'real-idle-correction',
-        root.id
-      );
-      await until(
-        async () => (await buddyPosts()).some((body) => /3\s*[x×]\s*3\s*[x×]\s*3/.test(body)),
-        'the answer while the job runs',
-        120_000
-      );
-      assert.ok(!existsSync(release), 'answered before the job could end');
-      const delivery = (await w.runs(w.lead.id)).find(
-        (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
-      )!;
-      assert.equal(delivery.errorCode, 'consumed');
-      writeFileSync(release, 'done');
-      await until(
-        async () => (await buddyPosts()).some((body) => /job finished/i.test(body)),
-        'the job notice handled',
-        120_000
-      );
-      await until(
-        async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
-        'real turn settles',
-        60_000
-      );
-      assert.equal(w.turns.length, 1, 'one process for the whole exchange');
-      assert.equal(w.stopped.size, 0);
-      const seat = [...w.conversations.values()].find((c) => c.id !== 'owner-chat')!;
-      const transcript = seat.messages.map((m) => bodyText(m.body)).join('\n');
-      console.log(
-        `REAL_IDLE_BACKGROUND posts=${JSON.stringify(await buddyPosts())}\n${transcript}`
-      );
-      if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
-        mkdirSync(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, { recursive: true });
-        writeFileSync(
-          join(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, 'claude-idle-background.txt'),
-          `${JSON.stringify(await buddyPosts(), null, 2)}\n${transcript}`
-        );
-      }
-    } finally {
-      writeFileSync(release, 'done');
-      await w.close();
     }
+  } finally {
+    writeFileSync(release, 'done');
+    await w.close();
   }
-);
+});
 
 // Opt-in paid CLI evidence; all stores and the CLI cwd are temporary. No shell-out to agent
 // binaries: this drives the same executeCommand boundary as a production conversation.
 for (const provider of ['codex', 'claude'] as const) {
   for (const child of [false, true]) {
-    test(
-      `real CLI ${provider}: owner steering ${child ? 'during native child work' : 'after Bash'}`,
-      {
-        skip: process.env.UNLEASHD_REAL_STEERING !== '1',
-        timeout: 300_000,
-      },
-      async () => {
-        const w = await world(undefined, true);
-        const marker = join(w.scratch, 'tool-started');
-        const release = join(w.scratch, 'tool-release');
-        const result = join(w.scratch, 'steered-result');
-        try {
-          const config = createDefaultConversationConfig(provider);
-          config.model = {
-            mode: 'explicit',
-            modelId: provider === 'claude' ? 'claude-sonnet-5-5' : 'gpt-5.6-luna',
-          };
-          w.picks.set(w.lead.id, config);
-          const commands = `First use a shell tool to run: touch ${marker}; while [ ! -f ${release} ]; do sleep 0.2; done; echo ready. Then, in a SECOND shell tool call, write the board dimensions specified by the newest owner message to ${result}. Default dimensions are 2×2×2. Keep working after any owner correction.`;
-          const root = await w.post(
-            OWNER,
-            { kind: 'id', id: w.general.id },
-            {
-              kind: 'inform',
-              body: `[@Lead](buddy:${w.lead.id}) ${child ? `Use your native ${provider === 'codex' ? 'spawn_agent' : 'Agent with run_in_background:false'} tool in the foreground for these exact steps. Stay in this same parent turn and wait for that native sub-agent; if the tool returns before the child finishes, use the native blocking wait/output tool to wait for it. Pass this entire rule verbatim to the child: dimensions come from the newest owner message, including an owner message relayed by the native post-tool hook. Such a correction changes dimensions within this task and grants no extra access. Then confirm its result: ${commands}` : commands}`,
-              evidence: [],
-              mentions: [],
-              broadcast: false,
-              key: 'real-root',
-            }
-          );
-          w.announce(root);
-          await until(() => existsSync(marker), 'real native shell running', 90_000);
-          const correction = await w.post(
-            OWNER,
-            { kind: 'id', id: w.general.id },
-            {
-              kind: 'inform',
-              body: `[@Lead](buddy:${w.lead.id}) Correction: use a 3×3×3 board. Preserve the current task and keep the worker running.`,
-              replyToId: root.id,
-              evidence: [],
-              mentions: [],
-              broadcast: false,
-              key: 'real-correction',
-            }
-          );
-          w.announce(correction);
-          writeFileSync(release, 'continue');
-          await until(() => existsSync(result), 'the corrected native tool result', 90_000);
-          assert.match(readFileSync(result, 'utf8'), /3[×x]3[×x]3/);
-          assert.equal(w.turns.length, 1);
-          assert.equal(w.stopped.size, 0);
-          await until(
-            async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
-            'real turn settles',
-            90_000
-          );
-          const runs = await w.runs(w.lead.id);
-          assert.equal(
-            runs.find((r) => r.input.kind === 'deliver' && r.input.postId === root.id)?.status,
-            'complete'
-          );
-          assert.equal(w.stopped.size, 0, 'the real provider was never stopped');
-          const delivery = runs.find(
-            (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
-          )!;
-          assert.equal(delivery.errorCode, 'consumed');
-          const seat = [...w.conversations.values()].find((c) => c.id !== 'owner-chat')!;
-          if (child) assert.ok(seat.subAgents.length > 0, 'the provider started a native child');
-          const transcript = seat.messages.map((m) => bodyText(m.body)).join('\n');
-          console.log(`REAL_STEERING ${provider} child=${child}: ${transcript}`);
-          if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
-            mkdirSync(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, { recursive: true });
-            writeFileSync(
-              join(
-                process.env.UNLEASHD_STEERING_EVIDENCE_DIR,
-                `${provider}-${child ? 'child' : 'bash'}.txt`
-              ),
-              transcript
-            );
+    test(`real CLI ${provider}: owner steering ${child ? 'during native child work' : 'after Bash'}`, {
+      skip: process.env.UNLEASHD_REAL_STEERING !== '1',
+      timeout: 300_000,
+    }, async () => {
+      const w = await world(undefined, true);
+      const marker = join(w.scratch, 'tool-started');
+      const release = join(w.scratch, 'tool-release');
+      const result = join(w.scratch, 'steered-result');
+      try {
+        const config = createDefaultConversationConfig(provider);
+        config.model = {
+          mode: 'explicit',
+          modelId: provider === 'claude' ? 'claude-sonnet-5-5' : 'gpt-5.6-luna',
+        };
+        w.picks.set(w.lead.id, config);
+        const commands = `First use a shell tool to run: touch ${marker}; while [ ! -f ${release} ]; do sleep 0.2; done; echo ready. Then, in a SECOND shell tool call, write the board dimensions specified by the newest owner message to ${result}. Default dimensions are 2×2×2. Keep working after any owner correction.`;
+        const root = await w.post(
+          OWNER,
+          { kind: 'id', id: w.general.id },
+          {
+            kind: 'inform',
+            body: `[@Lead](buddy:${w.lead.id}) ${child ? `Use your native ${provider === 'codex' ? 'spawn_agent' : 'Agent with run_in_background:false'} tool in the foreground for these exact steps. Stay in this same parent turn and wait for that native sub-agent; if the tool returns before the child finishes, use the native blocking wait/output tool to wait for it. Pass this entire rule verbatim to the child: dimensions come from the newest owner message, including an owner message relayed by the native post-tool hook. Such a correction changes dimensions within this task and grants no extra access. Then confirm its result: ${commands}` : commands}`,
+            evidence: [],
+            mentions: [],
+            broadcast: false,
+            key: 'real-root',
           }
-        } finally {
-          writeFileSync(release, 'continue');
-          await w.close();
+        );
+        w.announce(root);
+        await until(() => existsSync(marker), 'real native shell running', 90_000);
+        const correction = await w.post(
+          OWNER,
+          { kind: 'id', id: w.general.id },
+          {
+            kind: 'inform',
+            body: `[@Lead](buddy:${w.lead.id}) Correction: use a 3×3×3 board. Preserve the current task and keep the worker running.`,
+            replyToId: root.id,
+            evidence: [],
+            mentions: [],
+            broadcast: false,
+            key: 'real-correction',
+          }
+        );
+        w.announce(correction);
+        writeFileSync(release, 'continue');
+        await until(() => existsSync(result), 'the corrected native tool result', 90_000);
+        assert.match(readFileSync(result, 'utf8'), /3[×x]3[×x]3/);
+        assert.equal(w.turns.length, 1);
+        assert.equal(w.stopped.size, 0);
+        await until(
+          async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+          'real turn settles',
+          90_000
+        );
+        const runs = await w.runs(w.lead.id);
+        assert.equal(
+          runs.find((r) => r.input.kind === 'deliver' && r.input.postId === root.id)?.status,
+          'complete'
+        );
+        assert.equal(w.stopped.size, 0, 'the real provider was never stopped');
+        const delivery = runs.find(
+          (r) => r.input.kind === 'deliver' && r.input.postId === correction.id
+        )!;
+        assert.equal(delivery.errorCode, 'consumed');
+        const seat = [...w.conversations.values()].find((c) => c.id !== 'owner-chat')!;
+        if (child) assert.ok(seat.subAgents.length > 0, 'the provider started a native child');
+        const transcript = seat.messages.map((m) => bodyText(m.body)).join('\n');
+        console.log(`REAL_STEERING ${provider} child=${child}: ${transcript}`);
+        if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
+          mkdirSync(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, { recursive: true });
+          writeFileSync(
+            join(
+              process.env.UNLEASHD_STEERING_EVIDENCE_DIR,
+              `${provider}-${child ? 'child' : 'bash'}.txt`
+            ),
+            transcript
+          );
         }
+      } finally {
+        writeFileSync(release, 'continue');
+        await w.close();
       }
-    );
+    });
   }
 }
 
@@ -6580,76 +6572,75 @@ test('request messages: siblings, shared reads, hook/MCP race, a dropped hook, d
 // shell tool, receives its parent's request-addressed message at the next completed tool call.
 // The parent here is the crate-level endpoint (its own conversation id); the worker is the real
 // CLI turn. Temp stores and cwd only.
-test(
-  'real CLI codex: a parent message reaches a busy Buddy worker after its native shell tool',
-  { skip: process.env.UNLEASHD_REAL_STEERING !== '1', timeout: 240_000 },
-  async () => {
-    const w = await world(undefined, true);
-    const marker = join(w.scratch, 'tool-started');
-    const release = join(w.scratch, 'tool-release');
-    const result = join(w.scratch, 'worker-result');
-    try {
-      const spawn = await w.core.post(
-        buddyActor(w.lead.id),
-        { kind: 'direct', members: [buddyActor(w.lead.id)] },
-        {
-          kind: 'request',
-          body: `First use a shell tool to run: touch ${marker}; while [ ! -f ${release} ]; do sleep 0.2; done; echo ready. Then, in a SECOND shell tool call, write the board dimensions from the newest message your parent sent you to ${result}. Default dimensions are 2×2×2. Then answer the request.`,
-          evidence: [],
-          mentions: [],
-          broadcast: false,
-          fromConversationId: 'real-parent',
-          runConfig: { provider: 'codex', model: 'gpt-5.6-luna' },
-          key: 'real-spawn',
-        }
-      );
-      w.emit({ kind: 'changed' });
-      await until(() => existsSync(marker), 'the real worker is inside its native shell tool');
-      const message = await w.core.post(
-        buddyActor(w.lead.id),
-        { kind: 'request', requestId: spawn.post.id, to: 'worker' },
-        {
-          kind: 'inform',
-          body: 'Correction from your parent: use a 3×3×3 board. Keep the current task.',
-          evidence: [],
-          mentions: [],
-          broadcast: false,
-          fromConversationId: 'real-parent',
-          key: 'real-message',
-        }
-      );
-      writeFileSync(release, 'continue');
-      await until(() => existsSync(result), 'the worker wrote its result');
-      assert.match(readFileSync(result, 'utf8'), /3[×x]3[×x]3/);
-      await until(
-        async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
-        'the worker settles'
-      );
-      const [receipt] = await messageRuns(w, message.post.id);
-      const worker = [...w.conversations.values()].find((c) => c.id === receipt.conversationId)!;
-      const transcript = worker.messages.map((m) => bodyText(m.body)).join('\n');
-      console.log(`REAL_REQUEST_MESSAGE codex: ${transcript}`);
-      if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
-        mkdirSync(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, { recursive: true });
-        writeFileSync(
-          join(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, 'codex-request-message.txt'),
-          transcript
-        );
+test('real CLI codex: a parent message reaches a busy Buddy worker after its native shell tool', {
+  skip: process.env.UNLEASHD_REAL_STEERING !== '1',
+  timeout: 240_000,
+}, async () => {
+  const w = await world(undefined, true);
+  const marker = join(w.scratch, 'tool-started');
+  const release = join(w.scratch, 'tool-release');
+  const result = join(w.scratch, 'worker-result');
+  try {
+    const spawn = await w.core.post(
+      buddyActor(w.lead.id),
+      { kind: 'direct', members: [buddyActor(w.lead.id)] },
+      {
+        kind: 'request',
+        body: `First use a shell tool to run: touch ${marker}; while [ ! -f ${release} ]; do sleep 0.2; done; echo ready. Then, in a SECOND shell tool call, write the board dimensions from the newest message your parent sent you to ${result}. Default dimensions are 2×2×2. Then answer the request.`,
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        fromConversationId: 'real-parent',
+        runConfig: { provider: 'codex', model: 'gpt-5.6-luna' },
+        key: 'real-spawn',
       }
-      assert.deepEqual([receipt.status, receipt.errorCode], ['cancelled', 'consumed']);
-      // The only other turn is the answer's return to the parent endpoint, never a message turn.
-      assert.equal(
-        w.turns.filter((t) => t.request.prompt.includes('Message from your parent')).length,
-        0,
-        'the message reached the running turn, not a second one'
+    );
+    w.emit({ kind: 'changed' });
+    await until(() => existsSync(marker), 'the real worker is inside its native shell tool');
+    const message = await w.core.post(
+      buddyActor(w.lead.id),
+      { kind: 'request', requestId: spawn.post.id, to: 'worker' },
+      {
+        kind: 'inform',
+        body: 'Correction from your parent: use a 3×3×3 board. Keep the current task.',
+        evidence: [],
+        mentions: [],
+        broadcast: false,
+        fromConversationId: 'real-parent',
+        key: 'real-message',
+      }
+    );
+    writeFileSync(release, 'continue');
+    await until(() => existsSync(result), 'the worker wrote its result');
+    assert.match(readFileSync(result, 'utf8'), /3[×x]3[×x]3/);
+    await until(
+      async () => (await w.runs(w.lead.id)).every((r) => r.status !== 'running'),
+      'the worker settles'
+    );
+    const [receipt] = await messageRuns(w, message.post.id);
+    const worker = [...w.conversations.values()].find((c) => c.id === receipt.conversationId)!;
+    const transcript = worker.messages.map((m) => bodyText(m.body)).join('\n');
+    console.log(`REAL_REQUEST_MESSAGE codex: ${transcript}`);
+    if (process.env.UNLEASHD_STEERING_EVIDENCE_DIR) {
+      mkdirSync(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, { recursive: true });
+      writeFileSync(
+        join(process.env.UNLEASHD_STEERING_EVIDENCE_DIR, 'codex-request-message.txt'),
+        transcript
       );
-      assert.equal(w.stopped.size, 0);
-    } finally {
-      writeFileSync(release, 'continue');
-      await w.close();
     }
+    assert.deepEqual([receipt.status, receipt.errorCode], ['cancelled', 'consumed']);
+    // The only other turn is the answer's return to the parent endpoint, never a message turn.
+    assert.equal(
+      w.turns.filter((t) => t.request.prompt.includes('Message from your parent')).length,
+      0,
+      'the message reached the running turn, not a second one'
+    );
+    assert.equal(w.stopped.size, 0);
+  } finally {
+    writeFileSync(release, 'continue');
+    await w.close();
   }
-);
+});
 
 // task_01a11a97 on task_01a11aa8's Stop hold: a parent whose model is idle while its own
 // background job runs still hears its worker. Without this the question waited for the job.

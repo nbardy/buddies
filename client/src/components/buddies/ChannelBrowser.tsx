@@ -10,8 +10,10 @@ import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { rowBuddy } from '../../utils/conversation-row';
 import { Chat } from '../Chat';
 import { AppSettingsDropdown } from './AppSettingsDropdown';
+import { errorText } from './api';
 import { BuddyRailRow, CreatingBuddyRailRow } from './BuddyRailRow';
 import { BuddySigil } from './BuddySigil';
+import { useNewBuddy } from './buddy-direct-actions';
 import { ArchivedChannels, ChannelHeaderControls, useArchivedChannels } from './ChannelArchive';
 import type { OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
@@ -23,18 +25,6 @@ import { ChannelSearch } from './ChannelSearch';
 import { ChannelStar } from './ChannelStar';
 import { ChannelWorkers } from './ChannelWorkers';
 import { CopyLinkButton } from './CopyLinkButton';
-import { DESKTOP_ROW, RailExpeditions } from './ExpeditionRail';
-import { ExpeditionView, RetiredExpeditionView } from './ExpeditionView';
-import { GroupDmNotice } from './GroupDmNotice';
-import { HighlightRow } from './HighlightRow';
-import { KeyedExpeditionView } from './KeyedExpeditionView';
-import { TaskFilter } from './TaskFilter';
-import { TaskPage } from './TaskPage';
-import { ThreadResize, useThreadPaneStyle } from './ThreadResize';
-import { ThreadsPane } from './ThreadsPane';
-import { WorkspaceTeamDialog } from './WorkspaceTeamForm';
-import { errorText } from './api';
-import { useNewBuddy } from './buddy-direct-actions';
 import {
   type ChannelHeading,
   type WorkspaceDirectory,
@@ -64,8 +54,18 @@ import {
 import { channelLinkPath } from './channel-link';
 import { plainChannelText } from './channel-text';
 import { type ChannelsView, channelsHref, channelsView } from './channels-view';
+import { DESKTOP_ROW, RailExpeditions } from './ExpeditionRail';
+import { ExpeditionView, RetiredExpeditionView } from './ExpeditionView';
+import { GroupDmNotice } from './GroupDmNotice';
+import { HighlightRow } from './HighlightRow';
+import { KeyedExpeditionView } from './KeyedExpeditionView';
+import { TaskFilter } from './TaskFilter';
+import { TaskPage } from './TaskPage';
+import { ThreadResize, useThreadPaneStyle } from './ThreadResize';
+import { ThreadsPane } from './ThreadsPane';
 import type { Channel, ChannelUnread, Inbox } from './types';
 import { initials } from './ui-contract';
+import { WorkspaceTeamDialog } from './WorkspaceTeamForm';
 import { NEW_WORKSPACE_PATH } from './workspace-home';
 import './ChannelBrowser.css';
 

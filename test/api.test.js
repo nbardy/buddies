@@ -432,7 +432,9 @@ async function runTests() {
         throw new Error(`Expected Claude default ${claudeDefault}, got ${resolved.modelId}`);
       }
       if (resolved.reasoningEffort !== 'medium') {
-        throw new Error(`Expected Claude app default effort medium, got ${resolved.reasoningEffort}`);
+        throw new Error(
+          `Expected Claude app default effort medium, got ${resolved.reasoningEffort}`
+        );
       }
 
       const deletedOnSecond = waitForRemoved(ws2, id);

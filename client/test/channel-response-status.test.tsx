@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { register } from 'node:module';
+import test from 'node:test';
 import type { ChannelResponse, LiveReach } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
   export async function load(url, context, nextLoad) {
@@ -13,6 +14,7 @@ register(
   import.meta.url
 );
 const { Replying } = await import('../src/components/buddies/ChannelRows');
+
 import { respondingText } from '../src/components/buddies/channel-data';
 
 // Busy seats were called "at the run limit" even for owner posts that bypass capacity.

@@ -2,8 +2,8 @@ import { type ConversationConfig, isHarnessRetryFailure } from '@unleashd/shared
 import { type CSSProperties, useState } from 'react';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
-import { ChannelModelPicker } from './ChannelModelPicker';
 import { errorText, retryFailedReply } from './api';
+import { ChannelModelPicker } from './ChannelModelPicker';
 import { seatsResource } from './channel-data';
 import type { Post, ThreadSeat } from './types';
 import './ChannelComposer.css';

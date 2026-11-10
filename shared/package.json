@@ -20,7 +20,9 @@
     "check:catalog": "tsx scripts/gen-catalog.ts && git diff --exit-code -- src/generated/catalog.ts",
     "prepack": "pnpm run check:catalog"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "peerDependencies": {
     "zod": "^3.24.0"
   },

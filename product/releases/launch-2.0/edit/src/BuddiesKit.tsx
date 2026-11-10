@@ -10,8 +10,8 @@ import claude from '../../logos/claude.svg';
 import cursor from '../../logos/cursor.svg';
 import grok from '../../logos/grok.svg';
 import openai from '../../logos/openai.svg';
-import { clamp01, FONT, lerp } from './blocks';
 import { AURA, MARK, NIGHT } from './BuddiesLogos';
+import { FONT, clamp01, lerp } from './blocks';
 
 export const FPS = 60;
 
@@ -19,9 +19,23 @@ export const FPS = 60;
 const CREAM = '#fdf6e3';
 const QUIET = 'rgba(253,246,227,.62)';
 export type Tone = 'cream' | 'quiet' | 'violet' | 'teal' | 'pink';
-const TONE: Record<Tone, string> = { cream: CREAM, quiet: QUIET, violet: AURA.violet, teal: AURA.teal, pink: AURA.pink };
-const GLASS = { background: 'rgba(253,246,227,.07)', border: '1.5px solid rgba(253,246,227,.14)', backdropFilter: 'blur(14px)' };
-const DISPLAY = { fontWeight: 700, fontStretch: '92%', fontVariationSettings: "'opsz' 96" } as const;
+const TONE: Record<Tone, string> = {
+  cream: CREAM,
+  quiet: QUIET,
+  violet: AURA.violet,
+  teal: AURA.teal,
+  pink: AURA.pink,
+};
+const GLASS = {
+  background: 'rgba(253,246,227,.07)',
+  border: '1.5px solid rgba(253,246,227,.14)',
+  backdropFilter: 'blur(14px)',
+};
+const DISPLAY = {
+  fontWeight: 700,
+  fontStretch: '92%',
+  fontVariationSettings: "'opsz' 96",
+} as const;
 const TEXT = { fontVariationSettings: "'opsz' 48" } as const;
 
 const easeOutCubic = (x: number) => 1 - (1 - x) ** 3;
@@ -32,7 +46,11 @@ const useT = () => useCurrentFrame() / FPS;
 // ---- Primitives
 
 // The ground: night plus three aurora glows that drift slowly with time.
-export const Stage: React.FC<{ t: number; glow?: number; children: React.ReactNode }> = ({ t, glow = 0.3, children }) => {
+export const Stage: React.FC<{ t: number; glow?: number; children: React.ReactNode }> = ({
+  t,
+  glow = 0.3,
+  children,
+}) => {
   const dx = Math.sin(t * 0.5) * 3;
   const dy = Math.cos(t * 0.4) * 2;
   return (
@@ -54,15 +72,15 @@ export const Stage: React.FC<{ t: number; glow?: number; children: React.ReactNo
 
 // A line of words, each rising out of a blur `gap` seconds after the one before.
 export type Seg = [string, Tone];
-export const Words: React.FC<{ segs: Seg[]; t: number; at: number; size: number; weight?: number; gap?: number; display?: boolean }> = ({
-  segs,
-  t,
-  at,
-  size,
-  weight = 700,
-  gap = 0.07,
-  display = false,
-}) => {
+export const Words: React.FC<{
+  segs: Seg[];
+  t: number;
+  at: number;
+  size: number;
+  weight?: number;
+  gap?: number;
+  display?: boolean;
+}> = ({ segs, t, at, size, weight = 700, gap = 0.07, display = false }) => {
   const words = segs.flatMap(([text, tone]) => text.split(' ').map((w) => ({ w, tone })));
   return (
     <div
@@ -83,7 +101,12 @@ export const Words: React.FC<{ segs: Seg[]; t: number; at: number; size: number;
         return (
           <span
             key={`${i}-${w}`}
-            style={{ color: TONE[tone], opacity: p, filter: `blur(${lerp(10, 0, p)}px)`, transform: `translateY(${lerp(size * 0.18, 0, p)}px)` }}
+            style={{
+              color: TONE[tone],
+              opacity: p,
+              filter: `blur(${lerp(10, 0, p)}px)`,
+              transform: `translateY(${lerp(size * 0.18, 0, p)}px)`,
+            }}
           >
             {w}
           </span>
@@ -93,7 +116,12 @@ export const Words: React.FC<{ segs: Seg[]; t: number; at: number; size: number;
   );
 };
 
-const Pill: React.FC<{ t: number; at: number; size: number; children: React.ReactNode }> = ({ t, at, size, children }) => {
+const Pill: React.FC<{ t: number; at: number; size: number; children: React.ReactNode }> = ({
+  t,
+  at,
+  size,
+  children,
+}) => {
   const p = rise(t, at, 0.45);
   return (
     <div
@@ -117,17 +145,42 @@ const Pill: React.FC<{ t: number; at: number; size: number; children: React.Reac
 };
 
 const Dot: React.FC<{ color: string; size: number }> = ({ color, size }) => (
-  <span style={{ width: size, height: size, borderRadius: '50%', background: color, display: 'inline-block', flexShrink: 0 }} />
+  <span
+    style={{
+      width: size,
+      height: size,
+      borderRadius: '50%',
+      background: color,
+      display: 'inline-block',
+      flexShrink: 0,
+    }}
+  />
 );
 
 // The chosen lockup (Pair title card): the mark, then "Buddies" in title case.
 const WORD_EM = 3.01; // rendered width of "Buddies" in ems at this weight/stretch, measured off the Pair still
 const Wordmark: React.FC<{ t: number; at: number; size: number }> = ({ t, at, size }) => (
-  <div style={{ display: 'flex', fontSize: size, color: CREAM, letterSpacing: -size * 0.026, lineHeight: 1, ...DISPLAY }}>
+  <div
+    style={{
+      display: 'flex',
+      fontSize: size,
+      color: CREAM,
+      letterSpacing: -size * 0.026,
+      lineHeight: 1,
+      ...DISPLAY,
+    }}
+  >
     {'Buddies'.split('').map((ch, i) => {
       const p = rise(t, at + i * 0.04, 0.45);
       return (
-        <span key={`${i}${ch}`} style={{ opacity: p, filter: `blur(${lerp(8, 0, p)}px)`, transform: `translateY(${lerp(size * 0.25, 0, p)}px)` }}>
+        <span
+          key={`${i}${ch}`}
+          style={{
+            opacity: p,
+            filter: `blur(${lerp(8, 0, p)}px)`,
+            transform: `translateY(${lerp(size * 0.25, 0, p)}px)`,
+          }}
+        >
           {ch}
         </span>
       );
@@ -136,11 +189,25 @@ const Wordmark: React.FC<{ t: number; at: number; size: number }> = ({ t, at, si
 );
 
 // The mark builds centred, then slides left as the word arrives.
-const Lockup: React.FC<{ t: number; at: number; mark: number; word: number; wordAt: number }> = ({ t, at, mark, word, wordAt }) => {
-  const shift = ((word * WORD_EM + mark * 0.24) / 2) * (1 - easeInOut(clamp01((t - wordAt + 0.2) / 0.55)));
+const Lockup: React.FC<{ t: number; at: number; mark: number; word: number; wordAt: number }> = ({
+  t,
+  at,
+  mark,
+  word,
+  wordAt,
+}) => {
+  const shift =
+    ((word * WORD_EM + mark * 0.24) / 2) * (1 - easeInOut(clamp01((t - wordAt + 0.2) / 0.55)));
   const Pair = MARK.pair;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: mark * 0.24, transform: `translateX(${shift}px)` }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: mark * 0.24,
+        transform: `translateX(${shift}px)`,
+      }}
+    >
       <Pair u={t - at} size={mark} />
       <Wordmark t={t} at={wordAt} size={word} />
     </div>
@@ -148,14 +215,33 @@ const Lockup: React.FC<{ t: number; at: number; mark: number; word: number; word
 };
 
 const Centre: React.FC<{ gap: number; children: React.ReactNode }> = ({ gap, children }) => (
-  <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap, textAlign: 'center' }}>{children}</AbsoluteFill>
+  <AbsoluteFill
+    style={{
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'column',
+      gap,
+      textAlign: 'center',
+    }}
+  >
+    {children}
+  </AbsoluteFill>
 );
 
 // The product footage behind captions and the home statement, softened so it never competes with
 // the type. The blur also hides real channel and Buddy names in the sidebar.
 const Footage: React.FC<{ blur: number; dim: number }> = ({ blur, dim }) => (
   <AbsoluteFill>
-    <Img src={staticFile('2026-10-02_home_new.png')} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: `blur(${blur}px)`, transform: 'scale(1.04)' }} />
+    <Img
+      src={staticFile('2026-10-02_home_new.png')}
+      style={{
+        width: '100%',
+        height: '100%',
+        objectFit: 'cover',
+        filter: `blur(${blur}px)`,
+        transform: 'scale(1.04)',
+      }}
+    />
     <AbsoluteFill style={{ background: `rgba(11,10,20,${dim})` }} />
   </AbsoluteFill>
 );
@@ -167,10 +253,29 @@ const Overload: React.FC = () => {
   return (
     <Stage t={t} glow={0.22}>
       <Centre gap={30}>
-        <Words segs={[['AI', 'cream'], ['Overload.', 'pink']]} t={t} at={0.1} size={170} display gap={0.12} />
+        <Words
+          segs={[
+            ['AI', 'cream'],
+            ['Overload.', 'pink'],
+          ]}
+          t={t}
+          at={0.1}
+          size={170}
+          display
+          gap={0.12}
+        />
         <Words segs={[["We're all feeling it.", 'quiet']]} t={t} at={0.9} size={56} weight={500} />
         <div style={{ height: 30 }} />
-        <Words segs={[["Don't worry, we've got you", 'cream'], ['covered.', 'teal']]} t={t} at={1.8} size={64} weight={600} />
+        <Words
+          segs={[
+            ["Don't worry, we've got you", 'cream'],
+            ['covered.', 'teal'],
+          ]}
+          t={t}
+          at={1.8}
+          size={64}
+          weight={600}
+        />
       </Centre>
     </Stage>
   );
@@ -183,7 +288,14 @@ const Title: React.FC = () => {
       <Centre gap={34}>
         <Words segs={[['Introducing', 'quiet']]} t={t} at={0.05} size={46} weight={500} />
         <Lockup t={t} at={0.3} mark={230} word={230} wordAt={1.15} />
-        <Words segs={[['your team of AI agents', 'quiet']]} t={t} at={2.0} size={52} weight={500} gap={0.05} />
+        <Words
+          segs={[['your team of AI agents', 'quiet']]}
+          t={t}
+          at={2.0}
+          size={52}
+          weight={500}
+          gap={0.05}
+        />
       </Centre>
     </Stage>
   );
@@ -196,9 +308,27 @@ const Statement: React.FC = () => {
       <Footage blur={16} dim={0.62} />
       <Centre gap={20}>
         <Words segs={[['Swarms of agents,', 'cream']]} t={t} at={0.2} size={108} display />
-        <Words segs={[['organized around', 'cream'], ['tasks', 'violet'], ['and', 'cream'], ['channels.', 'teal']]} t={t} at={0.5} size={108} display />
+        <Words
+          segs={[
+            ['organized around', 'cream'],
+            ['tasks', 'violet'],
+            ['and', 'cream'],
+            ['channels.', 'teal'],
+          ]}
+          t={t}
+          at={0.5}
+          size={108}
+          display
+        />
         <div style={{ height: 22 }} />
-        <Words segs={[['Manage your team of agents just like a team of employees.', 'quiet']]} t={t} at={1.5} size={46} weight={500} gap={0.04} />
+        <Words
+          segs={[['Manage your team of agents just like a team of employees.', 'quiet']]}
+          t={t}
+          at={1.5}
+          size={46}
+          weight={500}
+          gap={0.04}
+        />
       </Centre>
     </AbsoluteFill>
   );
@@ -219,9 +349,29 @@ const Benefits: React.FC = () => {
         {BENEFITS.map((b) => {
           const p = rise(t, b.at);
           return (
-            <div key={b.text} style={{ display: 'flex', alignItems: 'center', gap: 40, opacity: p, transform: `translateX(${lerp(-24, 0, p)}px)` }}>
+            <div
+              key={b.text}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 40,
+                opacity: p,
+                transform: `translateX(${lerp(-24, 0, p)}px)`,
+              }}
+            >
               <Pair u={(t - b.at) * 1.4} size={84} />
-              <div style={{ fontSize: 104, color: CREAM, letterSpacing: -2, lineHeight: 1.04, filter: `blur(${lerp(8, 0, p)}px)`, ...DISPLAY }}>{b.text}</div>
+              <div
+                style={{
+                  fontSize: 104,
+                  color: CREAM,
+                  letterSpacing: -2,
+                  lineHeight: 1.04,
+                  filter: `blur(${lerp(8, 0, p)}px)`,
+                  ...DISPLAY,
+                }}
+              >
+                {b.text}
+              </div>
             </div>
           );
         })}
@@ -276,7 +426,16 @@ const Clock: React.FC<{ t: number }> = ({ t }) => {
   return (
     <svg width={38} height={38} viewBox="0 0 40 40">
       <circle cx={20} cy={20} r={17} fill="none" stroke={AURA.teal} strokeWidth={4} />
-      <line x1={20} y1={20} x2={20} y2={9} stroke={CREAM} strokeWidth={4} strokeLinecap="round" transform={`rotate(${turn} 20 20)`} />
+      <line
+        x1={20}
+        y1={20}
+        x2={20}
+        y2={9}
+        stroke={CREAM}
+        strokeWidth={4}
+        strokeLinecap="round"
+        transform={`rotate(${turn} 20 20)`}
+      />
       <circle cx={20} cy={20} r={3} fill={CREAM} />
     </svg>
   );
@@ -293,7 +452,16 @@ const LOGO = {
   grok: { src: grok, filter: 'invert(1)', scale: 1 },
 } satisfies Record<string, Logo>;
 const LogoImg: React.FC<{ logo: Logo; size: number }> = ({ logo, size }) => (
-  <Img src={logo.src} style={{ width: size, height: size, objectFit: 'contain', filter: logo.filter, transform: `scale(${logo.scale})` }} />
+  <Img
+    src={logo.src}
+    style={{
+      width: size,
+      height: size,
+      objectFit: 'contain',
+      filter: logo.filter,
+      transform: `scale(${logo.scale})`,
+    }}
+  />
 );
 
 const LogoFace: React.FC<{ logos: Logo[]; name: string }> = ({ logos, name }) => (
@@ -350,13 +518,33 @@ const MultiHarness: React.FC = () => {
   return (
     <Stage t={t} glow={0.24}>
       <Centre gap={64}>
-        <Words segs={[['Multi', 'cream'], ['harness.', 'teal']]} t={t} at={0.1} size={150} display gap={0.12} />
+        <Words
+          segs={[
+            ['Multi', 'cream'],
+            ['harness.', 'teal'],
+          ]}
+          t={t}
+          at={0.1}
+          size={150}
+          display
+          gap={0.12}
+        />
         <div style={{ display: 'flex', gap: 34 }}>
           {HARNESSES.map((h, i) => (
             <Tile key={h.key} face={h.face} t={t} at={0.5 + i * 0.14} />
           ))}
         </div>
-        <Words segs={[['One app.', 'cream'], ['Every agent you already use.', 'quiet']]} t={t} at={1.5} size={52} weight={600} gap={0.05} />
+        <Words
+          segs={[
+            ['One app.', 'cream'],
+            ['Every agent you already use.', 'quiet'],
+          ]}
+          t={t}
+          at={1.5}
+          size={52}
+          weight={600}
+          gap={0.05}
+        />
       </Centre>
     </Stage>
   );
@@ -384,7 +572,18 @@ const Subscriptions: React.FC = () => {
             </Pill>
           ))}
         </div>
-        <Words segs={[['Buddies is', 'cream'], ['free.', 'teal'], ['Your existing plans do the work.', 'quiet']]} t={t} at={1.6} size={50} weight={600} gap={0.05} />
+        <Words
+          segs={[
+            ['Buddies is', 'cream'],
+            ['free.', 'teal'],
+            ['Your existing plans do the work.', 'quiet'],
+          ]}
+          t={t}
+          at={1.6}
+          size={50}
+          weight={600}
+          gap={0.05}
+        />
       </Centre>
     </Stage>
   );
@@ -395,8 +594,25 @@ const Fork: React.FC = () => {
   return (
     <Stage t={t} glow={0.22}>
       <Centre gap={26}>
-        <Words segs={[['Fork', 'cream'], ['it.', 'violet']]} t={t} at={0.1} size={200} display gap={0.14} />
-        <Words segs={[['Add the features you want.', 'quiet']]} t={t} at={0.8} size={60} weight={500} gap={0.06} />
+        <Words
+          segs={[
+            ['Fork', 'cream'],
+            ['it.', 'violet'],
+          ]}
+          t={t}
+          at={0.1}
+          size={200}
+          display
+          gap={0.14}
+        />
+        <Words
+          segs={[['Add the features you want.', 'quiet']]}
+          t={t}
+          at={0.8}
+          size={60}
+          weight={500}
+          gap={0.06}
+        />
       </Centre>
     </Stage>
   );
@@ -419,12 +635,39 @@ const Quote: React.FC = () => {
   const mark = rise(t, 0, 0.8);
   return (
     <Stage t={t} glow={0.18}>
-      <div style={{ position: 'absolute', left: 110, top: 220, fontSize: 380, lineHeight: 1, color: AURA.violet, opacity: 0.35 * mark, ...DISPLAY }}>“</div>
+      <div
+        style={{
+          position: 'absolute',
+          left: 110,
+          top: 220,
+          fontSize: 380,
+          lineHeight: 1,
+          color: AURA.violet,
+          opacity: 0.35 * mark,
+          ...DISPLAY,
+        }}
+      >
+        “
+      </div>
       <Centre gap={40}>
         <div style={{ maxWidth: 1400 }}>
-          <Words segs={[["Vim is open source and it's still here decades later.", 'cream']]} t={t} at={0.2} size={86} weight={600} gap={0.06} />
+          <Words
+            segs={[["Vim is open source and it's still here decades later.", 'cream']]}
+            t={t}
+            at={0.2}
+            size={86}
+            weight={600}
+            gap={0.06}
+          />
         </div>
-        <Words segs={[['Agent software should be too.', 'teal']]} t={t} at={1.5} size={86} weight={700} gap={0.08} />
+        <Words
+          segs={[['Agent software should be too.', 'teal']]}
+          t={t}
+          at={1.5}
+          size={86}
+          weight={700}
+          gap={0.08}
+        />
       </Centre>
     </Stage>
   );
@@ -436,7 +679,17 @@ const End: React.FC = () => {
     <Stage t={t} glow={lerp(0.1, 0.32, clamp01(t / 1.5))}>
       <Centre gap={44}>
         <Lockup t={t} at={0.1} mark={200} word={200} wordAt={0.8} />
-        <Words segs={[['Try Buddies today.', 'cream'], ['Free.', 'teal']]} t={t} at={1.6} size={60} weight={600} gap={0.06} />
+        <Words
+          segs={[
+            ['Try Buddies today.', 'cream'],
+            ['Free.', 'teal'],
+          ]}
+          t={t}
+          at={1.6}
+          size={60}
+          weight={600}
+          gap={0.06}
+        />
         <Pill t={t} at={2.2} size={36}>
           <Dot color={AURA.violet} size={16} />
           github.com/nbardy/buddies
@@ -447,7 +700,18 @@ const End: React.FC = () => {
 };
 
 // ---- The video pages as data: one dispatcher, one handler each.
-export type Page = 'overload' | 'title' | 'statement' | 'benefits' | 'caption' | 'harness' | 'subscriptions' | 'fork' | 'run' | 'quote' | 'end';
+export type Page =
+  | 'overload'
+  | 'title'
+  | 'statement'
+  | 'benefits'
+  | 'caption'
+  | 'harness'
+  | 'subscriptions'
+  | 'fork'
+  | 'run'
+  | 'quote'
+  | 'end';
 export const PAGE: Record<Page, { C: React.FC; seconds: number }> = {
   overload: { C: Overload, seconds: 3.2 },
   title: { C: Title, seconds: 3.6 },
@@ -506,7 +770,9 @@ export const OgCard: React.FC = () => (
 // README header, 1280×320.
 export const Banner: React.FC = () => (
   <Stage t={1.5} glow={0.3}>
-    <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 56 }}>
+    <AbsoluteFill
+      style={{ alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 56 }}
+    >
       <Lockup t={SETTLED} at={0} mark={110} word={110} wordAt={0} />
       <div style={{ width: 2, height: 120, background: 'rgba(253,246,227,.16)' }} />
       <div style={{ fontSize: 40, lineHeight: 1.2, fontWeight: 500, color: QUIET }}>

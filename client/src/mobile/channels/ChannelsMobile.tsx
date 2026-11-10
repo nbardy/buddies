@@ -6,8 +6,10 @@ import { buddyRailFamily, channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { ActionTooltip } from '../../components/buddies/ActionTooltip';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
+import { errorText } from '../../components/buddies/api';
 import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
 import { BuddySigil } from '../../components/buddies/BuddySigil';
+import { useBuddyDirectActions, useNewBuddy } from '../../components/buddies/buddy-direct-actions';
 import { ArchivedChannels, useArchivedChannels } from '../../components/buddies/ChannelArchive';
 import { ChannelDm } from '../../components/buddies/ChannelDm';
 import { ChannelLanding } from '../../components/buddies/ChannelLanding';
@@ -15,17 +17,6 @@ import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelL
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { BuddyStar, ChannelStar } from '../../components/buddies/ChannelStar';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
-import { RailExpeditions, type RailRowClasses } from '../../components/buddies/ExpeditionRail';
-import { ExpeditionView, RetiredExpeditionView } from '../../components/buddies/ExpeditionView';
-import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
-import { HighlightRow } from '../../components/buddies/HighlightRow';
-import { KeyedExpeditionView } from '../../components/buddies/KeyedExpeditionView';
-import { TaskFilter } from '../../components/buddies/TaskFilter';
-import { TaskPage } from '../../components/buddies/TaskPage';
-import { WakeIcon, WakeIndicator } from '../../components/buddies/WakeIndicator';
-import { WorkspaceTeamDialog } from '../../components/buddies/WorkspaceTeamForm';
-import { errorText } from '../../components/buddies/api';
-import { useBuddyDirectActions, useNewBuddy } from '../../components/buddies/buddy-direct-actions';
 import {
   type ChannelHeading,
   type WorkspaceDirectory,
@@ -56,7 +47,16 @@ import {
   channelsHref,
   channelsView,
 } from '../../components/buddies/channels-view';
+import { RailExpeditions, type RailRowClasses } from '../../components/buddies/ExpeditionRail';
+import { ExpeditionView, RetiredExpeditionView } from '../../components/buddies/ExpeditionView';
+import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
+import { HighlightRow } from '../../components/buddies/HighlightRow';
+import { KeyedExpeditionView } from '../../components/buddies/KeyedExpeditionView';
+import { TaskFilter } from '../../components/buddies/TaskFilter';
+import { TaskPage } from '../../components/buddies/TaskPage';
 import type { Buddy, Channel, ChannelUnread, Inbox } from '../../components/buddies/types';
+import { WakeIcon, WakeIndicator } from '../../components/buddies/WakeIndicator';
+import { WorkspaceTeamDialog } from '../../components/buddies/WorkspaceTeamForm';
 import { NEW_WORKSPACE_PATH } from '../../components/buddies/workspace-home';
 import {
   buddyWorkspaceActivityAtom,

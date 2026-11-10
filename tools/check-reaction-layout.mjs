@@ -90,7 +90,7 @@ try {
         'Add emoji reaction'
       );
     }
-        console.log(JSON.stringify({ device: mobile ? 'phone' : 'desktop', before, passed: true }));
+    console.log(JSON.stringify({ device: mobile ? 'phone' : 'desktop', before, passed: true }));
   }
   console.log(JSON.stringify({ blockedWrites: await session.blockedWrites() }));
 } finally {

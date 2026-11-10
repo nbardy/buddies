@@ -119,10 +119,7 @@ const ENHANCEMENT_SCRIPT = [
   '})();',
 ].join('\n');
 
-export function loginPageHtml(options: {
-  notice: LoginNotice;
-  redirectTo: string;
-}): string {
+export function loginPageHtml(options: { notice: LoginNotice; redirectTo: string }): string {
   return `<!doctype html>
 <html lang="en">
 <head>

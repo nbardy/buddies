@@ -1,4 +1,4 @@
-import { constants, accessSync, statSync } from 'node:fs';
+import { accessSync, constants, statSync } from 'node:fs';
 import path from 'node:path';
 import { getHarness } from '@nbardy/agent-cli';
 import type { InstalledAgent, Provider } from '@unleashd/shared';

@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { inboxFixture, postFixture, publicChannel } from './fixtures/channel-posts';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {

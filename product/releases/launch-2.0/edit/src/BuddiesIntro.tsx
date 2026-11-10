@@ -8,8 +8,8 @@
 // ../../sound/INTRO_SOUND_PLAN.md, music in ../../sound/reveal.py).
 import type React from 'react';
 import { AbsoluteFill, useCurrentFrame } from 'remotion';
-import { clamp01, easeOutBack, FONT, lerp } from './blocks';
 import { AURA, NIGHT } from './BuddiesLogos';
+import { FONT, clamp01, easeOutBack, lerp } from './blocks';
 
 export const BEAT = 60 / 128; // = reveal.py and the score: one grid for picture and music
 export const BAR = 4 * BEAT;
@@ -65,7 +65,15 @@ export const CAST: Record<Count, Cast> = {
 // Bar 2: they keep "replying" for a beat, roll up on beat 2, gather from beat 3. The lock is the drop,
 // bar 3's downbeat, where "buddies" lands too; one more bar holds the logo before the home scene.
 export const POP_AT = 0.2; // the music cue starts here (cue bar 1)
-type Beats = { pop: (i: number) => number; roll: number; gather: number; lock: number; word: number; tag: number; end: number };
+type Beats = {
+  pop: (i: number) => number;
+  roll: number;
+  gather: number;
+  lock: number;
+  word: number;
+  tag: number;
+  end: number;
+};
 const beats = (c: Cast): Beats => {
   const lock = POP_AT + 2 * BAR;
   return {
@@ -98,7 +106,15 @@ export const Antenna: React.FC<{ p: Pose }> = ({ p }) => {
   const h = 0.48 * p.r * p.face;
   return (
     <g opacity={p.face}>
-      <line x1={p.x} y1={p.y - p.r * 0.8} x2={p.x} y2={p.y - p.r - h} stroke={p.color} strokeWidth={p.r * 0.11} strokeLinecap="round" />
+      <line
+        x1={p.x}
+        y1={p.y - p.r * 0.8}
+        x2={p.x}
+        y2={p.y - p.r - h}
+        stroke={p.color}
+        strokeWidth={p.r * 0.11}
+        strokeLinecap="round"
+      />
       <circle cx={p.x} cy={p.y - p.r - h} r={p.r * 0.15 * p.face} fill={p.color} />
     </g>
   );
@@ -109,28 +125,51 @@ export const Face: React.FC<{ p: Pose }> = ({ p }) => {
   const eyeR = p.r * 0.12;
   return (
     <g opacity={p.face}>
-      <rect x={p.x - p.r * 0.66} y={p.y - p.r * 0.26} width={p.r * 1.32} height={p.r * 0.64} rx={p.r * 0.32} fill="#14112a" opacity={0.82} />
+      <rect
+        x={p.x - p.r * 0.66}
+        y={p.y - p.r * 0.26}
+        width={p.r * 1.32}
+        height={p.r * 0.64}
+        rx={p.r * 0.32}
+        fill="#14112a"
+        opacity={0.82}
+      />
       {[-0.3, 0.3].map((dx) => (
-        <ellipse key={dx} cx={p.x + dx * p.r} cy={eyeY} rx={eyeR} ry={eyeR * p.blink} fill={CREAM} />
+        <ellipse
+          key={dx}
+          cx={p.x + dx * p.r}
+          cy={eyeY}
+          rx={eyeR}
+          ry={eyeR * p.blink}
+          fill={CREAM}
+        />
       ))}
     </g>
   );
 };
 
 // "Replying" with three dots that pulse in the robot's colour, rolling up and away at `roll`.
-const Replying: React.FC<{ t: number; at: number; roll: number; x: number; y: number; size: number; color: string }> = ({
-  t,
-  at,
-  roll,
-  x,
-  y,
-  size,
-  color,
-}) => {
+const Replying: React.FC<{
+  t: number;
+  at: number;
+  roll: number;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+}> = ({ t, at, roll, x, y, size, color }) => {
   const inP = easeOutCubic(span(t, at + 0.08, 0.4));
   const up = easeInOut(span(t, roll, 0.42));
   return (
-    <div style={{ position: 'absolute', left: x, top: y - size * 0.7, height: size * 1.4, overflow: 'hidden' }}>
+    <div
+      style={{
+        position: 'absolute',
+        left: x,
+        top: y - size * 0.7,
+        height: size * 1.4,
+        overflow: 'hidden',
+      }}
+    >
       <div
         style={{
           display: 'flex',
@@ -150,7 +189,11 @@ const Replying: React.FC<{ t: number; at: number; roll: number; x: number; y: nu
         Replying
         {[0, 1, 2].map((d) => {
           const pulse = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin((t - at) * 7 - d * 0.9));
-          return <span key={d} style={{ color, opacity: pulse }}>.</span>;
+          return (
+            <span key={d} style={{ color, opacity: pulse }}>
+              .
+            </span>
+          );
         })}
       </div>
     </div>
@@ -158,11 +201,29 @@ const Replying: React.FC<{ t: number; at: number; roll: number; x: number; y: nu
 };
 
 export const Wordmark: React.FC<{ t: number; at: number; size: number }> = ({ t, at, size }) => (
-  <div style={{ display: 'flex', fontFamily: FONT, fontSize: size, fontWeight: 800, fontVariationSettings: "'opsz' 96", letterSpacing: -size * 0.035, lineHeight: 1, color: CREAM }}>
+  <div
+    style={{
+      display: 'flex',
+      fontFamily: FONT,
+      fontSize: size,
+      fontWeight: 800,
+      fontVariationSettings: "'opsz' 96",
+      letterSpacing: -size * 0.035,
+      lineHeight: 1,
+      color: CREAM,
+    }}
+  >
     {'buddies'.split('').map((ch, i) => {
       const p = easeOutCubic(span(t, at + i * 0.04, 0.45));
       return (
-        <span key={`${i}${ch}`} style={{ opacity: p, filter: `blur(${lerp(8, 0, p)}px)`, transform: `translateY(${lerp(size * 0.25, 0, p)}px)` }}>
+        <span
+          key={`${i}${ch}`}
+          style={{
+            opacity: p,
+            filter: `blur(${lerp(8, 0, p)}px)`,
+            transform: `translateY(${lerp(size * 0.25, 0, p)}px)`,
+          }}
+        >
           {ch}
         </span>
       );
@@ -172,10 +233,19 @@ export const Wordmark: React.FC<{ t: number; at: number; size: number }> = ({ t,
 
 // The mark the intro lands on, for reuse elsewhere (the end card): the cast's discs drop in one
 // after another (u = seconds since the build began) and settle into the huddle.
-export const HuddleMark: React.FC<{ count: Count; size: number; u: number }> = ({ count, size, u }) => {
+export const HuddleMark: React.FC<{ count: Count; size: number; u: number }> = ({
+  count,
+  size,
+  u,
+}) => {
   const c = CAST[count];
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" style={{ overflow: 'visible', display: 'block' }}>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 100 100"
+      style={{ overflow: 'visible', display: 'block' }}
+    >
       <g style={{ isolation: 'isolate' }}>
         {c.huddle.map((s, i) => (
           <circle
@@ -244,7 +314,16 @@ export function BuddiesIntro({ count }: { count: Count }) {
         }}
       />
       {c.colors.map((color, i) => (
-        <Replying key={color} t={t} at={b.pop(i)} roll={b.roll + i * 0.06} x={avatarX + c.avatar + 34} y={rowY(i)} size={c.text} color={color} />
+        <Replying
+          key={color}
+          t={t}
+          at={b.pop(i)}
+          roll={b.roll + i * 0.06}
+          x={avatarX + c.avatar + 34}
+          y={rowY(i)}
+          size={c.text}
+          color={color}
+        />
       ))}
       <svg width={1920} height={1080} style={{ position: 'absolute', inset: 0 }}>
         {poses.map((p) => (
@@ -252,14 +331,27 @@ export function BuddiesIntro({ count }: { count: Count }) {
         ))}
         <g style={{ isolation: 'isolate' }}>
           {poses.map((p) => (
-            <circle key={p.color} cx={p.x} cy={p.y} r={Math.max(0, p.r)} fill={p.color} style={{ mixBlendMode: 'screen' }} />
+            <circle
+              key={p.color}
+              cx={p.x}
+              cy={p.y}
+              r={Math.max(0, p.r)}
+              fill={p.color}
+              style={{ mixBlendMode: 'screen' }}
+            />
           ))}
         </g>
         {poses.map((p) => (
           <Face key={p.color} p={p} />
         ))}
       </svg>
-      <div style={{ position: 'absolute', left: MARK_LEFT + MARK + GAP + slide, top: MARK_TOP + MARK / 2 - WORD * 0.56 }}>
+      <div
+        style={{
+          position: 'absolute',
+          left: MARK_LEFT + MARK + GAP + slide,
+          top: MARK_TOP + MARK / 2 - WORD * 0.56,
+        }}
+      >
         <Wordmark t={t} at={b.word} size={WORD} />
       </div>
       <div

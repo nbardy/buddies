@@ -2,22 +2,44 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { CHAT_KIND, ProviderSchema, encodeRows, kindBuddyContext } from '@unleashd/shared';
-import { recordsCarrier } from './turns/intake';
-
 import { attachExecution, executeCommand, getHarness } from '@nbardy/agent-cli';
+import { type SessionRow, defaultRoots } from '@unleashd/ingest';
+import { CHAT_KIND, ProviderSchema, encodeRows, kindBuddyContext } from '@unleashd/shared';
 import compression from 'compression';
 import express, { type ErrorRequestHandler } from 'express';
-import { v4 as uuidv4 } from 'uuid';
+import { validate as isUuid, v4 as uuidv4 } from 'uuid';
 import { WebSocketServer } from 'ws';
 import { appDataDirectory, uploadsDirectory } from './app-data';
 import { createConversationApplicationContext } from './application/context';
+import { auditLocalAgents } from './audit.js';
 import { registerAuthRoutes } from './auth/express';
 import { authorizeUpgrade } from './auth/gate';
 import { TAILSCALE_CANDIDATES, registerMobileAccessRoutes } from './auth/mobile-access';
 import { PairingCodes } from './auth/pairing';
 import { describePolicy, keyLocation, resolveAuthPolicy } from './auth/policy';
 import { watchTailnetOwner } from './auth/tailnet-owner';
+import { WORKSPACE_DIRECTORY, createBriefings } from './buddies/briefing';
+import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
+import { createChannelChangeFeed } from './buddies/channel-change-feed';
+import { createCliReplyGate } from './buddies/channel-reply-gate';
+import { createChannels } from './buddies/channels';
+import {
+  OWNER,
+  archivedBuddyIds,
+  buddiesDatabasePath,
+  buddiesLocation,
+  lateBoundCore,
+  openBuddiesCore,
+} from './buddies/core';
+import { createBuddyEvents } from './buddies/events';
+import { admitExecution, decideExecutionGate } from './buddies/execution-gate';
+import { createGrants } from './buddies/grants';
+import { type McpEndpoint, startMcpEndpoint } from './buddies/mcp';
+import { createMemoryReviewer } from './buddies/memory-review';
+import { type CrewRegistry, createBuddyPolicyPort } from './buddies/policy-port';
+import { type HostCommands, registerBuddyRoutes } from './buddies/routes';
+import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
+import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
 import { setIgnorePatterns, shouldIgnoreWorkingDirectory } from './config';
 import {
   BUDDY_BACKGROUND_TURN_MS,
@@ -41,14 +63,22 @@ import {
   openRecords,
   recordsLocation,
 } from './conversations/config-records';
-import { ConversationConfigService } from './conversations/config-service';
-import { ConversationTombstonedError } from './conversations/config-service';
+import {
+  ConversationConfigService,
+  ConversationTombstonedError,
+} from './conversations/config-service';
 import {
   type ConversationRuntime,
   createConversationRuntime,
   overlayHistoryFields,
 } from './conversations/runtime';
 import { replaceRuntimeConfig } from './conversations/runtime-config';
+import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
+import { registerExpeditionRoutes } from './expeditions/routes';
+import { callDirectory, expeditionsV1Root } from './expeditions-v1/call-directory';
+import { CALL_TIMING } from './expeditions-v1/executor/calls';
+import { registerKeyedExpeditionRoutes } from './expeditions-v1/routes';
+import { createKeyedExpeditions, decideKeyedMode } from './expeditions-v1/service';
 import { registerConversationRoutes } from './http/conversation-routes';
 import { registerCoreRoutes } from './http/core-routes';
 import { registerDebugProfileRoutes } from './http/debug-profile-routes';
@@ -97,40 +127,9 @@ import { registerConversationWebSocket } from './transport/conversation-websocke
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
 import { BackgroundWork } from './turns/background-work';
 import { type FoundExecution, createExecutionJournals } from './turns/executions';
-import { createUpstreamService } from './upstream/routes';
-
-import { type SessionRow, defaultRoots } from '@unleashd/ingest';
-import { validate as isUuid } from 'uuid';
-import { auditLocalAgents } from './audit.js';
-import { WORKSPACE_DIRECTORY, createBriefings } from './buddies/briefing';
-import { type StableConversationPorts, slotOf } from './buddies/buddy-conversation-slots';
-import { createChannelChangeFeed } from './buddies/channel-change-feed';
-import { createCliReplyGate } from './buddies/channel-reply-gate';
-import { createChannels } from './buddies/channels';
-import {
-  OWNER,
-  archivedBuddyIds,
-  buddiesDatabasePath,
-  buddiesLocation,
-  lateBoundCore,
-  openBuddiesCore,
-} from './buddies/core';
-import { createBuddyEvents } from './buddies/events';
-import { admitExecution, decideExecutionGate } from './buddies/execution-gate';
-import { createGrants } from './buddies/grants';
-import { type McpEndpoint, startMcpEndpoint } from './buddies/mcp';
-import { createMemoryReviewer } from './buddies/memory-review';
-import { type CrewRegistry, createBuddyPolicyPort } from './buddies/policy-port';
-import { type HostCommands, registerBuddyRoutes } from './buddies/routes';
-import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
-import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
-import { callDirectory, expeditionsV1Root } from './expeditions-v1/call-directory';
-import { CALL_TIMING } from './expeditions-v1/executor/calls';
-import { registerKeyedExpeditionRoutes } from './expeditions-v1/routes';
-import { createKeyedExpeditions, decideKeyedMode } from './expeditions-v1/service';
-import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
-import { registerExpeditionRoutes } from './expeditions/routes';
+import { recordsCarrier } from './turns/intake';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
+import { createUpstreamService } from './upstream/routes';
 
 let startupAuditResults: Awaited<ReturnType<typeof auditLocalAgents>> = [];
 

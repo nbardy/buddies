@@ -27,7 +27,11 @@ export function BuddySectionNav({
   buddyId,
   activeTab,
   layout,
-}: { buddyId: string; activeTab: EmployeeTab; layout: BuddyPageLayout }) {
+}: {
+  buddyId: string;
+  activeTab: EmployeeTab;
+  layout: BuddyPageLayout;
+}) {
   const labels = SUMMARY_LABELS[layout];
   const primary = layout === 'wide' ? WIDE_PRIMARY : NARROW_PRIMARY;
   const secondary = EMPLOYEE_TABS.filter((tab) => !primary.includes(tab));

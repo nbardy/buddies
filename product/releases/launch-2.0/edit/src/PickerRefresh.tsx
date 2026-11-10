@@ -21,11 +21,39 @@ const Shot: React.FC<{ shot: (typeof SHOTS)[number] }> = ({ shot }) => {
   const height = shot.height * 2;
   return (
     <AbsoluteFill style={{ background: INK.plate, overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', left: 1050, top: (1080 - height) / 2, width: 720, height, overflow: 'hidden', borderRadius: 10, boxShadow: '0 35px 90px rgba(0,0,0,.45)', transform: `scale(${lerp(0.94, 0.98, f / (end(shot.to) - end(shot.from)))})` }}>
-        <Img src={staticFile(`picker-refresh-20260927/${shot.file}.png`)} style={{ position: 'absolute', width: 2974, height: 1882, left: -2204, top: -shot.top * 2 }} />
+      <div
+        style={{
+          position: 'absolute',
+          left: 1050,
+          top: (1080 - height) / 2,
+          width: 720,
+          height,
+          overflow: 'hidden',
+          borderRadius: 10,
+          boxShadow: '0 35px 90px rgba(0,0,0,.45)',
+          transform: `scale(${lerp(0.94, 0.98, f / (end(shot.to) - end(shot.from)))})`,
+        }}
+      >
+        <Img
+          src={staticFile(`picker-refresh-20260927/${shot.file}.png`)}
+          style={{
+            position: 'absolute',
+            width: 2974,
+            height: 1882,
+            left: -2204,
+            top: -shot.top * 2,
+          }}
+        />
       </div>
       <div style={{ position: 'absolute', left: 100, top: 720 }}>
-        <Block text={shot.label} u={f / 60 - 0.12} size="md" fill={INK.cream} ink={INK.plate} rot={-1} />
+        <Block
+          text={shot.label}
+          u={f / 60 - 0.12}
+          size="md"
+          fill={INK.cream}
+          ink={INK.plate}
+          rot={-1}
+        />
       </div>
     </AbsoluteFill>
   );
@@ -34,9 +62,27 @@ const Shot: React.FC<{ shot: (typeof SHOTS)[number] }> = ({ shot }) => {
 const Headline: React.FC = () => {
   const t = useCurrentFrame() / 60;
   return (
-    <div style={{ position: 'absolute', left: 95, top: 200, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+    <div
+      style={{
+        position: 'absolute',
+        left: 95,
+        top: 200,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 12,
+      }}
+    >
       {['Pick', 'yours.'].map((text, i) => (
-        <Block key={text} text={text} u={t - i * 0.06} size="xl" fill={i ? INK.wordmarkOrange : INK.cyan} ink={INK.plate} rot={i ? 2 : -2} />
+        <Block
+          key={text}
+          text={text}
+          u={t - i * 0.06}
+          size="xl"
+          fill={i ? INK.wordmarkOrange : INK.cyan}
+          ink={INK.plate}
+          rot={i ? 2 : -2}
+        />
       ))}
     </div>
   );

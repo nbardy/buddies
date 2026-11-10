@@ -3,7 +3,19 @@
 // Follows the "Multi harness" logo slide (beat9/). Footage H and timecodes: ../footage/FOOTAGE.md.
 import type React from 'react';
 import { staticFile } from 'remotion';
-import { CardEdit, type Cut, FPS, type Key, type Play, STILL, type Shot, hold, play, push, timeline } from './card';
+import {
+  CardEdit,
+  type Cut,
+  FPS,
+  type Key,
+  type Play,
+  STILL,
+  type Shot,
+  hold,
+  play,
+  push,
+  timeline,
+} from './card';
 
 export { FPS, HEIGHT, WIDTH } from './card';
 
@@ -12,10 +24,22 @@ const H = staticFile('2026-09-26_multi-harness_H_pick-harness-in-composer.mov');
 // Source seconds. Typing is 9 s in the take; it only has to read as "a message is typed".
 const MENTION = play(1.0, 2.6, 1.5, 'mention menu: pick Buddies Release Engineer');
 const TYPE = play(2.6, 11.8, 6, 'type "Can we push a release to github and npm"');
-const PICK = play(11.8, 14.8, 1, 'open the reply picker; hover Claude → Codex → Cursor → Muse, pick Muse');
+const PICK = play(
+  11.8,
+  14.8,
+  1,
+  'open the reply picker; hover Claude → Codex → Cursor → Muse, pick Muse'
+);
 const THINK = play(14.8, 17.6, 2, 'thinking level: medium, then Done');
 const SEND = play(17.6, 20.5, 2, 'send; the post lands and "is replying…" appears');
-const CUTS: Cut[] = [MENTION, TYPE, PICK, THINK, SEND, hold(20.5, 0.6, 'hold on "Buddies Release Engineer is replying…"')];
+const CUTS: Cut[] = [
+  MENTION,
+  TYPE,
+  PICK,
+  THINK,
+  SEND,
+  hold(20.5, 0.6, 'hold on "Buddies Release Engineer is replying…"'),
+];
 
 const { duration, at } = timeline(CUTS);
 export const DURATION = duration;
@@ -31,7 +55,16 @@ const HARNESS: Shot = { ...PICKER, ox: 0.0, oy: 0.1 }; // Claude / Codex / Curso
 const THINKING: Shot = { ...PICKER, ox: 0.88, oy: 0.55 }; // thinking-level row through to Done
 // After the send the thread pane opens and the main column narrows (x 540–2106): the post and
 // "is replying…" sit at source y 1500–1680, above the emptied composer.
-const POSTED: Shot = { focus: 1, x: 540, w: 1600, top: 1440, scale: 1.1, ...STILL, ox: 0.3, oy: 0.5 };
+const POSTED: Shot = {
+  focus: 1,
+  x: 540,
+  w: 1600,
+  top: 1440,
+  scale: 1.1,
+  ...STILL,
+  ox: 0.3,
+  oy: 0.5,
+};
 
 // Output time of source second s inside a played cut.
 const when = (cut: Play, s: number) => at(CUTS.indexOf(cut)) + (s - cut.from) / cut.rate;

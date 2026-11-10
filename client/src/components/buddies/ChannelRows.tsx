@@ -6,7 +6,6 @@ import { TypingDots } from './ChannelMarkdown';
 import { ChannelPostContent, EditedMark } from './ChannelPostContent';
 import { ConversationEye } from './ConversationEye';
 import { CopyLinkButton } from './CopyLinkButton';
-import { ReplyRetry } from './HarnessPicker';
 import {
   type ChannelRow,
   type WorkspaceDirectory,
@@ -16,6 +15,7 @@ import {
   postPurposeTag,
 } from './channel-data';
 import { channelLinkPath, postLink } from './channel-link';
+import { ReplyRetry } from './HarnessPicker';
 import type { Post, ThreadStat } from './types';
 
 // The desktop transcript's rows, shared by the channel, thread, Task filter and Threads panes.
@@ -236,7 +236,11 @@ function MessageActions({
   post,
   context,
   hostRef,
-}: { post: Post; context: RowContext; hostRef: (element: HTMLElement | null) => void }) {
+}: {
+  post: Post;
+  context: RowContext;
+  hostRef: (element: HTMLElement | null) => void;
+}) {
   return (
     <div
       className="channel-browser-message-actions"
@@ -259,7 +263,11 @@ function PostBody({
   post,
   context,
   toolsHost,
-}: { post: Post; context: RowContext; toolsHost: HTMLElement | null }) {
+}: {
+  post: Post;
+  context: RowContext;
+  toolsHost: HTMLElement | null;
+}) {
   return <ChannelPostContent post={post} directory={context.directory} toolsHost={toolsHost} />;
 }
 
@@ -278,7 +286,11 @@ export function LeadRow({
   post,
   context,
   children,
-}: { post: Post; context: RowContext; children?: ReactNode }) {
+}: {
+  post: Post;
+  context: RowContext;
+  children?: ReactNode;
+}) {
   const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   return (
     <li

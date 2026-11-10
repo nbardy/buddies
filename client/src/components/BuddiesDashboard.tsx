@@ -1,9 +1,9 @@
 import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useBuddyOverview } from '../hooks/useBuddyData';
+import { errorText } from './buddies/api';
 import { BuddyDirectory } from './buddies/BuddyDirectory';
 import { BuddyPage, RefreshNotice } from './buddies/BuddyPage';
-import { errorText } from './buddies/api';
 import { createBuddyViaBuilder } from './buddies/create-buddy-builder';
 import './BuddiesDashboard.css';
 

@@ -1,7 +1,10 @@
 import { harnessMcpCapability } from '@nbardy/agent-cli';
 import type { RunConfig } from '@unleashd/buddies-core';
-import { type ConversationConfig, ProviderSchema } from '@unleashd/shared';
-import { configFromProviderPreferences } from '@unleashd/shared';
+import {
+  type ConversationConfig,
+  ProviderSchema,
+  configFromProviderPreferences,
+} from '@unleashd/shared';
 import { z } from 'zod';
 import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-service';
 

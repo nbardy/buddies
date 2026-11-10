@@ -17,10 +17,22 @@ export type Play = { kind: 'play'; from: number; to: number; rate: number; note:
 export type Hold = { kind: 'hold'; at: number; seconds: number; note: string };
 export type Cut = Play | Hold;
 
-export const play = (from: number, to: number, rate: number, note: string): Play => ({ kind: 'play', from, to, rate, note });
-export const hold = (at: number, seconds: number, note: string): Hold => ({ kind: 'hold', at, seconds, note });
+export const play = (from: number, to: number, rate: number, note: string): Play => ({
+  kind: 'play',
+  from,
+  to,
+  rate,
+  note,
+});
+export const hold = (at: number, seconds: number, note: string): Hold => ({
+  kind: 'hold',
+  at,
+  seconds,
+  note,
+});
 
-const cutFrames = (c: Cut) => Math.round((c.kind === 'play' ? (c.to - c.from) / c.rate : c.seconds) * FPS);
+const cutFrames = (c: Cut) =>
+  Math.round((c.kind === 'play' ? (c.to - c.from) / c.rate : c.seconds) * FPS);
 
 // Frame offsets of each cut, the total length, and `at(i)`: cut i's start in output seconds.
 export const timeline = (cuts: Cut[]) => {
@@ -32,7 +44,16 @@ export const timeline = (cuts: Cut[]) => {
 // centred over a blurred, dimmed backdrop. focus 0 = that region pixel-aligned in the plain frame.
 // zoom is the soft push inside the card, anchored at (ox, oy) as fractions of the card: every
 // hold drifts in toward where the action is, so no shot sits dead still.
-export type Shot = { focus: number; x: number; w: number; top: number; scale: number; zoom: number; ox: number; oy: number };
+export type Shot = {
+  focus: number;
+  x: number;
+  w: number;
+  top: number;
+  scale: number;
+  zoom: number;
+  ox: number;
+  oy: number;
+};
 // Output seconds. Two keys at the same instant are a hard cut.
 export type Key = { t: number; shot: Shot };
 
@@ -88,9 +109,18 @@ const HoldFootage: React.FC<FootageProps<Hold>> = ({ src, cut, style }) => (
 );
 
 const Footage: React.FC<FootageProps<Cut>> = ({ src, cut, style }) =>
-  cut.kind === 'play' ? <PlayFootage src={src} cut={cut} style={style} /> : <HoldFootage src={src} cut={cut} style={style} />;
+  cut.kind === 'play' ? (
+    <PlayFootage src={src} cut={cut} style={style} />
+  ) : (
+    <HoldFootage src={src} cut={cut} style={style} />
+  );
 
-const Frame: React.FC<{ src: string; camera: Key[]; cut: Cut; startFrame: number }> = ({ src, camera, cut, startFrame }) => {
+const Frame: React.FC<{ src: string; camera: Key[]; cut: Cut; startFrame: number }> = ({
+  src,
+  camera,
+  cut,
+  startFrame,
+}) => {
   const frame = useCurrentFrame();
   const { focus, x, w, top, scale: s, zoom, ox, oy } = shotAt(camera, (startFrame + frame) / FPS);
 
@@ -129,11 +159,23 @@ const Frame: React.FC<{ src: string; camera: Key[]; cut: Cut; startFrame: number
           outline: `1px solid rgba(255,255,255,${0.08 * focus})`,
         }}
       >
-        <div style={{ position: 'absolute', inset: 0, transform: `scale(${zoom})`, transformOrigin: `${ox * 100}% ${oy * 100}%` }}>
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            transform: `scale(${zoom})`,
+            transformOrigin: `${ox * 100}% ${oy * 100}%`,
+          }}
+        >
           <Footage
             src={src}
             cut={cut}
-            style={{ left: -x * scale, top: -srcTop * scale, width: SRC.w * scale, height: SRC.h * scale }}
+            style={{
+              left: -x * scale,
+              top: -srcTop * scale,
+              width: SRC.w * scale,
+              height: SRC.h * scale,
+            }}
           />
         </div>
       </div>
@@ -141,7 +183,11 @@ const Frame: React.FC<{ src: string; camera: Key[]; cut: Cut; startFrame: number
   );
 };
 
-export const CardEdit: React.FC<{ src: string; cuts: Cut[]; camera: Key[] }> = ({ src, cuts, camera }) => {
+export const CardEdit: React.FC<{ src: string; cuts: Cut[]; camera: Key[] }> = ({
+  src,
+  cuts,
+  camera,
+}) => {
   const { starts } = timeline(cuts);
   return (
     <Series>

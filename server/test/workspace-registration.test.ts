@@ -68,7 +68,10 @@ test('bootstrap follows a renamed checkout without duplicating its team', async 
   renameSync(moved, old);
   // The crate remembers a folder's existence for 10 s (folder_probe.rs), so an external move is
   // seen after the TTL; registration (the owner's own action) forgets it at once.
-  await core.createWorkspace(OWNER, await workspaceRegistration({ name: 'Ignored', rootPath: old }));
+  await core.createWorkspace(
+    OWNER,
+    await workspaceRegistration({ name: 'Ignored', rootPath: old })
+  );
   assert.equal((await core.listWorkspaces())[0].rootPath, old);
 });
 

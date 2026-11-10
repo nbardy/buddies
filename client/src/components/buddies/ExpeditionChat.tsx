@@ -8,7 +8,6 @@ import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { ChannelComposer, type ComposerSubmit } from './ChannelComposer';
 import { ChannelLoader } from './ChannelLoader';
 import { Replying, type RowContext, renderRow } from './ChannelRows';
-import type { Frame } from './ExpeditionView';
 import {
   CHANNEL_BACKSTOP_MS,
   type WorkspaceDirectory,
@@ -16,6 +15,7 @@ import {
   useThreadView,
 } from './channel-data';
 import { channelsHref } from './channels-view';
+import type { Frame } from './ExpeditionView';
 import { useExpeditionChat } from './expedition-api';
 
 // The manager chat: the expedition's one thread in the owner<->crew DM (server host.ts chatRoot),
@@ -33,7 +33,12 @@ export function ExpeditionChat({
   mode,
   frame,
   directory,
-}: { id: string; mode: ChatMode; frame: Frame; directory: WorkspaceDirectory }) {
+}: {
+  id: string;
+  mode: ChatMode;
+  frame: Frame;
+  directory: WorkspaceDirectory;
+}) {
   const chat = useExpeditionChat(id);
   if (chat.data !== null) return BODY[chat.data.t](chat.data as never, mode, frame, directory);
   return chat.kind === 'failed' ? (

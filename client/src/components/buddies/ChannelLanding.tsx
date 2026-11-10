@@ -3,11 +3,10 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { forgetRetiredHomePins, retiredHomePinsAtom } from '../../atoms/ui';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
+import { buddyWrite } from './api';
 import { BuddySigil } from './BuddySigil';
 import { liveRunsUrl } from './BuddyWorkspaceActivity';
 import { ChannelComposer } from './ChannelComposer';
-import { TaskProgress } from './TaskProgress';
-import { buddyWrite } from './api';
 import {
   type WorkspaceDirectory,
   authorName,
@@ -26,6 +25,7 @@ import {
   movePin,
   unpin,
 } from './home-view';
+import { TaskProgress } from './TaskProgress';
 import type { Inbox, Run, TaskSummary } from './types';
 import { ActionError, useBuddyAction } from './useBuddyAction';
 // Self-hosted variable fonts (unicode-range subsets, fetched only when Home renders). The app
@@ -300,13 +300,7 @@ function TaskCard({
   );
 }
 
-function ReorderMenu({
-  title,
-  menu,
-}: {
-  title: string;
-  menu: { earlier(): void; later(): void };
-}) {
+function ReorderMenu({ title, menu }: { title: string; menu: { earlier(): void; later(): void } }) {
   const [open, setOpen] = useState(false);
   const run = (action: () => void) => () => {
     setOpen(false);

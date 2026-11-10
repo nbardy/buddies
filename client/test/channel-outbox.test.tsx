@@ -24,13 +24,7 @@ function served(id: string, rootId: string | null): Post {
   });
 }
 
-function Feed({
-  rootId,
-  posts,
-}: {
-  rootId: string | null;
-  posts: readonly Post[] | null;
-}) {
+function Feed({ rootId, posts }: { rootId: string | null; posts: readonly Post[] | null }) {
   const shown = useWithOutbox('channel', rootId, posts);
   return <>{shown === null ? 'loading' : shown.map((post) => post.id).join(',')}</>;
 }

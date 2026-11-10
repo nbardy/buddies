@@ -25,7 +25,6 @@ import { CodeBlockFrame } from '../../views/transcript/markdown-components';
 import { AskUserQuestionWidget } from '../AskUserQuestion';
 import { BuddyBuilderResultCard } from './BuddyBuilderResultCard';
 import { ChannelTaskOverlay } from './ChannelTaskOverlay';
-import { ModalDialog } from './ModalDialog';
 import {
   type ChannelFileKind,
   type ChannelTask,
@@ -36,6 +35,7 @@ import {
   parseChannelLink,
 } from './channel-text';
 import { REF_ATTRIBUTE } from './composer-draft';
+import { ModalDialog } from './ModalDialog';
 import { taskStatusView } from './ui-contract';
 import './ChannelContent.css';
 

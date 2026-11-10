@@ -19,7 +19,10 @@ type Position = { left: number; top: number; above: boolean };
 export function ActionTooltip({
   text,
   children,
-}: { text: string; children: ReactElement<TriggerProps> }) {
+}: {
+  text: string;
+  children: ReactElement<TriggerProps>;
+}) {
   const id = useId();
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trigger = useRef<HTMLElement | null>(null);

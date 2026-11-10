@@ -1,4 +1,3 @@
-import { createDefaultConversationConfig } from '@unleashd/shared';
 import type {
   ConversationConfig,
   ModelSelection,
@@ -6,6 +5,7 @@ import type {
   ProviderCatalog,
   ReasoningSelection,
 } from '@unleashd/shared';
+import { createDefaultConversationConfig } from '@unleashd/shared';
 
 /**
  * The option list and grouping behind every provider / model / reasoning

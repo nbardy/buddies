@@ -21,6 +21,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {

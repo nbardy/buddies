@@ -61,7 +61,11 @@ export function TurnStatus({
   diagnostics,
   now,
   presentation,
-}: { diagnostics: TurnDiagnosticsInput; now?: number; presentation: TurnStatusPresentation }) {
+}: {
+  diagnostics: TurnDiagnosticsInput;
+  now?: number;
+  presentation: TurnStatusPresentation;
+}) {
   const [clock, setClock] = useState(() => now ?? Date.now());
   useEffect(() => {
     if (now !== undefined) return setClock(now);

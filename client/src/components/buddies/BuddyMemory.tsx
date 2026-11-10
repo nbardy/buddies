@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { type UsePolledFetchResult, usePolledFetch } from '../../hooks/usePolledFetch';
 import { formatTimeAgo } from '../../utils/time';
+import { BuddyApiError, buddyApi, buddyWrite, errorText } from './api';
 import { BuddySoulConflict } from './BuddySoulConflict';
 import { ChannelMarkdown } from './ChannelMarkdown';
-import { BuddyApiError, buddyApi, buddyWrite, errorText } from './api';
 import type { ChannelTask } from './channel-text';
 import { readMemoryDoc } from './memory-doc';
 import { type SoulMergeBlock, mergeSoulDraft } from './soul-merge';
@@ -409,15 +409,7 @@ function BuddyDoc({
 }
 
 /** One index row: the doc's name, revision and age, linking to its section. */
-function IndexLink({
-  buddyId,
-  kind,
-  hash,
-}: {
-  buddyId: string;
-  kind: PortableKind;
-  hash: string;
-}) {
+function IndexLink({ buddyId, kind, hash }: { buddyId: string; kind: PortableKind; hash: string }) {
   const doc = usePolledFetch<Doc | null>(readUrl(buddyId, kind, PORTABLE), 0);
   return (
     <li>
@@ -609,7 +601,10 @@ export function BuddyMemory({ buddyId, workspaceId }: { buddyId: string; workspa
 export function BuddyMemoryDoc({
   buddyId,
   kind,
-}: { buddyId: string; kind: 'working' | 'long_term' }) {
+}: {
+  buddyId: string;
+  kind: 'working' | 'long_term';
+}) {
   const { label, hint } = PORTABLE_DOC[kind];
   return (
     <section className="buddy-memory buddy-memory--single" aria-label={label}>

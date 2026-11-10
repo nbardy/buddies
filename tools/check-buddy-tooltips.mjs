@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, unlinkSync } from 'node:fs';
 import { openSession, resolveAuthToken, sleep } from './lib/headless-chrome.mjs';
+
 const [workspaceId, baseUrl = 'http://localhost:7489', out] = process.argv.slice(2);
 assert(workspaceId, 'Pass a workspace with an active Buddy');
 const session = await openSession({ baseUrl, token: resolveAuthToken() });

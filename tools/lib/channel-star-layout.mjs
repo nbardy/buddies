@@ -10,7 +10,10 @@ export function inspectChannelStarLayout() {
     const r = row.getBoundingClientRect();
     const worker = actions.querySelector('.buddy-background-link');
     const last = worker ?? star;
-    if (Math.abs(r.right - last.getBoundingClientRect().right) > 1 || actions.lastElementChild !== last) {
+    if (
+      Math.abs(r.right - last.getBoundingClientRect().right) > 1 ||
+      actions.lastElementChild !== last
+    ) {
       throw new Error('Worker status (or channel star) must be the last action at the far right');
     }
     if (worker && star.getBoundingClientRect().right > worker.getBoundingClientRect().left + 1) {
@@ -37,7 +40,9 @@ export function inspectChannelStarLayout() {
             Math.abs(opener.getBoundingClientRect().width - width) > 1 ||
             Math.abs(last.getBoundingClientRect().right - r.right) > 1
           ) {
-            throw new Error('Worker count moved the rightmost action or shortened the Buddy opener');
+            throw new Error(
+              'Worker count moved the rightmost action or shortened the Buddy opener'
+            );
           }
         }
       } finally {

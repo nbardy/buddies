@@ -40,9 +40,11 @@ export function inspectChannelModelPicker() {
   if (!options.querySelector('input[type="range"]')) {
     throw new Error('Model picker must reuse the thinking slider');
   }
-  const harnesses = [...options.querySelectorAll('.config-picker__group--provider .config-picker__option')];
+  const harnesses = [
+    ...options.querySelectorAll('.config-picker__group--provider .config-picker__option'),
+  ];
   const firstTop = harnesses[0]?.getBoundingClientRect().top;
-  if (harnesses.some(choice => Math.abs(choice.getBoundingClientRect().top - firstTop) > 1)) {
+  if (harnesses.some((choice) => Math.abs(choice.getBoundingClientRect().top - firstTop) > 1)) {
     throw new Error('Harness choices wrapped beneath their floating default hint');
   }
   return { visible: true, optionsScroll: options.scrollHeight > options.clientHeight };

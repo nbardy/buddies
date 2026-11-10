@@ -74,7 +74,10 @@ const KEYED_DOT = { running: 'running', paused: 'paused', finished: 'idle' } as 
 export function RailExpeditions({
   workspaceId,
   classes,
-}: { workspaceId: string; classes: RailRowClasses }) {
+}: {
+  workspaceId: string;
+  classes: RailRowClasses;
+}) {
   const rows = useExpeditionRows(workspaceId) ?? [];
   // This workspace's keyed expeditions; none when the backend has no keyed route (404/503) or the
   // list is still loading.

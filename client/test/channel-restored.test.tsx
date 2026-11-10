@@ -13,6 +13,7 @@ import type {
 } from '../src/components/buddies/types';
 import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { inboxFixture, postFixture, publicChannel } from './fixtures/channel-posts';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {

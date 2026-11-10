@@ -35,13 +35,36 @@ const Glow: React.FC<{ opacity: number }> = ({ opacity }) => (
 );
 
 const Stack: React.FC<{ children: React.ReactNode; gap: number }> = ({ children, gap }) => (
-  <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap, fontFamily: FONT }}>
+  <AbsoluteFill
+    style={{
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'column',
+      gap,
+      fontFamily: FONT,
+    }}
+  >
     {children}
   </AbsoluteFill>
 );
 
-const Line: React.FC<{ text: string; size: number; weight: number; color: string }> = ({ text, size, weight, color }) => (
-  <div style={{ fontSize: size, fontWeight: weight, color, letterSpacing: -0.5, fontVariationSettings: "'opsz' 32" }}>{text}</div>
+const Line: React.FC<{ text: string; size: number; weight: number; color: string }> = ({
+  text,
+  size,
+  weight,
+  color,
+}) => (
+  <div
+    style={{
+      fontSize: size,
+      fontWeight: weight,
+      color,
+      letterSpacing: -0.5,
+      fontVariationSettings: "'opsz' 32",
+    }}
+  >
+    {text}
+  </div>
 );
 
 // A: lowercase, wide and round, filled with the home's aurora. The friendliest of the three.
@@ -74,7 +97,18 @@ const Aurora: React.FC = () => (
 // B: a mark plus a cream wordmark. Two overlapping heads, violet and teal, are the "buddies";
 // the mark works alone as an app icon or avatar.
 const Head: React.FC<{ color: string; x: number; y: number; d: number }> = ({ color, x, y, d }) => (
-  <div style={{ position: 'absolute', left: x, top: y, width: d, height: d, borderRadius: '50%', background: color, mixBlendMode: 'screen' }} />
+  <div
+    style={{
+      position: 'absolute',
+      left: x,
+      top: y,
+      width: d,
+      height: d,
+      borderRadius: '50%',
+      background: color,
+      mixBlendMode: 'screen',
+    }}
+  />
 );
 
 const Pair: React.FC = () => (
@@ -86,7 +120,17 @@ const Pair: React.FC = () => (
           <Head color={AURA.violet} x={0} y={20} d={150} />
           <Head color={AURA.teal} x={80} y={20} d={150} />
         </div>
-        <div style={{ fontSize: 230, fontWeight: 700, fontStretch: '92%', fontVariationSettings: "'opsz' 96", letterSpacing: -6, color: INK.cream, lineHeight: 1 }}>
+        <div
+          style={{
+            fontSize: 230,
+            fontWeight: 700,
+            fontStretch: '92%',
+            fontVariationSettings: "'opsz' 96",
+            letterSpacing: -6,
+            color: INK.cream,
+            lineHeight: 1,
+          }}
+        >
           Buddies
         </div>
       </div>

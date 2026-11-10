@@ -4,8 +4,17 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
-import type { Actor, ChannelRef, DocRef, DocScope, ListScope, Post } from '@unleashd/buddies-core';
-import type { SteerBoundary, TaskQuery, ThreadUnread } from '@unleashd/buddies-core';
+import type {
+  Actor,
+  ChannelRef,
+  DocRef,
+  DocScope,
+  ListScope,
+  Post,
+  SteerBoundary,
+  TaskQuery,
+  ThreadUnread,
+} from '@unleashd/buddies-core';
 import type { Resolution } from '@unleashd/shared';
 import { z } from 'zod';
 import type { MessageSource } from '../conversations/messages';

@@ -60,7 +60,15 @@ type AppSkin = {
   model: string;
 };
 // A coding-agent CLI in a terminal window.
-type TermSkin = { layout: 'terminal'; bg: string; bar: string; text: string; muted: string; accent: string; box: string };
+type TermSkin = {
+  layout: 'terminal';
+  bg: string;
+  bar: string;
+  text: string;
+  muted: string;
+  accent: string;
+  box: string;
+};
 type Skin = AppSkin | TermSkin;
 
 const noChips = () => [];
@@ -68,43 +76,140 @@ const STUDIO_NAV = ['New chat', 'Projects', 'Artifacts', 'Scheduled'];
 const WORKBENCH_NAV = ['New chat', 'Pull requests', 'Scheduled', 'Plugins'];
 const ASSISTANT_NAV = ['New chat', 'Search chats', 'Library', 'Projects'];
 
-type Look = 'studioDark' | 'studioLight' | 'workbenchDark' | 'assistantDark' | 'assistantLight' | 'terminal';
+type Look =
+  | 'studioDark'
+  | 'studioLight'
+  | 'workbenchDark'
+  | 'assistantDark'
+  | 'assistantLight'
+  | 'terminal';
 const SKINS: Record<Look, Skin> = {
   studioDark: {
-    layout: 'app', bg: '#1a1a19', sidebar: '#1f1f1e', divider: '#2c2c2a', text: '#ecebe7', muted: '#8f8d88',
-    bubble: '#30302e', bubbleText: '#ecebe7', composer: '#232322', composerBorder: '#3b3b38', radius: 20,
-    send: '#c96442', sendInk: '#fff', headingFont: SERIF, heading: () => 'Good afternoon',
-    placeholder: 'How can I help you today?', nav: STUDIO_NAV, chips: noChips, model: 'Agent · Medium',
+    layout: 'app',
+    bg: '#1a1a19',
+    sidebar: '#1f1f1e',
+    divider: '#2c2c2a',
+    text: '#ecebe7',
+    muted: '#8f8d88',
+    bubble: '#30302e',
+    bubbleText: '#ecebe7',
+    composer: '#232322',
+    composerBorder: '#3b3b38',
+    radius: 20,
+    send: '#c96442',
+    sendInk: '#fff',
+    headingFont: SERIF,
+    heading: () => 'Good afternoon',
+    placeholder: 'How can I help you today?',
+    nav: STUDIO_NAV,
+    chips: noChips,
+    model: 'Agent · Medium',
   },
   studioLight: {
-    layout: 'app', bg: '#faf9f5', sidebar: '#f3f1ea', divider: '#e6e3d9', text: '#2f2c25', muted: '#8b877c',
-    bubble: '#efece3', bubbleText: '#2f2c25', composer: '#ffffff', composerBorder: '#e2dfd4', radius: 20,
-    send: '#c96442', sendInk: '#fff', headingFont: SERIF, heading: () => 'Good afternoon',
-    placeholder: 'How can I help you today?', nav: STUDIO_NAV, chips: noChips, model: 'Agent · Medium',
+    layout: 'app',
+    bg: '#faf9f5',
+    sidebar: '#f3f1ea',
+    divider: '#e6e3d9',
+    text: '#2f2c25',
+    muted: '#8b877c',
+    bubble: '#efece3',
+    bubbleText: '#2f2c25',
+    composer: '#ffffff',
+    composerBorder: '#e2dfd4',
+    radius: 20,
+    send: '#c96442',
+    sendInk: '#fff',
+    headingFont: SERIF,
+    heading: () => 'Good afternoon',
+    placeholder: 'How can I help you today?',
+    nav: STUDIO_NAV,
+    chips: noChips,
+    model: 'Agent · Medium',
   },
   workbenchDark: {
-    layout: 'app', bg: '#1b1b1b', sidebar: 'linear-gradient(165deg, #2c2338, #201d26 55%, #1c1c1c)', divider: '#2a2a2a',
-    text: '#ececec', muted: '#8a8a8a', bubble: '#2d2d2d', bubbleText: '#ececec', composer: '#2a2a2a',
-    composerBorder: '#353535', radius: 22, send: '#3b82f6', sendInk: '#fff', headingFont: SANS,
-    heading: (repo) => `What should we build in ${repo}?`, placeholder: 'Do anything', nav: WORKBENCH_NAV,
-    chips: (repo) => [repo, 'Local', 'main'], model: 'Extra High',
+    layout: 'app',
+    bg: '#1b1b1b',
+    sidebar: 'linear-gradient(165deg, #2c2338, #201d26 55%, #1c1c1c)',
+    divider: '#2a2a2a',
+    text: '#ececec',
+    muted: '#8a8a8a',
+    bubble: '#2d2d2d',
+    bubbleText: '#ececec',
+    composer: '#2a2a2a',
+    composerBorder: '#353535',
+    radius: 22,
+    send: '#3b82f6',
+    sendInk: '#fff',
+    headingFont: SANS,
+    heading: (repo) => `What should we build in ${repo}?`,
+    placeholder: 'Do anything',
+    nav: WORKBENCH_NAV,
+    chips: (repo) => [repo, 'Local', 'main'],
+    model: 'Extra High',
   },
   assistantDark: {
-    layout: 'app', bg: '#212121', sidebar: '#171717', divider: '#262626', text: '#ececec', muted: '#9b9b9b',
-    bubble: '#303030', bubbleText: '#ececec', composer: '#303030', composerBorder: '#303030', radius: 34,
-    send: '#ffffff', sendInk: '#000', headingFont: SANS, heading: () => 'What are we working on?',
-    placeholder: 'Ask anything', nav: ASSISTANT_NAV, chips: noChips, model: 'Thinking',
+    layout: 'app',
+    bg: '#212121',
+    sidebar: '#171717',
+    divider: '#262626',
+    text: '#ececec',
+    muted: '#9b9b9b',
+    bubble: '#303030',
+    bubbleText: '#ececec',
+    composer: '#303030',
+    composerBorder: '#303030',
+    radius: 34,
+    send: '#ffffff',
+    sendInk: '#000',
+    headingFont: SANS,
+    heading: () => 'What are we working on?',
+    placeholder: 'Ask anything',
+    nav: ASSISTANT_NAV,
+    chips: noChips,
+    model: 'Thinking',
   },
   assistantLight: {
-    layout: 'app', bg: '#ffffff', sidebar: '#f9f9f9', divider: '#ececec', text: '#0d0d0d', muted: '#8f8f8f',
-    bubble: '#f1f1f1', bubbleText: '#0d0d0d', composer: '#ffffff', composerBorder: '#e3e3e3', radius: 34,
-    send: '#000000', sendInk: '#fff', headingFont: SANS, heading: () => 'What are we working on?',
-    placeholder: 'Ask anything', nav: ASSISTANT_NAV, chips: noChips, model: 'Thinking',
+    layout: 'app',
+    bg: '#ffffff',
+    sidebar: '#f9f9f9',
+    divider: '#ececec',
+    text: '#0d0d0d',
+    muted: '#8f8f8f',
+    bubble: '#f1f1f1',
+    bubbleText: '#0d0d0d',
+    composer: '#ffffff',
+    composerBorder: '#e3e3e3',
+    radius: 34,
+    send: '#000000',
+    sendInk: '#fff',
+    headingFont: SANS,
+    heading: () => 'What are we working on?',
+    placeholder: 'Ask anything',
+    nav: ASSISTANT_NAV,
+    chips: noChips,
+    model: 'Thinking',
   },
-  terminal: { layout: 'terminal', bg: '#0e0e0e', bar: '#1c1c1c', text: '#d8d8d8', muted: '#7a7a7a', accent: '#d97757', box: '#4a4a4a' },
+  terminal: {
+    layout: 'terminal',
+    bg: '#0e0e0e',
+    bar: '#1c1c1c',
+    text: '#d8d8d8',
+    muted: '#7a7a7a',
+    accent: '#d97757',
+    box: '#4a4a4a',
+  },
 };
 // Weighted: mostly the two screenshots' styles, then the assistant, then the CLI.
-const LOOK_POOL: Look[] = ['studioDark', 'studioDark', 'workbenchDark', 'workbenchDark', 'studioLight', 'assistantDark', 'assistantLight', 'terminal'];
+const LOOK_POOL: Look[] = [
+  'studioDark',
+  'studioDark',
+  'workbenchDark',
+  'workbenchDark',
+  'studioLight',
+  'assistantDark',
+  'assistantLight',
+  'terminal',
+];
 
 // ---- Window content ------------------------------------------------------------------------------
 
@@ -212,7 +317,10 @@ const GAPS = (
     [1 / 30, 30],
   ] as const
 ).flatMap(([gap, n]) => Array<number>(n).fill(gap));
-const ARRIVALS = GAPS.reduce<number[]>((acc, gap, i) => [...acc, acc[i] + gap], [T.rampStart]).slice(0, -1);
+const ARRIVALS = GAPS.reduce<number[]>(
+  (acc, gap, i) => [...acc, acc[i] + gap],
+  [T.rampStart]
+).slice(0, -1);
 
 const W = 900;
 const H = 560;
@@ -253,10 +361,16 @@ const TONE: Record<Tone, (muted: string) => React.CSSProperties> = {
 };
 
 // Thin dispatcher: the status kind picks the rendering.
-const StatusLine: React.FC<{ status: Status; muted: string; u: number }> = ({ status, muted, u }) => {
+const StatusLine: React.FC<{ status: Status; muted: string; u: number }> = ({
+  status,
+  muted,
+  u,
+}) => {
   switch (status.kind) {
     case 'thinking':
-      return <span style={{ color: muted }}>Thinking{'.'.repeat(1 + (Math.floor(u * 4) % 3))}</span>;
+      return (
+        <span style={{ color: muted }}>Thinking{'.'.repeat(1 + (Math.floor(u * 4) % 3))}</span>
+      );
     case 'label':
       return <span style={TONE[status.tone](muted)}>{status.text}</span>;
   }
@@ -293,13 +407,23 @@ const Sidebar: React.FC<{ skin: AppSkin; recents: string[] }> = ({ skin, recents
     <div style={{ height: 8 }} />
     {skin.nav.map((label) => (
       <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.5px solid ${skin.muted}` }} />
+        <span
+          style={{ width: 14, height: 14, borderRadius: 4, border: `1.5px solid ${skin.muted}` }}
+        />
         {label}
       </div>
     ))}
     <div style={{ marginTop: 14, fontSize: 12, color: skin.muted }}>Recents</div>
     {recents.map((title) => (
-      <div key={title} style={{ fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <div
+        key={title}
+        style={{
+          fontSize: 13.5,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
         {title}
       </div>
     ))}
@@ -315,7 +439,15 @@ const Composer: React.FC<{ skin: AppSkin; spec: WindowSpec; u: number }> = ({ sk
   return (
     <div>
       {chips.length > 0 && (
-        <div style={{ display: 'flex', gap: 22, padding: '8px 18px 10px', fontSize: 14, color: skin.text }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 22,
+            padding: '8px 18px 10px',
+            fontSize: 14,
+            color: skin.text,
+          }}
+        >
           {chips.map((c) => (
             <span key={c}>{c}</span>
           ))}
@@ -330,13 +462,30 @@ const Composer: React.FC<{ skin: AppSkin; spec: WindowSpec; u: number }> = ({ sk
           boxShadow: '0 4px 18px rgba(0,0,0,.12)',
         }}
       >
-        <div style={{ fontSize: 17, height: 24, whiteSpace: 'nowrap', overflow: 'hidden', color: text ? skin.text : skin.muted }}>
+        <div
+          style={{
+            fontSize: 17,
+            height: 24,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            color: text ? skin.text : skin.muted,
+          }}
+        >
           {/* The caret follows what's typed; with nothing typed it sits before the placeholder. */}
           {text}
           <span style={{ color: skin.text, opacity: caretOn(u) ? 1 : 0 }}>|</span>
           {text ? '' : skin.placeholder}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 12, fontSize: 14, color: skin.muted }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+            marginTop: 12,
+            fontSize: 14,
+            color: skin.muted,
+          }}
+        >
           <span style={{ fontSize: 22, lineHeight: 1, color: skin.text }}>+</span>
           <span style={{ flex: 1 }} />
           <span>{skin.model} ⌄</span>
@@ -407,7 +556,15 @@ const AppWindow: React.FC<{ skin: AppSkin; spec: WindowSpec; u: number }> = ({ s
         >
           {spec.prompt}
         </div>
-        <div style={{ position: 'absolute', left: 48, top: 104, fontSize: 15, visibility: u >= statusAt(spec) ? 'visible' : 'hidden' }}>
+        <div
+          style={{
+            position: 'absolute',
+            left: 48,
+            top: 104,
+            fontSize: 15,
+            visibility: u >= statusAt(spec) ? 'visible' : 'hidden',
+          }}
+        >
           <StatusLine status={spec.status} muted={skin.muted} u={u} />
         </div>
       </div>
@@ -416,24 +573,68 @@ const AppWindow: React.FC<{ skin: AppSkin; spec: WindowSpec; u: number }> = ({ s
 };
 
 // A coding-agent CLI: boxed input line, the sent prompt echoed above it, status under that.
-const TerminalWindow: React.FC<{ skin: TermSkin; spec: WindowSpec; u: number }> = ({ skin, spec, u }) => {
+const TerminalWindow: React.FC<{ skin: TermSkin; spec: WindowSpec; u: number }> = ({
+  skin,
+  spec,
+  u,
+}) => {
   const sent = u >= sendAt(spec);
   return (
-    <div style={{ width: W, height: H, background: skin.bg, fontFamily: MONO, color: skin.text, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ height: 36, background: skin.bar, display: 'flex', alignItems: 'center', padding: '0 14px', gap: 14 }}>
+    <div
+      style={{
+        width: W,
+        height: H,
+        background: skin.bg,
+        fontFamily: MONO,
+        color: skin.text,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <div
+        style={{
+          height: 36,
+          background: skin.bar,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 14px',
+          gap: 14,
+        }}
+      >
         <Lights />
-        <span style={{ flex: 1, textAlign: 'center', fontSize: 13, color: skin.muted, marginRight: 52 }}>
+        <span
+          style={{ flex: 1, textAlign: 'center', fontSize: 13, color: skin.muted, marginRight: 52 }}
+        >
           {`~/git/${spec.repo} — zsh`}
         </span>
       </div>
-      <div style={{ flex: 1, padding: '18px 22px', fontSize: 17, lineHeight: 1.7, display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{
+          flex: 1,
+          padding: '18px 22px',
+          fontSize: 17,
+          lineHeight: 1.7,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         <div style={{ color: skin.accent }}>* agent ready in ~/git/{spec.repo}</div>
-        <div style={{ visibility: sent ? 'visible' : 'hidden', color: skin.muted }}>{`> ${spec.prompt}`}</div>
+        <div
+          style={{ visibility: sent ? 'visible' : 'hidden', color: skin.muted }}
+        >{`> ${spec.prompt}`}</div>
         <div style={{ visibility: u >= statusAt(spec) ? 'visible' : 'hidden' }}>
           <StatusLine status={spec.status} muted={skin.accent} u={u} />
         </div>
         <div style={{ flex: 1 }} />
-        <div style={{ border: `1px solid ${skin.box}`, borderRadius: 8, padding: '8px 14px', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+        <div
+          style={{
+            border: `1px solid ${skin.box}`,
+            borderRadius: 8,
+            padding: '8px 14px',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+          }}
+        >
           {'> '}
           {sent ? '' : typedText(spec, u)}
           <span style={{ background: skin.text, opacity: caretOn(u) ? 1 : 0 }}>&nbsp;</span>
@@ -455,7 +656,13 @@ const WindowBody: React.FC<{ skin: Skin; spec: WindowSpec; u: number }> = ({ ski
 };
 
 const ChatWindow: React.FC<{ spec: WindowSpec; u: number }> = ({ spec, u }) => (
-  <div style={{ borderRadius: 14, overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08)' }}>
+  <div
+    style={{
+      borderRadius: 14,
+      overflow: 'hidden',
+      boxShadow: '0 30px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08)',
+    }}
+  >
     <WindowBody skin={SKINS[spec.look]} spec={spec} u={u} />
   </div>
 );
@@ -504,12 +711,20 @@ const Pileup: React.FC = () => {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
-  const shake = interpolate(t, [9.2, T.cut], [0, 16], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const shake = interpolate(t, [9.2, T.cut], [0, 16], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
   const tick = Math.floor(frame / 2);
   const dx = shake * (random(`shake-x-${tick}`) - 0.5) * 2;
   const dy = shake * (random(`shake-y-${tick}`) - 0.5) * 2;
   return (
-    <AbsoluteFill style={{ background: 'radial-gradient(circle at 50% 40%, #1b212b, #0b0e13 70%)', overflow: 'hidden' }}>
+    <AbsoluteFill
+      style={{
+        background: 'radial-gradient(circle at 50% 40%, #1b212b, #0b0e13 70%)',
+        overflow: 'hidden',
+      }}
+    >
       <AbsoluteFill style={{ transform: `translate(${dx}px, ${dy}px) scale(${zoom})` }}>
         {WINDOWS.filter((w) => t >= w.at).map((w) => {
           const u = t - w.at;
@@ -533,7 +748,10 @@ const Pileup: React.FC = () => {
       <AbsoluteFill
         style={{
           background: 'radial-gradient(circle at 50% 50%, transparent 45%, rgba(0,0,0,.75))',
-          opacity: interpolate(t, [T.rampStart, T.cut], [0.3, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }),
+          opacity: interpolate(t, [T.rampStart, T.cut], [0.3, 1], {
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp',
+          }),
         }}
       />
     </AbsoluteFill>

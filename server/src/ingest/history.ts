@@ -116,7 +116,9 @@ export async function mergedCounts(
   groups: readonly (readonly MergeInput[])[]
 ): Promise<number[]> {
   return ingest.mergedCounts(
-    groups.map((group) => group.map(({ sessionId, createdAt, count }) => ({ sessionId, createdAt, count })))
+    groups.map((group) =>
+      group.map(({ sessionId, createdAt, count }) => ({ sessionId, createdAt, count }))
+    )
   );
 }
 

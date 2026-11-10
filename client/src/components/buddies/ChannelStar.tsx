@@ -23,7 +23,11 @@ function StarButton({
   starred,
   name,
   onClick,
-}: { starred: boolean; name: string; onClick(): void }) {
+}: {
+  starred: boolean;
+  name: string;
+  onClick(): void;
+}) {
   const label = `${starred ? 'Unstar' : 'Star'} ${name}`;
   return (
     <button

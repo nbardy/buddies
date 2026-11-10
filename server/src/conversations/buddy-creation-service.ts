@@ -6,8 +6,13 @@ import type {
   InstalledAgent,
   Provider,
 } from '@unleashd/shared';
-import { bodyText, buddyExecutionPreferences, buddyKind } from '@unleashd/shared';
-import { NO_AGENT_INSTALLED, configFromProviderPreferences } from '@unleashd/shared';
+import {
+  NO_AGENT_INSTALLED,
+  bodyText,
+  buddyExecutionPreferences,
+  buddyKind,
+  configFromProviderPreferences,
+} from '@unleashd/shared';
 import type { ResolvedBuddyConversation } from '../buddies/briefing';
 import { stableConversationId } from '../buddies/buddy-conversation-slots';
 import type { OwnerInput } from '../turns/input';

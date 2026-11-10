@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import {

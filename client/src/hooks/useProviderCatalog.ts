@@ -1,5 +1,5 @@
-import { ProviderCatalogSchema } from '@unleashd/shared';
 import type { ProviderCatalog } from '@unleashd/shared';
+import { ProviderCatalogSchema } from '@unleashd/shared';
 import { resource, usePolledFetch } from './usePolledFetch';
 
 export interface ProviderCatalogState {

@@ -50,7 +50,12 @@ test('ingest a root, receive an append through onChange, page by revision', asyn
     const changed = new Promise((resolve) => {
       wake = () => events.some((e) => e.t === 'changes' && e.rev > first.rev) && resolve();
     });
-    const usage = { input_tokens: 5, output_tokens: 3, cache_read_input_tokens: 2, cache_creation_input_tokens: 1 };
+    const usage = {
+      input_tokens: 5,
+      output_tokens: 3,
+      cache_read_input_tokens: 2,
+      cache_creation_input_tokens: 1,
+    };
     appendFileSync(
       file,
       `${JSON.stringify({ type: 'assistant', timestamp: '2026-09-25T10:00:00.000Z', cwd: '/work', message: { id: 'r1', model: 'claude-opus-5-5', usage, content: [{ type: 'text', text: 'hi there' }] } })}\n`

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ExecuteCommandRequest } from '@nbardy/agent-cli';
-import { executeCommand, PI_RESTRICTED_FLAGS } from '@nbardy/agent-cli';
+import { PI_RESTRICTED_FLAGS, executeCommand } from '@nbardy/agent-cli';
 import type { ConversationConfig, Provider, ResolvedExecutionConfig } from '@unleashd/shared';
 import { runDetached } from './detached-cli';
 

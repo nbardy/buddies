@@ -1,7 +1,8 @@
 // Real app capture through the repo's CDP driver. Draft selections only; never send.
+
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { openSession, resolveAuthToken, sleep } from '../../../../tools/lib/headless-chrome.mjs';
 
 const out = path.resolve(process.argv[2] || 'out/picker-refresh');
@@ -30,12 +31,19 @@ try {
   await evaluate(() => {
     const original = window.fetch;
     window.fetch = (input, init) => {
-      const method = (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
-      if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) return Promise.reject(new Error('Capture: write blocked'));
+      const method = (
+        init?.method || (input instanceof Request ? input.method : 'GET')
+      ).toUpperCase();
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method))
+        return Promise.reject(new Error('Capture: write blocked'));
       return original(input, init);
     };
     WebSocket.prototype.send = () => {};
-    history.pushState({}, '', '/buddies/workspaces/project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c/channels?channel=list_032cedcb-55a1-44b2-a625-5ff70fb4e616');
+    history.pushState(
+      {},
+      '',
+      '/buddies/workspaces/project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c/channels?channel=list_032cedcb-55a1-44b2-a625-5ff70fb4e616'
+    );
     dispatchEvent(new PopStateEvent('popstate'));
   });
   for (let i = 0; i < 100; i++) {
@@ -46,7 +54,10 @@ try {
   await evaluate(() => {
     const input = document.querySelector('.channel-composer textarea');
     input.focus();
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '@Marketing');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(
+      input,
+      '@Marketing'
+    );
     input.setSelectionRange(10, 10);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
@@ -54,8 +65,16 @@ try {
   await snap('00-mention');
   await evaluate(() => {
     const buttons = [...document.querySelectorAll('.channel-composer-picker button')];
-    const buddy = buttons.find(b => b.textContent.includes('Marketing Designer') && !b.querySelector('.channel-composer-picker-task'));
-    if (!buddy) throw new Error('Marketing Designer not found in real mention menu: ' + document.querySelector('.channel-composer')?.innerText);
+    const buddy = buttons.find(
+      (b) =>
+        b.textContent.includes('Marketing Designer') &&
+        !b.querySelector('.channel-composer-picker-task')
+    );
+    if (!buddy)
+      throw new Error(
+        'Marketing Designer not found in real mention menu: ' +
+          document.querySelector('.channel-composer')?.innerText
+      );
     buddy.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
   });
   for (let i = 0; i < 40; i++) {
@@ -75,7 +94,9 @@ try {
     })()`);
     if (provider === 'codex') {
       await sleep(200);
-      await evaluate(() => document.querySelector('.channel-composer-model input[value="gpt-6-astra"]').click());
+      await evaluate(() =>
+        document.querySelector('.channel-composer-model input[value="gpt-6-astra"]').click()
+      );
     }
     await snap(`03-${provider}`);
   }
@@ -91,12 +112,30 @@ try {
   await evaluate(() => document.querySelector('.channel-composer-model-done').click());
   await snap('05-done');
 } finally {
-  fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-    capturedAt: new Date().toISOString(),
-    commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-    dirtyPicker: execFileSync('git', ['status', '--short', '--', 'client/src/components/ConversationConfigPicker.tsx', 'client/src/components/ConversationConfigPicker.css'], { encoding: 'utf8' }).trim(),
-    viewport: { width: 1487, height: 941, scale: 2 }, states,
-  }, null, 2));
+  fs.writeFileSync(
+    path.join(out, 'manifest.json'),
+    JSON.stringify(
+      {
+        capturedAt: new Date().toISOString(),
+        commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+        dirtyPicker: execFileSync(
+          'git',
+          [
+            'status',
+            '--short',
+            '--',
+            'client/src/components/ConversationConfigPicker.tsx',
+            'client/src/components/ConversationConfigPicker.css',
+          ],
+          { encoding: 'utf8' }
+        ).trim(),
+        viewport: { width: 1487, height: 941, scale: 2 },
+        states,
+      },
+      null,
+      2
+    )
+  );
   await session.close();
 }
 console.log(JSON.stringify(states));

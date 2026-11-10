@@ -255,7 +255,10 @@ function AccentStrip({ name, family }: { name: string; family: DerivedTokens['ac
 function ColorRamp({
   items,
   bgColor,
-}: { items: { label: string; color: string }[]; bgColor?: string }) {
+}: {
+  items: { label: string; color: string }[];
+  bgColor?: string;
+}) {
   return (
     <div className="color-ramp">
       {items.map((item) => (

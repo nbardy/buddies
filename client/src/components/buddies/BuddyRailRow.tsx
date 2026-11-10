@@ -2,12 +2,12 @@ import { setConversationDone } from '../../atoms/actions';
 import { ActionTooltip } from './ActionTooltip';
 import { BuddyBackgroundLink } from './BuddyBackgroundLink';
 import { BuddySigil } from './BuddySigil';
+import { useBuddyDirectActions } from './buddy-direct-actions';
 import type { OpenDm } from './ChannelAuthor';
 import { BuddyStar } from './ChannelStar';
 import { HighlightRow } from './HighlightRow';
-import { WakeIcon, WakeIndicator } from './WakeIndicator';
-import { useBuddyDirectActions } from './buddy-direct-actions';
 import type { Buddy } from './types';
+import { WakeIcon, WakeIndicator } from './WakeIndicator';
 
 // One Buddy in the desktop channels rail. Like Slack (and the mobile Buddies
 // home), the name opens the DM — the ongoing owner chat, history kept; on

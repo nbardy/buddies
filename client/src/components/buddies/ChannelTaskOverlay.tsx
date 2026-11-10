@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { BuddyTaskPanel } from './BuddyWork';
-import { ModalDialog } from './ModalDialog';
 import type { ChannelTask } from './channel-text';
+import { ModalDialog } from './ModalDialog';
 import { taskStatusView } from './ui-contract';
 
 // A Task ref stays in Channels (493c1c7): the chip's hover card is the one-line preview, and a

@@ -11,8 +11,8 @@ import type {
   TurnAttemptSnapshot,
 } from '@unleashd/shared';
 import { type Atom, atom } from 'jotai';
-import { atomFamily } from 'jotai-family';
 import { selectAtom } from 'jotai/utils';
+import { atomFamily } from 'jotai-family';
 import {
   type MessageGroup,
   groupChatMessages,

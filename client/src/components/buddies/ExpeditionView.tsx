@@ -10,10 +10,10 @@ import {
 import { type KeyboardEvent, type ReactNode, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChannelLoader } from './ChannelLoader';
-import { type ChatMode, ExpeditionChat, useChatUnread } from './ExpeditionChat';
-import { AttemptsPanel, DetailsPanel, GoalPanel, when } from './ExpeditionPanels';
 import { type WorkspaceDirectory, useWorkspaceDirectory } from './channel-data';
 import { channelsHref } from './channels-view';
+import { type ChatMode, ExpeditionChat, useChatUnread } from './ExpeditionChat';
+import { AttemptsPanel, DetailsPanel, GoalPanel, when } from './ExpeditionPanels';
 import { useAct, useExpedition, useRetired } from './expedition-api';
 import './Expedition.css';
 
@@ -198,7 +198,11 @@ function TabBar({
   tab,
   open,
   badge,
-}: { tab: Tab; open(t: Tab): void; badge: Record<Tab, ReactNode> }) {
+}: {
+  tab: Tab;
+  open(t: Tab): void;
+  badge: Record<Tab, ReactNode>;
+}) {
   const key = (event: KeyboardEvent) => {
     const i = TABS.indexOf(tab);
     const moves: Record<string, number> = {

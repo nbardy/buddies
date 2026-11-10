@@ -7,10 +7,10 @@ import { useAtomValue } from 'jotai';
 import { type ReactElement, useState } from 'react';
 import { connectionAtom, defaultCwdOf, listField } from '../../atoms/conversations';
 import { prefsAtom } from '../../atoms/ui';
-import { ConversationConfigPicker } from '../config/ConversationConfigPicker';
 import { PathAutocomplete } from '../../components/PathAutocomplete';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { normalizeFolderDirectory, shortenHomePath } from '../../utils/directories';
+import { ConversationConfigPicker } from '../config/ConversationConfigPicker';
 import { type CreateKind, createFromRequest } from './create';
 import './NewConversationForm.css';
 

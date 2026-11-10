@@ -9,9 +9,9 @@ import {
   type BuddyCreationServicePorts,
   createBuddyCreationService,
 } from '../src/conversations/buddy-creation-service';
-import { installedAgent } from '../src/providers/installed-agent';
 import { creationFingerprint } from '../src/conversations/creation-service';
 import type { ConversationOptions, ConversationRuntime } from '../src/conversations/runtime';
+import { installedAgent } from '../src/providers/installed-agent';
 
 const context = {
   buddyId: 'buddy-1',

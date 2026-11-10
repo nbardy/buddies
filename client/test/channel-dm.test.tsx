@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { inboxFixture, postFixture, publicChannel } from './fixtures/channel-posts';
 import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-conversations';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {

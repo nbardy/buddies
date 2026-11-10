@@ -14,16 +14,17 @@ import test from 'node:test';
 import type { ExecutionHandle } from '@nbardy/agent-cli';
 import {
   type ConversationCreationMetadata,
-  type ConversationKind,
-  buddyKind,
   ConversationDetailSchema,
+  type ConversationKind,
   type Message,
   MessagePageSchema,
+  buddyKind,
   createDefaultConversationConfig,
   detectOompaSubcommand,
 } from '@unleashd/shared';
 import express from 'express';
 import type { ConversationRegistry } from '../src/application/context';
+import { builderFirstTurnPrompt } from '../src/buddies/turn-policy';
 import { ConversationConfigService } from '../src/conversations/config-service';
 import {
   type ConversationBroadcast,
@@ -31,14 +32,13 @@ import {
   createConversationRuntime,
   overlayHistoryFields,
 } from '../src/conversations/runtime';
-import { builderFirstTurnPrompt } from '../src/buddies/turn-policy';
 import { registerConversationRoutes } from '../src/http/conversation-routes';
 import { bootIngest } from '../src/ingest/boot';
 import type { ConversationList } from '../src/ingest/conversation-list';
-import { createRuntimeBuilder } from '../src/ingest/runtimes';
-import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { mergedCount, sessionMessages } from '../src/ingest/history';
+import { createRuntimeBuilder } from '../src/ingest/runtimes';
 import { mergeSessionMessages } from '../src/lifecycle/session-history';
+import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { fakeBuddyPort } from './fixtures/buddy-port';
 import { testExecutions } from './fixtures/fake-turn';
 import { claudeLine, ingestHome, until } from './fixtures/ingest-home';
@@ -623,7 +623,11 @@ test('a record without a transcript is listed from the record alone, with the ro
     const source = sessionId(900);
     await createBare(server, fixture, source, { t: 'chat' });
     const cases: Array<[string, ConversationKind, ConversationCreationMetadata | undefined]> = [
-      ...bareKinds.map(([name, kind]): [string, ConversationKind, undefined] => [name, kind, undefined]),
+      ...bareKinds.map(([name, kind]): [string, ConversationKind, undefined] => [
+        name,
+        kind,
+        undefined,
+      ]),
       ['branch', { t: 'chat' }, { resumedFromConversationId: source }],
     ];
     const ids = cases.map((_, n) => sessionId(901 + n));
@@ -637,7 +641,11 @@ test('a record without a transcript is listed from the record alone, with the ro
   const restarted = await serve(fixture);
   try {
     await restarted.builder.recover();
-    assert.equal(restarted.registry.size, 0, 'boot builds no runtime for cold transcript-less records');
+    assert.equal(
+      restarted.registry.size,
+      0,
+      'boot builds no runtime for cold transcript-less records'
+    );
     const cold = new Map(restarted.list.rows().map((row) => [row.id, row]));
     assert.equal(cold.size, bareKinds.length + 2, 'every record is listed without a runtime');
     for (const [id, row] of cold) {

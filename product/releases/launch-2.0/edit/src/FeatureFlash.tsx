@@ -7,9 +7,16 @@
 // (../capture/record-page.mjs; ../footage/FOOTAGE.md, "Feature clips"). Desktop captures are
 // lifted out as a card of the main column, so the sidebar's real Buddy names stay blurred.
 import type React from 'react';
-import { AbsoluteFill, Easing, OffthreadVideo, Series, staticFile, useCurrentFrame } from 'remotion';
-import { Block, clamp01, INK, lerp } from './blocks';
-import { CardEdit, type Key, play, push, STILL, type Shot } from './card';
+import {
+  AbsoluteFill,
+  Easing,
+  OffthreadVideo,
+  Series,
+  staticFile,
+  useCurrentFrame,
+} from 'remotion';
+import { Block, INK, clamp01, lerp } from './blocks';
+import { CardEdit, type Key, STILL, type Shot, play, push } from './card';
 
 export { FPS, HEIGHT, WIDTH } from './card';
 
@@ -21,7 +28,16 @@ const boundary = (i: number) => Math.round(i * FLASH_BEATS * BEAT * 60);
 const clip = (name: string) => staticFile(`2026-09-26_feature_${name}.mp4`);
 
 // The main column of a 2974×1882 desktop capture (the sidebar ends at x ≈ 560).
-const column = (top: number, ox: number, oy: number): Shot => ({ focus: 1, x: 560, w: 2414, top, scale: 0.74, ...STILL, ox, oy });
+const column = (top: number, ox: number, oy: number): Shot => ({
+  focus: 1,
+  x: 560,
+  w: 2414,
+  top,
+  scale: 0.74,
+  ...STILL,
+  ox,
+  oy,
+});
 
 type Desktop = { kind: 'desktop'; name: string; from: number; shot: Shot };
 type Phone = { kind: 'phone'; src: string; from: number; rate: number }; // from: source seconds
@@ -30,7 +46,17 @@ type Flash = { text: string; fill: string; rot: number; footage: Footage };
 
 const FLASHES: Flash[] = [
   // Footage P scrolls the art-direction thread for 6.4 s, then idles and ends on Control Center.
-  { text: 'Mobile Friendly!', fill: '#859900', rot: 3, footage: { kind: 'phone', src: staticFile('2026-09-28_mobile_P_art-direction-thread-scroll.mp4'), from: 0, rate: 1.7 } },
+  {
+    text: 'Mobile Friendly!',
+    fill: '#859900',
+    rot: 3,
+    footage: {
+      kind: 'phone',
+      src: staticFile('2026-09-28_mobile_P_art-direction-thread-scroll.mp4'),
+      from: 0,
+      rate: 1.7,
+    },
+  },
 ];
 
 export const DURATION = boundary(FLASHES.length);
@@ -41,7 +67,13 @@ const DesktopShot: React.FC<{ f: Desktop; frames: number }> = ({ f, frames }) =>
     { t: 0, shot: f.shot },
     { t: seconds, shot: push(f.shot, 1.08) },
   ];
-  return <CardEdit src={clip(f.name)} cuts={[play(f.from, f.from + seconds, 1, f.name)]} camera={camera} />;
+  return (
+    <CardEdit
+      src={clip(f.name)}
+      cuts={[play(f.from, f.from + seconds, 1, f.name)]}
+      camera={camera}
+    />
+  );
 };
 
 // A phone capture stands upright in the middle of the plate, pushing in slightly.
@@ -60,14 +92,24 @@ const PhoneShot: React.FC<{ f: Phone; frames: number }> = ({ f, frames }) => {
           transform: `translateX(260px) scale(${lerp(1, 1.05, settle)})`,
         }}
       >
-        <OffthreadVideo src={f.src} trimBefore={Math.round(f.from * 60)} playbackRate={f.rate} muted style={{ display: 'block', height: '100%' }} />
+        <OffthreadVideo
+          src={f.src}
+          trimBefore={Math.round(f.from * 60)}
+          playbackRate={f.rate}
+          muted
+          style={{ display: 'block', height: '100%' }}
+        />
       </div>
     </AbsoluteFill>
   );
 };
 
 const FootageShot: React.FC<{ f: Footage; frames: number }> = ({ f, frames }) =>
-  f.kind === 'desktop' ? <DesktopShot f={f} frames={frames} /> : <PhoneShot f={f} frames={frames} />;
+  f.kind === 'desktop' ? (
+    <DesktopShot f={f} frames={frames} />
+  ) : (
+    <PhoneShot f={f} frames={frames} />
+  );
 
 const Card: React.FC<{ flash: Flash }> = ({ flash }) => {
   const t = useCurrentFrame() / 60;

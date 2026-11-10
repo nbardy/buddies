@@ -6,8 +6,8 @@ import type {
   Message,
   Provider,
   ProviderTurnUsage,
+  TurnAttemptSnapshot,
 } from '@unleashd/shared';
-import type { TurnAttemptSnapshot } from '@unleashd/shared';
 import type { Express, Request, RequestHandler, Response } from 'express';
 import { BUDDY_BUILDER_BRIEFING } from '../buddies/builder';
 import { toolManifest } from '../buddies/mcp';

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
-import { TypingDots } from './ChannelMarkdown';
 import { useWakePhase } from './buddy-direct-actions';
+import { TypingDots } from './ChannelMarkdown';
 
 // Wake progress next to a Buddy: dots while it checks the channels, then a
 // check linking to the DM where its summary landed. Shared by the desktop rail,

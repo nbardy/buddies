@@ -5,7 +5,18 @@
 import type React from 'react';
 import { AbsoluteFill, Easing, Sequence, interpolate, staticFile, useCurrentFrame } from 'remotion';
 import { FONT, INK } from './blocks';
-import { CardEdit, FPS, type Cut, type Key, STILL, type Shot, hold, play, push, timeline } from './card';
+import {
+  CardEdit,
+  type Cut,
+  FPS,
+  type Key,
+  STILL,
+  type Shot,
+  hold,
+  play,
+  push,
+  timeline,
+} from './card';
 
 export { FPS, HEIGHT, WIDTH } from './card';
 
@@ -19,14 +30,28 @@ const D = staticFile('2026-09-26_design-review_D_post-screenshots-request.mov');
 const REQUEST = play(0.8, 5.3, 1.5, 'request appears in the composer, sent, thread opens');
 const CUTS: Cut[] = [
   REQUEST,
-  play(392.7, 398.1, 2.16, '~6 min later: "captured all 21 views", then Mobile / iPad / Desktop land'),
+  play(
+    392.7,
+    398.1,
+    2.16,
+    '~6 min later: "captured all 21 views", then Mobile / iPad / Desktop land'
+  ),
   hold(398.1, 2.0, 'the three posts in the channel, held'),
 ];
 
 const { starts, duration, at } = timeline(CUTS);
 export const DURATION = duration;
 
-const COMPOSER: Shot = { focus: 1, x: 540, w: 2080, top: 706, scale: 0.85, ...STILL, ox: 0.35, oy: 0.85 };
+const COMPOSER: Shot = {
+  focus: 1,
+  x: 540,
+  w: 2080,
+  top: 706,
+  scale: 0.85,
+  ...STILL,
+  ox: 0.35,
+  oy: 0.85,
+};
 const FULL: Shot = { ...COMPOSER, focus: 0 };
 const PANE_WAIT: Shot = { focus: 1, x: 2156, w: 818, top: 632, scale: 0.8, ...STILL, oy: 0.3 }; // request + typing
 const PANE_REPLY: Shot = { ...PANE_WAIT, top: 480, oy: 0.7 }; // request + "On it"
@@ -50,8 +75,14 @@ const CAMERA: Key[] = [
 // The honest time-skip: the Lead took about six minutes to capture 21 views at four sizes.
 const LaterChip: React.FC = () => {
   const u = useCurrentFrame() / FPS;
-  const o = interpolate(u, [0, 0.2, 1.3, 1.6], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-  const y = interpolate(u, [0, 0.3], [16, 0], { extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic) });
+  const o = interpolate(u, [0, 0.2, 1.3, 1.6], [0, 1, 1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const y = interpolate(u, [0, 0.3], [16, 0], {
+    extrapolateRight: 'clamp',
+    easing: Easing.out(Easing.cubic),
+  });
   return (
     <div
       style={{

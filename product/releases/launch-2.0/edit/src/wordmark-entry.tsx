@@ -20,7 +20,14 @@ registerRoot(() => (
       width={W.WIDTH}
       height={W.HEIGHT}
     />
-    <Composition id="BuddiesLogoSheet" component={L.LogoSheet} durationInFrames={1} fps={L.FPS} width={L.WIDTH} height={L.HEIGHT} />
+    <Composition
+      id="BuddiesLogoSheet"
+      component={L.LogoSheet}
+      durationInFrames={1}
+      fps={L.FPS}
+      width={L.WIDTH}
+      height={L.HEIGHT}
+    />
     <Composition
       id="BuddiesLogoReel"
       component={L.LogoReel}
@@ -29,12 +36,49 @@ registerRoot(() => (
       width={L.WIDTH}
       height={L.HEIGHT}
     />
-    <Composition id="KitReel" component={K.KitReel} durationInFrames={K.REEL_FRAMES} fps={K.FPS} width={1920} height={1080} />
+    <Composition
+      id="KitReel"
+      component={K.KitReel}
+      durationInFrames={K.REEL_FRAMES}
+      fps={K.FPS}
+      width={1920}
+      height={1080}
+    />
     {K.PAGES.map((p) => (
-      <Composition key={p} id={`Kit-${p}`} component={K.KitPage} defaultProps={{ page: p }} durationInFrames={K.frames(p)} fps={K.FPS} width={1920} height={1080} />
+      <Composition
+        key={p}
+        id={`Kit-${p}`}
+        component={K.KitPage}
+        defaultProps={{ page: p }}
+        durationInFrames={K.frames(p)}
+        fps={K.FPS}
+        width={1920}
+        height={1080}
+      />
     ))}
-    <Composition id="KitOg" component={K.OgCard} durationInFrames={1} fps={K.FPS} width={1200} height={630} />
-    <Composition id="KitBanner" component={K.Banner} durationInFrames={1} fps={K.FPS} width={1280} height={320} />
-    <Composition id="KitAvatar" component={K.Avatar} durationInFrames={1} fps={K.FPS} width={512} height={512} />
+    <Composition
+      id="KitOg"
+      component={K.OgCard}
+      durationInFrames={1}
+      fps={K.FPS}
+      width={1200}
+      height={630}
+    />
+    <Composition
+      id="KitBanner"
+      component={K.Banner}
+      durationInFrames={1}
+      fps={K.FPS}
+      width={1280}
+      height={320}
+    />
+    <Composition
+      id="KitAvatar"
+      component={K.Avatar}
+      durationInFrames={1}
+      fps={K.FPS}
+      width={512}
+      height={512}
+    />
   </>
 ));

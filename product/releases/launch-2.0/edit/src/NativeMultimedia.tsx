@@ -4,7 +4,16 @@
 // Timeline, camera and cards are data (CUTS, CAMERA, CARDS); the component just renders them.
 // Footage and how it was made: ../footage/FOOTAGE.md.
 import type React from 'react';
-import { AbsoluteFill, Audio, Easing, OffthreadVideo, Sequence, Series, staticFile, useCurrentFrame } from 'remotion';
+import {
+  AbsoluteFill,
+  Audio,
+  Easing,
+  OffthreadVideo,
+  Sequence,
+  Series,
+  staticFile,
+  useCurrentFrame,
+} from 'remotion';
 import edm from '../../sound/edm-build.wav';
 import { Block, INK } from './blocks';
 import { SFX } from './soundtrack';
@@ -28,9 +37,21 @@ type Cut = { src: string; from: number; frames: number; rate: number; note: stri
 const SEND = Math.round(7 * BEAT * FPS); // the cut to the thread lands on beat 8
 const CUTS: Cut[] = [
   // Typing runs 0.9–9.4 s in the source; the pauses after "video," are the slow part, cut off.
-  { src: ASK, from: 0.9, frames: SEND, rate: (9.4 - 0.9) / (SEND / FPS), note: '"@Marketing Designer Can you share with me the latest video"' },
+  {
+    src: ASK,
+    from: 0.9,
+    frames: SEND,
+    rate: (9.4 - 0.9) / (SEND / FPS),
+    note: '"@Marketing Designer Can you share with me the latest video"',
+  },
   // Capture: thread from 1.0 s; the inline video starts at 2.6 s (output ≈ 4.9 s).
-  { src: REPLY, from: 1.0, frames: DURATION - SEND, rate: 1, note: 'reply lands, the launch video plays inline' },
+  {
+    src: REPLY,
+    from: 1.0,
+    frames: DURATION - SEND,
+    rate: 1,
+    note: 'reply lands, the launch video plays inline',
+  },
 ];
 
 // Camera: a source window (px) shown at `scale`, centred at (cx, cy). focus 1 blurs and dims
@@ -38,13 +59,37 @@ const CUTS: Cut[] = [
 type Rect = { x: number; y: number; w: number; h: number };
 type Shot = { focus: number; win: Rect; scale: number; cx: number; cy: number };
 const COVER = WIDTH / SRC.w;
-const FULL: Shot = { focus: 0, win: { x: 0, y: 0, ...SRC }, scale: COVER, cx: WIDTH / 2, cy: HEIGHT / 2 };
+const FULL: Shot = {
+  focus: 0,
+  win: { x: 0, y: 0, ...SRC },
+  scale: COVER,
+  cx: WIDTH / 2,
+  cy: HEIGHT / 2,
+};
 // Composer strip of the channel column: the mention chip, the typed text, the Buddy's model.
-const COMPOSER: Shot = { focus: 1, win: { x: 572, y: 1380, w: 2402, h: 502 }, scale: 0.78, cx: WIDTH / 2, cy: HEIGHT / 2 };
+const COMPOSER: Shot = {
+  focus: 1,
+  win: { x: 572, y: 1380, w: 2402, h: 502 },
+  scale: 0.78,
+  cx: WIDTH / 2,
+  cy: HEIGHT / 2,
+};
 // Thread pane: the owner's post, the reply, the video player.
-const THREAD: Shot = { focus: 1, win: { x: 2156, y: 160, w: 818, h: 1290 }, scale: 0.8, cx: WIDTH / 2, cy: HEIGHT / 2 };
+const THREAD: Shot = {
+  focus: 1,
+  win: { x: 2156, y: 160, w: 818, h: 1290 },
+  scale: 0.8,
+  cx: WIDTH / 2,
+  cy: HEIGHT / 2,
+};
 // The inline player (measured on the capture at 6 s: x 2266–2941, y 1048–1428), pushed in.
-const PLAYER: Shot = { focus: 1, win: { x: 2256, y: 1038, w: 695, h: 400 }, scale: 2.2, cx: WIDTH / 2, cy: HEIGHT / 2 - 40 };
+const PLAYER: Shot = {
+  focus: 1,
+  win: { x: 2256, y: 1038, w: 695, h: 400 },
+  scale: 2.2,
+  cx: WIDTH / 2,
+  cy: HEIGHT / 2 - 40,
+};
 
 type Key = { t: number; shot: Shot };
 const CAMERA: Key[] = [
@@ -68,7 +113,12 @@ const shotAt = (t: number): Shot => {
   const u = ease(Math.min(1, (t - CAMERA[i].t) / (CAMERA[i + 1].t - CAMERA[i].t)));
   return {
     focus: mix(a.focus, b.focus, u),
-    win: { x: mix(a.win.x, b.win.x, u), y: mix(a.win.y, b.win.y, u), w: mix(a.win.w, b.win.w, u), h: mix(a.win.h, b.win.h, u) },
+    win: {
+      x: mix(a.win.x, b.win.x, u),
+      y: mix(a.win.y, b.win.y, u),
+      w: mix(a.win.w, b.win.w, u),
+      h: mix(a.win.h, b.win.h, u),
+    },
     scale: mix(a.scale, b.scale, u),
     cx: mix(a.cx, b.cx, u),
     cy: mix(a.cy, b.cy, u),
@@ -122,7 +172,12 @@ const Frame: React.FC<{ cut: Cut; startFrame: number }> = ({ cut, startFrame }) 
       >
         <Footage
           cut={cut}
-          style={{ left: -win.x * scale, top: -win.y * scale, width: SRC.w * scale, height: SRC.h * scale }}
+          style={{
+            left: -win.x * scale,
+            top: -win.y * scale,
+            width: SRC.w * scale,
+            height: SRC.h * scale,
+          }}
         />
       </div>
     </AbsoluteFill>
@@ -132,12 +187,62 @@ const Frame: React.FC<{ cut: Cut; startFrame: number }> = ({ cut, startFrame }) 
 // Cards, one per beat. "Native multimedia" titles the segment from its first beat, over the
 // typing (owner, rough cut 1: "put native multimedia at the start"); the drop brings the three
 // words one per beat.
-type Card = { text: string; at: number; out: number; size: 'md' | 'xl'; fill: string; ink: string; rot: number; x: number; y: number };
+type Card = {
+  text: string;
+  at: number;
+  out: number;
+  size: 'md' | 'xl';
+  fill: string;
+  ink: string;
+  rot: number;
+  x: number;
+  y: number;
+};
 const CARDS: Card[] = [
-  { text: 'Native multimedia', at: BEAT, out: SEND / FPS, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -3, x: 110, y: 90 },
-  { text: 'Code +', at: DROP, out: 99, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -4, x: 150, y: 140 },
-  { text: 'Design +', at: DROP + BEAT, out: 99, size: 'xl', fill: INK.yellow, ink: INK.plate, rot: 2, x: 520, y: 430 },
-  { text: 'Marketing!', at: DROP + 2 * BEAT, out: 99, size: 'xl', fill: INK.wordmarkOrange, ink: INK.plate, rot: -3, x: 900, y: 730 },
+  {
+    text: 'Native multimedia',
+    at: BEAT,
+    out: SEND / FPS,
+    size: 'xl',
+    fill: INK.cyan,
+    ink: INK.plate,
+    rot: -3,
+    x: 110,
+    y: 90,
+  },
+  {
+    text: 'Code +',
+    at: DROP,
+    out: 99,
+    size: 'xl',
+    fill: INK.cyan,
+    ink: INK.plate,
+    rot: -4,
+    x: 150,
+    y: 140,
+  },
+  {
+    text: 'Design +',
+    at: DROP + BEAT,
+    out: 99,
+    size: 'xl',
+    fill: INK.yellow,
+    ink: INK.plate,
+    rot: 2,
+    x: 520,
+    y: 430,
+  },
+  {
+    text: 'Marketing!',
+    at: DROP + 2 * BEAT,
+    out: 99,
+    size: 'xl',
+    fill: INK.wordmarkOrange,
+    ink: INK.plate,
+    rot: -3,
+    x: 900,
+    y: 730,
+  },
 ];
 
 const Cards: React.FC = () => {

@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { readSourceStatus } from './desktop-source-status.mjs';
 import { selectedRuntime } from './desktop-source.mjs';
+import { readSourceStatus } from './desktop-source-status.mjs';
 
 // Installed app passed NODE_ENV=production: dev tools were skipped. Retry then
 // silently skipped pnpm's non-TTY purge. Real install/build must recover both.

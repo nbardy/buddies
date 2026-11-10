@@ -537,75 +537,69 @@ after(async () => {
   }
 });
 
-test(
-  'one Ctrl+C on pnpm dev:server: agents survive and the relaunched backend adopts them',
-  { timeout: 300_000 },
-  async () => {
-    const c = makeCase('single');
-    const first = launch(c, 'A');
-    await first.ready;
-    const work = await startWork(c, 'worker');
-    signalGroup(first.pgid, 'SIGINT');
-    await assertGroupGoneAgentsJournaling(c, first, work);
-    // One press is a graceful stop. Until 2026-10-01 pnpm's relay of the same SIGINT counted as a
-    // second press and the supervisor SIGKILLed the backend ~30 ms into its shutdown.
-    assert.ok(
-      c.log.some((l) => l.includes('Backend stopped (exit 0)')),
-      `one Ctrl+C exits gracefully:\n${c.log.filter((l) => l.includes('server-watch')).join('\n')}`
-    );
-    const second = launch(c, 'B');
-    await second.ready;
-    await assertAdoptedAndCompleted(c, work);
-    await stopGroup(second);
-    c.finished = true;
-  }
-);
+test('one Ctrl+C on pnpm dev:server: agents survive and the relaunched backend adopts them', {
+  timeout: 300_000,
+}, async () => {
+  const c = makeCase('single');
+  const first = launch(c, 'A');
+  await first.ready;
+  const work = await startWork(c, 'worker');
+  signalGroup(first.pgid, 'SIGINT');
+  await assertGroupGoneAgentsJournaling(c, first, work);
+  // One press is a graceful stop. Until 2026-10-01 pnpm's relay of the same SIGINT counted as a
+  // second press and the supervisor SIGKILLed the backend ~30 ms into its shutdown.
+  assert.ok(
+    c.log.some((l) => l.includes('Backend stopped (exit 0)')),
+    `one Ctrl+C exits gracefully:\n${c.log.filter((l) => l.includes('server-watch')).join('\n')}`
+  );
+  const second = launch(c, 'B');
+  await second.ready;
+  await assertAdoptedAndCompleted(c, work);
+  await stopGroup(second);
+  c.finished = true;
+});
 
 // Step 6 (2026-10-07): this test used to be "two Ctrl+C", because a message queued behind the
 // running turn was memory-only work that the first press waited 3 s for, and a second press cut the
 // wait short with SIGKILL. A queued message is a durable row now, so nothing holds the reload: the
 // first press exits at once, with the message still queued, and the relaunched backend adopts the
 // turn and keeps the message (execution-adoption.test.ts runs it exactly once).
-test(
-  'one Ctrl+C with a message queued behind the turn: no wait, the turn is adopted and the message kept',
-  { timeout: 300_000 },
-  async () => {
-    const c = makeCase('double');
-    const first = launch(c, 'A');
-    await first.ready;
-    const work = await startWork(c, 'worker');
-    await wsCommand({ type: 'queue_message', conversationId: work.chatId, content: 'queued' });
-    signalGroup(first.pgid, 'SIGINT');
-    await assertGroupGoneAgentsJournaling(c, first, work);
-    assert.ok(
-      c.log.some((l) => l.includes('Backend stopped (exit 0)')),
-      `a queued message does not hold the reload:\n${c.log.filter((l) => l.includes('server-watch')).join('\n')}`
-    );
-    const second = launch(c, 'B');
-    await second.ready;
-    // The fake CLI answers a prompt with no SCENARIO marker with "ok".
-    await assertAdoptedAndCompleted(c, work, 'ok');
-    await stopGroup(second);
-    c.finished = true;
-  }
-);
+test('one Ctrl+C with a message queued behind the turn: no wait, the turn is adopted and the message kept', {
+  timeout: 300_000,
+}, async () => {
+  const c = makeCase('double');
+  const first = launch(c, 'A');
+  await first.ready;
+  const work = await startWork(c, 'worker');
+  await wsCommand({ type: 'queue_message', conversationId: work.chatId, content: 'queued' });
+  signalGroup(first.pgid, 'SIGINT');
+  await assertGroupGoneAgentsJournaling(c, first, work);
+  assert.ok(
+    c.log.some((l) => l.includes('Backend stopped (exit 0)')),
+    `a queued message does not hold the reload:\n${c.log.filter((l) => l.includes('server-watch')).join('\n')}`
+  );
+  const second = launch(c, 'B');
+  await second.ready;
+  // The fake CLI answers a prompt with no SCENARIO marker with "ok".
+  await assertAdoptedAndCompleted(c, work, 'ok');
+  await stopGroup(second);
+  c.finished = true;
+});
 
-test(
-  'pnpm dev:server --replace over a running runtime: agents survive and are adopted',
-  { timeout: 300_000 },
-  async () => {
-    const c = makeCase('replace');
-    const first = launch(c, 'A');
-    await first.ready;
-    const work = await startWork(c, 'worker');
-    const second = launch(c, 'B', ['--replace']);
-    await assertGroupGoneAgentsJournaling(c, first, work);
-    await second.ready;
-    await assertAdoptedAndCompleted(c, work);
-    await stopGroup(second);
-    c.finished = true;
-  }
-);
+test('pnpm dev:server --replace over a running runtime: agents survive and are adopted', {
+  timeout: 300_000,
+}, async () => {
+  const c = makeCase('replace');
+  const first = launch(c, 'A');
+  await first.ready;
+  const work = await startWork(c, 'worker');
+  const second = launch(c, 'B', ['--replace']);
+  await assertGroupGoneAgentsJournaling(c, first, work);
+  await second.ready;
+  await assertAdoptedAndCompleted(c, work);
+  await stopGroup(second);
+  c.finished = true;
+});
 
 /**
  * Bodies the worker posted to its DM with the owner. The channel id comes from the worker's
@@ -625,270 +619,262 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // ECONNREFUSED: neither claude nor codex retries that, so the post was lost unless the model chose
 // to try again (agent_notes/2026-10-05_outage-tool-delivery.md). Now the relay, which outlives the
 // Ctrl+C, holds the call and the relaunched backend delivers it.
-test(
-  'an outage: a Buddy post made with no backend lands once after relaunch; its replay creates nothing',
-  { timeout: 300_000 },
-  async () => {
-    const c = makeCase('downtime');
-    const first = launch(c, 'A');
-    await first.ready;
-    const work = await startWork(c, 'down');
-    signalGroup(first.pgid, 'SIGINT');
-    await assertGroupGoneAgentsJournaling(c, first, work);
-    await eventually(
-      c,
-      () => fs.existsSync(path.join(c.fakeDir, 'down.gap-sent')),
-      Boolean,
-      'tool call in the gap'
-    );
-    await sleep(OUTAGE_MS);
-    assert.ok(
-      !fs.existsSync(path.join(c.fakeDir, 'down.gap')),
-      `held while no backend runs, not failed: ${fs.existsSync(path.join(c.fakeDir, 'down.gap')) && work.fake('down.gap')}`
-    );
-    const second = launch(c, 'B');
-    await second.ready;
-    await eventually(
-      c,
-      () => fs.existsSync(path.join(c.fakeDir, 'down.gap')),
-      Boolean,
-      'the held call to return'
-    );
-    assert.match(work.fake('down.gap'), /^200 ok/, 'the in-gap post was delivered');
-    await assertAdoptedAndCompleted(c, work);
-    // The same call again with the same key (a CLI or model retry) replays the first result.
-    assert.match(work.fake('down.replay'), /^200 ok/);
-    const bodies = await ownerDmBodies(c, 'down');
-    assert.equal(bodies.filter((b) => b === 'down in-gap').length, 1, 'exactly once');
-    await stopGroup(second);
-    c.finished = true;
-  }
-);
+test('an outage: a Buddy post made with no backend lands once after relaunch; its replay creates nothing', {
+  timeout: 300_000,
+}, async () => {
+  const c = makeCase('downtime');
+  const first = launch(c, 'A');
+  await first.ready;
+  const work = await startWork(c, 'down');
+  signalGroup(first.pgid, 'SIGINT');
+  await assertGroupGoneAgentsJournaling(c, first, work);
+  await eventually(
+    c,
+    () => fs.existsSync(path.join(c.fakeDir, 'down.gap-sent')),
+    Boolean,
+    'tool call in the gap'
+  );
+  await sleep(OUTAGE_MS);
+  assert.ok(
+    !fs.existsSync(path.join(c.fakeDir, 'down.gap')),
+    `held while no backend runs, not failed: ${fs.existsSync(path.join(c.fakeDir, 'down.gap')) && work.fake('down.gap')}`
+  );
+  const second = launch(c, 'B');
+  await second.ready;
+  await eventually(
+    c,
+    () => fs.existsSync(path.join(c.fakeDir, 'down.gap')),
+    Boolean,
+    'the held call to return'
+  );
+  assert.match(work.fake('down.gap'), /^200 ok/, 'the in-gap post was delivered');
+  await assertAdoptedAndCompleted(c, work);
+  // The same call again with the same key (a CLI or model retry) replays the first result.
+  assert.match(work.fake('down.replay'), /^200 ok/);
+  const bodies = await ownerDmBodies(c, 'down');
+  assert.equal(bodies.filter((b) => b === 'down in-gap').length, 1, 'exactly once');
+  await stopGroup(second);
+  c.finished = true;
+});
 
-test(
-  'an outage longer than the hold: the in-gap call gets a clear tool error, never a hang',
-  { timeout: 300_000 },
-  async () => {
-    const c = makeCase('longdown');
-    const first = launch(c, 'A');
-    await first.ready;
-    const work = await startWork(c, 'longdown');
-    signalGroup(first.pgid, 'SIGINT');
-    await assertGroupGoneAgentsJournaling(c, first, work);
-    await eventually(
-      c,
-      () => fs.existsSync(path.join(c.fakeDir, 'longdown.gap')),
-      Boolean,
-      'the held call to give up'
-    );
-    const gap = work.fake('longdown.gap');
-    assert.match(gap, /^200 tool-error .*NOT delivered/, gap);
-    // Before claude's own 60 s request timeout, so the model reads the relay's message.
-    const waited = Number(work.fake('longdown.gap-ms'));
-    assert.ok(waited >= HOLD_MS - 100 && waited < HOLD_MS + 5_000, `held ${waited} ms`);
-    const second = launch(c, 'B');
-    await second.ready;
-    await assertAdoptedAndCompleted(c, work);
-    assert.deepEqual(
-      (await ownerDmBodies(c, 'longdown')).filter((b) => b === 'longdown in-gap'),
-      [],
-      'the call that got the error never lands later'
-    );
-    await stopGroup(second);
-    c.finished = true;
-  }
-);
+test('an outage longer than the hold: the in-gap call gets a clear tool error, never a hang', {
+  timeout: 300_000,
+}, async () => {
+  const c = makeCase('longdown');
+  const first = launch(c, 'A');
+  await first.ready;
+  const work = await startWork(c, 'longdown');
+  signalGroup(first.pgid, 'SIGINT');
+  await assertGroupGoneAgentsJournaling(c, first, work);
+  await eventually(
+    c,
+    () => fs.existsSync(path.join(c.fakeDir, 'longdown.gap')),
+    Boolean,
+    'the held call to give up'
+  );
+  const gap = work.fake('longdown.gap');
+  assert.match(gap, /^200 tool-error .*NOT delivered/, gap);
+  // Before claude's own 60 s request timeout, so the model reads the relay's message.
+  const waited = Number(work.fake('longdown.gap-ms'));
+  assert.ok(waited >= HOLD_MS - 100 && waited < HOLD_MS + 5_000, `held ${waited} ms`);
+  const second = launch(c, 'B');
+  await second.ready;
+  await assertAdoptedAndCompleted(c, work);
+  assert.deepEqual(
+    (await ownerDmBodies(c, 'longdown')).filter((b) => b === 'longdown in-gap'),
+    [],
+    'the call that got the error never lands later'
+  );
+  await stopGroup(second);
+  c.finished = true;
+});
 
-test(
-  'a turn Stopped before the outage: its call held through the outage gets 401, never a post',
-  { timeout: 300_000 },
-  async () => {
-    const c = makeCase('stopped');
-    const first = launch(c, 'A');
-    await first.ready;
-    const work = await startWork(c, 'stopped');
-    const run = await runOf(work.worker);
-    const cancelled = await http('POST', `/api/buddies/runs/${run.id}/cancel`);
-    assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
-    // Stop is durable (`stopping` on disk) and kills the CLI's group; the detached child that
-    // holds the grant's token lives on and calls during the outage.
-    await eventually(
-      c,
-      () => alive(work.pids.worker),
-      (a) => !a,
-      'the stopped CLI to exit'
-    );
-    signalGroup(first.pgid, 'SIGINT');
-    await first.exited;
-    fs.writeFileSync(path.join(c.fakeDir, 'dead'), '');
-    await eventually(
-      c,
-      () => fs.existsSync(path.join(c.fakeDir, 'stopped.gap-sent')),
-      Boolean,
-      'tool call in the gap'
-    );
-    // gap-sent proves the detached caller entered the outage; no 3 s sleep needed.
-    assert.ok(!fs.existsSync(path.join(c.fakeDir, 'stopped.gap')));
-    const second = launch(c, 'B');
-    await second.ready;
-    await eventually(
-      c,
-      () => fs.existsSync(path.join(c.fakeDir, 'stopped.gap')),
-      Boolean,
-      'the held call to return'
-    );
-    assert.match(work.fake('stopped.gap'), /^401 /, "a stopped turn's grant is not restored");
-    assert.deepEqual(
-      (await ownerDmBodies(c, 'stopped')).filter((b) => b === 'stopped in-gap'),
-      []
-    );
-    fs.writeFileSync(path.join(c.fakeDir, 'release'), '');
-    await stopGroup(second);
-    c.finished = true;
-  }
-);
+test('a turn Stopped before the outage: its call held through the outage gets 401, never a post', {
+  timeout: 300_000,
+}, async () => {
+  const c = makeCase('stopped');
+  const first = launch(c, 'A');
+  await first.ready;
+  const work = await startWork(c, 'stopped');
+  const run = await runOf(work.worker);
+  const cancelled = await http('POST', `/api/buddies/runs/${run.id}/cancel`);
+  assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
+  // Stop is durable (`stopping` on disk) and kills the CLI's group; the detached child that
+  // holds the grant's token lives on and calls during the outage.
+  await eventually(
+    c,
+    () => alive(work.pids.worker),
+    (a) => !a,
+    'the stopped CLI to exit'
+  );
+  signalGroup(first.pgid, 'SIGINT');
+  await first.exited;
+  fs.writeFileSync(path.join(c.fakeDir, 'dead'), '');
+  await eventually(
+    c,
+    () => fs.existsSync(path.join(c.fakeDir, 'stopped.gap-sent')),
+    Boolean,
+    'tool call in the gap'
+  );
+  // gap-sent proves the detached caller entered the outage; no 3 s sleep needed.
+  assert.ok(!fs.existsSync(path.join(c.fakeDir, 'stopped.gap')));
+  const second = launch(c, 'B');
+  await second.ready;
+  await eventually(
+    c,
+    () => fs.existsSync(path.join(c.fakeDir, 'stopped.gap')),
+    Boolean,
+    'the held call to return'
+  );
+  assert.match(work.fake('stopped.gap'), /^401 /, "a stopped turn's grant is not restored");
+  assert.deepEqual(
+    (await ownerDmBodies(c, 'stopped')).filter((b) => b === 'stopped in-gap'),
+    []
+  );
+  fs.writeFileSync(path.join(c.fakeDir, 'release'), '');
+  await stopGroup(second);
+  c.finished = true;
+});
 
 // Manual, never in CI: a REAL claude CLI through the same Ctrl+C → 30 s down → relaunch, on fresh
 // empty temp stores. It spends real tokens, so it runs only with UNLEASHD_REAL_CLAUDE=1. The CLI
 // authenticates from the real home (its credentials live there), so its one session transcript
 // lands in ~/.claude/projects; the test deletes that directory afterwards.
-test(
-  'manual: a real claude worker survives Ctrl+C and 30 s with no backend',
-  { skip: process.env.UNLEASHD_REAL_CLAUDE !== '1', timeout: 600_000 },
-  async () => {
-    const c = makeCase('real');
-    const realClaude = execFileSync('/bin/zsh', ['-lc', 'whence -p claude'], {
-      encoding: 'utf8',
-    }).trim();
-    const bin = path.join(c.root, 'bin');
-    fs.writeFileSync(
-      path.join(bin, 'claude'),
-      `#!/bin/sh\nexec env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_EXECPATH -u CLAUDE_PID HOME="${REAL_HOME}" "${realClaude}" "$@"\n`,
-      { mode: 0o755 }
-    );
-    const model = process.env.UNLEASHD_REAL_CLAUDE_MODEL ?? 'claude-haiku-4-5-20251001';
-    const report: Record<string, unknown> = { model };
-    const first = launch(c, 'A');
-    await first.ready;
-    const ws = await http('POST', '/api/buddies/workspaces', {
-      name: 'real',
-      rootPath: c.workspaceDir,
+test('manual: a real claude worker survives Ctrl+C and 30 s with no backend', {
+  skip: process.env.UNLEASHD_REAL_CLAUDE !== '1',
+  timeout: 600_000,
+}, async () => {
+  const c = makeCase('real');
+  const realClaude = execFileSync('/bin/zsh', ['-lc', 'whence -p claude'], {
+    encoding: 'utf8',
+  }).trim();
+  const bin = path.join(c.root, 'bin');
+  fs.writeFileSync(
+    path.join(bin, 'claude'),
+    `#!/bin/sh\nexec env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_EXECPATH -u CLAUDE_PID HOME="${REAL_HOME}" "${realClaude}" "$@"\n`,
+    { mode: 0o755 }
+  );
+  const model = process.env.UNLEASHD_REAL_CLAUDE_MODEL ?? 'claude-haiku-4-5-20251001';
+  const report: Record<string, unknown> = { model };
+  const first = launch(c, 'A');
+  await first.ready;
+  const ws = await http('POST', '/api/buddies/workspaces', {
+    name: 'real',
+    rootPath: c.workspaceDir,
+  });
+  assert.equal(ws.status, 201, JSON.stringify(ws.body));
+  const hired = await http('POST', '/api/buddies', {
+    workspaceId: ws.body.id,
+    slug: 'real',
+    name: 'real',
+    role: 'continuity check',
+    provider: 'claude',
+    model,
+    reasoningEffort: 'low',
+    key: 'hire-real',
+  });
+  assert.equal(hired.status, 201, JSON.stringify(hired.body));
+  const buddy = hired.body.id as string;
+  const buddyDm = await http('POST', `/api/buddies/${buddy}/direct`);
+  const posted = await http('POST', `/api/buddies/channels/${buddyDm.body.channelId}/posts`, {
+    kind: 'request',
+    body: [
+      'Manual continuity check. Do exactly these steps and nothing else:',
+      '1. Run the shell command `sleep 15` with your Bash tool.',
+      '2. Call the Buddy `post` tool once: channel {"direct":["owner"]}, body "real after sleep", key "real-after-sleep".',
+      `3. If step 2 returned any error, wait for the backend with Bash: \`until curl -s -o /dev/null http://127.0.0.1:${PORT}/; do sleep 2; done\` (timeout 180000 ms), then call the same \`post\` once more with body "real retry" and key "real-retry".`,
+      '4. Answer with the word FINISHED and one line quoting exactly what each post call returned.',
+    ].join('\n'),
+    key: 'ask-real',
+  });
+  assert.equal(posted.status, 201, JSON.stringify(posted.body));
+  const request = posted.body.post ?? posted.body;
+  const executions = path.join(c.dataDir, 'executions');
+  const journal = await eventually(
+    c,
+    () =>
+      (fs.existsSync(executions) ? fs.readdirSync(executions) : [])
+        .map((id) => path.join(executions, id))
+        .find(
+          (dir) =>
+            fs.existsSync(path.join(dir, 'stdout')) &&
+            /sleep 15/.test(fs.readFileSync(path.join(dir, 'stdout'), 'utf8'))
+        ),
+    Boolean,
+    'the real CLI to start its sleep'
+  );
+  assert.ok(journal);
+  const wrapper = Number(fs.readFileSync(path.join(journal, 'pid'), 'utf8'));
+  const size = () => fs.statSync(path.join(journal, 'stdout')).size;
+  signalGroup(first.pgid, 'SIGINT');
+  await first.exited;
+  await eventually(
+    c,
+    () => processesIn(first.pgid),
+    (left) => left.length === 0,
+    'group empty'
+  );
+  report.bytesAtCtrlC = size();
+  report.aliveAfterCtrlC = alive(wrapper);
+  await new Promise((resolve) => setTimeout(resolve, 30_000));
+  report.bytesAfter30sDown = size();
+  report.aliveAfter30sDown = alive(wrapper);
+  // What the CLI wrote with no backend at all: its tool calls, their results, its answer.
+  const gap = fs
+    .readFileSync(path.join(journal, 'stdout'), 'utf8')
+    .slice(Number(report.bytesAtCtrlC));
+  if (process.env.CTRLC_LOG_FILE) fs.writeFileSync(`${process.env.CTRLC_LOG_FILE}.gap.jsonl`, gap);
+  report.writtenWhileDown = gap
+    .split('\n')
+    .filter((line) => /^\{"type":"(assistant|user|result)"/.test(line))
+    .map((line) => {
+      const event = JSON.parse(line);
+      if (event.type === 'result') return `result ${event.subtype}: ${event.result}`;
+      return (event.message.content as Array<Record<string, unknown>>)
+        .map((part) =>
+          part.type === 'text'
+            ? `text: ${part.text}`
+            : part.type === 'tool_use'
+              ? `tool_use ${part.name} ${JSON.stringify(part.input)}`
+              : `${part.type} ${String(JSON.stringify(part.content ?? '')).slice(0, 500)}`
+        )
+        .join(' | ');
     });
-    assert.equal(ws.status, 201, JSON.stringify(ws.body));
-    const hired = await http('POST', '/api/buddies', {
-      workspaceId: ws.body.id,
-      slug: 'real',
-      name: 'real',
-      role: 'continuity check',
-      provider: 'claude',
-      model,
-      reasoningEffort: 'low',
-      key: 'hire-real',
-    });
-    assert.equal(hired.status, 201, JSON.stringify(hired.body));
-    const buddy = hired.body.id as string;
-    const buddyDm = await http('POST', `/api/buddies/${buddy}/direct`);
-    const posted = await http('POST', `/api/buddies/channels/${buddyDm.body.channelId}/posts`, {
-      kind: 'request',
-      body: [
-        'Manual continuity check. Do exactly these steps and nothing else:',
-        '1. Run the shell command `sleep 15` with your Bash tool.',
-        '2. Call the Buddy `post` tool once: channel {"direct":["owner"]}, body "real after sleep", key "real-after-sleep".',
-        `3. If step 2 returned any error, wait for the backend with Bash: \`until curl -s -o /dev/null http://127.0.0.1:${PORT}/; do sleep 2; done\` (timeout 180000 ms), then call the same \`post\` once more with body "real retry" and key "real-retry".`,
-        '4. Answer with the word FINISHED and one line quoting exactly what each post call returned.',
-      ].join('\n'),
-      key: 'ask-real',
-    });
-    assert.equal(posted.status, 201, JSON.stringify(posted.body));
-    const request = posted.body.post ?? posted.body;
-    const executions = path.join(c.dataDir, 'executions');
-    const journal = await eventually(
-      c,
-      () =>
-        (fs.existsSync(executions) ? fs.readdirSync(executions) : [])
-          .map((id) => path.join(executions, id))
-          .find(
-            (dir) =>
-              fs.existsSync(path.join(dir, 'stdout')) &&
-              /sleep 15/.test(fs.readFileSync(path.join(dir, 'stdout'), 'utf8'))
-          ),
-      Boolean,
-      'the real CLI to start its sleep'
-    );
-    assert.ok(journal);
-    const wrapper = Number(fs.readFileSync(path.join(journal, 'pid'), 'utf8'));
-    const size = () => fs.statSync(path.join(journal, 'stdout')).size;
-    signalGroup(first.pgid, 'SIGINT');
-    await first.exited;
-    await eventually(
-      c,
-      () => processesIn(first.pgid),
-      (left) => left.length === 0,
-      'group empty'
-    );
-    report.bytesAtCtrlC = size();
-    report.aliveAfterCtrlC = alive(wrapper);
-    await new Promise((resolve) => setTimeout(resolve, 30_000));
-    report.bytesAfter30sDown = size();
-    report.aliveAfter30sDown = alive(wrapper);
-    // What the CLI wrote with no backend at all: its tool calls, their results, its answer.
-    const gap = fs
-      .readFileSync(path.join(journal, 'stdout'), 'utf8')
-      .slice(Number(report.bytesAtCtrlC));
-    if (process.env.CTRLC_LOG_FILE)
-      fs.writeFileSync(`${process.env.CTRLC_LOG_FILE}.gap.jsonl`, gap);
-    report.writtenWhileDown = gap
-      .split('\n')
-      .filter((line) => /^\{"type":"(assistant|user|result)"/.test(line))
-      .map((line) => {
-        const event = JSON.parse(line);
-        if (event.type === 'result') return `result ${event.subtype}: ${event.result}`;
-        return (event.message.content as Array<Record<string, unknown>>)
-          .map((part) =>
-            part.type === 'text'
-              ? `text: ${part.text}`
-              : part.type === 'tool_use'
-                ? `tool_use ${part.name} ${JSON.stringify(part.input)}`
-                : `${part.type} ${String(JSON.stringify(part.content ?? '')).slice(0, 500)}`
-          )
-          .join(' | ');
-      });
-    const second = launch(c, 'B');
-    await second.ready;
-    const run = await eventually(
-      c,
-      () => runOf(buddy),
-      (r) => ['complete', 'failed', 'cancelled'].includes(r?.status),
-      'the real run to settle'
-    );
-    report.run = { status: run.status, error: run.error ?? null };
-    const dm = await http('GET', `/api/buddies/channels/${request.channelId}/posts`);
-    report.buddyPosts = (
-      (dm.body.posts ?? dm.body) as Array<{ body: string; author: { id?: string } }>
-    )
-      .filter((p) => p.author.id === buddy)
-      .map((p) => p.body);
-    const thread = await http('GET', `/api/buddies/posts/${request.id}/thread`);
-    report.answer = (
-      (thread.body.posts ?? thread.body) as Array<{ body: string; author: { id?: string } }>
-    )
-      .filter((p) => p.author.id === buddy)
-      .map((p) => p.body);
-    console.log(`[real claude] ${JSON.stringify(report, null, 2)}`);
-    await stopGroup(second);
-    c.finished = true;
-    fs.rmSync(
-      path.join(
-        REAL_HOME,
-        '.claude',
-        'projects',
-        fs.realpathSync(c.workspaceDir).replace(/[^a-zA-Z0-9]/g, '-')
-      ),
-      {
-        recursive: true,
-        force: true,
-      }
-    );
-    assert.equal(run.status, 'complete');
-  }
-);
+  const second = launch(c, 'B');
+  await second.ready;
+  const run = await eventually(
+    c,
+    () => runOf(buddy),
+    (r) => ['complete', 'failed', 'cancelled'].includes(r?.status),
+    'the real run to settle'
+  );
+  report.run = { status: run.status, error: run.error ?? null };
+  const dm = await http('GET', `/api/buddies/channels/${request.channelId}/posts`);
+  report.buddyPosts = (
+    (dm.body.posts ?? dm.body) as Array<{ body: string; author: { id?: string } }>
+  )
+    .filter((p) => p.author.id === buddy)
+    .map((p) => p.body);
+  const thread = await http('GET', `/api/buddies/posts/${request.id}/thread`);
+  report.answer = (
+    (thread.body.posts ?? thread.body) as Array<{ body: string; author: { id?: string } }>
+  )
+    .filter((p) => p.author.id === buddy)
+    .map((p) => p.body);
+  console.log(`[real claude] ${JSON.stringify(report, null, 2)}`);
+  await stopGroup(second);
+  c.finished = true;
+  fs.rmSync(
+    path.join(
+      REAL_HOME,
+      '.claude',
+      'projects',
+      fs.realpathSync(c.workspaceDir).replace(/[^a-zA-Z0-9]/g, '-')
+    ),
+    {
+      recursive: true,
+      force: true,
+    }
+  );
+  assert.equal(run.status, 'complete');
+});

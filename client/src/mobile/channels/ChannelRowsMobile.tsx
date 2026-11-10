@@ -7,7 +7,6 @@ import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { ChannelPostContent, EditedMark } from '../../components/buddies/ChannelPostContent';
 import { ConversationEye } from '../../components/buddies/ConversationEye';
 import { CopyLinkButton } from '../../components/buddies/CopyLinkButton';
-import { ReplyRetry } from '../../components/buddies/HarnessPicker';
 import {
   type ChannelRow,
   type WorkspaceDirectory,
@@ -17,6 +16,7 @@ import {
   postPurposeTag,
 } from '../../components/buddies/channel-data';
 import { channelLinkPath, postLink } from '../../components/buddies/channel-link';
+import { ReplyRetry } from '../../components/buddies/HarnessPicker';
 import type { Channel, Post } from '../../components/buddies/types';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 

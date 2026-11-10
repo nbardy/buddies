@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { readSourceStatus, sourceStatusView, writeSourceStatus } from './desktop-source-status.mjs';
 import { prepareSource, publishRuntime, selectedRuntime } from './desktop-source.mjs';
+import { readSourceStatus, sourceStatusView, writeSourceStatus } from './desktop-source-status.mjs';
 
 // Real filesystem/git boundary: version A survives failed staging/smoke and source edits;
 // successful B is selected atomically, with A retained and no app-store writes.

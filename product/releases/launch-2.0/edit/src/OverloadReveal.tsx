@@ -6,9 +6,23 @@
 // pop on its five boops, gather in its build bar and lock on its drop. Seconds from the cut to black.
 import type React from 'react';
 import { AbsoluteFill, random } from 'remotion';
-import { clamp01, easeOutBack, FONT, INK, lerp } from './blocks';
-import { Antenna, BAR, BEAT, CAST, CENTRE_SHIFT, Face, GAP, MARK, MARK_LEFT, MARK_TOP, type Pose, WORD, Wordmark } from './BuddiesIntro';
+import {
+  Antenna,
+  BAR,
+  BEAT,
+  CAST,
+  CENTRE_SHIFT,
+  Face,
+  GAP,
+  MARK,
+  MARK_LEFT,
+  MARK_TOP,
+  type Pose,
+  WORD,
+  Wordmark,
+} from './BuddiesIntro';
 import { AURA, NIGHT } from './BuddiesLogos';
+import { FONT, INK, clamp01, easeOutBack, lerp } from './blocks';
 
 const CREAM = '#fdf6e3';
 const ROBOTS = CAST[5];
@@ -43,7 +57,11 @@ const span = (t: number, from: number, dur: number) => clamp01((t - from) / dur)
 // ---- The lines (owner pick 2026-10-05: "slam", over a red/cyan glitch with typed answers, in git history). t = seconds from the cut.
 
 // A word slams in from 1.6x with motion blur; the frame shakes once on the boom.
-const SlamWord: React.FC<{ t: number; at: number; children: React.ReactNode }> = ({ t, at, children }) => {
+const SlamWord: React.FC<{ t: number; at: number; children: React.ReactNode }> = ({
+  t,
+  at,
+  children,
+}) => {
   const p = easeOutCubic(span(t, at, 0.2));
   return (
     <span
@@ -59,10 +77,22 @@ const SlamWord: React.FC<{ t: number; at: number; children: React.ReactNode }> =
   );
 };
 
-const Rise: React.FC<{ t: number; at: number; style: React.CSSProperties; children: React.ReactNode }> = ({ t, at, style, children }) => {
+const Rise: React.FC<{
+  t: number;
+  at: number;
+  style: React.CSSProperties;
+  children: React.ReactNode;
+}> = ({ t, at, style, children }) => {
   const p = easeOutCubic(span(t, at, 0.35));
   return (
-    <div style={{ ...style, opacity: p, transform: `translateY(${lerp(26, 0, p)}px)`, filter: `blur(${lerp(8, 0, p)}px)` }}>
+    <div
+      style={{
+        ...style,
+        opacity: p,
+        transform: `translateY(${lerp(26, 0, p)}px)`,
+        filter: `blur(${lerp(8, 0, p)}px)`,
+      }}
+    >
       {children}
     </div>
   );
@@ -83,14 +113,32 @@ const AuraWord: React.FC<{ text: string }> = ({ text }) => (
 );
 
 const Lines: React.FC<{ t: number }> = ({ t }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 26, fontFamily: FONT, color: CREAM }}>
-    <div style={{ fontSize: 196, fontWeight: 800, fontStretch: '78%', letterSpacing: '-0.03em', lineHeight: 0.95, display: 'flex', gap: '0.22em' }}>
-      <SlamWord t={t} at={R.slam}>AI</SlamWord>
+  <div
+    style={{ display: 'flex', flexDirection: 'column', gap: 26, fontFamily: FONT, color: CREAM }}
+  >
+    <div
+      style={{
+        fontSize: 196,
+        fontWeight: 800,
+        fontStretch: '78%',
+        letterSpacing: '-0.03em',
+        lineHeight: 0.95,
+        display: 'flex',
+        gap: '0.22em',
+      }}
+    >
+      <SlamWord t={t} at={R.slam}>
+        AI
+      </SlamWord>
       <SlamWord t={t} at={R.slam + 0.07}>
         Overload<span style={{ color: INK.red }}>.</span>
       </SlamWord>
     </div>
-    <Rise t={t} at={R.feeling} style={{ fontSize: 62, fontWeight: 600, color: 'rgba(253,246,227,.62)' }}>
+    <Rise
+      t={t}
+      at={R.feeling}
+      style={{ fontSize: 62, fontWeight: 600, color: 'rgba(253,246,227,.62)' }}
+    >
       We're all feeling it.
     </Rise>
     <Rise t={t} at={R.covered} style={{ fontSize: 62, fontWeight: 700 }}>
@@ -174,20 +222,41 @@ export const OverloadReveal: React.FC<{ t: number }> = ({ t }) => {
           <Lines t={t} />
         </AbsoluteFill>
         <svg width={1920} height={1080} style={{ position: 'absolute', inset: 0 }}>
-          <circle cx={markCx} cy={markCy} r={lerp(MARK * 0.55, 1100, ring)} fill="none" stroke={CREAM} strokeWidth={lerp(10, 1, ring)} opacity={0.5 * (1 - ring) * (t >= R.lock ? 1 : 0)} />
+          <circle
+            cx={markCx}
+            cy={markCy}
+            r={lerp(MARK * 0.55, 1100, ring)}
+            fill="none"
+            stroke={CREAM}
+            strokeWidth={lerp(10, 1, ring)}
+            opacity={0.5 * (1 - ring) * (t >= R.lock ? 1 : 0)}
+          />
           {poses.map((p) => (
             <Antenna key={p.color} p={p} />
           ))}
           <g style={{ isolation: 'isolate' }}>
             {poses.map((p) => (
-              <circle key={p.color} cx={p.x} cy={p.y} r={Math.max(0, p.r)} fill={p.color} style={{ mixBlendMode: 'screen' }} />
+              <circle
+                key={p.color}
+                cx={p.x}
+                cy={p.y}
+                r={Math.max(0, p.r)}
+                fill={p.color}
+                style={{ mixBlendMode: 'screen' }}
+              />
             ))}
           </g>
           {poses.map((p) => (
             <Face key={p.color} p={p} />
           ))}
         </svg>
-        <div style={{ position: 'absolute', left: MARK_LEFT + MARK + GAP + slide, top: MARK_TOP + MARK / 2 - WORD * 0.56 }}>
+        <div
+          style={{
+            position: 'absolute',
+            left: MARK_LEFT + MARK + GAP + slide,
+            top: MARK_TOP + MARK / 2 - WORD * 0.56,
+          }}
+        >
           <Wordmark t={t} at={R.lock + 0.1} size={WORD} />
         </div>
         <div
@@ -208,7 +277,12 @@ export const OverloadReveal: React.FC<{ t: number }> = ({ t }) => {
           your team of AI agents
         </div>
       </AbsoluteFill>
-      <AbsoluteFill style={{ background: `radial-gradient(circle at ${markCx}px ${markCy}px, rgba(253,246,227,.55), transparent 45%)`, opacity: flash }} />
+      <AbsoluteFill
+        style={{
+          background: `radial-gradient(circle at ${markCx}px ${markCy}px, rgba(253,246,227,.55), transparent 45%)`,
+          opacity: flash,
+        }}
+      />
     </AbsoluteFill>
   );
 };

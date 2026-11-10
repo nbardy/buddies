@@ -25,7 +25,16 @@ export const TITLES = [
 const CARD_W = 1780;
 const Home: React.FC = () => (
   <>
-    <Img src={HOME} style={{ position: 'absolute', left: 0, top: 0, width: CARD_W, height: Math.round((CARD_W * HOME_SRC.h) / HOME_SRC.w) }} />
+    <Img
+      src={HOME}
+      style={{
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        width: CARD_W,
+        height: Math.round((CARD_W * HOME_SRC.h) / HOME_SRC.w),
+      }}
+    />
     <div
       style={{
         position: 'absolute',
@@ -49,8 +58,13 @@ export const PostIntroBenefits: React.FC = () => {
     <AbsoluteFill style={{ background: INK.plate, overflow: 'hidden' }}>
       <div
         style={{
-          position: 'absolute', left: 70, top: 62, width: 1780, height: 690,
-          borderRadius: 24, overflow: 'hidden',
+          position: 'absolute',
+          left: 70,
+          top: 62,
+          width: 1780,
+          height: 690,
+          borderRadius: 24,
+          overflow: 'hidden',
           boxShadow: '0 32px 80px rgba(0,0,0,.45)',
           border: '1px solid rgba(253,246,227,.14)',
           transform: `scale(${lerp(1, 1.055, frame / DURATION)})`,
@@ -58,11 +72,41 @@ export const PostIntroBenefits: React.FC = () => {
       >
         <Home />
       </div>
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(0deg, #002b36 2%, transparent 35%)' }} />
-      <div style={{ position: 'absolute', left: 80, right: 80, bottom: 75, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'linear-gradient(0deg, #002b36 2%, transparent 35%)',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          left: 80,
+          right: 80,
+          bottom: 75,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
         {title.lines.map((line, i) => (
-          <div key={`${index}-${line}`} style={{ transform: title.lines.length > 1 ? 'scale(.85)' : undefined, marginTop: title.lines.length > 1 && i > 0 ? -20 : 0 }}>
-            <Block text={line} u={u - i * 0.07} size="xl" fill={title.fill} ink={INK.plate} rot={i % 2 ? -title.rot : title.rot} />
+          <div
+            key={`${index}-${line}`}
+            style={{
+              transform: title.lines.length > 1 ? 'scale(.85)' : undefined,
+              marginTop: title.lines.length > 1 && i > 0 ? -20 : 0,
+            }}
+          >
+            <Block
+              text={line}
+              u={u - i * 0.07}
+              size="xl"
+              fill={title.fill}
+              ink={INK.plate}
+              rot={i % 2 ? -title.rot : title.rot}
+            />
           </div>
         ))}
       </div>
@@ -83,6 +127,8 @@ export const BenefitsSound: React.FC = () => (
 export const BenefitsWithSound: React.FC = () => (
   <AbsoluteFill>
     <PostIntroBenefits />
-    <Sequence layout="none"><BenefitsSound /></Sequence>
+    <Sequence layout="none">
+      <BenefitsSound />
+    </Sequence>
   </AbsoluteFill>
 );

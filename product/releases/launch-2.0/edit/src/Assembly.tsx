@@ -7,16 +7,16 @@ import type React from 'react';
 import { AbsoluteFill, Audio, Freeze, OffthreadVideo, Sequence, useCurrentFrame } from 'remotion';
 import beat9 from '../../beat9/beat9.mp4';
 import launchSong from '../../sound/launch.wav';
+import { Block, INK } from './blocks';
 import * as Close from './Close';
 import * as DesignReview from './DesignReview';
 import * as FeatureFlash from './FeatureFlash';
 import * as HomeIntro from './HomeIntro';
 import * as Overload from './Overload';
 import * as PickerRefresh from './PickerRefresh';
-import * as Swarm from './Swarm';
-import { Block, INK } from './blocks';
 import * as PostIntroBenefits from './PostIntroBenefits';
 import * as ShowWork from './ShowWork';
+import * as Swarm from './Swarm';
 
 export const FPS = 60;
 export const WIDTH = 1920;
@@ -37,8 +37,22 @@ const Slides: React.FC = () => <OffthreadVideo src={beat9} muted />;
 
 // A section: component C (intrinsic length `frames`) starts at `from`, runs to `to`, and plays
 // C from `offset` frames in. Silent sections hold C's last frame to fill a bar-aligned slot.
-type Section = { id: string; from: number; to: number; C: React.FC; frames: number; offset: number };
-const section = (id: string, from: number, to: number, C: React.FC, frames: number, offset = 0): Section => ({
+type Section = {
+  id: string;
+  from: number;
+  to: number;
+  C: React.FC;
+  frames: number;
+  offset: number;
+};
+const section = (
+  id: string,
+  from: number,
+  to: number,
+  C: React.FC,
+  frames: number,
+  offset = 0
+): Section => ({
   id,
   from,
   to,
@@ -63,7 +77,13 @@ export const SECTIONS: Section[] = [
   section('subscriptions-slide', bar(22), bar(23), Slides, SLIDES_END, SLIDE_SPLIT),
   section('fork', bar(23), bar(25), Close.Fork, Close.FORK_FRAMES),
   section('run', bar(25), bar(27), Close.Run, Close.RUN_FRAMES),
-  section('benefits', bar(27), bar(31), PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
+  section(
+    'benefits',
+    bar(27),
+    bar(31),
+    PostIntroBenefits.PostIntroBenefits,
+    PostIntroBenefits.DURATION
+  ),
   section('vim', bar(31), bar(35), Close.Vim, Close.VIM_FRAMES),
   section('end', bar(35), bar(35) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
 ];
@@ -72,14 +92,28 @@ export const SECTIONS: Section[] = [
 const CAPTIONS: { from: number; to: number; lines: [string, string] }[] = [
   { from: bar(6), to: bar(10), lines: ['Multi-agent swarms.', 'Agents @-mention each other.'] },
   { from: bar(12), to: bar(16), lines: ['Ask your agents.', 'In channels.'] },
-  { from: bar(16), to: bar(18), lines: ['They show their work.', 'Images and video, right in the thread.'] },
+  {
+    from: bar(16),
+    to: bar(18),
+    lines: ['They show their work.', 'Images and video, right in the thread.'],
+  },
 ];
 const CAPTION_IN = (60 / 128) * 0.5; // seconds after the scene's downbeat
 
 const Caption: React.FC<{ lines: [string, string] }> = ({ lines }) => {
   const t = useCurrentFrame() / FPS - CAPTION_IN;
   return (
-    <div style={{ position: 'absolute', left: 70, top: 56, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
+    <div
+      style={{
+        position: 'absolute',
+        left: 70,
+        top: 56,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 10,
+      }}
+    >
       <Block text={lines[0]} u={t} size="md" fill={INK.cyan} ink={INK.plate} rot={-1.5} />
       <Block text={lines[1]} u={t - 0.25} size="md" fill={INK.surface} ink={INK.cream} rot={0} />
     </div>
@@ -97,7 +131,11 @@ const Place: React.FC<{ s: Section }> = ({ s }) => {
         </Sequence>
       </Sequence>
       {s.to - s.from > plays ? (
-        <Sequence from={s.from + plays} durationInFrames={s.to - s.from - plays} name={`${s.id} (hold)`}>
+        <Sequence
+          from={s.from + plays}
+          durationInFrames={s.to - s.from - plays}
+          name={`${s.id} (hold)`}
+        >
           <Freeze frame={s.frames - 1}>
             <s.C />
           </Freeze>
@@ -127,7 +165,12 @@ export const AssemblyPicture: React.FC = () => (
       <Place key={s.id} s={s} />
     ))}
     {CAPTIONS.map((c) => (
-      <Sequence key={c.lines[0]} from={c.from} durationInFrames={c.to - c.from} name={`caption: ${c.lines[0]}`}>
+      <Sequence
+        key={c.lines[0]}
+        from={c.from}
+        durationInFrames={c.to - c.from}
+        name={`caption: ${c.lines[0]}`}
+      >
         <Caption lines={c.lines} />
       </Sequence>
     ))}

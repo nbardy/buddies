@@ -4,8 +4,8 @@ import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import type { Task, TaskDetail } from '../src/components/buddies/types';
-import { postFixture } from './fixtures/channel-posts';
 import { CODEX_INSTALLED } from './fixtures/buddy-roster';
+import { postFixture } from './fixtures/channel-posts';
 
 register(
   `data:text/javascript,${encodeURIComponent(`

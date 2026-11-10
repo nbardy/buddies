@@ -12,7 +12,11 @@ export function BuddyBackgroundLink({
   buddyId,
   workspaceId,
   name,
-}: { buddyId: string; workspaceId: string; name: string }) {
+}: {
+  buddyId: string;
+  workspaceId: string;
+  name: string;
+}) {
   const read = useBuddyWorkerRead(buddyId, workspaceId);
   const {
     active: count,

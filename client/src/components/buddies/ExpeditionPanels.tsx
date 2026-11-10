@@ -202,7 +202,11 @@ export function DetailsPanel({
   x,
   directory,
   manage,
-}: { x: Expedition; directory: WorkspaceDirectory; manage: ReactNode }) {
+}: {
+  x: Expedition;
+  directory: WorkspaceDirectory;
+  manage: ReactNode;
+}) {
   const c = x.charter;
   const seat = [c.seat.provider, c.seat.model, c.seat.reasoningEffort].filter(Boolean).join(' · ');
   const limits: Row[] = [

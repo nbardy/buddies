@@ -1,8 +1,7 @@
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 // highlight.js + katex stylesheets load lazily with their plugins —
 // see utils/lazyMarkdownPlugins.ts. Do not re-add a static CSS import here.
-import type { BuddyContext, ConversationRow } from '@unleashd/shared';
-import type { QueuedMessage } from '@unleashd/shared';
+import type { BuddyContext, ConversationRow, QueuedMessage } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
@@ -55,11 +54,11 @@ import { SubAgentPanel } from '../views/conversation/SubAgentPanel';
 import { TurnStatus } from '../views/conversation/TurnStatus';
 import { COPY_GLYPH } from '../views/transcript/markdown-components';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
-import { ContextBreakdownMeter } from './ContextBreakdownMeter';
-import { VirtualizedMessageList } from './VirtualizedMessageList';
+import { lastOwnerText } from './buddies/channel-dm';
 import { DmChannelsNotice } from './buddies/DmChannelsNotice';
 import { HarnessPicker } from './buddies/HarnessPicker';
-import { lastOwnerText } from './buddies/channel-dm';
+import { ContextBreakdownMeter } from './ContextBreakdownMeter';
+import { VirtualizedMessageList } from './VirtualizedMessageList';
 import './Chat.css';
 import { useTimeTick } from '../hooks/useTimeTick';
 import { rowBuddy } from '../utils/conversation-row';

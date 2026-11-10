@@ -15,7 +15,11 @@ const fonts = [
   face('Opt Geist', '/tmp/fonts/Geist[wght].ttf', 'font-weight:100 900;'),
   face('Opt Inter', '/tmp/fonts/Inter[opsz,wght].ttf', 'font-weight:100 900;'),
   face('Opt Instrument Serif', '/tmp/fonts/InstrumentSerif-Regular.ttf'),
-  face('Opt Bricolage', new URL('../../releases/launch-2.0/fonts/BricolageGrotesque.ttf', import.meta.url).pathname, 'font-weight:200 800;'),
+  face(
+    'Opt Bricolage',
+    new URL('../../releases/launch-2.0/fonts/BricolageGrotesque.ttf', import.meta.url).pathname,
+    'font-weight:200 800;'
+  ),
 ].join('\n');
 
 // Each option: headline, section heads + card titles, and body copy on the Home.
@@ -34,7 +38,11 @@ const options = {
     .landing-project-title{font-weight:600;letter-spacing:-0.005em}`,
 };
 
-const session = await openSession({ baseUrl: base, token: resolveAuthToken(), clockMs: Date.now() });
+const session = await openSession({
+  baseUrl: base,
+  token: resolveAuthToken(),
+  clockMs: Date.now(),
+});
 try {
   await session.setViewport({ width: 1440, height: 900, deviceScaleFactor: 2, mobile: false });
   await session.goto(`${base}/buddies/workspaces/${workspace}/channels`, 3000);
@@ -42,7 +50,9 @@ try {
   await sleep(1500);
   // Freeze the aura so every option shows the same glow.
   await session.evaluate(`document.getAnimations().forEach(a => a.pause())`);
-  await session.evaluate(`(() => { const s = document.createElement('style'); s.textContent = ${JSON.stringify(fonts)}; document.head.append(s); })()`);
+  await session.evaluate(
+    `(() => { const s = document.createElement('style'); s.textContent = ${JSON.stringify(fonts)}; document.head.append(s); })()`
+  );
   for (const [name, css] of Object.entries(options)) {
     await session.evaluate(`(() => {
       let el = document.getElementById('font-probe');

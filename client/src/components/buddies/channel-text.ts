@@ -1,4 +1,3 @@
-import { isLocalFilePath } from '@unleashd/shared';
 /**
  * client/src/components/buddies/channel-text.ts
  *
@@ -13,6 +12,7 @@ import { isLocalFilePath } from '@unleashd/shared';
  * composer-draft.ts. This file keeps the @ menu ranking, media, tasks and the mention chip.
  */
 import type { ChannelReference, ConversationConfig, ProviderCatalog } from '@unleashd/shared';
+import { isLocalFilePath } from '@unleashd/shared';
 import { modelSummary } from '../../views/config/config-options';
 import type { TaskSummary as Task, TaskStatus, ThreadSeat } from './types';
 

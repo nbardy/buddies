@@ -8,30 +8,30 @@
 
 import { z } from 'zod';
 import {
-  ConfigErrorSchema,
-  ConversationConfigPatchSchema,
-  ConversationConfigSchema,
-  ConversationIdSchema,
-} from './conversation-config.js';
-import {
   CreateKindSchema,
   EncodedRowsSchema,
   MessageBodySchema,
   RowPatchSchema,
 } from './conversation.js';
+import {
+  ConfigErrorSchema,
+  ConversationConfigPatchSchema,
+  ConversationConfigSchema,
+  ConversationIdSchema,
+} from './conversation-config.js';
 import { legacyBody } from './legacy-content.js';
 import type { Provider } from './provider-catalog.js';
 
-export * from './conversation-config.js';
-export * from './config-mapping.js';
-export * from './conversation.js';
-export { bodyText } from './content-schema.js';
-export * from './turn-attempt.js';
-export * from './legacy-content.js';
-export * from './tool-content.js';
 export * from './buddy.js';
-export * from './provider-catalog.js';
+export * from './config-mapping.js';
+export { bodyText } from './content-schema.js';
+export * from './conversation.js';
+export * from './conversation-config.js';
+export * from './legacy-content.js';
 export * from './model-catalog.js';
+export * from './provider-catalog.js';
+export * from './tool-content.js';
+export * from './turn-attempt.js';
 
 // =============================================================================
 // Core Data Structures
@@ -514,6 +514,14 @@ export function classifyServerFrame(raw: unknown): ServerFrame {
     : { t: 'invalid', issues: parsed.error.issues.map((issue) => issue.message).join('; ') };
 }
 
+export * from './body-references.js';
+export * from './buddy-api.js';
+export * from './buddy-channel-posts.js';
+export * from './buddy-workspace-activity.js';
+export * from './dependencies.js';
+export * from './expedition.js';
+// A namespace: its names (Contract, Verdict, Outcome, ...) collide with the old expedition.ts.
+export * as keyed from './expedition-keyed.js';
 // Oompa raw JSON file types (auto-generated from oompa_loompas schemas)
 export type {
   OompaCycle,
@@ -521,18 +529,6 @@ export type {
   OompaStarted,
   OompaStopped,
 } from './generated/oompa-types.js';
-
-export * from './buddy-workspace-activity.js';
-export * from './buddy-channel-posts.js';
-export * from './body-references.js';
-export * from './buddy-api.js';
-export * from './expedition.js';
-// A namespace: its names (Contract, Verdict, Outcome, ...) collide with the old expedition.ts.
-export * as keyed from './expedition-keyed.js';
 export * from './harness-retry.js';
-
-export * from './upstream.js';
-
-export * from './dependencies.js';
-
 export * from './mobile-access.js';
+export * from './upstream.js';

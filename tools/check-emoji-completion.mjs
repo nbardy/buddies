@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { unlinkSync } from 'node:fs';
 import { openSession, resolveAuthToken, sleep } from './lib/headless-chrome.mjs';
+
 const [workspaceId, channelId, baseUrl = 'http://localhost:7489', shotDir] = process.argv.slice(2);
 assert.ok(workspaceId && channelId, 'Pass workspace and channel ids');
 const session = await openSession({ baseUrl, token: resolveAuthToken() });

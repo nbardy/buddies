@@ -11,10 +11,10 @@ import {
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { handleMessage } from './atoms/actions';
 import { jotaiStore } from './atoms/store';
-import { UpdateBanner } from './components/UpdateBanner';
-import { UpstreamUpdatePrompt } from './components/buddies/UpstreamUpdatePrompt';
 import { useOwnerUnreadTitle } from './components/buddies/channel-data';
 import type { ChannelsView } from './components/buddies/channels-view';
+import { UpstreamUpdatePrompt } from './components/buddies/UpstreamUpdatePrompt';
+import { UpdateBanner } from './components/UpdateBanner';
 import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
 import { initSettings } from './stores/settingsStore';

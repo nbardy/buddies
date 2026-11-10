@@ -59,7 +59,13 @@ function Generated({
   ground,
   className,
   pending,
-}: { name: string; kind: SigilKind; ground: string; className: string; pending: ReactNode }) {
+}: {
+  name: string;
+  kind: SigilKind;
+  ground: string;
+  className: string;
+  pending: ReactNode;
+}) {
   const source = useMemo(() => sigilResource(name, kind), [name, kind]);
   const { data } = usePolledFetch(source, 0);
   return data ? (
@@ -88,7 +94,11 @@ export function AuthorAvatar({
   author,
   name,
   className,
-}: { author: Actor; name: string; className: string }) {
+}: {
+  author: Actor;
+  name: string;
+  className: string;
+}) {
   switch (author.kind) {
     case 'owner':
       return <Initial name={name} className={className} />;

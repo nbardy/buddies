@@ -4,7 +4,7 @@
 // Footage B only; timecodes in ../footage/FOOTAGE.md.
 import type React from 'react';
 import { staticFile } from 'remotion';
-import { CardEdit, type Cut, type Key, play, push, STILL, timeline } from './card';
+import { CardEdit, type Cut, type Key, STILL, play, push, timeline } from './card';
 
 export { FPS, HEIGHT, WIDTH } from './card';
 
@@ -27,4 +27,6 @@ const CAMERA: Key[] = [
   { t: duration / 60, shot: push({ ...PANE_LOW, oy: 0.85 }, 1.06) },
 ];
 
-export const DesignIterationShort: React.FC = () => <CardEdit src={B} cuts={CUTS} camera={CAMERA} />;
+export const DesignIterationShort: React.FC = () => (
+  <CardEdit src={B} cuts={CUTS} camera={CAMERA} />
+);

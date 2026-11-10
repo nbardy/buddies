@@ -8,7 +8,7 @@
 // it lists real channel and Buddy names.
 import type React from 'react';
 import { AbsoluteFill, Easing, Img, staticFile, useCurrentFrame } from 'remotion';
-import { clamp01, FONT, INK, lerp } from './blocks';
+import { FONT, INK, clamp01, lerp } from './blocks';
 
 export const FPS = 60;
 export const WIDTH = 1920;
@@ -31,17 +31,44 @@ const HEADLINE_AT = 1.7;
 const SUBLINE_AT = 3.0;
 
 type Word = { text: string; color: string; weight: number; italic?: boolean };
-const word = (text: string, color: string = INK.cream, weight = 600, italic = false): Word => ({ text, color, weight, italic });
+const word = (text: string, color: string = INK.cream, weight = 600, italic = false): Word => ({
+  text,
+  color,
+  weight,
+  italic,
+});
 
 const HEADLINE: Word[][] = [
   [word('Swarms'), word('of'), word('Agents,')],
-  [word('organized'), word('around'), word('tasks', INK.wordmarkOrange, 600, true), word('and'), word('channels')],
+  [
+    word('organized'),
+    word('around'),
+    word('tasks', INK.wordmarkOrange, 600, true),
+    word('and'),
+    word('channels'),
+  ],
 ];
-const SUBLINE: Word[] = 'Manage your team of agents just like a team of employees'.split(' ').map((w) => word(w, 'rgba(253,246,227,.78)', 400));
+const SUBLINE: Word[] = 'Manage your team of agents just like a team of employees'
+  .split(' ')
+  .map((w) => word(w, 'rgba(253,246,227,.78)', 400));
 
 // Each word rises out of a soft blur, 0.11 s after the one before.
-const Words: React.FC<{ words: Word[]; at: number; t: number; size: number }> = ({ words, at, t, size }) => (
-  <div style={{ display: 'flex', gap: '0.26em', fontFamily: FONT, fontSize: size, letterSpacing: -0.5, lineHeight: 1.08 }}>
+const Words: React.FC<{ words: Word[]; at: number; t: number; size: number }> = ({
+  words,
+  at,
+  t,
+  size,
+}) => (
+  <div
+    style={{
+      display: 'flex',
+      gap: '0.26em',
+      fontFamily: FONT,
+      fontSize: size,
+      letterSpacing: -0.5,
+      lineHeight: 1.08,
+    }}
+  >
     {words.map((w, i) => {
       const u = Easing.out(Easing.cubic)(clamp01((t - at - i * 0.11) / 0.6));
       return (
@@ -79,7 +106,10 @@ export const HomeIntro: React.FC = () => {
           transformOrigin: '60% 20%',
         }}
       >
-        <Img src={HOME} style={{ position: 'absolute', left: 0, top: -30, width: HOME_W, height: HOME_H }} />
+        <Img
+          src={HOME}
+          style={{ position: 'absolute', left: 0, top: -30, width: HOME_W, height: HOME_H }}
+        />
         <div
           style={{
             position: 'absolute',

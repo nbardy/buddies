@@ -7,11 +7,7 @@ import { ConversationRow } from '../../views/conversation-row/ConversationRow';
 import { MobileEmptyPanel, MobileHeaderAction, MobilePage } from '../components/MobileUI';
 import { NewConversationSheet } from '../components/NewConversationSheet';
 
-export function ConversationListMobile({
-  scope = 'all',
-}: {
-  scope?: 'all' | 'chats';
-}) {
+export function ConversationListMobile({ scope = 'all' }: { scope?: 'all' | 'chats' }) {
   const order = useAtomValue(listField('order'));
   const chatInbox = useAtomValue(listField('inbox'));
   const ids = scope === 'chats' ? chatInbox.ids : order;

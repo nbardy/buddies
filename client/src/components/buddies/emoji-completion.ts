@@ -26,7 +26,7 @@ export function activeEmojiQuery(
   caret: number
 ): { start: number; query: string } | null {
   const before = text.slice(0, caret);
-  const match = /(?:^|[\s(\[{]):([a-zA-Z0-9_+\-]*)$/.exec(before);
+  const match = /(?:^|[\s([{]):([a-zA-Z0-9_+-]*)$/.exec(before);
   if (!match) return null;
   // A colon in unfinished inline/fenced code stays literal; URLs and times fail the boundary above.
   if ((before.match(/`+|~{3,}/g)?.length ?? 0) % 2 !== 0) return null;

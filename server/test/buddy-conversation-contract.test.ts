@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { PROTOCOL_VERSION, WS_PATH, buddyKind } from '@unleashd/shared';
-import { createDefaultConversationConfig } from '@unleashd/shared';
 import type { BuddyContext } from '@unleashd/shared';
+import {
+  PROTOCOL_VERSION,
+  WS_PATH,
+  buddyKind,
+  createDefaultConversationConfig,
+} from '@unleashd/shared';
 import { type ConversationOptions, createConversationRuntime } from '../src/conversations/runtime';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { registerConversationWebSocket } from '../src/transport/conversation-websocket';

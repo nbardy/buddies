@@ -68,7 +68,10 @@ const shotAt = (t: number): Shot => {
   const a = CAMERA[i];
   const b = CAMERA[i + 1];
   const u = ease(Math.min(1, (t - a.t) / (b.t - a.t)));
-  return { focus: a.shot.focus + (b.shot.focus - a.shot.focus) * u, top: a.shot.top + (b.shot.top - a.shot.top) * u };
+  return {
+    focus: a.shot.focus + (b.shot.focus - a.shot.focus) * u,
+    top: a.shot.top + (b.shot.top - a.shot.top) * u,
+  };
 };
 
 // Full frame: the source covers the 16:9 output (crops ~67 px top and bottom).
@@ -133,7 +136,12 @@ const Frame: React.FC<{ cut: Cut; startFrame: number }> = ({ cut, startFrame }) 
       >
         <Footage
           cut={cut}
-          style={{ left: -PANE.x * scale, top: -srcTop * scale, width: SRC.w * scale, height: SRC.h * scale }}
+          style={{
+            left: -PANE.x * scale,
+            top: -srcTop * scale,
+            width: SRC.w * scale,
+            height: SRC.h * scale,
+          }}
         />
       </div>
     </AbsoluteFill>

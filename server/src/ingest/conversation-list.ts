@@ -26,8 +26,8 @@ import {
   conversationLabel,
   overlayHistoryFields,
 } from '../conversations/runtime';
-import { labelled, noteActivity } from '../observability/event-loop-stall';
 import { mergeSessionMessages } from '../lifecycle/session-history';
+import { labelled, noteActivity } from '../observability/event-loop-stall';
 import { extendsHistory, mergedCount, mergedCounts, mergedPage, sessionMessages } from './history';
 
 type Records = {
@@ -580,7 +580,9 @@ export async function createConversationList(
       const creation = (await dependencies.records.getByConversationId(id))?.creation ?? {};
       bare.set(id, {
         row: bareRowOf(record, record.workingDirectory as string, creation),
-        pendingFirstMessage: Boolean(creation.initialMessage && !creation.initialMessageDispatchedAt),
+        pendingFirstMessage: Boolean(
+          creation.initialMessage && !creation.initialMessageDispatchedAt
+        ),
       });
     } catch (error) {
       logger.error(`[ingest-list] could not read record ${id}:`, error);
@@ -675,10 +677,12 @@ export async function createConversationList(
   return {
     // `rows` and `recordOf` share keys (both set by a listed publish, both cleared by forget).
     rows: () =>
-      [...rows, ...[...bare].map(([id, entry]) => [id, entry.row] as const)].flatMap(([id, row]) => {
-        const record = recordOf.get(id);
-        return record && !dependencies.runtime(id) ? [servedRow(record, row)] : [];
-      }),
+      [...rows, ...[...bare].map(([id, entry]) => [id, entry.row] as const)].flatMap(
+        ([id, row]) => {
+          const record = recordOf.get(id);
+          return record && !dependencies.runtime(id) ? [servedRow(record, row)] : [];
+        }
+      ),
     ids: () => [...rows.keys(), ...bare.keys()],
     joined(conversationId) {
       const record = recordOf.get(conversationId);

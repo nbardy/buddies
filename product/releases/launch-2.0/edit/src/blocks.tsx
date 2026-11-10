@@ -35,20 +35,38 @@ export const easeOutBack = (x: number, k = 1.9) => 1 + (k + 1) * (x - 1) ** 3 + 
 
 type Size = 'md' | 'xl' | 'xxl';
 const SIZE: Record<Size, React.CSSProperties> = {
-  md: { fontSize: 54, fontWeight: 700, fontStretch: '90%', padding: '12px 28px 16px', borderRadius: 14 },
-  xl: { fontSize: 150, fontWeight: 800, fontStretch: '78%', padding: '6px 34px 14px', borderRadius: 18 },
-  xxl: { fontSize: 176, fontWeight: 800, fontStretch: '78%', padding: '6px 34px 14px', borderRadius: 18 },
+  md: {
+    fontSize: 54,
+    fontWeight: 700,
+    fontStretch: '90%',
+    padding: '12px 28px 16px',
+    borderRadius: 14,
+  },
+  xl: {
+    fontSize: 150,
+    fontWeight: 800,
+    fontStretch: '78%',
+    padding: '6px 34px 14px',
+    borderRadius: 18,
+  },
+  xxl: {
+    fontSize: 176,
+    fontWeight: 800,
+    fontStretch: '78%',
+    padding: '6px 34px 14px',
+    borderRadius: 18,
+  },
 };
 
 // u = seconds since the block's entrance.
-export const Block: React.FC<{ text: string; u: number; size: Size; fill: string; ink: string; rot: number }> = ({
-  text,
-  u,
-  size,
-  fill,
-  ink,
-  rot,
-}) => {
+export const Block: React.FC<{
+  text: string;
+  u: number;
+  size: Size;
+  fill: string;
+  ink: string;
+  rot: number;
+}> = ({ text, u, size, fill, ink, rot }) => {
   const wipe = easeOutExpo(clamp01(u / 0.22));
   const rise = easeOutBack(clamp01((u - 0.06) / 0.3));
   const punch = easeOutBack(clamp01((u - 0.16) / 0.3), 3);
@@ -79,7 +97,12 @@ export const Block: React.FC<{ text: string; u: number; size: Size; fill: string
         }}
       />
       <span
-        style={{ position: 'relative', display: 'inline-block', color: ink, transform: `translateY(${lerp(110, 0, rise)}%)` }}
+        style={{
+          position: 'relative',
+          display: 'inline-block',
+          color: ink,
+          transform: `translateY(${lerp(110, 0, rise)}%)`,
+        }}
       >
         {text}
       </span>

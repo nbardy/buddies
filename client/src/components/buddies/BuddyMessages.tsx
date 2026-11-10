@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
-import { actorName } from './BuddyTaskComments';
 import { buddyWrite, postToBuddyDm } from './api';
+import { actorName } from './BuddyTaskComments';
 import type {
   Actor,
   ChannelPage,
@@ -214,13 +214,7 @@ function PostBody({ post, names }: { post: Post; names: Readonly<Record<string, 
 }
 
 /** A DM thread's replies (oldest first) and the owner's reply form; read only while open. */
-function ThreadReplies({
-  root,
-  names,
-}: {
-  root: Post;
-  names: Readonly<Record<string, string>>;
-}) {
+function ThreadReplies({ root, names }: { root: Post; names: Readonly<Record<string, string>> }) {
   const page = usePolledFetch<ThreadPage>(threadUrl(root.id), 0);
   const [body, setBody] = useState('');
   const action = useBuddyAction(page.refetch);

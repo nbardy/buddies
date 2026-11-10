@@ -33,14 +33,14 @@ export const settingOf = (value: string | null | undefined): Setting | undefined
 // ---- κ shared by the owner routes and the Buddy tools: one definition of each write's fields ----
 
 export {
-  key,
-  evidence,
+  BuddyChangesSchema,
+  BuddyCreateFieldsSchema,
   ChannelArchiveSchema,
   ChannelRenameSchema,
-  TaskChangesSchema,
   ScheduleFieldsSchema,
-  BuddyCreateFieldsSchema,
-  BuddyChangesSchema,
+  TaskChangesSchema,
+  evidence,
+  key,
 } from '@unleashd/shared';
 export const managerRef = (id: string | null): ManagerRef =>
   id === null ? { kind: 'nobody' } : { kind: 'buddy', id };

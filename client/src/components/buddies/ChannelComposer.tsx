@@ -13,9 +13,9 @@ import { emojiUsageAtom, recordEmojiUse } from '../../atoms/emoji-usage';
 import { useConversationDraft } from '../../hooks/useConversationDraft';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { newId } from '../../utils/ids';
+import { buddyUpload, buddyWrite, errorText } from './api';
 import { BuddySigil } from './BuddySigil';
 import { ChannelModelPicker } from './ChannelModelPicker';
-import { buddyUpload, buddyWrite, errorText } from './api';
 import { useThreadSeats } from './channel-data';
 import {
   type BuddyReference,

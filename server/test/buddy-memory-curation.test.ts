@@ -20,13 +20,13 @@ import {
 } from '../src/buddies/memory-review';
 import { TURN_MAX_RUNTIME_MS } from '../src/constants/timeouts';
 import { redactAndBound } from '../src/observability/error-journal';
+import { BackgroundWork } from '../src/turns/background-work';
 import {
   CURATION_CASES,
   type CurationCase,
   type CurationCheck,
   type MemoryDoc,
 } from './fixtures/memory-curation/cases';
-import { BackgroundWork } from '../src/turns/background-work';
 
 // One per test backend, as in server.ts: the hook route and the channel status read it.
 const backgroundWork = new BackgroundWork();
@@ -291,66 +291,62 @@ async function runCase(c: CurationCase, repeat: number, warnings: string[]): Pro
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
-test(
-  'memory curation benchmark (live)',
-  {
-    skip: LIVE ? false : 'set UNLEASHD_LIVE_MEMORY_CURATION=1 to run (real model calls)',
-    concurrency: 2,
-  },
-  async (t) => {
-    const plan = parsePlan(process.env);
-    const provenance = {
-      commit: execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim(),
-      dirty: execSync('git status --porcelain', { encoding: 'utf8' }).trim() !== '',
-      instructionsSha256: sha256(MEMORY_REVIEW_INSTRUCTIONS),
-      casesSha256: sha256(readFileSync(CASES_FILE, 'utf8')),
-      harnessSha256: sha256(readFileSync(__filename, 'utf8')),
-      ladder: MEMORY_REVIEW_MODELS,
-      rungTimeoutMs: MEMORY_REVIEW_TIMEOUT_MS,
-    };
-    t.diagnostic(`results: ${plan.resultsDir}`);
-    const rows: Array<{ case: string; repeat: number; outcome: string }> = [];
-    const runs = plan.cases.flatMap((c) =>
-      Array.from({ length: plan.repeats }, (_, i) => ({ c, repeat: i + 1 }))
-    );
-    await Promise.all(
-      runs.map(({ c, repeat }) =>
-        t.test(`${c.id} #${repeat}`, { timeout: REVIEW_BUDGET_MS + 60_000 }, async () => {
-          const warnings: string[] = [];
-          const startedAt = new Date().toISOString();
-          // A setup crash is an infra result too: recorded, never dropped.
-          const result = await runCase(c, repeat, warnings).catch(
-            (error): RunResult => ({
-              kind: 'infra',
-              error: String(error),
-              receipt: null,
-              rungs: [],
-            })
-          );
-          const failed = result.kind === 'reviewed' ? result.verdicts.filter((v) => !v.pass) : [];
-          rows.push({
-            case: c.id,
-            repeat,
-            outcome:
-              result.kind === 'infra' ? 'infra' : failed.length ? 'checks-failed' : 'checks-passed',
-          });
-          writeFileSync(
-            join(plan.resultsDir, `${c.id}.r${repeat}.json`),
-            JSON.stringify(
-              { case: c.id, repeat, startedAt, provenance, input: c, warnings, result },
-              null,
-              2
-            )
-          );
-          // Saved first; assertions after. Rubric lines are graded manually from the JSON.
-          assert.equal(result.kind, 'reviewed', result.kind === 'infra' ? result.error : '');
-          assert.deepEqual(failed, [], `${c.id} #${repeat} failed checks`);
-        })
-      )
-    );
-    writeFileSync(
-      join(plan.resultsDir, 'summary.json'),
-      JSON.stringify({ provenance, repeats: plan.repeats, rows }, null, 2)
-    );
-  }
-);
+test('memory curation benchmark (live)', {
+  skip: LIVE ? false : 'set UNLEASHD_LIVE_MEMORY_CURATION=1 to run (real model calls)',
+  concurrency: 2,
+}, async (t) => {
+  const plan = parsePlan(process.env);
+  const provenance = {
+    commit: execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim(),
+    dirty: execSync('git status --porcelain', { encoding: 'utf8' }).trim() !== '',
+    instructionsSha256: sha256(MEMORY_REVIEW_INSTRUCTIONS),
+    casesSha256: sha256(readFileSync(CASES_FILE, 'utf8')),
+    harnessSha256: sha256(readFileSync(__filename, 'utf8')),
+    ladder: MEMORY_REVIEW_MODELS,
+    rungTimeoutMs: MEMORY_REVIEW_TIMEOUT_MS,
+  };
+  t.diagnostic(`results: ${plan.resultsDir}`);
+  const rows: Array<{ case: string; repeat: number; outcome: string }> = [];
+  const runs = plan.cases.flatMap((c) =>
+    Array.from({ length: plan.repeats }, (_, i) => ({ c, repeat: i + 1 }))
+  );
+  await Promise.all(
+    runs.map(({ c, repeat }) =>
+      t.test(`${c.id} #${repeat}`, { timeout: REVIEW_BUDGET_MS + 60_000 }, async () => {
+        const warnings: string[] = [];
+        const startedAt = new Date().toISOString();
+        // A setup crash is an infra result too: recorded, never dropped.
+        const result = await runCase(c, repeat, warnings).catch(
+          (error): RunResult => ({
+            kind: 'infra',
+            error: String(error),
+            receipt: null,
+            rungs: [],
+          })
+        );
+        const failed = result.kind === 'reviewed' ? result.verdicts.filter((v) => !v.pass) : [];
+        rows.push({
+          case: c.id,
+          repeat,
+          outcome:
+            result.kind === 'infra' ? 'infra' : failed.length ? 'checks-failed' : 'checks-passed',
+        });
+        writeFileSync(
+          join(plan.resultsDir, `${c.id}.r${repeat}.json`),
+          JSON.stringify(
+            { case: c.id, repeat, startedAt, provenance, input: c, warnings, result },
+            null,
+            2
+          )
+        );
+        // Saved first; assertions after. Rubric lines are graded manually from the JSON.
+        assert.equal(result.kind, 'reviewed', result.kind === 'infra' ? result.error : '');
+        assert.deepEqual(failed, [], `${c.id} #${repeat} failed checks`);
+      })
+    )
+  );
+  writeFileSync(
+    join(plan.resultsDir, 'summary.json'),
+    JSON.stringify({ provenance, repeats: plan.repeats, rows }, null, 2)
+  );
+});

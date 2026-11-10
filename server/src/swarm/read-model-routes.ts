@@ -374,7 +374,7 @@ async function exists(filePath: string): Promise<boolean> {
 }
 
 function sanitizeTimestamp(value: string): string {
-  return value.replace(/[^0-9T:Z.+\-]/g, '');
+  return value.replace(/[^0-9T:Z.+-]/g, '');
 }
 
 function queryString(value: unknown): string | undefined {

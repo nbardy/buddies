@@ -4,7 +4,7 @@
 // history (432e886). That also takes the 16 readable workspace names off screen. Footage: FOOTAGE.md.
 import type React from 'react';
 import { AbsoluteFill, Series, staticFile, useCurrentFrame } from 'remotion';
-import { Block, clamp01, INK } from './blocks';
+import { Block, INK, clamp01 } from './blocks';
 import { CardEdit, FPS, type Key, STILL, type Shot, play, push, timeline } from './card';
 
 export { FPS, HEIGHT, WIDTH } from './card';

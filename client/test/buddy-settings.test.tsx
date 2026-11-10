@@ -4,6 +4,7 @@ import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { buddyFixture } from './fixtures/buddy-roster';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {

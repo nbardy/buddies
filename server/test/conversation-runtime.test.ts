@@ -6,9 +6,12 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { type UnifiedAgentEvent, createParser } from '@nbardy/agent-cli';
-import { buddyKind } from '@unleashd/shared';
 import type { Message, Provider } from '@unleashd/shared';
-import { type ConversationConfig, createDefaultConversationConfig } from '@unleashd/shared';
+import {
+  type ConversationConfig,
+  buddyKind,
+  createDefaultConversationConfig,
+} from '@unleashd/shared';
 import type { CompletedBuddyTurn } from '../src/buddies/memory-review';
 import type { BuddyPolicyPort } from '../src/buddies/policy-port';
 import {

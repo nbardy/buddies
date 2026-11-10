@@ -97,7 +97,11 @@ function WorkerRow({
   worker,
   run,
   tasks,
-}: { worker: BuddyBackgroundWorker; run?: Run; tasks: readonly Task[] }) {
+}: {
+  worker: BuddyBackgroundWorker;
+  run?: Run;
+  tasks: readonly Task[];
+}) {
   const { row, parent, agent } = worker;
   const available = useAtomValue(listField('idSet'));
   const streaming = useAtomValue(streamFamily(row.id));

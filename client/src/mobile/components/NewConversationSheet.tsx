@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
+import type { CreateKind } from '../../views/new-conversation/create';
 import {
   type DirectoryStart,
   NewConversationForm,
 } from '../../views/new-conversation/NewConversationForm';
-import type { CreateKind } from '../../views/new-conversation/create';
 
 /**
  * NewConversationSheet — the mobile container for the shared
@@ -21,13 +21,7 @@ import type { CreateKind } from '../../views/new-conversation/create';
 const DEFAULT_START: DirectoryStart = { t: 'default' };
 const TITLE: Record<CreateKind, string> = { chat: 'New chat', swarm: 'New swarm' };
 
-export function NewConversationSheet({
-  kind,
-  onClose,
-}: {
-  kind: CreateKind;
-  onClose: () => void;
-}) {
+export function NewConversationSheet({ kind, onClose }: { kind: CreateKind; onClose: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
   const chatRouteState = useMemo(() => mobileConversationRouteState(location), [location]);

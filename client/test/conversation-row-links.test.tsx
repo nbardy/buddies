@@ -19,6 +19,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { rowsAtom } from '../src/atoms/conversations';
 import { syntheticConversation } from './fixtures/synthetic-conversations';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {
@@ -34,9 +35,8 @@ Object.assign(globalThis, {
   getComputedStyle: () => ({ getPropertyValue: () => '' }),
 });
 const { ConversationRow } = await import('../src/views/conversation-row/ConversationRow');
-type ConversationRowProps = import(
-  '../src/views/conversation-row/ConversationRow'
-).ConversationRowProps;
+type ConversationRowProps =
+  import('../src/views/conversation-row/ConversationRow').ConversationRowProps;
 
 const LIVE = 'live-conversation-id';
 const DEAD = 'dead-conversation-id';

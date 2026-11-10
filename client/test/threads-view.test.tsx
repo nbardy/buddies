@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { FollowedThread, Post } from '../src/components/buddies/types';
 import { CODEX_INSTALLED, buddyFixture, rosterFixture } from './fixtures/buddy-roster';
 import { postFixture, publicChannel } from './fixtures/channel-posts';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {

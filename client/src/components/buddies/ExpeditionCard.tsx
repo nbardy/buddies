@@ -50,7 +50,11 @@ export function ActButton({
   label,
   act,
   send,
-}: { label: string; act: ReturnType<typeof useAct>; send: Act }) {
+}: {
+  label: string;
+  act: ReturnType<typeof useAct>;
+  send: Act;
+}) {
   return (
     <button
       type="button"

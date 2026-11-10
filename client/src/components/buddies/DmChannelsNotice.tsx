@@ -4,8 +4,8 @@ import { detailOf, transcriptFamily } from '../../atoms/conversations';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import type { BuddyRowKind } from '../../utils/conversation-row';
 import { type DirectChain, directChainUrl, startNewDirectChat } from './ChannelDm';
-import { HarnessPicker } from './HarnessPicker';
 import { channelLinkPath } from './channel-link';
+import { HarnessPicker } from './HarnessPicker';
 
 /**
  * A Buddy DM opened on the conversation page (a sidebar row, a link, an eye). Until 493c1c7 the

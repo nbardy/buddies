@@ -3,16 +3,16 @@
 import type React from 'react';
 import { Audio, Sequence } from 'remotion';
 import impact from '../../sound/impact.wav';
-import marG3 from '../../sound/mar-G3.wav';
-import marD4 from '../../sound/mar-D4.wav';
-import marFs4 from '../../sound/mar-Fs4.wav';
-import marA4 from '../../sound/mar-A4.wav';
-import marB4 from '../../sound/mar-B4.wav';
-import marD5 from '../../sound/mar-D5.wav';
-import marFs5 from '../../sound/mar-Fs5.wav';
 import key0 from '../../sound/key-0.wav';
 import key1 from '../../sound/key-1.wav';
 import key2 from '../../sound/key-2.wav';
+import marA4 from '../../sound/mar-A4.wav';
+import marB4 from '../../sound/mar-B4.wav';
+import marD4 from '../../sound/mar-D4.wav';
+import marD5 from '../../sound/mar-D5.wav';
+import marFs4 from '../../sound/mar-Fs4.wav';
+import marFs5 from '../../sound/mar-Fs5.wav';
+import marG3 from '../../sound/mar-G3.wav';
 import pad from '../../sound/pad.wav';
 import pop0 from '../../sound/pop-0.wav';
 import pop1 from '../../sound/pop-1.wav';
@@ -32,7 +32,15 @@ export const KEYS = [key0, key1, key2];
 export const POPS = [pop0, pop1, pop2, pop3, pop4, pop5, pop6, pop7]; // rising pitch
 export const SFX = { impact, pad, riser, send, sparkle, thud, whoosh };
 // The calm after the boom: soft marimba, one sample per note (modal synthesis in synth.py).
-export const MARIMBA = { G3: marG3, D4: marD4, Fs4: marFs4, A4: marA4, B4: marB4, D5: marD5, Fs5: marFs5 };
+export const MARIMBA = {
+  G3: marG3,
+  D4: marD4,
+  Fs4: marFs4,
+  A4: marA4,
+  B4: marB4,
+  D5: marD5,
+  Fs5: marFs5,
+};
 
 export type Cue = { at: number; src: string; volume: number }; // at = output seconds
 

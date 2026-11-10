@@ -38,9 +38,24 @@ try {
       await session.evaluate(`render(${i / FPS})`);
       await session.capture(path.join(frames, `f${String(i).padStart(5, '0')}.png`));
     }
-    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(FPS),
-      '-i', path.join(frames, 'f%05d.png'), '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-      '-crf', '16', '-movflags', '+faststart', path.join(here, 'beat9.mp4')]);
+    execFileSync('ffmpeg', [
+      '-y',
+      '-loglevel',
+      'error',
+      '-framerate',
+      String(FPS),
+      '-i',
+      path.join(frames, 'f%05d.png'),
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-crf',
+      '16',
+      '-movflags',
+      '+faststart',
+      path.join(here, 'beat9.mp4'),
+    ]);
     fs.rmSync(frames, { recursive: true, force: true });
   }
 } finally {

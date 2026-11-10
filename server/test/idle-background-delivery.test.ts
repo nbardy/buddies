@@ -244,101 +244,99 @@ after(async () => {
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
 });
 
-test(
-  'an owner post reaches a Buddy whose model is idle while its background job runs',
-  { timeout: 240_000 },
-  async () => {
-    const port = freePortSync();
-    const http = api(port);
-    await startBackend(port);
-    const ws = await http('POST', '/api/buddies/workspaces', {
-      name: 'bg',
-      rootPath: workspaceDir,
-    });
-    const buddy = await http('POST', '/api/buddies', {
-      workspaceId: ws.body.id,
-      slug: 'designer',
-      name: 'Designer',
-      role: 'test worker',
-      provider: 'claude',
-      key: 'hire-designer',
-    });
-    const buddyId = buddy.body.id as string;
-    // A channel thread, as in the incident: an @mention delivery shows "Designer is replying…".
-    const channel = await http('POST', `/api/buddies/workspaces/${ws.body.id}/channels`, {
-      name: 'game',
-      purpose: 'the incident thread',
-      key: 'channel',
-    });
-    const channelId = channel.body.id as string;
-    const asked = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
-      kind: 'inform',
-      body: `[@Designer](buddy:${buddyId}) Run the long job. SCENARIO:bgidle`,
-      key: 'ask',
-    });
-    const rootId = (asked.body.post ?? asked.body).id as string;
-    fs.writeFileSync(fake('thread.json'), JSON.stringify({ channelId, rootId }));
-    await eventually(() => fs.existsSync(fake('idle')), Boolean, 'the model turn to end');
+test('an owner post reaches a Buddy whose model is idle while its background job runs', {
+  timeout: 240_000,
+}, async () => {
+  const port = freePortSync();
+  const http = api(port);
+  await startBackend(port);
+  const ws = await http('POST', '/api/buddies/workspaces', {
+    name: 'bg',
+    rootPath: workspaceDir,
+  });
+  const buddy = await http('POST', '/api/buddies', {
+    workspaceId: ws.body.id,
+    slug: 'designer',
+    name: 'Designer',
+    role: 'test worker',
+    provider: 'claude',
+    key: 'hire-designer',
+  });
+  const buddyId = buddy.body.id as string;
+  // A channel thread, as in the incident: an @mention delivery shows "Designer is replying…".
+  const channel = await http('POST', `/api/buddies/workspaces/${ws.body.id}/channels`, {
+    name: 'game',
+    purpose: 'the incident thread',
+    key: 'channel',
+  });
+  const channelId = channel.body.id as string;
+  const asked = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+    kind: 'inform',
+    body: `[@Designer](buddy:${buddyId}) Run the long job. SCENARIO:bgidle`,
+    key: 'ask',
+  });
+  const rootId = (asked.body.post ?? asked.body).id as string;
+  fs.writeFileSync(fake('thread.json'), JSON.stringify({ channelId, rootId }));
+  await eventually(() => fs.existsSync(fake('idle')), Boolean, 'the model turn to end');
 
-    // The status line names the state: neither "replying" nor queued at the run limit.
-    const status = await eventually(
-      async () => (await http('GET', `/api/buddies/channels/${channelId}/responding`)).body,
-      (rows) => rows.some((r: { state: string }) => r.state === 'background'),
-      'the background-work status'
-    );
-    assert.equal(status.length, 1, JSON.stringify(status));
+  // The status line names the state: neither "replying" nor queued at the run limit.
+  const status = await eventually(
+    async () => (await http('GET', `/api/buddies/channels/${channelId}/responding`)).body,
+    (rows) => rows.some((r: { state: string }) => r.state === 'background'),
+    'the background-work status'
+  );
+  assert.equal(status.length, 1, JSON.stringify(status));
 
-    const correction = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
-      kind: 'inform',
-      body: `[@Designer](buddy:${buddyId}) While that runs: use a 3x3x3 board.`,
-      replyToId: rootId,
-      key: 'correction',
-    });
-    assert.equal(correction.status, 201, JSON.stringify(correction.body));
-    const correctionId = (correction.body.post ?? correction.body).id as string;
+  const correction = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+    kind: 'inform',
+    body: `[@Designer](buddy:${buddyId}) While that runs: use a 3x3x3 board.`,
+    replyToId: rootId,
+    key: 'correction',
+  });
+  assert.equal(correction.status, 201, JSON.stringify(correction.body));
+  const correctionId = (correction.body.post ?? correction.body).id as string;
 
-    // Delivered into the live process while the job still runs, framed and marked read.
-    const steered = await eventually(
-      () => readFake('steered'),
-      Boolean,
-      'the post to reach the model'
-    );
-    const delivered = JSON.parse(steered.trim().split('\n')[0]);
-    assert.equal(delivered.jobDone, false, 'answered before the background job ended');
-    assert.match(delivered.reason, /While you were working/);
-    assert.ok(delivered.reason.includes('use a 3x3x3 board'), delivered.reason);
-    const runs = async () => {
-      const r = await http('GET', `/api/buddies/runs?buddyId=${buddyId}`);
-      return (r.body.runs ?? r.body) as Array<{
-        status: string;
-        errorCode?: string | null;
-        input: { kind: string; postId?: string };
-      }>;
-    };
-    const delivery = (await runs()).find((r) => r.input.postId === correctionId);
-    assert.equal(delivery?.errorCode, 'consumed', JSON.stringify(delivery));
-    assert.equal(readFake('turns').trim().split('\n').length, 1, 'no second process');
-    assert.ok(!fs.existsSync(fake('notice-handled')), 'the job was not ended early');
-    const thread = async () => (await http('GET', `/api/buddies/posts/${rootId}/thread`)).body;
-    await eventually(
-      async () => JSON.stringify(await thread()),
-      (page) => page.includes('Switching to a 3x3x3 board'),
-      'the answer in the thread'
-    );
+  // Delivered into the live process while the job still runs, framed and marked read.
+  const steered = await eventually(
+    () => readFake('steered'),
+    Boolean,
+    'the post to reach the model'
+  );
+  const delivered = JSON.parse(steered.trim().split('\n')[0]);
+  assert.equal(delivered.jobDone, false, 'answered before the background job ended');
+  assert.match(delivered.reason, /While you were working/);
+  assert.ok(delivered.reason.includes('use a 3x3x3 board'), delivered.reason);
+  const runs = async () => {
+    const r = await http('GET', `/api/buddies/runs?buddyId=${buddyId}`);
+    return (r.body.runs ?? r.body) as Array<{
+      status: string;
+      errorCode?: string | null;
+      input: { kind: string; postId?: string };
+    }>;
+  };
+  const delivery = (await runs()).find((r) => r.input.postId === correctionId);
+  assert.equal(delivery?.errorCode, 'consumed', JSON.stringify(delivery));
+  assert.equal(readFake('turns').trim().split('\n').length, 1, 'no second process');
+  assert.ok(!fs.existsSync(fake('notice-handled')), 'the job was not ended early');
+  const thread = async () => (await http('GET', `/api/buddies/posts/${rootId}/thread`)).body;
+  await eventually(
+    async () => JSON.stringify(await thread()),
+    (page) => page.includes('Switching to a 3x3x3 board'),
+    'the answer in the thread'
+  );
 
-    // The job's completion is still processed afterwards, and the turn then settles.
-    fs.writeFileSync(fake('go'), '');
-    await eventually(() => fs.existsSync(fake('notice-handled')), Boolean, 'the job notice');
-    await eventually(
-      async () => (await runs()).find((r) => r.input.postId === rootId),
-      (r) => r?.status === 'complete',
-      'the run to complete'
-    );
-    assert.equal(readFake('turns').trim().split('\n').length, 1, 'still one process');
-    assert.equal(readFake('posts'), '200 false\n200 false\n', 'both replies posted');
-    assert.deepEqual((await http('GET', `/api/buddies/channels/${channelId}/responding`)).body, []);
-  }
-);
+  // The job's completion is still processed afterwards, and the turn then settles.
+  fs.writeFileSync(fake('go'), '');
+  await eventually(() => fs.existsSync(fake('notice-handled')), Boolean, 'the job notice');
+  await eventually(
+    async () => (await runs()).find((r) => r.input.postId === rootId),
+    (r) => r?.status === 'complete',
+    'the run to complete'
+  );
+  assert.equal(readFake('turns').trim().split('\n').length, 1, 'still one process');
+  assert.equal(readFake('posts'), '200 false\n200 false\n', 'both replies posted');
+  assert.deepEqual((await http('GET', `/api/buddies/channels/${channelId}/responding`)).body, []);
+});
 
 /**
  * task_01a11af2 (owner, 2026-10-08): execution 29c47118 carried only the PostToolUse hook it was
@@ -349,199 +347,195 @@ test(
  * reaches the turn (and, for a process from before hook sets were recorded, that it cannot); and
  * the parent takes the post at its own first tool use. Table: agent_notes/2026-10-08_waiting-paths.md.
  */
-test(
-  'sub-agents of a frozen-hook turn get one notice across a restart, and the parent takes the post',
-  { timeout: 180_000 },
-  async () => {
-    await stopBackend();
-    for (const name of ['idle', 'go', 'notices', 'rounds', 'parent', 'turns', 'posts', 'pgid'])
-      fs.rmSync(fake(name), { force: true });
-    const port = freePortSync();
-    const http = api(port);
-    await startBackend(port);
-    const ws = await http('POST', '/api/buddies/workspaces', {
-      name: 'fan',
-      rootPath: workspaceDir,
-    });
-    const buddy = await http('POST', '/api/buddies', {
-      workspaceId: ws.body.id,
-      slug: 'fan-designer',
-      name: 'Fan Designer',
-      role: 'test worker',
-      provider: 'claude',
-      key: 'hire-fan-designer',
-    });
-    const buddyId = buddy.body.id as string;
-    const channel = await http('POST', `/api/buddies/workspaces/${ws.body.id}/channels`, {
-      name: 'fan',
-      purpose: 'the 29c47118 thread',
-      key: 'fan-channel',
-    });
-    const channelId = channel.body.id as string;
-    const asked = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
-      kind: 'inform',
-      body: `[@Fan Designer](buddy:${buddyId}) Run the sweep. SCENARIO:fanout`,
-      key: 'fan-ask',
-    });
-    const rootId = (asked.body.post ?? asked.body).id as string;
-    fs.writeFileSync(fake('thread.json'), JSON.stringify({ channelId, rootId }));
+test('sub-agents of a frozen-hook turn get one notice across a restart, and the parent takes the post', {
+  timeout: 180_000,
+}, async () => {
+  await stopBackend();
+  for (const name of ['idle', 'go', 'notices', 'rounds', 'parent', 'turns', 'posts', 'pgid'])
+    fs.rmSync(fake(name), { force: true });
+  const port = freePortSync();
+  const http = api(port);
+  await startBackend(port);
+  const ws = await http('POST', '/api/buddies/workspaces', {
+    name: 'fan',
+    rootPath: workspaceDir,
+  });
+  const buddy = await http('POST', '/api/buddies', {
+    workspaceId: ws.body.id,
+    slug: 'fan-designer',
+    name: 'Fan Designer',
+    role: 'test worker',
+    provider: 'claude',
+    key: 'hire-fan-designer',
+  });
+  const buddyId = buddy.body.id as string;
+  const channel = await http('POST', `/api/buddies/workspaces/${ws.body.id}/channels`, {
+    name: 'fan',
+    purpose: 'the 29c47118 thread',
+    key: 'fan-channel',
+  });
+  const channelId = channel.body.id as string;
+  const asked = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+    kind: 'inform',
+    body: `[@Fan Designer](buddy:${buddyId}) Run the sweep. SCENARIO:fanout`,
+    key: 'fan-ask',
+  });
+  const rootId = (asked.body.post ?? asked.body).id as string;
+  fs.writeFileSync(fake('thread.json'), JSON.stringify({ channelId, rootId }));
+  await eventually(
+    () => readFake('rounds').length,
+    (n) => n > 0,
+    'the sub-agents to run'
+  );
+
+  const correction = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+    kind: 'inform',
+    body: `[@Fan Designer](buddy:${buddyId}) While that runs: use a 3x3x3 board.`,
+    replyToId: rootId,
+    key: 'fan-correction',
+  });
+  const correctionId = (correction.body.post ?? correction.body).id as string;
+  const rounds = async (more: number) => {
+    const from = readFake('rounds').length;
     await eventually(
       () => readFake('rounds').length,
-      (n) => n > 0,
-      'the sub-agents to run'
+      (n) => n >= from + more,
+      'sub-agent rounds'
     );
+  };
+  const notices = () => readFake('notices').trim().split('\n').filter(Boolean);
+  const responding = async () =>
+    (await http('GET', `/api/buddies/channels/${channelId}/responding`)).body as Array<{
+      state: string;
+      waiting?: { kind: string };
+      reach?: { kind: string };
+    }>;
+  await rounds(3);
+  assert.equal(notices().length, 1, `one notice for five sub-agents: ${notices().join('\n')}`);
+  assert.ok(notices()[0].includes('use a 3x3x3 board'), notices()[0]);
+  const queued = (await responding()).find((row) => row.state === 'queued');
+  assert.equal(queued?.waiting?.kind, 'conversation_busy', JSON.stringify(queued));
+  assert.equal(queued?.reach?.kind, 'next_step', 'a turn spawned with the stable hook set');
 
-    const correction = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
-      kind: 'inform',
-      body: `[@Fan Designer](buddy:${buddyId}) While that runs: use a 3x3x3 board.`,
-      replyToId: rootId,
-      key: 'fan-correction',
-    });
-    const correctionId = (correction.body.post ?? correction.body).id as string;
-    const rounds = async (more: number) => {
-      const from = readFake('rounds').length;
-      await eventually(
-        () => readFake('rounds').length,
-        (n) => n >= from + more,
-        'sub-agent rounds'
-      );
-    };
-    const notices = () => readFake('notices').trim().split('\n').filter(Boolean);
-    const responding = async () =>
-      (await http('GET', `/api/buddies/channels/${channelId}/responding`)).body as Array<{
-        state: string;
-        waiting?: { kind: string };
-        reach?: { kind: string };
-      }>;
-    await rounds(3);
-    assert.equal(notices().length, 1, `one notice for five sub-agents: ${notices().join('\n')}`);
-    assert.ok(notices()[0].includes('use a 3x3x3 board'), notices()[0]);
-    const queued = (await responding()).find((row) => row.state === 'queued');
-    assert.equal(queued?.waiting?.kind, 'conversation_busy', JSON.stringify(queued));
-    assert.equal(queued?.reach?.kind, 'next_step', 'a turn spawned with the stable hook set');
-
-    // A backend restart adopts the turn. Its journal is rewritten as a backend from before hook
-    // sets were recorded wrote it: no `hooks` on the grant.
-    await stopBackend();
-    const executions = path.join(root, 'data', 'executions');
-    const journal = fs
-      .readdirSync(executions)
-      .map((name) => path.join(executions, name, 'owner.json'))
-      .find(
-        (file) => fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('SCENARIO:fanout')
-      );
-    assert.ok(journal, 'the turn journal');
-    const owner = JSON.parse(fs.readFileSync(journal, 'utf8'));
-    owner.policy.grant.hooks = undefined;
-    fs.writeFileSync(journal, JSON.stringify(owner));
-    await startBackend(port);
-    await rounds(3);
-    assert.equal(notices().length, 1, `no notice again after the restart: ${notices().join('\n')}`);
-    const adopted = (await responding()).find((row) => row.state === 'queued');
-    assert.equal(adopted?.reach?.kind, 'spawned_before_live_delivery', JSON.stringify(adopted));
-
-    // The Workflow ends; the model's new turn in the same process takes the post at its first tool.
-    fs.writeFileSync(fake('go'), '');
-    await eventually(
-      () => readFake('parent'),
-      (text) => text.includes('use a 3x3x3 board'),
-      'the parent to take it'
+  // A backend restart adopts the turn. Its journal is rewritten as a backend from before hook
+  // sets were recorded wrote it: no `hooks` on the grant.
+  await stopBackend();
+  const executions = path.join(root, 'data', 'executions');
+  const journal = fs
+    .readdirSync(executions)
+    .map((name) => path.join(executions, name, 'owner.json'))
+    .find(
+      (file) => fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('SCENARIO:fanout')
     );
-    assert.match(readFake('parent'), /While you were working/);
-    const runs = (await http('GET', `/api/buddies/runs?buddyId=${buddyId}`)).body;
-    const delivery = (runs.runs ?? runs).find(
-      (r: { input: { postId?: string } }) => r.input.postId === correctionId
-    );
-    assert.equal(delivery?.errorCode, 'consumed', JSON.stringify(delivery));
-    assert.equal(readFake('turns').trim().split('\n').length, 1, 'one process throughout');
-  }
-);
+  assert.ok(journal, 'the turn journal');
+  const owner = JSON.parse(fs.readFileSync(journal, 'utf8'));
+  owner.policy.grant.hooks = undefined;
+  fs.writeFileSync(journal, JSON.stringify(owner));
+  await startBackend(port);
+  await rounds(3);
+  assert.equal(notices().length, 1, `no notice again after the restart: ${notices().join('\n')}`);
+  const adopted = (await responding()).find((row) => row.state === 'queued');
+  assert.equal(adopted?.reach?.kind, 'spawned_before_live_delivery', JSON.stringify(adopted));
+
+  // The Workflow ends; the model's new turn in the same process takes the post at its first tool.
+  fs.writeFileSync(fake('go'), '');
+  await eventually(
+    () => readFake('parent'),
+    (text) => text.includes('use a 3x3x3 board'),
+    'the parent to take it'
+  );
+  assert.match(readFake('parent'), /While you were working/);
+  const runs = (await http('GET', `/api/buddies/runs?buddyId=${buddyId}`)).body;
+  const delivery = (runs.runs ?? runs).find(
+    (r: { input: { postId?: string } }) => r.input.postId === correctionId
+  );
+  assert.equal(delivery?.errorCode, 'consumed', JSON.stringify(delivery));
+  assert.equal(readFake('turns').trim().split('\n').length, 1, 'one process throughout');
+});
 
 // Incident 2026-10-12 (room-runners #game-design): Game Designer followed the thread and sat idle
 // on background work. The owner's "everyone stop posting" (no @mention) reached it at the held
 // Stop. It acted on that and stayed silent as asked, yet the settle re-delivered the post for a
 // second turn ("already handled"). A held Stop's take re-runs only a post that owes a reply. Fails
 // if mcp.ts passes a tool-call boundary at the hold, or the crate re-delivers any held-Stop take.
-test(
-  'a post taken at a held Stop that owes no reply is not delivered again',
-  { timeout: 240_000 },
-  async () => {
-    await stopBackend();
-    for (const name of [
-      'idle',
-      'go',
-      'steered',
-      'turns',
-      'posts',
-      'pgid',
-      'notice-handled',
-      'thread.json',
-    ])
-      fs.rmSync(fake(name), { force: true });
-    const port = freePortSync();
-    const http = api(port);
-    await startBackend(port);
-    const ws = await http('POST', '/api/buddies/workspaces', {
-      name: 'quiet',
-      rootPath: workspaceDir,
-    });
-    const buddy = await http('POST', '/api/buddies', {
-      workspaceId: ws.body.id,
-      slug: 'quiet-designer',
-      name: 'Quiet Designer',
-      role: 'test worker',
-      provider: 'claude',
-      key: 'hire-quiet-designer',
-    });
-    const buddyId = buddy.body.id as string;
-    const channel = await http('POST', `/api/buddies/workspaces/${ws.body.id}/channels`, {
-      name: 'quiet',
-      purpose: 'the stop-posting thread',
-      key: 'quiet-channel',
-    });
-    const channelId = channel.body.id as string;
-    const asked = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
-      kind: 'inform',
-      body: `[@Quiet Designer](buddy:${buddyId}) Run the long job. SCENARIO:bgsilent`,
-      key: 'quiet-ask',
-    });
-    const rootId = (asked.body.post ?? asked.body).id as string;
-    fs.writeFileSync(fake('thread.json'), JSON.stringify({ channelId, rootId }));
-    await eventually(() => fs.existsSync(fake('idle')), Boolean, 'the model turn to end');
-    const stop = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
-      kind: 'inform',
-      body: 'Everyone, stop posting in this thread.',
-      replyToId: rootId,
-      key: 'quiet-stop',
-    });
-    const stopId = (stop.body.post ?? stop.body).id as string;
-    await eventually(
-      () => readFake('steered'),
-      (text) => text.includes('stop posting'),
-      'the hold to take it'
-    );
-    fs.writeFileSync(fake('go'), '');
-    const runs = async () => {
-      const r = await http('GET', `/api/buddies/runs?buddyId=${buddyId}`);
-      return (r.body.runs ?? r.body) as Array<{
-        status: string;
-        attempt: number;
-        input: { postId?: string };
-      }>;
-    };
-    await eventually(
-      async () => (await runs()).find((r) => r.input.postId === rootId),
-      (r) => r?.status === 'complete',
-      'the turn to settle'
-    );
-    // The re-delivery is written in the settle's own transaction: none now means none at all.
-    const attempts = (await runs()).filter((r) => r.input.postId === stopId).map((r) => r.attempt);
-    assert.deepEqual(attempts, [1], 'the post the model read and acted on is not run again');
-    assert.equal(
-      readFake('posts'),
-      '200 false\n',
-      'only the reply to the ask; silent as asked after'
-    );
-    assert.equal(readFake('turns').trim().split('\n').length, 1, 'one turn');
-  }
-);
+test('a post taken at a held Stop that owes no reply is not delivered again', {
+  timeout: 240_000,
+}, async () => {
+  await stopBackend();
+  for (const name of [
+    'idle',
+    'go',
+    'steered',
+    'turns',
+    'posts',
+    'pgid',
+    'notice-handled',
+    'thread.json',
+  ])
+    fs.rmSync(fake(name), { force: true });
+  const port = freePortSync();
+  const http = api(port);
+  await startBackend(port);
+  const ws = await http('POST', '/api/buddies/workspaces', {
+    name: 'quiet',
+    rootPath: workspaceDir,
+  });
+  const buddy = await http('POST', '/api/buddies', {
+    workspaceId: ws.body.id,
+    slug: 'quiet-designer',
+    name: 'Quiet Designer',
+    role: 'test worker',
+    provider: 'claude',
+    key: 'hire-quiet-designer',
+  });
+  const buddyId = buddy.body.id as string;
+  const channel = await http('POST', `/api/buddies/workspaces/${ws.body.id}/channels`, {
+    name: 'quiet',
+    purpose: 'the stop-posting thread',
+    key: 'quiet-channel',
+  });
+  const channelId = channel.body.id as string;
+  const asked = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+    kind: 'inform',
+    body: `[@Quiet Designer](buddy:${buddyId}) Run the long job. SCENARIO:bgsilent`,
+    key: 'quiet-ask',
+  });
+  const rootId = (asked.body.post ?? asked.body).id as string;
+  fs.writeFileSync(fake('thread.json'), JSON.stringify({ channelId, rootId }));
+  await eventually(() => fs.existsSync(fake('idle')), Boolean, 'the model turn to end');
+  const stop = await http('POST', `/api/buddies/channels/${channelId}/posts`, {
+    kind: 'inform',
+    body: 'Everyone, stop posting in this thread.',
+    replyToId: rootId,
+    key: 'quiet-stop',
+  });
+  const stopId = (stop.body.post ?? stop.body).id as string;
+  await eventually(
+    () => readFake('steered'),
+    (text) => text.includes('stop posting'),
+    'the hold to take it'
+  );
+  fs.writeFileSync(fake('go'), '');
+  const runs = async () => {
+    const r = await http('GET', `/api/buddies/runs?buddyId=${buddyId}`);
+    return (r.body.runs ?? r.body) as Array<{
+      status: string;
+      attempt: number;
+      input: { postId?: string };
+    }>;
+  };
+  await eventually(
+    async () => (await runs()).find((r) => r.input.postId === rootId),
+    (r) => r?.status === 'complete',
+    'the turn to settle'
+  );
+  // The re-delivery is written in the settle's own transaction: none now means none at all.
+  const attempts = (await runs()).filter((r) => r.input.postId === stopId).map((r) => r.attempt);
+  assert.deepEqual(attempts, [1], 'the post the model read and acted on is not run again');
+  assert.equal(
+    readFake('posts'),
+    '200 false\n',
+    'only the reply to the ask; silent as asked after'
+  );
+  assert.equal(readFake('turns').trim().split('\n').length, 1, 'one turn');
+});

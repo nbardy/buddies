@@ -30,8 +30,9 @@ import { TurnAttemptSnapshotSchema } from './turn-attempt.js';
 import { MessageBodySchema } from './content-schema.js';
 import { legacyBody, legacyToolInput } from './legacy-content.js';
 import { toolContentPart } from './tool-content.js';
-export { AskUserQuestionSchema, ContentPartSchema, MessageBodySchema } from './content-schema.js';
+
 export type { AskUserQuestion, ContentPart, MessageBody } from './content-schema.js';
+export { AskUserQuestionSchema, ContentPartSchema, MessageBodySchema } from './content-schema.js';
 
 const CurrentMessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),

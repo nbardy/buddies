@@ -10,14 +10,25 @@ const base = 'http://localhost:7489';
 const [workspace, cssFile, out, width = '1440', scrollY = '0'] = process.argv.slice(2);
 const css = cssFile === '-' ? '' : fs.readFileSync(cssFile, 'utf8');
 
-const session = await openSession({ baseUrl: base, token: resolveAuthToken(), clockMs: Date.now() });
+const session = await openSession({
+  baseUrl: base,
+  token: resolveAuthToken(),
+  clockMs: Date.now(),
+});
 try {
-  await session.setViewport({ width: Number(width), height: 900, deviceScaleFactor: 2, mobile: false });
+  await session.setViewport({
+    width: Number(width),
+    height: 900,
+    deviceScaleFactor: 2,
+    mobile: false,
+  });
   await session.goto(`${base}/buddies/workspaces/${workspace}/channels`, 3000);
   await session.waitForNetworkIdle(500, 20000, /sigil|prefetch/);
   await sleep(1200);
   // Freeze the aura so renders differ only by the override.
-  await session.evaluate(`document.getAnimations().forEach(a => { a.pause(); a.currentTime = 0; })`);
+  await session.evaluate(
+    `document.getAnimations().forEach(a => { a.pause(); a.currentTime = 0; })`
+  );
   await session.evaluate(`(() => {
     const s = document.createElement('style'); s.textContent = ${JSON.stringify(css)}; document.head.append(s);
     const pane = document.querySelector('.landing')?.closest('[class*="scroll"]') ?? document.scrollingElement;

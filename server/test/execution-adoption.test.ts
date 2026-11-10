@@ -328,195 +328,191 @@ after(async () => {
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
 });
 
-test(
-  'a backend SIGKILLed mid-turn is replaced and the new one adopts every running turn',
-  { timeout: 240_000 },
-  async () => {
-    await startBackend('A');
-    const ws = await http('POST', '/api/buddies/workspaces', {
-      name: 'adoption',
-      rootPath: workspaceDir,
-    });
-    assert.equal(ws.status, 201, JSON.stringify(ws.body));
-    const workspaceId = ws.body.id as string;
-    const worker = await hire(workspaceId, 'worker');
-    const hang = await hire(workspaceId, 'hang');
-    const lost = await hire(workspaceId, 'lost');
-    const chatId = crypto.randomUUID();
+test('a backend SIGKILLed mid-turn is replaced and the new one adopts every running turn', {
+  timeout: 240_000,
+}, async () => {
+  await startBackend('A');
+  const ws = await http('POST', '/api/buddies/workspaces', {
+    name: 'adoption',
+    rootPath: workspaceDir,
+  });
+  assert.equal(ws.status, 201, JSON.stringify(ws.body));
+  const workspaceId = ws.body.id as string;
+  const worker = await hire(workspaceId, 'worker');
+  const hang = await hire(workspaceId, 'hang');
+  const lost = await hire(workspaceId, 'lost');
+  const chatId = crypto.randomUUID();
 
-    await createChat(chatId, 'Hello. SCENARIO:chat');
-    const request = await ask(worker, 'worker');
-    await ask(hang, 'hang');
-    await ask(lost, 'lost');
-    for (const scenario of ['chat', 'worker', 'hang', 'lost'])
-      await eventually(() => exists(`${scenario}.midturn`), Boolean, `${scenario} mid-turn`);
-    assert.match(readFake('worker.before'), /^200 ok/, 'the Buddy tool works before the restart');
-    const pids = Object.fromEntries(
-      ['chat', 'worker', 'hang', 'lost'].map((s) => [s, Number(readFake(`${s}.midturn`))])
-    );
+  await createChat(chatId, 'Hello. SCENARIO:chat');
+  const request = await ask(worker, 'worker');
+  await ask(hang, 'hang');
+  await ask(lost, 'lost');
+  for (const scenario of ['chat', 'worker', 'hang', 'lost'])
+    await eventually(() => exists(`${scenario}.midturn`), Boolean, `${scenario} mid-turn`);
+  assert.match(readFake('worker.before'), /^200 ok/, 'the Buddy tool works before the restart');
+  const pids = Object.fromEntries(
+    ['chat', 'worker', 'hang', 'lost'].map((s) => [s, Number(readFake(`${s}.midturn`))])
+  );
 
-    // The backend dies abruptly, as it did at 22:09:26 on 2026-09-30.
-    await killBackend();
-    for (const pid of Object.values(pids)) assert.ok(alive(pid), 'a provider outlives its backend');
-    // Output written while no backend exists at all.
-    fs.writeFileSync(path.join(fakeDir, 'dead'), '');
-    await eventually(
-      () => exists('chat.during') && exists('worker.during'),
-      Boolean,
-      'output during the gap'
-    );
-    // An execution-owner death, distinct from a restart: its group is SIGKILLed while no backend runs.
-    process.kill(-Number(readFake('lost.pgid')), 'SIGKILL');
+  // The backend dies abruptly, as it did at 22:09:26 on 2026-09-30.
+  await killBackend();
+  for (const pid of Object.values(pids)) assert.ok(alive(pid), 'a provider outlives its backend');
+  // Output written while no backend exists at all.
+  fs.writeFileSync(path.join(fakeDir, 'dead'), '');
+  await eventually(
+    () => exists('chat.during') && exists('worker.during'),
+    Boolean,
+    'output during the gap'
+  );
+  // An execution-owner death, distinct from a restart: its group is SIGKILLed while no backend runs.
+  process.kill(-Number(readFake('lost.pgid')), 'SIGKILL');
 
-    await startBackend('B');
-    fs.writeFileSync(path.join(fakeDir, 'release'), '');
+  await startBackend('B');
+  fs.writeFileSync(path.join(fakeDir, 'release'), '');
 
-    // --- the chat turn: continued, ordered, one completion, no false interruption ----------------
-    await eventually(() => exists('chat.exited'), Boolean, 'chat provider finished');
-    // The attempt backend A opened is the one that succeeds: adopted, not interrupted and redone.
-    const chat = await eventually(
-      () => http('GET', `/api/conversations/${chatId}`),
-      (detail) => detail.status === 200 && detail.body.latestAttempt?.state === 'succeeded',
-      'the adopted chat turn to end'
-    );
-    const page = await http('GET', `/api/conversations/${chatId}/messages?afterSeq=-1&limit=200`);
-    const messages = page.body.messages as Array<{
-      role: string;
-      body: { t: string; text?: string };
-    }>;
-    const assistant = messages
-      .filter((m) => m.role === 'assistant' && m.body.t === 'text')
-      .map((m) => m.body.text)
-      .join('');
-    assert.equal(
-      assistant,
-      'one;two;during;four;',
-      'before, during and after the restart, once each, in order'
-    );
-    const system = messages.filter((m) => m.role === 'system').map((m) => m.body.text ?? '');
+  // --- the chat turn: continued, ordered, one completion, no false interruption ----------------
+  await eventually(() => exists('chat.exited'), Boolean, 'chat provider finished');
+  // The attempt backend A opened is the one that succeeds: adopted, not interrupted and redone.
+  const chat = await eventually(
+    () => http('GET', `/api/conversations/${chatId}`),
+    (detail) => detail.status === 200 && detail.body.latestAttempt?.state === 'succeeded',
+    'the adopted chat turn to end'
+  );
+  const page = await http('GET', `/api/conversations/${chatId}/messages?afterSeq=-1&limit=200`);
+  const messages = page.body.messages as Array<{
+    role: string;
+    body: { t: string; text?: string };
+  }>;
+  const assistant = messages
+    .filter((m) => m.role === 'assistant' && m.body.t === 'text')
+    .map((m) => m.body.text)
+    .join('');
+  assert.equal(
+    assistant,
+    'one;two;during;four;',
+    'before, during and after the restart, once each, in order'
+  );
+  const system = messages.filter((m) => m.role === 'system').map((m) => m.body.text ?? '');
+  assert.ok(
+    !system.some((t) => /restart|interrupt/i.test(t)),
+    `no false interruption: ${system.join(' | ')}`
+  );
+  assert.equal(chat.body.latestAttempt.terminalCause, 'provider_complete');
+
+  // --- the Buddy worker: same execution, tools work after the restart, one return --------------
+  await eventually(() => exists('worker.exited'), Boolean, 'worker provider finished');
+  assert.match(readFake('worker.after'), /^200 ok/, 'the same grant works on the new backend');
+  const run = await eventually(
+    () => runOf(worker),
+    (r) => r?.status === 'complete',
+    'worker run complete'
+  );
+  const thread = await http('GET', `/api/buddies/posts/${request.id}/thread`);
+  const posts = (thread.body.posts ?? thread.body) as Array<{
+    body: string;
+    author: { id?: string };
+  }>;
+  const answers = posts.filter((p) => p.body === 'one;two;during;four;');
+  assert.equal(answers.length, 1, 'exactly one answer returns to the requester');
+  const dm = await http('GET', `/api/buddies/channels/${request.channelId}/posts`);
+  const bodies = (
+    (dm.body.posts ?? dm.body) as Array<{ body: string; author: { kind: string; id?: string } }>
+  )
+    .filter((p) => p.author.id === worker)
+    .map((p) => p.body);
+  for (const expected of ['worker before-restart', 'worker after-restart'])
     assert.ok(
-      !system.some((t) => /restart|interrupt/i.test(t)),
-      `no false interruption: ${system.join(' | ')}`
+      bodies.includes(expected),
+      `${expected} written as the worker: ${bodies.join(' | ')}`
     );
-    assert.equal(chat.body.latestAttempt.terminalCause, 'provider_complete');
+  assert.equal(run.errorCode ?? null, null);
 
-    // --- the Buddy worker: same execution, tools work after the restart, one return --------------
-    await eventually(() => exists('worker.exited'), Boolean, 'worker provider finished');
-    assert.match(readFake('worker.after'), /^200 ok/, 'the same grant works on the new backend');
-    const run = await eventually(
-      () => runOf(worker),
-      (r) => r?.status === 'complete',
-      'worker run complete'
+  // --- no second writer: each scenario spawned exactly one provider, and it is the one that ran --
+  const spawned = spawns();
+  for (const scenario of ['chat', 'worker', 'hang', 'lost'])
+    assert.deepEqual(
+      spawned.filter((line) => line.startsWith(`${scenario} `)),
+      [`${scenario} ${pids[scenario]}`],
+      `${scenario}: one spawn, and the adopted process is that same pid`
     );
-    const thread = await http('GET', `/api/buddies/posts/${request.id}/thread`);
-    const posts = (thread.body.posts ?? thread.body) as Array<{
-      body: string;
-      author: { id?: string };
-    }>;
-    const answers = posts.filter((p) => p.body === 'one;two;during;four;');
-    assert.equal(answers.length, 1, 'exactly one answer returns to the requester');
-    const dm = await http('GET', `/api/buddies/channels/${request.channelId}/posts`);
-    const bodies = (
-      (dm.body.posts ?? dm.body) as Array<{ body: string; author: { kind: string; id?: string } }>
-    )
-      .filter((p) => p.author.id === worker)
-      .map((p) => p.body);
-    for (const expected of ['worker before-restart', 'worker after-restart'])
-      assert.ok(
-        bodies.includes(expected),
-        `${expected} written as the worker: ${bodies.join(' | ')}`
-      );
-    assert.equal(run.errorCode ?? null, null);
+  assert.equal(readFake('chat.exited'), String(pids.chat));
+  assert.equal(readFake('worker.exited'), String(pids.worker));
 
-    // --- no second writer: each scenario spawned exactly one provider, and it is the one that ran --
-    const spawned = spawns();
-    for (const scenario of ['chat', 'worker', 'hang', 'lost'])
-      assert.deepEqual(
-        spawned.filter((line) => line.startsWith(`${scenario} `)),
-        [`${scenario} ${pids[scenario]}`],
-        `${scenario}: one spawn, and the adopted process is that same pid`
-      );
-    assert.equal(readFake('chat.exited'), String(pids.chat));
-    assert.equal(readFake('worker.exited'), String(pids.worker));
+  // --- explicit Stop still stops an adopted turn and revokes its tools ------------------------
+  assert.ok(alive(pids.hang), 'the hanging turn was adopted, not killed, by the restart');
+  const hangRun = await runOf(hang);
+  assert.equal(hangRun.status, 'running');
+  assert.equal((await http('POST', `/api/buddies/runs/${hangRun.id}/cancel`)).status, 200);
+  await eventually(
+    () => runOf(hang),
+    (r) => r?.status === 'cancelled',
+    'hang run cancelled'
+  );
+  await eventually(() => !alive(pids.hang), Boolean, 'hang provider killed');
+  const tools = JSON.parse(readFake('hang.tools')) as { url: string; auth: string };
+  const revoked = await fetch(tools.url, {
+    method: 'POST',
+    headers: {
+      authorization: tools.auth,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  });
+  assert.equal(revoked.status, 401, 'a stopped turn keeps no tools');
 
-    // --- explicit Stop still stops an adopted turn and revokes its tools ------------------------
-    assert.ok(alive(pids.hang), 'the hanging turn was adopted, not killed, by the restart');
-    const hangRun = await runOf(hang);
-    assert.equal(hangRun.status, 'running');
-    assert.equal((await http('POST', `/api/buddies/runs/${hangRun.id}/cancel`)).status, 200);
-    await eventually(
-      () => runOf(hang),
-      (r) => r?.status === 'cancelled',
-      'hang run cancelled'
-    );
-    await eventually(() => !alive(pids.hang), Boolean, 'hang provider killed');
-    const tools = JSON.parse(readFake('hang.tools')) as { url: string; auth: string };
-    const revoked = await fetch(tools.url, {
-      method: 'POST',
-      headers: {
-        authorization: tools.auth,
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
-    });
-    assert.equal(revoked.status, 401, 'a stopped turn keeps no tools');
+  // --- an execution killed from outside is lost, never success --------------------------------
+  const lostRun = await eventually(
+    () => runOf(lost),
+    (r) => r?.status === 'failed',
+    'lost run failed'
+  );
+  assert.match(String(lostRun.error), /lost/, JSON.stringify(lostRun));
 
-    // --- an execution killed from outside is lost, never success --------------------------------
-    const lostRun = await eventually(
-      () => runOf(lost),
-      (r) => r?.status === 'failed',
-      'lost run failed'
-    );
-    assert.match(String(lostRun.error), /lost/, JSON.stringify(lostRun));
-
-    // Every journal is settled and gone, turns' and memory reviews' alike.
-    await eventually(
-      () => fs.readdirSync(path.join(home, '.agent-viewer', 'executions')),
-      (left) => left.length === 0,
-      'journals removed after settle'
-    );
-  }
-);
+  // Every journal is settled and gone, turns' and memory reviews' alike.
+  await eventually(
+    () => fs.readdirSync(path.join(home, '.agent-viewer', 'executions')),
+    (left) => left.length === 0,
+    'journals removed after settle'
+  );
+});
 
 // Review of P1 (2026-10-01): adoption re-armed the run deadline as max(0, deadline - now), so a
 // turn that finished cleanly while no backend ran, adopted after its deadline had passed, was
 // sealed as max_runtime_timeout mid-replay and its successful run settled failed.
-test(
-  'a turn that finished during the gap is adopted as finished, even past its deadline',
-  { timeout: 240_000 },
-  async () => {
-    // The fake CLI must start and finish inside this wall-clock deadline: 8 s was a race against
-    // node startup on a loaded machine. The deadline is only waited out, so slack costs time only.
-    const deadlineMs = 20_000;
-    const env = { CWV_BUDDY_BACKGROUND_TURN_MS: String(deadlineMs) };
-    await killBackend(); // the previous test's backend B still holds the port
-    await startBackend('C', env);
-    const ws = await http('POST', '/api/buddies/workspaces', {
-      name: 'gap',
-      rootPath: workspaceDir,
-    });
-    assert.equal(ws.status, 201, JSON.stringify(ws.body));
-    const quick = await hire(ws.body.id as string, 'quick');
-    const askedAt = Date.now();
-    await ask(quick, 'quick');
-    await eventually(() => exists('quick.midturn'), Boolean, 'quick mid-turn');
+test('a turn that finished during the gap is adopted as finished, even past its deadline', {
+  timeout: 240_000,
+}, async () => {
+  // The fake CLI must start and finish inside this wall-clock deadline: 8 s was a race against
+  // node startup on a loaded machine. The deadline is only waited out, so slack costs time only.
+  const deadlineMs = 20_000;
+  const env = { CWV_BUDDY_BACKGROUND_TURN_MS: String(deadlineMs) };
+  await killBackend(); // the previous test's backend B still holds the port
+  await startBackend('C', env);
+  const ws = await http('POST', '/api/buddies/workspaces', {
+    name: 'gap',
+    rootPath: workspaceDir,
+  });
+  assert.equal(ws.status, 201, JSON.stringify(ws.body));
+  const quick = await hire(ws.body.id as string, 'quick');
+  const askedAt = Date.now();
+  await ask(quick, 'quick');
+  await eventually(() => exists('quick.midturn'), Boolean, 'quick mid-turn');
 
-    await killBackend();
-    fs.writeFileSync(path.join(fakeDir, 'quick.go'), '');
-    await eventually(() => exists('quick.exited'), Boolean, 'quick finished with no backend');
-    assert.ok(Date.now() - askedAt < deadlineMs, 'the provider finished inside its deadline');
-    await new Promise((resolve) => setTimeout(resolve, askedAt + deadlineMs + 1_000 - Date.now()));
+  await killBackend();
+  fs.writeFileSync(path.join(fakeDir, 'quick.go'), '');
+  await eventually(() => exists('quick.exited'), Boolean, 'quick finished with no backend');
+  assert.ok(Date.now() - askedAt < deadlineMs, 'the provider finished inside its deadline');
+  await new Promise((resolve) => setTimeout(resolve, askedAt + deadlineMs + 1_000 - Date.now()));
 
-    await startBackend('D', env);
-    const run = await eventually(
-      () => runOf(quick),
-      (r) => r?.status === 'complete' || r?.status === 'failed',
-      'quick run settled'
-    );
-    assert.equal(run.status, 'complete', JSON.stringify(run));
-  }
-);
+  await startBackend('D', env);
+  const run = await eventually(
+    () => runOf(quick),
+    (r) => r?.status === 'complete' || r?.status === 'failed',
+    'quick run settled'
+  );
+  assert.equal(run.status, 'complete', JSON.stringify(run));
+});
 
 const executionsDir = path.join(home, '.agent-viewer', 'executions');
 const terminal = (status: string | undefined) =>
@@ -617,145 +613,133 @@ async function crashInsideKillGrace(
 // the SIGTERM→SIGKILL grace left a turn the next one adopted as LIVE, grant restored, never
 // stopped again. `stopping` is now on disk before the signal (execution-state.ts). On 811f758 the
 // tool call after the restart answers 200 and the CLI is never killed.
-test(
-  'a Stop survives a backend crash inside the kill grace: no tools back, killed, cancelled',
-  { timeout: 180_000 },
-  async () => {
-    const { run, attempt } = await crashInsideKillGrace('stopper', {}, stopConversation);
-    // Decision (2026-10-03): an owner Stop settles the run cancelled, live or adopted.
-    assert.equal(run.status, 'cancelled', JSON.stringify(run));
-    assert.deepEqual(attempt && [attempt.state, attempt.terminalCause], ['cancelled', 'user_stop']);
-  }
-);
+test('a Stop survives a backend crash inside the kill grace: no tools back, killed, cancelled', {
+  timeout: 180_000,
+}, async () => {
+  const { run, attempt } = await crashInsideKillGrace('stopper', {}, stopConversation);
+  // Decision (2026-10-03): an owner Stop settles the run cancelled, live or adopted.
+  assert.equal(run.status, 'cancelled', JSON.stringify(run));
+  assert.deepEqual(attempt && [attempt.state, attempt.terminalCause], ['cancelled', 'user_stop']);
+});
 
-test(
-  'a timeout survives a backend crash inside the kill grace: failed as max_runtime_timeout',
-  { timeout: 180_000 },
-  async () => {
-    // The run's deadline fires while the test watches, but the fake CLI must reach mid-turn (node
-    // start, ps, an MCP post) before it: at 6 s the deadline beat it under load (2026-11-03).
-    const env = { CWV_BUDDY_BACKGROUND_TURN_MS: '20000' };
-    const { run, attempt } = await crashInsideKillGrace('timeouter', env, async () => undefined);
-    assert.equal(run.status, 'failed', JSON.stringify(run));
-    assert.match(String(run.error), /maximum runtime/, JSON.stringify(run));
-    assert.deepEqual(attempt && [attempt.state, attempt.terminalCause], [
-      'failed',
-      'max_runtime_timeout',
-    ]);
-  }
-);
+test('a timeout survives a backend crash inside the kill grace: failed as max_runtime_timeout', {
+  timeout: 180_000,
+}, async () => {
+  // The run's deadline fires while the test watches, but the fake CLI must reach mid-turn (node
+  // start, ps, an MCP post) before it: at 6 s the deadline beat it under load (2026-11-03).
+  const env = { CWV_BUDDY_BACKGROUND_TURN_MS: '20000' };
+  const { run, attempt } = await crashInsideKillGrace('timeouter', env, async () => undefined);
+  assert.equal(run.status, 'failed', JSON.stringify(run));
+  assert.match(String(run.error), /maximum runtime/, JSON.stringify(run));
+  assert.deepEqual(attempt && [attempt.state, attempt.terminalCause], [
+    'failed',
+    'max_runtime_timeout',
+  ]);
+});
 
 // 2b (P1 review, 2026-10-01): the journal was removed when the drain resolved, before the
 // fire-and-forget run settle landed, so a crash between them recovered a finished run as
 // interrupted. The window is held open by a write lock on the (temp) Buddies store: the settle
 // blocks, the backend dies there. Now the journal says `ended` until the settle lands, and the
 // next backend settles that outcome. On 811f758 the journal is gone and the run ends failed.
-test(
-  'a crash between the drain and the run settle: the next boot settles it complete, once',
-  { timeout: 180_000 },
-  async () => {
-    await killBackend();
-    await startBackend('settle-1');
-    const ws = await http('POST', '/api/buddies/workspaces', {
-      name: 'settle',
-      rootPath: workspaceDir,
-    });
-    const settler = await hire(ws.body.id as string, 'settler');
-    const request = await ask(settler, 'settler');
-    await eventually(() => exists('settler.midturn'), Boolean, 'settler mid-turn');
-    const journal = fs
-      .readdirSync(executionsDir)
-      .map((name) => path.join(executionsDir, name))
-      .find((dir) =>
-        fs.readFileSync(path.join(dir, 'owner.json'), 'utf8').includes('SCENARIO:settler')
-      );
-    assert.ok(journal, 'the settler turn is journaled');
+test('a crash between the drain and the run settle: the next boot settles it complete, once', {
+  timeout: 180_000,
+}, async () => {
+  await killBackend();
+  await startBackend('settle-1');
+  const ws = await http('POST', '/api/buddies/workspaces', {
+    name: 'settle',
+    rootPath: workspaceDir,
+  });
+  const settler = await hire(ws.body.id as string, 'settler');
+  const request = await ask(settler, 'settler');
+  await eventually(() => exists('settler.midturn'), Boolean, 'settler mid-turn');
+  const journal = fs
+    .readdirSync(executionsDir)
+    .map((name) => path.join(executionsDir, name))
+    .find((dir) =>
+      fs.readFileSync(path.join(dir, 'owner.json'), 'utf8').includes('SCENARIO:settler')
+    );
+  assert.ok(journal, 'the settler turn is journaled');
 
-    const lock = new DatabaseSync(path.join(home, '.buddies', 'buddies-v3.sqlite'));
-    lock.exec('BEGIN IMMEDIATE');
-    try {
-      fs.writeFileSync(path.join(fakeDir, 'settler.go'), '');
-      // Drained: on this branch the journal says `ended`; on 811f758 it is already removed.
-      await eventually(
-        () => {
-          // 811f758 has no phase.json: read it only where it exists, so that build reaches its crash.
-          const phase = path.join(journal, 'phase.json');
-          return (
-            !fs.existsSync(journal) ||
-            (fs.existsSync(phase) && fs.readFileSync(phase, 'utf8').includes('"ended"'))
-          );
-        },
-        Boolean,
-        'the backend drained the finished turn'
-      );
-      await killBackend();
-    } finally {
-      lock.exec('ROLLBACK');
-      lock.close();
-    }
-
-    await startBackend('settle-2');
-    const run = await eventually(
-      () => runOf(settler),
-      (r) => terminal(r?.status),
-      'run settled'
-    );
-    assert.equal(run.status, 'complete', `a finished run is never failed: ${JSON.stringify(run)}`);
-    const thread = await http('GET', `/api/buddies/posts/${request.id}/thread`);
-    const answers = ((thread.body.posts ?? thread.body) as Array<{ body: string }>).filter(
-      (post) => post.body === 'one;two;'
-    );
-    assert.equal(answers.length, 1, 'exactly one answer returns to the requester');
-    assert.deepEqual(
-      [
-        (await attemptOf(run.conversationId))?.state,
-        spawns().filter((l) => l.startsWith('settler ')).length,
-      ],
-      ['succeeded', 1]
-    );
+  const lock = new DatabaseSync(path.join(home, '.buddies', 'buddies-v3.sqlite'));
+  lock.exec('BEGIN IMMEDIATE');
+  try {
+    fs.writeFileSync(path.join(fakeDir, 'settler.go'), '');
+    // Drained: on this branch the journal says `ended`; on 811f758 it is already removed.
     await eventually(
-      () => fs.readdirSync(executionsDir),
-      (left) => left.length === 0,
-      'journal removed once settled'
+      () => {
+        // 811f758 has no phase.json: read it only where it exists, so that build reaches its crash.
+        const phase = path.join(journal, 'phase.json');
+        return (
+          !fs.existsSync(journal) ||
+          (fs.existsSync(phase) && fs.readFileSync(phase, 'utf8').includes('"ended"'))
+        );
+      },
+      Boolean,
+      'the backend drained the finished turn'
     );
+    await killBackend();
+  } finally {
+    lock.exec('ROLLBACK');
+    lock.close();
   }
-);
+
+  await startBackend('settle-2');
+  const run = await eventually(
+    () => runOf(settler),
+    (r) => terminal(r?.status),
+    'run settled'
+  );
+  assert.equal(run.status, 'complete', `a finished run is never failed: ${JSON.stringify(run)}`);
+  const thread = await http('GET', `/api/buddies/posts/${request.id}/thread`);
+  const answers = ((thread.body.posts ?? thread.body) as Array<{ body: string }>).filter(
+    (post) => post.body === 'one;two;'
+  );
+  assert.equal(answers.length, 1, 'exactly one answer returns to the requester');
+  assert.deepEqual(
+    [
+      (await attemptOf(run.conversationId))?.state,
+      spawns().filter((l) => l.startsWith('settler ')).length,
+    ],
+    ['succeeded', 1]
+  );
+  await eventually(
+    () => fs.readdirSync(executionsDir),
+    (left) => left.length === 0,
+    'journal removed once settled'
+  );
+});
 
 // Step 6 (task_01a11013-bac6, durable owner messages). Until then a message typed behind a running
 // turn lived only in the backend's memory: a reload waited for it, and a crash lost it silently.
 // It is a records row now (an ordinary chat) or a `chat` run (a Buddy conversation), written when
 // it was sent. Guard: the message survives the SIGKILL, waits behind the ADOPTED turn, and runs
 // exactly once after it. A replay (the row requeued although its turn ran) would spawn twice.
-test(
-  'an owner message queued behind a running turn survives a backend SIGKILL and runs exactly once',
-  { timeout: 240_000 },
-  async () => {
-    await killBackend();
-    await startBackend('Q1');
-    const chatId = crypto.randomUUID();
-    await createChat(chatId, 'Hold the turn. SCENARIO:holder');
-    await eventually(() => exists('holder.midturn'), Boolean, 'holder mid-turn');
-    await queueMessage(chatId, 'Then run this. SCENARIO:second');
-    // The running turn is the queue's sending head; the message is the pending entry behind it.
-    const pending = async () =>
-      ((await http('GET', `/api/conversations/${chatId}`)).body.queue ?? []).filter(
-        (m: { status: string }) => m.status === 'pending'
-      ).length;
-    await eventually(pending, (n) => n === 1, 'the message is queued behind the running turn');
+test('an owner message queued behind a running turn survives a backend SIGKILL and runs exactly once', {
+  timeout: 240_000,
+}, async () => {
+  await killBackend();
+  await startBackend('Q1');
+  const chatId = crypto.randomUUID();
+  await createChat(chatId, 'Hold the turn. SCENARIO:holder');
+  await eventually(() => exists('holder.midturn'), Boolean, 'holder mid-turn');
+  await queueMessage(chatId, 'Then run this. SCENARIO:second');
+  // The running turn is the queue's sending head; the message is the pending entry behind it.
+  const pending = async () =>
+    ((await http('GET', `/api/conversations/${chatId}`)).body.queue ?? []).filter(
+      (m: { status: string }) => m.status === 'pending'
+    ).length;
+  await eventually(pending, (n) => n === 1, 'the message is queued behind the running turn');
 
-    await killBackend();
-    await startBackend('Q2');
-    assert.equal(await pending(), 1, 'the queued message came back from its row');
-    assert.equal(
-      spawns().filter((l) => l.startsWith('second ')).length,
-      0,
-      'it waits for the turn'
-    );
+  await killBackend();
+  await startBackend('Q2');
+  assert.equal(await pending(), 1, 'the queued message came back from its row');
+  assert.equal(spawns().filter((l) => l.startsWith('second ')).length, 0, 'it waits for the turn');
 
-    fs.writeFileSync(path.join(fakeDir, 'holder.go'), '');
-    await eventually(() => exists('second.exited'), Boolean, 'the queued message ran');
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-    assert.equal(spawns().filter((l) => l.startsWith('second ')).length, 1, 'it ran exactly once');
-    assert.equal(await pending(), 0, 'and left the queue');
-  }
-);
+  fs.writeFileSync(path.join(fakeDir, 'holder.go'), '');
+  await eventually(() => exists('second.exited'), Boolean, 'the queued message ran');
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  assert.equal(spawns().filter((l) => l.startsWith('second ')).length, 1, 'it ran exactly once');
+  assert.equal(await pending(), 0, 'and left the queue');
+});

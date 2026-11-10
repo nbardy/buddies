@@ -41,7 +41,10 @@ export function sendNow(message: ClientMessage): SendOutcome {
 }
 
 function putCommand(command: Command): void {
-  jotaiStore.set(commandsAtom, new Map(jotaiStore.get(commandsAtom)).set(command.commandId, command));
+  jotaiStore.set(
+    commandsAtom,
+    new Map(jotaiStore.get(commandsAtom)).set(command.commandId, command)
+  );
 }
 
 function dropCommands(keep: (command: Command) => boolean): void {

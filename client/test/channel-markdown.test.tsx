@@ -4,6 +4,7 @@ import test from 'node:test';
 import { legacyBody } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {

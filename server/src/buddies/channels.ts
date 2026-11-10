@@ -53,8 +53,10 @@ const buddyAuthor = (post: Post): string[] =>
 const talkOf = (thread: Post[]) => thread.filter((post) => post.purpose !== 'reply_failed');
 
 export type { ThreadSeat } from '@unleashd/shared';
+
 type Slots = Pick<StableConversationPorts, 'slot'>;
 type SeatRequest = { kind: 'keep' } | { kind: 'chosen'; config: ConversationConfig };
+
 export type { ChannelResponse } from '@unleashd/shared';
 
 const RUNNING_STATE = { working: 'replying', background: 'background' } as const satisfies Record<

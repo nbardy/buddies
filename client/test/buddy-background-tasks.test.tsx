@@ -5,6 +5,7 @@ import type { ConversationRow } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-conversations';
+
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {
@@ -225,7 +226,10 @@ test('worker hover text tracks running counts even when the active total stays u
       [second.id, second],
     ])
   );
-  assert.match(render(), /data-tooltip="Lead: 2 workers running\. View workers and recent activity"/);
+  assert.match(
+    render(),
+    /data-tooltip="Lead: 2 workers running\. View workers and recent activity"/
+  );
   store.set(
     rowsAtom,
     new Map([

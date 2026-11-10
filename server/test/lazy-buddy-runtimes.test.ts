@@ -24,11 +24,11 @@ import {
   openConversation,
   stableConversationId,
 } from '../src/buddies/buddy-conversation-slots';
-import { ConversationConfigService } from '../src/conversations/config-service';
 import { createBuddyCreationService } from '../src/conversations/buddy-creation-service';
+import { ConversationConfigService } from '../src/conversations/config-service';
 import {
-  creationFingerprint,
   createConversationService,
+  creationFingerprint,
 } from '../src/conversations/creation-service';
 import {
   type ConversationRuntime,

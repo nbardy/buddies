@@ -7,8 +7,8 @@ import { shortenHomePath } from '../../utils/directories';
 import { formatTimeAgo } from '../../utils/time';
 import { ConfigDropdown } from '../ConfigDropdown';
 import { BuddySigil, WorkspaceEmblem } from './BuddySigil';
-import { WorkspaceTeamForm } from './WorkspaceTeamForm';
 import { CHANNEL_BACKSTOP_MS, anyUnread, ownerUnreadTotal, useOwnerUnread } from './channel-data';
+import { WorkspaceTeamForm } from './WorkspaceTeamForm';
 import {
   type WorkspaceActivity,
   type WorkspaceHomeRow,

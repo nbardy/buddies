@@ -3,11 +3,9 @@ import { createPortal } from 'react-dom';
 import { recordEmojiUse } from '../../atoms/emoji-usage';
 import { invalidateChannelResources } from '../../atoms/resources';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
+import { buddyWrite, errorText } from './api';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelMarkdown } from './ChannelMarkdown';
-import { EmojiPicker } from './EmojiPicker';
-import { ExpeditionCard as ExpeditionCardView } from './ExpeditionCard';
-import { buddyWrite, errorText } from './api';
 import {
   type ExpeditionCard,
   type WorkspaceDirectory,
@@ -16,6 +14,8 @@ import {
   threadPageResource,
   wholePostIn,
 } from './channel-data';
+import { EmojiPicker } from './EmojiPicker';
+import { ExpeditionCard as ExpeditionCardView } from './ExpeditionCard';
 import type { ClippedPost, ThreadPage } from './types';
 import './ChannelPostContent.css';
 
@@ -41,7 +41,11 @@ export function ChannelPostContent({
   post: shown,
   directory,
   toolsHost,
-}: { post: ClippedPost; directory: WorkspaceDirectory; toolsHost: HTMLElement | null }) {
+}: {
+  post: ClippedPost;
+  directory: WorkspaceDirectory;
+  toolsHost: HTMLElement | null;
+}) {
   // A Threads card may hold only a preview (server routes.ts clipFollowedThreads). "Show full
   // message" swaps in the whole copy from the thread resource. Fix-guard: Edit is hidden on a
   // preview, or Save would overwrite the post with its clipped text.
@@ -78,35 +82,35 @@ export function ChannelPostContent({
       .finally(() => setBusy(false));
   };
   const tools: ReactNode = (
-        <div className="channel-post-tools" role="group" aria-label="Edit or react">
-          {post.author.kind === 'owner' && !clipped && (
-            <button type="button" aria-label="Edit message" onClick={() => setEditing(post)}>
-              Edit
-            </button>
-          )}
-          <button
-            type="button"
-            className="channel-post-add-reaction"
-            aria-label="Add emoji reaction"
-            title="Add emoji reaction"
-            disabled={busy}
-            onClick={() => setPicking(true)}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <circle cx="8" cy="8" r="6" />
-              <path d="M5 9.5Q8 12 11 9.5" />
-              <circle cx="6" cy="6" r=".5" />
-              <circle cx="10" cy="6" r=".5" />
-            </svg>
-          </button>
-        </div>
+    <div className="channel-post-tools" role="group" aria-label="Edit or react">
+      {post.author.kind === 'owner' && !clipped && (
+        <button type="button" aria-label="Edit message" onClick={() => setEditing(post)}>
+          Edit
+        </button>
+      )}
+      <button
+        type="button"
+        className="channel-post-add-reaction"
+        aria-label="Add emoji reaction"
+        title="Add emoji reaction"
+        disabled={busy}
+        onClick={() => setPicking(true)}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          aria-hidden="true"
+        >
+          <circle cx="8" cy="8" r="6" />
+          <path d="M5 9.5Q8 12 11 9.5" />
+          <circle cx="6" cy="6" r=".5" />
+          <circle cx="10" cy="6" r=".5" />
+        </svg>
+      </button>
+    </div>
   );
   return (
     <div

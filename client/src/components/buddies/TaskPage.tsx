@@ -8,7 +8,6 @@ import { NewTaskForm, TaskEditForm, TaskRows, taskDetailUrl } from './BuddyWork'
 import { ChannelComposer, type ComposerSubmit } from './ChannelComposer';
 import { ChannelMarkdown } from './ChannelMarkdown';
 import { LeadRow, type RowContext } from './ChannelRows';
-import { TaskProgress } from './TaskProgress';
 import {
   CHANNEL_BACKSTOP_MS,
   type WorkspaceDirectory,
@@ -17,6 +16,7 @@ import {
 } from './channel-data';
 import { channelsHref } from './channels-view';
 import { projectProgress } from './home-view';
+import { TaskProgress } from './TaskProgress';
 import type { TaskDetail } from './types';
 import { isTaskOpen, taskStatusView } from './ui-contract';
 import './ChannelBrowser.css';

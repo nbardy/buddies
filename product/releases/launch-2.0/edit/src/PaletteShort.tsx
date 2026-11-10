@@ -17,7 +17,7 @@ import clip from '../../clips/11_ai-color-themes-short.mp4';
 import song from '../../sound/palette-short.wav';
 import { BuddiesIntro, POP_AT } from './BuddiesIntro';
 import { Stage, Words } from './BuddiesKit';
-import { EndCard, END_FRAMES } from './Close';
+import { END_FRAMES, EndCard } from './Close';
 
 export const FPS = 60;
 export const WIDTH = 1920;
@@ -55,11 +55,18 @@ const CAMERA: { t: number; cam: Cam }[] = [
 const ease = Easing.inOut(Easing.cubic);
 const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
 const camAt = (t: number): Cam => {
-  const i = Math.max(0, CAMERA.findLastIndex((k) => k.t <= t));
+  const i = Math.max(
+    0,
+    CAMERA.findLastIndex((k) => k.t <= t)
+  );
   const a = CAMERA[i];
   const b = CAMERA[Math.min(i + 1, CAMERA.length - 1)];
   const u = b.t > a.t ? ease(Math.min(1, (t - a.t) / (b.t - a.t))) : 0;
-  return { cx: lerp(a.cam.cx, b.cam.cx, u), cy: lerp(a.cam.cy, b.cam.cy, u), z: lerp(a.cam.z, b.cam.z, u) };
+  return {
+    cx: lerp(a.cam.cx, b.cam.cx, u),
+    cy: lerp(a.cam.cy, b.cam.cy, u),
+    z: lerp(a.cam.z, b.cam.z, u),
+  };
 };
 // Keep the frame inside the take: never show past its edges.
 const clampTo = (c: number, half: number, size: number) => Math.min(size - half, Math.max(half, c));
@@ -87,7 +94,14 @@ const Take: React.FC = () => {
         <OffthreadVideo
           src={clip}
           muted
-          style={{ position: 'absolute', width: SRC.w * s, height: SRC.h * s, left: CARD.w / 2 - cx * s, top: CARD.h / 2 - cy * s, maxWidth: 'none' }}
+          style={{
+            position: 'absolute',
+            width: SRC.w * s,
+            height: SRC.h * s,
+            left: CARD.w / 2 - cx * s,
+            top: CARD.h / 2 - cy * s,
+            maxWidth: 'none',
+          }}
         />
       </div>
     </Stage>
@@ -99,7 +113,18 @@ const Title: React.FC = () => {
   return (
     <Stage t={t}>
       <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', padding: '0 160px' }}>
-        <Words segs={[['AI', 'cream'], ['color theme', 'violet'], ['generation.', 'cream']]} t={t} at={0.08} size={132} display gap={0.09} />
+        <Words
+          segs={[
+            ['AI', 'cream'],
+            ['color theme', 'violet'],
+            ['generation.', 'cream'],
+          ]}
+          t={t}
+          at={0.08}
+          size={132}
+          display
+          gap={0.09}
+        />
       </AbsoluteFill>
     </Stage>
   );

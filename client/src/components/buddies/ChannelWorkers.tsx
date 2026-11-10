@@ -9,7 +9,11 @@ export function ChannelWorkers({
   buddyId,
   buddyName,
   workspaceId,
-}: { buddyId: string; buddyName: string; workspaceId: string }) {
+}: {
+  buddyId: string;
+  buddyName: string;
+  workspaceId: string;
+}) {
   const location = useLocation();
   const [params] = useSearchParams();
   const detail = useBuddyDetail(buddyId);

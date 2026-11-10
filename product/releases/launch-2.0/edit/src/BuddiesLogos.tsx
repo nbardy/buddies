@@ -5,7 +5,7 @@
 import type React from 'react';
 import { useId } from 'react';
 import { AbsoluteFill, Sequence, useCurrentFrame } from 'remotion';
-import { clamp01, easeOutBack, FONT, lerp } from './blocks';
+import { FONT, clamp01, easeOutBack, lerp } from './blocks';
 
 export const FPS = 60;
 export const WIDTH = 1920;
@@ -47,7 +47,12 @@ const Gradient: React.FC<{ id: string }> = ({ id }) => (
 type MarkProps = { u: number; size: number };
 
 const Svg: React.FC<{ size: number; children: React.ReactNode }> = ({ size, children }) => (
-  <svg width={size} height={size} viewBox="0 0 100 100" style={{ overflow: 'visible', display: 'block' }}>
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 100 100"
+    style={{ overflow: 'visible', display: 'block' }}
+  >
     {children}
   </svg>
 );
@@ -70,7 +75,14 @@ const Pair: React.FC<MarkProps> = ({ u, size }) => {
       <g transform={`translate(50 50) scale(${hug}) translate(-50 -50)`}>
         <circle cx={left} cy={50} r={28} fill={AURA.violet} />
         <circle cx={right} cy={50} r={28} fill={AURA.teal} />
-        <circle cx={right} cy={50} r={28} fill={AURA.lens} clipPath={`url(#${id}c)`} opacity={lens} />
+        <circle
+          cx={right}
+          cy={50}
+          r={28}
+          fill={AURA.lens}
+          clipPath={`url(#${id}c)`}
+          opacity={lens}
+        />
       </g>
     </Svg>
   );
@@ -161,15 +173,38 @@ function easeOutCubic(x: number) {
   return 1 - (1 - x) ** 3;
 }
 
-export const MARK: Record<Concept, React.FC<MarkProps>> = { pair: Pair, bubble: Bubble, huddle: Huddle, chatty: Chatty };
+export const MARK: Record<Concept, React.FC<MarkProps>> = {
+  pair: Pair,
+  bubble: Bubble,
+  huddle: Huddle,
+  chatty: Chatty,
+};
 
 // The wordmark: lowercase, each letter rising out of a blur, 40 ms apart.
 const Wordmark: React.FC<{ u: number; size: number; color: string }> = ({ u, size, color }) => (
-  <div style={{ display: 'flex', fontFamily: FONT, fontSize: size, fontWeight: 800, fontVariationSettings: "'opsz' 96", letterSpacing: -size * 0.035, lineHeight: 1, color }}>
+  <div
+    style={{
+      display: 'flex',
+      fontFamily: FONT,
+      fontSize: size,
+      fontWeight: 800,
+      fontVariationSettings: "'opsz' 96",
+      letterSpacing: -size * 0.035,
+      lineHeight: 1,
+      color,
+    }}
+  >
     {'buddies'.split('').map((ch, i) => {
       const p = easeOutCubic(clamp01((u - i * 0.04) / 0.45));
       return (
-        <span key={`${i}${ch}`} style={{ opacity: p, filter: `blur(${lerp(8, 0, p)}px)`, transform: `translateY(${lerp(size * 0.25, 0, p)}px)` }}>
+        <span
+          key={`${i}${ch}`}
+          style={{
+            opacity: p,
+            filter: `blur(${lerp(8, 0, p)}px)`,
+            transform: `translateY(${lerp(size * 0.25, 0, p)}px)`,
+          }}
+        >
           {ch}
         </span>
       );
@@ -177,14 +212,14 @@ const Wordmark: React.FC<{ u: number; size: number; color: string }> = ({ u, siz
   </div>
 );
 
-const Lockup: React.FC<{ concept: Concept; u: number; mark: number; text: number; color: string; wordAt: number }> = ({
-  concept,
-  u,
-  mark,
-  text,
-  color,
-  wordAt,
-}) => {
+const Lockup: React.FC<{
+  concept: Concept;
+  u: number;
+  mark: number;
+  text: number;
+  color: string;
+  wordAt: number;
+}> = ({ concept, u, mark, text, color, wordAt }) => {
   const Mark = MARK[concept];
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: mark * 0.22 }}>
@@ -227,15 +262,43 @@ export const LogoReveal: React.FC<{ concept: Concept }> = ({ concept }) => {
   return (
     <AbsoluteFill style={{ background: NIGHT }}>
       <Glow opacity={glow} />
-      <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 40 }}>
+      <AbsoluteFill
+        style={{ alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 40 }}
+      >
         <div style={{ transform: `translateX(${slide}px)` }}>
-          <Lockup concept={concept} u={u} mark={MARK_PX} text={WORD_PX} color={CREAM} wordAt={WORD_AT} />
+          <Lockup
+            concept={concept}
+            u={u}
+            mark={MARK_PX}
+            text={WORD_PX}
+            color={CREAM}
+            wordAt={WORD_AT}
+          />
         </div>
-        <div style={{ fontFamily: FONT, fontSize: 50, fontWeight: 500, color: 'rgba(253,246,227,.75)', opacity: tag, transform: `translateY(${lerp(12, 0, tag)}px)` }}>
+        <div
+          style={{
+            fontFamily: FONT,
+            fontSize: 50,
+            fontWeight: 500,
+            color: 'rgba(253,246,227,.75)',
+            opacity: tag,
+            transform: `translateY(${lerp(12, 0, tag)}px)`,
+          }}
+        >
           your team of AI agents
         </div>
       </AbsoluteFill>
-      <div style={{ position: 'absolute', left: 60, bottom: 48, fontFamily: FONT, fontSize: 30, fontWeight: 600, color: 'rgba(253,246,227,.4)' }}>
+      <div
+        style={{
+          position: 'absolute',
+          left: 60,
+          bottom: 48,
+          fontFamily: FONT,
+          fontSize: 30,
+          fontWeight: 600,
+          color: 'rgba(253,246,227,.4)',
+        }}
+      >
         {label.title} · {label.idea}
       </div>
     </AbsoluteFill>
@@ -277,7 +340,17 @@ const Tab: React.FC<{ concept: Concept }> = ({ concept }) => {
   const Mark = MARK[concept];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#2a2738', borderRadius: '10px 10px 0 0', padding: '10px 16px', width: 190 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          background: '#2a2738',
+          borderRadius: '10px 10px 0 0',
+          padding: '10px 16px',
+          width: 190,
+        }}
+      >
         <Mark u={SETTLED} size={20} />
         <span style={{ fontFamily: 'system-ui', fontSize: 15, color: '#d8d4e8' }}>Buddies</span>
       </div>
@@ -291,16 +364,37 @@ const Tab: React.FC<{ concept: Concept }> = ({ concept }) => {
 
 const ROW_H = 222;
 const SheetRow: React.FC<{ concept: Concept }> = ({ concept }) => (
-  <div style={{ height: ROW_H, display: 'flex', alignItems: 'center', gap: 56, borderTop: '1px solid rgba(253,246,227,.08)', padding: '0 60px' }}>
+  <div
+    style={{
+      height: ROW_H,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 56,
+      borderTop: '1px solid rgba(253,246,227,.08)',
+      padding: '0 60px',
+    }}
+  >
     <div style={{ width: 260, fontFamily: FONT }}>
       <div style={{ fontSize: 38, fontWeight: 800, color: CREAM }}>{NAME[concept].title}</div>
-      <div style={{ fontSize: 20, fontWeight: 500, color: 'rgba(253,246,227,.55)', marginTop: 6 }}>{NAME[concept].idea}</div>
+      <div style={{ fontSize: 20, fontWeight: 500, color: 'rgba(253,246,227,.55)', marginTop: 6 }}>
+        {NAME[concept].idea}
+      </div>
     </div>
     <div style={{ width: 560 }}>
       <Lockup concept={concept} u={SETTLED} mark={120} text={112} color={CREAM} wordAt={0} />
     </div>
     <AppIcon concept={concept} size={150} />
-    <div style={{ width: 420, height: 170, borderRadius: 18, background: '#f6f3fb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div
+      style={{
+        width: 420,
+        height: 170,
+        borderRadius: 18,
+        background: '#f6f3fb',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
       <Lockup concept={concept} u={SETTLED} mark={80} text={74} color={INKDARK} wordAt={0} />
     </div>
     <Tab concept={concept} />
@@ -309,7 +403,17 @@ const SheetRow: React.FC<{ concept: Concept }> = ({ concept }) => (
 
 export const LogoSheet: React.FC = () => (
   <AbsoluteFill style={{ background: NIGHT, justifyContent: 'center' }}>
-    <div style={{ fontFamily: FONT, fontSize: 26, fontWeight: 600, color: 'rgba(253,246,227,.45)', padding: '0 60px 18px', display: 'flex', gap: 56 }}>
+    <div
+      style={{
+        fontFamily: FONT,
+        fontSize: 26,
+        fontWeight: 600,
+        color: 'rgba(253,246,227,.45)',
+        padding: '0 60px 18px',
+        display: 'flex',
+        gap: 56,
+      }}
+    >
       <span style={{ width: 260 }}>Concept</span>
       <span style={{ width: 560 }}>Lockup</span>
       <span style={{ width: 150 }}>App icon</span>

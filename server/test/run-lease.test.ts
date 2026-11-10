@@ -268,220 +268,212 @@ afterEach(async () => {
 
 after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 }));
 
-test(
-  'a holder that dies while the backend stays up is cleared within the lease time',
-  { timeout: 180_000 },
-  async () => {
-    // Fixed 7551–7554 made two suites share sockets. Guard: concurrent full suites.
-    const portA = freePortSync();
-    const portB = freePortSync();
-    const httpA = api(portA);
-    const httpB = api(portB);
-    // This case is about the LEASE; the idle timer must not end the held turn first while B boots.
-    const noIdle = { CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '600000' };
-    await startBackend('A', portA, noIdle);
-    const ws = await workspace(httpA, 'lease');
-    const held = await hire(httpA, ws, 'held');
-    const request = await ask(httpA, held, 'held');
-    await eventually(() => exists('held.midturn'), Boolean, 'held mid-turn');
+test('a holder that dies while the backend stays up is cleared within the lease time', {
+  timeout: 180_000,
+}, async () => {
+  // Fixed 7551–7554 made two suites share sockets. Guard: concurrent full suites.
+  const portA = freePortSync();
+  const portB = freePortSync();
+  const httpA = api(portA);
+  const httpB = api(portB);
+  // This case is about the LEASE; the idle timer must not end the held turn first while B boots.
+  const noIdle = { CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '600000' };
+  await startBackend('A', portA, noIdle);
+  const ws = await workspace(httpA, 'lease');
+  const held = await hire(httpA, ws, 'held');
+  const request = await ask(httpA, held, 'held');
+  await eventually(() => exists('held.midturn'), Boolean, 'held mid-turn');
 
-    // A second backend on the same Buddy store boots while A still drives the turn. Before the
-    // lease was a heartbeat, its startup sweep ended every held run, A's live one included.
-    await startBackend('B', portB, noIdle);
-    await staysRunning(httpB, held, 2 * LEASE_MS, "A's live, renewing run survives B's boot");
+  // A second backend on the same Buddy store boots while A still drives the turn. Before the
+  // lease was a heartbeat, its startup sweep ended every held run, A's live one included.
+  await startBackend('B', portB, noIdle);
+  await staysRunning(httpB, held, 2 * LEASE_MS, "A's live, renewing run survives B's boot");
 
-    // A dies, provider and all, while B stays up: nobody renews A's lease and nobody restarts.
-    await killBackend('A');
-    killGroup('held');
-    const diedAt = Date.now();
-    const run = await eventually(
-      () => runOf(httpB, held),
-      (r) => r?.status !== 'running',
-      "the dead holder's run to leave running",
-      // The lease, plus B's 5 s claim backstop, plus slack. A 24 h lease never gets here.
-      LEASE_MS + 10_000
-    );
-    assert.ok(Date.now() - diedAt < LEASE_MS + 10_000);
-    assert.equal(run?.status, 'failed', JSON.stringify(run));
-    assert.equal(run?.errorCode, 'lease_expired', JSON.stringify(run));
-    // Cleared like any failed settle, and then (decision G, owner 2026-10-06) the request it was
-    // executing continues once, so its sender is not left waiting. Before G this asserted the
-    // request `failed`; a second death fails it. It re-enters the SAME conversation where that
-    // conversation exists (crate `a_request_whose_holder_died_resumes_once_in_its_conversation_then_fails`);
-    // here B has its own records store, so it never knew A's conversation and opens a fresh one.
-    await eventually(() => runOf(httpB, held, 2), Boolean, 'the one resume of the request');
-    const thread = await httpB('GET', `/api/buddies/posts/${request.id}/thread`);
-    assert.equal(thread.body.root.request.state, 'awaiting', JSON.stringify(thread.body.root));
-    await killBackend('B');
-  }
-);
+  // A dies, provider and all, while B stays up: nobody renews A's lease and nobody restarts.
+  await killBackend('A');
+  killGroup('held');
+  const diedAt = Date.now();
+  const run = await eventually(
+    () => runOf(httpB, held),
+    (r) => r?.status !== 'running',
+    "the dead holder's run to leave running",
+    // The lease, plus B's 5 s claim backstop, plus slack. A 24 h lease never gets here.
+    LEASE_MS + 10_000
+  );
+  assert.ok(Date.now() - diedAt < LEASE_MS + 10_000);
+  assert.equal(run?.status, 'failed', JSON.stringify(run));
+  assert.equal(run?.errorCode, 'lease_expired', JSON.stringify(run));
+  // Cleared like any failed settle, and then (decision G, owner 2026-10-06) the request it was
+  // executing continues once, so its sender is not left waiting. Before G this asserted the
+  // request `failed`; a second death fails it. It re-enters the SAME conversation where that
+  // conversation exists (crate `a_request_whose_holder_died_resumes_once_in_its_conversation_then_fails`);
+  // here B has its own records store, so it never knew A's conversation and opens a fresh one.
+  await eventually(() => runOf(httpB, held, 2), Boolean, 'the one resume of the request');
+  const thread = await httpB('GET', `/api/buddies/posts/${request.id}/thread`);
+  assert.equal(thread.body.root.request.state, 'awaiting', JSON.stringify(thread.body.root));
+  await killBackend('B');
+});
 
-test(
-  'a heartbeating silent turn outlives its lease; a turn with no provider progress still dies of the idle timer',
-  { timeout: 180_000 },
-  async () => {
-    const port = freePortSync();
-    const http = api(port);
-    await startBackend('C', port, {});
-    const ws = await workspace(http, 'clocks');
-    const silent = await hire(http, ws, 'silent');
-    const stuck = await hire(http, ws, 'stuck');
-    await ask(http, silent, 'silent');
-    await ask(http, stuck, 'stuck');
-    await eventually(
-      () => exists('silent.midturn') && exists('stuck.midturn'),
-      Boolean,
-      'both mid-turn'
-    );
-    const startedAt = Date.now();
+test('a heartbeating silent turn outlives its lease; a turn with no provider progress still dies of the idle timer', {
+  timeout: 180_000,
+}, async () => {
+  const port = freePortSync();
+  const http = api(port);
+  await startBackend('C', port, {});
+  const ws = await workspace(http, 'clocks');
+  const silent = await hire(http, ws, 'silent');
+  const stuck = await hire(http, ws, 'stuck');
+  await ask(http, silent, 'silent');
+  await ask(http, stuck, 'stuck');
+  await eventually(
+    () => exists('silent.midturn') && exists('stuck.midturn'),
+    Boolean,
+    'both mid-turn'
+  );
+  const startedAt = Date.now();
 
-    // Three leases of provider silence: only agent-cli heartbeats reach the backend, and they
-    // renew the lease. Still well inside the provider-idle budget.
-    await staysRunning(http, silent, 3 * LEASE_MS, 'a silent, heartbeating turn');
-    fs.writeFileSync(path.join(fakeDir, 'silent.go'), '');
-    const done = await eventually(
-      () => runOf(http, silent),
-      (r) => r?.status !== 'running',
-      'silent run settled'
-    );
-    assert.equal(done?.status, 'complete', JSON.stringify(done));
+  // Three leases of provider silence: only agent-cli heartbeats reach the backend, and they
+  // renew the lease. Still well inside the provider-idle budget.
+  await staysRunning(http, silent, 3 * LEASE_MS, 'a silent, heartbeating turn');
+  fs.writeFileSync(path.join(fakeDir, 'silent.go'), '');
+  const done = await eventually(
+    () => runOf(http, silent),
+    (r) => r?.status !== 'running',
+    'silent run settled'
+  );
+  assert.equal(done?.status, 'complete', JSON.stringify(done));
 
-    // The same heartbeats keep `stuck`'s lease alive, but heartbeats are not provider progress:
-    // the 60-min idle timer (IDLE_MS here) still ends it, as its own cause, not a lease expiry.
-    const killed = await eventually(
-      () => runOf(http, stuck),
-      (r) => r?.status !== 'running',
-      'stuck run ended by the idle timer',
-      IDLE_MS + 60_000
-    );
-    assert.ok(Date.now() - startedAt >= IDLE_MS - 1_000, 'not before the idle budget');
-    assert.equal(killed?.status, 'failed', JSON.stringify(killed));
-    assert.equal(killed?.errorCode, 'provider_idle_timeout', JSON.stringify(killed));
-    assert.match(String(killed?.error), /no provider event/, JSON.stringify(killed));
-  }
-);
+  // The same heartbeats keep `stuck`'s lease alive, but heartbeats are not provider progress:
+  // the 60-min idle timer (IDLE_MS here) still ends it, as its own cause, not a lease expiry.
+  const killed = await eventually(
+    () => runOf(http, stuck),
+    (r) => r?.status !== 'running',
+    'stuck run ended by the idle timer',
+    IDLE_MS + 60_000
+  );
+  assert.ok(Date.now() - startedAt >= IDLE_MS - 1_000, 'not before the idle budget');
+  assert.equal(killed?.status, 'failed', JSON.stringify(killed));
+  assert.equal(killed?.errorCode, 'provider_idle_timeout', JSON.stringify(killed));
+  assert.match(String(killed?.error), /no provider event/, JSON.stringify(killed));
+});
 
-test(
-  'a live turn keeps its run across a freeze of its backend longer than the lease',
-  { timeout: 240_000 },
-  async () => {
-    // Incident 2026-10-06T16:53:14Z (agent_notes/2026-10-07_live-turn-lease-loss.md): the Mac
-    // slept 306 s, longer than the 300 s lease, with the backend and its turns frozen together.
-    // At wake the backend's overdue claim-gate tick ran before the turns' heartbeat renewals and
-    // ended five live runs as lease_expired; decision G then resumed one into its own busy
-    // conversation ("Conversation is busy"). SIGSTOP is that sleep for one process: wall time
-    // runs, the backend does not. A 100 ms backstop makes the gate's tick the first one due at
-    // wake, as the 5 s tick was against the 30 s heartbeat in production.
-    // afterEach has closed the previous case's holders: a SECOND live backend on this
-    // shared store would correctly expire D's frozen lease and invalidate this scenario.
-    const port = freePortSync();
-    const http = api(port);
-    // This scenario is about the lease. The independent idle clock gets effectively no deadline
-    // so it cannot race the freeze assertion, however slow the machine.
-    await startBackend('D', port, {
-      CWV_BUDDY_RUNNER_BACKSTOP_MS: '100',
-      CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '600000',
-    });
-    const ws = await workspace(http, 'freeze');
-    const frozen = await hire(http, ws, 'frozen');
-    await ask(http, frozen, 'frozen');
-    await eventually(() => exists('frozen.midturn'), Boolean, 'frozen mid-turn');
-    await staysRunning(http, frozen, LEASE_MS, 'renewing before the freeze');
+test('a live turn keeps its run across a freeze of its backend longer than the lease', {
+  timeout: 240_000,
+}, async () => {
+  // Incident 2026-10-06T16:53:14Z (agent_notes/2026-10-07_live-turn-lease-loss.md): the Mac
+  // slept 306 s, longer than the 300 s lease, with the backend and its turns frozen together.
+  // At wake the backend's overdue claim-gate tick ran before the turns' heartbeat renewals and
+  // ended five live runs as lease_expired; decision G then resumed one into its own busy
+  // conversation ("Conversation is busy"). SIGSTOP is that sleep for one process: wall time
+  // runs, the backend does not. A 100 ms backstop makes the gate's tick the first one due at
+  // wake, as the 5 s tick was against the 30 s heartbeat in production.
+  // afterEach has closed the previous case's holders: a SECOND live backend on this
+  // shared store would correctly expire D's frozen lease and invalidate this scenario.
+  const port = freePortSync();
+  const http = api(port);
+  // This scenario is about the lease. The independent idle clock gets effectively no deadline
+  // so it cannot race the freeze assertion, however slow the machine.
+  await startBackend('D', port, {
+    CWV_BUDDY_RUNNER_BACKSTOP_MS: '100',
+    CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: '600000',
+  });
+  const ws = await workspace(http, 'freeze');
+  const frozen = await hire(http, ws, 'frozen');
+  await ask(http, frozen, 'frozen');
+  await eventually(() => exists('frozen.midturn'), Boolean, 'frozen mid-turn');
+  await staysRunning(http, frozen, LEASE_MS, 'renewing before the freeze');
 
-    const backend = backends.get('D');
-    assert.ok(backend?.pid);
-    process.kill(backend.pid, 'SIGSTOP');
-    await new Promise((resolve) => setTimeout(resolve, 2 * LEASE_MS));
-    process.kill(backend.pid, 'SIGCONT');
+  const backend = backends.get('D');
+  assert.ok(backend?.pid);
+  process.kill(backend.pid, 'SIGSTOP');
+  await new Promise((resolve) => setTimeout(resolve, 2 * LEASE_MS));
+  process.kill(backend.pid, 'SIGCONT');
 
-    await staysRunning(http, frozen, 2 * LEASE_MS, 'a live turn after its backend woke');
-    assert.equal(await runOf(http, frozen, 2), undefined, 'no resume of a run that never died');
-    killGroup('frozen');
-    await killBackend('D');
-  }
-);
+  await staysRunning(http, frozen, 2 * LEASE_MS, 'a live turn after its backend woke');
+  assert.equal(await runOf(http, frozen, 2), undefined, 'no resume of a run that never died');
+  killGroup('frozen');
+  await killBackend('D');
+});
 
 // A background launch is not perpetual proof of progress: the old 13h exemption masked a
 // silent provider. Child stream events must keep the same clock alive, with no absolute cap.
-test(
-  'no-progress ends a silent background turn and frees its seat while child streams outlive N',
-  { timeout: 180_000 },
-  async () => {
-    const port = freePortSync();
-    const http = api(port);
-    // Load-tolerance (2026-11-03): the child streams every 500 ms and must never look idle, so N
-    // is 16 ticks wide: on a machine at load 25+ a backend stall of seconds no longer reads as
-    // silence on the live child (staysRunning below is the assertion that catches that bug).
-    const idleMs = 8_000;
-    await startBackend('liveness', port, {
-      CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: String(idleMs),
-      CWV_TURN_TIMEOUT_KILL_GRACE_MS: '200',
-      CWV_BUDDY_RUNNER_BACKSTOP_MS: '100',
+test('no-progress ends a silent background turn and frees its seat while child streams outlive N', {
+  timeout: 180_000,
+}, async () => {
+  const port = freePortSync();
+  const http = api(port);
+  // Load-tolerance (2026-11-03): the child streams every 500 ms and must never look idle, so N
+  // is 16 ticks wide: on a machine at load 25+ a backend stall of seconds no longer reads as
+  // silence on the live child (staysRunning below is the assertion that catches that bug).
+  const idleMs = 8_000;
+  await startBackend('liveness', port, {
+    CWV_TURN_PROVIDER_IDLE_TIMEOUT_MS: String(idleMs),
+    CWV_TURN_TIMEOUT_KILL_GRACE_MS: '200',
+    CWV_BUDDY_RUNNER_BACKSTOP_MS: '100',
+  });
+  const ws = await workspace(http, 'liveness');
+  const hung = await hire(http, ws, 'backgroundhung');
+  const slow = await hire(http, ws, 'backgroundslow');
+  await ask(http, hung, 'backgroundhung');
+  await ask(http, slow, 'backgroundslow');
+  await eventually(
+    () => exists('backgroundhung.midturn') && exists('backgroundslow.midturn'),
+    Boolean,
+    'both background turns started'
+  );
+  const ended = await eventually(
+    () => runOf(http, hung),
+    (r) => r?.status === 'failed',
+    'silent background run failed',
+    // The deadline only has to outlast a loaded machine; the run is read as soon as it fails.
+    idleMs + 40_000
+  );
+  assert.equal(ended?.errorCode, 'provider_idle_timeout', JSON.stringify(ended));
+  assert.ok(ended?.conversationId);
+  const rows = await new Promise<ConversationRow[]>((resolve, reject) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}${WS_PATH}`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
     });
-    const ws = await workspace(http, 'liveness');
-    const hung = await hire(http, ws, 'backgroundhung');
-    const slow = await hire(http, ws, 'backgroundslow');
-    await ask(http, hung, 'backgroundhung');
-    await ask(http, slow, 'backgroundslow');
-    await eventually(
-      () => exists('backgroundhung.midturn') && exists('backgroundslow.midturn'),
-      Boolean,
-      'both background turns started'
-    );
-    const ended = await eventually(
-      () => runOf(http, hung),
-      (r) => r?.status === 'failed',
-      'silent background run failed',
-      // The deadline only has to outlast a loaded machine; the run is read as soon as it fails.
-      idleMs + 40_000
-    );
-    assert.equal(ended?.errorCode, 'provider_idle_timeout', JSON.stringify(ended));
-    assert.ok(ended?.conversationId);
-    const rows = await new Promise<ConversationRow[]>((resolve, reject) => {
-      const socket = new WebSocket(`ws://127.0.0.1:${port}${WS_PATH}`, {
-        headers: { authorization: `Bearer ${TOKEN}` },
-      });
-      const timer = setTimeout(() => {
-        socket.terminate();
-        reject(new Error('no hello'));
-      }, 5_000);
-      socket.on('error', (error) => {
-        clearTimeout(timer);
-        socket.terminate();
-        reject(error);
-      });
-      socket.on('message', (raw) => {
-        const message = JSON.parse(raw.toString());
-        if (message.type !== 'hello') return;
-        clearTimeout(timer);
-        socket.close();
-        resolve(decodeRows(EncodedRowsSchema.parse(message)));
-      });
+    const timer = setTimeout(() => {
+      socket.terminate();
+      reject(new Error('no hello'));
+    }, 5_000);
+    socket.on('error', (error) => {
+      clearTimeout(timer);
+      socket.terminate();
+      reject(error);
     });
-    assert.equal(rows.find((row) => row.id === ended.conversationId)?.run, 'idle');
-    const diagnostics = await http('GET', `/api/conversations/${ended.conversationId}/diagnostics`);
-    assert.equal(diagnostics.body.latestAttempt.terminalCause, 'provider_idle_timeout');
-    // A second request to the same Buddy demonstrates the slot and conversation were released.
-    fs.writeFileSync(path.join(fakeDir, 'recovered.go'), '');
-    const next = await ask(http, hung, 'recovered');
-    await eventually(
-      async () => {
-        const runs = await http('GET', `/api/buddies/runs?buddyId=${hung}`);
-        return (runs.body.runs ?? runs.body).find(
-          (r: { input: { postId?: string } }) => r.input.postId === next.id
-        );
-      },
-      (r) => r?.status === 'complete',
-      'next request uses freed run slot and seat'
-    );
-    await staysRunning(http, slow, 2 * idleMs, 'child stream progresses beyond N');
-    fs.writeFileSync(path.join(fakeDir, 'backgroundslow.go'), '');
-    const done = await eventually(
-      () => runOf(http, slow),
-      (r) => r?.status === 'complete',
-      'slow run completes'
-    );
-    assert.equal(done?.errorCode ?? null, null);
-    await killBackend('liveness');
-  }
-);
+    socket.on('message', (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.type !== 'hello') return;
+      clearTimeout(timer);
+      socket.close();
+      resolve(decodeRows(EncodedRowsSchema.parse(message)));
+    });
+  });
+  assert.equal(rows.find((row) => row.id === ended.conversationId)?.run, 'idle');
+  const diagnostics = await http('GET', `/api/conversations/${ended.conversationId}/diagnostics`);
+  assert.equal(diagnostics.body.latestAttempt.terminalCause, 'provider_idle_timeout');
+  // A second request to the same Buddy demonstrates the slot and conversation were released.
+  fs.writeFileSync(path.join(fakeDir, 'recovered.go'), '');
+  const next = await ask(http, hung, 'recovered');
+  await eventually(
+    async () => {
+      const runs = await http('GET', `/api/buddies/runs?buddyId=${hung}`);
+      return (runs.body.runs ?? runs.body).find(
+        (r: { input: { postId?: string } }) => r.input.postId === next.id
+      );
+    },
+    (r) => r?.status === 'complete',
+    'next request uses freed run slot and seat'
+  );
+  await staysRunning(http, slow, 2 * idleMs, 'child stream progresses beyond N');
+  fs.writeFileSync(path.join(fakeDir, 'backgroundslow.go'), '');
+  const done = await eventually(
+    () => runOf(http, slow),
+    (r) => r?.status === 'complete',
+    'slow run completes'
+  );
+  assert.equal(done?.errorCode ?? null, null);
+  await killBackend('liveness');
+});

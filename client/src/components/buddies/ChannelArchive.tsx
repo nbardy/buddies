@@ -88,7 +88,10 @@ export function ChannelHeaderControls({
 export function ArchivedChannels({
   workspaceId,
   channels,
-}: { workspaceId: string; channels: readonly Channel[] }) {
+}: {
+  workspaceId: string;
+  channels: readonly Channel[];
+}) {
   if (!channels.length) return null;
   return (
     <section className="ui-stack" aria-labelledby="archived-channels-heading">
