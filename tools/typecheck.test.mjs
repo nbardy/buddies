@@ -56,11 +56,12 @@ appendFileSync(log, \`end \${process.ppid} \${Date.now()}\\n\`);
 `
   );
   const project = { compilerOptions: { strict: true, noEmit: true, types: [] }, include: ['src'] };
-  for (const directory of ['server', 'client', 'vendor/agent-cli-tool']) {
+  for (const directory of ['shared', 'server', 'client', 'vendor/agent-cli-tool']) {
     write(`${directory}/src/index.ts`, 'export const value: number = 1;\n');
     mkdirSync(path.join(root, directory, 'node_modules'), { recursive: true });
     symlinkSync(typescript, path.join(root, directory, 'node_modules', 'typescript'), 'dir');
   }
+  write('shared/tsconfig.json', JSON.stringify(project));
   write('server/tsconfig.test.json', JSON.stringify(project));
   write('vendor/agent-cli-tool/tsconfig.json', JSON.stringify(project));
   write('client/tsconfig.app.json', JSON.stringify(project));
