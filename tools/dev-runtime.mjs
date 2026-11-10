@@ -19,10 +19,16 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ensureAddonBuild } from './ensure-addons.mjs';
 import { tscLauncher } from './lib/tsc.mjs';
 import { createBackendRunner, esbuildCheck } from './watch-server.mjs';
+
+const BOUND_CHILD = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'lib',
+  'bound-child.mjs'
+);
 
 /** Prefix every line of a chunk, for tools that print through one stdout. */
 export function linePrefixer(prefix, write) {
@@ -71,9 +77,13 @@ export function startCompiler({ name, configPath, outDir, stateDirectory, log })
   const published = new Map();
   let publishing = Promise.resolve();
   let closing = false;
+  // Through bound-child.mjs: a native compiler outlived a SIGKILLed supervisor (2026-11-11). The
+  // wrapper's stdin is a pipe from this process, and it stops tsc when that pipe closes.
   const child = spawn(
     process.execPath,
     [
+      BOUND_CHILD,
+      process.execPath,
       tscLauncher(configPath),
       '-p',
       configPath,
@@ -87,7 +97,7 @@ export function startCompiler({ name, configPath, outDir, stateDirectory, log })
       '--outDir',
       stage,
     ],
-    { cwd: path.dirname(configPath), stdio: ['ignore', 'pipe', 'pipe'] }
+    { cwd: path.dirname(configPath), stdio: ['pipe', 'pipe', 'pipe'] }
   );
   const onLine = (line) => {
     if (line.trim()) log(`[${name}] ${line.trim()}`);
