@@ -3,6 +3,30 @@
 Index for agents. Hard rules inline; read the linked doc BEFORE working in
 that area.
 
+## This codebase is yours
+
+This codebase is yours: what it's for and how it's built are your call, and you'll keep building
+on it. (Wording from Anthropic's "Prompting Claude Fable 5.2" guide, "Say who owns the code";
+added 2026-11-10 at the owner's request.)
+
+What that means here:
+
+- **Improve the structure as you work.** Merge repeated code instead of adding beside it. Fix the
+  nearby bug, the stale comment, the red lint or type error you find; do not only report it.
+  Delete code that has no caller. Replace machinery; do not add a second copy of it.
+- **These need no approval:** retrying a failed or busy command that is safe to repeat; fixing
+  lint, format, type and test failures you come across; refactoring or deleting code in the area
+  you are changing; adding the regression test and fix-guard a fix needs; updating the docs and
+  this file to match the code; landing finished, verified work on `main`.
+- **Say what you changed beyond the ask.** Name every unrequested change in your report, small
+  ones included, and never change how an existing feature behaves without saying so. The owner
+  reviews the diff, not only the summary.
+- **The rules below are yours too.** Each one records an incident and its cost. They guard data,
+  history and other sessions' unfinished work, which no amount of ownership makes safe to lose.
+  If a rule's reason no longer holds, change the rule here, with the reason, in the same commit.
+- **Another session's uncommitted files are work in flight, not yours to sweep up.** The tree
+  often carries them. Do not stage, revert or reformat them; everything committed is yours.
+
 ## Code tree map
 
 ```
@@ -41,7 +65,7 @@ client/src/components/buddies/Expedition*.tsx → chat card, rail section (both 
                                      only swarm/index.ts (guard: swarm-quarantine.test.ts)
 ```
 
-## Hard rules (violations = rejected PR)
+## Hard rules (each records an incident; break one only by changing it here, with the reason)
 
 - Never `useAtomValue(rowsAtom)` in components — use `rowFamily(id)` (the row)
   and `listField(...)` (one field of the one-pass `listIndexAtom`). Bodies and
@@ -102,7 +126,7 @@ client/src/components/buddies/Expedition*.tsx → chat card, rail section (both 
   you ran ARE checks of the commit) or check the commit directly with
   `git grep <symbol> HEAD`. Stage file-by-file so concurrent sessions' work is
   never swept in.
-- Never `git reset --hard`, `filter-branch`, `filter-repo`, or `rebase -i` on a shared branch — they orphaned 5a6cf40/79a8381 on 2026-08-20. Use `git stash` or a throwaway branch and ask. Guarded in `.claude/settings.local.json` (deny) + `~/.zshrc` wrapper.
+- Never `git reset --hard`, `filter-branch`, `filter-repo`, or `rebase -i` on a shared branch — they orphaned 5a6cf40/79a8381 on 2026-08-20. Use a throwaway branch instead (this repo does not stash: the tree carries other sessions' files), and ask before rewriting shared history. Guarded in `.claude/settings.local.json` (deny) + `~/.zshrc` wrapper.
 - Prefer one integration test through a real boundary over mock-heavy units;
   never assert on TSX/CSS source text.
 - Foreground Buddy deadlines must receive `TURN_MAX_RUNTIME_MS` explicitly;
@@ -310,8 +334,9 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   surfaced as `Cannot read properties of undefined (reading 'flatMap')` inside
   a jotai atom (2026-09-16), and fixtures drifted from real types (missing
   `done`, stale provider handles). `server/tsconfig.test.json` still has a
-  TEMPORARY exclude list of runtime/Buddy tests owned by the lean-rewrite
-  tasks T08/T11 — shrink it, never grow it.
+  TEMPORARY exclude list of runtime/Buddy tests left from the lean-rewrite
+  tasks T08/T11. Fix a listed test's types and remove its entry whenever you
+  are in that area; never add to the list.
 
 - Typecheck the client with `tsc -b`, never `tsc --noEmit`. `client/tsconfig.json`
   is a solution file (`"files": []` + project references), so plain
@@ -372,7 +397,7 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   newest registered folder that exists. There is no workspace move/fold route or MCP tool.
   Guards: `server/test/workspace-registration.test.ts`; failed-spawn handling stays in agent-cli.
 - When source is broken, `server/dist/*.js` (and `shared/dist/`) is the oracle
-  for the author's prior intent — check it before git archaeology.
+  for what the code did before it broke — check it before git archaeology.
 - The formatter is **biome** (`pnpm format`, `pnpm lint:fix`; config in
   `biome.json` — single quotes, width 100). There is no prettier config, so
   `npx prettier --write` fetches prettier with ITS defaults and reformats
