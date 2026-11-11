@@ -115,6 +115,11 @@ pub struct UsageTurn {
     pub at: Option<f64>,
     pub model: Option<String>,
     pub usage: Usage,
+    /// The part of `usage.cache_write` written at Claude's 1-hour cache tier (2x input, against
+    /// 1.25x for the 5-minute tier). A record that does not say which tier it wrote counts all of
+    /// it here: a price must never under-count a budget (CONNECT_PLAN §10, second run: every
+    /// Claude turn wrote 1-hour cache and was priced at the 5-minute rate, 27% low).
+    pub cache_write_1h: f64,
     /// The cost the provider itself recorded (OpenCode); otherwise priced by the caller.
     pub reported_cost: Option<f64>,
 }
@@ -237,6 +242,10 @@ pub enum UsageKey {
         provider: Provider,
         format: Format,
         model: Option<String>,
+        /// The session that spawned this one, when it is a sub-agent's (a Codex sub-agent writes
+        /// its own rollout: `session_meta.source.subagent.thread_spawn.parent_thread_id`). A
+        /// caller pricing a session adds its sub-agents' groups (expeditions-v1 usage.ts).
+        parent_session_id: Option<String>,
     },
     /// A UTC calendar day, `YYYY-MM-DD` (what `toISOString().slice(0, 10)` gave).
     Day {
@@ -261,6 +270,8 @@ pub struct UsageGroup {
     pub output: f64,
     pub cache_read: f64,
     pub cache_write: f64,
+    /// The part of `cache_write` at Claude's 1-hour tier (`UsageTurn::cache_write_1h`).
+    pub cache_write_1h: f64,
     pub reported_cost_usd: f64,
     pub first_at: f64,
     pub last_at: f64,

@@ -219,7 +219,8 @@ pub fn read(session_dir: &Path, ctx: &Ctx) -> std::io::Result<Option<Doc>> {
                 let turn_model = model_name(data.get("providerID").and_then(Value::as_str), data.get("modelID").and_then(Value::as_str));
                 let turn_at = finite(data.pointer("/time/created")).or_else(|| finite(data.pointer("/time/completed")));
                 let usage = Usage { input: i, output: o, cache_read: r, cache_write: w };
-                turns.push(UsageTurn { at: turn_at, model: turn_model, usage, reported_cost: cost });
+                // No tier is recorded: all of a write counts as the dearer one (model.rs `cache_write_1h`).
+                turns.push(UsageTurn { at: turn_at, model: turn_model, usage, cache_write_1h: w, reported_cost: cost });
             }
             let created = finite(data.pointer("/time/created")).or_else(|| finite(data.pointer("/time/completed"))).unwrap_or(0.0);
             let parts = ["/tokens/input", "/tokens/cache/read", "/tokens/cache/write"].map(|p| finite(data.pointer(p)));

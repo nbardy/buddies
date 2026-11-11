@@ -12,6 +12,7 @@ import { checkedRunConfig } from '../../buddies/worker-config';
 import { type CallTurn, capabilitiesOf, limitsText, readsOf } from '../../expedition-kernel/access';
 import type { Clock, RawOutcome, RunSpec } from '../../expedition-kernel/ports';
 import { add, git, release, tip } from '../../expeditions/cambium';
+import { addDetachedTree, removeDetachedTree } from '../../expeditions/checks';
 import { labelled } from '../../observability/event-loop-stall';
 import { observeBuddyEvents } from '../observe';
 import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address';
@@ -689,13 +690,18 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
     if (named.t === 'missing') return refused(named.why);
     const judged = named.refs.get(spec.of) as NamedRef;
     const seat = await c.seatOf(spec.by, at, ws);
-    const tree: Tree = { t: 'dir', path: at.paths.work };
+    const view = (JUDGE_VIEW[judged.record.checkout.t] as JudgeView)(at, judged.record);
     const expected: Expected = { t: 'verdict' };
-    // The judged output, and what its producer could read.
+    // The judged output, what its producer could read, and the code it committed (read-only).
     const capabilities = capabilitiesOf({
       t: 'judge',
-      reads: unique([path.dirname(judged.record.answerPath), ...judged.record.reads]),
+      reads: unique([
+        path.dirname(judged.record.answerPath),
+        ...judged.record.reads,
+        ...view.reads,
+      ]),
     });
+    const tree = view.tree;
     const body = reviewBody({
       address: at.address,
       ctx: at.ctx,
@@ -740,6 +746,32 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
 };
 
 const unique = (xs: readonly string[]): string[] => [...new Set(xs)];
+
+/** What a review judge sees of the work beyond its answer file, by the judged ref's checkout.
+ * Until 2026-11-11 a judge of a checkout call got only the answer: the producer's worktree is
+ * released at its settle and a judge has no shell, so "a reviewer on another provider reads the
+ * implementation" could not happen. Now it reads a detached checkout of exactly the judged commit
+ * and the diff against the call's base. Guard: expeditions-v1-agent-restarts.test.ts. */
+type JudgeView = (at: Located, judged: RefRecord) => { tree: Tree; reads: readonly string[] };
+const JUDGE_VIEW: {
+  readonly [K in RefRecord['checkout']['t']]: (
+    at: Located,
+    judged: RefRecord & { checkout: Extract<RefRecord['checkout'], { t: K }> }
+  ) => { tree: Tree; reads: readonly string[] };
+} = {
+  none: (at) => ({ tree: { t: 'dir', path: at.paths.work }, reads: [] }),
+  branch: (at, judged) => ({
+    tree: {
+      t: 'judge-checkout',
+      path: at.paths.work,
+      code: at.paths.tree,
+      commit: judged.commit,
+      base: judged.checkout.base,
+      diff: path.join(at.paths.work, 'changes.diff'),
+    },
+    reads: [at.paths.tree],
+  }),
+};
 /** An agent call's turn, by its `tree` field (the policy is expedition-kernel/access.ts). */
 const TURN_OF: {
   readonly [K in keyed.AgentCall['tree']]: (
@@ -763,6 +795,7 @@ const GIT_OF: {
   none: async () => ({ t: 'none' }),
   detached: async () => ({ t: 'none' }),
   dir: async () => ({ t: 'none' }),
+  'judge-checkout': async () => ({ t: 'none' }),
   checkout: (t) => worktreeGit(t.path, t.branch),
 };
 /** The metadata `git commit` on `branch` in the linked worktree `tree` writes outside it. Guard:
@@ -858,6 +891,11 @@ const TREE_END: {
   none: atBase,
   detached: atBase,
   dir: atBase,
+  // The judge's view of the code goes when the judge does (a settle, a close, a refused post).
+  'judge-checkout': async (ctx, r, t) => {
+    await removeDetachedTree(ctx.repo, t.code);
+    return atBase(ctx, r);
+  },
   // The branch's tip is the call's commit (the base when nothing was committed); the worktree goes
   // back to Cambium with dirty work snapshotted at the salvage ref. Both are idempotent, so a
   // settle replayed after a crash ends the same way.
@@ -870,7 +908,7 @@ const TREE_END: {
         : { t: 'none' };
     return {
       commit: at.t === 'tip' ? at.sha : r.base,
-      checkout: { t: 'branch', branch: t.branch, salvage },
+      checkout: { t: 'branch', branch: t.branch, base: r.base, salvage },
     };
   },
 };
@@ -887,7 +925,7 @@ function makeTree(ctx: ExpeditionContext, base: string, tree: Tree): Promise<Sta
     tree
   );
 }
-const exists = (p: string) =>
+const exists = (p: string): Promise<boolean> =>
   stat(p).then(
     () => true,
     () => false
@@ -903,6 +941,29 @@ const TREE_START: {
   detached: async () => ({ t: 'failed', why: 'a call never runs in a detached tree' }),
   dir: async (_ctx, _base, t) => {
     await mkdir(t.path, { recursive: true, mode: 0o700 });
+    return { t: 'ready' };
+  },
+  // A replayed post (a restart before it) makes the view again from scratch: the same commit,
+  // HEAD verified, the same diff. Read-only to the judge by its capability set, not by mode bits.
+  'judge-checkout': async (ctx, _base, t) => {
+    await mkdir(t.path, { recursive: true, mode: 0o700 });
+    try {
+      await addDetachedTree(ctx.repo, t.code, t.commit);
+      // Straight to the file: a large diff never passes through a buffer.
+      await git(ctx.repo, [
+        'diff',
+        '--no-color',
+        '--no-ext-diff',
+        `--output=${t.diff}`,
+        t.base,
+        t.commit,
+      ]);
+    } catch (e) {
+      return {
+        t: 'failed',
+        why: `the judged code could not be checked out: ${(e as Error).message}`,
+      };
+    }
     return { t: 'ready' };
   },
   checkout: async (ctx, base, t) => {

@@ -80,8 +80,14 @@ impl ClaudeFold {
         self.usage.output += turn.output;
         self.usage.cache_read += turn.cache_read;
         self.usage.cache_write += turn.cache_write;
+        // `cache_creation` splits the write by tier; a record without it (an older CLI) says
+        // nothing about the tier, so all of it counts as the dearer 1-hour one (model.rs).
+        let cache_write_1h = match usage.get("cache_creation") {
+            Some(split) if split.is_object() => number(split.get("ephemeral_1h_input_tokens")),
+            _ => turn.cache_write,
+        };
         let model = truthy_string(message.get("model")).map(str::to_string);
-        sink.turn(UsageTurn { at, model, usage: turn, reported_cost: None });
+        sink.turn(UsageTurn { at, model, usage: turn, cache_write_1h, reported_cost: None });
     }
 
     /// Context is input + cache read + cache write: Claude reports cache hits in separate fields.

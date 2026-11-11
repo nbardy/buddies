@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { keyed } from '@unleashd/shared';
 import { labelled } from '../observability/event-loop-stall';
-import { type Authored, FromPlan, type ToPlan } from './protocol';
+import { type Authored, type CastRow, FromPlan, type ToPlan } from './protocol';
 
 // The plan runner (docs/expeditions/keyed/v1/DESIGN.md §2, §5): runs a plan folder's `plan.ts` in
 // a child process and relays its calls. The child holds nothing that matters; the host answers
@@ -50,6 +50,8 @@ export type Exit =
   | { readonly t: 'signal'; readonly signal: string };
 
 export type PlanEvents = {
+  /** The plan's cast table (each `steps({...})` table once, before its first call). */
+  onCast(rows: readonly CastRow[]): void;
   onCall(seq: number, call: Authored): void;
   onReview(seq: number, question: string): void;
   onPhase(name: string, edge: 'open' | 'close'): void;
@@ -178,6 +180,7 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
   };
 
   const handlers: { [T in FromPlan['t']]: (message: Extract<FromPlan, { t: T }>) => void } = {
+    cast: (m) => opts.onCast(m.rows),
     call: (m) => {
       outstanding.set(m.seq, 'call');
       opts.onCall(m.seq, m.call);
@@ -262,6 +265,8 @@ export type DryRunEnd =
   | { readonly t: 'crashed'; readonly exit: Exit; readonly stderr: string };
 
 export type DryRunResult = {
+  /** Every step of the plan's cast table, called or not. */
+  readonly cast: readonly CastRow[];
   /** Every call the plan authored, in the order it authored them. */
   readonly calls: readonly Authored[];
   readonly reviews: readonly string[];
@@ -284,6 +289,7 @@ type Declined =
 /** Run the plan answering only what the host already knows; stop when it ends or waits on
  * nothing but unanswered seqs. */
 export async function dryRun(opts: DryRunOptions): Promise<DryRunResult> {
+  const cast: CastRow[] = [];
   const calls: Authored[] = [];
   const reviews: string[] = [];
   const phases: { name: string; edge: 'open' | 'close' }[] = [];
@@ -295,6 +301,7 @@ export async function dryRun(opts: DryRunOptions): Promise<DryRunResult> {
 
   const handle = runPlan({
     folder: opts.folder,
+    onCast: (rows) => cast.push(...rows),
     onCall: (seq, call) => {
       calls.push(call);
       const outcome = opts.known(call);
@@ -324,7 +331,7 @@ export async function dryRun(opts: DryRunOptions): Promise<DryRunResult> {
 
   const end = await Promise.race([quiet, handle.ended.then(dryEndOf)]);
   await handle.kill();
-  return { calls, reviews, phases, end };
+  return { cast, calls, reviews, phases, end };
 }
 
 function dryEndOf(end: PlanEnd): DryRunEnd {

@@ -1,8 +1,8 @@
 import type { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import { zodToJsonSchema as zodToJsonSchemaTyped } from 'zod-to-json-schema';
-import type { Authored } from '../protocol';
-import { openSession, phases, session } from './session';
+import type { Authored, CastRow } from '../protocol';
+import { declareCast, openSession, phases, session } from './session';
 
 // zod-to-json-schema's signature makes tsc 5.9 instantiate zod's whole type graph for a generic
 // schema: typechecking this one file ran out of a 4 GB heap after 42 s (2026-11-10), which crashed
@@ -164,6 +164,8 @@ export type StepInput = {
 abstract class StepSpec<Out> implements Spec<Out> {
   abstract readonly answer: Answer<Out>;
   abstract author(step: string, key: keyed.Key, input: StepInput): Authored;
+  /** Its row of the cast table: what every call of the step will be. */
+  abstract castRow(step: string): CastRow;
   abstract returns<T>(schema: z.ZodType<T>): Spec<T>;
   abstract judged(judge: Judge): Spec<Out>;
   abstract checkout(): Spec<Out>;
@@ -213,6 +215,16 @@ class AgentSpec<Out> extends StepSpec<Out> {
   }
   needs(...pools: string[]): Spec<Out> {
     return this.with({ answer: this.answer, needs: [...this.f.needs, ...pools] });
+  }
+  castRow(step: string): CastRow {
+    return {
+      t: 'agent',
+      step,
+      by: this.f.by,
+      tree: this.f.tree,
+      grant: { reads: [...this.f.grantReads], web: this.f.web },
+      judge: this.f.judge,
+    };
   }
   author(step: string, key: keyed.Key, input: StepInput): Authored {
     return {
@@ -267,6 +279,9 @@ class CommandSpec<Out> extends StepSpec<Out> {
   }
   web(): Spec<Out> {
     return unsupported('web()');
+  }
+  castRow(step: string): CastRow {
+    return { t: 'command', step };
   }
   author(step: string, key: keyed.Key, input: StepInput): Authored {
     if (input.reads || input.continues)
@@ -347,9 +362,12 @@ export function steps<T extends Record<string, Spec<unknown>>>(
   const made = Object.entries(table).map(([name, spec]) => {
     if (!(spec instanceof StepSpec))
       throw new TypeError(`Step ${name} is not a role(...) or command(...) spec.`);
-    return [name, stepOf(name, spec)] as const;
+    return [name, spec] as const;
   });
-  return Object.freeze(Object.fromEntries(made)) as {
+  declareCast(made.map(([name, spec]) => spec.castRow(name)));
+  return Object.freeze(
+    Object.fromEntries(made.map(([name, spec]) => [name, stepOf(name, spec)]))
+  ) as {
     [K in keyof T]: T[K] extends Spec<infer Out> ? Step<Out> : never;
   };
 }

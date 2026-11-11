@@ -182,23 +182,36 @@ export async function withDetachedTree<T>(
   use: (dir: string) => Promise<T>
 ): Promise<T> {
   try {
-    await underRepoLock(repo, async () => {
-      await fsp.rm(dir, { recursive: true, force: true });
-      await git(repo, ['worktree', 'prune']);
-      const expected = await git(repo, ['rev-parse', '--verify', `${sha}^{commit}`]);
-      await git(repo, ['worktree', 'add', '--detach', dir, expected]);
-      const head = await git(dir, ['rev-parse', '--verify', 'HEAD^{commit}']);
-      if (head !== expected)
-        throw new Error(`the worktree at ${dir} is at ${head}, not ${expected} (${sha})`);
-    });
+    await addDetachedTree(repo, dir, sha);
     return await use(dir);
   } finally {
-    await underRepoLock(repo, async () => {
-      await exec('git', repo, ['worktree', 'remove', '--force', dir]);
-      await fsp.rm(dir, { recursive: true, force: true });
-      await exec('git', repo, ['worktree', 'prune']);
-    });
+    await removeDetachedTree(repo, dir);
   }
+}
+
+/** The first half of `withDetachedTree`, for a tree that must outlive one call (a review judge's
+ * view of the code it judges lasts its whole run, across restarts: executor/calls.ts). Anything
+ * at `dir` is replaced; the tree's HEAD is checked against `sha`. Throws on any git failure. */
+export async function addDetachedTree(repo: string, dir: string, sha: string): Promise<void> {
+  await underRepoLock(repo, async () => {
+    await fsp.rm(dir, { recursive: true, force: true });
+    await git(repo, ['worktree', 'prune']);
+    const expected = await git(repo, ['rev-parse', '--verify', `${sha}^{commit}`]);
+    await git(repo, ['worktree', 'add', '--detach', dir, expected]);
+    const head = await git(dir, ['rev-parse', '--verify', 'HEAD^{commit}']);
+    if (head !== expected)
+      throw new Error(`the worktree at ${dir} is at ${head}, not ${expected} (${sha})`);
+  });
+}
+
+/** The second half: the tree and its admin entry are gone. Idempotent; never throws for a tree
+ * that is already gone. */
+export async function removeDetachedTree(repo: string, dir: string): Promise<void> {
+  await underRepoLock(repo, async () => {
+    await exec('git', repo, ['worktree', 'remove', '--force', dir]);
+    await fsp.rm(dir, { recursive: true, force: true });
+    await exec('git', repo, ['worktree', 'prune']);
+  });
 }
 
 /** Worktree setup and teardown, one at a time per repo (the work in the trees runs in parallel).

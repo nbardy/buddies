@@ -44,6 +44,7 @@ const proposalOf = (n: number): keyed.KeyedProposal =>
       access: [
         {
           label: 'scope',
+          from: 'first-wave',
           turn: 'call',
           harness: {
             t: 'known',
@@ -58,6 +59,21 @@ const proposalOf = (n: number): keyed.KeyedProposal =>
               mcp: { t: 'enforced' },
               instructions: { t: 'enforced' },
             },
+          },
+        },
+        // A step behind the first wave: known only from the cast table, every limit held.
+        {
+          label: 'packet',
+          from: 'cast-table',
+          turn: 'checkout',
+          harness: {
+            t: 'known',
+            provider: 'claude',
+            grants: Object.fromEntries(
+              ['reads', 'writes', 'shell', 'web', 'agents', 'schedule', 'mcp', 'instructions'].map(
+                (g) => [g, { t: 'enforced' }]
+              )
+            ),
           },
         },
       ],
@@ -98,10 +114,20 @@ test('a clean proposal shows the goal, budget, first wave with who and cost, and
   assert.doesNotMatch(html, /Confirm launch/, 'the second click is a later state');
 });
 
-test('a grant the harness only advises is called out beside the first wave', async () => {
+// CONNECT_PLAN §10: the card listed only first-wave limits, so a later checkout step's were never
+// shown before launch. Every turn is listed, marked by where it comes from.
+test('every turn is listed with its source; a grant the harness only advises is called out', async () => {
   const html = await card(2, statusOf(LIVE, NOT_LAUNCHED));
-  assert.match(html, /aria-label="Limits not enforced"/);
-  assert.match(html, /scope \(codex\) reads: the sandbox does not confine reads/);
+  assert.match(html, /aria-label="What each turn may do"/);
+  assert.match(html, /1 with limits only advised, not enforced/);
+  assert.match(
+    html,
+    /scope · call · first-wave call · codex: only advised: reads: the sandbox does not confine reads/
+  );
+  assert.match(
+    html,
+    /packet · checkout · step, from the cast table · claude: every limit enforced/
+  );
   assert.doesNotMatch(html, /writes: /);
 });
 

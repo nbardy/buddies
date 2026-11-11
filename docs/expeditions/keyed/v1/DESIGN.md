@@ -129,6 +129,8 @@ type Entry = { at: Time } & (          // the log: append-only; all state is a f
   | { t: 'settled'; key: Key; hash: Hash; outcome: Outcome; spent: Usage }
   | { t: 'review'; question: string; decision: 'continue' | 'rewrite' | 'stop'; why: string }
   | { t: 'contract'; version: number; change: string }
+  | { t: 'act'; key: Key; after: BaseWake; act: LeaderAct;   // what became of one leader act
+      verdict: { t: 'accepted' } | { t: 'rejected'; issues: string[] } }
   | { t: 'finished'; reason: 'met' | 'not-met' | 'budget' | 'deadline' | 'stopped' });
 type Diff = { reused: Key[]; attached: Key[]; dropped: Key[]; started: Key[]; newCostUsd: number };
 ```
@@ -144,6 +146,9 @@ enforces where it can, and the preview says which grants are only advisory (CONN
   stops the run with a gap, or rewrites.
 - The host also wakes it when the plan ended and `done` is not met, when the plan cannot proceed,
   at 50% and 80% of the budget, and when the owner writes something that is not a command.
+- An act a gate refuses changes nothing and wakes the leader again with the reasons; two rejected
+  in a row at one wake point and the host asks the owner instead (continue, stop, or wait for a
+  rewrite). The count is folded from the log (`act` entries), so it survives a restart.
 - A rewrite is the leader editing the folder and submitting it with a reason. It passes four
   gates in order: **typecheck**, **dry run** (briefs exist, no reviewer on its producer's
   provider, pools exist, no duplicate key), **rules** (Contract untouched, new cost under

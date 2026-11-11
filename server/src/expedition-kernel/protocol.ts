@@ -47,8 +47,27 @@ export const Authored = z.discriminatedUnion('t', [
 ]);
 export type Authored = z.infer<typeof Authored>;
 
+/** One row of the plan's cast table (`steps({...})`): what every call of that step will be, known
+ * before any call is made. The preview reports each agent row's limits, so a step the dry run
+ * never reaches is still previewed (CONNECT_PLAN §10: the second run's checkout calls were not). */
+export const CastRow = z.discriminatedUnion('t', [
+  v('agent', {
+    step: z.string().min(1),
+    by: keyed.Who,
+    tree: z.enum(['none', 'checkout']),
+    grant: z.object({ reads: z.array(z.string()), web: z.boolean() }).strict(),
+    judge: keyed.Judge,
+  }),
+  /** A host command: no agent turn, so no limits to report. */
+  v('command', { step: z.string().min(1) }),
+]);
+export type CastRow = z.infer<typeof CastRow>;
+
 /** plan process → host */
 export const FromPlan = z.discriminatedUnion('t', [
+  /** The cast table, sent once per `steps({...})` table before any call of it (at plan start for
+   * a table made at module scope). */
+  v('cast', { rows: z.array(CastRow) }),
   v('call', { seq: z.number().int(), call: Authored }),
   v('phase', { name: z.string().min(1), edge: z.enum(['open', 'close']) }),
   v('review', { seq: z.number().int(), question: z.string() }),

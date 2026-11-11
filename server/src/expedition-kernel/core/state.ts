@@ -57,6 +57,27 @@ export type Progress =
   | { readonly t: 'open' }
   | { readonly t: 'finished'; readonly reason: keyed.Finish };
 
+/** One leader act a gate refused (the `act` entry's): its call, the act, and why. */
+export type RejectedAct = {
+  readonly key: keyed.Key;
+  readonly act: keyed.LeaderAct;
+  readonly issues: readonly string[];
+};
+/** The leader's acts rejected in a row at one wake point (`after`). Until 2026-11-11 each
+ * rejection woke the leader again at once, bounded only by the budget (the second real run's
+ * leader answered a not-allowed `retry` twice). Two in a row and the host asks the owner instead
+ * (change.ts); an accepted act, an applied plan or the owner's ruling clears it. Folded from the
+ * log, so a restart keeps the count.
+ * `rewrite-asked`: the owner chose to wait for a rewrite; the next wake there says so. */
+export type LeaderActs =
+  | { readonly t: 'clear' }
+  | {
+      readonly t: 'rejected';
+      readonly after: keyed.BaseWake;
+      readonly acts: readonly RejectedAct[];
+    }
+  | { readonly t: 'rewrite-asked'; readonly after: keyed.BaseWake; readonly last: RejectedAct };
+
 export type State = {
   readonly id: string;
   readonly contract: keyed.Contract;
@@ -80,6 +101,9 @@ export type State = {
   readonly pendingAsks: ReadonlySet<keyed.RefId>;
   /** Passed verdicts of judged agent calls since the last applied `plan` entry (or launch). */
   readonly passesSinceRewrite: number;
+  readonly leaderActs: LeaderActs;
+  /** The owner's `leader-stuck` rulings so far: each ask for one has its own key. */
+  readonly ownerRulings: number;
   readonly progress: Progress;
 };
 
@@ -206,6 +230,8 @@ function launch(e: keyed.Entry): State {
     poolsInUse: new Map(),
     pendingAsks: new Set(),
     passesSinceRewrite: 0,
+    leaderActs: { t: 'clear' },
+    ownerRulings: 0,
     progress: { t: 'open' },
   };
 }
@@ -265,7 +291,14 @@ const STEP: { [K in keyed.Entry['t']]: Step<K> } = {
       const live = r.status as LiveStatus;
       calls = put(calls, key, hash, { ...r, status: DROP[disposition](live.run, stageOf(live)) });
     }
-    return { ...s, calls, plan: { t: 'planned', version: e.version }, passesSinceRewrite: 0 };
+    return {
+      ...s,
+      calls,
+      plan: { t: 'planned', version: e.version },
+      passesSinceRewrite: 0,
+      // A new plan is a fresh start for the leader: rejections under the old one do not carry.
+      leaderActs: { t: 'clear' },
+    };
   },
   declared: (s, e, fail) => {
     const current = currentVersion(s);
@@ -371,6 +404,11 @@ const STEP: { [K in keyed.Entry['t']]: Step<K> } = {
     return s;
   },
   owner: (s, e, fail) => OWNER[e.act.t](s, e.act as never, fail),
+  act: (s, e, fail) => {
+    const r = leaderRecordOf(s, e.key, fail);
+    if (r.status.t !== 'settled') fail(`an act of ${e.key}, which has not settled`);
+    return { ...s, leaderActs: VERDICT[e.verdict.t](s.leaderActs, e as never) };
+  },
   finished: (s, e) => ({ ...s, progress: { t: 'finished', reason: e.reason } }),
 };
 
@@ -521,8 +559,54 @@ function release(
   };
 }
 
+/** The leader call an `act` entry names: exactly one hash of its key, a `leader` call. */
+function leaderRecordOf(s: State, key: keyed.Key, fail: Fail): CallRecord {
+  const records = [...(s.calls.get(key)?.values() ?? [])];
+  const only = records[0];
+  if (!only || records.length > 1 || only.call.t !== 'leader')
+    return fail(`${key} is not one leader call`);
+  return only;
+}
+
+const sameWake = (a: keyed.BaseWake, b: keyed.BaseWake): boolean =>
+  canonicalJson(a) === canonicalJson(b);
+type ActEntry = Extract<keyed.Entry, { t: 'act' }>;
+const VERDICT: {
+  readonly [K in keyed.ActVerdict['t']]: (
+    now: LeaderActs,
+    e: ActEntry & { verdict: Extract<keyed.ActVerdict, { t: K }> }
+  ) => LeaderActs;
+} = {
+  accepted: () => ({ t: 'clear' }),
+  rejected: (now, e) => {
+    const act: RejectedAct = { key: e.key, act: e.act, issues: e.verdict.issues };
+    return now.t === 'rejected' && sameWake(now.after, e.after)
+      ? { ...now, acts: [...now.acts, act] }
+      : { t: 'rejected', after: e.after, acts: [act] };
+  },
+};
+
+/** The owner's ruling on a leader stopped after two rejections: continue and stop clear it (the
+ * wake resolves), rewrite asks the leader once more, unclear changes nothing (asked again). */
+const RULING: {
+  readonly [K in keyed.LeaderRuling['t']]: (now: LeaderActs, fail: Fail) => LeaderActs;
+} = {
+  continue: () => ({ t: 'clear' }),
+  stop: () => ({ t: 'clear' }),
+  rewrite: (now, fail) => {
+    if (now.t !== 'rejected') return fail('a rewrite ruling with no rejected acts to rule on');
+    return { t: 'rewrite-asked', after: now.after, last: now.acts.at(-1) as RejectedAct };
+  },
+  unclear: (now) => now,
+};
+
 type Act = Extract<keyed.Entry, { t: 'owner' }>['act'];
 const OWNER: { [K in Act['t']]: (s: State, a: Extract<Act, { t: K }>, fail: Fail) => State } = {
+  'leader-stuck': (s, a, fail) => ({
+    ...s,
+    leaderActs: RULING[a.ruling.t](s.leaderActs, fail),
+    ownerRulings: s.ownerRulings + 1,
+  }),
   pause: (s, _a, fail) => (s.paused ? fail('paused twice') : { ...s, paused: true }),
   resume: (s, _a, fail) => (s.paused ? { ...s, paused: false } : fail('resumed while not paused')),
   extend: (s, a) => {

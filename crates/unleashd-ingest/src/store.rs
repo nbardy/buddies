@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS usage_turn (
   cache_read REAL NOT NULL,
   cache_write REAL NOT NULL,
   reported_cost REAL,
+  cache_write_1h REAL,
   PRIMARY KEY (source_id, n)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS usage_turn_by_at ON usage_turn(at);
@@ -108,6 +109,23 @@ CREATE TABLE IF NOT EXISTS removed (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS removed_by_rev ON removed(rev);
 ";
+
+/// Additive (2026-11-11, no SCHEMA_VERSION bump): `usage_turn.cache_write_1h`, the part of a
+/// turn's cache write at Claude's 1-hour tier (model.rs `UsageTurn`). `CREATE TABLE IF NOT EXISTS`
+/// does not add a column to a store made before it, so this does, once; existing rows keep NULL
+/// (their tier was never read) and the usage totals price them at the 1-hour rate. An older build
+/// names its columns in every statement, so it reads and writes a store that has the column.
+fn add_cache_write_1h(conn: &Connection) -> Result<()> {
+    let has: bool = conn.query_row(
+        "SELECT count(*) > 0 FROM pragma_table_info('usage_turn') WHERE name = 'cache_write_1h'",
+        [],
+        |r| r.get(0),
+    )?;
+    if !has {
+        conn.execute_batch("ALTER TABLE usage_turn ADD COLUMN cache_write_1h REAL")?;
+    }
+    Ok(())
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -165,6 +183,7 @@ impl Writer {
     pub fn open(path: &Path) -> Result<Writer> {
         let conn = open(path)?;
         conn.execute_batch(SCHEMA)?;
+        add_cache_write_1h(&conn)?;
         let version: Option<i64> = conn.query_row("SELECT value FROM meta WHERE key = 'schema'", [], |r| r.get(0)).optional()?;
         match version {
             None => {
@@ -213,8 +232,8 @@ impl Writer {
             let mut clear_messages = tx.prepare_cached("DELETE FROM message WHERE source_id = ?1")?;
             let mut clear_turns = tx.prepare_cached("DELETE FROM usage_turn WHERE source_id = ?1")?;
             let mut insert_turn = tx.prepare_cached(
-                "INSERT OR REPLACE INTO usage_turn (source_id, n, at, model, input, output, cache_read, cache_write, reported_cost)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT OR REPLACE INTO usage_turn (source_id, n, at, model, input, output, cache_read, cache_write, reported_cost, cache_write_1h)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?;
             let mut insert_message = tx.prepare_cached(
                 "INSERT OR REPLACE INTO message (source_id, seq, role, at, completed_at, content, tool_name, tool_input) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -254,7 +273,7 @@ impl Writer {
                 for (i, t) in outcome.turns.iter().enumerate() {
                     let u = &t.usage;
                     let n = outcome.first_turn + i as u32;
-                    insert_turn.execute(params![id, n, t.at, t.model, u.input, u.output, u.cache_read, u.cache_write, t.reported_cost])?;
+                    insert_turn.execute(params![id, n, t.at, t.model, u.input, u.output, u.cache_read, u.cache_write, t.reported_cost, t.cache_write_1h])?;
                 }
                 let previous: Option<(String, bool)> = old_row.query_row([id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
                 match (&outcome.row, previous) {
@@ -754,24 +773,26 @@ impl Reader {
                     r.get::<_, Option<String>>(2)?,
                     r.get::<_, Option<String>>(3)?,
                     r.get::<_, Option<String>>(4)?,
+                    r.get::<_, Option<String>>(5)?,
                 );
                 let totals = UsageGroup {
                     key: UsageKey::Day { day: String::new() },
-                    turns: r.get(5)?,
-                    sessions: r.get(6)?,
-                    input: r.get(7)?,
-                    output: r.get(8)?,
-                    cache_read: r.get(9)?,
-                    cache_write: r.get(10)?,
-                    reported_cost_usd: r.get(11)?,
-                    first_at: r.get(12)?,
-                    last_at: r.get(13)?,
+                    turns: r.get(6)?,
+                    sessions: r.get(7)?,
+                    input: r.get(8)?,
+                    output: r.get(9)?,
+                    cache_read: r.get(10)?,
+                    cache_write: r.get(11)?,
+                    reported_cost_usd: r.get(12)?,
+                    first_at: r.get(13)?,
+                    last_at: r.get(14)?,
+                    cache_write_1h: r.get(15)?,
                 };
                 Ok((key, totals))
             })?;
             rows.map(|row| {
-                let ((a, b, c, d, model), totals) = row?;
-                let key = usage_key(query.group_by, a, b, c, d, model)?;
+                let ((a, b, c, d, model, parent), totals) = row?;
+                let key = usage_key(query.group_by, a, b, c, d, model, parent)?;
                 Ok(UsageGroup { key, ..totals })
             })
             .collect::<Result<Vec<_>>>()?
@@ -847,11 +868,12 @@ pub struct SearchHit {
 const LATEST_CONTEXT: &str = "SELECT context FROM session WHERE session_id = ?1 AND context IS NOT NULL ORDER BY activity_at DESC LIMIT 1";
 const LATEST_RATE_LIMITS: &str = "SELECT rate_limits FROM session WHERE rate_limits IS NOT NULL ORDER BY activity_at DESC LIMIT 1";
 
-/// The totals every grouping selects, after its five key columns.
+/// The totals every grouping selects, after its six key columns. A row written before the 1-hour
+/// split was recorded (`cache_write_1h` NULL) counts its whole write as 1-hour: never under-count.
 macro_rules! usage_totals {
     () => {
         "count(*), count(DISTINCT t.source_id), sum(t.input), sum(t.output), sum(t.cache_read), sum(t.cache_write),
-         coalesce(sum(t.reported_cost), 0), min(t.at), max(t.at)
+         coalesce(sum(t.reported_cost), 0), min(t.at), max(t.at), sum(coalesce(t.cache_write_1h, t.cache_write))
          FROM usage_turn t JOIN session s ON s.source_id = t.source_id
          WHERE t.at >= ?1 AND t.at < ?2"
     };
@@ -859,13 +881,14 @@ macro_rules! usage_totals {
 
 const USAGE_BY_SESSION: &str = concat!(
     "SELECT s.session_id, s.source_path, s.provider, s.format,
-       (SELECT u.model FROM usage_turn u WHERE u.source_id = t.source_id AND u.model IS NOT NULL ORDER BY u.n LIMIT 1), ",
+       (SELECT u.model FROM usage_turn u WHERE u.source_id = t.source_id AND u.model IS NOT NULL ORDER BY u.n LIMIT 1),
+       s.parent_session_id, ",
     usage_totals!(),
     " GROUP BY t.source_id"
 );
 const USAGE_BY_DAY: &str =
-    concat!("SELECT strftime('%Y-%m-%d', t.at / 1000, 'unixepoch') AS day, NULL, NULL, NULL, NULL, ", usage_totals!(), " GROUP BY day");
-const USAGE_BY_MODEL: &str = concat!("SELECT NULL, NULL, s.provider, NULL, t.model, ", usage_totals!(), " GROUP BY s.provider, t.model");
+    concat!("SELECT strftime('%Y-%m-%d', t.at / 1000, 'unixepoch') AS day, NULL, NULL, NULL, NULL, NULL, ", usage_totals!(), " GROUP BY day");
+const USAGE_BY_MODEL: &str = concat!("SELECT NULL, NULL, s.provider, NULL, t.model, NULL, ", usage_totals!(), " GROUP BY s.provider, t.model");
 
 fn usage_key(
     by: UsageGroupBy,
@@ -874,6 +897,7 @@ fn usage_key(
     provider: Option<String>,
     format: Option<String>,
     model: Option<String>,
+    parent: Option<String>,
 ) -> Result<UsageKey> {
     let provider = || {
         let p = provider.clone().unwrap_or_default();
@@ -888,6 +912,7 @@ fn usage_key(
                 provider: provider()?,
                 format: Format::parse(&f).ok_or_else(|| StoreError::Corrupt(format!("format {f}")))?,
                 model,
+                parent_session_id: parent,
             }
         }
         UsageGroupBy::Day => UsageKey::Day { day: a.unwrap_or_default() },

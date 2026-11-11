@@ -50,6 +50,7 @@ export class PlanProcess {
       folder,
       onCall: on((seq: number, a: Authored) => this.onCall(seq, a)),
       onReview: on((seq: number, q: string) => this.onReview(seq, q)),
+      onCast: () => {},
       onPhase: () => {},
       onWaiting: on((seqs: readonly number[]) => {
         this.quiet = seqs.every((seq) => !this.answered.has(seq));

@@ -246,7 +246,8 @@ impl CodexFold {
         };
         // Codex repeats an unchanged total (rate-limit refreshes); that is no request.
         if grew != Usage::default() {
-            sink.turn(UsageTurn { at, model: self.model.clone(), usage: grew, reported_cost: None });
+            // Codex writes no cache (`cache_write` is 0), so no part of it is 1-hour.
+            sink.turn(UsageTurn { at, model: self.model.clone(), usage: grew, cache_write_1h: 0.0, reported_cost: None });
         }
         self.usage = Some(now);
     }

@@ -508,6 +508,8 @@ export interface UsageGroup {
   output: number
   cacheRead: number
   cacheWrite: number
+  /** The part of `cache_write` at Claude's 1-hour tier (`UsageTurn::cache_write_1h`). */
+  cacheWrite1H: number
   reportedCostUsd: number
   firstAt: number
   lastAt: number
@@ -517,7 +519,12 @@ export type UsageGroupBy = 'session' | 'day' | 'model'
 
 /** What one usage group is. */
 export type UsageKey =
-  | { t: 'session'; sessionId: string; sourcePath: string; provider: Provider; format: Format; model?: string }
+  | { t: 'session'; sessionId: string; sourcePath: string; provider: Provider; format: Format; model?: string; /**
+     * The session that spawned this one, when it is a sub-agent's (a Codex sub-agent writes
+     * its own rollout: `session_meta.source.subagent.thread_spawn.parent_thread_id`). A
+     * caller pricing a session adds its sub-agents' groups (expeditions-v1 usage.ts).
+     */
+  parentSessionId?: string }
   | { t: 'day'; day: string }
   | { t: 'model'; provider: Provider; model?: string }
 

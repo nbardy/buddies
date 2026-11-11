@@ -7,7 +7,7 @@ import { renderBrief, renderCommand } from '../src/expedition-kernel/brief';
 import { type ProviderOf, canonicalise } from '../src/expedition-kernel/canonical';
 import { expandHome, parseContract } from '../src/expedition-kernel/contract';
 import { staticGate, typecheckGate } from '../src/expedition-kernel/gates';
-import type { Authored } from '../src/expedition-kernel/protocol';
+import type { Authored, CastRow } from '../src/expedition-kernel/protocol';
 import { tempDir } from './fixtures/temp';
 
 const REPO = path.resolve(__dirname, '../..');
@@ -299,7 +299,26 @@ test('staticGate: clean calls pass; each defect is its own issue', () => {
   const folder = folderWith({ s: 'x', rub: 'r' });
   const judged = { t: 'review' as const, rubric: 'rub', by: seat('gemini') };
   const clean = [agent({ judge: judged }), agent({ key: 'collect/b' })];
-  const ok = staticGate({ contract: c, folder, calls: clean, providerOf });
+  // The cast table: the two steps the calls came from, and one no call reached (a checkout).
+  const cast: CastRow[] = [
+    {
+      t: 'agent',
+      step: 's',
+      by: seat('claude'),
+      tree: 'none',
+      grant: { reads: [], web: false },
+      judge: judged,
+    },
+    {
+      t: 'agent',
+      step: 'later',
+      by: seat('claude'),
+      tree: 'checkout',
+      grant: { reads: [], web: false },
+      judge: { t: 'none' },
+    },
+  ];
+  const ok = staticGate({ contract: c, folder, cast, calls: clean, providerOf });
   assert.equal(ok.t, 'ok');
   // Every turn the plan and contract would run, with its limits on its harness (access.ts):
   // claude enforces them all here; gemini has no mapping, so a gemini judge is told, not held.
@@ -307,16 +326,20 @@ test('staticGate: clean calls pass; each defect is its own issue', () => {
     a.harness.t === 'known'
       ? `${a.harness.provider}:${Object.values(a.harness.grants).every((g) => g.t === 'enforced') ? 'enforced' : 'advisory'}`
       : 'unknown';
-  assert.deepEqual(ok.t === 'ok' ? ok.access.map((a) => [a.label, a.turn, held(a)]) : [], [
-    ['collect/a', 'call', 'claude:enforced'],
-    ['collect/a', 'judge', 'gemini:advisory'],
-    ['collect/b', 'call', 'claude:enforced'],
-    ['leader', 'leader', 'claude:enforced'],
-    ['done/0', 'judge', 'gemini:advisory'],
+  assert.deepEqual(ok.t === 'ok' ? ok.access.map((a) => [a.label, a.from, a.turn, held(a)]) : [], [
+    ['s', 'cast-table', 'call', 'claude:enforced'],
+    ['s', 'cast-table', 'judge', 'gemini:advisory'],
+    // Never called in the first wave, still reported: and its shell makes its reads advisory.
+    ['later', 'cast-table', 'checkout', 'claude:advisory'],
+    ['collect/a', 'first-wave', 'call', 'claude:enforced'],
+    ['collect/a', 'first-wave', 'judge', 'gemini:advisory'],
+    ['collect/b', 'first-wave', 'call', 'claude:enforced'],
+    ['leader', 'contract', 'leader', 'claude:enforced'],
+    ['done/0', 'contract', 'judge', 'gemini:advisory'],
   ]);
 
   const run = (calls: Authored[], contract: keyed.Contract = c, dir = folder) => {
-    const r = staticGate({ contract, folder: dir, calls, providerOf });
+    const r = staticGate({ contract, folder: dir, cast: [], calls, providerOf });
     assert.equal(r.t, 'failed');
     return r.t === 'failed' ? r.issues : [];
   };

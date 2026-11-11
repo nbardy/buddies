@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { keyed } from '@unleashd/shared';
+import { runPaths } from '../src/expeditions-v1/executor/address';
 import { getRef } from '../src/expeditions-v1/executor/refs';
 import { HASH, agentSpec, git, harness, runIdOf } from './fixtures/agent-runs';
 
@@ -19,6 +20,36 @@ const EXP = '20261111T000000-cccccc';
 const expDir = path.join(h.expRoot, EXP);
 const brief = (tag: string, mode: string) =>
   `Do the thing. TAG:${tag} MODE:${mode} ANSWER_JSON:{"n":9}`;
+const REVIEWER: keyed.Who = {
+  t: 'seat',
+  provider: 'claude',
+  model: 'claude-haiku-5-5',
+  effort: 'low',
+};
+/** A review judge of `key`'s attempt `letter` that reports what it can see (fake mode lookcode). */
+async function judgeOf(key: string, letter: string, tag: string) {
+  const runId = runIdOf(EXP, key, letter, 'judge');
+  await h.start(runId, {
+    t: 'review',
+    by: REVIEWER,
+    brief: `Is the code right? TAG:${tag} MODE:lookcode ANSWER_JSON:{"verdict":"yes","why":"fine"}`,
+    of: keyed.refOf(key, HASH(letter)),
+    max: { usd: 5, minutes: 10 },
+  });
+  const [verdict] = await h.settledOf(runId);
+  const look = JSON.parse(h.read(`${tag}.look`)) as {
+    code: { dir: string; head: string; files: string[] }[];
+    diffAt: string;
+    diff: string;
+  };
+  return {
+    runId,
+    verdict,
+    look,
+    prompt: h.read(`${tag}.prompt`),
+    code: runPaths(expDir, runId).tree,
+  };
+}
 
 before(async () => {
   // The first backend's expedition posts hang: it "dies" between `posting` and the post.
@@ -240,6 +271,26 @@ test('a checkout call commits on its own branch from its base; the ref records i
     'the worktree is released'
   );
   assert.equal(git(h.repo, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main', "the owner's checkout");
+
+  // CONNECT_PLAN §10: a review judge of a checkout call got only the answer file (the worktree is
+  // released at settle, and a judge has no shell), so a reviewer could not read the code it
+  // judged. Now its run holds a detached checkout of exactly the judged commit in its read roots,
+  // and the diff against the call's base in a file, and the checkout goes when the judge settles.
+  const j = await judgeOf('r/checkout', '1', 'codejudge');
+  assert.deepEqual(j.verdict?.raw, { t: 'ok', out: { verdict: 'yes', why: 'fine' } });
+  assert.deepEqual(
+    j.look.code.map((c) => [c.dir, c.head, c.files.filter((f) => f !== '.git')]),
+    [[j.code, ref.value.commit, ['README.md', 'made-by-call.txt']]],
+    'the one checkout it reads is the judged commit'
+  );
+  assert.match(j.look.diff, /\+\+\+ b\/made-by-call\.txt\n@@ -0,0 \+1 @@\n\+work\n/);
+  assert.match(j.prompt, /THE CODE\nThe judged commit [0-9a-f]{40} is checked out read-only at /);
+  assert.ok(j.prompt.includes(j.code) && j.prompt.includes(j.look.diffAt));
+  // Still a judge: reads only, no shell, no web.
+  const argv = JSON.parse(h.read('codejudge.argv')) as string[];
+  assert.equal(argv[argv.indexOf('--tools') + 1], 'Read,Grep,Glob');
+  assert.ok(!fs.existsSync(j.code), 'the checkout is removed when the judge settles');
+  assert.ok(!git(h.repo, 'worktree', 'list', '--porcelain').includes(j.code));
 });
 
 test('a cancelled checkout call keeps its dirty work at a salvage ref, its partial', {
@@ -260,4 +311,15 @@ test('a cancelled checkout call keeps its dirty work at a salvage ref, its parti
   assert.equal(salvage.t, 'ref');
   if (salvage.t !== 'ref') return;
   assert.equal(git(h.repo, 'show', `${salvage.name}:half-done.txt`), 'partial');
+
+  // A judge of work that committed nothing is told so, and still gets the (base) checkout.
+  const j = await judgeOf('r/salvage', '2', 'emptyjudge');
+  assert.equal(j.verdict?.raw.t, 'ok');
+  assert.match(j.prompt, /The producer made no commit/);
+  assert.equal(j.look.diff, '');
+  assert.deepEqual(
+    j.look.code.map((c) => c.head),
+    [h.base]
+  );
+  assert.ok(!fs.existsSync(j.code));
 });

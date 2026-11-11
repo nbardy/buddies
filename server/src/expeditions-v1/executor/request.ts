@@ -46,6 +46,7 @@ const WHERE: {
   // What it may read there is in LIMITS (the turn's tools are set to it, CONNECT_PLAN §10 F1).
   dir: (t, ctx, base) =>
     `Your working directory is ${t.path}, a scratch directory. The repository is ${ctx.repo}, at commit ${base}.`,
+  'judge-checkout': (t) => `Your working directory is ${t.path}, a scratch directory.`,
   checkout: (t, _ctx, base) =>
     `Your working directory is ${t.path}: a checkout of the repository on its own branch ${t.branch}, starting at commit ${base}. Commit your work on this branch; uncommitted changes are not your answer.`,
 };
@@ -113,7 +114,28 @@ export function agentBody(x: {
   ].join('\n');
 }
 
-/** A review judge's request: the rubric, then the work it judges. */
+/** Where a review judge finds the code it judges, stated at the head of its prompt. Only a judge
+ * of a checkout call has any (its tree is `judge-checkout`); every other tree has none. */
+const CODE: {
+  readonly [K in Tree['t']]: (t: Extract<Tree, { t: K }>) => string[];
+} = {
+  none: () => [],
+  detached: () => [],
+  dir: () => [],
+  checkout: () => [],
+  'judge-checkout': (t) => [
+    'THE CODE',
+    `The judged commit ${t.commit} is checked out read-only at ${t.code}; read the implementation there.`,
+    t.commit === t.base
+      ? `The producer made no commit: that checkout is the call's base ${t.base}, and the diff at ${t.diff} is empty. Judge it as work that changed nothing.`
+      : `What it changed against the call's base ${t.base} is the diff at ${t.diff} (\`git diff ${t.base.slice(0, 12)} ${t.commit.slice(0, 12)}\`).`,
+    '',
+  ],
+};
+const codeOf = (tree: Tree): string[] => CODE[tree.t](tree as never);
+
+/** A review judge's request: where the code is (when it judges a checkout), the rubric, then the
+ * work it judges. */
 export function reviewBody(x: {
   readonly address: RunAddress;
   readonly ctx: ExpeditionContext;
@@ -126,6 +148,7 @@ export function reviewBody(x: {
   return [
     headOf(header(x.address), x.capabilities),
     '',
+    ...codeOf(x.tree),
     'You are judging work against the rubric below.',
     '',
     x.brief,

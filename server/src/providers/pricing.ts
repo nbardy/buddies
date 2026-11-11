@@ -14,39 +14,61 @@ import type { Provider as ProviderName } from '@unleashd/shared';
 //   provider-wide guess: an Opus call charged at a Sonnet rate would let a budget overrun.
 //
 // The provider catalog (vendor/agent-cli-tool/catalog.jsonc) carries no prices, so the per-model
-// table is here. Claude rates: Anthropic's first-party list prices (claude-api skill table, cached
-// 2026-11-03), input/output per 1M tokens; cache read where the table states it, otherwise 0.1x
-// input; cache write (5-minute) 1.25x input. Haiku 5.5 is at its <=100K-prompt tier (longer prompts
-// bill 5x and are under-counted).
+// table is here. Claude rates: Anthropic's first-party list prices (claude-api skill, models table
+// cached 2026-11-03, and its prompt-caching / cost-optimization notes for the cache multipliers),
+// input/output per 1M tokens; cache read where the table states it, otherwise 0.1x input; cache
+// write 1.25x input at the 5-minute tier and 2x at the 1-hour tier. Haiku 5.5 is at its <=100K-prompt
+// tier (longer prompts bill 5x and are under-counted).
+// The cache-write tier is per turn, from the ingest rows (`cacheWrite1H`, crates/unleashd-ingest
+// model.rs `UsageTurn`): until 2026-11-11 every write was priced at the 5-minute rate, and the
+// second real run's Claude turns, all of which wrote at the 1-hour tier, were recorded at $0.332
+// against the CLIs' own $0.455 (27% low; the gap was the 1-hour premium on every row). A row whose
+// tier was never read counts as 1-hour (the crate's rule): a budget must never under-count.
+// Guard: server/test/expeditions-v1-executor.test.ts (the run's probeClaude row prices to the CLI's
+// own figure).
 // Codex rates: OpenAI's published API pricing, https://developers.openai.com/api/docs/pricing
 // (fetched 2026-11-11), Standard tier, short context (<=272K input tokens), per 1M tokens. Longer
 // prompts bill at a higher tier and are under-counted here. OpenAI has no cache-write charge. A
 // Codex model absent from the table (gpt-5.3-codex-spark: not on that page) stays `unpriced`, and
 // its call `unreported` (the kernel then charges the whole reservation).
 
+/** Per 1M tokens. A cache write is priced by the tier it was written at. */
 export interface Rates {
   readonly input: number;
   readonly output: number;
   readonly cacheRead: number;
-  readonly cacheWrite: number;
+  readonly cacheWrite5m: number;
+  readonly cacheWrite1h: number;
 }
 
-/** Tokens of one usage group: `input` is the UNCACHED part (the crate splits cached input out). */
-export type Tokens = Pick<UsageGroup, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>;
+/** Tokens of one usage group: `input` is the UNCACHED part (the crate splits cached input out);
+ * `cacheWrite1H` is the part of `cacheWrite` written at the 1-hour tier. */
+export type Tokens = Pick<
+  UsageGroup,
+  'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'cacheWrite1H'
+>;
 
 const usdOf = (t: Tokens, r: Rates): number =>
   (t.input * r.input +
     t.output * r.output +
     t.cacheRead * r.cacheRead +
-    t.cacheWrite * r.cacheWrite) /
+    (t.cacheWrite - t.cacheWrite1H) * r.cacheWrite5m +
+    t.cacheWrite1H * r.cacheWrite1h) /
   1_000_000;
 
 // ---- the panel's estimate ----
 
-// Approximate list prices per 1M tokens (early 2026). OpenAI bills cached input at a tenth of the
+// Approximate list prices per 1M tokens (early 2026), one cache-write rate whatever the tier: an
+// estimate, unchanged since /api/usage first showed it. OpenAI bills cached input at a tenth of the
 // input rate. Gemini/Cursor/Muse record no usage; they carry the OpenAI-like row.
-const OPENAI_LIKE: Rates = { input: 2.5, output: 10, cacheRead: 0.25, cacheWrite: 0 };
-const PROVIDER_ESTIMATE: Record<ProviderName, Rates> = {
+type EstimateRates = {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+};
+const OPENAI_LIKE: EstimateRates = { input: 2.5, output: 10, cacheRead: 0.25, cacheWrite: 0 };
+const PROVIDER_ESTIMATE: Record<ProviderName, EstimateRates> = {
   claude: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   codex: OPENAI_LIKE,
   opencode: OPENAI_LIKE,
@@ -60,10 +82,17 @@ const PROVIDER_ESTIMATE: Record<ProviderName, Rates> = {
  * is 0 when none was recorded). */
 export function estimateUsd(
   provider: ProviderName,
-  g: Tokens & { reportedCostUsd: number }
+  g: Pick<UsageGroup, 'input' | 'output' | 'cacheRead' | 'cacheWrite'> & { reportedCostUsd: number }
 ): number {
   if (g.reportedCostUsd > 0) return g.reportedCostUsd;
-  return usdOf(g, PROVIDER_ESTIMATE[provider]);
+  const r = PROVIDER_ESTIMATE[provider];
+  return (
+    (g.input * r.input +
+      g.output * r.output +
+      g.cacheRead * r.cacheRead +
+      g.cacheWrite * r.cacheWrite) /
+    1_000_000
+  );
 }
 
 // ---- a price a budget may trust ----
@@ -72,13 +101,15 @@ const claude = (input: number, output: number, cacheRead = input / 10): Rates =>
   input,
   output,
   cacheRead,
-  cacheWrite: input * 1.25,
+  cacheWrite5m: input * 1.25,
+  cacheWrite1h: input * 2,
 });
 const openai = (input: number, cacheRead: number, output: number): Rates => ({
   input,
   output,
   cacheRead,
-  cacheWrite: 0,
+  cacheWrite5m: 0,
+  cacheWrite1h: 0,
 });
 const CODEX_RATES: Readonly<Record<string, Rates>> = {
   'gpt-6.1-sol': openai(2, 0.1, 10),

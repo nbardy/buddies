@@ -480,6 +480,7 @@ describe('commands are argv, never shell', () => {
     const r = staticGate({
       contract,
       folder,
+      cast: [],
       calls: [cmd('build', 'make && make test'), cmd('fine', "node -e 'a && b'")],
       providerOf: () => ({ t: 'unknown', why: 'none' }),
     });
@@ -525,29 +526,34 @@ test('a leader continue needs its reason; a log written without one still reads'
 
 // F6 (2026-11-11 run): every Codex call was `unreported` and charged its whole $0.50 reservation.
 describe('what a call cost, from ingest usage rows', () => {
-  const meterOver = (provider: string, model: string) =>
+  // The second real run's Codex turn: 48,324 input of which 36,992 cached, 234 output.
+  const CODEX_TURN = {
+    input: 11_332,
+    output: 234,
+    cacheRead: 36_992,
+    cacheWrite: 0,
+    cacheWrite1H: 0,
+  };
+  type Group = { key: Record<string, unknown> } & typeof CODEX_TURN;
+  const meterOverGroups = (groups: Group[]) =>
     ingestMeter({
       sessionOf: async () => ({ t: 'session', sessionId: 's1' }),
       ingest: () =>
         ({
           t: 'ready',
           ingest: {
-            // The real run's Codex turn: 48,324 input of which 36,992 cached, 234 output.
             usage: async () => ({
-              groups: [
-                {
-                  key: { t: 'session', sessionId: 's1', provider, model },
-                  input: 11_332,
-                  output: 234,
-                  cacheRead: 36_992,
-                  cacheWrite: 0,
-                  reportedCostUsd: 0,
-                },
-              ],
+              groups: groups.map((g) => ({
+                ...g,
+                key: { t: 'session', ...g.key },
+                reportedCostUsd: 0,
+              })),
             }),
           },
         }) as never,
     });
+  const meterOver = (provider: string, model: string, tokens = CODEX_TURN) =>
+    meterOverGroups([{ key: { sessionId: 's1', provider, model }, ...tokens }]);
   test('a Codex model with a published rate is priced', async () => {
     const m = await meterOver('codex', 'gpt-6.1-sol').spent(['c1'], 0);
     // (11,332 x $2 + 36,992 x $0.10 + 234 x $10) / 1M
@@ -556,5 +562,37 @@ describe('what a call cost, from ingest usage rows', () => {
   });
   test('a Codex model with no published rate stays unpriced', async () => {
     assert.equal((await meterOver('codex', 'gpt-5.3-codex-spark').spent(['c1'], 0)).t, 'unpriced');
+  });
+  // The second run's Claude turns all wrote their cache at the 1-hour tier and were priced at the
+  // 5-minute rate: $0.332 recorded against the CLIs' own $0.455. This is its `probeClaude` row
+  // (output/expedition-run2-2026-11-11/logs/steps.json), whose CLI reported $0.0319513; the old
+  // price was $0.0238993.
+  test("a Claude turn's 1-hour cache writes are priced at the 1-hour rate: the CLI's own figure", async () => {
+    const m = await meterOver('claude', 'claude-sonnet-5-5', {
+      input: 4,
+      output: 941,
+      cacheRead: 10_613,
+      cacheWrite: 5_368,
+      cacheWrite1H: 5_368,
+    }).spent(['c1'], 0);
+    assert.ok(m.t === 'priced' && Math.abs(m.usd - 0.0319513) < 1e-9, JSON.stringify(m));
+  });
+  // The second run's Codex seat started a sub-agent (no flag blocks one); its 13,258 input and 5
+  // output tokens were in its own rollout and never charged. A session whose parent is one of the
+  // call's (or theirs, depth 2) is added; an unrelated session is not.
+  test("a Codex sub-agent's own session is charged to its call", async () => {
+    const codex = { provider: 'codex', model: 'gpt-6.1-sol' };
+    const child = { input: 13_258, output: 5, cacheRead: 0, cacheWrite: 0, cacheWrite1H: 0 };
+    const m = await meterOverGroups([
+      { key: { sessionId: 's1', ...codex }, ...CODEX_TURN },
+      { key: { sessionId: 'k1', parentSessionId: 's1', ...codex }, ...child },
+      { key: { sessionId: 'k2', parentSessionId: 'k1', ...codex }, ...child },
+      { key: { sessionId: 'other', parentSessionId: 'elsewhere', ...codex }, ...child },
+    ]).spent(['c1'], 0);
+    // 0.028703 + 2 x (13,258 x $2 + 5 x $10) / 1M
+    assert.ok(
+      m.t === 'priced' && Math.abs(m.usd - (0.028703 + 2 * 0.026566)) < 1e-6,
+      JSON.stringify(m)
+    );
   });
 });

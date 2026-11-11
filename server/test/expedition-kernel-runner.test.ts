@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { cpSync, writeFileSync } from 'node:fs';
+import { cpSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import { zodToJsonSchema as zodToJsonSchemaTyped } from 'zod-to-json-schema';
+import { parseContract } from '../src/expedition-kernel/contract';
+import { turnAccessOf } from '../src/expedition-kernel/gates';
 import type { Authored } from '../src/expedition-kernel/protocol';
 import { type DryRunResult, dryRun, runPlan } from '../src/expedition-kernel/runner';
 import { tempDir } from './fixtures/temp';
@@ -75,6 +77,31 @@ test('a dry run of the GTM plan with nothing known asks for scope only and waits
   assert.equal(scope.t, 'agent');
   assert.deepEqual(scope.t === 'agent' && scope.output, zodToJsonSchema(z.array(Org)));
   assert.deepEqual(result.end, { t: 'waiting', calls: ['scope/scope'], reviews: [] });
+
+  // CONNECT_PLAN §10 (second real run): the preview reported limits only for the calls the dry run
+  // reached, so the checkout calls behind the first wave were never previewed. The plan sends its
+  // cast table before any call; every step is reported from it, the unreached `collect` and
+  // `packet` checkouts and their judges included.
+  const parsed = parseContract(readFileSync(path.join(FIXTURES, 'gtm', 'contract.md'), 'utf8'));
+  if (parsed.t !== 'ok') throw new Error(JSON.stringify(parsed));
+  const access = turnAccessOf(parsed.contract, result.cast, [], () => ({
+    t: 'known',
+    provider: 'claude',
+  }));
+  assert.deepEqual(
+    access.filter((a) => a.from === 'cast-table').map((a) => [a.label, a.turn]),
+    [
+      ['scope', 'call'],
+      ['collect', 'checkout'],
+      ['thesis', 'call'],
+      ['thesis', 'judge'],
+      ['attack', 'call'],
+      ['attack', 'judge'],
+      ['revise', 'call'],
+      ['revise', 'judge'],
+      ['packet', 'checkout'],
+    ]
+  );
 });
 
 test('scripted answers drive the GTM plan to its candidate, identically in a fresh process', async () => {
@@ -271,6 +298,7 @@ test('kill() during a pending call leaves no process behind', async () => {
   });
   const handle = runPlan({
     folder: copyPlan('need-gap').folder,
+    onCast: () => {},
     onCall: () => {},
     onReview: () => {},
     onPhase: () => {},

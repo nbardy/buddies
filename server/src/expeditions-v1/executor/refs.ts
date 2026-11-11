@@ -19,11 +19,15 @@ export const RefRecord = z
     answerPath: z.string().min(1),
     /** The commit the output is at: a command's is the commit it ran on (it keeps no changes). */
     commit: z.string().min(1),
-    /** An agent call with a checkout made a branch (a later step); a command makes none. */
+    /** An agent call with a checkout made a branch from `base` (what a review judge diffs its
+     * commit against); a command makes none. */
     checkout: z.discriminatedUnion('t', [
       v('none', {}),
       v('branch', {
         branch: z.string().min(1),
+        // Added 2026-11-11. A branch ref stored before it does not parse (CorruptRecord, loudly):
+        // the base is not knowable from the ref, and a judge must not diff against a guess.
+        base: z.string().min(1),
         salvage: z.discriminatedUnion('t', [v('none', {}), v('ref', { name: z.string() })]),
       }),
     ]),

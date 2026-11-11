@@ -42,16 +42,37 @@ export function ingestMeter(deps: { sessionOf: SessionOf; ingest: IngestAccessor
         ids.add(s.sessionId);
       }
       const report = await slot.ingest.usage({ since, groupBy: 'session' });
+      const groups = report.groups.flatMap((g) =>
+        g.key.t === 'session' ? [{ g, key: g.key }] : []
+      );
+      // A call's sessions and every sub-agent session below them: a Codex sub-agent (which no
+      // flag blocks) writes its own rollout, whose group names its parent. Until 2026-11-11 its
+      // tokens were never charged (CONNECT_PLAN §10). Ingest may see a child after its call
+      // settled; that spend is then missed (the same lag as the known limit above).
+      const counted = new Set(ids);
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const { key } of groups)
+          if (
+            key.parentSessionId &&
+            counted.has(key.parentSessionId) &&
+            !counted.has(key.sessionId)
+          ) {
+            counted.add(key.sessionId);
+            grew = true;
+          }
+      }
       let usd = 0;
       const seen = new Set<string>();
-      for (const g of report.groups) {
-        if (g.key.t !== 'session' || !ids.has(g.key.sessionId)) continue;
-        seen.add(g.key.sessionId);
-        const price = priceUsd(ProviderSchema.parse(g.key.provider), g.key.model, g);
+      for (const { g, key } of groups) {
+        if (!counted.has(key.sessionId)) continue;
+        seen.add(key.sessionId);
+        const price = priceUsd(ProviderSchema.parse(key.provider), key.model, g);
         if (price.t === 'unpriced') return price;
         usd += price.usd;
       }
-      if (seen.size < ids.size) return { t: 'pending', why: 'ingest has not seen every session' };
+      if ([...ids].some((id) => !seen.has(id)))
+        return { t: 'pending', why: 'ingest has not seen every session' };
       return { t: 'priced', usd };
     },
   };

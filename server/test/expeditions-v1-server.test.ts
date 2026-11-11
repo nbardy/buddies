@@ -275,11 +275,12 @@ test('flag on: preview writes nothing; launch, list, view; an owner reply settle
       .filter((a) => a.turn === turn)
       .map((a) =>
         a.harness.t === 'known'
-          ? `${a.harness.provider}:${Object.values(a.harness.grants).every((g) => g.t === 'enforced')}`
+          ? `${a.from}:${a.harness.provider}:${Object.values(a.harness.grants).every((g) => g.t === 'enforced')}`
           : a.harness.why
       );
-  assert.deepEqual(held('call'), ['claude:true']);
-  assert.deepEqual(held('leader'), ['claude:true']);
+  // The `work` step from the cast table the plan sent, and its call the dry run reached.
+  assert.deepEqual(held('call'), ['cast-table:claude:true', 'first-wave:claude:true']);
+  assert.deepEqual(held('leader'), ['contract:claude:true']);
   assert.deepEqual(snapshot(folder), before, 'the folder is untouched');
   assert.deepEqual(fs.existsSync(h.expRoot) ? fs.readdirSync(h.expRoot) : [], []);
   const broken = planFolder({ plan: `${HEAD}\nexport default plan(async () => nope);\n` });

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { keyed } from '@unleashd/shared';
-import { Authored, type FromPlan, ToPlan } from '../protocol';
+import { Authored, type CastRow, type FromPlan, ToPlan } from '../protocol';
 
 // The plan process's half of the wire (protocol.ts). One Session per process, created when the
 // plan starts. Every call, ask and review is a message to the host and resolves only when the host
@@ -90,6 +90,10 @@ export class Session {
     this.post({ t: 'phase', name, edge });
   }
 
+  cast(rows: readonly CastRow[]): void {
+    this.post({ t: 'cast', rows: [...rows] });
+  }
+
   /**
    * The plan returned. A call or review it issued and never awaited is still outstanding here: the
    * plan's result would not depend on it, and the kernel would cancel the work it started. That
@@ -177,6 +181,14 @@ export class Session {
 }
 
 let current: Session | 'not-started' = 'not-started';
+/** Cast rows declared before the session opened (a `steps({...})` table at module scope). */
+const castBeforeStart: CastRow[] = [];
+
+/** A `steps({...})` table: sent now when the plan runs, else when it starts (before any call). */
+export function declareCast(rows: readonly CastRow[]): void {
+  if (current === 'not-started') castBeforeStart.push(...rows);
+  else current.cast(rows);
+}
 
 export function session(): Session {
   if (current === 'not-started')
@@ -193,5 +205,6 @@ export function openSession(): Session {
   if (current !== 'not-started') throw new Error('The plan session is already open.');
   current = new Session(send, channel);
   current.listen();
+  if (castBeforeStart.length > 0) current.cast(castBeforeStart);
   return current;
 }

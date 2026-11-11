@@ -74,6 +74,48 @@ fn claude_turns_count_each_request_once_and_the_meter_skips_sidechains() {
     assert_eq!(reader.latest_context("nope").unwrap(), None);
 }
 
+// CONNECT_PLAN §10, the second real run: every Claude turn wrote its cache at the 1-hour tier
+// (2x input) and the rows did not say so, so pricing used the 5-minute rate (1.25x) and recorded
+// spend was 27% low. The split must survive into the totals, a record naming no tier must count
+// as the dearer one, and a store made before the column must gain it with its old rows priced so.
+#[test]
+fn claude_cache_writes_keep_their_tier_and_an_unknown_tier_counts_as_1h() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("ingest.sqlite");
+    // A store as the build before the split made it: no `cache_write_1h`, one row already in it.
+    {
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID;
+             INSERT INTO meta (key, value) VALUES ('schema', 2), ('rev', 0);
+             CREATE TABLE usage_turn (source_id INTEGER NOT NULL, n INTEGER NOT NULL, at REAL, model TEXT,
+               input REAL NOT NULL, output REAL NOT NULL, cache_read REAL NOT NULL, cache_write REAL NOT NULL,
+               reported_cost REAL, PRIMARY KEY (source_id, n)) WITHOUT ROWID;
+             INSERT INTO usage_turn VALUES (999, 0, 1, 'claude-opus-4', 0, 0, 0, 40, NULL);",
+        )
+        .unwrap();
+    }
+    let split = json!({ "input_tokens": 4, "output_tokens": 941, "cache_read_input_tokens": 10_613,
+        "cache_creation_input_tokens": 5_368,
+        "cache_creation": { "ephemeral_1h_input_tokens": 5_000, "ephemeral_5m_input_tokens": 368 } });
+    let unsplit = json!({ "input_tokens": 1, "output_tokens": 1, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 100 });
+    let text = jsonl(&[claude_assistant("m1", T0, split, false), claude_assistant("m2", T0 + 1.0, unsplit, false)]);
+    write(&dir.path().join("claude/-w/s1.jsonl"), &text);
+    Engine::open(vec![Root { format: Format::Claude, path: dir.path().join("claude").to_string_lossy().into_owned() }], &db)
+        .unwrap()
+        .scan(&mut |_| {});
+    let reader = Reader::open(&db).unwrap();
+    let report = reader.usage(&UsageQuery { since: 0.0, until: None, group_by: UsageGroupBy::Session }).unwrap();
+    let [g] = report.groups.as_slice() else { panic!("{report:?}") };
+    assert_eq!((g.cache_write, g.cache_write_1h), (5_468.0, 5_100.0));
+
+    // The old store opened (the engine wrote into the column it added); the row the old build
+    // wrote kept its unknown tier rather than a guessed 0.
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let old: Option<f64> = conn.query_row("SELECT cache_write_1h FROM usage_turn WHERE source_id = 999", [], |r| r.get(0)).unwrap();
+    assert_eq!(old, None, "an old row's tier was never read");
+}
+
 fn codex(at: f64, kind: &str, payload: Value) -> Value {
     json!({ "timestamp": iso(at), "type": kind, "payload": payload })
 }
@@ -117,6 +159,41 @@ fn codex_turns_telescope_to_the_last_total_and_the_meter_skips_the_reset_sentine
     let context = reader.latest_context("c1").unwrap().unwrap();
     assert_eq!((context.context_tokens, context.context_window), (1100.0, Some(272_000.0)));
     assert_eq!(context.compaction.map(|c| c.count), Some(1));
+}
+
+// CONNECT_PLAN §10 (second real run): a Codex expedition call started a sub-agent that no flag
+// can block; its tokens are in its own rollout, so pricing only the call's session missed them.
+// The sub-agent's usage group names its parent, which is how the meter finds and adds it.
+#[test]
+fn a_codex_sub_agent_rollout_is_its_own_usage_group_naming_its_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = jsonl(&[
+        codex(T0, "session_meta", json!({ "id": "p1", "cwd": "/w", "source": "exec" })),
+        codex(T0, "turn_context", json!({ "cwd": "/w", "model": "gpt-6.1-sol" })),
+        codex(T0, "event_msg", json!({ "type": "user_message", "message": "go" })),
+        token_count(T0 + 1.0, 1000, 800, 50, 1000),
+    ]);
+    let child = jsonl(&[
+        codex(T0, "session_meta", json!({ "id": "k1", "cwd": "/w",
+            "source": { "subagent": { "thread_spawn": { "parent_thread_id": "p1", "depth": 1 } } } })),
+        codex(T0, "turn_context", json!({ "cwd": "/w", "model": "gpt-6.1-sol" })),
+        codex(T0, "event_msg", json!({ "type": "user_message", "message": "probe" })),
+        token_count(T0 + 2.0, 13_258, 0, 5, 13_258),
+    ]);
+    write(&dir.path().join("codex/2026/08/29/rollout-2026-08-29T10-40-00-p1.jsonl"), &parent);
+    write(&dir.path().join("codex/2026/08/29/rollout-2026-08-29T10-40-01-k1.jsonl"), &child);
+    let reader = scan(dir.path(), vec![Root { format: Format::Codex, path: dir.path().join("codex").to_string_lossy().into_owned() }]);
+    let report = reader.usage(&UsageQuery { since: 0.0, until: None, group_by: UsageGroupBy::Session }).unwrap();
+    let mut by: Vec<(String, Option<String>, f64)> = report
+        .groups
+        .iter()
+        .map(|g| match &g.key {
+            UsageKey::Session { session_id, parent_session_id, .. } => (session_id.clone(), parent_session_id.clone(), g.input),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    by.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(by, vec![("k1".into(), Some("p1".into()), 13_258.0), ("p1".into(), None, 200.0)]);
 }
 
 #[test]

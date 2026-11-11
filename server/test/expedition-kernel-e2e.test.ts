@@ -614,11 +614,14 @@ describe('expedition kernel end to end', () => {
             .toString('utf8')
             .trim()
             .split('\n')
-            .map((l) => JSON.parse(l));
+            .map((l) => JSON.parse(l))
+            // The owner's ask after two rejections, and the ruling: asked about, not plan state.
+            .filter((x) => x.t !== 'owner' && !(x.key ?? x.call?.key ?? '').startsWith('owner/'));
           assert.deepEqual(
             added.map((x) => [x.t, x.key ?? x.call?.key]),
             [
               ['settled', `leader/${snaps.length}`],
+              ['act', `leader/${snaps.length}`],
               ['declared', `leader/${snaps.length + 1}`],
               ['started', `leader/${snaps.length + 1}`],
             ]
@@ -648,22 +651,44 @@ describe('expedition kernel end to end', () => {
         `${id} settles`
       );
     }
-    // Four rewrites, each through `tsc` (seconds apiece on a loaded machine), so a longer wait.
+    // Four rewrites, each through `tsc` (seconds apiece on a loaded machine), so longer waits.
+    // After every second rejection in a row the host asks the owner instead of waking the leader:
+    // the first time the owner waits for a rewrite (one more wake, then a fourth rejection), the
+    // second time it continues as planned.
+    const answerAsk = async (n: number, reply: string) => {
+      const ask = () =>
+        w.ex.running((r) => r.spec.t === 'ask' && r.spec.call.key === `owner/leader-stuck-${n}`);
+      await w.signal.until(() => ask().length === 1, `the owner is asked (${n})`, 120_000);
+      w.ex.end((ask()[0] as Run).runId, ok(reply), reported(0));
+    };
+    await answerAsk(1, 'rewrite');
+    await answerAsk(2, 'continue, as planned');
     await w.signal.until(
-      () => rejections.length === 4 && w.leader.events.length === 5,
-      'four rewrites are rejected',
-      120_000
+      () =>
+        e
+          .entries()
+          .some(
+            (x) => x.t === 'owner' && x.act.t === 'leader-stuck' && x.act.ruling.t === 'continue'
+          ),
+      'the owner rules to continue'
     );
-    assert.match(rejections[0]?.join() ?? '', /^typecheck: .*TS2339/);
-    assert.match(rejections[1]?.join() ?? '', /static: .*brief briefs\/collect\.md not found/);
+    assert.equal(w.leader.events.length, 4, 'no wake after the fourth rejection');
+    const issues = e
+      .entries()
+      .flatMap((x) => (x.t === 'act' && x.verdict.t === 'rejected' ? [x.verdict.issues] : []));
+    assert.equal(issues.length, 4);
+    assert.match(issues[0]?.join() ?? '', /^typecheck: .*TS2339/);
+    assert.match(issues[1]?.join() ?? '', /static: .*brief briefs\/collect\.md not found/);
     assert.match(
-      rejections[2]?.join() ?? '',
+      issues[2]?.join() ?? '',
       /rules: no cancel or finish for the dropped running calls collect\/collect\/labelbox, collect\/collect\/snorkel/
     );
     assert.match(
-      rejections[3]?.join() ?? '',
+      issues[3]?.join() ?? '',
       /owner: the owner declined: new cost \$\d+(\.\d+)? is over the auto-apply limit \$10/
     );
+    // The wake after the owner's "rewrite" carried that choice to the leader.
+    assert.match(rejections[1]?.join() ?? '', /chose to wait for a rewrite/);
     assert.equal(w.owner.asked.length, 1);
     assert.equal(e.entries().filter((x) => x.t === 'plan').length, 1);
     assert.deepEqual(readdirSync(path.join(dir, 'plans')), ['v0']);
@@ -780,6 +805,80 @@ describe('expedition kernel end to end', () => {
     assertEachRunCreatedOnce(w.ex);
     await e2.detach();
     assertBudgetAtEveryAppend(e2.dir);
+  });
+
+  // CONNECT_PLAN §10 (second real run): the leader answered `retry` for a call that had failed its
+  // judge, twice, and each rejection woke it again at once, bounded only by the budget. Two
+  // rejected acts in a row at one wake point now ask the owner; the count is folded from the log,
+  // so a host that dies between the two rejections still stops at two.
+  test('two rejected acts at one wake point ask the owner once and wake the leader no third time, across a restart', async () => {
+    const orgs = [org('taskus', 'direct'), org('psi', 'substitute')];
+    const retryFailed: keyed.LeaderAct = { t: 'retry', keys: ['collect/collect/taskus'] };
+    let crashed = false;
+    const w = world(
+      gtmPolicy(orgs, (r) =>
+        r.spec.t === 'check' && r.spec.of.startsWith('collect/collect/taskus@')
+          ? { raw: { t: 'no', why: 'quotes not found in page' }, spent: reported(0) }
+          : 'default'
+      ),
+      leaderFor({
+        'budget-mark': () => cont,
+        review: () => ({ act: retryFailed, spent: reported(0.1) }),
+        // Before the crash the second wake is still thinking when the host dies.
+        rejected: () =>
+          crashed ? { act: retryFailed, spent: reported(0.1) } : new Promise(() => {}),
+      })
+    );
+    const e1 = await launched(w, fixture('gtm'));
+    await w.signal.until(
+      () => w.leader.events.filter((x) => x.t === 'rejected').length === 1,
+      'the first rejection wakes the leader again'
+    );
+    const acts1 = e1.entries().filter((x) => x.t === 'act');
+    assert.deepEqual(
+      acts1.map((x) => x.t === 'act' && [x.key, x.verdict.t]),
+      [['leader/1', 'rejected']]
+    );
+    crashed = true;
+    await e1.detach();
+
+    const e2 = await reopen(w, e1.dir);
+    const ask = () =>
+      w.ex.running((r) => r.spec.t === 'ask' && r.spec.call.key === 'owner/leader-stuck-1');
+    await w.signal.until(() => ask().length === 1, 'the owner is asked after the second rejection');
+    // Rebuilt from the log: the wake after the restart carried the first rejection, and its act was
+    // the second; no third wake followed.
+    assert.deepEqual(
+      w.leader.events.map((x) => x.t),
+      ['review', 'rejected', 'rejected']
+    );
+    assert.deepEqual(
+      e2.entries().flatMap((x) => (x.t === 'act' ? [[x.key, x.verdict.t]] : [])),
+      [
+        ['leader/1', 'rejected'],
+        ['leader/3', 'rejected'],
+      ]
+    );
+    const [question] = ask();
+    const text = question?.spec.t === 'ask' ? question.spec.call.question : '';
+    assert.match(text, /last 2 acts at the review "Is the coverage enough/);
+    assert.match(
+      text,
+      /1\. leader\/1: retry collect\/collect\/taskus\. Rejected: .*failed: it has a result/
+    );
+    assert.match(text, /2\. leader\/3: retry collect\/collect\/taskus\./);
+    assert.match(text, /"continue".*"stop".*"rewrite"/);
+
+    w.ex.end(
+      question?.runId as string,
+      ok('Stop. It keeps asking for the same thing.'),
+      reported(0)
+    );
+    const finish = await finishedOf(w, e2);
+    assert.equal(finish.t, 'not-met');
+    assert.match(JSON.stringify(finish), /the owner stopped it after two rejected leader acts/);
+    assert.equal(w.leader.events.length, 3, 'the owner ruled; the leader was never woken again');
+    await e2.detach();
   });
 
   test('a rewrite never cancels a pending ask: a cancel for it is rejected, and without one it drains and is answered', async () => {

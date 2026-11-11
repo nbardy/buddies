@@ -7,6 +7,8 @@ import {
   ATTACHED,
   type Asked,
   DISPOSAL,
+  type LeaderActs,
+  type RejectedAct,
   type Rejection,
   type State,
   canonicalJson,
@@ -31,7 +33,12 @@ import { dryRun } from './runner';
 // ---- the plan gates, shared by launch and rewrite ----
 
 export type Checked =
-  | { readonly t: 'ok'; readonly asked: readonly Asked[] }
+  | {
+      readonly t: 'ok';
+      readonly asked: readonly Asked[];
+      /** What every turn it may run may do (gates.ts `turnAccessOf`). */
+      readonly access: readonly keyed.TurnAccess[];
+    }
   | {
       readonly t: 'failed';
       readonly gate: 'typecheck' | 'dry-run' | 'static';
@@ -51,7 +58,13 @@ export async function checkPlan(
   const dry = await dryRun({ folder, known, reviewed: () => false });
   if (dry.end.t === 'threw' || dry.end.t === 'crashed')
     return { t: 'failed', gate: 'dry-run', issues: [JSON.stringify(dry.end)] };
-  const checked = staticGate({ contract, folder, calls: dry.calls, providerOf: deps.providerOf });
+  const checked = staticGate({
+    contract,
+    folder,
+    cast: dry.cast,
+    calls: dry.calls,
+    providerOf: deps.providerOf,
+  });
   if (checked.t === 'failed') return { t: 'failed', gate: 'static', issues: checked.issues };
   const asked: Asked[] = [];
   for (const a of dry.calls) {
@@ -59,7 +72,7 @@ export async function checkPlan(
     if (canon.t === 'invalid') return { t: 'failed', gate: 'static', issues: canon.issues };
     asked.push({ call: canon.call, hash: hashOf(canon.call) });
   }
-  return { t: 'ok', asked };
+  return { t: 'ok', asked, access: checked.access };
 }
 
 // ---- wakes ----
@@ -111,18 +124,62 @@ export class Change {
       });
   }
 
-  /** Wake the leader until it settles on something other than a rewrite or retry that failed. */
+  /** Wake the leader until it settles on something other than a rewrite or retry that failed;
+   * after two such in a row at this wake point, ask the owner instead of waking it a third time.
+   * Each act's fate is logged (`act`), so the count survives a restart (state `leaderActs`). */
   private async resolve(event: keyed.BaseWake): Promise<Resolution> {
-    let next: keyed.WakeEvent = event;
     for (;;) {
-      const d = await this.m.hostCall((s) => leaderCall(s, next));
+      const at = atWake(this.m.state().leaderActs, event);
+      if (at.t === 'stuck') {
+        const ruled = await this.askOwner(event, at.acts);
+        if (ruled.t === 'resolved') return ruled.resolution;
+        continue;
+      }
+      let key = '';
+      const d = await this.m.hostCall((s) => {
+        const call = leaderCall(s, WAKE_EVENT[at.t](event, at as never));
+        key = call.key;
+        return call;
+      });
       if (d.t === 'closed') return { t: 'closed' };
       const act = actOf(d.outcome);
       if (act.t !== 'act') return act.resolution;
       const done = await ACT[act.act.t](this, act.act as never, event);
+      const verdict: keyed.ActVerdict =
+        done.t === 'rejected' ? { t: 'rejected', issues: [...done.issues] } : { t: 'accepted' };
+      await this.m.serial(async () => {
+        if (this.m.state().progress.t === 'open')
+          await this.m.append({ t: 'act', key, after: event, act: act.act, verdict });
+      });
       if (done.t !== 'rejected') return done;
-      next = { t: 'rejected', after: event, act: act.act, issues: [...done.issues] };
     }
+  }
+
+  /** The owner rules on a leader whose acts at `event` were rejected twice in a row: an ask in
+   * the expedition thread, its answer logged as the owner's `leader-stuck` act. */
+  private async askOwner(
+    event: keyed.BaseWake,
+    acts: readonly RejectedAct[]
+  ): Promise<{ t: 'resolved'; resolution: Resolution } | { t: 'ask-again' }> {
+    const key = `owner/leader-stuck-${this.m.state().ownerRulings + 1}`;
+    const d = await this.m.hostCall(() => ({
+      t: 'ask',
+      key,
+      question: stuckQuestion(event, acts),
+      answer: 'text',
+    }));
+    if (d.t === 'closed') return { t: 'resolved', resolution: { t: 'closed' } };
+    if (d.outcome.t !== 'passed')
+      return {
+        t: 'resolved',
+        resolution: { t: 'errored', why: `the owner's ruling was not given (${d.outcome.t})` },
+      };
+    const ruling = rulingOf(d.outcome.out);
+    await this.m.serial(async () => {
+      if (this.m.state().progress.t === 'open')
+        await this.m.append({ t: 'owner', act: { t: 'leader-stuck', ruling } });
+    });
+    return RULED[ruling.t];
   }
 
   async retry(keys: readonly keyed.Key[]): Promise<Resolution | Rejected> {
@@ -328,6 +385,119 @@ const RESOLVED: { [K in keyed.BaseWake['t']]: Resolve<K> } = {
   'budget-mark': onlyStop,
   drained: onlyStop,
 };
+
+// ---- a leader whose acts keep being rejected ----
+
+/** Rejected acts in a row at one wake point before the host stops waking the leader there. */
+export const REJECTED_BEFORE_OWNER = 2;
+
+/** Where the leader stands at this wake point, from the folded log. */
+type AtWake =
+  | { readonly t: 'fresh' }
+  | { readonly t: 'rejected'; readonly last: RejectedAct }
+  | { readonly t: 'stuck'; readonly acts: readonly RejectedAct[] }
+  | { readonly t: 'rewrite-asked'; readonly last: RejectedAct };
+const AT_WAKE: {
+  readonly [K in LeaderActs['t']]: (a: Extract<LeaderActs, { t: K }>) => AtWake;
+} = {
+  clear: () => ({ t: 'fresh' }),
+  rejected: (a) =>
+    a.acts.length >= REJECTED_BEFORE_OWNER
+      ? { t: 'stuck', acts: a.acts }
+      : { t: 'rejected', last: a.acts.at(-1) as RejectedAct },
+  'rewrite-asked': (a) => ({ t: 'rewrite-asked', last: a.last }),
+};
+/** A run at another wake point says nothing about this one. */
+function atWake(acts: LeaderActs, event: keyed.BaseWake): AtWake {
+  if (acts.t !== 'clear' && canonicalJson(acts.after) !== canonicalJson(event))
+    return { t: 'fresh' };
+  return AT_WAKE[acts.t](acts as never);
+}
+
+const OWNER_WANTS_REWRITE =
+  'The owner was asked after your acts here were rejected twice, and chose to wait for a rewrite: submit one.';
+/** The event a wake carries: the base event, or the rejection it follows (with the owner's
+ * request for a rewrite, when there was one). */
+const WAKE_EVENT: {
+  readonly [K in Exclude<AtWake['t'], 'stuck'>]: (
+    event: keyed.BaseWake,
+    at: Extract<AtWake, { t: K }>
+  ) => keyed.WakeEvent;
+} = {
+  fresh: (event) => event,
+  rejected: (event, at) => ({
+    t: 'rejected',
+    after: event,
+    act: at.last.act,
+    issues: [...at.last.issues],
+  }),
+  'rewrite-asked': (event, at) => ({
+    t: 'rejected',
+    after: event,
+    act: at.last.act,
+    issues: [...at.last.issues, OWNER_WANTS_REWRITE],
+  }),
+};
+
+const RULED: {
+  readonly [K in keyed.LeaderRuling['t']]:
+    | { t: 'resolved'; resolution: Resolution }
+    | { t: 'ask-again' };
+} = {
+  continue: {
+    t: 'resolved',
+    resolution: {
+      t: 'continue',
+      why: 'the owner chose to continue as planned after two rejected leader acts',
+    },
+  },
+  stop: {
+    t: 'resolved',
+    resolution: { t: 'stop', why: 'the owner stopped it after two rejected leader acts' },
+  },
+  // The fold now holds `rewrite-asked`: the loop wakes the leader once more, saying so.
+  rewrite: { t: 'ask-again' },
+  // The fold is unchanged: the loop asks again, under the next key.
+  unclear: { t: 'ask-again' },
+};
+
+/** The owner's reply, by its first word. */
+export function rulingOf(out: unknown): keyed.LeaderRuling {
+  const said = typeof out === 'string' ? out : JSON.stringify(out);
+  const word = /^\W*(\w+)/.exec(said)?.[1]?.toLowerCase();
+  return word === 'continue' || word === 'stop' || word === 'rewrite'
+    ? { t: word }
+    : { t: 'unclear', said };
+}
+
+const EVENT_WORDS: {
+  readonly [K in keyed.BaseWake['t']]: (e: Extract<keyed.BaseWake, { t: K }>) => string;
+} = {
+  review: (e) => `the review "${e.question}"`,
+  'ended-unmet': (e) => `the plan's end with done not met (${e.gaps.join('; ')})`,
+  stuck: (e) => `the plan being stuck (${e.why})`,
+  'budget-mark': (e) => `the ${e.percent}% budget mark`,
+  drained: (e) => `the end of the dropped call ${e.key}`,
+};
+const ACT_WORDS: {
+  readonly [K in keyed.LeaderAct['t']]: (a: Extract<keyed.LeaderAct, { t: K }>) => string;
+} = {
+  continue: () => 'continue',
+  stop: () => 'stop',
+  rewrite: (a) => `rewrite (${a.why})`,
+  retry: (a) => `retry ${a.keys.join(', ')}`,
+};
+/** Deterministic in the log (a restart asks the same question under the same key). */
+export function stuckQuestion(event: keyed.BaseWake, acts: readonly RejectedAct[]): string {
+  return [
+    `The leader's last ${acts.length} acts at ${EVENT_WORDS[event.t](event as never)} were rejected, so it is not being woken again until you decide.`,
+    ...acts.map(
+      (a, i) =>
+        `${i + 1}. ${a.key}: ${ACT_WORDS[a.act.t](a.act as never)}. Rejected: ${a.issues.join('; ')}`
+    ),
+    'Reply with one word: "continue" (go on as planned), "stop" (end the expedition, not met), or "rewrite" (wake the leader once more and ask it for a rewrite).',
+  ].join('\n');
+}
 
 function leaderCall(s: State, event: keyed.WakeEvent): keyed.Call {
   let n = 0;

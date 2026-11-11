@@ -52,7 +52,7 @@ export async function callDirectory(
   if (r.t !== 'posting' && r.t !== 'posted') return refuse(`its record is ${r.t}`);
   if (r.buddyId !== run.buddyId || r.body !== post.body)
     return refuse('the request is not the one the executor posted');
-  if (r.tree.t !== 'dir' && r.tree.t !== 'checkout')
+  if (r.tree.t !== 'dir' && r.tree.t !== 'checkout' && r.tree.t !== 'judge-checkout')
     return refuse(`a call never runs in a ${r.tree.t} tree`);
   return { t: 'call', runId, path: r.tree.path, capabilities: r.capabilities };
 }

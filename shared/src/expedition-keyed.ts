@@ -247,10 +247,22 @@ export const Finish = z.discriminatedUnion('t', [
   v('stopped', { by: str }),
 ]);
 export type Finish = z.infer<typeof Finish>;
+/** The owner's ruling when the leader's acts at one wake point were rejected twice in a row (the
+ * host stopped waking it and asked: kernel change.ts). `unclear`: the reply named none of the
+ * three, so the host asks again. */
+export const LeaderRuling = z.discriminatedUnion('t', [
+  v('continue', {}),
+  v('stop', {}),
+  v('rewrite', {}),
+  v('unclear', { said: str }),
+]);
+export type LeaderRuling = z.infer<typeof LeaderRuling>;
 export const OwnerAct = z.discriminatedUnion('t', [
   v('pause', {}),
   v('resume', {}),
   v('extend', { hours: z.number().positive() }),
+  /** Written by the host from the owner's answer to its ask, never sent by a client. */
+  v('leader-stuck', { ruling: LeaderRuling }),
 ]);
 export type OwnerAct = z.infer<typeof OwnerAct>;
 export const ReviewDecision = z.enum(['continue', 'rewrite', 'retry', 'stop']);
@@ -264,6 +276,12 @@ export const LaunchWorkspace = z.discriminatedUnion('t', [
   v('none', {}),
 ]);
 export type LaunchWorkspace = z.infer<typeof LaunchWorkspace>;
+
+export const ActVerdict = z.discriminatedUnion('t', [
+  v('accepted', {}),
+  v('rejected', { issues: z.array(str) }),
+]);
+export type ActVerdict = z.infer<typeof ActVerdict>;
 
 const at = { at: str };
 export const Entry = z.discriminatedUnion('t', [
@@ -311,6 +329,10 @@ export const Entry = z.discriminatedUnion('t', [
     why: str,
   }),
   v('owner', { ...at, act: OwnerAct }),
+  /** What became of one leader act (`key`: its `leader/<n>` call) answering `after`: it took
+   * effect, or a gate refused it and nothing changed. Two rejected in a row at one wake point
+   * stop the host waking the leader there (kernel change.ts); the fold keeps the run. */
+  v('act', { ...at, key: Key, after: BaseWake, act: LeaderAct, verdict: ActVerdict }),
   v('finished', { ...at, reason: Finish }),
 ]);
 export type Entry = z.infer<typeof Entry>;
@@ -494,6 +516,7 @@ const ON: { [K in Entry['t']]: (f: Fold, e: Extract<Entry, { t: K }>) => void } 
     });
   },
   owner: () => {},
+  act: () => {},
   finished: (f, e) => {
     f.markers.push({ t: 'finished', at: e.at, reason: e.reason });
   },
@@ -615,11 +638,18 @@ export type TurnGrants = z.infer<typeof TurnGrants>;
  * an agent call without a tree, one with a checkout, a review judge, a leader wake. */
 export const TurnKind = z.enum(['call', 'checkout', 'judge', 'leader']);
 export type TurnKind = z.infer<typeof TurnKind>;
+/** Where a preview's access row comes from: a step of the plan's cast table (every step, called
+ * or not, known before any call), a call the dry run reached (the first wave), or the contract
+ * (the leader's wakes, its done reviews). `unstated`: a server older than the field sent none. */
+export const TurnSource = z.enum(['cast-table', 'first-wave', 'contract', 'unstated']);
+export type TurnSource = z.infer<typeof TurnSource>;
 /** What one turn of a launch would be allowed, on the harness it would run on. `label` is the
- * call's key, `done/<i>` for a done criterion's review, `leader` for the leader's wakes. */
+ * step's name for a cast-table row, the call's key for a first-wave one, `done/<i>` for a done
+ * criterion's review, `leader` for the leader's wakes. */
 export const TurnAccess = z
   .object({
     label: nonEmpty,
+    from: TurnSource.default('unstated'),
     turn: TurnKind,
     harness: z.discriminatedUnion('t', [
       v('known', { provider: nonEmpty, grants: TurnGrants }),
@@ -647,8 +677,8 @@ const CleanPreview = v('clean', {
   firstWave: z.array(PreviewCall),
   /** Σ of their reservations: what the first wave may spend. */
   costUsd: z.number().nonnegative(),
-  /** Per turn of the first wave (and the leader and done reviews): which of its limits its
-   * harness enforces and which are advisory. An older server sent none. */
+  /** Per step of the cast table, per call of the first wave, and the leader and done reviews:
+   * which of its limits its harness enforces and which are advisory. An older server sent none. */
   access: z.array(TurnAccess).default([]),
 });
 export const KeyedPreview = z.discriminatedUnion('t', [

@@ -155,7 +155,9 @@ impl PiFold {
         self.usage.output += usage.output;
         self.usage.cache_read += usage.cache_read;
         self.usage.cache_write += usage.cache_write;
-        sink.turn(UsageTurn { at, model: self.billing_model.clone(), usage, reported_cost: finite(u.pointer("/cost/total")) });
+        // No tier is recorded: all of a write counts as the dearer one (model.rs `cache_write_1h`).
+        let cache_write_1h = usage.cache_write;
+        sink.turn(UsageTurn { at, model: self.billing_model.clone(), usage, cache_write_1h, reported_cost: finite(u.pointer("/cost/total")) });
     }
 }
 

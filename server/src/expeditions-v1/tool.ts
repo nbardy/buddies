@@ -69,15 +69,29 @@ async function originOf(deps: ToolDeps, grant: BuddyGrant): Promise<Origin> {
 }
 
 /** The unenforced limits a reader must know before trusting "no web" or "read-only". */
-type Advisory = { label: string; turn: string; provider: string; advisory: readonly string[] };
+type Advisory = {
+  label: string;
+  from: keyed.TurnSource;
+  turn: string;
+  provider: string;
+  advisory: readonly string[];
+};
 const advisoryOf = (access: readonly keyed.TurnAccess[]): Advisory[] =>
   access.flatMap((a) => {
     const g = keyed.advisoryGrants(a);
     // A harness we know nothing about enforces nothing we can name: say so as the limit itself.
     return g.t === 'unknown'
-      ? [{ label: a.label, turn: a.turn, provider: 'unknown', advisory: [g.why] }]
+      ? [{ label: a.label, from: a.from, turn: a.turn, provider: 'unknown', advisory: [g.why] }]
       : g.advisory.length > 0
-        ? [{ label: a.label, turn: a.turn, provider: g.provider, advisory: g.advisory }]
+        ? [
+            {
+              label: a.label,
+              from: a.from,
+              turn: a.turn,
+              provider: g.provider,
+              advisory: g.advisory,
+            },
+          ]
         : [];
   });
 

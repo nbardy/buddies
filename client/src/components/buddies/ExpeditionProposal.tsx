@@ -37,20 +37,40 @@ export function standingOf(read: PolledState<keyed.KeyedProposalStatus>): Standi
 
 const money = (usd: number) => `$${usd.toFixed(2)}`;
 
-/** The grants a harness only advises, called out: the owner must not read "no web" as enforced. */
-function Advisory({ access }: { access: readonly keyed.TurnAccess[] }) {
-  const lines = access.flatMap((a) => {
+/** Where an access row comes from, in words: the cast table covers every step, called or not. */
+const FROM: { readonly [K in keyed.TurnSource]: string } = {
+  'cast-table': 'step, from the cast table',
+  'first-wave': 'first-wave call',
+  contract: 'from the contract',
+  unstated: 'source not stated',
+};
+
+/** One line per turn the expedition may run: what its harness holds, and every grant it only
+ * advises, so the owner never reads "no web" as enforced. Advised lines come first. */
+function accessLines(access: readonly keyed.TurnAccess[]): { advised: boolean; text: string }[] {
+  const lines = access.map((a) => {
     const g = keyed.advisoryGrants(a);
-    return g.t === 'unknown'
-      ? [`${a.label}: harness unknown (${g.why})`]
-      : g.advisory.map((x) => `${a.label} (${g.provider}) ${x}`);
+    const head = `${a.label} · ${a.turn} · ${FROM[a.from]}`;
+    if (g.t === 'unknown') return { advised: true, text: `${head} · harness unknown (${g.why})` };
+    return g.advisory.length === 0
+      ? { advised: false, text: `${head} · ${g.provider}: every limit enforced` }
+      : { advised: true, text: `${head} · ${g.provider}: only advised: ${g.advisory.join('; ')}` };
   });
+  return [...lines.filter((l) => l.advised), ...lines.filter((l) => !l.advised)];
+}
+
+function Access({ access }: { access: readonly keyed.TurnAccess[] }) {
+  const lines = accessLines(access);
+  const advised = lines.filter((l) => l.advised).length;
   return lines.length === 0 ? null : (
-    <section className="keyed-expedition-need ui-stack" aria-label="Limits not enforced">
-      <strong>Only advised, not enforced</strong>
+    <section className="keyed-expedition-need ui-stack" aria-label="What each turn may do">
+      <strong>
+        What each turn may do
+        {advised > 0 ? ` (${advised} with limits only advised, not enforced)` : ''}
+      </strong>
       <ul className="expedition-notes">
         {lines.map((l) => (
-          <li key={l}>{l}</li>
+          <li key={l.text}>{l.text}</li>
         ))}
       </ul>
     </section>
@@ -129,7 +149,7 @@ export function ProposalCard({ proposal }: { proposal: keyed.KeyedProposal }) {
           </li>
         ))}
       </ul>
-      <Advisory access={p.access} />
+      <Access access={p.access} />
       <div className="expedition-manage ui-row">
         {(FOOT[standing.t] as Foot<Standing['t']>)(standing, proposal, launch, listed)}
       </div>

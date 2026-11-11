@@ -127,7 +127,7 @@ const EVENT: {
   'budget-mark': (e) => `The expedition has spent ${e.percent}% of its budget.`,
   drained: (e) => `${e.key}, dropped by a rewrite and told to finish, has settled.`,
   rejected: (e) =>
-    `Your ${e.act.t} at the previous wake changed nothing; it was rejected: ${e.issues.join('; ')}. The event it answered: ${eventLine(e.after)}`,
+    `Your ${e.act.t} at the previous wake changed nothing; it was rejected: ${e.issues.join('; ')}. The event it answered: ${eventLine(e.after)} After two rejected acts in a row at one event, the owner is asked to decide and you are not woken for it again.`,
 };
 const eventLine = (e: keyed.WakeEvent): string => EVENT[e.t](e as never);
 

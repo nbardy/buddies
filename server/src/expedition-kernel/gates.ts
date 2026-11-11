@@ -8,7 +8,7 @@ import { type CallTurn, grantsOf } from './access';
 import { parseCommand } from './argv';
 import { briefPath, missingBriefIssue } from './brief';
 import { type ProviderOf, canonicalise, providerFor } from './canonical';
-import type { Authored } from './protocol';
+import type { Authored, CastRow } from './protocol';
 import { AUTHORING_ENTRY } from './runner';
 
 // The first two rewrite gates (DESIGN.md §5): the plan typechecks against the authoring API, and
@@ -19,8 +19,9 @@ import { AUTHORING_ENTRY } from './runner';
 const NODE_TYPES = path.resolve(__dirname, '..', '..', 'node_modules', '@types');
 
 export type TypecheckResult = { t: 'ok' } | { t: 'failed'; errors: string[] };
-/** `access`: per turn the calls (and the contract's leader and done reviews) would run, which of
- * its limits its harness enforces and which are only advisory (`turnAccessOf`). */
+/** `access`: per turn the cast table's steps, the first-wave calls and the contract's leader and
+ * done reviews would run, which of its limits its harness enforces and which are only advisory
+ * (`turnAccessOf`). */
 export type StaticResult =
   | { t: 'ok'; access: keyed.TurnAccess[] }
   | { t: 'failed'; issues: string[] };
@@ -111,10 +112,11 @@ const unrunnable =
 export function staticGate(input: {
   contract: keyed.Contract;
   folder: string;
+  cast: readonly CastRow[];
   calls: readonly Authored[];
   providerOf: ProviderOf;
 }): StaticResult {
-  const { contract, folder, calls, providerOf } = input;
+  const { contract, folder, cast, calls, providerOf } = input;
   const issues: string[] = [];
   const hasBrief = (name: string) => {
     const located = briefPath(folder, name);
@@ -167,7 +169,7 @@ export function staticGate(input: {
   }
   const unique = [...new Set(issues)];
   return unique.length === 0
-    ? { t: 'ok', access: turnAccessOf(contract, canonical, providerOf) }
+    ? { t: 'ok', access: turnAccessOf(contract, cast, canonical, providerOf) }
     : { t: 'failed', issues: unique };
 }
 
@@ -181,8 +183,10 @@ const AT = {
   exp: '<expedition>',
   git: '<repo>/.git/worktrees/<tree>',
 };
+/** An agent's turn by its tree: a cast row and a call both carry tree and grant. */
+type Granted = Pick<keyed.AgentCall, 'grant'>;
 const AGENT_TURN: {
-  readonly [K in keyed.AgentCall['tree']]: (c: keyed.AgentCall) => CallTurn;
+  readonly [K in keyed.AgentCall['tree']]: (c: Granted) => CallTurn;
 } = {
   none: (c) => ({ t: 'call', work: AT.work, reads: [AT.refs, ...c.grant.reads], web: c.grant.web }),
   checkout: (c) => ({
@@ -196,14 +200,15 @@ const AGENT_TURN: {
 const JUDGE_TURN: CallTurn = { t: 'judge', reads: [AT.refs] };
 const LEADER_TURN: CallTurn = { t: 'leader', expDir: AT.exp, draft: `${AT.exp}/drafts/1` };
 
+type Row = { readonly label: string; readonly from: keyed.TurnSource };
 const accessRow = (
-  label: string,
+  row: Row,
   turn: CallTurn,
   who: keyed.Who,
   providerOf: ProviderOf
 ): keyed.TurnAccess => {
   const p = providerFor(who, providerOf);
-  return { label, turn: turn.t, harness: (HARNESS_OF[p.t] as HarnessOf)(p, turn) };
+  return { ...row, turn: turn.t, harness: (HARNESS_OF[p.t] as HarnessOf)(p, turn) };
 };
 type Provided = ReturnType<typeof providerFor>;
 type HarnessOf = (p: Provided, turn: CallTurn) => keyed.TurnAccess['harness'];
@@ -216,39 +221,37 @@ const HARNESS_OF: {
   known: (p, turn) => ({ t: 'known', provider: p.provider, grants: grantsOf(p.provider, turn) }),
   unknown: (p) => ({ t: 'unknown', why: p.why }),
 };
-/** A judge row for a review; a check is a host command, not a turn, and `none` judges nothing. */
+/** A judge row for a review; a check is a host command, not a turn, and `none` judges nothing.
+ * Only the reviewer matters, so an authored judge (a cast row's) and a canonical one both fit. */
+type AnyJudge = keyed.Judge | keyed.CallJudge | keyed.Verdict;
 const JUDGE_ROW: {
-  readonly [K in keyed.CallJudge['t']]: (
-    j: Extract<keyed.CallJudge, { t: K }>,
-    label: string,
+  readonly [K in AnyJudge['t']]: (
+    j: Extract<AnyJudge, { t: K }>,
+    row: Row,
     providerOf: ProviderOf
   ) => keyed.TurnAccess[];
 } = {
   none: () => [],
   check: () => [],
-  review: (j, label, providerOf) => [accessRow(label, JUDGE_TURN, j.by, providerOf)],
+  review: (j, row, providerOf) => [accessRow(row, JUDGE_TURN, j.by, providerOf)],
 };
-const reviewRow = (
-  label: string,
-  judge: keyed.CallJudge | keyed.Verdict,
-  providerOf: ProviderOf
-): keyed.TurnAccess[] =>
-  (JUDGE_ROW[judge.t] as (j: keyed.CallJudge, l: string, p: ProviderOf) => keyed.TurnAccess[])(
+const reviewRow = (row: Row, judge: AnyJudge, providerOf: ProviderOf): keyed.TurnAccess[] =>
+  (JUDGE_ROW[judge.t] as (j: AnyJudge, r: Row, p: ProviderOf) => keyed.TurnAccess[])(
     judge,
-    label,
+    row,
     providerOf
   );
 /** A done criterion's turn: a review is one (by its seat); a check and the owner's are not. */
 const CRITERION_ROW: {
   readonly [K in keyed.Criterion['t']]: (
     c: Extract<keyed.Criterion, { t: K }>,
-    label: string,
+    row: Row,
     providerOf: ProviderOf
   ) => keyed.TurnAccess[];
 } = {
   check: () => [],
   owner: () => [],
-  review: (c, label, providerOf) => [accessRow(label, JUDGE_TURN, c.by, providerOf)],
+  review: (c, row, providerOf) => [accessRow(row, JUDGE_TURN, c.by, providerOf)],
 };
 const ROWS: {
   readonly [K in keyed.Call['t']]: (
@@ -256,34 +259,62 @@ const ROWS: {
     providerOf: ProviderOf
   ) => keyed.TurnAccess[];
 } = {
-  agent: (c, providerOf) => [
-    accessRow(c.key, AGENT_TURN[c.tree](c), c.by, providerOf),
-    ...reviewRow(c.key, c.judge, providerOf),
-  ],
-  verdict: (c, providerOf) => reviewRow(c.key, c.verdict, providerOf),
+  agent: (c, providerOf) => {
+    const row: Row = { label: c.key, from: 'first-wave' };
+    return [
+      accessRow(row, AGENT_TURN[c.tree](c), c.by, providerOf),
+      ...reviewRow(row, c.judge, providerOf),
+    ];
+  },
+  verdict: (c, providerOf) =>
+    reviewRow({ label: c.key, from: 'first-wave' }, c.verdict, providerOf),
   command: () => [],
   ask: () => [],
   leader: () => [],
 };
 
+/** A cast-table step's turns: its producer and its review judge. A command is no turn. */
+const CAST_ROWS: {
+  readonly [K in CastRow['t']]: (
+    c: Extract<CastRow, { t: K }>,
+    providerOf: ProviderOf
+  ) => keyed.TurnAccess[];
+} = {
+  agent: (c, providerOf) => {
+    const row: Row = { label: c.step, from: 'cast-table' };
+    return [
+      accessRow(row, AGENT_TURN[c.tree](c), c.by, providerOf),
+      ...reviewRow(row, c.judge, providerOf),
+    ];
+  },
+  command: () => [],
+};
+
 /**
- * Per turn: the calls' producers and review judges, then the contract's leader (its wakes) and
- * its done reviews, each with the grants its harness enforces and the ones it can only state.
+ * Per turn: every step of the cast table (each step's role, tree, grant and judge are declared
+ * before any call, so a step the dry run cannot reach is still reported), then the first-wave
+ * calls the dry run reached, then the contract's leader (its wakes) and its done reviews, each
+ * with the grants its harness enforces and the ones it can only state.
  */
 export function turnAccessOf(
   contract: keyed.Contract,
+  cast: readonly CastRow[],
   calls: readonly keyed.Call[],
   providerOf: ProviderOf
 ): keyed.TurnAccess[] {
+  const fromContract = (label: string): Row => ({ label, from: 'contract' });
   return [
+    ...cast.flatMap((c) =>
+      (CAST_ROWS[c.t] as (c: CastRow, p: ProviderOf) => keyed.TurnAccess[])(c, providerOf)
+    ),
     ...calls.flatMap((c) =>
       (ROWS[c.t] as (c: keyed.Call, p: ProviderOf) => keyed.TurnAccess[])(c, providerOf)
     ),
-    accessRow('leader', LEADER_TURN, { t: 'buddy', id: contract.leader }, providerOf),
+    accessRow(fromContract('leader'), LEADER_TURN, { t: 'buddy', id: contract.leader }, providerOf),
     ...contract.done.flatMap((d, i) =>
-      (CRITERION_ROW[d.t] as (c: keyed.Criterion, l: string, p: ProviderOf) => keyed.TurnAccess[])(
+      (CRITERION_ROW[d.t] as (c: keyed.Criterion, r: Row, p: ProviderOf) => keyed.TurnAccess[])(
         d,
-        `done/${i}`,
+        fromContract(`done/${i}`),
         providerOf
       )
     ),

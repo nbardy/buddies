@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import { rm } from 'node:fs/promises';
 import type { keyed } from '@unleashd/shared';
 import type {
   Clock,
@@ -8,7 +7,7 @@ import type {
   RunSpec,
   RunStatus,
 } from '../../expedition-kernel/ports';
-import { exec } from '../../expeditions/cambium';
+import { removeDetachedTree } from '../../expeditions/checks';
 import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address';
 import { type Answered, type AskAnswer, type AskDeps, type Asks, NoAsks, OwnerAsks } from './asks';
 import {
@@ -512,11 +511,8 @@ const REMOVE_TREE: {
   none: async () => {},
   dir: async () => {},
   checkout: async () => {},
-  detached: async (repo, tree) => {
-    await exec('git', repo, ['worktree', 'remove', '--force', tree.path]);
-    await rm(tree.path, { recursive: true, force: true });
-    await exec('git', repo, ['worktree', 'prune']);
-  },
+  'judge-checkout': async () => {},
+  detached: (repo, tree) => removeDetachedTree(repo, tree.path),
 };
 const removeTree = (repo: string, tree: Tree): Promise<void> =>
   REMOVE_TREE[tree.t](repo, tree as never);

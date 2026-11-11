@@ -120,6 +120,16 @@ async function main() {
     git('-c', 'user.name=Call', '-c', 'user.email=call@example.com', 'commit', '-qm', 'the call');
     return answer();
   }
+  // A review judge reporting what it can see: each read root that is a git checkout (its HEAD and
+  // files) and the diff file its prompt names.
+  if (mode === 'lookcode') {
+    const dirs = process.argv.flatMap((a, i) => (a === '--add-dir' ? [process.argv[i + 1]] : []));
+    const code = dirs.filter((d) => fs.existsSync(path.join(d, '.git'))).map((d) => ({
+      dir: d, head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d, encoding: 'utf8' }).trim(), files: fs.readdirSync(d).sort() }));
+    const diffAt = (/the diff at (\S+?\.diff)/.exec(prompt) || [])[1];
+    mark(tag + '.look', JSON.stringify({ code, diffAt, diff: diffAt ? fs.readFileSync(diffAt, 'utf8') : null }));
+    return answer();
+  }
   if (mode === 'dirty') { fs.writeFileSync('half-done.txt', 'partial\n'); return setInterval(() => {}, 1000); }
   if (mode === 'usage' || mode === 'usagehang') {
     // 250k uncached input + 50k output on Opus 5.5 ($4 / $20 per 1M) is $1 + $1.

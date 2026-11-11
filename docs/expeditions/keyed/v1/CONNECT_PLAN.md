@@ -432,9 +432,9 @@ per temp path in the owner's home.
 - **F4**: every call's, judge's and wake's exact request body is kept at
   `runs/<name>.prompt.md` beside its record, written before the post and never rewritten; each
   view bar names its producer's and judge's prompt files (`Bar.prompts`).
-- **Known gaps**: a review judge of a checkout call cannot read the branch's files (no shell,
-  worktree released at settle); grant paths are passed as directories (a file path is not
-  narrowed); the other harnesses run unrestricted with every grant reported advisory.
+- **Known gaps**: grant paths are passed as directories (a file path is not narrowed); the other
+  harnesses run unrestricted with every grant reported advisory. (A review judge of a checkout
+  call could not read the branch's files until the fixes below.)
 
 ### The second real run (2026-11-11)
 
@@ -464,12 +464,64 @@ finished `met` after 16 agent turns, $0.43 recorded. Evidence: the gitignored
 - **F2 and F4 hold.** None of the 14 Claude transcripts holds the global CLAUDE.md (the first run's
   each held it twice); cache writes fell to 2.8-5.4k on a seat call. Every turn's stdin contains its
   kept prompt file verbatim. Codex still loads the global AGENTS.md and a skills listing (advisory).
-- **Open: Claude spend is under-counted by about 27%.** Every Claude turn wrote its cache at the
-  1-hour tier (`cache_creation.ephemeral_1h_input_tokens`); `providers/pricing.ts` prices cache
-  writes at the 5-minute rate (1.25x input, not 2x), and the ingest rows do not split the tiers.
-  Recorded $0.332 against the CLIs' own $0.455. A Codex sub-agent's tokens are not counted at all.
-- **Open: a rejected leader act re-wakes the leader at once, with no limit but the budget.** The
+- **Fixed: Claude spend was under-counted by about 27%.** Every Claude turn wrote its cache at the
+  1-hour tier (`cache_creation.ephemeral_1h_input_tokens`); `providers/pricing.ts` priced cache
+  writes at the 5-minute rate (1.25x input, not 2x), and the ingest rows did not split the tiers.
+  Recorded $0.332 against the CLIs' own $0.455. See "Fixes after the second run".
+- **Fixed: a rejected leader act re-woke the leader at once, with no limit but the budget.** The
   leader answered `retry` for a `failed` call twice (2 wasted wakes). The act list and the
-  `ended-unmet` line now say retry is only for errored, cancelled or refused calls.
-- **Preview** reports access only for first-wave calls, so checkout calls behind the first wave
-  were not previewed.
+  `ended-unmet` line now say retry is only for errored, cancelled or refused calls, and two
+  rejections in a row now go to the owner.
+- **Fixed: the preview** reported access only for first-wave calls, so checkout calls behind the
+  first wave were not previewed.
+
+### Fixes after the second run (2026-11-11)
+
+- **A review judge reads the code it judges.** The judge of a call whose ref has a branch (a
+  `tree: checkout` producer) runs with tree `judge-checkout` (`executor/records.ts`): a detached
+  checkout of exactly the judged commit at `<run>/tree` (`addDetachedTree` in
+  `expeditions/checks.ts`, the half of `withDetachedTree` that outlives one call; HEAD verified),
+  added to its read roots, and `git diff <base> <commit>` written to `<run>/work/changes.diff`,
+  its cwd, so it needs no shell. The ref records the call's base for this (`RefRecord.checkout.base`;
+  a branch ref stored before it does not parse). The prompt opens with a `THE CODE` section naming
+  both; when the producer committed nothing it says so ("the diff is empty; judge it as work that
+  changed nothing") and the judge still runs. The checkout is removed when the judge ends (settle,
+  close, refused post) and remade, HEAD verified, if a restart replays the post. Still read-only,
+  no shell, no web: the `judge` row of the policy table is unchanged; a judge of a `tree: none`
+  call is unchanged. Guard: `expeditions-v1-agent-restarts` (a committed and an empty checkout).
+- **Cache writes are priced by tier.** The ingest crate records, per usage turn, the part of the
+  cache write at the 1-hour tier (`usage_turn.cache_write_1h`, from Claude's `cache_creation`
+  split; `UsageGroup.cacheWrite1H`). A record that names no tier (an older Claude CLI, OpenCode,
+  pi) counts it all as 1-hour, and so do rows written before the column (NULL): a budget never
+  under-counts. The column is added to an existing store at open, no schema bump. `priceUsd` uses
+  1.25x input for the 5-minute part and 2x for the 1-hour part (claude-api skill); the usage
+  panel's estimate is unchanged. The run's `probeClaude` row now prices at $0.0319513, the CLI's
+  own figure (was $0.0238993). The owner's backend needs a restart to load the new addon.
+- **Two rejected leader acts in a row at one wake point ask the owner.** Each act's fate is logged
+  (`act` entry: accepted, or rejected with the gate's issues); the fold keeps the run of rejections
+  per wake point (`State.leaderActs`), so a restart between them keeps the count. At two the host
+  stops waking the leader there and asks the owner in the expedition thread (key
+  `owner/leader-stuck-<n>`, naming the event, both acts and their reasons): `continue` (go on as
+  planned), `stop` (not met), or `rewrite` (one more wake, telling the leader the owner waits for a
+  rewrite). The answer is logged as the owner's `leader-stuck` act; a reply that names none of the
+  three is asked again. An accepted act, an applied plan or the ruling clears the count. The rule
+  that a second rewrite with no new judged pass goes to the owner is unchanged (and a rewrite the
+  owner declines counts as a rejected act). Guard: `expedition-kernel-e2e` (two rejections across
+  a restart, one ask, no third wake; four rejected rewrites with two rulings).
+- **The preview covers the cast table.** The authoring library sends the plan's cast table (each
+  `steps({...})` table once, before any call: protocol `cast`), the dry run collects it, and the
+  static gate reports access for every agent step from it (producer and review judge), then for
+  each first-wave call, then the leader and done reviews; each row says where it comes from
+  (`TurnAccess.from`: `cast-table`, `first-wave`, `contract`; `unstated` from an older server).
+  The launch card lists every turn, advised limits first. Guard: `expedition-kernel-runner` (the
+  GTM plan's unreached `collect` and `packet` checkouts are reported).
+- **Codex sub-agents are charged.** They still cannot be blocked (no flag; reported advisory). The
+  run's evidence shows where their spend is: not in the parent rollout (its `token_count` totals
+  are its own), but in a sibling rollout of the sub-agent's own thread
+  (`rollout-…-01a1c93f-1c46-….jsonl`: 13,258 input, 5 output) whose `session_meta.source.subagent.
+  thread_spawn.parent_thread_id` is the parent's thread. The ingest crate already read that parent
+  into the session row; the usage key now carries it (`UsageKey.session.parentSessionId`) and the
+  call meter (`executor/usage.ts`) adds every session descending from the call's. Known limit: a
+  sub-agent rollout ingest sees only after the call settled is not charged to it.
+- **Not exercised yet:** the Codex commit fix (`TurnGit`) by a real Codex checkout turn, and the
+  checkout judge with a real Claude or Codex reviewer. Both are for the next real run.

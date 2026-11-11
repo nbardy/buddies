@@ -56,6 +56,17 @@ const Tree = z.discriminatedUnion('t', [
   /** A `tree: 'none'` call's own working directory (`<run>/work`): kept, never the owner's
    * checkout (briefing.ts TurnDirectory). */
   v('dir', { path: z.string() }),
+  /** A review judge of a checkout call's output: it runs in its own scratch directory `path`
+   * (like `dir`) and reads `code`, a detached checkout of the judged commit made before its post
+   * and removed when it ends, and `diff`, `git diff base commit` written into `path`. The judge
+   * has no shell, so the diff is how it sees what changed (CONNECT_PLAN §10). */
+  v('judge-checkout', {
+    path: z.string(),
+    code: z.string(),
+    commit: z.string().min(1),
+    base: z.string().min(1),
+    diff: z.string(),
+  }),
   /** A `tree: 'checkout'` call's Cambium worktree on its own branch from `base`; released at the
    * end, dirty work kept at a salvage ref. */
   v('checkout', {
