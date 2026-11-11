@@ -122,7 +122,7 @@ class Backend {
   }
 
   exitNaturally(turn: Turn): void {
-    this.end(turn, { t: 'complete', text: 'done' });
+    this.end(turn, { t: 'complete', text: 'done', final: 'done' });
   }
 
   private kill(turn: Turn): void {

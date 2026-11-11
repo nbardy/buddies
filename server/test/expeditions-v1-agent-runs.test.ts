@@ -4,6 +4,12 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { keyed } from '@unleashd/shared';
 import { toolsFor } from '../src/buddies/mcp';
+import {
+  type CallTurn,
+  capabilitiesOf,
+  grantsOf,
+  limitsText,
+} from '../src/expedition-kernel/access';
 import { endingOf } from '../src/expedition-kernel/runs';
 import { runPaths } from '../src/expeditions-v1/executor/address';
 import { withPrompts } from '../src/expeditions-v1/executor/prompts';
@@ -17,6 +23,34 @@ import { HASH, agentSpec, harness, runIdOf } from './fixtures/agent-runs';
 // stops and checkouts: expeditions-v1-agent-restarts.test.ts.
 
 const h = harness('xk-agent-runs');
+
+test('prompt headers tell the truth for both harnesses and all four turn kinds', () => {
+  const turns: CallTurn[] = [
+    { t: 'call', work: '/work', reads: ['/inputs'], web: false },
+    { t: 'checkout', tree: '/tree', reads: ['/inputs'], web: false, git: { t: 'none' } },
+    { t: 'judge', reads: ['/code'] },
+    { t: 'leader', expDir: '/expedition', draft: '/expedition/draft' },
+  ];
+  for (const provider of ['claude', 'codex'])
+    for (const turn of turns) {
+      const header = limitsText(provider, capabilitiesOf(turn));
+      for (const [name, enforcement] of Object.entries(grantsOf(provider, turn))) {
+        assert.ok(header.includes(`- ${name}: ${enforcement.t}`), `${provider} ${turn.t} ${name}`);
+        if (enforcement.t === 'advisory') assert.ok(header.includes(enforcement.reason));
+      }
+      if (provider === 'codex') {
+        assert.doesNotMatch(header, /Shell: none|Instructions: none load/);
+        if (turn.t === 'judge' || turn.t === 'call')
+          assert.match(
+            header,
+            /a read-only shell is available for reading files; it cannot write and has no network/
+          );
+        assert.match(header, /NOT held: .*spawn_agent/);
+      } else if (turn.t !== 'checkout')
+        assert.doesNotMatch(header, /Shell available on this harness/);
+      else assert.match(header, /command chains.*built-in safety checks/);
+    }
+});
 let ws = '';
 let named = '';
 const EXP_A = '20261111T000000-aaaaaa';
@@ -128,6 +162,14 @@ test('a seat call and a named-Buddy call answer with a typed value; one seat Bud
     t: 'known',
     provider: 'claude',
   });
+});
+
+test('the posted answer is the final message, excluding a progress message with an earlier JSON fence', {
+  timeout: 240_000,
+}, async () => {
+  const id = runIdOf(EXP_A, 'p/final/one', 'f');
+  await h.start(id, agentSpec('p/final/one', brief('finalonly', 'finalonly', '{"n":7}')));
+  assert.deepEqual((await h.settledOf(id))[0]?.raw, { t: 'ok', out: { n: 7 } });
 });
 
 test('a malformed answer errors before any ref is written; a review that says no is a judged failure', {

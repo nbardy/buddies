@@ -199,6 +199,114 @@ const leaderFor =
 const withContract = (edit: (md: string) => string) => ({ contract: edit });
 
 describe('expedition kernel end to end', () => {
+  test('an owner stop during replay closes a queued host wake without a post-finish declaration', async () => {
+    const w = world(
+      () => 'hold',
+      () => new Promise(() => {})
+    );
+    const e = await launched(w, fixture('need-gap'));
+    await w.signal.until(() => w.ex.running().length === 1, 'the initial call starts');
+    let release!: () => void;
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    let replaying!: () => void;
+    const replay = new Promise<void>((r) => {
+      replaying = r;
+    });
+    const queue = e.serial(async () => {
+      e.restartPlan(e.version());
+      replaying();
+      await held;
+    });
+    await replay;
+    // Exactly the run-3 stack: a hostCall enqueues request/consider after stop has queued.
+    // The serialized order is fixed, independently of when the child process answers replay.
+    const stop = e.stop();
+    let delivery: unknown;
+    const late = e
+      .hostCall(() => ({
+        t: 'leader',
+        key: 'leader/late',
+        event: { t: 'review', question: 'late replay' },
+        max: { usd: 1, minutes: 1 },
+      }))
+      .then((d) => {
+        delivery = d;
+      });
+    release();
+    await queue;
+    await stop;
+    await e.serial(() => {});
+    assert.deepEqual(e.view().faults, []);
+    await late;
+    assert.deepEqual(delivery, { t: 'closed', reason: { t: 'stopped', by: 'owner' } });
+    assert.equal(e.entries().at(-1)?.t, 'finished');
+    assert.ok(
+      !e.entries().some((entry) => entry.t === 'declared' && entry.call.key === 'leader/late')
+    );
+  });
+
+  for (const raw of [
+    { t: 'no', why: 'test failed' },
+    { t: 'errored', why: 'harness failed' },
+  ] as const) {
+    test(`a ${raw.t === 'no' ? 'failed' : 'errored'} call returns to the running plan and wakes the leader only at its review`, async () => {
+      const w = world(
+        () => 'hold',
+        (event) => {
+          assert.equal(event.t, 'review');
+          return { act: { t: 'stop', why: 'review reached' }, spent: reported(0) };
+        }
+      );
+      const file = fixture('need-gap', {
+        plan: (s) =>
+          s
+            .replace('import { expedition,', 'import { check, expedition,')
+            .replace(
+              '`Do the work for probe.`\n  ),',
+              '`Do the work for probe.`\n  ).judged(check("node scripts/check.js")),'
+            )
+            .replace(
+              "plan: async () => need(await probe(), 'The probe found nothing.'),",
+              `plan: async (x) => {
+          const result = await probe();
+          await x.ask('The plan handled ' + result.t + '; continue to review?');
+          await x.review('planned reflection');
+          return need(result, 'The probe found nothing.');
+        },`
+            ),
+      });
+      const e = await launched(w, file);
+      await w.signal.until(() => w.ex.running(isAgent('probe')).length === 1, 'probe starts');
+      w.ex.end(
+        w.ex.running(isAgent('probe'))[0].runId,
+        raw.t === 'no' ? ok(REPORT) : raw,
+        reported(0)
+      );
+      if (raw.t === 'no') {
+        await w.signal.until(
+          () => w.ex.running((r) => r.spec.t === 'check').length === 1,
+          'the probe judge starts'
+        );
+        w.ex.end(w.ex.running((r) => r.spec.t === 'check')[0].runId, raw, reported(0));
+      }
+      await w.signal.until(
+        () => w.ex.running((r) => r.spec.t === 'ask').length === 1,
+        'plan handles the failure itself'
+      );
+      assert.deepEqual(w.leader.events, []);
+      const ask = w.ex.running((r) => r.spec.t === 'ask')[0];
+      assert.ok(
+        ask.spec.t === 'ask' &&
+          ask.spec.call.question.includes(raw.t === 'no' ? 'failed' : 'errored')
+      );
+      w.ex.end(ask.runId, ok('yes'), reported(0));
+      assert.equal((await finishedOf(w, e)).t, 'not-met');
+      assert.deepEqual(w.leader.events, [{ t: 'review', question: 'planned reflection' }]);
+    });
+  }
+
   test('GTM v0 runs to `finished: met`: done is the host’s, the owner criterion is an ask', async () => {
     const orgs = [
       org('taskus', 'direct'),

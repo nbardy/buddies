@@ -92,6 +92,7 @@ export function leaderBody(x: LeaderBriefInput): string {
     '',
     'WHY YOU ARE WOKEN',
     eventLine(event),
+    'At x.review, continue lets the plan past it. If the plan ended unmet, rewrite or retry an errored, cancelled or refused call to go on; anything else ends the expedition not met.',
     '',
     'GOAL',
     goal,
@@ -119,13 +120,12 @@ void _rowFields;
 const EVENT: {
   readonly [K in keyed.WakeEvent['t']]: (e: Extract<keyed.WakeEvent, { t: K }>) => string;
 } = {
-  review: (e) =>
-    `The plan reached its review "${e.question}". continue lets it past; rewrite or retry changes course; stop ends the expedition.`,
+  review: (e) => `You were woken by x.review: ${JSON.stringify(e.question)}.`,
   'ended-unmet': (e) =>
-    `The plan ended without meeting the goal: ${e.gaps.join('; ')}. Rewrite (or retry an errored, cancelled or refused call) to go on; anything else ends the expedition not met.`,
-  stuck: (e) => `The plan cannot go on: ${e.why}.`,
-  'budget-mark': (e) => `The expedition has spent ${e.percent}% of its budget.`,
-  drained: (e) => `${e.key}, dropped by a rewrite and told to finish, has settled.`,
+    `You were woken because the plan ended without a met candidate: ${e.gaps.join('; ')}.`,
+  stuck: (e) => `You were woken because the plan is stuck: ${e.why}.`,
+  'budget-mark': (e) => `You were woken at the ${e.percent}% budget mark.`,
+  drained: (e) => `You were woken because dropped call ${e.key}, told to finish, has drained.`,
   rejected: (e) =>
     `Your ${e.act.t} at the previous wake changed nothing; it was rejected: ${e.issues.join('; ')}. The event it answered: ${eventLine(e.after)} After two rejected acts in a row at one event, the owner is asked to decide and you are not woken for it again.`,
 };

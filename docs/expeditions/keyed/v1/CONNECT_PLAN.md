@@ -352,6 +352,76 @@ read-only view never shows one.
 
 ## 10. The first real run, and what is open (2026-11-11)
 
+### Third-run repairs (2026-11-11, awaiting another real run)
+
+Evidence: gitignored `output/expedition-run3-2026-11-11/REPORT.md`, `analysis.json`,
+`attempt1/journals/7cf7f7db-0961-437a-834f-25156666cf4b/stdout`, both expedition logs,
+`argv.jsonl`, and the kept Claude transcripts. Comparison: run 2's `logs/argv.jsonl`
+and the farewell/shout transcripts. These repairs have synthetic regression coverage;
+they have not been confirmed by another real-agent run.
+
+- **Final answers:** Codex emitted an `agent_message` beginning “I’ll read the repository
+  instructions” and later a separate JSON `agent_message` reporting commit `aa76f2c`.
+  The log instead settled `malformed answer: not JSON (Unexpected token 'I'...)`.
+  Claude streamed all assistant text too; its result record also contains its final answer.
+  `agent-cli` now supplies final-message text separately from UI deltas for every harness,
+  and the turn runner uses it for the answer post. The executor reads the last fenced json
+  block; otherwise the final message as JSON; otherwise its last complete top-level JSON
+  value. A malformed answer quotes a bounded excerpt. Guards: `tool-results.test.ts` in
+  agent-cli and `expeditions-v1-executor.test.ts`.
+- **Claude shell:** the capability argv/settings were the same in both runs, apart from
+  generated paths (run 2 spelled the temp root `/private/tmp`, run 3 `/tmp`) and session/run
+  identities. Both used `dontAsk`, `--permission-prompts none`, project settings, the same
+  tool set, a broad `Bash` grant, `blockReadsOutsideWorkingDirectories: true`, and sandbox
+  auto-allow with unsandboxed commands disabled. Run 2 edited with Edit then ran
+  `node scripts/test.js farewell && git add src/greet.js && git commit -q -m ... && git rev-parse HEAD`.
+  Run 3 attempted `sed -i ... greeting.mjs && cat greeting.mjs && node test.mjs claude &&
+  git add greeting.mjs && git -c user.name=... -c user.email=... -c commit.gpgsign=false commit -qm ... &&
+  git rev-parse HEAD`. Neither commit chain used `cd`, a redirect, a heredoc, or an outside
+  pathname. The successful run 2 even included a newline in the quoted commit message.
+  There was no single-command-only pre-approval. Run 3's refusal only says “Permission to
+  use Bash has been denied because Claude Code is running in don't ask mode”; it does not
+  identify a subcommand, so attributing it to `sed` or `git -c` alone would exceed the evidence.
+  The installed 2.1.322 permission checker explicitly disables sandbox auto-allow while
+  the read block is enabled and syntax-checks commands before broad Bash allow rules.
+  Checkout shells now disable that conflicting read block; their reads were already advisory.
+  Other turn kinds keep their exact limits, and existing callers keep their argv.
+  Guard: agent-cli `capabilities.test.ts`, including all four kinds and pinned old argv.
+  This is not a guarantee that *every* syntactically possible shell call can run: Claude's
+  built-in safety checks and project/managed deny/ask rules remain independent of sandbox
+  auto-allow. `claude --help`, the installed settings schema, and the
+  [sandbox documentation](https://code.claude.com/docs/en/sandboxing#auto-allow-mode)
+  confirm this limit. The prompt says to stay inside the assigned tree, keep temporary
+  files there, and report a refusal's error without escaping the sandbox. Write/network
+  sandbox denials return their path/host error to the agent; no approval waits are enabled.
+- **Headers:** the Codex judge said “no permitted file-reading tool” after being told
+  “Shell: none”. Headers now use the same per-harness capability report as the preview.
+  Codex read-only calls explicitly have a read-only shell for file reads, no writes and no
+  network. Codex leaders are told their shell stays available; advisory read, agent and
+  instruction limits are disclosed, including global instructions that still load.
+  Checkout headers also name writable commit metadata. Guard: all eight harness/kind
+  combinations in `expeditions-v1-agent-runs.test.ts`.
+- **Stop/replay:** run 3's final fault was `ImpossibleEntry: log entry 17 (declared): the
+  expedition has finished`, from `hostCall → request → consider`. A queued call now gets
+  `closed` before any declaration if stop has already finished the expedition.
+  Guard: the ordered queue/replay race in `expedition-kernel-e2e.test.ts`.
+- **Wakes:** neither failure directly woke a leader. The plan called
+  `need(await codexEdit(), 'Codex edit did not pass.')` in the first attempt and
+  `need(await claudeEdit(...), 'Claude edit did not pass.')` in the retry; `need` ended the
+  plan, and both logs record `ended-unmet` with exactly those gaps. The existing wake policy
+  is retained: review, ended-unmet, stuck, budget marks and drained calls. The leader prompt
+  names its wake event plainly. Guard: failed and errored calls return to a running plan,
+  which handles them and reaches its own review without an intervening leader wake
+  (`expedition-kernel-e2e.test.ts`).
+- **Report files:** the retry returned `"files":["greeting.mjs"]`; wrapping each string in
+  `PlanRef` invented refs with no records. `Report.files` is now plain relative paths on
+  the wire and in plan code. Answer reading validates lexical and realpath containment,
+  existence and file kind inside the call's own tree/work directory, then normalizes paths.
+  Paths outside it, including symlink escapes, are malformed answers naming the path.
+  These paths are not accepted as stored-output refs: later checkout calls use the output's
+  existing commit/base ref to read committed files. A separate durable per-file ref store
+  is deliberately not introduced. Guard: `expeditions-v1-executor.test.ts`.
+
 **Format changed after these runs:** authoring, propose, preview and launch now use one
 `<name>.expedition.ts` file (`file` on the wire), with the owner contract and all briefs/rubrics
 inline. Versions are `plans/v<N>.expedition.ts`; drafts contain one editable plan file. The

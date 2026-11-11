@@ -59,7 +59,7 @@ const Tree = z.discriminatedUnion('t', [
   /** A review judge of a checkout call's output: it runs in its own scratch directory `path`
    * (like `dir`) and reads `code`, a detached checkout of the judged commit made before its post
    * and removed when it ends, and `diff`, `git diff base commit` written into `path`. The judge
-   * has no shell, so the diff is how it sees what changed (CONNECT_PLAN §10). */
+   * has read-only file access, so the diff shows what changed (CONNECT_PLAN §10). */
   v('judge-checkout', {
     path: z.string(),
     code: z.string(),

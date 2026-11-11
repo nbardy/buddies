@@ -100,15 +100,33 @@ const listed = (paths: readonly string[]) =>
 
 /**
  * The limits stated once at the head of a call's prompt: what its tools are set to, so a brief
- * never has to say "do not change files". Pure in the set (it is part of the posted body).
+ * never has to say "do not change files". Pure in the set and harness report, the same report the preview uses.
  */
-export function limitsText(caps: TurnCapabilities): string {
+export function limitsText(provider: string, caps: TurnCapabilities): string {
+  const report = capabilityReport(provider, caps);
   return [
-    'LIMITS (the tools of this turn are set to these; a refused tool call is not an error to work around)',
+    `LIMITS (the tools of this turn are set to these where enforced; advisory limits are instructions, not tool restrictions; harness ${provider})`,
     ...(LIMIT_FILES[caps.files.t] as (f: TurnCapabilities['files']) => string[])(caps.files),
+    ...(report.shell.t === 'enforced'
+      ? [
+          `- Shell: ${caps.files.t === 'write' && caps.files.shell === 'on' ? `inside ${caps.files.dir}, with no network` : 'none; use the file tools'}.`,
+        ]
+      : []),
+    ...(report.shell.t === 'advisory'
+      ? [`- Shell available on this harness (advisory): ${report.shell.reason}.`]
+      : []),
     `- Web: ${caps.web === 'on' ? 'search and fetch are allowed' : 'none'}.`,
     '- No sub-agents or other agents, no scheduled or remote work, no MCP tools.',
-    `- Instructions: ${caps.instructions === 'project' ? "the repository's own instruction files load; nothing user-level" : 'none load beyond this request'}.`,
+    `- Instructions: ${report.instructions.t === 'advisory' ? report.instructions.reason : caps.instructions === 'project' ? "the repository's own instruction files load; nothing user-level" : 'none load beyond this request'}.`,
+    ...Object.entries(report).map(
+      ([name, enforcement]) =>
+        `- ${name}: ${enforcement.t}${enforcement.t === 'advisory' ? `: ${enforcement.reason}` : ''}.`
+    ),
+    ...(provider === 'claude' && caps.files.t === 'write' && caps.files.shell === 'on'
+      ? [
+          `- Sandboxed shell commands are pre-approved, including command chains. Stay in ${caps.files.dir}; keep temporary files there. Writes outside the sandbox and shell network access are refused. Claude's built-in safety checks and project/managed deny or ask rules can still refuse a command; report its error, never escape the sandbox.`,
+        ]
+      : []),
   ].join('\n');
 }
 const LIMIT_FILES: {
@@ -118,11 +136,10 @@ const LIMIT_FILES: {
 } = {
   read: (f) => [
     `- Read: your working directory and ${listed(f.roots)} (${plural(f.roots.length, 'root')}).`,
-    '- Write: nothing. Shell: none.',
+    '- Write: nothing.',
   ],
   write: (f) => [
     `- Read: ${f.dir} and ${listed(f.reads)}.`,
-    `- Write: only inside ${f.dir}.`,
-    `- Shell: ${f.shell === 'on' ? `inside ${f.dir}, with no network` : 'none'}.`,
+    `- Write: inside ${f.dir}${f.git.t === 'worktree' ? ` and commit metadata at ${listed(f.git.dirs)}` : ''}.`,
   ],
 };

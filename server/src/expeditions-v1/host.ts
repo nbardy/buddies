@@ -95,6 +95,7 @@ export function createKeyedHost(d: KeyedHostDeps) {
     calls: {
       t: 'buddies',
       deps: {
+        installed: d.installed,
         core: d.core,
         events: d.events,
         gate: d.gate,

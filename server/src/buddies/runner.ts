@@ -756,6 +756,24 @@ export function createRunner(options: {
     }
   }
 
+  /** Which of a completed turn's texts its ending gets. An expedition call is answered with its
+   * FINAL message alone: that is its typed answer, and joined to progress text it did not parse
+   * (run 3, 2026-11-11). Every other run posts all its prose, as it always has. */
+  const ANSWER_TEXT: {
+    readonly [S in RequestSeat['t']]: (o: { text: string; final: string }) => string;
+  } = {
+    call: (o) => o.final,
+    buddy: (o) => o.text,
+  };
+  async function answerTextOf(run: Run, o: { text: string; final: string }): Promise<string> {
+    const input: RunInput = run.input;
+    const seat: RequestSeat =
+      input.kind === 'post'
+        ? requestSeatOf(await core.getPost(OWNER, input.postId))
+        : { t: 'buddy' };
+    return ANSWER_TEXT[seat.t](o);
+  }
+
   const FINISH: {
     readonly [O in ExecutionOutcome as O['t']]: (
       run: Run,
@@ -763,10 +781,12 @@ export function createRunner(options: {
       outcome: O
     ) => Promise<void>;
   } = {
-    complete: async (run, leaseToken, { text }) => {
+    complete: async (run, leaseToken, outcome) => {
       let after: (text: string) => Promise<void>;
+      let text: string;
       try {
         after = await endingFor(run);
+        text = await answerTextOf(run, outcome);
       } catch (error) {
         return fail(run, leaseToken, error);
       }

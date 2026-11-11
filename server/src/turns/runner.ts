@@ -828,14 +828,17 @@ export class TurnRunner {
     // stop or timeout (sealed): that outcome is the stop's, never a completion.
     if (completion.reason === 'success' && completion.exitCode === 0 && !this.sealed)
       host.policy.reviewCompleted(host.messages);
-    return {
-      t: 'complete',
-      text: host.messages
-        .slice(this.turnMessageStart)
-        .filter((message) => message.role === 'assistant')
-        .map((message) => bodyText(message.body))
-        .join(''),
-    };
+    const text = host.messages
+      .slice(this.turnMessageStart)
+      .filter((message) => message.role === 'assistant')
+      .map((message) => bodyText(message.body))
+      .join('');
+    // Run 3 (2026-11-11): an expedition call's typed answer was joined to Codex's progress text and
+    // failed to parse. `final` is the harness's last message alone; `text` stays every bit of the
+    // turn's prose, which is what ordinary Buddy answers have always posted. Only an expedition
+    // call reads `final` (buddies/runner.ts requestEnding). Guard: conversation-runtime completion
+    // tests; expeditions-v1-agent-runs.
+    return { t: 'complete', text, final: fold.finalText ?? text };
   }
 
   /** The process ended without turn.complete: crash, kill, OOM or a silent exit. */
@@ -1104,6 +1107,7 @@ const SETTLED: {
 
 /** One turn's event stream folded into its runner: one handler per event type. */
 class EventFold {
+  finalText: string | undefined;
   streamError: Error | null = null;
   // A failing turn.complete fails automation although the stream closed cleanly.
   completionError: string | null = null;
@@ -1136,6 +1140,9 @@ class EventFold {
         runner.ensureAssistantMessage();
         return;
       case 'text.delta':
+        // A resumed Claude turn can emit a task-notification result before the prompt's text.
+        // Its snapshot is stale once new text arrives; only a later completion can replace it.
+        this.finalText = undefined;
         runner.sawOutput();
         runner.appendText(event.text);
         return;
@@ -1147,6 +1154,7 @@ class EventFold {
         if (!event.isError) runner.applyToolResult(event.output);
         return;
       case 'turn.complete':
+        this.finalText = event.text;
         this.completionError = completionFailure(event.reason);
         runner.completeMessage(event.reason);
         return;

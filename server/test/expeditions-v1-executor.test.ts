@@ -14,7 +14,7 @@ import type { RawOutcome, RunSpec } from '../src/expedition-kernel/ports';
 import { keyedViewOf } from '../src/expedition-kernel/projection';
 import type { Authored } from '../src/expedition-kernel/protocol';
 import { HostExecutor } from '../src/expeditions-v1/executor';
-import { outcomeOf } from '../src/expeditions-v1/executor/answer';
+import { outcomeOf, readAnswer } from '../src/expeditions-v1/executor/answer';
 import { putRef } from '../src/expeditions-v1/executor/refs';
 import { ingestMeter } from '../src/expeditions-v1/executor/usage';
 import { NO_CALLS, hostDeps } from './fixtures/expedition-host';
@@ -511,6 +511,70 @@ test('a leader continue needs its reason; a log written without one still reads'
   assert.equal(act({ t: 'continue', why: '  ' }).t, 'errored');
   // F7: the old log's act has no `why`; the wire default reads it as empty.
   assert.deepEqual(keyed.LeaderAct.parse({ t: 'continue' }), { t: 'continue', why: '' });
+});
+
+test('run 3 Codex answers: bare final JSON, prose then JSON, and last fenced JSON', () => {
+  // Exact final from the initial run's rollout; the old host prepended agent_message progress.
+  const json =
+    '{"summary":"Committed aa76f2cbe57df8a56629bdefc8d7d189790586eb: greeting updated, punctuation \'.\' preserved; node test.mjs codex passed. Instructions: \\"Every tiny moon carries a copper umbrella.\\" \\"The patient otter counts seven blue lanterns.\\"","files":[]}';
+  const answer = JSON.parse(json);
+  const expected = { t: 'typed', schema: { type: 'object' } } as const;
+  for (const body of [
+    json,
+    `I’ll read the repository instructions, update the greeting, run the test, and commit on the assigned branch.\n${json}`,
+    `Done.\n${json}\nAll tests passed.`,
+    `\`\`\`json\n{}\n\`\`\`\n\`\`\`json\n${json}\n\`\`\``,
+  ])
+    assert.deepEqual(outcomeOf(expected, body), { t: 'ok', out: answer });
+  assert.deepEqual(outcomeOf(expected, `Earlier {"nested":{"n":1}} then ${json}`), {
+    t: 'ok',
+    out: answer,
+  });
+  assert.deepEqual(
+    outcomeOf({ t: 'typed', schema: { type: 'array' } }, 'Result: [1, {"q":"} \\" ["}]'),
+    { t: 'ok', out: [1, { q: '} " [' }] }
+  );
+  for (const body of [
+    'Nothing to report.',
+    '{"summary":"truncated", "files":[',
+    'prose ```json\nnot JSON\n```',
+  ]) {
+    const bad = outcomeOf(expected, body);
+    assert.equal(bad.t, 'errored');
+    assert.match(bad.t === 'errored' ? bad.why : '', /^malformed answer: not JSON.*excerpt/);
+  }
+  for (const value of [null, true, 17, 'answer'])
+    assert.deepEqual(outcomeOf({ t: 'typed', schema: {} }, `Result: ${JSON.stringify(value)}`), {
+      t: 'ok',
+      out: value,
+    });
+});
+
+test('Report.files are existing relative files inside this call, including realpath confinement', async () => {
+  const dir = tempDir('answer-files-');
+  const outside = tempDir('answer-outside-');
+  fs.writeFileSync(path.join(dir, 'greeting.mjs'), 'hello');
+  fs.writeFileSync(path.join(outside, 'secret'), 'secret');
+  fs.symlinkSync(outside, path.join(dir, 'escape'));
+  const expected = { t: 'typed', schema: { type: 'object' } } as const;
+  const read = (file: string) =>
+    readAnswer(expected, JSON.stringify({ summary: 'done', files: [file] }), dir);
+  for (const file of ['greeting.mjs', './greeting.mjs', path.join(dir, 'greeting.mjs')])
+    assert.deepEqual(await read(file), {
+      t: 'ok',
+      out: { summary: 'done', files: ['greeting.mjs'] },
+    });
+  for (const file of [
+    '../outside',
+    path.join(outside, 'secret'),
+    'escape/secret',
+    'missing',
+    '.',
+  ]) {
+    const bad = await read(file);
+    assert.equal(bad.t, 'errored', file);
+    assert.ok(bad.t === 'errored' && bad.why.includes(JSON.stringify(file)), JSON.stringify(bad));
+  }
 });
 
 // F6 (2026-11-11 run): every Codex call was `unreported` and charged its whole $0.50 reservation.

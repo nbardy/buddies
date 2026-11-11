@@ -3,7 +3,8 @@ import { mkdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { TurnCapabilities, TurnGit } from '@nbardy/agent-cli';
 import type { Run, RunConfig } from '@unleashd/buddies-core';
-import type { keyed } from '@unleashd/shared';
+import type { InstalledAgent, keyed } from '@unleashd/shared';
+import { profileExecution } from '../../buddies/briefing';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from '../../buddies/core';
 import { type BuddyEvents, announcePost } from '../../buddies/events';
 import type { ExecutionGate } from '../../buddies/execution-gate';
@@ -16,7 +17,7 @@ import { addDetachedTree, removeDetachedTree } from '../../expeditions/checks';
 import { labelled } from '../../observability/event-loop-stall';
 import { observeBuddyEvents } from '../observe';
 import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address';
-import { outcomeOf } from './answer';
+import { readAnswer } from './answer';
 import type { ExpeditionContext } from './context';
 import { commitOf } from './host-run';
 import { keepPrompt } from './prompts';
@@ -89,6 +90,7 @@ export const CALL_TIMING: CallTiming = {
 };
 
 export type BuddyCallDeps = {
+  readonly installed: () => InstalledAgent;
   readonly core: BuddiesCore;
   readonly events: BuddyEvents;
   readonly gate: ExecutionGate;
@@ -338,6 +340,17 @@ export class BuddyCalls implements Calls {
     return (WHO[who.t] as Who<keyed.Who['t']>)(who as never, this.seats, at, workspaceId);
   }
 
+  async providerOf(seat: { buddyId: string; runOn: RunOn }): Promise<string> {
+    if (seat.runOn.t === 'config') return seat.runOn.config.provider;
+    const execution = profileExecution(
+      await this.d.core.getBuddy(seat.buddyId),
+      this.d.installed()
+    );
+    if (execution.kind === 'no-agent')
+      throw new Error(`Buddy ${seat.buddyId} has no agent to run on`);
+    return execution.provider;
+  }
+
   /** The record a call starts with. */
   posting(
     at: Located,
@@ -559,7 +572,12 @@ export class BuddyCalls implements Calls {
   private async outcome(r: Posted, s: Exclude<Standing, { t: 'running' }>): Promise<RawOutcome> {
     switch (s.t) {
       case 'answered':
-        return outcomeOf(r.expected, (await this.d.core.getPost(OWNER, s.answerId)).body);
+        if (r.tree.t === 'none') return errored('an answered call has no working directory');
+        return readAnswer(
+          r.expected,
+          (await this.d.core.getPost(OWNER, s.answerId)).body,
+          r.tree.path
+        );
       case 'cancelled':
         return { t: 'cancelled' };
       case 'failed':
@@ -663,6 +681,7 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
     );
     const body = agentBody({
       address: at.address,
+      provider: await c.providerOf(seat),
       ctx: at.ctx,
       call,
       refs: named.refs,
@@ -704,6 +723,7 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
     const tree = view.tree;
     const body = reviewBody({
       address: at.address,
+      provider: await c.providerOf(seat),
       ctx: at.ctx,
       brief: spec.brief,
       judged,
@@ -734,7 +754,7 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
       posting: c.posting(at, {
         kind: 'leader',
         seat: { buddyId: at.ctx.leader, runOn: { t: 'profile' } },
-        body: `${limitsText(capabilities)}\n\n${spec.body}`,
+        body: `${limitsText(await c.providerOf({ buddyId: at.ctx.leader, runOn: { t: 'profile' } }), capabilities)}\n\n${spec.body}`,
         expected: { t: 'act', folder: spec.draft },
         tree: { t: 'dir', path: spec.draft },
         base: at.ctx.baseSha,
@@ -749,8 +769,7 @@ const unique = (xs: readonly string[]): string[] => [...new Set(xs)];
 
 /** What a review judge sees of the work beyond its answer file, by the judged ref's checkout.
  * Until 2026-11-11 a judge of a checkout call got only the answer: the producer's worktree is
- * released at its settle and a judge has no shell, so "a reviewer on another provider reads the
- * implementation" could not happen. Now it reads a detached checkout of exactly the judged commit
+ * released at its settle, so a reviewer could not read the implementation at its committed version. Now it reads a detached checkout of exactly the judged commit
  * and the diff against the call's base. Guard: expeditions-v1-agent-restarts.test.ts. */
 type JudgeView = (at: Located, judged: RefRecord) => { tree: Tree; reads: readonly string[] };
 const JUDGE_VIEW: {

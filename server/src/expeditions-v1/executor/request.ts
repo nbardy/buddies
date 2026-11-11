@@ -83,8 +83,8 @@ const header = (address: RunAddress) =>
 
 /** The head of every call's prompt: its id, then the limits its tools are set to, stated once. A
  * brief no longer needs to say "do not change files"; until 2026-11-11 it was only advice (D11). */
-export const headOf = (title: string, capabilities: TurnCapabilities): string =>
-  [title, '', limitsText(capabilities)].join('\n');
+export const headOf = (title: string, provider: string, capabilities: TurnCapabilities): string =>
+  [title, '', limitsText(provider, capabilities)].join('\n');
 
 /** An agent call's request. `refs` holds every ref its inputs and `context` name. */
 export function agentBody(x: {
@@ -96,10 +96,11 @@ export function agentBody(x: {
   readonly base: string;
   readonly expected: Expected;
   readonly capabilities: TurnCapabilities;
+  readonly provider: string;
 }): string {
   const { call, refs } = x;
   return [
-    headOf(header(x.address), x.capabilities),
+    headOf(header(x.address), x.provider, x.capabilities),
     '',
     call.brief,
     '',
@@ -144,9 +145,10 @@ export function reviewBody(x: {
   readonly tree: Tree;
   readonly expected: Expected;
   readonly capabilities: TurnCapabilities;
+  readonly provider: string;
 }): string {
   return [
-    headOf(header(x.address), x.capabilities),
+    headOf(header(x.address), x.provider, x.capabilities),
     '',
     ...codeOf(x.tree),
     'You are judging work against the rubric below.',

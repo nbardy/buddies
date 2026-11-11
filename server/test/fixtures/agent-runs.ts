@@ -111,6 +111,14 @@ async function main() {
   const tools = mcp();
   text('working;');
   mark(tag + '.midturn', process.pid);
+  if (mode === 'finalonly') {
+    const fence = String.fromCharCode(96).repeat(3);
+    text(fence + 'json\n{"n":999}\n' + fence);
+    const json = (/ANSWER_JSON:(.*)$/m.exec(prompt) || [])[1];
+    text(json);
+    say({ type: 'result', subtype: 'success', result: json });
+    return;
+  }
   if (mode === 'answer' || mode === 'malformed') return answer();
   if (mode === 'hold') { await until(tag + '.go'); return answer(); }
   if (mode === 'hang') return setInterval(() => {}, 1000);

@@ -75,7 +75,7 @@ function refId(ref: Ref): keyed.RefId {
 
 // ---- results ----
 export type Item = { readonly id: string };
-export type Report = { readonly summary: string; readonly files: readonly Ref[] };
+export type Report = { readonly summary: string; readonly files: readonly string[] };
 /** An output that exists. */
 export type Held<Out> = { readonly out: Out; readonly ref: Ref };
 export type Result<Out> =
@@ -98,15 +98,10 @@ class Answer<Out> {
   }
 }
 
-/** An agent's default answer. Files arrive as RefIds and reach plan code as Refs. */
-const REPORT: Answer<Report> = new Answer(
-  zodToJsonSchema(z.object({ summary: z.string(), files: z.array(z.string()) }).strict()),
-  z
-    .object({ summary: z.string(), files: z.array(z.string().min(1)) })
-    .strict()
-    .transform(
-      (wire): Report => ({ summary: wire.summary, files: wire.files.map((id) => new PlanRef(id)) })
-    )
+/** Files are validated paths relative to the call's own directory, not stored-output refs.
+ * Run 3 returned greeting.mjs: wrapping it as PlanRef invented a ref that never existed. */
+const REPORT: Answer<Report> = Answer.of(
+  z.object({ summary: z.string(), files: z.array(z.string().min(1)) }).strict()
 );
 /** A command's default answer: stdout is not read as JSON (`output: null` on the wire). */
 const TAIL: Answer<{ readonly tail: string }> = new Answer(

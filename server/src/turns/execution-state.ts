@@ -46,7 +46,9 @@ export type StopIntent =
 
 /** How a turn ended, for its attempt record and its run. */
 export type ExecutionOutcome =
-  | { readonly t: 'complete'; readonly text: string }
+  /** `text` is all the turn's assistant prose (what a Buddy posts, unchanged). `final` is the
+   * harness's last message alone, or `text` when the harness reports none. */
+  | { readonly t: 'complete'; readonly text: string; readonly final: string }
   | { readonly t: 'failed'; readonly cause: TurnTerminalCause; readonly detail: string }
   | { readonly t: 'cancelled'; readonly detail: string };
 

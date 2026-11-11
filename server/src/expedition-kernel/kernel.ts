@@ -262,6 +262,12 @@ export class Expedition {
   /** Declare the call under the current plan if the log does not already (or it should re-attach
    * a draining run), then act on what `decide` says. */
   private async consider(call: keyed.Call, asker: Asker): Promise<void> {
+    // Run 3 stopped while replay queued another declaration: decide's closed case was too late.
+    // Guard: stop during replay (expedition-kernel-e2e); finished logs accept no declarations.
+    if (this.current.progress.t === 'finished') {
+      asker.deliver({ t: 'closed', reason: this.current.progress.reason });
+      return;
+    }
     const hash = hashOf(call);
     const known = lookup(this.current, call.key, hash);
     const declare =
