@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { buildCommand } from '@nbardy/agent-cli';
 import {
   type ConversationConfig,
   ProviderCatalogSchema,
   applyConversationConfigPatch,
+  normalizeModelId,
   resolveConversationConfig,
 } from '../../shared/src/index';
 import {
@@ -223,4 +225,48 @@ test('invalid explicit reasoning for a new model rejects the whole transition', 
     assert.equal(resolution.error.code, 'reasoning_unavailable');
   }
   assert.deepEqual(current.model, { mode: 'default' });
+});
+
+// Fable's moving alias must select 5.2 while versioned history stays on 5.1.
+test('Fable 5.2 is selectable with every supported effort and the family alias follows it', () => {
+  const claude = createProviderCatalog().providers.find((provider) => provider.id === 'claude');
+  assert.equal(
+    claude?.models.find((model) => model.id === 'claude-fable-5-2')?.displayName,
+    'Fable 5.2'
+  );
+  assert.ok(claude?.models.some((model) => model.id === 'claude-fable-5-1'));
+  assert.equal(normalizeModelId('claude', 'fable'), 'claude-fable-5-2');
+  assert.equal(normalizeModelId('claude', 'claude-fable-5-1'), 'claude-fable-5-1');
+  const savedFamily = config({
+    provider: 'claude',
+    model: { mode: 'explicit', modelId: 'fable' },
+  });
+  const familyResolution = resolveConfigAgainstProviderCatalog(savedFamily);
+  assert.equal(familyResolution.status, 'resolved');
+  if (familyResolution.status === 'resolved') {
+    assert.equal(familyResolution.value.modelId, 'claude-fable-5-2');
+    assert.equal(familyResolution.value.reasoningEffort, 'medium');
+  }
+  assert.deepEqual(savedFamily.model, { mode: 'explicit', modelId: 'fable' });
+  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+    const resolved = resolveConfigAgainstProviderCatalog(
+      config({
+        provider: 'claude',
+        model: { mode: 'explicit', modelId: 'claude-fable-5-2' },
+        reasoning: { mode: 'explicit', effort },
+      })
+    );
+    assert.equal(resolved.status, 'resolved');
+    if (resolved.status === 'resolved') {
+      assert.equal(resolved.value.modelId, 'claude-fable-5-2');
+      assert.equal(resolved.value.reasoningEffort, effort);
+      const command = buildCommand('claude', {
+        model: resolved.value.modelId,
+        reasoning: resolved.value.reasoningEffort,
+        prompt: 'test',
+      });
+      assert.equal(command.argv[command.argv.indexOf('--model') + 1], 'claude-fable-5-2');
+      assert.equal(command.argv[command.argv.indexOf('--effort') + 1], effort);
+    }
+  }
 });

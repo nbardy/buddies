@@ -272,10 +272,10 @@ test('Fable session hydration recovers reported model names and preserves saved 
     assert.deepEqual(imported.diagnostics, []);
     assert.deepEqual((await store.getByConversationId(CONVERSATION_ID))?.config, {
       provider: 'claude',
-      model: { mode: 'explicit', modelId: 'fable' },
+      model: { mode: 'explicit', modelId: 'claude-fable-5-1' },
       reasoning: { mode: 'disabled' },
     });
-    assert.equal(imported.record.lastResolvedConfig?.modelId, 'fable');
+    assert.equal(imported.record.lastResolvedConfig?.modelId, 'claude-fable-5-1');
 
     const savedConfig: ConversationConfig = {
       provider: 'claude',

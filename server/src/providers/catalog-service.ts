@@ -12,6 +12,7 @@ import {
   ProviderSchema,
   catalogEntryForProvider,
   isModelIdValidForProvider,
+  normalizeModelId,
   resolveConversationConfig,
 } from '@unleashd/shared';
 
@@ -82,6 +83,19 @@ export function resolveConfigAgainstProviderCatalog(
   config: ConversationConfig,
   lastResolved?: Extract<ConfigResolution, { status: 'resolved' }>['value']
 ): ConfigResolution {
+  // Saved family selections must stay executable after their catalog id becomes an alias.
+  // Normalize only the execution snapshot; preserve the owner's stored selection intent.
+  const canonical =
+    config.model.mode === 'explicit'
+      ? {
+          ...config,
+          model: {
+            mode: 'explicit' as const,
+            modelId:
+              normalizeModelId(config.provider, config.model.modelId) ?? config.model.modelId,
+          },
+        }
+      : config;
   const catalog = createProviderCatalog();
-  return resolveConversationConfig(config, catalogForConfig(catalog, config), lastResolved);
+  return resolveConversationConfig(canonical, catalogForConfig(catalog, canonical), lastResolved);
 }

@@ -477,15 +477,10 @@ function configFromSessionEvidence(evidence: SessionConfigEvidence): {
 } {
   const diagnostics: SessionConfigDiagnostic[] = [];
   const reportedModel = trimmed(evidence.reportedModel);
-  // Claude reports this versioned name for the catalog's Fable alias.
-  // Recover it only from session evidence; explicit stored selections stay unchanged.
-  const reported =
-    evidence.provider === 'claude' && reportedModel === 'claude-fable-5-1'
-      ? 'fable'
-      : reportedModel;
-  // Collapse provider aliases (e.g. composer-2 → composer-2.5) before validation
-  // so historical session labels land on the current catalog id.
-  const modelId = reported && (normalizeModelId(evidence.provider, reported) ?? reported);
+  // Collapse provider aliases (e.g. fable → claude-fable-5-2) before validation.
+  // Keep versioned evidence intact: mapping 5.1 to the moving alias mislabels old history.
+  const modelId =
+    reportedModel && (normalizeModelId(evidence.provider, reportedModel) ?? reportedModel);
   const modelValid = modelId !== undefined && isModelIdValidForProvider(evidence.provider, modelId);
   if (reportedModel && !modelValid) {
     diagnostics.push({

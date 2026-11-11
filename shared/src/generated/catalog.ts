@@ -1,5 +1,5 @@
 // DO NOT EDIT - generated from catalog.jsonc
-// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-10-24.muse-wonder-1.0+sol-pi-1.1)
+// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-11-11.fable-5.2)
 // Generator: shared/scripts/gen-catalog.ts
 // Run: pnpm --filter @unleashd/shared gen:catalog
 
@@ -70,7 +70,21 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
     "shortName": "C",
     "models": [
       {
-        "id": "fable",
+        "id": "claude-fable-5-2",
+        "displayName": "Fable 5.2",
+        "reasoning": {
+          "levels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      },
+      {
+        "id": "claude-fable-5-1",
         "displayName": "Fable 5.1",
         "reasoning": {
           "levels": [
@@ -129,7 +143,8 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
     "defaultModelId": "claude-opus-5-5",
     "supportsDynamicModels": false,
     "aliases": {
-      "sonnet": "claude-sonnet-5-5"
+      "sonnet": "claude-sonnet-5-5",
+      "fable": "claude-fable-5-2"
     }
   },
   {
