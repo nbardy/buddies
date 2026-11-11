@@ -404,6 +404,32 @@ still adds no boot phase, opens no log for write, and every POST returns 503 wit
 Launch remains owner HTTP / launch card only. Guard: `expeditions-v1-server` (including the
 empty-live module-cache check), `startup`, `copied-store-guard`.
 
+### The fourth real run (2026-11-11): finished met
+
+Evidence: gitignored `output/expedition-run4-2026-11-11/REPORT.md`, at commit `ff4fc8d`, on a
+throwaway server (fresh stores, spare ports, no expedition flag: the execution gate alone).
+One expedition, 5 agent turns, $0.0551 recorded of a $3 budget, 144 s, no retry of the run.
+
+- A Codex checkout call edited, tested and committed inside its sandbox (`dee52976`), judged by
+  a Claude review; a Claude checkout call committed with a chained shell command (`5f2743cc`),
+  judged by a Codex review. Both reviewers opened the judged commit's source and its diff and
+  quoted real lines from each; each judge checkout was removed after it settled.
+- Host command steps ran the repo's test on both commits. The leader (Claude Haiku) rewrote the
+  one plan file to add a step; the host kept the four settled calls and started only the new one.
+  The owner question, the done check and the owner's acceptance were answered through the API.
+- Run 3's three failures did not recur: Codex answered with progress text and then bare JSON,
+  read first time; the Claude commit chain was allowed; the Codex reviewer read the code.
+- Every answer parsed on the first attempt. The recorded Claude dollars equal the CLI's own
+  figures (gap 0 on three turns).
+
+What it did not show: the goal told the leader exactly which step to add, so the leader's own
+judgment was not tested; no Codex helper started, so descendant accounting was not exercised; no
+hostile boundary attempts (the probes cover those per turn).
+
+Not a fault: an MCP relay process outlives the server it served. It is detached on purpose
+(`server/relay/buddy-mcp-relay.mjs`, hold-through-outage) and exits by itself after five idle
+minutes. Runs 3 and 4 both reported it as an orphan.
+
 ### Third-run repairs (2026-11-11, now checked by the conformance probes)
 
 Evidence: gitignored `output/expedition-run3-2026-11-11/REPORT.md`, `analysis.json`,
@@ -534,6 +560,11 @@ per temp path in the owner's home.
 5. With execution enabled, run the GTM case with its judges off Gemini (D2).
 6. Step 9: delete the old host once its last record is settled (D10), real `continues`, the crate
    deadline.
+
+State on 2026-11-11 after the fourth run: items 1 to 4 are done and the integrated path is proven
+light. Open: item 5 (the GTM case, launched by the owner from a Buddy's proposal card in the live
+app) and item 6. The old host's record `gtm-evidence-thesis-buye-dd0984` still reads
+"Running · 1/6", waiting on the owner's verdict, so the old host stays until the owner settles it.
 
 ### F1, F2, F4 as built (2026-11-11)
 
