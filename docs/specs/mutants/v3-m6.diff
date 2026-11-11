@@ -1,0 +1,11 @@
+--- expedition-v3.qnt
++++ v3-m6.qnt
+@@ -83,7 +83,7 @@
+   // What a start reserves: a producer also reserves maxClaims judgments (held on candidacy).
+   pure def startCost(j: int): int = cost(j) + maxClaims(j) * JUDGE_COST
+   // Judgment class: survives the deadline and drain. Integration is judgment class (rev2).
+-  pure def isJudgment(j: int): bool = kind(j) == "judge" or kind(j) == "owner" or kind(j) == "integrate"
++  pure def isJudgment(j: int): bool = kind(j) == "judge" or kind(j) == "owner"
+ 
+   type S = {
+     jstate: int -> str,     // none | pending | running | done | failed | lost | cancelled

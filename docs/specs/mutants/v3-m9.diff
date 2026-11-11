@@ -1,0 +1,11 @@
+--- expedition-v3.qnt
++++ v3-m9.qnt
+@@ -166,7 +166,7 @@
+     else if (st.spent + sumReserved(st) + st.held > TOTAL) drain(st, "budget")
+     else
+       val quotaDead = JOBS.filter(j =>
+-        st.jstate.get(j) == "pending" and not(isJudgment(j)) and not(familyOpen(st, j)))
++        false)
+       val js1 = JOBS.mapBy(j => if (quotaDead.contains(j)) "cancelled" else st.jstate.get(j))
+       val st1 = { ...st, jstate: js1 }
+       val idle = not(budgetLive(st1))

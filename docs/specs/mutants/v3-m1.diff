@@ -1,0 +1,11 @@
+--- expedition-v3.qnt
++++ v3-m1.qnt
+@@ -318,7 +318,7 @@
+       reserved: s.reserved.set(j, 0),
+       spent: s.spent + actual,
+       overruns: if (actual > JUDGE_COST) s.overruns + 1 else s.overruns,
+-      claim: s.claim.set(c, if (outcome == "pass") "verified" else if (outcome == "fail") "refuted" else "unjudged"),
++      claim: s.claim.set(c, if (outcome == "pass") "verified" else if (outcome == "fail") "refuted" else s.claim.get(c)),
+       integ: if (outcome == "pass") s.integ.set(c, "pending") else s.integ,
+       refutationsA: if (outcome == "fail") s.refutationsA + 1 else s.refutationsA,
+       fp: s.fp + 1, clock: s.clock + 1 }),

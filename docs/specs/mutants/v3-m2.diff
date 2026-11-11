@@ -1,0 +1,12 @@
+--- expedition-v3.qnt
++++ v3-m2.qnt
+@@ -170,8 +170,7 @@
+       val js1 = JOBS.mapBy(j => if (quotaDead.contains(j)) "cancelled" else st.jstate.get(j))
+       val st1 = { ...st, jstate: js1 }
+       val idle = not(budgetLive(st1))
+-      val budgetDead = if (idle) JOBS.filter(j =>
+-        js1.get(j) == "pending" and not(isJudgment(j)) and not(affordable(st1, j))) else Set()
++      val budgetDead = Set()
+       val planDead = idle and st.plan == "pending" and remaining(st1) < PLAN_COST
+       { ...st1,
+         jstate: JOBS.mapBy(j => if (budgetDead.contains(j)) "cancelled" else js1.get(j)),

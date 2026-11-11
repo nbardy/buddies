@@ -1,0 +1,13 @@
+--- expedition-v3.qnt
++++ v3-m3.qnt
+@@ -359,8 +359,8 @@
+     nondet dead = procs.powerset().oneOf()
+     nondet planDies = Set(true, false).oneOf()
+     val planLost = s.plan == "running" and planDies
+-    val lostJobs = dead.filter(j => kind(j) != "integrate")
+-    val reentered = dead.filter(j => kind(j) == "integrate")
++    val lostJobs = dead
++    val reentered = dead.filter(j => false)
+     val charge = lostJobs.fold(0, (acc, j) => acc + s.reserved.get(j)) + (if (planLost) s.planReserved else 0)
+     s' = react({ ...s,
+       jstate: JOBS.mapBy(j => if (lostJobs.contains(j)) "lost" else if (reentered.contains(j)) "pending" else s.jstate.get(j)),

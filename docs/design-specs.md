@@ -33,7 +33,12 @@ Conventions are not checking. For the concurrent core of a design (lifecycles, b
 restart), write a **Quint** model (`docs/specs/*.qnt`, installed through npm, TS-like syntax over
 TLA+'s logic):
 
-- `quint run`: random simulation, no JVM.
+- `quint run`: random simulation, no JVM. **Always pass `--backend=rust`**: Quint 0.33.1 defaults
+  to the TypeScript simulator, which ran 62 traces/s where rust ran 2,481/s on the same model
+  (expedition-v3 `safety`, 3000 samples: 48.7 s vs 1.2 s, measured 2026-11-09). Check several
+  invariants in one run with `--invariants a b c`, and count witnesses with `--witnesses w1 w2`
+  rather than one run per property. Keep models small: a model whose nondeterministic choices
+  draw from large sets ran at 11 traces/s even on rust (expedition-v4, 272 s).
 - `quint verify`: Apalache, a bounded symbolic check of every interleaving (needs a JVM).
 - Link the model to the code: drive the real implementation with the model's transitions
   (fast-check, or replaying Quint ITF traces). A proof covers the model, not the code.

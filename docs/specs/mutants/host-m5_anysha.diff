@@ -1,0 +1,11 @@
+--- expedition-host.qnt
++++ host-m5_anysha.qnt
+@@ -247,7 +247,7 @@
+     s.fin == "asking",
+     nondet ans = Set("yes", "no", "unanswered").oneOf()
+     val p2 = if (ans == "yes") s.passed.union(Set((2, s.finSha))) else s.passed
+-    val met = CRITS.forall(k => p2.contains((k, s.finSha))) and s.ver == s.finVer
++    val met = CRITS.forall(k => SHAS.exists(h => p2.contains((k, h))))
+     val st = { ...s, fin: "none", passed: p2, finResolved: s.finResolved + 1, afterWork: post(s) }
+     if (ans == "no") s' = closeAll(st, "owner-declined")
+     else if (met) s' = closeAll(st, "met")

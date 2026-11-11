@@ -1,0 +1,11 @@
+--- expedition-v3.qnt
++++ v3-m7.qnt
+@@ -341,7 +341,7 @@
+     nondet merged = Set(true, false).oneOf()
+     nondet recheck = Set(true, false).oneOf()
+     val c = claimOfInteg(j)
+-    val landed = merged and recheck
++    val landed = merged
+     s' = react({ ...s,
+       jstate: s.jstate.set(j, if (landed) "done" else "failed"),
+       integ: s.integ.set(c, if (landed) "landed" else "failed"),
