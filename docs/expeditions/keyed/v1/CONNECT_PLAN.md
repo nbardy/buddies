@@ -383,7 +383,8 @@ for a reason the format did not cause: the model wrote the draft with a shell he
 not create its temp file ("can't create temp file for here document: operation not permitted"),
 and the leader stopped, reporting the draft folder unwritable. A Codex write turn confines writes
 to its directory and excludes `/tmp` and `$TMPDIR`, so any command that needs a temp file fails;
-earlier passes used the patch tool. Open: give a write turn its own temp directory. Evidence:
+earlier passes used the patch tool. Fixed the same day (commit `8191578`): a write turn has its
+own temp directory, and a `temp` probe requires the heredoc. Evidence:
 gitignored `output/expedition-probes-2026-11-11T13-12-39-560Z/codex/leader/`.
 
 ### Real-agent conformance probes (2026-11-11)
@@ -463,6 +464,27 @@ hostile boundary attempts (the probes cover those per turn).
 Not a fault: an MCP relay process outlives the server it served. It is detached on purpose
 (`server/relay/buddy-mcp-relay.mjs`, hold-through-outage) and exits by itself after five idle
 minutes. Runs 3 and 4 both reported it as an orphan.
+
+### The fifth real run (2026-11-11): finished met, on the one-import format
+
+Evidence: gitignored `output/expedition-run5-2026-11-11/REPORT.md`, at commit `8191578`, on a
+throwaway server. One expedition written in the new authoring format (one import, string agents,
+plain-object steps, plain promises), 7 agent turns, $0.0964 recorded, 105 s, no retry.
+
+- The same shape as the fourth run (Codex and Claude checkout commits, cross-provider reviews
+  that quote the code, host tests, a leader rewrite, an owner question, the done checks), plus a
+  two-item fan-out through `Promise.all(items.map((i) => step.try(i)))` on an item step.
+- The file left `pools`, `autoApply`, `leaderWake` and `doneReview` out. The preview reported
+  the defaults (one call at a time per harness, auto-apply $0, wake and done review $0.30 and
+  5 min) and the log's reservations match them.
+- The Codex checkout call ran a shell heredoc and `mktemp "$TMPDIR/..."` successfully; its temp
+  directory was gone after it settled.
+- The leader's rewrite was in the new format and passed the gates first time; six settled keys
+  were reused and only the added step started. Every answer parsed on the first attempt.
+
+Not shown: a gate rejection on the new format (no file was rejected, so the wording of those
+messages is untested by a real author), a Codex helper's accounting, hostile boundary attempts.
+The run again reported the detached MCP relay as an orphan (see the fourth run: by design).
 
 ### Third-run repairs (2026-11-11, now checked by the conformance probes)
 
