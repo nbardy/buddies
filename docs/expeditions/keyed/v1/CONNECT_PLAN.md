@@ -1,9 +1,10 @@
 # Connecting the expedition kernel to the real system
 
-Status: **plan, 2026-11-10. Nothing here is built.** Written from a read-only study of the code at
-`6a38b5d`; every `file:line` is from that commit. The kernel (`server/src/expedition-kernel/`)
-passes its tests against a scripted executor; this is the plan for real Buddy runs, the leader,
-the owner, boot, routes and a timeline view. Design: [DESIGN.md](DESIGN.md).
+Status: **steps 1 to 7 built and on main, 2026-11-11, behind `UNLEASHD_EXPEDITIONS_V1=1` (off by
+default). One real-agent run has passed (§10).** Step 8 (the Buddy tool) and step 9 are not built,
+and §10 lists what the real run showed must change before real work runs on it. The plan below
+was written from a read-only study of the code at `6a38b5d`; its `file:line` citations are from
+that commit, and the "Built" notes in §8 record what each step did. Design: [DESIGN.md](DESIGN.md).
 
 ## 0. Findings that change the plan
 
@@ -348,3 +349,51 @@ read-only view never shows one.
 | D9 | Flag and namespace | `UNLEASHD_EXPEDITIONS_V1=1`, `/api/buddies/keyed-expeditions`, `~/.agent-viewer/expeditions-v1/` |
 | D10 | The live old GTM record | The owner gives it a verdict or stops it; the old host is deleted only after |
 | D11 | `grant.reads` / `web` | Advisory in the brief for v1 (nothing enforces them) |
+
+## 10. The first real run, and what is open (2026-11-11)
+
+One expedition ran with real agents on a throwaway server with fresh stores, using the installed
+`claude` and `codex` CLIs and their existing logins: a Claude seat call judged by a host command,
+a Codex seat call judged by a Claude review, one leader wake at a review, one owner question, and
+done criteria of a command plus an owner acceptance. It finished `met` in 3 min 43 s with 4 agent
+turns and $0.58 recorded of a $3 budget. Every answer parsed first time. The backend was
+SIGKILLed 3 s into the first call; the next backend adopted the turn and the call settled once.
+For the Claude calls the recorded cost equals the transcripts' token counts at the rates in
+`server/src/providers/pricing.ts`, to the last digit. Evidence is in the gitignored
+`output/expedition-smoke-2026-11-11/` (log, prompts, raw answers, transcripts, screenshots).
+
+Not covered by that run: the live stores and the owner's real server; Codex as leader; a leader
+rewrite with a real agent; a checkout call that commits; a named Buddy with memory as a seat; a
+fan-out wider than one call per provider.
+
+### Findings to act on, most important first
+
+| # | Finding | Evidence | Proposed change |
+|---|---|---|---|
+| F1 | **A call turn is not tool-less.** The `call` role removes the Buddy tools only. Claude ran with `--tools default` and bypassed permissions (sub-agents, web, file writes, shell, cron and remote triggers); Codex ran with `danger-full-access`. A brief's "do not change files" and "no web" are advice (D11). | the leader wake's `init` event and the CLI command lines in the run's watch log | Pass a restricted tool list and permission mode per call through `vendor/agent-cli-tool` (each harness's own flags), derived from the call's `grant`; report each grant as enforced or advisory in the preview |
+| F2 | **Calls inherit the owner's global agent instructions.** Codex's prompt began with the global AGENTS.md (3,057 characters). Each Claude call wrote 14-15k cache tokens, which suggests CLAUDE.md loads too (not verified). | the Codex rollout's first message; the Claude usage rows | Decide whether a call should load them. If not, run calls with the harness's "no user instructions" setting; either way record the choice in the brief header |
+| F3 | **A leader wake reserves $2 whatever the budget.** `DEFAULT_LIMITS` in `server/src/expeditions-v1/host.ts`, with no override. On a $3 budget it held most of it while spending $0.04. | budget after step 2: $0.54 spent, $2 reserved | Put the wake and done-review caps in the contract, defaulting to a fraction of the budget |
+| F4 | **A call's prompt is kept nowhere in the expedition directory.** A closed run record drops the posted body and the journals are deleted at settle. | the run's `runs/` records | Keep the rendered brief beside the ref (it is already part of the call's hash) |
+| F5 | **The owner is asked to accept an opaque ref.** The done question shows `rank@<64 hex>`, not the result. | the live screenshots | Show the candidate's summary and a link to its answer file in the ask and in the view |
+| F6 | **Codex and every non-Claude model are `unreported`,** so each is charged its whole reservation. Safe, but the budget then measures reservations, not work. | $0.50 of the run's $0.58 | Add rates for the models in use, or count tokens from the Codex rollout |
+| F7 | **The leader's `continue` carries no reason** in the timeline, though it explained itself in prose. | the review marker's empty "why" | Add `why` to the `continue` act |
+| F8 | **Wording.** A waiting ask reads "Why: Still running."; an owner-accepted criterion reads "Its judge passed it." | the screenshots | Say "Waiting on you" and "You accepted it" |
+
+Also known and not fixed: the time and dollar caps end a turn through the cancel path, so the
+crate run reads as cancelled by request (needs a per-request deadline in the crate); a pending
+rewrite approval lives in memory and is abandoned by a restart; the typecheck gate needs `tsc`,
+which is a devDependency, so a published install cannot run it; real CLIs leave a project folder
+per temp path in the owner's home.
+
+### Next work, in order
+
+1. F1 and F2: what a call may do and what it is told. Nothing unattended should run before these.
+2. F3 to F5 and F7, F8: small, and they make a run legible to the owner.
+3. A second real run covering what the first did not: a leader rewrite, a checkout call, Codex as
+   a seat with a rate, a 5-wide fan-out.
+4. Step 8: the Buddy tool (`propose`, `status`, `list`) and a launch button, so an expedition is
+   started from the app and not from an HTTP call.
+5. Turn the flag on for the live server and run the GTM case with its judges off Gemini (D2).
+6. Step 9: delete the old host once its last record is settled (D10), real `continues`, the crate
+   deadline.
+

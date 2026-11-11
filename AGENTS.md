@@ -61,10 +61,13 @@ server/src/expeditions/            → expeditions: one JSON record each, a seri
                                      the `expedition` tool, /api/buddies/expeditions; design:
                                      docs/expeditions-lean-design.md
 server/src/expedition-kernel/      → keyed expeditions (v1): log, reconcile, plan runner, gates;
-                                     types in shared/src/expedition-keyed.ts (`keyed`); not wired
-                                     into server.ts yet: docs/expeditions/keyed/v1/CONNECT_PLAN.md
-server/src/expeditions-v1/executor/ → the kernel's Executor over the host: run records, refs,
-                                     commands and check judges (agent runs: later steps)
+                                     types in shared/src/expedition-keyed.ts (`keyed`)
+server/src/expeditions-v1/         → its host: executor (commands, checks, agent calls as Buddy
+                                     requests, asks), leader and owner ports, routes under
+                                     /api/buddies/keyed-expeditions. Live only with the execution
+                                     gate on AND UNLEASHD_EXPEDITIONS_V1=1, else read-only. State
+                                     and open findings: docs/expeditions/keyed/v1/CONNECT_PLAN.md §10
+client/src/components/buddies/Keyed*.tsx → its timeline view and rail rows
 client/src/components/buddies/Expedition*.tsx → chat card, rail section (both shells) and modal.
 {server,client}/src/swarm/          → QUARANTINED swarm/oompa viewer; outside code imports
                                      only swarm/index.ts (guard: swarm-quarantine.test.ts)

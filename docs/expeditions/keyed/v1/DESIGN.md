@@ -1,12 +1,14 @@
 # Expeditions v1: the smallest version worth running
 
-Status: **kernel built, 2026-11-10; not yet connected to the server.** The kernel is
+Status: **built and connected to the server behind `UNLEASHD_EXPEDITIONS_V1=1` (off by default),
+2026-11-11. One real-agent run has passed; see [CONNECT_PLAN.md](CONNECT_PLAN.md) §10 for what it
+showed and what is open.** The kernel is
 `server/src/expedition-kernel/` (about 4,800 lines) with tests `server/test/expedition-kernel-*`:
 a pure core driven through 20,000 random steps, real plan child processes, and end-to-end runs of
 the GTM plan against a scripted executor (full run, crash and reopen, a rewrite with
 cancel-or-finish, every gate failure, the deadline, retry). The concurrent core is modelled in
-`docs/specs/expedition-keyed.qnt`: random simulation over 200,000 traces, not a proof. No real
-agent has run on it yet: the executor over Buddy runs, the routes and the UI are not written.
+`docs/specs/expedition-keyed.qnt`: random simulation over 200,000 traces, not a proof. The
+executor over Buddy runs, the routes and the timeline view are built (CONNECT_PLAN.md §8).
 §10 lists what building it changed. The API
 is the authoring library itself
 ([`server/src/expedition-kernel/authoring/index.ts`](../../../../server/src/expedition-kernel/authoring/index.ts);
