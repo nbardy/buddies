@@ -13,22 +13,17 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sharedBuildInputs, writeBuildStamp } from '../../tools/lib/shared-build-stamp.mjs';
+import { tscExecutable } from '../../tools/lib/tsc.mjs';
 
 const sharedRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cacheRoot = path.join(sharedRoot, 'node_modules', '.cache');
 const distRoot = path.join(sharedRoot, 'dist');
 const lockPath = path.join(cacheRoot, 'build.lock');
-// TypeScript 7's `exports` map names no `bin/tsc` subpath, so resolving it threw
-// ERR_PACKAGE_PATH_NOT_EXPORTED. The package's own `bin` field is the stable way in;
-// that launcher execs the native compiler.
-const typescriptManifest = createRequire(import.meta.url).resolve('typescript/package.json');
-const tsc = path.join(
-  path.dirname(typescriptManifest),
-  JSON.parse(await readFile(typescriptManifest, 'utf8')).bin.tsc
-);
+// The native compiler, spawned directly (no Node launcher per compile): tools/lib/tsc.mjs.
+const { exe: tsc } = await tscExecutable(path.join(sharedRoot, 'package.json'));
 
 async function acquireLock() {
   await mkdir(cacheRoot, { recursive: true });
@@ -72,7 +67,7 @@ async function acquireLock() {
 
 function compile(config, outDir) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [tsc, '-p', config, '--outDir', outDir], {
+    const child = spawn(tsc, ['-p', config, '--outDir', outDir], {
       cwd: sharedRoot,
       stdio: 'inherit',
     });
@@ -116,12 +111,19 @@ async function publish(stage) {
 const release = await acquireLock();
 let stage;
 try {
+  // Digested BEFORE compiling: a source edited mid-build leaves a stamp that no longer matches,
+  // so the next typecheck rebuilds (tools/lib/shared-build-stamp.mjs).
+  const inputs = sharedBuildInputs(sharedRoot);
   stage = await mkdtemp(path.join(cacheRoot, 'build-'));
-  await compile('tsconfig.json', stage);
-  await compile('tsconfig.cjs.json', path.join(stage, 'cjs'));
+  // The two emits are independent (the CJS one writes only under cjs/): run them at once.
+  await Promise.all([
+    compile('tsconfig.json', stage),
+    compile('tsconfig.cjs.json', path.join(stage, 'cjs')),
+  ]);
   await mkdir(path.join(stage, 'cjs'), { recursive: true });
   await writeFile(path.join(stage, 'cjs', 'package.json'), '{\n  "type": "commonjs"\n}\n');
   await publish(stage);
+  writeBuildStamp(sharedRoot, inputs);
 } finally {
   if (stage) await rm(stage, { recursive: true, force: true });
   await release();

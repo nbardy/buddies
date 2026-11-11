@@ -368,8 +368,9 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   (2026-11-11; guard `tools/bound-child.test.mjs`).
 - Editors: use TypeScript 7's language server, the workspace's
   `node_modules/typescript` (7.0.2; the native binary serves it with
-  `tsc --lsp`). tsrs has no language server. The old JS `tsserver.js` is gone in
-  TS 7; nothing in the repo pins an editor to it (no `.vscode`, no `tsdk`).
+  `tsc --lsp`). tsrs 0.23 also serves `--lsp` (stdio only), untried here.
+  The old JS `tsserver.js` is gone in TS 7; nothing in the repo pins an
+  editor to it (no `.vscode`, no `tsdk`).
 - A second dev runtime runs beside the live one on other ports:
   `UNLEASHD_DEV_CLIENT_PORT` / `UNLEASHD_DEV_API_PORT` (default 7489/7499,
   `server/src/dev-ports.ts`). Prove a dev-runtime change with temp stores
@@ -377,9 +378,24 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   Buddy execution) and `UNLEASHD_CHECKOUT_ROOT` at a non-git temp dir, so the
   upstream check never fetches in the main checkout.
 - While iterating, run `pnpm check [paths...]`: Biome (lint + format check) on
-  your paths, then the default typecheck on every project, under the typecheck
-  lock, with one summary line per part (whole repo ~15 s, two files ~10 s at
-  load 10-40, 2026-11-11). `pnpm lint` and `pnpm typecheck` still run alone.
+  your paths and the default typecheck on every project, AT ONCE under the
+  typecheck lock (Biome prints live, the typecheck's output is held until Biome
+  is done, so they never interleave), with one summary line per part. Biome is
+  now most of its wall time. `pnpm lint` and `pnpm typecheck` still run alone.
+- Fastest loop: `tools/typecheck.mjs` and `tools/check.mjs` are executable;
+  run them directly (`./tools/typecheck.mjs`, `./tools/check.mjs src/x.ts`) to
+  skip pnpm's own startup (~0.5 s per invocation, more than an unchanged-tree
+  typecheck). Flags on both: `--fresh` (never reuse a recorded result) and
+  `--timings` (one line: startup, fingerprint, shared build or skipped, each
+  project, total). Measured 2026-11-11, median of 5, old runner vs new
+  interleaved in one worktree at load 14-92 (absolute numbers are noisy, the
+  ratios hold): direct entry unchanged tree 13.2 s -> 0.53 s, one changed
+  `server/src` file 14.2 -> 2.9 s, one changed `shared/src` file 14.2 ->
+  6.5 s; `pnpm typecheck` 5.2 -> 1.3 s, 8.1 -> 4.0 s, 9.0 -> 5.7 s;
+  `pnpm check` 29 -> 9.3 s, 11.3 -> 4.8 s, 23.9 -> 14.3 s. At load ~5 the
+  old direct run took 1.4 s in every case; the new one answers an unchanged
+  tree in ~0.2 s (Node startup ~50 ms + fingerprint ~25-100 ms) and checks a
+  changed tree in ~0.4-0.5 s.
 - `pnpm typecheck` runs **tsrs** (npm `tsrs`, pinned 0.23.0-ts7.1.0-beta, a Rust
   port of TypeScript; EXPERIMENTAL) since 2026-11-11, at the owner's request:
   2.7-3.6 s and 257 MB peak against 4.9-6.6 s and 551-581 MB for the same
@@ -396,11 +412,46 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
 - `pnpm typecheck` is single-flight across every process on the machine
   (`tools/typecheck.mjs`): concurrent agents' typecheckers contended for the
   machine (2026-11-10). One lock file in the temp dir holds the holder's pid;
-  a second run waits, then reuses that result when it finished after the
-  waiter started on the same checkout with no file's size or mtime changed,
-  or runs next. A dead holder's lock (or one older than 10 min) is reclaimed.
-  It takes no dev-runtime lock, so it is safe while a dev runtime runs. Every
-  project is checked even after one fails. Guard: `tools/typecheck.test.mjs`.
+  a second run waits, then runs next or reuses a recorded result. A dead
+  holder's lock (or one older than 10 min) is reclaimed. It takes no
+  dev-runtime lock, so it is safe while a dev runtime runs. Every project is
+  checked even after one fails. Guard: `tools/typecheck.test.mjs`.
+- Where a typecheck's time goes (owner, 2026-11-11: "5-10s for a typecheck
+  still feels pretty slow"; the compilers take 85-150 ms per project):
+  - Result reuse: a finished run is recorded per mode in
+    `node_modules/.cache/typecheck-result-<mode>.json` under a key of the tree
+    (every tracked or unignored file, the submodule's too, by size and mtime,
+    plus `node_modules/.modules.yaml`), the generated inputs the projects read
+    (`shared/dist`, `vendor/agent-cli-tool/dist`: `GENERATED_INPUTS`), each
+    compiler's version and binary, the runner's own source and the mode. Any
+    run with the same key prints the recorded output, without the lock, and
+    says `reused the result of PID n from Ns ago`. Not recorded: a run during
+    which the tree changed, or one whose checker crashed or was killed.
+    `--fresh` always runs. Guards: "every file a project reads is
+    fingerprinted" (a project that starts reading another ignored file must
+    add it to `GENERATED_INPUTS`), and the reuse tests.
+  - The shared build (~0.7-2 s) runs only when the stamp
+    `shared/dist/.build-stamp.json` no longer matches: a digest of shared's
+    sources, configs, build script, `package.json`, TypeScript and each
+    dependency (a workspace one by its types file), plus every published
+    file's size and mtime (`tools/lib/shared-build-stamp.mjs`). A dev
+    `tsc --watch` publish makes it stale. `pnpm --dir shared run build` always
+    builds. Its two emits now run at once.
+  - The six projects run at once, output buffered and printed in project
+    order (the transcript is a sequential run's), and every child is stopped
+    on an interrupt. Peak RSS of the process tree (2026-11-11, 10 cores /
+    24 GB, load 4-17): default 380 -> 580 MB, reference 670 MB -> 1.6-1.75 GB,
+    cross-check 670 MB -> 1.65-1.73 GB. Three at once saved ~0.45 GB but took
+    1.5-3x as long, and the lock admits one typecheck at a time, so they are
+    unbounded.
+  - tsrs and tsc run as their native binaries (resolved by each package's own
+    `lib/getExePath.js`; `TSRS_BINARY` is honoured), not via a Node launcher.
+  - The floor for a changed tree is the slowest project (server, ~0.15 s
+    alone, ~0.3-0.6 s beside the other five). tsrs takes tsc's options:
+    `--watch` (a resident checker per project), `-b`/`--incremental`
+    (tsbuildinfo) and `--lsp`, `--api`; none is wired in here. A sub-100 ms
+    changed-tree check would need resident watchers whose latest verdict the
+    runner reads.
 - Recursive `rg` output is rewritten by rtk and is NOT safe to cite. The hook
   turns directory-target searches into `rtk rg`, which substitutes tokens
   silently (`compact_memory` reads back as `n_memory`, `compactProject` as

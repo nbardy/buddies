@@ -19,11 +19,21 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const sharedRoot = path.join(repositoryRoot, 'shared');
 
 test('shared build keeps the prior dist on compile failure and publishes complete replacements', (t) => {
-  const fixture = mkdtempSync(path.join(os.tmpdir(), 'unleashd-shared-build-'));
-  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const checkoutRoot = mkdtempSync(path.join(os.tmpdir(), 'unleashd-shared-build-'));
+  t.after(() => rmSync(checkoutRoot, { recursive: true, force: true }));
+  // Shaped like the checkout: the build imports its stamp and compiler lookup from tools/lib.
+  const fixture = path.join(checkoutRoot, 'shared');
+  mkdirSync(path.join(checkoutRoot, 'tools', 'lib'), { recursive: true });
+  for (const file of ['tsc.mjs', 'shared-build-stamp.mjs']) {
+    copyFileSync(
+      path.join(repositoryRoot, 'tools', 'lib', file),
+      path.join(checkoutRoot, 'tools', 'lib', file)
+    );
+  }
   for (const directory of ['scripts', 'src', 'dist/cjs', 'node_modules']) {
     mkdirSync(path.join(fixture, directory), { recursive: true });
   }
+  writeFileSync(path.join(fixture, 'package.json'), '{ "name": "fixture-shared" }\n');
   for (const config of ['tsconfig.json', 'tsconfig.cjs.json']) {
     copyFileSync(path.join(sharedRoot, config), path.join(fixture, config));
   }

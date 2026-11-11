@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-// `pnpm check [paths...]`: the one check to run while iterating. Biome (lint + format check, on
-// the given paths, or the whole repo without any) and then the default typecheck (tsrs, every
-// project), both inside the typecheck's machine-wide lock, so parallel agents queue instead of
-// stacking. Ends with one summary line per part and its wall time. Exit code: the first failure's.
-// `pnpm lint` and `pnpm typecheck` still run on their own.
+// `pnpm check [--fresh] [--timings] [paths...]`: the one check to run while iterating. Biome
+// (lint + format check, on the given paths, or the whole repo without any) and the default
+// typecheck (tsrs, every project) run AT ONCE inside the typecheck's machine-wide lock, so
+// parallel agents queue instead of stacking. Biome prints live; the typecheck's output is held
+// until Biome finishes, so the two never interleave. Ends with one summary line per part and its
+// wall time. Exit code: the first failure's. `pnpm lint` and `pnpm typecheck` still run alone.
+// `node tools/check.mjs` skips pnpm's own ~0.5 s startup.
 import { spawn } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { typecheckUnderLock, withLock } from './typecheck.mjs';
+import { liveOutput, parseArgs, typecheckUnderLock, withLock } from './typecheck.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -26,10 +28,13 @@ function biome(paths, current) {
       cwd: repositoryRoot,
       stdio: ['ignore', 'inherit', 'inherit'],
     });
-    current.child = child;
-    child.once('error', () => resolve(1));
+    current.children.add(child);
+    child.once('error', () => {
+      current.children.delete(child);
+      resolve(1);
+    });
     child.once('close', (code, signal) => {
-      current.child = null;
+      current.children.delete(child);
       resolve(signal ? 130 : code);
     });
   });
@@ -53,13 +58,30 @@ export function biomePaths(argv, initCwd = process.env.INIT_CWD) {
   return argv.length === 0 ? ['.'] : argv.map((file) => path.resolve(base, file));
 }
 
+/** Hold everything written through `current` until `release()`, then print it and go live. */
+function holdOutput(current) {
+  const held = [];
+  current.output = (stream, text) => held.push([stream, text]);
+  return () => {
+    for (const [stream, text] of held) liveOutput(stream, text);
+    current.output = liveOutput;
+  };
+}
+
 export async function main(argv) {
-  const paths = biomePaths(argv);
+  const flags = argv.filter((arg) => arg.startsWith('--'));
+  const paths = biomePaths(argv.filter((arg) => !arg.startsWith('--')));
+  const options = parseArgs(flags);
   return withLock('check', async (current) => {
-    const parts = [await timed('biome', () => biome(paths, current))];
-    if (!current.interrupted) {
-      parts.push(await timed('typecheck', () => typecheckUnderLock('default', current)));
-    }
+    const release = holdOutput(current);
+    const parts = await Promise.all([
+      timed('biome', async () => {
+        const code = await biome(paths, current);
+        release();
+        return code;
+      }),
+      timed('typecheck', () => typecheckUnderLock(options, current)),
+    ]);
     process.stderr.write('\n[check] summary\n');
     for (const part of parts) {
       const verdict = part.code === 0 ? 'ok    ' : `FAILED (exit ${part.code})`;
