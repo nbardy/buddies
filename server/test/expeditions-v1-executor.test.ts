@@ -14,7 +14,7 @@ import type { RawOutcome, RunSpec } from '../src/expedition-kernel/ports';
 import { keyedViewOf } from '../src/expedition-kernel/projection';
 import type { Authored } from '../src/expedition-kernel/protocol';
 import { HostExecutor } from '../src/expeditions-v1/executor';
-import { outcomeOf, readAnswer } from '../src/expeditions-v1/executor/answer';
+import { answerInstruction, outcomeOf, readAnswer } from '../src/expeditions-v1/executor/answer';
 import { putRef } from '../src/expeditions-v1/executor/refs';
 import { ingestMeter } from '../src/expeditions-v1/executor/usage';
 import { NO_CALLS, hostDeps } from './fixtures/expedition-host';
@@ -511,6 +511,21 @@ test('a leader continue needs its reason; a log written without one still reads'
   assert.equal(act({ t: 'continue', why: '  ' }).t, 'errored');
   // F7: the old log's act has no `why`; the wire default reads it as empty.
   assert.deepEqual(keyed.LeaderAct.parse({ t: 'continue' }), { t: 'continue', why: '' });
+});
+
+test('answer-format header permits the bare and progress renderings its reader accepts', () => {
+  const header = answerInstruction({ t: 'typed', schema: { type: 'object' } });
+  assert.match(header, /if the brief requests bare JSON or progress text followed by JSON/);
+  assert.doesNotMatch(header, /End your final message with that block/);
+  for (const body of [
+    '{"value":"ok"}',
+    'Progress.\n{"value":"ok"}',
+    '```json\n{"value":"ok"}\n```',
+  ])
+    assert.deepEqual(outcomeOf({ t: 'typed', schema: { type: 'object' } }, body), {
+      t: 'ok',
+      out: { value: 'ok' },
+    });
 });
 
 test('run 3 Codex answers: bare final JSON, prose then JSON, and last fenced JSON', () => {

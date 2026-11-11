@@ -1,8 +1,8 @@
 # Expeditions v1: the smallest version worth running
 
-Status: **built and connected to the server behind `UNLEASHD_EXPEDITIONS_V1=1` (off by default),
-2026-11-11. Two real-agent runs have passed; see [CONNECT_PLAN.md](CONNECT_PLAN.md) §10 for what it
-showed and what is open.** The kernel is
+Status: **built and connected to the server; live whenever Buddy execution is enabled,
+2026-11-11. Three integrated runs exposed harness failures; the small real-agent conformance
+suite now passes. See [CONNECT_PLAN.md](CONNECT_PLAN.md) §10 for evidence and remaining gaps.** `UNLEASHD_EXPEDITIONS_V1` was removed on 2026-11-11 at the owner’s request; the execution gate alone selects the mode. The kernel is
 `server/src/expedition-kernel/` (about 4,800 lines) with tests `server/test/expedition-kernel-*`:
 a pure core driven through 20,000 random steps, real plan child processes, and end-to-end runs of
 the GTM plan against a scripted executor (full run, crash and reopen, a rewrite with

@@ -6,8 +6,8 @@ import path from 'node:path';
 
 // The REAL backend (src/server.ts, unchanged) with a keyed expedition host running INSIDE it, for
 // the expeditions-v1-* executor, owner and leader tests that drive the host's ports directly. Since
-// step 6 server.ts composes its own keyed host, but only with UNLEASHD_EXPEDITIONS_V1=1; these
-// tests leave the flag off, so the server's own is read-only and inert, and this entry captures the
+// step 6 server.ts composes its own keyed host. This fixture forces only that service read-only
+// through its module wrapper, so two hosts cannot recover the same runs. It captures the
 // three objects server.ts builds that a host needs (its Buddy core, its in-process event bus and
 // its conversation records), builds a host beside it with `createKeyedHost`, and puts the host's
 // `consumes` in front of the Buddy routes' HostCommands (as server.ts does with its own). The
@@ -31,6 +31,10 @@ const captured: { events?: unknown; core?: unknown; records?: unknown; consumes?
 
 /** Wrap one export of one source module; every importer of it gets the wrapper. */
 const WRAP: Record<string, (m: Loaded) => Loaded> = {
+  [at('expeditions-v1/service.ts')]: (m) => ({
+    ...m,
+    decideKeyedMode: () => ({ t: 'read-only', why: 'fixture owns the keyed host' }),
+  }),
   [at('buddies/events.ts')]: (m) => ({
     ...m,
     createBuddyEvents: () => {

@@ -1,7 +1,8 @@
 # Connecting the expedition kernel to the real system
 
-Status: **steps 1 to 7 built and on main, 2026-11-11, behind `UNLEASHD_EXPEDITIONS_V1=1` (off by
-default). One real-agent run has passed (§10).** Step 8 (the Buddy tool) and step 9 are not built,
+Status: **steps 1 to 7 built and on main, 2026-11-11; live whenever Buddy execution is enabled.
+Three integrated runs exposed harness failures; the conformance checks in §10 now pass.**
+Step 8 (the Buddy tool) and step 9 are not built,
 and §10 lists what the real run showed must change before real work runs on it. The plan below
 was written from a read-only study of the code at `6a38b5d`; its `file:line` citations are from
 that commit, and the "Built" notes in §8 record what each step did. Design: [DESIGN.md](DESIGN.md).
@@ -153,8 +154,7 @@ log's `launched` line (`launch.ts:35-42`).
 
 - Open every unfinished expedition at `server.ts:1099`, after `adoptExecutions`
   (`server.ts:1078-1096`) and before the runner starts (`server.ts:1041`); its own boot phase.
-- Only when the execution gate is enabled (`execution-gate.ts:31-43`) **and**
-  `UNLEASHD_EXPEDITIONS_V1=1`. Otherwise serve a read-only view folded from `log.jsonl` without
+- Only when the execution gate is enabled (`execution-gate.ts:31-43`). Otherwise serve a read-only view folded from `log.jsonl` without
   `LogStore.open` (it truncates a torn last line, `log-store.ts:87-91`).
 - `interruptBootLive` is unnecessary for v1: calls run on ordinary Buddies, so their turns are
   adopted (`adopt-executions.ts:207-213`). The crew special-casing (`adopt-executions.ts:170-173`,
@@ -208,7 +208,7 @@ No acts from the tool in v1: only the owner steers.
 
 Where this can spend money, start agents or touch a repo:
 
-1. `open` at boot (recovery re-issues starts, `recovery.ts:57-58`): behind the gate and the flag.
+1. `open` at boot (recovery re-issues starts, `recovery.ts:57-58`): behind the execution gate.
 2. `launch`: owner HTTP only, never from the tool.
 3. Leader wakes and done reviews: bounded by the contract's `leaderWake` and `doneReview`
    (`defaulted` from the budget when the owner names none: DESIGN §5).
@@ -220,7 +220,7 @@ Where this can spend money, start agents or touch a repo:
    `contract.repo`; commands run plan-authored text on the host with a scrubbed env.
 9. Plan child processes are sandboxed (`expedition-kernel/runner.ts:58-111`).
 
-Before the first real run on the live stores: gate enabled and flag set; `tsx` and `typescript`
+Before the first real run on the live stores: execution gate enabled; `tsx` and `typescript`
 available to the running server; the seat Buddy exists with `maxActiveRuns ≥ Σpools`; the leader
 Buddy resolves; the plan has no Gemini calls; the check scripts exist in the target repo; a smoke
 expedition passes on a scratch repo ($3 / 1 h: one agent, one check, one ask, one kill and restart
@@ -300,7 +300,7 @@ answer either way).
 
 Built (2026-11-11, uncommitted): **step 6.** `server/src/expeditions-v1/service.ts` is the one value
 server.ts talks to, in one of two modes decided once at composition: **live** (execution gate
-enabled AND `UNLEASHD_EXPEDITIONS_V1=1`) or **read-only** (anything else: rows and views folded
+enabled) or **read-only** (anything else: rows and views folded
 from `log.jsonl` by `shelf.ts` through `log-store.ts` `readLog`, which never opens for write; every
 POST answers 503 with the reason; `consumes` is false; no boot phase, timer or directory). Live mode
 `require`s the host lazily (its module graph cost 140-410 ms under tsx; guard: the first test of
@@ -317,8 +317,8 @@ Wire: `Bar.cost` (`holding | spent | charged | unknown`), `KeyedRow.needsYou`, `
 (the `LaunchWorkspace` sum, not a nullable id), each with a wire default. The call turn's prompt
 says its final message is the answer (`buddies/expedition-calls.ts` `requestSeatOf`, used by the
 runner and `call-directory.ts`). Test: `server/test/expeditions-v1-server.test.ts` (the real
-server.ts, HTTP only). Known limits: with the flag off, an owner reply in an old expedition's thread
-is ordinary DM talk again (it wakes the leader); the leader's approval lives in memory, so a
+server.ts, HTTP only). Known limits: with execution disabled, an owner reply in an old expedition's thread
+takes the ordinary Buddy request path (the execution gate still prevents execution); the leader's approval lives in memory, so a
 read-only view never shows one.
 
 | # | Change | Test through a real boundary | Risk |
@@ -328,7 +328,7 @@ read-only view never shows one.
 | 3 | Owner thread and asks: `owner-thread.ts` out of `host.ts`; `consumes(…, replyToId)`; the answer route | real core on temp stores: a reply settles the ask; a consumed reply wakes nobody | medium |
 | 4 | Agent runs: post and key, status from the crate, watcher, cancel and close, minutes cap, `'call'` role, `TurnDirectory.call`, memory-review skip, JSON Schema validation, ingest usage, the seat Buddy | real backend with a fake `claude` on PATH (the `execution-adoption` harness): one crate run per run id across a SIGKILL; malformed → `errored`; close on a queued run → never claimed | high |
 | 5 | Leader and Owner ports: draft folder, `dispositions.json`, approval post | a fake-CLI leader writes `plan.expedition.ts` → a `plan` v1 entry; a rejected rewrite → a `rejected` wake | medium |
-| 6 | Host composition, boot, flag, read-only mode, routes, shutdown detach | real server: launch the fixture plan, kill the backend mid-call, the next backend adopts and the call settles once; a copied store refuses launch | medium |
+| 6 | Host composition, boot, execution gate, read-only mode, routes, shutdown detach | real server: launch the fixture plan, kill the backend mid-call, the next backend adopts and the call settles once; a copied store refuses launch | medium |
 | 7 | Client timeline view and rail rows | `pnpm screenshots` on a throwaway server; a unit test on the view model | low |
 | → | **First GTM run** (judges on Claude/Codex, small budget) | | |
 | 8 | Tool `propose` / `status` / `list`; remove the old `draft` | an MCP call over temp stores | low |
@@ -346,19 +346,71 @@ read-only view never shows one.
 | D6 | A command interrupted by a restart | `errored`, explicit retry |
 | D7 | Owner talk in the expedition thread | A note shown at the next wake; no paid wake |
 | D8 | Acts through the Buddy tool | None in v1 |
-| D9 | Flag and namespace | `UNLEASHD_EXPEDITIONS_V1=1`, `/api/buddies/keyed-expeditions`, `~/.agent-viewer/expeditions-v1/` |
+| D9 | Flag and namespace | `UNLEASHD_EXPEDITIONS_V1` removed 2026-11-11 at the owner’s request; Buddy execution gate alone. `/api/buddies/keyed-expeditions`, `~/.agent-viewer/expeditions-v1/` |
 | D10 | The live old GTM record | The owner gives it a verdict or stops it; the old host is deleted only after |
 | D11 | `grant.reads` / `web` | Superseded 2026-11-11 (F1): each turn kind has a capability set (`server/src/expedition-kernel/access.ts`) that agent-cli turns into the harness's own flags; the preview reports each grant enforced or advisory |
 
 ## 10. The first real run, and what is open (2026-11-11)
 
-### Third-run repairs (2026-11-11, awaiting another real run)
+### Real-agent conformance probes (2026-11-11)
+
+**14/14 checks now have passing real-agent evidence**, across the initial pass and focused
+reruns, on installed Claude 2.1.322 / Haiku 5.5 and Codex 0.160.0 / GPT-6 Luna, low effort.
+Run `pnpm probe:expeditions --harness all` before an integrated run, after any turn prompt,
+capability, harness or model change; selectors and cleanup are documented in AGENTS.md.
+No backend is needed: the runner calls `capabilitiesOf`, `agentBody` / `reviewBody` /
+`leaderBody` + `limitsText`, `turnCommand`, `worktreeGit` and `readAnswer` directly.
+
+| Probe (both harnesses) | Result and evidence |
+|---|---|
+| Typed answer: fenced, bare, progress + bare JSON | All three renderings parse first time through the real reader |
+| `tree: none` | Random granted-root and input-file canaries read; Claude outside read refused; Codex outside read succeeded, as its advisory report says; writes refused; no web; Claude native tools exclude helpers |
+| Checkout | Both changed the source, ran the repo test and made their own branch commits: Claude `fff15d1`, Codex `d090059`; independent shell write/network refusals recorded; project instructions loaded |
+| Checkout review | Both opened the detached source and diff and quoted exact real lines; neither wrote |
+| Leader wake | Both read expedition evidence, edited the one draft plan and returned a valid rewrite; writes outside the draft refused |
+| Header truth (every turn) | Reports/reasons included; native inventories/policies and tool outputs agree; Codex file-only turns explicitly have a read-only shell |
+
+**System correction:** the answer footer still mandated a fenced block, overriding a brief
+asking for bare JSON even though the reader accepts it. It now permits each accepted rendering;
+`expeditions-v1-executor` guards that contract. Claude bare and progress pass after the correction.
+No submodule mapping/report changes were required: run 3's shell/commit/reviewer fixes held.
+
+Probe-oracle corrections are preserved in the report: a valid review `no` is not malformed;
+Codex read-only network restriction is `permission_profile.network`; code-mode tool outputs need
+the native rollout joined by call ID. These were observation errors, not harness-policy failures.
+Existing advisories remain: Codex read boundaries, sub-agent exclusion, user instructions/skills
+and shell-off intent; Claude checkout Bash reads. One Codex retry actually started a helper,
+confirming that advisory. It was interrupted at parent exit and recorded no usage: not counted
+as free. The runner now counts descendant turns/cost and fails on missing usage; the final
+accounting retry passed with complete usage. **24 actual turns, $0.04093894 recorded, plus that
+one helper's unreported usage** (first pass 14/$0.02553449; focused retries 9/$0.01332301;
+accounting retry 1/$0.00208144). Per-turn cap about $0.20 / three minutes.
+
+Evidence: gitignored `output/expedition-probes-2026-11-11-summary/REPORT.md` and its linked dated
+runs: exact prompts/argv/finals, native transcripts, decisive tool lines, policy reports, parsed
+outcomes, git bundles/test receipts and cleanup receipts. Only scratch-cwd-matched CLI artifacts
+are removed. (That first pass also deleted its own rows from Codex's thread index; the tool no
+longer writes to Codex's database.) No credentials copied or backend/live stores used.
+No integrated expedition was run as part of this check. Verification: targeted executor/server/startup/copied-store tests,
+`./tools/check.mjs`, agent-cli (332 pass, 1 skip), and full `pnpm test:server` (95/95 processes)
+pass on the uncommitted tree. Token audit on preserved before/after bare-answer transcripts:
+one request each, 6,466 / 6,512 context tokens, zero excess in both; no broad cost claim.
+
+**Task 0:** at the owner's request on 2026-11-11, removed `UNLEASHD_EXPEDITIONS_V1` (D9).
+The execution gate alone decides live/read-only. Empty live boot defers the host graph, and the
+test backend measured 2.1–2.2 ms for shelf discovery, 0.0 ms for opening: a small measured cost,
+not literally zero. An empty live boot and previews create no directory; disabled execution
+still adds no boot phase, opens no log for write, and every POST returns 503 with the gate reason.
+Launch remains owner HTTP / launch card only. Guard: `expeditions-v1-server` (including the
+empty-live module-cache check), `startup`, `copied-store-guard`.
+
+### Third-run repairs (2026-11-11, now checked by the conformance probes)
 
 Evidence: gitignored `output/expedition-run3-2026-11-11/REPORT.md`, `analysis.json`,
 `attempt1/journals/7cf7f7db-0961-437a-834f-25156666cf4b/stdout`, both expedition logs,
 `argv.jsonl`, and the kept Claude transcripts. Comparison: run 2's `logs/argv.jsonl`
-and the farewell/shout transcripts. These repairs have synthetic regression coverage;
-they have not been confirmed by another real-agent run.
+and the farewell/shout transcripts. These repairs have synthetic regression coverage and are now checked by the real-agent
+conformance probes above; a new integrated expedition has not been run.
 
 - **Final answers:** Codex emitted an `agent_message` beginning “I’ll read the repository
   instructions” and later a separate JSON `agent_message` reporting commit `aa76f2c`.
@@ -479,7 +531,7 @@ per temp path in the owner's home.
    a seat with a rate, a 5-wide fan-out.
 4. Step 8: the Buddy tool (`propose`, `status`, `list`) and a launch button, so an expedition is
    started from the app and not from an HTTP call.
-5. Turn the flag on for the live server and run the GTM case with its judges off Gemini (D2).
+5. With execution enabled, run the GTM case with its judges off Gemini (D2).
 6. Step 9: delete the old host once its last record is settled (D10), real `continues`, the crate
    deadline.
 
@@ -607,5 +659,5 @@ finished `met` after 16 agent turns, $0.43 recorded. Evidence: the gitignored
   into the session row; the usage key now carries it (`UsageKey.session.parentSessionId`) and the
   call meter (`executor/usage.ts`) adds every session descending from the call's. Known limit: a
   sub-agent rollout ingest sees only after the call settled is not charged to it.
-- **Not exercised yet:** the Codex commit fix (`TurnGit`) by a real Codex checkout turn, and the
-  checkout judge with a real Claude or Codex reviewer. Both are for the next real run.
+- **Now exercised by the conformance probes above:** the Codex commit fix (`TurnGit`) and the
+  checkout judge with real Claude and Codex reviewers.

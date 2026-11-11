@@ -20,7 +20,7 @@ import type { Expect, KeyedExpeditions, Mutated, Previewing, Viewed } from './se
 //                             longer matches the card's `digest` (or it was launched already)
 //   GET  /proposals/:digest?file=   KeyedProposalStatus   (a proposal card's facts; both modes)
 //
-// In read-only mode every POST is 503 with the reason (flag off, or execution disabled).
+// In read-only mode every POST is 503 with the execution gate’s reason.
 // Pattern: table-driven (docs/patterns.md#table-driven)
 
 const M = buddyMutations;

@@ -13,18 +13,18 @@ import { tempDir } from './fixtures/temp';
 // down. The REAL backend (src/server.ts alone: no second host, no control port) on temp stores,
 // driven only through its HTTP routes, the way the client and the owner drive it; the agent CLI is
 // the only fake. The tests run in order on one harness, each boot the next one's predecessor:
-//   1. flag off, nothing on disk: inert (no directory, no boot phase), reads answer, writes 503;
-//   2. flag on: preview writes nothing, launch, list, view, an ask answered by an owner reply,
+//   1. execution disabled, nothing on disk: inert (no directory, no boot phase), reads answer, writes 503;
+//   2. execution enabled: preview writes nothing, launch, list, view, an ask answered by an owner reply,
 //      SIGKILL mid-call, the call settles once on the next backend, finished: met;
 //   3. a rewrite's approval, declined then approved through the route;
 //   4. a clean shutdown kills the plan process and the command's process group;
-//   5. flag off over that directory: read-only rows and views, nothing opened for write, and an
+//   5. execution disabled over that directory: read-only rows and views, nothing opened for write, and an
 //      owner reply in an expedition's thread is not consumed;
-//   6. the copied-store case (flag on, execution disabled): launch refused, nothing runs.
+//   6. the copied-store case (execution disabled): launch refused, nothing runs.
 
 const h = harness('xk-server', 'server');
 const API = '/api/buddies/keyed-expeditions';
-const ON = { UNLEASHD_EXPEDITIONS_V1: '1', CWV_EXPEDITION_CALL_USAGE_WAIT_MS: '500' };
+const ON = { CWV_EXPEDITION_CALL_USAGE_WAIT_MS: '500' };
 let ws = '';
 let lead = '';
 let dm = '';
@@ -166,13 +166,13 @@ const askPosts = async (exp: string) =>
 // ---- 0 ----
 
 // Regression guard (step 6): the live host's module graph took 140-410 ms to load under tsx, so a
-// flag-off boot that imported it would be slower than before step 6. Read-only mode must never
+// execution-disabled boot that imported it would be slower than before step 6. Read-only mode must never
 // load it; the service requires it inside live mode only.
 test('read-only mode loads none of the live host, kernel or plan runner', () => {
   const service =
     require('../src/expeditions-v1/service') as typeof import('../src/expeditions-v1/service');
   require('../src/expeditions-v1/routes');
-  const mode = service.decideKeyedMode({}, { t: 'enabled' });
+  const mode = service.decideKeyedMode({ t: 'disabled', reason: 'probe disabled' });
   assert.equal(mode.t, 'read-only');
   const x = service.createKeyedExpeditions(mode, {
     root: path.join(h.root, 'nowhere'),
@@ -184,12 +184,36 @@ test('read-only mode loads none of the live host, kernel or plan runner', () => 
   assert.deepEqual(loaded, []);
 });
 
+test('empty live mode loads no host graph and creates no directory', async () => {
+  const service =
+    require('../src/expeditions-v1/service') as typeof import('../src/expeditions-v1/service');
+  const root = path.join(h.root, 'empty-live');
+  const x = service.createKeyedExpeditions(service.decideKeyedMode({ t: 'enabled' }), {
+    root,
+  } as Parameters<typeof service.createKeyedExpeditions>[1]);
+  const phases: string[] = [];
+  const time: import('../src/expeditions-v1/service').PhaseTimer = (phase, work) => {
+    phases.push(phase);
+    return work();
+  };
+  await x.load(time);
+  await x.boot(time);
+  assert.deepEqual(await x.rows(), []);
+  await x.close();
+  assert.deepEqual(phases, ['expeditions_v1_books', 'expeditions_v1_open']);
+  assert.equal(fs.existsSync(root), false);
+  assert.equal(
+    Object.keys(require.cache).some((f) => /expeditions-v1\/host\.ts$/.test(f)),
+    false
+  );
+});
+
 // ---- 1 ----
 
-test('flag off, nothing on disk: the routes read empty, every write is 503, nothing is created', {
+test('execution disabled, nothing on disk: the routes read empty, every write is 503, nothing is created', {
   timeout: 180_000,
 }, async () => {
-  await h.boot('off');
+  await h.boot('off', { UNLEASHD_BUDDY_EXECUTION: '0' });
   ws = await h.workspace();
   lead = await h.hire(ws, 'lead');
   dm = await h.dm(lead);
@@ -199,7 +223,7 @@ test('flag off, nothing on disk: the routes read empty, every write is 503, noth
   for (const [route, body] of MUTATIONS('20261111T000000-aaaaaa')) {
     const r = await post(route, body);
     assert.equal(r.status, 503, `${route}: ${JSON.stringify(r.body)}`);
-    assert.match(r.body.error, /UNLEASHD_EXPEDITIONS_V1 is not 1/);
+    assert.match(r.body.error, /Buddy execution is disabled/);
   }
   // Inert: no directory, and no keyed boot phase in this boot's record.
   assert.equal(fs.existsSync(h.expRoot), false, 'no expeditions-v1 directory');
@@ -224,7 +248,7 @@ test('flag off, nothing on disk: the routes read empty, every write is 503, noth
     });
     assert.equal(r.status, 401, `${method} ${route}`);
   }
-  assert.equal(await h.stop(), 0, 'a clean shutdown with the flag off');
+  assert.equal(await h.stop(), 0, 'a clean shutdown with the execution disabled');
 });
 
 // ---- 2 ----
@@ -238,10 +262,27 @@ export default expedition({ contract: CONTRACT, plan: async (x) => {
 } });
 `;
 
-test('flag on: preview writes nothing; launch, list, view; an owner reply settles the ask; a call killed mid-turn settles once; met', {
+test('execution enabled: preview writes nothing; launch, list, view; an owner reply settles the ask; a call killed mid-turn settles once; met', {
   timeout: 400_000,
 }, async () => {
   await h.boot('on-A', ON);
+  assert.equal(fs.existsSync(h.expRoot), false, 'empty live boot creates no directory');
+  await h.eventually(
+    () => bootPhases().filter((p) => p.startsWith('expeditions_v1')).length,
+    (n) => n === 2,
+    'empty live boot phases flushed'
+  );
+  const phases = fs
+    .readFileSync(path.join(h.data, 'observability/perf/boot.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((p) => p.phase?.startsWith('expeditions_v1'));
+  console.log('empty live keyed boot phases:', JSON.stringify(phases));
+  const measured = path.resolve(__dirname, '../../output/expedition-probes-task0');
+  fs.mkdirSync(measured, { recursive: true });
+  fs.writeFileSync(path.join(measured, 'empty-boot.json'), JSON.stringify(phases, null, 2));
+
   const file = planFile({ plan: MAIN_PLAN, prompts: { work: answers('work', 'hold') } });
   const before = snapshot(file);
 
@@ -277,7 +318,7 @@ test('flag on: preview writes nothing; launch, list, view; an owner reply settle
   assert.deepEqual(held('call'), ['cast-table:claude:true', 'first-wave:claude:true']);
   assert.deepEqual(held('leader'), ['contract:claude:true']);
   assert.deepEqual(snapshot(file), before, 'the file is untouched');
-  assert.deepEqual(fs.existsSync(h.expRoot) ? fs.readdirSync(h.expRoot) : [], []);
+  assert.equal(fs.existsSync(h.expRoot), false, 'preview creates no expeditions-v1 directory');
   const broken = planFile({
     plan: `${HEAD}\nexport default expedition({ contract: CONTRACT, plan: async () => nope });\n`,
   });
@@ -304,11 +345,7 @@ test('flag on: preview writes nothing; launch, list, view; an owner reply settle
   assert.equal(stale.status, 409, JSON.stringify(stale.body));
   assert.match(stale.body.error, /changed after it was proposed/);
   assert.equal((await get(proposalUrl)).body.file.t, 'changed', 'the card reads the change');
-  assert.deepEqual(
-    fs.existsSync(h.expRoot) ? fs.readdirSync(h.expRoot) : [],
-    [],
-    'nothing written'
-  );
+  assert.equal(fs.existsSync(h.expRoot), false, 'a refused launch creates no directory');
   fs.writeFileSync(brief, original);
   const before1 = (await get(proposalUrl)).body as keyed.KeyedProposalStatus;
   assert.deepEqual(
@@ -528,14 +565,14 @@ export default expedition({ contract: CONTRACT, plan: async () => need(await slo
 
 // ---- 5 ----
 
-test('flag off over that directory: read-only rows and views, nothing written, replies not consumed', {
+test('execution disabled over that directory: read-only rows and views, nothing written, replies not consumed', {
   timeout: 180_000,
 }, async () => {
   // A torn last line (an append cut off): a reader leaves it on disk.
   const log1 = path.join(h.expRoot, exp1, 'log.jsonl');
   fs.appendFileSync(log1, '{"t":"owner","at":');
   const disk = snapshot(h.expRoot);
-  await h.boot('off-B');
+  await h.boot('off-B', { UNLEASHD_BUDDY_EXECUTION: '0' });
 
   // The card still reads in read-only mode: the reason, and the expedition it became.
   const card = (await get(`/proposals/${card1.digest}?file=${encodeURIComponent(card1.file)}`))
@@ -565,7 +602,7 @@ test('flag off over that directory: read-only rows and views, nothing written, r
   await h.eventually(
     () => h.runsOf(lead),
     (runs) => runs.length === leaderRuns + 1,
-    'the reply woke the leader as any DM reply does'
+    'the reply takes the ordinary Buddy request path (the execution gate still refuses execution)'
   );
 
   assert.deepEqual(snapshot(h.expRoot), disk, 'nothing under expeditions-v1 changed');
@@ -574,7 +611,7 @@ test('flag off over that directory: read-only rows and views, nothing written, r
 
 // ---- 6 ----
 
-test('the copied-store case (flag on, execution disabled): launch refused, nothing opened or run', {
+test('the copied-store case (execution disabled): launch refused, nothing opened or run', {
   timeout: 180_000,
 }, async () => {
   const disk = snapshot(h.expRoot);

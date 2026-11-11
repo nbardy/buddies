@@ -30,7 +30,7 @@ import { buddyProviders } from './providers';
 // The keyed expedition host, composed (CONNECT_PLAN §2, §8 step 5): the executor (commands,
 // checks, Buddy calls, owner asks), the real Leader and Owner ports, the owner's thread (`consumes`
 // and the inbox) and the open kernels, built from the dependencies the old host gets. The server
-// builds it only in live mode (service.ts: execution gate enabled AND `UNLEASHD_EXPEDITIONS_V1=1`)
+// builds it only in live mode (service.ts: execution gate enabled)
 // and boots it in three steps: `load()` before the server listens (the owner books, so `consumes`
 // is right for the first request), `start()` after execution adoption, then `open` for every
 // unfinished expedition before the Buddy runner starts; `close()` at shutdown. Nothing here

@@ -16,6 +16,7 @@
     "dev:server": "node tools/dev-supervisor.mjs --task dev-server",
     "dev:client": "node tools/dev-supervisor.mjs --task dev-client",
     "errors:list": "pnpm exec tsx tools/error-log.ts",
+    "probe:expeditions": "node tools/expedition-probes.mjs",
     "token-audit": "pnpm exec tsx tools/token-audit.ts",
     "perf:audit": "pnpm exec tsx tools/perf-audit.ts",
     "perf:profile": "pnpm exec tsx tools/perf-profile.ts",

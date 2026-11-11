@@ -65,7 +65,7 @@ server/src/expedition-kernel/      → keyed expeditions (v1): one .expedition.t
 server/src/expeditions-v1/         → its one-file host: executor (commands, checks, agent calls as Buddy
                                      requests, asks), leader and owner ports, routes under
                                      /api/buddies/keyed-expeditions. Live only with the execution
-                                     gate on AND UNLEASHD_EXPEDITIONS_V1=1, else read-only. State
+                                     gate on, else read-only. State
                                      and open findings: docs/expeditions/keyed/v1/CONNECT_PLAN.md §10
 client/src/components/buddies/Keyed*.tsx → its timeline view and rail rows
 client/src/components/buddies/Expedition*.tsx → chat card, rail section (both shells) and modal.
@@ -195,6 +195,22 @@ requirements to rebuild omitted machinery.
 | Channels: owner posts, @mention replies, threads, markdown media, Task chips | `product/buddies/CHANNEL_CONVERSATIONS_2026-09-23.md` |
 | Memory reviewer benchmark: rerun, grade, extend, historical evidence (read before changing reviewer prompts/tools) | [Memory curation benchmark](server/test/fixtures/memory-curation/README.md) |
 | New provider integration protocol | `docs/agent_client_spec.md` |
+
+## Keyed expedition real-agent conformance
+
+Run `pnpm probe:expeditions --harness all` after changing what an expedition turn is told or
+allowed, a harness upgrade, or a model change. Run an integrated real expedition only AFTER
+these probes pass. `--only answer-fenced|answer-bare|answer-progress|tree-none|checkout|review|leader`
+selects one probe; `--harness claude|codex|all` selects the CLI; `--keep` retains scratch files.
+The normal pass is 14 short turns (Haiku 5.5 and GPT-6 Luna, low effort), capped at about $0.20
+and three minutes per turn (14 turns measured $0.0255 on 2026-11-11); actual usage, prompts,
+argv, native transcripts and decisive evidence
+are in dated gitignored `output/expedition-probes-*` directories. It uses executor policy/request/
+answer functions and agent-cli's own turnCommand, fresh git repositories under `/tmp`, no backend,
+no live stores or owner token. It removes only CLI artifacts whose recorded cwd matches its
+scratch root, and leaves no agent process running. Codex's reported advisories are checked as
+advisories, with their reasons present in the prompt; a passing probe does not turn them into
+security boundaries. Re-run only failing probes after fixing their responsible system layer.
 
 ## Screenshot review (UI changes)
 

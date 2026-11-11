@@ -22,18 +22,16 @@ import {
 // The keyed expeditions as the server sees them (CONNECT_PLAN §3, §4, §7; step 6): ONE value the
 // routes, boot and shutdown talk to, in one of two modes decided once at composition.
 //
-//   live       the execution gate is enabled AND UNLEASHD_EXPEDITIONS_V1=1: the keyed host
+//   live       the execution gate is enabled: the keyed host
 //              (host.ts) runs, opens every unfinished expedition at boot, launches, takes acts.
 //   read-only  anything else: rows and views are folded from the logs on disk (shelf.ts) and
 //              nothing is opened for write, posted, started, cancelled or written; every
 //              mutation answers `unavailable` with the reason (the routes' 503); `consumes`
 //              consumes nothing; boot and shutdown do nothing (no boot phase, no timer, no
-//              directory), so with the flag off the server is what it was before step 6.
+//              directory), when execution is disabled.
 //
 // Pattern: sum types (docs/patterns.md#sum-types): the mode is the type; each mode is one
 // implementation of KeyedExpeditions with no "if live" inside it.
-
-export const EXPEDITIONS_V1_ENV = 'UNLEASHD_EXPEDITIONS_V1';
 
 export type KeyedMode = keyed.KeyedMode;
 
@@ -43,20 +41,15 @@ const GATE_MODE: {
   enabled: () => ({ t: 'live' }),
   disabled: (g) => ({ t: 'read-only', why: `Buddy execution is disabled: ${g.reason}` }),
 };
-/** Live only when both say so (§3, §7.1). */
-export function decideKeyedMode(env: NodeJS.ProcessEnv, gate: ExecutionGate): KeyedMode {
-  if (env[EXPEDITIONS_V1_ENV] !== '1')
-    return {
-      t: 'read-only',
-      why: `keyed expeditions are switched off (${EXPEDITIONS_V1_ENV} is not 1)`,
-    };
+/** The Buddy execution gate alone decides the mode (owner request, 2026-11-11). */
+export function decideKeyedMode(gate: ExecutionGate): KeyedMode {
   return (GATE_MODE[gate.t] as (g: ExecutionGate) => KeyedMode)(gate);
 }
 
 /** What a mutation came to; the routes map each to one status (routes.ts). */
 export type Mutated =
   | { readonly t: 'ok'; readonly view: keyed.KeyedView }
-  /** Read-only mode: the reason (flag off, or execution disabled). */
+  /** Read-only mode: the reason (execution disabled). */
   | { readonly t: 'unavailable'; readonly why: string }
   | { readonly t: 'missing'; readonly why: string }
   /** The kernel, the executor or the Owner port said no (finished, nothing pending, …). */
@@ -250,10 +243,60 @@ const ACT: {
   retry: (e, a) => e.retry(a.key),
 };
 
+// An empty normal boot must not pay for the host graph (140–410 ms under tsx).
+// Guard: expeditions-v1-server checks empty live boot phases and directory absence.
 function live(m: Extract<KeyedMode, { t: 'live' }>, d: KeyedExpeditionsDeps): KeyedExpeditions {
+  let current: KeyedExpeditions | undefined;
+  let loading: Promise<void> | undefined;
+  let starting: Promise<void> | undefined;
+  let booted = false;
+  const untimed: PhaseTimer = (_phase, work) => work();
+  const ready = async (): Promise<KeyedExpeditions> => {
+    current ??= activeLive(m, d);
+    const host = current;
+    loading ??= host.load(untimed);
+    await loading;
+    if (booted) {
+      starting ??= host.boot(untimed);
+      await starting;
+    }
+    return host;
+  };
+  return {
+    mode: m,
+    async load(time) {
+      await time('expeditions_v1_books', async () => {
+        if ((await shelfIds(d.root)).length) await ready();
+      });
+    },
+    async boot(time) {
+      booted = true;
+      await time('expeditions_v1_open', async () => {
+        if (current) await ready();
+      });
+    },
+    rows: () => (current ? current.rows() : rowsOnDisk(d.root, new Set())),
+    view: (id) => (current ? current.view(id) : viewOnDisk(d.root, id)),
+    act: async (id, act) => (await ready()).act(id, act),
+    answer: async (id, ref, answer) => (await ready()).answer(id, ref, answer),
+    approval: async (id, approve) => (await ready()).approval(id, approve),
+    preview: async (file) => (await ready()).preview(file),
+    propose: async (file) => (await ready()).propose(file),
+    launch: async (workspaceId, file, expect) => (await ready()).launch(workspaceId, file, expect),
+    proposal: (digest, file) => proposalStatus(m, d.root, digest, file),
+    consumes: (channelId, body, thread) => current?.consumes(channelId, body, thread) ?? false,
+    close: async () => {
+      await current?.close();
+    },
+  };
+}
+
+function activeLive(
+  m: Extract<KeyedMode, { t: 'live' }>,
+  d: KeyedExpeditionsDeps
+): KeyedExpeditions {
   // Loaded here, never at the top: the host's module graph (kernel, plan runner, leader, owner)
-  // took 140-410 ms to load under tsx (measured 2026-11-11), and a flag-off boot must cost what it
-  // did before step 6. Guard: expeditions-v1-server.test.ts "read-only mode loads none of …".
+  // is loaded only when there are expeditions or an owner requests an operation.
   const { createKeyedHost } = require('./host') as typeof import('./host');
   const { previewView } =
     require('../expedition-kernel/launch') as typeof import('../expedition-kernel/launch');

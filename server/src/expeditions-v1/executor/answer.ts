@@ -55,7 +55,9 @@ export function answerInstruction(expected: Expected): string {
     'ANSWER FORMAT',
     `Your final message is your answer: its LAST fenced json block is read; without a block, the message is read as JSON (or its last complete top-level JSON value). ${f.must}`,
     ...f.body,
-    `End your final message with that block. ${f.fails}`,
+    // Real conformance answer-bare lost to the old mandatory-fence footer (one wasted turn).
+    // The reader accepts both: keep its contract and the instruction in agreement.
+    `End with your JSON answer, preferably in a fenced json block; if the brief requests bare JSON or progress text followed by JSON, use that rendering instead. ${f.fails}`,
     'If your answer has files, name existing files inside your own tree or work directory as relative paths, never ref IDs or paths outside it.',
   ].join('\n');
 }

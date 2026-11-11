@@ -371,9 +371,8 @@ const buddyBriefings = createBriefings(
 );
 let buddyMcp: McpEndpoint | null = null;
 let expeditionHost: ExpeditionHost | null = null;
-// Keyed expeditions (expeditions-v1/service.ts): live only with the execution gate enabled AND
-// UNLEASHD_EXPEDITIONS_V1=1; otherwise read-only, and inert (no boot phase, timer or directory).
-const keyedExpeditions = createKeyedExpeditions(decideKeyedMode(process.env, EXECUTION_GATE), {
+// Keyed expeditions: live with Buddy execution enabled; otherwise read-only and inert.
+const keyedExpeditions = createKeyedExpeditions(decideKeyedMode(EXECUTION_GATE), {
   core: buddiesCore,
   events: buddyEvents,
   gate: EXECUTION_GATE,
