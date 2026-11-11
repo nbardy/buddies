@@ -1,7 +1,7 @@
 # Expeditions v1: the smallest version worth running
 
 Status: **built and connected to the server behind `UNLEASHD_EXPEDITIONS_V1=1` (off by default),
-2026-11-11. One real-agent run has passed; see [CONNECT_PLAN.md](CONNECT_PLAN.md) §10 for what it
+2026-11-11. Two real-agent runs have passed; see [CONNECT_PLAN.md](CONNECT_PLAN.md) §10 for what it
 showed and what is open.** The kernel is
 `server/src/expedition-kernel/` (about 4,800 lines) with tests `server/test/expedition-kernel-*`:
 a pure core driven through 20,000 random steps, real plan child processes, and end-to-end runs of
@@ -29,14 +29,43 @@ Claude Code workflow with the owner steering in chat. §8 says how that is measu
 
 ## 2. The idea
 
-An expedition is a folder the leader can rewrite at any time:
+An expedition is one TypeScript file, conventionally `<name>.expedition.ts`, anywhere on disk.
+It imports only the bare specifiers `expedition` and `zod`:
 
+```ts
+import { expedition, role, seat, steps, need } from 'expedition';
+const worker = role({ by: seat('claude', 'claude-sonnet-5-5', 'low'), usd: 1, minutes: 10 });
+const { probe } = steps({ probe: worker.brief('Find the evidence.') });
+export default expedition({
+  contract: { goal: 'Find evidence.', leader: 'lead', repo: '~/git/x',
+    budget: { usd: 3, hours: 1 }, autoApply: { usd: 1 }, pools: { claude: 1 },
+    done: [{ owner: 'Accept the evidence?' }], rules: ['No outreach.'] },
+  plan: async (x) => need(await x.phase('probe', () => probe()), 'No evidence.'),
+});
 ```
-gtm/
-  contract.md    the owner's: goal in prose; done, budget, pools, rules
-  plan.ts        the leader's: who does what, in what order, where it reflects
-  briefs/        one markdown prompt per step
-```
+
+The contract is a plain JSON literal inside the file; it remains the owner's. Every agent step
+has `.brief(text)` or `.brief((item: Org) => text)`. Commands and check commands take the same
+string-or-item-function form. Review rubrics are inline strings, including in `contract.done`.
+There are no prompt files or template slots. The item function's type reaches the call:
+`collect({ item: org })` requires an `Org`; a string brief takes no item. Missing briefs are named
+dry-run errors for every cast-table step, including steps the run never reaches. TypeScript
+cannot inspect a function's returned prose or defeat explicit casts/`any`; runtime validation
+still checks rendered text and the IPC boundary. Attach item-dependent judges after the final
+`.brief(...)`: replacing the brief later cannot re-check an already attached callback's item type.
+
+The plan process sends the contract as its first message, before the cast table and calls. The
+host validates it with the canonical Contract schema and supplies the two budget-derived caps.
+Functions, getters, class instances, cycles and other non-JSON contract data are errors.
+Each applied version is `plans/v<N>.expedition.ts`. A leader's draft folder holds one editable
+`plan.expedition.ts`; its canonically evaluated contract must equal the launched contract or the
+rules gate rejects it. `dispositions.json` remains a sidecar for dropped-running-call decisions,
+not part of the plan or contract.
+
+`propose {file}`, preview `{file}`, launch `{workspaceId, file, digest?}` and the proposal card all
+name an absolute `.ts` file. Proposals require it inside a folder the Buddy workspace owns. The
+digest covers the real path and exact file bytes. No live keyed expeditions exist, so this is a
+format replacement with no migration or folder compatibility path.
 
 Every unit of work has a **key** (`collect/taskus`). The host keeps an append-only **log** of what
 each key produced. Running a plan means, for each keyed call: finished → return the logged result;
@@ -46,7 +75,7 @@ Restart recovery, plan rewrites and the cost preview are all that one rule.
 The owner writes the Contract, the leader writes the Plan, the host writes the Log. Nobody writes
 another's.
 
-[`gtm/plan.ts`](gtm/plan.ts) is a complete plan in 47 lines. Its structure is the lines that
+[`gtm.expedition.ts`](gtm.expedition.ts) is the complete worked example. Its structure is the lines that
 start `x.phase`, `x.review` and `need(...)`:
 
 ```
@@ -61,7 +90,7 @@ scope → collect (parallel) → ⟳ review → synthesize → duel ×3 → ⟳ 
 | `command` steps the host runs | objective judging |
 | A judge declared on each step: a check command, or a review on another provider | independent judging is the main bet on better results |
 | `ask` / `confirm`: owner check-ins that hold nothing | the failure that started this (a verdict wait recorded as "skipped") |
-| The cast table, briefs as files, phases | the plan has to be readable to be rewritten |
+| The cast table, inline briefs, phases | the plan has to be readable to be rewritten |
 | `review` and plan rewrite, with cancel-or-finish | the difference from a workflow |
 | Budget in dollars and hours; pools as concurrency caps | never overspend |
 | Dry run with a cost diff | see a change before paying for it |
@@ -98,7 +127,7 @@ type Contract = {
 };
 type Criterion =
   | { t: 'check'; command: string }
-  | { t: 'review'; rubric: BriefName; by: Seat }
+  | { t: 'review'; rubric: Markdown; by: Seat }
   | { t: 'owner'; question: string };
 
 type Call =
@@ -149,8 +178,8 @@ enforces where it can, and the preview says which grants are only advisory (CONN
 - An act a gate refuses changes nothing and wakes the leader again with the reasons; two rejected
   in a row at one wake point and the host asks the owner instead (continue, stop, or wait for a
   rewrite). The count is folded from the log (`act` entries), so it survives a restart.
-- A rewrite is the leader editing the folder and submitting it with a reason. It passes four
-  gates in order: **typecheck**, **dry run** (briefs exist, no reviewer on its producer's
+- A rewrite is the leader editing the file and submitting it with a reason. It passes four
+  gates in order: **typecheck**, **dry run** (every agent step has a brief, no reviewer on its producer's
   provider, pools exist, no duplicate key), **rules** (Contract untouched, new cost under
   `autoApply`, at least one new judged pass since the last rewrite, a `cancel` or `finish` for
   every running call the new plan drops), then **apply**.
@@ -158,7 +187,9 @@ enforces where it can, and the preview says which grants are only advisory (CONN
 [`gtm/rewrite/REWRITE.md`](gtm/rewrite/REWRITE.md) walks through one rewrite end to end: the
 trigger, the leader's reason, the gates, the diff, the kill-or-finish choice and the timeline.
 
-The plan runs as ordinary `async` code in a child process with no file or network access. It holds
+The plan runs as ordinary `async` code in a child process. It can read only an isolated copy of its
+one file and the library/dependencies, cannot write or spawn, and imports only expedition/zod.
+Node 24 does not block sockets; do not treat this as network confinement. It holds
 no state that matters, so the host kills and re-runs it whenever it needs to.
 
 ## 6. Guarantees

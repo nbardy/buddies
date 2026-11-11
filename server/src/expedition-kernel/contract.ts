@@ -1,26 +1,10 @@
 import { keyed } from '@unleashd/shared';
-import { parse as parseYaml } from 'yaml';
+import { z } from 'zod';
 
-// κ for the owner's contract.md: YAML frontmatter + the prose under `# Goal`, parsed once into the
-// canonical `Contract`. Every problem is collected with the field path it belongs to; nothing is
-// defaulted, so a typo (`dones:`) cannot silently drop a criterion.
 // Pattern: one parse at the boundary (docs/patterns.md#sum-types)
-
 export type ParsedContract =
   | { t: 'ok'; contract: keyed.Contract }
   | { t: 'invalid'; issues: string[] };
-
-const KNOWN_KEYS = [
-  'leader',
-  'repo',
-  'budget',
-  'autoApply',
-  'leaderWake',
-  'doneReview',
-  'pools',
-  'rules',
-  'done',
-] as const;
 
 // The cap of one leader wake or done review when the contract names none, ONE rule:
 //   usd     = min(budget.usd, clamp(10% of budget.usd, $0.25, $1.00))
@@ -45,178 +29,89 @@ export function defaultCap(budget: keyed.Budget): keyed.Cap {
   };
 }
 
-const isRecord = (x: unknown): x is Record<string, unknown> =>
-  typeof x === 'object' && x !== null && !Array.isArray(x);
+// Reject lossy JSON before IPC: JSON.stringify alone silently drops functions, undefined and
+// symbols, and invokes toJSON/getters. Guard: expedition-kernel-contract plain-data cases.
+export function assertPlainJson(value: unknown, at = 'contract', seen = new Set<object>()): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number' && Number.isFinite(value)) return;
+  if (typeof value !== 'object' || value === null)
+    throw new TypeError(`${at}: must be plain JSON data`);
+  if (seen.has(value)) throw new TypeError(`${at}: circular data`);
+  const proto: unknown = Object.getPrototypeOf(value);
+  if (
+    Array.isArray(value) ? proto !== Array.prototype : proto !== Object.prototype && proto !== null
+  )
+    throw new TypeError(`${at}: must be a plain object`);
+  seen.add(value);
+  for (const key of Reflect.ownKeys(value)) {
+    if (Array.isArray(value) && key === 'length') continue;
+    if (typeof key !== 'string') throw new TypeError(`${at}: symbol key`);
+    const d = Object.getOwnPropertyDescriptor(value, key);
+    if (!d || !('value' in d) || !d.enumerable)
+      throw new TypeError(`${at}.${key}: must be plain data`);
+    assertPlainJson(d.value, `${at}.${key}`, seen);
+  }
+  if (Array.isArray(value) && Object.keys(value).length !== value.length)
+    throw new TypeError(`${at}: sparse or extended array`);
+  seen.delete(value);
+}
 
-const FRONTMATTER = /^---\n(?:([\s\S]*?)\n)?---[ \t]*(?:\n([\s\S]*))?$/;
+const Done = z.union([
+  z
+    .object({ check: z.string() })
+    .strict()
+    .transform((c) => ({ t: 'check' as const, command: c.check })),
+  z
+    .object({ review: z.object({ rubric: z.string(), by: keyed.Seat }).strict() })
+    .strict()
+    .transform((c) => ({ t: 'review' as const, ...c.review })),
+  z
+    .object({ owner: z.string() })
+    .strict()
+    .transform((c) => ({ t: 'owner' as const, question: c.owner })),
+]);
+const Literal = keyed.Contract.omit({ done: true, leaderWake: true, doneReview: true })
+  .extend({
+    done: z.array(Done),
+    leaderWake: keyed.Max.optional(),
+    doneReview: keyed.Max.optional(),
+  })
+  .strict();
+export type ContractInput = z.input<typeof Literal>;
+
+/** The one-file literal -> canonical owner contract, including the two budget-derived caps. */
+export function parseContract(raw: unknown): ParsedContract {
+  try {
+    assertPlainJson(raw);
+  } catch (e) {
+    return { t: 'invalid', issues: [(e as Error).message] };
+  }
+  const literal = Literal.safeParse(raw);
+  if (!literal.success)
+    return {
+      t: 'invalid',
+      issues: literal.error.issues.map((i) => `${i.path.join('.') || 'contract'}: ${i.message}`),
+    };
+  const { leaderWake, doneReview, ...given } = literal.data;
+  const cap = (c: keyed.Max | undefined): keyed.Cap =>
+    c ? { t: 'given', ...c } : defaultCap(given.budget);
+  const canonical = keyed.Contract.safeParse({
+    ...given,
+    leaderWake: cap(leaderWake),
+    doneReview: cap(doneReview),
+  });
+  return canonical.success
+    ? { t: 'ok', contract: canonical.data }
+    : {
+        t: 'invalid',
+        issues: canonical.error.issues.map(
+          (i) => `${i.path.join('.') || 'contract'}: ${i.message}`
+        ),
+      };
+}
 
 /** `~/x` becomes `<home>/x`. Kept out of parseContract so the parse stays pure. */
 export function expandHome(path: string, home: string): string {
   if (path === '~') return home;
   return path.startsWith('~/') ? `${home.replace(/\/+$/, '')}/${path.slice(2)}` : path;
-}
-
-export function parseContract(markdown: string): ParsedContract {
-  const issues: string[] = [];
-  const text = markdown.replace(/\r\n/g, '\n');
-  const m = FRONTMATTER.exec(text);
-  if (!m) {
-    return {
-      t: 'invalid',
-      issues: ['frontmatter: the file must start with a `---` line and close it with another'],
-    };
-  }
-  const front = parseFrontmatter(m[1] ?? '', issues);
-  const goal = parseGoal(m[2] ?? '', issues);
-
-  // Top-level keys whose own parse already reported; Zod's follow-up on them would only repeat it.
-  const reported = new Set<string>();
-  if (goal === undefined) reported.add('goal');
-
-  for (const key of Object.keys(front)) {
-    if (!(KNOWN_KEYS as readonly string[]).includes(key)) {
-      issues.push(`${key}: unknown key (expected one of ${KNOWN_KEYS.join(', ')})`);
-    }
-  }
-  const done = parseDone(front.done, issues);
-  if (done === undefined) reported.add('done');
-
-  const candidate = {
-    ...front,
-    goal,
-    done,
-    leaderWake: capOf(front.leaderWake, front.budget),
-    doneReview: capOf(front.doneReview, front.budget),
-  };
-  const canonical = keyed.Contract.safeParse(candidate);
-  if (!canonical.success) {
-    for (const issue of canonical.error.issues) {
-      const top = issue.path[0];
-      if (typeof top === 'string' && reported.has(top)) continue;
-      // Zod reports an unknown key on the parent; ours is already named above.
-      if (issue.path.length === 0 && issue.code === 'unrecognized_keys') continue;
-      issues.push(`${pathString(issue.path)}: ${issue.message}`);
-    }
-  }
-  return issues.length > 0 || !canonical.success
-    ? { t: 'invalid', issues }
-    : { t: 'ok', contract: canonical.data };
-}
-
-/** The owner's `{usd, minutes}` as a `given` cap, or the rule's `defaulted` one when the key is
- * absent. A malformed budget is left to Zod's report on `budget`, so no cap is guessed from it. */
-function capOf(raw: unknown, budget: unknown): unknown {
-  if (raw !== undefined) return isRecord(raw) ? { t: 'given', ...raw } : raw;
-  const b = keyed.Budget.safeParse(budget);
-  return b.success ? defaultCap(b.data) : undefined;
-}
-
-function parseFrontmatter(yamlText: string, issues: string[]): Record<string, unknown> {
-  try {
-    const value: unknown = parseYaml(yamlText);
-    if (isRecord(value)) return value;
-    issues.push('frontmatter: must be a YAML mapping of keys');
-  } catch (e) {
-    issues.push(`frontmatter: not valid YAML (${(e as Error).message.split('\n')[0]})`);
-  }
-  return {};
-}
-
-/** The prose under `# Goal`, up to the next `## ` heading or the end of the file. */
-function parseGoal(body: string, issues: string[]): string | undefined {
-  const lines = body.split('\n');
-  const start = lines.findIndex((l) => /^# Goal\s*$/.test(l));
-  if (start < 0) {
-    issues.push('goal: the file has no `# Goal` section');
-    return undefined;
-  }
-  const rest = lines.slice(start + 1);
-  const next = rest.findIndex((l) => /^## /.test(l));
-  const goal = (next < 0 ? rest : rest.slice(0, next)).join('\n').trim();
-  if (goal === '') {
-    issues.push('goal: the `# Goal` section is empty');
-    return undefined;
-  }
-  return goal;
-}
-
-/** The three done shapes, as written: `{check}`, `{review: {rubric, by}}`, `{owner}`. */
-function parseDone(raw: unknown, issues: string[]): keyed.Criterion[] | undefined {
-  if (!Array.isArray(raw)) {
-    // A missing `done` is reported here, once: Zod would say the same under a different wording.
-    issues.push('done: must be a list of {check}, {review} or {owner} items');
-    return undefined;
-  }
-  const before = issues.length;
-  const out: keyed.Criterion[] = [];
-  raw.forEach((item, i) => {
-    const c = parseCriterion(item, `done[${i}]`, issues);
-    if (c !== undefined) out.push(c);
-  });
-  return issues.length === before ? out : undefined;
-}
-
-const CRITERION_KINDS = ['check', 'review', 'owner'] as const;
-
-function parseCriterion(item: unknown, at: string, issues: string[]): keyed.Criterion | undefined {
-  if (!isRecord(item)) {
-    issues.push(`${at}: must be a mapping with exactly one of check, review, owner`);
-    return undefined;
-  }
-  const keys = Object.keys(item);
-  const kinds = keys.filter((k) => (CRITERION_KINDS as readonly string[]).includes(k));
-  const stray = keys.filter((k) => !kinds.includes(k));
-  if (stray.length > 0) issues.push(`${at}: unknown key ${stray.join(', ')}`);
-  if (kinds.length !== 1) {
-    issues.push(
-      `${at}: must have exactly one of check, review, owner (found ${kinds.length === 0 ? 'none' : kinds.join(' and ')})`
-    );
-    return undefined;
-  }
-  if (stray.length > 0) return undefined;
-  const kind = kinds[0] as (typeof CRITERION_KINDS)[number];
-  const value = item[kind];
-  if (kind === 'review') return parseReview(value, `${at}.review`, issues);
-  if (typeof value !== 'string' || value.trim() === '') {
-    issues.push(`${at}.${kind}: must be a non-empty string`);
-    return undefined;
-  }
-  return kind === 'check' ? { t: 'check', command: value } : { t: 'owner', question: value };
-}
-
-function parseReview(value: unknown, at: string, issues: string[]): keyed.Criterion | undefined {
-  if (!isRecord(value)) {
-    issues.push(`${at}: must be { rubric, by }`);
-    return undefined;
-  }
-  const before = issues.length;
-  for (const k of Object.keys(value)) {
-    if (k !== 'rubric' && k !== 'by') issues.push(`${at}: unknown key ${k}`);
-  }
-  const { rubric, by } = value;
-  if (typeof rubric !== 'string' || rubric.trim() === '')
-    issues.push(`${at}.rubric: must be a non-empty string`);
-  const seat = typeof by === 'string' ? parseSeat(by, `${at}.by`, issues) : undefined;
-  if (typeof by !== 'string') issues.push(`${at}.by: must be a string 'provider/model/effort'`);
-  if (issues.length !== before || typeof rubric !== 'string' || seat === undefined)
-    return undefined;
-  return { t: 'review', rubric, by: seat };
-}
-
-function parseSeat(by: string, at: string, issues: string[]): keyed.Seat | undefined {
-  const parts = by.split('/');
-  if (parts.length !== 3 || parts.some((p) => p.trim() === '')) {
-    issues.push(`${at}: '${by}' must be three non-empty parts 'provider/model/effort'`);
-    return undefined;
-  }
-  const [provider, model, effort] = parts as [string, string, string];
-  return keyed.Seat.parse({ t: 'seat', provider, model, effort });
-}
-
-function pathString(path: readonly (string | number)[]): string {
-  if (path.length === 0) return 'contract';
-  return path.reduce<string>(
-    (s, k) => (typeof k === 'number' ? `${s}[${k}]` : s === '' ? k : `${s}.${k}`),
-    ''
-  );
 }

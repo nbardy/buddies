@@ -41,7 +41,7 @@ export function diffOf(state: State, asked: readonly Asked[]): keyed.Diff {
 
 export type Proposal = {
   readonly version: number;
-  /** The contract as the rewritten folder carries it. */
+  /** The contract as the rewritten file carries it. */
   readonly contract: keyed.Contract;
   readonly asked: readonly Asked[];
   readonly dispositions: Readonly<Record<keyed.Key, keyed.Disposition>>;

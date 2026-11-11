@@ -163,7 +163,7 @@ async function main(): Promise<void> {
     buddyId: string;
     who: never;
     id: string;
-    folder: string;
+    file: string;
     baseSha: string;
     workspace: never;
     ref: string;
@@ -192,7 +192,7 @@ async function main(): Promise<void> {
     },
     // The keyed host: what step 6's boot and routes will call.
     launch: async (b) => {
-      const r = await host.launch(b.folder, b.baseSha, b.workspace);
+      const r = await host.launch(b.file, b.baseSha, b.workspace);
       return r.t === 'launched' ? { t: 'launched', id: r.expedition.id } : r;
     },
     open: async (b) => {

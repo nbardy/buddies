@@ -1,14 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import {
-  cpSync,
-  existsSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 import { keyed } from '@unleashd/shared';
@@ -56,25 +48,17 @@ const org = (id: string, kind: 'direct' | 'substitute' | 'comparator'): Org => (
   kind,
 });
 
-/** A copy of a fixture folder in a temp dir, optionally edited. */
+/** Copy one plan file, optionally editing its owner literal or plan code. */
 function fixture(
   name: string,
-  edit: {
-    contract?: (md: string) => string;
-    plan?: (src: string) => string;
-    remove?: string[];
-    append?: Record<string, string>;
-  } = {}
+  edit: { contract?: (source: string) => string; plan?: (source: string) => string } = {}
 ): string {
-  const folder = path.join(tempDir('expedition-folder-'), path.basename(name));
-  cpSync(path.join(FIXTURES, name), folder, { recursive: true });
-  const rewrite = (file: string, fn: (s: string) => string) =>
-    writeFileSync(path.join(folder, file), fn(readFileSync(path.join(folder, file), 'utf8')));
-  if (edit.contract) rewrite('contract.md', edit.contract);
-  if (edit.plan) rewrite('plan.ts', edit.plan);
-  for (const f of edit.remove ?? []) rmSync(path.join(folder, f));
-  for (const [f, text] of Object.entries(edit.append ?? {})) rewrite(f, (s) => `${s}\n${text}\n`);
-  return folder;
+  const file = path.join(tempDir('expedition-file-'), `${path.basename(name)}.expedition.ts`);
+  let source = readFileSync(path.join(FIXTURES, `${name}.expedition.ts`), 'utf8');
+  if (edit.contract) source = edit.contract(source);
+  if (edit.plan) source = edit.plan(source);
+  writeFileSync(file, source);
+  return file;
 }
 
 type World = {
@@ -138,8 +122,8 @@ function watch(w: World, e: Expedition): Expedition {
   });
   return e;
 }
-async function launched(w: World, folder: string): Promise<Expedition> {
-  const r = await launch(w.deps, w.root, folder, 'base0', { t: 'none' });
+async function launched(w: World, file: string): Promise<Expedition> {
+  const r = await launch(w.deps, w.root, file, 'base0', { t: 'none' });
   if (r.t !== 'launched') throw new Error(`launch rejected at ${r.gate}: ${r.issues.join('\n')}`);
   return watch(w, r.expedition);
 }
@@ -443,7 +427,7 @@ describe('expedition kernel end to end', () => {
         'budget-mark': (event) =>
           event.t === 'budget-mark' && event.percent === 50
             ? {
-                act: { t: 'rewrite', folder: v1, why: 'vendor pages carry no buyer complaints' },
+                act: { t: 'rewrite', file: v1, why: 'vendor pages carry no buyer complaints' },
                 spent: reported(0.1),
               }
             : cont,
@@ -558,6 +542,40 @@ describe('expedition kernel end to end', () => {
     assertBudgetAtEveryAppend(e.dir);
   });
 
+  // The contract now travels inside executable plan code. It still belongs to the owner:
+  // evaluating a leader rewrite may not replace it. Guard: this real file -> IPC -> rules gate.
+  test('a leader file whose evaluated contract changes the goal is rejected at the rules gate', async () => {
+    const changed = fixture('ask-rewrite/v0', {
+      contract: (s) =>
+        s.replace(
+          'Probe one thing, ask the owner which segment comes first, then follow up.',
+          'A different owner goal.'
+        ),
+    });
+    const w = world(
+      () => 'hold',
+      leaderFor({
+        review: () => ({
+          act: { t: 'rewrite', file: changed, why: 'change the goal' },
+          spent: reported(0.1),
+        }),
+        rejected: () => cont,
+      })
+    );
+    const e = await launched(w, fixture('ask-rewrite/v0'));
+    await w.signal.until(
+      () => w.leader.events.some((x) => x.t === 'rejected'),
+      'contract change is rejected'
+    );
+    const rejection = w.leader.events.find((x) => x.t === 'rejected');
+    assert.equal(rejection?.t, 'rejected');
+    if (rejection?.t === 'rejected')
+      assert.match(rejection.issues.join('; '), /rules:.*contract.*owner/);
+    assert.equal(e.entries().filter((x) => x.t === 'plan').length, 1);
+    assert.deepEqual(readdirSync(path.join(e.dir, 'plans')), ['v0.expedition.ts']);
+    await e.detach();
+  });
+
   test('a rewrite that fails a gate leaves the log and the plans directory byte-identical', async () => {
     const orgs = [
       org('taskus', 'direct'),
@@ -578,11 +596,22 @@ describe('expedition kernel end to end', () => {
             "(await x.phase('scope', () => scope())).out"
           ),
       }),
-      fixture('gtm', { contract: budget26, remove: ['briefs/collect.md'] }),
+      fixture('gtm', {
+        contract: budget26,
+        plan: (s) =>
+          s.replace(
+            /\.brief\(\s*\(item: z\.infer<typeof Org>\) => `[\s\S]*?`\s*\)/,
+            '.brief(undefined as unknown as (item: z.infer<typeof Org>) => string)'
+          ),
+      }),
       fixture('gtm-rewrite', withContract(budget26)), // drops two running calls; no dispositions
       fixture('gtm', {
         contract: budget26,
-        append: { 'briefs/collect.md': 'Also note forum links you come across.' },
+        plan: (s) =>
+          s.replace(
+            '# Collect: the public record',
+            'Also note forum links you come across.\n# Collect: the public record'
+          ),
       }),
     ];
     type Snap = { log: Buffer; plans: string };
@@ -599,7 +628,7 @@ describe('expedition kernel end to end', () => {
         'budget-mark': () => {
           snaps.push(snap());
           return {
-            act: { t: 'rewrite', folder: bad[0] as string, why: 'try 1' },
+            act: { t: 'rewrite', file: bad[0] as string, why: 'try 1' },
             spent: reported(0.1),
           };
         },
@@ -631,7 +660,7 @@ describe('expedition kernel end to end', () => {
           const next = bad[snaps.length - 1];
           return next
             ? {
-                act: { t: 'rewrite', folder: next, why: `try ${snaps.length}` },
+                act: { t: 'rewrite', file: next, why: `try ${snaps.length}` },
                 spent: reported(0.1),
               }
             : cont;
@@ -678,7 +707,7 @@ describe('expedition kernel end to end', () => {
       .flatMap((x) => (x.t === 'act' && x.verdict.t === 'rejected' ? [x.verdict.issues] : []));
     assert.equal(issues.length, 4);
     assert.match(issues[0]?.join() ?? '', /^typecheck: .*TS2339/);
-    assert.match(issues[1]?.join() ?? '', /static: .*brief briefs\/collect\.md not found/);
+    assert.match(issues[1]?.join() ?? '', /dry-run: .*Agent step collect has no \.brief/);
     assert.match(
       issues[2]?.join() ?? '',
       /rules: no cancel or finish for the dropped running calls collect\/collect\/labelbox, collect\/collect\/snorkel/
@@ -691,7 +720,7 @@ describe('expedition kernel end to end', () => {
     assert.match(rejections[1]?.join() ?? '', /chose to wait for a rewrite/);
     assert.equal(w.owner.asked.length, 1);
     assert.equal(e.entries().filter((x) => x.t === 'plan').length, 1);
-    assert.deepEqual(readdirSync(path.join(dir, 'plans')), ['v0']);
+    assert.deepEqual(readdirSync(path.join(dir, 'plans')), ['v0.expedition.ts']);
     await e.detach();
 
     // At launch, a failed gate writes nothing at all.
@@ -891,11 +920,11 @@ describe('expedition kernel end to end', () => {
           : 'hold',
       leaderFor({
         review: () => ({
-          act: { t: 'rewrite', folder: v1, why: 'scan instead' },
+          act: { t: 'rewrite', file: v1, why: 'scan instead' },
           spent: reported(0.1),
         }),
         rejected: () => ({
-          act: { t: 'rewrite', folder: v1, why: 'scan instead, keep the question' },
+          act: { t: 'rewrite', file: v1, why: 'scan instead, keep the question' },
           spent: reported(0.1),
         }),
         drained: () => cont,
@@ -966,8 +995,7 @@ describe('expedition kernel end to end', () => {
 
 const reviewWakes = (w: World) => w.leader.events.filter((x) => x.t === 'review').length;
 const isCollect = (r: Run) => r.spec.t === 'agent' && r.spec.call.key.startsWith('collect/');
-const budget26 = (md: string) =>
-  md.replace('budget: { usd: 60, hours: 8 }', 'budget: { usd: 26, hours: 8 }');
+const budget26 = (md: string) => md.replace('usd: 60', 'usd: 26');
 
 /** Paths and bytes of every file under `dir`, hashed: equal iff the tree is byte-identical. */
 function treeHash(dir: string): string {

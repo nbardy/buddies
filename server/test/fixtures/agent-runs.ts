@@ -467,9 +467,9 @@ export function harness(name: string, entry: keyof typeof ENTRIES = 'expedition-
     ): void {
       fs.writeFileSync(fake(`leader-${exp}-${n}.json`), JSON.stringify(script));
     },
-    async launch(folder: string, workspaceId: string, baseSha: string = base): Promise<string> {
+    async launch(file: string, workspaceId: string, baseSha: string = base): Promise<string> {
       const r = await ex<{ t: string; id?: string; issues?: string[] }>('launch', {
-        folder,
+        file,
         baseSha,
         workspace: { t: 'workspace', id: workspaceId },
       });

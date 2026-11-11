@@ -4,6 +4,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import type { keyed } from '@unleashd/shared';
 import { git, harness } from './fixtures/agent-runs';
+import { rewriteSource, writePlan } from './fixtures/expedition-source';
 import { tempDir } from './fixtures/temp';
 
 // CONNECT_PLAN §8 step 5: the real Leader and Owner ports through real boundaries. The REAL
@@ -47,48 +48,38 @@ after(async () => {
 });
 
 const SEAT = "seat('claude', 'claude-sonnet-5-5', 'low')";
-const HEAD = `import { check, need, plan, role, seat, steps } from 'expedition';
+const HEAD = `import { check, need, expedition, role, seat, steps } from 'expedition';
 
 const worker = role({ by: ${SEAT}, usd: 1, minutes: 10 });`;
 const answers = (tag: string, mode = 'answer', summary = 'done') =>
   `Do it. TAG:${tag} MODE:${mode} ANSWER_JSON:{"summary":"${summary}","files":[]}`;
 
-function contractOf(x: { done?: string; autoApply?: number; wakeUsd?: number }): string {
-  return `---
-leader: ${lead}
-repo: ${h.repo}
-budget: { usd: 50, hours: 4 }
-autoApply: { usd: ${x.autoApply ?? 5} }
-${x.wakeUsd === undefined ? '' : `leaderWake: { usd: ${x.wakeUsd}, minutes: 5 }`}
-pools: { claude: 4 }
-done:
-${x.done ?? '  - check: node scripts/ok.js'}
-rules:
-  - Stay inside the repo.
----
-
-# Goal
-
-Probe, reflect, and finish.
-`;
-}
-function planFolder(x: {
+function planFile(x: {
   plan: string;
-  briefs: Record<string, string>;
-  done?: string;
+  prompts?: Record<string, string>;
   autoApply?: number;
+  done?: import('../src/expedition-kernel/contract').ContractInput['done'];
   wakeUsd?: number;
 }): string {
-  const folder = tempDir('xk-leader-plan-');
-  fs.writeFileSync(path.join(folder, 'contract.md'), contractOf(x));
-  fs.writeFileSync(path.join(folder, 'plan.ts'), x.plan);
-  fs.mkdirSync(path.join(folder, 'briefs'));
-  for (const [name, text] of Object.entries(x.briefs))
-    fs.writeFileSync(path.join(folder, 'briefs', `${name}.md`), text);
-  return folder;
+  return writePlan(
+    path.join(tempDir('xk-leader-plan-'), 'plan.expedition.ts'),
+    {
+      leader: lead,
+      repo: h.repo,
+      goal: 'Probe, reflect, and finish.',
+      budget: { usd: 50, hours: 4 },
+      autoApply: { usd: x.autoApply ?? 5 },
+      pools: { claude: 4 },
+      done: x.done ?? [{ check: 'node scripts/ok.js' }],
+      rules: ['Stay inside the repo.'],
+      ...(x.wakeUsd === undefined ? {} : { leaderWake: { usd: x.wakeUsd, minutes: 5 } }),
+    },
+    x.plan,
+    x.prompts
+  );
 }
 const fence = (o: unknown) => `I decided.\n\n\`\`\`json\n${JSON.stringify(o)}\n\`\`\``;
-const rewrite = (why: string) => fence({ t: 'rewrite', folder: '.', why });
+const rewrite = (why: string) => fence({ t: 'rewrite', file: 'plan.expedition.ts', why });
 
 const ofKey = <T extends keyed.Entry['t']>(es: keyed.Entry[], t: T, key: string) =>
   es.filter((e): e is Extract<keyed.Entry, { t: T }> => e.t === t && 'key' in e && e.key === key);
@@ -109,17 +100,17 @@ test('a wake is one crate run per run id across a SIGKILL; a rewrite applies pla
   timeout: 400_000,
 }, async () => {
   const exp = await h.launch(
-    planFolder({
+    planFile({
       plan: `${HEAD}
-const { probe } = steps({ probe: worker.judged(check('node scripts/check.js')) });
+const { probe } = steps({ probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')) });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   const p = need(await probe(), 'no probe');
   await Promise.all([x.ask('Which segment first?'), x.review('Change course?')]);
   return p;
-});
+} });
 `,
-      briefs: { probe: answers('probe', 'answer', 'SECRET-PROBE-OUTPUT') },
+      prompts: { probe: answers('probe', 'answer', 'SECRET-PROBE-OUTPUT') },
     }),
     ws,
     base
@@ -127,7 +118,7 @@ export default plan(async (x) => {
   await wake(exp, 1);
   const draft1 = path.join(expDir(exp), 'drafts', '1');
 
-  // The wake's turn: no tools, in its draft folder (the current plan + a read-only contract),
+  // The wake's turn: no tools, in its draft folder (one editable file with the inline owner contract),
   // told the state without the body of any output.
   const name1 = h.leaderName(exp, 1);
   assert.deepEqual(JSON.parse(h.read(`${name1}.tools`)), [], 'a leader wake has no tools');
@@ -148,11 +139,10 @@ export default plan(async (x) => {
   assert.ok(!argv1.includes('--dangerously-skip-permissions') && !argv1.includes('--mcp-config'));
   assert.equal(fs.realpathSync(h.read(`${name1}.cwd`)), fs.realpathSync(draft1));
   assert.equal(
-    fs.readFileSync(path.join(draft1, 'plan.ts'), 'utf8'),
-    fs.readFileSync(path.join(expDir(exp), 'plans', 'v0', 'plan.ts'), 'utf8')
+    fs.readFileSync(path.join(draft1, 'plan.expedition.ts'), 'utf8'),
+    fs.readFileSync(path.join(expDir(exp), 'plans', 'v0.expedition.ts'), 'utf8')
   );
-  assert.ok(fs.existsSync(path.join(draft1, 'briefs', 'probe.md')));
-  assert.equal(fs.statSync(path.join(draft1, 'contract.md')).mode & 0o777, 0o444);
+  assert.deepEqual(fs.readdirSync(draft1), ['plan.expedition.ts']);
   const prompt1 = promptOf(exp, 1);
   assert.match(prompt1, /Change course\?/);
   assert.match(prompt1, /Which segment first\?/, 'the pending ask is in the state');
@@ -191,19 +181,22 @@ export default plan(async (x) => {
   // leader/2 rewrites: v1 keeps the probe and the question and adds `more`.
   h.leaderAnswers(exp, 2, {
     files: {
-      'plan.ts': `${HEAD}
+      'plan.expedition.ts': rewriteSource(
+        expDir(exp),
+        `${HEAD}
 const { probe, more } = steps({
-  probe: worker.judged(check('node scripts/check.js')),
-  more: worker,
+  probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')),
+  more: worker.brief(PROMPTS.more),
 });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   const p = need(await probe(), 'no probe');
   await x.ask('Which segment first?');
   return need(await more({ reads: [p] }), 'no more');
-});
+} });
 `,
-      'briefs/more.md': answers('more'),
+        { more: answers('more') }
+      ),
     },
     answer: rewrite('one more step'),
   });
@@ -217,7 +210,7 @@ export default plan(async (x) => {
   assert.equal(v1?.why, 'one more step');
   assert.deepEqual(v1?.diff.reused, ['probe']);
   assert.deepEqual(v1?.diff.attached, ['ask/which-segment-first']);
-  assert.ok(fs.existsSync(path.join(expDir(exp), 'plans', 'v1', 'briefs', 'more.md')));
+  assert.ok(fs.existsSync(path.join(expDir(exp), 'plans', 'v1.expedition.ts')));
 
   // The pending ask was not disturbed: one post, answered in its thread, and the plan goes on.
   assert.equal((await h.rootPosts(dm)).filter((p) => p.purpose === 'expedition_ask').length, 1);
@@ -232,17 +225,17 @@ test('an answer that is not an act settles the wake errored, and it is charged',
   timeout: 240_000,
 }, async () => {
   const exp = await h.launch(
-    planFolder({
+    planFile({
       plan: `${HEAD}
-const { probe } = steps({ probe: worker });
+const { probe } = steps({ probe: worker.brief(PROMPTS.probe) });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   const p = need(await probe(), 'no probe');
   await x.review('Anything to change?');
   return p;
-});
+} });
 `,
-      briefs: { probe: answers('probetwo') },
+      prompts: { probe: answers('probetwo') },
       wakeUsd: 0.4,
     }),
     ws,
@@ -270,23 +263,23 @@ test('dropping running calls without dispositions.json is rejected and the next 
   timeout: 300_000,
 }, async () => {
   const exp = await h.launch(
-    planFolder({
+    planFile({
       plan: `${HEAD}
 const { probe, slowa, slowb } = steps({
-  probe: worker.judged(check('node scripts/check.js')),
-  slowa: worker,
-  slowb: worker,
+  probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')),
+  slowa: worker.brief(PROMPTS.slowa),
+  slowb: worker.brief(PROMPTS.slowb),
 });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   const p = need(await probe(), 'no probe');
   const slow = Promise.all([slowa(), slowb()]);
   await x.review('Keep the slow ones?');
   await slow;
   return p;
-});
+} });
 `,
-      briefs: {
+      prompts: {
         probe: answers('probethree'),
         slowa: answers('slowa', 'hold'),
         slowb: answers('slowb', 'hold'),
@@ -303,15 +296,18 @@ export default plan(async (x) => {
   );
   // v1 waits on the owner, so it cannot finish (and cancel what drains) before slowb is done.
   const V1 = `${HEAD}
-const { probe } = steps({ probe: worker.judged(check('node scripts/check.js')) });
+const { probe } = steps({ probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')) });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   const p = need(await probe(), 'no probe');
   await x.ask('Ready to finish?');
   return p;
-});
+} });
 `;
-  h.leaderAnswers(exp, 1, { files: { 'plan.ts': V1 }, answer: rewrite('drop the slow ones') });
+  h.leaderAnswers(exp, 1, {
+    files: { 'plan.expedition.ts': rewriteSource(expDir(exp), V1) },
+    answer: rewrite('drop the slow ones'),
+  });
   await wake(exp, 2);
   const prompt2 = promptOf(exp, 2);
   assert.match(prompt2, /no cancel or finish for the dropped running calls slowa, slowb/);
@@ -321,7 +317,7 @@ export default plan(async (x) => {
   h.leaderAnswers(exp, 3, { answer: fence({ t: 'continue', why: 'on track' }) });
   h.leaderAnswers(exp, 2, {
     files: {
-      'plan.ts': V1,
+      'plan.expedition.ts': rewriteSource(expDir(exp), V1),
       'dispositions.json': JSON.stringify({ slowa: 'cancel', slowb: 'finish' }),
     },
     answer: rewrite('drop the slow ones, decided'),
@@ -356,19 +352,19 @@ test('a rewrite over autoApply waits for the owner: decline changes nothing, app
   timeout: 300_000,
 }, async () => {
   const exp = await h.launch(
-    planFolder({
+    planFile({
       autoApply: 0,
       plan: `${HEAD}
-const { probe } = steps({ probe: worker.judged(check('node scripts/check.js')) });
+const { probe } = steps({ probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')) });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   const p = need(await probe(), 'no probe');
   await x.review('First look?');
   await x.review('Second look?');
   return p;
-});
+} });
 `,
-      briefs: { probe: answers('probefour'), more: answers('morefour') },
+      prompts: { probe: answers('probefour'), more: answers('morefour') },
     }),
     ws,
     base
@@ -377,21 +373,24 @@ export default plan(async (x) => {
   const root = book.thread.t === 'posted' ? book.thread.rootId : '';
   const V1 = `${HEAD}
 const { probe, more } = steps({
-  probe: worker.judged(check('node scripts/check.js')),
-  more: worker,
+  probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')),
+  more: worker.brief(PROMPTS.more),
 });
 
-export default plan(async () => {
+export default expedition({ contract: CONTRACT, plan: async () => {
   need(await probe(), 'no probe');
   return need(await more(), 'no more');
-});
+} });
 `;
   const approvalPosts = () =>
     h.thread(root).then((ps) => ps.filter((p) => p.body.startsWith('The leader wants to rewrite')));
 
   // First look: the rewrite adds $1 of new cost over a $0 auto-apply limit.
   await wake(exp, 1);
-  h.leaderAnswers(exp, 1, { files: { 'plan.ts': V1 }, answer: rewrite('add more') });
+  h.leaderAnswers(exp, 1, {
+    files: { 'plan.expedition.ts': rewriteSource(expDir(exp), V1) },
+    answer: rewrite('add more'),
+  });
   const [request] = await h.eventually(approvalPosts, (ps) => ps.length === 1, 'the request');
   assert.match(request?.body ?? '', /new cost \$1 is over the auto-apply limit \$0/);
   assert.match(request?.body ?? '', /Started 1: more/);
@@ -402,7 +401,7 @@ export default plan(async () => {
   await h.reply(dm, root, 'decline', 'l-decline');
   await wake(exp, 2);
   assert.match(promptOf(exp, 2), /owner: the owner declined/);
-  // Nothing changed but the wakes' own entries: no plan entry, no v1 folder, no `more`.
+  // Nothing changed but the wakes' own entries: no plan entry, no v1 file, no `more`.
   const keyOf = (e: keyed.Entry) =>
     e.t === 'declared' ? e.call.key : 'key' in e ? e.key : `(${e.t})`;
   const since = (await h.entries(exp)).slice(logBefore);
@@ -418,7 +417,10 @@ export default plan(async () => {
 
   // Second look: the same rewrite, approved in the thread.
   await wake(exp, 3);
-  h.leaderAnswers(exp, 3, { files: { 'plan.ts': V1 }, answer: rewrite('add more, again') });
+  h.leaderAnswers(exp, 3, {
+    files: { 'plan.expedition.ts': rewriteSource(expDir(exp), V1) },
+    answer: rewrite('add more, again'),
+  });
   await h.eventually(approvalPosts, (ps) => ps.length === 2, 'the second request');
   await h.reply(dm, root, 'approve', 'l-approve');
   const applied = await h.eventually(
@@ -444,19 +446,27 @@ test('end to end through the composition: an agent call judged by a check, a rev
   timeout: 300_000,
 }, async () => {
   const exp = await h.launch(
-    planFolder({
-      done: `  - check: node scripts/ok.js
-  - review: { rubric: rubric, by: claude/claude-sonnet-5-5/low }
-  - owner: Ship the result?`,
+    planFile({
+      done: [
+        { check: 'node scripts/ok.js' },
+        {
+          review: {
+            rubric:
+              'Is it good? TAG:rubric MODE:answer ANSWER_JSON:{"verdict":"yes","why":"it is fine"}',
+            by: { t: 'seat', provider: 'claude', model: 'claude-sonnet-5-5', effort: 'low' },
+          },
+        },
+        { owner: 'Ship the result?' },
+      ],
       plan: `${HEAD}
-const { make } = steps({ make: worker.judged(check('node scripts/check.js')) });
+const { make } = steps({ make: worker.brief(PROMPTS.make).judged(check('node scripts/check.js')) });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   const audience = await x.ask('Who is it for?');
   return need(await make({ reads: [audience] }), 'nothing made');
-});
+} });
 `,
-      briefs: {
+      prompts: {
         make: answers('make'),
         rubric:
           'Is it good? TAG:rubric MODE:answer ANSWER_JSON:{"verdict":"yes","why":"it is fine"}',

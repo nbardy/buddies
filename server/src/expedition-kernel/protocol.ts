@@ -11,15 +11,15 @@ import { z } from 'zod';
 const v = <T extends string, S extends z.ZodRawShape>(t: T, shape: S) =>
   z.object({ t: z.literal(t), ...shape }).strict();
 
-/** A call as the plan authored it. The host canonicalises it into a `Call`: it renders the brief
- * (`briefs/<step>.md` with `item` slots, plus the contract's rules), adds the provider's pool, and
+/** A call as the plan authored it. The host canonicalises it into a `Call`: it appends the
+ * contract's rules to the rendered text, adds the provider's pool, and
  * fills the launch base. */
 export const Authored = z.discriminatedUnion('t', [
   v('agent', {
     key: keyed.Key,
-    /** The cast-table name: the brief is `briefs/<step>.md`. */
+    /** The cast-table name. */
     step: z.string().min(1),
-    item: z.record(z.unknown()),
+    brief: z.string().min(1),
     by: keyed.Who,
     inputs: z.array(keyed.Input),
     output: z.unknown(),
@@ -35,9 +35,8 @@ export const Authored = z.discriminatedUnion('t', [
   v('command', {
     key: keyed.Key,
     step: z.string().min(1),
-    /** With `{{slots}}` still in it; the host fills them from `item`. */
+    /** Rendered by the authoring library. */
     command: z.string().min(1),
-    item: z.record(z.unknown()),
     on: keyed.Base,
     output: z.unknown(),
     needs: z.array(z.string()),
@@ -57,6 +56,8 @@ export const CastRow = z.discriminatedUnion('t', [
     tree: z.enum(['none', 'checkout']),
     grant: z.object({ reads: z.array(z.string()), web: z.boolean() }).strict(),
     judge: keyed.Judge,
+    hasBrief: z.boolean(),
+    needs: z.array(z.string()),
   }),
   /** A host command: no agent turn, so no limits to report. */
   v('command', { step: z.string().min(1) }),
@@ -65,8 +66,9 @@ export type CastRow = z.infer<typeof CastRow>;
 
 /** plan process → host */
 export const FromPlan = z.discriminatedUnion('t', [
-  /** The cast table, sent once per `steps({...})` table before any call of it (at plan start for
-   * a table made at module scope). */
+  /** The owner literal, always first. */
+  v('contract', { value: z.unknown() }),
+  /** The cast table, before any of its calls. */
   v('cast', { rows: z.array(CastRow) }),
   v('call', { seq: z.number().int(), call: Authored }),
   v('phase', { name: z.string().min(1), edge: z.enum(['open', 'close']) }),

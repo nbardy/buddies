@@ -11,9 +11,9 @@ import { errorText } from './api';
 export const KEYED_URL = '/api/buddies/keyed-expeditions';
 export const keyedUrl = (id: string) => `${KEYED_URL}/${encodeURIComponent(id)}`;
 
-/** What a proposal card needs now (mode, launched, folder unchanged): a cheap read, no gate run. */
-export const proposalUrl = (p: Pick<keyed.KeyedProposal, 'digest' | 'folder'>) =>
-  `${KEYED_URL}/proposals/${encodeURIComponent(p.digest)}?folder=${encodeURIComponent(p.folder)}`;
+/** What a proposal card needs now (mode, launched, file unchanged): a cheap read, no gate run. */
+export const proposalUrl = (p: Pick<keyed.KeyedProposal, 'digest' | 'file'>) =>
+  `${KEYED_URL}/proposals/${encodeURIComponent(p.digest)}?file=${encodeURIComponent(p.file)}`;
 
 /** One workspace's rows. Empty until the list loads, and for good when the backend has no such
  * route (404: not reloaded yet): the rail then shows nothing extra. The list is every workspace's

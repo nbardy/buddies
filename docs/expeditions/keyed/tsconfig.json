@@ -6,7 +6,12 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "paths": { "zod": ["../../../server/node_modules/zod"] }
+    "paths": {
+      "zod": ["../../../server/node_modules/zod"],
+      "expedition": ["../../../server/src/expedition-kernel/authoring/index.ts"]
+    },
+    "types": ["node"],
+    "typeRoots": ["../../../server/node_modules/@types"]
   },
   "include": ["api/expedition.d.ts", "examples/**/*.ts", "v1/**/*.ts"]
 }

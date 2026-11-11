@@ -123,7 +123,7 @@ export function createKeyedHost(d: KeyedHostDeps) {
         leader: contract.leader,
         channelId,
       });
-      await book.threadPosted(id, channelId, await ownerThread.threadRoot(thread));
+      await ownerThread.threadRoot(thread, (post) => book.threadPosted(id, channelId, post.id));
       return thread;
     })();
     threads.set(id, making);
@@ -169,12 +169,12 @@ export function createKeyedHost(d: KeyedHostDeps) {
 
   const stops: (() => void)[] = [];
 
-  /** The gates on a folder; writes nothing (the owner's `POST /preview`, and launch). */
-  const previewFolder = async (folder: string): Promise<Previewed> => {
+  /** The gates on a file; writes nothing (the owner's `POST /preview`, and launch). */
+  const previewFile = async (file: string): Promise<Previewed> => {
     await providers.refresh();
-    return preview(deps, folder);
+    return preview(deps, file);
   };
-  /** Launch a folder that passed `preview` (the owner's HTTP route only, never a tool: §7.2). */
+  /** Launch a file that passed `preview` (the owner's HTTP route only, never a tool: §7.2). */
   const launchPreviewed = (
     clean: Clean,
     baseSha: string,
@@ -217,16 +217,16 @@ export function createKeyedHost(d: KeyedHostDeps) {
       stops.push(observeBuddyEvents(d.events, timing, 'expedition-owner', readInbox));
     },
 
-    preview: previewFolder,
+    preview: previewFile,
     launchClean: launchPreviewed,
 
     /** Preview, then launch at `baseSha`. */
     async launch(
-      folder: string,
+      file: string,
       baseSha: string,
       workspace: keyed.LaunchWorkspace
     ): Promise<Launched> {
-      const p = await previewFolder(folder);
+      const p = await previewFile(file);
       return p.t === 'rejected' ? p : launchPreviewed(p, baseSha, workspace);
     },
 

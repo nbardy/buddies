@@ -13,6 +13,7 @@ import { startMcpEndpoint, toolsFor } from '../src/buddies/mcp';
 import { createKeyedExpeditions } from '../src/expeditions-v1/service';
 import { BackgroundWork } from '../src/turns/background-work';
 import { rpc } from './fixtures/expedition-fixture';
+import { writePlan } from './fixtures/expedition-source';
 import { tempDir } from './fixtures/temp';
 
 // CONNECT_PLAN §8 step 8: the keyed half of the `expedition` Buddy tool, through the REAL MCP
@@ -21,11 +22,11 @@ import { tempDir } from './fixtures/temp';
 // is tested in expeditions-v1-server.test.ts).
 
 const SEAT = "seat('claude', 'claude-sonnet-5-5', 'low')";
-const HEAD = `import { check, need, plan, role, seat, steps } from 'expedition';
+const HEAD = `import { check, need, expedition, role, seat, steps } from 'expedition';
 const worker = role({ by: ${SEAT}, usd: 1, minutes: 10 });`;
 const GOOD = `${HEAD}
-const { work } = steps({ work: worker });
-export default plan(async () => need(await work(), 'no work'));
+const { work } = steps({ work: worker.brief(PROMPTS.work) });
+export default expedition({ contract: CONTRACT, plan: async () => need(await work(), 'no work') });
 `;
 
 // Every endpoint a test opened is closed at the end, or its listener keeps the process alive.
@@ -94,36 +95,27 @@ async function setup() {
       hooks: { t: 'unrecorded' },
     })
   );
-  /** A plan folder inside the workspace (the Buddy wrote it with its own file tools). */
-  const folder = (plan: string, briefs: Record<string, string> = { work: 'Do the work.' }) => {
+  /** A plan file inside the workspace (the Buddy wrote it with its own file tools). */
+  const file = (plan: string, prompts: Record<string, string> = { work: 'Do the work.' }) => {
     const dir = fs.mkdtempSync(path.join(repo, 'exp-'));
-    fs.writeFileSync(
-      path.join(dir, 'contract.md'),
-      `---
-leader: ${lead.id}
-repo: ${repo}
-budget: { usd: 50, hours: 4 }
-autoApply: { usd: 5 }
-pools: { claude: 4 }
-done:
-  - check: node scripts/ok.js
-rules:
-  - Stay inside the repo.
----
-
-# Goal
-
-Do the work.
-`
+    return writePlan(
+      path.join(dir, 'plan.expedition.ts'),
+      {
+        leader: lead.id,
+        repo,
+        goal: 'Do the work.',
+        budget: { usd: 50, hours: 4 },
+        autoApply: { usd: 5 },
+        pools: { claude: 4 },
+        done: [{ check: 'node scripts/ok.js' }],
+        rules: ['Stay inside the repo.'],
+      },
+      plan,
+      prompts
     );
-    fs.writeFileSync(path.join(dir, 'plan.ts'), plan);
-    fs.mkdirSync(path.join(dir, 'briefs'));
-    for (const [name, text] of Object.entries(briefs))
-      fs.writeFileSync(path.join(dir, 'briefs', `${name}.md`), text);
-    return dir;
   };
   const propose = (dir: string) =>
-    rpc(spec, 'expedition', { action: { do: 'propose', folder: dir } });
+    rpc(spec, 'expedition', { action: { do: 'propose', file: dir } });
   const cards = async () => {
     const dm = await core.openChannel(OWNER, {
       kind: 'direct',
@@ -135,18 +127,18 @@ Do the work.
   return {
     scratch,
     ws,
-    folder,
+    file,
     propose,
     cards,
     call: (action: object) => rpc(spec, 'expedition', { action }),
   };
 }
 
-test('propose: a clean folder returns its preview and posts one card, however often it is repeated; an edit posts a new one', {
+test('propose: a clean file returns its preview and posts one card, however often it is repeated; an edit posts a new one', {
   timeout: 120_000,
 }, async () => {
   const t = await setup();
-  const dir = t.folder(GOOD);
+  const dir = t.file(GOOD);
   const first = await t.propose(dir);
   assert.equal(first.error, false, first.text);
   const clean = first.value as {
@@ -162,27 +154,33 @@ test('propose: a clean folder returns its preview and posts one card, however of
   );
   const posted = await t.cards();
   assert.equal(posted.length, 1);
+  assert.ok(posted[0]?.body.includes(`File: ${fs.realpathSync(dir)}`));
   // The card carries what the client needs to render and launch it, parsed with the wire schema.
   const evidence = posted[0]?.evidence.find((e) => e.startsWith(keyed.PROPOSAL_EVIDENCE)) as string;
   const proposal = keyed.KeyedProposal.parse(
     JSON.parse(evidence.slice(keyed.PROPOSAL_EVIDENCE.length))
   );
-  assert.equal(proposal.folder, fs.realpathSync(dir));
+  assert.equal(proposal.file, fs.realpathSync(dir));
   assert.equal(proposal.workspaceId, t.ws.id);
 
   assert.equal((await t.propose(dir)).error, false);
-  assert.equal((await t.cards()).length, 1, 'an unchanged folder posts nothing new');
+  assert.equal((await t.cards()).length, 1, 'an unchanged file posts nothing new');
 
-  fs.writeFileSync(path.join(dir, 'briefs', 'work.md'), 'Do the work, carefully.');
+  fs.writeFileSync(
+    dir,
+    fs.readFileSync(dir, 'utf8').replace('Do the work.', 'Do the work, carefully.')
+  );
   assert.equal((await t.propose(dir)).error, false);
-  assert.equal((await t.cards()).length, 2, 'a changed folder is a new card');
+  assert.equal((await t.cards()).length, 2, 'a changed file is a new card');
 });
 
 test('propose: a type error answers the gate and its issues, and posts nothing', {
   timeout: 120_000,
 }, async () => {
   const t = await setup();
-  const r = await t.propose(t.folder(`${HEAD}\nexport default plan(async () => nope);\n`));
+  const r = await t.propose(
+    t.file(`${HEAD}\nexport default expedition({ contract: CONTRACT, plan: async () => nope });\n`)
+  );
   assert.equal(r.error, false, r.text);
   const rejected = r.value as { t: string; gate: string; issues: string[] };
   assert.equal(rejected.t, 'rejected');
@@ -192,15 +190,16 @@ test('propose: a type error answers the gate and its issues, and posts nothing',
 });
 
 // Guard (CONNECT_PLAN §5): a Buddy proposes only what its workspace owns, symlinks resolved.
-test('propose: a folder outside the workspace is refused, a symlink out of it too', {
+test('propose: a file outside the workspace is refused, a symlink out of it too', {
   timeout: 120_000,
 }, async () => {
   const t = await setup();
-  const outside = tempDir('xk-tool-outside-');
+  const outside = path.join(tempDir('xk-tool-outside-'), 'outside.ts');
+  fs.writeFileSync(outside, 'export default {};');
   const refused = await t.propose(outside);
   assert.equal(refused.error, true);
   assert.match(refused.text, /outside this workspace/);
-  const link = path.join(path.dirname(t.folder(GOOD)), 'link');
+  const link = path.join(path.dirname(t.file(GOOD)), 'link.ts');
   fs.symlinkSync(outside, link);
   assert.match((await t.propose(link)).text, /outside this workspace/);
   assert.match((await t.propose('relative/dir')).text, /absolute path/);

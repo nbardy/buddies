@@ -7,7 +7,7 @@ import { ScriptedLeader, ScriptedOwner, Signal, reported } from './expedition-po
 
 // A kernel over the REAL host executor (commands and checks run as processes on a real repo), with
 // the leader and the owner scripted: no agent runs exist yet. Run as a script it is a host process
-// a test can SIGKILL: `node --import tsx expedition-host.ts <root> <plan folder> <base sha>`
+// a test can SIGKILL: `node --import tsx expedition-host.ts <root> <plan file> <base sha>`
 // launches, prints `{"dir": ...}` and stays up until killed.
 
 const SERVER = path.resolve(__dirname, '..', '..');
@@ -41,9 +41,9 @@ export function hostDeps(root: string): Host {
 }
 
 async function main(): Promise<void> {
-  const [root, folder, baseSha] = process.argv.slice(2);
-  if (!root || !folder || !baseSha) throw new Error('usage: <root> <plan folder> <base sha>');
-  const r = await launch(hostDeps(root).deps, root, folder, baseSha, { t: 'none' });
+  const [root, file, baseSha] = process.argv.slice(2);
+  if (!root || !file || !baseSha) throw new Error('usage: <root> <plan file> <base sha>');
+  const r = await launch(hostDeps(root).deps, root, file, baseSha, { t: 'none' });
   if (r.t !== 'launched') throw new Error(`launch rejected at ${r.gate}: ${r.issues.join('; ')}`);
   process.stdout.write(`${JSON.stringify({ dir: r.expedition.dir })}\n`);
   setInterval(() => {}, 60_000);

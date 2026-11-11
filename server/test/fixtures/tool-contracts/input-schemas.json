@@ -614,14 +614,14 @@
                   "type": "string",
                   "const": "propose"
                 },
-                "folder": {
+                "file": {
                   "type": "string",
                   "minLength": 1
                 }
               },
               "required": [
                 "do",
-                "folder"
+                "file"
               ],
               "additionalProperties": false
             }
@@ -1978,14 +1978,14 @@
                   "type": "string",
                   "const": "propose"
                 },
-                "folder": {
+                "file": {
                   "type": "string",
                   "minLength": 1
                 }
               },
               "required": [
                 "do",
-                "folder"
+                "file"
               ],
               "additionalProperties": false
             }

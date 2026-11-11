@@ -1,3 +1,5 @@
+> The built format is the one-file form in [v1/DESIGN.md](v1/DESIGN.md); this document preserves the earlier full design.
+
 # Expeditions: the final design
 
 > **Build [`v1/`](v1/DESIGN.md) first.** It is this design cut down to what one real case needs,

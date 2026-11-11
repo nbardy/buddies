@@ -41,7 +41,7 @@ const FORMAT: { readonly [K in Expected['t']]: (e: Extract<Expected, { t: K }>) 
       // Second real run (2026-11-11): the leader answered `retry` for a FAILED call twice; each was
       // rejected ("it has a result, so a retry would rebuy it") and each rejection cost a wake.
       '- {"t":"retry","keys":["<key>", ...]}: run errored, cancelled or refused calls again. Never a failed or passed call: it has a result; to run it differently, rewrite its brief or the plan.',
-      `- {"t":"rewrite","folder":"${e.folder}","why":"<reason>"}: you edited plan.ts or briefs/ in that folder and submit it as the next plan version. The folder must be exactly this one.`,
+      `- {"t":"rewrite","file":"${path.join(e.folder, 'plan.expedition.ts')}","why":"<reason>"}: you edited that one file and submit it as the next plan version. Keep its owner contract unchanged.`,
     ],
     fails: 'An answer that does not parse or is not one of these acts fails the wake.',
   }),
@@ -78,18 +78,18 @@ const bySchema =
     return checked.t === 'valid' ? read(value) : malformed(checked.why);
   };
 
-/** A leader's act. A rewrite names a folder; it must be the wake's own draft (a relative path is
- * read from the draft), so a wake can never submit a folder it was not given. */
+/** A leader's act. A rewrite names exactly the wake's draft plan file; relative paths are read
+ * from its draft directory. The directory itself is never a plan input. */
 function actOf(value: unknown, folder: string): RawOutcome {
   const act = keyed.LeaderAct.safeParse(value);
   if (!act.success) return malformed(`not a leader act: ${act.error.message}`);
   if (act.data.t === 'continue' && act.data.why.trim() === '')
     return malformed('a continue needs a reason in "why"');
   if (act.data.t !== 'rewrite') return { t: 'ok', out: act.data };
-  const named = path.resolve(folder, act.data.folder);
-  if (named !== path.resolve(folder))
-    return malformed(`the rewrite names ${act.data.folder}, not its draft folder ${folder}`);
-  return { t: 'ok', out: { ...act.data, folder: path.resolve(folder) } };
+  const named = path.resolve(folder, act.data.file);
+  if (named !== path.resolve(folder, 'plan.expedition.ts'))
+    return malformed(`the rewrite names ${act.data.file}, not its draft folder ${folder}`);
+  return { t: 'ok', out: { ...act.data, file: path.resolve(folder, 'plan.expedition.ts') } };
 }
 
 const OUTCOME: {

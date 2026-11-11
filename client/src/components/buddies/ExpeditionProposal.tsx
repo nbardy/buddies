@@ -10,9 +10,9 @@ import './Expedition.css';
 import './KeyedExpedition.css';
 
 // The chat card of a keyed proposal (server expeditions-v1/tool.ts `propose`): what the Buddy's
-// folder would start, as the gates reported it, and the owner's Launch. The post carries the
+// file would start, as the gates reported it, and the owner's Launch. The post carries the
 // preview the Buddy was shown; the card asks the server only for the facts that change (the
-// folder's files against the digest, whether it launched, whether the host can launch at all).
+// file's bytes against the digest, whether it launched, whether the host can launch at all).
 // Launch is the owner's click here, never a tool (CONNECT_PLAN §7.2).
 
 /** Where the proposal stands now. κ: the one place the server's facts become a state. */
@@ -31,7 +31,7 @@ export function standingOf(read: PolledState<keyed.KeyedProposalStatus>): Standi
       : { t: 'checking' };
   const s = read.data;
   if (s.launched.t === 'yes') return { t: 'launched', id: s.launched.id };
-  if (s.folder.t === 'changed') return { t: 'changed', why: s.folder.why };
+  if (s.file.t === 'changed') return { t: 'changed', why: s.file.why };
   return s.mode.t === 'read-only' ? { t: 'read-only', why: s.mode.why } : { t: 'ready' };
 }
 
@@ -84,7 +84,7 @@ type Foot<K extends Standing['t']> = (
   listed: ReadonlySet<string>
 ) => ReactNode;
 const FOOT: { readonly [K in Standing['t']]: Foot<K> } = {
-  checking: () => <span className="ui-muted">Checking the folder…</span>,
+  checking: () => <span className="ui-muted">Checking the file…</span>,
   unreadable: (s) => <span className="ui-muted">{s.why}</span>,
   launched: (s, p, _launch, listed) =>
     listed.has(s.id) ? (
@@ -111,7 +111,7 @@ const FOOT: { readonly [K in Standing['t']]: Foot<K> } = {
             buddyWrite(
               'keyed.launch',
               {},
-              { workspaceId: p.workspaceId, folder: p.folder, digest: p.digest }
+              { workspaceId: p.workspaceId, file: p.file, digest: p.digest }
             )
           )
         }

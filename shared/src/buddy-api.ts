@@ -224,19 +224,20 @@ const KeyedAnswerSchema = z.union([
   z.object({ confirm: z.boolean() }).strict(),
 ]);
 const KeyedApprovalSchema = z.object({ approve: z.boolean() }).strict();
-/** A plan folder on the server's disk (contract.md, plan.ts, briefs/): absolute, never relative to
+/** One TypeScript plan file on the server's disk: absolute, never relative to
  * the server's cwd. */
-const PlanFolder = z
+const PlanFile = z
   .string()
   .min(1)
-  .refine((p) => p.startsWith('/'), 'must be an absolute path');
-const KeyedPreviewSchema = z.object({ folder: PlanFolder }).strict();
+  .refine((p) => p.startsWith('/'), 'must be an absolute path')
+  .refine((p) => p.endsWith('.ts'), 'must be a .ts file');
+const KeyedPreviewSchema = z.object({ file: PlanFile }).strict();
 // `digest` is the proposal card's (expeditions-v1/digest.ts): given, the server launches only a
-// folder whose files still hash to it. Absent (direct HTTP), no check.
+// file whose bytes still hash to it. Absent (direct HTTP), no check.
 const KeyedLaunchSchema = z
   .object({
     workspaceId: z.string().min(1),
-    folder: PlanFolder,
+    file: PlanFile,
     digest: z.string().min(1).optional(),
   })
   .strict();
@@ -412,7 +413,7 @@ export const buddyMutations = {
     status: 200,
     body: KeyedApprovalSchema,
   },
-  // The gates on a plan folder, run without writing anything (a rejected plan is a 200 too).
+  // The gates on a plan file, run without writing anything (a rejected plan is a 200 too).
   'keyed.preview': {
     method: 'POST',
     path: '/api/buddies/keyed-expeditions/preview',

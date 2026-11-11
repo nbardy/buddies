@@ -1,1 +1,0 @@
-inside the plan folder

@@ -28,7 +28,7 @@ export type Seat = z.infer<typeof Seat>;
 export const Who = z.discriminatedUnion('t', [v('buddy', { id: nonEmpty }), Seat]);
 export type Who = z.infer<typeof Who>;
 
-/** A judge as the plan authors it: a review names its rubric brief. */
+/** A judge as the plan authors it: a review carries its rubric text. */
 export const Judge = z.discriminatedUnion('t', [
   v('none', {}),
   v('check', { command: nonEmpty }),
@@ -108,7 +108,7 @@ export type Max = z.infer<typeof Max>;
 export const AgentCall = v('agent', {
   key: Key,
   by: Who,
-  /** The rendered brief: `briefs/<step>.md` with slots filled and the contract's rules appended. */
+  /** The spec's rendered brief text with the contract's rules appended. */
   brief: nonEmpty,
   inputs: z.array(Input),
   /** JSON Schema of the answer the plan reads. */
@@ -165,7 +165,7 @@ export const LeaderAct = z.discriminatedUnion('t', [
    * keeps a log written before it existed readable, with the reason it never recorded. */
   v('continue', { why: str.default('') }),
   v('stop', { why: str }),
-  v('rewrite', { folder: nonEmpty, why: str }),
+  v('rewrite', { file: nonEmpty, why: str }),
   v('retry', { keys: z.array(Key).min(1) }),
 ]);
 export type LeaderAct = z.infer<typeof LeaderAct>;
@@ -659,7 +659,7 @@ export const TurnAccess = z
   .strict();
 export type TurnAccess = z.infer<typeof TurnAccess>;
 
-/** A plan folder's gates, run without writing anything: what a launch of it would start first. */
+/** A plan file's gates, run without writing anything: what a launch of it would start first. */
 export const PreviewCall = z
   .object({ key: Key, kind: CallKind, reservedUsd: z.number().nonnegative() })
   .strict();
@@ -707,12 +707,12 @@ export function advisoryGrants(a: TurnAccess): AdvisoryGrants {
 // ---- Proposing (the Buddy tool `expedition` action `propose`; the chat card) ----
 
 /** What a proposal card's post carries (as one `keyed-proposal:<json>` evidence entry): the clean
- * preview the Buddy was shown, where the folder is, and the digest of its files at that moment.
- * Launch sends the digest back; the server refuses a folder that no longer matches it. */
+ * preview the Buddy was shown, where the file is, and the digest of its bytes at that moment.
+ * Launch sends the digest back; the server refuses a file that no longer matches it. */
 export const ProposedPreview = CleanPreview.extend({ firstWave: z.array(ProposedCall) }).strict();
 export type ProposedPreview = z.infer<typeof ProposedPreview>;
 export const KeyedProposal = z
-  .object({ folder: nonEmpty, workspaceId: nonEmpty, digest: nonEmpty, preview: ProposedPreview })
+  .object({ file: nonEmpty, workspaceId: nonEmpty, digest: nonEmpty, preview: ProposedPreview })
   .strict();
 export type KeyedProposal = z.infer<typeof KeyedProposal>;
 export const PROPOSAL_EVIDENCE = 'keyed-proposal:';
@@ -724,14 +724,14 @@ export const KeyedMode = z.discriminatedUnion('t', [
   v('read-only', { why: nonEmpty }),
 ]);
 export type KeyedMode = z.infer<typeof KeyedMode>;
-/** What a proposal card needs to know now (`GET …/proposals/:digest?folder=`). */
+/** What a proposal card needs to know now (`GET …/proposals/:digest?file=`). */
 export const KeyedProposalStatus = z
   .object({
     mode: KeyedMode,
     /** The expedition started from this digest, when one was. */
     launched: z.discriminatedUnion('t', [v('no', {}), v('yes', { id: nonEmpty })]),
-    /** The folder's files now against the proposal's digest. */
-    folder: z.discriminatedUnion('t', [v('unchanged', {}), v('changed', { why: nonEmpty })]),
+    /** The file's bytes now against the proposal's digest. */
+    file: z.discriminatedUnion('t', [v('unchanged', {}), v('changed', { why: nonEmpty })]),
   })
   .strict();
 export type KeyedProposalStatus = z.infer<typeof KeyedProposalStatus>;

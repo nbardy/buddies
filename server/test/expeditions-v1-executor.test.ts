@@ -18,6 +18,7 @@ import { outcomeOf } from '../src/expeditions-v1/executor/answer';
 import { putRef } from '../src/expeditions-v1/executor/refs';
 import { ingestMeter } from '../src/expeditions-v1/executor/usage';
 import { NO_CALLS, hostDeps } from './fixtures/expedition-host';
+import { writePlan } from './fixtures/expedition-source';
 import { tempDir } from './fixtures/temp';
 
 // The executor core (CONNECT_PLAN §8 step 2) through real boundaries: the REAL kernel over the
@@ -79,29 +80,20 @@ const worktreesOf = (repo: string) =>
     .split('\n')
     .filter((l) => l.startsWith('worktree '));
 
-function contractFor(repo: string, doneCheck: string): string {
-  return `---
-leader: lead
-repo: ${repo}
-budget: { usd: 1, hours: 1 }
-autoApply: { usd: 0 }
-pools: { host: 1 }
-done:
-  - check: ${doneCheck}
-rules:
-  - Stay inside the repo.
----
-
-# Goal
-
-Run host commands to a checked answer.
-`;
+function contractFor(repo: string, doneCheck: string) {
+  return {
+    leader: 'lead',
+    repo,
+    goal: 'Run host commands to a checked answer.',
+    budget: { usd: 1, hours: 1 },
+    autoApply: { usd: 0 },
+    pools: { host: 1 },
+    done: [{ check: doneCheck }],
+    rules: ['Stay inside the repo.'],
+  };
 }
-function planFolder(contract: string, plan: string): string {
-  const folder = tempDir('exp-plan-');
-  fs.writeFileSync(path.join(folder, 'contract.md'), contract);
-  fs.writeFileSync(path.join(folder, 'plan.ts'), plan);
-  return folder;
+function planFile(contract: ReturnType<typeof contractFor>, plan: string): string {
+  return writePlan(path.join(tempDir('exp-plan-'), 'plan.expedition.ts'), contract, plan);
 }
 
 const opened = new Set<Expedition>();
@@ -149,29 +141,29 @@ describe('the host executor under the real kernel', () => {
   test('command steps and a check judge run to `finished: met` at the launch base', async () => {
     const { repo, base, second } = repoWithScripts();
     const root = tempDir('exp-root-');
-    const folder = planFolder(
+    const file = planFile(
       contractFor(repo, 'node scripts/check.js'),
       `import { z } from 'zod';
-import { command, need, plan, steps } from 'expedition';
+import { command, need, expedition, steps } from 'expedition';
 
 const Probe = z.object({ n: z.number(), head: z.string() });
 const { probe, double, fails, slow, notjson, wrong } = steps({
   probe: command('node scripts/probe.js', { minutes: 1 }).returns(Probe),
-  double: command('node scripts/use.js {{n}}', { minutes: 1 }).returns(Probe),
+  double: command((item: { n: number }) => 'node scripts/use.js ' + item.n, { minutes: 1 }).returns(Probe),
   fails: command('node scripts/fail.js', { minutes: 1 }),
   slow: command('node scripts/slow.js', { minutes: 0.01 }),
   notjson: command('node scripts/emit.js notjson', { minutes: 1 }).returns(Probe),
   wrong: command('node scripts/emit.js wrong', { minutes: 1 }).returns(Probe),
 });
 
-export default plan(async () => {
+export default expedition({ contract: CONTRACT, plan: async () => {
   const p = need(await probe(), 'no probe');
   await Promise.all([fails(), slow(), notjson(), wrong()]);
   return need(await double({ item: { n: p.out.n }, on: p }), 'no double');
-});
+} });
 `
     );
-    const r = await launch(hostDeps(root).deps, root, folder, base, { t: 'none' });
+    const r = await launch(hostDeps(root).deps, root, file, base, { t: 'none' });
     if (r.t !== 'launched') throw new Error(`rejected at ${r.gate}: ${r.issues.join('\n')}`);
     const e = r.expedition;
     opened.add(e);
@@ -227,24 +219,24 @@ export default plan(async () => {
     const { repo, base } = repoWithScripts();
     const root = tempDir('exp-root-');
     const marker = path.join(tempDir('exp-marker-'), 'hang.json');
-    const folder = planFolder(
+    const file = planFile(
       contractFor(repo, 'node scripts/ok.js'),
-      `import { command, need, plan, steps } from 'expedition';
+      `import { command, need, expedition, steps } from 'expedition';
 
 const { hang, after } = steps({
-  hang: command('node scripts/hang.js {{marker}}', { minutes: 5 }),
+  hang: command((item: { marker: string }) => 'node scripts/hang.js ' + item.marker, { minutes: 5 }),
   after: command('node scripts/ok.js', { minutes: 1 }),
 });
 
-export default plan(async () => {
+export default expedition({ contract: CONTRACT, plan: async () => {
   const h = await hang({ item: { marker: ${JSON.stringify(marker)} } });
   if (h.t !== 'errored') throw new Error('hang ended ' + h.t);
   return need(await after(), 'no after');
-});
+} });
 `
     );
     // Host 1: a separate process that launches the expedition and is then killed outright.
-    const host = spawn(process.execPath, ['--import', 'tsx', HOST_SCRIPT, root, folder, base], {
+    const host = spawn(process.execPath, ['--import', 'tsx', HOST_SCRIPT, root, file, base], {
       cwd: SERVER,
       stdio: ['ignore', 'pipe', 'inherit'],
     });
@@ -296,7 +288,7 @@ const runIdOf = (key: string, h: string) => `${ID}/${key}@${HASH(h)}#1:producer`
 async function seeded(repo: string, base: string): Promise<{ ex: HostExecutor; dir: string }> {
   const root = tempDir('exp-root-');
   const dir = path.join(root, ID);
-  const store = await LogStore.create(dir, contractFor(repo, 'node scripts/ok.js'));
+  const store = await LogStore.create(dir);
   await store.append(
     keyed.Entry.parse({
       t: 'launched',
@@ -453,7 +445,6 @@ describe('commands are argv, never shell', () => {
   });
 
   test('the static gate refuses shell syntax in a command, a check judge or a done check', () => {
-    const folder = tempDir('exp-gate-');
     const contract: keyed.Contract = {
       goal: 'g',
       done: [{ t: 'check', command: 'pytest | tee log' }],
@@ -471,7 +462,6 @@ describe('commands are argv, never shell', () => {
       key,
       step: key,
       command,
-      item: {},
       on: { t: 'launch' },
       output: null,
       needs: [],
@@ -479,7 +469,6 @@ describe('commands are argv, never shell', () => {
     });
     const r = staticGate({
       contract,
-      folder,
       cast: [],
       calls: [cmd('build', 'make && make test'), cmd('fine', "node -e 'a && b'")],
       providerOf: () => ({ t: 'unknown', why: 'none' }),

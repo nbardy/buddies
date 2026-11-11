@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { keyed } from '@unleashd/shared';
 import { canonicalise } from './canonical';
 import { maxOfCap, parseContract } from './contract';
@@ -35,13 +33,14 @@ import { dryRun } from './runner';
 export type Checked =
   | {
       readonly t: 'ok';
+      readonly contract: keyed.Contract;
       readonly asked: readonly Asked[];
       /** What every turn it may run may do (gates.ts `turnAccessOf`). */
       readonly access: readonly keyed.TurnAccess[];
     }
   | {
       readonly t: 'failed';
-      readonly gate: 'typecheck' | 'dry-run' | 'static';
+      readonly gate: 'contract' | 'typecheck' | 'dry-run' | 'static';
       readonly issues: readonly string[];
     };
 
@@ -49,18 +48,19 @@ export type Checked =
  * the calls it made. `asked`: those calls, canonical and hashed. */
 export async function checkPlan(
   deps: KernelDeps,
-  folder: string,
-  contract: keyed.Contract,
+  file: string,
   known: (call: Authored) => keyed.Outcome | undefined
 ): Promise<Checked> {
-  const typed = await typecheckGate(folder, deps.gates);
+  const typed = await typecheckGate(file, deps.gates);
   if (typed.t === 'failed') return { t: 'failed', gate: 'typecheck', issues: typed.errors };
-  const dry = await dryRun({ folder, known, reviewed: () => false });
+  const dry = await dryRun({ file, known, reviewed: () => false });
+  const parsed = parseContract(dry.contract);
+  if (parsed.t === 'invalid') return { t: 'failed', gate: 'contract', issues: parsed.issues };
+  const contract = parsed.contract;
   if (dry.end.t === 'threw' || dry.end.t === 'crashed')
     return { t: 'failed', gate: 'dry-run', issues: [JSON.stringify(dry.end)] };
   const checked = staticGate({
     contract,
-    folder,
     cast: dry.cast,
     calls: dry.calls,
     providerOf: deps.providerOf,
@@ -68,11 +68,11 @@ export async function checkPlan(
   if (checked.t === 'failed') return { t: 'failed', gate: 'static', issues: checked.issues };
   const asked: Asked[] = [];
   for (const a of dry.calls) {
-    const canon = canonicalise(a, { contract, folder, providerOf: deps.providerOf });
+    const canon = canonicalise(a, { contract, providerOf: deps.providerOf });
     if (canon.t === 'invalid') return { t: 'failed', gate: 'static', issues: canon.issues };
     asked.push({ call: canon.call, hash: hashOf(canon.call) });
   }
-  return { t: 'ok', asked, access: checked.access };
+  return { t: 'ok', contract, asked, access: checked.access };
 }
 
 // ---- wakes ----
@@ -189,7 +189,7 @@ export class Change {
 
   // ---- a rewrite ----
 
-  /** Copy the folder as the next version, run the gates in order, and apply. A rejection changes
+  /** Copy the file as the next version, run the gates in order, and apply. A rejection changes
    * nothing: no entry is written and the copy is removed (I8). */
   async rewrite(
     act: Extract<keyed.LeaderAct, { t: 'rewrite' }>,
@@ -199,9 +199,9 @@ export class Change {
     // Anything but an applied rewrite removes the copy, a kernel fault included.
     let result: Applied = reject('kernel', ['the rewrite did not complete']);
     try {
-      result = await this.m.store.copyPlan(act.folder, version).then(
+      result = await this.m.store.copyPlan(act.file, version).then(
         () => this.gated(act, event, version),
-        (e: Error) => reject('folder', [`it could not be copied: ${e.message}`])
+        (e: Error) => reject('file', [`it could not be copied: ${e.message}`])
       );
     } finally {
       if (result.t === 'rejected') await this.m.store.removePlan(version);
@@ -215,30 +215,22 @@ export class Change {
     version: number
   ): Promise<Applied> {
     const m = this.m;
-    const dest = m.planDir(version);
-    const parsed = await readFile(path.join(act.folder, 'contract.md'), 'utf8').then(
-      parseContract,
-      (e: Error) =>
-        ({ t: 'invalid', issues: [`contract.md could not be read: ${e.message}`] }) as const
-    );
-    if (parsed.t === 'invalid') return reject('contract', parsed.issues);
-    const checked = await checkPlan(m.deps, dest, m.state().contract, (a) =>
-      knownOutcome(m, a, dest)
-    );
+    const dest = m.planFile(version);
+    const checked = await checkPlan(m.deps, dest, (a) => knownOutcome(m, a));
     if (checked.t === 'failed') return reject(checked.gate, checked.issues);
     const diff = diffOf(m.state(), checked.asked);
     const choose = diff.dropped.filter((k) => DISPOSAL[attached(m.state(), k).call.t] === 'choose');
     const disposed: Disposed =
       choose.length > 0
         ? await m.deps.leader.dispose(
-            { expedition: m.id, folder: act.folder },
+            { expedition: m.id, file: act.file },
             diff,
             droppedInfo(m, choose)
           )
         : { t: 'decided', dispositions: {} };
     if (disposed.t === 'invalid') return reject('dispositions', disposed.issues);
     const { dispositions } = disposed;
-    const proposal = { version, contract: parsed.contract, asked: checked.asked, dispositions };
+    const proposal = { version, contract: checked.contract, asked: checked.asked, dispositions };
     const verdict = judgeRewrite(m.state(), proposal);
     if (verdict.t === 'reject') return reject('rules', [describe(verdict.why)]);
     if (verdict.t === 'needs-owner') {
@@ -507,9 +499,9 @@ function leaderCall(s: State, event: keyed.WakeEvent): keyed.Call {
 }
 
 /** The dry run of a rewrite answers from the log: a settled call's logged outcome, else nothing. */
-function knownOutcome(m: Expedition, a: Authored, folder: string): keyed.Outcome | undefined {
+function knownOutcome(m: Expedition, a: Authored): keyed.Outcome | undefined {
   const s = m.state();
-  const canon = canonicalise(a, { contract: s.contract, folder, providerOf: m.deps.providerOf });
+  const canon = canonicalise(a, { contract: s.contract, providerOf: m.deps.providerOf });
   if (canon.t === 'invalid') return undefined;
   const found = lookup(s, canon.call.key, hashOf(canon.call));
   return found.t === 'known' && found.record.status.t === 'settled'

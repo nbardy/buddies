@@ -1,12 +1,13 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { keyed } from '@unleashd/shared';
 import { labelled } from '../observability/event-loop-stall';
 import { type Authored, type CastRow, FromPlan, type ToPlan } from './protocol';
 
-// The plan runner (docs/expeditions/keyed/v1/DESIGN.md §2, §5): runs a plan folder's `plan.ts` in
+// The plan runner (docs/expeditions/keyed/v1/DESIGN.md §2, §5): runs one expedition file in
 // a child process and relays its calls. The child holds nothing that matters; the host answers
 // every call (from its log or by running it), and may kill the child and start a fresh one at any
 // time. A dry run is the same run where the host answers only what it already knows.
@@ -50,7 +51,9 @@ export type Exit =
   | { readonly t: 'signal'; readonly signal: string };
 
 export type PlanEvents = {
-  /** The plan's cast table (each `steps({...})` table once, before its first call). */
+  /** The plain owner contract; the first message. */
+  onContract(value: unknown): void;
+  /** The plan's cast table (each table once, before its first call). */
   onCast(rows: readonly CastRow[]): void;
   onCall(seq: number, call: Authored): void;
   onReview(seq: number, question: string): void;
@@ -60,7 +63,7 @@ export type PlanEvents = {
   /** Exactly once, after the child has exited. */
   onEnd(end: PlanEnd): void;
 };
-export type RunPlanOptions = { readonly folder: string } & PlanEvents;
+export type RunPlanOptions = { readonly file: string } & PlanEvents;
 
 export interface PlanHandle {
   readonly pid: number;
@@ -76,17 +79,14 @@ export interface PlanHandle {
 
 type Outstanding = 'call' | 'review';
 
-/** Sandbox: Node's permission model. The child may read its plan folder, the library and the
+/** Sandbox: Node's permission model. The child may read its plan file, the library and the
  * library's dependencies, and nothing else; it may not write, spawn or load addons. tsx needs two
  * allowances: worker threads (its loader hooks run in one; workers inherit these permissions) and
  * its transform cache off (it writes to the temp dir). Node walks up from each module looking for
  * package.json; those exact ancestor files are readable so the walk ends normally instead of
- * throwing ERR_ACCESS_DENIED. Ancestor tsconfig.json files are NOT readable: tsx's search for one
- * stops at the plan folder, so a plan compiles the same wherever it lives. When the folder has its
- * own tsconfig.json, tsx probes case sensitivity by stat-ing the folder's path with its case
- * inverted, so that path is readable too (on a case-insensitive disk it is the folder itself).
+ * throwing ERR_ACCESS_DENIED. tsx uses the library's explicit config; no owner tsconfig is read.
  * Node 24 has no network permission (`--allow-net` arrives in Node 25): sockets are NOT blocked. */
-function sandboxFlags(folder: string): string[] {
+function sandboxFlags(file: string): string[] {
   const kernel = realpathSync(__dirname);
   const server = path.resolve(kernel, '..', '..');
   const store = pnpmStore(realpathSync(TSX_LOADER));
@@ -94,14 +94,15 @@ function sandboxFlags(folder: string): string[] {
   // child loads that package's build. Its link resolves outside server/node_modules.
   const shared = realpathSync(path.join(server, 'node_modules', '@unleashd', 'shared'));
   const readable = [
-    folder,
+    path.dirname(file),
+    invertCase(path.dirname(file)),
     kernel,
+    invertCase(kernel),
     path.join(server, 'node_modules'),
     store,
     path.join(shared, 'dist'),
     path.join(shared, 'node_modules'),
-    invertCase(folder),
-    ...ancestorPackages(folder),
+    ...ancestorPackages(path.dirname(file)),
     ...ancestorPackages(kernel),
     ...ancestorPackages(path.join(shared, 'dist')),
   ];
@@ -117,7 +118,6 @@ function ancestorPackages(dir: string): string[] {
   if (parent === dir) return [];
   return [path.join(parent, 'package.json'), ...ancestorPackages(parent)];
 }
-/** get-tsconfig's case probe (isFsCaseSensitive): every letter's case swapped. */
 function invertCase(text: string): string {
   return [...text].map((c) => (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase())).join('');
 }
@@ -133,21 +133,29 @@ function pnpmStore(file: string): string {
 }
 
 export function runPlan(opts: RunPlanOptions): PlanHandle {
-  const folder = realpathSync(opts.folder);
+  // tsx probes directory case sensitivity. Give it a private directory containing ONLY the
+  // source, never the owner's adjacent files. Guard: expedition-kernel-runner sandbox test.
+  const sandbox = realpathSync(mkdtempSync(path.join(tmpdir(), 'expedition-process-')));
+  const file = path.join(sandbox, 'plan.expedition.ts');
+  copyFileSync(realpathSync(opts.file), file);
   const child: ChildProcess = spawn(
     process.execPath,
     [
-      ...sandboxFlags(folder),
+      ...sandboxFlags(file),
       '--import',
       pathToFileURL(TSX_LOADER).href,
       CHILD,
-      folder,
+      file,
       AUTHORING_ENTRY,
+      opts.file, // Keep the durable source path in process listings for operational inspection.
     ],
     {
-      cwd: folder,
+      cwd: path.dirname(file),
       // No inherited environment: a plan needs none, and the host's may hold secrets.
-      env: { TSX_DISABLE_CACHE: '1' },
+      env: {
+        TSX_DISABLE_CACHE: '1',
+        TSX_TSCONFIG_PATH: path.join(__dirname, 'plan-tsconfig.json'),
+      },
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
       // Its own process group, so kill() takes anything it started with it.
       detached: true,
@@ -155,7 +163,7 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
     }
   );
   const pid = child.pid;
-  if (pid === undefined) throw new Error(`Could not start the plan process for ${folder}.`);
+  if (pid === undefined) throw new Error(`Could not start the plan process for ${file}.`);
 
   const outstanding = new Map<number, Outstanding>();
   let decided: PlanEnd | 'running' = 'running';
@@ -180,6 +188,7 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
   };
 
   const handlers: { [T in FromPlan['t']]: (message: Extract<FromPlan, { t: T }>) => void } = {
+    contract: (m) => opts.onContract(m.value),
     cast: (m) => opts.onCast(m.rows),
     call: (m) => {
       outstanding.set(m.seq, 'call');
@@ -195,6 +204,7 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
     gap: (m) => decide({ t: 'gap', why: m.why, evidence: m.evidence }),
     threw: (m) => decide({ t: 'threw', message: m.message }),
   };
+  let receivedContract = false;
   child.on('message', (raw: unknown) => {
     if (decided !== 'running') return;
     const parsed = FromPlan.safeParse(raw);
@@ -204,7 +214,25 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
       return;
     }
     const message = parsed.data;
-    (handlers[message.t] as (m: FromPlan) => void)(message);
+    // Guard: expedition-kernel-runner. No plan work can precede or replace its owner contract.
+    if (message.t === 'contract') {
+      if (receivedContract) {
+        decide({ t: 'threw', message: 'Duplicate plan contract.' });
+        killGroup();
+        return;
+      }
+      receivedContract = true;
+    } else if (!receivedContract && message.t !== 'threw') {
+      decide({ t: 'threw', message: 'The contract must be the first plan message.' });
+      killGroup();
+      return;
+    }
+    try {
+      (handlers[message.t] as (m: FromPlan) => void)(message);
+    } catch (error) {
+      decide({ t: 'threw', message: (error as Error).message });
+      killGroup();
+    }
   });
 
   const ended = new Promise<PlanEnd>((resolve) => {
@@ -220,6 +248,7 @@ export function runPlan(opts: RunPlanOptions): PlanHandle {
               exit: signal ? { t: 'signal', signal } : { t: 'code', code: code ?? -1 },
               stderr,
             };
+      rmSync(sandbox, { recursive: true, force: true });
       opts.onEnd(end);
       resolve(end);
     });
@@ -265,6 +294,8 @@ export type DryRunEnd =
   | { readonly t: 'crashed'; readonly exit: Exit; readonly stderr: string };
 
 export type DryRunResult = {
+  /** The owner literal, before canonical validation. */
+  readonly contract: unknown;
   /** Every step of the plan's cast table, called or not. */
   readonly cast: readonly CastRow[];
   /** Every call the plan authored, in the order it authored them. */
@@ -275,7 +306,7 @@ export type DryRunResult = {
 };
 
 export type DryRunOptions = {
-  readonly folder: string;
+  readonly file: string;
   /** The logged outcome for this call, or `undefined`: never answered in this run. */
   known(call: Authored): keyed.Outcome | undefined;
   /** `true`: the leader continues at this review; `false`: never answered in this run. */
@@ -289,6 +320,7 @@ type Declined =
 /** Run the plan answering only what the host already knows; stop when it ends or waits on
  * nothing but unanswered seqs. */
 export async function dryRun(opts: DryRunOptions): Promise<DryRunResult> {
+  let contract: unknown;
   const cast: CastRow[] = [];
   const calls: Authored[] = [];
   const reviews: string[] = [];
@@ -300,7 +332,10 @@ export async function dryRun(opts: DryRunOptions): Promise<DryRunResult> {
   });
 
   const handle = runPlan({
-    folder: opts.folder,
+    file: opts.file,
+    onContract: (value) => {
+      contract = value;
+    },
     onCast: (rows) => cast.push(...rows),
     onCall: (seq, call) => {
       calls.push(call);
@@ -331,7 +366,7 @@ export async function dryRun(opts: DryRunOptions): Promise<DryRunResult> {
 
   const end = await Promise.race([quiet, handle.ended.then(dryEndOf)]);
   await handle.kill();
-  return { cast, calls, reviews, phases, end };
+  return { contract, cast, calls, reviews, phases, end };
 }
 
 function dryEndOf(end: PlanEnd): DryRunEnd {

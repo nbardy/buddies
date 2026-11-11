@@ -9,7 +9,7 @@ start once those collects settle. Everything else here matches what the end-to-e
 
 **This is an illustration, not a record of a run.** The numbers are made up to show what the host
 and the leader would each do. The two plans are real files and both typecheck:
-[`../plan.ts`](../plan.ts) (version 0) and [`plan.ts`](plan.ts) (version 1).
+[`../../gtm.expedition.ts`](../../gtm.expedition.ts) (version 0) and [`../../gtm-rewrite.expedition.ts`](../../gtm-rewrite.expedition.ts) (version 1).
 
 ## 1. What triggered it
 
@@ -34,15 +34,15 @@ is redone:
 
 | File | Change |
 |---|---|
-| `plan.ts` | Skip organizations of kind `comparator`. Add a `mine` step over four forum venues. Give the thesis both sets of sources. The changed lines are marked `// v1`. |
-| `briefs/mine.md` | New: [the brief for the forum search](briefs/mine.md). |
+| `gtm-rewrite.expedition.ts` | Skip organizations of kind `comparator`. Add a `mine` step over four forum venues. Give the thesis both sets of sources. The changed lines are marked `// v1`. |
+| The same file, `mine.brief(...)` | New inline forum-search prose; each item renders its own prompt and check command. |
 
 ## 3. The four gates
 
 | Gate | Result |
 |---|---|
 | Typecheck (`tsc`) | passed |
-| Dry run | passed: `briefs/mine.md` exists; the `mine` judge is a command, so no provider clash |
+| Dry run | passed: every cast step has `.brief(...)`; the `mine` judge is a command, so no provider clash |
 | Rules | Contract untouched · new cost $6.00 is under the $10 auto-apply limit · 31 judged passes since launch, so this is not a rewrite without progress |
 | Running calls the new plan drops | 2, and the leader must decide each one (below) |
 
@@ -98,7 +98,12 @@ What the rewrite did cost: one leader wake, four new calls, and one cancelled ca
 ## 8. The weak spot this shows
 
 The leader wanted the collectors to also note forum links they came across. That means editing
-`briefs/collect.md`, and a changed brief changes every `collect` call's identity: all 34 would run
+`collect.brief(...)` in the one file, and a changed brief changes every `collect` call's identity: all 34 would run
 again. So it wrote a new step and left the old brief alone. That is the right call here, but it
 is a constraint an author has to know about, and the dry run is what warns them: it would have
 shown "34 calls restarted, about $45" before anything was spent.
+
+The rewrite submits `{t: 'rewrite', file: '<draft>/plan.expedition.ts', why: '...'}`.
+Both files carry the same plain owner contract. The rules gate compares its canonical value,
+including defaulted caps, before applying any rewrite. The full prose of every original prompt
+is embedded in each file; the Codex critic is reviewed by Claude, and Claude steps by Codex.

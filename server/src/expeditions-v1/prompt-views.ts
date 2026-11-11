@@ -38,6 +38,6 @@ export function keepingPrompts(root: string, x: KeyedExpeditions): KeyedExpediti
     act: (id, act) => mutated(x.act(id, act)),
     answer: (id, ref, answer) => mutated(x.answer(id, ref, answer)),
     approval: (id, approve) => mutated(x.approval(id, approve)),
-    launch: (workspaceId, folder, expect) => mutated(x.launch(workspaceId, folder, expect)),
+    launch: (workspaceId, file, expect) => mutated(x.launch(workspaceId, file, expect)),
   };
 }

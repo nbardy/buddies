@@ -160,17 +160,15 @@ const MAY_ACT: {
 const lessonText = (l: Lesson) => (l.t === 'lesson' ? l.text : 'no lesson');
 
 // Sent on every Buddy turn: keep it tight. The authoring API (expedition-kernel/authoring/index.ts)
-// is the source of truth for the plan.ts lines; the long form is the keyed DESIGN.md and gtm/.
-const DESCRIPTION = `Self-running expeditions; only the OWNER launches, steers or stops one.
-propose {folder}: write the folder (absolute path, inside your workspace) with your file tools, then call. Returns the gate's issues (fix, propose again; nothing posts) or, if clean, budget, first wave with cost and who runs each call, and the limits only advised; then posts a Launch card in this chat. Changed files make a new card.
+// is the source of truth; the complete one-file example is in the keyed v1 docs.
+const DESCRIPTION = `Self-running expeditions; only the OWNER launches, steers or stops.
+propose {file}: write one absolute .ts file inside your workspace, then call. Gate issues post nothing; fix and propose again. Clean posts a Launch card with cost and advisory limits; edits need a new proposal.
 status {id}, list: read. draft, act: OLD expeditions only.
-Folder: contract.md, plan.ts, briefs/<step>.md ({{slot}} = item field).
-contract.md: YAML frontmatter + "# Goal" prose. leader: Buddy id; repo; budget {usd, hours}; autoApply {usd}; pools {provider: concurrent calls}; done: [check: cmd | review: {rubric, by: provider/model/effort} | owner: question]; rules: [..]; optional leaderWake, doneReview {usd, minutes}.
-plan.ts: import { role, seat, buddy, command, check, review, steps, plan, need, passed, parallel } from 'expedition'.
- const w = role({by: seat(provider, model, effort) | buddy(id), usd, minutes}) + .reads(paths) .web() .checkout() .returns(zod) .lists(zod) .needs(pool) .judged(check(cmd) | review(rubric, seat of ANOTHER provider)); command(cmd, {minutes}).
- const {a, b} = steps({a: w, b: ..}); await a({item, reads, on}) is {t:'passed', out, ref} or a non-pass.
- export default plan(async (x) => { x.phase(name, fn); parallel(items, fn); x.review(q); x.ask(q); x.confirm(q); need(result, why); passed(results); return held }).
-Long form: docs/expeditions/keyed/v1/DESIGN.md, gtm/.`;
+Import only 'expedition' and 'zod'. export default expedition({contract, plan: async (x) => held}).
+contract: {goal, leader: Buddy id, repo, budget:{usd,hours}, autoApply:{usd}, pools:{provider:concurrency}, done:[{check:cmd}|{review:{rubric:text,by:seat}}|{owner:question}], rules:[text]}; optional leaderWake, doneReview:{usd,minutes}. Leader rewrites must preserve this owner literal.
+role({by:seat(provider,model,effort)|buddy(id),usd,minutes}): .brief(text | item=>text), .reads(paths), .web(), .checkout(), .returns(zod), .lists(zod), .needs(pool), .judged(check(cmd | item=>cmd) | review(text,another-provider-seat)). command(cmd | item=>cmd,{minutes}).
+steps({a:spec}) makes await a({item,reads,on,continues,id}); item is required only for an item function. Result: passed with out/ref, or non-pass. need(result,why), passed(results), parallel(items,fn); x.phase(name,fn), x.review(q), x.ask(q), x.confirm(q). Return held.
+Example: docs/expeditions/keyed/v1/gtm.expedition.ts.`;
 
 export const EXPEDITION_TOOL = {
   description: DESCRIPTION,

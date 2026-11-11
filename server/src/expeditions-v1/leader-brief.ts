@@ -16,7 +16,7 @@ export type LeaderBriefInput = {
   readonly key: keyed.Key;
   readonly view: ExpeditionView;
   readonly event: keyed.WakeEvent;
-  /** The wake's draft folder: a copy of the current plan and a read-only contract.md. */
+  /** The wake's draft folder: an editable copy of the current plan file. */
   readonly draft: string;
   readonly plans: string;
   readonly notes: readonly Note[];
@@ -103,9 +103,9 @@ export function leaderBody(x: LeaderBriefInput): string {
     ...(calls.length > 0 ? calls.map((c) => JSON.stringify(c)) : ['(none yet)']),
     '',
     'FOLDERS',
-    `- Your draft folder: ${x.draft}. It holds a copy of plan v${p.planVersion} (plan.ts, briefs/) and the contract (contract.md, read-only: it is the owner's, and a rewrite that changes it is rejected).`,
-    `- To change the plan, edit plan.ts and briefs/ in the draft folder, then answer rewrite. If the new plan drops calls that are still running, write ${x.draft}/dispositions.json first: {"<key>": "cancel" | "finish"} for each of them.`,
-    `- Plan versions so far: ${x.plans}/v<n>.`,
+    `- Your draft folder: ${x.draft}. It holds a copy of plan v${p.planVersion} as plan.expedition.ts. The inline contract is the owner's: a rewrite whose evaluated contract differs canonically from the launched one is rejected at the rules gate.`,
+    `- To change the plan, edit plan.expedition.ts in the draft folder, then answer rewrite. If the new plan drops calls that are still running, write ${x.draft}/dispositions.json first: {"<key>": "cancel" | "finish"} for each of them.`,
+    `- Plan versions so far: ${x.plans}/v<n>.expedition.ts.`,
     '- Read a call output from its "ref" file only when you need it.',
     '',
     answerInstruction({ t: 'act', folder: x.draft }),

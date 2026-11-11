@@ -126,6 +126,7 @@ export class OwnerBook {
   }
 
   threadPosted(expedition: string, channelId: string, rootId: string): Promise<OwnerFile> {
+    this.indexThread(expedition, { channelId, rootId });
     return this.update(expedition, (f) =>
       f.thread.t === 'posted' ? f : { ...f, thread: { t: 'posted', channelId, rootId } }
     );
@@ -134,6 +135,9 @@ export class OwnerBook {
     expedition: string,
     ask: { runId: string; channelId: string; postId: string }
   ): Promise<OwnerFile> {
+    // A question is already readable from the crate while owner.json is fsyncing. A fast reply
+    // bypassed consumption (full suite: 1/95 processes failed, 2026-11-11). Guard: owned-root publication (expeditions-v1-owner).
+    this.indexAsk(expedition, ask);
     return this.update(expedition, (f) =>
       f.asks.some((a) => a.postId === ask.postId) ? f : { ...f, asks: [...f.asks, ask] }
     );
@@ -144,17 +148,23 @@ export class OwnerBook {
   }
 
   private index(expedition: string, f: OwnerFile): void {
-    if (f.thread.t === 'posted')
-      this.owned.set(f.thread.rootId, {
-        expedition,
-        channelId: f.thread.channelId,
-        thread: { t: 'expedition' },
-      });
-    for (const a of f.asks)
-      this.owned.set(a.postId, {
-        expedition,
-        channelId: a.channelId,
-        thread: { t: 'ask', runId: a.runId },
-      });
+    if (f.thread.t === 'posted') this.indexThread(expedition, f.thread);
+    for (const a of f.asks) this.indexAsk(expedition, a);
+  }
+
+  private indexThread(expedition: string, thread: { channelId: string; rootId: string }): void {
+    this.owned.set(thread.rootId, {
+      expedition,
+      channelId: thread.channelId,
+      thread: { t: 'expedition' },
+    });
+  }
+
+  private indexAsk(expedition: string, ask: OwnerFile['asks'][number]): void {
+    this.owned.set(ask.postId, {
+      expedition,
+      channelId: ask.channelId,
+      thread: { t: 'ask', runId: ask.runId },
+    });
   }
 }

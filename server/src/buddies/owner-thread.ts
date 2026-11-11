@@ -50,7 +50,8 @@ export function createOwnerThread({ core, events }: OwnerThreadDeps) {
     at: Place,
     p: Said,
     evidence: string,
-    notice: Notice
+    notice: Notice,
+    beforeNotice?: (post: Post) => Promise<unknown>
   ): Promise<string> {
     const input = { ...p, kind: 'inform' as const, evidence: [evidence], mentions: [] };
     const write = await core.post(by, at.channel, {
@@ -58,15 +59,18 @@ export function createOwnerThread({ core, events }: OwnerThreadDeps) {
       replyToId: at.replyToId,
       broadcast: false,
     });
+    // A host can register reply ownership before a notification exposes this root. Replayed
+    // posts register too, so recovery cannot announce a question with no reply consumer.
+    if (beforeNotice) await beforeNotice(write.post);
     if (write.created) await NOTICE[notice](write.post);
     return write.post.id;
   }
 
   /** The thread's root post id. Quiet: review 2026-11-03, boot announced one root per
    * expedition, a notification each. */
-  function threadRoot(t: Thread): Promise<string> {
+  function threadRoot(t: Thread, beforeNotice?: (post: Post) => Promise<unknown>): Promise<string> {
     const at = { channel: { kind: 'id' as const, id: t.channelId } };
-    return inform(t.author, at, t.root, t.evidence, 'quiet');
+    return inform(t.author, at, t.root, t.evidence, 'quiet', beforeNotice);
   }
 
   /** Author-written, in the thread; the key makes a repeat a no-op. */

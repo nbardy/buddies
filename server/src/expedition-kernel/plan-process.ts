@@ -1,6 +1,8 @@
 import type { keyed } from '@unleashd/shared';
 import type { CanonCtx } from './canonical';
 import { canonicalise } from './canonical';
+import { parseContract } from './contract';
+import { canonicalJson } from './core';
 import type { Authored } from './protocol';
 import { type PlanEnd, type PlanHandle, runPlan } from './runner';
 
@@ -40,16 +42,24 @@ export class PlanProcess {
   constructor(
     private readonly host: PlanHost,
     readonly version: number,
-    folder: string
+    file: string
   ) {
     const on =
       <A extends unknown[]>(fn: (...a: A) => unknown) =>
       (...a: A) =>
         host.enqueue(() => (this.alive ? fn(...a) : undefined));
     this.handle = runPlan({
-      folder,
+      file,
       onCall: on((seq: number, a: Authored) => this.onCall(seq, a)),
       onReview: on((seq: number, q: string) => this.onReview(seq, q)),
+      onContract: (raw) => {
+        const parsed = parseContract(raw);
+        if (
+          parsed.t !== 'ok' ||
+          canonicalJson(parsed.contract) !== canonicalJson(host.canonCtx(version).contract)
+        )
+          throw new Error('The running file changed the owner contract.');
+      },
       onCast: () => {},
       onPhase: () => {},
       onWaiting: on((seqs: readonly number[]) => {
@@ -96,7 +106,7 @@ export class PlanProcess {
     };
     const canon = canonicalise(authored, this.host.canonCtx(this.version));
     if (canon.t === 'invalid') {
-      // Deterministic from the folder and the item, so a replay fails the same way.
+      // Deterministic from the rendered call, so a replay fails the same way.
       const why = `${authored.key} does not canonicalise: ${canon.issues.join('; ')}`;
       this.host.fault(why);
       return asker.deliver({ t: 'outcome', outcome: { t: 'errored', why } });

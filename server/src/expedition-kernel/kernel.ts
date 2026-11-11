@@ -231,8 +231,8 @@ export class Expedition {
     this.faultList.push({ at: this.deps.clock.now().toISOString(), what });
   }
 
-  planDir(version: number): string {
-    return this.store.planDir(version);
+  planFile(version: number): string {
+    return this.store.planFile(version);
   }
   version(): number {
     const plan = this.current.plan;
@@ -477,7 +477,7 @@ export class Expedition {
   private startPlan(version: number): void {
     this.proc = {
       t: 'running',
-      p: new PlanProcess(this.planHost, version, this.store.planDir(version)),
+      p: new PlanProcess(this.planHost, version, this.store.planFile(version)),
     };
   }
   private async stopPlan(): Promise<void> {
@@ -498,9 +498,8 @@ export class Expedition {
   private readonly planHost: PlanHost = {
     enqueue: (task) => this.enqueue(task),
     request: (call, asker) => this.request(call, asker),
-    canonCtx: (version) => ({
+    canonCtx: () => ({
       contract: this.current.contract,
-      folder: this.store.planDir(version),
       providerOf: this.deps.providerOf,
     }),
     fault: (what) => this.fault(what),

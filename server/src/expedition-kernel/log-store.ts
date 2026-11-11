@@ -1,33 +1,16 @@
 import { constants } from 'node:fs';
-import {
-  type FileHandle,
-  cp,
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { type FileHandle, copyFile, mkdir, open, readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { keyed } from '@unleashd/shared';
 
 // One expedition on disk: a directory holding
 //   log.jsonl      append-only, one Entry per line, fsync'd on every append
-//   contract.md    the owner's
-//   plans/v<N>/    each plan version as applied: plan.ts + briefs/
-// State is fold(log); nothing else here is durable state (the plan copies are what the plan
-// process runs, and a copy with no `plan` entry is a leftover from a crash, removed at open).
-
+//   plans/v<N>.expedition.ts   each applied plan, contract and prompts included
+// State is fold(log); an unapplied copy is removed at open.
 const LOG = 'log.jsonl';
-const CONTRACT = 'contract.md';
 const PLANS = 'plans';
-/** Where an expedition directory keeps its contract and each plan version (readers outside the
- * kernel, the leader's draft folder, read them by these). */
-export const contractFileOf = (dir: string): string => path.join(dir, CONTRACT);
-export const planDirOf = (dir: string, version: number): string =>
-  path.join(dir, PLANS, `v${version}`);
+export const planFileOf = (dir: string, version: number): string =>
+  path.join(dir, PLANS, `v${version}.expedition.ts`);
 
 /** A line of the log that is not an Entry. Only the LAST line can be torn by a crash (an append
  * that never finished, so nothing acted on it); any other bad line is a corrupt log and opening
@@ -61,11 +44,10 @@ export class LogStore {
   ) {}
 
   /** A new expedition directory. Fails if `dir` exists: an expedition is never written over. */
-  static async create(dir: string, contractMarkdown: string): Promise<LogStore> {
+  static async create(dir: string): Promise<LogStore> {
     await mkdir(path.dirname(dir), { recursive: true });
     await mkdir(dir);
     await mkdir(path.join(dir, PLANS));
-    await writeFile(path.join(dir, CONTRACT), contractMarkdown, { flag: 'wx' });
     const fh = await open(
       path.join(dir, LOG),
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_APPEND
@@ -96,41 +78,24 @@ export class LogStore {
     await this.fh.close();
   }
 
-  get contractFile(): string {
-    return contractFileOf(this.dir);
+  planFile(version: number): string {
+    return planFileOf(this.dir, version);
   }
 
-  planDir(version: number): string {
-    return planDirOf(this.dir, version);
-  }
-
-  /** Copy a plan folder's `plan.ts` and `briefs/` as plan version `version`. Nothing else in the
-   * folder is the plan's (its contract.md is the owner's, read and compared, never copied). */
+  /** One immutable plan version; no neighbouring file is part of it. */
   async copyPlan(from: string, version: number): Promise<void> {
-    const dest = this.planDir(version);
-    await mkdir(dest);
-    await cp(path.join(from, 'plan.ts'), path.join(dest, 'plan.ts'), {
-      errorOnExist: true,
-      force: false,
-    });
-    const briefs = path.join(from, 'briefs');
-    if (await isDir(briefs))
-      await cp(briefs, path.join(dest, 'briefs'), {
-        recursive: true,
-        errorOnExist: true,
-        force: false,
-      });
+    await copyFile(from, this.planFile(version), constants.COPYFILE_EXCL);
   }
 
   async removePlan(version: number): Promise<void> {
-    await rm(this.planDir(version), { recursive: true, force: true });
+    await rm(this.planFile(version), { force: true });
   }
 
   /** Plan copies newer than `current`: a rewrite that crashed or failed between copy and apply. */
   async removePlansAfter(current: number): Promise<number[]> {
     const names = await readdir(path.join(this.dir, PLANS));
     const stale = names
-      .map((n) => /^v(\d+)$/.exec(n))
+      .map((n) => /^v(\d+)\.expedition\.ts$/.exec(n))
       .flatMap((m) => (m ? [Number(m[1])] : []))
       .filter((v) => v > current);
     for (const v of stale) await this.removePlan(v);
@@ -189,16 +154,6 @@ function parseLine(file: string, line: number, text: string): keyed.Entry {
       `not an entry: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`
     );
   return parsed.data;
-}
-
-async function isDir(p: string): Promise<boolean> {
-  try {
-    return (await stat(p)).isDirectory();
-  } catch (e) {
-    // A plan with no agent steps has no briefs; any other failure is real.
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw e;
-  }
 }
 
 /** fsync the directory so a newly created file's name is durable too. */

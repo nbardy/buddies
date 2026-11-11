@@ -27,7 +27,7 @@ const { MemoryRouter } = await import('react-router-dom');
 
 const proposalOf = (n: number): keyed.KeyedProposal =>
   keyed.KeyedProposal.parse({
-    folder: `/repo/exp-${n}`,
+    file: `/repo/exp-${n}.expedition.ts`,
     workspaceId: 'ws-1',
     digest: `digest-${n}`,
     preview: {
@@ -82,8 +82,8 @@ const proposalOf = (n: number): keyed.KeyedProposal =>
 const statusOf = (
   mode: object,
   launched: object,
-  folder: object = { t: 'unchanged' }
-): keyed.KeyedProposalStatus => keyed.KeyedProposalStatus.parse({ mode, launched, folder });
+  file: object = { t: 'unchanged' }
+): keyed.KeyedProposalStatus => keyed.KeyedProposalStatus.parse({ mode, launched, file });
 
 const card = async (n: number, status: keyed.KeyedProposalStatus, listed = false) => {
   const proposal = proposalOf(n);
@@ -140,14 +140,14 @@ test('a read-only host says why and offers no Launch', async () => {
   assert.doesNotMatch(html, />Launch</);
 });
 
-// Guard: the owner launches what they looked at. A folder edited after the proposal is superseded
+// Guard: the owner launches what they looked at. A file edited after the proposal is superseded
 // here, and the server refuses its digest anyway (expeditions-v1-server.test.ts).
-test('a folder changed after the proposal reads as superseded, with no Launch', async () => {
+test('a file changed after the proposal reads as superseded, with no Launch', async () => {
   const html = await card(
     4,
-    statusOf(LIVE, NOT_LAUNCHED, { t: 'changed', why: 'its files changed after this was proposed' })
+    statusOf(LIVE, NOT_LAUNCHED, { t: 'changed', why: 'its file changed after this was proposed' })
   );
-  assert.match(html, /Superseded: its files changed after this was proposed/);
+  assert.match(html, /Superseded: its file changed after this was proposed/);
   assert.doesNotMatch(html, />Launch</);
 });
 
@@ -189,7 +189,7 @@ test('a chat post is a proposal card only when its evidence parses', () => {
     'none'
   );
   assert.equal(
-    expeditionCardOf(post('expedition', [`${keyed.PROPOSAL_EVIDENCE}{"folder":"/x"}`])).t,
+    expeditionCardOf(post('expedition', [`${keyed.PROPOSAL_EVIDENCE}{"file":"/x"}`])).t,
     'none'
   );
   assert.deepEqual(expeditionCardOf(post('expedition', ['expedition:old-1'])), {

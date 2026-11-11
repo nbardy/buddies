@@ -1,9 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { keyed } from '@unleashd/shared';
 import { checkPlan } from './change';
-import { parseContract } from './contract';
 import { type Asked, diffOf, reservationOf, usd } from './core';
 import { Expedition, type KernelDeps } from './kernel';
 import { LogStore, type Repair } from './log-store';
@@ -17,11 +15,10 @@ export type Rejected = {
   readonly gate: string;
   readonly issues: readonly string[];
 };
-/** A folder that passed every gate: what launching it would write and start first. */
+/** A file that passed every gate: what launching it would write and start first. */
 export type Clean = {
   readonly t: 'clean';
-  readonly folder: string;
-  readonly markdown: string;
+  readonly file: string;
   readonly contract: keyed.Contract;
   /** The calls a dry run asked for before it waited on an answer (canonical, hashed). */
   readonly asked: readonly Asked[];
@@ -34,22 +31,13 @@ export type Previewed = Clean | Rejected;
 export type LaunchResult = { readonly t: 'launched'; readonly expedition: Expedition } | Rejected;
 
 /** Gates: the contract, then typecheck, dry run and the static checks. Writes nothing. */
-export async function preview(deps: KernelDeps, folder: string): Promise<Previewed> {
-  const markdown = await readFile(path.join(folder, 'contract.md'), 'utf8').then(
-    (text) => ({ t: 'read', text }) as const,
-    (e: Error) => ({ t: 'unreadable', why: e.message }) as const
-  );
-  if (markdown.t === 'unreadable')
-    return { t: 'rejected', gate: 'contract', issues: [`contract.md: ${markdown.why}`] };
-  const contract = parseContract(markdown.text);
-  if (contract.t === 'invalid') return { t: 'rejected', gate: 'contract', issues: contract.issues };
-  const checked = await checkPlan(deps, folder, contract.contract, () => undefined);
+export async function preview(deps: KernelDeps, file: string): Promise<Previewed> {
+  const checked = await checkPlan(deps, file, () => undefined);
   if (checked.t === 'failed') return { t: 'rejected', gate: checked.gate, issues: checked.issues };
   return {
     t: 'clean',
-    folder,
-    markdown: markdown.text,
-    contract: contract.contract,
+    file,
+    contract: checked.contract,
     asked: checked.asked,
     access: checked.access,
   };
@@ -89,15 +77,15 @@ const PREVIEW_VIEW: {
 export async function launch(
   deps: KernelDeps,
   root: string,
-  folder: string,
+  file: string,
   baseSha: string,
   workspace: keyed.LaunchWorkspace
 ): Promise<LaunchResult> {
-  const p = await preview(deps, folder);
+  const p = await preview(deps, file);
   return p.t === 'rejected' ? p : launchClean(deps, root, p, baseSha, workspace);
 }
 
-/** The writes of a launch, for a folder `preview` passed. */
+/** The writes of a launch, for a file `preview` passed. */
 export async function launchClean(
   deps: KernelDeps,
   root: string,
@@ -107,8 +95,8 @@ export async function launchClean(
 ): Promise<LaunchResult> {
   const now = deps.clock.now();
   const id = `${now.toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomBytes(3).toString('hex')}`;
-  const store = await LogStore.create(path.join(root, id), clean.markdown);
-  await store.copyPlan(clean.folder, 0);
+  const store = await LogStore.create(path.join(root, id));
+  await store.copyPlan(clean.file, 0);
   const launched = keyed.Entry.parse({
     t: 'launched',
     at: now.toISOString(),

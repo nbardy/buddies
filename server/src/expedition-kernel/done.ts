@@ -1,6 +1,6 @@
 import type { keyed } from '@unleashd/shared';
 import { z } from 'zod';
-import { renderBrief } from './brief';
+import { withRules } from './canonical';
 import { maxOfCap } from './contract';
 import type { Expedition } from './kernel';
 
@@ -80,16 +80,18 @@ const CRITERION: {
     },
   }),
   review: (c, key, of, m) => {
-    const brief = renderBrief(m.planDir(m.version()), c.rubric, {}, m.state().contract.rules);
-    if (brief.t === 'invalid')
-      return { t: 'gap', why: `review ${c.rubric}: ${brief.issues.join('; ')}` };
     return {
       t: 'call',
       call: {
         t: 'verdict',
         key,
         of,
-        verdict: { t: 'review', rubric: c.rubric, by: c.by, brief: brief.text },
+        verdict: {
+          t: 'review',
+          rubric: c.rubric,
+          by: c.by,
+          brief: withRules(c.rubric, m.state().contract.rules),
+        },
         pools: [c.by.provider],
         max: maxOfCap(m.state().contract.doneReview),
       },

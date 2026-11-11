@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { keyed } from '@unleashd/shared';
+import { assertPlainJson } from '../contract';
 import { Authored, type CastRow, type FromPlan, ToPlan } from '../protocol';
 
 // The plan process's half of the wire (protocol.ts). One Session per process, created when the
@@ -88,6 +89,11 @@ export class Session {
 
   phase(name: string, edge: 'open' | 'close'): void {
     this.post({ t: 'phase', name, edge });
+  }
+
+  contract(value: unknown): void {
+    assertPlainJson(value);
+    this.post({ t: 'contract', value });
   }
 
   cast(rows: readonly CastRow[]): void {
@@ -192,12 +198,14 @@ export function declareCast(rows: readonly CastRow[]): void {
 
 export function session(): Session {
   if (current === 'not-started')
-    throw new Error('Steps, asks and reviews run only inside plan(...) as the host runs it.');
+    throw new Error(
+      'Steps, asks and reviews run only inside expedition({ plan }) as the host runs it.'
+    );
   return current;
 }
 
 /** Start the session over this process's IPC channel. Called once, by the child entry. */
-export function openSession(): Session {
+export function openSession(contract: unknown): Session {
   const send = process.send?.bind(process) as Send | undefined;
   const channel = process.channel;
   if (!send || !channel)
@@ -205,6 +213,7 @@ export function openSession(): Session {
   if (current !== 'not-started') throw new Error('The plan session is already open.');
   current = new Session(send, channel);
   current.listen();
+  current.contract(contract);
   if (castBeforeStart.length > 0) current.cast(castBeforeStart);
   return current;
 }

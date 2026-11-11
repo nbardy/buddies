@@ -18,11 +18,11 @@ const zodToJsonSchema = zodToJsonSchemaTyped as unknown as (schema: unknown) => 
 // Plans are copied to a temp dir first (plans live outside the repo) unless a test says otherwise.
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'expedition-plans');
-function copyPlan(name: string): { folder: string; root: string } {
+function copyPlan(name: string): { file: string; root: string } {
   const root = tempDir('expedition-plan-');
-  const folder = path.join(root, name);
-  cpSync(path.join(FIXTURES, name), folder, { recursive: true });
-  return { folder, root };
+  const file = path.join(root, `${path.basename(name)}.expedition.ts`);
+  cpSync(path.join(FIXTURES, `${name}.expedition.ts`), file, { recursive: true });
+  return { file, root };
 }
 
 const ref = (key: string) => keyed.refOf(key, 'h0');
@@ -55,7 +55,7 @@ function gtmLog(call: Authored): keyed.Outcome {
 const COVERAGE = 'Is the coverage enough to argue from, or is a kind of source missing?';
 const HELD = 'Did the thesis hold, bend or die? Stopping with "no thesis" is a valid result.';
 
-const runGtm = (folder: string) => dryRun({ folder, known: gtmLog, reviewed: () => true });
+const runGtm = (file: string) => dryRun({ file, known: gtmLog, reviewed: () => true });
 const callOf = (result: DryRunResult, key: string) => {
   const call = result.calls.find((c) => c.key === key);
   assert.ok(call, `no call ${key}`);
@@ -65,7 +65,7 @@ const callOf = (result: DryRunResult, key: string) => {
 test('a dry run of the GTM plan with nothing known asks for scope only and waits', async () => {
   // In place (inside server/, a CommonJS package scope); the other runs use copies outside the repo.
   const result = await dryRun({
-    folder: path.join(FIXTURES, 'gtm'),
+    file: path.join(FIXTURES, 'gtm.expedition.ts'),
     known: () => undefined,
     reviewed: () => false,
   });
@@ -82,7 +82,7 @@ test('a dry run of the GTM plan with nothing known asks for scope only and waits
   // reached, so the checkout calls behind the first wave were never previewed. The plan sends its
   // cast table before any call; every step is reported from it, the unreached `collect` and
   // `packet` checkouts and their judges included.
-  const parsed = parseContract(readFileSync(path.join(FIXTURES, 'gtm', 'contract.md'), 'utf8'));
+  const parsed = parseContract(result.contract);
   if (parsed.t !== 'ok') throw new Error(JSON.stringify(parsed));
   const access = turnAccessOf(parsed.contract, result.cast, [], () => ({
     t: 'known',
@@ -105,8 +105,8 @@ test('a dry run of the GTM plan with nothing known asks for scope only and waits
 });
 
 test('scripted answers drive the GTM plan to its candidate, identically in a fresh process', async () => {
-  const { folder } = copyPlan('gtm');
-  const first = await runGtm(folder);
+  const { file } = copyPlan('gtm');
+  const first = await runGtm(file);
 
   assert.deepEqual(
     first.calls.map((c) => c.key),
@@ -157,18 +157,18 @@ test('scripted answers drive the GTM plan to its candidate, identically in a fre
 
   // The host hashes authored calls to recognise finished work: a fresh process must author the
   // same bytes for the same answers.
-  const second = await runGtm(folder);
+  const second = await runGtm(file);
   assert.equal(JSON.stringify(second.calls), JSON.stringify(first.calls));
 });
 
 test("the rewrite re-issues version 0's calls for the orgs it still studies and adds only mine/*", async () => {
-  const v0 = await runGtm(copyPlan('gtm').folder);
+  const v0 = await runGtm(copyPlan('gtm').file);
   const authoredV0 = new Map(v0.calls.map((c) => [c.key, JSON.stringify(c)]));
   // Reconcile by key and hash: only a byte-identical call is answered from version 0's log.
   const sameAsV0 = (call: Authored) => authoredV0.get(call.key) === JSON.stringify(call);
 
   const v1 = await dryRun({
-    folder: copyPlan('gtm-rewrite').folder,
+    file: copyPlan('gtm-rewrite').file,
     known: (call) => (sameAsV0(call) ? gtmLog(call) : undefined),
     reviewed: () => true,
   });
@@ -199,7 +199,7 @@ test("the rewrite re-issues version 0's calls for the orgs it still studies and 
 // ---- how a plan ends ----
 test('need() on a failed result ends with a gap carrying its ref as evidence', async () => {
   const result = await dryRun({
-    folder: copyPlan('need-gap').folder,
+    file: copyPlan('need-gap').file,
     known: (call) => ({ t: 'failed', ref: ref(call.key), out: REPORT, why: 'nothing there' }),
     reviewed: () => false,
   });
@@ -213,7 +213,7 @@ test('need() on a failed result ends with a gap carrying its ref as evidence', a
 
 test('an exception in plan code ends with threw', async () => {
   const result = await dryRun({
-    folder: copyPlan('throws').folder,
+    file: copyPlan('throws').file,
     known: () => undefined,
     reviewed: () => false,
   });
@@ -223,7 +223,7 @@ test('an exception in plan code ends with threw', async () => {
 
 test('a key issued twice in one evaluation ends with threw naming the key', async () => {
   const result = await dryRun({
-    folder: copyPlan('duplicate').folder,
+    file: copyPlan('duplicate').file,
     known: () => undefined,
     reviewed: () => false,
   });
@@ -237,7 +237,7 @@ test('a key issued twice in one evaluation ends with threw naming the key', asyn
 test("an answer that violates the step's schema reaches plan code as errored, never as a value", async () => {
   const seen = async (n: unknown) => {
     const result = await dryRun({
-      folder: copyPlan('schema').folder,
+      file: copyPlan('schema').file,
       known: (call) =>
         call.key === 'count'
           ? { t: 'passed', ref: ref('count'), out: { n } }
@@ -247,7 +247,9 @@ test("an answer that violates the step's schema reaches plan code as errored, ne
     assert.equal(result.end.t, 'candidate');
     const echo = callOf(result, 'echo');
     assert.notEqual(echo.t, 'ask');
-    return echo.t === 'ask' ? {} : echo.item;
+    return echo.t === 'command'
+      ? (JSON.parse(echo.command.slice('echo '.length)) as Record<string, unknown>)
+      : {};
   };
   const bad = await seen('three');
   assert.equal(bad.t, 'errored');
@@ -261,7 +263,7 @@ test("an answer that violates the step's schema reaches plan code as errored, ne
 // that calls awaited through parallel and Promise.all still end as a candidate.
 test('a plan that returns while calls it issued are unanswered ends with threw naming them', async () => {
   const result = await dryRun({
-    folder: copyPlan('unawaited').folder,
+    file: copyPlan('unawaited').file,
     known: (call) => (call.key === 'probe/kept' ? passedReport(call.key) : undefined),
     reviewed: () => false,
   });
@@ -274,7 +276,7 @@ test('a plan that returns while calls it issued are unanswered ends with threw n
 
 test('concurrent calls inside parallel inside phases keep their own phase prefix', async () => {
   const result = await dryRun({
-    folder: copyPlan('phases').folder,
+    file: copyPlan('phases').file,
     known: (call) => passedReport(call.key),
     reviewed: () => false,
   });
@@ -296,37 +298,72 @@ test('kill() during a pending call leaves no process behind', async () => {
   const quiet = new Promise<readonly number[]>((resolve) => {
     waiting = resolve;
   });
+  let sawContract = false;
   const handle = runPlan({
-    folder: copyPlan('need-gap').folder,
-    onCast: () => {},
-    onCall: () => {},
+    file: copyPlan('need-gap').file,
+    onContract: () => {
+      sawContract = true;
+    },
+    onCast: () => {
+      assert.equal(sawContract, true);
+    },
+    onCall: () => {
+      assert.equal(sawContract, true);
+    },
     onReview: () => {},
     onPhase: () => {},
     onWaiting: (seqs) => waiting(seqs),
     onEnd: () => {},
   });
-  assert.deepEqual(await quiet, [0]);
+  const waitingOrEnd = await Promise.race([quiet, handle.ended]);
+  assert.deepEqual(waitingOrEnd, [0]);
   await handle.kill();
   assert.deepEqual(await handle.ended, { t: 'killed' });
   assert.throws(() => process.kill(handle.pid, 0), { code: 'ESRCH' });
   assert.throws(() => process.kill(-handle.pid, 0), { code: 'ESRCH' });
 });
 
-test('the sandbox lets a plan read its own folder and nothing else, write nothing, spawn nothing', async () => {
-  const { folder, root } = copyPlan('sandbox');
-  writeFileSync(path.join(root, 'secret.txt'), 'outside the plan folder');
+test('the sandbox lets a plan read its own file and nothing else, write nothing, spawn nothing', async () => {
+  const { file, root } = copyPlan('sandbox');
+  const secret = path.join(root, 'secret.txt');
+  writeFileSync(secret, 'outside the plan file');
+  writeFileSync(
+    file,
+    readFileSync(file, 'utf8').replace(
+      "readFileSync('secret.txt')",
+      `readFileSync(${JSON.stringify(secret)})`
+    )
+  );
   const result = await dryRun({
-    folder,
+    file,
     known: (call) => passedReport(call.key),
     reviewed: () => false,
   });
   assert.equal(result.end.t, 'candidate');
   const first = result.calls[0];
-  assert.deepEqual(first.t === 'ask' ? {} : first.item, {
-    brief: 'inside the plan folder',
+  assert.deepEqual(first.t === 'agent' ? JSON.parse(first.brief) : {}, {
+    own: true,
     sibling: 'ERR_ACCESS_DENIED',
     etcHosts: 'ERR_ACCESS_DENIED',
     write: 'ERR_ACCESS_DENIED',
     spawn: 'ERR_ACCESS_DENIED',
   });
+});
+
+// Guard: the protocol must not silently stringify away owner data or execute extra imports.
+test('non-JSON contracts and extra imports fail before any call', async () => {
+  for (const [source, issue] of [
+    [
+      "import { expedition } from 'expedition'; export default expedition({ contract: { rules: [() => 'x'] } as never, plan: async () => { throw Error('should not run'); } });",
+      /contract.rules.0.*plain JSON/,
+    ],
+    ["import 'node:fs'; export default {};", /may import only expedition and zod/],
+  ] as const) {
+    const file = path.join(tempDir('invalid-plan-'), 'bad.expedition.ts');
+    writeFileSync(file, source);
+    const dry = await dryRun({ file, known: () => undefined, reviewed: () => false });
+    assert.deepEqual(dry.calls, []);
+    assert.equal(dry.end.t, 'threw');
+    assert.match(dry.end.t === 'threw' ? dry.end.message : '', issue);
+  }
 });

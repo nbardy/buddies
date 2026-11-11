@@ -2,8 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { BuddiesCore } from '@unleashd/buddies-core';
 import type { keyed } from '@unleashd/shared';
+import { OWNER, buddyActor } from '../src/buddies/core';
+import { createBuddyEvents } from '../src/buddies/events';
+import { createOwnerThread } from '../src/buddies/owner-thread';
+import { OwnerBook } from '../src/expeditions-v1/owner/book';
 import { git, harness } from './fixtures/agent-runs';
+import { writePlan } from './fixtures/expedition-source';
 import { tempDir } from './fixtures/temp';
 
 // CONNECT_PLAN §8 steps 3 and 5, the owner's side, through real boundaries: the REAL backend
@@ -39,32 +45,22 @@ after(async () => {
 });
 
 const SEAT = "seat('claude', 'claude-sonnet-5-5', 'low')";
-function planFolder(x: { plan: string; briefs?: Record<string, string>; hours?: number }): string {
-  const folder = tempDir('xk-owner-plan-');
-  fs.writeFileSync(
-    path.join(folder, 'contract.md'),
-    `---
-leader: ${lead}
-repo: ${h.repo}
-budget: { usd: 50, hours: ${x.hours ?? 4} }
-autoApply: { usd: 5 }
-pools: { claude: 4 }
-done:
-  - owner: Is it done?
-rules:
-  - Stay inside the repo.
----
-
-# Goal
-
-Answer the owner's questions, then finish.
-`
+function planFile(x: { plan: string; prompts?: Record<string, string>; hours?: number }): string {
+  return writePlan(
+    path.join(tempDir('xk-owner-plan-'), 'plan.expedition.ts'),
+    {
+      leader: lead,
+      repo: h.repo,
+      goal: "Answer the owner's questions, then finish.",
+      budget: { usd: 50, hours: x.hours ?? 4 },
+      autoApply: { usd: 5 },
+      pools: { claude: 4 },
+      done: [{ owner: 'Is it done?' }],
+      rules: ['Stay inside the repo.'],
+    },
+    x.plan,
+    x.prompts
   );
-  fs.writeFileSync(path.join(folder, 'plan.ts'), x.plan);
-  fs.mkdirSync(path.join(folder, 'briefs'));
-  for (const [name, text] of Object.entries(x.briefs ?? {}))
-    fs.writeFileSync(path.join(folder, 'briefs', `${name}.md`), text);
-  return folder;
 }
 const fence = (o: unknown) => `Decided.\n\n\`\`\`json\n${JSON.stringify(o)}\n\`\`\``;
 
@@ -85,28 +81,28 @@ const threadRoot = async (exp: string) => {
 const leaderRuns = () => h.runsOf(lead);
 const settle = () => new Promise((resolve) => setTimeout(resolve, 1_500));
 
-const STEER_PLAN = `import { command, need, plan, role, seat, steps } from 'expedition';
+const STEER_PLAN = `import { command, need, expedition, role, seat, steps } from 'expedition';
 
 const worker = role({ by: ${SEAT}, usd: 1, minutes: 10 });
 const { flaky, finish } = steps({
-  flaky: worker,
+  flaky: worker.brief(PROMPTS.flaky),
   finish: command('node scripts/ok.js', { minutes: 1 }),
 });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   await Promise.all([x.ask('Which color first?'), x.confirm('Ship it?'), flaky()]);
   await x.review('Go on?');
   return need(await finish(), 'no finish');
-});
+} });
 `;
 
 test('asks post once across a restart and settle from thread replies; commands steer; talk is a note', {
   timeout: 400_000,
 }, async () => {
   const exp = await h.launch(
-    planFolder({
+    planFile({
       plan: STEER_PLAN,
-      briefs: { flaky: 'Answer badly. TAG:flaky MODE:malformed' },
+      prompts: { flaky: 'Answer badly. TAG:flaky MODE:malformed' },
     }),
     ws,
     base
@@ -249,16 +245,16 @@ test('an ask stays answerable after the deadline; stop ends the expedition, ackn
   timeout: 240_000,
 }, async () => {
   const exp = await h.launch(
-    planFolder({
+    planFile({
       hours: 0.003,
-      plan: `import { command, need, plan, steps } from 'expedition';
+      plan: `import { command, need, expedition, steps } from 'expedition';
 
 const { finish } = steps({ finish: command('node scripts/ok.js', { minutes: 1 }) });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   await x.ask('Is it late?');
   return need(await finish(), 'no finish');
-});
+} });
 `,
     }),
     ws,
@@ -297,4 +293,103 @@ export default plan(async (x) => {
   await settle();
   assert.equal((await acked()).length, 1);
   assert.equal((await h.view(exp)).status.t, 'finished');
+});
+
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
+test('owned roots are consumed before announcement or the owner-book write finishes', {
+  timeout: 30_000,
+}, async () => {
+  const root = tempDir('ask-publication-');
+  const core = await BuddiesCore.open(path.join(root, 'buddies.sqlite'));
+  const workspace = await core.createWorkspace(OWNER, { name: 'Publication', rootPath: root });
+  const leader = await core.createBuddy(OWNER, {
+    workspaceId: workspace.id,
+    slug: 'lead',
+    name: 'Lead',
+    role: 'Lead',
+    manager: { kind: 'nobody' },
+    key: 'lead',
+  });
+  const channel = await core.openChannel(OWNER, {
+    kind: 'direct',
+    members: [OWNER, buddyActor(leader.id)],
+  });
+  const events = createBuddyEvents();
+  const book = new OwnerBook(path.join(root, 'expeditions'));
+  const thread = createOwnerThread({ core, events });
+  const update = book.update.bind(book);
+  for (const kind of ['ask', 'thread'] as const) {
+    let release = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = () => {};
+    const blocked = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    book.update = async (id, change) => {
+      entered();
+      await hold;
+      return update(id, change);
+    };
+    let postId = '';
+    let announced = 0;
+    const off = events.on(() => {
+      announced++;
+      assert.equal(book.consumes(channel.id, { t: 'reply', to: postId }), true);
+    });
+    const register = (post: { id: string }) => {
+      postId = post.id;
+      return kind === 'ask'
+        ? book.askPosted(kind, { runId: 'ask-run', channelId: channel.id, postId })
+        : book.threadPosted(kind, channel.id, postId);
+    };
+    const said = { body: 'Which color?', purpose: `expedition_${kind}`, key: kind };
+    const posting =
+      kind === 'ask'
+        ? thread.inform(
+            buddyActor(leader.id),
+            { channel: { kind: 'id', id: channel.id } },
+            said,
+            `expedition-v1:${kind}`,
+            'announce',
+            register
+          )
+        : thread.threadRoot(
+            {
+              author: buddyActor(leader.id),
+              channelId: channel.id,
+              evidence: `expedition-v1:${kind}`,
+              root: said,
+              statusPurpose: 'expedition_status',
+            },
+            register
+          );
+    try {
+      assert.equal(
+        await Promise.race([blocked.then(() => 'blocked'), posting.then(() => 'posted')]),
+        'blocked'
+      );
+      const page = await core.listPosts(
+        OWNER,
+        { kind: 'channel', channelId: channel.id },
+        null,
+        10
+      );
+      assert.ok(
+        page.posts.some((p) => p.id === postId),
+        'the crate exposes the root while owner.json is still pending'
+      );
+      assert.equal(book.consumes(channel.id, { t: 'reply', to: postId }), true, kind);
+      assert.equal(announced, 0);
+      release();
+      await posting;
+      assert.equal(announced, 1);
+    } finally {
+      release();
+      await posting;
+      off();
+      book.update = update;
+    }
+  }
 });

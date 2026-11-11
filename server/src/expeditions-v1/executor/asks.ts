@@ -259,9 +259,10 @@ export class OwnerAsks implements Asks {
       { channel: { kind: 'id', id: channelId } },
       { body: r.body, purpose: ASK_PURPOSE, key: `xk:${r.runId}` },
       evidenceOf(at.address.expedition),
-      'announce'
+      'announce',
+      (post) =>
+        this.d.book.askPosted(at.address.expedition, { runId: r.runId, channelId, postId: post.id })
     );
-    await this.d.book.askPosted(at.address.expedition, { runId: r.runId, channelId, postId });
     const asked: Asked = {
       ...r,
       t: 'asked',

@@ -130,8 +130,8 @@ log's `launched` line (`launch.ts:35-42`).
   already closes it (`kernel.ts:330-331`); recovery already settles an orphaned wake `errored`
   (`recovery.ts:32-38`).
 - A wake is a leader-authored self-DM request, key `xk:<runId>`, role `'call'`. Its turn directory
-  is `<expDir>/drafts/<n>/`, pre-filled with a copy of `plans/v<current>/` and a read-only
-  `contract.md`. The prompt is a compact projection of the view: goal, spent/reserved/budget,
+  is `<expDir>/drafts/<n>/`, pre-filled with `plan.expedition.ts`, a copy of `plans/v<current>.expedition.ts`
+  with the inline owner contract. The prompt is a compact projection of the view: goal, spent/reserved/budget,
   deadline, plan version, the event, one row per key (kind, attempt, outcome, why, spent, ref
   path), pending asks, the last 10 faults, owner notes, the folder paths. The answer is parsed
   with `LeaderAct.safeParse`; invalid → `errored`.
@@ -169,8 +169,8 @@ log's `launched` line (`launch.ts:35-42`).
 - Routes under `/api/buddies/keyed-expeditions`, registered before the Buddy routes
   (`expeditions/routes.ts:6-7`): `GET /` rows; `GET /:id` view; `POST /:id/act`
   (`pause|resume|extend|stop|retry key`); `POST /:id/asks/:ref`; `POST /:id/approval`;
-  `POST /preview {folder}` (dry-run diff and cost, writes nothing); `POST /launch
-  {workspaceId, folder}` (base from `resolveBase`, `checks.ts:35-59`). Mutations go in
+  `POST /preview {file}` (dry-run diff and cost, writes nothing); `POST /launch
+  {workspaceId, file}` (base from `resolveBase`, `checks.ts:35-59`). Mutations go in
   `shared/src/buddy-api.ts` beside `'expedition.act'` (`:356-368`).
 - To `shared/src/expedition-keyed.ts`: all of `types.ts`; `Bar`, `BarEnd`, `Marker`, `Timeline`,
   `Fault` and the pure `timelineOf`; new `KeyedRow` and `KeyedView` (a JSON projection with lanes
@@ -189,7 +189,7 @@ log's `launched` line (`launch.ts:35-42`).
 
 ## 5. The `expedition` Buddy tool
 
-Replace `draft` (`tool.ts:67-89`) with `propose {folder}` (the Buddy writes the folder with its
+Replace `draft` (`tool.ts:67-89`) with `propose {file}` (the Buddy writes the file with its
 own file tools; the tool runs the preview, returns gate issues and cost, and on a clean pass posts
 a keyed card in the origin thread, `tool.ts:31-37`, `host.ts:933-936`), `status {id}` and `list`.
 No acts from the tool in v1: only the owner steers.
@@ -279,7 +279,7 @@ synchronously); the owner's replies are read by `owner/inbox.ts`; one grammar fo
 leader is `leader.ts` + `leader-brief.ts`, a `leader`-kind Buddy call in `executor/calls.ts` whose
 end goes to the waiting wake, never to the kernel's `onSettled`. The Owner port is
 `owner/approvals.ts`. Kernel changes: `Woken` is a sum (`acted` | `errored`, both with `spent`),
-`Leader.dispose(at, diff, dropped)` gets the expedition and folder and returns `Disposed`
+`Leader.dispose(at, diff, dropped)` gets the expedition and file and returns `Disposed`
 (`decided` | `invalid`: an unreadable `dispositions.json` rejects the rewrite with its reason),
 `RewriteForOwner` names its expedition, `ExpeditionView` carries `entries`. Tests:
 `expeditions-v1-owner` and `expeditions-v1-leader`. Choices the plan left open: `consumes` takes
@@ -290,7 +290,7 @@ applying an `extend` twice), a note exactly once; every command, note and refusa
 status line; a `confirm` ask takes `yes y yeah yep ok okay confirm confirmed approve approved
 accept accepted pass true` / `no n nope nah decline declined reject rejected fail false`
 (case-insensitive, trailing `.`/`!` ignored) and answers each other reply once; a stored ask answer
-is a ref like any output; a rewrite must name its own draft folder (a relative path is read from
+is a ref like any output; a rewrite must name its own draft plan.expedition.ts file (a relative path is read from
 it); approval requests get a fresh key each time (a re-submitted rewrite posts again); a wake and a done
 review are bounded by the contract's caps (first run: a fixed $2 / 20 min, see F3). Known limits: an owner reply that lands
 before `start()` has loaded the `owner.json` files is not consumed (it wakes the leader, as before
@@ -327,7 +327,7 @@ read-only view never shows one.
 | 2 | Executor core: records, ref store, context registry, commands and checks (`runChecks` gets a timeout, extra env, a stdout buffer; tokenise, and refuse shell metacharacters in the static gate) | kernel + executor on a temp git repo with real `sh` commands and a scripted leader; kill mid-command → `errored` | low |
 | 3 | Owner thread and asks: `owner-thread.ts` out of `host.ts`; `consumes(…, replyToId)`; the answer route | real core on temp stores: a reply settles the ask; a consumed reply wakes nobody | medium |
 | 4 | Agent runs: post and key, status from the crate, watcher, cancel and close, minutes cap, `'call'` role, `TurnDirectory.call`, memory-review skip, JSON Schema validation, ingest usage, the seat Buddy | real backend with a fake `claude` on PATH (the `execution-adoption` harness): one crate run per run id across a SIGKILL; malformed → `errored`; close on a queued run → never claimed | high |
-| 5 | Leader and Owner ports: draft folder, `dispositions.json`, approval post | a fake-CLI leader writes `plan.ts` → a `plan` v1 entry; a rejected rewrite → a `rejected` wake | medium |
+| 5 | Leader and Owner ports: draft folder, `dispositions.json`, approval post | a fake-CLI leader writes `plan.expedition.ts` → a `plan` v1 entry; a rejected rewrite → a `rejected` wake | medium |
 | 6 | Host composition, boot, flag, read-only mode, routes, shutdown detach | real server: launch the fixture plan, kill the backend mid-call, the next backend adopts and the call settles once; a copied store refuses launch | medium |
 | 7 | Client timeline view and rail rows | `pnpm screenshots` on a throwaway server; a unit test on the view model | low |
 | → | **First GTM run** (judges on Claude/Codex, small budget) | | |
@@ -351,6 +351,20 @@ read-only view never shows one.
 | D11 | `grant.reads` / `web` | Superseded 2026-11-11 (F1): each turn kind has a capability set (`server/src/expedition-kernel/access.ts`) that agent-cli turns into the harness's own flags; the preview reports each grant enforced or advisory |
 
 ## 10. The first real run, and what is open (2026-11-11)
+
+**Format changed after these runs:** authoring, propose, preview and launch now use one
+`<name>.expedition.ts` file (`file` on the wire), with the owner contract and all briefs/rubrics
+inline. Versions are `plans/v<N>.expedition.ts`; drafts contain one editable plan file. The
+contract arrives first over IPC; rewrites still cannot change it. No live keyed expeditions
+exist, so no migration or folder compatibility path is provided. The run evidence below records
+the earlier format, not another supported authoring path. See [DESIGN.md](DESIGN.md) §2.
+
+The conversion's full-suite run exposed a reply-publication race (one failed test process): a
+question could be read before the owner book indexed it, so a fast reply bypassed consumption.
+Owned ask and expedition roots now enter the synchronous reply index before the book write can
+yield, and the shared owner-thread publisher awaits registration/durability before announcing.
+Guard: `expeditions-v1-owner`, which holds the book write open while reading and checking consumption for the
+already-visible roots; the affected server suites pass after the fix.
 
 One expedition ran with real agents on a throwaway server with fresh stores, using the installed
 `claude` and `codex` CLIs and their existing logins: a Claude seat call judged by a host command,

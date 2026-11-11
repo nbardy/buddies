@@ -94,8 +94,8 @@ export type Woken =
   | { readonly t: 'acted'; readonly act: keyed.LeaderAct; readonly spent: keyed.Usage }
   | { readonly t: 'errored'; readonly why: string; readonly spent: keyed.Usage };
 
-/** Which rewrite a disposition is asked for: its expedition and the folder the leader submitted. */
-export type RewriteAt = { readonly expedition: string; readonly folder: string };
+/** Which rewrite a disposition is asked for: its expedition and the file the leader submitted. */
+export type RewriteAt = { readonly expedition: string; readonly file: string };
 /** The leader's choice per dropped key, or why it could not be read (a rejection of the rewrite,
  * shown at the next wake). */
 export type Disposed =

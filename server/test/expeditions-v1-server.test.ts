@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 import type { keyed } from '@unleashd/shared';
 import { digestOf } from '../src/expeditions-v1/digest';
 import { type Post, git, harness } from './fixtures/agent-runs';
+import { rewriteSource, writePlan } from './fixtures/expedition-source';
 import { tempDir } from './fixtures/temp';
 
 // CONNECT_PLAN §8 step 6: the keyed expeditions as server.ts composes, boots, routes and shuts them
@@ -28,8 +29,8 @@ let ws = '';
 let lead = '';
 let dm = '';
 let exp1 = '';
-// The proposal card's launch of exp1: the folder and the digest the owner looked at.
-let card1 = { folder: '', digest: '' };
+// The proposal card's launch of exp1: the file and the digest the owner looked at.
+let card1 = { file: '', digest: '' };
 let exp3 = '';
 
 const slowPid = () => path.join(h.root, 'slow.pid');
@@ -61,39 +62,32 @@ after(async () => {
 // ---- helpers ----
 
 const SEAT = "seat('claude', 'claude-sonnet-5-5', 'low')";
-const HEAD = `import { check, command, need, plan, role, seat, steps } from 'expedition';
+const HEAD = `import { check, command, need, expedition, role, seat, steps } from 'expedition';
 
 const worker = role({ by: ${SEAT}, usd: 1, minutes: 10 });`;
-function planFolder(x: {
+function planFile(x: {
   plan: string;
-  briefs?: Record<string, string>;
+  prompts?: Record<string, string>;
   autoApply?: number;
+  done?: { check: string }[];
+  wakeUsd?: number;
 }): string {
-  const folder = tempDir('xk-server-plan-');
-  fs.writeFileSync(
-    path.join(folder, 'contract.md'),
-    `---
-leader: ${lead}
-repo: ${h.repo}
-budget: { usd: 50, hours: 4 }
-autoApply: { usd: ${x.autoApply ?? 5} }
-pools: { claude: 4 }
-done:
-  - check: node scripts/ok.js
-rules:
-  - Stay inside the repo.
----
-
-# Goal
-
-Pick a color, do the work, finish.
-`
+  return writePlan(
+    path.join(tempDir('xk-server-plan-'), 'plan.expedition.ts'),
+    {
+      leader: lead,
+      repo: h.repo,
+      goal: 'Pick a color, do the work, finish.',
+      budget: { usd: 50, hours: 4 },
+      autoApply: { usd: x.autoApply ?? 5 },
+      pools: { claude: 4 },
+      done: x.done ?? [{ check: 'node scripts/ok.js' }],
+      rules: ['Stay inside the repo.'],
+      ...(x.wakeUsd === undefined ? {} : { leaderWake: { usd: x.wakeUsd, minutes: 5 } }),
+    },
+    x.plan,
+    x.prompts
   );
-  fs.writeFileSync(path.join(folder, 'plan.ts'), x.plan);
-  fs.mkdirSync(path.join(folder, 'briefs'));
-  for (const [name, text] of Object.entries(x.briefs ?? {}))
-    fs.writeFileSync(path.join(folder, 'briefs', `${name}.md`), text);
-  return folder;
 }
 const answers = (tag: string, mode = 'answer') =>
   `Do it. TAG:${tag} MODE:${mode} ANSWER_JSON:{"summary":"done","files":[]}`;
@@ -128,10 +122,11 @@ function snapshot(dir: string): Record<string, string> {
       else out[path.relative(dir, p)] = fs.readFileSync(p, 'base64');
     }
   };
-  walk(dir);
+  if (fs.statSync(dir).isFile()) out[path.basename(dir)] = fs.readFileSync(dir, 'base64');
+  else walk(dir);
   return out;
 }
-/** The processes whose command line names `text` (a plan process names its plan folder). */
+/** The processes whose command line names `text` (a plan process names its plan file). */
 const processesNaming = (text: string): string[] =>
   execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
     .split('\n')
@@ -159,9 +154,9 @@ const MUTATIONS = (id: string) =>
     [`/${id}/act`, { t: 'pause' }],
     [`/${id}/asks/${encodeURIComponent('ask/x@h')}`, { answer: 'x' }],
     [`/${id}/approval`, { approve: true }],
-    ['/preview', { folder: '/tmp/none' }],
-    ['/launch', { workspaceId: ws, folder: '/tmp/none' }],
-    ['/launch', { workspaceId: ws, folder: '/tmp/none', digest: 'x' }],
+    ['/preview', { file: '/tmp/none.ts' }],
+    ['/launch', { workspaceId: ws, file: '/tmp/none.ts' }],
+    ['/launch', { workspaceId: ws, file: '/tmp/none.ts', digest: 'x' }],
   ] as const;
 const askPosts = async (exp: string) =>
   (await h.rootPosts(dm)).filter(
@@ -235,30 +230,30 @@ test('flag off, nothing on disk: the routes read empty, every write is 503, noth
 // ---- 2 ----
 
 const MAIN_PLAN = `${HEAD}
-const { work } = steps({ work: worker });
+const { work } = steps({ work: worker.brief(PROMPTS.work) });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   const [, done] = await Promise.all([x.ask('Which color?'), work()]);
   return need(done, 'no work');
-});
+} });
 `;
 
 test('flag on: preview writes nothing; launch, list, view; an owner reply settles the ask; a call killed mid-turn settles once; met', {
   timeout: 400_000,
 }, async () => {
   await h.boot('on-A', ON);
-  const folder = planFolder({ plan: MAIN_PLAN, briefs: { work: answers('work', 'hold') } });
-  const before = snapshot(folder);
+  const file = planFile({ plan: MAIN_PLAN, prompts: { work: answers('work', 'hold') } });
+  const before = snapshot(file);
 
   // Bodies are checked, naming the field.
-  const bad = await post('/preview', { folder: 'relative/path' });
+  const bad = await post('/preview', { file: 'relative/path' });
   assert.equal(bad.status, 400);
-  assert.match(bad.body.error, /folder: must be an absolute path/);
-  assert.equal((await post('/launch', { folder })).status, 400, 'workspaceId missing');
-  assert.match((await post('/launch', { folder })).body.error, /workspaceId/);
+  assert.match(bad.body.error, /file: must be an absolute path/);
+  assert.equal((await post('/launch', { file })).status, 400, 'workspaceId missing');
+  assert.match((await post('/launch', { file })).body.error, /workspaceId/);
 
   // Preview: the first wave and its cost, and nothing written anywhere.
-  const preview = await post('/preview', { folder });
+  const preview = await post('/preview', { file });
   assert.equal(preview.status, 200, JSON.stringify(preview.body));
   const p = preview.body as keyed.KeyedPreview;
   assert.equal(p.t, 'clean', JSON.stringify(p));
@@ -281,32 +276,34 @@ test('flag on: preview writes nothing; launch, list, view; an owner reply settle
   // The `work` step from the cast table the plan sent, and its call the dry run reached.
   assert.deepEqual(held('call'), ['cast-table:claude:true', 'first-wave:claude:true']);
   assert.deepEqual(held('leader'), ['contract:claude:true']);
-  assert.deepEqual(snapshot(folder), before, 'the folder is untouched');
+  assert.deepEqual(snapshot(file), before, 'the file is untouched');
   assert.deepEqual(fs.existsSync(h.expRoot) ? fs.readdirSync(h.expRoot) : [], []);
-  const broken = planFolder({ plan: `${HEAD}\nexport default plan(async () => nope);\n` });
-  const rejected = await post('/preview', { folder: broken });
+  const broken = planFile({
+    plan: `${HEAD}\nexport default expedition({ contract: CONTRACT, plan: async () => nope });\n`,
+  });
+  const rejected = await post('/preview', { file: broken });
   assert.equal(rejected.status, 200);
   assert.equal(rejected.body.t, 'rejected');
   assert.equal(rejected.body.gate, 'typecheck');
 
   // Launch: owner HTTP, a known workspace, the repo's base.
-  const nowhere = await post('/launch', { workspaceId: 'no-such-workspace', folder });
+  const nowhere = await post('/launch', { workspaceId: 'no-such-workspace', file });
   assert.equal(nowhere.status, 404);
   // A card's launch names the digest of the files the owner looked at (CONNECT_PLAN §5, step 8).
   // Regression guard: a Buddy that edits a brief after proposing must not get the edit launched
   // under the owner's approval of the old one; the refusal writes nothing.
-  const looked = await digestOf(folder);
+  const looked = await digestOf(file);
   assert.equal(looked.t, 'digest');
   const digest = looked.t === 'digest' ? looked.digest : '';
-  card1 = { folder, digest };
-  const proposalUrl = `/proposals/${digest}?folder=${encodeURIComponent(folder)}`;
-  const brief = path.join(folder, 'briefs', 'work.md');
+  card1 = { file, digest };
+  const proposalUrl = `/proposals/${digest}?file=${encodeURIComponent(file)}`;
+  const brief = file;
   const original = fs.readFileSync(brief, 'utf8');
   fs.writeFileSync(brief, `${original}\nAlso delete the tests.`);
-  const stale = await post('/launch', { workspaceId: ws, folder, digest });
+  const stale = await post('/launch', { workspaceId: ws, file, digest });
   assert.equal(stale.status, 409, JSON.stringify(stale.body));
   assert.match(stale.body.error, /changed after it was proposed/);
-  assert.equal((await get(proposalUrl)).body.folder.t, 'changed', 'the card reads the change');
+  assert.equal((await get(proposalUrl)).body.file.t, 'changed', 'the card reads the change');
   assert.deepEqual(
     fs.existsSync(h.expRoot) ? fs.readdirSync(h.expRoot) : [],
     [],
@@ -315,15 +312,15 @@ test('flag on: preview writes nothing; launch, list, view; an owner reply settle
   fs.writeFileSync(brief, original);
   const before1 = (await get(proposalUrl)).body as keyed.KeyedProposalStatus;
   assert.deepEqual(
-    [before1.mode.t, before1.launched.t, before1.folder.t],
+    [before1.mode.t, before1.launched.t, before1.file.t],
     ['live', 'no', 'unchanged']
   );
-  const launched = await post('/launch', { workspaceId: ws, folder, digest });
+  const launched = await post('/launch', { workspaceId: ws, file, digest });
   assert.equal(launched.status, 201, JSON.stringify(launched.body));
   exp1 = (launched.body as keyed.KeyedView).id;
   const after1 = (await get(proposalUrl)).body as keyed.KeyedProposalStatus;
   assert.deepEqual(after1.launched, { t: 'yes', id: exp1 });
-  const twice = await post('/launch', { workspaceId: ws, folder, digest });
+  const twice = await post('/launch', { workspaceId: ws, file, digest });
   assert.equal(twice.status, 409, 'a card launches once');
   assert.match(twice.body.error, /already launched/);
   const launchedLine = JSON.parse(
@@ -413,34 +410,34 @@ test('a rewrite over autoApply waits for the owner: declined, then approved, thr
 }, async () => {
   const launched = await post('/launch', {
     workspaceId: ws,
-    folder: planFolder({
+    file: planFile({
       autoApply: 0,
       plan: `${HEAD}
-const { probe } = steps({ probe: worker });
+const { probe } = steps({ probe: worker.brief(PROMPTS.probe) });
 
-export default plan(async (x) => {
+export default expedition({ contract: CONTRACT, plan: async (x) => {
   const p = need(await probe(), 'no probe');
   await x.review('First look?');
   await x.review('Second look?');
   return p;
-});
+} });
 `,
-      briefs: { probe: answers('probetwo'), more: answers('moretwo') },
+      prompts: { probe: answers('probetwo'), more: answers('moretwo') },
     }),
   });
   assert.equal(launched.status, 201, JSON.stringify(launched.body));
   const exp = (launched.body as keyed.KeyedView).id;
   const V1 = `${HEAD}
-const { probe, more } = steps({ probe: worker, more: worker });
+const { probe, more } = steps({ probe: worker.brief(PROMPTS.probe), more: worker.brief(PROMPTS.more) });
 
-export default plan(async () => {
+export default expedition({ contract: CONTRACT, plan: async () => {
   need(await probe(), 'no probe');
   return need(await more(), 'no more');
-});
+} });
 `;
   const wake = (n: number) =>
     h.eventually(() => h.exists(`${h.leaderName(exp, n)}.midturn`), Boolean, `wake ${n}`);
-  const rewrite = (why: string) => fence({ t: 'rewrite', folder: '.', why });
+  const rewrite = (why: string) => fence({ t: 'rewrite', file: 'plan.expedition.ts', why });
   const pending = () =>
     h.eventually(
       () => view(exp),
@@ -449,7 +446,10 @@ export default plan(async () => {
     );
 
   await wake(1);
-  h.leaderAnswers(exp, 1, { files: { 'plan.ts': V1 }, answer: rewrite('add more') });
+  h.leaderAnswers(exp, 1, {
+    files: { 'plan.expedition.ts': rewriteSource(path.join(h.expRoot, exp), V1) },
+    answer: rewrite('add more'),
+  });
   const waiting = await pending();
   assert.equal(waiting.approval.t === 'pending' && waiting.approval.diff.started.join(), 'more');
   assert.equal(waiting.needsYou, true);
@@ -468,7 +468,10 @@ export default plan(async () => {
   h.leaderAnswers(exp, 2, { answer: fence({ t: 'continue', why: 'on track' }) });
 
   await wake(3);
-  h.leaderAnswers(exp, 3, { files: { 'plan.ts': V1 }, answer: rewrite('add more, again') });
+  h.leaderAnswers(exp, 3, {
+    files: { 'plan.expedition.ts': rewriteSource(path.join(h.expRoot, exp), V1) },
+    answer: rewrite('add more, again'),
+  });
   await pending();
   const approved = await post(`/${exp}/approval`, { approve: true });
   assert.equal(approved.status, 200, JSON.stringify(approved.body));
@@ -492,11 +495,11 @@ test('a clean shutdown kills the plan process and the command process group', {
 }, async () => {
   const launched = await post('/launch', {
     workspaceId: ws,
-    folder: planFolder({
+    file: planFile({
       plan: `${HEAD}
 const { slow } = steps({ slow: command('node scripts/slow.js', { minutes: 30 }) });
 
-export default plan(async () => need(await slow(), 'no slow'));
+export default expedition({ contract: CONTRACT, plan: async () => need(await slow(), 'no slow') });
 `,
     }),
   });
@@ -535,7 +538,7 @@ test('flag off over that directory: read-only rows and views, nothing written, r
   await h.boot('off-B');
 
   // The card still reads in read-only mode: the reason, and the expedition it became.
-  const card = (await get(`/proposals/${card1.digest}?folder=${encodeURIComponent(card1.folder)}`))
+  const card = (await get(`/proposals/${card1.digest}?file=${encodeURIComponent(card1.file)}`))
     .body as keyed.KeyedProposalStatus;
   assert.equal(card.mode.t, 'read-only');
   assert.deepEqual(card.launched, { t: 'yes', id: exp1 });
@@ -576,8 +579,8 @@ test('the copied-store case (flag on, execution disabled): launch refused, nothi
 }, async () => {
   const disk = snapshot(h.expRoot);
   await h.boot('copied', { ...ON, UNLEASHD_BUDDY_EXECUTION: '0' });
-  const folder = planFolder({ plan: MAIN_PLAN, briefs: { work: answers('copied', 'answer') } });
-  const refused = await post('/launch', { workspaceId: ws, folder });
+  const file = planFile({ plan: MAIN_PLAN, prompts: { work: answers('copied', 'answer') } });
+  const refused = await post('/launch', { workspaceId: ws, file });
   assert.equal(refused.status, 503);
   assert.match(refused.body.error, /Buddy execution is disabled/);
   assert.equal((await rows()).length, 3, 'read-only rows');

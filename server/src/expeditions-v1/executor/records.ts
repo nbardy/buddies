@@ -110,7 +110,7 @@ export type RunOn = z.infer<typeof RunOn>;
 const Typed = v('typed', { schema: z.unknown() }).transform(
   (a): { readonly t: 'typed'; readonly schema: unknown } => ({ t: 'typed', schema: a.schema })
 );
-/** A leader wake's answer: one `LeaderAct`; a rewrite must name `folder`, the wake's own draft. */
+/** A leader wake's answer: one `LeaderAct`; a rewrite's file must be inside `folder`, the wake's own draft directory. */
 const Expected = z.union([Typed, v('verdict', {}), v('act', { folder: z.string().min(1) })]);
 export type Expected = z.infer<typeof Expected>;
 /** Why a call was stopped before it ended on its own: the kernel's cancel, or a cap (a cap is an

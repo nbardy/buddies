@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { chmod, copyFile, cp, mkdir, readFile, rename, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { keyed } from '@unleashd/shared';
 import { z } from 'zod';
-import { contractFileOf, planDirOf } from '../expedition-kernel/log-store';
+import { planFileOf } from '../expedition-kernel/log-store';
 import type {
   Disposed,
   ExpeditionView,
@@ -24,8 +24,8 @@ import type { OwnerBook } from './owner/book';
 // `call` role: the SAME Buddy-call path as an agent call (executor/calls.ts), so it is one post and
 // one crate run per run id, capped by `limits.leaderWake`, metered by the same usage path, and its
 // turn directory is its draft folder `<expDir>/drafts/<n>/`: a copy of the current plan version
-// plus a read-only `contract.md`. Its answer is one `LeaderAct` (executor/answer.ts); a rewrite
-// names that draft folder, and the kernel's gates copy it as the next version.
+// with its inline owner contract. Its answer is one `LeaderAct` (executor/answer.ts); a rewrite
+// names that draft's one plan file, and the kernel's gates copy it as the next version.
 //
 // What the wake may do is the policy table's `leader` row (expedition-kernel/access.ts): read the
 // expedition directory, write only its draft folder, no shell, no web; Claude and Codex both hold
@@ -53,7 +53,7 @@ export function createLeader(d: LeaderDeps): Leader {
         view,
         event,
         draft,
-        plans: path.dirname(planDirOf(view.dir, 0)),
+        plans: path.dirname(planFileOf(view.dir, 0)),
         notes: (await d.book.read(view.id)).notes,
         refPaths: await refPathsOf(view),
       });
@@ -87,17 +87,15 @@ const exists = (p: string) =>
 
 /** The current plan version and the contract, copied once per wake: made under a temporary name
  * and renamed, so a draft folder that exists is complete, and a repeated wake keeps the leader's
- * edits. contract.md is read-only: it is the owner's (the rewrite gate rejects a changed one). */
+ * edits. The inline contract remains the owner's; the rules gate rejects a changed one. */
 async function prepareDraft(view: ExpeditionView, draft: string): Promise<void> {
   if (await exists(draft)) return;
   const plan = view.state.plan;
   if (plan.t === 'unplanned') throw new Error(`${view.id} has no plan to draft from`);
   await mkdir(path.dirname(draft), { recursive: true, mode: 0o700 });
   const tmp = `${draft}.tmp-${randomBytes(4).toString('hex')}`;
-  await cp(planDirOf(view.dir, plan.version), tmp, { recursive: true });
-  const contract = path.join(tmp, 'contract.md');
-  await copyFile(contractFileOf(view.dir), contract);
-  await chmod(contract, 0o444);
+  await mkdir(tmp);
+  await copyFile(planFileOf(view.dir, plan.version), path.join(tmp, 'plan.expedition.ts'));
   await rename(tmp, draft);
 }
 
@@ -133,7 +131,7 @@ const Dispositions = z.record(keyed.Key, keyed.Disposition);
  * then rejects the rewrite as `undecided`, and the next wake is told); unreadable is a rejection
  * naming why, never taken as `{}`. */
 async function readDispositions(at: RewriteAt): Promise<Disposed> {
-  const file = path.join(at.folder, DISPOSITIONS);
+  const file = path.join(path.dirname(at.file), DISPOSITIONS);
   let text: string;
   try {
     text = await readFile(file, 'utf8');

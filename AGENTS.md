@@ -60,9 +60,9 @@ client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen in
 server/src/expeditions/            → expeditions: one JSON record each, a serialized step per record,
                                      the `expedition` tool, /api/buddies/expeditions; design:
                                      docs/expeditions-lean-design.md
-server/src/expedition-kernel/      → keyed expeditions (v1): log, reconcile, plan runner, gates;
+server/src/expedition-kernel/      → keyed expeditions (v1): one .expedition.ts file, log, reconcile, runner, gates;
                                      types in shared/src/expedition-keyed.ts (`keyed`)
-server/src/expeditions-v1/         → its host: executor (commands, checks, agent calls as Buddy
+server/src/expeditions-v1/         → its one-file host: executor (commands, checks, agent calls as Buddy
                                      requests, asks), leader and owner ports, routes under
                                      /api/buddies/keyed-expeditions. Live only with the execution
                                      gate on AND UNLEASHD_EXPEDITIONS_V1=1, else read-only. State
@@ -536,7 +536,7 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   Two type-aware rules are errors: `noFloatingPromises` (57 findings, 4 real
   bugs; deliberate fire-and-forget is written `void call()`) and
   `useAwaitThenable`. They double lint time (~0.5 s -> ~1.1 s). Biome cannot
-  resolve a plan folder's bare `expedition` import, so un-awaited plan calls
+  resolve a plan file's bare `expedition` import, so un-awaited plan calls
   are not caught statically, and tsc does not report a floating promise either.
   The authoring library catches it at run time instead: a plan that returns while
   a call or review it issued is unanswered ends as `threw`, naming the pending
