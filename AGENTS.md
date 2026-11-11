@@ -196,6 +196,13 @@ requirements to rebuild omitted machinery.
 | Memory reviewer benchmark: rerun, grade, extend, historical evidence (read before changing reviewer prompts/tools) | [Memory curation benchmark](server/test/fixtures/memory-curation/README.md) |
 | New provider integration protocol | `docs/agent_client_spec.md` |
 
+## Keyed expedition examples
+
+Runnable one-file cases live in `docs/expeditions/keyed/v1/examples/`
+(start with `01-gtm.expedition.ts`; index: `README.md`). The real launch gates for every
+example run free with `pnpm test:server expedition-kernel-contract`; this starts no agents
+or server. Read each header’s prerequisites and v1 limitations before proposing it.
+
 ## Keyed expedition real-agent conformance
 
 Run `pnpm probe:expeditions --harness all` after changing what an expedition turn is told or

@@ -12,8 +12,8 @@ executor over Buddy runs, the routes and the timeline view are built (CONNECT_PL
 §10 lists what building it changed. The API
 is the authoring library itself
 ([`server/src/expedition-kernel/authoring/index.ts`](../../../../server/src/expedition-kernel/authoring/index.ts);
-[`expedition.d.ts`](expedition.d.ts) re-exports it), and both example plans typecheck
-(`../../../../server/node_modules/.bin/tsc -p ../tsconfig.json`, from this folder).
+[`expedition.d.ts`](expedition.d.ts) re-exports it), and all runnable [example plans](examples/README.md) pass the real launch gates
+(`pnpm test:server expedition-kernel-contract`, from the repo root; no agents or server).
 
 This is what to build first. [`../DESIGN.md`](../DESIGN.md) is the larger design it was cut from;
 its nine example cases are the checklist for what v1 leaves out.
@@ -75,7 +75,7 @@ Restart recovery, plan rewrites and the cost preview are all that one rule.
 The owner writes the Contract, the leader writes the Plan, the host writes the Log. Nobody writes
 another's.
 
-[`gtm.expedition.ts`](gtm.expedition.ts) is the complete worked example. Its structure is the lines that
+[`examples/01-gtm.expedition.ts`](examples/01-gtm.expedition.ts) is the complete worked example. Its structure is the lines that
 start `x.phase`, `x.review` and `need(...)`:
 
 ```

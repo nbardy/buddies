@@ -11,7 +11,7 @@ import {
   steps,
 } from 'expedition';
 // @ts-nocheck: `expedition` resolves only inside the plan runner (runner-child.mjs), not in server typecheck.
-// Copy of docs/expeditions/keyed/v1/gtm.expedition.ts with the import changed to the bare specifier.
+// Copy of docs/expeditions/keyed/v1/examples/01-gtm.expedition.ts with the import changed to the bare specifier.
 // Plan version 0, as launched.
 import { z } from 'zod';
 

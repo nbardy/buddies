@@ -11,7 +11,7 @@ import {
   steps,
 } from 'expedition';
 // @ts-nocheck: `expedition` resolves only inside the plan runner (runner-child.mjs), not in server typecheck.
-// Copy of docs/expeditions/keyed/v1/gtm-rewrite.expedition.ts with the import changed to the bare specifier.
+// Copy of docs/expeditions/keyed/v1/examples/01-gtm-rewrite.expedition.ts with the import changed to the bare specifier.
 // Plan version 1: the leader's rewrite at the 50% budget wake. See REWRITE.md for why and the diff.
 // Changed lines are marked `// v1`.
 import { z } from 'zod';

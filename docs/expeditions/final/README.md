@@ -1,5 +1,8 @@
 # Expeditions as durable, multi-harness scripts
 
+The built system is in [keyed/v1](../keyed/v1/DESIGN.md), with its runnable
+[one-file examples](../keyed/v1/examples/README.md). This document is the earlier research record.
+
 Status: **final design, 2026-11-10. Not built.** It replaces the four candidate designs in
 `../v1…v4-*.md`, which stay as the research record. Conventions: `../../design-specs.md`.
 

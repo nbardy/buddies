@@ -9,7 +9,7 @@ start once those collects settle. Everything else here matches what the end-to-e
 
 **This is an illustration, not a record of a run.** The numbers are made up to show what the host
 and the leader would each do. The two plans are real files and both typecheck:
-[`../../gtm.expedition.ts`](../../gtm.expedition.ts) (version 0) and [`../../gtm-rewrite.expedition.ts`](../../gtm-rewrite.expedition.ts) (version 1).
+[`../../examples/01-gtm.expedition.ts`](../../examples/01-gtm.expedition.ts) (version 0) and [`../../examples/01-gtm-rewrite.expedition.ts`](../../examples/01-gtm-rewrite.expedition.ts) (version 1).
 
 ## 1. What triggered it
 
@@ -34,7 +34,7 @@ is redone:
 
 | File | Change |
 |---|---|
-| `gtm-rewrite.expedition.ts` | Skip organizations of kind `comparator`. Add a `mine` step over four forum venues. Give the thesis both sets of sources. The changed lines are marked `// v1`. |
+| `01-gtm-rewrite.expedition.ts` | Skip organizations of kind `comparator`. Add a `mine` step over four forum venues. Give the thesis both sets of sources. The changed lines are marked `// v1`. |
 | The same file, `mine.brief(...)` | New inline forum-search prose; each item renders its own prompt and check command. |
 
 ## 3. The four gates

@@ -46,7 +46,7 @@ gtm-evidence/
   briefs/           one markdown file per step: the prompt, as long as the work needs
 ```
 
-The plan for the GTM case, complete ([`examples/01-gtm`](examples/01-gtm/plan.ts)):
+The plan for the GTM case, complete ([the runnable GTM port](v1/examples/01-gtm.expedition.ts); the sketch below uses the earlier API):
 
 ```ts
 const { scope, collect, thesis, attack, revise, packet } = steps({
@@ -293,19 +293,21 @@ const ok = await stick.met(work);      // the host judges it; passing a sub-goal
 
 ## 10. The nine cases
 
-Each is a folder under [`examples/`](examples/) with a contract, a plan and its briefs.
+The original folder examples have been ported into [runnable v1 one-file examples](v1/examples/README.md).
+This table records the earlier design’s plan-only line counts and intended guarantees;
+the ports’ headers state which guarantees v1 does not implement.
 
 | Case | Plan | Briefs | Shape |
 |---|---|---|---|
-| [01 GTM research](examples/01-gtm) | 52 lines | 8 | scope → collect (wide, anchored) → ⟳ → synthesize → duel ×3 on three providers → ⟳ → packet → land → ✋ owner |
-| [02 Game design](examples/02-game-design) | 90 lines | 9 | measure the stick → [sub-goal: fix it] → exploit hunt → ⟳ → theory → levers (wide) → host A/B per lever → ⟳ → stack best 3 → confirm on reserved seeds → ✋ playtest → record → land |
-| [03 Sim auto-research](examples/03-sim-autoresearch) | 82 lines | 5 | cases → noise A/A (wide, Modal) → [sub-goal: measuring stick] → ⟳ → 3 generations of propose → implement → gate, keep best 3 → ⟳ → confirm (counted) → record → land |
-| [04 Frontier math](examples/04-frontier-math) | 80 lines | 10 | freeze → 4 blind discovery runs → census on another provider → ⟳ → falsify ≤2 survivors (counted) → ⟳ → record → land, or an honest gap |
-| [05 Sim capabilities](examples/05-sim-capabilities) | 77 lines | 6 | cells → baseline (wide, rows × engines) → ⟳ → per row: diagnose → repair → replay → strike (counted) → ⟳ → integrate → re-score the matrix → ⟳ → record → land |
-| [06 Deslop](examples/06-deslop) | 73 lines | 6 | measure → inventory (wide) → target → land → ⟳ → waves: seams (narrow) → slices (wide, fenced) → land each → ⟳ → re-measure → closeout → land |
-| [07 CRUD SaaS](examples/07-crud-saas) | 47 lines | 5 | foundation → land → first feature → land → the rest (wide, fenced) → integrate → walkthrough → land → ✋ owner |
-| [08 Geometry engine](examples/08-geometry-engine) | 59 lines | 5 | derive → loop ≤3: implement (same conversation) → guarded probe → ⟳ → the one replay → receipt → land → ✋ owner |
-| [09 Document model](examples/09-document-model) | 82 lines | 11 | ledger → design → ≤3 rounds: attack → adjudicate → ✋ rulings ∥ spikes → revise → ⟳ → ✋ ratify → retirement plan → land |
+| [01 GTM research](v1/examples/01-gtm.expedition.ts) | 52 lines | 8 | scope → collect (wide, anchored) → ⟳ → synthesize → duel ×3 on three providers → ⟳ → packet → land → ✋ owner |
+| [02 Game design](v1/examples/02-game-design.expedition.ts) | 90 lines | 9 | measure the stick → [sub-goal: fix it] → exploit hunt → ⟳ → theory → levers (wide) → host A/B per lever → ⟳ → stack best 3 → confirm on reserved seeds → ✋ playtest → record → land |
+| [03 Sim auto-research](v1/examples/03-sim-autoresearch.expedition.ts) | 82 lines | 5 | cases → noise A/A (wide, Modal) → [sub-goal: measuring stick] → ⟳ → 3 generations of propose → implement → gate, keep best 3 → ⟳ → confirm (counted) → record → land |
+| [04 Frontier math](v1/examples/04-frontier-math.expedition.ts) | 80 lines | 10 | freeze → 4 blind discovery runs → census on another provider → ⟳ → falsify ≤2 survivors (counted) → ⟳ → record → land, or an honest gap |
+| [05 Sim capabilities](v1/examples/05-sim-capabilities.expedition.ts) | 77 lines | 6 | cells → baseline (wide, rows × engines) → ⟳ → per row: diagnose → repair → replay → strike (counted) → ⟳ → integrate → re-score the matrix → ⟳ → record → land |
+| [06 Deslop](v1/examples/06-deslop.expedition.ts) | 73 lines | 6 | measure → inventory (wide) → target → land → ⟳ → waves: seams (narrow) → slices (wide, fenced) → land each → ⟳ → re-measure → closeout → land |
+| [07 CRUD SaaS](v1/examples/07-crud-saas.expedition.ts) | 47 lines | 5 | foundation → land → first feature → land → the rest (wide, fenced) → integrate → walkthrough → land → ✋ owner |
+| [08 Geometry engine](v1/examples/08-geometry-engine.expedition.ts) | 59 lines | 5 | derive → loop ≤3: implement (same conversation) → guarded probe → ⟳ → the one replay → receipt → land → ✋ owner |
+| [09 Document model](v1/examples/09-document-model.expedition.ts) | 82 lines | 11 | ledger → design → ≤3 rounds: attack → adjudicate → ✋ rulings ∥ spikes → revise → ⟳ → ✋ ratify → retirement plan → land |
 
 `⟳` is a review, `✋` an owner check-in. Each folder's `contract.md` ends with a "Not yet real"
 list (scripts, Buddy ids and paths the example assumes), and its `NOTES.md` lists what the API

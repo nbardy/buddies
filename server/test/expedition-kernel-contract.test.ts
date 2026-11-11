@@ -6,12 +6,15 @@ import { keyed } from '@unleashd/shared';
 import { type ProviderOf, canonicalise, withRules } from '../src/expedition-kernel/canonical';
 import { expandHome, parseContract } from '../src/expedition-kernel/contract';
 import { staticGate, typecheckGate } from '../src/expedition-kernel/gates';
+import type { KernelDeps } from '../src/expedition-kernel/kernel';
+import { preview } from '../src/expedition-kernel/launch';
 import type { Authored, CastRow } from '../src/expedition-kernel/protocol';
 import { dryRun } from '../src/expedition-kernel/runner';
 import { tempDir } from './fixtures/temp';
 
 const REPO = path.resolve(__dirname, '../..');
-const GTM = path.join(REPO, 'docs/expeditions/keyed/v1/gtm.expedition.ts');
+const EXAMPLES = path.join(REPO, 'docs/expeditions/keyed/v1/examples');
+const GTM = path.join(EXAMPLES, '01-gtm.expedition.ts');
 const GOOD = {
   goal: 'Do the thing.',
   leader: 'lead',
@@ -198,6 +201,52 @@ const gateOpts = {
   zodEntry: path.join(REPO, 'server/node_modules/zod'),
   tscBin: path.join(REPO, 'server/node_modules/.bin/tsc'),
 };
+
+// Fix-guard: eight design cases had no launchable example. The real preview gates below
+// keep future API changes from silently breaking the tool's copyable examples; no work executes.
+test('every documented one-file example passes the real launch gates without executing work', async (t) => {
+  const forbidden = (): never => assert.fail('preview must never execute work or ask an owner');
+  // Example Buddy slugs are placeholders, not live-store lookups. Before launch the owner
+  // substitutes actual ids; these explicit provider assumptions also appear in the headers.
+  const buddies = new Map([
+    ['market-research', 'claude'],
+    ['game-design', 'claude'],
+    ['wave-simulation-lead', 'claude'],
+    ['simulation-research', 'claude'],
+    ['product-dev', 'claude'],
+    ['document-model-lead', 'claude'],
+  ]);
+  const deps: KernelDeps = {
+    gates: gateOpts,
+    providerOf: (who) => {
+      const provider = who.t === 'buddy' ? buddies.get(who.id) : undefined;
+      return provider === undefined
+        ? { t: 'unknown', why: 'No declared example Buddy provider' }
+        : { t: 'known', provider };
+    },
+    executor: {
+      start: forbidden,
+      cancel: forbidden,
+      close: forbidden,
+      status: forbidden,
+      onSettled: forbidden,
+    },
+    leader: { wake: forbidden, dispose: forbidden },
+    owner: { approve: forbidden },
+    clock: { now: forbidden, wakeAt: forbidden },
+  };
+  const files = readdirSync(EXAMPLES)
+    .filter((name) => name.endsWith('.expedition.ts'))
+    .sort();
+  assert.equal(files.length, 10, 'nine cases plus the GTM rewrite; never silently skip a case');
+  for (const file of files) {
+    await t.test(file, async () => {
+      const result = await preview(deps, path.join(EXAMPLES, file));
+      assert.equal(result.t, 'clean', JSON.stringify(result));
+      if (result.t === 'clean') assert.ok(result.asked.length > 0, 'a real first wave is declared');
+    });
+  }
+});
 function planFile(edit: (s: string) => string = (s) => s): string {
   const file = path.join(tempDir('expedition-plan-'), 'test.expedition.ts');
   writeFileSync(file, edit(readFileSync(GTM, 'utf8')));

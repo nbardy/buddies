@@ -1,5 +1,8 @@
 # Expeditions: four designs, one verdict
 
+The built system is in [keyed/v1](keyed/v1/DESIGN.md), with its runnable
+[one-file examples](keyed/v1/examples/README.md). This document is the earlier research record.
+
 Status: **judgment, 2026-11-09. Nothing is built, committed or launched.** This page compares four
 designs for the next generation of expeditions against the owner's nine use cases, re-checks
 their Quint models, and recommends what to build. Today's code is the lean retry loop: one crew

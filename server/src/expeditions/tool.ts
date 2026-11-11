@@ -168,7 +168,7 @@ Import only 'expedition' and 'zod'. export default expedition({contract, plan: a
 contract: {goal, leader: Buddy id, repo, budget:{usd,hours}, autoApply:{usd}, pools:{provider:concurrency}, done:[{check:cmd}|{review:{rubric:text,by:seat}}|{owner:question}], rules:[text]}; optional leaderWake, doneReview:{usd,minutes}. Leader rewrites must preserve this owner literal.
 role({by:seat(provider,model,effort)|buddy(id),usd,minutes}): .brief(text | item=>text), .reads(paths), .web(), .checkout(), .returns(zod), .lists(zod), .needs(pool), .judged(check(cmd | item=>cmd) | review(text,another-provider-seat)). command(cmd | item=>cmd,{minutes}).
 steps({a:spec}) makes await a({item,reads,on,continues,id}); item is required only for an item function. Result: passed with out/ref, or non-pass. need(result,why), passed(results), parallel(items,fn); x.phase(name,fn), x.review(q), x.ask(q), x.confirm(q). Return held.
-Example: docs/expeditions/keyed/v1/gtm.expedition.ts.`;
+Example: docs/expeditions/keyed/v1/examples/01-gtm.expedition.ts.`;
 
 export const EXPEDITION_TOOL = {
   description: DESCRIPTION,

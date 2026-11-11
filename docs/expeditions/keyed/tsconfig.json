@@ -13,5 +13,5 @@
     "types": ["node"],
     "typeRoots": ["../../../server/node_modules/@types"]
   },
-  "include": ["api/expedition.d.ts", "examples/**/*.ts", "v1/**/*.ts"]
+  "include": ["api/expedition.d.ts", "v1/**/*.ts"]
 }

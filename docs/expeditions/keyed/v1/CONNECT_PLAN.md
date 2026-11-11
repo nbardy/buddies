@@ -1,5 +1,10 @@
 # Connecting the expedition kernel to the real system
 
+Runnable cases: [examples/README.md](examples/README.md), including
+[01 GTM](examples/01-gtm.expedition.ts) and its
+[leader rewrite](examples/01-gtm-rewrite.expedition.ts). Every file passes the free
+launch-preview gates in `server/test/expedition-kernel-contract.test.ts`; headers name live-launch prerequisites.
+
 Status: **steps 1 to 7 built and on main, 2026-11-11; live whenever Buddy execution is enabled.
 Three integrated runs exposed harness failures; the conformance checks in §10 now pass.**
 Step 8 (the Buddy tool) and step 9 are not built,
