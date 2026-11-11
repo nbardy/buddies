@@ -20,6 +20,13 @@ const EXP = '20261111T000000-cccccc';
 const expDir = path.join(h.expRoot, EXP);
 const brief = (tag: string, mode: string) =>
   `Do the thing. TAG:${tag} MODE:${mode} ANSWER_JSON:{"n":9}`;
+const tempOf = (tag: string): string => {
+  const temp = JSON.parse(h.read(`${tag}.temp`)) as { dir: string };
+  assert.equal(fs.statSync(temp.dir).mode & 0o777, 0o700);
+  assert.equal(fs.readFileSync(path.join(temp.dir, 'owned-by-turn'), 'utf8'), tag);
+  assert.ok(!temp.dir.startsWith(`${h.repo}/`) && !temp.dir.startsWith(`${expDir}/`));
+  return temp.dir;
+};
 const REVIEWER: keyed.Who = {
   t: 'seat',
   provider: 'claude',
@@ -154,11 +161,13 @@ test('a call executing when the backend dies is adopted, not re-run, and settles
   timeout: 240_000,
 }, async () => {
   const runId = runIdOf(EXP, 'r/executing', 'c');
-  await h.start(runId, agentSpec('r/executing', brief('executing', 'hold')));
+  await h.start(runId, agentSpec('r/executing', brief('executing', 'hold'), { tree: 'checkout' }));
   await h.eventually(() => h.exists('executing.midturn'), Boolean, 'the call mid-turn');
+  const temp = tempOf('executing');
   await h.kill();
 
   await h.boot('D');
+  assert.ok(fs.existsSync(temp), 'adoption keeps a live checkout call scratch directory');
   h.release('executing');
   const reports = await h.settledOf(runId);
   assert.equal(reports.length, 1, 'reported once by the new backend');
@@ -166,6 +175,7 @@ test('a call executing when the backend dies is adopted, not re-run, and settles
   assert.equal(h.spawnsOf('executing'), 1, 'adopted, not re-run');
   const record = await h.record(runId);
   assert.ok(record.t === 'found' && record.value.t === 'settled');
+  assert.ok(!fs.existsSync(temp), 'the adopted call removes scratch at settle');
 });
 
 test('close on a queued call cancels its run, which is never claimed; a cancelled queued call is cancelled', {
@@ -174,10 +184,20 @@ test('close on a queued call cancels its run, which is never claimed; a cancelle
   await holdSlot('holdertwo');
   const closed = runIdOf(EXP, 'r/closed', 'd');
   const cancelled = runIdOf(EXP, 'r/queued-cancel', 'e');
-  await h.start(closed, agentSpec('r/closed', brief('closedcall', 'answer'), byNamed()));
-  await h.start(cancelled, agentSpec('r/queued-cancel', brief('qcancel', 'answer'), byNamed()));
+  await h.start(
+    closed,
+    agentSpec('r/closed', brief('closedcall', 'answer'), { ...byNamed(), tree: 'checkout' })
+  );
+  await h.start(
+    cancelled,
+    agentSpec('r/queued-cancel', brief('qcancel', 'answer'), { ...byNamed(), tree: 'checkout' })
+  );
   const closedPost = await postedRecord(closed);
   const cancelledPost = await postedRecord(cancelled);
+  assert.ok(closedPost.capabilities.files.t === 'write');
+  assert.ok(cancelledPost.capabilities.files.t === 'write');
+  const closedTemp = closedPost.capabilities.files.temp;
+  const cancelledTemp = cancelledPost.capabilities.files.temp;
   for (const p of [closedPost, cancelledPost])
     await h.eventually(
       () => runsOfPost(named, p.postId),
@@ -189,6 +209,7 @@ test('close on a queued call cancels its run, which is never claimed; a cancelle
   const tomb = await h.record(closed);
   assert.ok(tomb.t === 'found' && tomb.value.t === 'closed');
   assert.equal((await runsOfPost(named, closedPost.postId))[0]?.status, 'cancelled');
+  assert.ok(!fs.existsSync(closedTemp), 'close removes scratch even before a turn is claimed');
 
   // A queued run's cancel leaves its request `awaiting` (crate runs.rs cancel_queued); it is
   // still read as cancelled.
@@ -196,6 +217,7 @@ test('close on a queued call cancels its run, which is never claimed; a cancelle
   const [report] = await h.settledOf(cancelled);
   assert.deepEqual(report?.raw, { t: 'cancelled' });
   assert.deepEqual(report?.spent, { t: 'reported', usd: 0 }, 'it never ran');
+  assert.ok(!fs.existsSync(cancelledTemp), 'queued cancellation removes scratch');
   const thread = await h.http('GET', `/api/buddies/posts/${cancelledPost.postId}/thread`);
   const root = thread.body.root as { id: string; request: { state: string } };
   assert.equal(root?.request.state, 'awaiting');
@@ -224,10 +246,15 @@ test('the minutes cap stops a call as an expiry: errored("exceeded …"), record
   const runId = runIdOf(EXP, 'r/minutes', 'f');
   await h.start(
     runId,
-    agentSpec('r/minutes', brief('minutes', 'hang'), { max: { usd: 20, minutes: 0.05 } })
+    agentSpec('r/minutes', brief('minutes', 'hang'), {
+      tree: 'checkout',
+      max: { usd: 20, minutes: 0.05 },
+    })
   );
   const [report] = await h.settledOf(runId);
   assert.deepEqual(report?.raw, { t: 'errored', why: 'exceeded 0.05 min' });
+  const temp = JSON.parse(h.read('minutes.temp')) as { dir: string };
+  assert.ok(!fs.existsSync(temp.dir), 'timeout removes private scratch');
   const record = await h.record(runId);
   assert.ok(record.t === 'found' && record.value.t === 'settled');
   assert.deepEqual(record.value.t === 'settled' && record.value.stop, {
@@ -257,6 +284,8 @@ test('a checkout call commits on its own branch from its base; the ref records i
   await h.start(runId, agentSpec('r/checkout', brief('checkout', 'commit'), { tree: 'checkout' }));
   const [report] = await h.settledOf(runId);
   assert.deepEqual(report?.raw, { t: 'ok', out: { n: 9 } });
+  const temp = JSON.parse(h.read('checkout.temp')) as { dir: string };
+  assert.ok(!fs.existsSync(temp.dir), 'success removes private scratch');
   const ref = await getRef(expDir, keyed.refOf('r/checkout', HASH('1')));
   assert.ok(ref.t === 'found' && ref.value.checkout.t === 'branch');
   if (ref.t !== 'found' || ref.value.checkout.t !== 'branch') return;
@@ -299,9 +328,11 @@ test('a cancelled checkout call keeps its dirty work at a salvage ref, its parti
   const runId = runIdOf(EXP, 'r/salvage', '2');
   await h.start(runId, agentSpec('r/salvage', brief('salvage', 'dirty'), { tree: 'checkout' }));
   await h.eventually(() => h.exists('salvage.midturn'), Boolean, 'the call mid-turn');
+  const temp = tempOf('salvage');
   await h.cancel(runId);
   const [report] = await h.settledOf(runId);
   assert.deepEqual(report?.raw, { t: 'cancelled' });
+  assert.ok(!fs.existsSync(temp), 'cancelled checkout removes its private scratch');
   const partial = await getRef(expDir, keyed.refOf('r/salvage', HASH('2')));
   assert.ok(partial.t === 'found' && partial.value.checkout.t === 'branch');
   if (partial.t !== 'found' || partial.value.checkout.t !== 'branch') return;

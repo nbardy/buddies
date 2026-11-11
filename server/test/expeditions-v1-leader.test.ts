@@ -340,7 +340,14 @@ export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-
     (es) => ofKey(es, 'settled', 'slowb')[0]?.outcome.t === 'passed',
     'slowb finished'
   );
-  const ready = (await h.view(exp)).asks.find((a) => a.key === 'ask/ready-to-finish');
+  // The ask is issued by the next plan run, a child process: under a loaded suite it can land
+  // after slowb settles. Reading the view once failed 2 of 3 full-suite runs (2026-11-11).
+  const asked = await h.eventually(
+    () => h.view(exp),
+    (v) => v.asks.some((a) => a.key === 'ask/ready-to-finish'),
+    'the ask is open'
+  );
+  const ready = asked.asks.find((a) => a.key === 'ask/ready-to-finish');
   assert.ok(ready);
   assert.equal((await h.answerAsk(exp, ready.ref, { t: 'text', text: 'yes' })).t, 'answered');
   const done = await finished(exp);

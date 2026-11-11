@@ -196,13 +196,19 @@ const AGENT_TURN: {
   checkout: (c) => ({
     t: 'checkout',
     tree: AT.tree,
+    temp: '/private-temp/turn',
     reads: [AT.refs, ...c.grant.reads],
     web: c.grant.web,
     git: { t: 'worktree', dirs: [AT.git] },
   }),
 };
 const JUDGE_TURN: CallTurn = { t: 'judge', reads: [AT.refs] };
-const LEADER_TURN: CallTurn = { t: 'leader', expDir: AT.exp, draft: `${AT.exp}/drafts/1` };
+const LEADER_TURN: CallTurn = {
+  t: 'leader',
+  expDir: AT.exp,
+  draft: `${AT.exp}/drafts/1`,
+  temp: '/private-temp/turn',
+};
 
 type Row = { readonly label: string; readonly from: keyed.TurnSource };
 const accessRow = (

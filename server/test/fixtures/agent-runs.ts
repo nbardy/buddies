@@ -107,6 +107,13 @@ async function main() {
   mark(tag + '.cwd', process.cwd());
   mark(tag + '.prompt', prompt);
   mark(tag + '.argv', JSON.stringify(process.argv.slice(2)));
+  const recordFile = path.dirname(process.cwd()) + '.json';
+  const record = fs.existsSync(recordFile) ? JSON.parse(fs.readFileSync(recordFile, 'utf8')) : null;
+  const scratch = record?.capabilities?.files.t === 'write' ? record.capabilities.files.temp : undefined;
+  if (scratch) {
+    mark(tag + '.temp', JSON.stringify({ dir: scratch }));
+    fs.writeFileSync(path.join(scratch, 'owned-by-turn'), tag);
+  }
   await listTools(tag);
   const tools = mcp();
   text('working;');

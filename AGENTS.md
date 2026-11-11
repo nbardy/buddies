@@ -151,6 +151,19 @@ client/src/components/buddies/Expedition*.tsx → chat card, rail section (both 
   (2026-09-30). Never derive a deadline from the lease, either: that was the
   09-10 incident. Guard: `server/test/run-lease.test.ts`.
 
+- A new name must buy a new capability (global rule 3). On any surface a Buddy, a leader or the
+  owner writes against (an expedition plan file, a tool's input, a config file), the writer
+  already knows JavaScript and plain data: add a function, key or concept only for what they could
+  not otherwise do, write the example file before the library, and cut before showing it. The
+  incident: the first expedition surface mirrored the kernel's types (eleven imports, an
+  eight-method builder, `{t:'seat', ...}` objects). The owner had to ask what `parallel`, `need` and
+  `seat()` were for, then steer the cut himself over five messages ("instead of defending do you
+  think the design could be simpler?", "let the model write promise code"), down to one import
+  (2026-11-11, a82cfba). What survived shows the test: `x.ask` and `x.checkin` do what the language
+  cannot (wait on the owner, wake the leader), and `step({...})` exists only because the type
+  checker needs it. The Buddy tool's description (`server/src/expeditions/tool.ts`) lists the whole
+  surface and is sent on every Buddy turn: a change that makes it longer states the capability it
+  buys.
 - Structural patterns live in `docs/patterns.md` (one store + one index,
   sum types, capability grants, one write path, idempotency keys,
   wake-on-write, patches not snapshots, one type source, fix-guards, …).
@@ -207,9 +220,9 @@ or server. Read each header’s prerequisites and v1 limitations before proposin
 
 Run `pnpm probe:expeditions --harness all` after changing what an expedition turn is told or
 allowed, a harness upgrade, or a model change. Run an integrated real expedition only AFTER
-these probes pass. `--only answer-fenced|answer-bare|answer-progress|tree-none|checkout|review|leader`
+these probes pass. `--only answer-fenced|answer-bare|answer-progress|tree-none|checkout|temp|review|leader`
 selects one probe; `--harness claude|codex|all` selects the CLI; `--keep` retains scratch files.
-The normal pass is 14 short turns (Haiku 5.5 and GPT-6 Luna, low effort), capped at about $0.20
+The normal pass is 16 short turns (Haiku 5.5 and GPT-6 Luna, low effort), capped at about $0.20
 and three minutes per turn (14 turns measured $0.0255 on 2026-11-11); actual usage, prompts,
 argv, native transcripts and decisive evidence
 are in dated gitignored `output/expedition-probes-*` directories. It uses executor policy/request/
@@ -218,6 +231,13 @@ no live stores or owner token. It removes only CLI artifacts whose recorded cwd 
 scratch root, and leaves no agent process running. Codex's reported advisories are checked as
 advisories, with their reasons present in the prompt; a passing probe does not turn them into
 security boundaries. Re-run only failing probes after fixing their responsible system layer.
+
+The `temp` probe (and the leader probe where the leader has a shell) requires a shell heredoc,
+`mktemp` with a template in `$TMPDIR`, and a refused write to `/tmp`. A write turn has its own
+scratch directory outside its working directory and read roots, made by the host and removed
+when the turn settles (adoption included). Codex gets it as a writable root; Claude's sandbox
+supplies its own. One claim per probe: folded into the checkout probe's brief, the low-effort
+Codex model skipped an instruction twice.
 
 ## Screenshot review (UI changes)
 

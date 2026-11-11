@@ -23,6 +23,7 @@ export type CallTurn =
   | {
       readonly t: 'checkout';
       readonly tree: string;
+      readonly temp: string;
       readonly reads: readonly string[];
       readonly web: boolean;
       readonly git: TurnGit;
@@ -30,7 +31,12 @@ export type CallTurn =
   /** A review judge: the judged output's directory and its producer's read roots. */
   | { readonly t: 'judge'; readonly reads: readonly string[] }
   /** A leader wake: the expedition directory to read, its draft folder (inside it) to write. */
-  | { readonly t: 'leader'; readonly expDir: string; readonly draft: string };
+  | {
+      readonly t: 'leader';
+      readonly expDir: string;
+      readonly draft: string;
+      readonly temp: string;
+    };
 
 const WEB = (on: boolean): TurnCapabilities['web'] => (on ? 'on' : 'off');
 const set = (
@@ -60,14 +66,21 @@ export const TURN_CAPABILITIES: {
   call: (c) => set({ t: 'read', roots: c.reads }, WEB(c.web), 'none'),
   checkout: (c) =>
     set(
-      { t: 'write', dir: c.tree, reads: c.reads, shell: 'on', git: c.git },
+      { t: 'write', dir: c.tree, temp: c.temp, reads: c.reads, shell: 'on', git: c.git },
       WEB(c.web),
       'project'
     ),
   judge: (c) => set({ t: 'read', roots: c.reads }, 'off', 'none'),
   leader: (c) =>
     set(
-      { t: 'write', dir: c.draft, reads: [c.expDir], shell: 'off', git: { t: 'none' } },
+      {
+        t: 'write',
+        dir: c.draft,
+        temp: c.temp,
+        reads: [c.expDir],
+        shell: 'off',
+        git: { t: 'none' },
+      },
       'off',
       'none'
     ),
@@ -106,7 +119,10 @@ export function limitsText(provider: string, caps: TurnCapabilities): string {
   const report = capabilityReport(provider, caps);
   return [
     `LIMITS (the tools of this turn are set to these where enforced; advisory limits are instructions, not tool restrictions; harness ${provider})`,
-    ...(LIMIT_FILES[caps.files.t] as (f: TurnCapabilities['files']) => string[])(caps.files),
+    ...(LIMIT_FILES[caps.files.t] as (f: TurnCapabilities['files'], provider: string) => string[])(
+      caps.files,
+      provider
+    ),
     ...(report.shell.t === 'enforced'
       ? [
           `- Shell: ${caps.files.t === 'write' && caps.files.shell === 'on' ? `inside ${caps.files.dir}, with no network` : 'none; use the file tools'}.`,
@@ -131,15 +147,16 @@ export function limitsText(provider: string, caps: TurnCapabilities): string {
 }
 const LIMIT_FILES: {
   readonly [K in TurnCapabilities['files']['t']]: (
-    f: Extract<TurnCapabilities['files'], { t: K }>
+    f: Extract<TurnCapabilities['files'], { t: K }>,
+    provider: string
   ) => string[];
 } = {
   read: (f) => [
     `- Read: your working directory and ${listed(f.roots)} (${plural(f.roots.length, 'root')}).`,
     '- Write: nothing.',
   ],
-  write: (f) => [
+  write: (f, provider) => [
     `- Read: ${f.dir} and ${listed(f.reads)}.`,
-    `- Write: inside ${f.dir}${f.git.t === 'worktree' ? ` and commit metadata at ${listed(f.git.dirs)}` : ''}.`,
+    `- Write: inside ${f.dir}${provider === 'codex' ? ` and private temp ${f.temp}` : ''}${f.git.t === 'worktree' ? ` and commit metadata at ${listed(f.git.dirs)}` : ''}.`,
   ],
 };

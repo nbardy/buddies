@@ -39,6 +39,7 @@ import {
 import { type RefRecord, getRef, putRef } from './refs';
 import { type NamedRef, agentBody, reviewBody } from './request';
 import { Seats } from './seat';
+import { endTemp, privateTemp, startTemp } from './temp';
 import { NOTHING, type UsageMeter } from './usage';
 
 // Agent calls, review judges and leader wakes as Buddy requests (CONNECT_PLAN §1 step 4, §2). One
@@ -587,11 +588,12 @@ export class BuddyCalls implements Calls {
 
   /** The call's tree at its end: its commit, and where its branch and dirty work went. */
   async endTree(ctx: ExpeditionContext, r: Call): Promise<TreeEnd> {
-    return (TREE_END[r.tree.t] as (c: ExpeditionContext, r: Call, t: Tree) => Promise<TreeEnd>)(
-      ctx,
-      r,
-      r.tree
-    );
+    const end = await (
+      TREE_END[r.tree.t] as (c: ExpeditionContext, r: Call, t: Tree) => Promise<TreeEnd>
+    )(ctx, r, r.tree);
+    if (r.capabilities.files.t === 'write' && r.capabilities.files.temp)
+      await endTemp(r.capabilities.files.temp);
+    return end;
   }
 
   /** Spend, waiting a bounded time for ingest. A call no run of which ever started spent nothing. */
@@ -667,7 +669,7 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
     const commits = await (GIT_OF[tree.t] as (t: Tree) => Promise<TurnGit>)(tree);
     const expected: Expected = { t: 'typed', schema: call.output };
     const capabilities = capabilitiesOf(
-      TURN_OF[call.tree](
+      await TURN_OF[call.tree](
         at,
         {
           reads: unique([
@@ -748,7 +750,12 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
   // The leader on its own profile, in its draft folder: it reads the expedition directory and
   // writes only the draft. Its brief is leader-brief.ts; the limits go first, as for every call.
   leader: async (c, at, spec) => {
-    const capabilities = capabilitiesOf({ t: 'leader', expDir: at.ctx.dir, draft: spec.draft });
+    const capabilities = capabilitiesOf({
+      t: 'leader',
+      expDir: at.ctx.dir,
+      draft: spec.draft,
+      temp: await privateTemp(),
+    });
     return {
       t: 'ready',
       posting: c.posting(at, {
@@ -797,10 +804,16 @@ const TURN_OF: {
     at: Located,
     g: { readonly reads: readonly string[]; readonly web: boolean },
     git: TurnGit
-  ) => CallTurn;
+  ) => Promise<CallTurn>;
 } = {
-  none: (at, g) => ({ t: 'call', work: at.paths.work, ...g }),
-  checkout: (at, g, git) => ({ t: 'checkout', tree: at.paths.tree, ...g, git }),
+  none: async (at, g) => ({ t: 'call', work: at.paths.work, ...g }),
+  checkout: async (at, g, git) => ({
+    t: 'checkout',
+    tree: at.paths.tree,
+    temp: await privateTemp(),
+    ...g,
+    git,
+  }),
 };
 
 /** What a commit in the tree writes outside it (agent-cli `TurnGit`). Only a checkout is a linked
@@ -935,6 +948,8 @@ const TREE_END: {
 type Started = { readonly t: 'ready' } | { readonly t: 'failed'; readonly why: string };
 /** Make the call's tree if it is not there yet (a replayed post finds it made). */
 async function startTree(ctx: ExpeditionContext, r: Call): Promise<Started> {
+  if (r.capabilities.files.t === 'write' && r.capabilities.files.temp)
+    await startTemp(r.capabilities.files.temp);
   return makeTree(ctx, r.base, r.tree);
 }
 function makeTree(ctx: ExpeditionContext, base: string, tree: Tree): Promise<Started> {

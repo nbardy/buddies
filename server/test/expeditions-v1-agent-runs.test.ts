@@ -13,6 +13,7 @@ import {
 import { endingOf } from '../src/expedition-kernel/runs';
 import { runPaths } from '../src/expeditions-v1/executor/address';
 import { withPrompts } from '../src/expeditions-v1/executor/prompts';
+import { Capabilities } from '../src/expeditions-v1/executor/records';
 import { getRef } from '../src/expeditions-v1/executor/refs';
 import { HASH, agentSpec, harness, runIdOf } from './fixtures/agent-runs';
 
@@ -24,12 +25,35 @@ import { HASH, agentSpec, harness, runIdOf } from './fixtures/agent-runs';
 
 const h = harness('xk-agent-runs');
 
+test('capability records from before scratch still parse without widening the old grant', () => {
+  const common = { web: 'off', instructions: 'none', agents: 'off', schedule: 'off', mcp: 'none' };
+  const read = { ...common, files: { t: 'read', roots: [] } };
+  assert.deepEqual(Capabilities.parse(read), read);
+  const write = {
+    ...common,
+    files: { t: 'write', dir: '/draft', reads: [], shell: 'off', git: { t: 'none' } },
+  };
+  assert.deepEqual(Capabilities.parse(write), { ...write, files: { ...write.files, temp: '' } });
+});
+
 test('prompt headers tell the truth for both harnesses and all four turn kinds', () => {
   const turns: CallTurn[] = [
     { t: 'call', work: '/work', reads: ['/inputs'], web: false },
-    { t: 'checkout', tree: '/tree', reads: ['/inputs'], web: false, git: { t: 'none' } },
+    {
+      t: 'checkout',
+      tree: '/tree',
+      reads: ['/inputs'],
+      web: false,
+      git: { t: 'none' },
+      temp: '/private-temp/checkout',
+    },
     { t: 'judge', reads: ['/code'] },
-    { t: 'leader', expDir: '/expedition', draft: '/expedition/draft' },
+    {
+      t: 'leader',
+      expDir: '/expedition',
+      draft: '/expedition/draft',
+      temp: '/private-temp/leader',
+    },
   ];
   for (const provider of ['claude', 'codex'])
     for (const turn of turns) {
@@ -176,10 +200,15 @@ test('a malformed answer errors before any ref is written; a review that says no
   timeout: 240_000,
 }, async () => {
   const bad = runIdOf(EXP_A, 'p/bad/one', 'd');
-  await h.start(bad, agentSpec('p/bad/one', 'Answer badly. TAG:badone MODE:malformed'));
+  await h.start(
+    bad,
+    agentSpec('p/bad/one', 'Answer badly. TAG:badone MODE:malformed', { tree: 'checkout' })
+  );
   const [report] = await h.settledOf(bad);
   assert.equal(report?.raw.t, 'errored');
   assert.match(report?.raw.t === 'errored' ? report.raw.why : '', /^malformed answer: not JSON/);
+  const temp = JSON.parse(h.read('badone.temp')) as { dir: string };
+  assert.ok(!fs.existsSync(temp.dir), 'failed answer removes private scratch');
   const ref = keyed.refOf('p/bad/one', HASH('d'));
   assert.equal((await getRef(expDir(EXP_A), ref)).t, 'missing', 'nothing stored to judge');
 

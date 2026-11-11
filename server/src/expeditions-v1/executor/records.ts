@@ -138,6 +138,8 @@ const Files = z.discriminatedUnion('t', [
   v('read', { roots: z.array(z.string().min(1)).readonly() }),
   v('write', {
     dir: z.string().min(1),
+    // Older write records granted no scratch. Empty preserves that grant on replay/adoption.
+    temp: z.string().default(''),
     reads: z.array(z.string().min(1)).readonly(),
     shell: z.enum(['off', 'on']),
     // A record written before `git` existed (2026-11-11) ran with no git metadata writable:
