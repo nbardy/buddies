@@ -69,21 +69,14 @@ class RunTurnPolicy extends ChatTurnPolicy {
     super(() => null, volatileCarrier);
     this.maxRuntimeMs = record.maxRuntimeMs;
   }
-  override startTurn() {
-    // agent-cli encodes this capability set; adoption restores this same record, without respawn.
-    return { capabilities: this.record.capabilities };
-  }
-  override adoptionRecord(): RunTurnAdoption {
-    return this.record;
-  }
+  // agent-cli encodes this capability set; adoption restores this same record, without respawn.
+  override startTurn = () => ({ capabilities: this.record.capabilities });
+  override adoptionRecord = (): RunTurnAdoption => this.record;
   override adopt(): void {}
   override settle(outcome: ExecutionOutcome): Promise<void> {
-    this.save(outcome);
-    return Promise.resolve();
+    return Promise.resolve(this.save(outcome));
   }
-  override stop(): boolean {
-    return false;
-  }
+  override stop = () => false;
 }
 // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys)
 export function createRunTurn(ports: {
