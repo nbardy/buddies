@@ -1,6 +1,6 @@
 import { useAtomValue } from 'jotai';
 import { useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
 import { buddyRailFamily, channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
@@ -220,7 +220,13 @@ function DmScreen({ conversationId, context }: { conversationId: string; context
       />
     );
   if (buddy === null)
-    return <p role="alert">This conversation is not a Buddy DM or Builder chat.</p>;
+    return (
+      <Navigate
+        replace
+        to={`/chat/${encodeURIComponent(conversationId)}`}
+        state={mobileConversationRouteState({ ...location, search: backSearch })}
+      />
+    );
   const member = context.directory.activeMembers.find((entry) => entry.id === buddy.buddyId);
   const name = member?.name ?? 'Buddy';
   return (

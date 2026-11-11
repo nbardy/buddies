@@ -170,28 +170,35 @@ export function ChannelBuilder({
   const detail = detailOf(transcript);
   const config = detail?.config.config ?? null;
   const running = row !== null && row.run !== 'idle';
+  const modelControl = (
+    <button
+      type="button"
+      className="channel-dm-model channel-inline-action ui-truncate"
+      aria-label="Buddy Builder model"
+      aria-haspopup="dialog"
+      aria-expanded={modelOpen}
+      disabled={config === null}
+      onClick={() => setModelOpen(true)}
+    >
+      Model: {config ? modelSummary(config, catalog) : 'Loading'} ▾
+    </button>
+  );
   return (
     <section className={f.pane} aria-label="Buddy Builder conversation">
-      <header className={f.header}>
+      <header className={f.header} style={frame === 'mobile' ? { flexWrap: 'wrap' } : undefined}>
         {backTo !== null && (
           <Link className="mobile-channel-header__back" to={backTo} aria-label="Back">
             ‹
           </Link>
         )}
-        <div className={f.heading}>
+        <div className={f.heading} style={frame === 'mobile' ? { flex: 1 } : undefined}>
           {frame === 'desktop' ? <h2>Buddy Builder</h2> : <h1>Buddy Builder</h1>}
         </div>
-        <button
-          type="button"
-          className="channel-dm-model channel-inline-action ui-truncate"
-          aria-label="Buddy Builder model"
-          aria-haspopup="dialog"
-          aria-expanded={modelOpen}
-          disabled={config === null}
-          onClick={() => setModelOpen(true)}
-        >
-          Model: {config ? modelSummary(config, catalog) : 'Loading'} ▾
-        </button>
+        {frame === 'mobile' ? (
+          <div className="mobile-channel-header__dm-actions ui-row">{modelControl}</div>
+        ) : (
+          modelControl
+        )}
       </header>
       {modelOpen && (
         <ConfigOverlay

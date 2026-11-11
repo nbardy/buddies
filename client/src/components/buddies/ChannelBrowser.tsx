@@ -8,6 +8,7 @@ import { openSetupAt } from '../../atoms/ui';
 import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
 import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { rowBuddy } from '../../utils/conversation-row';
+import { Chat } from '../Chat';
 import { AppSettingsDropdown } from './AppSettingsDropdown';
 import { errorText } from './api';
 import { BuddyRailRow, CreatingBuddyRailRow } from './BuddyRailRow';
@@ -390,9 +391,9 @@ function DmPane({
     );
   if (buddy === null)
     return (
-      <p className="channel-browser-error" role="alert">
-        This conversation is not a Buddy DM or Builder chat.
-      </p>
+      <section className="channel-browser-dm" aria-label="Direct message">
+        <Chat id={conversationId} />
+      </section>
     );
   const member = directory.activeMembers.find((entry) => entry.id === buddy.buddyId);
   return (
