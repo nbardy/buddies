@@ -10,6 +10,7 @@
 
 .keyed-expedition-need {
   padding: var(--sp-6) var(--sp-7);
+  overflow-wrap: anywhere; /* a 64-hex ref ran off the phone card (real run, 2026-11-11) */
   border-left: 3px solid var(--theme-warning);
   background: color-mix(in srgb, var(--theme-warning) 8%, transparent);
   font-size: var(--fs-4);
