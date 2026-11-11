@@ -42,6 +42,8 @@ const contractOf = (over: Partial<keyed.Contract> = {}): keyed.Contract => ({
   leader: 'lead',
   repo: '/repo',
   autoApply: { usd: 5 },
+  leaderWake: { t: 'given', usd: 0.5, minutes: 10 },
+  doneReview: { t: 'given', usd: 2, minutes: 20 },
   ...over,
 });
 

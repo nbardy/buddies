@@ -264,6 +264,18 @@ test('flag on: preview writes nothing; launch, list, view; an owner reply settle
     ['ask', 0],
   ]);
   assert.equal(p.costUsd, 1);
+  // Per turn, which limits its harness holds (expedition-kernel/access.ts): a Claude call and the
+  // leader's wakes enforce every grant.
+  const held = (turn: keyed.TurnKind) =>
+    p.access
+      .filter((a) => a.turn === turn)
+      .map((a) =>
+        a.harness.t === 'known'
+          ? `${a.harness.provider}:${Object.values(a.harness.grants).every((g) => g.t === 'enforced')}`
+          : a.harness.why
+      );
+  assert.deepEqual(held('call'), ['claude:true']);
+  assert.deepEqual(held('leader'), ['claude:true']);
   assert.deepEqual(snapshot(folder), before, 'the folder is untouched');
   assert.deepEqual(fs.existsSync(h.expRoot) ? fs.readdirSync(h.expRoot) : [], []);
   const broken = planFolder({ plan: `${HEAD}\nexport default plan(async () => nope);\n` });
@@ -417,7 +429,7 @@ export default plan(async () => {
     1,
     'declined: no new plan'
   );
-  h.leaderAnswers(exp, 2, { answer: fence({ t: 'continue' }) });
+  h.leaderAnswers(exp, 2, { answer: fence({ t: 'continue', why: 'on track' }) });
 
   await wake(3);
   h.leaderAnswers(exp, 3, { files: { 'plan.ts': V1 }, answer: rewrite('add more, again') });

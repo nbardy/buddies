@@ -23,7 +23,7 @@ import { tempDir } from './temp';
 // TAG:<name> names the turn's files in FAKE_DIR; MODE:<mode> picks what it does; ANSWER_JSON:<json>
 // is what it answers. A prompt with no TAG (a memory reviewer would be one, but it runs on the fake
 // codex) answers at once. A leader wake (its body starts "Leader wake leader/<n> of expedition
-// <id>") is named `leader-<id>-<n>`: it records its prompt, then waits for the test's script
+// <id>") is named `leader-<id>-<n>`: it records its prompt and argv, then waits for the test's script
 // `<name>.json` ({ files: {path: text}, answer: text }), writes the files into its working
 // directory (the draft folder) and answers `answer` verbatim.
 const FAKE_CLAUDE = String.raw`#!/usr/bin/env node
@@ -56,6 +56,11 @@ async function rpc(tools, method, params) {
   const line = raw.split('\n').find((l) => l.startsWith('data: '));
   return JSON.parse(line ? line.slice(6) : raw);
 }
+// The Buddy tools the turn is shown; a turn given no MCP server (an expedition call) is shown none.
+async function listTools(name) {
+  const tools = mcp();
+  mark(name + '.tools', tools ? JSON.stringify((await rpc(tools, 'tools/list', {})).result.tools.map((t) => t.name)) : '[]');
+}
 function answer() {
   const json = (/ANSWER_JSON:(.*)$/m.exec(prompt) || [])[1];
   text('Here is my answer.\n\n');
@@ -76,8 +81,8 @@ async function leader(name) {
   mark(name + '.pgid', execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
   mark(name + '.cwd', process.cwd());
   mark(name + '.prompt', prompt);
-  const tools = mcp();
-  if (tools) mark(name + '.tools', JSON.stringify((await rpc(tools, 'tools/list', {})).result.tools.map((t) => t.name)));
+  mark(name + '.argv', JSON.stringify(process.argv.slice(2)));
+  await listTools(name);
   text('reading;');
   mark(name + '.midturn', process.pid);
   await until(name + '.json');
@@ -101,8 +106,9 @@ async function main() {
   mark(tag + '.pgid', execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
   mark(tag + '.cwd', process.cwd());
   mark(tag + '.prompt', prompt);
+  mark(tag + '.argv', JSON.stringify(process.argv.slice(2)));
+  await listTools(tag);
   const tools = mcp();
-  if (tools) mark(tag + '.tools', JSON.stringify((await rpc(tools, 'tools/list', {})).result.tools.map((t) => t.name)));
   text('working;');
   mark(tag + '.midturn', process.pid);
   if (mode === 'answer' || mode === 'malformed') return answer();
@@ -537,6 +543,8 @@ export function agentSpec(
     tree?: 'none' | 'checkout';
     max?: keyed.Max;
     context?: keyed.AgentCall['context'];
+    grant?: keyed.AgentCall['grant'];
+    inputs?: keyed.AgentCall['inputs'];
   } = {}
 ): RunSpec {
   return {
@@ -546,11 +554,11 @@ export function agentSpec(
       key,
       by: x.by ?? SEAT,
       brief,
-      inputs: [],
+      inputs: x.inputs ?? [],
       output: N_SCHEMA,
       tree: x.tree ?? 'none',
       base: { t: 'launch' },
-      grant: { reads: [], web: false },
+      grant: x.grant ?? { reads: [], web: false },
       context: x.context ?? { t: 'cold' },
       pools: ['claude'],
       max: x.max ?? { usd: 20, minutes: 30 },

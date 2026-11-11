@@ -93,6 +93,8 @@ type Contract = {
   rules: string[];                     // appended to every brief
   leader: BuddyId; repo: Path;
   autoApply: { usd: number };          // a rewrite adding more new cost than this waits for the owner
+  leaderWake: Cap;                     // { t: 'given' | 'defaulted'; usd; minutes }: one wake's bound
+  doneReview: Cap;                     // the same, for one host-run done check or review
 };
 type Criterion =
   | { t: 'check'; command: string }
@@ -132,7 +134,9 @@ type Diff = { reused: Key[]; attached: Key[]; dropped: Key[]; started: Key[]; ne
 ```
 
 `Key` is `phase / step / id`, built by the library. `Hash` covers the whole call, brief text
-included.
+included. `grant` and `tree` decide what the call's turn may do: one policy table
+(`server/src/expedition-kernel/access.ts`) turns them into a capability set that the harness
+enforces where it can, and the preview says which grants are only advisory (CONNECT_PLAN §10).
 
 ## 5. How a plan changes
 
@@ -222,7 +226,15 @@ Building the kernel found two more:
   empty and its new cost is $0 when the rules gate runs. The auto-apply limit therefore only
   bounds work the new plan can start at once, not everything it adds. See §9 q4.
 - **Leader wakes and done criteria are calls too** (`leader`, `verdict`), so they use the same
-  log, budget, reuse and restart path. The contract does not price them; the host's limits do.
+  log, budget, reuse and restart path. The contract bounds each one: `leaderWake` and
+  `doneReview`, each `{usd, minutes}`, either the owner's (`given`) or the host's rule applied to the
+  budget (`defaulted`, shown as such in the parsed contract). The rule, `defaultCap` in
+  `expedition-kernel/contract.ts`: usd = min(budget, clamp(10% of budget, $0.25, $1.00)); minutes =
+  min(budget hours, clamp(10% of budget minutes, 5, 20)). The first real run paid $0.039 and 12 s
+  for a wake, so the floor is ~6x a real wake; 10% keeps wakes proportionate on a small budget
+  (a $3 budget reserves $0.30 per wake, not the $2 that held most of it); the ceiling stops a
+  large budget reserving an agent-sized sum per wake. A log written before the fields existed reads
+  them as `defaulted` $2 / 20 min, what it ran under.
 
 Keys are `phase/step/id` (`collect/collect/taskus`), not the shorter `collect/taskus` used in
 earlier sketches.

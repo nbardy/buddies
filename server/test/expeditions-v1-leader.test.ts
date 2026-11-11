@@ -53,12 +53,13 @@ const worker = role({ by: ${SEAT}, usd: 1, minutes: 10 });`;
 const answers = (tag: string, mode = 'answer', summary = 'done') =>
   `Do it. TAG:${tag} MODE:${mode} ANSWER_JSON:{"summary":"${summary}","files":[]}`;
 
-function contractOf(x: { done?: string; autoApply?: number }): string {
+function contractOf(x: { done?: string; autoApply?: number; wakeUsd?: number }): string {
   return `---
 leader: ${lead}
 repo: ${h.repo}
 budget: { usd: 50, hours: 4 }
 autoApply: { usd: ${x.autoApply ?? 5} }
+${x.wakeUsd === undefined ? '' : `leaderWake: { usd: ${x.wakeUsd}, minutes: 5 }`}
 pools: { claude: 4 }
 done:
 ${x.done ?? '  - check: node scripts/ok.js'}
@@ -76,6 +77,7 @@ function planFolder(x: {
   briefs: Record<string, string>;
   done?: string;
   autoApply?: number;
+  wakeUsd?: number;
 }): string {
   const folder = tempDir('xk-leader-plan-');
   fs.writeFileSync(path.join(folder, 'contract.md'), contractOf(x));
@@ -129,6 +131,21 @@ export default plan(async (x) => {
   // told the state without the body of any output.
   const name1 = h.leaderName(exp, 1);
   assert.deepEqual(JSON.parse(h.read(`${name1}.tools`)), [], 'a leader wake has no tools');
+  // Its limits (expedition-kernel/access.ts `leader`, CONNECT_PLAN §10 F1): read the expedition
+  // directory, write only the draft folder; no shell, web, instructions, MCP server or bypass.
+  const argv1: string[] = JSON.parse(h.read(`${name1}.argv`));
+  const flag = (name: string) => argv1[argv1.indexOf(name) + 1];
+  assert.equal(flag('--permission-mode'), 'dontAsk');
+  assert.equal(flag('--setting-sources'), '');
+  assert.equal(flag('--tools'), 'Read,Grep,Glob,Edit,Write,NotebookEdit');
+  assert.deepEqual(
+    argv1.flatMap((a, i) => (a === '--add-dir' ? [argv1[i + 1]] : [])),
+    [expDir(exp)]
+  );
+  assert.deepEqual(JSON.parse(flag('--settings') as string).permissions.allow, [
+    `Edit(/${draft1}/**)`,
+  ]);
+  assert.ok(!argv1.includes('--dangerously-skip-permissions') && !argv1.includes('--mcp-config'));
   assert.equal(fs.realpathSync(h.read(`${name1}.cwd`)), fs.realpathSync(draft1));
   assert.equal(
     fs.readFileSync(path.join(draft1, 'plan.ts'), 'utf8'),
@@ -226,6 +243,7 @@ export default plan(async (x) => {
 });
 `,
       briefs: { probe: answers('probetwo') },
+      wakeUsd: 0.4,
     }),
     ws,
     base
@@ -237,9 +255,13 @@ export default plan(async (x) => {
   const [settled] = ofKey(await h.entries(exp), 'settled', 'leader/1');
   assert.equal(settled?.outcome.t, 'errored');
   assert.match(settled?.outcome.t === 'errored' ? settled.outcome.why : '', /malformed answer/);
-  // Its turn reported no usage, so the kernel charged the wake's whole reservation ($1).
+  // Its turn reported no usage, so the kernel charged the wake's whole reservation: the
+  // contract's `leaderWake` cap ($0.40), not a fixed $2 (the 2026-11-11 run held $2 of a $3
+  // budget for a wake that cost $0.04).
   assert.deepEqual(settled?.spent, { t: 'unreported' });
-  assert.equal(done.spentUsd - before, 1);
+  const [started] = ofKey(await h.entries(exp), 'started', 'leader/1');
+  assert.equal(started?.reserved.usd, 0.4);
+  assert.ok(Math.abs(done.spentUsd - before - 0.4) < 1e-9);
   // An errored review wake ends the expedition with the reason as its gap.
   assert.equal(done.status.t === 'finished' && done.status.reason.t, 'not-met');
 });
@@ -296,7 +318,7 @@ export default plan(async (x) => {
   assert.equal(plansOf(await h.entries(exp)).length, 1, 'the rejected rewrite changed nothing');
   assert.ok(!fs.existsSync(path.join(expDir(exp), 'plans', 'v1')));
 
-  h.leaderAnswers(exp, 3, { answer: fence({ t: 'continue' }) });
+  h.leaderAnswers(exp, 3, { answer: fence({ t: 'continue', why: 'on track' }) });
   h.leaderAnswers(exp, 2, {
     files: {
       'plan.ts': V1,
@@ -392,7 +414,7 @@ export default plan(async () => {
   assert.equal(plansOf(await h.entries(exp)).length, 1);
   assert.ok(!fs.existsSync(path.join(expDir(exp), 'plans', 'v1')));
   assert.equal((await h.view(exp)).approval.t, 'none');
-  h.leaderAnswers(exp, 2, { answer: fence({ t: 'continue' }) });
+  h.leaderAnswers(exp, 2, { answer: fence({ t: 'continue', why: 'on track' }) });
 
   // Second look: the same rewrite, approved in the thread.
   await wake(exp, 3);
@@ -408,6 +430,8 @@ export default plan(async () => {
   assert.equal((await h.answerApproval(exp, true)).t, 'nothing-pending', 'answered once');
   const done = await finished(exp);
   assert.equal(done.status.t === 'finished' && done.status.reason.t, 'met');
+  // The continue's reason reaches the review marker (2026-11-11: it read empty).
+  assert.ok(done.markers.some((m) => m.t === 'review' && m.why === 'on track'));
   assert.equal(h.spawnsOf('morefour'), 1);
   assert.deepEqual(
     (await h.runsOf(lead)).filter((r) => r.input.kind !== 'post'),
@@ -460,9 +484,23 @@ export default plan(async (x) => {
     'the owner criterion'
   );
   assert.equal(owner.lanes.find((l) => l.key === 'make')?.status, 'settled');
-  const shipRoot = (await h.rootPosts(dm)).find(
-    (p) => p.purpose === 'expedition_ask' && p.body.includes('Ship the result?')
+  const shipRoot = await h.eventually(
+    async () =>
+      (await h.rootPosts(dm)).find(
+        (p) => p.purpose === 'expedition_ask' && p.body.includes('Ship the result?')
+      ),
+    Boolean,
+    'the acceptance question'
   );
+  // F5: the owner is asked to accept the result, not an opaque ref (2026-11-11: `rank@<64 hex>`).
+  const ship = owner.asks.find((x) => x.key === 'done/2');
+  assert.equal(ship?.about.t, 'candidate');
+  if (ship?.about.t === 'candidate') {
+    assert.equal(ship.about.summary, 'done');
+    assert.ok(fs.existsSync(ship.about.answerPath), 'the answer file exists');
+    assert.ok(shipRoot?.body.includes(`Summary:\ndone`), shipRoot?.body);
+    assert.ok(shipRoot?.body.includes(`Full answer: ${ship.about.answerPath}`), shipRoot?.body);
+  }
   await h.reply(dm, shipRoot?.id as string, 'yes', 'e-ship');
   const done = await finished(exp);
   assert.equal(done.status.t === 'finished' && done.status.reason.t, 'met');

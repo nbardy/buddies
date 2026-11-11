@@ -210,8 +210,8 @@ Where this can spend money, start agents or touch a repo:
 
 1. `open` at boot (recovery re-issues starts, `recovery.ts:57-58`): behind the gate and the flag.
 2. `launch`: owner HTTP only, never from the tool.
-3. Leader wakes and done reviews: bounded by `limits.leaderWake` and `limits.doneReview`
-   (`kernel.ts:66-67`).
+3. Leader wakes and done reviews: bounded by the contract's `leaderWake` and `doneReview`
+   (`defaulted` from the budget when the owner names none: DESIGN §5).
 4. The memory reviewer after each call: suppressed.
 5. Owner replies in the leader DM waking the leader: consumed.
 6. Decision-G automatic resume (`runner.ts:382-391`): inside the call's reservation.
@@ -291,8 +291,8 @@ status line; a `confirm` ask takes `yes y yeah yep ok okay confirm confirmed app
 accept accepted pass true` / `no n nope nah decline declined reject rejected fail false`
 (case-insensitive, trailing `.`/`!` ignored) and answers each other reply once; a stored ask answer
 is a ref like any output; a rewrite must name its own draft folder (a relative path is read from
-it); approval requests get a fresh key each time (a re-submitted rewrite posts again); the default
-limits are $2 / 20 min for a wake and for a done review. Known limits: an owner reply that lands
+it); approval requests get a fresh key each time (a re-submitted rewrite posts again); a wake and a done
+review are bounded by the contract's caps (first run: a fixed $2 / 20 min, see F3). Known limits: an owner reply that lands
 before `start()` has loaded the `owner.json` files is not consumed (it wakes the leader, as before
 this step); one in an expedition the host has not opened is consumed but read by no inbox; the Buddy briefing still appends its generic "Answer it with
 `post({ answers })`" line to call and wake requests, which have no tools (the final message is the
@@ -348,7 +348,7 @@ read-only view never shows one.
 | D8 | Acts through the Buddy tool | None in v1 |
 | D9 | Flag and namespace | `UNLEASHD_EXPEDITIONS_V1=1`, `/api/buddies/keyed-expeditions`, `~/.agent-viewer/expeditions-v1/` |
 | D10 | The live old GTM record | The owner gives it a verdict or stops it; the old host is deleted only after |
-| D11 | `grant.reads` / `web` | Advisory in the brief for v1 (nothing enforces them) |
+| D11 | `grant.reads` / `web` | Superseded 2026-11-11 (F1): each turn kind has a capability set (`server/src/expedition-kernel/access.ts`) that agent-cli turns into the harness's own flags; the preview reports each grant enforced or advisory |
 
 ## 10. The first real run, and what is open (2026-11-11)
 
@@ -372,12 +372,12 @@ fan-out wider than one call per provider.
 |---|---|---|---|
 | F1 | **A call turn is not tool-less.** The `call` role removes the Buddy tools only. Claude ran with `--tools default` and bypassed permissions (sub-agents, web, file writes, shell, cron and remote triggers); Codex ran with `danger-full-access`. A brief's "do not change files" and "no web" are advice (D11). | the leader wake's `init` event and the CLI command lines in the run's watch log | Pass a restricted tool list and permission mode per call through `vendor/agent-cli-tool` (each harness's own flags), derived from the call's `grant`; report each grant as enforced or advisory in the preview |
 | F2 | **Calls inherit the owner's global agent instructions.** Codex's prompt began with the global AGENTS.md (3,057 characters). Each Claude call wrote 14-15k cache tokens, which suggests CLAUDE.md loads too (not verified). | the Codex rollout's first message; the Claude usage rows | Decide whether a call should load them. If not, run calls with the harness's "no user instructions" setting; either way record the choice in the brief header |
-| F3 | **A leader wake reserves $2 whatever the budget.** `DEFAULT_LIMITS` in `server/src/expeditions-v1/host.ts`, with no override. On a $3 budget it held most of it while spending $0.04. | budget after step 2: $0.54 spent, $2 reserved | Put the wake and done-review caps in the contract, defaulting to a fraction of the budget |
+| F3 (done) | **A leader wake reserves $2 whatever the budget.** `DEFAULT_LIMITS` in `server/src/expeditions-v1/host.ts`, with no override. On a $3 budget it held most of it while spending $0.04. | budget after step 2: $0.54 spent, $2 reserved | Put the wake and done-review caps in the contract, defaulting to a fraction of the budget |
 | F4 | **A call's prompt is kept nowhere in the expedition directory.** A closed run record drops the posted body and the journals are deleted at settle. | the run's `runs/` records | Keep the rendered brief beside the ref (it is already part of the call's hash) |
-| F5 | **The owner is asked to accept an opaque ref.** The done question shows `rank@<64 hex>`, not the result. | the live screenshots | Show the candidate's summary and a link to its answer file in the ask and in the view |
-| F6 | **Codex and every non-Claude model are `unreported`,** so each is charged its whole reservation. Safe, but the budget then measures reservations, not work. | $0.50 of the run's $0.58 | Add rates for the models in use, or count tokens from the Codex rollout |
-| F7 | **The leader's `continue` carries no reason** in the timeline, though it explained itself in prose. | the review marker's empty "why" | Add `why` to the `continue` act |
-| F8 | **Wording.** A waiting ask reads "Why: Still running."; an owner-accepted criterion reads "Its judge passed it." | the screenshots | Say "Waiting on you" and "You accepted it" |
+| F5 (done: the ask post and the view carry the candidate summary and answer-file path (`AskAbout`)) | **The owner is asked to accept an opaque ref.** The done question shows `rank@<64 hex>`, not the result. | the live screenshots | Show the candidate's summary and a link to its answer file in the ask and in the view |
+| F6 (done: Codex models are priced from OpenAI's published rates (`providers/pricing.ts`); a model off that page stays `unreported`) | **Codex and every non-Claude model are `unreported`,** so each is charged its whole reservation. Safe, but the budget then measures reservations, not work. | $0.50 of the run's $0.58 | Add rates for the models in use, or count tokens from the Codex rollout |
+| F7 (done: `continue` carries a required `why`) | **The leader's `continue` carries no reason** in the timeline, though it explained itself in prose. | the review marker's empty "why" | Add `why` to the `continue` act |
+| F8 (done: one words table by call kind and state (`keyed-timeline.ts`)) | **Wording.** A waiting ask reads "Why: Still running."; an owner-accepted criterion reads "Its judge passed it." | the screenshots | Say "Waiting on you" and "You accepted it" |
 
 Also known and not fixed: the time and dollar caps end a turn through the cancel path, so the
 crate run reads as cancelled by request (needs a per-request deadline in the crate); a pending
@@ -388,6 +388,8 @@ per temp path in the owner's home.
 ### Next work, in order
 
 1. F1 and F2: what a call may do and what it is told. Nothing unattended should run before these.
+   **Built 2026-11-11, F4 too** (see "F1, F2, F4 as built" below); the second real run confirms
+   the limits with the real CLIs.
 2. F3 to F5 and F7, F8: small, and they make a run legible to the owner.
 3. A second real run covering what the first did not: a leader rewrite, a checkout call, Codex as
    a seat with a rate, a 5-wide fan-out.
@@ -397,3 +399,37 @@ per temp path in the owner's home.
 6. Step 9: delete the old host once its last record is settled (D10), real `continues`, the crate
    deadline.
 
+### F1, F2, F4 as built (2026-11-11)
+
+- **One policy table**, `server/src/expedition-kernel/access.ts`: a `call` (`tree: none`) reads
+  its inputs' directories and `grant.reads` (relative to the repo), writes nothing, no shell, web
+  only with `grant.web`, no instructions; a `checkout` call reads and writes its worktree with a
+  sandboxed shell, web only with `grant.web`, the repository's own instructions; a review `judge`
+  reads the judged output and its producer's read roots, nothing else; a `leader` wake reads the
+  expedition directory and writes only its draft folder. Every turn: no sub-agents, no scheduling
+  or remote triggers, no MCP server, never the owner's user-level instructions or memory.
+- **The canonical set** is agent-cli's `TurnCapabilities` (a sum, no optional fields), passed as
+  `capabilities` on the turn request; each harness config maps it to its own flags and reports
+  each capability `enforced` or `advisory(reason)` (`capabilityReport`). A request without one
+  builds the same argv as before, pinned by `vendor/agent-cli-tool/test/capabilities.test.ts`.
+- **Claude**: `--tools` (the whole visible set), `--permission-mode dontAsk` and
+  `--permission-prompts none` (a refused tool returns an error result, nothing waits),
+  `--setting-sources ""` or `project` (CLAUDE.md follows the sources: verified in 2.1.322, and the
+  smoke transcripts show the 2,251-character global CLAUDE.md in every call),
+  `permissions.blockReads/WritesOutsideWorkingDirectories`, `--add-dir` per read root, an
+  `Edit(//dir/**)` pre-approval for the one writable directory, Claude's sandbox for Bash,
+  `--strict-mcp-config` with no servers, `--disable-slash-commands`. All enforced, except reads
+  once a shell is granted (the sandbox does not confine reads).
+- **Codex**: `--ignore-user-config` (drops the owner's MCP servers, plugins and
+  `danger-full-access`), `--ignore-rules`, `approval_policy="never"`, `-s read-only` or
+  `workspace-write` (cwd only, no network, TMPDIR and /tmp excluded), `web_search`, features off
+  (multi-agent, apps, plugins, hooks, browser and computer use, local automation),
+  `project_doc_max_bytes=0` when no instructions. Advisory: reads (the sandbox does not confine
+  them), shell off (Codex reads through its shell), agents (its prompt still describes
+  `spawn_agent`), instructions (`$CODEX_HOME/AGENTS.md` always loads).
+- **F4**: every call's, judge's and wake's exact request body is kept at
+  `runs/<name>.prompt.md` beside its record, written before the post and never rewritten; each
+  view bar names its producer's and judge's prompt files (`Bar.prompts`).
+- **Known gaps**: a review judge of a checkout call cannot read the branch's files (no shell,
+  worktree released at settle); grant paths are passed as directories (a file path is not
+  narrowed); the other harnesses run unrestricted with every grant reported advisory.

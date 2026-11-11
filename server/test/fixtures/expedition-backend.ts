@@ -138,10 +138,6 @@ async function main(): Promise<void> {
     installed: () => installedAgent(),
     logger: console,
     clock: systemClock,
-    limits: {
-      leaderWake: { usd: env('EXP_LEADER_USD', 1), minutes: 10 },
-      doneReview: { usd: 2, minutes: 10 },
-    },
     timing: {
       debounceMs: env('EXP_DEBOUNCE_MS', CALL_TIMING.debounceMs),
       backstopMs: env('EXP_BACKSTOP_MS', CALL_TIMING.backstopMs),

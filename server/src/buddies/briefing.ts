@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { TurnCapabilities } from '@nbardy/agent-cli';
 import type { Buddy, Doc } from '@unleashd/buddies-core';
 import type { BuddyContext, BuddyExecution, InstalledAgent } from '@unleashd/shared';
 import { buddyExecutionPreferences } from '@unleashd/shared';
@@ -19,12 +20,13 @@ export interface ResolvedBuddyConversation {
  * attempt run's, or one expedition call's (expeditions-v1/call-directory.ts: a run whose request
  * carries `expedition-run:` evidence; never the owner's checkout). 2026-11-01 smoke incident: crew
  * turns ran in the owner's checkout, isolated only by a brief, and a Codex sandbox rooted there
- * could not write the attempt worktree. */
+ * could not write the attempt worktree. A call also carries what its turn may do, from the
+ * executor's record (expedition-kernel/access.ts). */
 export type TurnDirectory =
   | { t: 'workspace' }
   | { t: 'crew'; path: string }
   | { t: 'attempt'; runId: string; path: string }
-  | { t: 'call'; runId: string; path: string };
+  | { t: 'call'; runId: string; path: string; capabilities: TurnCapabilities };
 export const WORKSPACE_DIRECTORY: TurnDirectory = { t: 'workspace' };
 
 const MAX = { soul: 10_000, memory: 6_000, tasks: 4_000 } as const;
@@ -56,10 +58,10 @@ export const BUDDY_TOOL_GUIDE = [
 ].join('\n');
 
 // An expedition call's turn is shown no tools (grants.ts `call`), so it is told so instead of the
-// tool guide: its request names the answer format.
+// tool guide: its request names the answer format and states the limits its tools are set to.
 export const CALL_TOOL_GUIDE = [
   'EXPEDITION CALL: this turn has NO Buddy tools (no posts, workers, tasks or docs).',
-  'Do the work in your working directory with your own file and shell tools. Your final message is your answer, in the exact format the request names; nothing else you write is read.',
+  'Do the work with the tools this turn has; the request states their limits. Your final message is your answer, in the exact format the request names; nothing else you write is read.',
 ].join('\n');
 /** The guide a turn's briefing carries, by its directory. */
 const GUIDE: { readonly [K in TurnDirectory['t']]: string } = {
@@ -174,9 +176,14 @@ const keyOf = (context: BuddyContext) => JSON.stringify([context.buddyId, contex
 
 export type Briefings = ReturnType<typeof createBriefings>;
 
-/** What kind of turn a warmed briefing is for: an expedition call, or any other Buddy turn. It
- * picks the turn's grant role (policy-port.ts). */
-export type TurnSeat = 'call' | 'buddy';
+// Pattern: sum-types (docs/patterns.md#sum-types)
+/** What kind of turn a warmed briefing is for: an expedition call, with what its turn may do, or
+ * any other Buddy turn. It picks the turn's grant role (policy-port.ts) and its harness request
+ * (turn-policy.ts `SEAT_REQUEST`). */
+export type TurnSeat =
+  | { readonly t: 'call'; readonly capabilities: TurnCapabilities }
+  | { readonly t: 'buddy' };
+const BUDDY_SEAT: TurnSeat = { t: 'buddy' };
 type Kept = { readonly resolved: ResolvedBuddyConversation; readonly seat: TurnSeat };
 /** Where a warmed briefing is kept, by its directory: a per-run directory by run id, else by Buddy. */
 const KEEP: {
@@ -186,8 +193,8 @@ const KEEP: {
 } = {
   workspace: () => ({ t: 'buddy' }),
   crew: () => ({ t: 'buddy' }),
-  attempt: (d) => ({ t: 'run', runId: d.runId, seat: 'buddy' }),
-  call: (d) => ({ t: 'run', runId: d.runId, seat: 'call' }),
+  attempt: (d) => ({ t: 'run', runId: d.runId, seat: BUDDY_SEAT }),
+  call: (d) => ({ t: 'run', runId: d.runId, seat: { t: 'call', capabilities: d.capabilities } }),
 };
 
 /**
@@ -210,7 +217,7 @@ export function createBriefings(
     const own = context.coordinationRunId ? runs.get(context.coordinationRunId) : undefined;
     if (own) return own;
     const resolved = cache.get(keyOf(context));
-    return resolved && { resolved, seat: 'buddy' };
+    return resolved && { resolved, seat: BUDDY_SEAT };
   };
   return {
     async warm(context: BuddyContext): Promise<ResolvedBuddyConversation> {

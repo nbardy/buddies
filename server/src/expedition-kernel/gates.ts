@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { keyed } from '@unleashd/shared';
+import { type CallTurn, grantsOf } from './access';
 import { parseCommand } from './argv';
 import { briefPath, missingBriefIssue } from './brief';
 import { type ProviderOf, canonicalise, providerFor } from './canonical';
@@ -18,7 +19,11 @@ import { AUTHORING_ENTRY } from './runner';
 const NODE_TYPES = path.resolve(__dirname, '..', '..', 'node_modules', '@types');
 
 export type TypecheckResult = { t: 'ok' } | { t: 'failed'; errors: string[] };
-export type StaticResult = { t: 'ok' } | { t: 'failed'; issues: string[] };
+/** `access`: per turn the calls (and the contract's leader and done reviews) would run, which of
+ * its limits its harness enforces and which are only advisory (`turnAccessOf`). */
+export type StaticResult =
+  | { t: 'ok'; access: keyed.TurnAccess[] }
+  | { t: 'failed'; issues: string[] };
 
 export const TSC_TIMEOUT_MS = 120_000;
 
@@ -117,6 +122,7 @@ export function staticGate(input: {
   };
 
   const seen = new Set<string>();
+  const canonical: keyed.Call[] = [];
   for (const call of calls) {
     if (seen.has(call.key)) issues.push(`${call.key}: key appears more than once`);
     seen.add(call.key);
@@ -148,8 +154,10 @@ export function staticGate(input: {
     }
     const canon = canonicalise(call, { contract, folder, providerOf });
     if (canon.t === 'invalid') issues.push(...canon.issues.map((i) => `${call.key}: ${i}`));
-    else
+    else {
+      canonical.push(canon.call);
       issues.push(...COMMANDS_OF[canon.call.t](canon.call as never).flatMap(unrunnable(call.key)));
+    }
   }
 
   for (const c of contract.done) {
@@ -158,5 +166,124 @@ export function staticGate(input: {
     if (c.t === 'check') issues.push(...unrunnable('contract done')(c.command));
   }
   const unique = [...new Set(issues)];
-  return unique.length === 0 ? { t: 'ok' } : { t: 'failed', issues: unique };
+  return unique.length === 0
+    ? { t: 'ok', access: turnAccessOf(contract, canonical, providerOf) }
+    : { t: 'failed', issues: unique };
+}
+
+// ---- what each turn may do, on its harness (expedition-kernel/access.ts) ----
+
+/** Placeholder paths: what a harness enforces depends on a set's shape, never its paths. */
+const AT = {
+  work: '<run>/work',
+  tree: '<run>/tree',
+  refs: '<expedition>/refs',
+  exp: '<expedition>',
+};
+const AGENT_TURN: {
+  readonly [K in keyed.AgentCall['tree']]: (c: keyed.AgentCall) => CallTurn;
+} = {
+  none: (c) => ({ t: 'call', work: AT.work, reads: [AT.refs, ...c.grant.reads], web: c.grant.web }),
+  checkout: (c) => ({
+    t: 'checkout',
+    tree: AT.tree,
+    reads: [AT.refs, ...c.grant.reads],
+    web: c.grant.web,
+  }),
+};
+const JUDGE_TURN: CallTurn = { t: 'judge', reads: [AT.refs] };
+const LEADER_TURN: CallTurn = { t: 'leader', expDir: AT.exp, draft: `${AT.exp}/drafts/1` };
+
+const accessRow = (
+  label: string,
+  turn: CallTurn,
+  who: keyed.Who,
+  providerOf: ProviderOf
+): keyed.TurnAccess => {
+  const p = providerFor(who, providerOf);
+  return { label, turn: turn.t, harness: (HARNESS_OF[p.t] as HarnessOf)(p, turn) };
+};
+type Provided = ReturnType<typeof providerFor>;
+type HarnessOf = (p: Provided, turn: CallTurn) => keyed.TurnAccess['harness'];
+const HARNESS_OF: {
+  readonly [K in Provided['t']]: (
+    p: Extract<Provided, { t: K }>,
+    turn: CallTurn
+  ) => keyed.TurnAccess['harness'];
+} = {
+  known: (p, turn) => ({ t: 'known', provider: p.provider, grants: grantsOf(p.provider, turn) }),
+  unknown: (p) => ({ t: 'unknown', why: p.why }),
+};
+/** A judge row for a review; a check is a host command, not a turn, and `none` judges nothing. */
+const JUDGE_ROW: {
+  readonly [K in keyed.CallJudge['t']]: (
+    j: Extract<keyed.CallJudge, { t: K }>,
+    label: string,
+    providerOf: ProviderOf
+  ) => keyed.TurnAccess[];
+} = {
+  none: () => [],
+  check: () => [],
+  review: (j, label, providerOf) => [accessRow(label, JUDGE_TURN, j.by, providerOf)],
+};
+const reviewRow = (
+  label: string,
+  judge: keyed.CallJudge | keyed.Verdict,
+  providerOf: ProviderOf
+): keyed.TurnAccess[] =>
+  (JUDGE_ROW[judge.t] as (j: keyed.CallJudge, l: string, p: ProviderOf) => keyed.TurnAccess[])(
+    judge,
+    label,
+    providerOf
+  );
+/** A done criterion's turn: a review is one (by its seat); a check and the owner's are not. */
+const CRITERION_ROW: {
+  readonly [K in keyed.Criterion['t']]: (
+    c: Extract<keyed.Criterion, { t: K }>,
+    label: string,
+    providerOf: ProviderOf
+  ) => keyed.TurnAccess[];
+} = {
+  check: () => [],
+  owner: () => [],
+  review: (c, label, providerOf) => [accessRow(label, JUDGE_TURN, c.by, providerOf)],
+};
+const ROWS: {
+  readonly [K in keyed.Call['t']]: (
+    c: Extract<keyed.Call, { t: K }>,
+    providerOf: ProviderOf
+  ) => keyed.TurnAccess[];
+} = {
+  agent: (c, providerOf) => [
+    accessRow(c.key, AGENT_TURN[c.tree](c), c.by, providerOf),
+    ...reviewRow(c.key, c.judge, providerOf),
+  ],
+  verdict: (c, providerOf) => reviewRow(c.key, c.verdict, providerOf),
+  command: () => [],
+  ask: () => [],
+  leader: () => [],
+};
+
+/**
+ * Per turn: the calls' producers and review judges, then the contract's leader (its wakes) and
+ * its done reviews, each with the grants its harness enforces and the ones it can only state.
+ */
+export function turnAccessOf(
+  contract: keyed.Contract,
+  calls: readonly keyed.Call[],
+  providerOf: ProviderOf
+): keyed.TurnAccess[] {
+  return [
+    ...calls.flatMap((c) =>
+      (ROWS[c.t] as (c: keyed.Call, p: ProviderOf) => keyed.TurnAccess[])(c, providerOf)
+    ),
+    accessRow('leader', LEADER_TURN, { t: 'buddy', id: contract.leader }, providerOf),
+    ...contract.done.flatMap((d, i) =>
+      (CRITERION_ROW[d.t] as (c: keyed.Criterion, l: string, p: ProviderOf) => keyed.TurnAccess[])(
+        d,
+        `done/${i}`,
+        providerOf
+      )
+    ),
+  ];
 }

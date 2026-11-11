@@ -228,7 +228,7 @@ export class ScriptedLeader implements Leader {
     return { t: 'decided', dispositions: this.disposer(diff, dropped) };
   }
 }
-export const cont: Acted = { act: { t: 'continue' }, spent: reported(0.1) };
+export const cont: Acted = { act: { t: 'continue', why: 'on track' }, spent: reported(0.1) };
 
 export class ScriptedOwner implements Owner {
   readonly asked: RewriteForOwner[] = [];

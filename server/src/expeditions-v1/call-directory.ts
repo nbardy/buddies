@@ -54,5 +54,5 @@ export async function callDirectory(
     return refuse('the request is not the one the executor posted');
   if (r.tree.t !== 'dir' && r.tree.t !== 'checkout')
     return refuse(`a call never runs in a ${r.tree.t} tree`);
-  return { t: 'call', runId, path: r.tree.path };
+  return { t: 'call', runId, path: r.tree.path, capabilities: r.capabilities };
 }

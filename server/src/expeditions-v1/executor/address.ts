@@ -49,12 +49,15 @@ export type RunPaths = {
   readonly scratch: string;
   /** A `tree: 'none'` call's working directory (kept after it ends). */
   readonly work: string;
+  /** An agent turn's exact request body, kept beside its record (prompts.ts). */
+  readonly prompt: string;
 };
 export function runPaths(expDir: string, runId: string): RunPaths {
   const name = fileNameOf(runId);
   const dir = path.join(expDir, 'runs', name);
   return {
     record: path.join(expDir, 'runs', `${name}.json`),
+    prompt: path.join(expDir, 'runs', `${name}.prompt.md`),
     tree: path.join(dir, 'tree'),
     scratch: path.join(dir, 'scratch'),
     work: path.join(dir, 'work'),

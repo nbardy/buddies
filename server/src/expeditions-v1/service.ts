@@ -7,6 +7,8 @@ import { keyedRowOf, keyedViewOf } from '../expedition-kernel/projection';
 import { type Resolved, resolveBase } from '../expeditions/checks';
 import type { AskAnswer } from './executor/asks';
 import type { KeyedHost, KeyedHostDeps } from './host';
+import { aboutIn } from './owner/candidate';
+import { keepingPrompts } from './prompt-views';
 import { isExpeditionId, needsOpening, shelfIds, shelved } from './shelf';
 
 // The keyed expeditions as the server sees them (CONNECT_PLAN §3, §4, §7; step 6): ONE value the
@@ -93,7 +95,11 @@ export function createKeyedExpeditions(
   mode: KeyedMode,
   deps: KeyedExpeditionsDeps
 ): KeyedExpeditions {
-  return (MODES[mode.t] as (m: KeyedMode, d: KeyedExpeditionsDeps) => KeyedExpeditions)(mode, deps);
+  // Each view leaves with its bars' kept prompt files (prompt-views.ts, CONNECT_PLAN §10 F4).
+  return keepingPrompts(
+    deps.root,
+    (MODES[mode.t] as (m: KeyedMode, d: KeyedExpeditionsDeps) => KeyedExpeditions)(mode, deps)
+  );
 }
 const MODES: {
   readonly [K in KeyedMode['t']]: (
@@ -123,7 +129,7 @@ async function viewOnDisk(root: string, id: string): Promise<Viewed> {
   if (!isExpeditionId(id)) return { t: 'missing', why: `no expedition ${id}` };
   const s = await shelved(root, id);
   return s.t === 'readable'
-    ? { t: 'ok', view: keyedViewOf(s.view, NO_APPROVAL) }
+    ? { t: 'ok', view: keyedViewOf(s.view, NO_APPROVAL, aboutIn(s.view)) }
     : { t: 'missing', why: `expedition ${id} is unreadable: ${s.why}` };
 }
 /** An unreadable directory is left out of the list (a row has no "unreadable" shape) and said

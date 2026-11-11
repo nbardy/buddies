@@ -27,8 +27,9 @@ import type { OwnerBook } from './owner/book';
 // plus a read-only `contract.md`. Its answer is one `LeaderAct` (executor/answer.ts); a rewrite
 // names that draft folder, and the kernel's gates copy it as the next version.
 //
-// Write access is by the turn's cwd only: Codex sandboxes writes to it, Claude does not (accepted
-// for v1, §2). After a restart the kernel settles a wake that was in flight `errored` and closes
+// What the wake may do is the policy table's `leader` row (expedition-kernel/access.ts): read the
+// expedition directory, write only its draft folder, no shell, no web; Claude and Codex both hold
+// the writes to the draft (CONNECT_PLAN §10 F1). After a restart the kernel settles a wake that was in flight `errored` and closes
 // its id (recovery.ts), which cancels the turn: a wake's answer lives in the process that waits.
 
 export type LeaderDeps = {

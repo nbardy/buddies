@@ -11,6 +11,7 @@ import {
   groupLanes,
   placeMarkers,
   toneOf,
+  whyOf,
 } from '../src/components/buddies/keyed-timeline';
 import { finished, rowOf, runningWithAsks } from './keyed-fixtures';
 
@@ -31,6 +32,7 @@ const bar = (start: number, end: number | 'open'): keyed.Bar => ({
       ? { t: 'open' }
       : { t: 'settled', at: new Date(end).toISOString(), outcome: { t: 'errored', why: 'x' } },
   cost: { t: 'unknown' },
+  prompts: [],
 });
 
 // Regression guard: on a two-day axis a 3-second call is 0.0017% of the width. Drawn to scale it
@@ -130,4 +132,27 @@ test('the axis reads in minutes and in days', () => {
   assert.equal(durationLabel(3_000), '3 s');
   assert.equal(durationLabel(130 * 60_000), '2 h 10 m');
   assert.equal(durationLabel(2 * DAY + 4 * 3_600_000), '2 d 4 h');
+});
+
+// F8 (2026-11-11 screenshots): a waiting ask read "Still running." and the owner's own acceptance
+// read "Its judge passed it." The words depend on the kind of call as well as its state.
+test('a bar says what is true for its kind: waiting on you, you accepted it, a judge said no', () => {
+  const settled = (kind: keyed.CallKind, outcome: keyed.Outcome): keyed.Bar => ({
+    ...bar(0, 1000),
+    kind,
+    end: { t: 'settled', at: new Date(1000).toISOString(), outcome },
+  });
+  assert.equal(whyOf({ ...bar(0, 'open'), kind: 'ask' }), 'Waiting on you.');
+  assert.equal(whyOf({ ...bar(0, 'open'), kind: 'agent' }), 'Running.');
+  assert.equal(whyOf(settled('ask', { t: 'passed', ref: 'r', out: true })), 'You accepted it.');
+  assert.equal(whyOf(settled('ask', { t: 'passed', ref: 'r', out: false })), 'You said no.');
+  assert.equal(
+    whyOf(settled('ask', { t: 'passed', ref: 'r', out: 'Robotics' })),
+    'You answered: Robotics'
+  );
+  assert.match(
+    whyOf(settled('agent', { t: 'failed', ref: 'r', out: 1, why: 'too vague' })),
+    /its judge said no: too vague/
+  );
+  assert.doesNotMatch(whyOf(settled('ask', { t: 'passed', ref: 'r', out: true })), /judge/);
 });

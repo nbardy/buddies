@@ -1,4 +1,4 @@
-import type { McpServerSpec } from '@nbardy/agent-cli';
+import type { McpServerSpec, TurnCapabilities } from '@nbardy/agent-cli';
 import type {
   BuddyContext,
   ContentPart,
@@ -43,6 +43,13 @@ export type TurnGate = 'send' | 'enqueue' | 'wait' | 'admitted';
 // Pattern: sum-types (docs/patterns.md#sum-types)
 export type PolicyAdoption = { t: 'chat' } | BuddyPolicyAdoption;
 
+/** What a policy adds to a turn's harness request. */
+export type TurnRequestExtras = {
+  mcpServers?: Record<string, McpServerSpec>;
+  extraArgs?: readonly string[];
+  capabilities?: TurnCapabilities;
+};
+
 /** The adopted turn's own review window: its attempt, and where its messages start. */
 export interface AdoptedReview {
   attemptId: string;
@@ -80,11 +87,10 @@ export interface TurnPolicy {
   turnDirectory(stored: string): string;
   /** Configuration admission: throws when the provider cannot run this kind. */
   preflight(provider: ProviderName): void;
-  /** Right before spawn: extra request fields for this turn. */
-  startTurn(
-    input: TurnInput,
-    config: ResolvedExecutionConfig
-  ): { mcpServers?: Record<string, McpServerSpec>; extraArgs?: readonly string[] };
+  /** Right before spawn: extra request fields for this turn. `capabilities` only for an
+   * expedition call (its harness flags replace the permission bypass; agent-cli then refuses
+   * `mcpServers` and `extraArgs`); every other turn leaves it out and spawns as before. */
+  startTurn(input: TurnInput, config: ResolvedExecutionConfig): TurnRequestExtras;
   spawned(review: { attemptId: string; messageStart: number }): void;
   /** Right after startTurn, before spawn: this turn's state as data, for adoption. */
   adoptionRecord(): PolicyAdoption;

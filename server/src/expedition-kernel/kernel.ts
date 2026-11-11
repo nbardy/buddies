@@ -49,8 +49,6 @@ export type KernelDeps = {
     readonly zodEntry: string;
     readonly tscBin: string;
   };
-  /** What a leader wake and a done review may cost; neither is priced by the contract. */
-  readonly limits: { readonly leaderWake: keyed.Max; readonly doneReview: keyed.Max };
 };
 
 type Deliver = Asker['deliver'];

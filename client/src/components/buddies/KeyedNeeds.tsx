@@ -39,6 +39,22 @@ const Button = ({
   </button>
 );
 
+/** What the question's ref holds: the candidate's summary (a line per span, so it wraps inside the
+ * card without a pre-formatted block) and where its full answer is. Nothing for an ordinary ask. */
+const ABOUT: {
+  [K in keyed.AskAbout['t']]: (a: Extract<keyed.AskAbout, { t: K }>) => ReactNode;
+} = {
+  nothing: () => null,
+  candidate: (a) => (
+    <>
+      {a.summary.split('\n').map((line, i) => (
+        <span key={i}>{line}</span>
+      ))}
+      <span className="ui-muted">Full answer: {a.answerPath}</span>
+    </>
+  ),
+};
+
 /** A text ask takes an answer; a confirm ask takes Yes or No. */
 function Ask({ id, ask }: { id: string; ask: keyed.PendingAsk }) {
   const [text, setText] = useState('');
@@ -79,6 +95,7 @@ function Ask({ id, ask }: { id: string; ask: keyed.PendingAsk }) {
   return (
     <div className="keyed-expedition-need ui-stack">
       <strong>{ask.question}</strong>
+      {ABOUT[ask.about.t](ask.about as never)}
       <span className="ui-muted">{ask.key}</span>
       <div className="expedition-manage ui-row">
         {CONTROL[ask.answer]()}

@@ -240,6 +240,7 @@ function BarDetail({
           ],
           ['Ran', `${when(bar.start)} · ${span}`],
           ['Cost', costText(bar.cost)],
+          ['Prompt', bar.prompts.map((p) => `${p.role}: ${p.path}`).join(' · ') || 'none kept'],
         ]}
       />
       {canRetry(lane, bar) && (

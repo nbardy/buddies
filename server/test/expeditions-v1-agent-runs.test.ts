@@ -5,6 +5,8 @@ import { after, before, test } from 'node:test';
 import { keyed } from '@unleashd/shared';
 import { toolsFor } from '../src/buddies/mcp';
 import { endingOf } from '../src/expedition-kernel/runs';
+import { runPaths } from '../src/expeditions-v1/executor/address';
+import { withPrompts } from '../src/expeditions-v1/executor/prompts';
 import { getRef } from '../src/expeditions-v1/executor/refs';
 import { HASH, agentSpec, harness, runIdOf } from './fixtures/agent-runs';
 
@@ -40,6 +42,23 @@ after(async () => {
 const brief = (tag: string, mode: string, answer = '{"n":7}') =>
   `Do the thing. TAG:${tag} MODE:${mode} ANSWER_JSON:${answer}`;
 const expDir = (exp: string) => path.join(h.expRoot, exp);
+
+/** What the fake CLI was spawned with, read as the limits a turn ran under (claude flags). */
+const argvOf = (tag: string): string[] => JSON.parse(h.read(`${tag}.argv`));
+const flagOf = (argv: string[], name: string) => argv[argv.indexOf(name) + 1];
+const limitsOf = (argv: string[]) => {
+  const settings = JSON.parse(flagOf(argv, '--settings') as string);
+  return {
+    mode: flagOf(argv, '--permission-mode'),
+    sources: flagOf(argv, '--setting-sources'),
+    tools: flagOf(argv, '--tools'),
+    addDirs: argv.flatMap((a, i) => (a === '--add-dir' ? [argv[i + 1]] : [])),
+    allow: settings.permissions.allow,
+    sandbox: settings.sandbox?.enabled === true,
+    bypass: argv.includes('--dangerously-skip-permissions'),
+    mcp: argv.includes('--mcp-config'),
+  };
+};
 
 test('a seat call and a named-Buddy call answer with a typed value; one seat Buddy per workspace', {
   timeout: 240_000,
@@ -185,6 +204,177 @@ test('no memory review follows a call turn; one still follows a normal turn, who
     JSON.parse(h.read('normalone.tools')),
     Object.keys(toolsFor('worker')),
     "a normal Buddy turn's tool list is unchanged"
+  );
+  // ...and so is its command line: the bypass, the one MCP server and the steering hooks exactly
+  // as before capability sets (agent-cli pins the full argv of a request without one), and none
+  // of a call's limits.
+  const normal = argvOf('normalone'); // argv after the binary
+  assert.equal(normal[0], '--dangerously-skip-permissions');
+  assert.deepEqual(normal.slice(normal.indexOf('-p'), normal.indexOf('--settings')), [
+    '-p',
+    '--verbose',
+    '--output-format',
+    'stream-json',
+    '--include-partial-messages',
+    '--permission-mode',
+    'bypassPermissions',
+    '--tools',
+    'default',
+    '--add-dir',
+    h.repo,
+  ]);
+  assert.deepEqual(Object.keys(JSON.parse(flagOf(normal, '--settings') as string)), [
+    'autoMemoryEnabled',
+    'hooks',
+  ]);
+  assert.deepEqual(normal.slice(-3, -1), ['--strict-mcp-config', '--mcp-config']);
+  for (const limit of ['dontAsk', '--setting-sources', '--disable-slash-commands'])
+    assert.ok(!normal.includes(limit), `an ordinary turn has no ${limit}`);
+});
+
+test('each expedition turn kind spawns with its limits; its exact prompt is kept before the post', {
+  timeout: 240_000,
+}, async () => {
+  // CONNECT_PLAN §10 F1/F2/F4. Before: a call ran `--tools default`, bypassed permissions and
+  // loaded the owner's global CLAUDE.md; its prompt was kept only in a provider transcript.
+  const refs = path.join(expDir(EXP_A), 'refs');
+  const docs = path.join(h.repo, 'docs');
+  const input = keyed.refOf('p/seat/one', HASH('a')); // stored by the first test
+  const call = runIdOf(EXP_A, 'p/limits/call', '3');
+  const checkout = runIdOf(EXP_A, 'p/limits/checkout', '4');
+  await Promise.all([
+    h.start(
+      call,
+      agentSpec('p/limits/call', brief('limcall', 'answer', '{"n":3}'), {
+        grant: { reads: ['docs'], web: true },
+        inputs: [{ t: 'ref', ref: input }],
+      })
+    ),
+    h.start(
+      checkout,
+      agentSpec('p/limits/checkout', brief('limcheckout', 'answer', '{"n":4}'), {
+        tree: 'checkout',
+      })
+    ),
+  ]);
+  for (const id of [call, checkout])
+    assert.equal((await h.settledOf(id))[0]?.raw.t, 'ok', `${id} answered`);
+  const judge = runIdOf(EXP_A, 'p/limits/call', '3', 'judge');
+  await h.start(judge, {
+    t: 'review',
+    by: { t: 'seat', provider: 'claude', model: 'claude-haiku-5-5', effort: 'low' },
+    brief: 'Is it fine? TAG:limjudge MODE:answer ANSWER_JSON:{"verdict":"yes","why":"fine"}',
+    of: keyed.refOf('p/limits/call', HASH('3')),
+    max: { usd: 5, minutes: 10 },
+  });
+  assert.equal((await h.settledOf(judge))[0]?.raw.t, 'ok');
+
+  // A tree-less call: reads its input's directory and its grant (relative to the repo), web on,
+  // writes nothing, no shell, no user or project instructions, no MCP server, no bypass.
+  assert.deepEqual(limitsOf(argvOf('limcall')), {
+    mode: 'dontAsk',
+    sources: '',
+    tools: 'Read,Grep,Glob,WebSearch,WebFetch',
+    addDirs: [refs, docs],
+    allow: ['WebSearch', 'WebFetch'],
+    sandbox: false,
+    bypass: false,
+    mcp: false,
+  });
+  // A checkout call: read-write and a sandboxed shell in its worktree only, the repo's own
+  // instructions, web off (not granted).
+  // The worktree is released at settle; the harness root is already a realpath.
+  assert.equal(h.read('limcheckout.cwd'), runPaths(expDir(EXP_A), checkout).tree);
+  const inTree = limitsOf(argvOf('limcheckout'));
+  assert.deepEqual(inTree, {
+    mode: 'dontAsk',
+    sources: 'project',
+    tools: 'Read,Grep,Glob,Edit,Write,NotebookEdit,Bash',
+    addDirs: [],
+    allow: [`Edit(/${runPaths(expDir(EXP_A), checkout).tree}/**)`, 'Bash'],
+    sandbox: true,
+    bypass: false,
+    mcp: false,
+  });
+  // A review judge: the judged output and what its producer could read; nothing else.
+  assert.deepEqual(limitsOf(argvOf('limjudge')), {
+    mode: 'dontAsk',
+    sources: '',
+    tools: 'Read,Grep,Glob',
+    addDirs: [refs, docs],
+    allow: [],
+    sandbox: false,
+    bypass: false,
+    mcp: false,
+  });
+  // The limits are stated once, at the head of the prompt; the old advice is gone.
+  const sent = h.read('limcall.prompt');
+  assert.match(sent, /LIMITS \(the tools of this turn are set to these/);
+  assert.doesNotMatch(sent, /ACCESS \(advisory\)|do not change it/);
+
+  // F4: one prompt file per run id beside its record, holding exactly the posted body (which the
+  // CLI received inside the request line), written before the post.
+  for (const [runId, tag] of [
+    [call, 'limcall'],
+    [checkout, 'limcheckout'],
+    [judge, 'limjudge'],
+  ] as const) {
+    const file = runPaths(expDir(EXP_A), runId).prompt;
+    const kept = fs.readFileSync(file, 'utf8');
+    assert.ok(kept.startsWith(`Expedition call ${runId} `), file);
+    assert.ok(h.read(`${tag}.prompt`).includes(kept), `${tag} received the kept prompt`);
+  }
+  const seat = (await h.buddies(ws)).find((b) => b.slug === 'expedition-seat');
+  const posts = (await h.runsOf(seat?.id as string)).flatMap((r) =>
+    r.input.kind === 'post' ? [r.input.postId as string] : []
+  );
+  const keptBodies = new Map(
+    [call, checkout, judge].map((id) => [
+      fs.readFileSync(runPaths(expDir(EXP_A), id).prompt, 'utf8'),
+      runPaths(expDir(EXP_A), id).prompt,
+    ])
+  );
+  let matched = 0;
+  for (const postId of posts) {
+    const { body } = await h.http('GET', `/api/buddies/posts/${postId}/thread?limit=1`);
+    const file = keptBodies.get(body.root.body);
+    if (file === undefined) continue;
+    matched += 1;
+    assert.ok(
+      fs.statSync(file).mtimeMs <= Date.parse(body.root.createdAt),
+      `${file} was written before its post`
+    );
+  }
+  assert.equal(matched, 3, 'each kept prompt is exactly a posted body');
+
+  // The view's bar detail names them: the producer's and its judge's, at the paths written.
+  const bar = (key: string, letter: string): keyed.Bar => ({
+    key,
+    hash: HASH(letter),
+    kind: 'agent',
+    attempt: 1,
+    planVersion: 0,
+    start: new Date().toISOString(),
+    end: { t: 'open' },
+    cost: { t: 'unknown' },
+    prompts: [],
+  });
+  const view = withPrompts(h.expRoot, {
+    id: EXP_A,
+    lanes: [
+      { key: 'p/limits/call', kind: 'agent', status: 'settled', bars: [bar('p/limits/call', '3')] },
+      { key: 'p/never', kind: 'agent', status: 'declared', bars: [bar('p/never', '5')] },
+    ],
+  } as unknown as keyed.KeyedView);
+  assert.deepEqual(
+    view.lanes.map((l) => l.bars[0]?.prompts),
+    [
+      [
+        { role: 'producer', path: runPaths(expDir(EXP_A), call).prompt },
+        { role: 'judge', path: runPaths(expDir(EXP_A), judge).prompt },
+      ],
+      [],
+    ]
   );
 });
 

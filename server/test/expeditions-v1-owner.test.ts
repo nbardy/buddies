@@ -218,7 +218,7 @@ test('asks post once across a restart and settle from thread replies; commands s
   const name = h.leaderName(exp, 1);
   await h.eventually(() => h.exists(`${name}.midturn`), Boolean, 'the review wake');
   assert.match(h.read(`${name}.prompt`), /Please favour blue options\./);
-  h.leaderAnswers(exp, 1, { answer: fence({ t: 'continue' }) });
+  h.leaderAnswers(exp, 1, { answer: fence({ t: 'continue', why: 'on track' }) });
 
   // The candidate's owner criterion is an ask too; answered here through the route.
   const doneAsk = await h.eventually(

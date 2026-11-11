@@ -1,5 +1,6 @@
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
+import type { TurnCapabilities } from '@nbardy/agent-cli';
 import { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import type { RawOutcome, RunSpec } from '../../expedition-kernel/ports';
@@ -118,8 +119,35 @@ const Settled = v('settled', {
   spent: keyed.Usage,
   stop: Stop.default({ t: 'none' }),
 });
+/** What the call's turn may do (expedition-kernel/access.ts), decided at start and read by the
+ * Buddy server when the turn spawns (call-directory.ts): the record is the authority, never the
+ * post. A record written before capability sets does not parse; that is deliberate (a call must
+ * never run without its limits). */
+const Files = z.discriminatedUnion('t', [
+  v('read', { roots: z.array(z.string().min(1)).readonly() }),
+  v('write', {
+    dir: z.string().min(1),
+    reads: z.array(z.string().min(1)).readonly(),
+    shell: z.enum(['off', 'on']),
+  }),
+]);
+export const Capabilities = z
+  .object({
+    files: Files,
+    web: z.enum(['off', 'on']),
+    instructions: z.enum(['none', 'project']),
+    agents: z.literal('off'),
+    schedule: z.literal('off'),
+    mcp: z.literal('none'),
+  })
+  .strict();
+// The harness wrapper's type, exactly (a drift in either is a compile error here).
+const _sameCaps: z.ZodType<TurnCapabilities, z.ZodTypeDef, unknown> = Capabilities;
+void _sameCaps;
+
 const call = {
   ...live,
+  capabilities: Capabilities,
   /** The Buddy the request is from and to (a self-DM). */
   buddyId: z.string().min(1),
   /** The request body, exactly as posted: the key `xk:<runId>` replays only an identical body. */

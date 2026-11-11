@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
+import type { TurnCapabilities } from '@nbardy/agent-cli';
 import type { Run, RunConfig } from '@unleashd/buddies-core';
 import type { keyed } from '@unleashd/shared';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from '../../buddies/core';
@@ -8,6 +9,7 @@ import { type BuddyEvents, announcePost } from '../../buddies/events';
 import type { ExecutionGate } from '../../buddies/execution-gate';
 import { EXPEDITION_CALL_PURPOSE, EXPEDITION_RUN_EVIDENCE } from '../../buddies/expedition-calls';
 import { checkedRunConfig } from '../../buddies/worker-config';
+import { type CallTurn, capabilitiesOf, limitsText, readsOf } from '../../expedition-kernel/access';
 import type { Clock, RawOutcome, RunSpec } from '../../expedition-kernel/ports';
 import { add, release, tip } from '../../expeditions/cambium';
 import { labelled } from '../../observability/event-loop-stall';
@@ -16,6 +18,7 @@ import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address'
 import { outcomeOf } from './answer';
 import type { ExpeditionContext } from './context';
 import { commitOf } from './host-run';
+import { keepPrompt } from './prompts';
 import {
   type Expected,
   type Last,
@@ -44,8 +47,11 @@ import { NOTHING, type UsageMeter } from './usage';
 // turn is a call: it runs in the call's own directory (call-directory.ts) under the tool-less
 // `call` grant, and no memory review follows it.
 //
-//   start:   record `posting` (the body, the answer it expects, the tree, the caps) → tree → post
-//            → record `posted`. A crash anywhere replays from the record under the same key.
+//   start:   the prompt file (prompts.ts) → record `posting` (the body, the answer it expects, the
+//            tree, the caps, what its turn may do) → tree → post → record `posted`. A crash
+//            anywhere replays from the record under the same key.
+// What a call's turn may do is decided here, once, by the policy table (expedition-kernel/
+// access.ts), and stored in its record; the Buddy server hands it to the harness.
 //   observe: the post's request state and its crate runs, read on `changed`/`posted` (debounced),
 //            on a 60 s backstop, and on `status`. Terminal = every run settled (no decision-G
 //            attempt 2 queued) and the request ended; a request left `awaiting` with every run
@@ -262,6 +268,8 @@ export class BuddyCalls implements Calls {
     }
     if (prepared.t === 'refused')
       return settleAtStart(this.side, at, spec.t, errored(prepared.why));
+    // Before the post, never rewritten: the one copy of the prompt the turn is sent (F4).
+    await keepPrompt(at.paths.prompt, prepared.posting.body);
     await writeRecord(at.paths.record, prepared.posting);
     await this.post(at, prepared.posting);
   }
@@ -340,6 +348,7 @@ export class BuddyCalls implements Calls {
       tree: Tree;
       base: string;
       max: keyed.Max;
+      capabilities: TurnCapabilities;
     }
   ): Posting {
     const deadline = this.side.clock.now().getTime() + x.max.minutes * 60_000;
@@ -349,6 +358,7 @@ export class BuddyCalls implements Calls {
       kind: x.kind,
       deadlineAt: new Date(deadline).toISOString(),
       tree: x.tree,
+      capabilities: x.capabilities,
       buddyId: x.seat.buddyId,
       body: x.body,
       runOn: x.seat.runOn,
@@ -631,6 +641,15 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
     const seat = await c.seatOf(call.by, at, ws);
     const tree = TREE_OF[call.tree](at, call.key);
     const expected: Expected = { t: 'typed', schema: call.output };
+    const capabilities = capabilitiesOf(
+      TURN_OF[call.tree](at, {
+        reads: unique([
+          ...[...named.refs.values()].map((n) => path.dirname(n.record.answerPath)),
+          ...call.grant.reads.map((p) => path.resolve(at.ctx.repo, p)),
+        ]),
+        web: call.grant.web,
+      })
+    );
     const body = agentBody({
       address: at.address,
       ctx: at.ctx,
@@ -639,6 +658,7 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
       tree,
       base: base.sha,
       expected,
+      capabilities,
     });
     return {
       t: 'ready',
@@ -650,6 +670,7 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
         tree,
         base: base.sha,
         max: call.max,
+        capabilities,
       }),
     };
   },
@@ -660,6 +681,11 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
     const seat = await c.seatOf(spec.by, at, ws);
     const tree: Tree = { t: 'dir', path: at.paths.work };
     const expected: Expected = { t: 'verdict' };
+    // The judged output, and what its producer could read.
+    const capabilities = capabilitiesOf({
+      t: 'judge',
+      reads: unique([path.dirname(judged.record.answerPath), ...judged.record.reads]),
+    });
     const body = reviewBody({
       address: at.address,
       ctx: at.ctx,
@@ -667,6 +693,7 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
       judged,
       tree,
       expected,
+      capabilities,
     });
     return {
       t: 'ready',
@@ -678,22 +705,40 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
         tree,
         base: judged.record.commit,
         max: spec.max,
+        capabilities,
       }),
     };
   },
-  // The leader on its own profile, in its draft folder; it reads the repo's base, never changes it.
-  leader: async (c, at, spec) => ({
-    t: 'ready',
-    posting: c.posting(at, {
-      kind: 'leader',
-      seat: { buddyId: at.ctx.leader, runOn: { t: 'profile' } },
-      body: spec.body,
-      expected: { t: 'act', folder: spec.draft },
-      tree: { t: 'dir', path: spec.draft },
-      base: at.ctx.baseSha,
-      max: spec.max,
-    }),
-  }),
+  // The leader on its own profile, in its draft folder: it reads the expedition directory and
+  // writes only the draft. Its brief is leader-brief.ts; the limits go first, as for every call.
+  leader: async (c, at, spec) => {
+    const capabilities = capabilitiesOf({ t: 'leader', expDir: at.ctx.dir, draft: spec.draft });
+    return {
+      t: 'ready',
+      posting: c.posting(at, {
+        kind: 'leader',
+        seat: { buddyId: at.ctx.leader, runOn: { t: 'profile' } },
+        body: `${limitsText(capabilities)}\n\n${spec.body}`,
+        expected: { t: 'act', folder: spec.draft },
+        tree: { t: 'dir', path: spec.draft },
+        base: at.ctx.baseSha,
+        max: spec.max,
+        capabilities,
+      }),
+    };
+  },
+};
+
+const unique = (xs: readonly string[]): string[] => [...new Set(xs)];
+/** An agent call's turn, by its `tree` field (the policy is expedition-kernel/access.ts). */
+const TURN_OF: {
+  readonly [K in keyed.AgentCall['tree']]: (
+    at: Located,
+    g: { readonly reads: readonly string[]; readonly web: boolean }
+  ) => CallTurn;
+} = {
+  none: (at, g) => ({ t: 'call', work: at.paths.work, ...g }),
+  checkout: (at, g) => ({ t: 'checkout', tree: at.paths.tree, ...g }),
 };
 
 type Who<K extends keyed.Who['t']> = (
@@ -843,13 +888,14 @@ const conversationOf = (runs: Run[]): RefRecord['conversation'] => {
 };
 const store =
   (out: (raw: RawOutcome) => unknown): StoreRef =>
-  async (at, _r, raw, end, runs) => {
+  async (at, r, raw, end, runs) => {
     await putRef(at.ctx.dir, {
       ref: at.address.ref,
       out: out(raw),
       commit: end.commit,
       checkout: end.checkout,
       conversation: conversationOf(runs),
+      reads: [...readsOf(r.capabilities)],
     });
   };
 const nothingStored: StoreRef = async () => {};

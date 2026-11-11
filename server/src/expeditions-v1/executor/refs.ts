@@ -29,6 +29,9 @@ export const RefRecord = z
     ]),
     /** The agent conversation that produced it (a later step); a command has none. */
     conversation: z.discriminatedUnion('t', [v('none', {}), v('conversation', { id: z.string() })]),
+    /** The directories its producer could read (expedition-kernel/access.ts `readsOf`): a review
+     * judge of it reads them too. A command, an ask, and a ref stored before this field: none. */
+    reads: z.array(z.string().min(1)).default([]),
   })
   .strict();
 export type RefRecord = z.infer<typeof RefRecord>;
@@ -43,7 +46,10 @@ export const refFilesOf = (expDir: string, ref: keyed.RefId) => {
 };
 
 /** The answer file first, then the record: a record never points at a missing answer. */
-export async function putRef(expDir: string, r: Omit<RefRecord, 'answerPath'>): Promise<RefRecord> {
+export async function putRef(
+  expDir: string,
+  r: Omit<z.input<typeof RefRecord>, 'answerPath'>
+): Promise<RefRecord> {
   const at = refFilesOf(expDir, r.ref);
   await writeJsonAtomic(at.answer, r.out);
   const record = RefRecord.parse({ ...r, answerPath: at.answer });

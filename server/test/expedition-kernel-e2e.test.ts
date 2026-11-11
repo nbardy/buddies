@@ -102,7 +102,6 @@ function world(policy: Policy, script: WakeScript): World {
         ? { t: 'known', provider: 'claude' }
         : { t: 'unknown', why: `no buddy ${JSON.stringify(who)}` },
     gates: GATES,
-    limits: { leaderWake: { usd: 0.5, minutes: 10 }, doneReview: { usd: 2, minutes: 20 } },
   };
   return { signal, ex, leader, owner, clock, deps, root: tempDir('expedition-root-') };
 }

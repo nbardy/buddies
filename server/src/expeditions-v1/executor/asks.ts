@@ -3,9 +3,11 @@ import type { keyed } from '@unleashd/shared';
 import { type BuddiesCore, OWNER, buddyActor } from '../../buddies/core';
 import { type BuddyEvents, announcePost } from '../../buddies/events';
 import { type OwnerThread, createOwnerThread } from '../../buddies/owner-thread';
+import { askedAbout } from '../../expedition-kernel/done';
 import type { RawOutcome, RunSpec } from '../../expedition-kernel/ports';
 import { type Observing, observeBuddyEvents } from '../observe';
 import type { OwnerBook } from '../owner/book';
+import { ABOUT_LINES, describeCandidate } from '../owner/candidate';
 import { ASK_PURPOSE, STATUS_PURPOSE, evidenceOf, leaderDm } from '../owner/thread';
 import { yesNo } from '../owner/words';
 import { parseRunId } from './address';
@@ -20,7 +22,7 @@ import {
   recordsUnder,
   writeRecord,
 } from './records';
-import { putRef } from './refs';
+import { getRef, putRef } from './refs';
 import { NOTHING } from './usage';
 
 // Owner asks (CONNECT_PLAN §1 "ask", §2): each ask is its own root post in the owner↔leader DM,
@@ -91,9 +93,10 @@ const HOW_TO_ANSWER: { readonly [K in keyed.AskCall['answer']]: string } = {
   confirm: 'Reply in this thread with yes or no.',
 };
 /** The question post: a pure function of the run (its key replays only this exact body). */
-function askBody(at: Located, call: keyed.AskCall): string {
+function askBody(at: Located, call: keyed.AskCall, about: keyed.AskAbout): string {
   return [
     `❓ ${call.question}`,
+    ...(ABOUT_LINES[about.t] as (a: keyed.AskAbout) => string[])(about),
     '',
     HOW_TO_ANSWER[call.answer],
     `(expedition ${at.address.expedition} · ${call.key})`,
@@ -149,12 +152,38 @@ export class OwnerAsks implements Asks {
     this.thread = createOwnerThread({ core: d.core, events: d.events });
   }
 
+  /** What the ask's question is about, read from the ref store (the candidate was stored before
+   * the kernel logged it passed). A candidate with no stored output cannot be shown to the owner:
+   * the ask settles `errored` instead of asking them to accept a ref they cannot see. */
+  private async aboutOf(
+    at: Located,
+    question: string
+  ): Promise<
+    | { readonly t: 'about'; readonly about: keyed.AskAbout }
+    | { readonly t: 'missing'; readonly ref: keyed.RefId }
+  > {
+    const about = askedAbout(question);
+    if (about.t === 'nothing') return { t: 'about', about };
+    const found = await getRef(at.ctx.dir, about.ref);
+    if (found.t === 'missing') return { t: 'missing', ref: about.ref };
+    return {
+      t: 'about',
+      about: describeCandidate(about.ref, found.value.out, found.value.answerPath),
+    };
+  }
+
   async start(at: Located, spec: AskSpec): Promise<void> {
+    const known = await this.aboutOf(at, spec.call.question);
+    if (known.t === 'missing')
+      return settleAtStart(this.side, at, spec.t, {
+        t: 'errored',
+        why: `the candidate ${known.ref} has no stored output to show the owner`,
+      });
     const asking: Asking = {
       t: 'asking',
       runId: at.address.runId,
       buddyId: at.ctx.leader,
-      body: askBody(at, spec.call),
+      body: askBody(at, spec.call, known.about),
       answer: spec.call.answer,
     };
     await writeRecord(at.paths.record, asking);

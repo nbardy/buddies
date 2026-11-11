@@ -14,7 +14,9 @@ import type { RawOutcome, RunSpec } from '../src/expedition-kernel/ports';
 import { keyedViewOf } from '../src/expedition-kernel/projection';
 import type { Authored } from '../src/expedition-kernel/protocol';
 import { HostExecutor } from '../src/expeditions-v1/executor';
+import { outcomeOf } from '../src/expeditions-v1/executor/answer';
 import { putRef } from '../src/expeditions-v1/executor/refs';
+import { ingestMeter } from '../src/expeditions-v1/executor/usage';
 import { NO_CALLS, hostDeps } from './fixtures/expedition-host';
 import { tempDir } from './fixtures/temp';
 
@@ -205,7 +207,7 @@ export default plan(async () => {
     assert.deepEqual(worktreesOf(repo), [`worktree ${repo}`]);
 
     // The wire projection survives JSON whole: no Map, no Set, no undefined field.
-    const view = keyedViewOf(e.view(), { t: 'none' });
+    const view = keyedViewOf(e.view(), { t: 'none' }, () => ({ t: 'nothing' }));
     const wire: unknown = JSON.parse(JSON.stringify(view));
     assert.deepEqual(wire, view);
     assert.deepEqual(keyed.KeyedView.parse(wire), view);
@@ -461,6 +463,8 @@ describe('commands are argv, never shell', () => {
       leader: 'lead',
       repo: '/tmp/r',
       autoApply: { usd: 0 },
+      leaderWake: { t: 'given', usd: 0.5, minutes: 10 },
+      doneReview: { t: 'given', usd: 0.5, minutes: 10 },
     };
     const cmd = (key: string, command: string): Authored => ({
       t: 'command',
@@ -502,4 +506,55 @@ test('a month-away wakeAt does not fire, and a near one does', async () => {
   cancel();
   assert.equal(far, 0);
   assert.equal(near, 1);
+});
+
+test('a leader continue needs its reason; a log written without one still reads', () => {
+  const act = (o: unknown) =>
+    outcomeOf({ t: 'act', folder: '/d' }, `\`\`\`json\n${JSON.stringify(o)}\n\`\`\``);
+  assert.deepEqual(act({ t: 'continue', why: 'on track' }), {
+    t: 'ok',
+    out: { t: 'continue', why: 'on track' },
+  });
+  const bare = act({ t: 'continue' });
+  assert.equal(bare.t, 'errored');
+  assert.match(bare.t === 'errored' ? bare.why : '', /malformed answer: a continue needs a reason/);
+  assert.equal(act({ t: 'continue', why: '  ' }).t, 'errored');
+  // F7: the old log's act has no `why`; the wire default reads it as empty.
+  assert.deepEqual(keyed.LeaderAct.parse({ t: 'continue' }), { t: 'continue', why: '' });
+});
+
+// F6 (2026-11-11 run): every Codex call was `unreported` and charged its whole $0.50 reservation.
+describe('what a call cost, from ingest usage rows', () => {
+  const meterOver = (provider: string, model: string) =>
+    ingestMeter({
+      sessionOf: async () => ({ t: 'session', sessionId: 's1' }),
+      ingest: () =>
+        ({
+          t: 'ready',
+          ingest: {
+            // The real run's Codex turn: 48,324 input of which 36,992 cached, 234 output.
+            usage: async () => ({
+              groups: [
+                {
+                  key: { t: 'session', sessionId: 's1', provider, model },
+                  input: 11_332,
+                  output: 234,
+                  cacheRead: 36_992,
+                  cacheWrite: 0,
+                  reportedCostUsd: 0,
+                },
+              ],
+            }),
+          },
+        }) as never,
+    });
+  test('a Codex model with a published rate is priced', async () => {
+    const m = await meterOver('codex', 'gpt-6.1-sol').spent(['c1'], 0);
+    // (11,332 x $2 + 36,992 x $0.10 + 234 x $10) / 1M
+    assert.equal(m.t, 'priced');
+    assert.ok(m.t === 'priced' && Math.abs(m.usd - 0.028703) < 1e-6, JSON.stringify(m));
+  });
+  test('a Codex model with no published rate stays unpriced', async () => {
+    assert.equal((await meterOver('codex', 'gpt-5.3-codex-spark').spent(['c1'], 0)).t, 'unpriced');
+  });
 });

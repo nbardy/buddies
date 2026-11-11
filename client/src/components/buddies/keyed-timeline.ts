@@ -163,20 +163,72 @@ const END_TONE: { [K in keyed.BarEnd['t']]: (bar: Bar & { end: { t: K } }) => To
 };
 export const toneOf = (bar: Bar): Tone => END_TONE[bar.end.t](bar as never);
 
-const OUTCOME_WHY: { [K in keyed.Outcome['t']]: (o: Extract<keyed.Outcome, { t: K }>) => string } =
-  {
-    passed: () => 'Its judge passed it.',
-    failed: (o) => o.why,
-    errored: (o) => o.why,
-    cancelled: (o) => `Cancelled; partial work kept at ${o.partial}.`,
-    refused: (o) => `Refused before it started: ${o.reason}.`,
-  };
-const END_WHY: { [K in keyed.BarEnd['t']]: (e: Extract<keyed.BarEnd, { t: K }>) => string } = {
-  open: () => 'Still running.',
-  settled: (e) => OUTCOME_WHY[e.outcome.t](e.outcome as never),
+// ---- What a bar says about itself: one table by call kind and state ----
+// A bar is a kind of call in one state (still open, or settled as an outcome), and the words differ
+// by BOTH: an ask that passed is the owner's answer, a call that passed was judged (2026-11-11: the
+// owner's own acceptance read "Its judge passed it.", and a waiting ask "Still running."). So the
+// sentence is looked up, never composed in JSX. How long it has been open is the detail's Ran row.
+
+type Ended = { open: { t: 'open' } } & {
+  [K in keyed.Outcome['t']]: Extract<keyed.Outcome, { t: K }>;
 };
-/** The one sentence a detail panel says about how a bar ended. */
-export const whyOf = (bar: Bar): string => END_WHY[bar.end.t](bar.end as never);
+type Words = { [S in keyof Ended]: (o: Ended[S]) => string };
+
+const EXCERPT = 120;
+/** An owner's answer, in words: yes or no for a confirm ask, the text (bounded) for a text ask. */
+const youAnswered = (out: unknown): string => {
+  if (out === true) return 'You accepted it.';
+  if (out === false) return 'You said no.';
+  const text = String(out);
+  return `You answered: ${text.length > EXCERPT ? `${text.slice(0, EXCERPT)}…` : text}`;
+};
+const NOT_RUN: Pick<Words, 'cancelled' | 'refused'> = {
+  cancelled: (o) => `Cancelled; partial work kept at ${o.partial}.`,
+  refused: (o) => `Refused before it started: ${o.reason}.`,
+};
+const WORK_ENDED: Pick<Words, 'errored' | 'cancelled' | 'refused'> = {
+  errored: (o) => `It did not finish: ${o.why}`,
+  ...NOT_RUN,
+};
+const BAR_WORDS: { [K in keyed.CallKind]: Words } = {
+  agent: {
+    open: () => 'Running.',
+    passed: () => 'It answered and was accepted.',
+    failed: (o) => `It answered, but its judge said no: ${o.why}`,
+    ...WORK_ENDED,
+  },
+  command: {
+    open: () => 'Running.',
+    passed: () => 'It ran and exited cleanly.',
+    failed: (o) => `It ran, but its check said no: ${o.why}`,
+    ...WORK_ENDED,
+  },
+  verdict: {
+    open: () => 'Being judged.',
+    passed: () => 'This done criterion was met.',
+    failed: (o) => `This done criterion was not met: ${o.why}`,
+    ...WORK_ENDED,
+  },
+  leader: {
+    open: () => 'The leader is deciding.',
+    passed: () => 'The leader answered.',
+    failed: (o) => o.why,
+    ...WORK_ENDED,
+  },
+  ask: {
+    open: () => 'Waiting on you.',
+    passed: (o) => youAnswered(o.out),
+    failed: (o) => o.why,
+    ...WORK_ENDED,
+  },
+};
+const endedOf = (bar: Bar): Ended[keyof Ended] =>
+  bar.end.t === 'open' ? { t: 'open' } : bar.end.outcome;
+/** The one sentence a detail panel says about how a bar stands or ended. */
+export const whyOf = (bar: Bar): string => {
+  const ended = endedOf(bar);
+  return (BAR_WORDS[bar.kind][ended.t] as (o: typeof ended) => string)(ended);
+};
 
 const PLAN_VERSION: {
   [K in keyed.KeyedPlan['t']]: (p: Extract<keyed.KeyedPlan, { t: K }>) => number;
@@ -222,7 +274,7 @@ export const markerLabel = (m: Marker): string => MARKER_LABEL[m.t](m as never);
 
 const MARKER_WHY: { [K in Marker['t']]: (m: Extract<Marker, { t: K }>) => string } = {
   plan: (m) => m.why,
-  review: (m) => `${m.question} ${m.why}`,
+  review: (m) => (m.why === '' ? m.question : `${m.question} ${m.why}`),
   finished: (m) => finishLabel(m.reason),
 };
 export const markerWhy = (m: Marker): string => MARKER_WHY[m.t](m as never);
@@ -242,9 +294,10 @@ export const diffLine = (d: keyed.Diff): string =>
 export const usd = (x: number): string => `$${x.toFixed(2)}`;
 
 const COST_TEXT: { [K in keyed.BarCost['t']]: (c: Extract<keyed.BarCost, { t: K }>) => string } = {
-  holding: (c) => `${usd(c.reservedUsd)} reserved while it runs`,
+  holding: (c) =>
+    c.reservedUsd === 0 ? 'nothing reserved' : `${usd(c.reservedUsd)} reserved while it runs`,
   spent: (c) => usd(c.usd),
-  charged: (c) => `${usd(c.usd)} (no usage reported: charged its whole reservation)`,
+  charged: (c) => `${usd(c.usd)} (its provider reported no usage, so the whole reservation counts)`,
   unknown: () => 'not reported by this backend',
 };
 /** What one bar cost, in words (the bar detail's Cost row). */

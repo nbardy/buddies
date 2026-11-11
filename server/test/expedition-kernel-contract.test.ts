@@ -299,7 +299,21 @@ test('staticGate: clean calls pass; each defect is its own issue', () => {
   const folder = folderWith({ s: 'x', rub: 'r' });
   const judged = { t: 'review' as const, rubric: 'rub', by: seat('gemini') };
   const clean = [agent({ judge: judged }), agent({ key: 'collect/b' })];
-  assert.deepEqual(staticGate({ contract: c, folder, calls: clean, providerOf }), { t: 'ok' });
+  const ok = staticGate({ contract: c, folder, calls: clean, providerOf });
+  assert.equal(ok.t, 'ok');
+  // Every turn the plan and contract would run, with its limits on its harness (access.ts):
+  // claude enforces them all here; gemini has no mapping, so a gemini judge is told, not held.
+  const held = (a: keyed.TurnAccess) =>
+    a.harness.t === 'known'
+      ? `${a.harness.provider}:${Object.values(a.harness.grants).every((g) => g.t === 'enforced') ? 'enforced' : 'advisory'}`
+      : 'unknown';
+  assert.deepEqual(ok.t === 'ok' ? ok.access.map((a) => [a.label, a.turn, held(a)]) : [], [
+    ['collect/a', 'call', 'claude:enforced'],
+    ['collect/a', 'judge', 'gemini:advisory'],
+    ['collect/b', 'call', 'claude:enforced'],
+    ['leader', 'leader', 'claude:enforced'],
+    ['done/0', 'judge', 'gemini:advisory'],
+  ]);
 
   const run = (calls: Authored[], contract: keyed.Contract = c, dir = folder) => {
     const r = staticGate({ contract, folder: dir, calls, providerOf });
@@ -317,4 +331,52 @@ test('staticGate: clean calls pass; each defect is its own issue', () => {
   has(run([agent(), agent()]), 'collect/a', 'more than once');
   has(run([agent()], c, folderWith({ s: 'x' })), 'contract done', 'briefs/rub.md');
   has(run([agent()], c, folderWith({ s: '{{missing}}', rub: 'r' })), 'collect/a', '{{missing}}');
+});
+
+test('a contract without wake and review caps gets the budget rule, marked defaulted; given caps are marked given', () => {
+  const ok = (md: string) => {
+    const r = parseContract(md);
+    assert.equal(r.t, 'ok');
+    return r.t === 'ok' ? r.contract : assert.fail('invalid');
+  };
+  // $10: 10% is $1.00 (the ceiling); 2 h: 10% is 12 min.
+  const plain = ok(GOOD);
+  assert.deepEqual(plain.leaderWake, { t: 'defaulted', usd: 1, minutes: 12 });
+  assert.deepEqual(plain.doneReview, plain.leaderWake);
+  // $3 (the 2026-11-11 run): 10% is $0.30, so a wake no longer holds $2 of it.
+  const small = ok(GOOD.replace('usd: 10, hours: 2', 'usd: 3, hours: 1'));
+  assert.deepEqual(small.leaderWake, { t: 'defaulted', usd: 0.3, minutes: 6 });
+  // The floor, but never more than the budget allows.
+  assert.equal(ok(GOOD.replace('usd: 10, hours: 2', 'usd: 1, hours: 1')).leaderWake.usd, 0.25);
+  assert.equal(ok(GOOD.replace('usd: 10, hours: 2', 'usd: 0.2, hours: 1')).leaderWake.usd, 0.2);
+  const given = ok(
+    GOOD.replace(
+      'rules:',
+      'leaderWake: { usd: 0.4, minutes: 3 }\ndoneReview: { usd: 1.5, minutes: 9 }\nrules:'
+    )
+  );
+  assert.deepEqual(given.leaderWake, { t: 'given', usd: 0.4, minutes: 3 });
+  assert.deepEqual(given.doneReview, { t: 'given', usd: 1.5, minutes: 9 });
+  has(issuesOf(GOOD.replace('rules:', 'leaderWake: { usd: 0 }\nrules:')), 'leaderWake');
+});
+
+test('a launched entry written before the caps existed still parses, at the $2 / 20 min it ran under', () => {
+  const launched = keyed.Entry.parse({
+    t: 'launched',
+    at: '2026-11-11T00:00:00.000Z',
+    id: 'x',
+    baseSha: 'abc',
+    contract: {
+      goal: 'g',
+      done: [{ t: 'owner', question: 'q' }],
+      budget: { usd: 3, hours: 1 },
+      pools: {},
+      rules: [],
+      leader: 'lead',
+      repo: '/r',
+      autoApply: { usd: 0 },
+    },
+  });
+  assert.equal(launched.t === 'launched' && launched.contract.leaderWake.usd, 2);
+  assert.equal(launched.t === 'launched' && launched.contract.leaderWake.t, 'defaulted');
 });

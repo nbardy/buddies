@@ -36,10 +36,6 @@ export function hostDeps(root: string): Host {
         zodEntry: path.join(SERVER, 'node_modules', 'zod'),
         tscBin: path.join(SERVER, 'node_modules', '.bin', 'tsc'),
       },
-      limits: {
-        leaderWake: { usd: 0.01, minutes: 1 },
-        doneReview: { usd: 0.01, minutes: 1 },
-      },
     },
   };
 }

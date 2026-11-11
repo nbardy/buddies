@@ -36,7 +36,7 @@ const FORMAT: { readonly [K in Expected['t']]: (e: Extract<Expected, { t: K }>) 
   act: (e) => ({
     must: 'It must be exactly one of these acts:',
     body: [
-      '- {"t":"continue"}: carry on as planned (at a review, the plan goes past it).',
+      '- {"t":"continue","why":"<reason>"}: carry on as planned (at a review, the plan goes past it). The reason is required: the owner reads it on the review.',
       '- {"t":"stop","why":"<reason>"}: end the expedition now, its goal not met.',
       '- {"t":"retry","keys":["<key>", ...]}: run errored, cancelled or refused calls again.',
       `- {"t":"rewrite","folder":"${e.folder}","why":"<reason>"}: you edited plan.ts or briefs/ in that folder and submit it as the next plan version. The folder must be exactly this one.`,
@@ -81,6 +81,8 @@ const bySchema =
 function actOf(value: unknown, folder: string): RawOutcome {
   const act = keyed.LeaderAct.safeParse(value);
   if (!act.success) return malformed(`not a leader act: ${act.error.message}`);
+  if (act.data.t === 'continue' && act.data.why.trim() === '')
+    return malformed('a continue needs a reason in "why"');
   if (act.data.t !== 'rewrite') return { t: 'ok', out: act.data };
   const named = path.resolve(folder, act.data.folder);
   if (named !== path.resolve(folder))

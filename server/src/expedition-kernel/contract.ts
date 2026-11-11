@@ -10,7 +10,40 @@ export type ParsedContract =
   | { t: 'ok'; contract: keyed.Contract }
   | { t: 'invalid'; issues: string[] };
 
-const KNOWN_KEYS = ['leader', 'repo', 'budget', 'autoApply', 'pools', 'rules', 'done'] as const;
+const KNOWN_KEYS = [
+  'leader',
+  'repo',
+  'budget',
+  'autoApply',
+  'leaderWake',
+  'doneReview',
+  'pools',
+  'rules',
+  'done',
+] as const;
+
+// The cap of one leader wake or done review when the contract names none, ONE rule:
+//   usd     = min(budget.usd, clamp(10% of budget.usd, $0.25, $1.00))
+//   minutes = min(budget.hours * 60, clamp(10% of budget.hours * 60, 5, 20))
+// The real run (2026-11-11) paid $0.039 and 12 s for a wake, so the $0.25 floor is ~6x a real wake
+// and a cap that ends a turn is rare; the 10% share keeps a bigger budget's wakes proportionate
+// (a $3 budget reserves $0.30 per wake, not the $2 that held most of it); the $1 ceiling stops a
+// large budget reserving an agent-sized sum per wake. Never above what the budget itself allows.
+const WAKE_USD = { share: 0.1, floor: 0.25, ceiling: 1 } as const;
+const WAKE_MINUTES = { share: 0.1, floor: 5, ceiling: 20 } as const;
+const clamp = (x: number, r: { floor: number; ceiling: number }) =>
+  Math.min(r.ceiling, Math.max(r.floor, x));
+const cents = (x: number) => Math.round(x * 100) / 100;
+/** A cap as the `max` of the call it bounds. */
+export const maxOfCap = (c: keyed.Cap): keyed.Max => ({ usd: c.usd, minutes: c.minutes });
+export function defaultCap(budget: keyed.Budget): keyed.Cap {
+  const budgetMinutes = budget.hours * 60;
+  return {
+    t: 'defaulted',
+    usd: cents(Math.min(budget.usd, clamp(budget.usd * WAKE_USD.share, WAKE_USD))),
+    minutes: Math.min(budgetMinutes, clamp(budgetMinutes * WAKE_MINUTES.share, WAKE_MINUTES)),
+  };
+}
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
   typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -48,7 +81,13 @@ export function parseContract(markdown: string): ParsedContract {
   const done = parseDone(front.done, issues);
   if (done === undefined) reported.add('done');
 
-  const candidate = { ...front, goal, done };
+  const candidate = {
+    ...front,
+    goal,
+    done,
+    leaderWake: capOf(front.leaderWake, front.budget),
+    doneReview: capOf(front.doneReview, front.budget),
+  };
   const canonical = keyed.Contract.safeParse(candidate);
   if (!canonical.success) {
     for (const issue of canonical.error.issues) {
@@ -62,6 +101,14 @@ export function parseContract(markdown: string): ParsedContract {
   return issues.length > 0 || !canonical.success
     ? { t: 'invalid', issues }
     : { t: 'ok', contract: canonical.data };
+}
+
+/** The owner's `{usd, minutes}` as a `given` cap, or the rule's `defaulted` one when the key is
+ * absent. A malformed budget is left to Zod's report on `budget`, so no cap is guessed from it. */
+function capOf(raw: unknown, budget: unknown): unknown {
+  if (raw !== undefined) return isRecord(raw) ? { t: 'given', ...raw } : raw;
+  const b = keyed.Budget.safeParse(budget);
+  return b.success ? defaultCap(b.data) : undefined;
 }
 
 function parseFrontmatter(yamlText: string, issues: string[]): Record<string, unknown> {

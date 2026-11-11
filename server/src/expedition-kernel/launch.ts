@@ -5,6 +5,7 @@ import { keyed } from '@unleashd/shared';
 import { checkPlan } from './change';
 import { parseContract } from './contract';
 import { type Asked, diffOf, reservationOf, usd } from './core';
+import { turnAccessOf } from './gates';
 import { Expedition, type KernelDeps } from './kernel';
 import { LogStore, type Repair } from './log-store';
 
@@ -25,6 +26,9 @@ export type Clean = {
   readonly contract: keyed.Contract;
   /** The calls a dry run asked for before it waited on an answer (canonical, hashed). */
   readonly asked: readonly Asked[];
+  /** What each of those turns (and the leader's and done reviews') may do on its harness: the
+   * static gate's report, enforced or advisory per grant. */
+  readonly access: readonly keyed.TurnAccess[];
 };
 export type Previewed = Clean | Rejected;
 
@@ -48,6 +52,11 @@ export async function preview(deps: KernelDeps, folder: string): Promise<Preview
     markdown: markdown.text,
     contract: contract.contract,
     asked: checked.asked,
+    access: turnAccessOf(
+      contract.contract,
+      checked.asked.map((a) => a.call),
+      deps.providerOf
+    ),
   };
 }
 
@@ -73,6 +82,7 @@ const PREVIEW_VIEW: {
       budget: { ...p.contract.budget },
       firstWave,
       costUsd: firstWave.reduce((sum, c) => usd(sum + c.reservedUsd), 0),
+      access: [...p.access],
     };
   },
 };

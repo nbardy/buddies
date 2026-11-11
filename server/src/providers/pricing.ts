@@ -17,8 +17,12 @@ import type { Provider as ProviderName } from '@unleashd/shared';
 // table is here. Claude rates: Anthropic's first-party list prices (claude-api skill table, cached
 // 2026-11-03), input/output per 1M tokens; cache read where the table states it, otherwise 0.1x
 // input; cache write (5-minute) 1.25x input. Haiku 5.5 is at its <=100K-prompt tier (longer prompts
-// bill 5x and are under-counted). No OpenAI (Codex) model has a known rate here: a Codex call is
-// `unreported` until one is added from a stated source.
+// bill 5x and are under-counted).
+// Codex rates: OpenAI's published API pricing, https://developers.openai.com/api/docs/pricing
+// (fetched 2026-11-11), Standard tier, short context (<=272K input tokens), per 1M tokens. Longer
+// prompts bill at a higher tier and are under-counted here. OpenAI has no cache-write charge. A
+// Codex model absent from the table (gpt-5.3-codex-spark: not on that page) stays `unpriced`, and
+// its call `unreported` (the kernel then charges the whole reservation).
 
 export interface Rates {
   readonly input: number;
@@ -70,6 +74,25 @@ const claude = (input: number, output: number, cacheRead = input / 10): Rates =>
   cacheRead,
   cacheWrite: input * 1.25,
 });
+const openai = (input: number, cacheRead: number, output: number): Rates => ({
+  input,
+  output,
+  cacheRead,
+  cacheWrite: 0,
+});
+const CODEX_RATES: Readonly<Record<string, Rates>> = {
+  'gpt-6.1-sol': openai(2, 0.1, 10),
+  'gpt-6-sol': openai(2, 0.2, 10),
+  'gpt-6-luna': openai(0.1, 0.01, 0.5),
+  'gpt-6-astra': openai(10, 1, 50),
+  'gpt-5.6-sol': openai(4, 0.4, 20),
+  'gpt-5.6-terra': openai(2, 0.2, 12),
+  'gpt-5.6-luna': openai(0.2, 0.02, 1.2),
+  'gpt-5.5': openai(5, 0.5, 30),
+  'gpt-5.4': openai(2.5, 0.25, 15),
+  'gpt-5.4-mini': openai(0.75, 0.075, 4.5),
+};
+
 /** By model id as a transcript records it (a dated suffix `-YYYYMMDD` is accepted). */
 const MODEL_RATES: Readonly<Partial<Record<ProviderName, Readonly<Record<string, Rates>>>>> = {
   claude: {
@@ -87,6 +110,7 @@ const MODEL_RATES: Readonly<Partial<Record<ProviderName, Readonly<Record<string,
     'claude-haiku-5-5': claude(0.1, 0.5),
     'claude-haiku-4-5': claude(1, 5),
   },
+  codex: CODEX_RATES,
 };
 
 export type Priced =

@@ -61,6 +61,14 @@ export const Budget = z
   .object({ usd: z.number().positive(), hours: z.number().positive() })
   .strict();
 export type Budget = z.infer<typeof Budget>;
+/** What one leader wake, or one done review, may cost and how long it may run. `given` is the
+ * owner's own number; `defaulted` is the host's rule applied to the budget (contract.ts
+ * `defaultCap`), shown as such so a preview never passes a guess off as the owner's choice. */
+const capShape = { usd: z.number().positive(), minutes: z.number().positive() };
+export const Cap = z.discriminatedUnion('t', [v('given', capShape), v('defaulted', capShape)]);
+export type Cap = z.infer<typeof Cap>;
+/** A log written before the caps were in the contract ran every wake and review at $2 / 20 min. */
+const OLD_CAP: Cap = { t: 'defaulted', usd: 2, minutes: 20 };
 export const Contract = z
   .object({
     goal: nonEmpty,
@@ -74,6 +82,10 @@ export const Contract = z
     repo: nonEmpty,
     /** A rewrite adding more new cost than this waits for the owner. */
     autoApply: z.object({ usd: z.number().nonnegative() }).strict(),
+    /** Each leader wake is charged to the budget (DESIGN §5): this bounds one. */
+    leaderWake: Cap.default(OLD_CAP),
+    /** Bounds each host-run done review (and the minutes of a done check). */
+    doneReview: Cap.default(OLD_CAP),
   })
   .strict();
 export type Contract = z.infer<typeof Contract>;
@@ -149,7 +161,9 @@ export const BaseWake = z.discriminatedUnion('t', [
 export type BaseWake = z.infer<typeof BaseWake>;
 /** What the leader decides at a wake: the `out` of its `leader` call. */
 export const LeaderAct = z.discriminatedUnion('t', [
-  v('continue', {}),
+  /** `why` is required of a new answer (executor/answer.ts refuses an empty one); `.default`
+   * keeps a log written before it existed readable, with the reason it never recorded. */
+  v('continue', { why: str.default('') }),
   v('stop', { why: str }),
   v('rewrite', { folder: nonEmpty, why: str }),
   v('retry', { keys: z.array(Key).min(1) }),
@@ -322,6 +336,10 @@ export const BarCost = z.discriminatedUnion('t', [
   v('unknown', {}),
 ]);
 export type BarCost = z.infer<typeof BarCost>;
+/** The exact prompt one agent turn of a bar was sent, as a file in the expedition directory
+ * (server executor/prompts.ts): its producer's, and its review judge's when it has one. */
+export const BarPrompt = z.object({ role: z.enum(['producer', 'judge']), path: nonEmpty }).strict();
+export type BarPrompt = z.infer<typeof BarPrompt>;
 export const Bar = z
   .object({
     key: Key,
@@ -333,6 +351,9 @@ export const Bar = z
     start: str,
     end: BarEnd,
     cost: BarCost.default({ t: 'unknown' }),
+    /** The log does not know where prompts are: the fold leaves this empty and the server adds
+     * the files that exist. An older server sent none. */
+    prompts: z.array(BarPrompt).default([]),
   })
   .strict();
 export type Bar = z.infer<typeof Bar>;
@@ -428,6 +449,7 @@ const ON: { [K in Entry['t']]: (f: Fold, e: Extract<Entry, { t: K }>) => void } 
       start: e.at,
       end: { t: 'open' },
       cost: { t: 'holding', reservedUsd: e.reserved.usd },
+      prompts: [],
     });
   },
   produced: () => {},
@@ -446,6 +468,7 @@ const ON: { [K in Entry['t']]: (f: Fold, e: Extract<Entry, { t: K }>) => void } 
         start: e.at,
         end,
         cost: chargedOf(e.spent, 0),
+        prompts: [],
       });
       return;
     }
@@ -528,6 +551,14 @@ export const Lane = z
   .object({ key: Key, kind: CallKind, status: LaneStatus, bars: z.array(Bar) })
   .strict();
 export type Lane = z.infer<typeof Lane>;
+/** What an ask is about. The owner is asked to accept a candidate by an opaque ref; this is what
+ * that ref holds: the standard report's `summary` (else a bounded excerpt of the typed answer as
+ * text) and the path of its answer file. `.default` keeps an older server's frame readable. */
+export const AskAbout = z.discriminatedUnion('t', [
+  v('nothing', {}),
+  v('candidate', { ref: RefId, summary: str, answerPath: nonEmpty }),
+]);
+export type AskAbout = z.infer<typeof AskAbout>;
 export const PendingAsk = z
   .object({
     ref: RefId,
@@ -535,6 +566,7 @@ export const PendingAsk = z
     question: nonEmpty,
     answer: z.enum(['text', 'confirm']),
     askedAt: str,
+    about: AskAbout.default({ t: 'nothing' }),
   })
   .strict();
 export type PendingAsk = z.infer<typeof PendingAsk>;
@@ -557,6 +589,46 @@ export type KeyedView = z.infer<typeof KeyedView>;
 
 // ---- Launching (owner HTTP only: `POST /api/buddies/keyed-expeditions/{preview,launch}`) ----
 
+/** Whether a turn's harness holds it to one capability, or can only tell it (agent-cli
+ * `Enforcement`, by value: shared does not depend on the harness wrapper). */
+export const GrantEnforcement = z.discriminatedUnion('t', [
+  v('enforced', {}),
+  v('advisory', { reason: nonEmpty }),
+]);
+export type GrantEnforcement = z.infer<typeof GrantEnforcement>;
+/** One turn's capabilities, each enforced or advisory on its harness (agent-cli
+ * `CapabilityReport`; `reads`/`writes` split its file access). */
+export const TurnGrants = z
+  .object({
+    reads: GrantEnforcement,
+    writes: GrantEnforcement,
+    shell: GrantEnforcement,
+    web: GrantEnforcement,
+    agents: GrantEnforcement,
+    schedule: GrantEnforcement,
+    mcp: GrantEnforcement,
+    instructions: GrantEnforcement,
+  })
+  .strict();
+export type TurnGrants = z.infer<typeof TurnGrants>;
+/** The kinds of expedition turn, each with its own limits (server expedition-kernel/access.ts):
+ * an agent call without a tree, one with a checkout, a review judge, a leader wake. */
+export const TurnKind = z.enum(['call', 'checkout', 'judge', 'leader']);
+export type TurnKind = z.infer<typeof TurnKind>;
+/** What one turn of a launch would be allowed, on the harness it would run on. `label` is the
+ * call's key, `done/<i>` for a done criterion's review, `leader` for the leader's wakes. */
+export const TurnAccess = z
+  .object({
+    label: nonEmpty,
+    turn: TurnKind,
+    harness: z.discriminatedUnion('t', [
+      v('known', { provider: nonEmpty, grants: TurnGrants }),
+      v('unknown', { why: nonEmpty }),
+    ]),
+  })
+  .strict();
+export type TurnAccess = z.infer<typeof TurnAccess>;
+
 /** A plan folder's gates, run without writing anything: what a launch of it would start first. */
 export const PreviewCall = z
   .object({ key: Key, kind: CallKind, reservedUsd: z.number().nonnegative() })
@@ -572,6 +644,9 @@ export const KeyedPreview = z.discriminatedUnion('t', [
     firstWave: z.array(PreviewCall),
     /** Σ of their reservations: what the first wave may spend. */
     costUsd: z.number().nonnegative(),
+    /** Per turn of the first wave (and the leader and done reviews): which of its limits its
+     * harness enforces and which are advisory. An older server sent none. */
+    access: z.array(TurnAccess).default([]),
   }),
   v('rejected', { gate: nonEmpty, issues: z.array(str) }),
 ]);

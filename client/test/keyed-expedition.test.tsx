@@ -56,6 +56,11 @@ test('a running expedition shows its asks, bars by outcome, plan markers and the
     assert.match(html, />Send answer</);
     assert.match(html, /Send the cold emails\?/);
     assert.match(html, />Yes<.*>No</s);
+    // F5: the owner sees what they accept, above the buttons, not only an opaque ref.
+    assert.match(
+      html,
+      /Robotics teams first\..*They buy within a week\..*Full answer: .*rank\.out\.json.*>Yes</s
+    );
     // A failed attempt, an errored call and a call waiting on the owner are marked as such.
     assert.match(html, /aria-label="build\/agent\/1, attempt 1: Failed"[^>]*/);
     assert.match(html, /data-tone="failed"/);

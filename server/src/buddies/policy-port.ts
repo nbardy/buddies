@@ -36,6 +36,9 @@ export type SessionScope = { t: 'durable' } | { t: 'boot'; bootId: string };
 export interface BuddyPolicyPort {
   /** The briefing composed for this context right before its turn (synchronous; see briefing.ts). */
   currentBriefing(context: BuddyContext): ResolvedBuddyConversation;
+  /** What kind of turn that briefing is for: an expedition call (with its capability set) or any
+   * other Buddy turn. Same lookup, same error when cold. */
+  turnSeat(context: BuddyContext): TurnSeat;
   /** How long this Buddy's provider session may be resumed (crews: one boot). */
   sessionScope(buddyId: string): SessionScope;
   /**
@@ -89,7 +92,7 @@ export interface BuddyTurnTools extends TurnTools {
 }
 
 /** The grant role of a Buddy turn, by the seat its briefing was warmed for (briefing.ts). */
-const GRANT_ROLE: { readonly [S in TurnSeat]: 'worker' | 'call' } = {
+const GRANT_ROLE: { readonly [S in TurnSeat['t']]: 'worker' | 'call' } = {
   buddy: 'worker',
   call: 'call',
 };
@@ -115,6 +118,7 @@ export function createBuddyPolicyPort(deps: {
     throw new Error(`Buddy chat deadline ${runner.chatDeadlineMs} ms < TURN_MAX_RUNTIME_MS`);
   return {
     currentBriefing: (context) => briefings.current(context),
+    turnSeat: (context) => briefings.seat(context),
     sessionScope: (buddyId) => (crews.crewBuddyIds().has(buddyId) ? boot : durable),
     queueChat: (context, conversationId, turnId, body) =>
       runner.queueChat(context, conversationId, turnId, body),
@@ -125,7 +129,7 @@ export function createBuddyPolicyPort(deps: {
       grants.revokeConversation(conversationId);
       const grant = grants.issueBuddy({
         // An expedition call's briefing (a call directory) gets the tool-less `call` role.
-        role: GRANT_ROLE[briefings.seat(context)],
+        role: GRANT_ROLE[briefings.seat(context).t],
         buddyId: context.buddyId,
         workspaceId: context.workspaceId,
         conversationId,

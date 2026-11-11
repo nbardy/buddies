@@ -1,6 +1,7 @@
 import type { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import { renderBrief } from './brief';
+import { maxOfCap } from './contract';
 import type { Expedition } from './kernel';
 
 // Only the host says "done" (DESIGN §1): it evaluates the contract's `done` on the plan's
@@ -8,6 +9,21 @@ import type { Expedition } from './kernel';
 // on the candidate, a review an agent run on the rubric, the owner an ask, which holds nothing and
 // may be answered after the deadline. Checks and reviews first, together; the owner only on a
 // candidate that passed them.
+
+// The owner's acceptance question names its candidate on a last line. `candidateQuestion` writes
+// it and `askedAbout` reads it back: the one pair, so the host can show what the ref holds
+// (owner/candidate.ts) without the ask call carrying a new field (a field would change the hash
+// of every ask already in a log, and the log's hash check would refuse it).
+const CANDIDATE_LINE = /\n\nCandidate: (\S+)$/;
+export const candidateQuestion = (question: string, of: keyed.RefId): string =>
+  `${question}\n\nCandidate: ${of}`;
+export type AskedAbout =
+  | { readonly t: 'nothing' }
+  | { readonly t: 'candidate'; readonly ref: keyed.RefId };
+export function askedAbout(question: string): AskedAbout {
+  const m = CANDIDATE_LINE.exec(question);
+  return m?.[1] ? { t: 'candidate', ref: m[1] } : { t: 'nothing' };
+}
 
 /** The gaps left, or `closed` if the expedition finished meanwhile. */
 export async function evaluateDone(
@@ -60,7 +76,7 @@ const CRITERION: {
       of,
       verdict: { t: 'check', command: c.command },
       pools: [],
-      max: m.deps.limits.doneReview,
+      max: maxOfCap(m.state().contract.doneReview),
     },
   }),
   review: (c, key, of, m) => {
@@ -75,14 +91,14 @@ const CRITERION: {
         of,
         verdict: { t: 'review', rubric: c.rubric, by: c.by, brief: brief.text },
         pools: [c.by.provider],
-        max: m.deps.limits.doneReview,
+        max: maxOfCap(m.state().contract.doneReview),
       },
     };
   },
   // The candidate is in the question, so a new candidate is a new question, never a reused yes.
   owner: (c, key, of) => ({
     t: 'call',
-    call: { t: 'ask', key, question: `${c.question}\n\nCandidate: ${of}`, answer: 'confirm' },
+    call: { t: 'ask', key, question: candidateQuestion(c.question, of), answer: 'confirm' },
   }),
 };
 

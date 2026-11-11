@@ -29,9 +29,11 @@ const APPROVAL_WAITS: { readonly [K in keyed.PendingApproval['t']]: boolean } = 
   pending: true,
 };
 
+/** `aboutOf` says what an ask's question is about (the host knows where outputs are stored). */
 export function keyedViewOf(
   view: ExpeditionView,
-  approval: keyed.PendingApproval
+  approval: keyed.PendingApproval,
+  aboutOf: (question: string) => keyed.AskAbout
 ): keyed.KeyedView {
   const s = view.state;
   const barsByKey = new Map<keyed.Key, keyed.Bar[]>();
@@ -45,7 +47,7 @@ export function keyedViewOf(
     ...keyedRowOf(s, approval),
     lanes,
     markers: [...view.timeline.markers],
-    asks: pendingAsks(s, view.timeline),
+    asks: pendingAsks(s, view.timeline, aboutOf),
     approval,
     faults: [...view.faults],
   };
@@ -67,7 +69,11 @@ function newestOf(records: readonly CallRecord[], key: keyed.Key): CallRecord {
   return rest.reduce((a, b) => (b.declaredIn >= a.declaredIn ? b : a), first);
 }
 
-function pendingAsks(s: State, timeline: keyed.Timeline): keyed.PendingAsk[] {
+function pendingAsks(
+  s: State,
+  timeline: keyed.Timeline,
+  aboutOf: (question: string) => keyed.AskAbout
+): keyed.PendingAsk[] {
   const openBar = new Map<keyed.RefId, keyed.Bar>();
   for (const bar of timeline.bars)
     if (bar.end.t === 'open') openBar.set(keyed.refOf(bar.key, bar.hash), bar);
@@ -78,7 +84,14 @@ function pendingAsks(s: State, timeline: keyed.Timeline): keyed.PendingAsk[] {
       if (!s.pendingAsks.has(ref) || r.call.t !== 'ask') continue;
       const bar = openBar.get(ref);
       if (!bar) throw new Error(`projection: the pending ask ${ref} has no open bar`);
-      asks.push({ ref, key, question: r.call.question, answer: r.call.answer, askedAt: bar.start });
+      asks.push({
+        ref,
+        key,
+        question: r.call.question,
+        answer: r.call.answer,
+        askedAt: bar.start,
+        about: aboutOf(r.call.question),
+      });
     }
   return asks;
 }

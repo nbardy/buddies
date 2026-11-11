@@ -21,12 +21,14 @@ import {
   type PolicyAdoption,
   type TurnGate,
   type TurnPolicy,
+  type TurnRequestExtras,
   commonToolResultParts,
 } from '../turns/policy';
+import type { TurnSeat } from './briefing';
 import { BUDDY_BUILDER_BRIEFING } from './builder';
 import { type GrantRecord, REVIEWS_MEMORY, adoptedGrant } from './grants';
-import { HARNESS_TURN } from './harness-steering';
-import type { BuddyPolicyPort, SessionScope } from './policy-port';
+import { HARNESS_TURN, type HookSet } from './harness-steering';
+import type { BuddyPolicyPort, BuddyTurnTools, SessionScope } from './policy-port';
 import type { OwnedChatRun } from './runner';
 
 /**
@@ -227,6 +229,35 @@ function audienceOf(
 }
 
 // --- Buddy ---------------------------------------------------------------------
+
+// Pattern: table-driven (docs/patterns.md#table-driven)
+/**
+ * A Buddy turn's harness request, by its seat. Any Buddy turn: the one MCP server and the
+ * harness's steering hooks (args unchanged since before calls had limits). An expedition call:
+ * only its capability set (expedition-kernel/access.ts), which the harness turns into its own
+ * flags: no MCP server, no hooks (they authenticate with the MCP bearer and steer owner posts,
+ * and a call has neither), no permission bypass. Its grant is still issued, tool-less (`call`
+ * role), so adoption and settle treat it like every Buddy turn. 2026-11-11 real run: a call
+ * turn ran Claude `--tools default` + bypassPermissions and Codex `danger-full-access`.
+ * Guard: expeditions-v1-agent-runs.test.ts "each expedition turn kind spawns with its limits".
+ */
+const SEAT_REQUEST: {
+  readonly [K in TurnSeat['t']]: (
+    seat: Extract<TurnSeat, { t: K }>,
+    tools: BuddyTurnTools,
+    provider: ProviderName
+  ) => TurnRequestExtras;
+} = {
+  buddy: (_seat, tools, provider) => ({
+    mcpServers: tools.servers,
+    extraArgs: HARNESS_TURN[provider].args(tools.steering),
+  }),
+  call: (seat) => ({ capabilities: seat.capabilities }),
+};
+const SEAT_HOOKS: { readonly [K in TurnSeat['t']]: (provider: ProviderName) => HookSet } = {
+  buddy: (provider) => HARNESS_TURN[provider].hooks,
+  call: (provider) => ({ t: 'none', harness: provider }),
+};
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
 /**
@@ -490,19 +521,19 @@ export class BuddyTurnPolicy implements TurnPolicy {
     }
     assertBuddyProviderSupportsMcp(config.provider);
     const context = this.turnContext();
+    const seat = this.buddies.turnSeat(context);
     const tools = this.buddies.mcpServers({
       context,
       conversationId: this.host.id,
       owner: input.origin === 'owner_input',
       // A turn the owner typed (a chat run) subscribes the chat's branch (mcp.ts `subscriber`).
       subscribes: owned ? 'branch' : 'self',
-      hooks: HARNESS_TURN[config.provider].hooks,
+      hooks: (SEAT_HOOKS[seat.t] as (p: ProviderName) => HookSet)(config.provider),
     });
     this.grant = tools.grant;
-    return {
-      mcpServers: tools.servers,
-      extraArgs: HARNESS_TURN[config.provider].args(tools.steering),
-    };
+    return (
+      SEAT_REQUEST[seat.t] as (s: TurnSeat, t: BuddyTurnTools, p: ProviderName) => TurnRequestExtras
+    )(seat, tools, config.provider);
   }
 
   /**

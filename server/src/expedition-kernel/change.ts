@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { keyed } from '@unleashd/shared';
 import { canonicalise } from './canonical';
-import { parseContract } from './contract';
+import { maxOfCap, parseContract } from './contract';
 import {
   ATTACHED,
   type Asked,
@@ -65,7 +65,7 @@ export async function checkPlan(
 // ---- wakes ----
 
 type Resolution =
-  | { readonly t: 'continue' }
+  | { readonly t: 'continue'; readonly why: string }
   | { readonly t: 'stop'; readonly why: string }
   | { readonly t: 'rewritten' }
   | { readonly t: 'retried' }
@@ -115,7 +115,7 @@ export class Change {
   private async resolve(event: keyed.BaseWake): Promise<Resolution> {
     let next: keyed.WakeEvent = event;
     for (;;) {
-      const d = await this.m.hostCall((s) => leaderCall(s, next, this.m.deps));
+      const d = await this.m.hostCall((s) => leaderCall(s, next));
       if (d.t === 'closed') return { t: 'closed' };
       const act = actOf(d.outcome);
       if (act.t !== 'act') return act.resolution;
@@ -258,7 +258,7 @@ type ActHandler<K extends keyed.LeaderAct['t']> = (
   event: keyed.BaseWake
 ) => Promise<Resolution | Rejected>;
 const ACT: { [K in keyed.LeaderAct['t']]: ActHandler<K> } = {
-  continue: async () => ({ t: 'continue' }),
+  continue: async (_c, act) => ({ t: 'continue', why: act.why }),
   stop: async (_c, act) => ({ t: 'stop', why: act.why }),
   rewrite: (c, act, event) => c.rewrite(act, event),
   retry: (c, act) => c.retry(act.keys),
@@ -310,7 +310,7 @@ const RESOLVED: { [K in keyed.BaseWake['t']]: Resolve<K> } = {
     const review = (decision: 'continue' | 'retry' | 'stop', why: string) =>
       m.append({ t: 'review', planVersion: m.version(), question: event.question, decision, why });
     if (r.t === 'continue') {
-      await review('continue', '');
+      await review('continue', r.why);
       m.answerReview(event.question);
     } else if (r.t === 'stop' || r.t === 'errored') {
       await review('stop', r.why);
@@ -329,11 +329,11 @@ const RESOLVED: { [K in keyed.BaseWake['t']]: Resolve<K> } = {
   drained: onlyStop,
 };
 
-function leaderCall(s: State, event: keyed.WakeEvent, deps: KernelDeps): keyed.Call {
+function leaderCall(s: State, event: keyed.WakeEvent): keyed.Call {
   let n = 0;
   for (const byHash of s.calls.values())
     for (const r of byHash.values()) if (r.call.t === 'leader') n++;
-  return { t: 'leader', key: `leader/${n + 1}`, event, max: deps.limits.leaderWake };
+  return { t: 'leader', key: `leader/${n + 1}`, event, max: maxOfCap(s.contract.leaderWake) };
 }
 
 /** The dry run of a rewrite answers from the log: a settled call's logged outcome, else nothing. */

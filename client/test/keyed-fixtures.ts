@@ -165,6 +165,12 @@ export const runningWithAsks = parse({
       question: 'Send the cold emails?',
       answer: 'confirm',
       askedAt: at('10:41:00'),
+      about: {
+        t: 'candidate',
+        ref: 'rank@h',
+        summary: 'Robotics teams first.\nThey buy within a week.',
+        answerPath: '/exp/refs/rank.out.json',
+      },
     },
   ],
   faults: [{ at: at('10:35:00'), what: 'executor cannot run a web call' }],

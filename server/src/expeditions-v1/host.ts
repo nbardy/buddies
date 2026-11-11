@@ -22,6 +22,7 @@ import { createLeader } from './leader';
 import { observeBuddyEvents } from './observe';
 import { Approvals, type Decided } from './owner/approvals';
 import { OwnerBook } from './owner/book';
+import { aboutIn } from './owner/candidate';
 import { Inbox } from './owner/inbox';
 import { expeditionThread, leaderDm } from './owner/thread';
 import { buddyProviders } from './providers';
@@ -51,15 +52,9 @@ export type KeyedHostDeps = {
   readonly logger: Pick<Console, 'warn'>;
   readonly clock?: Clock;
   readonly gates?: KernelDeps['gates'];
-  readonly limits?: KernelDeps['limits'];
   readonly timing?: CallTiming;
 };
 
-/** Neither a wake nor a done review is priced by a contract: these bound each one. */
-export const DEFAULT_LIMITS: KernelDeps['limits'] = {
-  leaderWake: { usd: 2, minutes: 20 },
-  doneReview: { usd: 2, minutes: 20 },
-};
 /** The typecheck gate's zod and tsc: the server's own (server/node_modules). */
 const SERVER_DIR = path.resolve(__dirname, '..', '..');
 export const SERVER_GATES: KernelDeps['gates'] = {
@@ -151,7 +146,6 @@ export function createKeyedHost(d: KeyedHostDeps) {
     clock,
     providerOf: providers.providerOf,
     gates: d.gates ?? SERVER_GATES,
-    limits: d.limits ?? DEFAULT_LIMITS,
   };
 
   /** Run `work` only while Buddy execution is enabled: launch and open start agents (§7.1-2). */
@@ -253,7 +247,7 @@ export function createKeyedHost(d: KeyedHostDeps) {
     /** The wire view, with the approval only the Owner port holds. */
     view(id: string): keyed.KeyedView | undefined {
       const e = kernels.get(id);
-      return e ? keyedViewOf(e.view(), approvals.pendingOf(id)) : undefined;
+      return e ? keyedViewOf(e.view(), approvals.pendingOf(id), aboutIn(e.view())) : undefined;
     },
     /** The list row of an open expedition. */
     row(e: Expedition): keyed.KeyedRow {

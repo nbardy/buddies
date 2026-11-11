@@ -1,4 +1,6 @@
+import type { TurnCapabilities } from '@nbardy/agent-cli';
 import type { keyed } from '@unleashd/shared';
+import { limitsText } from '../../expedition-kernel/access';
 import type { RunAddress } from './address';
 import { answerInstruction } from './answer';
 import type { ExpeditionContext } from './context';
@@ -41,8 +43,9 @@ const WHERE: {
 } = {
   none: () => 'You have no working directory of your own.',
   detached: (t) => `Your working directory is ${t.path}.`,
+  // What it may read there is in LIMITS (the turn's tools are set to it, CONNECT_PLAN §10 F1).
   dir: (t, ctx, base) =>
-    `Your working directory is ${t.path}, a scratch directory. The repository is ${ctx.repo}, at commit ${base}: read it there, do not change it.`,
+    `Your working directory is ${t.path}, a scratch directory. The repository is ${ctx.repo}, at commit ${base}.`,
   checkout: (t, _ctx, base) =>
     `Your working directory is ${t.path}: a checkout of the repository on its own branch ${t.branch}, starting at commit ${base}. Commit your work on this branch; uncommitted changes are not your answer.`,
 };
@@ -77,6 +80,11 @@ const CONTEXT: {
 const header = (address: RunAddress) =>
   `Expedition call ${address.runId} (expedition ${address.expedition}).`;
 
+/** The head of every call's prompt: its id, then the limits its tools are set to, stated once. A
+ * brief no longer needs to say "do not change files"; until 2026-11-11 it was only advice (D11). */
+export const headOf = (title: string, capabilities: TurnCapabilities): string =>
+  [title, '', limitsText(capabilities)].join('\n');
+
 /** An agent call's request. `refs` holds every ref its inputs and `context` name. */
 export function agentBody(x: {
   readonly address: RunAddress;
@@ -86,10 +94,11 @@ export function agentBody(x: {
   readonly tree: Tree;
   readonly base: string;
   readonly expected: Expected;
+  readonly capabilities: TurnCapabilities;
 }): string {
   const { call, refs } = x;
   return [
-    header(x.address),
+    headOf(header(x.address), x.capabilities),
     '',
     call.brief,
     '',
@@ -99,10 +108,6 @@ export function agentBody(x: {
     ...CONTEXT[call.context.t](call.context as never, refs),
     'WHERE YOU WORK',
     whereOf(x.tree, x.ctx, x.base),
-    '',
-    // D11: advisory in v1; nothing enforces them.
-    'ACCESS (advisory)',
-    `Read: ${call.grant.reads.length > 0 ? call.grant.reads.join(', ') : 'what the brief names'}. Web: ${call.grant.web ? 'allowed' : 'not allowed'}.`,
     '',
     answerInstruction(x.expected),
   ].join('\n');
@@ -116,10 +121,12 @@ export function reviewBody(x: {
   readonly judged: NamedRef;
   readonly tree: Tree;
   readonly expected: Expected;
+  readonly capabilities: TurnCapabilities;
 }): string {
   return [
-    header(x.address),
-    'You are judging work against the rubric below. Do not change the work.',
+    headOf(header(x.address), x.capabilities),
+    '',
+    'You are judging work against the rubric below.',
     '',
     x.brief,
     '',
