@@ -61,10 +61,6 @@ after(async () => {
 
 // ---- helpers ----
 
-const SEAT = "seat('claude', 'claude-sonnet-5-5', 'low')";
-const HEAD = `import { check, command, need, expedition, role, seat, steps } from 'expedition';
-
-const worker = role({ by: ${SEAT}, usd: 1, minutes: 10 });`;
 function planFile(x: {
   plan: string;
   prompts?: Record<string, string>;
@@ -75,7 +71,7 @@ function planFile(x: {
   return writePlan(
     path.join(tempDir('xk-server-plan-'), 'plan.expedition.ts'),
     {
-      leader: lead,
+      leader: `buddy:${lead}`,
       repo: h.repo,
       goal: 'Pick a color, do the work, finish.',
       budget: { usd: 50, hours: 4 },
@@ -253,13 +249,15 @@ test('execution disabled, nothing on disk: the routes read empty, every write is
 
 // ---- 2 ----
 
-const MAIN_PLAN = `${HEAD}
-const { work } = steps({ work: worker.brief(PROMPTS.work) });
+const MAIN_PLAN = `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{work:{by:"worker",brief:PROMPTS.work}},plan: async ({work}, x) => {
   const [, done] = await Promise.all([x.ask('Which color?'), work()]);
-  return need(done, 'no work');
-} });
+  return done;
+}});
 `;
 
 test('execution enabled: preview writes nothing; launch, list, view; an owner reply settles the ask; a call killed mid-turn settles once; met', {
@@ -320,7 +318,11 @@ test('execution enabled: preview writes nothing; launch, list, view; an owner re
   assert.deepEqual(snapshot(file), before, 'the file is untouched');
   assert.equal(fs.existsSync(h.expRoot), false, 'preview creates no expeditions-v1 directory');
   const broken = planFile({
-    plan: `${HEAD}\nexport default expedition({ contract: CONTRACT, plan: async () => nope });\n`,
+    plan: `import {expedition} from 'expedition';
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{},plan: async ({}, x) => nope});
+`,
   });
   const rejected = await post('/preview', { file: broken });
   assert.equal(rejected.status, 200);
@@ -449,28 +451,32 @@ test('a rewrite over autoApply waits for the owner: declined, then approved, thr
     workspaceId: ws,
     file: planFile({
       autoApply: 0,
-      plan: `${HEAD}
-const { probe } = steps({ probe: worker.brief(PROMPTS.probe) });
+      plan: `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
-  const p = need(await probe(), 'no probe');
-  await x.review('First look?');
-  await x.review('Second look?');
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{probe:{by:"worker",brief:PROMPTS.probe}},plan: async ({probe}, x) => {
+  const p = await probe();
+  await x.checkin('First look?');
+  await x.checkin('Second look?');
   return p;
-} });
+}});
 `,
       prompts: { probe: answers('probetwo'), more: answers('moretwo') },
     }),
   });
   assert.equal(launched.status, 201, JSON.stringify(launched.body));
   const exp = (launched.body as keyed.KeyedView).id;
-  const V1 = `${HEAD}
-const { probe, more } = steps({ probe: worker.brief(PROMPTS.probe), more: worker.brief(PROMPTS.more) });
+  const V1 = `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async () => {
-  need(await probe(), 'no probe');
-  return need(await more(), 'no more');
-} });
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{probe:{by:"worker",brief:PROMPTS.probe},more:{by:"worker",brief:PROMPTS.more}},plan: async ({probe,more}, x) => {
+  await probe();
+  return await more();
+}});
 `;
   const wake = (n: number) =>
     h.eventually(() => h.exists(`${h.leaderName(exp, n)}.midturn`), Boolean, `wake ${n}`);
@@ -533,10 +539,12 @@ test('a clean shutdown kills the plan process and the command process group', {
   const launched = await post('/launch', {
     workspaceId: ws,
     file: planFile({
-      plan: `${HEAD}
-const { slow } = steps({ slow: command('node scripts/slow.js', { minutes: 30 }) });
+      plan: `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async () => need(await slow(), 'no slow') });
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{slow:{run:'node scripts/slow.js',minutes:30}},plan: async ({slow}, x) => await slow()});
 `,
     }),
   });

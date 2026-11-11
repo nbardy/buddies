@@ -6,9 +6,11 @@
  * Run: pnpm --filter @unleashd/shared gen:catalog
  */
 
+import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import {
   CatalogProviderSchema,
@@ -67,7 +69,10 @@ async function main() {
   ].join('\n');
   await mkdir(dirname(OUT_FILE), { recursive: true });
   await writeFile(OUT_FILE, out, 'utf-8');
-  console.log(`Wrote ${OUT_FILE}`);
+  await promisify(execFile)(process.execPath, [
+    join(REPO_ROOT, 'vendor/agent-cli-tool/scripts/gen-model-catalog.mjs'),
+  ]);
+  console.log(`Wrote ${OUT_FILE} and agent-cli's parser catalog`);
 }
 
 main().catch((error) => {

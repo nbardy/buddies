@@ -162,12 +162,13 @@ const lessonText = (l: Lesson) => (l.t === 'lesson' ? l.text : 'no lesson');
 // Sent on every Buddy turn: keep it tight. The authoring API (expedition-kernel/authoring/index.ts)
 // is the source of truth; the complete one-file example is in the keyed v1 docs.
 const DESCRIPTION = `Self-running expeditions; only the OWNER launches, steers or stops.
-propose {file}: write one absolute .ts file inside your workspace, then call. Gate issues post nothing; fix and propose again. Clean posts a Launch card with cost and advisory limits; edits need a new proposal.
+propose {file}: write an absolute .ts file in your workspace. Fix gate issues and retry. Clean posts a Launch card with cost, defaults and advisory limits; edits need a new proposal.
 status {id}, list: read. draft, act: OLD expeditions only.
-Import only 'expedition' and 'zod'. export default expedition({contract, plan: async (x) => held}).
-contract: {goal, leader: Buddy id, repo, budget:{usd,hours}, autoApply:{usd}, pools:{provider:concurrency}, done:[{check:cmd}|{review:{rubric:text,by:seat}}|{owner:question}], rules:[text]}; optional leaderWake, doneReview:{usd,minutes}. Leader rewrites must preserve this owner literal.
-role({by:seat(provider,model,effort)|buddy(id),usd,minutes}): .brief(text | item=>text), .reads(paths), .web(), .checkout(), .returns(zod), .lists(zod), .needs(pool), .judged(check(cmd | item=>cmd) | review(text,another-provider-seat)). command(cmd | item=>cmd,{minutes}).
-steps({a:spec}) makes await a({item,reads,on,continues,id}); item is required only for an item function. Result: passed with out/ref, or non-pass. need(result,why), passed(results), parallel(items,fn); x.phase(name,fn), x.review(q), x.ask(q), x.confirm(q). Return held.
+Import {expedition} from 'expedition'; zod for schemas; step({...}) only for item callback inference.
+export default expedition({contract,agents,steps,plan:async(steps,x)=>held}).
+contract:{goal,leader,repo,budget:{usd,hours},rules,done:[{check:cmd}|{review:rubric,by:who}|{owner:q}]}; optional pools,autoApply,leaderWake,doneReview,call. Rewrites preserve the owner's contract.
+agents:{name:'harness:model[:effort]'|'buddy:<id>'|{use:spec,usd?,minutes?}}. Steps:{by,brief,returns?,item?,reads?,web?,checkout?,needs?,judge?,usd?,minutes?} or {run,minutes?,returns?,item?,needs?}. Judge uses the done check/review shape. by is a name or spec; brief/check/run are text or item=>text; item requires string id.
+await name(item?,options?) requires a pass; name.try returns the result union. Options:{id,reads,on,continues}. Use JS promises/loops/filter. x.phase(name,fn),x.checkin(q) wakes leader,x.ask(q),x.confirm(q). Return a passed result.
 Example: docs/expeditions/keyed/v1/examples/01-gtm.expedition.ts.`;
 
 export const EXPEDITION_TOOL = {

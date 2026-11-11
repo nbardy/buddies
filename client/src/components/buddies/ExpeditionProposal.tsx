@@ -77,6 +77,40 @@ function Access({ access }: { access: readonly keyed.TurnAccess[] }) {
   );
 }
 
+/** What the file left unsaid and the host filled in, in words. Only defaulted values are listed:
+ * a value the file states is the owner's own and needs no note. */
+function defaultLines(d: keyed.PreviewDefaults): string[] {
+  const cap = (c: keyed.Cap) => `up to ${money(c.usd)} and ${c.minutes} min`;
+  const stepsOnDefault = d.steps.filter(
+    (s) => s.usd?.t === 'defaulted' || s.minutes.t === 'defaulted'
+  ).length;
+  return [
+    d.pools.t === 'defaulted' ? 'One call at a time per harness' : null,
+    d.call.usd.t === 'defaulted' || d.call.minutes.t === 'defaulted'
+      ? `Each call: up to ${money(d.call.usd.value)} and ${d.call.minutes.value} min unless its step or agent says otherwise${stepsOnDefault > 0 ? ` (${stepsOnDefault} ${stepsOnDefault === 1 ? 'step uses' : 'steps use'} this)` : ''}`
+      : null,
+    d.autoApply.t === 'defaulted'
+      ? `A leader rewrite that adds more than ${money(d.autoApply.value.usd)} waits for your approval`
+      : null,
+    d.leaderWake.t === 'defaulted' ? `Each leader check-in: ${cap(d.leaderWake)}` : null,
+    d.doneReview.t === 'defaulted' ? `The final review: ${cap(d.doneReview)}` : null,
+  ].filter((line) => line !== null);
+}
+
+function Defaults({ defaults }: { defaults: keyed.PreviewDefaults | null }) {
+  const lines = defaults === null ? [] : defaultLines(defaults);
+  return lines.length === 0 ? null : (
+    <section className="keyed-expedition-need ui-stack" aria-label="Defaults the file did not set">
+      <strong>Defaults the file did not set</strong>
+      <ul className="expedition-notes">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 type Foot<K extends Standing['t']> = (
   s: Extract<Standing, { t: K }>,
   p: keyed.KeyedProposal,
@@ -149,6 +183,7 @@ export function ProposalCard({ proposal }: { proposal: keyed.KeyedProposal }) {
           </li>
         ))}
       </ul>
+      <Defaults defaults={p.defaults} />
       <Access access={p.access} />
       <div className="expedition-manage ui-row">
         {(FOOT[standing.t] as Foot<Standing['t']>)(standing, proposal, launch, listed)}

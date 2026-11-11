@@ -45,25 +45,10 @@
 // Gates typecheck and dry-run declarations; they never execute or establish existence of these tools.
 // Fill in actual Buddy ids and check their providers; test providers below are explicit assumptions.
 
-import {
-  type Held,
-  type Readable,
-  type Result,
-  buddy,
-  check,
-  command,
-  expedition,
-  need,
-  parallel,
-  passed,
-  review,
-  role,
-  seat,
-  steps,
-} from 'expedition';
+import { type Held, type Readable, type Result, expedition, step } from 'expedition';
 import { z } from 'zod';
 
-// Preserve failed outputs as evidence too: passed(...) alone would erase a search's refutations.
+// Preserve failed outputs as evidence too: filtering for passes alone would erase a search's refutations.
 function evidence(result: Result<unknown>): Readable[] {
   switch (result.t) {
     case 'passed':
@@ -78,7 +63,7 @@ function evidence(result: Result<unknown>): Readable[] {
       return [`refused: ${result.reason}`];
   }
 }
-const noResult = (why: string) => need({ t: 'errored', why }, why);
+
 const ENGINE = 'prototypes/surf_engine_v1/src/';
 const BENCH = 'tools/speed_search_v1';
 const MAX_SPREAD = 0.03;
@@ -89,13 +74,7 @@ const Idea = z.object({
   idea: z.string(),
   prediction: z.string(),
 });
-const judge = seat('gemini', 'gemini-3.1-pro-preview', 'high');
-const lead = role({ by: buddy('wave-simulation-lead'), usd: 6, minutes: 45 }).reads(
-  'KEY_LEARNINGS.md',
-  'SHADER_AND_PERFORMANCE_TRICKS.md',
-  'auto_research/'
-);
-const coder = role({ by: seat('codex', 'gpt-6.1-sol', 'high'), usd: 5, minutes: 60 });
+
 const abba = (flags: string) => `python3 ${BENCH}/abba.py ${flags} --json`;
 const speed_claim = `# Rubric: does the record say exactly what the measurements say?
 
@@ -113,7 +92,7 @@ Open the reports the page cites. Check each of these:
    loop alone, fails.
 4. **The protocol did not move.** The cases, metric and baseline commit in the report match
    \`benchmarks/speed_search_v1/protocol.json\` at the launch commit.
-5. **The rejects are all there.** Every idea in the learning log has a row in the table and, if
+5. **The rejects are all there.** Every idea in the supplied call evidence has a row in the table and, if
    rejected, a graveyard row. A missing reject fails the review as surely as a wrong number.
 6. **No promotion.** The page says "candidate". \`matchedErrorSpeedup\` is not set. Nothing claims
    the result holds on a device or case that was not measured.
@@ -125,26 +104,81 @@ In your answer, list each number you checked and where you found it. If you fail
 the line and the report field that disagree.
 `;
 
-const { cases, noise, instrument, quiet, propose, implement, screen, gate, confirm, record } =
-  steps({
-    cases: command(`python3 ${BENCH}/cases.py --json`, { minutes: 1 }).lists(Case),
-    noise: command(
-      (item: z.infer<typeof Case>) =>
-        abba(`--aa --case ${item.id} --device modal-l4 --max-usd 0.50`),
-      { minutes: 20 }
-    )
-      .returns(z.object({ spread: z.number() }))
-      .needs('modal'),
-    instrument: coder
-      .checkout()
-      .brief(`# Instrument: make the benchmark able to tell A from A
+export default expedition({
+  contract: {
+    goal: `Make the WebGPU APIC engine (\`prototypes/surf_engine_v1\`) faster without making it less accurate,
+and do it as a search I do not have to babysit.
+
+I want many ideas tried in parallel: kernel variants, solver changes, precision, scheduling. Each
+one has to clear the same matched-error gate before its speed counts for anything. Use the local
+M4 for a quick screen and Modal for the full case set, and keep the implementers working while the
+GPU is busy.
+
+Two things have burned us before. First, noisy baselines: we once recorded a false 0.842× because
+the A and B runs were not paired. If the benchmark cannot tell an A/A pair apart from a real
+change, fix the benchmark before tuning anything. Second, repetition: the swarm re-tested ideas
+that were already in the graveyard, and wrote hundreds of notes while no kernel moved. Keep one
+dense shared record of what was tried and what it measured, and make every proposer read it.
+
+A real result is one candidate that is at least 15% faster at matched error on the frozen cases,
+under complete cost, on a named L4, confirmed by an ABBA audit and checked by someone who did not
+build it. "Nothing beat the baseline, and here are the twelve ideas that failed and why" is also
+a result I will accept. Either way the graveyard in \`KEY_LEARNINGS.md\` gets the new rows.`,
+    leader: 'buddy:wave-simulation-lead',
+    repo: '~/git/wave_sim',
+    budget: { usd: 140, hours: 36 },
+    autoApply: { usd: 15 },
+    pools: { claude: 3, codex: 3, gemini: 1, gpu: 1, modal: 4, confirm: 1 },
+    done: [
+      {
+        check:
+          "bash -c 'bun test prototypes/surf_engine_v1/src tools/sim_runner_v1/runner.test.ts'",
+      },
+      {
+        check:
+          'python3 tools/speed_search_v1/verify_audit.py --max-error-ratio 1.0 --min-speedup 1.15',
+      },
+      { review: speed_claim, by: 'judge' },
+      { owner: 'Do you accept the audit, and may this case set record matchedErrorSpeedup=true?' },
+    ],
+    rules: [
+      'Commit on the work branch; never merge main or push. Integrate supplied commits only inside your private checkout.',
+      'Keep predictions and every verdict, including failures, in repo records from the supplied call evidence.',
+      'Speed counts only at matched error on the frozen case set in benchmarks/speed_search_v1/protocol.json. Nobody edits that file, the reference fields or the scoring code during the run.',
+      'Every speed number is an ABBA pair on one named device, with complete cost (setup, compile, evolution, readback, output, rejected work). A single timing is not a measurement.',
+      'One change family per candidate. Before proposing or building, read the graveyard in KEY_LEARNINGS.md and the supplied call evidence. A refuted family is not re-tested without a stated representation change.',
+      'Write a repo research row for every idea you touch, with the prediction made before the measurement. Do not write agent notes for timing checkpoints; notes are not progress.',
+      'Results cite a commit, never a dirty tree. Raw output goes to output/ through artifact_store_v1; only small summaries are tracked.',
+      'Use "candidate" for everything that has not passed the confirm audit. Do not set matchedErrorSpeedup yourself.',
+      "One local GPU runner at a time. Modal runs are scale-to-zero, carry --max-usd, and are launched only by the host's benchmark steps, never from an agent turn.",
+      'Modal total cap is $30 including all runs; use an external spend ledger and scale-to-zero launcher. confirm may be called at most twice, never automatically retried.',
+    ],
+  },
+  agents: {
+    judge: 'gemini:gemini-3.1-pro-preview',
+    lead: { use: 'buddy:wave-simulation-lead', usd: 6, minutes: 45 },
+    coder: { use: 'codex:gpt-6.1-sol:high', usd: 5, minutes: 60 },
+  },
+  steps: {
+    cases: { run: `python3 ${BENCH}/cases.py --json`, minutes: 1, returns: z.array(Case) },
+    noise: step({
+      run: (item) => abba(`--aa --case ${item.id} --device modal-l4 --max-usd 0.50`),
+      minutes: 20,
+      item: Case,
+      returns: z.object({ spread: z.number() }),
+      needs: ['modal'],
+    }),
+    instrument: {
+      by: 'coder',
+      checkout: true,
+      brief: `# Instrument: make the benchmark able to tell A from A
 
 The A/A runs in your inputs are the same commit timed against itself on the same device. They
 should agree. They do not: at least one frozen case shows a spread above 3%, or failed to produce
 a number at all. Until that is fixed, no A/B ratio from this benchmark means anything, and the
 search is paused behind you.
 
-This is a sub-goal of the expedition, not the expedition. You are repairing the measuring stick.
+This repair phase fixes the measuring stick before the search continues.
 You are not making the engine faster.
 
 ## Read first
@@ -173,20 +207,24 @@ timings, with no GPU.
 
 ## What good looks like
 
-One cause, named, with the evidence. A small change. The harness's own tests pass. The sub-goal's
+One cause, named, with the evidence. A small change. The harness's own tests pass. The repair phase's
 check is then run by the host, not by you: A/A on every frozen case on Modal from your commit,
 passing only if the worst spread is at most 3%. You do not run Modal or the local GPU yourself.
 
-Write one \`learn\` row: family \`benchmark-noise\`, the cause as the idea, your predicted spread
+Write one repo research row: family \`benchmark-noise\`, the cause as the idea, your predicted spread
 after the fix, and leave \`measured\` for the re-run. Stop when the tests pass and you have committed.
-`)
-      .judged(check(`python3 -m unittest discover -s ${BENCH}`)),
-    quiet: command(abba('--aa --all --device modal-l4 --max-spread 0.03 --max-usd 2.00'), {
+`,
+      judge: { check: `python3 -m unittest discover -s ${BENCH}` },
+    },
+    quiet: {
+      run: abba('--aa --all --device modal-l4 --max-spread 0.03 --max-usd 2.00'),
       minutes: 40,
-    }).needs('modal'),
-    propose: lead
-      .brief(
-        (item: { gen: number }) => `# Propose: the ideas for generation ${item.gen}
+      needs: ['modal'],
+    },
+    propose: step({
+      by: 'lead',
+      reads: ['KEY_LEARNINGS.md', 'SHADER_AND_PERFORMANCE_TRICKS.md', 'auto_research/'],
+      brief: (item) => `# Propose: the ideas for generation ${item.gen}
 
 You are choosing what the implementers build next. Each idea you list becomes one candidate
 commit, a local screen on the M4 and, if it survives, a paid run on Modal. Choose as if each one
@@ -194,7 +232,7 @@ costs a dollar and an hour, because it does.
 
 ## Read first, all of it
 
-- The learning log in your inputs. Every idea already tried in this run or an earlier one is
+- The supplied call evidence in your inputs. Every idea already tried in this run or an earlier one is
   there with its prediction, its measurement and its verdict.
 - \`KEY_LEARNINGS.md\`, "Refuted (the graveyard — never delete, never re-test without a
   representation change)". About thirty rows. Multigrid at our grid sizes, kernel fusion and
@@ -207,7 +245,7 @@ costs a dollar and an hour, because it does.
 A list of four to six ideas. Each has:
 
 - \`id\`: \`g${item.gen}-\` plus a short hyphenated name. It must not repeat an id from an earlier generation.
-- \`family\`: the mechanism family, in the words the learning log already uses where one fits
+- \`family\`: the mechanism family, in the words the supplied call evidence already uses where one fits
   (\`pressure-solver\`, \`kernel-fusion\`, \`precision\`, \`memory-layout\`, \`pass-scheduling\`, …).
 - \`idea\`: one change, stated so that an implementer can build exactly it. Name the pass or file.
 - \`prediction\`: the speedup you expect on the frozen set, as a number, and where the time comes
@@ -217,7 +255,7 @@ A list of four to six ideas. Each has:
 
 - One change family per idea. A candidate that changes two things teaches nothing when it moves.
 - If a family is rejected in the log or the graveyard, you may propose in it only by stating the
-  representation change that makes this a different experiment. Otherwise the host refuses the call.
+  representation change that makes this a different experiment. Otherwise do not propose it; the leader and reviewer must check this rule.
 - After generation 1, spend most slots near what survived: a retune of a kept family, or the next
   step it makes possible. Keep one slot for a family nobody has tried.
 - Prefer ideas whose prediction can be wrong. "Should help a bit" is not a prediction.
@@ -226,13 +264,14 @@ A list of four to six ideas. Each has:
 
 If you cannot find four ideas worth a dollar each, list fewer and say so in your summary. Do not
 write code in this step.
-`
-      )
-      .lists(Idea),
-    implement: coder
-      .checkout()
-      .brief(
-        (item: z.infer<typeof Idea>) => `# Implement: ${item.id}
+`,
+      item: z.object({ id: z.string(), gen: z.number() }),
+      returns: z.array(Idea),
+    }),
+    implement: step({
+      by: 'coder',
+      checkout: true,
+      brief: (item) => `# Implement: ${item.id}
 
 Family: ${item.family}
 
@@ -252,7 +291,7 @@ against the baseline. Other implementers are building other ideas now; you do no
 
 ## Before you write code
 
-Write a \`learn\` row with the idea, the family and your own prediction: the speedup you expect and
+Write a repo research row with the idea, the family and your own prediction: the speedup you expect and
 which pass it comes from. The row must exist before any measurement does.
 
 ## Build
@@ -282,31 +321,37 @@ only that the candidate is valid; the paid Modal run that follows decides whethe
 
 Stop when the tests pass and the change is committed. In your summary, say what you changed in
 two or three lines and anything about the code that the next implementer in this family should know.
-`
-      )
-      .judged(check(`bun test ${ENGINE}`)),
-    screen: command(abba('--case dam_break --device local-m4 --require-matched'), {
+`,
+      item: Idea,
+      judge: { check: `bun test ${ENGINE}` },
+    }),
+    screen: {
+      run: abba('--case dam_break --device local-m4 --require-matched'),
       minutes: 20,
-    }).needs('gpu'),
-    gate: command(
-      abba(
+      needs: ['gpu'],
+    },
+    gate: {
+      run: abba(
         '--all --device modal-l4 --require-matched --blocks 2 --require-speedup 1.03 --max-usd 1.00'
       ),
-      { minutes: 40 }
-    )
-      .returns(z.object({ speedup: z.number() }))
-      .needs('modal'),
-    confirm: command(
-      abba(
+      minutes: 40,
+      returns: z.object({ speedup: z.number() }),
+      needs: ['modal'],
+    },
+    confirm: {
+      run: abba(
         '--all --device modal-l4 --require-matched --blocks 6 --complete-cost --require-speedup 1.15 --max-usd 4.00'
       ),
-      { minutes: 120 }
-    ).needs('modal', 'confirm'),
-    record: lead
-      .checkout()
-      .brief(`# Record: the result, and the graveyard rows
+      minutes: 120,
+      needs: ['modal', 'confirm'],
+    },
+    record: {
+      by: 'lead',
+      reads: ['KEY_LEARNINGS.md', 'SHADER_AND_PERFORMANCE_TRICKS.md', 'auto_research/'],
+      checkout: true,
+      brief: `# Record: the result, and the graveyard rows
 
-The search is over. Your inputs hold the whole learning log and, if a candidate passed the long
+The search is over. Your inputs hold the whole supplied call evidence and, if a candidate passed the long
 audit, its commit and the audit report. Write the tracked record and commit it. A reviewer on
 another model will check every number you write against the reports.
 
@@ -338,91 +383,45 @@ There are two cases. Look at your inputs to see which one you are in.
 - Do not write agent notes, and do not touch the engine source or the benchmark.
 
 Stop when both files are committed.
-`)
-      .judged(review(speed_claim, judge)),
-  });
-
-export default expedition({
-  contract: {
-    goal: `Make the WebGPU APIC engine (\`prototypes/surf_engine_v1\`) faster without making it less accurate,
-and do it as a search I do not have to babysit.
-
-I want many ideas tried in parallel: kernel variants, solver changes, precision, scheduling. Each
-one has to clear the same matched-error gate before its speed counts for anything. Use the local
-M4 for a quick screen and Modal for the full case set, and keep the implementers working while the
-GPU is busy.
-
-Two things have burned us before. First, noisy baselines: we once recorded a false 0.842× because
-the A and B runs were not paired. If the benchmark cannot tell an A/A pair apart from a real
-change, fix the benchmark before tuning anything. Second, repetition: the swarm re-tested ideas
-that were already in the graveyard, and wrote hundreds of notes while no kernel moved. Keep one
-dense shared record of what was tried and what it measured, and make every proposer read it.
-
-A real result is one candidate that is at least 15% faster at matched error on the frozen cases,
-under complete cost, on a named L4, confirmed by an ABBA audit and checked by someone who did not
-build it. "Nothing beat the baseline, and here are the twelve ideas that failed and why" is also
-a result I will accept. Either way the graveyard in \`KEY_LEARNINGS.md\` gets the new rows.`,
-    leader: 'wave-simulation-lead',
-    repo: '~/git/wave_sim',
-    budget: { usd: 140, hours: 36 },
-    autoApply: { usd: 15 },
-    pools: { claude: 3, codex: 3, gemini: 1, gpu: 1, modal: 4, confirm: 1 },
-    done: [
-      {
-        check:
-          "bash -c 'bun test prototypes/surf_engine_v1/src tools/sim_runner_v1/runner.test.ts'",
-      },
-      {
-        check:
-          'python3 tools/speed_search_v1/verify_audit.py --max-error-ratio 1.0 --min-speedup 1.15',
-      },
-      { review: { rubric: speed_claim, by: judge } },
-      { owner: 'Do you accept the audit, and may this case set record matchedErrorSpeedup=true?' },
-    ],
-    rules: [
-      'Speed counts only at matched error on the frozen case set in benchmarks/speed_search_v1/protocol.json. Nobody edits that file, the reference fields or the scoring code during the run.',
-      'Every speed number is an ABBA pair on one named device, with complete cost (setup, compile, evolution, readback, output, rejected work). A single timing is not a measurement.',
-      'One change family per candidate. Before proposing or building, read the graveyard in KEY_LEARNINGS.md and the learning log. A refuted family is not re-tested without a stated representation change.',
-      'Write a `learn` row for every idea you touch, with the prediction made before the measurement. Do not write agent notes for timing checkpoints; notes are not progress.',
-      'Results cite a commit, never a dirty tree. Raw output goes to output/ through artifact_store_v1; only small summaries are tracked.',
-      'Use "candidate" for everything that has not passed the confirm audit. Do not set matchedErrorSpeedup yourself.',
-      "One local GPU runner at a time. Modal runs are scale-to-zero, carry --max-usd, and are launched only by the host's benchmark steps, never from an agent turn.",
-      'V1 execution notes override historical host claims in the briefs: no land, fence, protect, tests/learn tool, automatic learning rows or no-retest gate exists. Commit on the work branch; never merge main or push. Integration may combine supplied commits only inside its private checkout. Carry prior commits explicitly through on/reads; record predictions and every verdict in the repo records from the supplied evidence, including failures. Writable scopes and frozen graders are instructions and review obligations, not host-enforced write fences.',
-      'Modal total cap is $30 including all runs; use an external spend ledger and scale-to-zero launcher. confirm may be called at most twice, never automatically retried.',
-    ],
+`,
+      judge: { review: speed_claim, by: 'judge' },
+    },
   },
-  plan: async (x) => {
-    const set = need(await x.phase('cases', () => cases()), 'No frozen case list.');
+  plan: async (
+    { cases, noise, instrument, quiet, propose, implement, screen, gate, confirm, record },
+    x
+  ) => {
+    const set = await x.phase('cases', () => cases());
     const trail: Readable[] = [];
     const [firstCase, ...otherCases] = set.out;
-    if (!firstCase) return noResult('The frozen case set is empty.');
-    const pilotNoise = await x.phase('noise-pilot', () => noise({ item: firstCase }));
-    need(pilotNoise, 'The noise pilot did not produce a measurement.');
+    if (!firstCase) throw new Error('The frozen case set is empty.');
+    const pilotNoise = await x.phase('noise-pilot', () => noise(firstCase));
+
     const aa = [
       pilotNoise,
-      ...(await x.phase('noise', () => parallel(otherCases, (item) => noise({ item })))),
+      ...(await x.phase('noise', () => Promise.all(otherCases.map((item) => noise.try(item))))),
     ];
     trail.push(...aa.flatMap(evidence));
     let base: Held<unknown> | undefined;
-    if (passed(aa).length !== set.out.length || passed(aa).some((a) => a.out.spread > MAX_SPREAD)) {
-      base = need(
-        await x.phase('instrument', () => instrument({ reads: trail })),
-        'The benchmark repair failed.'
-      );
-      const quieted = need(await quiet({ on: base }), 'A/A is still too noisy for the search.');
+    if (
+      aa.filter((r) => r.t === 'passed').length !== set.out.length ||
+      aa.filter((r) => r.t === 'passed').some((a) => a.out.spread > MAX_SPREAD)
+    ) {
+      base = await x.phase('instrument', () => instrument({ reads: trail }));
+      const quieted = await quiet({ on: base });
       trail.push(quieted);
     }
-    await x.review('Is every frozen case trustworthy? Removing a noisy case needs the owner.');
+    await x.checkin('Is every frozen case trustworthy? Removing a noisy case needs the owner.');
     let keep: { id: string; code: Held<unknown>; speedup: number }[] = [];
     for (const gen of [1, 2, 3]) {
       await x.phase(`generation-${gen}`, async () => {
-        const ideas = need(
-          await propose({ id: gen, item: { gen }, reads: [...trail, ...keep.map((k) => k.code)] }),
-          'No candidate proposals.'
+        const ideas = await propose(
+          { id: String(gen), gen },
+          { id: gen, reads: [...trail, ...keep.map((k) => k.code)] }
         );
         trail.push(ideas);
         const trial = async (item: z.infer<typeof Idea>) => {
-          const built = await implement({ item, on: base, reads: [ideas, ...trail] });
+          const built = await implement.try(item, { on: base, reads: [ideas, ...trail] });
           const history: Readable[] = evidence(built);
           if (built.t !== 'passed')
             return {
@@ -430,7 +429,7 @@ a result I will accept. Either way the graveyard in \`KEY_LEARNINGS.md\` gets th
               history,
               winners: [],
             };
-          const local = await screen({ id: item.id, on: built });
+          const local = await screen.try({ id: item.id, on: built });
           history.push(...evidence(local));
           if (local.t !== 'passed')
             return {
@@ -438,7 +437,7 @@ a result I will accept. Either way the graveyard in \`KEY_LEARNINGS.md\` gets th
               history,
               winners: [],
             };
-          const scored = await gate({ id: item.id, on: built });
+          const scored = await gate.try({ id: item.id, on: built });
           history.push(...evidence(scored));
           return {
             t:
@@ -456,20 +455,20 @@ a result I will accept. Either way the graveyard in \`KEY_LEARNINGS.md\` gets th
         const pilot = first ? await trial(first) : undefined;
         const trials = pilot ? [pilot] : [];
         // A refuted pilot teaches us something; only a broken pipeline suppresses width.
-        if (pilot?.t === 'ready') trials.push(...(await parallel(rest, trial)));
+        if (pilot?.t === 'ready') trials.push(...(await Promise.all(rest.map(trial))));
         trail.push(...trials.flatMap((t) => t.history));
         keep = [...keep, ...trials.flatMap((t) => t.winners)]
           .sort((a, b) => b.speedup - a.speedup)
           .slice(0, 3);
       });
-      await x.review(
+      await x.checkin(
         `Generation ${gen}: did any family move matched-error speed? Stop if two generations moved nothing.`
       );
     }
     let winner: Held<unknown> | undefined;
     await x.phase('confirm', async () => {
       for (const k of keep.slice(0, 2)) {
-        const audit = await confirm({ id: k.id, on: k.code });
+        const audit = await confirm.try({ id: k.id, on: k.code });
         trail.push(...evidence(audit));
         if (audit.t === 'passed') {
           winner = k.code;
@@ -477,19 +476,16 @@ a result I will accept. Either way the graveyard in \`KEY_LEARNINGS.md\` gets th
         }
       }
     });
-    return need(
-      await x.phase('record', () =>
-        record({
-          on: winner ?? base,
-          reads: [
-            winner
-              ? 'A candidate passed its long audit.'
-              : 'No candidate passed; preserve every graveyard row.',
-            ...trail,
-          ],
-        })
-      ),
-      'The independent audit of the record failed.'
+    return await x.phase('record', () =>
+      record({
+        on: winner ?? base,
+        reads: [
+          winner
+            ? 'A candidate passed its long audit.'
+            : 'No candidate passed; preserve every graveyard row.',
+          ...trail,
+        ],
+      })
     );
   },
 });

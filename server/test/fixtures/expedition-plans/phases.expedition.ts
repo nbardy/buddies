@@ -1,19 +1,14 @@
 // @ts-nocheck: `expedition` resolves only inside the plan runner (runner-child.mjs), not in server typecheck.
 // Two phases run concurrently and interleave their awaits; each call must keep its own phase.
 // A phase stack shared across the process would mislabel the calls after the first await.
-import { expedition, parallel, role, seat, steps } from 'expedition';
+import { expedition } from 'expedition';
 
-const { probe } = steps({
-  probe: role({ by: seat('claude', 'm', 'low'), usd: 1, minutes: 5 }).brief(
-    `Do the work for probe.`
-  ),
-});
 const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
 
 export default expedition({
   contract: {
     goal: 'Probe.',
-    leader: 'lead',
+    leader: 'buddy:lead',
     repo: '~/git/x',
     budget: {
       usd: 10,
@@ -32,15 +27,24 @@ export default expedition({
     ],
     rules: [],
   },
-  plan: async (x) => {
+  agents: {},
+  steps: {
+    probe: {
+      by: 'claude:claude-sonnet-5-5:low',
+      usd: 1,
+      minutes: 5,
+      brief: `Do the work for probe.`,
+    },
+  },
+  plan: async ({ probe }, x) => {
     const [left] = await Promise.all([
       x.phase('left', async () => {
-        await probe({ id: 'first' });
-        return x.phase('inner', () => parallel(items, (item) => probe({ id: item.id })));
+        await probe.try({ id: 'first' });
+        return x.phase('inner', () => Promise.all(items.map((item) => probe.try({ id: item.id }))));
       }),
       x.phase('right', async () => {
-        await probe({ id: 'first' });
-        return parallel(items, (item) => probe({ id: item.id }));
+        await probe.try({ id: 'first' });
+        return Promise.all(items.map((item) => probe.try({ id: item.id })));
       }),
     ]);
     return left[0];

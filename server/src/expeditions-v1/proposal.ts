@@ -5,7 +5,8 @@ import { type Clean, previewView } from '../expedition-kernel/launch';
 // (the card and the tool's reply). `previewView` (expedition-kernel/launch.ts) stays the owner
 // HTTP preview's one projection; this adds the one column a reader of a proposal needs.
 
-const seatLabel = (s: keyed.Seat): string => `${s.provider} · ${s.model} · ${s.effort}`;
+const seatLabel = (s: keyed.Seat): string =>
+  [s.provider, s.model, s.effort].filter((part) => part !== '').join(' · ');
 const whoLabel: { readonly [K in keyed.Who['t']]: (w: Extract<keyed.Who, { t: K }>) => string } = {
   seat: seatLabel,
   buddy: (w) => `buddy ${w.id}`,

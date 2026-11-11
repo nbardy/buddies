@@ -17,7 +17,7 @@ const EXAMPLES = path.join(REPO, 'docs/expeditions/keyed/v1/examples');
 const GTM = path.join(EXAMPLES, '01-gtm.expedition.ts');
 const GOOD = {
   goal: 'Do the thing.',
-  leader: 'lead',
+  leader: 'buddy:lead',
   repo: '~/git/x',
   budget: { usd: 10, hours: 2 },
   autoApply: { usd: 1 },
@@ -244,6 +244,13 @@ test('every documented one-file example passes the real launch gates without exe
       const result = await preview(deps, path.join(EXAMPLES, file));
       assert.equal(result.t, 'clean', JSON.stringify(result));
       if (result.t === 'clean') assert.ok(result.asked.length > 0, 'a real first wave is declared');
+      assert.deepEqual(
+        await typecheckGate(path.join(EXAMPLES, file), {
+          ...gateOpts,
+          tscBin: path.join(REPO, 'node_modules/.bin/tsrs'),
+        }),
+        { t: 'ok' }
+      );
     });
   }
 });
@@ -257,25 +264,59 @@ test('the gate typechecks only the real file against the authoring API and write
   assert.deepEqual(await typecheckGate(file, gateOpts), { t: 'ok' });
   assert.deepEqual(readdirSync(path.dirname(file)), ['test.expedition.ts']);
 });
-test('the typecheck gate catches narrowing, unknown steps, missing/wrong item, and items on string briefs', async () => {
-  for (const [from, to, issue] of [
-    [
-      "need(await x.phase('scope', () => scope()), 'No list of organizations.')",
-      "(await x.phase('scope', () => scope())).out",
-      'TS2339',
-    ],
-    ['await attack({', 'await attak({', 'attak'],
-    ['collect({ item: org })', 'collect()', 'argument'],
-    ['collect({ item: org })', 'collect({ item: { id: 7 } })', 'number'],
-    ['scope()', 'scope({ item: { id: 7 } })', 'assignable'],
-    ['check((item: z.infer<typeof Org>)', 'check((item: { id: number })', 'assignable'],
-  ]) {
-    const r = await typecheckGate(
-      planFile((s) => s.replace(from!, to!)),
-      gateOpts
+const TYPED_PLAN = `import {expedition,step} from 'expedition';
+import {z} from 'zod';
+const Org=z.object({id:z.string(),name:z.string()});
+export default expedition({
+ contract:{goal:'Probe',leader:'buddy:lead',repo:'/tmp/x',budget:{usd:5,hours:1},rules:[],done:[{owner:'Accept?'}]},
+ agents:{scout:'claude:claude-sonnet-5-5:medium'},
+ steps:{scope:{by:'scout',brief:'Scope',returns:z.array(Org)},collect:step({by:'scout',item:Org,brief:org=>org.name,returns:z.number(),judge:{check:org=>'echo '+org.id}})},
+ plan:async({scope,collect})=>{
+   const orgs=await scope();
+   const org=orgs.out[0]!;
+   const found=await collect(org);
+   found.out.toFixed();
+   return found;
+ }
+});`;
+const compilerBins = [gateOpts.tscBin, path.join(REPO, 'node_modules/.bin/tsrs')];
+function typedFile(source: string): string {
+  const file = path.join(tempDir('typed-plan-'), 'plan.expedition.ts');
+  writeFileSync(file, source);
+  return file;
+}
+test('both checkers infer schema outputs, callback items and agent names without any', async () => {
+  for (const tscBin of compilerBins) {
+    assert.deepEqual(await typecheckGate(typedFile(TYPED_PLAN), { ...gateOpts, tscBin }), {
+      t: 'ok',
+    });
+    // The expected-error directives would become TS2578 if returns or callback items decayed to any.
+    const guarded = TYPED_PLAN.replace(
+      'found.out.toFixed();',
+      `found.out.toFixed();
+   // @ts-expect-error a number has no invented output field
+   found.out.invented;
+   // @ts-expect-error item name remains a string
+   org.name.toFixed();`
     );
-    assert.equal(r.t, 'failed', `${from} -> ${to}`);
-    if (r.t === 'failed') has(r.errors, issue!);
+    assert.deepEqual(await typecheckGate(typedFile(guarded), { ...gateOpts, tscBin }), { t: 'ok' });
+    for (const [from, to, issue] of [
+      ['await scope()', 'await scope.try()', 'out'],
+      ['collect(org)', 'collect()', 'argument'],
+      ['collect(org)', 'collect({id:7,name:"x"})', 'number'],
+      ['collect(org)', 'collect(org, 7)', 'StepInput'],
+      ['scope()', 'scope({item:{id:"x"}})', 'item'],
+      ["by:'scout',brief:'Scope'", "by:'scuot',brief:'Scope'", 'TS2322'],
+      ['org=>org.name', 'org=>org.missing', 'missing'],
+      ['found.out.toFixed()', 'found.out.toUpperCase()', 'toUpperCase'],
+    ]) {
+      const r = await typecheckGate(typedFile(TYPED_PLAN.replace(from!, to!)), {
+        ...gateOpts,
+        tscBin,
+      });
+      assert.equal(r.t, 'failed', `${tscBin}: ${from} -> ${to}`);
+      if (r.t === 'failed') has(r.errors, issue!);
+    }
   }
   assert.equal(
     (await typecheckGate(planFile(), { ...gateOpts, tscBin: '/nonexistent/tsc' })).t,
@@ -293,6 +334,7 @@ test('static checks cover every cast step, even beyond the first wave, and retai
       grant: { reads: [], web: false },
       judge,
       hasBrief: true,
+      caps: { usd: { t: 'step', value: 1 }, minutes: { t: 'step', value: 5 } },
       needs: [],
     },
   ];
@@ -314,7 +356,7 @@ test('static checks cover every cast step, even beyond the first wave, and retai
   };
   const row = cast[0]!;
   if (row.t !== 'agent') return;
-  has(bad([{ ...row, hasBrief: false }]), 'later', 'no .brief');
+  has(bad([{ ...row, hasBrief: false }]), 'later', 'no brief');
   has(bad([{ ...row, judge: { ...judge, by: seat('claude') } }]), 'later', 'reviewer', 'producer');
   has(bad([{ ...row, needs: ['gpu'] }]), "pool 'gpu'");
   has(bad([], [agent({ judge: { ...judge, by: seat('claude') } })]), 'reviewer', 'producer');

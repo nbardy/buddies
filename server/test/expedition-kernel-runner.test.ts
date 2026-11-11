@@ -197,14 +197,17 @@ test("the rewrite re-issues version 0's calls for the orgs it still studies and 
 });
 
 // ---- how a plan ends ----
-test('need() on a failed result ends with a gap carrying its ref as evidence', async () => {
+test('a required call that failed ends with a gap carrying its ref as evidence', async () => {
   const result = await dryRun({
     file: copyPlan('need-gap').file,
     known: (call) => ({ t: 'failed', ref: ref(call.key), out: REPORT, why: 'nothing there' }),
     reviewed: () => false,
   });
   assert.equal(result.end.t, 'gap');
-  assert.equal(result.end.t === 'gap' && result.end.why, 'The probe found nothing.');
+  assert.equal(
+    result.end.t === 'gap' && result.end.why,
+    'Step probe did not pass: failed: nothing there.'
+  );
   assert.deepEqual(result.end.t === 'gap' && result.end.evidence[0], {
     t: 'ref',
     ref: ref('probe'),
@@ -260,7 +263,7 @@ test("an answer that violates the step's schema reaches plan code as errored, ne
 // 2026-11-11: nothing static catches a plan call left un-awaited (Biome cannot resolve the bare
 // `expedition` import; tsc does not report floating promises). Returning while a call or review is
 // still unanswered ends the plan as threw, naming what was pending. The phases test below proves
-// that calls awaited through parallel and Promise.all still end as a candidate.
+// that calls awaited through Promise.all still end as a candidate.
 test('a plan that returns while calls it issued are unanswered ends with threw naming them', async () => {
   const result = await dryRun({
     file: copyPlan('unawaited').file,
@@ -270,11 +273,11 @@ test('a plan that returns while calls it issued are unanswered ends with threw n
   assert.equal(result.end.t, 'threw');
   assert.equal(
     result.end.t === 'threw' ? result.end.message : '',
-    'The plan returned while 2 calls were still pending: probe/forgotten, review "Was the forgotten probe any good?" (a call was not awaited).'
+    'The plan returned while 2 calls were still pending: probe/forgotten, checkin "Was the forgotten probe any good?" (a call was not awaited).'
   );
 });
 
-test('concurrent calls inside parallel inside phases keep their own phase prefix', async () => {
+test('concurrent calls inside Promise.all inside phases keep their own phase prefix', async () => {
   const result = await dryRun({
     file: copyPlan('phases').file,
     known: (call) => passedReport(call.key),

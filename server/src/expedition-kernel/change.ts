@@ -34,6 +34,7 @@ export type Checked =
   | {
       readonly t: 'ok';
       readonly contract: keyed.Contract;
+      readonly defaults: keyed.PreviewDefaults;
       readonly asked: readonly Asked[];
       /** What every turn it may run may do (gates.ts `turnAccessOf`). */
       readonly access: readonly keyed.TurnAccess[];
@@ -54,6 +55,10 @@ export async function checkPlan(
   const typed = await typecheckGate(file, deps.gates);
   if (typed.t === 'failed') return { t: 'failed', gate: 'typecheck', issues: typed.errors };
   const dry = await dryRun({ file, known, reviewed: () => false });
+  // A bad contract agent name can fail before IPC opens; preserve its named error instead of
+  // replacing it with 'must be JSON'. Guard: expedition-kernel-authoring preview test.
+  if (dry.contract === undefined && (dry.end.t === 'threw' || dry.end.t === 'crashed'))
+    return { t: 'failed', gate: 'contract', issues: [JSON.stringify(dry.end)] };
   const parsed = parseContract(dry.contract);
   if (parsed.t === 'invalid') return { t: 'failed', gate: 'contract', issues: parsed.issues };
   const contract = parsed.contract;
@@ -72,7 +77,16 @@ export async function checkPlan(
     if (canon.t === 'invalid') return { t: 'failed', gate: 'static', issues: canon.issues };
     asked.push({ call: canon.call, hash: hashOf(canon.call) });
   }
-  return { t: 'ok', contract, asked, access: checked.access };
+  return {
+    t: 'ok',
+    contract,
+    asked,
+    access: checked.access,
+    defaults: {
+      ...parsed.defaults,
+      steps: dry.cast.map((row) => ({ step: row.step, ...row.caps })),
+    },
+  };
 }
 
 // ---- wakes ----
@@ -465,7 +479,7 @@ export function rulingOf(out: unknown): keyed.LeaderRuling {
 const EVENT_WORDS: {
   readonly [K in keyed.BaseWake['t']]: (e: Extract<keyed.BaseWake, { t: K }>) => string;
 } = {
-  review: (e) => `the review "${e.question}"`,
+  review: (e) => `the checkin "${e.question}"`,
   'ended-unmet': (e) => `the plan's end with done not met (${e.gaps.join('; ')})`,
   stuck: (e) => `the plan being stuck (${e.why})`,
   'budget-mark': (e) => `the ${e.percent}% budget mark`,

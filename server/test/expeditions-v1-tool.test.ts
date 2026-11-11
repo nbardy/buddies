@@ -21,12 +21,10 @@ import { tempDir } from './fixtures/temp';
 // run for real), on temp stores. Launch is not here: it is the owner's HTTP route (the digest rule
 // is tested in expeditions-v1-server.test.ts).
 
-const SEAT = "seat('claude', 'claude-sonnet-5-5', 'low')";
-const HEAD = `import { check, need, expedition, role, seat, steps } from 'expedition';
-const worker = role({ by: ${SEAT}, usd: 1, minutes: 10 });`;
-const GOOD = `${HEAD}
-const { work } = steps({ work: worker.brief(PROMPTS.work) });
-export default expedition({ contract: CONTRACT, plan: async () => need(await work(), 'no work') });
+const GOOD = `import {expedition} from 'expedition';
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{work:{by:"worker",brief:PROMPTS.work}},plan: async ({work}, x) => await work()});
 `;
 
 // Every endpoint a test opened is closed at the end, or its listener keeps the process alive.
@@ -101,7 +99,7 @@ async function setup() {
     return writePlan(
       path.join(dir, 'plan.expedition.ts'),
       {
-        leader: lead.id,
+        leader: `buddy:${lead.id}`,
         repo,
         goal: 'Do the work.',
         budget: { usd: 50, hours: 4 },
@@ -179,7 +177,10 @@ test('propose: a type error answers the gate and its issues, and posts nothing',
 }, async () => {
   const t = await setup();
   const r = await t.propose(
-    t.file(`${HEAD}\nexport default expedition({ contract: CONTRACT, plan: async () => nope });\n`)
+    t.file(`import {expedition} from 'expedition';
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{},plan: async ({}, x) => nope});
+`)
   );
   assert.equal(r.error, false, r.text);
   const rejected = r.value as { t: string; gate: string; issues: string[] };

@@ -35,14 +35,14 @@ is redone:
 | File | Change |
 |---|---|
 | `01-gtm-rewrite.expedition.ts` | Skip organizations of kind `comparator`. Add a `mine` step over four forum venues. Give the thesis both sets of sources. The changed lines are marked `// v1`. |
-| The same file, `mine.brief(...)` | New inline forum-search prose; each item renders its own prompt and check command. |
+| The same file, `steps.mine.brief` | New inline forum-search prose; each item renders its own prompt and check command. |
 
 ## 3. The four gates
 
 | Gate | Result |
 |---|---|
 | Typecheck (`tsc`) | passed |
-| Dry run | passed: every cast step has `.brief(...)`; the `mine` judge is a command, so no provider clash |
+| Dry run | passed: every cast step has an inline `brief`; the `mine` judge is a command, so no provider clash |
 | Rules | Contract untouched · new cost $6.00 is under the $10 auto-apply limit · 31 judged passes since launch, so this is not a rewrite without progress |
 | Running calls the new plan drops | 2, and the leader must decide each one (below) |
 
@@ -84,7 +84,7 @@ collect/labelbox                    ██████████────�
 collect/snorkel                                    ██ ✗ cancelled           (dropped: cancel)
 mine/rl-forums                                        │ ██████ passed       (started by v1)
 mine/cfd-forums                                       │ ████████ passed
-⟳ review "is the coverage enough?"                    │          ◆ continue
+⟳ checkin "is the coverage enough?"                    │          ◆ continue
 synthesize/thesis                                     │            █████████ passed
 ```
 
@@ -98,7 +98,7 @@ What the rewrite did cost: one leader wake, four new calls, and one cancelled ca
 ## 8. The weak spot this shows
 
 The leader wanted the collectors to also note forum links they came across. That means editing
-`collect.brief(...)` in the one file, and a changed brief changes every `collect` call's identity: all 34 would run
+`steps.collect.brief` in the one file, and a changed brief changes every `collect` call's identity: all 34 would run
 again. So it wrote a new step and left the old brief alone. That is the right call here, but it
 is a constraint an author has to know about, and the dry run is what warns them: it would have
 shown "34 calls restarted, about $45" before anything was spent.

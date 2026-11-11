@@ -97,6 +97,7 @@ function sandboxFlags(file: string): string[] {
     path.dirname(file),
     invertCase(path.dirname(file)),
     kernel,
+    realpathSync(path.resolve(kernel, '../../../vendor/agent-cli-tool/dist')),
     invertCase(kernel),
     path.join(server, 'node_modules'),
     store,

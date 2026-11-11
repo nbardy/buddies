@@ -6,18 +6,7 @@
 // V1 has no automatic merge or no-retest ledger; source coverage and claim tags are judged.
 // Plan version 0, as launched.
 
-import {
-  buddy,
-  check,
-  expedition,
-  need,
-  parallel,
-  passed,
-  review,
-  role,
-  seat,
-  steps,
-} from 'expedition';
+import { expedition, step } from 'expedition';
 import { z } from 'zod';
 
 const OUT = 'business/research/2026-11-10_gtm';
@@ -29,8 +18,6 @@ const Org = z.object({
 });
 
 // Codex judges the Claude steps; Claude judges the Codex critic.
-const judge = seat('codex', 'gpt-6.1-sol', 'low');
-const criticJudge = seat('claude', 'claude-sonnet-5-5', 'low');
 const traceable = `# Rubric: is every load-bearing claim traceable?
 
 You are reviewing work written on another model. Do not trust its tags.
@@ -63,16 +50,41 @@ Fail a plausible story with no source. Fail a repeat. Do not pass an attack beca
 looks weak; judge the counterexample.
 `;
 
-const lead = role({ by: buddy('market-research'), usd: 8, minutes: 45 }).reads('business/');
-const scout = role({
-  by: seat('claude', 'claude-sonnet-5-5', 'medium'),
-  usd: 1.5,
-  minutes: 15,
-}).web();
-const critic = role({ by: seat('codex', 'gpt-6.1-sol', 'high'), usd: 4, minutes: 30 });
-
-const { scope, collect, thesis, attack, revise, packet } = steps({
-  scope: lead.lists(Org).brief(`# Scope: who to study
+export default expedition({
+  contract: {
+    leader: 'buddy:market-research',
+    repo: '~/git/wave_sim',
+    budget: { usd: 60, hours: 8 },
+    autoApply: { usd: 10 },
+    pools: { claude: 6, codex: 1 },
+    done: [
+      {
+        check: 'python tools/gtm/audit_ledger.py business/research/2026-11-10_gtm',
+      },
+      { review: traceable, by: 'codex:gpt-6.1-sol:low' },
+      { owner: 'Do you accept the packet and the buyer-test plan?' },
+    ],
+    rules: [
+      'No paid scraping or enrichment, no GPU, no outreach, no publication. Nick does all external sending.',
+      'Tag every claim VERIFIED, CLAIMED or SPECULATION. A polished report does not establish PMF.',
+      'Keep RL/data evidence and design-partner evidence separate. Generic data or CAD vendors are comparators, not proof of demand.',
+      'Commit on your own branch and never merge or push. Nick merges.',
+    ],
+    goal: 'Follow the raw evidence → difficult questions → adversarial revision → buyer conversations method.\n\nProduce one falsifiable engineering RL/data sales hypothesis and one separately judged\ndesign-partner hypothesis. The blocker today is that we lack evidence connecting actual buyer\nworkflows and buying triggers to an offer we can deliver.\n\nI want traceable conclusions, the actual coverage (or candid gaps), the adversarial reasoning kept\non the record, and a buyer test I can run myself.',
+  },
+  agents: {
+    judge: 'codex:gpt-6.1-sol:low',
+    criticJudge: 'claude:claude-sonnet-5-5:low',
+    lead: { use: 'buddy:market-research', usd: 8, minutes: 45 },
+    scout: { use: 'claude:claude-sonnet-5-5:medium', usd: 1.5, minutes: 15 },
+    critic: { use: 'codex:gpt-6.1-sol:high', usd: 4, minutes: 30 },
+  },
+  steps: {
+    scope: {
+      by: 'lead',
+      reads: ['business/'],
+      returns: z.array(Org),
+      brief: `# Scope: who to study
 
 You are choosing the organizations this research will collect evidence on. You are not collecting
 the evidence yet.
@@ -111,11 +123,13 @@ it did.
 ## Stop
 
 About 30 minutes. Do not fetch product pages in this step.
-`),
-  collect: scout
-    .checkout()
-    .brief(
-      (item: z.infer<typeof Org>) => `# Collect: the public record for ${item.name}
+`,
+    },
+    collect: step({
+      by: 'scout',
+      web: true,
+      checkout: true,
+      brief: (item) => `# Collect: the public record for ${item.name}
 
 Segment: ${item.segment}
 
@@ -152,11 +166,14 @@ Store raw page bodies through \`artifact_store_v1\` under \`output/\`. Do not co
 In your summary, say how many surfaces were fetched, missing and login-blocked, and name anything
 that surprised you, especially anything that changes who we should study (a company went private,
 was acquired, or shut the product).
-`
-    )
-    .judged(check((item: z.infer<typeof Org>) => `python tools/gtm/anchors.py ${item.id}`)),
-  thesis: lead
-    .brief(`# Synthesize: one falsifiable thesis per segment
+`,
+      item: Org,
+      judge: { check: (item) => `python tools/gtm/anchors.py ${item.id}` },
+    }),
+    thesis: {
+      by: 'lead',
+      reads: ['business/'],
+      brief: `# Synthesize: one falsifiable thesis per segment
 
 You have the whole collected record. Read all of it before writing anything.
 
@@ -184,10 +201,12 @@ You have the whole collected record. Read all of it before writing anything.
   missing" is a result.
 
 Take the time this needs. This step is one mind holding everything; it is not parallel work.
-`)
-    .judged(review(traceable, judge)),
-  attack: critic
-    .brief(`# Attack: the strongest counterexample
+`,
+      judge: { review: traceable, by: 'judge' },
+    },
+    attack: {
+      by: 'critic',
+      brief: `# Attack: the strongest counterexample
 
 You are given the current thesis and the sources behind it. Your job is to break it.
 
@@ -207,10 +226,13 @@ nothing is evidence that the thesis is holding.
 
 Keep the two segments separate. Evidence about generic data vendors does not refute a claim about
 engineering RL buyers unless you show why it transfers.
-`)
-    .judged(review(realCounterexample, criticJudge)),
-  revise: lead
-    .brief(`# Revise: answer the counterexample
+`,
+      judge: { review: realCounterexample, by: 'criticJudge' },
+    },
+    revise: {
+      by: 'lead',
+      reads: ['business/'],
+      brief: `# Revise: answer the counterexample
 
 You wrote the current thesis. A counterexample has been judged real, sourced and new.
 
@@ -225,11 +247,14 @@ answer. The history of what was claimed and what broke it is part of the result.
 
 Update the belief/falsifier table. The same evidence rules apply: every load-bearing claim links
 to its sources and carries its tag.
-`)
-    .judged(review(traceable, judge)),
-  packet: lead
-    .checkout()
-    .brief(`# Packet: what the owner will read and act on
+`,
+      judge: { review: traceable, by: 'judge' },
+    },
+    packet: {
+      by: 'lead',
+      reads: ['business/'],
+      checkout: true,
+      brief: `# Packet: what the owner will read and act on
 
 Write the final packet under \`business/research/2026-11-10_gtm/\` and commit it. Write in the
 repo's own structure; add the packet to the index in \`business/README.md\`.
@@ -255,83 +280,32 @@ repo's own structure; add the packet to the index in \`business/README.md\`.
 
 Your commit is checked by a ledger audit: every source id cited in the packet must exist in the
 source ledger, and every ledger row must have a status.
-`)
-    .judged(check(`python tools/gtm/audit_ledger.py ${OUT}`)),
-});
-
-export default expedition({
-  contract: {
-    leader: 'market-research',
-    repo: '~/git/wave_sim',
-    budget: {
-      usd: 60,
-      hours: 8,
+`,
+      judge: { check: `python tools/gtm/audit_ledger.py ${OUT}` },
     },
-    autoApply: {
-      usd: 10,
-    },
-    pools: {
-      claude: 6,
-      codex: 1,
-    },
-    done: [
-      {
-        check: 'python tools/gtm/audit_ledger.py business/research/2026-11-10_gtm',
-      },
-      {
-        review: {
-          rubric: traceable,
-          by: {
-            t: 'seat',
-            provider: 'codex',
-            model: 'gpt-6.1-sol',
-            effort: 'low',
-          },
-        },
-      },
-      {
-        owner: 'Do you accept the packet and the buyer-test plan?',
-      },
-    ],
-    rules: [
-      'No paid scraping or enrichment, no GPU, no outreach, no publication. Nick does all external sending.',
-      'Tag every claim VERIFIED, CLAIMED or SPECULATION. A polished report does not establish PMF.',
-      'Keep RL/data evidence and design-partner evidence separate. Generic data or CAD vendors are comparators, not proof of demand.',
-      'Commit on your own branch and never merge or push. Nick merges.',
-    ],
-    goal: 'Follow the raw evidence → difficult questions → adversarial revision → buyer conversations method.\n\nProduce one falsifiable engineering RL/data sales hypothesis and one separately judged\ndesign-partner hypothesis. The blocker today is that we lack evidence connecting actual buyer\nworkflows and buying triggers to an offer we can deliver.\n\nI want traceable conclusions, the actual coverage (or candid gaps), the adversarial reasoning kept\non the record, and a buyer test I can run myself.',
   },
-  plan: async (x) => {
-    const orgs = need(await x.phase('scope', () => scope()), 'No list of organizations.');
+  plan: async ({ scope, collect, thesis, attack, revise, packet }, x) => {
+    const orgs = await x.phase('scope', () => scope());
 
     const found = await x.phase('collect', () =>
-      parallel(orgs.out, (org) => collect({ item: org }))
+      Promise.all(orgs.out.map((org) => collect.try(org)))
     );
-    const sources = passed(found);
-    await x.review('Is the coverage enough to argue from, or is a kind of source missing?');
+    const sources = found.filter((r) => r.t === 'passed');
+    await x.checkin('Is the coverage enough to argue from, or is a kind of source missing?');
 
-    let current = need(
-      await x.phase('synthesize', () => thesis({ reads: sources })),
-      'No traceable thesis.'
-    );
+    let current = await x.phase('synthesize', () => thesis({ reads: sources }));
 
     await x.phase('duel', async () => {
       for (const round of [1, 2, 3]) {
-        const hit = await attack({ id: round, reads: [current] });
+        const hit = await attack.try({ id: round, reads: [current] });
         if (hit.t !== 'passed') continue; // no real, sourced, new counterexample this round
-        current = need(
-          await revise({ id: round, reads: [current, hit], continues: current }),
-          `No thesis survived round ${round}.`
-        );
+        current = await revise({ id: round, reads: [current, hit], continues: current });
       }
     });
-    await x.review(
+    await x.checkin(
       'Did the thesis hold, bend or die? Stopping with "no thesis" is a valid result.'
     );
 
-    return need(
-      await x.phase('packet', () => packet({ reads: [current, ...sources] })),
-      'The packet failed its ledger audit.'
-    );
+    return await x.phase('packet', () => packet({ reads: [current, ...sources] }));
   },
 });

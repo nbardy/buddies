@@ -29,32 +29,17 @@
 // - The `product-dev` Buddy id is assumed from the "Product Dev" Buddy the server bootstraps. Its
 //   provider must not be gemini, or the dry run refuses the closeout's reviewer.
 // - The 80,000-line bar and the dollar and hour budgets are illustrative, not measured.
-// - The seat model names are copied from example 01, not checked against the catalog.
+// - Model ids pass the catalog gate; verify local CLI availability before launch.
 // - The real commands used as they exist today: `pnpm typecheck`, `pnpm test:server`,
 //   `pnpm test:client`, `bash tools/check-client-invariants.sh`, `pnpm screenshots`.
 //
 // Gates typecheck and dry-run declarations; they never execute or establish existence of these tools.
 // Fill in actual Buddy ids and check their providers; test providers below are explicit assumptions.
 
-import {
-  type Held,
-  type Readable,
-  type Result,
-  buddy,
-  check,
-  command,
-  expedition,
-  need,
-  parallel,
-  passed,
-  review,
-  role,
-  seat,
-  steps,
-} from 'expedition';
+import { type Held, type Readable, type Result, expedition, step } from 'expedition';
 import { z } from 'zod';
 
-// Preserve failed outputs as evidence too: passed(...) alone would erase a search's refutations.
+// Preserve failed outputs as evidence too: filtering for passes alone would erase a search's refutations.
 function evidence(result: Result<unknown>): Readable[] {
   switch (result.t) {
     case 'passed':
@@ -69,7 +54,7 @@ function evidence(result: Result<unknown>): Readable[] {
       return [`refused: ${result.reason}`];
   }
 }
-const noResult = (why: string) => need({ t: 'errored', why }, why);
+
 const NOTES = 'agent_notes/2026-11-10_deslop';
 const CODE = [
   'server/src/',
@@ -101,18 +86,7 @@ const Slice = z.object({
   retires: z.string(),
   keeps: z.string(),
 });
-const judge = seat('gemini', 'gemini-3.1-pro-preview', 'high');
-const lead = role({ by: buddy('product-dev'), usd: 10, minutes: 60 }).reads(
-  ...CODE,
-  'docs/',
-  'agent_notes/'
-);
-const scout = role({ by: seat('claude', 'claude-sonnet-5-5', 'low'), usd: 1, minutes: 15 }).reads(
-  ...CODE,
-  'docs/patterns.md'
-);
-const coder = role({ by: seat('claude', 'claude-sonnet-5-5', 'high'), usd: 4, minutes: 45 });
-const typer = role({ by: seat('codex', 'gpt-6.1-sol', 'high'), usd: 10, minutes: 90 });
+
 const gate = (item: z.infer<typeof Slice>) =>
   `bash -c 'pnpm typecheck && pnpm test:server && pnpm test:client && bash tools/check-client-invariants.sh && node tools/deslop/slice-gate.mjs ${NOTES}/TARGET.json ${item.id}'`;
 const retired = `# Rubric: is each fact now owned once, and is the old path really gone?
@@ -126,7 +100,7 @@ trust its table. You did not write any of this code.
    chosen by you if there are more. For each, search the commit for the type, schema, table or
    function that defines the fact. Pass the row only if one definition is left and the others are
    deleted, not renamed, re-exported or commented out.
-2. **Retired paths.** For each landed slice, or fifteen chosen by you, confirm that what it says
+2. **Retired paths.** For each integrated slice, or fifteen chosen by you, confirm that what it says
    it retired is absent from the commit and has no remaining caller.
 3. **Tests.** For the same slices, confirm that every deleted test tested only the retired path,
    and that the behaviour listed as kept is exercised by a test that goes through the real path.
@@ -139,7 +113,7 @@ trust its table. You did not write any of this code.
 ## Verdict
 
 Pass only if every row and slice you checked holds, and section 3 of the closeout lists the
-slices that did not land rather than hiding them. One \`single\` row with two live definitions is
+slices that did not integrate rather than hiding them. One \`single\` row with two live definitions is
 a fail.
 
 In your answer list each row and slice you checked, the search you ran and what you found. If you
@@ -147,16 +121,70 @@ fail it, name the exact definitions or callers that remain. Do not fail it for m
 owner's line bar: that is a separate criterion, and a smaller honest cut can still pass here.
 `;
 
-const { measure, shots, inventory, target, unify, slice, integrate, closeout } = steps({
-  measure: command('node tools/deslop/measure.mjs --json', { minutes: 5 }).returns(Size),
-  shots: command('node tools/deslop/shots.mjs --out output/deslop/base', { minutes: 30 }).needs(
-    'checks'
-  ),
-  inventory: scout.brief(
-    (item: {
-      id: string;
-      path: string;
-    }) => `# Inventory: who defines, writes and reads each fact in \`${item.path}\`
+export default expedition({
+  contract: {
+    goal: `The September lean rewrite cut this repo from 133,955 lines to 99,841 and made it much faster, but
+it missed its own 3–4× target, and the same facts are still defined in more than one place. I want
+the next cut done properly: one canonical owner for each fact in the data model, every superseded
+path deleted along with its tests, and the types unified so the compiler carries the distinctions
+instead of \`if\` ladders and optional fields.
+
+Measure before anything is changed. Then write the lean target with line budgets and a named owner
+per fact, and cut toward it in waves of small, file-fenced slices that each pass the real checks on
+their own commit. I do not want another large branch that verifies green against a dirty tree.
+
+Everything I use must keep working: chats, Buddies, channels, expeditions, the mobile tree. Report
+the net source delta with tests counted separately, the deletion list per slice, and anything you
+chose to keep and why. If the 80,000-line bar turns out to be wrong, say so with the numbers; do
+not hit it by moving code into places the count does not look.`,
+    leader: 'buddy:product-dev',
+    repo: '~/git/buddies',
+    budget: { usd: 150, hours: 16 },
+    autoApply: { usd: 15 },
+    pools: { claude: 4, codex: 1, gemini: 1, checks: 2 },
+    done: [
+      {
+        check: `bash -c 'pnpm typecheck && pnpm test:server && pnpm test:client && bash tools/check-client-invariants.sh'`,
+      },
+      { check: 'node tools/deslop/shots.mjs --baseline output/deslop/base' },
+      {
+        check: `python3 -c 'import json,subprocess; r=json.loads(subprocess.check_output(["node","tools/deslop/measure.mjs","--json"])); assert r["sourceLines"] <= 80000'`,
+      },
+      { review: retired, by: 'judge' },
+      {
+        owner:
+          'Does everything you use still behave the same, and is the code that is left the code you want to own?',
+      },
+    ],
+    rules: [
+      'Commit on the work branch; never merge main or push. Integrate supplied commits only inside your private checkout.',
+      'Keep predictions and every verdict, including failures, in repo records from the supplied call evidence.',
+      'Every slice replaces AND deletes. A new interface with nothing retired is preparatory work, not a simplification.',
+      'Change only files inside your fence. If the right fix is outside it, stop and report the seam; do not reach across.',
+      'Verify the commit, not the working tree. Other sessions leave dirty files in shared checkouts; never stash, never reset.',
+      'Never open ~/.buddies or ~/.agent-viewer, never run the Buddies CLI without BUDDIES_HOME at a tmpdir, never format vendor/.',
+      'Do not weaken, skip or delete a test to get green. A test goes only when the path it tests goes, and the deletion is listed.',
+      'Keep every fix-guard comment and its regression test (docs/patterns.md#fix-guards) unless the guarded code itself is retired.',
+    ],
+  },
+  agents: {
+    judge: 'gemini:gemini-3.1-pro-preview',
+    lead: { use: 'buddy:product-dev', usd: 10, minutes: 60 },
+    scout: { use: 'claude:claude-sonnet-5-5:low', usd: 1, minutes: 15 },
+    coder: { use: 'claude:claude-sonnet-5-5:high', usd: 4, minutes: 45 },
+    typer: { use: 'codex:gpt-6.1-sol:high', usd: 10, minutes: 90 },
+  },
+  steps: {
+    measure: { run: 'node tools/deslop/measure.mjs --json', minutes: 5, returns: Size },
+    shots: {
+      run: 'node tools/deslop/shots.mjs --out output/deslop/base',
+      minutes: 30,
+      needs: ['checks'],
+    },
+    inventory: step({
+      by: 'scout',
+      reads: [...CODE, 'docs/patterns.md'],
+      brief: (item) => `# Inventory: who defines, writes and reads each fact in \`${item.path}\`
 
 You are one of several readers, each given one area of the repo. Yours is \`${item.path}\`. You change
 nothing. Someone else will write the lean target from your answer and the other areas' answers, so
@@ -198,11 +226,14 @@ what they need from you is a record they can trust, not a plan.
 
 Stop after about 15 minutes. An honest partial inventory that names what you did not read is
 better than a complete-looking one.
-`
-  ),
-  target: lead
-    .checkout()
-    .brief(`# Target: the lean design, its budgets and its slices
+`,
+      item: z.object({ id: z.string(), path: z.string() }),
+    }),
+    target: {
+      by: 'lead',
+      reads: [...CODE, 'docs/', 'agent_notes/'],
+      checkout: true,
+      brief: `# Target: the lean design, its budgets and its slices
 
 You are writing the plan of record for this cut: what the code should look like when it is done,
 and the fenced slices that get it there. You have the measured size of the tree and one inventory
@@ -232,13 +263,13 @@ Each slice has an \`id\`, a \`wave\`, a \`kind\`, a \`fence\` (the only paths it
 behaviour a real consumer must still see, and which test or screen shows it).
 
 - A \`slice\` stays inside one fence and replaces and deletes one redundant path. Within a wave no
-  two fences overlap, down to the file. A lint checks this before any code is cut. The host
-  enforces each fence on its worker, and a fence must lie inside \`server/src/\`, \`server/test/\`,
+  two fences overlap, down to the file. A lint checks this before any code is cut. The slice gate and review must
+  verify each actual diff against its scope; v1 does not enforce per-call write fences. Each scope lies inside \`server/src/\`, \`server/test/\`,
   \`client/src/\`, \`client/test/\`, \`shared/src/\` or \`crates/\`.
 - A \`seam\` is a change that cannot be fenced to one area: moving a type to its one owner in
   \`shared/src\` and re-pointing every consumer. Seams are done by one worker, one at a time, before
   the wave's slices. Keep them few. A wave with three seams is a wave planned wrong.
-- Order the waves so that each wave's slices can assume the earlier waves landed. Put the cuts
+- Order the waves so that each wave's slices can assume the earlier waves were integrated into the supplied checkout. Put the cuts
   with the clearest check and the largest deletion first.
 - Size a slice so one worker finishes it in about 40 minutes including a full test run.
 
@@ -250,14 +281,15 @@ behaviour a real consumer must still see, and which test or screen shows it).
   does not, say what would be needed and leave that decision to the owner.
 
 Stop when the lint would pass. Do not start cutting.
-`)
-    .lists(Slice)
-    .judged(check(`node tools/deslop/target-lint.mjs ${NOTES}/TARGET.json`)),
-  unify: typer
-    .checkout()
-    .needs('checks')
-    .brief(
-      (item: z.infer<typeof Slice>) => `# Seam ${item.id}: one owner for one type
+`,
+      returns: z.array(Slice),
+      judge: { check: `node tools/deslop/target-lint.mjs ${NOTES}/TARGET.json` },
+    },
+    unify: step({
+      by: 'typer',
+      checkout: true,
+      needs: ['checks'],
+      brief: (item) => `# Seam ${item.id}: one owner for one type
 
 This is a cross-cutting change, which is why you have it alone and why nothing else is editing
 the code while you work. The target and the full slice list are in your inputs; read this seam's
@@ -301,14 +333,15 @@ let you write outside the paths listed above.
 In your summary list every file where a definition was deleted, every consumer you re-pointed,
 and anything you learned about hidden consumers. Stop when the checks pass or when you can say
 exactly what blocks them.
-`
-    )
-    .judged(check(gate)),
-  slice: coder
-    .checkout()
-    .needs('checks')
-    .brief(
-      (item: z.infer<typeof Slice>) => `# Slice ${item.id}: replace and delete one redundant path
+`,
+      item: Slice,
+      judge: { check: gate },
+    }),
+    slice: step({
+      by: 'coder',
+      checkout: true,
+      needs: ['checks'],
+      brief: (item) => `# Slice ${item.id}: replace and delete one redundant path
 
 You have one small cut to make, in your own checkout, at the same time as other workers who are
 making other cuts in other files. Your fence is what keeps the merges clean.
@@ -336,8 +369,8 @@ your fence before you change anything.
 
 Your commit is run through \`pnpm typecheck\`, \`pnpm test:server\`, \`pnpm test:client\` and
 \`bash tools/check-client-invariants.sh\`, then a gate that fails on
-any deleted test this slice did not list or a net gain in source lines. The host itself refuses
-a write outside your fence. Run them yourself first,
+any deleted test this slice did not list, a net gain in source lines, or a diff outside the
+listed scope. Verify that scope in the slice gate and review; v1 has no per-call write fence. Run them yourself first,
 on your commit with a clean tree. A green run over uncommitted files proves nothing.
 
 ## What good looks like
@@ -358,36 +391,37 @@ on your commit with a clean tree. A green run over uncommitted files proves noth
 
 Your summary: what is gone, the line delta for source and for tests separately, the test that
 shows the kept behaviour, and anything surprising.
-`
-    )
-    .judged(check(gate)),
-  integrate: typer
-    .checkout()
-    .needs('checks')
-    .brief(
-      `Integrate this wave's supplied slice commits in order onto your starting checkout. Keep each retirement and every fix-guard. Resolve only integration conflicts; stop if a new behavior decision is needed. Do not push or merge main. Produce one commit containing the target and all prior waves. Run the complete repo checks on the integrated commit and report each unmerged slice with its reason.`
-    )
-    .judged(
-      check(
-        `bash -c 'pnpm typecheck && pnpm test:server && pnpm test:client && bash tools/check-client-invariants.sh'`
-      )
-    ),
-  closeout: lead
-    .checkout()
-    .brief(`# Closeout: what was cut, what was kept, what is still double
+`,
+      item: Slice,
+      judge: { check: gate },
+    }),
+    integrate: {
+      by: 'typer',
+      checkout: true,
+      needs: ['checks'],
+      brief: `Integrate this wave's supplied slice commits in order onto your starting checkout. Keep each retirement and every fix-guard. Resolve only integration conflicts; stop if a new behavior decision is needed. Do not push or merge main. Produce one commit containing the target and all prior waves. Run the complete repo checks on the integrated commit and report each unmerged slice with its reason.`,
+      judge: {
+        check: `bash -c 'pnpm typecheck && pnpm test:server && pnpm test:client && bash tools/check-client-invariants.sh'`,
+      },
+    },
+    closeout: {
+      by: 'lead',
+      reads: [...CODE, 'docs/', 'agent_notes/'],
+      checkout: true,
+      brief: `# Closeout: what was cut, what was kept, what is still double
 
 The waves are over. You have the measurement before and after, the target with every slice, and
 the inventories. Write the record the owner will read and the next cut will start from. You are
-working on the last landed commit; describe that commit, not your memory of the plan.
+working on the last integrated candidate commit; describe that commit, not your memory of the plan.
 
 ## Write \`agent_notes/2026-11-10_deslop/CLOSEOUT.md\`
 
 1. **Numbers first.** Source lines before and after, tests before and after, as two separate
    deltas. Per area: budget, actual, and for every area still over budget, the specific reason.
    If the owner's bar was not reached, say so in the first paragraph.
-2. **Per landed slice:** what it retired (paths, exports, tests) and the test or screen that
+2. **Per integrated slice:** what it retired (paths, exports, tests) and the test or screen that
    shows the kept behaviour. Take this from the commits, not from the slice list.
-3. **Slices that did not land:** each one, with the stage it reached (not started, failed its
+3. **Slices that did not integrate:** each one, with the stage it reached (not started, failed its
    checks, passed but failed on the merged commit) and what blocked it. Do not fold these into a
    count.
 4. **One owner per fact.** Go back through \`INVENTORY.md\` row by row. For each fact, check on
@@ -412,69 +446,21 @@ entry in \`docs/patterns.md\`. Do not write a new guide.
 - No code changes in this step. If you find something broken, report it.
 
 Stop when the document is complete and every \`file:line\` in it opens.
-`)
-    .judged(review(retired, judge)),
-});
-
-export default expedition({
-  contract: {
-    goal: `The September lean rewrite cut this repo from 133,955 lines to 99,841 and made it much faster, but
-it missed its own 3–4× target, and the same facts are still defined in more than one place. I want
-the next cut done properly: one canonical owner for each fact in the data model, every superseded
-path deleted along with its tests, and the types unified so the compiler carries the distinctions
-instead of \`if\` ladders and optional fields.
-
-Measure before anything is changed. Then write the lean target with line budgets and a named owner
-per fact, and cut toward it in waves of small, file-fenced slices that each pass the real checks on
-their own commit. I do not want another large branch that verifies green against a dirty tree.
-
-Everything I use must keep working: chats, Buddies, channels, expeditions, the mobile tree. Report
-the net source delta with tests counted separately, the deletion list per slice, and anything you
-chose to keep and why. If the 80,000-line bar turns out to be wrong, say so with the numbers; do
-not hit it by moving code into places the count does not look.`,
-    leader: 'product-dev',
-    repo: '~/git/buddies',
-    budget: { usd: 150, hours: 16 },
-    autoApply: { usd: 15 },
-    pools: { claude: 4, codex: 1, gemini: 1, checks: 2 },
-    done: [
-      {
-        check: `bash -c 'pnpm typecheck && pnpm test:server && pnpm test:client && bash tools/check-client-invariants.sh'`,
-      },
-      { check: 'node tools/deslop/shots.mjs --baseline output/deslop/base' },
-      {
-        check: `python3 -c 'import json,subprocess; r=json.loads(subprocess.check_output(["node","tools/deslop/measure.mjs","--json"])); assert r["sourceLines"] <= 80000'`,
-      },
-      { review: { rubric: retired, by: judge } },
-      {
-        owner:
-          'Does everything you use still behave the same, and is the code that is left the code you want to own?',
-      },
-    ],
-    rules: [
-      'Every slice replaces AND deletes. A new interface with nothing retired is preparatory work, not a simplification.',
-      'Change only files inside your fence. If the right fix is outside it, stop and report the seam; do not reach across.',
-      'Verify the commit, not the working tree. Other sessions leave dirty files in shared checkouts; never stash, never reset.',
-      'Never open ~/.buddies or ~/.agent-viewer, never run the Buddies CLI without BUDDIES_HOME at a tmpdir, never format vendor/.',
-      'Do not weaken, skip or delete a test to get green. A test goes only when the path it tests goes, and the deletion is listed.',
-      'Keep every fix-guard comment and its regression test (docs/patterns.md#fix-guards) unless the guarded code itself is retired.',
-      'V1 execution notes override historical host claims in the briefs: no land, fence, protect, tests/learn tool, automatic learning rows or no-retest gate exists. Commit on the work branch; never merge main or push. Integration may combine supplied commits only inside its private checkout. Carry prior commits explicitly through on/reads; record predictions and every verdict in the repo records from the supplied evidence, including failures. Writable scopes and frozen graders are instructions and review obligations, not host-enforced write fences.',
-    ],
+`,
+      judge: { review: retired, by: 'judge' },
+    },
   },
-  plan: async (x) => {
-    const [beforeResult, baseResult] = await x.phase('measure', () =>
+  plan: async ({ measure, shots, inventory, target, unify, slice, integrate, closeout }, x) => {
+    const [beforeResult] = await x.phase('measure', () =>
       Promise.all([measure({ id: 'before' }), shots()])
     );
-    const before = need(beforeResult, 'The launch base could not be measured.');
-    need(baseResult, 'No screenshot baseline.');
-    const scans = passed(
-      await x.phase('inventory', () => parallel(AREAS, (item) => inventory({ item })))
-    );
-    const targetPlan = need(
-      await x.phase('target', () => target({ reads: [before, ...scans] })),
-      'No linted lean target.'
-    );
-    await x.review('Are the budgets achievable and each retirement worth its wave?');
+    const before = beforeResult;
+
+    const scans = (
+      await x.phase('inventory', () => Promise.all(AREAS.map((item) => inventory.try(item))))
+    ).filter((r) => r.t === 'passed');
+    const targetPlan = await x.phase('target', () => target({ reads: [before, ...scans] }));
+    await x.checkin('Are the budgets achievable and each retirement worth its wave?');
     let current: Held<unknown> = targetPlan;
     const trail: Readable[] = [targetPlan, ...scans];
     let cutCount = 0;
@@ -482,49 +468,40 @@ not hit it by moving code into places the count does not look.`,
       await x.phase(`wave-${wave}`, async () => {
         const todo = targetPlan.out.filter((s) => s.wave === wave);
         for (const item of todo.filter((s) => s.kind === 'seam')) {
-          const built = await unify({ item, on: current, reads: [targetPlan] });
+          const built = await unify(item, { on: current, reads: [targetPlan] });
           trail.push(...evidence(built));
-          current = need(built, `Seam ${item.id} failed; dependent slices cannot start.`);
+          current = built;
           cutCount += 1;
         }
         const cuts = todo.filter((s) => s.kind === 'slice');
         const [first, ...rest] = cuts;
-        const pilot = first
-          ? await slice({ item: first, on: current, reads: [targetPlan] })
-          : undefined;
-        if (pilot) need(pilot, 'The pilot slice failed.');
+        const pilot = first ? await slice(first, { on: current, reads: [targetPlan] }) : undefined;
+
         const built = pilot
           ? [
               pilot,
-              ...(await parallel(rest, (item) =>
-                slice({ item, on: current, reads: [targetPlan] })
+              ...(await Promise.all(
+                rest.map((item) => slice.try(item, { on: current, reads: [targetPlan] }))
               )),
             ]
           : [];
         trail.push(...built.flatMap(evidence));
-        const accepted = passed(built);
+        const accepted = built.filter((r) => r.t === 'passed');
         if (accepted.length) {
-          current = need(
-            await integrate({ on: current, reads: [targetPlan, ...accepted] }),
-            'The combined wave failed its repo checks.'
-          );
+          current = await integrate({ on: current, reads: [targetPlan, ...accepted] });
           cutCount += accepted.length;
         }
       });
-      await x.review(
+      await x.checkin(
         `Wave ${wave}: which cuts failed, and did each new interface retire its predecessor?`
       );
     }
-    if (!cutCount) return noResult('No slice passed and integrated.');
-    const after = need(
-      await x.phase('remeasure', () => measure({ id: 'after', on: current })),
-      'The combined source could not be measured.'
-    );
+    if (!cutCount) throw new Error('No slice passed and integrated.');
+    const after = await x.phase('remeasure', () => measure({ id: 'after', on: current }));
     if (after.out.sourceLines >= before.out.sourceLines)
-      return noResult('Source lines did not go down.');
-    return need(
-      await x.phase('closeout', () => closeout({ on: current, reads: [before, after, ...trail] })),
-      'The closeout did not prove one owner per fact.'
+      throw new Error('Source lines did not go down.');
+    return await x.phase('closeout', () =>
+      closeout({ on: current, reads: [before, after, ...trail] })
     );
   },
 });

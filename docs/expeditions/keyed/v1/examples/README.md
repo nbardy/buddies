@@ -22,3 +22,16 @@ replace them with real ids and verify their providers before launch. Each header
 concurrency pools do not enforce machine locks, dollar sub-budgets or lifetime-use counts;
 write scopes and frozen graders need the stated independent checks. A useful no-go record can
 still leave numerical contract criteria unmet; only the host declares done.
+
+Author with `import { expedition } from 'expedition'` and plain `agents`/`steps` objects.
+Item callbacks use the one optional `step({...})` wrapper for sibling Zod inference; there are no
+builders. Names are `buddy:<full-id>` or `harness:model[:effort]`, checked against agent-cli's
+catalog (no invented aliases). A normal call requires a pass; `.try` lets the plan branch on the
+result union. Concurrency is ordinary `Promise.all(items.map(item => call.try(item)))`.
+`x.checkin` wakes the leader; review judges remain `{review: rubric, by: who}`.
+The preview's `defaults` reports resolved pools, rewrite/wake/review/call caps and every step's
+cap provenance, including unreached steps. See [the authoring contract](../DESIGN.md#2-the-idea).
+
+Briefs describe v1 directly: workers integrate only inside their supplied private checkout,
+the owner merges; repo records are written from supplied call evidence; scopes and frozen
+graders require the header's independent checks. No override rule supplies missing host features.

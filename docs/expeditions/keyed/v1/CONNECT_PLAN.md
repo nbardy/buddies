@@ -357,6 +357,35 @@ read-only view never shows one.
 
 ## 10. The first real run, and what is open (2026-11-11)
 
+### Authoring replacement (2026-11-11)
+
+The owner asked for “less lib functions” and “less verbose configs”, with string agent names,
+and on parallel helpers: “let the model write promise code”. Replaced the builder surface with
+`expedition({contract,agents,steps,plan})`, catalog-parsed who strings, plain judges, required
+calls plus `.try`, native promises/arrays, and `x.checkin`. The only extra runtime export is the
+allowed identity `step({...})` wrapper: sibling item callback/result inference needs it on both
+checkers. Defaults are explicit in the preview, including unreached step caps. All ten examples
+and test plans use the replacement, with historical host claims edited in their briefs.
+The kernel's reconciliation/execution protocol is retained. Necessary seams: `contract.call`
+is retained as canonical owner policy for rewrite equality; non-reasoning seats omit effort;
+command `needs` remains to preserve resource accounting. A leader must still resolve to a Buddy,
+and a done-reviewer to a seat: accepting the other variants needs a separate kernel change.
+No migration or old authoring API remains.
+
+Review changes on top: `buddy:<id>` is read in the expedition layer (`authoring/who.ts`), so
+agent-cli's `parseModelString` knows harnesses and models only; a model may drop the harness name
+it repeats (`claude:opus-5-5`, the owner's own spelling); `preview.defaults` is null on the wire
+when not reported, so proposal cards stored before it still parse; the Launch card lists the
+defaults a file left unset.
+
+Leader probe after this change (the leader's instructions changed): Claude passed. Codex FAILED,
+for a reason the format did not cause: the model wrote the draft with a shell heredoc, zsh could
+not create its temp file ("can't create temp file for here document: operation not permitted"),
+and the leader stopped, reporting the draft folder unwritable. A Codex write turn confines writes
+to its directory and excludes `/tmp` and `$TMPDIR`, so any command that needs a temp file fails;
+earlier passes used the patch tool. Open: give a write turn its own temp directory. Evidence:
+gitignored `output/expedition-probes-2026-11-11T13-12-39-560Z/codex/leader/`.
+
 ### Real-agent conformance probes (2026-11-11)
 
 **14/14 checks now have passing real-agent evidence**, across the initial pass and focused

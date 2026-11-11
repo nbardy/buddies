@@ -47,10 +47,6 @@ after(async () => {
     } catch {}
 });
 
-const SEAT = "seat('claude', 'claude-sonnet-5-5', 'low')";
-const HEAD = `import { check, need, expedition, role, seat, steps } from 'expedition';
-
-const worker = role({ by: ${SEAT}, usd: 1, minutes: 10 });`;
 const answers = (tag: string, mode = 'answer', summary = 'done') =>
   `Do it. TAG:${tag} MODE:${mode} ANSWER_JSON:{"summary":"${summary}","files":[]}`;
 
@@ -64,7 +60,7 @@ function planFile(x: {
   return writePlan(
     path.join(tempDir('xk-leader-plan-'), 'plan.expedition.ts'),
     {
-      leader: lead,
+      leader: `buddy:${lead}`,
       repo: h.repo,
       goal: 'Probe, reflect, and finish.',
       budget: { usd: 50, hours: 4 },
@@ -101,14 +97,16 @@ test('a wake is one crate run per run id across a SIGKILL; a rewrite applies pla
 }, async () => {
   const exp = await h.launch(
     planFile({
-      plan: `${HEAD}
-const { probe } = steps({ probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')) });
+      plan: `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
-  const p = need(await probe(), 'no probe');
-  await Promise.all([x.ask('Which segment first?'), x.review('Change course?')]);
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{probe:{by:"worker",brief:PROMPTS.probe,judge:{check:'node scripts/check.js'}}},plan: async ({probe}, x) => {
+  const p = await probe();
+  await Promise.all([x.ask('Which segment first?'), x.checkin('Change course?')]);
   return p;
-} });
+}});
 `,
       prompts: { probe: answers('probe', 'answer', 'SECRET-PROBE-OUTPUT') },
     }),
@@ -183,17 +181,16 @@ export default expedition({ contract: CONTRACT, plan: async (x) => {
     files: {
       'plan.expedition.ts': rewriteSource(
         expDir(exp),
-        `${HEAD}
-const { probe, more } = steps({
-  probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')),
-  more: worker.brief(PROMPTS.more),
-});
+        `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
-  const p = need(await probe(), 'no probe');
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{probe:{by:"worker",brief:PROMPTS.probe,judge:{check:'node scripts/check.js'}},more:{by:"worker",brief:PROMPTS.more}},plan: async ({probe,more}, x) => {
+  const p = await probe();
   await x.ask('Which segment first?');
-  return need(await more({ reads: [p] }), 'no more');
-} });
+  return await more({ reads: [p] });
+}});
 `,
         { more: answers('more') }
       ),
@@ -226,14 +223,16 @@ test('an answer that is not an act settles the wake errored, and it is charged',
 }, async () => {
   const exp = await h.launch(
     planFile({
-      plan: `${HEAD}
-const { probe } = steps({ probe: worker.brief(PROMPTS.probe) });
+      plan: `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
-  const p = need(await probe(), 'no probe');
-  await x.review('Anything to change?');
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{probe:{by:"worker",brief:PROMPTS.probe}},plan: async ({probe}, x) => {
+  const p = await probe();
+  await x.checkin('Anything to change?');
   return p;
-} });
+}});
 `,
       prompts: { probe: answers('probetwo') },
       wakeUsd: 0.4,
@@ -264,20 +263,18 @@ test('dropping running calls without dispositions.json is rejected and the next 
 }, async () => {
   const exp = await h.launch(
     planFile({
-      plan: `${HEAD}
-const { probe, slowa, slowb } = steps({
-  probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')),
-  slowa: worker.brief(PROMPTS.slowa),
-  slowb: worker.brief(PROMPTS.slowb),
-});
+      plan: `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
-  const p = need(await probe(), 'no probe');
-  const slow = Promise.all([slowa(), slowb()]);
-  await x.review('Keep the slow ones?');
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{probe:{by:"worker",brief:PROMPTS.probe,judge:{check:'node scripts/check.js'}},slowa:{by:"worker",brief:PROMPTS.slowa},slowb:{by:"worker",brief:PROMPTS.slowb}},plan: async ({probe,slowa,slowb}, x) => {
+  const p = await probe();
+  const slow = Promise.all([slowa.try(), slowb.try()]);
+  await x.checkin('Keep the slow ones?');
   await slow;
   return p;
-} });
+}});
 `,
       prompts: {
         probe: answers('probethree'),
@@ -295,14 +292,16 @@ export default expedition({ contract: CONTRACT, plan: async (x) => {
     'both slow calls running'
   );
   // v1 waits on the owner, so it cannot finish (and cancel what drains) before slowb is done.
-  const V1 = `${HEAD}
-const { probe } = steps({ probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')) });
+  const V1 = `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
-  const p = need(await probe(), 'no probe');
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{probe:{by:"worker",brief:PROMPTS.probe,judge:{check:'node scripts/check.js'}}},plan: async ({probe}, x) => {
+  const p = await probe();
   await x.ask('Ready to finish?');
   return p;
-} });
+}});
 `;
   h.leaderAnswers(exp, 1, {
     files: { 'plan.expedition.ts': rewriteSource(expDir(exp), V1) },
@@ -354,15 +353,17 @@ test('a rewrite over autoApply waits for the owner: decline changes nothing, app
   const exp = await h.launch(
     planFile({
       autoApply: 0,
-      plan: `${HEAD}
-const { probe } = steps({ probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')) });
+      plan: `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
-  const p = need(await probe(), 'no probe');
-  await x.review('First look?');
-  await x.review('Second look?');
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{probe:{by:"worker",brief:PROMPTS.probe,judge:{check:'node scripts/check.js'}}},plan: async ({probe}, x) => {
+  const p = await probe();
+  await x.checkin('First look?');
+  await x.checkin('Second look?');
   return p;
-} });
+}});
 `,
       prompts: { probe: answers('probefour'), more: answers('morefour') },
     }),
@@ -371,16 +372,15 @@ export default expedition({ contract: CONTRACT, plan: async (x) => {
   );
   const book = await h.ownerBook(exp);
   const root = book.thread.t === 'posted' ? book.thread.rootId : '';
-  const V1 = `${HEAD}
-const { probe, more } = steps({
-  probe: worker.brief(PROMPTS.probe).judged(check('node scripts/check.js')),
-  more: worker.brief(PROMPTS.more),
-});
+  const V1 = `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async () => {
-  need(await probe(), 'no probe');
-  return need(await more(), 'no more');
-} });
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{probe:{by:"worker",brief:PROMPTS.probe,judge:{check:'node scripts/check.js'}},more:{by:"worker",brief:PROMPTS.more}},plan: async ({probe,more}, x) => {
+  await probe();
+  return await more();
+}});
 `;
   const approvalPosts = () =>
     h.thread(root).then((ps) => ps.filter((p) => p.body.startsWith('The leader wants to rewrite')));
@@ -450,21 +450,21 @@ test('end to end through the composition: an agent call judged by a check, a rev
       done: [
         { check: 'node scripts/ok.js' },
         {
-          review: {
-            rubric:
-              'Is it good? TAG:rubric MODE:answer ANSWER_JSON:{"verdict":"yes","why":"it is fine"}',
-            by: { t: 'seat', provider: 'claude', model: 'claude-sonnet-5-5', effort: 'low' },
-          },
+          review:
+            'Is it good? TAG:rubric MODE:answer ANSWER_JSON:{"verdict":"yes","why":"it is fine"}',
+          by: 'claude:claude-sonnet-5-5:low',
         },
         { owner: 'Ship the result?' },
       ],
-      plan: `${HEAD}
-const { make } = steps({ make: worker.brief(PROMPTS.make).judged(check('node scripts/check.js')) });
+      plan: `import {expedition} from 'expedition';
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
+
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{make:{by:"worker",brief:PROMPTS.make,judge:{check:'node scripts/check.js'}}},plan: async ({make}, x) => {
   const audience = await x.ask('Who is it for?');
-  return need(await make({ reads: [audience] }), 'nothing made');
-} });
+  return await make({ reads: [audience] });
+}});
 `,
       prompts: {
         make: answers('make'),

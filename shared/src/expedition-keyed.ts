@@ -23,7 +23,7 @@ export const RefId = nonEmpty;
 export type RefId = string;
 export const refOf = (key: Key, hash: Hash): RefId => `${key}@${hash}`;
 
-export const Seat = v('seat', { provider: nonEmpty, model: nonEmpty, effort: nonEmpty });
+export const Seat = v('seat', { provider: nonEmpty, model: nonEmpty, effort: z.string() });
 export type Seat = z.infer<typeof Seat>;
 export const Who = z.discriminatedUnion('t', [v('buddy', { id: nonEmpty }), Seat]);
 export type Who = z.infer<typeof Who>;
@@ -76,6 +76,11 @@ export const Contract = z
     budget: Budget,
     /** Concurrency caps by pool name. An agent call reserves the pool named for its provider. */
     pools: z.record(nonEmpty, z.number().int().positive()),
+    /** Authoring caps retained for the owner-contract equality gate; execution uses Call.max. */
+    call: z
+      .object({ usd: z.number().positive(), minutes: z.number().positive() })
+      .strict()
+      .optional(),
     /** Appended verbatim to every brief. */
     rules: z.array(nonEmpty),
     leader: nonEmpty,
@@ -668,7 +673,30 @@ export type PreviewCall = z.infer<typeof PreviewCall>;
  * `buddy <id>`, `host command`, `you`). */
 export const ProposedCall = PreviewCall.extend({ who: nonEmpty }).strict();
 export type ProposedCall = z.infer<typeof ProposedCall>;
+/** Resolved authoring policy, with provenance; separate from the durable kernel contract. */
+export const ResolvedLimit = z
+  .object({ t: z.enum(['step', 'agent', 'contract', 'defaulted']), value: z.number().positive() })
+  .strict();
+export const PreviewDefaults = z
+  .object({
+    pools: z.object({ t: z.enum(['given', 'defaulted']), value: Contract.shape.pools }).strict(),
+    autoApply: z
+      .object({ t: z.enum(['given', 'defaulted']), value: Contract.shape.autoApply })
+      .strict(),
+    leaderWake: Cap,
+    doneReview: Cap,
+    call: z.object({ usd: ResolvedLimit, minutes: ResolvedLimit }).strict(),
+    steps: z.array(
+      z.object({ step: nonEmpty, usd: ResolvedLimit.optional(), minutes: ResolvedLimit }).strict()
+    ),
+  })
+  .strict();
+export type PreviewDefaults = z.infer<typeof PreviewDefaults>;
 const CleanPreview = v('clean', {
+  // Null on the wire means "not reported": a proposal post stored before this field existed, or a
+  // backend not yet reloaded. Required here, it rejected every such card (7 client tests, caught
+  // before release). Guard: client/test/keyed-proposal.test.tsx, whose fixtures carry no `defaults`.
+  defaults: PreviewDefaults.nullable().default(null),
   goal: str,
   leader: nonEmpty,
   repo: nonEmpty,

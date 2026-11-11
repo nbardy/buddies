@@ -149,7 +149,7 @@ export function staticGate(input: {
   // Guard: expedition-kernel-contract. Validate the whole cast, including steps behind awaits.
   for (const row of cast) {
     if (row.t !== 'agent') continue;
-    if (!row.hasBrief) issues.push(`Agent step ${row.step} has no .brief(...).`);
+    if (!row.hasBrief) issues.push(`Agent step ${row.step} has no brief.`);
     issues.push(...agentIssues(row.step, row, contract, providerOf));
   }
   const seen = new Set<string>();

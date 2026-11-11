@@ -27,7 +27,7 @@ export const Authored = z.discriminatedUnion('t', [
     base: keyed.Base,
     grant: z.object({ reads: z.array(z.string()), web: z.boolean() }).strict(),
     context: z.discriminatedUnion('t', [v('cold', {}), v('continue', { of: keyed.RefId })]),
-    /** Extra pools from `.needs(...)`. */
+    /** Extra pools from `needs`. */
     needs: z.array(z.string()),
     max: z.object({ usd: z.number().positive(), minutes: z.number().positive() }).strict(),
     judge: keyed.Judge,
@@ -46,7 +46,7 @@ export const Authored = z.discriminatedUnion('t', [
 ]);
 export type Authored = z.infer<typeof Authored>;
 
-/** One row of the plan's cast table (`steps({...})`): what every call of that step will be, known
+/** One row of the plan's cast table (`config.steps`): what every call of that step will be, known
  * before any call is made. The preview reports each agent row's limits, so a step the dry run
  * never reaches is still previewed (CONNECT_PLAN §10: the second run's checkout calls were not). */
 export const CastRow = z.discriminatedUnion('t', [
@@ -57,10 +57,14 @@ export const CastRow = z.discriminatedUnion('t', [
     grant: z.object({ reads: z.array(z.string()), web: z.boolean() }).strict(),
     judge: keyed.Judge,
     hasBrief: z.boolean(),
+    caps: z.object({ usd: keyed.ResolvedLimit, minutes: keyed.ResolvedLimit }).strict(),
     needs: z.array(z.string()),
   }),
   /** A host command: no agent turn, so no limits to report. */
-  v('command', { step: z.string().min(1) }),
+  v('command', {
+    step: z.string().min(1),
+    caps: z.object({ minutes: keyed.ResolvedLimit }).strict(),
+  }),
 ]);
 export type CastRow = z.infer<typeof CastRow>;
 
@@ -77,7 +81,7 @@ export const FromPlan = z.discriminatedUnion('t', [
   v('waiting', { on: z.array(z.number().int()) }),
   /** The plan returned its candidate. */
   v('candidate', { ref: keyed.RefId }),
-  /** `need(...)` ended the plan: no result, and this is why. */
+  /** A required call ended the plan: no result, and this is why. */
   v('gap', { why: z.string(), evidence: z.array(keyed.Input) }),
   v('threw', { message: z.string() }),
 ]);

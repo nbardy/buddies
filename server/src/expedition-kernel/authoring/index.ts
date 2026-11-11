@@ -1,12 +1,13 @@
 import type { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import { zodToJsonSchema as zodToJsonSchemaTyped } from 'zod-to-json-schema';
-import type { ContractInput } from '../contract';
+import { AUTHORING_DEFAULTS, type ContractInput, assertPlainJson } from '../contract';
+import { Agent, type Agents, type WhoName, specOf, whoOf } from './who';
 
 export type { ContractInput } from '../contract';
 
 import type { Authored, CastRow } from '../protocol';
-import { declareCast, openSession, phases, session } from './session';
+import { openSession, phases, session } from './session';
 
 // zod-to-json-schema's signature makes tsc 5.9 instantiate zod's whole type graph for a generic
 // schema: typechecking this one file ran out of a 4 GB heap after 42 s (2026-11-10), which crashed
@@ -20,38 +21,7 @@ const zodToJsonSchema = zodToJsonSchemaTyped as unknown as (schema: unknown) => 
 // Expeditions v1: the authoring library, and the authoring API itself: the typecheck gate checks
 // plans against this file (gates.ts), and docs/expeditions/keyed/v1/expedition.d.ts only re-exports
 // it. A plan imports it as `expedition`; it runs inside the plan's child process (runner.ts) and
-// turns every step, ask and review into a message to the host.
-
-// ---- who ----
-export type Who =
-  | { readonly t: 'buddy'; readonly id: string }
-  | {
-      readonly t: 'seat';
-      readonly provider: string;
-      readonly model: string;
-      readonly effort: string;
-    };
-/** A named Buddy: its role and memory come with it. */
-export const buddy = (id: string): Extract<Who, { t: 'buddy' }> =>
-  Object.freeze({ t: 'buddy', id });
-/** An anonymous worker. Values pass through verbatim to vendor/agent-cli-tool. */
-export const seat = (
-  provider: string,
-  model: string,
-  effort: string
-): Extract<Who, { t: 'seat' }> => Object.freeze({ t: 'seat', provider, model, effort });
-
-// ---- judges ----
-export type Text<I> = string | ((item: I) => string);
-export type Judge<I = never> =
-  | { readonly t: 'check'; readonly command: Text<I> }
-  | { readonly t: 'review'; readonly rubric: string; readonly by: Who };
-/** The host runs the rendered command on the output; exit 0 passes. */
-export const check = <I = never>(command: Text<I>): Judge<I> =>
-  Object.freeze({ t: 'check', command });
-/** Another provider reviews against the inline rubric. */
-export const review = (rubric: string, by: Who): Extract<Judge, { t: 'review' }> =>
-  Object.freeze({ t: 'review', rubric, by });
+// turns every step, ask and checkin into a message to the host.
 
 // ---- refs ----
 export type Ref = { readonly __ref: true };
@@ -100,14 +70,14 @@ class Answer<Out> {
 
 /** Files are validated paths relative to the call's own directory, not stored-output refs.
  * Run 3 returned greeting.mjs: wrapping it as PlanRef invented a ref that never existed. */
-const REPORT: Answer<Report> = Answer.of(
-  z.object({ summary: z.string(), files: z.array(z.string().min(1)) }).strict()
-);
+const reportSchema = z.object({ summary: z.string(), files: z.array(z.string().min(1)) }).strict();
+const REPORT: Answer<Report> = Answer.of(reportSchema);
 /** A command's default answer: stdout is not read as JSON (`output: null` on the wire). */
-const TAIL: Answer<{ readonly tail: string }> = new Answer(
-  null,
-  z.object({ tail: z.string() }).strict()
-);
+const tailSchema = z
+  .object({ tail: z.string() })
+  .strict()
+  .transform(({ tail }) => ({ summary: tail, files: [] as string[] }));
+const TAIL: Answer<Report> = new Answer(null, tailSchema);
 
 /** Outcome → Result, with `out` checked against the step's schema. An answer that does not parse is
  * `errored`: plan code never sees an unvalidated value, and never a ZodError. */
@@ -145,296 +115,329 @@ function heldOf<Out>(
   return wrap({ out: parsed.data, ref: new PlanRef(ref) });
 }
 
-// ---- the cast table ----
-/** One row of the cast table. Each refinement returns a new spec. */
-export interface Spec<Out, I = never> {
-  readonly __types?: { out: Out; item: I };
-  brief(text: string): Spec<Out>;
-  brief<T extends object>(text: (item: T) => string): Spec<Out, T>;
-  returns<T>(schema: z.ZodType<T>): Spec<T, I>;
-  lists<T extends Item>(schema: z.ZodType<T>): Spec<T[], I>;
-  judged(judge: Judge<I>): Spec<Out, I>;
-  checkout(): Spec<Out, I>;
-  reads(...paths: string[]): Spec<Out, I>;
-  web(): Spec<Out, I>;
-  needs(...pools: string[]): Spec<Out, I>;
+// ---- plain definitions ----
+type Text<I> = string | ((item: I) => string);
+type Judge<I> = { check: Text<I> } | { review: string; by: string };
+type AgentDefinition<I> = {
+  by: string;
+  brief: Text<I>;
+  item?: z.ZodTypeAny;
+  returns?: z.ZodTypeAny;
+  reads?: string | readonly string[];
+  web?: boolean;
+  checkout?: boolean;
+  needs?: readonly string[];
+  judge?: Judge<I>;
+  usd?: number;
+  minutes?: number;
+};
+type CommandDefinition<I> = {
+  needs?: readonly string[];
+  run: Text<I>;
+  minutes?: number;
+  returns?: z.ZodTypeAny;
+  item?: z.ZodTypeAny;
+};
+type Definition = AgentDefinition<never> | CommandDefinition<never>;
+type ItemAgent<I extends z.ZodType<Item>, O extends z.ZodTypeAny> = Omit<
+  AgentDefinition<z.output<I>>,
+  'item' | 'returns'
+> & { item: I; returns?: O };
+type ItemCommand<I extends z.ZodType<Item>, O extends z.ZodTypeAny> = Omit<
+  CommandDefinition<z.output<I>>,
+  'item' | 'returns'
+> & { item: I; returns?: O };
+/** Only needed for sibling-schema callback inference; it adds no runtime behaviour. */
+type NamedItemAgent<I extends z.ZodType<Item>, O extends z.ZodTypeAny, B extends string> = Omit<
+  ItemAgent<I, O>,
+  'by'
+> & { by: B };
+export function step<I extends z.ZodType<Item>, O extends z.ZodTypeAny, const B extends string>(
+  definition: NamedItemAgent<I, O, B> & { returns: O }
+): NamedItemAgent<I, O, B>;
+export function step<I extends z.ZodType<Item>, const B extends string>(
+  definition: NamedItemAgent<I, typeof reportSchema, B> & { returns?: never }
+): NamedItemAgent<I, typeof reportSchema, B>;
+export function step<I extends z.ZodType<Item>, O extends z.ZodTypeAny>(
+  definition: ItemCommand<I, O> & { returns: O }
+): ItemCommand<I, O>;
+export function step<I extends z.ZodType<Item>>(
+  definition: ItemCommand<I, typeof tailSchema> & { returns?: never }
+): ItemCommand<I, typeof tailSchema>;
+export function step(definition: unknown): unknown {
+  return definition;
 }
 
-export type StepInput = {
+type StepInput = {
   id?: string | number;
-  item?: object;
   reads?: readonly Readable[];
   continues?: Held<unknown>;
   on?: Held<unknown>;
 };
-
-/** A spec the library made (`role` or `command`): it knows how to author its call. */
-abstract class StepSpec<Out, I = never> implements Spec<Out, I> {
-  declare readonly __types?: { out: Out; item: I };
-  abstract brief(text: string): Spec<Out>;
-  abstract brief<T extends object>(text: (item: T) => string): Spec<Out, T>;
-  abstract readonly answer: Answer<Out>;
-  abstract author(step: string, key: keyed.Key, input: StepInput): Authored;
-  /** Its row of the cast table: what every call of the step will be. */
-  abstract castRow(step: string): CastRow;
-  abstract returns<T>(schema: z.ZodType<T>): Spec<T, I>;
-  abstract judged(judge: Judge<I>): Spec<Out, I>;
-  abstract checkout(): Spec<Out, I>;
-  abstract reads(...paths: string[]): Spec<Out, I>;
-  abstract web(): Spec<Out, I>;
-  abstract needs(...pools: string[]): Spec<Out, I>;
-  lists<T extends Item>(schema: z.ZodType<T>): Spec<T[], I> {
-    return this.returns(z.array(schema));
-  }
-}
-
-type AgentFields<Out, I> = {
-  readonly brief?: Text<I>;
-  readonly by: Who;
-  readonly max: { readonly usd: number; readonly minutes: number };
-  readonly answer: Answer<Out>;
-  readonly judge: Judge<I> | { readonly t: 'none' };
-  readonly tree: 'none' | 'checkout';
-  readonly grantReads: readonly string[];
-  readonly web: boolean;
-  readonly needs: readonly string[];
+type Out<D> = D extends { returns?: infer O extends z.ZodTypeAny } ? z.output<O> : Report;
+type Arguments<D> = D extends { item: infer I extends z.ZodTypeAny }
+  ? [item: z.output<I>, input?: StepInput]
+  : [input?: StepInput];
+type Step<D> = ((...args: Arguments<D>) => Promise<Extract<Result<Out<D>>, { t: 'passed' }>>) & {
+  try: (...args: Arguments<D>) => Promise<Result<Out<D>>>;
+};
+type Made<S> = { [K in keyof S]: Step<S[K]> };
+type CheckedNames<S, A> = {
+  [K in keyof S]: S[K] extends { by: unknown } ? { by: WhoName<A> } : unknown;
 };
 
-class AgentSpec<Out, I = never> extends StepSpec<Out, I> {
-  readonly answer: Answer<Out>;
-  constructor(private readonly f: AgentFields<Out, I>) {
-    super();
-    this.answer = f.answer;
-    Object.freeze(this);
-  }
-  private with<O>(change: Partial<AgentFields<O, I>> & { answer: Answer<O> }): AgentSpec<O, I> {
-    return new AgentSpec<O, I>({ ...this.f, ...change });
-  }
-  brief(text: string): Spec<Out>;
-  brief<T extends object>(text: (item: T) => string): Spec<Out, T>;
-  brief<T extends object>(text: string | ((item: T) => string)): Spec<Out, T> {
-    return new AgentSpec<Out, T>({ ...this.f, brief: text, judge: this.f.judge as Judge<T> });
-  }
-  returns<T>(schema: z.ZodType<T>): Spec<T, I> {
-    return this.with({ answer: Answer.of(schema) });
-  }
-  judged(judge: Judge<I>): Spec<Out, I> {
-    return this.with({ answer: this.answer, judge });
-  }
-  checkout(): Spec<Out, I> {
-    return this.with({ answer: this.answer, tree: 'checkout' });
-  }
-  reads(...paths: string[]): Spec<Out, I> {
-    return this.with({ answer: this.answer, grantReads: [...this.f.grantReads, ...paths] });
-  }
-  web(): Spec<Out, I> {
-    return this.with({ answer: this.answer, web: true });
-  }
-  needs(...pools: string[]): Spec<Out, I> {
-    return this.with({ answer: this.answer, needs: [...this.f.needs, ...pools] });
-  }
-  castRow(step: string): CastRow {
-    return {
-      t: 'agent',
-      step,
-      by: this.f.by,
-      tree: this.f.tree,
-      grant: { reads: [...this.f.grantReads], web: this.f.web },
-      judge: castJudge(this.f.judge),
-      hasBrief: this.f.brief !== undefined,
-      needs: [...this.f.needs],
-    };
-  }
-  author(step: string, key: keyed.Key, input: StepInput): Authored {
-    return {
-      t: 'agent',
-      key,
-      step,
-      brief:
-        this.f.brief === undefined
-          ? session().fail(`Agent step ${step} has no .brief(...).`)
-          : render(this.f.brief, input),
-      by: this.f.by,
-      inputs: (input.reads ?? []).map(inputOf),
-      output: this.answer.jsonSchema,
-      tree: this.f.tree,
-      base: baseOf(input),
-      grant: { reads: [...this.f.grantReads], web: this.f.web },
-      context: input.continues ? { t: 'continue', of: refId(input.continues.ref) } : { t: 'cold' },
-      needs: [...this.f.needs],
-      max: { usd: this.f.max.usd, minutes: this.f.max.minutes },
-      judge: renderedJudge(this.f.judge, input),
-    };
-  }
-}
-
-type CommandFields<Out, I> = {
-  readonly command: Text<I>;
-  readonly minutes: number;
-  readonly answer: Answer<Out>;
-  readonly needs: readonly string[];
+// Pattern: parse-dont-validate (docs/patterns.md#parse-dont-validate)
+// Parse the entire table before running the plan, including steps behind awaits. No config is
+// silently discarded: strict schemas refuse misspelled keys and incompatible step variants.
+const text = z.union([z.string().min(1), z.function()]);
+const schema = z.custom<z.ZodTypeAny>((v) => v instanceof z.ZodType, 'Expected a Zod schema');
+const judge = z.union([
+  z.object({ check: text }).strict(),
+  z.object({ review: z.string().min(1), by: z.string().min(1) }).strict(),
+]);
+const common = {
+  item: schema.optional(),
+  returns: schema.optional(),
+  minutes: z.number().positive().optional(),
 };
-
-/** A host-run command. The wire has no judge, tree, grant or context for a command, so those
- * refinements are authoring errors here rather than settings the host would silently drop. */
-class CommandSpec<Out, I = never> extends StepSpec<Out, I> {
-  readonly answer: Answer<Out>;
-  constructor(private readonly f: CommandFields<Out, I>) {
-    super();
-    this.answer = f.answer;
-    Object.freeze(this);
-  }
-  brief(text: string): Spec<Out>;
-  brief<T extends object>(text: (item: T) => string): Spec<Out, T>;
-  brief(): never {
-    return unsupported('brief()');
-  }
-  returns<T>(schema: z.ZodType<T>): Spec<T, I> {
-    return new CommandSpec<T, I>({ ...this.f, answer: Answer.of(schema) });
-  }
-  needs(...pools: string[]): Spec<Out, I> {
-    return new CommandSpec<Out, I>({ ...this.f, needs: [...this.f.needs, ...pools] });
-  }
-  judged(): Spec<Out, I> {
-    return unsupported('judged()');
-  }
-  checkout(): Spec<Out, I> {
-    return unsupported('checkout()');
-  }
-  reads(): Spec<Out, I> {
-    return unsupported('reads()');
-  }
-  web(): Spec<Out, I> {
-    return unsupported('web()');
-  }
-  castRow(step: string): CastRow {
-    return { t: 'command', step };
-  }
-  author(step: string, key: keyed.Key, input: StepInput): Authored {
-    if (input.reads || input.continues)
-      throw new TypeError(
-        `Command step ${step} takes no \`reads\` or \`continues\`: a command reads only its checkout.`
-      );
-    return {
-      t: 'command',
-      key,
-      step,
-      command: render(this.f.command, input),
-      on: baseOf(input),
-      output: this.answer.jsonSchema,
-      needs: [...this.f.needs],
-      maxMinutes: this.f.minutes,
-    };
-  }
-}
-function unsupported(refinement: string): never {
-  throw new TypeError(
-    `A command step does not take ${refinement}: its exit code is its judge, and it runs on its own checkout.`
-  );
-}
-
-/** An agent step; each named step supplies its prompt with .brief(...). */
-export function role(r: { by: Who; usd: number; minutes: number }): Spec<Report> {
-  return new AgentSpec({
-    by: r.by,
-    max: { usd: r.usd, minutes: r.minutes },
-    answer: REPORT,
-    judge: { t: 'none' },
-    tree: 'none',
-    grantReads: [],
-    web: false,
-    needs: [],
-  });
-}
-/** A host-run command step. Exit 0 passes; with `.returns(schema)` stdout is parsed as JSON. */
-export function command(cmd: string, limits: { minutes: number }): Spec<{ readonly tail: string }>;
-export function command<I extends object>(
-  cmd: (item: I) => string,
-  limits: { minutes: number }
-): Spec<{ readonly tail: string }, I>;
-export function command<I = never>(
-  cmd: Text<I>,
-  limits: { minutes: number }
-): Spec<{ readonly tail: string }, I> {
-  return new CommandSpec({ command: cmd, minutes: limits.minutes, answer: TAIL, needs: [] });
-}
-
-// ---- calls ----
-function render<I>(text: Text<I>, input: StepInput): string {
-  const rendered = typeof text === 'string' ? text : text(input.item as I);
+const definition = z.union([
+  z
+    .object({
+      ...common,
+      by: z.string().min(1),
+      brief: text,
+      reads: z.union([z.string(), z.array(z.string())]).optional(),
+      web: z.boolean().optional(),
+      checkout: z.boolean().optional(),
+      needs: z.array(z.string()).optional(),
+      judge: judge.optional(),
+      usd: z.number().positive().optional(),
+    })
+    .strict(),
+  z.object({ ...common, run: text, needs: z.array(z.string()).optional() }).strict(),
+]);
+type Parsed = z.infer<typeof definition>;
+type InternalInput = StepInput & { item?: Item };
+type Compiled = {
+  answer: Answer<unknown>;
+  item: z.ZodTypeAny | undefined;
+  row: CastRow;
+  author: (key: keyed.Key, input: InternalInput) => Authored;
+};
+function render(value: unknown, item: unknown): string {
+  const rendered = typeof value === 'function' ? value(item) : value;
   if (typeof rendered !== 'string' || rendered.trim() === '')
     throw new TypeError('A brief or command must render non-empty text.');
   return rendered;
-}
-function renderedJudge<I>(j: Judge<I> | { readonly t: 'none' }, input: StepInput): keyed.Judge {
-  return j.t === 'check' ? { t: 'check', command: render(j.command, input) } : j;
-}
-function castJudge<I>(j: Judge<I> | { readonly t: 'none' }): keyed.Judge {
-  return j.t === 'check'
-    ? { t: 'check', command: typeof j.command === 'string' ? j.command : '<item-dependent>' }
-    : j;
-}
-function baseOf(input: StepInput): keyed.Base {
-  return input.on ? { t: 'ref', ref: refId(input.on.ref) } : { t: 'launch' };
 }
 function inputOf(readable: Readable): keyed.Input {
   if (typeof readable === 'string') return { t: 'text', text: readable };
   if (readable instanceof PlanRef) return { t: 'ref', ref: readable.id };
   return { t: 'ref', ref: refId((readable as Held<unknown>).ref) };
 }
-
-/** `input.id`, else `item.id` when it is a string or number, else none: the step name alone. */
-function idOf(input: StepInput): string | number | 'none' {
-  if (input.id !== undefined) return input.id;
-  const itemId: unknown = (input.item as { id?: unknown } | undefined)?.id;
-  return typeof itemId === 'string' || typeof itemId === 'number' ? itemId : 'none';
+function baseOf(input: StepInput): keyed.Base {
+  return input.on ? { t: 'ref', ref: refId(input.on.ref) } : { t: 'launch' };
 }
 function phasePrefix(): string {
   const path = phases.getStore();
-  if (!path) throw new Error('Steps, asks and reviews run only inside expedition(...).');
+  if (!path) throw new Error('Steps, asks and checkins run only inside expedition(...).');
   return path.map((name) => `${name}/`).join('');
 }
-function stepKey(step: string, input: StepInput): keyed.Key {
-  const id = idOf(input);
-  return `${phasePrefix()}${step}${id === 'none' ? '' : `/${id}`}`;
+function stepKey(name: string, input: InternalInput): keyed.Key {
+  const id = input.id ?? input.item?.id;
+  return `${phasePrefix()}${name}${id === undefined || id === 'none' ? '' : `/${id}`}`;
 }
-
-type CallInput<I> = Omit<StepInput, 'item'> &
-  ([I] extends [never] ? { item?: never } : { item: I });
-export type Step<Out, I = never> = [I] extends [never]
-  ? (input?: CallInput<I>) => Promise<Result<Out>>
-  : (input: CallInput<I>) => Promise<Result<Out>>;
-type SpecTypes = { readonly __types?: { out: unknown; item: unknown } };
-type Made<T extends Record<string, SpecTypes>> = {
-  [K in keyof T]: T[K] extends { readonly __types?: { out: infer O; item: infer I } }
-    ? Step<O, I>
-    : never;
-};
-/** Property names are the durable step names. The brief/command's item type reaches its call. */
-export function steps<T extends Record<string, SpecTypes>>(table: T): Made<T> {
-  const made = Object.entries(table).map(([name, spec]) => {
-    if (!(spec instanceof StepSpec))
-      throw new TypeError(`Step ${name} is not a role(...) or command(...) spec.`);
-    return [name, spec] as const;
-  });
-  declareCast(made.map(([name, spec]) => spec.castRow(name)));
-  return Object.freeze(
-    Object.fromEntries(made.map(([name, spec]) => [name, stepOf(name, spec)]))
-  ) as Made<T>;
+type Limit = keyed.PreviewDefaults['call']['usd'];
+function cap(
+  field: 'usd' | 'minutes',
+  d: { usd?: number; minutes?: number },
+  agent: Agent | undefined,
+  contract: ContractInput
+): Limit {
+  if (d[field] !== undefined) return { t: 'step', value: d[field] };
+  if (typeof agent === 'object' && agent[field] !== undefined)
+    return { t: 'agent', value: agent[field] };
+  if (contract.call?.[field] !== undefined) return { t: 'contract', value: contract.call[field] };
+  return { t: 'defaulted', value: AUTHORING_DEFAULTS.call[field] };
 }
-function stepOf<Out, I>(
-  name: string,
-  spec: StepSpec<Out, I>
-): (input?: StepInput) => Promise<Result<Out>> {
-  return async (input = {}) => {
-    const s = session();
-    const key = s.claim(stepKey(name, input));
-    const outcome = await s.call(spec.author(name, key, input));
-    return resultOf(spec.answer, key, outcome);
+type CompileContext = { name: string; agents: Agents; contract: ContractInput };
+/** Pattern: sum-types (docs/patterns.md#sum-types)
+ * Classify the judge once; calls only render its item-dependent command, never reparse its kind.
+ */
+function compileJudge(
+  j: Extract<Parsed, { by: string }>['judge'],
+  c: CompileContext
+): { cast: keyed.Judge; render: (item: unknown) => keyed.Judge } {
+  if (j === undefined) {
+    const cast: keyed.Judge = { t: 'none' };
+    return { cast, render: () => cast };
+  }
+  if ('check' in j)
+    return {
+      cast: { t: 'check', command: typeof j.check === 'string' ? j.check : '<item-dependent>' },
+      render: (item) => ({ t: 'check', command: render(j.check, item) }),
+    };
+  const cast: keyed.Judge = {
+    t: 'review',
+    rubric: j.review,
+    by: whoOf(specOf(j.by, c.agents, `${c.name}.judge`), `${c.name}.judge`),
+  };
+  return { cast, render: () => cast };
+}
+function compileAgent(d: Extract<Parsed, { by: string }>, c: CompileContext): Compiled {
+  const by = whoOf(specOf(d.by, c.agents, c.name), c.name);
+  const agent = Object.hasOwn(c.agents, d.by) ? c.agents[d.by] : undefined;
+  const usd = cap('usd', d, agent, c.contract),
+    minutes = cap('minutes', d, agent, c.contract);
+  const judged = compileJudge(d.judge, c);
+  const row: Extract<CastRow, { t: 'agent' }> = {
+    t: 'agent',
+    step: c.name,
+    by,
+    tree: d.checkout ? 'checkout' : 'none',
+    grant: {
+      reads: typeof d.reads === 'string' ? [d.reads] : (d.reads ?? []),
+      web: d.web ?? false,
+    },
+    judge: judged.cast,
+    hasBrief: true,
+    needs: d.needs ?? [],
+    caps: { usd, minutes },
+  };
+  const answer = d.returns ? Answer.of(d.returns) : REPORT;
+  return {
+    item: d.item,
+    answer,
+    row,
+    author: (key, input) => ({
+      t: 'agent',
+      key,
+      step: c.name,
+      by,
+      brief: render(d.brief, input.item),
+      inputs: (input.reads ?? []).map(inputOf),
+      output: answer.jsonSchema,
+      tree: row.tree,
+      base: baseOf(input),
+      grant: row.grant,
+      context: input.continues ? { t: 'continue', of: refId(input.continues.ref) } : { t: 'cold' },
+      needs: row.needs,
+      max: { usd: usd.value, minutes: minutes.value },
+      judge: judged.render(input.item),
+    }),
   };
 }
+function compileCommand(d: Extract<Parsed, { run: unknown }>, c: CompileContext): Compiled {
+  const minutes = cap('minutes', d, undefined, c.contract);
+  const answer = d.returns ? Answer.of(d.returns) : TAIL;
+  return {
+    item: d.item,
+    answer,
+    row: { t: 'command', step: c.name, caps: { minutes } },
+    author: (key, input) => {
+      if (input.reads || input.continues)
+        throw new TypeError(
+          `Command step ${c.name} takes no reads or continues: a command reads only its checkout.`
+        );
+      return {
+        t: 'command',
+        key,
+        step: c.name,
+        command: render(d.run, input.item),
+        on: baseOf(input),
+        output: answer.jsonSchema,
+        needs: d.needs ?? [],
+        maxMinutes: minutes.value,
+      };
+    },
+  };
+}
+/** Boundary classification into one handler per variant; handlers do not rediscover step kind. */
+function compile(raw: unknown, c: CompileContext): Compiled {
+  const parsed = definition.safeParse(raw);
+  if (!parsed.success) throw new TypeError(`Step ${c.name}: ${parsed.error.message}`);
+  const d = parsed.data;
+  const callbacks =
+    'by' in d ? [d.brief, ...(d.judge && 'check' in d.judge ? [d.judge.check] : [])] : [d.run];
+  if (!d.item && callbacks.some((v) => typeof v === 'function'))
+    throw new TypeError(`Step ${c.name}: item schema is required for an item callback.`);
+  if (d.item) {
+    const json = zodToJsonSchema(d.item) as {
+      type?: string;
+      properties?: Record<string, { type?: string }>;
+      required?: string[];
+    };
+    if (
+      json.type !== 'object' ||
+      json.properties?.id?.type !== 'string' ||
+      !json.required?.includes('id')
+    )
+      throw new TypeError(`Step ${c.name}: item schema must require a string id.`);
+  }
+  return 'by' in d ? compileAgent(d, c) : compileCommand(d, c);
+}
+const callOptions = z
+  .object({
+    id: z.union([z.string(), z.number()]).optional(),
+    reads: z.array(z.unknown()).optional(),
+    continues: z.unknown().optional(),
+    on: z.unknown().optional(),
+  })
+  .strict();
+function itemOf(schema: z.ZodTypeAny, raw: unknown, name: string): Item {
+  const value: unknown = schema.parse(raw);
+  // A Zod transform can remove/change id after its JSON Schema passed the cast gate. Never
+  // turn that into a no-id call key. Guard: expedition-kernel-authoring transformed-item test.
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('id' in value) ||
+    typeof value.id !== 'string'
+  )
+    throw new TypeError(`Step ${name}: parsed item must have a string id.`);
+  return value as Item;
+}
+function stepOf(name: string, spec: Compiled) {
+  const attempt = async (first?: unknown, second?: unknown): Promise<Result<unknown>> => {
+    // map passes its index as argument two. Reject it before it can alter a durable key or grants.
+    // Guard: expedition-kernel-authoring arity test; use an explicit callback in native array APIs.
+    if (
+      second !== undefined &&
+      (typeof second !== 'object' || second === null || Array.isArray(second))
+    )
+      throw new TypeError(
+        `Step ${name}: second argument must be an options object; write (org) => ${name}(org), not orgs.map(${name}).`
+      );
+    if (!spec.item && second !== undefined)
+      throw new TypeError(`Step ${name} takes one options object.`);
+    const options = callOptions.parse(spec.item ? (second ?? {}) : (first ?? {})) as StepInput;
+    const input: InternalInput = spec.item
+      ? { ...options, item: itemOf(spec.item, first, name) }
+      : options;
+    const key = session().claim(stepKey(name, input));
+    return resultOf(spec.answer, key, await session().call(spec.author(key, input)));
+  };
+  return Object.assign(
+    async (first?: unknown, second?: unknown): Promise<Held<unknown>> => {
+      const result = await attempt(first, second);
+      if (result.t === 'passed') return result;
+      return session().gap(`Step ${name} did not pass: ${failureOf(result)}.`, evidenceOf(result));
+    },
+    { try: attempt }
+  );
+}
+function failureOf(r: Exclude<Result<unknown>, { t: 'passed' }>): string {
+  switch (r.t) {
+    case 'failed':
+    case 'errored':
+      return `${r.t}: ${r.why}`;
+    case 'cancelled':
+      return 'cancelled';
+    case 'refused':
+      return `refused: ${r.reason}`;
+  }
+}
 
-// ---- results ----
 /** What a result that did not pass can show for itself. */
 function evidenceOf(result: Exclude<Result<unknown>, { t: 'passed' }>): keyed.Input[] {
   switch (result.t) {
@@ -454,27 +457,10 @@ function evidenceOf(result: Exclude<Result<unknown>, { t: 'passed' }>): keyed.In
       return [{ t: 'text', text: `refused: ${result.reason}` }];
   }
 }
-/** The passed result, or end the plan here with a gap: "no result, and this is why". */
-export function need<Out>(result: Result<Out>, why: string): Held<Out> {
-  if (result.t === 'passed') return result;
-  return session().gap(why, evidenceOf(result));
-}
-/** The results that passed. The rest stay in the log as counted gaps. */
-export function passed<Out>(results: readonly Result<Out>[]): Held<Out>[] {
-  return results.flatMap((result) => (result.t === 'passed' ? [result] : []));
-}
-/** One call or trial per item, all at once, in item order. The host's pools do the limiting. */
-export function parallel<T extends Item, R>(
-  items: readonly T[],
-  each: (item: T) => Promise<R>
-): Promise<R[]> {
-  return Promise.all(items.map((item) => each(item)));
-}
-
 // ---- the plan ----
 export interface X {
   phase<T>(name: string, body: () => Promise<T>): Promise<T>;
-  review(question: string): Promise<void>;
+  checkin(question: string): Promise<void>;
   ask(question: string): Promise<string>;
   confirm(question: string): Promise<boolean>;
 }
@@ -526,23 +512,47 @@ const x: X = Object.freeze({
       s.phase(name, 'close');
     }
   },
-  review: (question: string) => session().review(question),
+  checkin: (question: string) => session().review(question),
   ask: (question: string) => askOwner(question, 'text', z.string()),
   confirm: (question: string) => askOwner(question, 'confirm', z.boolean()),
 });
 
-/** The child entry (runner-child.mjs) finds the plan's starter under this global symbol, so it
- * runs in the same module instance the plan imported, whatever module format each was loaded as. */
+/** The child entry and plan import share this symbol across module formats. */
 const START = Symbol.for('expedition.start');
-
-/** The plan returns its candidate. The host, never the plan, evaluates the contract's `done`. */
-export type ExpeditionConfig = { contract: ContractInput; plan: (x: X) => Promise<Held<unknown>> };
-export function expedition(config: ExpeditionConfig): Plan {
+export function expedition<
+  const S extends Record<string, Definition>,
+  const A extends Agents = Record<never, never>,
+>(config: {
+  contract: ContractInput;
+  agents?: A;
+  steps: S & CheckedNames<S, A>;
+  plan: (steps: Made<S>, x: X) => Promise<Held<unknown>>;
+}): Plan {
   const start = (): void => {
-    const s = openSession(config.contract);
+    // Send the owner literal first, even if a step later fails boundary parsing.
+    const agents = z.record(Agent).parse(config.agents ?? {}) as Agents;
+    const raw = config.contract;
+    assertPlainJson(raw);
+    const contract = {
+      ...raw,
+      leader: specOf(raw.leader, agents, 'contract.leader'),
+      done: raw.done.map((d, i) =>
+        'review' in d ? { ...d, by: specOf(d.by, agents, `contract.done/${i}`) } : d
+      ),
+    };
+    const s = openSession(contract);
     phases
       .run([], async () => {
-        const candidate = await config.plan(x);
+        for (const [name, agent] of Object.entries(agents))
+          whoOf(typeof agent === 'string' ? agent : agent.use, `agents.${name}`);
+        const compiled = Object.entries(config.steps).map(
+          ([name, d]) => [name, compile(d, { name, agents, contract })] as const
+        );
+        s.cast(compiled.map(([, d]) => d.row));
+        const calls = Object.fromEntries(
+          compiled.map(([name, d]) => [name, stepOf(name, d)])
+        ) as unknown as Made<S>;
+        const candidate = await config.plan(calls, x);
         return refId(candidate.ref);
       })
       .then(

@@ -1,9 +1,11 @@
+import { listHarnesses } from '@nbardy/agent-cli';
 import { keyed } from '@unleashd/shared';
 import { z } from 'zod';
+import { whoOf } from './authoring/who';
 
 // Pattern: one parse at the boundary (docs/patterns.md#sum-types)
 export type ParsedContract =
-  | { t: 'ok'; contract: keyed.Contract }
+  | { t: 'ok'; contract: keyed.Contract; defaults: keyed.PreviewDefaults }
   | { t: 'invalid'; issues: string[] };
 
 // The cap of one leader wake or done review when the contract names none, ONE rule:
@@ -62,9 +64,14 @@ const Done = z.union([
     .strict()
     .transform((c) => ({ t: 'check' as const, command: c.check })),
   z
-    .object({ review: z.object({ rubric: z.string(), by: keyed.Seat }).strict() })
+    .object({ review: z.string(), by: z.string() })
     .strict()
-    .transform((c) => ({ t: 'review' as const, ...c.review })),
+    .transform((c) => {
+      const by = whoOf(c.by, 'contract.done review');
+      if (by.t !== 'seat')
+        throw new TypeError('contract.done review: the kernel requires a seat reviewer.');
+      return { t: 'review' as const, rubric: c.review, by };
+    }),
   z
     .object({ owner: z.string() })
     .strict()
@@ -73,6 +80,10 @@ const Done = z.union([
 const Literal = keyed.Contract.omit({ done: true, leaderWake: true, doneReview: true })
   .extend({
     done: z.array(Done),
+    leader: z.string().min(1),
+    pools: keyed.Contract.shape.pools.optional(),
+    autoApply: keyed.Contract.shape.autoApply.optional(),
+    call: keyed.Max.partial().optional(),
     leaderWake: keyed.Max.optional(),
     doneReview: keyed.Max.optional(),
   })
@@ -80,7 +91,7 @@ const Literal = keyed.Contract.omit({ done: true, leaderWake: true, doneReview: 
 export type ContractInput = z.input<typeof Literal>;
 
 /** The one-file literal -> canonical owner contract, including the two budget-derived caps. */
-export function parseContract(raw: unknown): ParsedContract {
+function parseLiteral(raw: unknown): ParsedContract {
   try {
     assertPlainJson(raw);
   } catch (e) {
@@ -92,16 +103,46 @@ export function parseContract(raw: unknown): ParsedContract {
       t: 'invalid',
       issues: literal.error.issues.map((i) => `${i.path.join('.') || 'contract'}: ${i.message}`),
     };
-  const { leaderWake, doneReview, ...given } = literal.data;
-  const cap = (c: keyed.Max | undefined): keyed.Cap =>
-    c ? { t: 'given', ...c } : defaultCap(given.budget);
+  const { leaderWake, doneReview, pools, autoApply, call, ...given } = literal.data;
+  const leader = whoOf(given.leader, 'contract.leader');
+  if (leader.t !== 'buddy')
+    throw new TypeError('contract.leader: the kernel requires a Buddy leader.');
+  const cap = (kind: 'leaderWake' | 'doneReview', c: keyed.Max | undefined): keyed.Cap =>
+    c ? { t: 'given', ...c } : AUTHORING_DEFAULTS[kind](given.budget);
   const canonical = keyed.Contract.safeParse({
     ...given,
-    leaderWake: cap(leaderWake),
-    doneReview: cap(doneReview),
+    leader: leader.id,
+    call: {
+      usd: call?.usd ?? AUTHORING_DEFAULTS.call.usd,
+      minutes: call?.minutes ?? AUTHORING_DEFAULTS.call.minutes,
+    },
+    pools: pools ?? AUTHORING_DEFAULTS.pools,
+    autoApply: autoApply ?? AUTHORING_DEFAULTS.autoApply,
+    leaderWake: cap('leaderWake', leaderWake),
+    doneReview: cap('doneReview', doneReview),
   });
   return canonical.success
-    ? { t: 'ok', contract: canonical.data }
+    ? {
+        t: 'ok',
+        contract: canonical.data,
+        defaults: {
+          pools: { t: pools ? 'given' : 'defaulted', value: canonical.data.pools },
+          autoApply: { t: autoApply ? 'given' : 'defaulted', value: canonical.data.autoApply },
+          leaderWake: canonical.data.leaderWake,
+          doneReview: canonical.data.doneReview,
+          call: {
+            usd: {
+              t: call?.usd === undefined ? 'defaulted' : 'contract',
+              value: call?.usd ?? AUTHORING_DEFAULTS.call.usd,
+            },
+            minutes: {
+              t: call?.minutes === undefined ? 'defaulted' : 'contract',
+              value: call?.minutes ?? AUTHORING_DEFAULTS.call.minutes,
+            },
+          },
+          steps: [],
+        },
+      }
     : {
         t: 'invalid',
         issues: canonical.error.issues.map(
@@ -114,4 +155,23 @@ export function parseContract(raw: unknown): ParsedContract {
 export function expandHome(path: string, home: string): string {
   if (path === '~') return home;
   return path.startsWith('~/') ? `${home.replace(/\/+$/, '')}/${path.slice(2)}` : path;
+}
+
+/** Pattern: table-driven (docs/patterns.md#table-driven)
+ * All authoring defaults live here. PreviewDefaults records every resolution, even unreached steps.
+ * Pool defaults serialize each catalog harness independently; explicit pools replace the table.
+ */
+export const AUTHORING_DEFAULTS = {
+  pools: Object.fromEntries(listHarnesses().map((harness) => [harness, 1])),
+  autoApply: { usd: 0 },
+  call: { usd: 1, minutes: 20 },
+  leaderWake: defaultCap,
+  doneReview: defaultCap,
+} as const;
+export function parseContract(raw: unknown): ParsedContract {
+  try {
+    return parseLiteral(raw);
+  } catch (error) {
+    return { t: 'invalid', issues: [(error as Error).message] };
+  }
 }

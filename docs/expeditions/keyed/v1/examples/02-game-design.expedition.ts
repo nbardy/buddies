@@ -44,24 +44,10 @@
 // Gates typecheck and dry-run declarations; they never execute or establish existence of these tools.
 // Fill in actual Buddy ids and check their providers; test providers below are explicit assumptions.
 
-import {
-  type Held,
-  type Readable,
-  type Result,
-  buddy,
-  check,
-  command,
-  expedition,
-  need,
-  parallel,
-  review,
-  role,
-  seat,
-  steps,
-} from 'expedition';
+import { type Held, type Readable, type Result, expedition, step } from 'expedition';
 import { z } from 'zod';
 
-// Preserve failed outputs as evidence too: passed(...) alone would erase a search's refutations.
+// Preserve failed outputs as evidence too: filtering for passes alone would erase a search's refutations.
 function evidence(result: Result<unknown>): Readable[] {
   switch (result.t) {
     case 'passed':
@@ -76,18 +62,11 @@ function evidence(result: Result<unknown>): Readable[] {
       return [`refused: ${result.reason}`];
   }
 }
-const noResult = (why: string) => need({ t: 'errored', why }, why);
+
 const RUNS = 'reports/tidewar-balance';
 const Exp = z.object({ id: z.string(), family: z.string(), idea: z.string() });
-const judge = seat('gemini', 'gemini-3.1-pro-preview', 'high');
-const lead = role({ by: buddy('game-design'), usd: 8, minutes: 45 }).reads(
-  'notes/design/',
-  RUNS,
-  'keel/GAMES.md'
-);
-const coder = role({ by: seat('claude', 'claude-sonnet-5-5', 'high'), usd: 5, minutes: 60 });
-const hunter = role({ by: seat('codex', 'gpt-6.1-sol', 'high'), usd: 6, minutes: 45 });
-const SUITE = check('keel/scripts/dev.sh test game_bships --test it');
+
+const SUITE = { check: 'keel/scripts/dev.sh test game_bships --test it' };
 const exploit_evidence = `# Rubric: is the exploit report backed by runs?
 
 You are judging an exploit hunter's report. You did not write it, and you did not write the game.
@@ -120,12 +99,11 @@ measurements in your inputs, not against its own summary.
 
 For every row of the progression log opened this round:
 
-1. **The prediction is unchanged.** Compare the row with the version landed on main before the
+1. **The prediction is unchanged.** Compare the row with the version committed before the
    measurements. A prediction edited after its measurement fails the whole review.
 2. **The numbers match.** Finished count, median length, win split and the paired sign test
    equal the measurement's output. Unfinished matches are reported as censored, not averaged.
-3. **The verdict follows**, and agrees with the keep or reject the host wrote in the learning
-   log. Confirmed needs the predicted direction and significance. A team-bias
+3. **The verdict follows**, and agrees with the measured verdict in the supplied call evidence. Confirmed needs the predicted direction and significance. A team-bias
    claim needs the mirrored run. "Inconclusive" is not used to avoid writing "refuted".
 4. **The row is closed**: verdict, and kept or reverted.
 
@@ -167,12 +145,66 @@ passes if it is clean. In your answer, list the differing map fields and the fil
 for a fail, name the line that breaks which rule.
 `;
 
-const { spread, unblock, hunt, theorize, change, ab, stack, confirm, record } = steps({
-  spread: command(`python3 -I ${RUNS}/spread.py --seeds 16`, { minutes: 20 }).needs('cpu'),
-  unblock: coder
-    .checkout()
-    .needs('compile')
-    .brief(`# Unblock: fix what stops the round from measuring anything
+export default expedition({
+  contract: {
+    goal: `Tidewar is not fun to finish yet. On the shipped map, AI against AI, most matches are still going
+at 45 minutes, there are almost no fights, and captains spend a third of their time doing nothing.
+
+I want matches that land in 12 to 20 minutes, a Kraken about every 4.5 minutes, no advantage for
+either team, and the fun numbers in range: lead changes, comebacks, fights, contested Krakens, low
+idle time. Balance means fun. A balanced game that is dull has failed.
+
+Round 1 spent 38 agents on 7 experiments and shipped nothing, and most of what went wrong was the
+process: one deterministic AI made 48 seeds into one sample, exploits confounded every experiment,
+two confirmed levers stacked into a biased game, and code fixes had no owner. Read
+\`notes/design/2026-11-01_balance_swarm_meta_prompt.md\` and do not repeat it. Check the measuring
+stick first. Hunt exploits before experimenting. Test one lever at a time, and never a lever that
+the log already shows refuted unless something about it has changed.
+
+AI against AI measures structure, not feel, so I will play the result myself before it merges.
+If no lever earns its place, say so. A round that ships nothing but leaves an honest log, a
+corrected theory and better lessons in the meta prompt is a result I accept.`,
+    leader: 'buddy:game-design',
+    repo: '~/git/room-runners-arena-lib',
+    budget: { usd: 120, hours: 12 },
+    autoApply: { usd: 15 },
+    pools: { claude: 4, codex: 1, gemini: 2, compile: 1, cpu: 2, 'fresh-seeds': 1 },
+    done: [
+      {
+        check:
+          'python3 -I reports/tidewar-balance/verify_confirmation.py --seed-start 1001 --seeds 48 --mirror --median-at-most 20',
+      },
+      { check: 'python3 -I reports/tidewar-balance/predictions.py --closed' },
+      { review: exploit_evidence, by: 'judge' },
+      {
+        owner: "Do you accept the change set, the round's log and the owner decisions it asks for?",
+      },
+    ],
+    rules: [
+      'Commit on the work branch; never merge main or push. Integrate supplied commits only inside your private checkout.',
+      'Keep predictions and every verdict, including failures, in repo records from the supplied call evidence.',
+      'Owner rulings are fixed. The flagship stays shielded until all three Inner towers are sunk. A lever that bends a ruling is proposed in the log, never applied.',
+      'Predict before you measure. The prediction row is written before the run. No bar is lowered after a result is seen.',
+      'A/B runs use the same seeds, 1..48. Seeds 1001..1048 are reserved; do not run them. A team-bias claim needs the mirrored run. An unfinished match is censored, never averaged at the cap.',
+      'Refuted results stay. Never delete a log row, a variant map or a run folder.',
+      "Compile only through keel/scripts/dev.sh (it takes the machine's compile lock). Run matches outside the lock at nice 15. Report no tick timing: the host is not idle.",
+      'Never deploy. Do not touch the production server or keel/deploy/.',
+      'Seeds 1001..1048 are for the single host confirm call only; the done checker reads its stored receipt and must not run matches. No retry without owner authorization. Before live launch implement verify_confirmation.py and targets.py --require-median-at-most 20.',
+    ],
+  },
+  agents: {
+    judge: 'gemini:gemini-3.1-pro-preview',
+    lead: { use: 'buddy:game-design', usd: 8, minutes: 45 },
+    coder: { use: 'claude:claude-sonnet-5-5:high', usd: 5, minutes: 60 },
+    hunter: { use: 'codex:gpt-6.1-sol:high', usd: 6, minutes: 45 },
+  },
+  steps: {
+    spread: { run: `python3 -I ${RUNS}/spread.py --seeds 16`, minutes: 20, needs: ['cpu'] },
+    unblock: {
+      by: 'coder',
+      checkout: true,
+      needs: ['compile'],
+      brief: `# Unblock: fix what stops the round from measuring anything
 
 You own code fixes in this round. Nobody else may edit the game or the match runner before the
 experiments start, so if you do not fix it, it stays broken.
@@ -205,15 +237,16 @@ the knob off and write the owner decision it needs; do not turn it on.
 
 ## Report
 
-Say what was wrong, what you changed, and which test proves it. Record the cause with the \`learn\`
-tool, family \`measuring-stick\` or \`exploit\`. If the block cannot be fixed without bending an
+Say what was wrong, what you changed, and which test proves it. Record the cause in the progression log, family \`measuring-stick\` or \`exploit\`. If the block cannot be fixed without bending an
 owner ruling, stop and say so; that is the leader's and the owner's decision.
-`)
-    .judged(SUITE),
-  hunt: hunter
-    .checkout()
-    .needs('cpu')
-    .brief(`# Hunt: break the game before anyone tunes it
+`,
+      judge: SUITE,
+    },
+    hunt: {
+      by: 'hunter',
+      checkout: true,
+      needs: ['cpu'],
+      brief: `# Hunt: break the game before anyone tunes it
 
 You are the exploit hunter. You run twice in a round: on the baseline before any experiment, and
 on the stacked candidate before it is confirmed. Your inputs tell you which commit you are on.
@@ -249,12 +282,15 @@ not, with its evidence path. Zero is a valid answer; that is your sign-off, so d
 unless you tried.
 
 Do not fix anything. Do not edit the game. Stop after 45 minutes and report what you have.
-`)
-    .returns(z.object({ blocking: z.number() }))
-    .judged(review(exploit_evidence, judge)),
-  theorize: lead
-    .checkout()
-    .brief(`# Theorize: choose the experiments and write their predictions
+`,
+      returns: z.object({ blocking: z.number() }),
+      judge: { review: exploit_evidence, by: 'judge' },
+    },
+    theorize: {
+      by: 'lead',
+      reads: ['notes/design/', RUNS, 'keel/GAMES.md'],
+      checkout: true,
+      brief: `# Theorize: choose the experiments and write their predictions
 
 You own the theory doc, \`notes/design/2026-11-01_tidewar_balance_theory.md\`. In this step you are
 the only one who edits it. You choose what the round tests. You do not run anything.
@@ -263,7 +299,7 @@ the only one who edits it. You choose what the round tests. You do not run anyth
 
 - The theory doc, whole. Sections 11 (progression log), 12 (what the theory got wrong) and 13
   (the round-2 plan) matter most.
-- The learning log in your inputs: every lever tried so far, with its family and verdict.
+- The supplied call evidence in your inputs: every lever tried so far, with its family and verdict.
 - The exploit hunter's report in your inputs.
 - \`reports/tidewar-balance/README.md\` for the knobs that exist and how a variant is made.
 
@@ -293,13 +329,14 @@ are merged to main before any lever is measured, and nobody can edit them after 
 
 Fewer good experiments beat more. If the theory supports only two, return two. If it supports
 none, return an empty list and write why in section 12.
-`)
-    .lists(Exp)
-    .judged(check(`python3 -I ${RUNS}/predictions.py`)),
-  change: coder
-    .checkout()
-    .brief(
-      (item: z.infer<typeof Exp>) => `# Change: implement one lever, ${item.id}
+`,
+      returns: z.array(Exp),
+      judge: { check: `python3 -I ${RUNS}/predictions.py` },
+    },
+    change: step({
+      by: 'coder',
+      checkout: true,
+      brief: (item) => `# Change: implement one lever, ${item.id}
 
 Family: ${item.family}
 
@@ -340,18 +377,24 @@ A reviewer on another model reads your diff and passes it only if it is this one
 ## Report
 
 State the knob values you set and the files you changed, and what you expect the measurement
-to show. Do not write a learning row for the lever: the host writes keep or reject from the
-measurement.
-`
-    )
-    .judged(review(one_lever, judge)),
-  ab: command((item: { id: string }) => `${RUNS}/ab.sh --variant ${item.id}`, { minutes: 40 })
-    .returns(z.object({ inTarget: z.number() }))
-    .needs('cpu'),
-  stack: coder
-    .checkout()
-    .needs('compile')
-    .brief(`# Stack: combine the confirmed levers into one candidate
+to show. Record your prediction before measurement; the later record step derives keep or reject
+from the host measurement and writes the progression row.
+`,
+      item: Exp,
+      judge: { review: one_lever, by: 'judge' },
+    }),
+    ab: step({
+      run: (item) => `${RUNS}/ab.sh --variant ${item.id}`,
+      minutes: 40,
+      item: z.object({ id: z.string() }),
+      returns: z.object({ inTarget: z.number() }),
+      needs: ['cpu'],
+    }),
+    stack: {
+      by: 'coder',
+      checkout: true,
+      needs: ['compile'],
+      brief: `# Stack: combine the confirmed levers into one candidate
 
 Your inputs are up to three levers. Each was changed alone and confirmed alone on seeds 1..48.
 Put them together in one commit. The host then measures the stack again, because confirmed levers
@@ -385,34 +428,36 @@ interact: in round 1 two of them stacked into a biased, snowballing game.
 
 List the levers stacked, the final knob values, and every conflict you resolved and how. Say
 which interactions you expect between the levers and which metric would show each one.
-`)
-    .judged(SUITE),
-  confirm: command(
-    `python3 -I ${RUNS}/targets.py --seed-start 1001 --seeds 48 --mirror --require-median-at-most 20`,
-    {
+`,
+      judge: SUITE,
+    },
+    confirm: {
+      run: `python3 -I ${RUNS}/targets.py --seed-start 1001 --seeds 48 --mirror --require-median-at-most 20`,
       minutes: 60,
-    }
-  ).needs('cpu', 'fresh-seeds'),
-  record: lead
-    .checkout()
-    .brief(`# Record: write the round into the repo
+      needs: ['cpu', 'fresh-seeds'],
+    },
+    record: {
+      by: 'lead',
+      reads: ['notes/design/', RUNS, 'keel/GAMES.md'],
+      checkout: true,
+      brief: `# Record: write the round into the repo
 
-The round is over. Your inputs hold the learning log, every A/B measurement, and, if a stack was
+The round is over. Your inputs hold the supplied call evidence, every A/B measurement, and, if a stack was
 built, its re-measurement, the exploit hunter's report and the reserved-seed confirmation. Write
 what happened into the files that already own this knowledge. You are the only one editing them
 in this step.
 
 The first line of your inputs is the outcome of the stack in one sentence: nothing stacked,
-dropped at a named gate, refused by the owner's playtest, or landed. Use it as written. If the
-stack landed, the shipped map in your checkout already carries it.
+dropped at a named gate, refused by the owner's playtest, or accepted as a candidate for owner
+integration. Use it as written. The supplied checkout carries the candidate, not a merge to main.
 
 ## Write
 
 1. **Progression log** (theory doc, section 11). For every row opened this round, fill in the
    seeds, the measured numbers and the verdict: confirmed, refuted or inconclusive. Say whether
    the mechanism was confirmed, not only the headline number. Mark each lever kept or reverted.
-   Leave no open row. Never delete or soften an earlier row. The host has already written each
-   lever's keep or reject into the learning log; your rows must agree with it.
+   Leave no open row. Never delete or soften an earlier row. The supplied call log contains the measurements; derive each keep or reject verdict and write
+   the durable rows from that evidence.
 2. **What the theory got wrong** (section 12). For each prediction that missed, say which
    formula or assumption was at fault, and correct it where it stands, with its tag: \`[code:
    file:line]\`, \`[derived]\`, \`[assumption]\` or \`[measured]\`. Only a number from this round's
@@ -424,7 +469,7 @@ stack landed, the shipped map in your checkout already carries it.
 5. **The meta prompt**, \`notes/design/2026-11-01_balance_swarm_meta_prompt.md\`: a "Lessons from
    round 2" section about running the round itself: what wasted effort, what the plan should do
    differently. One durable lesson may also go in \`key_learnings/agent_workflow_and_evidence.md\`.
-6. **\`keel/GAMES.md\`**, "Balance status", is outside your fence. Put its replacement paragraph
+6. **\`keel/GAMES.md\`**, "Balance status", is outside your allowed scope (an instruction, checked by review). Put its replacement paragraph
    in your report for the owner to apply.
 
 ## Honesty
@@ -436,106 +481,39 @@ stack landed, the shipped map in your checkout already carries it.
 - AI against AI measures structure. Claim nothing about how the game feels.
 
 A reviewer on another model checks your rows against the raw measurements.
-`)
-    .judged(review(log_honest, judge)),
-});
-
-export default expedition({
-  contract: {
-    goal: `Tidewar is not fun to finish yet. On the shipped map, AI against AI, most matches are still going
-at 45 minutes, there are almost no fights, and captains spend a third of their time doing nothing.
-
-I want matches that land in 12 to 20 minutes, a Kraken about every 4.5 minutes, no advantage for
-either team, and the fun numbers in range: lead changes, comebacks, fights, contested Krakens, low
-idle time. Balance means fun. A balanced game that is dull has failed.
-
-Round 1 spent 38 agents on 7 experiments and shipped nothing, and most of what went wrong was the
-process: one deterministic AI made 48 seeds into one sample, exploits confounded every experiment,
-two confirmed levers stacked into a biased game, and code fixes had no owner. Read
-\`notes/design/2026-11-01_balance_swarm_meta_prompt.md\` and do not repeat it. Check the measuring
-stick first. Hunt exploits before experimenting. Test one lever at a time, and never a lever that
-the log already shows refuted unless something about it has changed.
-
-AI against AI measures structure, not feel, so I will play the result myself before it merges.
-If no lever earns its place, say so. A round that ships nothing but leaves an honest log, a
-corrected theory and better lessons in the meta prompt is a result I accept.`,
-    leader: 'game-design',
-    repo: '~/git/room-runners-arena-lib',
-    budget: { usd: 120, hours: 12 },
-    autoApply: { usd: 15 },
-    pools: { claude: 4, codex: 1, gemini: 2, compile: 1, cpu: 2, 'fresh-seeds': 1 },
-    done: [
-      {
-        check:
-          'python3 -I reports/tidewar-balance/verify_confirmation.py --seed-start 1001 --seeds 48 --mirror --median-at-most 20',
-      },
-      { check: 'python3 -I reports/tidewar-balance/predictions.py --closed' },
-      { review: { rubric: exploit_evidence, by: judge } },
-      {
-        owner: "Do you accept the change set, the round's log and the owner decisions it asks for?",
-      },
-    ],
-    rules: [
-      'Owner rulings are fixed. The flagship stays shielded until all three Inner towers are sunk. A lever that bends a ruling is proposed in the log, never applied.',
-      'Predict before you measure. The prediction row is written before the run. No bar is lowered after a result is seen.',
-      'A/B runs use the same seeds, 1..48. Seeds 1001..1048 are reserved; do not run them. A team-bias claim needs the mirrored run. An unfinished match is censored, never averaged at the cap.',
-      'Refuted results stay. Never delete a log row, a variant map or a run folder.',
-      "Compile only through keel/scripts/dev.sh (it takes the machine's compile lock). Run matches outside the lock at nice 15. Report no tick timing: the host is not idle.",
-      'Never deploy. Do not touch the production server or keel/deploy/.',
-      'V1 execution notes override historical host claims in the briefs: no land, fence, protect, tests/learn tool, automatic learning rows or no-retest gate exists. Commit on the work branch; never merge main or push. Integration may combine supplied commits only inside its private checkout. Carry prior commits explicitly through on/reads; record predictions and every verdict in the repo records from the supplied evidence, including failures. Writable scopes and frozen graders are instructions and review obligations, not host-enforced write fences.',
-      'Seeds 1001..1048 are for the single host confirm call only; the done checker reads its stored receipt and must not run matches. No retry without owner authorization. Before live launch implement verify_confirmation.py and targets.py --require-median-at-most 20.',
-    ],
+`,
+      judge: { review: log_honest, by: 'judge' },
+    },
   },
-  plan: async (x) => {
+  plan: async ({ spread, unblock, hunt, theorize, change, ab, stack, confirm, record }, x) => {
     let base: Held<unknown> | undefined;
     const trail: Readable[] = [];
-    const sampled = await x.phase('stick', () => spread());
+    const sampled = await x.phase('stick', () => spread.try());
     trail.push(...evidence(sampled));
     if (sampled.t !== 'passed') {
-      base = need(
-        await x.phase('instrument', () => unblock({ id: 'stick', reads: trail })),
-        'The measuring-stick repair failed.'
-      );
-      need(
-        await spread({ id: 'repaired', on: base }),
-        'Seeds still do not give independent games.'
-      );
+      base = await x.phase('instrument', () => unblock({ id: 'stick', reads: trail }));
+      await spread({ id: 'repaired', on: base });
     }
-    let hunted = need(
-      await x.phase('exploits', () => hunt({ id: 'base', on: base })),
-      'No trustworthy exploit hunt.'
-    );
+    let hunted = await x.phase('exploits', () => hunt({ id: 'base', on: base }));
     trail.push(hunted);
     if (hunted.out.blocking > 0) {
-      base = need(
-        await x.phase('unblock', () => unblock({ id: 'exploits', on: base, reads: [hunted] })),
-        'Blocking exploits remain.'
-      );
-      hunted = need(
-        await hunt({ id: 'repaired', on: base }),
-        'The repaired baseline was not hunted.'
-      );
+      base = await x.phase('unblock', () => unblock({ id: 'exploits', on: base, reads: [hunted] }));
+      hunted = await hunt({ id: 'repaired', on: base });
       if (hunted.out.blocking > 0)
-        return noResult('A blocking exploit still confounds the baseline.');
+        throw new Error('A blocking exploit still confounds the baseline.');
     }
-    await x.review(
+    await x.checkin(
       'Is the baseline a fair measuring stick, or does a confound or map bias remain?'
     );
-    const exps = need(
-      await x.phase('theory', () => theorize({ on: base, reads: trail })),
-      'No written predictions.'
-    );
-    const build = (item: z.infer<typeof Exp>) => change({ item, on: exps, reads: [exps] });
+    const exps = await x.phase('theory', () => theorize({ on: base, reads: trail }));
+    const build = (item: z.infer<typeof Exp>) => change.try(item, { on: exps, reads: [exps] });
     const [first, ...rest] = exps.out;
     const made: { item: z.infer<typeof Exp>; code: Held<unknown> }[] = [];
     if (first) {
-      const pilot = need(
-        await x.phase('pilot', () => build(first)),
-        'The first lever build failed; width was not started.'
-      );
+      const pilot = await x.phase('pilot', () => change(first, { on: exps, reads: [exps] }));
       made.push({ item: first, code: pilot });
       const results = await x.phase('levers', () =>
-        parallel(rest, async (item) => ({ item, result: await build(item) }))
+        Promise.all(rest.map(async (item) => ({ item, result: await build(item) })))
       );
       for (const { item, result } of results) {
         trail.push(...evidence(result));
@@ -543,13 +521,14 @@ corrected theory and better lessons in the meta prompt is a result I accept.`,
       }
     }
     const trials = await x.phase('measure', () =>
-      parallel(
-        made.map((m) => ({ ...m, id: m.item.id })),
-        async (m) => ({ ...m, result: await ab({ item: m.item, on: m.code }) })
+      Promise.all(
+        made
+          .map((m) => ({ ...m, id: m.item.id }))
+          .map(async (m) => ({ ...m, result: await ab.try(m.item, { on: m.code }) }))
       )
     );
     trail.push(...trials.flatMap((t) => evidence(t.result)));
-    await x.review(
+    await x.checkin(
       'Which levers moved the game as predicted? No change worth shipping is a valid result.'
     );
     const top = trials
@@ -559,16 +538,16 @@ corrected theory and better lessons in the meta prompt is a result I accept.`,
     let candidate: Held<unknown> = exps;
     const outcome = await x.phase('stack', async () => {
       if (!top.length) return 'No lever was confirmed alone, so nothing was stacked.';
-      const stacked = await stack({ on: exps, reads: top.flatMap((t) => [t.code, t.score]) });
+      const stacked = await stack.try({ on: exps, reads: top.flatMap((t) => [t.code, t.score]) });
       trail.push(...evidence(stacked));
       if (stacked.t !== 'passed') return 'The stack did not pass the game tests.';
-      const again = await ab({ item: { id: 'stack' }, on: stacked });
-      const clean = await hunt({ id: 'stack', on: stacked });
+      const again = await ab.try({ id: 'stack' }, { on: stacked });
+      const clean = await hunt.try({ id: 'stack', on: stacked });
       trail.push(...evidence(again), ...evidence(clean));
       if (again.t !== 'passed') return 'The stack was dropped at its re-measurement.';
       if (clean.t !== 'passed' || clean.out.blocking > 0)
         return 'The stack was dropped at the exploit hunt.';
-      const fresh = await confirm({ on: stacked });
+      const fresh = await confirm.try({ on: stacked });
       trail.push(...evidence(fresh));
       if (fresh.t !== 'passed')
         return 'The stack was dropped on the reserved seeds, which are now spent.';
@@ -577,9 +556,8 @@ corrected theory and better lessons in the meta prompt is a result I accept.`,
       candidate = stacked;
       return 'The stack passed every gate, including the owner playtest; it awaits owner integration.';
     });
-    return need(
-      await x.phase('record', () => record({ on: candidate, reads: [outcome, exps, ...trail] })),
-      'The round log failed independent review.'
+    return await x.phase('record', () =>
+      record({ on: candidate, reads: [outcome, exps, ...trail] })
     );
   },
 });

@@ -30,14 +30,11 @@
 // Gates typecheck and dry-run declarations; they never execute or establish existence of these tools.
 // Fill in actual Buddy ids and check their providers; test providers below are explicit assumptions.
 
-import { buddy, check, expedition, need, parallel, review, role, seat, steps } from 'expedition';
+import { expedition, step } from 'expedition';
 import { z } from 'zod';
 
-const noResult = (why: string) => need({ t: 'errored', why }, why);
 const Entity = z.object({ id: z.string(), name: z.string() });
-const judge = seat('gemini', 'gemini-3.1-pro-preview', 'high');
-const lead = role({ by: buddy('product-dev'), usd: 6, minutes: 60 });
-const builder = role({ by: seat('claude', 'claude-sonnet-5-5', 'medium'), usd: 3, minutes: 40 });
+
 const walkthrough_real = `# Rubric: does the walkthrough show what it says?
 
 You are reviewing a walkthrough of a small web app, written on another model. The owner will
@@ -64,10 +61,55 @@ walkthrough honestly reports as broken does not fail this review; it is the owne
 A broken step described as working does. List each step and what you saw.
 `;
 
-const { foundation, slice, integrate, walkthrough } = steps({
-  foundation: lead
-    .checkout()
-    .brief(`# Foundation: everything the four features share
+export default expedition({
+  contract: {
+    goal: `I run a small repair workshop and I want a plain web app to replace the whiteboard and the
+spreadsheet. Staff sign in with email and password. There are four things to keep track of:
+
+- **Customers**: name, phone, email, notes.
+- **Vehicles**: belongs to a customer; registration, make, model, year.
+- **Jobs**: belongs to a vehicle; description, status (booked, in progress, waiting for parts,
+  done), assigned staff member, booked date.
+- **Invoices**: belongs to a job; line items, total, status (draft, sent, paid).
+
+For each one I need a list I can search, a page for one record, and create, edit and delete.
+Deleting a customer who has vehicles should be refused with a clear message, and the same down
+the chain. Only signed-in staff see anything.
+
+Nothing here is new or clever, and I do not want it to be. I want the four parts to look and
+behave like one app written by one person. Show me a walkthrough with a screenshot of every
+screen and I will tell you whether it is right.`,
+    leader: 'buddy:product-dev',
+    repo: '~/git/shop-desk',
+    budget: { usd: 40, hours: 6 },
+    autoApply: { usd: 5 },
+    pools: { claude: 4, gemini: 1 },
+    done: [
+      { check: `bash -c 'pnpm typecheck && pnpm accept --all && pnpm build'` },
+      { review: walkthrough_real, by: 'judge' },
+      { owner: 'Does the walkthrough show the app you asked for?' },
+    ],
+    rules: [
+      'Commit on the work branch; never merge main or push. Integrate supplied commits only inside your private checkout.',
+      'Keep predictions and every verdict, including failures, in repo records from the supplied call evidence.',
+      'One type source. Table shapes live in db/schema.ts and the types derived from it in shared/. Nothing else declares the shape of a record.',
+      'Follow docs/CONVENTIONS.md. If it does not cover your case, copy the nearest existing feature. Do not invent a second way.',
+      'Test through the real boundary, HTTP against a real database. No mocked database, no mocked router.',
+      'Use pnpm. Add no dependency that docs/CONVENTIONS.md does not list.',
+      'No deploy, no real email, no real payment. I deploy it myself.',
+      'Stop and report an exact foundation fault in your answer. Do not change schema, tests or shared conventions from a feature turn.',
+    ],
+  },
+  agents: {
+    judge: 'gemini:gemini-3.1-pro-preview',
+    lead: { use: 'buddy:product-dev', usd: 6, minutes: 60 },
+    builder: { use: 'claude:claude-sonnet-5-5:medium', usd: 3, minutes: 40 },
+  },
+  steps: {
+    foundation: {
+      by: 'lead',
+      checkout: true,
+      brief: `# Foundation: everything the four features share
 
 You build the part of the app that every feature depends on, and you fix the rules the feature
 builders will follow. After you, four workers build one feature each in parallel, and they
@@ -108,13 +150,14 @@ and alone, and the others copy it.
 loader. The acceptance tests are not part of that run. Do not build any feature. If the owner's
 goal leaves a field or a rule undecided, choose the plainest reading and list the choice in your
 report.
-`)
-    .lists(Entity)
-    .judged(check(`bash -c 'pnpm typecheck && pnpm test'`)),
-  slice: builder
-    .checkout()
-    .brief(
-      (item: z.infer<typeof Entity>) => `# Slice: build the ${item.name} feature
+`,
+      returns: z.array(Entity),
+      judge: { check: `bash -c 'pnpm typecheck && pnpm test'` },
+    },
+    slice: step({
+      by: 'builder',
+      checkout: true,
+      brief: (item) => `# Slice: build the ${item.name} feature
 
 You build one feature, \`${item.id}\`, end to end: its API and its screens. Other workers build the other
 features from the same starting commit, most of them at the same time as you.
@@ -150,22 +193,22 @@ Only inside \`server/src/features/${item.id}/\` and \`client/src/features/${item
 - Build screens for another entity because yours links to it. Link to where it will be.
 
 If the schema or a shared piece is wrong or missing something you need, do not work around it:
-stop, call \`flag\`, and say exactly what is missing.
+stop and report exactly what is missing in your answer for the leader to handle.
 
 ## Done
 
 \`pnpm typecheck && pnpm accept ${item.id}\` passes in your checkout. Commit. In your report, list the files
 you added and anything in the conventions you found unclear.
-`
-    )
-    .judged(
-      check((item: z.infer<typeof Entity>) => `bash -c 'pnpm typecheck && pnpm accept ${item.id}'`)
-    ),
-  integrate: lead
-    .checkout()
-    .brief(`# Integrate: put the four features into one app
+`,
+      item: Entity,
+      judge: { check: (item) => `bash -c 'pnpm typecheck && pnpm accept ${item.id}'` },
+    }),
+    integrate: {
+      by: 'lead',
+      checkout: true,
+      brief: `# Integrate: put the four features into one app
 
-Your checkout holds the foundation and the first feature, which is already merged. Your inputs
+Your private checkout already contains the foundation and the first feature. Your inputs
 are the commits of the other features. Each passed its own acceptance tests alone, starting from
 the tree you are in. Merge them into one commit on which all of them pass together.
 
@@ -186,7 +229,7 @@ the tree you are in. Merge them into one commit on which all of them pass togeth
 
 You may change files only under \`server/src/features/\` and \`client/src/features/\`. You may not
 change the schema, the shared types, the shell or the acceptance tests. If the features cannot
-work together without changing one of those, stop and call \`flag\` with the exact change needed;
+work together without changing one of those, stop and report the exact change needed in your answer;
 that is a foundation fault and the leader decides what to rerun.
 
 Do not add features, restyle screens or refactor working code that follows the conventions.
@@ -195,11 +238,13 @@ Do not add features, restyle screens or refactor working code that follows the c
 
 List what you merged, each seam or drift you fixed and in which feature, and anything you chose
 not to fix. Commit once.
-`)
-    .judged(check(`bash -c 'pnpm typecheck && pnpm accept --all && pnpm build'`)),
-  walkthrough: builder
-    .checkout()
-    .brief(`# Walkthrough: show the owner the app
+`,
+      judge: { check: `bash -c 'pnpm typecheck && pnpm accept --all && pnpm build'` },
+    },
+    walkthrough: {
+      by: 'builder',
+      checkout: true,
+      brief: `# Walkthrough: show the owner the app
 
 The owner decides whether this app is right by reading your walkthrough. He runs a repair
 workshop and will not read code. Show him every screen, in the order he would use it.
@@ -230,72 +275,22 @@ workshop and will not read code. Show him every screen, in the order he would us
 
 When every step of the story has its screenshot and sentence. Commit. In your report, give the
 count of steps that worked and list those that did not.
-`)
-    .judged(review(walkthrough_real, judge)),
-});
-
-export default expedition({
-  contract: {
-    goal: `I run a small repair workshop and I want a plain web app to replace the whiteboard and the
-spreadsheet. Staff sign in with email and password. There are four things to keep track of:
-
-- **Customers**: name, phone, email, notes.
-- **Vehicles**: belongs to a customer; registration, make, model, year.
-- **Jobs**: belongs to a vehicle; description, status (booked, in progress, waiting for parts,
-  done), assigned staff member, booked date.
-- **Invoices**: belongs to a job; line items, total, status (draft, sent, paid).
-
-For each one I need a list I can search, a page for one record, and create, edit and delete.
-Deleting a customer who has vehicles should be refused with a clear message, and the same down
-the chain. Only signed-in staff see anything.
-
-Nothing here is new or clever, and I do not want it to be. I want the four parts to look and
-behave like one app written by one person. Show me a walkthrough with a screenshot of every
-screen and I will tell you whether it is right.`,
-    leader: 'product-dev',
-    repo: '~/git/shop-desk',
-    budget: { usd: 40, hours: 6 },
-    autoApply: { usd: 5 },
-    pools: { claude: 4, gemini: 1 },
-    done: [
-      { check: `bash -c 'pnpm typecheck && pnpm accept --all && pnpm build'` },
-      { review: { rubric: walkthrough_real, by: judge } },
-      { owner: 'Does the walkthrough show the app you asked for?' },
-    ],
-    rules: [
-      'One type source. Table shapes live in db/schema.ts and the types derived from it in shared/. Nothing else declares the shape of a record.',
-      'Follow docs/CONVENTIONS.md. If it does not cover your case, copy the nearest existing feature. Do not invent a second way.',
-      'Test through the real boundary, HTTP against a real database. No mocked database, no mocked router.',
-      'Use pnpm. Add no dependency that docs/CONVENTIONS.md does not list.',
-      'No deploy, no real email, no real payment. I deploy it myself.',
-      'V1 execution notes override historical host claims in the briefs: no land, fence, protect, tests/learn tool, automatic learning rows or no-retest gate exists. Commit on the work branch; never merge main or push. Integration may combine supplied commits only inside its private checkout. Carry prior commits explicitly through on/reads; record predictions and every verdict in the repo records from the supplied evidence, including failures. Writable scopes and frozen graders are instructions and review obligations, not host-enforced write fences.',
-      'Historical flag instructions mean stop and report the exact foundation fault; no flag tool exists in the v1 API. Do not change schema, tests or shared conventions from a feature turn.',
-    ],
+`,
+      judge: { review: walkthrough_real, by: 'judge' },
+    },
   },
-  plan: async (x) => {
-    const base = need(
-      await x.phase('foundation', () => foundation()),
-      'Schema, auth or foundation tests failed.'
-    );
+  plan: async ({ foundation, slice, integrate, walkthrough }, x) => {
+    const base = await x.phase('foundation', () => foundation());
     const [first, ...rest] = base.out;
-    if (!first) return noResult('Foundation returned no entities.');
-    const exemplar = need(
-      await x.phase('exemplar', () => slice({ item: first, on: base, reads: [base] })),
-      'The first feature failed; the remaining builders were not started.'
-    );
+    if (!first) throw new Error('Foundation returned no entities.');
+    const exemplar = await x.phase('exemplar', () => slice(first, { on: base, reads: [base] }));
     const built = await x.phase('slices', () =>
-      parallel(rest, (item) => slice({ item, on: exemplar, reads: [base, exemplar] }))
+      Promise.all(rest.map((item) => slice(item, { on: exemplar, reads: [base, exemplar] })))
     );
-    const slices = built.map((result) => need(result, 'A feature failed its acceptance tests.'));
-    const whole = need(
-      await x.phase('integrate', () =>
-        integrate({ on: exemplar, reads: [base, exemplar, ...slices] })
-      ),
-      'The features do not work together.'
+    const slices = built;
+    const whole = await x.phase('integrate', () =>
+      integrate({ on: exemplar, reads: [base, exemplar, ...slices] })
     );
-    return need(
-      await x.phase('walkthrough', () => walkthrough({ on: whole, reads: [whole] })),
-      'The walkthrough does not show what it claims.'
-    );
+    return await x.phase('walkthrough', () => walkthrough({ on: whole, reads: [whole] }));
   },
 });

@@ -29,7 +29,7 @@
 //   `covers-ledger` rubric, which is weaker than a script; see NOTES.md.
 // - Spike commands are whatever each spike writes. No benchmark for Z5 (column evaluation within 3×
 //   of plain JS) or Z9 (agent productivity) exists as a runnable command today.
-// - The seat model names are copied from example 01, not checked against the catalog. The budget
+// - Model ids pass the catalog gate; verify local CLI availability before launch. The budget
 //   figures are illustrative.
 // - Real paths this expedition reads, as they exist today: `studio/DOCUMENT_MODEL.md`,
 //   `studio/design_kernel/09_ADJUDICATION.md`, `product/MASTER_TASKS.md`,
@@ -41,21 +41,10 @@
 // Gates typecheck and dry-run declarations; they never execute or establish existence of these tools.
 // Fill in actual Buddy ids and check their providers; test providers below are explicit assumptions.
 
-import {
-  type Readable,
-  type Result,
-  buddy,
-  expedition,
-  need,
-  parallel,
-  review,
-  role,
-  seat,
-  steps,
-} from 'expedition';
+import { type Readable, type Result, expedition, step } from 'expedition';
 import { z } from 'zod';
 
-// Preserve failed outputs as evidence too: passed(...) alone would erase a search's refutations.
+// Preserve failed outputs as evidence too: filtering for passes alone would erase a search's refutations.
 function evidence(result: Result<unknown>): Readable[] {
   switch (result.t) {
     case 'passed':
@@ -70,7 +59,7 @@ function evidence(result: Result<unknown>): Readable[] {
       return [`refused: ${result.reason}`];
   }
 }
-const noResult = (why: string) => need({ t: 'errored', why }, why);
+
 const PRIOR = [
   'studio/',
   'product/MASTER_TASKS.md',
@@ -86,20 +75,7 @@ const Verdict = z.object({
   ),
   spikes: z.array(z.object({ id: z.string(), claim: z.string(), measure: z.string() })),
 });
-const referee = seat('gemini', 'gemini-3.1-pro-preview', 'high');
-const lead = role({ by: buddy('document-model-lead'), usd: 8, minutes: 60 }).reads(...PRIOR);
-const designer = role({
-  by: seat('claude', 'claude-sonnet-5-5', 'high'),
-  usd: 12,
-  minutes: 90,
-}).reads(...PRIOR);
-const critic = role({ by: seat('codex', 'gpt-6.1-sol', 'high'), usd: 6, minutes: 45 }).reads(
-  ...PRIOR
-);
-const reflect = role({ by: referee, usd: 4, minutes: 30 }).reads(...PRIOR);
-const builder = role({ by: seat('codex', 'gpt-6.1-sol', 'medium'), usd: 3, minutes: 30 }).needs(
-  'cpu'
-);
+
 const ledger_complete = `# Rubric: does the ledger carry every source row, unchanged in force?
 
 You are reviewing a requirement ledger written on another model. Every design round will be
@@ -228,10 +204,60 @@ plan because it is detailed; a detailed plan to build beside the old model is th
 rubric exists to catch.
 `;
 
-const { ledger, design, attack, adjudicate, spike, revise, retire } = steps({
-  ledger: lead
-    .checkout()
-    .brief(`# Ledger: every requirement the model will be held to
+export default expedition({
+  contract: {
+    goal: `I want one document model for Studio that I can ratify and that actually replaces what runs: the
+capacity of Zoo or Onshape for the things we do, behind a much leaner interface.
+
+We have designed this roughly eight times. Authoring v1–v4 and v7, L6, Marine v0.5,
+feature_program, PR146, ae4487, DG and cleanroom: none of them replaced what runs in the app. I do
+not want a ninth design document. I want the argument had properly, on the record, against the
+requirement rows and use cases we already wrote down, by models that do not share each other's
+blind spots, and then I want the questions that are really mine put to me with options and a
+default.
+
+The result is a model I ratify, with every inherited requirement row either covered or explicitly
+scoped out, plus a retirement plan that names what gets deleted and in what order. If the critique
+and the design cannot be reconciled, or I do not ratify it, tell me exactly what the open
+disagreement is. That is a useful result. A polished design nobody adopted is not.`,
+    leader: 'buddy:document-model-lead',
+    repo: '~/git/wave_sim',
+    budget: { usd: 120, hours: 72 },
+    autoApply: { usd: 10 },
+    pools: { claude: 1, codex: 2, gemini: 1, cpu: 2 },
+    done: [
+      { review: covers_ledger, by: 'referee' },
+      { review: replaces_running, by: 'referee' },
+      {
+        owner:
+          'Do you ratify this model and its retirement plan as the replacement for what runs in the app today?',
+      },
+    ],
+    rules: [
+      'Commit on the work branch; never merge main or push. Integrate supplied commits only inside your private checkout.',
+      'Keep predictions and every verdict, including failures, in repo records from the supplied call evidence.',
+      'studio/DOCUMENT_MODEL.md owns the facts about what runs today. Older design documents are history, not instructions.',
+      'Every ledger row ends each round as covered (with the section that covers it), scoped out (with the reason and who decided), or open for the owner. No row is dropped silently.',
+      'Owner rulings are fixed inputs, quoted with their date. A design may propose changing one; it may not assume the change.',
+      'Tag every claim VERIFIED (run, or read in the code at a commit), CLAIMED or SPECULATION. A claim about Zoo or Onshape needs a source you opened.',
+      "No changes to app, kernel or solver code. Spikes live under the expedition's spikes folder and are thrown away.",
+      'A design that would sit beside the running model is not a result.',
+    ],
+  },
+  agents: {
+    referee: 'gemini:gemini-3.1-pro-preview',
+    lead: { use: 'buddy:document-model-lead', usd: 8, minutes: 60 },
+    designer: { use: 'claude:claude-sonnet-5-5:high', usd: 12, minutes: 90 },
+    critic: { use: 'codex:gpt-6.1-sol:high', usd: 6, minutes: 45 },
+    reflect: { use: 'gemini:gemini-3.1-pro-preview', usd: 4, minutes: 30 },
+    builder: { use: 'codex:gpt-6.1-sol:medium', usd: 3, minutes: 30 },
+  },
+  steps: {
+    ledger: {
+      by: 'lead',
+      reads: [...PRIOR],
+      checkout: true,
+      brief: `# Ledger: every requirement the model will be held to
 
 Before anyone designs anything, write down the rows a design must answer. Every later round is
 judged against this file, row by row, so a row you leave out is a requirement nobody will defend.
@@ -272,11 +298,14 @@ one-line reason each was abandoned, from \`agent_notes/2026-10-12_reset/PLAN.md\
 
 Do not add requirements of your own, rank the rows, or mark any row satisfied. Stop when every
 source row has a ledger row; about an hour.
-`)
-    .judged(review(ledger_complete, referee)),
-  design: designer
-    .checkout()
-    .brief(`# Design: one document model that can replace what runs
+`,
+      judge: { review: ledger_complete, by: 'referee' },
+    },
+    design: {
+      by: 'designer',
+      reads: [...PRIOR],
+      checkout: true,
+      brief: `# Design: one document model that can replace what runs
 
 You are the designer for this expedition and you keep this role through every round: later calls
 continue this conversation, so reason here in a way you can build on. The ledger is in your inputs
@@ -321,11 +350,14 @@ and is committed in your checkout. It is the list of what the model must answer.
 
 Take the time this needs; this is one mind holding the whole model. Commit when \`COVERAGE.md\` has
 a line for every row.
-`)
-    .judged(review(covers_ledger, referee)),
-  attack: critic
-    .web()
-    .brief(`# Attack: where this model fails a requirement
+`,
+      judge: { review: covers_ledger, by: 'referee' },
+    },
+    attack: {
+      by: 'critic',
+      reads: [...PRIOR],
+      web: true,
+      brief: `# Attack: where this model fails a requirement
 
 You are the critic. You are given the current model, its coverage table and the ledger. The
 designer is on another provider and will defend the model; a referee on a third decides whether
@@ -366,10 +398,13 @@ whether it can be tested by running something. If it can, describe the smallest 
 - Propose your own model. Say what breaks, not what you would build.
 - Pad. Three grounded defects beat twelve doubts. If you find none that meets the bar, say so
   and stop: a round with no real defect is evidence the model is holding.
-`)
-    .judged(review(real_defect, referee)),
-  adjudicate: reflect
-    .brief(`# Adjudicate: which defects stand, and who has to decide
+`,
+      judge: { review: real_defect, by: 'referee' },
+    },
+    adjudicate: {
+      by: 'reflect',
+      reads: [...PRIOR],
+      brief: `# Adjudicate: which defects stand, and who has to decide
 
 You are the referee, on a different provider from both the designer and the critic. You have the
 model, the critique and the ledger. Neither side is yours. Decide what this round established.
@@ -408,14 +443,14 @@ Return \`blocking\` (the number of standing, blocking defects), \`questions\` (e
 \`question\`, \`options\`, \`fallback\` as the default) and \`spikes\` (each with \`id\`, \`claim\`,
 \`measure\`). Put the per-defect rulings and your reasoning in the report. If nothing blocks and
 nothing needs the owner, return zero and empty lists; that ends the rounds.
-`)
-    .returns(Verdict),
-  spike: builder.checkout().brief(
-    (item: {
-      id: string;
-      claim: string;
-      measure: string;
-    }) => `# Spike ${item.id}: run it instead of arguing about it
+`,
+      returns: Verdict,
+    },
+    spike: step({
+      by: 'builder',
+      needs: ['cpu'],
+      checkout: true,
+      brief: (item) => `# Spike ${item.id}: run it instead of arguing about it
 
 The designer and the critic disagree about a claim that can be tested. Test it.
 
@@ -453,11 +488,14 @@ imported by the app, the kernel or a solver, and you change no file outside that
 - Use a GPU, a remote machine or any paid service.
 
 Your result is a claim until someone independent reruns it; say so in your summary.
-`
-  ),
-  revise: designer
-    .checkout()
-    .brief(`# Revise: answer the round
+`,
+      item: z.object({ id: z.string(), claim: z.string(), measure: z.string() }),
+    }),
+    revise: {
+      by: 'designer',
+      reads: [...PRIOR],
+      checkout: true,
+      brief: `# Revise: answer the round
 
 You designed the current model, and this call continues that work. In your inputs are the
 critique, the referee's ruling on each defect, any spike results, and the ledger. The owner's
@@ -500,11 +538,14 @@ CLAIMED until rerun independently. Do not promote it.
 
 Commit when \`COVERAGE.md\` again has a line for every row. A reviewer on another provider will
 check coverage against the ledger before the next round starts.
-`)
-    .judged(review(covers_ledger, referee)),
-  retire: designer
-    .checkout()
-    .brief(`# Retirement: how this model replaces what runs
+`,
+      judge: { review: covers_ledger, by: 'referee' },
+    },
+    retire: {
+      by: 'designer',
+      reads: [...PRIOR],
+      checkout: true,
+      brief: `# Retirement: how this model replaces what runs
 
 The owner has ratified the model. You designed it, and this call continues that work. The owner's
 note with the ratification is in your inputs, starting "Owner ratification note".
@@ -546,89 +587,46 @@ what runs until each step lands. Change nothing else in that file.
 
 Do not start the migration, and do not edit app, kernel or solver code. Stop when the inventory
 accounts for every layer the running model document lists.
-`)
-    .judged(review(replaces_running, referee)),
-});
-
-export default expedition({
-  contract: {
-    goal: `I want one document model for Studio that I can ratify and that actually replaces what runs: the
-capacity of Zoo or Onshape for the things we do, behind a much leaner interface.
-
-We have designed this roughly eight times. Authoring v1–v4 and v7, L6, Marine v0.5,
-feature_program, PR146, ae4487, DG and cleanroom: none of them replaced what runs in the app. I do
-not want a ninth design document. I want the argument had properly, on the record, against the
-requirement rows and use cases we already wrote down, by models that do not share each other's
-blind spots, and then I want the questions that are really mine put to me with options and a
-default.
-
-The result is a model I ratify, with every inherited requirement row either covered or explicitly
-scoped out, plus a retirement plan that names what gets deleted and in what order. If the critique
-and the design cannot be reconciled, or I do not ratify it, tell me exactly what the open
-disagreement is. That is a useful result. A polished design nobody adopted is not.`,
-    leader: 'document-model-lead',
-    repo: '~/git/wave_sim',
-    budget: { usd: 120, hours: 72 },
-    autoApply: { usd: 10 },
-    pools: { claude: 1, codex: 2, gemini: 1, cpu: 2 },
-    done: [
-      { review: { rubric: covers_ledger, by: referee } },
-      { review: { rubric: replaces_running, by: referee } },
-      {
-        owner:
-          'Do you ratify this model and its retirement plan as the replacement for what runs in the app today?',
-      },
-    ],
-    rules: [
-      'studio/DOCUMENT_MODEL.md owns the facts about what runs today. Older design documents are history, not instructions.',
-      'Every ledger row ends each round as covered (with the section that covers it), scoped out (with the reason and who decided), or open for the owner. No row is dropped silently.',
-      'Owner rulings are fixed inputs, quoted with their date. A design may propose changing one; it may not assume the change.',
-      'Tag every claim VERIFIED (run, or read in the code at a commit), CLAIMED or SPECULATION. A claim about Zoo or Onshape needs a source you opened.',
-      "No changes to app, kernel or solver code. Spikes live under the expedition's spikes folder and are thrown away.",
-      'A design that would sit beside the running model is not a result.',
-      'V1 execution notes override historical host claims in the briefs: no land, fence, protect, tests/learn tool, automatic learning rows or no-retest gate exists. Commit on the work branch; never merge main or push. Integration may combine supplied commits only inside its private checkout. Carry prior commits explicitly through on/reads; record predictions and every verdict in the repo records from the supplied evidence, including failures. Writable scopes and frozen graders are instructions and review obligations, not host-enforced write fences.',
-    ],
+`,
+      judge: { review: replaces_running, by: 'referee' },
+    },
   },
-  plan: async (x) => {
-    const rows = need(await x.phase('ledger', () => ledger()), 'No complete requirement ledger.');
-    let current = need(
-      await x.phase('design', () => design({ on: rows, reads: [rows] })),
-      'No design covering the ledger.'
-    );
+  plan: async ({ ledger, design, attack, adjudicate, spike, revise, retire }, x) => {
+    const rows = await x.phase('ledger', () => ledger());
+    let current = await x.phase('design', () => design({ on: rows, reads: [rows] }));
     let open: Readable[] = [];
     let clean = false;
     for (const round of [1, 2, 3]) {
       const model = current;
       const next = await x.phase(`round-${round}`, async () => {
-        const hit = await attack({ id: round, reads: [model, rows, ...open] });
+        const hit = await attack.try({ id: round, reads: [model, rows, ...open] });
         if (hit.t === 'failed') {
           open = evidence(hit);
           return { t: 'clean' as const };
         }
-        const critique = need(
-          hit,
-          `Round ${round} critique did not run; that is not a clean round.`
-        );
-        const verdict = need(
-          await adjudicate({ id: round, reads: [model, critique, rows] }),
-          'No independent adjudication.'
-        );
+        if (hit.t !== 'passed')
+          throw new Error(`Attack round ${round} did not produce a judged answer.`);
+        const critique = hit;
+        const verdict = await adjudicate({ id: round, reads: [model, critique, rows] });
         open = [critique, verdict];
         const { blocking, questions, spikes } = verdict.out;
         if (!blocking && !questions.length && !spikes.length) return { t: 'clean' as const };
         const [answers, probes] = await Promise.all([
-          parallel(
-            questions,
-            async (q) =>
-              `Owner ruling on ${q.id}: ${await x.ask(`${q.id}. ${q.question} Options: ${q.options} Default: ${q.fallback}`)}`
+          Promise.all(
+            questions.map(
+              async (q) =>
+                `Owner ruling on ${q.id}: ${await x.ask(`${q.id}. ${q.question} Options: ${q.options} Default: ${q.fallback}`)}`
+            )
           ),
-          parallel(spikes, (item) => spike({ item, on: model, reads: [model] })),
+          Promise.all(spikes.map((item) => spike.try(item, { on: model, reads: [model] }))),
         ]);
         open.push(...answers, ...probes.flatMap(evidence));
-        const revised = need(
-          await revise({ id: round, on: model, continues: model, reads: [rows, ...open] }),
-          'No revision covering the ledger.'
-        );
+        const revised = await revise({
+          id: round,
+          on: model,
+          continues: model,
+          reads: [rows, ...open],
+        });
         return { t: 'revised' as const, next: revised };
       });
       if (next.t === 'clean') {
@@ -636,7 +634,7 @@ disagreement is. That is a useful result. A polished design nobody adopted is no
         break;
       }
       current = next.next;
-      await x.review(
+      await x.checkin(
         `Round ${round}: did a blocking defect close, or only the wording move? Stop a ninth unadopted design.`
       );
     }
@@ -647,16 +645,13 @@ disagreement is. That is a useful result. A polished design nobody adopted is no
       `Do you ratify this model as the replacement for what runs? Last round ended ${clean ? 'with no referee-supported blocking defect' : 'on a revision not attacked again'}. Conditions: ${note}`
     );
     if (!ratified)
-      return noResult(`The owner did not ratify. Open disagreement and conditions: ${note}`);
-    return need(
-      await x.phase('retirement', () =>
-        retire({
-          on: current,
-          continues: current,
-          reads: [current, rows, ...open, `Owner ratification note: ${note}`],
-        })
-      ),
-      'The model is ratified but no plan retires what runs.'
+      throw new Error(`The owner did not ratify. Open disagreement and conditions: ${note}`);
+    return await x.phase('retirement', () =>
+      retire({
+        on: current,
+        continues: current,
+        reads: [current, rows, ...open, `Owner ratification note: ${note}`],
+      })
     );
   },
 });

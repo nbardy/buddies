@@ -262,19 +262,19 @@ describe('expedition kernel end to end', () => {
       const file = fixture('need-gap', {
         plan: (s) =>
           s
-            .replace('import { expedition,', 'import { check, expedition,')
             .replace(
-              '`Do the work for probe.`\n  ),',
-              '`Do the work for probe.`\n  ).judged(check("node scripts/check.js")),'
+              'brief: `Do the work for probe.`,',
+              'brief: `Do the work for probe.`, judge:{check:"node scripts/check.js"},'
             )
             .replace(
-              "plan: async () => need(await probe(), 'The probe found nothing.'),",
-              `plan: async (x) => {
-          const result = await probe();
-          await x.ask('The plan handled ' + result.t + '; continue to review?');
-          await x.review('planned reflection');
-          return need(result, 'The probe found nothing.');
-        },`
+              /plan: async \(\{ probe \}(?:, x)?\) => await probe\(\),/,
+              `plan: async ({probe},x) => {
+            const result=await probe.try();
+            await x.ask('The plan handled '+result.t+'; continue to checkin?');
+            await x.checkin('planned reflection');
+            if(result.t !== 'passed') throw new Error('The probe found nothing.');
+            return result;
+          },`
             ),
       });
       const e = await launched(w, file);
@@ -700,16 +700,16 @@ describe('expedition kernel end to end', () => {
         contract: budget26,
         plan: (s) =>
           s.replace(
-            "need(await x.phase('scope', () => scope()), 'No list of organizations.')",
-            "(await x.phase('scope', () => scope())).out"
+            "await x.phase('scope', () => scope())",
+            "(await x.phase('scope', () => scope.try())).out"
           ),
       }),
       fixture('gtm', {
         contract: budget26,
         plan: (s) =>
           s.replace(
-            /\.brief\(\s*\(item: z\.infer<typeof Org>\) => `[\s\S]*?`\s*\)/,
-            '.brief(undefined as unknown as (item: z.infer<typeof Org>) => string)'
+            /brief: \(item\) => `# Collect:[\s\S]*?`,\n\s*item: Org,/,
+            'brief: undefined as unknown as (item: z.infer<typeof Org>) => string, item: Org,'
           ),
       }),
       fixture('gtm-rewrite', withContract(budget26)), // drops two running calls; no dispositions
@@ -815,7 +815,7 @@ describe('expedition kernel end to end', () => {
       .flatMap((x) => (x.t === 'act' && x.verdict.t === 'rejected' ? [x.verdict.issues] : []));
     assert.equal(issues.length, 4);
     assert.match(issues[0]?.join() ?? '', /^typecheck: .*TS2339/);
-    assert.match(issues[1]?.join() ?? '', /dry-run: .*Agent step collect has no \.brief/);
+    assert.match(issues[1]?.join() ?? '', /dry-run: .*Step collect/);
     assert.match(
       issues[2]?.join() ?? '',
       /rules: no cancel or finish for the dropped running calls collect\/collect\/labelbox, collect\/collect\/snorkel/
@@ -861,7 +861,10 @@ describe('expedition kernel end to end', () => {
     await w.signal.until(() => outcomeOf(e, 'probe') === 'passed', 'the judge completes');
     w.ex.end(question.runId, ok('rl-data'), reported(0));
     const finish: keyed.Finish = await finishedOf(w, e);
-    assert.deepEqual(finish, { t: 'not-met', gaps: ['No follow-up.'] });
+    assert.deepEqual(finish, {
+      t: 'not-met',
+      gaps: ['Step after did not pass: refused: deadline.'],
+    });
     assert.deepEqual(settledOf(e, 'after')[0]?.outcome, { t: 'refused', reason: 'deadline' });
     for (const key of ['probe', 'ask/which-segment-first']) {
       const s = settledOf(e, key)[0];
@@ -998,7 +1001,7 @@ describe('expedition kernel end to end', () => {
     );
     const [question] = ask();
     const text = question?.spec.t === 'ask' ? question.spec.call.question : '';
-    assert.match(text, /last 2 acts at the review "Is the coverage enough/);
+    assert.match(text, /last 2 acts at the checkin "Is the coverage enough/);
     assert.match(
       text,
       /1\. leader\/1: retry collect\/collect\/taskus\. Rejected: .*failed: it has a result/

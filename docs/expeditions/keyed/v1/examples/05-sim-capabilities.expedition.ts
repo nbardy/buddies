@@ -49,24 +49,10 @@
 // Gates typecheck and dry-run declarations; they never execute or establish existence of these tools.
 // Fill in actual Buddy ids and check their providers; test providers below are explicit assumptions.
 
-import {
-  type Held,
-  type Readable,
-  type Result,
-  buddy,
-  check,
-  command,
-  expedition,
-  need,
-  parallel,
-  review,
-  role,
-  seat,
-  steps,
-} from 'expedition';
+import { type Held, type Readable, type Result, expedition, step } from 'expedition';
 import { z } from 'zod';
 
-// Preserve failed outputs as evidence too: passed(...) alone would erase a search's refutations.
+// Preserve failed outputs as evidence too: filtering for passes alone would erase a search's refutations.
 function evidence(result: Result<unknown>): Readable[] {
   switch (result.t) {
     case 'passed':
@@ -81,7 +67,7 @@ function evidence(result: Result<unknown>): Readable[] {
       return [`refused: ${result.reason}`];
   }
 }
-const noResult = (why: string) => need({ t: 'errored', why }, why);
+
 const TARGET = 'E';
 const ENGINE = 'prototypes/eulerian_mac_mg_v0/cuda_body_forces_v1/';
 const MATRIX = 'tools/capability_matrix_v1';
@@ -90,17 +76,10 @@ const Cell = z.object({
   row: z.enum(['R6', 'R7', 'R9']),
   engine: z.enum(['E', 'A']),
 });
-const judge = seat('gemini', 'gemini-3.1-pro-preview', 'high');
-const lead = role({ by: buddy('wave-simulation-lead'), usd: 8, minutes: 60 }).reads(
-  'goals/',
-  'KEY_LEARNINGS.md'
-);
-const deep = role({ by: seat('codex', 'gpt-6.1-sol', 'high'), usd: 15, minutes: 150 });
+
 const score = (item: z.infer<typeof Cell>) =>
   `python3 ${MATRIX}/score.py --row ${item.row} --engine ${item.engine} --max-usd 0.50 --json`;
-const tests = check<z.infer<typeof Cell>>(
-  `python3 -m unittest discover -s ${ENGINE} -p 'test_*.py'`
-);
+const tests = { check: `python3 -m unittest discover -s ${ENGINE} -p 'test_*.py'` };
 const failure_class = `# Rubric: does this page localise the failure?
 
 You are reviewing a one-page failure-class document for one row on one engine. A repair will be
@@ -160,15 +139,84 @@ place where the file differs. If the file and the reports agree but a report its
 (a cost of zero, a missing commit), pass the file and flag the report for the leader.
 `;
 
-const { cells, measure, diagnose, repair, replay, strike, integrate, matrix, record } = steps({
-  cells: command(`python3 ${MATRIX}/cells.py --json`, { minutes: 1 }).lists(Cell),
-  measure: command(score, { minutes: 40 })
-    .returns(z.object({ pass: z.boolean() }))
-    .needs('modal'),
-  diagnose: deep
-    .checkout()
-    .brief(
-      (item: z.infer<typeof Cell>) => `# Diagnose: why ${item.row} fails on Engine ${item.engine}
+export default expedition({
+  contract: {
+    goal: `I want one engine that does forces, moving bodies and wind at the same time. Today no engine
+does. Engine E (the Eulerian CUDA solver) is the one I want to carry all three; Engine A (CUDA
+APIC) is measured on the same cases so the matrix shows where each stands.
+
+The rows are the ones already written down in \`goals/2026-10-12_three_engine_goals.md\`, unchanged:
+
+- **R6 forces.** Foil lift within 10% at Re 1000 on two grids, with the error falling.
+- **R7 moving bodies.** Floating-box draft within 2%, heave decays, period within 5%; a dropped
+  rock settles; momentum exchange closes.
+- **R9 wind.** Solved air/water coupling, not only a prescribed stress; setup slope within 10% of
+  τ/(ρgh).
+
+R12 conservation is checked inside each of those cases. Sand (R8) is out of scope here.
+
+Where it stood on 2026-10-12: Engine E has foil lift 15.75% low, draft off by 16.5%, wind setup
+31% low. Engine A has a sphere force 177% high and nothing else measured on CUDA.
+
+What went wrong before is the reason for the rules. Plate lift took about nineteen paid attempts,
+each one moving the fault to the next particle. The beta quietly depended on the hardest physics
+row. So: each row gets a written diagnosis of the whole failure class first, a free local replay
+of its saved failures before any paid run, and at most two paid tries. The rows are independent
+of each other and can be worked at the same time. Inside a row the work is serial.
+
+Done means all three rows pass their frozen gates on Engine E, from one committed source, with
+the cost recorded, re-scored by the host and not by the people who fixed it. If a row does not
+close in two strikes, I want the matrix to say so plainly and the failure-class document to tell
+me what decision I have to make.`,
+    leader: 'buddy:wave-simulation-lead',
+    repo: '~/git/wave_sim',
+    budget: { usd: 220, hours: 72 },
+    autoApply: { usd: 15 },
+    pools: { claude: 1, codex: 3, gemini: 1, gpu: 1, modal: 3, strikes: 3 },
+    done: [
+      {
+        check: `bash -c 'bun test tools/sim_runner_v1/runner.test.ts tools/sim_runner_v1/tolerance.test.ts'`,
+      },
+      {
+        check: `python3 -c 'import json,subprocess; r=json.loads(subprocess.check_output(["python3","tools/capability_matrix_v1/matrix.py","--max-usd","6.00","--json"])); assert r["failing"] <= 0'`,
+      },
+      { review: matrix_honest, by: 'judge' },
+      {
+        owner:
+          'Do you accept Engine E as the engine that carries forces, moving bodies and wind together?',
+      },
+    ],
+    rules: [
+      'Commit on the work branch; never merge main or push. Integrate supplied commits only inside your private checkout.',
+      'Keep predictions and every verdict, including failures, in repo records from the supplied call evidence.',
+      'The gates in benchmarks/capability_matrix_v1/matrix.json are frozen. Same Scene, initial state, observation window, reference and scoring for every engine. A changed window or reference is a separate case, never a pass.',
+      'Tolerances come from the typed constructors in tools/sim_runner_v1/tolerance.ts. f32 relative tolerances are at least 1e-4. No bare numbers.',
+      'Two strikes per row. After a second failed paid run on a row, paid runs on it stop until the owner decides. A repair renamed as a "sidecar" or a "probe" is still a strike.',
+      "No paid run before the local replay of every saved failure for that row passes. Agents never launch Modal or the local GPU; the host's benchmark steps do.",
+      'A result cites a commit and its complete cost (setup, compile, evolution, output, readback, dollars). A run from a dirty tree is exploratory and cannot be cited.',
+      'Say "passes row R on engine X at commit S". Do not write "working", "validated" or "qualified" for an engine that fails any row.',
+      'Write a repo research row for each diagnosed mechanism and each repair, with the prediction made before the measurement.',
+      'The total Modal cap is $40; require an external spend ledger, scale-to-zero launcher, machine GPU lock and two-strike counter per row before execution. Never retry a paid scoring call automatically.',
+    ],
+  },
+  agents: {
+    judge: 'gemini:gemini-3.1-pro-preview',
+    lead: { use: 'buddy:wave-simulation-lead', usd: 8, minutes: 60 },
+    deep: { use: 'codex:gpt-6.1-sol:high', usd: 15, minutes: 150 },
+  },
+  steps: {
+    cells: { run: `python3 ${MATRIX}/cells.py --json`, minutes: 1, returns: z.array(Cell) },
+    measure: {
+      item: Cell,
+      run: score,
+      minutes: 40,
+      returns: z.object({ pass: z.boolean() }),
+      needs: ['modal'],
+    },
+    diagnose: step({
+      by: 'deep',
+      checkout: true,
+      brief: (item) => `# Diagnose: why ${item.row} fails on Engine ${item.engine}
 
 You own one cell of the requirement matrix: row ${item.row} on Engine ${item.engine}. It fails its frozen
 gate. Your inputs hold the baseline score for this cell and, if this is a second round, the first
@@ -185,7 +233,7 @@ particle and nobody had written down the class.
 - \`benchmarks/capability_matrix_v1/matrix.json\`: the case, window, reference and gate for ${item.row}.
 - \`goals/2026-10-12_three_engine_goals.md\`: the row's pass check and the 2026-10-12 status.
 - \`KEY_LEARNINGS.md\`, especially "2026-10-07: Foil lift deficit is in the flow, not the force
-  measurement" and the graveyard. Then the learning log in your inputs.
+  measurement" and the graveyard. Then the supplied call evidence in your inputs.
 - \`agent_notes/2026-10-12_engine_dual/R5_FIXED_SOLIDS_FAILURE_CLASS.md\` as the model for the
   document you are writing.
 - The engine source under \`prototypes/eulerian_mac_mg_v0/cuda_body_forces_v1/\` that the row exercises.
@@ -204,22 +252,23 @@ particle and nobody had written down the class.
 
 ## Answer
 
-Return \`family\` (the mechanism family, in words the learning log already uses where one fits) and
+Return \`family\` (the mechanism family, in words the supplied call evidence already uses where one fits) and
 \`idea\` (the one repair, in a sentence). The plan declares these as what the repair tests. If that
 family is already rejected for this engine, your page must say what is different this time.
 
-Write a \`learn\` row for the diagnosed mechanism. A reviewer on another model checks that your
+Write a repo research row for the diagnosed mechanism. A reviewer on another model checks that your
 localisation follows from the evidence. If the evidence cannot localise the failure, say which
 local replay would, and return that as the idea. Do not launch anything on Modal or the GPU, and
 do not edit the gate, the window or the reference.
-`
-    )
-    .returns(z.object({ family: z.string(), idea: z.string() }))
-    .judged(review(failure_class, judge)),
-  repair: deep
-    .checkout()
-    .brief(
-      (item: z.infer<typeof Cell>) => `# Repair: ${item.row} on Engine ${item.engine}
+`,
+      item: Cell,
+      returns: z.object({ family: z.string(), idea: z.string() }),
+      judge: { review: failure_class, by: 'judge' },
+    }),
+    repair: step({
+      by: 'deep',
+      checkout: true,
+      brief: (item) => `# Repair: ${item.row} on Engine ${item.engine}
 
 You have just written the failure-class page for this cell, and this call continues that
 conversation. Now make the one repair the page names. Not a different one, and not two.
@@ -254,23 +303,30 @@ why; if you cannot say why, you are not done.
 - Rename a second attempt so that it does not look like one.
 - Claim the row passes. You have not seen a score.
 
-Write a \`learn\` row before you commit: the repair, its family, the error you predict on the
+Write a repo research row before you commit: the repair, its family, the error you predict on the
 frozen case, and leave the measurement for the host's runs. In your summary, say in three lines
 what you changed and what a failed paid run would most likely mean. Stop when the tests pass and
 the change is committed.
-`
-    )
-    .judged(tests),
-  replay: command(
-    (item: z.infer<typeof Cell>) => `python3 ${MATRIX}/replay.py --row ${item.row} --require-fixed`,
-    { minutes: 20 }
-  ).needs('gpu'),
-  strike: command((item: z.infer<typeof Cell>) => `${score(item)} --require-pass`, {
-    minutes: 40,
-  }).needs('modal', 'strikes'),
-  integrate: deep
-    .checkout()
-    .brief(`# Integrate: one source that passes every closed row
+`,
+      item: Cell,
+      judge: tests,
+    }),
+    replay: step({
+      run: (item) => `python3 ${MATRIX}/replay.py --row ${item.row} --require-fixed`,
+      minutes: 20,
+      item: Cell,
+      needs: ['gpu'],
+    }),
+    strike: step({
+      run: (item) => `${score(item)} --require-pass`,
+      minutes: 40,
+      item: Cell,
+      needs: ['modal', 'strikes'],
+    }),
+    integrate: {
+      by: 'deep',
+      checkout: true,
+      brief: `# Integrate: one source that passes every closed row
 
 Your inputs are the repair commits that each closed one row on Engine E, alone. Each started from
 the launch base plus its own failure-class page, so none contains the others. Produce one commit
@@ -306,17 +362,23 @@ List the commits you combined, every conflict you resolved and how, and any plac
 repairs now run in an order that one of the failure-class pages did not assume. If you received
 only one commit, check it builds on the base, run the tests, and say there was nothing to combine.
 Stop when the tests pass and the result is one commit.
-`)
-    .judged(tests),
-  matrix: command(`python3 ${MATRIX}/matrix.py --max-usd 6.00 --json`, { minutes: 120 })
-    .returns(z.object({ failing: z.number() }))
-    .needs('modal'),
-  record: lead
-    .checkout()
-    .brief(`# Record: the matrix as it now stands
+`,
+      judge: tests,
+    },
+    matrix: {
+      run: `python3 ${MATRIX}/matrix.py --max-usd 6.00 --json`,
+      minutes: 120,
+      returns: z.object({ failing: z.number() }),
+      needs: ['modal'],
+    },
+    record: {
+      by: 'lead',
+      reads: ['goals/', 'KEY_LEARNINGS.md'],
+      checkout: true,
+      brief: `# Record: the matrix as it now stands
 
 Your inputs hold the baseline score of every cell, the repair commits that closed a row, the
-final matrix scored on the integrated commit, and the learning log. You are working on top of the
+final matrix scored on the integrated commit, and the supplied call evidence. You are working on top of the
 integrated commit. Write the tracked record. A reviewer on another model will check every cell
 you write against the reports.
 
@@ -347,147 +409,87 @@ you write against the reports.
 - Do not touch engine source, the gates or the scoring tools.
 
 Stop when the files are committed.
-`)
-    .judged(review(matrix_honest, judge)),
-});
-
-export default expedition({
-  contract: {
-    goal: `I want one engine that does forces, moving bodies and wind at the same time. Today no engine
-does. Engine E (the Eulerian CUDA solver) is the one I want to carry all three; Engine A (CUDA
-APIC) is measured on the same cases so the matrix shows where each stands.
-
-The rows are the ones already written down in \`goals/2026-10-12_three_engine_goals.md\`, unchanged:
-
-- **R6 forces.** Foil lift within 10% at Re 1000 on two grids, with the error falling.
-- **R7 moving bodies.** Floating-box draft within 2%, heave decays, period within 5%; a dropped
-  rock settles; momentum exchange closes.
-- **R9 wind.** Solved air/water coupling, not only a prescribed stress; setup slope within 10% of
-  τ/(ρgh).
-
-R12 conservation is checked inside each of those cases. Sand (R8) is out of scope here.
-
-Where it stood on 2026-10-12: Engine E has foil lift 15.75% low, draft off by 16.5%, wind setup
-31% low. Engine A has a sphere force 177% high and nothing else measured on CUDA.
-
-What went wrong before is the reason for the rules. Plate lift took about nineteen paid attempts,
-each one moving the fault to the next particle. The beta quietly depended on the hardest physics
-row. So: each row gets a written diagnosis of the whole failure class first, a free local replay
-of its saved failures before any paid run, and at most two paid tries. The rows are independent
-of each other and can be worked at the same time. Inside a row the work is serial.
-
-Done means all three rows pass their frozen gates on Engine E, from one committed source, with
-the cost recorded, re-scored by the host and not by the people who fixed it. If a row does not
-close in two strikes, I want the matrix to say so plainly and the failure-class document to tell
-me what decision I have to make.`,
-    leader: 'wave-simulation-lead',
-    repo: '~/git/wave_sim',
-    budget: { usd: 220, hours: 72 },
-    autoApply: { usd: 15 },
-    pools: { claude: 1, codex: 3, gemini: 1, gpu: 1, modal: 3, strikes: 3 },
-    done: [
-      {
-        check: `bash -c 'bun test tools/sim_runner_v1/runner.test.ts tools/sim_runner_v1/tolerance.test.ts'`,
-      },
-      {
-        check: `python3 -c 'import json,subprocess; r=json.loads(subprocess.check_output(["python3","tools/capability_matrix_v1/matrix.py","--max-usd","6.00","--json"])); assert r["failing"] <= 0'`,
-      },
-      { review: { rubric: matrix_honest, by: judge } },
-      {
-        owner:
-          'Do you accept Engine E as the engine that carries forces, moving bodies and wind together?',
-      },
-    ],
-    rules: [
-      'The gates in benchmarks/capability_matrix_v1/matrix.json are frozen. Same Scene, initial state, observation window, reference and scoring for every engine. A changed window or reference is a separate case, never a pass.',
-      'Tolerances come from the typed constructors in tools/sim_runner_v1/tolerance.ts. f32 relative tolerances are at least 1e-4. No bare numbers.',
-      'Two strikes per row. After a second failed paid run on a row, paid runs on it stop until the owner decides. A repair renamed as a "sidecar" or a "probe" is still a strike.',
-      "No paid run before the local replay of every saved failure for that row passes. Agents never launch Modal or the local GPU; the host's benchmark steps do.",
-      'A result cites a commit and its complete cost (setup, compile, evolution, output, readback, dollars). A run from a dirty tree is exploratory and cannot be cited.',
-      'Say "passes row R on engine X at commit S". Do not write "working", "validated" or "qualified" for an engine that fails any row.',
-      'Write a `learn` row for each diagnosed mechanism and each repair, with the prediction made before the measurement.',
-      'V1 execution notes override historical host claims in the briefs: no land, fence, protect, tests/learn tool, automatic learning rows or no-retest gate exists. Commit on the work branch; never merge main or push. Integration may combine supplied commits only inside its private checkout. Carry prior commits explicitly through on/reads; record predictions and every verdict in the repo records from the supplied evidence, including failures. Writable scopes and frozen graders are instructions and review obligations, not host-enforced write fences.',
-      'The total Modal cap is $40; require an external spend ledger, scale-to-zero launcher, machine GPU lock and two-strike counter per row before execution. Never retry a paid scoring call automatically.',
-    ],
+`,
+      judge: { review: matrix_honest, by: 'judge' },
+    },
   },
-  plan: async (x) => {
-    const grid = need(
-      await x.phase('cells', () => cells()),
-      'The frozen matrix could not be listed.'
-    );
+  plan: async (
+    { cells, measure, diagnose, repair, replay, strike, integrate, matrix, record },
+    x
+  ) => {
+    const grid = await x.phase('cells', () => cells());
     const target = grid.out.filter((c) => c.engine === TARGET);
     if (target.length !== 3 || new Set(target.map((c) => c.row)).size !== 3)
-      return noResult('Expected exactly one Engine E cell for each of R6, R7 and R9.');
+      throw new Error('Expected exactly one Engine E cell for each of R6, R7 and R9.');
     if (new Set(grid.out.map((c) => c.id)).size !== grid.out.length)
-      return noResult('Matrix cell ids must be unique.');
+      throw new Error('Matrix cell ids must be unique.');
     const [first, ...rest] = grid.out;
-    if (!first) return noResult('No baseline cells.');
-    const pilot = await x.phase('baseline-pilot', () => measure({ item: first }));
-    need(pilot, 'Baseline scoring did not run.');
+    if (!first) throw new Error('No baseline cells.');
+    const pilot = await x.phase('baseline-pilot', () => measure(first));
+
     const before = [
       { item: first, result: pilot },
       ...(await x.phase('baseline', () =>
-        parallel(rest, async (item) => ({ item, result: await measure({ item }) }))
+        Promise.all(rest.map(async (item) => ({ item, result: await measure.try(item) })))
       )),
     ];
     const open = before.filter(
       (b) => b.item.engine === TARGET && !(b.result.t === 'passed' && b.result.out.pass)
     );
-    await x.review(
+    await x.checkin(
       'Do the baselines reproduce E: foil 15.75% low, draft 16.5%, setup 31% low? A moved number needs investigation.'
     );
     const rows = await x.phase('rows', () =>
-      parallel(
-        open.map((b) => ({ id: b.item.id, ...b })),
-        async ({ item, result }) => {
-          const history: Readable[] = evidence(result);
-          let base: Held<unknown> | undefined;
-          for (const round of [1, 2]) {
-            const id = `${item.id}-${round}`;
-            const cause = await diagnose({ id, item, on: base, reads: history });
-            history.push(...evidence(cause));
-            if (cause.t !== 'passed') continue;
-            const fix = await repair({ id, item, on: cause, continues: cause, reads: [cause] });
-            history.push(...evidence(fix));
-            if (fix.t !== 'passed') continue;
-            base = fix;
-            const local = await replay({ id, item, on: fix });
-            history.push(...evidence(local));
-            if (local.t !== 'passed') continue;
-            const paid = await strike({ id, item, on: fix });
-            history.push(...evidence(paid));
-            if (paid.t === 'passed') return { fixes: [fix], history };
-          }
-          return { fixes: [], history };
-        }
+      Promise.all(
+        open
+          .map((b) => ({ id: b.item.id, ...b }))
+          .map(async ({ item, result }) => {
+            const history: Readable[] = evidence(result);
+            let base: Held<unknown> | undefined;
+            for (const round of [1, 2]) {
+              const id = `${item.id}-${round}`;
+              const cause = await diagnose.try(item, { id, on: base, reads: history });
+              history.push(...evidence(cause));
+              if (cause.t !== 'passed') continue;
+              const fix = await repair.try(item, {
+                id,
+                on: cause,
+                continues: cause,
+                reads: [cause],
+              });
+              history.push(...evidence(fix));
+              if (fix.t !== 'passed') continue;
+              base = fix;
+              const local = await replay.try(item, { id, on: fix });
+              history.push(...evidence(local));
+              if (local.t !== 'passed') continue;
+              const paid = await strike.try(item, { id, on: fix });
+              history.push(...evidence(paid));
+              if (paid.t === 'passed') return { fixes: [fix], history };
+            }
+            return { fixes: [], history };
+          })
       )
     );
     const fixes = rows.flatMap((r) => r.fixes);
     const trail = [...before.flatMap((b) => evidence(b.result)), ...rows.flatMap((r) => r.history)];
-    await x.review(
+    await x.checkin(
       'Which rows closed? Rows at two strikes need an owner decision, never a third renamed run.'
     );
     let combined: Held<unknown> | undefined;
-    if (fixes.length)
-      combined = need(
-        await x.phase('integrate', () => integrate({ reads: fixes })),
-        'The repairs did not combine into one source.'
-      );
-    const after = await x.phase('matrix', () => matrix({ on: combined }));
+    if (fixes.length) combined = await x.phase('integrate', () => integrate({ reads: fixes }));
+    const after = await x.phase('matrix', () => matrix.try({ on: combined }));
     trail.push(...evidence(after));
-    await x.review('Did combining repairs cost a row that passed alone? Name any interference.');
-    return need(
-      await x.phase('record', () =>
-        record({
-          on: combined,
-          reads: [
-            ...trail,
-            ...fixes,
-            'If a row remains open, state the owner decision and strikes used.',
-          ],
-        })
-      ),
-      'The final matrix record failed independent review.'
+    await x.checkin('Did combining repairs cost a row that passed alone? Name any interference.');
+    return await x.phase('record', () =>
+      record({
+        on: combined,
+        reads: [
+          ...trail,
+          ...fixes,
+          'If a row remains open, state the owner decision and strikes used.',
+        ],
+      })
     );
   },
 });

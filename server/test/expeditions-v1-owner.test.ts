@@ -44,12 +44,11 @@ after(async () => {
     } catch {}
 });
 
-const SEAT = "seat('claude', 'claude-sonnet-5-5', 'low')";
 function planFile(x: { plan: string; prompts?: Record<string, string>; hours?: number }): string {
   return writePlan(
     path.join(tempDir('xk-owner-plan-'), 'plan.expedition.ts'),
     {
-      leader: lead,
+      leader: `buddy:${lead}`,
       repo: h.repo,
       goal: "Answer the owner's questions, then finish.",
       budget: { usd: 50, hours: x.hours ?? 4 },
@@ -81,19 +80,16 @@ const threadRoot = async (exp: string) => {
 const leaderRuns = () => h.runsOf(lead);
 const settle = () => new Promise((resolve) => setTimeout(resolve, 1_500));
 
-const STEER_PLAN = `import { command, need, expedition, role, seat, steps } from 'expedition';
+const STEER_PLAN = `import {expedition} from 'expedition';
 
-const worker = role({ by: ${SEAT}, usd: 1, minutes: 10 });
-const { flaky, finish } = steps({
-  flaky: worker.brief(PROMPTS.flaky),
-  finish: command('node scripts/ok.js', { minutes: 1 }),
-});
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
-  await Promise.all([x.ask('Which color first?'), x.confirm('Ship it?'), flaky()]);
-  await x.review('Go on?');
-  return need(await finish(), 'no finish');
-} });
+
+
+export default expedition({contract:CONTRACT,agents:{worker:{use:"claude:claude-sonnet-5-5:low",usd:1,minutes:10}},steps:{flaky:{by:"worker",brief:PROMPTS.flaky},finish:{run:'node scripts/ok.js',minutes:1}},plan: async ({flaky,finish}, x) => {
+  await Promise.all([x.ask('Which color first?'), x.confirm('Ship it?'), flaky.try()]);
+  await x.checkin('Go on?');
+  return await finish();
+}});
 `;
 
 test('asks post once across a restart and settle from thread replies; commands steer; talk is a note', {
@@ -247,14 +243,14 @@ test('an ask stays answerable after the deadline; stop ends the expedition, ackn
   const exp = await h.launch(
     planFile({
       hours: 0.003,
-      plan: `import { command, need, expedition, steps } from 'expedition';
+      plan: `import {expedition} from 'expedition';
 
-const { finish } = steps({ finish: command('node scripts/ok.js', { minutes: 1 }) });
 
-export default expedition({ contract: CONTRACT, plan: async (x) => {
+
+export default expedition({contract:CONTRACT,agents:{},steps:{finish:{run:'node scripts/ok.js',minutes:1}},plan: async ({finish}, x) => {
   await x.ask('Is it late?');
-  return need(await finish(), 'no finish');
-} });
+  return await finish();
+}});
 `,
     }),
     ws,

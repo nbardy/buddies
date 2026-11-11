@@ -285,7 +285,7 @@ const MARKER_FACTS: {
     ['Changes', diffLine(m.diff)],
   ],
   review: (m) => [
-    ['Review', `${m.decision} (plan v${m.planVersion})`],
+    ['Checkin', `${m.decision} (plan v${m.planVersion})`],
     ['Asked', m.question],
     ['Why', m.why],
   ],

@@ -82,7 +82,7 @@ const worktreesOf = (repo: string) =>
 
 function contractFor(repo: string, doneCheck: string) {
   return {
-    leader: 'lead',
+    leader: 'buddy:lead',
     repo,
     goal: 'Run host commands to a checked answer.',
     budget: { usd: 1, hours: 1 },
@@ -144,23 +144,16 @@ describe('the host executor under the real kernel', () => {
     const file = planFile(
       contractFor(repo, 'node scripts/check.js'),
       `import { z } from 'zod';
-import { command, need, expedition, steps } from 'expedition';
+import {expedition, step} from 'expedition';
 
 const Probe = z.object({ n: z.number(), head: z.string() });
-const { probe, double, fails, slow, notjson, wrong } = steps({
-  probe: command('node scripts/probe.js', { minutes: 1 }).returns(Probe),
-  double: command((item: { n: number }) => 'node scripts/use.js ' + item.n, { minutes: 1 }).returns(Probe),
-  fails: command('node scripts/fail.js', { minutes: 1 }),
-  slow: command('node scripts/slow.js', { minutes: 0.01 }),
-  notjson: command('node scripts/emit.js notjson', { minutes: 1 }).returns(Probe),
-  wrong: command('node scripts/emit.js wrong', { minutes: 1 }).returns(Probe),
-});
 
-export default expedition({ contract: CONTRACT, plan: async () => {
-  const p = need(await probe(), 'no probe');
-  await Promise.all([fails(), slow(), notjson(), wrong()]);
-  return need(await double({ item: { n: p.out.n }, on: p }), 'no double');
-} });
+
+export default expedition({contract:CONTRACT,agents:{},steps:{probe:{run:'node scripts/probe.js',minutes:1,returns:Probe},double:step({run:(item) => 'node scripts/use.js ' + item.n,minutes:1,item:z.object({id:z.string(),n: z.number()}),returns:Probe}),fails:{run:'node scripts/fail.js',minutes:1},slow:{run:'node scripts/slow.js',minutes:0.01},notjson:{run:'node scripts/emit.js notjson',minutes:1,returns:Probe},wrong:{run:'node scripts/emit.js wrong',minutes:1,returns:Probe}},plan: async ({probe,double,fails,slow,notjson,wrong}, x) => {
+  const p = await probe();
+  await Promise.all([fails.try(), slow.try(), notjson.try(), wrong.try()]);
+  return await double({ id:"none",n: p.out.n },{on: p});
+}});
 `
     );
     const r = await launch(hostDeps(root).deps, root, file, base, { t: 'none' });
@@ -221,18 +214,16 @@ export default expedition({ contract: CONTRACT, plan: async () => {
     const marker = path.join(tempDir('exp-marker-'), 'hang.json');
     const file = planFile(
       contractFor(repo, 'node scripts/ok.js'),
-      `import { command, need, expedition, steps } from 'expedition';
+      `import {z} from 'zod';
+import {expedition, step} from 'expedition';
 
-const { hang, after } = steps({
-  hang: command((item: { marker: string }) => 'node scripts/hang.js ' + item.marker, { minutes: 5 }),
-  after: command('node scripts/ok.js', { minutes: 1 }),
-});
 
-export default expedition({ contract: CONTRACT, plan: async () => {
-  const h = await hang({ item: { marker: ${JSON.stringify(marker)} } });
+
+export default expedition({contract:CONTRACT,agents:{},steps:{hang:step({run:(item) => 'node scripts/hang.js ' + item.marker,minutes:5,item:z.object({id:z.string(),marker: z.string()})}),after:{run:'node scripts/ok.js',minutes:1}},plan: async ({hang,after}, x) => {
+  const h = await hang.try({ id:"none",marker: ${JSON.stringify(marker)} });
   if (h.t !== 'errored') throw new Error('hang ended ' + h.t);
-  return need(await after(), 'no after');
-} });
+  return await after();
+}});
 `
     );
     // Host 1: a separate process that launches the expedition and is then killed outright.
@@ -301,7 +292,7 @@ async function seeded(repo: string, base: string): Promise<{ ex: HostExecutor; d
         budget: { usd: 1, hours: 1 },
         pools: {},
         rules: [],
-        leader: 'lead',
+        leader: 'buddy:lead',
         repo,
         autoApply: { usd: 0 },
       },
@@ -451,7 +442,7 @@ describe('commands are argv, never shell', () => {
       budget: { usd: 1, hours: 1 },
       pools: {},
       rules: [],
-      leader: 'lead',
+      leader: 'buddy:lead',
       repo: '/tmp/r',
       autoApply: { usd: 0 },
       leaderWake: { t: 'given', usd: 0.5, minutes: 10 },

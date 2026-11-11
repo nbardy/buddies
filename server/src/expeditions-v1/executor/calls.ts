@@ -222,7 +222,7 @@ const RUN_CONFIG: {
   readonly [K in RunOn['t']]: (r: Extract<RunOn, { t: K }>) => RunConfig | undefined;
 } = {
   profile: () => undefined,
-  config: (r) => r.config,
+  config: (r) => ({ ...r.config, reasoningEffort: r.config.reasoningEffort || undefined }),
 };
 
 /** A cap is an expiry: the stop decides the outcome whatever the turn did after it. */
@@ -850,7 +850,7 @@ const WHO: { readonly [K in keyed.Who['t']]: Who<K> } = {
     const config = checkedRunConfig({
       provider: w.provider,
       model: w.model,
-      reasoningEffort: w.effort,
+      reasoningEffort: w.effort || undefined,
     });
     const buddyId = await seats.seatFor(ws, at.ctx.poolSlots);
     return {

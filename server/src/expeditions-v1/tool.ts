@@ -138,6 +138,7 @@ export async function propose(deps: ToolDeps, grant: BuddyGrant, { file }: Propo
   const p = proposal.preview;
   return {
     t: 'clean',
+    defaults: p.defaults,
     goal: p.goal,
     leader: p.leader,
     repo: p.repo,

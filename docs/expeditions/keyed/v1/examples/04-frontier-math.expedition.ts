@@ -40,25 +40,10 @@
 // Gates typecheck and dry-run declarations; they never execute or establish existence of these tools.
 // Fill in actual Buddy ids and check their providers; test providers below are explicit assumptions.
 
-import {
-  type Held,
-  type Readable,
-  type Result,
-  buddy,
-  check,
-  command,
-  expedition,
-  need,
-  parallel,
-  passed,
-  review,
-  role,
-  seat,
-  steps,
-} from 'expedition';
+import { type Held, type Readable, type Result, expedition, step } from 'expedition';
 import { z } from 'zod';
 
-// Preserve failed outputs as evidence too: passed(...) alone would erase a search's refutations.
+// Preserve failed outputs as evidence too: filtering for passes alone would erase a search's refutations.
 function evidence(result: Result<unknown>): Readable[] {
   switch (result.t) {
     case 'passed':
@@ -73,7 +58,7 @@ function evidence(result: Result<unknown>): Readable[] {
       return [`refused: ${result.reason}`];
   }
 }
-const noResult = (why: string) => need({ t: 'errored', why }, why);
+
 const PACKET = 'auto_research/experiments/pending/astra_wave_sim_restart_v1';
 const HANDOFF = 'theory/radical_wave_computation/astra_handoff/v1';
 const HARDWARE = `${PACKET}/MODEL_AND_HARDWARE_CONTRACT.md`;
@@ -85,12 +70,7 @@ const Pick = z.object({
   premise: z.string(),
   kill: z.string(),
 });
-const gemini = seat('gemini', 'gemini-3.1-pro-preview', 'high');
-const redTeam = seat('claude', 'claude-opus-5-5', 'high');
-const inventor = role({ by: seat('codex', 'gpt-6-astra', 'high'), usd: 30, minutes: 240 });
-const outsider = role({ by: gemini, usd: 8, minutes: 60 });
-const builder = role({ by: redTeam, usd: 25, minutes: 180 }).checkout();
-const keeper = role({ by: buddy('simulation-research'), usd: 6, minutes: 45 });
+
 const math_red_team = `# Rubric: does the mathematics close?
 
 You are reviewing one discovery answer written on another model. You have the answer and the
@@ -190,14 +170,71 @@ Pass only if all six hold. If the synthesis and the evidence disagree anywhere, 
 both. A record that is modest and correct passes; a record that is complete and inflated does not.
 `;
 
-const { frozen, neutral, subvolume, census, lineage, build, falsify, claim, record } = steps({
-  frozen: command(
-    `bash -c '! rg -q TBD_AT_LAUNCH ${HARDWARE} ${PACKET}/REFERENCE_AND_ACCOUNTING_CONTRACT.md && test -s ${HARDWARE} && test -s ${PACKET}/REFERENCE_AND_ACCOUNTING_CONTRACT.md'`,
-    { minutes: 1 }
-  ),
-  neutral: inventor
-    .reads(...BLIND)
-    .brief(`# Discover: one system, from first principles
+export default expedition({
+  contract: {
+    goal: `I want a materially faster true-3D breaking-water system: new mathematics that gives a 10× to 200×
+speedup at matched physical error and complete target-GPU cost, not another tuning pass on what we
+have. Everything we have tried so far is in the graveyard, and I think the next real step comes
+from a representation we have not looked at.
+
+Run the Astra restart packet the way it was designed. The discovery runs must be blind: they see
+the minimal problem and the hardware facts and nothing else of ours, no architecture names, no
+attempt ledger, no sibling output. Otherwise I cannot tell invention from our own vocabulary read
+back to us. Then a blind census by a different model, then one GPU falsifier per selected
+candidate against the best admissible baseline, then a hostile judgment by someone who did not
+write it.
+
+I would rather get "nothing survived, and here is the lower bound that says why" than a candidate
+that was graded by its author or timed against an unfair baseline. That has happened to us: an
+integrator-order result sold as novelty against a first-order baseline, an elimination that cut
+iterations 18% and ran 30% slower. If two clean falsifiers fail, stop.
+
+Whatever happens, the refuted representations go into the graveyard with their mechanism, so the
+next campaign does not pay for them again.`,
+    leader: 'buddy:simulation-research',
+    repo: '~/git/wave_sim',
+    budget: { usd: 400, hours: 36 },
+    autoApply: { usd: 40 },
+    pools: { codex: 4, claude: 2, gemini: 2, gpu: 1, falsifiers: 1 },
+    done: [
+      {
+        check:
+          'python3 tools/astra/audit_run.py auto_research/experiments/astra_wave_sim_restart_2026-11-10',
+      },
+      {
+        check: `python3 -c 'import json,subprocess; r=json.loads(subprocess.check_output(["python3","tools/astra/receipt.py","--best","--json"])); assert r["speedup"] >= 10'`,
+      },
+      { review: matched_error, by: 'gemini' },
+      { owner: 'Do you accept this candidate (or this no-go) as the result of the campaign?' },
+    ],
+    rules: [
+      'Commit on the work branch; never merge main or push. Integrate supplied commits only inside your private checkout.',
+      'Keep predictions and every verdict, including failures, in repo records from the supplied call evidence.',
+      'Label every load-bearing statement TEXTBOOK, LITERATURE (with the citation), DERIVATION or CONJECTURE.',
+      'Speed counts only at matched physical error and complete cost. Charge setup, compile, adaptation, certification, conversion, rejected work, fallback, readback and output.',
+      'A precise no-go or lower bound is a full result. Page count, theorem count and polished prose are not progress.',
+      "No Modal and no paid compute. The local GPU is used only by the host's falsifier command. Do not start a GPU run yourself.",
+      'Raw responses and run output go to output/ through artifact_store_v1. Tracked summaries go under the run folder and cite a commit, never a dirty tree.',
+      'No retry of a spent falsifier. Before launch establish external machine GPU locking and a durable two-use authorization record. Write each prediction, verdict and mechanism in the run ledger from supplied call evidence.',
+    ],
+  },
+  agents: {
+    gemini: 'gemini:gemini-3.1-pro-preview',
+    redTeam: 'claude:claude-opus-5-5:high',
+    inventor: { use: 'codex:gpt-6-astra:high', usd: 30, minutes: 240 },
+    outsider: { use: 'gemini:gemini-3.1-pro-preview', usd: 8, minutes: 60 },
+    builder: { use: 'claude:claude-opus-5-5:high', usd: 25, minutes: 180 },
+    keeper: { use: 'buddy:simulation-research', usd: 6, minutes: 45 },
+  },
+  steps: {
+    frozen: {
+      run: `bash -c '! rg -q TBD_AT_LAUNCH ${HARDWARE} ${PACKET}/REFERENCE_AND_ACCOUNTING_CONTRACT.md && test -s ${HARDWARE} && test -s ${PACKET}/REFERENCE_AND_ACCOUNTING_CONTRACT.md'`,
+      minutes: 1,
+    },
+    neutral: {
+      by: 'inventor',
+      reads: [...BLIND],
+      brief: `# Discover: one system, from first principles
 
 You are a mathematical physicist and GPU systems inventor. This is a fresh context, on purpose.
 
@@ -238,11 +275,13 @@ test is worth more than a DERIVATION that does not close.
 
 The single load-bearing hypothesis, the observation that would kill it, and the smallest
 executable slice that would produce that observation. Then stop. Do not revise after the end.
-`)
-    .judged(review(math_red_team, redTeam)),
-  subvolume: inventor
-    .reads(...BLIND, `${HANDOFF}/SUBVOLUMETRIC_CHALLENGE.md`)
-    .brief(`# Discover: a sub-volume-time system, or the reason there cannot be one
+`,
+      judge: { review: math_red_team, by: 'redTeam' },
+    },
+    subvolume: {
+      by: 'inventor',
+      reads: [...BLIND, `${HANDOFF}/SUBVOLUMETRIC_CHALLENGE.md`],
+      brief: `# Discover: a sub-volume-time system, or the reason there cannot be one
 
 You are a mathematical physicist and GPU systems inventor. This is a fresh context, on purpose.
 
@@ -284,10 +323,12 @@ law is wrong.
 
 For a candidate: the load-bearing hypothesis, its killing observation, the smallest executable
 slice. For a no-go: the bound, in one sentence, and the assumption it rests on. Then stop.
-`)
-    .judged(review(math_red_team, redTeam)),
-  census: outsider
-    .brief(`# Census: what was actually proposed, and what to build first
+`,
+      judge: { review: math_red_team, by: 'redTeam' },
+    },
+    census: {
+      by: 'outsider',
+      brief: `# Census: what was actually proposed, and what to build first
 
 You are an independent census analyst. You are given the discovery answers that passed a
 mathematical review, and nothing else. Two came from a neutral prompt (\`N00-*\`) and two from a
@@ -328,25 +369,26 @@ it came from), \`premise\` (its load-bearing hypothesis in one sentence) and \`k
 that would refute it). In your summary, list every non-selection and the reason.
 
 Do not score prose. A long, confident answer and a short one are judged on their fingerprint.
-`)
-    .lists(Pick),
-  lineage: keeper
-    .reads('KEY_LEARNINGS.md')
-    .brief(
-      (item: z.infer<typeof Pick>) => `# Lineage: has this family already been refuted?
+`,
+      returns: z.array(Pick),
+    },
+    lineage: step({
+      by: 'keeper',
+      reads: ['KEY_LEARNINGS.md'],
+      brief: (item) => `# Lineage: has this family already been refuted?
 
 Candidate: \`${item.id}\`, from run ${item.source}.
 Premise: ${item.premise}
 
 You are the only seat in this expedition that reads both a blind candidate and the project's
-learning log. That is why your answer is one word. The builder and the judge of this candidate
+supplied call evidence. That is why your answer is one word. The builder and the judge of this candidate
 must not learn what the project tried before, so nothing you write except the family name leaves
 this call, and the family name goes to the host, not to them.
 
 ## Read
 
 - The candidate's discovery answer, in your inputs.
-- The learning log, in your inputs.
+- The supplied call evidence, in your inputs.
 - \`KEY_LEARNINGS.md\`, the section "Refuted (the graveyard ...)", and
   \`theory/subvolumetric_simulation/v1/ATTEMPT_LEDGER.md\`.
 
@@ -357,8 +399,8 @@ carrier, the time representation, the owner of the global constraint. A candidat
 old idea through a genuinely different representation is a new family. That is the repo's own
 rule: a refuted row is never re-tested without a representation change.
 
-- If it matches a family already in the log, return that family's exact name. The host will then
-  refuse to spend a falsifier on it if the family is rejected.
+- If it matches a family already in the log, return that family's exact name. State any rejection
+  explicitly for the leader to enforce before spending a falsifier; v1 has no automatic no-retest gate.
 - If it does not, return a new, short, neutral family name.
 
 Do not stretch a match to save a falsifier, and do not invent a new name to let a dead idea
@@ -368,12 +410,14 @@ be different for it to count as new; the leader reads that at the next review.
 ## Stop
 
 About 30 minutes. Do not assess whether the candidate is good. That is not your call.
-`
-    )
-    .returns(z.object({ family: z.string() })),
-  build: builder
-    .brief(
-      (item: z.infer<typeof Pick>) => `# Build: the smallest slice that can kill \`${item.id}\`
+`,
+      item: Pick,
+      returns: z.object({ family: z.string() }),
+    }),
+    build: step({
+      by: 'builder',
+      checkout: true,
+      brief: (item) => `# Build: the smallest slice that can kill \`${item.id}\`
 
 Premise to test: ${item.premise}
 Killing observation: ${item.kill}
@@ -413,26 +457,25 @@ the known answer fails, the falsifier is not spent on this candidate.
 - Read the project's earlier work: \`KEY_LEARNINGS.md\`, \`theory/\` outside the handoff's
   \`MINIMAL_PROBLEM.md\`, other candidates' folders, or solver source. Your checkout can open them;
   the campaign is only valid if you do not.
-- Edit \`tools/astra/\`, the campaign packet or another candidate's folder. The first two are
-  restored before your work is checked and before the falsifier runs.
+- Edit \`tools/astra/\`, the campaign packet or another candidate's folder. The first two must be
+  independently checked against the frozen source before grading and before the falsifier runs.
 
-Stop at the smallest slice that would materially change belief. Record what you learn with \`learn\`.
-`
-    )
-    .judged(
-      check(
-        (item: z.infer<typeof Pick>) => `python3 tools/astra/known_answer.py --candidate ${item.id}`
-      )
-    ),
-  falsify: command(
-    (item: z.infer<typeof Pick>) => `python3 tools/astra/falsify.py --candidate ${item.id} --json`,
-    { minutes: 180 }
-  )
-    .needs('gpu', 'falsifiers')
-    .returns(z.object({ speedup: z.number() })),
-  claim: builder
-    .brief(
-      (item: z.infer<typeof Pick>) => `# Claim: exactly what the receipt supports for \`${item.id}\`
+Stop at the smallest slice that would materially change belief. Record what you learn in the candidate notes for the final research ledger.
+`,
+      item: Pick,
+      judge: { check: (item) => `python3 tools/astra/known_answer.py --candidate ${item.id}` },
+    }),
+    falsify: step({
+      run: (item) => `python3 tools/astra/falsify.py --candidate ${item.id} --json`,
+      minutes: 180,
+      item: Pick,
+      needs: ['gpu', 'falsifiers'],
+      returns: z.object({ speedup: z.number() }),
+    }),
+    claim: step({
+      by: 'builder',
+      checkout: true,
+      brief: (item) => `# Claim: exactly what the receipt supports for \`${item.id}\`
 
 You built this slice. The host has now run its one falsifier, and the receipt is in your inputs.
 There will be no second run. Your job is to write down what was shown, and nothing more.
@@ -462,17 +505,19 @@ There will be no second run. Your job is to write down what was shown, and nothi
   mechanism is what the graveyard needs, and it is a better outcome than an inflated survival.
 
 A reviewer on another model, who has not seen your conversation, will recompute the comparison
-from the frozen source and the receipt. Their verdict is written to the learning log by the host;
+from the frozen source and the receipt. The host stores their verdict with the keyed call; write the durable research rows from it;
 do not record a verdict yourself.
-`
-    )
-    .judged(review(matched_error, gemini)),
-  record: keeper
-    .checkout()
-    .brief(`# Record: put what was learned where the next campaign will read it
+`,
+      item: Pick,
+      judge: { review: matched_error, by: 'gemini' },
+    }),
+    record: {
+      by: 'keeper',
+      checkout: true,
+      brief: `# Record: put what was learned where the next campaign will read it
 
 The falsifiers are spent. You are given the discovery answers, the kills, any surviving claim and
-the learning log. Write the durable record in the repo's own files and commit it. Do not create a
+the supplied call evidence. Write the durable record in the repo's own files and commit it. Do not create a
 new notes folder.
 
 ## Write
@@ -504,113 +549,58 @@ new notes folder.
 
 When the ledger, the synthesis and the knowledge rows are committed. If nothing survived, the
 synthesis says so in its first line, followed by what future spend this saves.
-`)
-    .judged(review(faithful_record, gemini)),
-});
-
-export default expedition({
-  contract: {
-    goal: `I want a materially faster true-3D breaking-water system: new mathematics that gives a 10× to 200×
-speedup at matched physical error and complete target-GPU cost, not another tuning pass on what we
-have. Everything we have tried so far is in the graveyard, and I think the next real step comes
-from a representation we have not looked at.
-
-Run the Astra restart packet the way it was designed. The discovery runs must be blind: they see
-the minimal problem and the hardware facts and nothing else of ours, no architecture names, no
-attempt ledger, no sibling output. Otherwise I cannot tell invention from our own vocabulary read
-back to us. Then a blind census by a different model, then one GPU falsifier per selected
-candidate against the best admissible baseline, then a hostile judgment by someone who did not
-write it.
-
-I would rather get "nothing survived, and here is the lower bound that says why" than a candidate
-that was graded by its author or timed against an unfair baseline. That has happened to us: an
-integrator-order result sold as novelty against a first-order baseline, an elimination that cut
-iterations 18% and ran 30% slower. If two clean falsifiers fail, stop.
-
-Whatever happens, the refuted representations go into the graveyard with their mechanism, so the
-next campaign does not pay for them again.`,
-    leader: 'simulation-research',
-    repo: '~/git/wave_sim',
-    budget: { usd: 400, hours: 36 },
-    autoApply: { usd: 40 },
-    pools: { codex: 4, claude: 2, gemini: 2, gpu: 1, falsifiers: 1 },
-    done: [
-      {
-        check:
-          'python3 tools/astra/audit_run.py auto_research/experiments/astra_wave_sim_restart_2026-11-10',
-      },
-      {
-        check: `python3 -c 'import json,subprocess; r=json.loads(subprocess.check_output(["python3","tools/astra/receipt.py","--best","--json"])); assert r["speedup"] >= 10'`,
-      },
-      { review: { rubric: matched_error, by: gemini } },
-      { owner: 'Do you accept this candidate (or this no-go) as the result of the campaign?' },
-    ],
-    rules: [
-      'Label every load-bearing statement TEXTBOOK, LITERATURE (with the citation), DERIVATION or CONJECTURE.',
-      'Speed counts only at matched physical error and complete cost. Charge setup, compile, adaptation, certification, conversion, rejected work, fallback, readback and output.',
-      'A precise no-go or lower bound is a full result. Page count, theorem count and polished prose are not progress.',
-      "No Modal and no paid compute. The local GPU is used only by the host's falsifier command. Do not start a GPU run yourself.",
-      'Raw responses and run output go to output/ through artifact_store_v1. Tracked summaries go under the run folder and cite a commit, never a dirty tree.',
-      'V1 execution notes override historical host claims in the briefs: no land, fence, protect, tests/learn tool, automatic learning rows or no-retest gate exists. Commit on the work branch; never merge main or push. Integration may combine supplied commits only inside its private checkout. Carry prior commits explicitly through on/reads; record predictions and every verdict in the repo records from the supplied evidence, including failures. Writable scopes and frozen graders are instructions and review obligations, not host-enforced write fences.',
-      'No retry of a spent falsifier. Before launch establish external machine GPU locking and a durable two-use authorization record. Historical learn instructions mean record in the run ledger; the host writes no verdict row.',
-    ],
+`,
+      judge: { review: faithful_record, by: 'gemini' },
+    },
   },
-  plan: async (x) => {
-    need(
-      await x.phase('freeze', () => frozen()),
-      'Nothing is generated against unfrozen evaluator contracts.'
-    );
+  plan: async (
+    { frozen, neutral, subvolume, census, lineage, build, falsify, claim, record },
+    x
+  ) => {
+    await x.phase('freeze', () => frozen());
     const runs = await x.phase('discover', () =>
-      parallel(TRACKS, ({ id }) => (id.startsWith('N') ? neutral : subvolume)({ id }))
+      Promise.all(TRACKS.map(({ id }) => (id.startsWith('N') ? neutral : subvolume).try({ id })))
     );
-    const sound = passed(runs);
-    if (!sound.length) return noResult('No blind discovery survived the math red team.');
-    const picks = need(
-      await x.phase('census', () => census({ reads: sound })),
-      'The census could not select candidates.'
-    );
-    await x.review(
+    const sound = runs.filter((r) => r.t === 'passed');
+    if (!sound.length) throw new Error('No blind discovery survived the math red team.');
+    const picks = await x.phase('census', () => census({ reads: sound }));
+    await x.checkin(
       'Are the picks distinct mechanisms with killing observations, before a falsifier is spent?'
     );
     const trail: Readable[] = runs.flatMap(evidence);
     const survivors: { claim: Held<unknown>; speedup: number }[] = [];
     await x.phase('falsify', async () => {
       for (const c of picks.out.slice(0, 2)) {
-        const origin = need(
-          runs[TRACKS.findIndex((t) => t.id === c.source)]!,
-          'The selected origin did not pass.'
-        );
-        const kin = await lineage({ item: c, reads: [origin] });
+        const origin = runs[TRACKS.findIndex((t) => t.id === c.source)]!;
+        if (origin.t !== 'passed') throw new Error(`Discovery ${c.source} did not pass.`);
+        const kin = await lineage.try(c, { reads: [origin] });
         trail.push(...evidence(kin));
         if (kin.t !== 'passed') continue;
-        const built = await build({ item: c, reads: [origin] });
+        const built = await build.try(c, { reads: [origin] });
         trail.push(...evidence(built));
         if (built.t !== 'passed') continue;
-        const run = await falsify({ item: c, on: built });
+        const run = await falsify.try(c, { on: built });
         trail.push(...evidence(run));
         if (run.t !== 'passed') continue;
-        const claimed = await claim({ item: c, continues: built, on: built, reads: [run] });
+        const claimed = await claim.try(c, { continues: built, on: built, reads: [run] });
         trail.push(...evidence(claimed));
         if (claimed.t === 'passed') survivors.push({ claim: claimed, speedup: run.out.speedup });
       }
     });
-    await x.review(
+    await x.checkin(
       'Compare receipts to predictions. Two clean failures end this line; a no-go is a result.'
     );
     const winner = survivors.sort((a, b) => b.speedup - a.speedup)[0];
-    return need(
-      await x.phase('record', () =>
-        record({
-          on: winner?.claim,
-          reads: [
-            winner
-              ? 'A candidate survived.'
-              : 'No candidate survived; record every kill and lower bound.',
-            ...trail,
-          ],
-        })
-      ),
-      'The campaign record failed independent review.'
+    return await x.phase('record', () =>
+      record({
+        on: winner?.claim,
+        reads: [
+          winner
+            ? 'A candidate survived.'
+            : 'No candidate survived; record every kill and lower bound.',
+          ...trail,
+        ],
+      })
     );
   },
 });

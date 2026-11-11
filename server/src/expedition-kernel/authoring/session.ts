@@ -7,7 +7,7 @@ import { Authored, type CastRow, type FromPlan, ToPlan } from '../protocol';
 // plan starts. Every call, ask and review is a message to the host and resolves only when the host
 // answers; the plan keeps nothing that matters, so the host may kill this process at any time.
 
-/** Thrown out of plan code once the plan has ended (`need`, a duplicate key, a host fault). The
+/** Thrown out of plan code once the plan has ended (a required call, a duplicate key, a host fault). The
  * end message is already sent and later sends are dropped, so plan code that catches it changes
  * nothing. */
 export class PlanEnded extends Error {
@@ -28,7 +28,7 @@ type Waiter =
 type Send = (message: FromPlan, done?: (error: Error | null) => void) => boolean;
 type Channel = { ref(): void; unref(): void };
 
-/** The enclosing `x.phase(...)` names. Async-local, so concurrent calls inside `parallel` keep
+/** The enclosing `x.phase(...)` names. Async-local, so concurrent calls inside `Promise.all` keep
  * their own phase even when their awaits interleave. */
 export const phases = new AsyncLocalStorage<readonly string[]>();
 
@@ -82,7 +82,7 @@ export class Session {
   review(question: string): Promise<void> {
     const seq = this.nextSeq++;
     return new Promise((settle) => {
-      this.waiters.set(seq, { t: 'review', label: `review "${question}"`, settle });
+      this.waiters.set(seq, { t: 'review', label: `checkin "${question}"`, settle });
       this.post({ t: 'review', seq, question });
     });
   }
@@ -105,8 +105,7 @@ export class Session {
    * plan's result would not depend on it, and the kernel would cancel the work it started. That
    * is always a missing `await` (nothing static catches it: Biome cannot resolve the bare
    * `expedition` import, and tsc does not report floating promises), so it ends the plan as
-   * `threw`, naming what was pending, instead of as a candidate. Calls awaited through `parallel`
-   * or `Promise.all` have all settled by the time the plan can return.
+   * `threw`, naming what was pending, instead of as a candidate. Calls awaited through `Promise.all` have all settled by the time the plan can return.
    * Guard: server/test/expedition-kernel-runner.test.ts.
    */
   candidate(ref: string): void {
@@ -187,19 +186,10 @@ export class Session {
 }
 
 let current: Session | 'not-started' = 'not-started';
-/** Cast rows declared before the session opened (a `steps({...})` table at module scope). */
-const castBeforeStart: CastRow[] = [];
-
-/** A `steps({...})` table: sent now when the plan runs, else when it starts (before any call). */
-export function declareCast(rows: readonly CastRow[]): void {
-  if (current === 'not-started') castBeforeStart.push(...rows);
-  else current.cast(rows);
-}
-
 export function session(): Session {
   if (current === 'not-started')
     throw new Error(
-      'Steps, asks and reviews run only inside expedition({ plan }) as the host runs it.'
+      'Steps, asks and checkins run only inside expedition({ plan }) as the host runs it.'
     );
   return current;
 }
@@ -214,6 +204,5 @@ export function openSession(contract: unknown): Session {
   current = new Session(send, channel);
   current.listen();
   current.contract(contract);
-  if (castBeforeStart.length > 0) current.cast(castBeforeStart);
   return current;
 }

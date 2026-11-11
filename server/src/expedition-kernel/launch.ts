@@ -20,6 +20,7 @@ export type Clean = {
   readonly t: 'clean';
   readonly file: string;
   readonly contract: keyed.Contract;
+  readonly defaults: keyed.PreviewDefaults;
   /** The calls a dry run asked for before it waited on an answer (canonical, hashed). */
   readonly asked: readonly Asked[];
   /** What each turn may do on its harness (every cast-table step, those first-wave calls, the
@@ -38,6 +39,7 @@ export async function preview(deps: KernelDeps, file: string): Promise<Previewed
     t: 'clean',
     file,
     contract: checked.contract,
+    defaults: checked.defaults,
     asked: checked.asked,
     access: checked.access,
   };
@@ -59,6 +61,7 @@ const PREVIEW_VIEW: {
     );
     return {
       t: 'clean',
+      defaults: p.defaults,
       goal: p.contract.goal,
       leader: p.contract.leader,
       repo: p.contract.repo,

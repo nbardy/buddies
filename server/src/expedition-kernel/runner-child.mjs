@@ -43,7 +43,7 @@ try {
   if (plan) plan[START]();
   else
     threw(
-      'The file must `export default expedition({ contract, plan: async (x) => ... })` from "expedition".'
+      'The file must `export default expedition({ contract, agents, steps, plan: async (steps, x) => ... })` from "expedition".'
     );
 } catch (error) {
   threw(error instanceof Error ? (error.stack ?? error.message) : String(error));

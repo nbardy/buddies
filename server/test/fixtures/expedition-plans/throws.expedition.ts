@@ -4,7 +4,7 @@ import { expedition } from 'expedition';
 export default expedition({
   contract: {
     goal: 'Probe.',
-    leader: 'lead',
+    leader: 'buddy:lead',
     repo: '~/git/x',
     budget: {
       usd: 10,
@@ -23,6 +23,8 @@ export default expedition({
     ],
     rules: [],
   },
+  agents: {},
+  steps: {},
   plan: async () => {
     throw new Error('boom from plan code');
   },

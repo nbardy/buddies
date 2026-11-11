@@ -92,7 +92,7 @@ export function leaderBody(x: LeaderBriefInput): string {
     '',
     'WHY YOU ARE WOKEN',
     eventLine(event),
-    'At x.review, continue lets the plan past it. If the plan ended unmet, rewrite or retry an errored, cancelled or refused call to go on; anything else ends the expedition not met.',
+    'At x.checkin, continue lets the plan past it. If the plan ended unmet, rewrite or retry an errored, cancelled or refused call to go on; anything else ends the expedition not met.',
     '',
     'GOAL',
     goal,
@@ -107,6 +107,7 @@ export function leaderBody(x: LeaderBriefInput): string {
     `- Your draft folder: ${x.draft}. It holds a copy of plan v${p.planVersion} as plan.expedition.ts. The inline contract is the owner's: a rewrite whose evaluated contract differs canonically from the launched one is rejected at the rules gate.`,
     `- To change the plan, edit plan.expedition.ts in the draft folder, then answer rewrite. If the new plan drops calls that are still running, write ${x.draft}/dispositions.json first: {"<key>": "cancel" | "finish"} for each of them.`,
     `- Plan versions so far: ${x.plans}/v<n>.expedition.ts.`,
+    "- Author with import { expedition } from 'expedition' (and step only for item callback inference), plus zod for typed outputs. expedition({contract,agents,steps,plan:async(steps,x)=>held}); agents are harness:model[:effort] or buddy:<id> strings (object {use,usd,minutes} only for caps). Steps are plain {by,brief,returns?,item?,reads?,web?,checkout?,needs?,judge?,usd?,minutes?}, or {run,minutes?,returns?,item?,needs?}. A judge is {check:cmd} or {review:rubric,by:agentNameOrSpec}. await step(item?,options?) requires a pass; step.try returns the result union. Use native Promise.all, map, loops and filtering. x.phase, x.checkin (leader wake), x.ask and x.confirm remain.",
     '- Read a call output from its "ref" file only when you need it.',
     '',
     answerInstruction({ t: 'act', folder: x.draft }),
@@ -120,7 +121,7 @@ void _rowFields;
 const EVENT: {
   readonly [K in keyed.WakeEvent['t']]: (e: Extract<keyed.WakeEvent, { t: K }>) => string;
 } = {
-  review: (e) => `You were woken by x.review: ${JSON.stringify(e.question)}.`,
+  review: (e) => `You were woken by x.checkin: ${JSON.stringify(e.question)}.`,
   'ended-unmet': (e) =>
     `You were woken because the plan ended without a met candidate: ${e.gaps.join('; ')}.`,
   stuck: (e) => `You were woken because the plan is stuck: ${e.why}.`,

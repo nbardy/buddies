@@ -33,29 +33,88 @@ An expedition is one TypeScript file, conventionally `<name>.expedition.ts`, any
 It imports only the bare specifiers `expedition` and `zod`:
 
 ```ts
-import { expedition, role, seat, steps, need } from 'expedition';
-const worker = role({ by: seat('claude', 'claude-sonnet-5-5', 'low'), usd: 1, minutes: 10 });
-const { probe } = steps({ probe: worker.brief('Find the evidence.') });
+import { expedition, step } from 'expedition';
+import { z } from 'zod';
+const Org = z.object({ id: z.string(), name: z.string() });
 export default expedition({
-  contract: { goal: 'Find evidence.', leader: 'lead', repo: '~/git/x',
-    budget: { usd: 3, hours: 1 }, autoApply: { usd: 1 }, pools: { claude: 1 },
-    done: [{ owner: 'Accept the evidence?' }], rules: ['No outreach.'] },
-  plan: async (x) => need(await x.phase('probe', () => probe()), 'No evidence.'),
+  contract: { goal: 'Find evidence.', leader: 'buddy:lead', repo: '~/git/x',
+    budget: { usd: 3, hours: 1 }, done: [{ owner: 'Accept the evidence?' }],
+    rules: ['No outreach.'] },
+  agents: { scout: 'claude:claude-sonnet-5-5:medium' },
+  steps: {
+    scope: { by: 'scout', brief: 'Choose organizations.', returns: z.array(Org) },
+    collect: step({ by: 'scout', item: Org, web: true, brief: org => `Study ${org.name}.` }),
+    test: { run: 'node test.mjs', minutes: 1 },
+  },
+  plan: async ({ scope, collect }, x) => {
+    const orgs = await scope();
+    const found = await Promise.all(orgs.out.map(org => collect.try(org)));
+    const sources = found.filter(r => r.t === 'passed');
+    await x.checkin('Is coverage sufficient?');
+    const first = sources[0];
+    if (!first) throw new Error('No evidence survived.');
+    return first;
+  },
 });
 ```
 
-The contract is a plain JSON literal inside the file; it remains the owner's. Every agent step
-has `.brief(text)` or `.brief((item: Org) => text)`. Commands and check commands take the same
-string-or-item-function form. Review rubrics are inline strings, including in `contract.done`.
-There are no prompt files or template slots. The item function's type reaches the call:
-`collect({ item: org })` requires an `Org`; a string brief takes no item. Missing briefs are named
-dry-run errors for every cast-table step, including steps the run never reaches. TypeScript
-cannot inspect a function's returned prose or defeat explicit casts/`any`; runtime validation
-still checks rendered text and the IPC boundary. Attach item-dependent judges after the final
-`.brief(...)`: replacing the brief later cannot re-check an already attached callback's item type.
+`expedition` is the only required runtime import. `step({...})` is an identity wrapper used only
+for item callbacks: both checkers need it to infer a callback parameter from the sibling `item`
+Zod schema while retaining the output schema and literal agent name. Ordinary steps are plain
+objects. There are no builders or concurrency/result helpers: use JavaScript promises, arrays,
+loops and conditions. Zod is needed only for typed items or outputs.
+
+Who is one string: `harness:model` or `harness:model:effort`, or `buddy:<full-id>`; `agents` gives
+these strings short names. The catalog-backed parser is exported by `@nbardy/agent-cli` in the
+submodule. It recognizes a trailing effort only for a model that lists it, preserving all other
+colons in model ids. Missing/unknown harnesses and unknown closed-catalog models are gate errors.
+Only catalog aliases resolve; effort values pass through verbatim. Without an effort the catalog's
+explicit default is recorded as `defaulted`; a model without reasoning records `none` and sends
+no effort override. An agent's object form is `{use: spec, usd?, minutes?}`, only for caps.
+A step's `by`, a review's `by`, the leader and done reviews accept names or spec strings. Names
+are resolved at the authoring boundary; unknown names name their step in the gate error.
+The unchanged kernel requires a Buddy leader and seat done-reviewer: other variants are explicit
+gate errors, rather than guessed conversions.
+
+An agent step has `by`, `brief` (text or `item => text`), optional `item`, `returns`, `reads`
+(a path or path array), `web`, `checkout`, `needs`, `judge`, `usd`, and `minutes`. A host command
+has `run` (text or item function), optional `minutes`, `returns`, `item`, and `needs`. Command
+`needs` retains the examples' GPU/compile concurrency accounting. Unknown keys and mixed
+agent/command fields are gate errors. An item callback requires `item`; its schema must require
+a string `id`. A judge has the same shape in a step and in `done`: `{check: command}` or
+`{review: rubricText, by: nameOrSpec}` (done checks are literal commands). Reviewers must be on a
+different provider from the producer, as before.
+
+`await scope(options?)` and `await collect(org, options?)` return the passed result with `out`
+and `ref`, or hold the plan with the step's name, non-pass reason and evidence refs. `.try(...)`
+returns the full result union for branching without a hold. Options are `{id, reads, on,
+continues}`. `returns` determines `out`; otherwise it is `{summary, files}`. Host commands keep
+stdout's tail on the kernel wire; the authoring boundary presents it as `summary` with no files.
+`orgs.map(collect)` is rejected with a clear instruction to write `(org) => collect(org)`: array
+methods pass the index as argument two. A plan returning while any issued call or checkin is
+unanswered ends as `threw`, naming the pending keys/questions. Plan-specific no-candidate
+conditions use an ordinary `throw new Error(reason)`, taking the existing `stuck` leader-wake
+path; the removed synthetic gap helper has no replacement in `x`.
+
+Defaults are defined once in `server/src/expedition-kernel/contract.ts`'s `AUTHORING_DEFAULTS`:
+
+| Optional value | Resolved default |
+|---|---|
+| `pools` | one concurrent call per registered harness; explicit pools replace that map |
+| `autoApply` | `{usd: 0}`; positive new cost needs the owner |
+| `leaderWake`, `doneReview` | budget-derived cap: USD = min(budget, clamp(10%, $0.25, $1)); minutes = min(budget minutes, clamp(10%, 5, 20)) |
+| `call` | `{usd: 1, minutes: 20}` |
+| Step caps | each field independently: step → named agent → `contract.call` → default |
+
+The Launch card's `keyed.KeyedPreview.defaults` contains every resolved policy value: pools and
+autoApply are tagged `given`/`defaulted`; leaderWake and doneReview carry the same cap tags;
+call and each entry in `defaults.steps` carry per-field `step`/`agent`/`contract`/`defaulted`
+provenance. Every step is listed, even beyond an unresolved await. `contract.call` is retained
+as owner policy in the canonical contract so the existing contract-equality gate also protects
+it. Calls, keys, hashes, log transitions, reservations, reconcile and execution remain unchanged.
 
 The plan process sends the contract as its first message, before the cast table and calls. The
-host validates it with the canonical Contract schema and supplies the two budget-derived caps.
+host validates it with the canonical Contract schema and resolves its explicit authoring defaults.
 Functions, getters, class instances, cycles and other non-JSON contract data are errors.
 Each applied version is `plans/v<N>.expedition.ts`. A leader's draft folder holds one editable
 `plan.expedition.ts`; its canonically evaluated contract must equal the launched contract or the
@@ -76,7 +135,7 @@ The owner writes the Contract, the leader writes the Plan, the host writes the L
 another's.
 
 [`examples/01-gtm.expedition.ts`](examples/01-gtm.expedition.ts) is the complete worked example. Its structure is the lines that
-start `x.phase`, `x.review` and `need(...)`:
+start `x.phase`, `x.checkin` and required step calls:
 
 ```
 scope → collect (parallel) → ⟳ review → synthesize → duel ×3 → ⟳ review → packet
@@ -91,7 +150,7 @@ scope → collect (parallel) → ⟳ review → synthesize → duel ×3 → ⟳ 
 | A judge declared on each step: a check command, or a review on another provider | independent judging is the main bet on better results |
 | `ask` / `confirm`: owner check-ins that hold nothing | the failure that started this (a verdict wait recorded as "skipped") |
 | The cast table, inline briefs, phases | the plan has to be readable to be rewritten |
-| `review` and plan rewrite, with cancel-or-finish | the difference from a workflow |
+| `checkin` and plan rewrite, with cancel-or-finish | the difference from a workflow |
 | Budget in dollars and hours; pools as concurrency caps | never overspend |
 | Dry run with a cost diff | see a change before paying for it |
 
@@ -171,7 +230,7 @@ enforces where it can, and the preview says which grants are only advisory (CONN
 
 ## 5. How a plan changes
 
-- `x.review(question)` wakes the leader with what settled since the last review. It continues,
+- `x.checkin(question)` wakes the leader with what settled since the last review. It continues,
   stops the run with a gap, or rewrites.
 - The host also wakes it when the plan ended and `done` is not met, when the plan cannot proceed,
   at 50% and 80% of the budget, and when the owner writes something that is not a command.
@@ -221,7 +280,7 @@ After the deadline no agent or command starts; `ask` and the `done` evaluation s
 | Plan runner (child process), dry run and diff | **new** |
 | Budget and pool reservation | **new** |
 | Leader wakes, the four gates, cancel-or-finish | **new** |
-| The cast-table library (`steps`, `role`, `need`, `parallel`) | **new**, small |
+| The plain-object authoring boundary (`expedition`, optional `step`) | **new**, small |
 | Timeline view | **new**, a fold over the log |
 
 It replaces `server/src/expeditions/host.ts` and the per-expedition crew Buddy.
@@ -233,7 +292,7 @@ It replaces `server/src/expeditions/host.ts` and the per-expedition crew Buddy.
    `traceable` review, and what went wrong.
 1. **Quint model** of §4's call states, the budget and reconcile (I1–I4, I6).
 2. **Kernel:** log, reconcile, reservation, plan runner, dry run, `agent`, `command`, `ask`.
-3. **Change:** `review`, leader wakes, the gates, cancel-or-finish, the timeline.
+3. **Change:** `checkin`, leader wakes, the gates, cancel-or-finish, the timeline.
 4. **Run GTM on it** and compare with step 0 on the same four numbers.
 
 If step 4 does not beat step 0 on verified claims per dollar or on owner minutes, stop and find
