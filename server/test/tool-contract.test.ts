@@ -163,7 +163,11 @@ test('tool input schemas change only additively; reshaped forms need a legacy ca
 // lives in BUDDY_TOOL_GUIDE and docs/expeditions-lean-design.md.
 // 2026-11-03: 3960 -> 3084 (measured). The Buddy Oompa host and its `oompa` tool were retired;
 // what remains over 3000 is the `expedition` tool (its 87-char description plus nested text).
-const WORKER_DESCRIPTION_BUDGET = 3084;
+// 2026-11-11: 3084 -> 4512 (measured). The `expedition` tool's description (87 -> 1,513 chars)
+// teaches a Buddy to write a keyed expedition folder (contract.md frontmatter, the plan.ts authoring
+// calls) because `propose` has no other teacher: a Buddy reads no docs outside the unleashd checkout.
+// Gating the tool to Buddies that may propose would win it back.
+const WORKER_DESCRIPTION_BUDGET = 4512;
 
 function describedChars(role: Role): number {
   const nested = (node: Json): number => {

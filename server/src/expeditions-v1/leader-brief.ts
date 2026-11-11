@@ -122,7 +122,7 @@ const EVENT: {
   review: (e) =>
     `The plan reached its review "${e.question}". continue lets it past; rewrite or retry changes course; stop ends the expedition.`,
   'ended-unmet': (e) =>
-    `The plan ended without meeting the goal: ${e.gaps.join('; ')}. Rewrite or retry to go on; anything else ends the expedition not met.`,
+    `The plan ended without meeting the goal: ${e.gaps.join('; ')}. Rewrite (or retry an errored, cancelled or refused call) to go on; anything else ends the expedition not met.`,
   stuck: (e) => `The plan cannot go on: ${e.why}.`,
   'budget-mark': (e) => `The expedition has spent ${e.percent}% of its budget.`,
   drained: (e) => `${e.key}, dropped by a rewrite and told to finish, has settled.`,

@@ -1,4 +1,4 @@
-import { type TurnCapabilities, capabilityReport } from '@nbardy/agent-cli';
+import { type TurnCapabilities, type TurnGit, capabilityReport } from '@nbardy/agent-cli';
 import type { keyed } from '@unleashd/shared';
 
 // What each kind of expedition turn may do: ONE table (CONNECT_PLAN §10 F1, F2). The executor
@@ -18,12 +18,14 @@ export type CallTurn =
       readonly reads: readonly string[];
       readonly web: boolean;
     }
-  /** An agent call with `tree: 'checkout'`: `tree` is its worktree and cwd. */
+  /** An agent call with `tree: 'checkout'`: `tree` is its worktree and cwd; `git` the metadata a
+   * commit on its branch writes outside it (resolved from the made worktree, calls.ts). */
   | {
       readonly t: 'checkout';
       readonly tree: string;
       readonly reads: readonly string[];
       readonly web: boolean;
+      readonly git: TurnGit;
     }
   /** A review judge: the judged output's directory and its producer's read roots. */
   | { readonly t: 'judge'; readonly reads: readonly string[] }
@@ -44,7 +46,8 @@ const set = (
  * | turn     | reads                         | writes          | shell        | web         | instructions |
  * |----------|-------------------------------|-----------------|--------------|-------------|--------------|
  * | call     | input files' dirs, grant.reads| nothing         | none         | grant.web   | none         |
- * | checkout | its worktree, grant.reads     | its worktree    | in worktree  | grant.web   | the repo's   |
+ * | checkout | its worktree, grant.reads     | its worktree +  | in worktree  | grant.web   | the repo's   |
+ * |          |                               | its commit meta |              |             |              |
  * | judge    | the judged output, its reads  | nothing         | none         | none        | none         |
  * | leader   | the expedition directory      | its draft folder| none         | none        | none         |
  *
@@ -56,9 +59,18 @@ export const TURN_CAPABILITIES: {
 } = {
   call: (c) => set({ t: 'read', roots: c.reads }, WEB(c.web), 'none'),
   checkout: (c) =>
-    set({ t: 'write', dir: c.tree, reads: c.reads, shell: 'on' }, WEB(c.web), 'project'),
+    set(
+      { t: 'write', dir: c.tree, reads: c.reads, shell: 'on', git: c.git },
+      WEB(c.web),
+      'project'
+    ),
   judge: (c) => set({ t: 'read', roots: c.reads }, 'off', 'none'),
-  leader: (c) => set({ t: 'write', dir: c.draft, reads: [c.expDir], shell: 'off' }, 'off', 'none'),
+  leader: (c) =>
+    set(
+      { t: 'write', dir: c.draft, reads: [c.expDir], shell: 'off', git: { t: 'none' } },
+      'off',
+      'none'
+    ),
 };
 export const capabilitiesOf = (turn: CallTurn): TurnCapabilities =>
   (TURN_CAPABILITIES[turn.t] as (c: CallTurn) => TurnCapabilities)(turn);

@@ -1,6 +1,6 @@
 import fsp from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
-import type { Actor, BuddiesCore, Post, Run } from '@unleashd/buddies-core';
+import type { BuddiesCore, Post, Run } from '@unleashd/buddies-core';
 import {
   ALLOWED,
   type Act,
@@ -27,7 +27,7 @@ import { type TurnDirectory, WORKSPACE_DIRECTORY } from '../buddies/briefing';
 import { OWNER, buddyActor } from '../buddies/core';
 import type { BuddyEvents } from '../buddies/events';
 import type { ExecutionGate } from '../buddies/execution-gate';
-import { type Place, type Thread, createOwnerThread } from '../buddies/owner-thread';
+import { type Thread, createOwnerThread, placeOf } from '../buddies/owner-thread';
 import { checkedRunConfig } from '../buddies/worker-config';
 import { labelled } from '../observability/event-loop-stall';
 import * as brief from './brief';
@@ -643,7 +643,7 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
       notes: [],
     });
     const launcher = buddyActor(input.launcherId);
-    const place = PLACE[input.origin.t](input.origin as never, launcher);
+    const place = placeOf(input.origin, launcher);
     const card = {
       body: `⛺ Expedition: ${x.charter.name}`,
       purpose: 'expedition',
@@ -881,10 +881,6 @@ export function createExpeditionHost(o: ExpeditionHostOptions) {
   };
 }
 
-const PLACE: { [K in Origin['t']]: (o: Extract<Origin, { t: K }>, launcher: Actor) => Place } = {
-  thread: (o) => ({ channel: { kind: 'id', id: o.channelId }, replyToId: o.rootId }),
-  direct: (_o, launcher) => ({ channel: { kind: 'direct', members: [OWNER, launcher] } }),
-};
 export type Seat =
   | { t: 'none' }
   | { t: 'manager'; id: string }

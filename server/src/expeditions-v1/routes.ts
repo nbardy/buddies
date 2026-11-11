@@ -2,7 +2,7 @@ import { buddyMutations } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import type { z } from 'zod';
 import type { AskAnswer } from './executor/asks';
-import type { KeyedExpeditions, Mutated, Previewing, Viewed } from './service';
+import type { Expect, KeyedExpeditions, Mutated, Previewing, Viewed } from './service';
 
 // Owner HTTP for keyed expeditions (CONNECT_PLAN §4, step 6), under /api/buddies/keyed-expeditions.
 // Registered after the auth gate and BEFORE the Buddy routes, whose `/api/buddies/:buddyId` would
@@ -16,7 +16,9 @@ import type { KeyedExpeditions, Mutated, Previewing, Viewed } from './service';
 //                                                       it when the executor observes the reply)
 //   POST /:id/approval        KeyedView | 409          (nothing waiting)
 //   POST /preview             KeyedPreview (200, a rejected plan included) — writes nothing
-//   POST /launch         201  KeyedView | 422 {gate, issues} | 404 workspace
+//   POST /launch         201  KeyedView | 422 {gate, issues} | 404 workspace | 409 the folder no
+//                             longer matches the card's `digest` (or it was launched already)
+//   GET  /proposals/:digest?folder=   KeyedProposalStatus   (a proposal card's facts; both modes)
 //
 // In read-only mode every POST is 503 with the reason (flag off, or execution disabled).
 // Pattern: table-driven (docs/patterns.md#table-driven)
@@ -61,6 +63,10 @@ const PREVIEWING: {
 const askAnswerOf = (body: { answer: string } | { confirm: boolean }): AskAnswer =>
   'answer' in body ? { t: 'text', text: body.answer } : { t: 'confirm', yes: body.confirm };
 
+/** κ: a launch body naming a digest demands it of the folder; one without is direct HTTP. */
+const expectOf = (digest: string | undefined): Expect =>
+  digest === undefined ? { t: 'any' } : { t: 'digest', digest };
+
 /** The body, checked: a bad one is answered 400 naming each field and `undefined` returned. */
 function parsed<S extends z.ZodTypeAny>(
   schema: S,
@@ -103,7 +109,21 @@ export function registerKeyedExpeditionRoutes(app: Express, x: KeyedExpeditions)
     handled(async (req, res) => {
       const body = parsed(M['keyed.launch'].body, req, res);
       if (body)
-        replyMutated(res, M['keyed.launch'].status, await x.launch(body.workspaceId, body.folder));
+        replyMutated(
+          res,
+          M['keyed.launch'].status,
+          await x.launch(body.workspaceId, body.folder, expectOf(body.digest))
+        );
+    })
+  );
+  // A proposal card's facts (mode, launched, folder unchanged): a read, in both modes.
+  app.get(
+    `${ROOT}/proposals/:digest`,
+    handled(async (req, res) => {
+      const folder = typeof req.query.folder === 'string' ? req.query.folder : '';
+      if (!folder.startsWith('/'))
+        return res.status(400).json({ error: 'folder: must be an absolute path' });
+      return res.json(await x.proposal(req.params.digest, folder));
     })
   );
   app.get(

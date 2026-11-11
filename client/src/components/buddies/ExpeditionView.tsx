@@ -10,6 +10,7 @@ import {
 import { type KeyboardEvent, type ReactNode, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChannelLoader } from './ChannelLoader';
+import { Confirm } from './Confirm';
 import { type WorkspaceDirectory, useWorkspaceDirectory } from './channel-data';
 import { channelsHref } from './channels-view';
 import { type ChatMode, ExpeditionChat, useChatUnread } from './ExpeditionChat';
@@ -397,22 +398,6 @@ function Manage({ x, workspaceId }: { x: Expedition; workspaceId: string }) {
       )}
       {error}
     </div>
-  );
-}
-
-/** An act that cannot be undone takes two clicks. */
-export function Confirm({ label, sure, run }: { label: string; sure: string; run(): void }) {
-  const [armed, setArmed] = useState(false);
-  return (
-    <button
-      type="button"
-      className="expedition-button"
-      data-tone={armed ? 'danger' : 'plain'}
-      onClick={() => (armed ? run() : setArmed(true))}
-      onBlur={() => setArmed(false)}
-    >
-      {armed ? sure : label}
-    </button>
   );
 }
 

@@ -1,8 +1,8 @@
 import type { keyed } from '@unleashd/shared';
 import type { CSSProperties, ReactNode } from 'react';
 import { buddyWrite } from './api';
+import { Confirm } from './Confirm';
 import { when } from './ExpeditionPanels';
-import { Confirm } from './ExpeditionView';
 import { useKeyedWrite } from './keyed-api';
 import {
   type Axis,

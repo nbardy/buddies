@@ -38,7 +38,9 @@ const FORMAT: { readonly [K in Expected['t']]: (e: Extract<Expected, { t: K }>) 
     body: [
       '- {"t":"continue","why":"<reason>"}: carry on as planned (at a review, the plan goes past it). The reason is required: the owner reads it on the review.',
       '- {"t":"stop","why":"<reason>"}: end the expedition now, its goal not met.',
-      '- {"t":"retry","keys":["<key>", ...]}: run errored, cancelled or refused calls again.',
+      // Second real run (2026-11-11): the leader answered `retry` for a FAILED call twice; each was
+      // rejected ("it has a result, so a retry would rebuy it") and each rejection cost a wake.
+      '- {"t":"retry","keys":["<key>", ...]}: run errored, cancelled or refused calls again. Never a failed or passed call: it has a result; to run it differently, rewrite its brief or the plan.',
       `- {"t":"rewrite","folder":"${e.folder}","why":"<reason>"}: you edited plan.ts or briefs/ in that folder and submit it as the next plan version. The folder must be exactly this one.`,
     ],
     fails: 'An answer that does not parse or is not one of these acts fails the wake.',

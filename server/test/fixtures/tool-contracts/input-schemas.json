@@ -606,6 +606,24 @@
                 "act"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "propose"
+                },
+                "folder": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "do",
+                "folder"
+              ],
+              "additionalProperties": false
             }
           ]
         }
@@ -1950,6 +1968,24 @@
                 "do",
                 "id",
                 "act"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "propose"
+                },
+                "folder": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "do",
+                "folder"
               ],
               "additionalProperties": false
             }

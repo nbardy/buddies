@@ -634,20 +634,74 @@ export const PreviewCall = z
   .object({ key: Key, kind: CallKind, reservedUsd: z.number().nonnegative() })
   .strict();
 export type PreviewCall = z.infer<typeof PreviewCall>;
+/** A first-wave call of a proposal, with who does it in words (`claude · opus-5 · high`,
+ * `buddy <id>`, `host command`, `you`). */
+export const ProposedCall = PreviewCall.extend({ who: nonEmpty }).strict();
+export type ProposedCall = z.infer<typeof ProposedCall>;
+const CleanPreview = v('clean', {
+  goal: str,
+  leader: nonEmpty,
+  repo: nonEmpty,
+  budget: Budget,
+  /** The calls a dry run of the plan asked for before it waited on any answer. */
+  firstWave: z.array(PreviewCall),
+  /** Σ of their reservations: what the first wave may spend. */
+  costUsd: z.number().nonnegative(),
+  /** Per turn of the first wave (and the leader and done reviews): which of its limits its
+   * harness enforces and which are advisory. An older server sent none. */
+  access: z.array(TurnAccess).default([]),
+});
 export const KeyedPreview = z.discriminatedUnion('t', [
-  v('clean', {
-    goal: str,
-    leader: nonEmpty,
-    repo: nonEmpty,
-    budget: Budget,
-    /** The calls a dry run of the plan asked for before it waited on any answer. */
-    firstWave: z.array(PreviewCall),
-    /** Σ of their reservations: what the first wave may spend. */
-    costUsd: z.number().nonnegative(),
-    /** Per turn of the first wave (and the leader and done reviews): which of its limits its
-     * harness enforces and which are advisory. An older server sent none. */
-    access: z.array(TurnAccess).default([]),
-  }),
+  CleanPreview,
   v('rejected', { gate: nonEmpty, issues: z.array(str) }),
 ]);
 export type KeyedPreview = z.infer<typeof KeyedPreview>;
+
+/** The grants of one turn that its harness only advises (`advisory`), with why; or why the
+ * harness is unknown. What a launch's reader must know before trusting "no web" or "read-only". */
+export type AdvisoryGrants =
+  | { readonly t: 'known'; readonly provider: string; readonly advisory: readonly string[] }
+  | { readonly t: 'unknown'; readonly why: string };
+export function advisoryGrants(a: TurnAccess): AdvisoryGrants {
+  return a.harness.t === 'unknown'
+    ? { t: 'unknown', why: a.harness.why }
+    : {
+        t: 'known',
+        provider: a.harness.provider,
+        advisory: Object.entries(a.harness.grants).flatMap(([name, g]) =>
+          g.t === 'advisory' ? [`${name}: ${g.reason}`] : []
+        ),
+      };
+}
+
+// ---- Proposing (the Buddy tool `expedition` action `propose`; the chat card) ----
+
+/** What a proposal card's post carries (as one `keyed-proposal:<json>` evidence entry): the clean
+ * preview the Buddy was shown, where the folder is, and the digest of its files at that moment.
+ * Launch sends the digest back; the server refuses a folder that no longer matches it. */
+export const ProposedPreview = CleanPreview.extend({ firstWave: z.array(ProposedCall) }).strict();
+export type ProposedPreview = z.infer<typeof ProposedPreview>;
+export const KeyedProposal = z
+  .object({ folder: nonEmpty, workspaceId: nonEmpty, digest: nonEmpty, preview: ProposedPreview })
+  .strict();
+export type KeyedProposal = z.infer<typeof KeyedProposal>;
+export const PROPOSAL_EVIDENCE = 'keyed-proposal:';
+
+/** Whether the keyed host can launch: live, or read-only with the reason (flag off, execution
+ * disabled). */
+export const KeyedMode = z.discriminatedUnion('t', [
+  v('live', {}),
+  v('read-only', { why: nonEmpty }),
+]);
+export type KeyedMode = z.infer<typeof KeyedMode>;
+/** What a proposal card needs to know now (`GET …/proposals/:digest?folder=`). */
+export const KeyedProposalStatus = z
+  .object({
+    mode: KeyedMode,
+    /** The expedition started from this digest, when one was. */
+    launched: z.discriminatedUnion('t', [v('no', {}), v('yes', { id: nonEmpty })]),
+    /** The folder's files now against the proposal's digest. */
+    folder: z.discriminatedUnion('t', [v('unchanged', {}), v('changed', { why: nonEmpty })]),
+  })
+  .strict();
+export type KeyedProposalStatus = z.infer<typeof KeyedProposalStatus>;

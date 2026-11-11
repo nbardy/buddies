@@ -425,11 +425,51 @@ per temp path in the owner's home.
   `workspace-write` (cwd only, no network, TMPDIR and /tmp excluded), `web_search`, features off
   (multi-agent, apps, plugins, hooks, browser and computer use, local automation),
   `project_doc_max_bytes=0` when no instructions. Advisory: reads (the sandbox does not confine
-  them), shell off (Codex reads through its shell), agents (its prompt still describes
-  `spawn_agent`), instructions (`$CODEX_HOME/AGENTS.md` always loads).
+  them), shell off (Codex reads through its shell), agents (**not held**: the second run's seat
+  call started a sub-agent through `collaboration.spawn_agent` with `multi_agent` and
+  `multi_agent_v2` disabled), instructions (`$CODEX_HOME/AGENTS.md` always loads, and so does a
+  listing of the owner's skills).
 - **F4**: every call's, judge's and wake's exact request body is kept at
   `runs/<name>.prompt.md` beside its record, written before the post and never rewritten; each
   view bar names its producer's and judge's prompt files (`Bar.prompts`).
 - **Known gaps**: a review judge of a checkout call cannot read the branch's files (no shell,
   worktree released at settle); grant paths are passed as directories (a file path is not
   narrowed); the other harnesses run unrestricted with every grant reported advisory.
+
+### The second real run (2026-11-11)
+
+One expedition on a throwaway server (fresh stores, the committed code in its own worktree, the
+installed `claude` 2.1.322 and `codex` 0.160.0): a 3-wide Haiku fan-out judged by host checks, a
+Claude and a Codex probe call (`tree: none`; the Codex one judged by a Claude review), a Claude
+checkout then a checkout on top of it, a review, an owner question, done = check + owner. It
+finished `met` after 16 agent turns, $0.43 recorded. Evidence: the gitignored
+`output/expedition-run2-2026-11-11/`.
+
+- **Limits held with the real CLIs, except Codex sub-agents.** Claude `tree: none`: tools were
+  exactly `Read,Grep,Glob`; reads outside its roots (a sibling repo directory, a temp file,
+  `~/.zshrc`) refused by `blockReadsOutsideWorkingDirectories`; no write, shell, web, Task or Cron
+  tool. Claude checkout: Write and Bash writes outside the worktree refused, Bash network denied by
+  the sandbox, no web tool, the repo's CLAUDE.md loaded. Leader: Write outside its draft refused,
+  no shell. Codex seat: writes and network refused, no web search, the canary outside its roots
+  readable (advisory, as reported), but **`collaboration.spawn_agent` worked**; the report now says
+  so (agent-cli `codex.ts`).
+- **Fixed: a Codex checkout could not commit.** `workspace-write` makes only the cwd writable;
+  a linked worktree's `index.lock`, objects and branch ref are in the main repo's `.git`. A
+  checkout's capability set now names that metadata (agent-cli `TurnGit`, resolved from the made
+  worktree by `worktreeGit` in `executor/calls.ts`), and Codex gets it as
+  `sandbox_workspace_write.writable_roots`; the repo's `.git` itself stays read-only. Verified
+  without a model turn (`codex sandbox` with the run's exact policy) and by
+  `expeditions-v1-worktree-git`; not yet by a real Codex checkout. Claude's sandbox already
+  handles a linked worktree.
+- **F2 and F4 hold.** None of the 14 Claude transcripts holds the global CLAUDE.md (the first run's
+  each held it twice); cache writes fell to 2.8-5.4k on a seat call. Every turn's stdin contains its
+  kept prompt file verbatim. Codex still loads the global AGENTS.md and a skills listing (advisory).
+- **Open: Claude spend is under-counted by about 27%.** Every Claude turn wrote its cache at the
+  1-hour tier (`cache_creation.ephemeral_1h_input_tokens`); `providers/pricing.ts` prices cache
+  writes at the 5-minute rate (1.25x input, not 2x), and the ingest rows do not split the tiers.
+  Recorded $0.332 against the CLIs' own $0.455. A Codex sub-agent's tokens are not counted at all.
+- **Open: a rejected leader act re-wakes the leader at once, with no limit but the budget.** The
+  leader answered `retry` for a `failed` call twice (2 wasted wakes). The act list and the
+  `ended-unmet` line now say retry is only for errored, cancelled or refused calls.
+- **Preview** reports access only for first-wave calls, so checkout calls behind the first wave
+  were not previewed.

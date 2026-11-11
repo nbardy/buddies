@@ -1019,6 +1019,7 @@ void runServerStartup(
           openBranch: (chat) => buddyCreationService.openBranch(chat),
           backgroundWork,
           expeditions: expeditionHost ?? undefined,
+          keyed: keyedExpeditions,
           portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
         })
       );

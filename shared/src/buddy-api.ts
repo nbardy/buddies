@@ -231,7 +231,15 @@ const PlanFolder = z
   .min(1)
   .refine((p) => p.startsWith('/'), 'must be an absolute path');
 const KeyedPreviewSchema = z.object({ folder: PlanFolder }).strict();
-const KeyedLaunchSchema = z.object({ workspaceId: z.string().min(1), folder: PlanFolder }).strict();
+// `digest` is the proposal card's (expeditions-v1/digest.ts): given, the server launches only a
+// folder whose files still hash to it. Absent (direct HTTP), no check.
+const KeyedLaunchSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    folder: PlanFolder,
+    digest: z.string().min(1).optional(),
+  })
+  .strict();
 export const BuddyDocKindSchema = z.enum(['soul', 'working', 'long_term', 'shared']);
 // Pattern: table-driven (docs/patterns.md#table-driven)
 // This table owns the wire: client paths, methods and bodies; server routes and success statuses.

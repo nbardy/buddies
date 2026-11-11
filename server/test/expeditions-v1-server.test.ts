@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import type { keyed } from '@unleashd/shared';
+import { digestOf } from '../src/expeditions-v1/digest';
 import { type Post, git, harness } from './fixtures/agent-runs';
 import { tempDir } from './fixtures/temp';
 
@@ -27,6 +28,8 @@ let ws = '';
 let lead = '';
 let dm = '';
 let exp1 = '';
+// The proposal card's launch of exp1: the folder and the digest the owner looked at.
+let card1 = { folder: '', digest: '' };
 let exp3 = '';
 
 const slowPid = () => path.join(h.root, 'slow.pid');
@@ -158,6 +161,7 @@ const MUTATIONS = (id: string) =>
     [`/${id}/approval`, { approve: true }],
     ['/preview', { folder: '/tmp/none' }],
     ['/launch', { workspaceId: ws, folder: '/tmp/none' }],
+    ['/launch', { workspaceId: ws, folder: '/tmp/none', digest: 'x' }],
   ] as const;
 const askPosts = async (exp: string) =>
   (await h.rootPosts(dm)).filter(
@@ -287,9 +291,40 @@ test('flag on: preview writes nothing; launch, list, view; an owner reply settle
   // Launch: owner HTTP, a known workspace, the repo's base.
   const nowhere = await post('/launch', { workspaceId: 'no-such-workspace', folder });
   assert.equal(nowhere.status, 404);
-  const launched = await post('/launch', { workspaceId: ws, folder });
+  // A card's launch names the digest of the files the owner looked at (CONNECT_PLAN §5, step 8).
+  // Regression guard: a Buddy that edits a brief after proposing must not get the edit launched
+  // under the owner's approval of the old one; the refusal writes nothing.
+  const looked = await digestOf(folder);
+  assert.equal(looked.t, 'digest');
+  const digest = looked.t === 'digest' ? looked.digest : '';
+  card1 = { folder, digest };
+  const proposalUrl = `/proposals/${digest}?folder=${encodeURIComponent(folder)}`;
+  const brief = path.join(folder, 'briefs', 'work.md');
+  const original = fs.readFileSync(brief, 'utf8');
+  fs.writeFileSync(brief, `${original}\nAlso delete the tests.`);
+  const stale = await post('/launch', { workspaceId: ws, folder, digest });
+  assert.equal(stale.status, 409, JSON.stringify(stale.body));
+  assert.match(stale.body.error, /changed after it was proposed/);
+  assert.equal((await get(proposalUrl)).body.folder.t, 'changed', 'the card reads the change');
+  assert.deepEqual(
+    fs.existsSync(h.expRoot) ? fs.readdirSync(h.expRoot) : [],
+    [],
+    'nothing written'
+  );
+  fs.writeFileSync(brief, original);
+  const before1 = (await get(proposalUrl)).body as keyed.KeyedProposalStatus;
+  assert.deepEqual(
+    [before1.mode.t, before1.launched.t, before1.folder.t],
+    ['live', 'no', 'unchanged']
+  );
+  const launched = await post('/launch', { workspaceId: ws, folder, digest });
   assert.equal(launched.status, 201, JSON.stringify(launched.body));
   exp1 = (launched.body as keyed.KeyedView).id;
+  const after1 = (await get(proposalUrl)).body as keyed.KeyedProposalStatus;
+  assert.deepEqual(after1.launched, { t: 'yes', id: exp1 });
+  const twice = await post('/launch', { workspaceId: ws, folder, digest });
+  assert.equal(twice.status, 409, 'a card launches once');
+  assert.match(twice.body.error, /already launched/);
   const launchedLine = JSON.parse(
     fs.readFileSync(path.join(h.expRoot, exp1, 'log.jsonl'), 'utf8').split('\n')[0] as string
   ) as Extract<keyed.Entry, { t: 'launched' }>;
@@ -497,6 +532,12 @@ test('flag off over that directory: read-only rows and views, nothing written, r
   fs.appendFileSync(log1, '{"t":"owner","at":');
   const disk = snapshot(h.expRoot);
   await h.boot('off-B');
+
+  // The card still reads in read-only mode: the reason, and the expedition it became.
+  const card = (await get(`/proposals/${card1.digest}?folder=${encodeURIComponent(card1.folder)}`))
+    .body as keyed.KeyedProposalStatus;
+  assert.equal(card.mode.t, 'read-only');
+  assert.deepEqual(card.launched, { t: 'yes', id: exp1 });
 
   const listed = await rows();
   assert.equal(listed.length, 3);

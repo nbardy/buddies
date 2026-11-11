@@ -13,17 +13,23 @@ import {
 import { z } from 'zod';
 import type { BuddyGrant } from '../buddies/grants';
 import type { ToolDeps } from '../buddies/mcp';
+import { isKeyedId } from '../expeditions-v1/shelf';
+import { ProposeAction, keyedList, keyedStatus, propose } from '../expeditions-v1/tool';
 import type { ExpeditionHost, Seat } from './host';
 
 // The `expedition` Buddy tool (docs/expeditions-lean-design.md §3.7). launch and retire are the
 // owner's (HTTP); a Buddy drafts, reads and relays the owner's steering, and a crew's chat seat
-// is its expedition's manager (brief.ts CREW_ROLE).
+// is its expedition's manager (brief.ts CREW_ROLE). `propose` is the keyed host's (expeditions-v1/
+// tool.ts, CONNECT_PLAN §5): new expeditions use it, `draft` and `act` serve the old host's records
+// until it is deleted (§6), and `status` / `list` answer for both (a keyed id is told by its shape).
 
 const Action = z.discriminatedUnion('do', [
   z.object({ do: z.literal('draft'), charter: CharterInput }).strict(),
   z.object({ do: z.literal('status'), id: z.string().min(1) }).strict(),
   z.object({ do: z.literal('list') }).strict(),
   z.object({ do: z.literal('act'), id: z.string().min(1), act: BuddyAct }).strict(),
+  // Last: the union's indexes are in the contract snapshot's $refs.
+  ProposeAction,
 ]);
 type Action = z.infer<typeof Action>;
 
@@ -56,15 +62,21 @@ function notCrew(host: ExpeditionHost, grant: BuddyGrant, what: string): void {
   if (host.crewOf(grant.buddyId)) throw new Error(`an expedition crew cannot ${what}`);
 }
 
-const HANDLE: {
-  [K in Action['do']]: (
-    h: ExpeditionHost,
-    d: ToolDeps,
-    g: BuddyGrant,
-    a: Extract<Action, { do: K }>
-  ) => Promise<unknown>;
-} = {
-  draft: async (host, deps, grant, { charter }) => {
+type Handler<K extends Action['do']> = (
+  d: ToolDeps,
+  g: BuddyGrant,
+  a: Extract<Action, { do: K }>
+) => Promise<unknown>;
+/** The old host's, which a deployment may lack (`deps.expeditions`). */
+const oldHost = (d: ToolDeps): ExpeditionHost => {
+  if (!d.expeditions) throw new Error('Expedition host unavailable');
+  return d.expeditions;
+};
+
+const HANDLE: { [K in Action['do']]: Handler<K> } = {
+  propose,
+  draft: async (deps, grant, { charter }) => {
+    const host = oldHost(deps);
     notCrew(host, grant, 'draft an expedition');
     const keys = ['maxLive', 'hours', 'seat'] as const;
     const defaulted = keys.filter((k) => charter[k] === undefined);
@@ -87,20 +99,17 @@ const HANDLE: {
       next,
     };
   },
-  status: async (host, _d, grant, { id }) => {
-    const x = here(host, grant, id);
-    const attempts = x.attempts.map((a) => ({
-      n: a.n,
-      result: attemptResult(a, x.charter.done),
-      lesson: 'end' in a.phase ? lessonText(a.phase.end.lesson) : null,
-      branch: a.branch,
-    }));
-    const deadline = 'launch' in x.state ? x.state.launch.deadline : null;
-    return { state: stateLabel(x), deadline, attempts, notes: x.notes.map((n) => n.text) };
-  },
-  list: async (host, _d, grant) =>
-    host.rows().filter((r) => r.t === 'ok' && r.workspaceId === grant.workspaceId),
-  act: async (host, _d, grant, { id, act }) => {
+  status: (deps, grant, { id }) =>
+    isKeyedId(id) ? keyedStatus(deps, grant, id) : oldStatus(deps, grant, id),
+  // No old host composed = no old expeditions to list; the keyed ones still read.
+  list: async (deps, grant) => [
+    ...(deps.expeditions?.rows() ?? []).filter(
+      (r) => r.t === 'ok' && r.workspaceId === grant.workspaceId
+    ),
+    ...(await keyedList(deps, grant)),
+  ],
+  act: async (deps, grant, { id, act }) => {
+    const host = oldHost(deps);
     here(host, grant, id);
     const seat = await host.seatOf(grant.buddyId, grant.runId);
     (MAY_ACT[seat.t] as (s: Seat, id: string, a: BuddyActT) => void)(seat, id, act);
@@ -111,6 +120,18 @@ const HANDLE: {
     return { id: acted.x.id, state: stateLabel(acted.x) };
   },
 };
+
+async function oldStatus(deps: ToolDeps, grant: BuddyGrant, id: string) {
+  const x = here(oldHost(deps), grant, id);
+  const attempts = x.attempts.map((a) => ({
+    n: a.n,
+    result: attemptResult(a, x.charter.done),
+    lesson: 'end' in a.phase ? lessonText(a.phase.end.lesson) : null,
+    branch: a.branch,
+  }));
+  const deadline = 'launch' in x.state ? x.state.launch.deadline : null;
+  return { state: stateLabel(x), deadline, attempts, notes: x.notes.map((n) => n.text) };
+}
 
 /** Who may steer. A Buddy outside a crew relays pause, resume, stop, extend and note; verdict and
  * relaunch are the owner's words, relayed only by the manager seat (a crew turn the owner
@@ -138,19 +159,24 @@ const MAY_ACT: {
 };
 const lessonText = (l: Lesson) => (l.t === 'lesson' ? l.text : 'no lesson');
 
+// Sent on every Buddy turn: keep it tight. The authoring API (expedition-kernel/authoring/index.ts)
+// is the source of truth for the plan.ts lines; the long form is the keyed DESIGN.md and gtm/.
+const DESCRIPTION = `Self-running expeditions; only the OWNER launches, steers or stops one.
+propose {folder}: write the folder (absolute path, inside your workspace) with your file tools, then call. Returns the gate's issues (fix, propose again; nothing posts) or, if clean, budget, first wave with cost and who runs each call, and the limits only advised; then posts a Launch card in this chat. Changed files make a new card.
+status {id}, list: read. draft, act: OLD expeditions only.
+Folder: contract.md, plan.ts, briefs/<step>.md ({{slot}} = item field).
+contract.md: YAML frontmatter + "# Goal" prose. leader: Buddy id; repo; budget {usd, hours}; autoApply {usd}; pools {provider: concurrent calls}; done: [check: cmd | review: {rubric, by: provider/model/effort} | owner: question]; rules: [..]; optional leaderWake, doneReview {usd, minutes}.
+plan.ts: import { role, seat, buddy, command, check, review, steps, plan, need, passed, parallel } from 'expedition'.
+ const w = role({by: seat(provider, model, effort) | buddy(id), usd, minutes}) + .reads(paths) .web() .checkout() .returns(zod) .lists(zod) .needs(pool) .judged(check(cmd) | review(rubric, seat of ANOTHER provider)); command(cmd, {minutes}).
+ const {a, b} = steps({a: w, b: ..}); await a({item, reads, on}) is {t:'passed', out, ref} or a non-pass.
+ export default plan(async (x) => { x.phase(name, fn); parallel(items, fn); x.review(q); x.ask(q); x.confirm(q); need(result, why); passed(results); return held }).
+Long form: docs/expeditions/keyed/v1/DESIGN.md, gtm/.`;
+
 export const EXPEDITION_TOOL = {
-  description:
-    'Draft a self-running expedition (posts a card the owner launches); status, list, act.',
+  description: DESCRIPTION,
   writes: true,
   schema: z.object({ action: Action }).strict(),
   handler(deps: ToolDeps, grant: BuddyGrant, { action }: { action: Action }) {
-    if (!deps.expeditions) throw new Error('Expedition host unavailable');
-    const handle = HANDLE[action.do] as (
-      h: ExpeditionHost,
-      d: ToolDeps,
-      g: BuddyGrant,
-      a: Action
-    ) => Promise<unknown>;
-    return handle(deps.expeditions, deps, grant, action);
+    return (HANDLE[action.do] as Handler<Action['do']>)(deps, grant, action);
   },
 };

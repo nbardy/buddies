@@ -129,6 +129,14 @@ const Files = z.discriminatedUnion('t', [
     dir: z.string().min(1),
     reads: z.array(z.string().min(1)).readonly(),
     shell: z.enum(['off', 'on']),
+    // A record written before `git` existed (2026-11-11) ran with no git metadata writable:
+    // `none` is what its turn had, not a guess.
+    git: z
+      .discriminatedUnion('t', [
+        v('none', {}),
+        v('worktree', { dirs: z.array(z.string().min(1)).readonly() }),
+      ])
+      .default({ t: 'none' }),
   }),
 ]);
 export const Capabilities = z

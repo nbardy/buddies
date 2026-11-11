@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { TurnCapabilities } from '@nbardy/agent-cli';
+import type { TurnCapabilities, TurnGit } from '@nbardy/agent-cli';
 import type { Run, RunConfig } from '@unleashd/buddies-core';
 import type { keyed } from '@unleashd/shared';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from '../../buddies/core';
@@ -11,7 +11,7 @@ import { EXPEDITION_CALL_PURPOSE, EXPEDITION_RUN_EVIDENCE } from '../../buddies/
 import { checkedRunConfig } from '../../buddies/worker-config';
 import { type CallTurn, capabilitiesOf, limitsText, readsOf } from '../../expedition-kernel/access';
 import type { Clock, RawOutcome, RunSpec } from '../../expedition-kernel/ports';
-import { add, release, tip } from '../../expeditions/cambium';
+import { add, git, release, tip } from '../../expeditions/cambium';
 import { labelled } from '../../observability/event-loop-stall';
 import { observeBuddyEvents } from '../observe';
 import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address';
@@ -640,15 +640,25 @@ const PREPARE: { readonly [K in CallSpec['t']]: Prepare<K> } = {
     if (base.t === 'missing') return refused(base.why);
     const seat = await c.seatOf(call.by, at, ws);
     const tree = TREE_OF[call.tree](at, call.key);
+    // The tree is made here, before the capability set: a checkout's set names the git metadata
+    // its commits write, which exists only once the worktree does. Idempotent (post() makes it
+    // again and finds it made), so a start replayed after a crash names the same directories.
+    const made = await makeTree(at.ctx, base.sha, tree);
+    if (made.t === 'failed') return refused(made.why);
+    const commits = await (GIT_OF[tree.t] as (t: Tree) => Promise<TurnGit>)(tree);
     const expected: Expected = { t: 'typed', schema: call.output };
     const capabilities = capabilitiesOf(
-      TURN_OF[call.tree](at, {
-        reads: unique([
-          ...[...named.refs.values()].map((n) => path.dirname(n.record.answerPath)),
-          ...call.grant.reads.map((p) => path.resolve(at.ctx.repo, p)),
-        ]),
-        web: call.grant.web,
-      })
+      TURN_OF[call.tree](
+        at,
+        {
+          reads: unique([
+            ...[...named.refs.values()].map((n) => path.dirname(n.record.answerPath)),
+            ...call.grant.reads.map((p) => path.resolve(at.ctx.repo, p)),
+          ]),
+          web: call.grant.web,
+        },
+        commits
+      )
     );
     const body = agentBody({
       address: at.address,
@@ -734,12 +744,45 @@ const unique = (xs: readonly string[]): string[] => [...new Set(xs)];
 const TURN_OF: {
   readonly [K in keyed.AgentCall['tree']]: (
     at: Located,
-    g: { readonly reads: readonly string[]; readonly web: boolean }
+    g: { readonly reads: readonly string[]; readonly web: boolean },
+    git: TurnGit
   ) => CallTurn;
 } = {
   none: (at, g) => ({ t: 'call', work: at.paths.work, ...g }),
-  checkout: (at, g) => ({ t: 'checkout', tree: at.paths.tree, ...g }),
+  checkout: (at, g, git) => ({ t: 'checkout', tree: at.paths.tree, ...g, git }),
 };
+
+/** What a commit in the tree writes outside it (agent-cli `TurnGit`). Only a checkout is a linked
+ * worktree; the exact directories come from git itself, because the worktree's git directory is
+ * named by git (`worktrees/tree`, `tree1`, ... as checkout paths all end in `tree`). The branch's
+ * ref and reflog directories are its parent directories (`refs/heads/expedition/<id>/`): the
+ * finest grain a sandbox root allows, so sibling branches of the same expedition share them. */
+const GIT_OF: {
+  readonly [K in Tree['t']]: (t: Extract<Tree, { t: K }>) => Promise<TurnGit>;
+} = {
+  none: async () => ({ t: 'none' }),
+  detached: async () => ({ t: 'none' }),
+  dir: async () => ({ t: 'none' }),
+  checkout: (t) => worktreeGit(t.path, t.branch),
+};
+/** The metadata `git commit` on `branch` in the linked worktree `tree` writes outside it. Guard:
+ * server/test/expeditions-v1-worktree-git.test.ts (a real commit writes nowhere else). */
+export async function worktreeGit(tree: string, branch: string): Promise<TurnGit> {
+  const [gitDir, commonDir] = (
+    await git(tree, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])
+  ).split('\n');
+  if (!gitDir || !commonDir) throw new Error(`git rev-parse in ${tree} named no git directory`);
+  const branchDir = path.posix.dirname(branch);
+  const refs = path.join(commonDir, 'refs', 'heads', branchDir);
+  const logs = path.join(commonDir, 'logs', 'refs', 'heads', branchDir);
+  // A sandbox root must exist; the reflog directory may not yet (no reflog written so far).
+  await mkdir(refs, { recursive: true });
+  await mkdir(logs, { recursive: true });
+  const dirs = await Promise.all(
+    [gitDir, path.join(commonDir, 'objects'), refs, logs].map((d) => realpath(d))
+  );
+  return { t: 'worktree', dirs };
+}
 
 type Who<K extends keyed.Who['t']> = (
   w: Extract<keyed.Who, { t: K }>,
@@ -835,10 +878,13 @@ const TREE_END: {
 type Started = { readonly t: 'ready' } | { readonly t: 'failed'; readonly why: string };
 /** Make the call's tree if it is not there yet (a replayed post finds it made). */
 async function startTree(ctx: ExpeditionContext, r: Call): Promise<Started> {
-  return (TREE_START[r.tree.t] as (c: ExpeditionContext, r: Call, t: Tree) => Promise<Started>)(
+  return makeTree(ctx, r.base, r.tree);
+}
+function makeTree(ctx: ExpeditionContext, base: string, tree: Tree): Promise<Started> {
+  return (TREE_START[tree.t] as (c: ExpeditionContext, b: string, t: Tree) => Promise<Started>)(
     ctx,
-    r,
-    r.tree
+    base,
+    tree
   );
 }
 const exists = (p: string) =>
@@ -849,24 +895,24 @@ const exists = (p: string) =>
 const TREE_START: {
   readonly [K in Tree['t']]: (
     ctx: ExpeditionContext,
-    r: Call,
+    base: string,
     t: Extract<Tree, { t: K }>
   ) => Promise<Started>;
 } = {
   none: async () => ({ t: 'ready' }),
   detached: async () => ({ t: 'failed', why: 'a call never runs in a detached tree' }),
-  dir: async (_ctx, _r, t) => {
+  dir: async (_ctx, _base, t) => {
     await mkdir(t.path, { recursive: true, mode: 0o700 });
     return { t: 'ready' };
   },
-  checkout: async (ctx, r, t) => {
+  checkout: async (ctx, base, t) => {
     if (await exists(t.path)) return { t: 'ready' };
     await mkdir(path.dirname(t.path), { recursive: true, mode: 0o700 });
     const added = await add(ctx.repo, {
       workspace: t.workspace,
       branch: t.branch,
       path: t.path,
-      baseSha: r.base,
+      baseSha: base,
     });
     return added.t === 'ok' ? { t: 'ready' } : { t: 'failed', why: added.message };
   },

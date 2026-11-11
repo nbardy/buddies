@@ -5,11 +5,19 @@ import { expandHome } from '../expedition-kernel/contract';
 import type { Expedition, OwnerResult } from '../expedition-kernel/kernel';
 import { keyedRowOf, keyedViewOf } from '../expedition-kernel/projection';
 import { type Resolved, resolveBase } from '../expeditions/checks';
+import { type Digested, digestOf } from './digest';
 import type { AskAnswer } from './executor/asks';
 import type { KeyedHost, KeyedHostDeps } from './host';
 import { aboutIn } from './owner/candidate';
 import { keepingPrompts } from './prompt-views';
-import { isExpeditionId, needsOpening, shelfIds, shelved } from './shelf';
+import {
+  isExpeditionId,
+  launchedFrom,
+  needsOpening,
+  recordProposal,
+  shelfIds,
+  shelved,
+} from './shelf';
 
 // The keyed expeditions as the server sees them (CONNECT_PLAN §3, §4, §7; step 6): ONE value the
 // routes, boot and shutdown talk to, in one of two modes decided once at composition.
@@ -27,7 +35,7 @@ import { isExpeditionId, needsOpening, shelfIds, shelved } from './shelf';
 
 export const EXPEDITIONS_V1_ENV = 'UNLEASHD_EXPEDITIONS_V1';
 
-export type KeyedMode = { readonly t: 'live' } | { readonly t: 'read-only'; readonly why: string };
+export type KeyedMode = keyed.KeyedMode;
 
 const GATE_MODE: {
   readonly [K in ExecutionGate['t']]: (g: Extract<ExecutionGate, { t: K }>) => KeyedMode;
@@ -58,9 +66,18 @@ export type Mutated =
 export type Previewing =
   | { readonly t: 'previewed'; readonly preview: keyed.KeyedPreview }
   | { readonly t: 'unavailable'; readonly why: string };
+/** The gates on a folder a Buddy proposes (tool.ts): the clean preview with who does each call. */
+export type Proposing =
+  | { readonly t: 'clean'; readonly preview: keyed.ProposedPreview }
+  | { readonly t: 'rejected'; readonly gate: string; readonly issues: readonly string[] }
+  | { readonly t: 'unavailable'; readonly why: string };
 export type Viewed =
   | { readonly t: 'ok'; readonly view: keyed.KeyedView }
   | { readonly t: 'missing'; readonly why: string };
+
+/** What a launch demands of the folder: nothing (direct HTTP), or the digest a proposal card
+ * carries (digest.ts). */
+export type Expect = { readonly t: 'any' } | { readonly t: 'digest'; readonly digest: string };
 
 export interface KeyedExpeditions {
   readonly mode: KeyedMode;
@@ -75,8 +92,12 @@ export interface KeyedExpeditions {
   answer(id: string, ref: string, answer: AskAnswer): Promise<Mutated>;
   approval(id: string, approve: boolean): Promise<Mutated>;
   preview(folder: string): Promise<Previewing>;
+  /** `preview` for the Buddy tool's `propose`; writes nothing. */
+  propose(folder: string): Promise<Proposing>;
   /** Owner HTTP only (§7.2); the base is the repo's launch base rule (`resolveBase`). */
-  launch(workspaceId: string, folder: string): Promise<Mutated>;
+  launch(workspaceId: string, folder: string, expect: Expect): Promise<Mutated>;
+  /** A proposal card's facts, readable in both modes (writes nothing, runs no gate). */
+  proposal(digest: string, folder: string): Promise<keyed.KeyedProposalStatus>;
   readonly consumes: HostCommands['consumes'];
   /** Shutdown: detach every kernel, kill every command process group (host.ts `close`). */
   close(): Promise<void>;
@@ -142,6 +163,57 @@ function unreadableOnce(id: string, why: string): void {
   console.warn(`[expeditions-v1] ${id} is unreadable and not listed: ${why}`);
 }
 
+async function proposalStatus(
+  mode: KeyedMode,
+  root: string,
+  digest: string,
+  folder: string
+): Promise<keyed.KeyedProposalStatus> {
+  const now = await digestOf(folder);
+  return {
+    mode,
+    launched: await launchedFrom(root, digest),
+    folder: PROPOSED_FOLDER[now.t](now as never, digest),
+  };
+}
+const PROPOSED_FOLDER: {
+  readonly [K in Digested['t']]: (
+    d: Extract<Digested, { t: K }>,
+    digest: string
+  ) => keyed.KeyedProposalStatus['folder'];
+} = {
+  digest: (d, digest) =>
+    d.digest === digest
+      ? { t: 'unchanged' }
+      : { t: 'changed', why: 'its files changed after this was proposed' },
+  unreadable: (d) => ({ t: 'changed', why: `the folder cannot be read: ${d.why}` }),
+};
+type Checked = { readonly t: 'fine' } | Extract<Mutated, { t: 'refused' }>;
+const FINE: Checked = { t: 'fine' };
+/** The files must still be the ones the owner looked at (`any`: no claim to check). */
+const EXPECTED: {
+  readonly [K in Expect['t']]: (
+    e: Extract<Expect, { t: K }>,
+    root: string,
+    folder: string
+  ) => Promise<Checked>;
+} = {
+  any: async () => FINE,
+  digest: async (e, root, folder) => {
+    const launched = await launchedFrom(root, e.digest);
+    if (launched.t === 'yes')
+      return { t: 'refused', why: `this proposal was already launched as ${launched.id}` };
+    const now = await digestOf(folder);
+    const same = now.t === 'digest' && now.digest === e.digest;
+    return same
+      ? FINE
+      : {
+          t: 'refused',
+          why: 'the folder changed after it was proposed: ask the Buddy to propose it again',
+        };
+  },
+};
+
 function readOnly(m: Extract<KeyedMode, { t: 'read-only' }>, root: string): KeyedExpeditions {
   const unavailable = async () => ({ t: 'unavailable', why: m.why }) as const;
   return {
@@ -154,7 +226,9 @@ function readOnly(m: Extract<KeyedMode, { t: 'read-only' }>, root: string): Keye
     answer: unavailable,
     approval: unavailable,
     preview: unavailable,
+    propose: unavailable,
     launch: unavailable,
+    proposal: (digest, folder) => proposalStatus(m, root, digest, folder),
     consumes: () => false,
     close: async () => {},
   };
@@ -183,8 +257,11 @@ function live(m: Extract<KeyedMode, { t: 'live' }>, d: KeyedExpeditionsDeps): Ke
   const { createKeyedHost } = require('./host') as typeof import('./host');
   const { previewView } =
     require('../expedition-kernel/launch') as typeof import('../expedition-kernel/launch');
+  const { proposedPreview } = require('./proposal') as typeof import('./proposal');
   const host: KeyedHost = createKeyedHost(d);
   const baseOf = d.baseOf ?? resolveBase;
+  const launching = new Set<string>();
+  type ExpectedCheck = (e: Expect, root: string, folder: string) => Promise<Checked>;
   const viewOf = (id: string): Mutated => {
     const view = host.view(id);
     return view ? { t: 'ok', view } : { t: 'missing', why: `no open expedition ${id}` };
@@ -264,18 +341,42 @@ function live(m: Extract<KeyedMode, { t: 'live' }>, d: KeyedExpeditionsDeps): Ke
     async preview(folder) {
       return { t: 'previewed', preview: previewView(await host.preview(folder)) };
     },
-    async launch(workspaceId, folder) {
+    async propose(folder) {
+      const p = await host.preview(folder);
+      return p.t === 'rejected'
+        ? { t: 'rejected', gate: p.gate, issues: p.issues }
+        : { t: 'clean', preview: proposedPreview(p) };
+    },
+    async launch(workspaceId, folder, expect) {
       const workspaces = await d.core.listWorkspaces();
       if (!workspaces.some((w) => w.id === workspaceId))
         return { t: 'missing', why: `no workspace ${workspaceId}` };
-      const p = await host.preview(folder);
-      if (p.t === 'rejected') return p;
-      const base = await baseOf(expandHome(p.contract.repo, d.home));
-      if (base.t === 'refused') return { t: 'rejected', gate: 'base', issues: [base.issue] };
-      const r = await host.launchClean(p, base.base.sha, { t: 'workspace', id: workspaceId });
-      if (r.t === 'launched') return viewOf(r.expedition.id);
-      return r.t === 'refused' ? { t: 'unavailable', why: r.why } : r;
+      const unchanged = (): Promise<Checked> =>
+        (EXPECTED[expect.t] as ExpectedCheck)(expect, d.root, folder);
+      // One launch per proposal at a time: a double click must not start two expeditions.
+      const claim = expect.t === 'digest' ? expect.digest : null;
+      if (claim !== null && launching.has(claim))
+        return { t: 'refused', why: 'this proposal is being launched' };
+      if (claim !== null) launching.add(claim);
+      try {
+        const stale = await unchanged();
+        if (stale.t === 'refused') return stale;
+        const p = await host.preview(folder);
+        if (p.t === 'rejected') return p;
+        // Again: the gates take seconds, and the files are copied after them.
+        const staleNow = await unchanged();
+        if (staleNow.t === 'refused') return staleNow;
+        const base = await baseOf(expandHome(p.contract.repo, d.home));
+        if (base.t === 'refused') return { t: 'rejected', gate: 'base', issues: [base.issue] };
+        const r = await host.launchClean(p, base.base.sha, { t: 'workspace', id: workspaceId });
+        if (r.t !== 'launched') return r.t === 'refused' ? { t: 'unavailable', why: r.why } : r;
+        if (claim !== null) await recordProposal(d.root, r.expedition.id, claim);
+        return viewOf(r.expedition.id);
+      } finally {
+        if (claim !== null) launching.delete(claim);
+      }
     },
+    proposal: (digest, folder) => proposalStatus(m, d.root, digest, folder),
     consumes: host.consumes,
     close: () => host.close(),
   };

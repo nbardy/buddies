@@ -1,4 +1,5 @@
 import type { Actor, BuddiesCore, ChannelRef, Post, PostQuery } from '@unleashd/buddies-core';
+import type { Origin } from '@unleashd/shared';
 import { OWNER } from './core';
 import { type BuddyEvents, announcePost } from './events';
 
@@ -10,6 +11,15 @@ export type Place = { channel: ChannelRef; replyToId?: string };
 /** A new post is announced (notifications, live feeds), or only refreshes the clients. */
 export type Notice = 'announce' | 'quiet';
 export type Said = { body: string; purpose: string; key: string };
+
+/** Where a post answering `origin` goes: in its thread, or the owner's DM with `launcher`. The
+ * expedition cards (old host's draft, the keyed `propose`) are posted here. */
+const PLACE: { [K in Origin['t']]: (o: Extract<Origin, { t: K }>, launcher: Actor) => Place } = {
+  thread: (o) => ({ channel: { kind: 'id', id: o.channelId }, replyToId: o.rootId }),
+  direct: (_o, launcher) => ({ channel: { kind: 'direct', members: [OWNER, launcher] } }),
+};
+export const placeOf = (origin: Origin, launcher: Actor): Place =>
+  PLACE[origin.t](origin as never, launcher);
 
 /** Everything one owner thread closes over. `evidence` tags every post written into it. */
 export interface Thread {

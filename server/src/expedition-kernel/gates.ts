@@ -179,6 +179,7 @@ const AT = {
   tree: '<run>/tree',
   refs: '<expedition>/refs',
   exp: '<expedition>',
+  git: '<repo>/.git/worktrees/<tree>',
 };
 const AGENT_TURN: {
   readonly [K in keyed.AgentCall['tree']]: (c: keyed.AgentCall) => CallTurn;
@@ -189,6 +190,7 @@ const AGENT_TURN: {
     tree: AT.tree,
     reads: [AT.refs, ...c.grant.reads],
     web: c.grant.web,
+    git: { t: 'worktree', dirs: [AT.git] },
   }),
 };
 const JUDGE_TURN: CallTurn = { t: 'judge', reads: [AT.refs] };

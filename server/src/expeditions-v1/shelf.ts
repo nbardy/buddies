@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { keyed } from '@unleashd/shared';
 import { type State, fold, liveCalls } from '../expedition-kernel/core';
@@ -14,6 +14,9 @@ import type { ExpeditionView } from '../expedition-kernel/ports';
 /** An expedition id is a directory name the kernel made (`launch.ts`): never a path. */
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 export const isExpeditionId = (id: string): boolean => ID.test(id);
+/** The shape `launch.ts` gives an id (`20261111T120000-ab12cd`); the old host's ids are
+ * `<slug>-<hex>`, so a tool told only an id can tell the two hosts apart. */
+export const isKeyedId = (id: string): boolean => /^\d{8}T\d{6}-[0-9a-f]{6}$/.test(id);
 
 export type Shelved =
   | { readonly t: 'readable'; readonly view: ExpeditionView }
@@ -68,3 +71,27 @@ const TAIL_FAULTS: { readonly [K in Tail['t']]: (t: Extract<Tail, { t: K }>) => 
  * (after `finished`, judges, verdicts and asks still wind down, kernel.ts `finish`). */
 export const needsOpening = (s: State): boolean =>
   s.progress.t === 'open' || liveCalls(s).length > 0;
+
+// ---- Which expedition a proposal became ----
+
+/** The file beside an expedition's log that names the proposal digest it was launched from. */
+const PROPOSAL_FILE = 'proposal.json';
+export async function recordProposal(root: string, id: string, digest: string): Promise<void> {
+  await writeFile(path.join(root, id, PROPOSAL_FILE), JSON.stringify({ digest }), 'utf8');
+}
+export type LaunchedFrom = { readonly t: 'no' } | { readonly t: 'yes'; readonly id: string };
+/** The expedition launched from `digest` (a card's launch), if any. An expedition without the
+ * file (direct HTTP, or a crash between its launch and the write) was not launched from a card. */
+export async function launchedFrom(root: string, digest: string): Promise<LaunchedFrom> {
+  for (const id of await shelfIds(root)) {
+    const text = await readFile(path.join(root, id, PROPOSAL_FILE), 'utf8').catch(
+      (e: NodeJS.ErrnoException) => {
+        if (e.code === 'ENOENT') return null;
+        throw e;
+      }
+    );
+    if (text !== null && (JSON.parse(text) as { digest: string }).digest === digest)
+      return { t: 'yes', id };
+  }
+  return { t: 'no' };
+}
