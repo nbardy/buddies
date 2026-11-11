@@ -136,7 +136,7 @@ export function createRuntimeBuilder(dependencies: RuntimeBuilderDependencies): 
         record.creation?.resumedFromConversationId ?? joined?.row?.resumedFrom ?? null,
       parentConversationId: joined?.row?.parent ?? null,
       observedModel: current?.observedModel ?? null,
-      title: current?.title ?? null,
+      title: record.creation?.title ?? current?.title ?? null,
       kind:
         record.kind.t === 'buddy' && buddy
           ? { ...record.kind, context: buddy.context }

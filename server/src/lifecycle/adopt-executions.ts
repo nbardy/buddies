@@ -56,6 +56,7 @@ const GRANTS: {
   readonly [P in PolicyAdoption as P['t']]: (policy: P) => GrantRecord[];
 } = {
   chat: () => [],
+  'run-turn': () => [],
   builder: ({ grant }) => (grant ? [grant] : []),
   buddy: ({ grant }) => [grant],
 };
@@ -64,6 +65,7 @@ const RUNS: {
   readonly [P in PolicyAdoption as P['t']]: (policy: P, conversationId: string) => AdoptedRun[];
 } = {
   chat: () => [],
+  'run-turn': () => [],
   builder: () => [],
   buddy: ({ run }, conversationId) => [
     { runId: run.runId, leaseToken: run.leaseToken, conversationId },

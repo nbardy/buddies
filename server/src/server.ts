@@ -127,6 +127,7 @@ import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocke
 import { BackgroundWork } from './turns/background-work';
 import { type FoundExecution, createExecutionJournals } from './turns/executions';
 import { recordsCarrier } from './turns/intake';
+import { createRunTurn } from './turns/run-turn';
 import { UPLOADS_GC_FIRST_DELAY_MS, UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 import { createUpstreamService } from './upstream/routes';
 
@@ -538,6 +539,7 @@ const buddyPolicyPort = createBuddyPolicyPort({
   },
 });
 const Conversation = createConversationRuntime({
+  adoptPolicy: (record, fallback) => turnCalls.adopt(record, fallback),
   // Chat and Builder owner messages are rows of the records store (turns/intake.ts).
   inputs: recordsCarrier(conversationConfigStore),
   // BuddyTurnPolicy (buddies/turn-policy.ts) reaches the Buddy module only through this port.
@@ -567,6 +569,15 @@ const Conversation = createConversationRuntime({
     idle: (conversationId) => conversationList?.idle(conversationId),
   },
 });
+
+const turnCalls = createRunTurn({
+  directory: path.join(APP_DATA_DIR, 'turn-calls'),
+  ready: initialLoadComplete,
+  records: conversationConfigStore,
+  conversations,
+  Conversation,
+});
+export const { runTurn, cancelTurn } = turnCalls;
 
 registerConversationWebSocket(wss, {
   registry: applicationContext.registry,

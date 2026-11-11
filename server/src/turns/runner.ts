@@ -34,6 +34,7 @@ import type { ExecutionJournals, TurnOwner } from './executions';
 import type { TurnInput } from './input';
 import type { TurnPolicy } from './policy';
 import type { QueueEntry, TurnQueue } from './queue';
+import { turnUsage } from './run-turn';
 import {
   type SubAgentFold,
   type SubAgentHost,
@@ -316,7 +317,7 @@ export class TurnRunner {
         model: turn.config.modelId,
         resumeSessionId: turn.resume ? host.sessionId : undefined,
         forkSessionId: forking ? turn.forkSourceSessionId : undefined,
-        yolo: true,
+        yolo: !extras.capabilities,
         journalDir: execution.dir,
         debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
         reasoningEffort: turn.config.reasoningEffort,
@@ -789,9 +790,12 @@ export class TurnRunner {
     console.log(
       `[${host.id}] Process closed with code ${exitCode} signal=${signal ?? 'none'} (reason=${reason}) after ${durationMs}ms`
     );
-    const observed = this.completedCleanly
-      ? this.showCleanEnd(completion, fold)
-      : this.showCrash(completion, durationMs);
+    const observed = {
+      ...(this.completedCleanly
+        ? this.showCleanEnd(completion, fold)
+        : this.showCrash(completion, durationMs)),
+      usage: turnUsage(fold.requests),
+    };
     await this.perform(
       this.ports.executions.step(execution, { t: 'drained', observed }),
       handle,
@@ -1107,6 +1111,7 @@ const SETTLED: {
 
 /** One turn's event stream folded into its runner: one handler per event type. */
 class EventFold {
+  readonly requests: Omit<ProviderTurnUsage, 'observedAt'>[] = [];
   finalText: string | undefined;
   streamError: Error | null = null;
   // A failing turn.complete fails automation although the stream closed cleanly.
@@ -1120,6 +1125,8 @@ class EventFold {
   async consume(events: AsyncIterable<UnifiedAgentEvent>): Promise<void> {
     for await (const event of events) {
       if (!this.runner.isCurrent(this.runToken)) return;
+      // Preserve usage even during a stopped journal's sealed replay (run-turn cancellation guard).
+      if (event.type === 'usage') this.requests.push(event.usage);
       // Late events after a timeout/stop cannot resurrect the turn.
       if (this.runner.streamClosed) continue;
       this.runner.noteActivity(event);

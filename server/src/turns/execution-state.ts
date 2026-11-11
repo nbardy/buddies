@@ -1,4 +1,5 @@
 import type { TurnTerminalCause } from '../observability';
+import type { Usage } from './run-turn';
 
 // Pattern: persisted-state-machine (docs/patterns.md#persisted-state-machine)
 /**
@@ -48,9 +49,11 @@ export type StopIntent =
 export type ExecutionOutcome =
   /** `text` is all the turn's assistant prose (what a Buddy posts, unchanged). `final` is the
    * harness's last message alone, or `text` when the harness reports none. */
-  | { readonly t: 'complete'; readonly text: string; readonly final: string }
-  | { readonly t: 'failed'; readonly cause: TurnTerminalCause; readonly detail: string }
-  | { readonly t: 'cancelled'; readonly detail: string };
+  (
+    | { readonly t: 'complete'; readonly text: string; readonly final: string }
+    | { readonly t: 'failed'; readonly cause: TurnTerminalCause; readonly detail: string }
+    | { readonly t: 'cancelled'; readonly detail: string }
+  ) & { readonly usage?: Usage };
 
 /** What happens to a live execution. */
 export type ExecutionEvent =
@@ -147,8 +150,11 @@ export const TRANSITIONS: TransitionTable = {
     // The first intent stands: its signal and SIGKILL escalation are already armed.
     stop: stay,
     abandon: () => ({ phase: { t: 'abandoned' }, effects: [] }),
-    drained: ({ intent }) => {
-      const outcome = outcomeOfStop(intent);
+    drained: ({ intent }, { observed }) => {
+      const outcome = {
+        ...outcomeOfStop(intent),
+        ...(observed.usage ? { usage: observed.usage } : {}),
+      };
       return { phase: { t: 'ended', outcome }, effects: [{ t: 'settle', outcome }] };
     },
     landed: notEnded,

@@ -341,6 +341,7 @@ impl Records {
                 r.get::<_, i64>(9)?,
                 r.get::<_, String>(10)?,
                 r.get::<_, String>(11)?,
+                r.get::<_, Option<String>>(12)?,
             ))
         })?;
         let mut out = Vec::new();
@@ -358,6 +359,7 @@ impl Records {
                 config_revision,
                 created_at,
                 updated_at,
+                title,
             ) = row?;
             let kind = decode_json(&id, "kind", &kind)?;
             let current_session = match (cur_provider, cur_session) {
@@ -366,6 +368,7 @@ impl Records {
                 _ => return Err(RecordsError::Corrupt(id, "current_session without provider or sessionId".into())),
             };
             out.push(RecordSummary {
+                title,
                 status: RecordStatus::parse(&status).ok_or_else(|| RecordsError::Corrupt(id.clone(), format!("status {status}")))?,
                 provenance: Provenance::parse(&provenance)
                     .ok_or_else(|| RecordsError::Corrupt(id.clone(), format!("provenance {provenance}")))?,
@@ -700,7 +703,7 @@ impl Records {
 const SUMMARY_SESSIONS: &str = "SELECT conversation_id, provider, session_id FROM conversation_session";
 const SUMMARY_ROWS: &str = "SELECT conversation_id, status, done, kind, provenance, working_directory,
   json_extract(config, '$.provider'), json_extract(current_session, '$.provider'), json_extract(current_session, '$.sessionId'),
-  config_revision, created_at, updated_at FROM conversation_record";
+  config_revision, created_at, updated_at, json_extract(creation, '$.title') FROM conversation_record";
 
 fn parse_provider(id: &str, s: &str) -> Result<Provider> {
     Provider::parse(s).ok_or_else(|| RecordsError::Corrupt(id.to_string(), format!("provider {s}")))

@@ -218,6 +218,7 @@ export const ConversationBranchSchema = z.object({
 export type ConversationBranch = z.infer<typeof ConversationBranchSchema>;
 
 export const ConversationCreationMetadataSchema = z.object({
+  title: z.string().optional(),
   branch: ConversationBranchSchema.optional(),
   commandId: z.string().min(1).optional(),
   fingerprint: z.string().min(1).optional(),

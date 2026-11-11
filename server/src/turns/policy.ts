@@ -12,6 +12,7 @@ import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from './execution-state';
 import type { TurnInput } from './input';
 import type { InputCarrier } from './intake';
+import type { RunTurnAdoption } from './run-turn';
 
 /**
  * What a conversation's KIND adds to its turns. Chosen ONCE per conversation
@@ -41,7 +42,7 @@ export type TurnGate = 'send' | 'enqueue' | 'wait' | 'admitted';
  * policy reads back only its own variant; any other is a typed refusal, never a default.
  */
 // Pattern: sum-types (docs/patterns.md#sum-types)
-export type PolicyAdoption = { t: 'chat' } | BuddyPolicyAdoption;
+export type PolicyAdoption = { t: 'chat' } | BuddyPolicyAdoption | RunTurnAdoption;
 
 /** What a policy adds to a turn's harness request. */
 export type TurnRequestExtras = {
@@ -161,7 +162,7 @@ export function commonToolResultParts(output: unknown): ContentPart[] {
  */
 export abstract class NoRunPolicy {
   readonly maxRuntimeMs = TURN_MAX_RUNTIME_MS;
-  readonly acceptsUserInput = true;
+  readonly acceptsUserInput: boolean = true;
 
   gate(): TurnGate {
     return 'send';
@@ -181,7 +182,7 @@ export abstract class NoRunPolicy {
   armDeadline(): void {}
   streamCompleted(): void {}
   reviewCompleted(): void {}
-  settle(): Promise<void> {
+  settle(_outcome: ExecutionOutcome): Promise<void> {
     return Promise.resolve();
   }
   dropWaitingTurn(): boolean {

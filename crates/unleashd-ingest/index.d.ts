@@ -164,6 +164,7 @@ export interface ConversationConfig {
 }
 
 export interface ConversationCreation {
+  title?: string
   branch?: ConversationBranch
   commandId?: string
   fingerprint?: string
@@ -340,6 +341,7 @@ export type RecordStatus = 'active' | 'deleted'
  * one `get` away.
  */
 export interface RecordSummary {
+  title?: string
   conversationId: string
   status: RecordStatus
   done: boolean

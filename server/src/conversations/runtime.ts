@@ -53,6 +53,7 @@ import {
 } from '../turns/input';
 import { type InputCarrier, decodeEntry, volatileCarrier } from '../turns/intake';
 import { keepAwake } from '../turns/keep-awake';
+import type { PolicyAdoption } from '../turns/policy';
 import { ChatTurnPolicy, type MemorySnapshot, type TurnPolicy } from '../turns/policy';
 import { type QueueEntry, TurnQueue } from '../turns/queue';
 import { TurnRunner, type TurnRunnerPorts } from '../turns/runner';
@@ -112,6 +113,7 @@ export interface ConversationRuntimeDependencies
   inputs?: InputCarrier;
   /** The ingest list (production); absent = a host with no transcripts (the overlay is all). */
   history?: RuntimeHistory;
+  adoptPolicy?(record: PolicyAdoption, fallback: TurnPolicy): TurnPolicy;
 }
 
 /** What the history owns in a runtime's row: label, times and the served history's length. */
@@ -503,7 +505,16 @@ export class Conversation extends EventEmitter {
     }
   }
 
-  private sendAdmittedMessage(prompt: SessionRelativePrompt, input: TurnInput): void {
+  startTurn(content: string, policy: TurnPolicy, config: ResolvedExecutionConfig): void {
+    this._policy = policy;
+    this.sendAdmittedMessage(sameEitherWay(content), unknownInput(), config);
+  }
+
+  private sendAdmittedMessage(
+    prompt: SessionRelativePrompt,
+    input: TurnInput,
+    config?: ResolvedExecutionConfig
+  ): void {
     const refreshBriefing = this._policy.prepare(input);
     const fork = this.chatForkSource();
     if (fork.t === 'rejected') {
@@ -516,7 +527,7 @@ export class Conversation extends EventEmitter {
     const content = resume ? prompt.resumed : prompt.fresh;
 
     const attemptId = this.runner.beginAttempt();
-    const executionConfig = this.preflightExecution();
+    const executionConfig = config ?? this.preflightExecution();
     if (!executionConfig) return;
 
     // History keeps the clean text; the provider gets the policy's prompt (none after a
@@ -566,6 +577,7 @@ export class Conversation extends EventEmitter {
       body: { t: 'text', text: owner.userMessage.text },
       timestamp: new Date(owner.userMessage.timestamp),
     });
+    this._policy = this.env.deps.adoptPolicy?.(owner.policy, this._policy) ?? this._policy;
     this._policy.adopt(owner.policy, { attemptId: owner.attemptId, messageStart: 0 });
     this.runner.adopt(owner, handle, phase, effects);
   }
@@ -655,7 +667,7 @@ export class Conversation extends EventEmitter {
     if (this._policy.stop()) this.stopOwnedTurn();
   }
 
-  private stopOwnedTurn(): void {
+  stopOwnedTurn(): void {
     if (this._policy.dropWaitingTurn()) {
       this.emit('buddy-turn-failed', 'Stopped while waiting for a run slot');
     }

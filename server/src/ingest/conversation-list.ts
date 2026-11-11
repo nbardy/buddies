@@ -104,6 +104,7 @@ function labelOf(
 ): string {
   const current = currentSession(record, sessions);
   return (
+    record.title?.trim() ||
     current?.title?.trim() ||
     runtime?.title?.trim() ||
     sessions.find((session) => session.label)?.label ||
@@ -196,7 +197,7 @@ export function bareRowOf(record: RecordSummary, workingDirectory: string, creat
     resumedFrom: creation.resumedFromConversationId ?? null,
     provider: record.provider,
     cwd: workingDirectory,
-    label: conversationLabel(undefined, EMPTY),
+    label: conversationLabel(record.title, EMPTY),
     createdAt,
     activityAt: createdAt,
     messageCount: 0,

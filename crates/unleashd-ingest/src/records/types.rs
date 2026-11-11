@@ -173,6 +173,8 @@ pub struct ConversationBranch {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConversationCreation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<ConversationBranch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command_id: Option<String>,
@@ -283,6 +285,7 @@ pub struct SessionKey {
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordSummary {
+    pub title: Option<String>,
     pub conversation_id: String,
     pub status: RecordStatus,
     pub done: bool,
