@@ -6,6 +6,7 @@ import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { ChannelLoader } from './ChannelLoader';
 import { channelLinkPath } from './channel-link';
 
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
 // Fix guard: sidebar and directory links still address /chat/:id. Resolve Builder chats
 // into their workspace's Channels route so these entry points cannot revive the old UI.
 export function BuilderChatRoute({ id, children }: { id: string; children: ReactNode }) {

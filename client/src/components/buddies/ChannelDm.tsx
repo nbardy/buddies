@@ -134,6 +134,7 @@ const profileOf = (config: ConversationConfig) => ({
 const saveBuddyDefault = (buddyId: string, config: ConversationConfig) =>
   buddyWrite('buddy.update', { buddyId }, profileOf(config));
 
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
 // Fix guard: Builder was explicitly routed to the legacy chat on desktop and phone.
 // Share DM history and composition without giving setup chats a Buddy's chain or defaults.
 // Guard: channel-dm.test.tsx, Builder stays in Channels on both shells.
