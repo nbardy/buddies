@@ -1,6 +1,8 @@
 # Expeditions
 
-A crew Buddy runs one attempt per turn toward a fuzzy goal, in a fresh Cambium workspace, until
-the checks pass (or the owner says pass), the budget or deadline runs out, or the owner stops it.
-The design and its known limits: [docs/expeditions-lean-design.md](../docs/expeditions-lean-design.md).
-When to use one instead of a workflow or a swarm: [workflows-vs-expeditions.md](./workflows-vs-expeditions.md).
+The [keyed expedition system](../docs/expeditions/keyed/v1/DESIGN.md) runs one-file plans with
+judged calls, leader check-ins and owner steering. Start with its
+[runnable examples](../docs/expeditions/keyed/v1/examples/README.md).
+
+The old retry-loop host was deleted on 2026-11-11 after its four records were stopped and retired.
+The retired data stays on disk, unread; no migration or cleanup runs.

@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import { rosterHiddenBuddyIdsAtom } from '../../atoms/buddy-visibility';
+import { archivedBuddyIdsAtom } from '../../atoms/buddy-visibility';
 import type { BuddyOverview } from '../../components/buddies/types';
 import {
   type DirectoryEntry,
@@ -17,7 +17,7 @@ export interface MobileBuddyGroup {
 // per workspace (a Buddy has exactly one home workspace), workspaces by name.
 export function mobileBuddyDirectoryAtom(overview: BuddyOverview | null, query: string) {
   return atom((get) => {
-    const hidden = get(rosterHiddenBuddyIdsAtom);
+    const hidden = get(archivedBuddyIdsAtom);
     const entries = directoryEntries(overview ?? []).filter((entry) => !hidden.has(entry.buddy.id));
     const filtered = filterDirectoryEntries(entries, query);
     const groups = new Map<string, MobileBuddyGroup>();

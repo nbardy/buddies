@@ -1,5 +1,7 @@
 # Expeditions v1: the smallest version worth running
 
+2026-11-11: the old host was deleted. Its four records were stopped and retired through its own API on 2026-11-11; they remain on disk under `~/.agent-viewer/expeditions/.retired/`, which nothing reads any more. No migration or cleanup touches them.
+
 Status: **built and connected to the server; live whenever Buddy execution is enabled,
 2026-11-11. Three integrated runs exposed harness failures; the small real-agent conformance
 suite now passes. See [CONNECT_PLAN.md](CONNECT_PLAN.md) §10 for evidence and remaining gaps.** `UNLEASHD_EXPEDITIONS_V1` was removed on 2026-11-11 at the owner’s request; the execution gate alone selects the mode. The kernel is
@@ -273,9 +275,9 @@ After the deadline no agent or command starts; `ask` and the `done` evaluation s
 | Run an agent on any harness, journaled, surviving restarts | exists: `vendor/agent-cli-tool`, Buddy runs, execution adoption |
 | Worker runs on a named Buddy or a chosen model | exists: `server/src/buddies/worker-config.ts` |
 | Steer a running turn | exists: `server/src/buddies/harness-steering.ts` |
-| Checkout per unit of work | exists: `server/src/expeditions/cambium.ts` |
-| Host-run checks | exists: `server/src/expeditions/checks.ts` |
-| Atomic record writes; owner chat commands | exists: `record.ts`, `brief.ts` |
+| Checkout per unit of work | exists: `server/src/expeditions-v1/cambium.ts` |
+| Host-run checks | exists: `server/src/expeditions-v1/checks.ts` |
+| Atomic log writes; owner chat commands | `expedition-kernel/log-store.ts`, `expeditions-v1/owner/words.ts` |
 | The log and reconcile | **new** |
 | Plan runner (child process), dry run and diff | **new** |
 | Budget and pool reservation | **new** |
@@ -283,7 +285,7 @@ After the deadline no agent or command starts; `ask` and the `done` evaluation s
 | The plain-object authoring boundary (`expedition`, optional `step`) | **new**, small |
 | Timeline view | **new**, a fold over the log |
 
-It replaces `server/src/expeditions/host.ts` and the per-expedition crew Buddy.
+It replaced the old retry-loop host and the per-expedition crew Buddy (deleted 2026-11-11).
 
 ## 8. Build order, and how we will know
 

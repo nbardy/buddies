@@ -1,5 +1,7 @@
 # Expeditions: the nine use cases, as the repos show them
 
+Status: superseded by the [keyed expedition system](../keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: **research brief, 2026-11-09.** Read-only survey of `~/git/wave_sim`,
 `~/git/room-runners-arena-lib`, `~/git/nova_docs`, `~/git/geometry_book`, this repo and the
 two expedition records in `~/.agent-viewer/expeditions/`. Nothing was run. Every claim about
@@ -7,7 +9,7 @@ existing code or results cites a path. Paths starting `wave_sim/`, `rr/` (room-r
 or `buddies/` are relative to `~/git/`. Numbers are copied from the cited records, not
 re-measured.
 
-Companion docs: `docs/expeditions-lean-design.md` (today's host, about 2,000 lines in
+Companion docs: `historical retry-loop design (git d7bb99a)` (today's host, about 2,000 lines in
 `server/src/expeditions/`), `docs/expeditions-leader-design.md` (the leader/rounds proposal).
 
 ## 0. Summary table
@@ -626,7 +628,7 @@ Each requirement names the cases that force it.
 9. **Compute classes with concurrency caps** (2, 3, 5): local GPU = 1 runner; the machine-wide
    compile lock = 1; Modal = N concurrent under a dollar ceiling and scale-to-zero; plus "idle
    host required" for timing measurements. Today checks run one at a time host-wide
-   (`expeditions-lean-design.md` §11), which would serialize case 2's 48-seed A/B fan-out and
+   (the retry-loop design at git d7bb99a, §11), which would serialize case 2's 48-seed A/B fan-out and
    case 3's Modal population for no reason.
 10. **Evaluation cost spans five orders of magnitude**: ~1 s geometry suites, ~6.5 s per match,
     ~2.5 min Modal smoke (mostly setup), 10–30 min GPU scenes, hours of synthesis. Scheduling and

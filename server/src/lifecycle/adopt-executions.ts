@@ -1,6 +1,5 @@
 import type { ExecutionHandle } from '@nbardy/agent-cli';
 import type { GrantRecord } from '../buddies/grants';
-import type { CrewRegistry } from '../buddies/policy-port';
 import type { AdoptedRun } from '../buddies/runner';
 import { forEachConcurrently } from '../ingest/conversation-list';
 import {
@@ -31,8 +30,6 @@ export interface AdoptionPorts {
   discard(found: FoundExecution): void;
   /** An open attempt whose execution cannot be adopted ends as it always did at a restart. */
   attemptInterrupted(attemptId: string): void;
-  /** Expedition crews: their turns are never adopted (`restartOf`). */
-  crews: CrewRegistry;
   logger: Pick<Console, 'log' | 'warn' | 'error'>;
 }
 
@@ -169,8 +166,6 @@ const ADOPT: {
   },
   follow: async (item, { effects }, ports) => {
     const { owner } = item;
-    const restart = restartOf(owner, ports.crews.crewBuddyIds());
-    if (restart.t === 'fresh') return refuse(item, restart.reason, ports);
     const conversation = await ports.conversation(owner.conversationId);
     if (!conversation) return refuse(item, 'its conversation is gone', ports);
     try {
@@ -185,40 +180,3 @@ const ADOPT: {
     return RUNS[owner.policy.t](owner.policy as never, owner.conversationId);
   },
 };
-
-// Pattern: sum-types (docs/patterns.md#sum-types)
-/**
- * Whether a live turn survives a restart. Regression: owner 2026-11-03: crews restart on new
- * sessions. An expedition crew's turn is never adopted: the adopted CLI kept the old backend's
- * harness, so `fresh` goes to `refuse` (its process group is killed, its attempt ends
- * interrupted) and the expedition replans the work on a new session. Every other turn is adopted.
- */
-export type Restart = { t: 'adopt' } | { t: 'fresh'; reason: string };
-
-const ADOPT_TURN: Restart = { t: 'adopt' };
-
-export function restartOf(owner: TurnOwner, crews: ReadonlySet<string>): Restart {
-  return RESTART[owner.policy.t](owner.policy as never, crews);
-}
-
-const RESTART: {
-  readonly [P in PolicyAdoption as P['t']]: (policy: P, crews: ReadonlySet<string>) => Restart;
-} = {
-  chat: () => ADOPT_TURN,
-  builder: () => ADOPT_TURN,
-  buddy: ({ run }, crews) =>
-    crews.has(run.context.buddyId)
-      ? { t: 'fresh', reason: `crew ${run.context.buddyId} restarts on a new session` }
-      : ADOPT_TURN,
-};
-
-/**
- * Graceful shutdown: the journals a crew owns, to discard (kill and remove) before exit. Every
- * other turn is left running for the next backend to adopt (lifecycle/shutdown.ts).
- */
-export function crewExecutions(
-  found: readonly FoundExecution[],
-  crews: ReadonlySet<string>
-): FoundExecution[] {
-  return found.filter((item) => item.t === 'turn' && restartOf(item.owner, crews).t === 'fresh');
-}

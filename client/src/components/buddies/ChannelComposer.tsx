@@ -86,7 +86,6 @@ export function ChannelComposer({
   autoFocus = false,
   submit,
   mentionPlacement = 'above',
-  hint,
   onPosted,
   editPost,
   onCancel,
@@ -100,9 +99,6 @@ export function ChannelComposer({
   autoFocus?: boolean;
   submit: ComposerSubmit;
   mentionPlacement?: 'above' | 'below';
-  /** The idle hint line; absent: the submit keys and @ mentions (the expedition chat names its
-   * commands instead: a 1:1 manager chat has nobody to mention). */
-  hint?: ReactNode;
   onPosted(result: PostResult): void;
   editPost?: Post;
   onCancel?(): void;
@@ -552,7 +548,7 @@ export function ChannelComposer({
           ) : ambiguous.length > 0 ? (
             `${ambiguous[0]} names more than one Buddy; pick one from the @ menu`
           ) : mentions.length > 0 ? null : (
-            (hint ?? <SubmitHint submit={submit} />)
+            <SubmitHint submit={submit} />
           )}
         </span>
         {onCancel && (

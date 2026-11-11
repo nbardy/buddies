@@ -16,7 +16,6 @@ register(
 const { KeyedExpeditionView } = await import('../src/components/buddies/KeyedExpeditionView');
 const { RailExpeditions, DESKTOP_ROW } = await import('../src/components/buddies/ExpeditionRail');
 const { KEYED_URL, keyedUrl } = await import('../src/components/buddies/keyed-api');
-const { EXPEDITIONS_URL } = await import('../src/components/buddies/expedition-api');
 const { loadResource } = await import('../src/atoms/resources');
 const { jotaiStore } = await import('../src/atoms/store');
 const { Provider } = await import('jotai');
@@ -122,8 +121,6 @@ test('a 404 or 503 reads as unavailable, not as a crash', async () => {
 });
 
 test('the rail shows nothing extra when the list route is missing', async () => {
-  await loadResource({ key: EXPEDITIONS_URL, load: async () => [] });
-  await loadResource({ key: `${EXPEDITIONS_URL}/retired`, load: async () => [] });
   await loadResource({
     key: KEYED_URL,
     load: async () => Promise.reject(new Error('HTTP 503')),
@@ -134,8 +131,6 @@ test('the rail shows nothing extra when the list route is missing', async () => 
 // The row says whether the owner is wanted (KeyedRow.needsYou): the rail reads no view per row,
 // so nothing is primed here. Before step 6 it polled every live row's view to learn it.
 test('the rail marks "needs you" from the row, and lists only its own workspace', async () => {
-  await loadResource({ key: EXPEDITIONS_URL, load: async () => [] });
-  await loadResource({ key: `${EXPEDITIONS_URL}/retired`, load: async () => [] });
   const quiet = {
     ...runningWithAsks,
     id: 'ex-quiet',

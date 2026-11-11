@@ -4,7 +4,7 @@ import type { HostCommands } from '../buddies/routes';
 import { expandHome } from '../expedition-kernel/contract';
 import type { Expedition, OwnerResult } from '../expedition-kernel/kernel';
 import { keyedRowOf, keyedViewOf } from '../expedition-kernel/projection';
-import { type Resolved, resolveBase } from '../expeditions/checks';
+import { type Resolved, resolveBase } from './checks';
 import { type Digested, digestOf } from './digest';
 import type { AskAnswer } from './executor/asks';
 import type { KeyedHost, KeyedHostDeps } from './host';

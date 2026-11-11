@@ -12,7 +12,7 @@ import {
 import { createConversation } from '../atoms/commands';
 import { commandsAtom, connectionAtom, listField, pendingCreatesOf } from '../atoms/conversations';
 import { openSetupAt, prefsAtom, toggleGalleryCollapsed } from '../atoms/ui';
-import { useBuddyOverview, useExpeditionCrews } from '../hooks/useBuddyData';
+import { useBuddyOverview } from '../hooks/useBuddyData';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useScrollActivity } from '../hooks/useScrollActivity';
 import { shortenHomePath } from '../utils/directories';
@@ -91,7 +91,6 @@ export function Sidebar() {
   const [isOpeningBuddyBuilder, setIsOpeningBuddyBuilder] = useState(false);
   const [buddyBuilderError, setBuddyBuilderError] = useState<string | null>(null);
   const { data: buddyOverview } = useBuddyOverview(30_000);
-  useExpeditionCrews();
   const [, setBuddyOverview] = useAtom(buddySidebarOverviewAtom);
   useEffect(() => {
     if (buddyOverview) setBuddyOverview(buddyOverview);

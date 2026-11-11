@@ -2,7 +2,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { attachExecution, executeCommand, getHarness } from '@nbardy/agent-cli';
+import { attachExecution, executeCommand } from '@nbardy/agent-cli';
 import { type SessionRow, defaultRoots } from '@unleashd/ingest';
 import { CHAT_KIND, ProviderSchema, encodeRows, kindBuddyContext } from '@unleashd/shared';
 import compression from 'compression';
@@ -36,7 +36,7 @@ import { admitExecution, decideExecutionGate } from './buddies/execution-gate';
 import { createGrants } from './buddies/grants';
 import { type McpEndpoint, startMcpEndpoint } from './buddies/mcp';
 import { createMemoryReviewer } from './buddies/memory-review';
-import { type CrewRegistry, createBuddyPolicyPort } from './buddies/policy-port';
+import { createBuddyPolicyPort } from './buddies/policy-port';
 import { type HostCommands, registerBuddyRoutes } from './buddies/routes';
 import { type AdoptedRun, type RunnerHost, createRunner } from './buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from './buddies/worker-config';
@@ -74,8 +74,6 @@ import {
 } from './conversations/runtime';
 import { replaceRuntimeConfig } from './conversations/runtime-config';
 import { devPorts } from './dev-ports';
-import { type ExpeditionHost, createExpeditionHost } from './expeditions/host';
-import { registerExpeditionRoutes } from './expeditions/routes';
 import { callDirectory, expeditionsV1Root } from './expeditions-v1/call-directory';
 import { CALL_TIMING } from './expeditions-v1/executor/calls';
 import { registerKeyedExpeditionRoutes } from './expeditions-v1/routes';
@@ -96,7 +94,7 @@ import { type BootedIngest, bootIngest } from './ingest/boot';
 import { type ConversationList, forEachConcurrently } from './ingest/conversation-list';
 import { currentIngest } from './ingest/instance';
 import { createRuntimeBuilder } from './ingest/runtimes';
-import { adoptExecutions, crewExecutions, liveGrants } from './lifecycle/adopt-executions';
+import { adoptExecutions, liveGrants } from './lifecycle/adopt-executions';
 import { type ShutdownController, registerShutdownHandlers } from './lifecycle/shutdown';
 import { runServerStartup } from './lifecycle/startup';
 import { registerStaticClient } from './lifecycle/static-client';
@@ -122,7 +120,7 @@ import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { createDependencyChecks, registerDependencyRoutes } from './providers/dependencies';
-import { installedAgent, onPath } from './providers/installed-agent';
+import { installedAgent } from './providers/installed-agent';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
@@ -138,7 +136,7 @@ const app = express();
 const server = http.createServer(app);
 const APP_DATA_DIR = appDataDirectory();
 // Whether this backend may start agents (copied-store guard): decided once, read by the Buddy
-// runner, both expedition hosts and the keyed expeditions' mode.
+// runner, the expedition host and the keyed expeditions' mode.
 const EXECUTION_GATE = decideExecutionGate();
 // Every provider execution is journaled here so the next backend can adopt it (turns/executions.ts).
 const executionJournals = createExecutionJournals(path.join(APP_DATA_DIR, 'executions'));
@@ -357,8 +355,7 @@ const backgroundWork = new BackgroundWork();
 // A grant lives as long as its run's lease at most; settle and turn end revoke it sooner.
 const buddyGrants = createGrants({ ttlMs: TURN_MAX_RUNTIME_MS });
 // A turn's directory: an expedition call runs in its own directory (expeditions-v1/
-// call-directory.ts; inert for any run whose request is not an `expedition_call`), an expedition
-// attempt run in its own worktree (expeditions host.ts `turnDirectory`), every other Buddy turn in
+// call-directory.ts; inert for any run whose request is not an `expedition_call`), every other Buddy turn in
 // its workspace root.
 const expeditionCallsRoot = expeditionsV1Root(APP_DATA_DIR);
 const buddyBriefings = createBriefings(
@@ -366,11 +363,10 @@ const buddyBriefings = createBriefings(
   () => installedAgent(),
   (context) =>
     callDirectory(buddiesCore, expeditionCallsRoot, context, () =>
-      expeditionHost ? expeditionHost.turnDirectory(context) : Promise.resolve(WORKSPACE_DIRECTORY)
+      Promise.resolve(WORKSPACE_DIRECTORY)
     )
 );
 let buddyMcp: McpEndpoint | null = null;
-let expeditionHost: ExpeditionHost | null = null;
 // Keyed expeditions: live with Buddy execution enabled; otherwise read-only and inert.
 const keyedExpeditions = createKeyedExpeditions(decideKeyedMode(EXECUTION_GATE), {
   core: buddiesCore,
@@ -384,12 +380,6 @@ const keyedExpeditions = createKeyedExpeditions(decideKeyedMode(EXECUTION_GATE),
   logger: console,
   timing: { ...CALL_TIMING, usageWaitMs: EXPEDITION_CALL_USAGE_WAIT_MS },
 });
-// The expedition crews: adoption, session scope and shutdown ask it (policy-port.ts CrewRegistry).
-// The host answers once `initialize` made it; before that no ledger is read, so no Buddy crews.
-const NO_CREWS: ReadonlySet<string> = new Set();
-const crewRegistry: CrewRegistry = {
-  crewBuddyIds: () => expeditionHost?.crewBuddyIds() ?? NO_CREWS,
-};
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {
   if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
   return buddyMcp.spec(grant);
@@ -546,7 +536,6 @@ const buddyPolicyPort = createBuddyPolicyPort({
     if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');
     return { hookUrl: buddyMcp.hookUrl };
   },
-  crews: crewRegistry,
 });
 const Conversation = createConversationRuntime({
   // Chat and Builder owner messages are rows of the records store (turns/intake.ts).
@@ -746,7 +735,7 @@ buddyEvents.on((event) => {
   if (event.kind === 'changed') buddiesChanged();
 });
 
-/** An archived Buddy's conversations stop: the owner's Archive and an expedition's retire. */
+/** An archived Buddy's conversations stop. */
 const onBuddyArchived = (buddyId: string) => {
   applicationContext.broadcast({ type: 'buddy_archived', buddyId });
   for (const conversation of conversations.values()) {
@@ -758,14 +747,9 @@ const onBuddyArchived = (buddyId: string) => {
 };
 
 registerKeyedExpeditionRoutes(app, keyedExpeditions);
-registerExpeditionRoutes(app, () => expeditionHost);
-// An owner post the expedition hosts read instead of waking a Buddy. The keyed host asks first:
-// it owns only replies under roots it posted (its books are loaded before the server listens).
-// Until the old host boots there is no expedition chat to consume a command from.
+// The keyed host consumes owner replies under its own roots before a Buddy can wake.
 const hostCommands: HostCommands = {
-  consumes: (channelId, body, thread) =>
-    keyedExpeditions.consumes(channelId, body, thread) ||
-    (expeditionHost?.consumes(channelId, body) ?? false),
+  consumes: (channelId, body, thread) => keyedExpeditions.consumes(channelId, body, thread),
 };
 registerBuddyRoutes(app, {
   core: buddiesCore,
@@ -894,7 +878,6 @@ shutdownController = registerShutdownHandlers(
       upstream.stop();
       dependencyChecks.close();
       await Promise.all([turnAttemptJournal.flush(), errorJournal.flush(), flushRouteLatency()]);
-      expeditionHost?.close();
       // Detaches every keyed kernel (kills its plan process) and kills command process groups;
       // Buddy turns go on and are adopted by the next backend.
       await keyedExpeditions.close();
@@ -904,11 +887,6 @@ shutdownController = registerShutdownHandlers(
         list.stop();
         await ingest.stop();
       }
-    },
-    discardCrewTurns: () => {
-      // discardNow, not discard: process.exit follows at once, so a grace timer never fires.
-      for (const found of crewExecutions(executionJournals.scan(), crewRegistry.crewBuddyIds()))
-        executionJournals.discardNow(found);
     },
     exit: (code = 0) => process.exit(code),
     kill: () => process.kill(process.pid, 'SIGKILL'),
@@ -992,18 +970,6 @@ void runServerStartup(
         foundExecutions = execution.scan();
         for (const grant of liveGrants(foundExecutions)) buddyGrants.adopt(grant);
       });
-      // Expeditions (docs/expeditions-lean-design.md): records load here; inert on a copied store.
-      expeditionHost = timeBootPhase('expeditions', () =>
-        createExpeditionHost({
-          core: buddiesCore,
-          events: buddyEvents,
-          root: path.join(APP_DATA_DIR, 'expeditions'),
-          gate: EXECUTION_GATE,
-          installed: (provider) => onPath(getHarness(provider).binary, process.env),
-          onBuddyArchived,
-          onChannelArchived: (channelId) => channelChanged(channelId, 'all'),
-        })
-      );
       // Keyed expeditions' owner books, before the server listens: an owner reply in one of their
       // threads is consumed from the first request on (live mode only; read-only does nothing).
       await keyedExpeditions.load(timeBootPhaseAsync);
@@ -1017,7 +983,6 @@ void runServerStartup(
           messages: async (id, page) => (await listReady).page(id, page),
           openBranch: (chat) => buddyCreationService.openBranch(chat),
           backgroundWork,
-          expeditions: expeditionHost ?? undefined,
           keyed: keyedExpeditions,
           portFile: path.join(APP_DATA_DIR, 'buddy-mcp.json'),
         })
@@ -1101,15 +1066,6 @@ void runServerStartup(
       // `ingest_start` (initialize) is the work; this phase is only the wait left over after the rest.
       await timeBootPhaseAsync('conversation_list_wait', () => ingestStarting);
       await timeBootPhaseAsync('recovery', () => runtimeBuilder.recover());
-      // Crews restart on new sessions (owner 2026-11-03): every unsettled crew run is cancelled
-      // and its attempt ends interrupted BEFORE adoption refuses the crew's turns and before the
-      // runner starts, so no crew run resumes in its old conversation (expeditions/host.ts).
-      await timeBootPhaseAsync('expeditions_interrupt', async () => {
-        await buddiesReady;
-        await expeditionHost?.interruptBootLive();
-      }).catch((error) =>
-        console.error('[expeditions] Crew runs were not interrupted at boot:', error)
-      );
       // Before the Buddy runner recovers or claims anything (lifecycle/adopt-executions.ts).
       const adoptionStarted = performance.now();
       adoptedRuns = await adoptExecutions(foundExecutions, {
@@ -1128,12 +1084,9 @@ void runServerStartup(
             state: 'interrupted',
             terminalCause: 'server_restart',
           }),
-        crews: crewRegistry,
         logger: console,
       });
       bootPhase('adoption', performance.now() - adoptionStarted);
-      // Expedition ticks start only now: none observes a crew run the boot cancelled.
-      expeditionHost?.start();
       // Keyed expeditions: after adoption (their calls' turns were adopted, never re-run) and
       // before the Buddy runner starts; recovery re-issues their starts (§7.1). Live mode only.
       await keyedExpeditions

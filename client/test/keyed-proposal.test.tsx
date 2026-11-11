@@ -192,8 +192,6 @@ test('a chat post is a proposal card only when its evidence parses', () => {
     expeditionCardOf(post('expedition', [`${keyed.PROPOSAL_EVIDENCE}{"file":"/x"}`])).t,
     'none'
   );
-  assert.deepEqual(expeditionCardOf(post('expedition', ['expedition:old-1'])), {
-    t: 'card',
-    id: 'old-1',
-  });
+  // Retired drafts stay plain post text; only keyed proposals have a card after cut-over.
+  assert.deepEqual(expeditionCardOf(post('expedition', ['expedition:old-1'])), { t: 'none' });
 });

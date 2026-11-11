@@ -1,5 +1,7 @@
 # Expeditions V3: a minimal kernel (Jobs on Pools over a Ledger)
 
+Status: superseded by the [keyed expedition system](keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: **design, revision 2, 2026-11-09. Not built.** Derived from first principles from the
 nine owner use cases. Inputs: `docs/expeditions/research/{use-cases,prior-art,external}.md`;
 conventions: `docs/design-specs.md`; checked model: `docs/specs/expedition-v3.qnt`. Revision 2

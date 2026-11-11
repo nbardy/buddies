@@ -3,7 +3,7 @@ import { type ReactNode, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { createBuddyViaBuilder } from '../../components/buddies/create-buddy-builder';
 import { initials } from '../../components/buddies/ui-contract';
-import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
+import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 import { mobileBuddyDirectoryAtom } from '../atoms/buddies';
 import {
@@ -19,7 +19,6 @@ export function BuddiesMobile() {
   const chatRouteState = useMemo(() => mobileConversationRouteState(location), [location]);
   const overviewFetch = useBuddyOverview();
   const overview = overviewFetch.data;
-  useExpeditionCrews();
   const [query, setQuery] = useState('');
   const directoryAtom = useMemo(() => mobileBuddyDirectoryAtom(overview, query), [overview, query]);
   const { groups, total, matched } = useAtomValue(directoryAtom);

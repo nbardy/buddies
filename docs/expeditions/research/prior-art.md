@@ -1,5 +1,7 @@
 # Expeditions prior art: oompa, today's expeditions, Workflows, AI-OS
 
+Status: superseded by the [keyed expedition system](../keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: research brief, 2026-11-09. Read-only survey to ground the v2 leader design
 (`docs/expeditions-leader-design.md`). Every claim cites a path; numbers were measured
 on 2026-11-09 unless dated otherwise.
@@ -10,7 +12,7 @@ Sources read:
   docs/LEAN_DESIGN_STATUS.md, agent_notes/2026-10-*.md, notes/2025-01-myth_of_long_running_tasks.md,
   schemas/*.json, config/prompts/**}`
 - real oompa run logs: `~/git/wave_sim/runs/*/{cycles,reviews}/*.json` (107 run dirs)
-- buddies: `docs/expeditions-lean-design.md`, `docs/expeditions-leader-design.md`,
+- buddies: `historical retry-loop design (git d7bb99a)`, `docs/expeditions-leader-design.md`,
   `expeditions/workflows-vs-expeditions.md`, `server/src/expeditions/*.ts`,
   `shared/src/expedition.ts`, `server/src/buddies/harness-steering.ts`, `server/src/swarm/*`,
   `docs/turn-lifecycle.md#execution-adoption`, `docs/patterns.md#lease-heartbeat`,
@@ -149,7 +151,7 @@ Read from the DualSPHysics report (`.retired/one-qualified-dualsphysi-404846.jso
 
 ### 3.2 Generation 2: lean host (today, `server/src/expeditions/*`, 2,038 lines + shared 311)
 
-Design `docs/expeditions-lean-design.md`; built `bcb2f5f` + 2026-11-03 fixes.
+Design `historical retry-loop design (git d7bb99a)`; built `bcb2f5f` + 2026-11-03 fixes.
 - **Shape:** one crew Buddy; each attempt = one crew turn in a fresh Cambium tree from `baseSha`;
   brief = goal + done + one prior line per attempt (result, `Lesson:` sentence, branch, salvage ref)
   (`brief.ts`). Judge = host checks (argv, exit 0, detached checkout of the turn-end sha with oracle

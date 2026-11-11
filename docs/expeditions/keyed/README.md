@@ -1,5 +1,7 @@
 # Keyed expeditions: three final designs
 
+Status: superseded by the [keyed expedition system](v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: **v1 is built and on main, 2026-11-11:** [built system](v1/DESIGN.md) and
 [runnable one-file examples](v1/examples/README.md). The three designs below are the
 2026-11-10 research record; their code blocks are sketches. Conventions: `../../design-specs.md`. Background: `../fresh-keyed-scripts.md` (the

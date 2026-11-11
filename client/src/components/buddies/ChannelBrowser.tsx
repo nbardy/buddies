@@ -5,7 +5,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { buddyRailFamily, channelRailFamily } from '../../atoms/channel-rail';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { openSetupAt } from '../../atoms/ui';
-import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
+import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { rowBuddy } from '../../utils/conversation-row';
 import { Chat } from '../Chat';
@@ -55,7 +55,6 @@ import { channelLinkPath } from './channel-link';
 import { plainChannelText } from './channel-text';
 import { type ChannelsView, channelsHref, channelsView } from './channels-view';
 import { DESKTOP_ROW, RailExpeditions } from './ExpeditionRail';
-import { ExpeditionView, RetiredExpeditionView } from './ExpeditionView';
 import { GroupDmNotice } from './GroupDmNotice';
 import { HighlightRow } from './HighlightRow';
 import { KeyedExpeditionView } from './KeyedExpeditionView';
@@ -669,7 +668,6 @@ export function ChannelBrowser({
   const archived = useArchivedChannels(workspaceId);
   const rail = useAtomValue(channelRailFamily(workspaceId));
   const buddyRail = useAtomValue(buddyRailFamily(directory.activeMembers));
-  useExpeditionCrews();
   useWarmChannelPosts(rail.channels);
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
@@ -887,14 +885,8 @@ export function ChannelBrowser({
               onConversation={openDm}
             />
           ),
-          expedition: (id) => (
-            <ExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
-          ),
           keyed: (id) => (
             <KeyedExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
-          ),
-          retired: (id) => (
-            <RetiredExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
           ),
           threads: () => (
             <ThreadsPane
@@ -963,9 +955,7 @@ type MainPanes = {
   home(): ReactNode;
   workers(buddyId: string): ReactNode;
   dm(conversationId: string): ReactNode;
-  expedition(id: string): ReactNode;
   keyed(id: string): ReactNode;
-  retired(id: string): ReactNode;
   threads(): ReactNode;
   channel(): ReactNode;
   task(taskId: string, channelId: string): ReactNode;
@@ -980,12 +970,8 @@ function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
       return panes.workers(view.buddyId);
     case 'dm':
       return panes.dm(view.conversationId);
-    case 'expedition':
-      return panes.expedition(view.id);
     case 'keyed':
       return panes.keyed(view.id);
-    case 'retired':
-      return panes.retired(view.id);
     case 'threads':
       return panes.threads();
     case 'task':

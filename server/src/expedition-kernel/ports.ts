@@ -2,7 +2,7 @@ import type { keyed } from '@unleashd/shared';
 import type { State } from './core';
 
 // What the kernel needs from the outside world. The real Executor runs agent calls as Buddy
-// worker runs through vendor/agent-cli-tool, commands through expeditions/checks.ts and asks as
+// worker runs through vendor/agent-cli-tool, commands through expeditions-v1/checks.ts and asks as
 // owner posts; the real Leader is a turn of the contract's leader Buddy. Tests script all four.
 
 /** The kernel's read view: the folded state plus its timeline, both pure functions of the log.

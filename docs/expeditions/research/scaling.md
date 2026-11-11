@@ -1,5 +1,7 @@
 # When going wide helps: scaling evidence for expeditions
 
+Status: superseded by the [keyed expedition system](../keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Checked against the primary sources on 2026-11-09. Every expedition design must follow the
 decision rule in §4. Each design doc carries a worked example of it (its "Scaling example"
 section).

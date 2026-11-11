@@ -1,17 +1,16 @@
 import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { Workspace } from '@unleashd/buddies-core';
-import { type Origin, keyed } from '@unleashd/shared';
+import { keyed } from '@unleashd/shared';
 import { z } from 'zod';
 import { buddyActor } from '../buddies/core';
 import type { BuddyGrant } from '../buddies/grants';
 import type { ToolDeps } from '../buddies/mcp';
-import { createOwnerThread, placeOf } from '../buddies/owner-thread';
+import { type Origin, createOwnerThread, placeOf } from '../buddies/owner-thread';
 import { digestOf } from './digest';
 import type { KeyedExpeditions } from './service';
 
-// The keyed half of the `expedition` Buddy tool (CONNECT_PLAN §5, step 8; the other half is
-// expeditions/tool.ts). A Buddy writes the expedition file with its own file tools and calls
+// The `expedition` Buddy tool (CONNECT_PLAN §5, step 8). A Buddy writes the expedition file with its own file tools and calls
 // `propose`; the tool runs the host's gates, answers with what they found, and on a clean pass posts
 // ONE card where the request was made. LAUNCH IS NEVER HERE (§7.2, D8): the card's button calls the
 // owner's HTTP route, and a Buddy can neither launch, steer nor stop; `status` and `list` read.
@@ -158,7 +157,7 @@ const keyedHere = async (deps: ToolDeps, grant: BuddyGrant): Promise<keyed.Keyed
     (r) => r.workspace.t === 'workspace' && r.workspace.id === grant.workspaceId
   );
 
-/** A row as `list` shows it; `t: 'keyed'` tells it from an older expedition's row (`t: 'ok'`). */
+/** The existing keyed wire tag stays stable for tool readers. */
 export async function keyedList(deps: ToolDeps, grant: BuddyGrant) {
   return (await keyedHere(deps, grant)).map((r) => ({ t: 'keyed' as const, ...r }));
 }
@@ -197,3 +196,40 @@ export async function keyedStatus(deps: ToolDeps, grant: BuddyGrant, id: string)
     faults: v.view.faults.map((f) => f.what),
   };
 }
+
+// Pattern: sum-types (docs/patterns.md#sum-types)
+const Action = z.discriminatedUnion('do', [
+  ProposeAction,
+  z.object({ do: z.literal('status'), id: z.string().min(1) }).strict(),
+  z.object({ do: z.literal('list') }).strict(),
+]);
+type Action = z.infer<typeof Action>;
+type Handler<K extends Action['do']> = (
+  d: ToolDeps,
+  g: BuddyGrant,
+  a: Extract<Action, { do: K }>
+) => Promise<unknown>;
+const HANDLE: { [K in Action['do']]: Handler<K> } = {
+  propose,
+  status: (deps, grant, { id }) => keyedStatus(deps, grant, id),
+  list: (deps, grant) => keyedList(deps, grant),
+};
+
+const DESCRIPTION = `Self-running expeditions; only the OWNER launches, steers or stops.
+propose {file}: write an absolute .ts file in your workspace. Fix gate issues and retry. Clean posts a Launch card with cost, defaults and advisory limits; edits need a new proposal.
+status {id}, list: read.
+Import {expedition} from 'expedition'; zod for schemas; step({...}) only for item callback inference.
+export default expedition({contract,agents,steps,plan:async(steps,x)=>held}).
+contract:{goal,leader,repo,budget:{usd,hours},rules,done:[{check:cmd}|{review:rubric,by:who}|{owner:q}]}; optional pools,autoApply,leaderWake,doneReview,call. Rewrites preserve the owner's contract.
+agents:{name:'harness:model[:effort]'|'buddy:<id>'|{use:spec,usd?,minutes?}}. Steps:{by,brief,returns?,item?,reads?,web?,checkout?,needs?,judge?,usd?,minutes?} or {run,minutes?,returns?,item?,needs?}. Judge uses the done check/review shape. by is a name or spec; brief/check/run are text or item=>text; item requires string id.
+await name(item?,options?) requires a pass; name.try returns the result union. Options:{id,reads,on,continues}. Use JS promises/loops/filter. x.phase(name,fn),x.checkin(q) wakes leader,x.ask(q),x.confirm(q). Return a passed result.
+Example: docs/expeditions/keyed/v1/examples/01-gtm.expedition.ts.`;
+
+export const EXPEDITION_TOOL = {
+  description: DESCRIPTION,
+  writes: true,
+  schema: z.object({ action: Action }).strict(),
+  handler(deps: ToolDeps, grant: BuddyGrant, { action }: { action: Action }) {
+    return (HANDLE[action.do] as Handler<Action['do']>)(deps, grant, action);
+  },
+};

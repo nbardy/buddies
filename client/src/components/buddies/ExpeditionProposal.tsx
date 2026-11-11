@@ -6,7 +6,6 @@ import { buddyWrite } from './api';
 import { Confirm } from './Confirm';
 import { channelsHref } from './channels-view';
 import { proposalUrl, unavailableText, useKeyedRows, useKeyedWrite } from './keyed-api';
-import './Expedition.css';
 import './KeyedExpedition.css';
 
 // The chat card of a keyed proposal (server expeditions-v1/tool.ts `propose`): what the Buddy's

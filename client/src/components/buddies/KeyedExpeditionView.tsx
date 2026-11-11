@@ -5,8 +5,7 @@ import { buddyWrite } from './api';
 import { ChannelLoader } from './ChannelLoader';
 import { Confirm } from './Confirm';
 import { channelsHref } from './channels-view';
-import { Scroll, when } from './ExpeditionPanels';
-import { type Frame, Gone, timeLeft, useNow } from './ExpeditionView';
+import { type Frame, Gone, Scroll, timeLeft, useNow, when } from './KeyedLayout';
 import { KeyedApproval, KeyedAsks } from './KeyedNeeds';
 import { Timeline } from './KeyedTimeline';
 import { unavailableText, useKeyedView, useKeyedWrite } from './keyed-api';
@@ -24,11 +23,10 @@ import {
   planLabel,
   recentFaults,
 } from './keyed-timeline';
-import './Expedition.css';
 import './KeyedExpedition.css';
 
 // One keyed expedition in the Channels main pane (`?keyed=<id>`, ChannelsView kind `keyed`): a
-// header like the other expedition view's, the owner's asks and approval above the Timeline, and
+// channel-style header, the owner's asks and approval above the Timeline, and
 // the faults folded below (docs/expeditions/keyed/v1/CONNECT_PLAN.md §4). The server projects the
 // view; nothing is derived here beyond placing bars (keyed-timeline.ts).
 

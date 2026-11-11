@@ -1,5 +1,7 @@
 > The built format is the one-file form in [v1/DESIGN.md](v1/DESIGN.md); this document preserves the earlier full design.
 
+Status: superseded by the [keyed expedition system](v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 # Expeditions: the final design
 
 > **Build [`v1/`](v1/DESIGN.md) first.** It is this design cut down to what one real case needs,

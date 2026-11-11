@@ -10,12 +10,9 @@
  * from its channel.
  *
  *   D = Home (channel list + Buddies) ⊕ Landing (the workspace Home) ⊕ Threads ⊕ Channel ⊕ Thread ⊕ Task ⊕ DM ⊕ Workers
- *       ⊕ Expedition ⊕ Keyed expedition ⊕ Retired expedition
+ *       ⊕ Keyed expedition
  *
- * `expedition` is one expedition in the main pane: the manager chat with Attempts, Goal and
- * Details tabs (owner 2026-11-03); its `tab` param is read by ExpeditionView.tsx, so it rides
- * along untouched here. `retired` reads a retired record. `keyed` is one keyed expedition
- * (`?keyed=`): the Timeline of KeyedExpeditionView.tsx.
+ * `keyed` (`?keyed=`) opens the Timeline of KeyedExpeditionView.tsx.
  *
  * `dm` is a Buddy DM conversation drawn as a thread (493c1c7). It wins over the other params,
  * which stay in the URL so Back (dropping `dm`) returns to the screen the DM was opened from.
@@ -29,9 +26,7 @@ export type ChannelsView =
   | { kind: 'task'; channelId: string; taskId: string }
   | { kind: 'dm'; conversationId: string }
   | { kind: 'workers'; buddyId: string }
-  | { kind: 'expedition'; id: string }
-  | { kind: 'keyed'; id: string }
-  | { kind: 'retired'; id: string };
+  | { kind: 'keyed'; id: string };
 
 export function channelsView(search: string): ChannelsView {
   const params = new URLSearchParams(search);
@@ -40,12 +35,8 @@ export function channelsView(search: string): ChannelsView {
   const taskId = params.get('task');
   const workers = params.get('workers');
   if (workers) return { kind: 'workers', buddyId: workers };
-  const expedition = params.get('expedition');
-  if (expedition) return { kind: 'expedition', id: expedition };
   const keyed = params.get('keyed');
   if (keyed) return { kind: 'keyed', id: keyed };
-  const retired = params.get('retired');
-  if (retired) return { kind: 'retired', id: retired };
   const dm = params.get('dm');
   if (dm) return { kind: 'dm', conversationId: dm };
   if (params.get('view') === 'home') return { kind: 'landing' };
@@ -80,11 +71,7 @@ export function channelsHref(workspaceId: string, screen: ChannelsView): string 
       return `${base}?workers=${encodeURIComponent(screen.buddyId)}`;
     case 'dm':
       return `${base}?dm=${encodeURIComponent(screen.conversationId)}`;
-    case 'expedition':
-      return `${base}?expedition=${encodeURIComponent(screen.id)}`;
     case 'keyed':
       return `${base}?keyed=${encodeURIComponent(screen.id)}`;
-    case 'retired':
-      return `${base}?retired=${encodeURIComponent(screen.id)}`;
   }
 }

@@ -525,22 +525,15 @@ export function postPurposeTag(post: Post): string | undefined {
   return post.purpose;
 }
 
-/** The expedition card a host post carries: an old host's draft (server expeditions/host.ts
- * `draft`, `expedition:<id>` evidence) or a keyed proposal (expeditions-v1/tool.ts `propose`,
- * `keyed-proposal:<json>` evidence). Keyed by purpose AND evidence: a plain post that merely cites
- * an expedition is no card. */
-export type ExpeditionCard =
-  | { t: 'none' }
-  | { t: 'card'; id: string }
-  | { t: 'proposal'; proposal: keyed.KeyedProposal };
+export type ExpeditionCard = { t: 'none' } | { t: 'proposal'; proposal: keyed.KeyedProposal };
 
 export function expeditionCardOf(post: Post): ExpeditionCard {
   // κ: purpose is free text on the wire; only `expedition` with its evidence is a card.
   if (post.purpose !== 'expedition') return { t: 'none' };
   const proposed = post.evidence.find((e) => e.startsWith(keyed.PROPOSAL_EVIDENCE));
   if (proposed !== undefined) return proposalOf(proposed.slice(keyed.PROPOSAL_EVIDENCE.length));
-  const id = post.evidence.find((e) => e.startsWith('expedition:'))?.slice('expedition:'.length);
-  return id !== undefined ? { t: 'card', id } : { t: 'none' };
+
+  return { t: 'none' };
 }
 /** A proposal that does not parse is shown as its plain body (the fallback text), not guessed at. */
 function proposalOf(json: string): ExpeditionCard {

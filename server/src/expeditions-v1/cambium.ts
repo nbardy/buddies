@@ -1,12 +1,11 @@
 import { execFile } from 'node:child_process';
 import { z } from 'zod';
 
-// The host's git and Cambium calls (docs/expeditions-lean-design.md §3.2), each a typed result.
+// The keyed executor's Git and Cambium calls, each a typed result.
 
 /** Incident audit 2026-11-01 #7: git ran with the full server env, so a repository hook ran
  * agent-written code with every provider key in reach. Only these variables pass; hooks and
- * fsmonitor are off as command-line config, which outranks the repository's own. Only `archive`
- * (it pushes) gets the ssh agent socket. Known limit: `filter.<x>.smudge` still runs. */
+ * fsmonitor are off as command-line config, which outranks the repository's own. Only an explicit SSH call gets the agent socket (launch-base fetch). Known limit: `filter.<x>.smudge` still runs. */
 const KEEP = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR'];
 const IDENTITY = /^GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)$/;
 export const gitEnv = (withSsh: boolean): NodeJS.ProcessEnv => ({
@@ -73,32 +72,6 @@ export async function release(repo: string, workspace: string, ref: string): Pro
   return { t: 'removed', salvageRef: Removed.parse(JSON.parse(r.stdout)).salvageRef || null };
 }
 
-export type Archived =
-  | { t: 'archived'; sha: string }
-  | { t: 'refused'; reason: string }
-  | { t: 'failed'; message: string };
-/** Tags the branch on origin, then deletes it; a rerun (`already: true`) counts as archived. */
-export async function archive(repo: string, branch: string, tag: string): Promise<Archived> {
-  const r = await exec('git-cambium', repo, ['archive', '-json', branch, tag], true);
-  if (r.code === 3) return { t: 'refused', reason: `${branch}: ${refusalText(r.stdout)}` };
-  if (r.code !== 0) return { t: 'failed', message: `${branch}: ${r.stderr.slice(-600)}` };
-  return { t: 'archived', sha: z.object({ sha: z.string() }).parse(JSON.parse(r.stdout)).sha };
-}
-const refusalText = (stdout: string) => {
-  const r = Refusal.parse(JSON.parse(stdout));
-  return `${r.reason} (${r.detail})`;
-};
-
-/** Short names under refs/heads/expedition/<id>/. */
-export async function branches(repo: string, id: string): Promise<string[]> {
-  const out = await git(repo, [
-    'for-each-ref',
-    '--format=%(refname:short)',
-    `refs/heads/expedition/${id}/`,
-  ]);
-  return out.split('\n').filter(Boolean);
-}
-
 export type Tip = { t: 'tip'; sha: string } | { t: 'lost' };
 /** The attempt branch's tip at turn end. Review 2026-11-03: a crew that renamed or deleted its
  * branch made this throw on every step, so the attempt never settled and retire was refused. The
@@ -110,36 +83,4 @@ export async function tip(repo: string, branch: string, tree: string): Promise<T
   if (head.code !== 0) return { t: 'lost' };
   await git(repo, ['branch', branch, head.stdout]);
   return { t: 'tip', sha: head.stdout };
-}
-
-export type Salvaged = { t: 'archived'; tags: string[] } | { t: 'failed'; messages: string[] };
-/** Retire: the salvage refs (dirty work a released tree left) go to origin as tags
- * archive/expeditions/<id>/salvage/<a#>, because `cambium archive` handles branches only. A ref is
- * deleted locally (compare-and-delete at the sha that was pushed) only after `ls-remote` shows the
- * tag at that sha, so recovered work is never local-only. A rerun finds the tag already there. */
-export async function archiveSalvage(repo: string, id: string): Promise<Salvaged> {
-  const listed = await git(repo, [
-    'for-each-ref',
-    '--format=%(objectname) %(refname)',
-    `refs/salvage/expeditions/${id}/`,
-  ]);
-  const tags: string[] = [];
-  const messages: string[] = [];
-  for (const line of listed.split('\n').filter(Boolean)) {
-    const [sha, ref] = line.split(' ');
-    const tag = `archive/expeditions/${id}/salvage/${ref.split('/').at(-1)}`;
-    const dest = `refs/tags/${tag}`;
-    const pushed = await exec('git', repo, ['push', 'origin', `${sha}:${dest}`], true);
-    const remote = await exec('git', repo, ['ls-remote', 'origin', dest], true);
-    if (remote.code !== 0 || !remote.stdout.startsWith(`${sha}\t`)) {
-      messages.push(
-        `${ref}: not on origin as ${tag} (${(pushed.stderr || remote.stderr).slice(-300)})`
-      );
-      continue;
-    }
-    const gone = await exec('git', repo, ['update-ref', '-d', ref, sha]);
-    if (gone.code !== 0) messages.push(`${ref}: ${gone.stderr.slice(-300)}`);
-    else tags.push(tag);
-  }
-  return messages.length > 0 ? { t: 'failed', messages } : { t: 'archived', tags };
 }

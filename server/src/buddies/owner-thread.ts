@@ -1,19 +1,19 @@
 import type { Actor, BuddiesCore, ChannelRef, Post, PostQuery } from '@unleashd/buddies-core';
-import type { Origin } from '@unleashd/shared';
 import { OWNER } from './core';
 import { type BuddyEvents, announcePost } from './events';
 
 // The owner thread: talking to the owner in ONE thread of a DM. Idempotent thread root, status
 // lines posted into it, and the owner's fresh posts read back (channel feed + every thread).
-// Shared by the expedition host and the expedition kernel; each passes its own `Thread`.
+// The keyed host passes its own `Thread`.
 
+export type Origin = { t: 'direct' } | { t: 'thread'; channelId: string; rootId: string };
 export type Place = { channel: ChannelRef; replyToId?: string };
 /** A new post is announced (notifications, live feeds), or only refreshes the clients. */
 export type Notice = 'announce' | 'quiet';
 export type Said = { body: string; purpose: string; key: string };
 
 /** Where a post answering `origin` goes: in its thread, or the owner's DM with `launcher`. The
- * expedition cards (old host's draft, the keyed `propose`) are posted here. */
+ * expedition proposal cards are posted here. */
 const PLACE: { [K in Origin['t']]: (o: Extract<Origin, { t: K }>, launcher: Actor) => Place } = {
   thread: (o) => ({ channel: { kind: 'id', id: o.channelId }, replyToId: o.rootId }),
   direct: (_o, launcher) => ({ channel: { kind: 'direct', members: [OWNER, launcher] } }),
@@ -94,24 +94,6 @@ export function createOwnerThread({ core, events }: OwnerThreadDeps) {
     }
   }
 
-  /** The channel feed and every thread's replies after `seen`, oldest first. Review 2026-11-03:
-   * the channel feed leaves thread replies out, so a "pass" answered in the thread of the "Reply
-   * pass or fail" line was never read. */
-  async function freshPosts(channelId: string, seen: string): Promise<Post[]> {
-    const roots = await pageAfter({ kind: 'channel', channelId }, '');
-    const stats = await core.threadStats(
-      OWNER,
-      channelId,
-      roots.map((p) => p.id)
-    );
-    const threads = stats.filter((t) => t.lastReplyOrd > seen);
-    const replies = await Promise.all(
-      threads.map((t) => pageAfter({ kind: 'thread', rootId: t.rootId }, seen))
-    );
-    const all = new Map([...roots, ...replies.flat()].map((p) => [p.id, p]));
-    return [...all.values()].filter((p) => p.ord > seen).sort((a, b) => (a.ord < b.ord ? -1 : 1));
-  }
-
-  return { threadRoot, postStatus, inform, freshPosts, pageAfter };
+  return { threadRoot, postStatus, inform, pageAfter };
 }
 export type OwnerThread = ReturnType<typeof createOwnerThread>;

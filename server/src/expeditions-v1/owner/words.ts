@@ -1,8 +1,4 @@
-// κ for what the owner types in an expedition's thread: ONE grammar for both hosts. The old host
-// (expeditions/brief.ts `chatAct`) reads the words it knows and treats the rest as talk; the keyed
-// host (owner/inbox.ts) applies its commands through the kernel and keeps everything else as a
-// note for the leader's next wake (D7). A word is recognised only when it is the whole message, so
-// a sentence that merely mentions "stop" is talk, never a command.
+// The keyed owner thread’s commands and yes/no answers. Unrecognised text becomes a note.
 // Pattern: sum-types (docs/patterns.md#sum-types): parsed once here; nothing downstream re-reads
 // the text.
 
@@ -16,9 +12,6 @@ export type OwnerWord =
   | { readonly t: 'retry'; readonly key: string }
   | { readonly t: 'approve' }
   | { readonly t: 'decline' }
-  /** The old host's owner verdict on a judging attempt. */
-  | { readonly t: 'pass' }
-  | { readonly t: 'fail' }
   /** `note: <text>`, the text at most 2,000 characters. */
   | { readonly t: 'note'; readonly text: string }
   | { readonly t: 'talk' };
@@ -29,8 +22,6 @@ const WORDS: Readonly<Record<string, OwnerWord>> = {
   stop: { t: 'stop' },
   approve: { t: 'approve' },
   decline: { t: 'decline' },
-  pass: { t: 'pass' },
-  fail: { t: 'fail' },
 };
 const TALK: OwnerWord = { t: 'talk' };
 const MAX_EXTEND_HOURS = 72;

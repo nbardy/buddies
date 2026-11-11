@@ -160,13 +160,15 @@ test('tool input schemas change only additively; reshaped forms need a legacy ca
 // Oompa authority would win the rest back.
 // 2026-11-01: 3870 -> 3990. The `expedition` tool, so a Buddy can draft an expedition from any
 // thread. 2026-11-03: 3990 -> 3960. The lean rewrite's description is 87 chars (was 120); usage
-// lives in BUDDY_TOOL_GUIDE and docs/expeditions-lean-design.md.
+// lives in BUDDY_TOOL_GUIDE and the keyed v1 design.
 // 2026-11-03: 3960 -> 3084 (measured). The Buddy Oompa host and its `oompa` tool were retired;
 // what remains over 3000 is the `expedition` tool (its 87-char description plus nested text).
 // 2026-11-11: 3084 -> 4512 (measured). The `expedition` tool's description (87 -> 1,513 chars)
 // teaches a Buddy to write a keyed expedition folder (contract.md frontmatter, the plan.ts authoring
 // calls) because `propose` has no other teacher: a Buddy reads no docs outside the unleashd checkout.
 // Gating the tool to Buddies that may propose would win it back.
+// 2026-11-11: cut-over removes draft/act after all four records were stopped and retired.
+// Snapshot regenerated with UPDATE_TOOL_SNAPSHOT=1; the additive guard remains unchanged.
 const WORKER_DESCRIPTION_BUDGET = 4512;
 
 function describedChars(role: Role): number {
@@ -190,5 +192,20 @@ test(`the worker role's tool descriptions total at most ${WORKER_DESCRIPTION_BUD
   assert.ok(
     chars <= WORKER_DESCRIPTION_BUDGET,
     `worker tool descriptions are ${chars} chars (budget ${WORKER_DESCRIPTION_BUDGET}). They are paid on every turn: keep each rule to one sentence, move detail into docs`
+  );
+});
+
+// Cut-over guard: all four old records were stopped and retired on 2026-11-11.
+// Only keyed proposals and reads remain; never reintroduce a second host's actions.
+test('expedition advertises only keyed propose, status and list', () => {
+  const tool = toolsFor('worker').expedition;
+  const schema = advertised(tool.schema);
+  const properties = schema.properties as Obj;
+  const action = properties.action as Obj;
+  assert.deepEqual(
+    asList(action.anyOf)
+      .map((v) => ((v as Obj).properties as Obj).do)
+      .map((v) => (v as Obj).const),
+    ['propose', 'status', 'list']
   );
 });

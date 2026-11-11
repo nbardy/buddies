@@ -65,7 +65,7 @@ export function fakeBuddyPort(
     }),
     // An ordinary Buddy turn (expedition calls are covered through the real backend).
     turnSeat: () => ({ t: 'buddy' }),
-    sessionScope: () => ({ t: 'durable' }),
+
     queueChat:
       options.queueChat ??
       ((_context, conversationId, turnId, body) =>

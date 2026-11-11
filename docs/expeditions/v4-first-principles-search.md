@@ -1,5 +1,7 @@
 # Expeditions V4: budgeted search over a frozen gauge
 
+Status: superseded by the [keyed expedition system](keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: **design, revision 2, 2026-11-09. Not built.** Revision 2 answers an independent critique
 (§11). The lens is progress per token. Quint model: `docs/specs/expedition-v4.qnt` (typechecked,
 13 directed tests, simulated, mutant-checked; see §9). Inputs: `docs/expeditions/research/{use-cases,prior-art,external}.md`.

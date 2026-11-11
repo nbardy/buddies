@@ -28,7 +28,7 @@ import type { TurnSeat } from './briefing';
 import { BUDDY_BUILDER_BRIEFING } from './builder';
 import { type GrantRecord, REVIEWS_MEMORY, adoptedGrant } from './grants';
 import { HARNESS_TURN, type HookSet } from './harness-steering';
-import type { BuddyPolicyPort, BuddyTurnTools, SessionScope } from './policy-port';
+import type { BuddyPolicyPort, BuddyTurnTools } from './policy-port';
 import type { OwnedChatRun } from './runner';
 
 /**
@@ -189,28 +189,8 @@ export class BuddyBuilderTurnPolicy extends NoRunPolicy implements TurnPolicy {
  * the conversation's own audience; any other turn (worker, message, schedule) is its work's: the
  * task, else the workspace. It no longer addresses memory (one per Buddy), but its strings are the
  * ones sessions were saved under before 2026-09-26, so a deploy resumes every saved session.
- * A `boot`-scoped session (an expedition crew's) also names its boot: after a restart the key
- * differs and `admitAudience` starts a fresh session. Regression: owner 2026-11-03: crews
- * restart on new sessions (a resumed crew session carried the interrupted run's harness).
  */
 export function sessionAudienceKey(
-  origin: TurnInput['origin'],
-  conversationId: string,
-  context: Pick<BuddyContext, 'buddyProjectId' | 'workspaceId'>,
-  scope: SessionScope
-): string {
-  return SCOPED[scope.t](scope as never, audienceOf(origin, conversationId, context));
-}
-
-const SCOPED: {
-  readonly [S in SessionScope as S['t']]: (scope: S, audience: string) => string;
-} = {
-  // Unchanged strings: every session saved before scopes existed still resumes.
-  durable: (_, audience) => audience,
-  boot: ({ bootId }, audience) => JSON.stringify({ boot: bootId, audience }),
-};
-
-function audienceOf(
   origin: TurnInput['origin'],
   conversationId: string,
   context: Pick<BuddyContext, 'buddyProjectId' | 'workspaceId'>
@@ -444,12 +424,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
   // a different or unknown one (a session saved before its key was recorded) starts fresh, while
   // the display history stays. Guard: conversation-runtime.test.ts "session audience key: …".
   private admitAudience(input: TurnInput, context: BuddyContext): void {
-    const key = sessionAudienceKey(
-      input.origin,
-      this.host.id,
-      context,
-      this.buddies.sessionScope(context.buddyId)
-    );
+    const key = sessionAudienceKey(input.origin, this.host.id, context);
     if (this.providerAudienceKey !== key && this.host.hasStartedSession()) {
       console.log(
         `[${this.host.id}] Buddy context reset: the session audience changed or is unknown`

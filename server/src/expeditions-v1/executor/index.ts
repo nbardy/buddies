@@ -7,7 +7,7 @@ import type {
   RunSpec,
   RunStatus,
 } from '../../expedition-kernel/ports';
-import { removeDetachedTree } from '../../expeditions/checks';
+import { removeDetachedTree } from '../checks';
 import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address';
 import { type Answered, type AskAnswer, type AskDeps, type Asks, NoAsks, OwnerAsks } from './asks';
 import {

@@ -18,9 +18,8 @@ import type {
 import type { Resolution } from '@unleashd/shared';
 import { z } from 'zod';
 import type { MessageSource } from '../conversations/messages';
-import type { ExpeditionHost } from '../expeditions/host';
-import { EXPEDITION_TOOL } from '../expeditions/tool';
 import type { KeyedExpeditions } from '../expeditions-v1/service';
+import { EXPEDITION_TOOL } from '../expeditions-v1/tool';
 import type { BackgroundWork } from '../turns/background-work';
 import { requireCanonicalPostMedia } from './channel-media';
 import {
@@ -75,7 +74,6 @@ export interface ToolDeps {
   openBranch(chat: OwnerChat): Promise<string>;
   /** Turns whose model is idle while their background jobs run (turns/background-work.ts). */
   backgroundWork: BackgroundWork;
-  expeditions?: ExpeditionHost;
   /** The keyed expeditions (`propose`, `status`, `list`; never launch: tool.ts). */
   keyed?: KeyedExpeditions;
 }

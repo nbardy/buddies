@@ -1,5 +1,7 @@
 # Expeditions V2: the leader and rounds, refined
 
+Status: superseded by the [keyed expedition system](keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: **design only, nothing built.** Written 2026-11-09; **revision 3** the same day, after an
 independent critique (§11 records every item and the response). V2 is a **refinement** of V1
 (`docs/expeditions/v1-leader-rounds.md`, revision 2, with its critique in V1 §11), not a rewrite.

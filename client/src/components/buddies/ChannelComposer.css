@@ -115,7 +115,7 @@
   font: 500 10.5px / 1.5 var(--font-mono);
 }
 
-/* A long hint (the expedition chat's commands) wraps on a phone instead of ending in an ellipsis. */
+/* Long composer hints and validation messages wrap on a phone. */
 [data-device="mobile"] .channel-composer .channel-composer-hint {
   line-height: 1.35;
   white-space: normal;

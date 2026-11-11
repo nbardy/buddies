@@ -1,5 +1,7 @@
 # Design B: Reads like the plan
 
+Status: superseded by the [keyed expedition system](v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: design only, sketch code. Shared goal and base: [README](README.md).
 
 ## Motivation set

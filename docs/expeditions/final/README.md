@@ -1,5 +1,7 @@
 # Expeditions as durable, multi-harness scripts
 
+Status: superseded by the [keyed expedition system](../keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 The built system is in [keyed/v1](../keyed/v1/DESIGN.md), with its runnable
 [one-file examples](../keyed/v1/examples/README.md). This document is the earlier research record.
 

@@ -48,7 +48,6 @@ import {
   channelsView,
 } from '../../components/buddies/channels-view';
 import { RailExpeditions, type RailRowClasses } from '../../components/buddies/ExpeditionRail';
-import { ExpeditionView, RetiredExpeditionView } from '../../components/buddies/ExpeditionView';
 import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
 import { HighlightRow } from '../../components/buddies/HighlightRow';
 import { KeyedExpeditionView } from '../../components/buddies/KeyedExpeditionView';
@@ -62,7 +61,7 @@ import {
   buddyWorkspaceActivityAtom,
   overviewWorkspaces,
 } from '../../components/buddies/workspace-order';
-import { useBuddyOverview, useExpeditionCrews } from '../../hooks/useBuddyData';
+import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 import { rowBuddy } from '../../utils/conversation-row';
 import { MobileEmptyPanel, MobilePage, MobileSection } from '../components/MobileUI';
@@ -123,27 +122,9 @@ function renderScreen(screen: ChannelsView, context: ScreenContext) {
           workspaceId={context.workspaceId}
         />
       );
-    case 'expedition':
-      return (
-        <ExpeditionView
-          key={screen.id}
-          id={screen.id}
-          workspaceId={context.workspaceId}
-          frame="mobile"
-        />
-      );
     case 'keyed':
       return (
         <KeyedExpeditionView
-          key={screen.id}
-          id={screen.id}
-          workspaceId={context.workspaceId}
-          frame="mobile"
-        />
-      );
-    case 'retired':
-      return (
-        <RetiredExpeditionView
           key={screen.id}
           id={screen.id}
           workspaceId={context.workspaceId}
@@ -453,7 +434,6 @@ function BuddySection({
 }) {
   const openDm = useChannelsDm();
   const buddyRail = useAtomValue(buddyRailFamily(members));
-  useExpeditionCrews();
   const newBuddy = useNewBuddy(openDm, workspaceId);
   const [teamCreator, setTeamCreator] = useState(false);
   const creating = useAtomValue(listField('builders')).find((entry) => !entry.done);

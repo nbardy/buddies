@@ -4,7 +4,7 @@ import { z } from 'zod';
 // the Contract, a Call, its Outcome, the Log, the timeline fold over it, and the wire projection a
 // client reads (KeyedRow, KeyedView). Everything read from disk, from a plan process or off the
 // wire is parsed with these once (κ); the kernel works on the parsed values only.
-// Exported from index.ts as the namespace `keyed`: names collide with the old expedition.ts.
+// Exported from index.ts as the namespace `keyed`.
 // Pattern: one type source (docs/patterns.md#one-type-source)
 
 const str = z.string();

@@ -172,10 +172,7 @@ function mentionConfigsByBuddy(
   return byBuddy;
 }
 
-/** Owner posts a host applies itself (an expedition's bare chat command, expeditions/host.ts
- * `consumes`): they wake no Buddy turn, so no manager answers or repeats them. Review
- * 2026-11-03: dropping the mentions alone was not enough, the chat thread's subscribed manager
- * seat still got a delivery of every owner post. */
+/** Owner posts the keyed host applies itself, without waking an unbudgeted Buddy turn. */
 export interface HostCommands {
   /** `thread` names where the post lands: a host that owns a thread (an ask) consumes the owner's
    * replies inside it, and without the thread id an owner reply in the leader's DM starts an

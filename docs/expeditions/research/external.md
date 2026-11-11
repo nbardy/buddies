@@ -1,5 +1,7 @@
 # Expeditions: external brief (what works, late 2026)
 
+Status: superseded by the [keyed expedition system](../keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: research input, written 2026-11-09. It grounds the expedition redesign
 (`docs/expeditions-leader-design.md`) in published evidence. Every claim carries a URL. Tags:
 **[primary]** means read from the authors' own page or paper. **[secondary]** means a news or blog
@@ -11,7 +13,7 @@ workspace. A host judges it by `done: checks` (argv exit 0, `server/src/expediti
 2 h timeout at `CHECK_TIMEOUT_MS`) or `done: owner`. What carries forward is one `Lesson: <one
 sentence>` per attempt (`server/src/expeditions/brief.ts` `CREW_ROLE`). The schema caps
 `maxLive ≤ 4` and `maxAttempts ≤ 60` and allows one seat (`shared/src/expedition.ts`, quoted in
-`docs/expeditions-lean-design.md` §1).
+`historical retry-loop design (git d7bb99a)` §1).
 
 ---
 

@@ -15,7 +15,6 @@ import {
   wholePostIn,
 } from './channel-data';
 import { EmojiPicker } from './EmojiPicker';
-import { ExpeditionCard as ExpeditionCardView } from './ExpeditionCard';
 import { ProposalCard } from './ExpeditionProposal';
 import type { ClippedPost, ThreadPage } from './types';
 import './ChannelPostContent.css';
@@ -195,8 +194,6 @@ function PostBody({ post, directory }: { post: ClippedPost; directory: Workspace
           tasks={directory.taskById}
         />
       );
-    case 'card':
-      return <ExpeditionCardView id={card.id} />;
     case 'proposal':
       return <ProposalCard proposal={card.proposal} />;
   }

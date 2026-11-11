@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef } from 'react';
 
 // Pattern: one-definition (docs/patterns.md#one-definition)
-// The one modal for Buddy surfaces: the Task overlay, the file viewer and the expedition modal.
+// The one modal for Buddy surfaces: the Task overlay and the file viewer.
 // Native <dialog> + showModal() gives the top layer, the focus trap and Escape (as `cancel`), and
 // needs no portal. A click on ::backdrop reaches the dialog itself; one inside reaches a child.
 // Focus returns to whatever held it before opening (the badge or card that opened it).

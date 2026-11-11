@@ -12,11 +12,11 @@ import { createGrants } from '../src/buddies/grants';
 import { startMcpEndpoint, toolsFor } from '../src/buddies/mcp';
 import { createKeyedExpeditions } from '../src/expeditions-v1/service';
 import { BackgroundWork } from '../src/turns/background-work';
-import { rpc } from './fixtures/expedition-fixture';
+import { rpc } from './fixtures/expedition-rpc';
 import { writePlan } from './fixtures/expedition-source';
 import { tempDir } from './fixtures/temp';
 
-// CONNECT_PLAN §8 step 8: the keyed half of the `expedition` Buddy tool, through the REAL MCP
+// CONNECT_PLAN §8 step 8: the `expedition` Buddy tool, through the REAL MCP
 // endpoint, a real BuddiesCore and the live keyed service (typecheck gate, dry run and static gate
 // run for real), on temp stores. Launch is not here: it is the owner's HTTP route (the digest rule
 // is tested in expeditions-v1-server.test.ts).

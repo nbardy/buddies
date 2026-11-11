@@ -58,7 +58,7 @@ test('different conversations adopt concurrently; one conversation adopts in sca
     attach: () => ({}) as ExecutionHandle,
     discard: () => undefined,
     attemptInterrupted: () => undefined,
-    crews: { crewBuddyIds: () => new Set() },
+
     logger: { log: () => undefined, warn: () => undefined, error: () => undefined },
   };
   const adopted = await adoptExecutions(journals, ports);

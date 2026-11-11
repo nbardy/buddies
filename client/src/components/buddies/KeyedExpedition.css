@@ -1,6 +1,266 @@
-/* Keyed expedition view (KeyedExpeditionView.tsx, KeyedTimeline.tsx, KeyedNeeds.tsx). Header, pill,
-   buttons and facts are Expedition.css's. Bar and marker positions are fractions of one time axis,
-   set inline; the plot scrolls inside its own container, so a phone never scrolls the page. */
+.expedition-card {
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-4);
+  max-width: min(560px, 100%);
+  padding: var(--sp-3) var(--sp-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--ui-radius);
+  background: var(--bg-raised-1);
+  font-size: var(--fs-3);
+}
+
+.expedition-pill {
+  --tone: var(--text-muted);
+  flex: none;
+  padding: var(--sp-1) var(--sp-4);
+  border-radius: 999px;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  font-size: var(--fs-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.expedition-pill[data-state="running"] {
+  --tone: var(--theme-success);
+}
+
+.expedition-pill[data-state="paused"],
+.expedition-pill[data-state="needs-you"] {
+  --tone: var(--theme-warning);
+}
+
+.expedition-button {
+  flex: none;
+  padding: var(--sp-2) var(--sp-6);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-raised-2);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-3);
+  line-height: 1.5;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.expedition-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text-bright);
+}
+
+.expedition-button[data-tone="primary"] {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.expedition-button[data-tone="danger"] {
+  border-color: var(--theme-danger);
+  color: var(--theme-danger);
+}
+
+.expedition-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.expedition-error {
+  min-width: 0;
+  color: var(--theme-danger);
+  font-size: var(--fs-3);
+}
+
+.expedition-rail {
+  min-width: 0;
+  margin-top: var(--sp-8);
+}
+
+.expedition-rail li {
+  min-width: 0;
+}
+
+.expedition-rail > h3 {
+  margin-bottom: var(--sp-3);
+}
+
+.expedition-rail-dot {
+  display: grid;
+  place-items: center;
+}
+
+.expedition-rail-dot .conversation-row__dot[data-status="paused"] {
+  background: var(--theme-warning);
+}
+
+.expedition-rail-flag {
+  flex: none;
+  color: var(--text-muted);
+  font: 600 var(--fs-1) / 1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.expedition-rail-flag[data-alert] {
+  color: var(--warning);
+}
+
+.expedition {
+  flex: 1;
+  min-height: 0;
+}
+
+.expedition-head {
+  gap: var(--sp-5);
+}
+
+.expedition[data-frame="desktop"] .expedition-head {
+  height: var(--channel-header-height);
+  box-sizing: border-box;
+  padding-block: 0;
+}
+
+.expedition-head h2 {
+  flex: 0 1 auto;
+  min-width: 8em;
+  margin: 0;
+  color: var(--text-bright);
+  font-size: var(--fs-6);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.expedition-head-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--fs-3);
+  line-height: 1.25;
+}
+
+.expedition-controls,
+.expedition-manage {
+  flex: none;
+  gap: var(--sp-4);
+}
+
+.expedition-controls {
+  margin-left: auto;
+}
+
+.expedition-manage {
+  flex-wrap: wrap;
+}
+
+.expedition-scroll {
+  padding: var(--sp-9) var(--sp-9) var(--sp-11);
+}
+
+.expedition-checks {
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.expedition-checks li {
+  max-width: 100%;
+}
+
+.expedition-checks code {
+  display: block;
+  max-width: 100%;
+  padding: var(--sp-1) var(--sp-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--ui-radius);
+  background: var(--bg-raised-1);
+  font: var(--fs-3) / 1.6 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.expedition-notes {
+  margin: 0;
+  padding-left: var(--sp-8);
+  font-size: var(--fs-4);
+  line-height: 1.6;
+}
+
+.expedition-fact {
+  display: grid;
+  grid-template-columns: 8em minmax(0, 1fr);
+  gap: var(--sp-6);
+  padding: var(--sp-3) 0;
+  font-size: var(--fs-4);
+  line-height: 1.5;
+}
+
+.expedition-fact dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.expedition-fact code {
+  font: var(--fs-3) / 1.5 var(--font-mono);
+}
+
+.expedition-gone {
+  align-items: center;
+}
+
+.expedition[data-frame="mobile"] .expedition-head {
+  flex-wrap: wrap;
+  row-gap: 0;
+  padding-bottom: var(--sp-4);
+}
+
+.expedition-phone-title {
+  flex: 1;
+}
+
+.expedition[data-frame="mobile"] .expedition-pill {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.expedition-phone-line {
+  flex: 1 0 100%;
+  gap: var(--sp-4);
+  min-width: 0;
+
+  padding-left: calc(var(--sp-11) + var(--sp-4));
+  font-size: var(--fs-3);
+}
+
+.expedition[data-frame="mobile"] .expedition-scroll {
+  padding: var(--sp-8) var(--sp-7) var(--sp-11);
+}
+
+.keyed-expedition-result {
+  --tone: var(--text-muted);
+  color: var(--tone);
+  font-weight: 600;
+}
+
+.keyed-expedition-result[data-tone="pass"] {
+  --tone: var(--theme-success);
+}
+
+.keyed-expedition-result[data-tone="fail"] {
+  --tone: var(--theme-danger);
+}
+
+.keyed-expedition-result[data-tone="live"] {
+  --tone: var(--accent);
+}
+
+.keyed-expedition-result[data-tone="waiting"] {
+  --tone: var(--theme-warning);
+}
+
+/* Keyed cards, controls and timeline; positions share one time axis. */
 .keyed-expedition-budget {
   flex: 1 1 10em;
   max-width: 20em;

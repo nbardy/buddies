@@ -1,5 +1,7 @@
 # Workflows vs. expeditions (and when to use which)
 
+Status: historical comparison, superseded by the [keyed system](../docs/expeditions/keyed/v1/DESIGN.md); old host deleted 2026-11-11.
+
 A Claude Code workflow is a **script written before it runs**. An expedition
 is a **loop that works out its next steps as it learns**. They fit together:
 a workflow makes a good implementation of one fixed-shape step inside an

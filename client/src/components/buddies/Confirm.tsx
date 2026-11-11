@@ -1,5 +1,5 @@
+import './KeyedExpedition.css';
 import { useState } from 'react';
-import './Expedition.css';
 
 /** An act that cannot be undone takes two clicks. */
 export function Confirm({ label, sure, run }: { label: string; sure: string; run(): void }) {

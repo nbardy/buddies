@@ -4,7 +4,7 @@ import { AWAITED_BY_FINISH, CUT_AT_DEADLINE } from './tables';
 // When the expedition stops. The deadline bounds work, not judgment: a judge already running, a
 // done verdict and a question already put to the owner finish first. The old host cut these off
 // at the deadline and recorded an answered owner verdict as `skipped` (see `finishIfDue` in
-// server/src/expeditions/host.ts and bce2400); here they hold `due` back instead.
+// historical commit bce2400); here they hold `due` back instead.
 
 export type Due = { readonly t: 'no' } | { readonly t: 'budget' } | { readonly t: 'deadline' };
 

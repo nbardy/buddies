@@ -2,8 +2,8 @@ import { useAtomValue } from 'jotai';
 import { type CSSProperties, type RefObject, useRef, useState } from 'react';
 import { setThreadWidth, threadWidthAtom } from '../../atoms/ui';
 
-// The side pane's width and its drag handle: a channel's thread pane and an expedition's manager
-// chat share them (review 2026-11-03: the chat was a fixed 440px that could not be resized).
+// The channel thread pane's width and drag handle (review 2026-11-03: the expedition chat
+// that originally shared it was a fixed 440px that could not be resized).
 
 /** The pane's inline width: the device's thread width, leaving the main pane readable when a
  * saved width exceeds the current window. */

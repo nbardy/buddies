@@ -538,6 +538,8 @@ variant. Shared workspace and branch safety is not re-implemented per feature: i
 snapshots dirty work to a salvage ref, `archive` tags and verifies before it deletes), and oompa and Buddies both call it.
 A later incident is then one more typed refusal in the owner of the rule (launch preflight, retire archiving), not a
 branch added to the loop.
-**Here:** `docs/expeditions-lean-design.md` (§11 known limits, §12 deviations), `server/src/expeditions/` (`cambium.ts`,
-`checks.ts` `launchPreflight`, `retire.ts`). Guards: `launch refuses a done-check that cannot run`, `retire archives
-every branch, or refuses whole`, `retire ends a crew run whose stop was only requested` in `server/test/expeditions.test.ts`.
+**Here:** `server/src/expedition-kernel/` (one log and pure reconciliation),
+`server/src/expeditions-v1/cambium.ts` (typed worktree results) and `checks.ts` (isolated host processes).
+Guards: `server/test/expeditions-v1-executor.test.ts` and `expeditions-v1-agent-restarts.test.ts`.
+History: the lean retry loop described above was itself replaced by keyed expeditions; its four records
+were stopped and retired and its host deleted on 2026-11-11. No code reads the retired records.

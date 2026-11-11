@@ -1,7 +1,9 @@
 # Expeditions v2: a leader running a self-revising workflow
 
+Status: superseded by the [keyed expedition system](expeditions/keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: **design only, nothing built.** Written 2026-11-08 from an owner design conversation. It
-proposes replacing the retry loop of today's expeditions (`docs/expeditions-lean-design.md`,
+proposes replacing the retry loop of today's expeditions (`historical retry-loop design (git d7bb99a)`,
 `server/src/expeditions/host.ts`) with a leader that plans and revises rounds of workflow. The
 spec follows `docs/design-specs.md`; the concurrent core is to be model-checked in Quint.
 

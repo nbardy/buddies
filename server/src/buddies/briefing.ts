@@ -16,16 +16,8 @@ export interface ResolvedBuddyConversation {
   execution: BuddyExecution;
 }
 
-/** A turn's cwd (expeditions host.ts turnDirectory): workspace root, a crew's fixed directory, one
- * attempt run's, or one expedition call's (expeditions-v1/call-directory.ts: a run whose request
- * carries `expedition-run:` evidence; never the owner's checkout). 2026-11-01 smoke incident: crew
- * turns ran in the owner's checkout, isolated only by a brief, and a Codex sandbox rooted there
- * could not write the attempt worktree. A call also carries what its turn may do, from the
- * executor's record (expedition-kernel/access.ts). */
 export type TurnDirectory =
   | { t: 'workspace' }
-  | { t: 'crew'; path: string }
-  | { t: 'attempt'; runId: string; path: string }
   | { t: 'call'; runId: string; path: string; capabilities: TurnCapabilities };
 export const WORKSPACE_DIRECTORY: TurnDirectory = { t: 'workspace' };
 
@@ -51,7 +43,7 @@ export const BUDDY_TOOL_GUIDE = [
   'Detailed notes: agent_notes/<date>_<topic>.md, written and searched with file tools.',
   'Background worker: post kind "request" with worker {provider, model} to {direct:[]} (you) or a report: a tracked run whose answer wakes you. While it runs, post {channel:{request:id, to:"worker"}} directs it and its {to:"parent"} asks you; each lands after the next tool call. Never shell out to agent CLIs.',
   'runs: scoped slim rows with waiting reasons, plus get/cancel. schedule: scoped cron runs. team: list rows, then get one body.',
-  'expedition: for a big, fuzzy goal with a checkable done. Asked, draft one (name, goal markdown, done {t:"checks",checks:[argv…]} or {t:"owner"}, maxAttempts, optional oracle:[repo paths of the grader, e.g. tests/, restored from base before each check]); the host posts a card the owner launches; post no link. act relays the owner\'s pause/resume/stop/extend/note/verdict/relaunch.',
+  'expedition: propose {file} previews a keyed expedition file and posts a Launch card. status and list read; only the owner launches, steers or stops.',
   'Never edit the Buddies database or files to change Buddy state. A denied tool is an authority boundary; do not route around it.',
   'Do not copy task status into memory; save shared work in files, linked from posts. Workers: post a one-line progress note on the Task at each milestone; the final answer carries evidence paths (commits, files, test names), not prose.',
   'Owner-needed action: request it in the owner DM ({direct:["owner"]}), naming the action and risk; act only after an explicit answer.',
@@ -66,8 +58,6 @@ export const CALL_TOOL_GUIDE = [
 /** The guide a turn's briefing carries, by its directory. */
 const GUIDE: { readonly [K in TurnDirectory['t']]: string } = {
   workspace: BUDDY_TOOL_GUIDE,
-  crew: BUDDY_TOOL_GUIDE,
-  attempt: BUDDY_TOOL_GUIDE,
   call: CALL_TOOL_GUIDE,
 };
 
@@ -192,19 +182,15 @@ const KEEP: {
   ) => { t: 'run'; runId: string; seat: TurnSeat } | { t: 'buddy' };
 } = {
   workspace: () => ({ t: 'buddy' }),
-  crew: () => ({ t: 'buddy' }),
-  attempt: (d) => ({ t: 'run', runId: d.runId, seat: BUDDY_SEAT }),
   call: (d) => ({ t: 'run', runId: d.runId, seat: { t: 'call', capabilities: d.capabilities } }),
 };
 
 /**
  * The runtime reads a briefing synchronously as it admits a turn, while the core is async. The
  * runner (and the conversation creator) warm the entry right before each turn, so `current` reads
- * what was just composed. A cold entry is an error, never an empty briefing. An attempt or call
+ * what was just composed. A cold entry is an error, never an empty briefing. A call
  * run is kept by run id (concurrent runs of one Buddy must not share a directory: two calls on the
- * one seat Buddy run side by side), forgotten at settle. Any other turn is kept by Buddy; a crew's
- * entry is always its own directory, never the owner's checkout, whatever warmed it (a chat reads
- * it before its run is armed: 2026-11-01 review).
+ * one seat Buddy run side by side), forgotten at settle. Any other turn is kept by Buddy.
  */
 export function createBriefings(
   core: BuddiesCore,

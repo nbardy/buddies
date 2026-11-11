@@ -1,5 +1,7 @@
 # Expeditions: four designs, one verdict
 
+Status: superseded by the [keyed expedition system](keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 The built system is in [keyed/v1](keyed/v1/DESIGN.md), with its runnable
 [one-file examples](keyed/v1/examples/README.md). This document is the earlier research record.
 
@@ -35,7 +37,7 @@ typed attempts and edges plus its `judging` status, and V2's warm lanes. Pilot i
 | Research | [`research/prior-art.md`](research/prior-art.md) | oompa, three expedition generations, Workflows, AI-OS; 20 failure lessons; token numbers |
 | Research | [`research/external.md`](research/external.md) | Published systems: FunSearch, AlphaEvolve, Shinka, autoresearch, Anthropic harnesses, judging, caching |
 | Research | [`research/scaling.md`](research/scaling.md) | When width helps (arXiv 2512.08296, 2603.12229, 2602.05965) and the seven-rule width decision (§4) |
-| Older | `../expeditions-leader-design.md`, `../expeditions-lean-design.md` | The owner's leader sketch and the design of today's code |
+| Older | `../expeditions-leader-design.md`, `historical retry-loop design (git d7bb99a)` | The owner's leader sketch and the design of today's code |
 
 ## 2. Scorecard
 

@@ -53,7 +53,6 @@ test('a command parked on the startup barrier runs before a reload queued during
       stopScheduler: () => undefined,
       flushState: () => undefined,
       exit: () => order.push('exit'),
-      discardCrewTurns: () => undefined,
       kill: () => undefined,
     }
   );

@@ -2,7 +2,7 @@ import type { keyed } from '@unleashd/shared';
 import type { CSSProperties, ReactNode } from 'react';
 import { buddyWrite } from './api';
 import { Confirm } from './Confirm';
-import { when } from './ExpeditionPanels';
+import { when } from './KeyedLayout';
 import { useKeyedWrite } from './keyed-api';
 import {
   type Axis,
@@ -227,7 +227,7 @@ function BarDetail({
           ['Attempt', `${bar.attempt} (${lane.kind})`],
           [
             'Outcome',
-            <span key="o" className="expedition-attempt-result" data-tone={TONE_CLASS[tone]}>
+            <span key="o" className="keyed-expedition-result" data-tone={TONE_CLASS[tone]}>
               {TONE_LABEL[tone]}
             </span>,
           ],
@@ -263,7 +263,7 @@ function BarDetail({
   );
 }
 
-/** The attempt-result tones of Expedition.css, for the outcome words. */
+/** The result tones of KeyedExpedition.css, for the outcome words. */
 const TONE_CLASS = {
   passed: 'pass',
   failed: 'fail',

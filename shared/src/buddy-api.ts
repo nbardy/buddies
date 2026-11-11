@@ -12,7 +12,6 @@ import type {
 import { z } from 'zod';
 import { OwnerPostMentionConfigSchema } from './buddy-channel-posts.js';
 import { type ConversationConfig, ConversationConfigSchema } from './conversation-config.js';
-import { Act, type Expedition } from './expedition.js';
 import type { KeyedPreview, KeyedView } from './expedition-keyed.js';
 import type { UpstreamUpdateResult } from './upstream.js';
 
@@ -385,13 +384,6 @@ export const buddyMutations = {
     status: 201,
     body: NoBodySchema,
   },
-  // Every owner act on an expedition (server/src/expeditions/routes.ts); refusals are 409.
-  'expedition.act': {
-    method: 'POST',
-    path: '/api/buddies/expeditions/:id/act',
-    status: 200,
-    body: Act,
-  },
   // Keyed expeditions (docs/expeditions/keyed/v1/CONNECT_PLAN.md §4). Served by the keyed-expedition
   // routes, not server/src/buddies/routes.ts; each answers with the refreshed view.
   'keyed.act': {
@@ -431,11 +423,10 @@ export const buddyMutations = {
 
 export type BuddyMutation = keyof typeof buddyMutations;
 /** The mutations server/src/buddies/routes.ts serves; the rest have their own route owners
- * (server/src/upstream, server/src/expeditions). */
+ * (server/src/upstream, server/src/expeditions-v1). */
 export type BuddyRouteMutation = Exclude<
   BuddyMutation,
   | 'upstream.update'
-  | 'expedition.act'
   | 'keyed.act'
   | 'keyed.answer'
   | 'keyed.approval'
@@ -497,7 +488,6 @@ export interface BuddyMutationResults {
   'reply.retry': ReplyRetryResult;
   read: { ok: boolean };
   'upstream.update': UpstreamUpdateResult;
-  'expedition.act': Expedition;
   'keyed.act': KeyedView;
   'keyed.answer': KeyedView;
   'keyed.approval': KeyedView;

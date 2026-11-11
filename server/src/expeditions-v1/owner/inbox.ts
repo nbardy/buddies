@@ -81,9 +81,6 @@ const HEARD: {
   approve: () => ({ t: 'approval', approved: true }),
   decline: () => ({ t: 'approval', approved: false }),
   note: (w) => note(w.text),
-  // The old host's verdict words mean nothing here: the owner's verdict is an ask's answer.
-  pass: (_w, body) => note(body.trim()),
-  fail: (_w, body) => note(body.trim()),
   talk: (_w, body) => note(body.trim()),
 };
 const heardOf = (body: string): Heard => {

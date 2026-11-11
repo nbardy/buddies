@@ -520,8 +520,7 @@ export * from './buddy-api.js';
 export * from './buddy-channel-posts.js';
 export * from './buddy-workspace-activity.js';
 export * from './dependencies.js';
-export * from './expedition.js';
-// A namespace: its names (Contract, Verdict, Outcome, ...) collide with the old expedition.ts.
+// The keyed expedition wire model remains namespaced for its consumers.
 export * as keyed from './expedition-keyed.js';
 // Oompa raw JSON file types (auto-generated from oompa_loompas schemas)
 export type {

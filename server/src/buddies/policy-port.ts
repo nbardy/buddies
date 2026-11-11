@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { BuddyContext } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
@@ -11,24 +10,6 @@ import type { CompletedBuddyTurn, MemoryReviewer } from './memory-review';
 import type { LeaseRenewal, Runner } from './runner';
 
 /**
- * Which Buddies are expedition crews (the expedition host implements it). A crew Buddy's turns
- * never outlive the backend that started them: boot adoption discards them, a graceful shutdown
- * kills them, and a crew seat's provider session lasts one boot (`SessionScope`).
- * Regression: owner 2026-11-03: crews restart on new sessions.
- */
-export interface CrewRegistry {
-  crewBuddyIds(): ReadonlySet<string>;
-}
-
-// Pattern: sum-types (docs/patterns.md#sum-types)
-/**
- * How long a Buddy's provider session may be resumed. `durable`: across restarts (every Buddy
- * but a crew). `boot`: only within the backend `bootId` names, so the first crew turn after a
- * restart starts a fresh session instead of resuming the one an interrupted crew left.
- */
-export type SessionScope = { t: 'durable' } | { t: 'boot'; bootId: string };
-
-/**
  * The narrow interface BuddyTurnPolicy (buddies/turn-policy.ts) calls for one Buddy turn.
  * Everything Buddy-specific a turn needs goes through here: the briefing, run admission, the one
  * MCP server (an HTTP spec carrying a fresh per-turn grant), settle, and the post-turn hook.
@@ -39,8 +20,6 @@ export interface BuddyPolicyPort {
   /** What kind of turn that briefing is for: an expedition call (with its capability set) or any
    * other Buddy turn. Same lookup, same error when cold. */
   turnSeat(context: BuddyContext): TurnSeat;
-  /** How long this Buddy's provider session may be resumed (crews: one boot). */
-  sessionScope(buddyId: string): SessionScope;
   /**
    * A queued owner message becomes a `chat` run carrying `body` (its text and provenance), named
    * by the message id. The runner claims it when the Buddy has a slot and hands it to the
@@ -104,12 +83,8 @@ export function createBuddyPolicyPort(deps: {
   reviewer: MemoryReviewer;
   spec(grant: TurnGrant): McpServerSpec;
   steering(): SteeringEndpoint;
-  crews: CrewRegistry;
 }): BuddyPolicyPort {
-  const { runner, grants, briefings, crews } = deps;
-  // One port per backend process, so this names the boot a `boot`-scoped session belongs to.
-  const boot: SessionScope = { t: 'boot', bootId: crypto.randomUUID() };
-  const durable: SessionScope = { t: 'durable' };
+  const { runner, grants, briefings } = deps;
   // A chat's deadline is its run's `deadline`, set at claim from this budget. A chat deadline
   // shorter than the turn budget (a 600 s claim lease) killed healthy owner chats on 2026-09-10;
   // refuse to build that. The lease is a separate, short heartbeat since 2026-10-01 and is
@@ -119,7 +94,6 @@ export function createBuddyPolicyPort(deps: {
   return {
     currentBriefing: (context) => briefings.current(context),
     turnSeat: (context) => briefings.seat(context),
-    sessionScope: (buddyId) => (crews.crewBuddyIds().has(buddyId) ? boot : durable),
     queueChat: (context, conversationId, turnId, body) =>
       runner.queueChat(context, conversationId, turnId, body),
     promoteChat: (turnId) => runner.promoteChat(turnId),

@@ -1,5 +1,7 @@
 # Expeditions V1: a leader running rounds of typed nodes
 
+Status: superseded by the [keyed expedition system](keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: **design only, nothing built.** Written 2026-11-09; **revision 2** the same day answers an
 independent critique (§11). This is the owner's model from `docs/expeditions-leader-design.md`,
 made precise and checked. It is not a redesign. It follows `docs/design-specs.md`. The

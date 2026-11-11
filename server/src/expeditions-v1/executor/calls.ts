@@ -12,9 +12,9 @@ import { EXPEDITION_CALL_PURPOSE, EXPEDITION_RUN_EVIDENCE } from '../../buddies/
 import { checkedRunConfig } from '../../buddies/worker-config';
 import { type CallTurn, capabilitiesOf, limitsText, readsOf } from '../../expedition-kernel/access';
 import type { Clock, RawOutcome, RunSpec } from '../../expedition-kernel/ports';
-import { add, git, release, tip } from '../../expeditions/cambium';
-import { addDetachedTree, removeDetachedTree } from '../../expeditions/checks';
 import { labelled } from '../../observability/event-loop-stall';
+import { add, git, release, tip } from '../cambium';
+import { addDetachedTree, removeDetachedTree } from '../checks';
 import { observeBuddyEvents } from '../observe';
 import { type RunAddress, type RunPaths, parseRunId, runPaths } from './address';
 import { readAnswer } from './answer';

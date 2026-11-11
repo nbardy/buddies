@@ -8,7 +8,7 @@ import {
   restoreOracle,
   runProcess,
   withDetachedTree,
-} from '../../expeditions/checks';
+} from '../checks';
 import type { RunAddress, RunPaths } from './address';
 import type { ExpeditionContext } from './context';
 import { checkOutput } from './output-schema';

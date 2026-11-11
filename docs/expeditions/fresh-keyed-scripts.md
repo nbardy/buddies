@@ -1,5 +1,7 @@
 # Expeditions as keyed, replaceable scripts
 
+Status: superseded by the [keyed expedition system](keyed/v1/DESIGN.md); retained as historical design/research. Old host deleted 2026-11-11.
+
 Status: **independent design, 2026-11-10. Not built, not model-checked.** Written from the
 problem statement only (`research/use-cases.md` §10, `research/prior-art.md` §6) without adopting
 the structure of V1–V4 or `final/`. Conventions: `../design-specs.md`. §9 says where it overlaps

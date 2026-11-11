@@ -57,9 +57,6 @@ client/src/atoms/*                 → jotai atoms, derived views, WS actions
 client/src/components/{Sidebar,Chat,ConversationConfigPicker}.tsx → main desktop UI
 client/src/mobile/*                → mobile view tree (second shell, same core)
 client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen indexes
-server/src/expeditions/            → expeditions: one JSON record each, a serialized step per record,
-                                     the `expedition` tool, /api/buddies/expeditions; design:
-                                     docs/expeditions-lean-design.md
 server/src/expedition-kernel/      → keyed expeditions (v1): one .expedition.ts file, log, reconcile, runner, gates;
                                      types in shared/src/expedition-keyed.ts (`keyed`)
 server/src/expeditions-v1/         → its one-file host: executor (commands, checks, agent calls as Buddy
@@ -68,7 +65,7 @@ server/src/expeditions-v1/         → its one-file host: executor (commands, ch
                                      gate on, else read-only. State
                                      and open findings: docs/expeditions/keyed/v1/CONNECT_PLAN.md §10
 client/src/components/buddies/Keyed*.tsx → its timeline view and rail rows
-client/src/components/buddies/Expedition*.tsx → chat card, rail section (both shells) and modal.
+client/src/components/buddies/{ExpeditionProposal,ExpeditionRail}.tsx → keyed proposal card and rail (both shells).
 {server,client}/src/swarm/          → QUARANTINED swarm/oompa viewer; outside code imports
                                      only swarm/index.ts (guard: swarm-quarantine.test.ts)
 ```
@@ -161,7 +158,7 @@ client/src/components/buddies/Expedition*.tsx → chat card, rail section (both 
   think the design could be simpler?", "let the model write promise code"), down to one import
   (2026-11-11, a82cfba). What survived shows the test: `x.ask` and `x.checkin` do what the language
   cannot (wait on the owner, wake the leader), and `step({...})` exists only because the type
-  checker needs it. The Buddy tool's description (`server/src/expeditions/tool.ts`) lists the whole
+  checker needs it. The Buddy tool's description (`server/src/expeditions-v1/tool.ts`) lists the whole
   surface and is sent on every Buddy turn: a change that makes it longer states the capability it
   buys.
 - Structural patterns live in `docs/patterns.md` (one store + one index,
@@ -188,7 +185,7 @@ requirements to rebuild omitted machinery.
 |---|---|
 | Code patterns: the structural patterns, tagging rule, where each is implemented | `docs/patterns.md` |
 | Writing a design spec: TS types, goals that name their mechanism, invariants that name their guard, ❌ gaps; Quint for the concurrent core | `docs/design-specs.md` |
-| Expeditions v2 (design only): leader + revisable round graphs, user goal vs objective | `docs/expeditions-leader-design.md` |
+| Keyed expeditions: one-file plans, kernel and host | `docs/expeditions/keyed/v1/DESIGN.md`, `CONNECT_PLAN.md` |
 | Buddies: core model, motivating cases, rationale and scope | `product/buddies/CORE_DESIGN.md` |
 | Client state: subscriptions, mutations, perf, hook ordering | `docs/client-state.md` |
 | Mobile view tree, grep gates, DeviceKind, UI-state partition | `docs/mobile-view-tree.md` |

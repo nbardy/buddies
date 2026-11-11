@@ -4,8 +4,6 @@ export interface ShutdownPorts {
   resumeScheduler(): void;
   stopScheduler(): void;
   flushState(): void | Promise<void>;
-  /** Kill and remove every expedition crew's turn journal (adopt-executions.ts `crewExecutions`). */
-  discardCrewTurns(): void;
   exit(code?: number): void;
   /** Last resort when `exit` itself did not end the process: SIGKILL, no handlers, no flush. */
   kill(): void;
@@ -23,10 +21,7 @@ export interface ShutdownOptions {
 // (turns/executions.ts, agent_notes/2026-09-30_execution-adoption-design.md). Before 2026-09-30
 // a reload waited for every turn to finish (it starved for 20+ minutes under steady Buddy work)
 // and SIGTERM stopped them all; an abrupt death orphaned every run anyway. Exits now wait only
-// for work that lives solely in memory. Only an explicit Stop stops a turn, with one exception:
-// an expedition crew's turn dies with its backend on every exit path (exitOnce). Regression:
-// owner 2026-11-03: crews restart on new sessions; the next backend would refuse to adopt them
-// anyway (adopt-executions.ts `restartOf`), and a shutdown with no successor left them running.
+// for work that lives solely in memory. Only an explicit Stop stops a turn.
 const DRAIN_POLL_INTERVAL_MS = 500;
 // Slack past (drain grace + flush grace) before the process is SIGKILLed from inside.
 // Fix-guard (2026-10-23): `--replace` waited its whole 10 s timeout and SIGKILLed a backend with
@@ -106,11 +101,6 @@ export function createShutdownController(
     state = 'exiting';
     reloadRequested = false;
     clearTimers();
-    try {
-      ports.discardCrewTurns();
-    } catch (error: unknown) {
-      console.error('Failed to discard crew turns during shutdown:', error);
-    }
     step(`flushing state (${code === 0 ? 'exit' : `exit ${code}`})`);
     let pendingFlush: void | Promise<void>;
     try {

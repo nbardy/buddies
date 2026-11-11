@@ -39,7 +39,7 @@ that commit, and the "Built" notes in §8 record what each step did. Design: [DE
    agents) and `expedition` (`policy-port.ts:119-120`, `mcp.ts:800-813`).
 7. **No run-settled event.** The runner emits a bare `{kind:'changed'}` on settle
    (`runner.ts:247`); answers arrive as `posted` (`runner.ts:409`). No lookup from a post to its
-   run; the old host scans `listRuns({kind:'buddy'}, 2000)` (`server/src/expeditions/host.ts:460-463`).
+   run; the retired host scanned `listRuns({kind:'buddy'}, 2000)` (historical git d7bb99a).
 8. **Cancelling a queued run leaves its request `awaiting` forever** (`host.ts:283-292`; crate
    `runs.rs:477`, `972-977`).
 9. **Run cap per Buddy.** `max_active_runs` defaults to 5
@@ -61,13 +61,13 @@ that commit, and the "Built" notes in §8 record what each step did. Design: [DE
 13. **Commands are strings; checks take argv.** `runChecks` takes `string[][]`
     (`checks.ts:136-171`), keeps only a 4,000-character mixed tail (`:202-204`, `:227-230`), has a
     fixed 2 h timeout and a fixed env (`:204`, `:219`).
-14. **An old-host GTM record is live**: `gtm-evidence-thesis-buye-dd0984`, `running`, a1 `judging`
+14. **Resolved 2026-11-11 (§6):** the old-host GTM record was live at this initial audit: `gtm-evidence-thesis-buye-dd0984`, `running`, a1 `judging`
     on an owner-judged done.
 
 ## 1. Executor over Buddy runs (`server/src/expeditions-v1/executor/`)
 
 **Durable state.** One record per run at `<expDir>/runs/<enc(runId)>.json` (tmp + rename, like
-`record.ts:80-86`): `posting{postBody}` → `posted{postId, buddyId, crateRunIds[]}` →
+the former host’s record writer (git d7bb99a)): `posting{postBody}` → `posted{postId, buddyId, crateRunIds[]}` →
 `settled{raw, spent}`, plus `closed` (tombstone); fields `kind`, `deadlineAt`, `tree`. One ref
 record per output at `<expDir>/refs/<enc(key@hash)>.json`:
 `{out, answerPath, commit, branch, salvageRef, conversationId}`, written before `ok` is reported.
@@ -145,11 +145,10 @@ log's `launched` line (`launch.ts:35-42`).
 - `dispose` reads `dispositions.json` from the draft folder; missing → `{}` → the rules gate
   rejects `undecided` and the next wake shows it (`change.ts:184-188`, `134`).
 - Owner thread: one thread per expedition in the owner↔leader DM, root key `xk:<id>:thread`.
-  Reuse `inform` / `postStatus` / `freshPosts` / `pageAfter` (`host.ts:229-253`, `481-521`),
-  extracted to `buddies/owner-thread.ts`. An ask is its own keyed root; the first owner reply is
+  Reuse `inform` / `postStatus` / `pageAfter` from `buddies/owner-thread.ts`. An ask is its own keyed root; the first owner reply is
   the answer. `Owner.approve` is a keyed post resolved by a bare `approve`/`decline` or the route;
   it lives in memory, and a restart re-wakes the leader (`kernel.ts:514`). Bare commands at the
-  root: `pause`, `resume`, `stop`, `extend Nh`, `retry <key>` (parsed like `brief.ts:117-135`).
+  root: `pause`, `resume`, `stop`, `extend Nh`, `retry <key>` (parsed by `owner/words.ts`).
   Other talk is stored as a note shown at the next wake.
 - `HostCommands.consumes(channelId, body, replyToId)` must take the thread
   (`buddies/routes.ts:178-181`, `:215`), or an owner reply starts an unbudgeted leader turn
@@ -161,30 +160,26 @@ log's `launched` line (`launch.ts:35-42`).
   (`server.ts:1078-1096`) and before the runner starts (`server.ts:1041`); its own boot phase.
 - Only when the execution gate is enabled (`execution-gate.ts:31-43`). Otherwise serve a read-only view folded from `log.jsonl` without
   `LogStore.open` (it truncates a torn last line, `log-store.ts:87-91`).
-- `interruptBootLive` is unnecessary for v1: calls run on ordinary Buddies, so their turns are
-  adopted (`adopt-executions.ts:207-213`). The crew special-casing (`adopt-executions.ts:170-173`,
-  `191-224`; `shutdown.ts:7-8`, `27-29`, `110-112`; `server.ts:875-879`; `policy-port.ts:14-27`,
-  `111`; `turn-policy.ts:190-192`; `briefing.ts:170-172`; `server.ts:1067-1075`, `361-367`) stays
-  until the old host is gone.
+- Calls run on ordinary Buddies and their turns are adopted. No crew-specific boot, session or shutdown path remains.
 - Shutdown: in `flushState` (`server.ts:863-874`), `detach()` every kernel and kill command
   process groups. Leave Buddy turns running.
 
 ## 4. API, wire types, UI
 
 - Routes under `/api/buddies/keyed-expeditions`, registered before the Buddy routes
-  (`expeditions/routes.ts:6-7`): `GET /` rows; `GET /:id` view; `POST /:id/act`
+  (`expeditions-v1/routes.ts`): `GET /` rows; `GET /:id` view; `POST /:id/act`
   (`pause|resume|extend|stop|retry key`); `POST /:id/asks/:ref`; `POST /:id/approval`;
   `POST /preview {file}` (dry-run diff and cost, writes nothing); `POST /launch
   {workspaceId, file}` (base from `resolveBase`, `checks.ts:35-59`). Mutations go in
-  `shared/src/buddy-api.ts` beside `'expedition.act'` (`:356-368`).
+  `shared/src/buddy-api.ts` as `keyed.*`.
 - To `shared/src/expedition-keyed.ts`: all of `types.ts`; `Bar`, `BarEnd`, `Marker`, `Timeline`,
   `Fault` and the pure `timelineOf`; new `KeyedRow` and `KeyedView` (a JSON projection with lanes
   grouped by key on the server, markers, pending asks with text, pending approval, spent,
   reserved, budget, deadline, faults). Export as a namespace (`export * as keyed`): names collide
-  with the old `shared/src/expedition.ts`.
+  with the other shared domain names.
 - Client: a `ChannelsView` kind `keyed` (`channels-view.ts:31-32`); `RailExpeditions` lists keyed
-  rows (`ExpeditionRail.tsx:36-45`); a `KeyedExpeditionView` reusing `Frame`, `Gone`,
-  `ChannelLoader` and the pill styles (`ExpeditionView.tsx:50-81`) with one Timeline tab: a lane
+  rows (`ExpeditionRail.tsx`); a `KeyedExpeditionView` reusing `Frame`, `Gone`,
+  `Scroll`, timestamps (`KeyedLayout.tsx`), `ChannelLoader` and `KeyedExpedition.css` with one Timeline tab: a lane
   per key, bars coloured by outcome, plan-version markers, review ticks, pending asks with an
   answer box, act buttons.
 - Client rules: `usePolledFetch(url, ms)` only; all hooks before any early return; no list
@@ -199,15 +194,11 @@ own file tools; the tool runs the preview, returns gate issues and cost, and on 
 a keyed card in the origin thread, `tool.ts:31-37`, `host.ts:933-936`), `status {id}` and `list`.
 No acts from the tool in v1: only the owner steers.
 
-## 6. Coexistence and cut-over
+## 6. Cut-over complete
 
-- Data root `~/.agent-viewer/expeditions-v1/`; the old loader skips directories (`record.ts:25-36`).
-- Both hosts run side by side. The old GTM record stays on the old host until the owner gives it
-  a verdict or stops it.
-- Deleting the old host, in order: remove `draft` when `propose` ships; wait for no `running` or
-  `paused` old records and retire them; delete `host.ts`, `brief.ts`, `record.ts`, `retire.ts`,
-  the old `routes.ts` and `tool.ts` (move `cambium.ts` and `checks.ts`); delete the crew machinery
-  in §3; delete the old shared types and client views.
+2026-11-11: the old host was deleted. Its four records were stopped and retired through its own API on 2026-11-11; they remain on disk under `~/.agent-viewer/expeditions/.retired/`, which nothing reads any more. No migration or cleanup touches them.
+
+Only the keyed host runs. The `expedition` tool exposes `propose`, `status`, `list`. Shared Git, Cambium, detached-tree and command helpers live in `server/src/expeditions-v1/`; the old crew machinery, wire types, routes and views are gone.
 
 ## 7. Safety
 
@@ -279,8 +270,8 @@ the Buddy routes' HostCommands. `launch` and `open` refuse while the execution g
 Asks are `executor/asks.ts` (records `asking` → `asked` → `settled`; the answer is read from the
 ask's own thread on every observation); the expedition's thread, its asks' roots, the read mark and
 the owner's notes are `<expDir>/owner.json` (`owner/book.ts`, which also answers `consumes`
-synchronously); the owner's replies are read by `owner/inbox.ts`; one grammar for both hosts is
-`owner/words.ts` (the old `brief.ts` `chatAct` now reads it; its behaviour is unchanged). The
+synchronously); the owner's replies are read by `owner/inbox.ts`; the owner grammar is
+`owner/words.ts` (the old host also used it before cut-over; see §6). The
 leader is `leader.ts` + `leader-brief.ts`, a `leader`-kind Buddy call in `executor/calls.ts` whose
 end goes to the waiting wake, never to the kernel's `onSettled`. The Owner port is
 `owner/approvals.ts`. Kernel changes: `Woken` is a sum (`acted` | `errored`, both with `spent`),
@@ -337,7 +328,7 @@ read-only view never shows one.
 | 7 | Client timeline view and rail rows | `pnpm screenshots` on a throwaway server; a unit test on the view model | low |
 | → | **First GTM run** (judges on Claude/Codex, small budget) | | |
 | 8 | Tool `propose` / `status` / `list`; remove the old `draft` | an MCP call over temp stores | low |
-| 9 | Later: crate run-by-post lookup; real `continues`; a Gemini path; per-model rates; delete the old host | | |
+| 9 | Old-host deletion **done 2026-11-11** (four records stopped and retired; see §6). Remaining: crate run-by-post lookup; real `continues`; a Gemini path; per-model rates | | |
 
 ## 9. Decisions (the recommendation is what gets built unless the owner says otherwise)
 
@@ -352,10 +343,14 @@ read-only view never shows one.
 | D7 | Owner talk in the expedition thread | A note shown at the next wake; no paid wake |
 | D8 | Acts through the Buddy tool | None in v1 |
 | D9 | Flag and namespace | `UNLEASHD_EXPEDITIONS_V1` removed 2026-11-11 at the owner’s request; Buddy execution gate alone. `/api/buddies/keyed-expeditions`, `~/.agent-viewer/expeditions-v1/` |
-| D10 | The live old GTM record | The owner gives it a verdict or stops it; the old host is deleted only after |
+| D10 | Old-host cut-over | Done 2026-11-11: all four records stopped and retired before host deletion (§6) |
 | D11 | `grant.reads` / `web` | Superseded 2026-11-11 (F1): each turn kind has a capability set (`server/src/expedition-kernel/access.ts`) that agent-cli turns into the harness's own flags; the preview reports each grant enforced or advisory |
 
 ## 10. The first real run, and what is open (2026-11-11)
+
+### Old host deleted (2026-11-11)
+
+2026-11-11: the old host was deleted. Its four records were stopped and retired through its own API on 2026-11-11; they remain on disk under `~/.agent-viewer/expeditions/.retired/`, which nothing reads any more. No migration or cleanup touches them.
 
 ### Authoring replacement (2026-11-11)
 
@@ -614,13 +609,12 @@ per temp path in the owner's home.
 4. Step 8: the Buddy tool (`propose`, `status`, `list`) and a launch button, so an expedition is
    started from the app and not from an HTTP call.
 5. With execution enabled, run the GTM case with its judges off Gemini (D2).
-6. Step 9: delete the old host once its last record is settled (D10), real `continues`, the crate
-   deadline.
+6. Step 9: old host deleted 2026-11-11 after its four records were stopped and retired (D10).
+   Remaining: real `continues`, the crate deadline.
 
 State on 2026-11-11 after the fourth run: items 1 to 4 are done and the integrated path is proven
 light. Open: item 5 (the GTM case, launched by the owner from a Buddy's proposal card in the live
-app) and item 6. The old host's record `gtm-evidence-thesis-buye-dd0984` still reads
-"Running · 1/6", waiting on the owner's verdict, so the old host stays until the owner settles it.
+app) and the remaining step-9 work. Old-host deletion is complete; see §6.
 
 ### F1, F2, F4 as built (2026-11-11)
 
@@ -703,7 +697,7 @@ finished `met` after 16 agent turns, $0.43 recorded. Evidence: the gitignored
 - **A review judge reads the code it judges.** The judge of a call whose ref has a branch (a
   `tree: checkout` producer) runs with tree `judge-checkout` (`executor/records.ts`): a detached
   checkout of exactly the judged commit at `<run>/tree` (`addDetachedTree` in
-  `expeditions/checks.ts`, the half of `withDetachedTree` that outlives one call; HEAD verified),
+  `expeditions-v1/checks.ts`, the half of `withDetachedTree` that outlives one call; HEAD verified),
   added to its read roots, and `git diff <base> <commit>` written to `<run>/work/changes.diff`,
   its cwd, so it needs no shell. The ref records the call's base for this (`RefRecord.checkout.base`;
   a branch ref stored before it does not parse). The prompt opens with a `THE CODE` section naming
