@@ -54,6 +54,7 @@ import { SubAgentPanel } from '../views/conversation/SubAgentPanel';
 import { TurnStatus } from '../views/conversation/TurnStatus';
 import { COPY_GLYPH } from '../views/transcript/markdown-components';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
+import { BuilderChatRoute } from './buddies/BuilderChatRoute';
 import { lastOwnerText } from './buddies/channel-dm';
 import { DmChannelsNotice } from './buddies/DmChannelsNotice';
 import { HarnessPicker } from './buddies/HarnessPicker';
@@ -89,7 +90,11 @@ function useTimeAgo(date: Date | undefined): string | null {
 // The desktop /chat/:id page.
 export function ChatRoute() {
   const { id = '' } = useParams<{ id: string }>();
-  return <Chat id={id} />;
+  return (
+    <BuilderChatRoute id={id}>
+      <Chat id={id} />
+    </BuilderChatRoute>
+  );
 }
 
 // One conversation, by id: the /chat page and the DM pane inside the desktop

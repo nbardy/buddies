@@ -134,6 +134,136 @@ const profileOf = (config: ConversationConfig) => ({
 const saveBuddyDefault = (buddyId: string, config: ConversationConfig) =>
   buddyWrite('buddy.update', { buddyId }, profileOf(config));
 
+// Fix guard: Builder was explicitly routed to the legacy chat on desktop and phone.
+// Share DM history and composition without giving setup chats a Buddy's chain or defaults.
+// Guard: channel-dm.test.tsx, Builder stays in Channels on both shells.
+export function ChannelBuilder({
+  conversationId,
+  buddyNames,
+  tasks,
+  frame,
+  backTo,
+  composeShell,
+}: {
+  conversationId: string;
+  buddyNames: Readonly<Record<string, string>>;
+  tasks: ReadonlyMap<string, ChannelTask>;
+  frame: DmFrame;
+  backTo: string | null;
+  composeShell(composer: ReactNode): ReactNode;
+}) {
+  const f = FRAMES[frame];
+  const row = useAtomValue(rowFamily(conversationId));
+  const transcript = useAtomValue(transcriptFamily(conversationId));
+  const groups = useAtomValue(groupsFamily(conversationId));
+  const stream = useAtomValue(streamFamily(conversationId));
+  const command = useAtomValue(commandFor(conversationId)).config;
+  const bodies = useConversationBodies(conversationId);
+  const { catalog } = useProviderCatalog();
+  const [modelOpen, setModelOpen] = useState(false);
+  const [limit, setLimit] = useState(DM_ROW_WINDOW);
+  const follow = useFollowBottom(
+    messagesOf(transcript).length + queueOf(transcript).length + limit,
+    groups,
+    null
+  );
+  const detail = detailOf(transcript);
+  const config = detail?.config.config ?? null;
+  const running = row !== null && row.run !== 'idle';
+  return (
+    <section className={f.pane} aria-label="Buddy Builder conversation">
+      <header className={f.header}>
+        {backTo !== null && (
+          <Link className="mobile-channel-header__back" to={backTo} aria-label="Back">
+            ‹
+          </Link>
+        )}
+        <div className={f.heading}>
+          {frame === 'desktop' ? <h2>Buddy Builder</h2> : <h1>Buddy Builder</h1>}
+        </div>
+        <button
+          type="button"
+          className="channel-dm-model channel-inline-action ui-truncate"
+          aria-label="Buddy Builder model"
+          aria-haspopup="dialog"
+          aria-expanded={modelOpen}
+          disabled={config === null}
+          onClick={() => setModelOpen(true)}
+        >
+          Model: {config ? modelSummary(config, catalog) : 'Loading'} ▾
+        </button>
+      </header>
+      {modelOpen && (
+        <ConfigOverlay
+          presentation={frame === 'mobile' ? 'sheet' : 'popover'}
+          value={config}
+          onClose={() => setModelOpen(false)}
+          picker={{
+            disabled: command?.state.tag === 'sent',
+            providerDisabled: (row?.messageCount ?? 0) > 0,
+            defaults: 'inline',
+            providerFilter: (id) =>
+              catalog?.providers.some((p) => p.id === id && p.supportsRequiredMcp) ?? false,
+          }}
+          onChange={(next) => {
+            if (detail)
+              setConversationConfig({
+                conversationId,
+                expectedRevision: detail.config.revision,
+                patch: { kind: 'replace', config: next },
+              });
+          }}
+          notes={
+            command?.state.tag === 'rejected'
+              ? [{ tone: 'error', text: command.state.message }]
+              : []
+          }
+        />
+      )}
+      <div className={f.scroll} ref={follow.scrollRef} onScroll={follow.onScroll}>
+        {bodies.error && (
+          <p className={f.error} role="alert">
+            {bodies.error}
+          </p>
+        )}
+        <div className="channel-dm-timeline" ref={follow.contentRef}>
+          <DmGeneration
+            conversationId={conversationId}
+            previousId={null}
+            frame={f}
+            buddyName="Buddy Builder"
+            buddyNames={buddyNames}
+            tasks={tasks}
+            limit={limit}
+            scrollRef={follow.scrollRef}
+            onReachTop={() => {
+              follow.hold();
+              setLimit((n) => n + DM_ROW_WINDOW);
+            }}
+            top={null}
+          />
+        </div>
+        {running && stream.length === 0 && (
+          <p className={f.note}>
+            <TypingDots />
+            <span>Buddy Builder is replying…</span>
+          </p>
+        )}
+      </div>
+      {composeShell(
+        <DmComposer
+          conversationId={conversationId}
+          placeholder="Describe the Buddy or team you need"
+          submit={frame === 'desktop' ? 'enter' : 'button'}
+          ready={row !== null}
+          running={running}
+          onSent={follow.pin}
+        />
+      )}
+    </section>
+  );
+}
+
 export function ChannelDm({
   conversationId,
   buddyId,

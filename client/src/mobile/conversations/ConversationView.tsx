@@ -26,6 +26,7 @@ import {
 } from '../../atoms/conversations';
 import { forkConversation } from '../../atoms/fork-actions';
 import { markMessagesSeen } from '../../atoms/ui';
+import { BuilderChatRoute } from '../../components/buddies/BuilderChatRoute';
 import { DmChannelsNotice } from '../../components/buddies/DmChannelsNotice';
 import { useConversationBodies } from '../../hooks/useConversationBodies';
 import { useCopyAction } from '../../hooks/useCopyAction';
@@ -195,6 +196,7 @@ export function ConversationView({
   }, [conversationId, totalMessageCount, messageGroups.length]);
 
   // Auto-scroll to bottom on new messages (flat list, not virtualized — iOS momentum)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: new groups and stream text trigger scroll measurement.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -206,6 +208,7 @@ export function ConversationView({
   }, [messageGroups, streamingText]);
 
   // Also scroll to bottom on mount / conversation switch
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a conversation switch resets the scroll position.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -513,5 +516,9 @@ export function ChatMobile() {
     event.preventDefault();
     void navigate(-1);
   };
-  return <ConversationView conversationId={id} backTo={destination.path} onBack={handleBack} />;
+  return (
+    <BuilderChatRoute id={id}>
+      <ConversationView conversationId={id} backTo={destination.path} onBack={handleBack} />
+    </BuilderChatRoute>
+  );
 }

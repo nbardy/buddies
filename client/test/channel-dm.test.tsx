@@ -138,6 +138,94 @@ test('a desktop DM opens on its latest chat, earlier ones behind a button, Refre
   assert.match(old, />Latest chat</);
 });
 
+test('Builder stays in Channels on both shells, with setup controls and saved Buddy cards', async () => {
+  await seed();
+  const builder = syntheticConversation(3, {
+    id: NEW,
+    kind: { t: 'builder' },
+    provider: 'codex',
+    messageCount: 2,
+  });
+  jotaiStore.set(rowsAtom, new Map([[NEW, builder]]));
+  jotaiStore.set(transcriptStore.patch, {
+    set: [
+      [
+        NEW,
+        {
+          tag: 'loaded',
+          epoch: 0,
+          detail: syntheticDetail(NEW),
+          messages: [
+            message('user', 'Hire someone to review designs', 30),
+            {
+              ...message('assistant', '', 31),
+              body: {
+                t: 'parts',
+                parts: [
+                  { t: 'text', text: 'Your design reviewer is ready.' },
+                  {
+                    t: 'buddy_builder_result',
+                    event: {
+                      action: 'created',
+                      result: {
+                        conversationId: NEW,
+                        creationKey: 'reviewer',
+                        buddy: {
+                          id: 'reviewer',
+                          project_id: WS,
+                          slug: 'reviewer',
+                          name: 'Design Reviewer',
+                          role: 'Review designs',
+                          status: 'active',
+                          provider: 'codex',
+                          model: null,
+                          reasoning_effort: null,
+                        },
+                        homeWorkspace: {
+                          id: WS,
+                          slug: 'test',
+                          name: 'Test',
+                          root_path: '/tmp/test',
+                        },
+                        workspaces: [],
+                        followUpQuestions: [],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    ],
+    remove: [],
+  });
+  const phone = renderToStaticMarkup(
+    <MemoryRouter initialEntries={[`/buddies/workspaces/${WS}/channels?channel=ch_a&dm=${NEW}`]}>
+      <Provider store={jotaiStore}>
+        <Routes>
+          <Route path="/buddies/workspaces/:workspaceId/channels" element={<ChannelsMobile />} />
+        </Routes>
+      </Provider>
+    </MemoryRouter>
+  );
+  for (const html of [desktop(NEW), phone]) {
+    assert.match(html, /aria-label="Buddy Builder conversation"/);
+    assert.match(html, /Hire someone to review designs/);
+    assert.match(html, /Your design reviewer is ready/);
+    assert.match(html, /Design Reviewer/);
+    assert.match(html, /Start conversation/);
+    assert.match(html, /placeholder="Describe the Buddy or team you need"/);
+    assert.match(html, /aria-label="Buddy Builder model"/);
+    assert.doesNotMatch(
+      html,
+      /class="chat-container|Refresh context|About Buddy Builder|Latest chat/
+    );
+  }
+  assert.match(phone, /aria-label="Back" href="[^"]*channels\?channel=ch_a"/);
+});
+
 test('a sending DM queue head disappears once its owner message is in the transcript', async () => {
   await seed();
   const body =

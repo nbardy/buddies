@@ -1,5 +1,5 @@
 import { useAtomValue } from 'jotai';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
 import { buddyRailFamily, channelRailFamily } from '../../atoms/channel-rail';
@@ -11,7 +11,7 @@ import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLin
 import { BuddySigil } from '../../components/buddies/BuddySigil';
 import { useBuddyDirectActions, useNewBuddy } from '../../components/buddies/buddy-direct-actions';
 import { ArchivedChannels, useArchivedChannels } from '../../components/buddies/ChannelArchive';
-import { ChannelDm } from '../../components/buddies/ChannelDm';
+import { ChannelBuilder, ChannelDm } from '../../components/buddies/ChannelDm';
 import { ChannelLanding } from '../../components/buddies/ChannelLanding';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
 import { TypingDots } from '../../components/buddies/ChannelMarkdown';
@@ -196,8 +196,7 @@ function renderScreen(screen: ChannelsView, context: ScreenContext) {
   }
 }
 
-// A Buddy DM drawn as a thread. The Buddy Builder chat is the hire flow, so it opens the
-// conversation page instead, with Back returning here without `dm`.
+// Both Buddy DMs and Builder setup chats use the channel screen, preserving Back.
 function DmScreen({ conversationId, context }: { conversationId: string; context: ScreenContext }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -206,15 +205,22 @@ function DmScreen({ conversationId, context }: { conversationId: string; context
   const back = new URLSearchParams(location.search);
   back.delete('dm');
   const backSearch = back.size ? `?${back}` : '';
-  const builder = row !== null && buddy === null;
-  useEffect(() => {
-    if (!builder) return;
-    void navigate(`/chat/${encodeURIComponent(conversationId)}`, {
-      replace: true,
-      state: mobileConversationRouteState({ ...location, search: backSearch }),
-    });
-  }, [builder, conversationId, location, backSearch, navigate]);
-  if (buddy === null) return <ChannelLoader label="Opening DM…" />;
+  if (row === null) return <ChannelLoader label="Opening DM…" />;
+  if (row.kind.t === 'builder')
+    return (
+      <ChannelBuilder
+        conversationId={conversationId}
+        buddyNames={context.directory.buddyNames}
+        tasks={context.directory.taskById}
+        frame="mobile"
+        backTo={`${location.pathname}${backSearch}`}
+        composeShell={(composer) => (
+          <MobileChannelComposeFrame title="Buddy Builder">{composer}</MobileChannelComposeFrame>
+        )}
+      />
+    );
+  if (buddy === null)
+    return <p role="alert">This conversation is not a Buddy DM or Builder chat.</p>;
   const member = context.directory.activeMembers.find((entry) => entry.id === buddy.buddyId);
   const name = member?.name ?? 'Buddy';
   return (
@@ -431,7 +437,7 @@ const MOBILE_ROW: RailRowClasses = {
 };
 
 // The rail's '+' and "Creating buddy" row (desktop e9e3426), as touch rows: New Buddy starts a
-// Buddy Builder chat, which DmScreen hands to the conversation page; × archives that setup chat.
+// Buddy Builder chat in the channel screen; × archives that setup chat.
 function BuddySection({
   members,
   workspaceId,
