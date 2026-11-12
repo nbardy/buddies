@@ -133,3 +133,41 @@ test('a stalled fetch is bounded and reports its failure while using the cached 
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test('a remote added by hand (no recorded default branch) still starts from the remote default, not the folder branch', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'expedition-sethead-'));
+  const origin = path.join(root, 'origin.git');
+  const repo = path.join(root, 'repo');
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  const commit = (cwd: string, message: string) =>
+    git(
+      cwd,
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.invalid',
+      'commit',
+      '--allow-empty',
+      '-qm',
+      message
+    );
+  try {
+    fs.mkdirSync(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    commit(repo, 'base');
+    const main = git(repo, 'rev-parse', 'HEAD');
+    git(root, 'clone', '--bare', '-q', repo, origin);
+    git(repo, 'remote', 'add', 'origin', origin);
+    git(repo, 'fetch', '-q', 'origin');
+    // Another session's branch is checked out, with a commit main does not have.
+    git(repo, 'checkout', '-q', '-b', 'other-session');
+    commit(repo, 'unrelated work');
+    assert.throws(() => git(repo, 'symbolic-ref', '-q', 'refs/remotes/origin/HEAD'));
+    const result = await resolveBase(repo);
+    assert.equal(result.commit, main);
+    assert.equal(result.line, `starts from origin/main at ${main.slice(0, 7)}, fetch succeeded`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

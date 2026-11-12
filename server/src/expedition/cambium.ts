@@ -41,7 +41,16 @@ export async function git(cwd: string, args: string[]) {
 export async function resolveBase(repo: string, override?: string) {
   const fetched = await exec('git', repo, ['fetch', 'origin'], 3000);
   const head = 'refs/remotes/origin/HEAD';
-  const remote = await exec('git', repo, ['rev-parse', '--symbolic-full-name', head]);
+  const recorded = () => exec('git', repo, ['rev-parse', '--symbolic-full-name', head]);
+  let remote = await recorded();
+  // A checkout that was not made by `git clone` never recorded the remote's default branch: 12 of
+  // the owner's 14 repositories with a remote (2026-11-12), so every launch there fell back to the
+  // folder's current branch, often another session's. Ask the remote once, bounded like the fetch.
+  // Guard: expedition-small "a remote added by hand".
+  if (remote.code !== 0) {
+    await exec('git', repo, ['remote', 'set-head', 'origin', '--auto'], 5000);
+    remote = await recorded();
+  }
   const fallback = !override && remote.code !== 0;
   const ref = override ?? (fallback ? 'HEAD' : remote.stdout.trim());
   const commit = await git(repo, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]);
