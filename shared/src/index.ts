@@ -532,3 +532,5 @@ export type {
 export * from './harness-retry.js';
 export * from './mobile-access.js';
 export * from './upstream.js';
+
+export * from './expedition.js';
