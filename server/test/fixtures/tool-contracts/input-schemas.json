@@ -329,6 +329,10 @@
                 },
                 "file": {
                   "type": "string"
+                },
+                "at": {
+                  "type": "string",
+                  "const": "base"
                 }
               },
               "required": [
@@ -1501,6 +1505,10 @@
                 },
                 "file": {
                   "type": "string"
+                },
+                "at": {
+                  "type": "string",
+                  "const": "base"
                 }
               },
               "required": [

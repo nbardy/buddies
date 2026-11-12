@@ -72,6 +72,7 @@ test('proposal states cost and owner launch; old evidence stays plain text', () 
       goal: view.goal,
       leader: 'buddy:manager',
       repo: '/tmp/repo',
+      start: { commit: 'abc1234', line: 'starts from origin/main at abc1234, fetch succeeded' },
       budget: view.budget,
       costUsd: 0.25,
       firstWave: [{ key: 'edit', who: 'codex:model:low', usd: 0.25 }],
@@ -85,6 +86,7 @@ test('proposal states cost and owner launch; old evidence stays plain text', () 
   );
   assert.match(html, /Launch expedition/);
   assert.match(html, /\$0.25/);
+  assert.match(html, /starts from origin\/main at abc1234, fetch succeeded/);
   const old: Post = {
     id: 'p',
     channelId: 'dm',

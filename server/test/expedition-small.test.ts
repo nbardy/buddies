@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { readAnswer } from '../src/expedition/call';
+import { resolveBase } from '../src/expedition/cambium';
 import { gates } from '../src/expedition/gates';
 import { priceUsd } from '../src/providers/pricing';
 
@@ -24,6 +26,14 @@ test('preview reserves reviews; rejects unawaited plans, forged IPC and nonfinit
   try {
     fs.writeFileSync(file, source);
     assert.ok(Math.abs((await gates(file)).preview.costUsd - 0.45) < 1e-9);
+    fs.unlinkSync(file);
+    const pinned = source.replace("repo:'/tmp'", "repo:'/tmp',base:'release'");
+    assert.equal((await gates(file, undefined, pinned)).contract.base, 'release');
+    assert.equal(
+      fs.existsSync(file),
+      false,
+      'committed source gates without writing into the repo'
+    );
     fs.writeFileSync(
       file,
       source.replace('async s=>s.a()', "async s=>{void s.a();return {out:'early',ref:{id:'x'}}}")
@@ -83,4 +93,43 @@ test('answer formats retain the last whole value', () => {
   ])
     assert.deepEqual(readAnswer(body, schema), { ok: true });
   assert.throws(() => readAnswer('Progress {"nested":{"ok":true}', schema));
+});
+
+test('a stalled fetch is bounded and reports its failure while using the cached default', {
+  timeout: 15000,
+}, async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'expedition-fetch-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  try {
+    git('init', '-q', '-b', 'main');
+    git(
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.invalid',
+      'commit',
+      '--allow-empty',
+      '-qm',
+      'base'
+    );
+    const commit = git('rev-parse', 'HEAD');
+    git('update-ref', 'refs/remotes/origin/main', commit);
+    git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+    git('remote', 'add', 'origin', repo);
+    const stall = path.join(repo, 'stall.cjs');
+    fs.writeFileSync(
+      stall,
+      `#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>process.exit());setTimeout(()=>{},30000);`,
+      { mode: 0o755 }
+    );
+    git('config', 'remote.origin.uploadpack', stall);
+    const began = Date.now();
+    const result = await resolveBase(repo);
+    assert.ok(Date.now() - began < 8000, 'fetch returns within a few seconds');
+    assert.equal(result.commit, commit);
+    assert.equal(result.line, `starts from origin/main at ${commit.slice(0, 7)}, fetch failed`);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
 });

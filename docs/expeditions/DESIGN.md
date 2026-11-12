@@ -4,6 +4,9 @@ One TypeScript plan runs a chain of agent turns, host commands and questions. A 
 it; the owner launches its card. Its manager is the Buddy in `contract.leader`, with that Buddy's
 normal tools and memory. The [ten examples](examples/README.md) are the authoring contract.
 
+The base is `origin/HEAD` after a bounded fetch (or `HEAD`, explicitly disclosed, if absent), overridden by `contract.base`; the Launch card pins its commit and reports the ref and fetch result in the launch log too.
+`propose {file:'repo/path',at:'base'}` gates a temporary copy from the workspace repository's base commit and carries that exact source and hash on the card, without writing into the shared checkout.
+
 The server runs the plan in a permission-limited child with no inherited environment, writes or
 process spawning. Each call is keyed by its name and rendered inputs. A settled answer comes
 from `log.jsonl`; otherwise its cap is reserved, its harness slot is acquired, and `runTurn` executes

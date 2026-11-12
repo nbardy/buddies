@@ -12,6 +12,7 @@ export const Contract = z
     goal: z.string().min(1),
     leader: z.string().regex(/^buddy:.+/),
     repo: z.string().min(1),
+    base: z.string().min(1).optional(),
     budget: z.object({ usd: z.number().positive(), hours: z.number().positive() }).strict(),
     rules: z.array(z.string()),
     done: z.array(
@@ -35,10 +36,14 @@ export const defaultCap = (c: Contract) => ({
   minutes: Math.min(c.budget.hours * 60, Math.min(20, Math.max(5, c.budget.hours * 6))),
 });
 export async function gates(
-  file: string,
-  known: (c: Call) => ExpeditionResult | undefined = () => undefined
+  inputFile: string,
+  known: (c: Call) => ExpeditionResult | undefined = () => undefined,
+  source?: string
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'expedition-types-'));
+  // Base-only plans stay out of shared worktrees. Guard: expedition-small committed source gates.
+  const file = source === undefined ? inputFile : path.join(dir, 'plan.expedition.ts');
+  if (source !== undefined) fs.writeFileSync(file, source);
   const config = path.join(dir, 'tsconfig.json');
   fs.writeFileSync(
     config,
@@ -69,71 +74,72 @@ export async function gates(
         (e, out, err) => (e ? reject(new Error(out + err)) : resolve())
       )
     );
+    let contract: Contract | undefined;
+    const calls: Call[] = [],
+      defaults: string[] = [];
+    const unanswered = new Set<number>();
+    await new Promise<void>((resolve, reject) => {
+      const child = runPlan(file, (m, reply) => {
+        try {
+          switch (m.t) {
+            case 'contract':
+              contract = Contract.parse(m.contract);
+              defaults.push(...m.defaults);
+              break;
+            case 'call': {
+              const result = known(m.call);
+              if (result) reply(result);
+              else {
+                calls.push(m.call);
+                unanswered.add(m.seq);
+              }
+              break;
+            }
+            case 'waiting':
+              if (m.on.every((seq) => unanswered.has(seq))) {
+                if (!m.on.length) {
+                  void child.kill();
+                  reject(new Error('Plan waits without a host call'));
+                  break;
+                }
+                void child.kill().then(resolve);
+              }
+              break;
+            case 'end':
+              resolve();
+              break;
+            case 'error':
+              reject(new Error(m.why));
+              break;
+          }
+        } catch (e) {
+          void child.kill();
+          reject(e);
+        }
+      });
+    });
+    if (!contract) throw new Error('The plan supplied no contract');
+    const reviewUsd = (contract.doneReview ?? defaultCap(contract)).usd;
+    const preview: ExpeditionProposal['preview'] = {
+      ...contract,
+      // Include the judge reservation: the first real card showed $0.15 for a $0.25 wave.
+      // Guard: expedition-small preview includes review caps.
+      costUsd: calls.reduce(
+        (sum, c) =>
+          sum + c.usd + (c.t === 'agent' && c.judge && 'review' in c.judge ? reviewUsd : 0),
+        0
+      ),
+      firstWave: calls.map((c) => ({ key: c.key, who: c.t === 'agent' ? c.by : c.t, usd: c.usd })),
+      defaults: [
+        ...defaults,
+        `pools = ${JSON.stringify(contract.pools)}`,
+        `autoApply = $${contract.autoApply.usd}`,
+        `leaderWake = ${(contract.leaderWake ?? defaultCap(contract)).usd}`,
+        `doneReview = ${JSON.stringify(contract.doneReview ?? defaultCap(contract))}`,
+      ],
+    };
+    return { contract, preview, calls };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-  let contract: Contract | undefined;
-  const calls: Call[] = [],
-    defaults: string[] = [];
-  const unanswered = new Set<number>();
-  await new Promise<void>((resolve, reject) => {
-    const child = runPlan(file, (m, reply) => {
-      try {
-        switch (m.t) {
-          case 'contract':
-            contract = Contract.parse(m.contract);
-            defaults.push(...m.defaults);
-            break;
-          case 'call': {
-            const result = known(m.call);
-            if (result) reply(result);
-            else {
-              calls.push(m.call);
-              unanswered.add(m.seq);
-            }
-            break;
-          }
-          case 'waiting':
-            if (m.on.every((seq) => unanswered.has(seq))) {
-              if (!m.on.length) {
-                void child.kill();
-                reject(new Error('Plan waits without a host call'));
-                break;
-              }
-              void child.kill().then(resolve);
-            }
-            break;
-          case 'end':
-            resolve();
-            break;
-          case 'error':
-            reject(new Error(m.why));
-            break;
-        }
-      } catch (e) {
-        void child.kill();
-        reject(e);
-      }
-    });
-  });
-  if (!contract) throw new Error('The plan supplied no contract');
-  const reviewUsd = (contract.doneReview ?? defaultCap(contract)).usd;
-  const preview: ExpeditionProposal['preview'] = {
-    ...contract,
-    // Include the judge reservation: the first real card showed $0.15 for a $0.25 wave.
-    // Guard: expedition-small preview includes review caps.
-    costUsd: calls.reduce(
-      (sum, c) => sum + c.usd + (c.t === 'agent' && c.judge && 'review' in c.judge ? reviewUsd : 0),
-      0
-    ),
-    firstWave: calls.map((c) => ({ key: c.key, who: c.t === 'agent' ? c.by : c.t, usd: c.usd })),
-    defaults: [
-      ...defaults,
-      `pools = ${JSON.stringify(contract.pools)}`,
-      `autoApply = $${contract.autoApply.usd}`,
-      `leaderWake = ${(contract.leaderWake ?? defaultCap(contract)).usd}`,
-      `doneReview = ${JSON.stringify(contract.doneReview ?? defaultCap(contract))}`,
-    ],
-  };
-  return { contract, preview, calls };
 }

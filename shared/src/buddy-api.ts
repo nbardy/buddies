@@ -12,7 +12,7 @@ import type {
 import { z } from 'zod';
 import { OwnerPostMentionConfigSchema } from './buddy-channel-posts.js';
 import { type ConversationConfig, ConversationConfigSchema } from './conversation-config.js';
-import type { ExpeditionView } from './expedition.js';
+import { ExpeditionProposal, type ExpeditionView } from './expedition.js';
 import type { UpstreamUpdateResult } from './upstream.js';
 
 // Pattern: one-type-source (docs/patterns.md#one-type-source)
@@ -357,7 +357,7 @@ export const buddyMutations = {
     method: 'POST',
     path: '/api/buddies/expeditions/launch',
     status: 200,
-    body: z.object({ file: z.string(), hash: z.string(), workspaceId: z.string() }).strict(),
+    body: ExpeditionProposal.partial({ preview: true }).strict(),
   },
   'expedition.answer': {
     method: 'POST',

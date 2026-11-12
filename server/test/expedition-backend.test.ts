@@ -5,7 +5,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { type ExpeditionView, WS_PATH, decodeRows } from '@unleashd/shared';
+import {
+  EXPEDITION_PROPOSAL,
+  ExpeditionProposal,
+  type ExpeditionView,
+  WS_PATH,
+  decodeRows,
+} from '@unleashd/shared';
 import { WebSocket } from 'ws';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 import { freePortSync } from './free-port';
@@ -36,13 +42,18 @@ async function main(){
  const out=text=>say(codex?{type:'item.completed',item:{type:'agent_message',text}}:{type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text}}});
  const done=text=>{out(text);if(!codex)say({type:'assistant',message:{content:[],usage:{input_tokens:10,output_tokens:2,cache_read_input_tokens:0,cache_creation_input_tokens:0}}});say(codex?{type:'turn.completed',usage:{input_tokens:10,output_tokens:2}}:{type:'result',subtype:'success',result:text});};
  say(codex?{type:'thread.started',thread_id:'fake-'+Date.now()}:{type:'system',subtype:'init',session_id:'fake-'+Date.now()});
- const manager=/Expedition ([a-f0-9-]+) needs your decision: (rewrite|stop)/.exec(prompt);
- if(manager&&(manager[2]==='stop'||!fs.existsSync(path.join(fake,'rewritten')))){
+ const manager=/Expedition ([a-f0-9-]+) needs your decision: (rewrite|stop|propose)/.exec(prompt);
+ if(manager&&(manager[2]!=='rewrite'||!fs.existsSync(path.join(fake,'rewritten')))){
   const {Client}=require(process.env.SDK_CLIENT),{StreamableHTTPClientTransport}=require(process.env.SDK_HTTP);
   const spec=Object.values(JSON.parse(process.argv[process.argv.indexOf('--mcp-config')+1]).mcpServers)[0];
   const headers=Object.fromEntries(Object.entries(spec.headers).map(([k,v])=>[k,v.replace(/\$\{([^}]+)\}/g,(_,n)=>process.env[n])]));
   const client=new Client({name:'fake-manager',version:'1'});
   await client.connect(new StreamableHTTPClientTransport(new URL(spec.url),{requestInit:{headers}}));
+  if(manager[2]==='propose'){
+   const {actions,result}=JSON.parse(fs.readFileSync(path.join(fake,'propose.json'),'utf8'));
+   const replies=[];for(const action of actions)replies.push(await client.callTool({name:'expedition',arguments:{action}}));
+   fs.writeFileSync(path.join(fake,result),JSON.stringify(replies));await client.close();done('Proposed');return;
+  }
   if(manager[2]==='stop'){await client.callTool({name:'expedition',arguments:{action:{do:'stop',id:manager[1],why:'Done with this proof'}}});await client.close();done('Stopped');return;}
   const folder=/Read (.+)\/log.jsonl/.exec(prompt)[1];
   const next=fs.readFileSync(path.join(fake,'next.ts'),'utf8');
@@ -61,7 +72,8 @@ async function main(){
  fs.appendFileSync(path.join(fake,'spawns'),tag+' '+process.pid+'\n');
  fs.writeFileSync(path.join(fake,tag+'.started'),String(process.pid));
  if(tag==='slow'||tag==='drop'||tag==='resource'||tag==='ownerstop')await new Promise(resolve=>{const t=setInterval(()=>{if(fs.existsSync(path.join(fake,tag+'.go'))){clearInterval(t);resolve()}},10)});
- if(tag==='edit'){
+ if(tag==='baseedit')fs.writeFileSync(path.join(fake,'baseedit.base'),cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}));
+ if(tag==='edit'||tag==='baseedit'){
   fs.writeFileSync('value.txt','after\n');cp.execFileSync('git',['add','value.txt']);cp.execFileSync('git',['-c','commit.gpgsign=false','commit','-qm','edit']);
  }
  if(tag==='review'){
@@ -350,4 +362,164 @@ test('owner Stop cancels a step and wakes its manager', { timeout: 120000 }, asy
   } finally {
     socket.close();
   }
+});
+
+// Shared HEAD once selected another session's feature branch, losing main-only plans and checks.
+test('base checkouts: remote default, disclosed HEAD, override and committed proposal', {
+  timeout: 120000,
+}, async () => {
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  const original = git('rev-parse', 'HEAD');
+  const probe = plan("check:{run:'git rev-parse HEAD'}", 'return s.check();');
+  let sequence = 0;
+  async function propose(actions: unknown[]) {
+    const result = `proposals-${++sequence}.json`;
+    fs.writeFileSync(path.join(fake, 'propose.json'), JSON.stringify({ actions, result }));
+    await launch(plan('', "await x.checkin('propose');return {out:'proposed',ref:{id:'owner'}};"));
+    const before = git('status', '--porcelain');
+    await eventually(() => fs.existsSync(path.join(fake, result)), 'manager proposed over MCP');
+    assert.equal(git('status', '--porcelain'), before, 'proposal never writes to the shared tree');
+    return JSON.parse(fs.readFileSync(path.join(fake, result), 'utf8')) as Array<{
+      isError?: boolean;
+      content: Array<{ text: string }>;
+    }>;
+  }
+  async function card(reply: { content: Array<{ text: string }> }) {
+    const preview = JSON.parse(reply.content[0].text);
+    assert.equal(preview.issues, undefined, reply.content[0].text);
+    const thread = await api<{ root: { evidence: string[] } }>(
+      `/api/buddies/posts/${preview.card}/thread`
+    );
+    return ExpeditionProposal.parse(
+      JSON.parse(thread.root.evidence[0].slice(EXPEDITION_PROPOSAL.length))
+    );
+  }
+  async function settled(p: ExpeditionProposal) {
+    const run = await api<ExpeditionView>('/api/buddies/expeditions/launch', p);
+    await eventually(
+      async () => ['met', 'held'].includes((await view(run.id)).status),
+      'base steps settled'
+    );
+    const v = await view(run.id);
+    assert.equal(v.status, 'met', JSON.stringify(v));
+    const entries = fs
+      .readFileSync(path.join(data, 'expedition-runs', run.id, 'log.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    return { v, log: entries.find((e) => e.t === 'launch') };
+  }
+  const disk = path.join(repo, 'local.expedition.ts');
+  fs.writeFileSync(disk, probe);
+  const [localReply] = await propose([{ do: 'propose', file: disk }]);
+  const local = await card(localReply);
+  assert.equal(
+    local.preview.start?.line,
+    `starts from this folder's current branch main at ${original.slice(0, 7)}: the repository has no origin default branch, fetch failed`
+  );
+  const fallback = await settled(local);
+  assert.equal(fallback.log.base, original);
+  assert.equal(fallback.log.baseLine, local.preview.start?.line);
+  assert.equal(fallback.v.steps[0].commit, original);
+
+  const source = `${plan(
+    "edit:{by:'claude:claude-haiku-5-5:low',checkout:true,brief:'TAG:baseedit'},check:{run:'node base-check.cjs'}",
+    'const a=await s.edit();await s.check({on:a});return a;'
+  )}\n\n`;
+  fs.writeFileSync(path.join(repo, 'committed.expedition.ts'), source);
+  fs.writeFileSync(
+    path.join(repo, 'base-check.cjs'),
+    "require('node:assert/strict').equal(require('node:fs').readFileSync('value.txt','utf8'),'after\\n')"
+  );
+  git('add', 'committed.expedition.ts', 'base-check.cjs');
+  git('-c', 'commit.gpgsign=false', 'commit', '-qm', 'default-only plan and check');
+  const base = git('rev-parse', 'HEAD');
+  const origin = path.join(root, 'origin.git');
+  git('clone', '--bare', '-q', repo, origin);
+  git('--git-dir', origin, 'update-ref', 'refs/heads/trunk', base);
+  git('--git-dir', origin, 'symbolic-ref', 'HEAD', 'refs/heads/trunk');
+  git('remote', 'add', 'origin', origin);
+  git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
+  git('checkout', '-qb', 'muse/feature', original);
+  assert.equal(fs.existsSync(path.join(repo, 'committed.expedition.ts')), false);
+  const outside = path.join(root, 'outside.expedition.ts');
+  fs.writeFileSync(outside, probe);
+  const link = path.join(repo, 'outside-link.expedition.ts');
+  fs.symlinkSync(outside, link);
+  const [traversal, absolute, symlink, valid] = await propose([
+    { do: 'propose', file: '../outside.expedition.ts', at: 'base' },
+    { do: 'propose', file: outside },
+    { do: 'propose', file: link },
+    { do: 'propose', file: 'committed.expedition.ts', at: 'base' },
+  ]);
+  for (const refused of [traversal, absolute, symlink]) {
+    assert.equal(refused.isError, true, JSON.stringify(refused));
+    assert.match(refused.content[0].text, /outside workspace/);
+  }
+  const proposal = await card(valid);
+  assert.equal(
+    proposal.source,
+    source,
+    'git show preserves the exact bytes, including final newlines'
+  );
+  assert.equal(proposal.hash, createHash('sha256').update(JSON.stringify(source)).digest('hex'));
+  assert.ok(proposal.preview.start);
+  assert.equal(proposal.preview.start.commit, base);
+  assert.equal(
+    proposal.preview.start.line,
+    `starts from origin/trunk at ${base.slice(0, 7)}, fetch succeeded`
+  );
+  assert.equal(fs.existsSync(proposal.file), false);
+  const changed = await fetch(`http://127.0.0.1:${port}/api/buddies/expeditions/launch`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ...proposal, source: `${source}// changed` }),
+  });
+  assert.equal(changed.status, 409);
+  assert.match(await changed.text(), /Plan changed/);
+  // Moving the default branch after approval must not retarget the reviewed card.
+  git('--git-dir', origin, 'update-ref', 'refs/heads/trunk', original);
+  const pinned = await settled(proposal);
+  assert.equal(pinned.log.base, base);
+  assert.equal(pinned.log.baseLine, proposal.preview.start.line);
+  assert.equal(fs.readFileSync(path.join(fake, 'baseedit.base'), 'utf8').trim(), base);
+  assert.ok(pinned.v.steps.every((step) => step.state === 'passed'));
+  assert.equal(
+    fs.readFileSync(path.join(data, 'expedition-runs', pinned.v.id, 'plan.expedition.ts'), 'utf8'),
+    source
+  );
+
+  for (const ref of ['main', base]) {
+    const override = await launch(probe.replace('rules:[]', `base:'${ref}',rules:[]`));
+    await eventually(
+      async () => (await view(override.id)).status === 'met',
+      'explicit base override'
+    );
+    assert.equal((await view(override.id)).steps[0].commit, base);
+    const log = JSON.parse(
+      fs
+        .readFileSync(path.join(data, 'expedition-runs', override.id, 'log.jsonl'), 'utf8')
+        .split('\n')[0]
+    );
+    assert.equal(log.baseLine, `starts from ${ref} at ${base.slice(0, 7)}, fetch succeeded`);
+  }
+  await assert.rejects(
+    launch(probe.replace('rules:[]', "base:'missing-ref',rules:[]")),
+    /rev-parse/
+  );
+  const [reproposed] = await propose([{ do: 'propose', file: disk }]);
+  const fresh = await card(reproposed);
+  assert.equal(
+    fresh.preview.start?.line,
+    `starts from origin/trunk at ${original.slice(0, 7)}, fetch succeeded`,
+    'same source and commit with new provenance must not reuse a stale card'
+  );
+  git('remote', 'set-url', 'origin', path.join(root, 'unavailable.git'));
+  const [unavailable] = await propose([{ do: 'propose', file: disk }]);
+  const cached = await card(unavailable);
+  assert.equal(
+    cached.preview.start?.line,
+    `starts from origin/trunk at ${original.slice(0, 7)}, fetch failed`
+  );
 });

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 
 // A repository hook once inherited provider keys (2026-11-01). Scrub env and disable hooks.
-export function exec(bin: 'git' | 'git-cambium', cwd: string, args: string[]) {
+export function exec(bin: 'git' | 'git-cambium', cwd: string, args: string[], timeout = 900000) {
   const keep =
     /^(PATH|HOME|USER|LOGNAME|LANG|LC_ALL|TZ|TMPDIR|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL))$/;
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => keep.test(k)));
@@ -11,7 +11,7 @@ export function exec(bin: 'git' | 'git-cambium', cwd: string, args: string[]) {
       args,
       {
         cwd,
-        timeout: 900000,
+        timeout,
         maxBuffer: 16 << 20,
         env: {
           ...env,
@@ -26,7 +26,7 @@ export function exec(bin: 'git' | 'git-cambium', cwd: string, args: string[]) {
       (error, stdout, stderr) =>
         resolve({
           code: error ? -1 : 0,
-          stdout: stdout.trim(),
+          stdout,
           stderr: stderr + (error?.message ?? ''),
         })
     );
@@ -35,5 +35,22 @@ export function exec(bin: 'git' | 'git-cambium', cwd: string, args: string[]) {
 export async function git(cwd: string, args: string[]) {
   const result = await exec('git', cwd, args);
   if (result.code) throw new Error(`git ${args.join(' ')}: ${result.stderr.slice(-600)}`);
-  return result.stdout;
+  return result.stdout.trim();
+}
+// Shared checkouts may be on another session's branch. Guard: expedition-backend base checkouts.
+export async function resolveBase(repo: string, override?: string) {
+  const fetched = await exec('git', repo, ['fetch', 'origin'], 3000);
+  const head = 'refs/remotes/origin/HEAD';
+  const remote = await exec('git', repo, ['rev-parse', '--symbolic-full-name', head]);
+  const fallback = !override && remote.code !== 0;
+  const ref = override ?? (fallback ? 'HEAD' : remote.stdout.trim());
+  const commit = await git(repo, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]);
+  const branch = await exec('git', repo, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+  const name = fallback
+    ? `this folder's ${branch.code === 0 ? `current branch ${branch.stdout.trim()}` : 'detached HEAD'}`
+    : ref.replace(/^refs\/remotes\//, '');
+  return {
+    commit,
+    line: `starts from ${name} at ${commit.slice(0, 7)}${fallback ? ': the repository has no origin default branch' : ''}, fetch ${fetched.code === 0 ? 'succeeded' : 'failed'}`,
+  };
 }

@@ -13,11 +13,7 @@ export function ProposalCard({ proposal: p }: { proposal: ExpeditionProposal }) 
     setBusy(true);
     setError('');
     try {
-      const result = await buddyWrite(
-        'expedition.launch',
-        {},
-        { file: p.file, hash: p.hash, workspaceId: p.workspaceId }
-      );
+      const result = await buddyWrite('expedition.launch', {}, p);
       setId(result.id);
     } catch (e) {
       setError(String(e));
@@ -28,6 +24,7 @@ export function ProposalCard({ proposal: p }: { proposal: ExpeditionProposal }) 
   return (
     <section className="expedition-proposal ui-stack" aria-label="Proposed expedition">
       <h3>{p.preview.goal.split('\n')[0]}</h3>
+      {p.preview.start && <p>{p.preview.start.line}</p>}
       <p>
         Budget ${p.preview.budget.usd} · {p.preview.budget.hours} hours
       </p>

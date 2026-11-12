@@ -1,3 +1,4 @@
+import { buddyMutations } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import { z } from 'zod';
 import type { Expeditions } from './engine';
@@ -19,11 +20,7 @@ export function registerExpeditionRoutes(app: Express, host: Expeditions) {
   );
   route('get', '/:id', (req) => host.view(String(req.params.id)));
   route('post', '/launch', (req) => {
-    const p = z
-      .object({ file: z.string(), hash: z.string(), workspaceId: z.string() })
-      .strict()
-      .parse(req.body);
-    return host.launch(p.file, p.hash, p.workspaceId);
+    return host.launch(buddyMutations['expedition.launch'].body.parse(req.body));
   });
   route('post', '/:id/answer', (req) => {
     const p = z

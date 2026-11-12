@@ -2,18 +2,31 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ExpeditionQuestion, ExpeditionStep, ExpeditionView } from '@unleashd/shared';
+import type {
+  ExpeditionProposal,
+  ExpeditionQuestion,
+  ExpeditionStep,
+  ExpeditionView,
+} from '@unleashd/shared';
 import type { ExecutionGate } from '../buddies/execution-gate';
 import type { Call } from './author';
 import { type CallDeps, type Receipt, execute } from './call';
-import { git } from './cambium';
+import { resolveBase } from './cambium';
 import { runPlan } from './child';
 import { type Contract, defaultCap, gates } from './gates';
 
 export const hash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
 type Entry =
-  | { t: 'launch'; workspaceId: string; contract: Contract; repo: string; base: string; at: number }
+  | {
+      t: 'launch';
+      workspaceId: string;
+      contract: Contract;
+      repo: string;
+      base: string;
+      baseLine: string;
+      at: number;
+    }
   | { t: 'plan'; version: number; hash: string }
   | { t: 'start'; call: Call; hash: string }
   | { t: 'result'; key: string; hash: string; receipt: Receipt }
@@ -334,16 +347,20 @@ export function createExpeditions(
         if (d.gate.t === 'enabled' && !['met', 'stopped'].includes(r.status.status)) evaluate(r);
       }
     },
-    async launch(file: string, contentHash: string, workspaceId: string) {
+    async launch(
+      p: Omit<ExpeditionProposal, 'preview'> & { preview?: ExpeditionProposal['preview'] }
+    ) {
+      const { file, hash: contentHash, workspaceId, source: content } = p;
       allowed();
-      const source = fs.readFileSync(file, 'utf8');
+      const source = content ?? fs.readFileSync(file, 'utf8');
       if (hash(source) !== contentHash) throw new Error('Plan changed; propose again');
-      const checked = await gates(file);
-      if (fs.readFileSync(file, 'utf8') !== source) throw new Error('Plan changed during gates');
+      const checked = await gates(file, undefined, content);
+      if (content === undefined && fs.readFileSync(file, 'utf8') !== source)
+        throw new Error('Plan changed during gates');
       const id = randomUUID(),
         folder = path.join(d.root, id);
       const repo = checked.contract.repo.replace(/^~(?=\/)/, os.homedir());
-      const base = await git(repo, ['rev-parse', 'HEAD']);
+      const base = p.preview?.start ?? (await resolveBase(repo, checked.contract.base));
       fs.mkdirSync(path.join(folder, 'plans'), { recursive: true, mode: 0o700 });
       fs.writeFileSync(path.join(folder, 'plan.expedition.ts'), source);
       fs.writeFileSync(path.join(folder, 'plans/v1.expedition.ts'), source);
@@ -353,7 +370,8 @@ export function createExpeditions(
         t: 'launch',
         workspaceId,
         contract: checked.contract,
-        base,
+        base: base.commit,
+        baseLine: base.line,
         repo,
         at: Date.now(),
       });

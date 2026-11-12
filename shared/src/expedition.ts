@@ -4,10 +4,12 @@ export const ExpeditionProposal = z.object({
   file: z.string(),
   hash: z.string(),
   workspaceId: z.string(),
+  source: z.string().optional(),
   preview: z.object({
     goal: z.string(),
     leader: z.string(),
     repo: z.string(),
+    start: z.object({ commit: z.string(), line: z.string() }).optional(),
     budget: z.object({ usd: z.number(), hours: z.number() }),
     costUsd: z.number(),
     firstWave: z.array(z.object({ key: z.string(), who: z.string(), usd: z.number() })),
