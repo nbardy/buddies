@@ -235,8 +235,14 @@ export function createExpeditions(
       .catch(
         (error) => ({ cost: cap, result: { t: 'errored', why: String(error) } }) satisfies Receipt
       )
-      .then((receipt) => {
+      .then(async (receipt) => {
         append(r, { t: 'result', key: call.key, hash: h, receipt });
+        // Owner Stop holds even a .try call; rewrite/manager cancellation has an aborted signal.
+        // Guard: expedition-backend owner Stop never starts the next step.
+        if (receipt.result.t === 'cancelled' && !abort.signal.aborted) {
+          await r.child?.kill();
+          void hold(r, `Step ${call.key} cancelled by owner Stop`);
+        }
         return receipt;
       })
       .finally(() => r.active.delete(token));

@@ -307,7 +307,10 @@ export async function execute(
           cost: r.cost + (reviewReceipt?.cost ?? 0),
           review: reviewReceipt,
           commit: ref.commit,
-          result: { ...r.result, ref, t: why ? 'failed' : 'passed', why },
+          result:
+            reviewReceipt?.result.t === 'cancelled'
+              ? reviewReceipt.result
+              : { ...r.result, ref, t: why ? 'failed' : 'passed', why },
         };
       }
     }

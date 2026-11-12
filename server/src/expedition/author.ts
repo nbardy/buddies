@@ -181,6 +181,7 @@ export function expedition<const S extends Record<string, Definition>>(config: {
         const usd = 'by' in d ? cap('usd', 1) : 0,
           minutes = cap('minutes', 20);
         const by = 'by' in d ? resolve(d.by) : '';
+        if ('by' in d && d.judge && 'review' in d.judge) d.judge.by = resolve(d.judge.by);
         if (d.needs?.some((key) => ['claude', 'codex', 'gemini', 'cursor', 'muse'].includes(key)))
           throw new Error('needs names resources; agent harness slots are acquired automatically');
         const attempt = async (first?: unknown, second?: Options): Promise<ExpeditionResult> => {
@@ -210,9 +211,7 @@ export function expedition<const S extends Record<string, Definition>>(config: {
                   checkout: d.checkout ?? false,
                   judge:
                     d.judge &&
-                    ('check' in d.judge
-                      ? { check: render(d.judge.check, item) }
-                      : { ...d.judge, by: resolve(d.judge.by) }),
+                    ('check' in d.judge ? { check: render(d.judge.check, item) } : d.judge),
                 };
           const result = await call(c);
           if (result.t === 'passed' || result.t === 'failed') {

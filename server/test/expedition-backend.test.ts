@@ -310,7 +310,10 @@ test('real backend: fan-out, restart adoption, checkout judges, question, rewrit
 
 test('owner Stop cancels a step and wakes its manager', { timeout: 120000 }, async () => {
   const run = await launch(
-    plan("wait:{by:'claude:claude-haiku-5-5:low',brief:'TAG:ownerstop'}", 'return await s.wait();')
+    plan(
+      "wait:{by:'claude:claude-haiku-5-5:low',brief:'TAG:ownerstop'},next:{by:'claude:claude-haiku-5-5:low',brief:'TAG:afterstop'}",
+      'await s.wait.try();return await s.next();'
+    )
   );
   await eventually(() => count('ownerstop') === 1, 'step running');
   const socket = new WebSocket(`ws://127.0.0.1:${port}${WS_PATH}`, {
@@ -338,9 +341,10 @@ test('owner Stop cancels a step and wakes its manager', { timeout: 120000 }, asy
     }, 'cancelled receipt held the plan and reached the manager');
     assert.match(
       fs.readFileSync(path.join(fake, 'cancel-wake'), 'utf8'),
-      /Required step wait cancelled/
+      /Step wait cancelled by owner Stop/
     );
     assert.equal(count('ownerstop'), 1);
+    assert.equal(count('afterstop'), 0, 'owner Stop holds even when the plan used .try');
     const pid = Number(fs.readFileSync(path.join(fake, 'ownerstop.started'), 'utf8'));
     assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
   } finally {

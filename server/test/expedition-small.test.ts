@@ -45,6 +45,8 @@ test('preview reserves reviews; rejects unawaited plans, forged IPC and nonfinit
         .replace('usd:.15,', '')
     );
     await assert.rejects(gates(file), /less than|finite/);
+    fs.writeFileSync(file, source.replace("by:'codex:gpt-6.1-sol:low'", "by:'unknownJudge'"));
+    await assert.rejects(gates(file), /Unknown agent unknownJudge/);
     fs.writeFileSync(
       file,
       source.replace('done:[],rules:[]', 'done:[],rules:[],leaderWake:{usd:.3,minutes:3}')

@@ -32,14 +32,14 @@ is over the server budget and must not be represented as meeting it. No minifica
 
 | Group | Prediction | Actual |
 |---|---:|---:|
-| author + child (including sandbox host) | 300 | 413 |
-| engine | 220 | 441 |
-| call + answer + worktree + command helpers | 300 | 505 |
+| author + child (including sandbox host) | 300 | 412 |
+| engine | 220 | 447 |
+| call + answer + worktree + command helpers | 300 | 508 |
 | gates | 130 | 139 |
 | manager | 70 | 23 |
 | routes + tool | 200 | 145 |
 | shared view/proposal | 80 | 52 |
-| server + shared | **1,300 max** | **1,718** |
+| server + shared | **1,300 max** | **1,726** |
 | client | **700 max** | 298 |
 | expedition tests | **1,000 max** | 489 |
 
@@ -56,25 +56,25 @@ manager prompt/CLI probe. Runtime and budget limitations must be reported with t
 
 The cost/Stop follow-up removed repeated log scans (one append/boot fold now owns the index),
 the second process spawner, duplicate judge checkout cleanup, duplicate option/cap definitions,
-and the ignored wake-minute option. It removes 44 formatted source lines; the 1,300 cap is still
-missed by 418. No behavior was moved outside this count to meet the cap. Remaining blocks:
+and the ignored wake-minute option. It removes 36 formatted source lines; the 1,300 cap is still
+missed by 426. No behavior was moved outside this count to meet the cap. Remaining blocks:
 
 | File | Lines | Capability retained |
 |---|---:|---|
 | answer.ts | 56 | Final JSON extraction without accepting nested fragments of truncated answers |
-| author.ts | 279 | Inferred item/output types, strict definitions, defaults, keyed promises and questions |
-| call.ts | 331 | Native turn grants, exact-commit checks/reviews, pricing, file containment and safe worktree release |
+| author.ts | 278 | Inferred item/output types, strict definitions, defaults, keyed promises and questions |
+| call.ts | 334 | Native turn grants, exact-commit checks/reviews, pricing, file containment and safe worktree release |
 | checks.ts | 118 | Shell-free argv, scrubbed environment, process-group cancellation, bounded output and Git commands |
 | child.mjs | 40 | Restricted imports and exclusive host IPC authority |
 | child.ts | 94 | Permission-limited plan child, execution timeout, process cleanup |
-| engine.ts | 441 | Durable replay index, resource/budget admission, owner answers, completion criteria, manager rewrites |
+| engine.ts | 447 | Durable replay index, resource/budget admission, owner answers, completion criteria, manager rewrites |
 | gates.ts | 139 | Real TypeScript check, dry evaluation, contract parsing and first-wave reservation preview |
 | manager.ts | 23 | Idempotent wake through ordinary Buddy mail |
 | routes.ts | 35 | Owner launch/answer and read routes behind the existing auth gate |
 | tool.ts | 110 | Workspace/manager authority, proposal cards, action parsing and authoring tool description |
 | shared expedition.ts | 52 | Proposal wire parsing and shared result/view types |
 
-A required cancelled step throws a message containing its actual result variant; the replay
-therefore holds at that call and the normal manager wake includes `cancelled`. The backend
-guard is `owner Stop cancels a step and wakes its manager`. A plan deliberately using `.try`
-can inspect and handle cancellation itself, like any other non-passing result.
+Owner Stop writes the cancelled receipt, ends that plan evaluation and holds at the cancelled
+call, even for `.try`. The normal manager wake names the cancelled step. A rewrite dropping
+work or a manager stopping a run carries the engine's aborted signal and does not trigger
+another manager wake. The backend guard is `owner Stop cancels a step and wakes its manager`.
