@@ -39,7 +39,9 @@ export async function git(cwd: string, args: string[]) {
 }
 // Shared checkouts may be on another session's branch. Guard: expedition-backend base checkouts.
 export async function resolveBase(repo: string, override?: string) {
-  const fetched = await exec('git', repo, ['fetch', 'origin'], 3000);
+  // 15 s, not 3: a real fetch of the owner's largest repository takes about 4 s, so the first real
+  // proposal card read "fetch failed" over an up-to-date main (2026-11-12). A launch can wait.
+  const fetched = await exec('git', repo, ['fetch', 'origin'], 15_000);
   const head = 'refs/remotes/origin/HEAD';
   const recorded = () => exec('git', repo, ['rev-parse', '--symbolic-full-name', head]);
   let remote = await recorded();

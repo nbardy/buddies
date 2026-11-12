@@ -96,7 +96,7 @@ test('answer formats retain the last whole value', () => {
 });
 
 test('a stalled fetch is bounded and reports its failure while using the cached default', {
-  timeout: 15000,
+  timeout: 40_000,
 }, async () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'expedition-fetch-'));
   const git = (...args: string[]) =>
@@ -126,7 +126,7 @@ test('a stalled fetch is bounded and reports its failure while using the cached 
     git('config', 'remote.origin.uploadpack', stall);
     const began = Date.now();
     const result = await resolveBase(repo);
-    assert.ok(Date.now() - began < 8000, 'fetch returns within a few seconds');
+    assert.ok(Date.now() - began < 25_000, 'a stalled fetch is abandoned at its bound');
     assert.equal(result.commit, commit);
     assert.equal(result.line, `starts from origin/main at ${commit.slice(0, 7)}, fetch failed`);
   } finally {
