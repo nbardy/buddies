@@ -231,6 +231,17 @@ test('real backend: fan-out, restart adoption, checkout judges, question, rewrit
     'met',
     JSON.stringify(await view(checkoutRun.id))
   );
+  const checked = await launch(
+    plan(
+      `edit:{by:'${who}',checkout:true,brief:'TAG:edit',judge:{check:'node check.cjs'}}`,
+      `return s.edit();`
+    )
+  );
+  await eventually(
+    async () => ['met', 'held'].includes((await view(checked.id)).status),
+    'command judge'
+  );
+  assert.equal((await view(checked.id)).status, 'met', 'check judge reads the committed tree');
   const initial = plan(
     `first:{by:'${who}',brief:'TAG:first'},drop:{by:'${who}',brief:'TAG:drop'}`,
     `const a=await s.first();await Promise.all([s.drop.try(),x.checkin('rewrite')]);return a;`

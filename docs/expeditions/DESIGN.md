@@ -41,7 +41,7 @@ is over the server budget and must not be represented as meeting it. No minifica
 | shared view/proposal | 80 | 52 |
 | server + shared | **1,300 max** | **1,762** |
 | client | **700 max** | 298 |
-| expedition tests | **1,000 max** | 478 |
+| expedition tests | **1,000 max** | 489 |
 
 Deliberately absent: a kernel with ports; a separate run record store; versioned wire entry
 schemas; per-call enforced/advisory grant reports (the card states Codex's advisory limits once);
